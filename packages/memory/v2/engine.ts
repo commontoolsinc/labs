@@ -861,6 +861,12 @@ export interface AppliedCommit {
   schedulerDirtiedReaders?: SchedulerReaderIndexEntry[];
 }
 
+/** Internal apply outcome. Kept separate from the wire-facing AppliedCommit. */
+export interface AppliedCommitOutcome {
+  commit: AppliedCommit;
+  replayed: boolean;
+}
+
 export type SchedulerActionKind =
   | "computation"
   | "effect"
@@ -2377,6 +2383,13 @@ export const applyCommit = (
   engine: Engine,
   options: ApplyCommitOptions,
 ): AppliedCommit => {
+  return applyCommitWithOutcome(engine, options).commit;
+};
+
+export const applyCommitWithOutcome = (
+  engine: Engine,
+  options: ApplyCommitOptions,
+): AppliedCommitOutcome => {
   return engine.database.transaction(applyCommitTransaction).immediate(
     engine,
     options,
@@ -4892,7 +4905,7 @@ const applyCommitTransaction = (
     commit,
     sqliteAttachments,
   }: ApplyCommitOptions,
-): AppliedCommit => {
+): AppliedCommitOutcome => {
   const sessionKey = resolveCommitSessionKey(sessionId, principal);
   const schedulerObservation = commit
     .schedulerObservation as SchedulerActionObservation | undefined;
@@ -4953,15 +4966,18 @@ const applyCommitTransaction = (
       )
       : undefined;
     return {
-      seq: existing.seq,
-      branch: existing.branch,
-      revisions: selectCommitRevisions(engine, existing.seq),
-      ...(observationResult?.schedulerObservationId !== undefined
-        ? { schedulerObservationId: observationResult.schedulerObservationId }
-        : {}),
-      ...(observationResult
-        ? { schedulerObservationResults: [observationResult] }
-        : {}),
+      replayed: true,
+      commit: {
+        seq: existing.seq,
+        branch: existing.branch,
+        revisions: selectCommitRevisions(engine, existing.seq),
+        ...(observationResult?.schedulerObservationId !== undefined
+          ? { schedulerObservationId: observationResult.schedulerObservationId }
+          : {}),
+        ...(observationResult
+          ? { schedulerObservationResults: [observationResult] }
+          : {}),
+      },
     };
   }
 
@@ -5099,23 +5115,26 @@ const applyCommitTransaction = (
     : undefined;
 
   return {
-    seq,
-    branch,
-    revisions,
-    ...(schedulerObservationResult
-      ? {
-        schedulerObservationId: schedulerObservationResult.observationId,
-        schedulerObservationResults: [{
-          localSeq: commit.localSeq,
-          status: "kept" as const,
+    replayed: false,
+    commit: {
+      seq,
+      branch,
+      revisions,
+      ...(schedulerObservationResult
+        ? {
           schedulerObservationId: schedulerObservationResult.observationId,
-          executionContextKey: schedulerObservationResult.executionContextKey,
-        }],
-      }
-      : {}),
-    ...(schedulerDirtiedReaders && schedulerDirtiedReaders.length > 0
-      ? { schedulerDirtiedReaders }
-      : {}),
+          schedulerObservationResults: [{
+            localSeq: commit.localSeq,
+            status: "kept" as const,
+            schedulerObservationId: schedulerObservationResult.observationId,
+            executionContextKey: schedulerObservationResult.executionContextKey,
+          }],
+        }
+        : {}),
+      ...(schedulerDirtiedReaders && schedulerDirtiedReaders.length > 0
+        ? { schedulerDirtiedReaders }
+        : {}),
+    },
   };
 };
 
@@ -5667,7 +5686,7 @@ const applySchedulerObservationOnlyCommit = (
     reads: ClientCommit["reads"];
     schedulerObservation: SchedulerActionObservation;
   },
-): AppliedCommit => {
+): AppliedCommitOutcome => {
   const observedAtSeq = headSeq(engine, branch);
   const replayPayload = schedulerObservationReplayPayload({
     branch,
@@ -5691,13 +5710,16 @@ const applySchedulerObservationOnlyCommit = (
       existingReplay,
     );
     return {
-      seq: existingReplay.observed_at_seq,
-      branch,
-      revisions: [],
-      ...(replayed.schedulerObservationId !== undefined
-        ? { schedulerObservationId: replayed.schedulerObservationId }
-        : {}),
-      schedulerObservationResults: [replayed],
+      replayed: true,
+      commit: {
+        seq: existingReplay.observed_at_seq,
+        branch,
+        revisions: [],
+        ...(replayed.schedulerObservationId !== undefined
+          ? { schedulerObservationId: replayed.schedulerObservationId }
+          : {}),
+        schedulerObservationResults: [replayed],
+      },
     };
   }
 
@@ -5719,14 +5741,17 @@ const applySchedulerObservationOnlyCommit = (
       payload: replayPayload,
     });
     return {
-      seq: observedAtSeq,
-      branch,
-      revisions: [],
-      schedulerObservationResults: [{
-        localSeq,
-        status: "dropped",
-        reason: dropReason,
-      }],
+      replayed: false,
+      commit: {
+        seq: observedAtSeq,
+        branch,
+        revisions: [],
+        schedulerObservationResults: [{
+          localSeq,
+          status: "dropped",
+          reason: dropReason,
+        }],
+      },
     };
   }
 
@@ -5747,16 +5772,19 @@ const applySchedulerObservationOnlyCommit = (
     observation: schedulerObservation,
   });
   return {
-    seq: observedAtSeq,
-    branch,
-    revisions: [],
-    schedulerObservationId: observationResult.observationId,
-    schedulerObservationResults: [{
-      localSeq,
-      status: "kept",
+    replayed: false,
+    commit: {
+      seq: observedAtSeq,
+      branch,
+      revisions: [],
       schedulerObservationId: observationResult.observationId,
-      executionContextKey: observationResult.executionContextKey,
-    }],
+      schedulerObservationResults: [{
+        localSeq,
+        status: "kept",
+        schedulerObservationId: observationResult.observationId,
+        executionContextKey: observationResult.executionContextKey,
+      }],
+    },
   };
 };
 
@@ -5777,10 +5805,11 @@ const applySchedulerObservationBatchCommit = (
     branch: BranchName;
     batch: NonNullable<ClientCommit["schedulerObservationBatch"]>;
   },
-): AppliedCommit => {
+): AppliedCommitOutcome => {
   const results: AppliedSchedulerObservationResult[] = [];
+  let replayed = true;
   for (const item of batch) {
-    const result = applySchedulerObservationOnlyCommit(engine, {
+    const outcome = applySchedulerObservationOnlyCommit(engine, {
       sessionId,
       sessionKey,
       space,
@@ -5791,14 +5820,18 @@ const applySchedulerObservationBatchCommit = (
       schedulerObservation: item
         .schedulerObservation as SchedulerActionObservation,
     });
-    results.push(result.schedulerObservationResults![0]);
+    replayed &&= outcome.replayed;
+    results.push(outcome.commit.schedulerObservationResults![0]);
   }
 
   return {
-    seq: headSeq(engine, branch),
-    branch,
-    revisions: [],
-    schedulerObservationResults: results,
+    replayed,
+    commit: {
+      seq: headSeq(engine, branch),
+      branch,
+      revisions: [],
+      schedulerObservationResults: results,
+    },
   };
 };
 

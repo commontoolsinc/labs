@@ -16,6 +16,7 @@ import {
   type HelloMessage,
   type Operation,
   parseMemoryProtocolFlags,
+  type PatchOp,
   type ResponseMessage,
   type SchedulerActionSnapshotQuery,
   type SchedulerExecutionContextKey,
@@ -98,7 +99,13 @@ import {
 } from "./server-sync.ts";
 import { SessionRegistry, type SessionState } from "./session-registry.ts";
 import { authorizationError } from "./session-open-auth.ts";
-import { SpanStatusCode, trace } from "@opentelemetry/api";
+import {
+  INVALID_SPAN_CONTEXT,
+  type Span,
+  SpanStatusCode,
+  trace,
+  type Tracer,
+} from "@opentelemetry/api";
 
 export { SessionRegistry } from "./session-registry.ts";
 
@@ -251,6 +258,238 @@ const toPreconditionFailedError = (
 
 export type MemoryAclMode = "off" | "observe" | "enforce";
 
+/**
+ * Aggregate, content-free telemetry for received transact attempts. Commit
+ * payload metrics describe the parsed request before authorization or
+ * capability filtering; outcomes describe the server's final disposition.
+ */
+export interface CommitTelemetrySnapshot {
+  transactCount: number;
+  acceptedCount: number;
+  rejectedCount: number;
+  conflictCount: number;
+  replayCount: number;
+  receivedCommitBytes: { total: number; max: number };
+  confirmedReadEntries: { total: number; max: number };
+  confirmedReadBytes: { total: number; max: number };
+  operationEntries: { total: number; max: number };
+  operationBytes: { total: number; max: number };
+  newlyPersistedRevisions: { total: number; max: number };
+  operationsByType: Record<Operation["op"], number>;
+  /** Patch kinds in received requests, including rejected and replayed requests. */
+  receivedPatchOperationsByType: PatchOperationKindCounts;
+  /** Patch kinds newly applied by non-replayed commits only. */
+  newlyAppliedPatchOperationsByType: PatchOperationKindCounts;
+  patchesByPathShape: Record<string, number>;
+  rejectedByName: Record<string, number>;
+}
+
+type CommitTelemetryCounter = { total: number; max: number };
+
+type PatchOperationKindCounts = Record<PatchOp["op"], number>;
+
+const emptyPatchOperationKindCounts = (): PatchOperationKindCounts => ({
+  replace: 0,
+  add: 0,
+  remove: 0,
+  move: 0,
+  splice: 0,
+  append: 0,
+  "add-unique": 0,
+  "remove-by-value": 0,
+  increment: 0,
+});
+
+const emptyCommitTelemetryCounter = (): CommitTelemetryCounter => ({
+  total: 0,
+  max: 0,
+});
+
+const emptyCommitTelemetrySnapshot = (): CommitTelemetrySnapshot => ({
+  transactCount: 0,
+  acceptedCount: 0,
+  rejectedCount: 0,
+  conflictCount: 0,
+  replayCount: 0,
+  receivedCommitBytes: emptyCommitTelemetryCounter(),
+  confirmedReadEntries: emptyCommitTelemetryCounter(),
+  confirmedReadBytes: emptyCommitTelemetryCounter(),
+  operationEntries: emptyCommitTelemetryCounter(),
+  operationBytes: emptyCommitTelemetryCounter(),
+  newlyPersistedRevisions: emptyCommitTelemetryCounter(),
+  operationsByType: { set: 0, patch: 0, delete: 0, sqlite: 0 },
+  receivedPatchOperationsByType: emptyPatchOperationKindCounts(),
+  newlyAppliedPatchOperationsByType: emptyPatchOperationKindCounts(),
+  patchesByPathShape: {},
+  rejectedByName: {},
+});
+
+const addCommitTelemetryCounter = (
+  counter: CommitTelemetryCounter,
+  value: number,
+): void => {
+  counter.total += value;
+  counter.max = Math.max(counter.max, value);
+};
+
+const incrementCommitTelemetryMap = (
+  map: Record<string, number>,
+  key: string,
+): void => {
+  map[key] = (map[key] ?? 0) + 1;
+};
+
+const patchPathShape = (path: string): string => {
+  if (path === "/value") return "value-root";
+  if (path.startsWith("/value/")) {
+    const segments = path.slice("/value/".length).split("/");
+    return `value/${
+      segments.map((segment) => /^\d+$/.test(segment) ? "#" : "*").join("/")
+    }`;
+  }
+  // Entity-document metadata has a small fixed surface; all other roots are
+  // deliberately collapsed so arbitrary keys never enter telemetry.
+  return path === "" || path === "/source" || path.startsWith("/source/")
+    ? "metadata"
+    : "other";
+};
+
+let commitTelemetryTextEncoder: TextEncoder | undefined;
+
+class CommitTelemetry {
+  #snapshot = emptyCommitTelemetrySnapshot();
+
+  recordTransactAttempt(): void {
+    this.#snapshot.transactCount += 1;
+  }
+
+  recordReceivedCommit(commit: unknown): void {
+    if (!isRecord(commit)) return;
+    const encodedByteLength = (
+      value: Parameters<typeof encodeMemoryBoundary>[0],
+    ): number => {
+      try {
+        return (commitTelemetryTextEncoder ??= new TextEncoder()).encode(
+          encodeMemoryBoundary(value),
+        ).byteLength;
+      } catch {
+        // Telemetry is observational; malformed ingress must reach the normal
+        // protocol validator and typed-error path unchanged.
+        return 0;
+      }
+    };
+    const reads = isRecord(commit.reads) ? commit.reads : undefined;
+    const confirmedReads = Array.isArray(reads?.confirmed)
+      ? reads.confirmed
+      : [];
+    const operations = Array.isArray(commit.operations)
+      ? commit.operations.filter(isRecord)
+      : [];
+    const confirmedReadBytes = encodedByteLength(confirmedReads);
+    const operationBytes = operations.reduce(
+      (total, operation) => total + encodedByteLength(operation),
+      0,
+    );
+
+    addCommitTelemetryCounter(
+      this.#snapshot.receivedCommitBytes,
+      encodedByteLength(commit),
+    );
+    addCommitTelemetryCounter(
+      this.#snapshot.confirmedReadEntries,
+      confirmedReads.length,
+    );
+    addCommitTelemetryCounter(
+      this.#snapshot.confirmedReadBytes,
+      confirmedReadBytes,
+    );
+    addCommitTelemetryCounter(
+      this.#snapshot.operationEntries,
+      operations.length,
+    );
+    addCommitTelemetryCounter(this.#snapshot.operationBytes, operationBytes);
+    for (const operation of operations) {
+      if (
+        operation.op === "set" || operation.op === "patch" ||
+        operation.op === "delete" || operation.op === "sqlite"
+      ) {
+        this.#snapshot.operationsByType[operation.op] += 1;
+      }
+      if (operation.op === "patch" && Array.isArray(operation.patches)) {
+        for (const patch of operation.patches) {
+          if (
+            isRecord(patch) && typeof patch.path === "string" &&
+            (patch.op === "replace" || patch.op === "add" ||
+              patch.op === "remove" || patch.op === "move" ||
+              patch.op === "splice" || patch.op === "append" ||
+              patch.op === "add-unique" || patch.op === "remove-by-value" ||
+              patch.op === "increment")
+          ) {
+            this.#snapshot.receivedPatchOperationsByType[patch.op] += 1;
+            this.#recordPatchPath(patch.path);
+          }
+        }
+      }
+    }
+  }
+
+  #recordPatchPath(path: string): void {
+    incrementCommitTelemetryMap(
+      this.#snapshot.patchesByPathShape,
+      patchPathShape(path),
+    );
+  }
+
+  recordAccepted(
+    applied: Engine.AppliedCommitOutcome,
+  ): void {
+    this.#snapshot.acceptedCount += 1;
+    if (applied.replayed) {
+      this.#snapshot.replayCount += 1;
+    } else {
+      for (const revision of applied.commit.revisions) {
+        for (const patch of revision.patches ?? []) {
+          this.#snapshot.newlyAppliedPatchOperationsByType[patch.op] += 1;
+        }
+      }
+    }
+    addCommitTelemetryCounter(
+      this.#snapshot.newlyPersistedRevisions,
+      applied.replayed ? 0 : applied.commit.revisions.length,
+    );
+  }
+
+  recordRejected(name: string): void {
+    this.#snapshot.rejectedCount += 1;
+    if (name === "ConflictError") this.#snapshot.conflictCount += 1;
+    this.#snapshot.rejectedByName[name] =
+      (this.#snapshot.rejectedByName[name] ?? 0) + 1;
+  }
+
+  snapshotAndReset(): CommitTelemetrySnapshot {
+    const snapshot: CommitTelemetrySnapshot = {
+      ...this.#snapshot,
+      receivedCommitBytes: { ...this.#snapshot.receivedCommitBytes },
+      confirmedReadEntries: { ...this.#snapshot.confirmedReadEntries },
+      confirmedReadBytes: { ...this.#snapshot.confirmedReadBytes },
+      operationEntries: { ...this.#snapshot.operationEntries },
+      operationBytes: { ...this.#snapshot.operationBytes },
+      newlyPersistedRevisions: { ...this.#snapshot.newlyPersistedRevisions },
+      operationsByType: { ...this.#snapshot.operationsByType },
+      receivedPatchOperationsByType: {
+        ...this.#snapshot.receivedPatchOperationsByType,
+      },
+      newlyAppliedPatchOperationsByType: {
+        ...this.#snapshot.newlyAppliedPatchOperationsByType,
+      },
+      patchesByPathShape: { ...this.#snapshot.patchesByPathShape },
+      rejectedByName: { ...this.#snapshot.rejectedByName },
+    };
+    this.#snapshot = emptyCommitTelemetrySnapshot();
+    return snapshot;
+  }
+}
+
 type AclState =
   | { kind: "missing" }
   | { kind: "invalid" }
@@ -355,6 +594,17 @@ type DirtyOrigin = {
   seq: number;
 };
 
+type DiagnosticsEffectAck = {
+  promise: Promise<void>;
+  cancel: () => void;
+};
+
+type DiagnosticsEffectAckWaiter = {
+  connectionId: string;
+  targetSeq: number;
+  resolve: () => void;
+};
+
 class Connection {
   #ready = false;
   #closed = false;
@@ -378,6 +628,9 @@ class Connection {
   ) {}
 
   private send(message: ServerMessage): void {
+    if (message.type === "session/effect") {
+      this.server.recordDiagnosticsOutgoingMessage();
+    }
     this.sendRaw(
       this.#syncSchemaTable ? compressServerMessageSchemas(message) : message,
     );
@@ -436,6 +689,7 @@ class Connection {
     if (!this.#sessions.delete(key) || this.#closed) {
       return;
     }
+    this.server.cancelDiagnosticsEffectAcks(this.id, space, sessionId);
     this.send({
       type: "session/revoked",
       space,
@@ -520,6 +774,13 @@ class Connection {
     return this.#pendingReceives > 0;
   }
 
+  async waitForReceiveQueueToSettle(): Promise<void> {
+    while (this.#pendingReceives > 0) {
+      this.#receiveIdle ??= Promise.withResolvers<void>();
+      await this.#receiveIdle.promise;
+    }
+  }
+
   async waitForReceiveQueueToDrain(deadlineMs: number): Promise<boolean> {
     while (this.#pendingReceives > 0) {
       const remainingMs = deadlineMs - Date.now();
@@ -549,18 +810,21 @@ class Connection {
     requestId: string,
     space: string,
     sessionId: string,
+    rejectedResponse?: () => ServerMessage,
   ): boolean {
     if (this.hasSession(space, sessionId)) {
       return true;
     }
-    this.send({
-      type: "response",
-      requestId,
-      error: toError(
-        "SessionError",
-        "Session is not open on this connection",
-      ),
-    });
+    this.send(
+      rejectedResponse?.() ?? {
+        type: "response",
+        requestId,
+        error: toError(
+          "SessionError",
+          "Session is not open on this connection",
+        ),
+      },
+    );
     return false;
   }
 
@@ -632,6 +896,14 @@ class Connection {
             parsed.requestId,
             parsed.space,
             parsed.sessionId,
+            () =>
+              this.server.rejectTransact(
+                parsed,
+                toError(
+                  "SessionError",
+                  "Session is not open on this connection",
+                ),
+              ),
           )
         ) {
           return;
@@ -811,6 +1083,7 @@ class Connection {
         continue;
       }
       if (effect !== null) {
+        this.server.recordDiagnosticsSessionEffect(this.id, effect);
         this.send(effect);
       }
     }
@@ -821,6 +1094,7 @@ class Connection {
       return;
     }
     this.#closed = true;
+    this.server.cancelDiagnosticsEffectAcks(this.id);
     for (const { space, sessionId } of this.#sessions.values()) {
       this.server.detachSession(space, sessionId, this.id);
     }
@@ -863,6 +1137,17 @@ export class Server {
   // re-ensures (additive migration) with no hash-collision risk.
   #ensuredSchemas = new Map<string, true>();
   #ensuredSchemasMax = 4096;
+  #commitTelemetry?: CommitTelemetry;
+  #diagnosticsActivityGeneration = 0;
+  #diagnosticsEffectAcks?: DiagnosticsEffectAck[];
+  #diagnosticsEffectAckWaiters?: Map<
+    string,
+    Set<DiagnosticsEffectAckWaiter>
+  >;
+  #diagnosticsFlushQueue: Promise<void> = Promise.resolve();
+  #closeSignal = Promise.withResolvers<void>();
+  #closed = false;
+  #tracer: Tracer;
 
   #recordSchemaEnsured(key: string): void {
     this.#ensuredSchemas.set(key, true);
@@ -922,10 +1207,184 @@ export class Server {
         mode: MemoryAclMode;
         serviceDids?: readonly string[];
       };
+      /** Enable aggregate received-commit telemetry for synthetic workloads. */
+      commitTelemetry?: boolean;
+      /** Suppress identifier-bearing logs and spans for aggregate diagnostics. */
+      aggregateOnlyDiagnostics?: boolean;
+      /** Override the OTel tracer, primarily for isolated verification. */
+      diagnosticsTracer?: Tracer;
     },
   ) {
     this.#sessions = options.sessions ?? new SessionRegistry();
     this.#store = options.store;
+    this.#tracer = options.diagnosticsTracer ?? tracer;
+    if (options.commitTelemetry) {
+      this.#commitTelemetry = new CommitTelemetry();
+    }
+  }
+
+  #warn(...args: unknown[]): void {
+    if (!this.options.aggregateOnlyDiagnostics) console.warn(...args);
+  }
+
+  #withSpan<T>(name: string, callback: (span: Span) => T): T {
+    if (this.options.aggregateOnlyDiagnostics) {
+      return callback(trace.wrapSpanContext(INVALID_SPAN_CONTEXT));
+    }
+    return this.#tracer.startActiveSpan(name, callback);
+  }
+
+  #withRootSpan<T>(name: string, callback: (span: Span) => T): T {
+    if (this.options.aggregateOnlyDiagnostics) {
+      return callback(trace.wrapSpanContext(INVALID_SPAN_CONTEXT));
+    }
+    return this.#tracer.startActiveSpan(name, { root: true }, callback);
+  }
+
+  /** Returns and resets aggregate transact telemetry when collection is enabled. */
+  commitTelemetry(): CommitTelemetrySnapshot {
+    if (this.#commitTelemetry === undefined) {
+      throw new Error("commit telemetry is disabled");
+    }
+    return this.#commitTelemetry.snapshotAndReset();
+  }
+
+  #recordReceivedTransact(message: TransactRequest): void {
+    const telemetry = this.#commitTelemetry;
+    if (telemetry === undefined) {
+      return;
+    }
+    this.#diagnosticsActivityGeneration++;
+    telemetry.recordTransactAttempt();
+    telemetry.recordReceivedCommit(message.commit);
+  }
+
+  /** Records a parsed transact rejected before it reaches the apply boundary. */
+  rejectTransact(
+    message: TransactRequest,
+    error: V2Error,
+  ): ResponseMessage<Engine.AppliedCommit> {
+    this.#recordReceivedTransact(message);
+    this.#commitTelemetry?.recordRejected(error.name);
+    return respondTypedError<Engine.AppliedCommit>(message.requestId, error);
+  }
+
+  /** Monotonic local-diagnostics activity counter; unavailable when disabled. */
+  diagnosticsActivityGeneration(): number {
+    if (this.#commitTelemetry === undefined) {
+      throw new Error("commit telemetry is disabled");
+    }
+    return this.#diagnosticsActivityGeneration;
+  }
+
+  /** Records a content-free emitted session effect for local diagnostics only. */
+  recordDiagnosticsOutgoingMessage(): void {
+    if (this.#commitTelemetry !== undefined) {
+      this.#diagnosticsActivityGeneration++;
+    }
+  }
+
+  recordDiagnosticsSessionEffect(
+    connectionId: string,
+    effect: SessionEffectMessage,
+  ): void {
+    if (
+      this.#closed ||
+      this.#commitTelemetry === undefined ||
+      this.#diagnosticsEffectAcks === undefined
+    ) {
+      return;
+    }
+    this.#diagnosticsEffectAcks.push(
+      this.waitForDiagnosticsEffectAck(connectionId, effect),
+    );
+  }
+
+  private waitForDiagnosticsEffectAck(
+    connectionId: string,
+    effect: SessionEffectMessage,
+  ): DiagnosticsEffectAck {
+    const key = sessionKey(effect.space, effect.sessionId);
+    const targetSeq = effect.effect.toSeq;
+    let waiter: DiagnosticsEffectAckWaiter | undefined;
+    const cancel = () => {
+      if (waiter === undefined) return;
+      const waiters = this.#diagnosticsEffectAckWaiters?.get(key);
+      waiters?.delete(waiter);
+      if (waiters?.size === 0) {
+        this.#diagnosticsEffectAckWaiters?.delete(key);
+      }
+      waiter.resolve();
+      waiter = undefined;
+    };
+    const session = this.#sessions.get(effect.space, effect.sessionId);
+    if (session === null || session.seenSeq >= targetSeq) {
+      return { promise: Promise.resolve(), cancel };
+    }
+    const deferred = Promise.withResolvers<void>();
+    waiter = { connectionId, targetSeq, resolve: deferred.resolve };
+    let waiters = this.#diagnosticsEffectAckWaiters?.get(key);
+    if (waiters === undefined) {
+      waiters = new Set();
+      (this.#diagnosticsEffectAckWaiters ??= new Map()).set(key, waiters);
+    }
+    waiters.add(waiter);
+    // The check after registration closes the acknowledgment race: an ack may
+    // update seenSeq between the initial check and creating this waiter.
+    if (
+      (this.#sessions.get(effect.space, effect.sessionId)?.seenSeq ?? 0) >=
+        targetSeq
+    ) {
+      cancel();
+    }
+    return { promise: deferred.promise, cancel };
+  }
+
+  private resolveDiagnosticsEffectAcks(
+    space: string,
+    sessionId: string,
+    seenSeq: number,
+  ): void {
+    const key = sessionKey(space, sessionId);
+    const waiters = this.#diagnosticsEffectAckWaiters?.get(key);
+    if (waiters === undefined) return;
+    for (const waiter of [...waiters]) {
+      if (seenSeq >= waiter.targetSeq) {
+        waiters.delete(waiter);
+        waiter.resolve();
+      }
+    }
+    if (waiters.size === 0) {
+      this.#diagnosticsEffectAckWaiters?.delete(key);
+    }
+  }
+
+  cancelDiagnosticsEffectAcks(
+    connectionId: string,
+    space?: string,
+    sessionId?: string,
+  ): void {
+    for (const [key, waiters] of this.#diagnosticsEffectAckWaiters ?? []) {
+      if (space !== undefined && key !== sessionKey(space, sessionId!)) {
+        continue;
+      }
+      for (const waiter of [...waiters]) {
+        if (waiter.connectionId === connectionId) {
+          waiters.delete(waiter);
+          waiter.resolve();
+        }
+      }
+      if (waiters.size === 0) {
+        this.#diagnosticsEffectAckWaiters?.delete(key);
+      }
+    }
+  }
+
+  private cancelAllDiagnosticsEffectAcks(): void {
+    for (const waiters of this.#diagnosticsEffectAckWaiters?.values() ?? []) {
+      for (const waiter of waiters) waiter.resolve();
+    }
+    this.#diagnosticsEffectAckWaiters?.clear();
   }
 
   nowSeconds(): number {
@@ -1054,7 +1513,7 @@ export class Server {
     }
     if (this.#aclMode() === "observe") {
       this.aclStats.wouldDeny += 1;
-      console.warn(
+      this.#warn(
         `[memory-acl] would deny ${requirement} on ${space} for ` +
           `${principalLabel} (capability: ${capability ?? "none"})`,
       );
@@ -1193,6 +1652,13 @@ export class Server {
       // Drop the de-authorized session from the registry: the refresh loop
       // iterates registered sessions, so removal stops all further watch
       // pushes, and its next message fails closed (Unknown session).
+      if (session.ownerConnectionId !== null) {
+        this.cancelDiagnosticsEffectAcks(
+          session.ownerConnectionId,
+          space,
+          session.id,
+        );
+      }
       this.#sessions.remove(space, session.id);
       if (session.id === writerSessionId) {
         // The writer's own session — it just removed its own access. Removal
@@ -1247,6 +1713,11 @@ export class Server {
   }
 
   async close(): Promise<void> {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.#closeSignal.resolve();
+    this.cancelAllDiagnosticsEffectAcks();
+    await this.#diagnosticsFlushQueue;
     this.cancelScheduledRefresh();
     await this.#refreshing;
     for (const engine of this.#engines.values()) {
@@ -1662,7 +2133,7 @@ export class Server {
       if (wantColumns && !(await ensureColumnOriginAvailable())) {
         // The reason names a filesystem path, and this error reaches the query
         // caller, so it goes to the log and the caller gets the bare fact.
-        console.warn(
+        this.#warn(
           `[memory-sqlite] column-origin symbols could not be bound: ` +
             `${columnOriginUnavailableReason()}`,
         );
@@ -1909,6 +2380,11 @@ export class Server {
         toError("SessionError", "Unknown session for space"),
       );
     }
+    this.resolveDiagnosticsEffectAcks(
+      message.space,
+      message.sessionId,
+      session.seenSeq,
+    );
     try {
       const engine = await this.openEngine(message.space);
       return {
@@ -1932,15 +2408,18 @@ export class Server {
   transact(
     message: TransactRequest,
   ): Promise<ResponseMessage<Engine.AppliedCommit>> {
+    this.#recordReceivedTransact(message);
+    const telemetry = this.#commitTelemetry;
     const session = this.#sessions.get(message.space, message.sessionId);
     if (session === null) {
+      telemetry?.recordRejected("SessionError");
       return Promise.resolve(respondTypedError<Engine.AppliedCommit>(
         message.requestId,
         toError("SessionError", "Unknown session for space"),
       ));
     }
 
-    return tracer.startActiveSpan(
+    return this.#withSpan(
       "memory.transact",
       async (span): Promise<ResponseMessage<Engine.AppliedCommit>> => {
         span.setAttribute("space.did", message.space);
@@ -1967,6 +2446,7 @@ export class Server {
         if (message.commit.localSeq !== undefined) {
           span.setAttribute("commit.local_seq", message.commit.localSeq);
         }
+        let commitWasApplied = false;
         try {
           const engine = await this.openEngine(message.space);
           // The session may be revoked or replaced while openEngine awaits.
@@ -1975,6 +2455,7 @@ export class Server {
           if (
             this.#sessions.get(message.space, message.sessionId) !== session
           ) {
+            telemetry?.recordRejected("SessionError");
             return respondTypedError<Engine.AppliedCommit>(
               message.requestId,
               toError("SessionError", "Unknown or replaced session for space"),
@@ -1987,6 +2468,7 @@ export class Server {
             message.commit,
           );
           if (invalid) {
+            telemetry?.recordRejected(invalid.name);
             return respondTypedError<Engine.AppliedCommit>(
               message.requestId,
               invalid,
@@ -2004,6 +2486,7 @@ export class Server {
             aclTouched ? "OWNER" : "WRITE",
           );
           if (deny) {
+            telemetry?.recordRejected(deny.name);
             return respondTypedError<Engine.AppliedCommit>(
               message.requestId,
               deny,
@@ -2058,19 +2541,26 @@ export class Server {
             commitPayload.operations,
             { principal: session.principal, sessionId: message.sessionId },
           );
-          let commit: Engine.AppliedCommit;
+          let outcome: Engine.AppliedCommitOutcome;
           try {
-            commit = tracer.startActiveSpan(
+            outcome = this.#withSpan(
               "memory.commit.persist",
               (persistSpan) => {
                 try {
-                  return Engine.applyCommit(engine, {
+                  const applied = Engine.applyCommitWithOutcome(engine, {
                     sessionId: message.sessionId,
                     space: message.space,
                     principal: session.principal,
                     commit: commitPayload,
                     sqliteAttachments,
                   });
+                  // The engine transaction has committed at this point. Cleanup
+                  // and post-commit effects cannot turn this into a rejection.
+                  commitWasApplied = true;
+                  if (telemetry !== undefined) {
+                    telemetry.recordAccepted(applied);
+                  }
+                  return applied;
                 } finally {
                   persistSpan.end();
                 }
@@ -2087,6 +2577,7 @@ export class Server {
               detachDatabase(engine.database, alias);
             }
           }
+          const commit = outcome.commit;
           if (aclTouched) {
             this.#invalidateAclCapabilities(message.space);
             // Pass the writing session so it isn't sent the terminal revocation
@@ -2168,6 +2659,9 @@ export class Server {
           );
           if (retryAfterSeq !== undefined) {
             responseError.retryAfterSeq = retryAfterSeq;
+          }
+          if (!commitWasApplied) {
+            telemetry?.recordRejected(responseError.name);
           }
           span.recordException(
             error instanceof Error ? error : new Error(messageText),
@@ -2686,7 +3180,7 @@ export class Server {
     if (session === null) {
       return Promise.resolve(null);
     }
-    return tracer.startActiveSpan(
+    return this.#withSpan(
       "memory.subscriber.sync",
       async (span): Promise<SessionEffectMessage | null> => {
         span.setAttribute("space.did", space);
@@ -2782,7 +3276,7 @@ export class Server {
             const updates = new Map<string, SessionCacheEntry>();
 
             for (const graph of session.graphs.values()) {
-              const refreshed = tracer.startActiveSpan(
+              const refreshed = this.#withSpan(
                 "memory.watch.refresh",
                 (watchSpan) => {
                   watchSpan.setAttribute("space.did", space);
@@ -2980,7 +3474,7 @@ export class Server {
         sync.observations = observations;
       }
     } catch (error) {
-      console.warn(
+      this.#warn(
         "attachAdoptionObservations failed; sync pushed without observations",
         error,
       );
@@ -3068,6 +3562,53 @@ export class Server {
       }
     });
     await this.#refreshing;
+  }
+
+  /**
+   * Flush local diagnostic sessions only after every already-started client
+   * frame has reached the server. This is event-driven and intentionally has
+   * no deadline because the diagnostics barrier needs a true fixed point.
+   */
+  async #flushDiagnosticsSessions(): Promise<void> {
+    if (this.#closed) return;
+    await Promise.race([
+      this.waitForDiagnosticsReceives(),
+      this.#closeSignal.promise,
+    ]);
+    if (this.#closed) return;
+    if (this.#commitTelemetry === undefined) {
+      await this.flushSessions();
+      return;
+    }
+    const effects: DiagnosticsEffectAck[] = [];
+    this.#diagnosticsEffectAcks = effects;
+    try {
+      await this.flushSessions();
+      await Promise.all(effects.map((effect) => effect.promise));
+    } finally {
+      for (const effect of effects) effect.cancel();
+      if (this.#diagnosticsEffectAcks === effects) {
+        this.#diagnosticsEffectAcks = undefined;
+      }
+    }
+  }
+
+  async flushDiagnosticsSessions(): Promise<void> {
+    const flush = this.#diagnosticsFlushQueue.then(
+      () => this.#flushDiagnosticsSessions(),
+      () => this.#flushDiagnosticsSessions(),
+    );
+    this.#diagnosticsFlushQueue = flush.catch(() => undefined);
+    await flush;
+  }
+
+  /** Await server receipt of client frames already started by diagnostics. */
+  async waitForDiagnosticsReceives(): Promise<void> {
+    await Promise.all(
+      [...this.#connections.values()].map((connection) =>
+        connection.waitForReceiveQueueToSettle()
+      ),
+    );
   }
 
   private scheduleRefresh(): void {
@@ -3168,9 +3709,8 @@ export class Server {
         // context manager propagates the active context into timer callbacks,
         // so without it this span could parent under whichever memory.transact
         // happened to schedule the refresh.
-        await tracer.startActiveSpan(
+        await this.#withRootSpan(
           "memory.fanout",
-          { root: true },
           async (span) => {
             span.setAttribute("space.did", space);
             span.setAttribute("subscriber.count", this.#connections.size);
@@ -3334,7 +3874,7 @@ export class Server {
         );
       }
     } catch (error) {
-      console.warn(
+      this.#warn(
         "Post-commit scheduler state update failed after semantic commit:",
         error,
       );

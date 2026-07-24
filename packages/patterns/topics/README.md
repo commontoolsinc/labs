@@ -90,3 +90,126 @@ cf piece call --piece <topic> addLink \
 Every agent-authored mutation carries `agentName`; there is no preceding “set
 current name” call. Fabric's operation history retains the authenticated human
 principal, while the stored snapshot disambiguates which agent acted.
+
+Do **not** run `cf piece step` from a fresh CLI replica: a replica with a
+partial view persists deriveds computed from that partial view. Writes commit
+fine on their own; renderers derive for themselves. Verify writes via a renderer
+or post-materialization fid reads.
+
+## Local workload diagnostics
+
+`topics-diagnose.ts` runs the board in worker-isolated local runtimes sharing an
+in-process memory server. It creates a fresh space per matrix case, drives real
+root and nested Topic streams, and emits one pretty JSON report on stdout;
+progress goes to stderr. Local runs require no collector.
+
+```bash
+# Small smoke matrix (two users, two topics).
+deno run --frozen -A packages/patterns/tools/topics-diagnose.ts --quick
+
+# Focused two-state whole-root conflict/storage profile.
+deno run --frozen -A packages/patterns/tools/topics-diagnose.ts --profile=conflicts
+
+# Explicit matrix and a focused scenario subset.
+deno run --frozen -A packages/patterns/tools/topics-diagnose.ts \
+  --cases=2x2,8x4 --rounds=3 --typing-steps=5 \
+  --scenario=comments,bodies
+
+# Two sessions per identity with deliberate storage-frame delay.
+deno run --frozen -A packages/patterns/tools/topics-diagnose.ts \
+  --topics=4 --users=2 --sessions-per-user=2 --ws-delay-ms=10
+```
+
+Supported scenarios are `create-topics`, `noops`, `titles`, `comments`, `links`,
+`bodies`, `crossrefs`, and `root-oscillation`. The matrix default keeps the
+original scenarios; `--scenario=all` adds root oscillation.
+`--profile=conflicts` is intentionally small and deterministic: 2 topics, 2
+users, 2 sessions per user, a 10ms WebSocket frame delay, 4 rounds, and only
+`root-oscillation`; `--profile=conflicts --quick` keeps that topology but uses 2
+rounds. Standalone `--quick` instead selects the small matrix: 2 topics, 2
+users, 1 round, 2 typing steps, and the ordinary matrix scenarios. Every
+explicit dimension or `--scenario` overrides profile defaults.
+`root-oscillation` has each worker read the stored topics link array locally,
+preserve those links, and prepare the reversed whole-root value between two
+sessions. Its diagnostic-only harness operation replaces the containing
+document's `value` record (preserving siblings), so canonical memory telemetry
+records a literal `/value` patch rather than nested `/value/topics/*` diffs. It
+requires at least two topics and two total sessions. The `noops` phase repeats
+each topic's current title and body so write elision is measured directly. When
+`create-topics` is not selected, setup creates the seed topics serially so
+focused profiles begin from a known baseline. Each target is prepared from the
+same confirmed root in two sessions then committed concurrently; the accepted
+root write and stale conflict/revert are both observed before the next target.
+Phase snapshots use an event-driven drain of delayed frames, worker
+synchronization, and server refreshes before counter reset or collection.
+`--program`, `--topics`, `--users`, `--rounds`, `--typing-steps`,
+`--sessions-per-user`, `--ws-delay-ms`, and `--cases=TOPICSxUSERS` are also
+available; invalid explicit values fail instead of falling back.
+
+Each phase reports logical submitted operations plus direct set/push accepted
+and rejected outcomes; queued stream sends are submitted, not accepted. It also
+reports scheduler invocations, scheduler commit markers, direct UI-style
+commits, retries, read/write/changed-write totals, truncated-write markers,
+distinct invoked/successful/dropped event counts, fixed drop and permanent
+rejection reason maps, and changed writes grouped by structural marker path. The
+worker correlates event IDs only in private sets; JSON reports contain no event
+IDs, handler IDs, paths, content, DIDs, or URLs beyond the fixed path shapes
+described below. `changedWriteCount` includes locally applied/speculative paths
+from failed or retried attempts; `writesByPathShape` contains only fixed
+structural shapes (`value`, `*`, `#`, `metadata`, `other`, `$root`), never IDs
+or field/content keys. Derived ratios show changed and attempted writes per
+submitted operation; `elided` is `writeCount - changedWriteCount` clamped at
+zero, so it is a candidate signal, not proof of a product-level no-op. Graph
+samples are post-settle cross-session maxima and settle samples are trailing
+cumulative history, not per-phase peaks. Workload inputs and control paths may
+cross into workers, but Topics diagnostic responses contain only numeric
+aggregates, booleans, fixed outcomes, and structural metadata. Equality tokens
+and bootstrap piece IDs travel only between workers over a fresh private
+BroadcastChannel; workers aggregate their scheduler graph and settle data into
+numeric counts and durations before transfer, so no scheduler nodes, edges,
+histories, action traces, or pattern values cross IPC for Topics diagnostics.
+They and storage-conflict churn are local runtime observations; compare them
+across the same machine/configuration, not as stable production benchmarks. Each
+local diagnostic phase also includes `memoryTelemetry`, a snapshot reset at the
+phase boundary from the canonical memory server: transact/accepted/rejected
+counts, conflict and replay counts, total/max received commit bytes, confirmed
+read entries/bytes, operation entries/bytes, newly persisted revisions, and
+rejections grouped by error name. It also reports fixed-vocabulary patch-op
+counts for received requests and newly applied non-replay revisions (including
+`append`); these counts contain no patch values, paths, or IDs. Canonical patch
+paths use the same privacy rule; a whole document `value` replacement is
+reported as `value-root`. `rootOscillation` is content-free metadata: the number
+of intended distinct states, target writes, and two-step eligible/repeat
+count/ratio. `targetWriteCount` counts one intended accepted state per competing
+transaction pair; the phase's `operations.submitted` also includes each stale
+contender. `twoStepEligibleCount` is `max(0, target writes - 2)`. It contains no
+links, IDs, values, or fingerprints. When no two-step comparison is eligible,
+its ratio is `null`; a one-round conflict profile remains valid and still
+measures accepted root writes and stale conflicts. Final convergence reports
+only a boolean equality result and per-session cardinality arrays; the private
+equality token includes durable topic, comment, link, and structured author
+snapshots, but neither that data nor the user-supplied program path is
+serialized. Failed cases use only fixed diagnostic error codes, never exception
+messages or input content: `invalid-configuration`,
+`harness-initialization-failed`, `phase-verification-failed`,
+`phase-operation-failed`, `root-oscillation-failed`, `convergence-failed`, or
+`unknown-error`.
+
+Canonical byte definitions and the oscillation sequence shape are stable local
+diagnostic signals. Their totals, accepted/rejected outcomes, conflict counts,
+scheduler churn, graph/settle samples, and timing remain observational: they can
+vary by runtime scheduling and should not be compared as exact production
+benchmarks.
+
+### Telemetry privacy
+
+Topics diagnostics use aggregate-only workers. They do not attach the runtime
+OTel bridge and suppress worker error output, so identifier-bearing worker spans
+and scheduler error payloads cannot escape through the diagnostic process. The
+local memory server also uses non-recording spans and suppresses free-form
+warnings in this mode. Aggregate workers reject generic read, raw-read, link,
+detailed-diagnostics, and logger-map RPCs. They allow lifecycle controls, the
+fixed-shape Topics commands, and the sanitized `diagnosticsSummary`,
+`diagnosticsActivityGeneration`, `telemetry`, and `topicsDiagnosticsChurn`
+aggregate commands. Those responses and the report retain only numeric
+aggregates, booleans, and fixed categories.

@@ -1,14 +1,48 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { type Pattern } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import type { Options } from "../src/storage/v2.ts";
 import { ensurePieceRunning } from "../src/ensure-piece-running.ts";
 import { trustPattern } from "./support/trusted-builder.ts";
 import { getDerivedInternalCell, getMetaCell } from "../src/link-utils.ts";
 import { setResultCell } from "../src/result-utils.ts";
+import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
+
+class SharedServerStorageManager extends EmulatedStorageManager {
+  static connectTo(
+    server: MemoryV2Server.Server,
+    options: Omit<Options, "memoryHost" | "spaceHostMap">,
+  ): SharedServerStorageManager {
+    const manager = new SharedServerStorageManager(
+      { ...options, memoryHost: new URL("memory://") },
+      () => server,
+    );
+    manager.sharedServer = server;
+    return manager;
+  }
+
+  private sharedServer!: MemoryV2Server.Server;
+
+  protected override server(): MemoryV2Server.Server {
+    return this.sharedServer;
+  }
+}
+
+const newSharedServer = () =>
+  new MemoryV2Server.Server({
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
+  });
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -796,5 +830,115 @@ describe("queueEvent with auto-start", () => {
     expect(resultCell.getAsQueryResult()).toMatchObject({
       doubled: 12,
     });
+  });
+
+  it("starts a piece for a queued nested event on a fresh replica", async () => {
+    const server = newSharedServer();
+    const writerStorage = SharedServerStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const writerRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: writerStorage,
+    });
+    const readerStorage = SharedServerStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const readerRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: readerStorage,
+    });
+    let handlerRunCount = 0;
+    const receivedEvents: unknown[] = [];
+
+    try {
+      const pattern: Pattern = {
+        argumentSchema: { type: "object" },
+        resultSchema: {
+          type: "object",
+          properties: { events: { type: "object" } },
+        },
+        derivedInternalCells: [{
+          partialCause: "events",
+          schema: { default: { $stream: true } },
+        }],
+        result: {
+          events: { $alias: { partialCause: "events", path: [] } },
+        },
+        nodes: [{
+          module: {
+            type: "javascript",
+            wrapper: "handler",
+            implementation: (event: unknown) => {
+              handlerRunCount++;
+              receivedEvents.push(event);
+            },
+          },
+          inputs: {
+            $event: { $alias: { partialCause: "events", path: [] } },
+          },
+          outputs: {},
+        }],
+      };
+      const patternIdentity = {
+        identity: "test-ensure-piece-cold-nested-event",
+        symbol: "default",
+      };
+      writerRuntime.patternManager.associatePatternIdentity(
+        trustPattern(writerRuntime, pattern),
+        patternIdentity,
+      );
+      readerRuntime.patternManager.associatePatternIdentity(
+        trustPattern(readerRuntime, pattern),
+        patternIdentity,
+      );
+
+      const tx = writerRuntime.edit();
+      const resultCell = writerRuntime.getCell(
+        space,
+        "cold-nested-event-result",
+        undefined,
+        tx,
+      );
+      const intermediateCell = writerRuntime.getCell(
+        space,
+        "cold-nested-event-intermediate",
+        undefined,
+        tx,
+      );
+      const eventsCell = getDerivedInternalCell(resultCell, {
+        partialCause: "events",
+      }, tx);
+      const argumentCell = getMetaCell(resultCell, "argument", tx);
+
+      resultCell.setRaw({
+        events: eventsCell.getAsWriteRedirectLink(),
+      });
+      resultCell.setMetaRaw("patternIdentity", patternIdentity);
+      resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+      argumentCell.set({});
+      intermediateCell.setRaw({});
+      eventsCell.setRaw({ $stream: true });
+      setResultCell(eventsCell, intermediateCell);
+      setResultCell(intermediateCell, resultCell);
+
+      await tx.commit();
+      await writerStorage.synced();
+
+      readerRuntime.scheduler.queueEvent(
+        eventsCell.getAsNormalizedFullLink(),
+        { type: "click", x: 42 },
+      );
+      await readerRuntime.settled();
+
+      expect(handlerRunCount).toBe(1);
+      expect(receivedEvents).toEqual([{ type: "click", x: 42 }]);
+    } finally {
+      await readerRuntime.dispose();
+      await readerStorage.close();
+      await writerRuntime.dispose();
+      await writerStorage.close();
+      await server.close();
+    }
   });
 });

@@ -101,6 +101,31 @@ export interface SchedulerEventPreflightActionSummary {
   writeCount: number;
 }
 
+/** Aggregate-only preflight statistics safe to transfer to a runtime host. */
+export interface HostSchedulerEventPreflightStats {
+  visitCount: number;
+  dirtyInputCount: number;
+  resultTrueCount: number;
+  workSetAddCount: number;
+  reverseDependencyActionCount: number;
+  reverseDependencyEdgeCount: number;
+  logReadCount: number;
+  logShallowReadCount: number;
+  writerCandidateCount: number;
+  writerOverlapCount: number;
+  directWriterCount: number;
+  hotActionCount: number;
+  hotFanoutActionCount: number;
+  rootDirectWriterCount: number;
+}
+
+/** Fixed, content-free reasons an event can be dropped before dispatch. */
+export type SchedulerEventDropReason =
+  | "piece-load"
+  | "lineage"
+  | "preflight"
+  | "load-gate";
+
 // ============================================================
 // Diagnosis types for non-settling / non-idempotent detection
 // ============================================================
@@ -169,16 +194,24 @@ export type RuntimeTelemetryMarker = {
   error?: string;
 } | {
   type: "scheduler.invocation";
+  /** Internal-only correlation key. Never export this as an OTel attribute. */
+  eventId: string;
   handlerId: string;
   handlerInfo?: SchedulerActionInfo;
   error?: string;
 } | {
   type: "scheduler.event.commit";
+  /** Internal-only correlation key. Never export this as an OTel attribute. */
+  eventId: string;
   handlerId: string;
   handlerInfo?: SchedulerActionInfo;
+  /** Scheduler dependency reads performed by this commit attempt. */
   readCount: number;
+  /** Changed writes plus deduplicated non-overlapping no-op candidate targets. */
   writeCount: number;
+  /** Paths locally changed by this attempt, including speculative failed retries. */
   changedWriteCount: number;
+  /** Capped structural addresses for changed writes only. */
   writes: string[];
   writesTruncated?: boolean;
   error?: string;
@@ -194,6 +227,12 @@ export type RuntimeTelemetryMarker = {
    * deterministic server-side commit-rule refusal (never retried).
    */
   terminal?: "permanent" | "convergence" | "rule";
+} | {
+  /** A final pre-dispatch outcome, categorized without event content. */
+  type: "scheduler.event.drop";
+  /** Internal-only correlation key. Never export this as an OTel attribute. */
+  eventId: string;
+  reason: SchedulerEventDropReason;
 } | {
   type: "scheduler.event.preflight";
   handlerId: string;
@@ -282,6 +321,97 @@ export type RuntimeTelemetryMarkerResult = RuntimeTelemetryMarker & {
   timeStamp: number;
 };
 
+/** Telemetry marker safe to transfer from a runtime worker to its host. */
+export type HostRuntimeTelemetryMarker =
+  | { type: "scheduler.run"; timeStamp: number; ok: boolean }
+  | {
+    type: "scheduler.run.complete";
+    timeStamp: number;
+    durationMs: number;
+    ok: boolean;
+  }
+  | {
+    type: "scheduler.settle";
+    timeStamp: number;
+    durationMs: number;
+    iterations: number;
+    settledEarly: boolean;
+    seedCount: number;
+    workSetSize: number;
+  }
+  | { type: "cell.update"; timeStamp: number }
+  | { type: "scheduler.invocation"; timeStamp: number; ok: boolean }
+  | {
+    type: "scheduler.event.commit";
+    timeStamp: number;
+    readCount: number;
+    writeCount: number;
+    changedWriteCount: number;
+    ok: boolean;
+    permanentRejection?: "origin-committed" | "receipt-exists";
+    retryAttempt?: number;
+    backoffMs?: number;
+    terminal?: "permanent" | "convergence" | "rule";
+  }
+  | {
+    type: "scheduler.event.drop";
+    timeStamp: number;
+    reason: SchedulerEventDropReason;
+  }
+  | {
+    type: "scheduler.event.preflight";
+    timeStamp: number;
+    readCount: number;
+    shallowReadCount: number;
+    dirtySizeBefore: number;
+    pendingSizeBefore: number;
+    dirtyDependencyCount: number;
+    hasDirtyDependencies: boolean;
+    skipped: boolean;
+    populateMs: number;
+    txToLogMs: number;
+    depCommitMs: number;
+    collectMs: number;
+    scheduleMs: number;
+    stats: HostSchedulerEventPreflightStats;
+    ok: boolean;
+  }
+  | { type: "storage.push.start"; timeStamp: number; ok: boolean }
+  | { type: "storage.push.complete"; timeStamp: number; ok: boolean }
+  | { type: "storage.push.error"; timeStamp: number; ok: false }
+  | { type: "storage.pull.start"; timeStamp: number; ok: boolean }
+  | { type: "storage.pull.complete"; timeStamp: number; ok: boolean }
+  | { type: "storage.pull.error"; timeStamp: number; ok: false }
+  | {
+    type: "storage.connection.update";
+    timeStamp: number;
+    status: "pending" | "ok" | "error";
+    attempt: number;
+    ok: boolean;
+  }
+  | { type: "storage.subscription.add"; timeStamp: number; ok: boolean }
+  | { type: "storage.subscription.remove"; timeStamp: number; ok: boolean }
+  | {
+    type: "scheduler.graph.snapshot";
+    timeStamp: number;
+    nodeCount: number;
+    edgeCount: number;
+  }
+  | { type: "scheduler.subscribe"; timeStamp: number; isEffect: boolean }
+  | {
+    type: "scheduler.dependencies.update";
+    timeStamp: number;
+    readCount: number;
+    writeCount: number;
+  }
+  | {
+    type: "scheduler.non-settling";
+    timeStamp: number;
+    busyTime: number;
+    windowDuration: number;
+    busyRatio: number;
+  };
+
 export class RuntimeTelemetryEvent
   extends CustomEvent<{ marker: RuntimeTelemetryMarker }> {
   readonly marker: RuntimeTelemetryMarkerResult;
@@ -298,6 +428,7 @@ export class RuntimeTelemetryEvent
 
 export class RuntimeTelemetry extends EventTarget {
   #storageTelemetry: StorageTelemetry;
+  #detailedEventCommitTelemetryLeases = 0;
 
   constructor() {
     super();
@@ -306,6 +437,26 @@ export class RuntimeTelemetry extends EventTarget {
 
   submit(marker: RuntimeTelemetryMarker) {
     this.dispatchEvent(new RuntimeTelemetryEvent(marker));
+  }
+
+  /** Whether a consumer has requested detailed event-commit telemetry. */
+  get detailedEventCommitTelemetryEnabled(): boolean {
+    return this.#detailedEventCommitTelemetryLeases > 0;
+  }
+
+  /**
+   * Request detailed event-commit telemetry until the returned release function
+   * is called. Releases are idempotent so independent consumers cannot disable
+   * each other's demand.
+   */
+  retainDetailedEventCommitTelemetry(): () => void {
+    this.#detailedEventCommitTelemetryLeases++;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.#detailedEventCommitTelemetryLeases--;
+    };
   }
 
   processInspectorCommand(command: Inspector.BroadcastCommand) {

@@ -17,6 +17,7 @@ import { env } from "./env.ts";
 import {
   getMeter,
   getTracer,
+  getTracerProvider,
   initOpenTelemetry,
   shutdownOpenTelemetry,
 } from "./otel.ts";
@@ -47,6 +48,34 @@ let runtime: Runtime | null = null;
 let detachOtelBridge: (() => void) | null = null;
 const loadedPieces = new Map<string, Cell<{ bgUpdater: Stream<unknown> }>>();
 let streamValidator = isStream;
+
+/** Attach detailed runtime telemetry only after the canonical OTel init succeeds. */
+export function attachOtelBridgeWhenInitialized(
+  telemetry: Runtime["telemetry"],
+  spaceDid: DID,
+  userDid: DID,
+): (() => void) | null {
+  if (getTracerProvider() === undefined) return null;
+  return attachRuntimeTelemetryOtelBridge(telemetry, {
+    tracer: getTracer(),
+    meter: getMeter(),
+    attributes: {
+      "ct.runtime": "bg-piece",
+    },
+    spanAttributes: {
+      "space.did": spaceDid,
+      "user.did": userDid,
+    },
+    // Metric datapoints don't inherit resource attributes in SigNoz, so stamp
+    // the scoping labels explicitly (metrics only — on spans these live on the
+    // resource, and duplicating them as span attributes makes the bare key
+    // ambiguous in queries).
+    metricAttributes: {
+      "service.name": env.OTEL_SERVICE_NAME,
+      "deployment.environment": env.ENV,
+    },
+  });
+}
 
 export function recordLatestError(e: ErrorWithContext): void {
   latestError = e;
@@ -114,6 +143,7 @@ export function setWorkerStateForTesting(
       [string, Cell<{ bgUpdater: Stream<unknown> }>]
     >;
     streamValidator?: typeof isStream;
+    detachOtelBridge?: (() => void) | null;
   },
 ): void {
   if ("initialized" in state) initialized = state.initialized ?? false;
@@ -130,6 +160,9 @@ export function setWorkerStateForTesting(
   }
   if ("streamValidator" in state) {
     streamValidator = state.streamValidator ?? isStream;
+  }
+  if ("detachOtelBridge" in state) {
+    detachOtelBridge = state.detachOtelBridge ?? null;
   }
 }
 
@@ -183,30 +216,18 @@ export async function initialize(
     errorHandlers: [errorHandler],
   }));
   // Each worker is its own isolate: the provider main.ts registers doesn't
-  // exist here, so initialize OTel in-worker (idempotent, fail-open) or the
-  // bridge below would attach to no-op instruments.
+  // exist here, so initialize OTel in-worker when export is enabled. Setup is
+  // idempotent and fail-open; a failed setup leaves the API instruments no-op.
   await initOpenTelemetry();
 
-  // Bridge the runtime's existing telemetry stream to OpenTelemetry. This is a
-  // second, passive consumer of the same event bus the debug tooling uses; it
-  // emits no-op instruments unless a provider is registered (see otel.ts).
-  detachOtelBridge = attachRuntimeTelemetryOtelBridge(runtime.telemetry, {
-    tracer: getTracer(),
-    meter: getMeter(),
-    attributes: {
-      "ct.runtime": "bg-piece",
-      "space.did": spaceId,
-      "user.did": identity.did(),
-    },
-    // Metric datapoints don't inherit resource attributes in SigNoz, so stamp
-    // the scoping labels explicitly (metrics only — on spans these live on the
-    // resource, and duplicating them as span attributes makes the bare key
-    // ambiguous in queries).
-    metricAttributes: {
-      "service.name": env.OTEL_SERVICE_NAME,
-      "deployment.environment": env.ENV,
-    },
-  });
+  // Do not attach a no-op bridge when OTel is disabled: attaching retains the
+  // runtime's detailed event-commit telemetry until cleanup. Enabled workers
+  // retain the bridge and detach it during cleanup after runtime disposal.
+  detachOtelBridge = attachOtelBridgeWhenInitialized(
+    runtime.telemetry,
+    spaceId,
+    identity.did(),
+  );
 
   manager = new PieceManager(currentSession, runtime);
   await manager.ready;
@@ -227,30 +248,34 @@ export async function cleanup(): Promise<void> {
   currentSession = null;
   manager = null;
 
-  // Ensure storage is synced before cleanup
-  if (runtime) {
-    await runtime.storageManager.synced();
-    await runtime.dispose();
-    runtime = null;
-  }
-
-  // Detach the OTel bridge only after the runtime is fully torn down, so the
-  // final sync/dispose telemetry (storage completions, subscription removals)
-  // is still observed; detaching closes any spans left in flight.
-  if (detachOtelBridge) {
-    detachOtelBridge();
-    detachOtelBridge = null;
-  }
-
-  // Flush buffered spans/metrics before the controller terminates this worker;
-  // fail-open — telemetry teardown must never block cleanup.
   try {
-    await shutdownOpenTelemetry();
-  } catch (error) {
-    console.error("Failed to shut down OpenTelemetry:", error);
-  }
+    if (runtime) {
+      try {
+        await runtime.storageManager.synced();
+      } finally {
+        await runtime.dispose();
+      }
+    }
+  } finally {
+    runtime = null;
 
-  initialized = false;
+    // Detach only after runtime teardown so final sync/dispose telemetry is
+    // observed. The finally block also closes spans when teardown rejects.
+    if (detachOtelBridge) {
+      detachOtelBridge();
+      detachOtelBridge = null;
+    }
+
+    // Flush before the controller terminates this worker. Telemetry teardown
+    // remains fail-open and must not replace a runtime cleanup failure.
+    try {
+      await shutdownOpenTelemetry();
+    } catch (error) {
+      console.error("Failed to shut down OpenTelemetry:", error);
+    }
+
+    initialized = false;
+  }
 }
 
 export async function runPiece(data: RunData): Promise<void> {

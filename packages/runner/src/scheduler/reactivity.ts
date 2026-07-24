@@ -8,6 +8,7 @@ import { normalizeCellScope } from "../scope.ts";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
+  IStorageTransaction,
   TransactionReactivityLog,
 } from "../storage/interface.ts";
 import { reactivityLogFromActivities } from "../storage/reactivity-log.ts";
@@ -137,8 +138,89 @@ export function txToReactivityLog(
   return toSchedulerReactivityLog(txToTransactionReactivityLog(tx));
 }
 
+/**
+ * Counts event-commit write targets for telemetry without widening the
+ * scheduler's dependency ReactivityLog. Changed writes are transaction writes;
+ * attempted targets that do not overlap a changed write are no-op candidates.
+ */
+export function eventCommitTelemetryWriteCounts(
+  tx: IStorageTransaction | IExtendedStorageTransaction,
+  changedWrites: readonly IMemorySpaceAddress[],
+): { writeCount: number; changedWriteCount: number } {
+  return classifyTelemetryWriteCounts(
+    changedWrites,
+    txToTransactionReactivityLog(tx).attemptedWrites ?? [],
+  );
+}
+
+export function classifyTelemetryWriteCounts(
+  changedWrites: readonly IMemorySpaceAddress[],
+  attemptedWrites: readonly IMemorySpaceAddress[],
+): { writeCount: number; changedWriteCount: number } {
+  const attemptedTargets = new Map<string, IMemorySpaceAddress>();
+  for (const address of attemptedWrites) {
+    attemptedTargets.set(normalizedAddressKey(address), address);
+  }
+  const changedByDocument = new Map<
+    string,
+    ChangedPathNode
+  >();
+  for (const changed of changedWrites) {
+    const documentKey = normalizedDocumentKey(changed);
+    const root = changedByDocument.get(documentKey) ?? changedPathNode();
+    let node = root;
+    for (const segment of changed.path) {
+      const child = node.children.get(segment) ?? changedPathNode();
+      node.children.set(segment, child);
+      node = child;
+    }
+    node.terminal = true;
+    changedByDocument.set(documentKey, root);
+  }
+  const noOpCandidates = [...attemptedTargets.values()].filter((attempted) => {
+    let node = changedByDocument.get(normalizedDocumentKey(attempted));
+    if (!node) return true;
+    if (node.terminal) return false;
+    for (const segment of attempted.path) {
+      node = node.children.get(segment);
+      if (!node) return true;
+      if (node.terminal) return false;
+    }
+    // The attempted path is a prefix of at least one changed path.
+    return node.children.size === 0;
+  });
+  return {
+    changedWriteCount: changedWrites.length,
+    writeCount: changedWrites.length + noOpCandidates.length,
+  };
+}
+
+interface ChangedPathNode {
+  terminal: boolean;
+  children: Map<string, ChangedPathNode>;
+}
+
+function changedPathNode(): ChangedPathNode {
+  return { terminal: false, children: new Map() };
+}
+
+function normalizedAddressKey(address: IMemorySpaceAddress): string {
+  return JSON.stringify([
+    normalizedDocumentKey(address),
+    address.path,
+  ]);
+}
+
+function normalizedDocumentKey(address: IMemorySpaceAddress): string {
+  return JSON.stringify([
+    address.space,
+    normalizeCellScope(address.scope),
+    address.id,
+  ]);
+}
+
 function txToTransactionReactivityLog(
-  tx: IExtendedStorageTransaction,
+  tx: IStorageTransaction | IExtendedStorageTransaction,
 ): TransactionReactivityLog {
   const direct = getDirectTransactionReactivityLog(tx);
   if (direct) {

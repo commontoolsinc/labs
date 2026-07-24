@@ -3,9 +3,9 @@ import type { RuntimeInternals } from "./runtime.ts";
 import type {
   CellHandle,
   CellRef,
+  HostRuntimeTelemetryMarker,
   LoggerFlagsData,
   PatternSourceInfo,
-  RuntimeTelemetryMarkerResult,
   SchedulerDiagnosisResult,
   SchedulerGraphEdge,
   SchedulerGraphSnapshot,
@@ -59,7 +59,7 @@ export class DebuggerController implements ReactiveController {
   private runtime?: RuntimeInternals;
   private visible = false;
   private telemetryEnabled = false; // Manual telemetry on/off
-  private telemetryMarkers: RuntimeTelemetryMarkerResult[] = [];
+  private telemetryMarkers: HostRuntimeTelemetryMarker[] = [];
   private updateVersion = 0;
   private watchedCells = new Map<string, WatchedCell>();
 
@@ -176,7 +176,7 @@ export class DebuggerController implements ReactiveController {
   /**
    * Get the current telemetry markers
    */
-  getTelemetryMarkers(): RuntimeTelemetryMarkerResult[] {
+  getTelemetryMarkers(): HostRuntimeTelemetryMarker[] {
     return this.telemetryMarkers;
   }
 
@@ -274,14 +274,6 @@ export class DebuggerController implements ReactiveController {
         // Limit to maximum number of events to prevent memory issues
         this.telemetryMarkers = allMarkers.slice(-MAX_TELEMETRY_EVENTS);
         this.updateVersion++;
-
-        // Check for graph snapshot events in recent markers
-        const latestMarker = allMarkers[allMarkers.length - 1];
-        if (latestMarker?.type === "scheduler.graph.snapshot") {
-          this.processGraphSnapshot(
-            (latestMarker as { graph: SchedulerGraphSnapshot }).graph,
-          );
-        }
 
         // NOTE: Auto-refresh disabled - was causing infinite loop
         // (telemetry -> UI update -> sink -> telemetry)

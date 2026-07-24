@@ -7,6 +7,8 @@ import {
 } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import {
+  attachOtelBridgeWhenInitialized,
+  cleanup,
   executeWorkerRequest,
   formatConsoleMessage,
   handleWorkerMessage,
@@ -19,6 +21,7 @@ import {
   workerConsoleContext,
 } from "../src/worker.ts";
 import { WorkerIPCMessageType } from "../src/worker-ipc.ts";
+import { RuntimeTelemetry } from "@commonfabric/runner";
 
 const TEST_DID = "did:key:z6Mktestspace";
 const OTHER_DID = "did:key:z6Mkotherspace";
@@ -26,6 +29,19 @@ const PIECE_ID = `fid1:${"a".repeat(54)}`;
 
 try {
   resetWorkerStateForTesting();
+
+  // No provider is registered in this subprocess, which is the same state the
+  // fail-open OTel initializer leaves after setup failure.
+  const telemetry = new RuntimeTelemetry();
+  assertEquals(
+    attachOtelBridgeWhenInitialized(
+      telemetry,
+      TEST_DID as never,
+      TEST_DID as never,
+    ),
+    null,
+  );
+  assertEquals(telemetry.detailedEventCommitTelemetryEnabled, false);
 
   assertEquals(workerConsoleContext(undefined), "Worker(NO_SPACE)");
   assertEquals(workerConsoleContext(TEST_DID as never), `Worker(${TEST_DID})`);
@@ -265,6 +281,39 @@ try {
     `runtime failed @ ${TEST_DID}:${PIECE_ID} running pattern`,
   );
   assertEquals(state.sends.length, 2);
+
+  let detachCalls = 0;
+  setWorkerStateForTesting({
+    initialized: true,
+    runtime: null,
+    detachOtelBridge: () => {
+      detachCalls++;
+    },
+  });
+  await cleanup();
+  await cleanup();
+  assertEquals(detachCalls, 1);
+
+  let disposeCalls = 0;
+  setWorkerStateForTesting({
+    initialized: true,
+    runtime: {
+      storageManager: {
+        synced: () => Promise.reject(new Error("sync failed")),
+      },
+      dispose: () => {
+        disposeCalls++;
+        return Promise.resolve();
+      },
+    } as never,
+    detachOtelBridge: () => {
+      detachCalls++;
+    },
+  });
+  await assertRejects(() => cleanup(), Error, "sync failed");
+  await cleanup();
+  assertEquals(disposeCalls, 1);
+  assertEquals(detachCalls, 2);
 } finally {
   resetWorkerStateForTesting();
 }

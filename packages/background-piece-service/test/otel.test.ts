@@ -10,6 +10,9 @@ import {
   type OtelConfig,
   shutdownOpenTelemetry,
 } from "../src/otel.ts";
+import { attachOtelBridgeWhenInitialized } from "../src/worker.ts";
+import { RuntimeTelemetry } from "@commonfabric/runner";
+import { Identity } from "@commonfabric/identity";
 
 const cfg = (enabled: boolean): OtelConfig => ({
   OTEL_ENABLED: enabled,
@@ -19,6 +22,36 @@ const cfg = (enabled: boolean): OtelConfig => ({
 });
 
 describe("OpenTelemetry setup", () => {
+  it(
+    "only attaches the worker telemetry bridge after telemetry initialization",
+    { sanitizeOps: false, sanitizeResources: false },
+    async () => {
+      const telemetry = new RuntimeTelemetry();
+      const identity = await Identity.fromPassphrase("bg-piece-otel-bridge");
+      assertEquals(
+        attachOtelBridgeWhenInitialized(
+          telemetry,
+          identity.did(),
+          identity.did(),
+        ),
+        null,
+      );
+
+      await initOpenTelemetry(cfg(true));
+      try {
+        const detach = attachOtelBridgeWhenInitialized(
+          telemetry,
+          identity.did(),
+          identity.did(),
+        );
+        assert(detach !== null, "enabled telemetry should attach the bridge");
+        detach();
+      } finally {
+        await shutdownOpenTelemetry();
+      }
+    },
+  );
+
   it("exposes a no-op tracer and no provider before init", () => {
     assertEquals(getTracerProvider(), undefined);
     const tracer = getTracer();

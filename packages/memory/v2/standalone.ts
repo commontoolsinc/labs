@@ -51,6 +51,10 @@ export class StandaloneMemoryServer {
         mode: MemoryServer.MemoryAclMode;
         serviceDids?: readonly string[];
       };
+      /** Enable aggregate received-commit telemetry for synthetic workloads. */
+      commitTelemetry?: boolean;
+      /** Do not emit payload-bearing local debug logs. */
+      aggregateOnlyDiagnostics?: boolean;
     } = {},
   ): StandaloneMemoryServer {
     const memory = new MemoryServer.Server({
@@ -59,6 +63,8 @@ export class StandaloneMemoryServer {
         audience: standaloneMemoryAudience,
       },
       acl: options.acl,
+      commitTelemetry: options.commitTelemetry,
+      aggregateOnlyDiagnostics: options.aggregateOnlyDiagnostics,
     });
     const http = Deno.serve({
       hostname: "127.0.0.1",
@@ -75,7 +81,8 @@ export class StandaloneMemoryServer {
           socket.send(encodeMemoryBoundary(message));
         }
       });
-      const debugWrites = Deno.env.get("CF_DEBUG_MEMORY_WRITES") === "1";
+      const debugWrites = !options.aggregateOnlyDiagnostics &&
+        Deno.env.get("CF_DEBUG_MEMORY_WRITES") === "1";
       socket.addEventListener("message", (event) => {
         if (typeof event.data !== "string") {
           socket.close(1003, "memory websocket expects text frames");
@@ -102,6 +109,27 @@ export class StandaloneMemoryServer {
   async close(): Promise<void> {
     await this.#http.shutdown();
     await this.#memory.close();
+  }
+
+  /** Returns and resets aggregate transact telemetry when collection is enabled. */
+  commitTelemetry(): MemoryServer.CommitTelemetrySnapshot {
+    return this.#memory.commitTelemetry();
+  }
+
+  async flushSessions(): Promise<void> {
+    await this.#memory.flushSessions();
+  }
+
+  async flushDiagnosticsSessions(): Promise<void> {
+    await this.#memory.flushDiagnosticsSessions();
+  }
+
+  async waitForDiagnosticsReceives(): Promise<void> {
+    await this.#memory.waitForDiagnosticsReceives();
+  }
+
+  diagnosticsActivityGeneration(): number {
+    return this.#memory.diagnosticsActivityGeneration();
   }
 }
 

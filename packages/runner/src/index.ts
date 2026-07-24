@@ -102,6 +102,7 @@ export {
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,
 } from "./storage/reactivity-log.ts";
+export { classifyTelemetryWriteCounts } from "./scheduler/reactivity.ts";
 export { resolveLink } from "./link-resolution.ts";
 export {
   areLinksSame,
@@ -208,10 +209,13 @@ export {
 } from "./cfc.ts";
 export type { Mutable } from "@commonfabric/utils/types";
 export {
+  type HostRuntimeTelemetryMarker,
+  type HostSchedulerEventPreflightStats,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
   type RuntimeTelemetryMarker,
   type RuntimeTelemetryMarkerResult,
+  type SchedulerEventPreflightStats,
   type SchedulerGraphEdge,
   type SchedulerGraphNode,
   type SchedulerGraphSnapshot,

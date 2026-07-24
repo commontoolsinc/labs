@@ -139,13 +139,17 @@ describe("scheduler event identity", () => {
     const backgroundTasks = new Set<Promise<unknown>>();
     let callbackCount = 0;
     let callbackStatus: string | undefined;
+    const markers: unknown[] = [];
     const droppedTx = {
       abort: () => {},
       status: () => ({ status: "error" }),
     } as unknown as IExtendedStorageTransaction;
 
     queueSchedulerEvent({
-      runtime: { edit: () => droppedTx } as unknown as Runtime,
+      runtime: {
+        edit: () => droppedTx,
+        telemetry: { submit: (marker: unknown) => markers.push(marker) },
+      } as unknown as Runtime,
       eventHandlers: [],
       eventQueue,
       backgroundTasks,
@@ -163,11 +167,17 @@ describe("scheduler event identity", () => {
         callbackStatus = commitTx.status().status;
       },
     });
+    const eventId = eventQueue[0]?.id;
 
     await Promise.all([...backgroundTasks]);
     expect(eventQueue).toEqual([]);
     expect(callbackCount).toBe(1);
     expect(callbackStatus).toBe("error");
+    expect(markers).toEqual([{
+      type: "scheduler.event.drop",
+      eventId,
+      reason: "piece-load",
+    }]);
   });
 
   it("does not resurrect an event dropped while its handler is loading", async () => {
@@ -179,8 +189,12 @@ describe("scheduler event identity", () => {
       abort: () => {},
       status: () => ({ status: "error" }),
     } as unknown as IExtendedStorageTransaction;
+    const markers: unknown[] = [];
     const state = {
-      runtime: { edit: () => droppedTx } as unknown as Runtime,
+      runtime: {
+        edit: () => droppedTx,
+        telemetry: { submit: (marker: unknown) => markers.push(marker) },
+      } as unknown as Runtime,
       eventHandlers: [],
       eventQueue,
       backgroundTasks,
@@ -200,13 +214,23 @@ describe("scheduler event identity", () => {
     const queued = eventQueue[0];
     expect(queued.handlerLoadPending).toBe(true);
 
-    dropQueuedEvent(state, queued, "lineage failed while loading");
-    dropQueuedEvent(state, queued, "duplicate terminal notification");
+    dropQueuedEvent(state, queued, "lineage", "lineage failed while loading");
+    dropQueuedEvent(
+      state,
+      queued,
+      "lineage",
+      "duplicate terminal notification",
+    );
     pieceLoad.resolve(true);
     await Promise.all([...backgroundTasks]);
 
     expect(eventQueue).toEqual([]);
     expect(callbackCount).toBe(1);
     expect(queued.handlerLoadPending).toBe(true);
+    expect(markers).toEqual([{
+      type: "scheduler.event.drop",
+      eventId: queued.id,
+      reason: "lineage",
+    }]);
   });
 });

@@ -25,6 +25,7 @@ import {
 } from "./backpressure.ts";
 import type {
   SchedulerActionInfo,
+  SchedulerEventDropReason,
   SchedulerEventPreflightStats,
 } from "../telemetry.ts";
 import { MAX_EVENT_BACKLOG_PER_STREAM } from "./constants.ts";
@@ -35,6 +36,7 @@ import type { OriginStatus } from "./lineage.ts";
 import type { NodeRegistry } from "./node-record.ts";
 import { RetryImmediately } from "./retry-immediately.ts";
 import {
+  eventCommitTelemetryWriteCounts,
   hasAnnotatedWrites,
   trustedEventWriteCandidatesFromTransaction,
   txToReactivityLog,
@@ -130,11 +132,18 @@ export interface SchedulerEventQueueState {
 function notifyEventDropped(
   state: Pick<SchedulerEventQueueState, "runtime">,
   args: {
+    readonly id: string;
     readonly eventLink: NormalizedFullLink;
     readonly onCommit?: QueuedEvent["onCommit"];
   },
+  dropReason: SchedulerEventDropReason,
   reason: string,
 ): void {
+  state.runtime.telemetry.submit({
+    type: "scheduler.event.drop",
+    eventId: args.id,
+    reason: dropReason,
+  });
   logger.warn("scheduler", reason, { eventLink: args.eventLink });
   if (!args.onCommit) return;
   const tx = state.runtime.edit();
@@ -161,6 +170,7 @@ export function dropQueuedEvent(
     & Pick<SchedulerEventQueueState, "runtime" | "eventQueue">
     & Partial<Pick<SchedulerEventQueueState, "releaseLineageEvent">>,
   event: QueuedEvent,
+  dropReason: SchedulerEventDropReason,
   reason: string,
 ): void {
   const index = state.eventQueue.indexOf(event);
@@ -170,7 +180,7 @@ export function dropQueuedEvent(
   }
   if (event.finalOutcomeNotified) return;
   event.finalOutcomeNotified = true;
-  notifyEventDropped(state, event, reason);
+  notifyEventDropped(state, event, dropReason, reason);
 }
 
 function findEventHandler(
@@ -369,6 +379,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           dropQueuedEvent(
             state,
             queuedEvent,
+            "piece-load",
             started
               ? `Event dropped: no handler registered for ${args.eventLink.id} after starting its piece`
               : `Event dropped: no handler registered for ${args.eventLink.id} and its piece could not be started`,
@@ -378,6 +389,7 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
         dropQueuedEvent(
           state,
           queuedEvent,
+          "piece-load",
           `Event dropped: starting the piece for ${args.eventLink.id} failed: ${
             error instanceof Error ? error.message : String(error)
           }`,
@@ -396,7 +408,8 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
     // instantiate). Trying again won't change this, so settle the event now.
     notifyEventDropped(
       state,
-      args,
+      { ...args, id },
+      "load-gate",
       `Event dropped: no handler registered for ${args.eventLink.id} ` +
         `after starting its piece`,
     );
@@ -483,7 +496,11 @@ export interface SchedulerEventExecutionState {
     originTx: IExtendedStorageTransaction,
     event: QueuedEvent,
   ) => void;
-  readonly dropEvent: (event: QueuedEvent, reason: string) => void;
+  readonly dropEvent: (
+    event: QueuedEvent,
+    dropReason: SchedulerEventDropReason,
+    reason: string,
+  ) => void;
   readonly recordLineageEvent: (
     originTx: IExtendedStorageTransaction,
     event: QueuedEvent,
@@ -524,7 +541,11 @@ export function preflightQueuedEventDependencies(state: {
   readonly getNextDebounceRunTime: (action: Action) => number | undefined;
   readonly getNextEligibleRunTime: (action: Action) => number | undefined;
   readonly scheduleWake: (notBefore: number) => void;
-  readonly dropEvent: (event: QueuedEvent, reason: string) => void;
+  readonly dropEvent: (
+    event: QueuedEvent,
+    dropReason: SchedulerEventDropReason,
+    reason: string,
+  ) => void;
 }, queuedEvent: QueuedEvent): EventDependencyPreflightResult {
   const { handler, event: eventValue } = queuedEvent;
   const preflightStats = createEventPreflightTraceContext();
@@ -558,6 +579,7 @@ export function preflightQueuedEventDependencies(state: {
     // await it hanging.
     state.dropEvent(
       queuedEvent,
+      "preflight",
       `Event dropped: populateDependencies threw during dependency ` +
         `preflight for ${queuedEvent.eventLink.id}`,
     );
@@ -720,6 +742,7 @@ export async function processPullQueuedEventDuringExecute(
     if (originStatus === "failed") {
       state.dropEvent(
         queuedEvent,
+        "lineage",
         `Event dropped: lineage origin failed before ${queuedEvent.id} dispatched`,
       );
       logger.debug("scheduler-lineage", () => [
@@ -788,7 +811,8 @@ export async function processPullQueuedEventDuringExecute(
       getNextDebounceRunTime: (dep) => state.getNextDebounceRunTime(dep),
       getNextEligibleRunTime: (dep) => state.getNextEligibleRunTime(dep),
       scheduleWake: (notBefore) => state.scheduleWake(notBefore),
-      dropEvent: (event, reason) => state.dropEvent(event, reason),
+      dropEvent: (event, dropReason, reason) =>
+        state.dropEvent(event, dropReason, reason),
     }, queuedEvent);
     shouldSkipEvent = preflight.shouldSkipEvent;
 
@@ -894,6 +918,7 @@ export async function dispatchQueuedEvent(state: {
 
   state.runtime.telemetry.submit({
     type: "scheduler.invocation",
+    eventId: queuedEvent.id,
     handlerId,
     handlerInfo: state.getActionTelemetryInfo(handler),
   });
@@ -1066,10 +1091,17 @@ export async function dispatchQueuedEvent(state: {
     }
 
     state.runtime.prepareTxForCommit(tx);
+    const detailedEventCommitTelemetry =
+      state.runtime.telemetry.detailedEventCommitTelemetryEnabled;
     const log = txToReactivityLog(tx);
-    const telemetryWrites = log.writes
-      .slice(0, EVENT_COMMIT_TELEMETRY_WRITE_LIMIT)
-      .map(formatEventCommitAddress);
+    const writeCounts = detailedEventCommitTelemetry
+      ? eventCommitTelemetryWriteCounts(tx, log.writes)
+      : { writeCount: log.writes.length, changedWriteCount: log.writes.length };
+    const telemetryWrites = detailedEventCommitTelemetry
+      ? log.writes
+        .slice(0, EVENT_COMMIT_TELEMETRY_WRITE_LIMIT)
+        .map(formatEventCommitAddress)
+      : [];
     // Do not await event commits here. commit() applies the transaction
     // locally before returning, and the scheduler must let later client work
     // continue against that speculative state while server confirmation is in
@@ -1098,13 +1130,15 @@ export async function dispatchQueuedEvent(state: {
 
       state.runtime.telemetry.submit({
         type: "scheduler.event.commit",
+        eventId: queuedEvent.id,
         handlerId,
         handlerInfo: state.getActionTelemetryInfo(handler),
         readCount: log.reads.length + log.shallowReads.length,
-        writeCount: log.writes.length,
-        changedWriteCount: log.writes.length,
+        writeCount: writeCounts.writeCount,
+        changedWriteCount: writeCounts.changedWriteCount,
         writes: telemetryWrites,
-        ...(log.writes.length > EVENT_COMMIT_TELEMETRY_WRITE_LIMIT
+        ...(detailedEventCommitTelemetry &&
+            log.writes.length > EVENT_COMMIT_TELEMETRY_WRITE_LIMIT
           ? { writesTruncated: true }
           : {}),
         ...(result.error ? { error: result.error.message } : {}),

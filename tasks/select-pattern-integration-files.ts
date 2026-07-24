@@ -28,6 +28,7 @@ export const FOUR_SHARD_ASSIGNMENTS: Readonly<Record<string, number>> = {
   "cf-code-editor.test.ts": 1,
   "home-profile-reload-durability.test.ts": 1,
   "sqlite-db-owner-multi-runtime.test.ts": 1,
+  "topics-diagnose-scripted.test.ts": 1,
 
   // shard 2
   "cfc-group-chat-demo-two-browsers.test.ts": 2,

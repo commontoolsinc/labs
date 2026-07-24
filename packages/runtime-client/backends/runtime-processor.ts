@@ -35,6 +35,10 @@ import {
   type SigilLink,
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
+import type {
+  RuntimeTelemetryMarkerResult,
+  SchedulerEventPreflightStats,
+} from "@commonfabric/runner";
 import { linkRefPayload } from "@commonfabric/runner/shared";
 import {
   cfcLabelViewForCell,
@@ -155,7 +159,7 @@ import {
   type RenderDeclassificationPolicy,
   WorkerReconciler,
 } from "@commonfabric/html/worker";
-import type { VDomOp } from "../protocol/types.ts";
+import type { HostRuntimeTelemetryMarker, VDomOp } from "../protocol/types.ts";
 import type { JSONValue, RuntimeOptions } from "@commonfabric/runner";
 import {
   postContextualRuntimeError,
@@ -171,6 +175,170 @@ const cfcLabelLogger = getLogger("runtime-client.cfc-label", {
   enabled: true,
   level: "error",
 });
+
+/**
+ * Keep event correlation and detailed write addresses in the worker. The host
+ * needs aggregate counts and fixed categories, not identifier-bearing joins.
+ */
+export function telemetryMarkerForHost(
+  marker: RuntimeTelemetryMarkerResult,
+): HostRuntimeTelemetryMarker {
+  switch (marker.type) {
+    case "scheduler.run":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        ok: marker.error === undefined,
+      };
+    case "scheduler.run.complete":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        durationMs: marker.durationMs,
+        ok: marker.error === undefined,
+      };
+    case "scheduler.settle":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        durationMs: marker.durationMs,
+        iterations: marker.iterations,
+        settledEarly: marker.settledEarly,
+        seedCount: marker.seedCount,
+        workSetSize: marker.workSetSize,
+      };
+    case "cell.update":
+      return { type: marker.type, timeStamp: marker.timeStamp };
+    case "scheduler.invocation":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        ok: marker.error === undefined,
+      };
+    case "scheduler.event.commit":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        readCount: marker.readCount,
+        writeCount: marker.writeCount,
+        changedWriteCount: marker.changedWriteCount,
+        ok: marker.error === undefined,
+        ...(marker.permanentRejection === undefined
+          ? {}
+          : { permanentRejection: marker.permanentRejection }),
+        ...(marker.retryAttempt === undefined
+          ? {}
+          : { retryAttempt: marker.retryAttempt }),
+        ...(marker.backoffMs === undefined
+          ? {}
+          : { backoffMs: marker.backoffMs }),
+        ...(marker.terminal === undefined ? {} : { terminal: marker.terminal }),
+      };
+    case "scheduler.event.drop":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        reason: marker.reason,
+      };
+    case "scheduler.event.preflight": {
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        readCount: marker.readCount,
+        shallowReadCount: marker.shallowReadCount,
+        dirtySizeBefore: marker.dirtySizeBefore,
+        pendingSizeBefore: marker.pendingSizeBefore,
+        dirtyDependencyCount: marker.dirtyDependencyCount,
+        hasDirtyDependencies: marker.hasDirtyDependencies,
+        skipped: marker.skipped,
+        populateMs: marker.populateMs,
+        txToLogMs: marker.txToLogMs,
+        depCommitMs: marker.depCommitMs,
+        collectMs: marker.collectMs,
+        scheduleMs: marker.scheduleMs,
+        stats: telemetryPreflightStatsForHost(marker.stats),
+        ok: marker.error === undefined,
+      };
+    }
+    case "storage.push.start":
+    case "storage.push.complete":
+    case "storage.pull.start":
+    case "storage.pull.complete":
+    case "storage.subscription.add":
+    case "storage.subscription.remove":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        ok: marker.error === undefined,
+      };
+    case "storage.push.error":
+    case "storage.pull.error":
+      return { type: marker.type, timeStamp: marker.timeStamp, ok: false };
+    case "storage.connection.update":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        status: marker.status,
+        attempt: marker.attempt,
+        ok: marker.error === undefined,
+      };
+    case "scheduler.graph.snapshot":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        nodeCount: marker.graph.nodes.length,
+        edgeCount: marker.graph.edges.length,
+      };
+    case "scheduler.subscribe":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        isEffect: marker.isEffect,
+      };
+    case "scheduler.dependencies.update":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        readCount: marker.reads.length,
+        writeCount: marker.writes.length,
+      };
+    case "scheduler.non-settling":
+      return {
+        type: marker.type,
+        timeStamp: marker.timeStamp,
+        busyTime: marker.busyTime,
+        windowDuration: marker.windowDuration,
+        busyRatio: marker.busyRatio,
+      };
+  }
+
+  return assertNeverTelemetryMarker(marker);
+}
+
+function telemetryPreflightStatsForHost(
+  stats: SchedulerEventPreflightStats,
+) {
+  return {
+    visitCount: stats.visitCount,
+    dirtyInputCount: stats.dirtyInputCount,
+    resultTrueCount: stats.resultTrueCount,
+    workSetAddCount: stats.workSetAddCount,
+    reverseDependencyActionCount: stats.reverseDependencyActionCount,
+    reverseDependencyEdgeCount: stats.reverseDependencyEdgeCount,
+    logReadCount: stats.logReadCount,
+    logShallowReadCount: stats.logShallowReadCount,
+    writerCandidateCount: stats.writerCandidateCount,
+    writerOverlapCount: stats.writerOverlapCount,
+    directWriterCount: stats.directWriterCount,
+    hotActionCount: stats.hotActions?.length ?? 0,
+    hotFanoutActionCount: stats.hotFanoutActions?.length ?? 0,
+    rootDirectWriterCount: stats.rootDirectWriters?.length ?? 0,
+  };
+}
+
+function assertNeverTelemetryMarker(marker: never): never {
+  throw new Error(`Unhandled runtime telemetry marker: ${marker}`);
+}
 
 /**
  * PageId intake: accepts both the bare tagged hash (`fid1:<hash>`, the
@@ -454,6 +622,7 @@ export class RuntimeProcessor {
   private subscriptions = new Map<string, Cancel>();
   private telemetry: RuntimeTelemetry;
   #telemetryEnabled = false;
+  #releaseDetailedEventCommitTelemetry: (() => void) | undefined;
 
   // VDOM mounts: mountId -> { reconciler, cancel }
   private vdomMounts = new Map<
@@ -739,6 +908,8 @@ export class RuntimeProcessor {
     this._isDisposed = true;
     this.disposingPromise = (async () => {
       this.telemetry.removeEventListener("telemetry", this.#onTelemetry);
+      this.#releaseDetailedEventCommitTelemetry?.();
+      this.#releaseDetailedEventCommitTelemetry = undefined;
       try {
         this.#siteTableCancel?.();
         this.#siteTableCancel = undefined;
@@ -1355,8 +1526,16 @@ export class RuntimeProcessor {
   }
 
   setTelemetryEnabled(request: SetTelemetryEnabledRequest): void {
+    if (request.enabled === this.#telemetryEnabled) return;
     this.#telemetryEnabled = request.enabled;
     this.runtime.scheduler.setEventPreflightTelemetryEnabled(request.enabled);
+    if (request.enabled) {
+      this.#releaseDetailedEventCommitTelemetry = this.telemetry
+        .retainDetailedEventCommitTelemetry();
+    } else {
+      this.#releaseDetailedEventCommitTelemetry?.();
+      this.#releaseDetailedEventCommitTelemetry = undefined;
+    }
   }
 
   resetLoggerBaselines(_: any): void {
@@ -1383,7 +1562,7 @@ export class RuntimeProcessor {
     const marker = (event as RuntimeTelemetryEvent).marker;
     self.postMessage({
       type: NotificationType.Telemetry,
-      marker,
+      marker: telemetryMarkerForHost(marker),
     });
   };
 

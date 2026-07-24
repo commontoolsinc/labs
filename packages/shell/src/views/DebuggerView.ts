@@ -2,8 +2,8 @@ import { css, html, LitElement, TemplateResult } from "lit";
 import { property, state } from "lit/decorators.js";
 import { ResizableDrawerController } from "../lib/resizable-drawer-controller.ts";
 import type {
+  HostRuntimeTelemetryMarker,
   LoggerMetadata,
-  RuntimeTelemetryMarkerResult,
   TimingStats,
 } from "@commonfabric/runtime-client";
 import { isRecord } from "@commonfabric/utils/types";
@@ -832,7 +832,7 @@ export class XDebuggerView extends LitElement {
   accessor visible = false;
 
   @property({ attribute: false })
-  accessor telemetryMarkers: RuntimeTelemetryMarkerResult[] = [];
+  accessor telemetryMarkers: HostRuntimeTelemetryMarker[] = [];
 
   @property({ attribute: false })
   accessor debuggerController: DebuggerController | undefined = undefined;
@@ -894,7 +894,7 @@ export class XDebuggerView extends LitElement {
   private accessor isPaused = false;
 
   @state()
-  private accessor pausedMarkers: RuntimeTelemetryMarkerResult[] = [];
+  private accessor pausedMarkers: HostRuntimeTelemetryMarker[] = [];
 
   @state()
   private accessor tooltipData: {
@@ -1100,7 +1100,7 @@ export class XDebuggerView extends LitElement {
     this.fullHeightEvents = newSet;
   }
 
-  private async copyJson(data: RuntimeTelemetryMarkerResult) {
+  private async copyJson(data: HostRuntimeTelemetryMarker) {
     try {
       const jsonString = JSON.stringify(data, null, 2);
       await navigator.clipboard.writeText(jsonString);
@@ -1116,7 +1116,7 @@ export class XDebuggerView extends LitElement {
     }`;
   }
 
-  private getEventIcon(marker: RuntimeTelemetryMarkerResult): string {
+  private getEventIcon(marker: HostRuntimeTelemetryMarker): string {
     const type = marker.type;
 
     // Try to find a matching topic
@@ -1132,7 +1132,7 @@ export class XDebuggerView extends LitElement {
     return "📊";
   }
 
-  private getEventColor(marker: RuntimeTelemetryMarkerResult): string {
+  private getEventColor(marker: HostRuntimeTelemetryMarker): string {
     const type = marker.type;
 
     // Try to find a matching topic
@@ -1148,7 +1148,7 @@ export class XDebuggerView extends LitElement {
     return "#64748b";
   }
 
-  private matchesActiveTopics(marker: RuntimeTelemetryMarkerResult): boolean {
+  private matchesActiveTopics(marker: HostRuntimeTelemetryMarker): boolean {
     if (this.activeSubtopics.size === 0) return false;
 
     const type = marker.type;
@@ -1168,7 +1168,7 @@ export class XDebuggerView extends LitElement {
     return false;
   }
 
-  private matchesSearch(marker: RuntimeTelemetryMarkerResult): boolean {
+  private matchesSearch(marker: HostRuntimeTelemetryMarker): boolean {
     if (!this.searchText) return true;
 
     const searchLower = this.searchText.toLowerCase();
@@ -1177,7 +1177,7 @@ export class XDebuggerView extends LitElement {
     return markerStr.includes(searchLower);
   }
 
-  private getFilteredEvents(): RuntimeTelemetryMarkerResult[] {
+  private getFilteredEvents(): HostRuntimeTelemetryMarker[] {
     const markers = this.isPaused ? this.pausedMarkers : this.telemetryMarkers;
 
     return markers.filter((marker) =>
@@ -1186,7 +1186,7 @@ export class XDebuggerView extends LitElement {
   }
 
   private renderEventDetails(
-    marker: RuntimeTelemetryMarkerResult,
+    marker: HostRuntimeTelemetryMarker,
   ): TemplateResult[] {
     const details = [];
 
@@ -1237,21 +1237,21 @@ export class XDebuggerView extends LitElement {
             </div>
           `);
         }
-        if (Array.isArray(info.reads) && info.reads.length > 0) {
+        if (typeof info.readCount === "number" && info.readCount > 0) {
           details.push(html`
             <div class="event-detail">
               <span class="event-detail-label">reads:</span>
-              <span class="event-detail-value">${info.reads
-                .length} dependencies</span>
+              <span class="event-detail-value">${info
+                .readCount} dependencies</span>
             </div>
           `);
         }
-        if (Array.isArray(info.writes) && info.writes.length > 0) {
+        if (typeof info.writeCount === "number" && info.writeCount > 0) {
           details.push(html`
             <div class="event-detail">
               <span class="event-detail-label">writes:</span>
-              <span class="event-detail-value">${info.writes
-                .length} outputs</span>
+              <span class="event-detail-value">${info
+                .writeCount} outputs</span>
             </div>
           `);
         }

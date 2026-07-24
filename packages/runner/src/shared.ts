@@ -40,10 +40,13 @@ export {
 export { type Cancel, useCancelGroup } from "./cancel.ts";
 export type {
   CycleReport,
+  HostRuntimeTelemetryMarker,
+  HostSchedulerEventPreflightStats,
   NonIdempotentReport,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
   RuntimeTelemetryMarkerResult,
+  SchedulerActionInfo,
   SchedulerDiagnosisResult,
   SchedulerGraphEdge,
   SchedulerGraphNode,
