@@ -102,8 +102,9 @@ instead of hiding it in module-scoped mutable variables.
   clock is coarsened to one-second resolution); in a lift/computed or at
   pattern-body level they throw a `TimeCapabilityError`. For reactive time in a
   computed, read the `#now` wish.
-- Timers are not exposed inside authored modules yet, so do not rely on
-  `setTimeout()` or `setInterval()` in handler code.
+- Timers are not part of the authored surface and do not compile, so drive
+  timed work through the scheduler rather than reaching for `setTimeout()` or
+  `setInterval()` in handler code.
 
 ## Input Delivery Is Rate-Shaped
 

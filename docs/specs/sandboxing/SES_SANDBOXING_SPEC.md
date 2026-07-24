@@ -895,12 +895,12 @@ is feature detection: `typeof Proxy` no longer compiles, though coping with an
 absent global is the whole point of that idiom. Code that needs to ask must go
 through a `globalThis` record.
 
-`SANDBOX_UNRESOLVED_GLOBAL_GAPS` alongside it lists the names that still
-violate this rule: the timers, `queueMicrotask`, and `Intl`. Each is a live
-instance of the bug, held to an exact list by the same test so the set cannot
-grow. They are listed rather than stripped because several API clients under
-`packages/patterns` build retry backoff out of `setTimeout`, so the
-declarations cannot go until that code does.
+The contract test enforces this as a zero-gap invariant: the set of globals the
+compiler declares but the Compartment lacks must be empty. A type-library change
+that reintroduces a gap fails the test until the new name is endowed or
+withheld. Withholding a `declare namespace` such as `Intl` removes only its
+value members, so its interfaces stay and authored code can still name the types
+even though it cannot construct the objects.
 
 Notably, SES stops listing `Float32Array` and `Float64Array` as universal
 globals as of version 2. A NaN carries spare mantissa bits, and storing one

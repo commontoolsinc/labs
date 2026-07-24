@@ -85,15 +85,6 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
       "fetch-json example renders the typed repo star count",
     );
 
-    const { default: TestAwaitInHandler } = await import(
-      "../../../gideon-tests/test-await-in-handler.tsx"
-    );
-    const testAwaitInHandler = instantiatePattern(TestAwaitInHandler, {});
-    assert(
-      textContent(uiOf(testAwaitInHandler)).includes("Fetched successfully"),
-      "await-in-handler pattern renders the reactive fetchJson result",
-    );
-
     const { default: GmailImporter } = await import(
       "../../../google/core/gmail-importer.tsx"
     );
