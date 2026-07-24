@@ -166,8 +166,12 @@ describe("lunch poll: two users vote on a shared option", () => {
           ]),
       );
 
-      // Host joins first -> becomes host/admin. The roster chip carrying the
-      // host's name appears once the join lands.
+      // Host joins first -> becomes host/admin. Fresh identities carry no
+      // shared profile, so the join card opens on the profile create/pick
+      // surface; "Continue as guest" reveals the typed-name input this test
+      // drives. The roster chip carrying the host's name appears once the join
+      // lands.
+      await clickCfButton(hostPage, "#lp-guest-button");
       await timer.run(
         "host name filled",
         () => fillCfInput(hostPage, "#lp-join-name", HOST),
@@ -178,9 +182,11 @@ describe("lunch poll: two users vote on a shared option", () => {
         () => waitForText(hostPage, "body", HOST),
       );
 
-      // Guest joins second. The board shows a participant count, not a full
-      // roster, so the host's join landing is observed as "2 joined" (and the
-      // guest's own page shows its name plus "hosted by Alice").
+      // Guest joins second via the same guest path. The board shows a
+      // participant count, not a full roster, so the host's join landing is
+      // observed as "2 joined" (and the guest's own page shows its name plus
+      // "hosted by Alice").
+      await clickCfButton(guestPage, "#lp-guest-button");
       await fillCfInput(guestPage, "#lp-join-name", GUEST);
       await clickCfButton(guestPage, "#lp-join-button");
       await timer.run(
