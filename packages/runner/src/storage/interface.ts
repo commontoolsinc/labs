@@ -823,6 +823,16 @@ export interface IStorageTransaction {
   ): void;
 
   /**
+   * Abandon the mergeable fast path for the array at `address`. A caller that
+   * rewrites the whole array in a way a recorded mergeable op cannot represent —
+   * an in-place reshape such as sort/reverse/splice after a push — calls this so
+   * the commit emits the whole-array diff (the correct local value) instead of a
+   * tail-relative op whose recorded tail no longer identifies the appended
+   * elements. A path with no recorded op is left untouched.
+   */
+  poisonMergeableOp?(address: IMemorySpaceAddress): void;
+
+  /**
    * The document addresses for which this transaction recorded a mergeable op.
    * The commit's read-set builder uses these to drop reads of those paths from
    * conflict detection.
@@ -1045,6 +1055,13 @@ export interface IExtendedStorageTransaction
    * resolving the link to a memory address.
    */
   recordMergeableOp?(link: NormalizedFullLink, delta: MergeableOpDelta): void;
+
+  /**
+   * Abandon the mergeable fast path for the array addressed by `link`, forwarded
+   * to the underlying transaction after resolving the link. See
+   * {@link IStorageTransaction.poisonMergeableOp}.
+   */
+  poisonMergeableOp?(link: NormalizedFullLink): void;
 
   getCfcState(): Readonly<CfcTxState>;
   setCfcEnforcementMode(mode: CfcEnforcementMode): void;

@@ -99,11 +99,13 @@ no read dependency on the array, and dropping the array read from the conflict
 set loses no necessary safety.
 
 The limitation: an append whose decision depends on the current contents — for
-example "append only if the list has fewer than N elements" — is not expressible
-as a pure append, because the conditional read is dropped from conflict
-detection. Such a write should continue to use a read-modify-write `set`, which
-keeps its read in the conflict set. `Cell.push` is unconditional, so it qualifies
-for the mergeable path.
+example "append only if the list has fewer than N elements" — cannot both merge
+and stay correct. Its read is *kept* in the conflict set (the narrowing below
+drops only the op's own incidental reads, and the array's `length` child is
+explicitly kept), so a concurrent append makes the commit conflict and retry
+rather than merge — correct, but at the cost of the mergeability the op exists
+for. See the *Read-set builder* and *Conditional pushes stay protected* sections
+for exactly which reads are kept. `Cell.push` is unconditional, so it merges.
 
 ## Mechanics
 
@@ -143,7 +145,40 @@ The same machinery carries three mergeable ops. `append` is described below;
   itself*: the read the op's `Cell` method marks as its own (`mergeableOpRead`),
   a read marked as an attempted write, the `["cfc"]` write-policy label, and any
   strict descendant of an op path (the link-resolution sub-reads the write makes
-  beneath the value). A handler's *own* explicit `.get()` of the list is not
+  beneath the value). The one strict descendant that is *not* dropped is the
+  array's own `length` child (`[...opPath, "length"]`): a read of it is the
+  handler depending on the element count, which a mergeable append / add-unique /
+  remove-by-value changes, and the op itself never reads `length`. So a push
+  whose new element's index, id, or position came from the length conflicts
+  against a concurrent append instead of merging with a stale index. This is
+  precise: the `length` read conflicts with a change to the element count, not
+  with an edit to an existing element (whose path is a different descendant and
+  leaves the length unchanged). The carve-out rescues the length reads recorded
+  *only* at this child path — a `for...of`/spread over the array (the proxy
+  iterator reads `[...opPath, "length"]`) and a `key("length")` read. The other
+  ways to observe the count read the whole array and are already kept: a bare
+  `.length` on the query-result proxy, `.get()`, and the read-only array methods
+  (`.map`/`.filter`/`.some`/…) all record a *recursive* read AT the op path,
+  which is the handler's explicit read (below).
+
+  Key enumeration and index probing are a stronger case than the length: an array
+  here can be **sparse** (holes below `length`), and filling or punching a hole
+  changes the present-key set with no `length` write (a write at `[...opPath, i]`
+  only). `Object.keys`/`values`/`entries`/spread/`for...in` (the `ownKeys` trap)
+  and `n in arr` (the `has` trap) observe that present-key set, so a length read
+  — or a nonRecursive shape read at the array path, which the engine does not
+  conflict against a same-length element-slot write — would miss a concurrent
+  hole edit and let an enumeration-derived push merge on a stale key set. Those
+  two traps instead record a **recursive** read of the array, the one kept read a
+  hole edit invalidates, marked `ignoreReadForScheduling` so it adds only the
+  conflict dependency (reactivity stays on the nonRecursive shape read). It is
+  gated to arrays, so object enumeration keeps the shape-only conflict granularity
+  of the conflict-granularity work. The carve-out applies to every
+  mergeable op: a length read before an `addUnique` or `removeByValue` likewise
+  conflicts with a concurrent count-changing op, so a transaction that
+  gratuitously reads the length forfeits that op's distinct-element merge — the
+  same tradeoff as any explicit read kept in the conflict set. A handler's *own*
+  explicit `.get()` of the list is not
   marked, so it is kept — which is what makes a conditional push or keyed write
   still conflict-and-retry (see "Danger" below). This is narrower than the
   earlier path-level exclusion, which dropped any read overlapping the array path
@@ -236,10 +271,24 @@ first, since the op carries only the delta.
   predetermined order. Code must not assume a specific interleaving of
   independently-issued appends.
 
-- **Mixed whole-array reshape.** A transaction that both pushes and reshapes the
-  whole array in another way (sort, reverse, splice-out) in the same commit
-  emits the append and may drop the whole-array reshape op. Reshapes should be
-  committed separately from a push.
+- **Mixed ops on one path fall back to the whole-array diff.** A tail-relative
+  intent can only carry the change it recorded. When one transaction records more
+  than one kind of mergeable op at the same array path (an `addUnique` and a
+  `push`, a `removeByValue` and an `addUnique` — the "remove the old value, add
+  the new" idiom), or reshapes the array with an in-place mutator after a push
+  (`sort`, `reverse`, `splice`, `unshift`, `fill`), the recorded tail no longer
+  identifies what the op should carry. The path is *poisoned*: its mergeable
+  intent is dropped and the commit emits the whole-array diff, which reflects the
+  correct combined local value. That transaction's write to that path forfeits
+  merge-friendliness (it commits as a value diff, so it can false-conflict under
+  contention) but is never silently corrupted. Three sites poison via
+  `poisonMergeableOp`: `recordMergeableOp` on a second, different op kind; the
+  query-result proxy on any non-`push` in-place mutator; and `Cell.set` on a
+  whole-value overwrite of a path that already carries an intent. `poisonMergeableOp`
+  only acts when an intent is already present at the exact path, so a same-kind
+  repeat (two `push`es, two `increment`s) still folds into one op, an element edit
+  (`cell.key(i).set(...)`, whose path carries no intent) still composes with a
+  push, and a reshape or `set` *before* any op leaves a later push mergeable.
 
 ## Conditional pushes stay protected: the read-set narrowing
 
