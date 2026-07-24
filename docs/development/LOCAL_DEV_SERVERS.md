@@ -93,6 +93,7 @@ operator/admin (`add-admin-piece`, the background piece service, deploying
 system home patterns):
 ```bash
 deno run -A packages/cli/mod.ts id derive "implicit trust" > claude.key
+export CF_IDENTITY="$PWD/claude.key"
 ```
 It is a shared, publicly-derivable key — every developer who derives it gets
 the same DID. Never use it against a server other people use, and don't deploy
