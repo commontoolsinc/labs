@@ -2527,6 +2527,14 @@ Deno.test("memory v2 engine resolves pending reads and rejects stale pending rea
 // stack exists). It is exempt from the staleness check — that stays with the
 // top-of-stack pending read — so a later overlapping foreign write must NOT
 // reject it, while an unresolved dependency still must.
+//
+// NOTE: this pins main's de-facto lower-layer semantics made explicit on the
+// wire, not an endorsement of the scan interval. The staleness scan for a
+// pending read starts at the NAMED layer's resolution seq (with or without
+// resolutionOnly), so foreign writes in (reader's confirmed basis,
+// top-layer resolution] go unscanned — a pre-existing gap tracked as the
+// "pending-read basis over-advance" follow-up on CT-1872, whose fix
+// (own-session exclusion + true-basis validation) supersedes this exemption.
 Deno.test("memory v2 engine: resolutionOnly pending reads skip staleness but still require resolution", async () => {
   const { engine, path } = await createEngine();
 

@@ -20,7 +20,10 @@ import {
   setPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
-import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
+import {
+  getLogger,
+  getLoggerCountsBreakdown,
+} from "@commonfabric/utils/logger";
 import type {
   ClientCommit,
   ConfirmedRead,
@@ -39,6 +42,7 @@ import type {
   IStorageProviderWithReplica,
   StorageNotification,
 } from "../src/storage/interface.ts";
+import { setConflictAdmissionMode } from "../src/storage/v2.ts";
 import {
   NotificationRecorder,
   ScriptedSessionTransport,
@@ -435,27 +439,54 @@ class ScriptedModelTransport extends ScriptedSessionTransport {
         const responseGate = this.model.scripted.get(
           commit.localSeq,
         )?.responseGate;
-        setTimeout(() => {
-          void (async () => {
-            await responseGate;
-            const response = this.model.transact(commit);
-            if (response.type === "drop") {
-              this.disconnect(new Error("disconnect"));
-              return;
-            }
-            this.respond({
-              type: "response",
-              requestId: message.requestId!,
-              ...(response.type === "accept"
-                ? { ok: response.applied }
-                : { error: response.error }),
-            });
-          })();
-        }, 0);
+        const verdictTask = new Promise<void>((resolveVerdict) => {
+          setTimeout(() => {
+            void (async () => {
+              try {
+                await responseGate;
+                const response = this.model.transact(commit);
+                if (response.type === "drop") {
+                  this.disconnect(new Error("disconnect"));
+                  return;
+                }
+                this.respond({
+                  type: "response",
+                  requestId: message.requestId!,
+                  ...(response.type === "accept"
+                    ? { ok: response.applied }
+                    : { error: response.error }),
+                });
+              } finally {
+                resolveVerdict();
+              }
+            })();
+          }, 0);
+        });
+        this.#verdictTasks.add(verdictTask);
+        void verdictTask.finally(() => this.#verdictTasks.delete(verdictTask));
         break;
       }
       default:
         throw new Error(`Unhandled scripted message: ${message.type}`);
+    }
+  }
+
+  // Verdict callbacks queued by `handle`'s transact case but not yet booked
+  // into the model (their responseGate may still be held). `drainVerdicts`
+  // awaits them so tests can assert on final server-side bookkeeping without
+  // a wall-clock sleep.
+  readonly #verdictTasks = new Set<Promise<void>>();
+
+  /**
+   * Resolve once every transact callback queued SO FAR (including any queued
+   * while draining) has booked its verdict and sent its response. Only the
+   * transport's side is drained: client-side settlement of those responses
+   * is still subject to the caller awaiting the affected commit promises or
+   * an observable event (e.g. a logger count).
+   */
+  async drainVerdicts(): Promise<void> {
+    while (this.#verdictTasks.size > 0) {
+      await Promise.all([...this.#verdictTasks]);
     }
   }
 
@@ -1134,7 +1165,7 @@ const runStressSeed = async (seed: number) => {
     // queued transact callback books the (suppressed) late verdict. Drain
     // those callbacks so the server-side bookkeeping below is final — it also
     // makes the accepted-despite-client-error check meaningful.
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await harness.transport.drainVerdicts();
 
     assertEquals(
       topPendingSurface(harness).size,
@@ -2184,6 +2215,11 @@ Deno.test("memory v2 stacked commits: late server reject after a cascade is swal
   const harness = await createHarness();
   const g1 = Promise.withResolvers<void>();
   const g2 = Promise.withResolvers<void>();
+  // Debug level so the lazy log closures on the cascade/suppression paths
+  // actually format their messages (they are counted either way).
+  const storageLogger = getLogger("storage.v2");
+  const previousLevel = storageLogger.level;
+  storageLogger.level = "debug";
   try {
     const t1 = beginSet(harness, DOCS.A, valueFor("t1"));
     harness.model.setOutcome(t1.localSeq, {
@@ -2220,9 +2256,20 @@ Deno.test("memory v2 stacked commits: late server reject after a cascade is swal
     );
 
     // The late server reject lands, is swallowed, and changes nothing: no
-    // second settle is possible and no second revert may be emitted.
+    // second settle is possible and no second revert may be emitted. The
+    // swallow itself is observable: "cascade-late-reject" is counted in
+    // suppressLateVerdict's rejection handler, so once the count moves the
+    // late verdict has demonstrably been consumed off the books.
+    const lateRejectBaseline = getLoggerCountsBreakdown()["storage.v2"]
+      ?.["cascade-late-reject"]?.debug ?? 0;
     g2.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await harness.transport.drainVerdicts();
+    await waitForCondition(
+      () =>
+        (getLoggerCountsBreakdown()["storage.v2"]?.["cascade-late-reject"]
+          ?.debug ?? 0) > lateRejectBaseline,
+      "the late server reject to be swallowed",
+    );
     assertEquals(harness.model.rejected.has(t2.localSeq), true);
     assertEquals(
       changedIdsFor(harness.notifications.notifications, "revert"),
@@ -2230,6 +2277,7 @@ Deno.test("memory v2 stacked commits: late server reject after a cascade is swal
     );
     expectVisible(harness, { A: undefined, D: undefined });
   } finally {
+    storageLogger.level = previousLevel;
     g1.resolve();
     g2.resolve();
     await harness.close();
@@ -2240,6 +2288,11 @@ Deno.test("memory v2 stacked commits: impossible late accept after a cascade doe
   const harness = await createHarness();
   const g1 = Promise.withResolvers<void>();
   const g2 = Promise.withResolvers<void>();
+  // Warn stays visible at the default level; drop to debug anyway so every
+  // lazy closure on this path formats (coverage of the message builders).
+  const storageLogger = getLogger("storage.v2");
+  const previousLevel = storageLogger.level;
+  storageLogger.level = "debug";
   try {
     const t1 = beginSet(harness, DOCS.A, valueFor("t1"));
     harness.model.setOutcome(t1.localSeq, {
@@ -2279,9 +2332,18 @@ Deno.test("memory v2 stacked commits: impossible late accept after a cascade doe
 
     // The server durably accepts the doomed commit — the client warns
     // ("cascade-late-accept") and must NOT promote the already-dropped write
-    // to confirmed: the promise settled as a conflict long ago.
+    // to confirmed: the promise settled as a conflict long ago. The warn
+    // count moving is the event that the late verdict has been consumed.
+    const lateAcceptBaseline = getLoggerCountsBreakdown()["storage.v2"]
+      ?.["cascade-late-accept"]?.warn ?? 0;
     g2.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await harness.transport.drainVerdicts();
+    await waitForCondition(
+      () =>
+        (getLoggerCountsBreakdown()["storage.v2"]?.["cascade-late-accept"]
+          ?.warn ?? 0) > lateAcceptBaseline,
+      "the late server accept to be suppressed",
+    );
     assertEquals(harness.model.applied.has(t2.localSeq), true);
     expectVisible(harness, { A: undefined, D: undefined });
     assertEquals(currentSeq(harness, DOCS.D), 0);
@@ -2290,8 +2352,259 @@ Deno.test("memory v2 stacked commits: impossible late accept after a cascade doe
       notificationsAtSettle,
     );
   } finally {
+    storageLogger.level = previousLevel;
     g1.resolve();
     g2.resolve();
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: replica reset locally rejects in-flight dependents exactly once", async () => {
+  const harness = await createHarness();
+  const g1 = Promise.withResolvers<void>();
+  const g2 = Promise.withResolvers<void>();
+  const storageLogger = getLogger("storage.v2");
+  const previousLevel = storageLogger.level;
+  storageLogger.level = "debug";
+  try {
+    const t1 = beginSet(harness, DOCS.A, valueFor("t1"));
+    harness.model.setOutcome(t1.localSeq, {
+      kind: "accept",
+      responseGate: g1.promise,
+    });
+    const t2 = beginSet(
+      harness,
+      DOCS.D,
+      valueFor("t2-d"),
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+    harness.model.setOutcome(t2.localSeq, {
+      kind: "rejectConflict",
+      message: "late server verdict for t2",
+      responseGate: g2.promise,
+    });
+    await waitForCondition(
+      () => harness.model.transactLocalSeqs.includes(t2.localSeq),
+      "t2 to reach the wire",
+    );
+
+    // reset() sweeps the in-flight registry: t2 (pending read on t1's doc)
+    // is locally rejected; t1 (no pending reads, never registered) is not.
+    // A second sweep in the same tick must be a no-op — the entry already
+    // carries its local rejection (the rejectInFlightCommitLocally guard).
+    const resettable = harness.replica as unknown as { reset(): void };
+    resettable.reset();
+    resettable.reset();
+    await assertConflict(t2.promise, "memory replica reset");
+
+    // t1 was never locally rejected: its verdict resolves normally even
+    // though the replica was wiped underneath it.
+    g1.resolve();
+    await assertResultOk(t1.promise);
+
+    // t2's late server verdict is consumed off the books, exactly once.
+    const lateRejectBaseline = getLoggerCountsBreakdown()["storage.v2"]
+      ?.["cascade-late-reject"]?.debug ?? 0;
+    g2.resolve();
+    await harness.transport.drainVerdicts();
+    await waitForCondition(
+      () =>
+        (getLoggerCountsBreakdown()["storage.v2"]?.["cascade-late-reject"]
+          ?.debug ?? 0) > lateRejectBaseline,
+      "the late server verdict to be swallowed after reset",
+    );
+    assertEquals(harness.model.rejected.has(t2.localSeq), true);
+  } finally {
+    storageLogger.level = previousLevel;
+    g1.resolve();
+    g2.resolve();
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: a dependency dropped during the scheduler-batch flush finalizes at the pre-send checkpoint", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const harness = await createHarness();
+  const g1 = Promise.withResolvers<void>();
+  const gObs = Promise.withResolvers<void>();
+  try {
+    // localSeqs are the client's own counter, so drive commitNative directly:
+    // t1 = 1, the observation commit = 2, t2 = 3.
+    const t1 = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("t1") },
+      }],
+    });
+    harness.model.setOutcome(1, {
+      kind: "rejectConflict",
+      responseGate: g1.promise,
+    });
+    await waitForCondition(
+      () => harness.model.transactLocalSeqs.includes(1),
+      "t1 to reach the wire",
+    );
+
+    // The observation commit enters the scheduler batch (consuming localSeq
+    // 2); t2 takes 3; the flush then MINTS its own commit as localSeq 4.
+    // Gating 4 deterministically parks t2 on the flush await.
+    const observation = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:doomed-window"),
+    });
+    harness.model.setOutcome(4, {
+      kind: "accept",
+      responseGate: gObs.promise,
+    });
+    const t2 = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.D,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("t2-d") },
+      }],
+    }, sourceFromReads([{ id: DOCS.A }]));
+
+    // While t2 waits on the flush, its dependency drops: the cascade books
+    // the local rejection on the registered in-flight entry.
+    g1.resolve();
+    await assertConflict(t1);
+
+    // Release the flush: t2 resumes at the pre-send checkpoint, sees its
+    // provable doom, and finalizes WITHOUT ever sending its own transact —
+    // only t1 (1) and the batch flush commit (4) ever reached the wire.
+    gObs.resolve();
+    await assertConflict(
+      t2,
+      "pending dependency dropped locally: localSeq=1",
+    );
+    await assertResultOk(observation);
+    assertEquals(harness.model.transactLocalSeqs.includes(3), false);
+    assertEquals(harness.model.transactLocalSeqs.includes(4), true);
+  } finally {
+    g1.resolve();
+    gObs.resolve();
+    await harness.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 stacked commits: a rejected scheduler-batch flush rejects the waiting write pre-send", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const harness = await createHarness();
+  try {
+    // The observation entry consumes localSeq 1 and the write takes 2, but
+    // the batch flush MINTS its own commit as localSeq 3 — scripting THAT to
+    // reject makes the semantic write waiting on the flush surface the
+    // rejection without ever sending its own commit.
+    const observation = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:rejected-batch"),
+    });
+    harness.model.setOutcome(3, {
+      kind: "rejectConflict",
+      message: "observation batch rejected",
+    });
+    const write = harness.replica.commitNative({
+      operations: [{
+        op: "set",
+        id: DOCS.A,
+        type: DOCUMENT_MIME,
+        value: { value: valueFor("write") },
+      }],
+    });
+    await assertConflict(write, "observation batch rejected");
+    await assertConflict(observation, "observation batch rejected");
+    assertEquals(harness.model.transactLocalSeqs, [3]);
+  } finally {
+    await harness.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+// The admission-control override reaches into the replica the same way the
+// subscription tests do (recordStaleFloor/noteCaughtUpLocalSeq are private).
+type AdmissionReplica = {
+  recordStaleFloor(commit: unknown, localSeq: number): void;
+  noteCaughtUpLocalSeq(localSeq: number | undefined): void;
+};
+
+Deno.test("memory v2 stacked commits: hold-mode admission finalizes a dependency-dropped commit without sending", async () => {
+  setConflictAdmissionMode("hold");
+  const harness = await createHarness();
+  const g1 = Promise.withResolvers<void>();
+  try {
+    const t1 = beginSet(harness, DOCS.A, valueFor("t1"));
+    harness.model.setOutcome(t1.localSeq, {
+      kind: "rejectConflict",
+      responseGate: g1.promise,
+    });
+    await waitForCondition(
+      () => harness.model.transactLocalSeqs.includes(t1.localSeq),
+      "t1 to reach the wire",
+    );
+
+    // Floor A above the current caught-up seq: t2's read of A (a pending
+    // read through t1's optimistic layer) parks it in the hold.
+    const replica = harness.replica as unknown as AdmissionReplica;
+    replica.recordStaleFloor({
+      localSeq: 50,
+      reads: { confirmed: [{ id: DOCS.A, path: [], seq: 0 }], pending: [] },
+      operations: [],
+    }, 50);
+    const t2 = beginSet(
+      harness,
+      DOCS.D,
+      valueFor("t2-d"),
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+
+    // The dependency drops while t2 is held; releasing the hold must land on
+    // the post-hold doom checkpoint — finalize without sending.
+    g1.resolve();
+    await assertConflict(t1.promise);
+    replica.noteCaughtUpLocalSeq(50);
+    await assertConflict(
+      t2.promise,
+      `pending dependency dropped locally: localSeq=${t1.localSeq}`,
+    );
+    assertEquals(harness.model.transactLocalSeqs.includes(t2.localSeq), false);
+  } finally {
+    setConflictAdmissionMode(undefined);
+    g1.resolve();
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: preempt-mode admission rejects a floored commit without sending", async () => {
+  setConflictAdmissionMode("preempt");
+  const harness = await createHarness();
+  const storageLogger = getLogger("storage.v2");
+  const previousLevel = storageLogger.level;
+  storageLogger.level = "debug";
+  try {
+    const replica = harness.replica as unknown as AdmissionReplica;
+    replica.recordStaleFloor({
+      localSeq: 50,
+      reads: { confirmed: [{ id: DOCS.A, path: [], seq: 0 }], pending: [] },
+      operations: [],
+    }, 50);
+    const t = beginSet(
+      harness,
+      DOCS.D,
+      valueFor("t"),
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+    // The preempt rejection carries readyToRetry(threshold), so the repair
+    // gate holds the revert until the catch-up seq is observed.
+    replica.noteCaughtUpLocalSeq(50);
+    await assertConflict(t.promise, "preempted");
+    assertEquals(harness.model.transactLocalSeqs.includes(t.localSeq), false);
+  } finally {
+    storageLogger.level = previousLevel;
+    setConflictAdmissionMode(undefined);
     await harness.close();
   }
 });
@@ -2358,7 +2671,15 @@ Deno.test("memory v2 stacked commits: conflict rejection delivered before the wi
           ?.debug ?? 0) > conflictBaseline,
       "the conflict rejection to reach the runner",
     );
-    await clock.tick(30);
+    // If the gate were broken, the wrongful settle would arrive within
+    // microtasks of the catch (finalizeRejection past a non-waiting gate is
+    // pure promise flow — the only timer on this path is the 30s repair
+    // timeout). Drain the transport, then give the microtask queue ample
+    // turns; no wall-clock wait can make the non-event more certain.
+    await harness.transport.drainVerdicts();
+    for (let turn = 0; turn < 32; turn += 1) {
+      await Promise.resolve();
+    }
 
     // Rejection processed-but-held: the commit promise must not settle, the
     // optimistic value stays visible, and no revert is emitted before the

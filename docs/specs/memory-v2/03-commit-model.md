@@ -153,6 +153,11 @@ interface PendingRead {
   id: EntityId;
   path: ReadPath;
   localSeq: number;
+  // Existence-only dependency record: asserts that `localSeq` resolved to an
+  // accepted commit, without carrying a staleness precondition of its own.
+  // Emitted for the layers UNDER the staleness-bearing top-of-stack read when
+  // a read observes a value through a stack of pending commits (§3.5).
+  resolutionOnly?: boolean;
 }
 ```
 
@@ -178,6 +183,17 @@ If `C1` is later confirmed, the server resolves `C2`'s pending read to that
 confirmed commit. If `C1` is rejected, `C2` is invalid and must be rejected as
 well. Rejection therefore cascades through the stack of dependent pending
 commits.
+
+The cascade cannot rely on each pending layer reading the layer beneath it:
+zero-read operations (mergeable collection writes) legally interleave into a
+stack without any read edge. A commit that reads through a pending stack
+therefore records its FULL dependency set directly — the top-of-stack layer as
+the ordinary (staleness-bearing) pending read, and every lower layer at or
+under the read path as a `resolutionOnly` existence read. The client mirrors
+the server cascade at drop time: when a pending commit's optimistic writes are
+dropped, every queued or in-flight commit whose recorded dependency set names
+the dropped `localSeq` is locally rejected without waiting for the server's
+per-commit verdict.
 
 ## 3.6 Server Validation
 
@@ -240,6 +256,17 @@ function validatePendingReads(
 If a referenced `localSeq` is not resolved yet, the server MAY hold the commit
 in the session queue until the dependency resolves. If the dependency resolves
 to rejection, the queued commit is rejected immediately.
+
+A `resolutionOnly` pending read participates in this resolution requirement
+exactly like an ordinary pending read — an unresolved or rejected dependency
+rejects the commit — but carries no staleness precondition of its own: the
+overlap validation of §3.6.1/§3.6.2 applies only to the staleness-bearing
+reads. The staleness scan for a pending read starts at the NAMED layer's
+resolution seq; writes landing between the reader's confirmed basis and that
+seq are not scanned through pending reads today (tracked as the pending-read
+basis over-advance follow-up on CT-1872 — the planned repair validates the
+full interval from the reader's confirmed basis, excluding only the reader's
+own resolved session stack).
 
 ### 3.6.4 Conflict Response
 
