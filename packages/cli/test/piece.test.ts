@@ -881,7 +881,7 @@ describe("cli piece parsing", () => {
       };
     };
     const controller = {
-      getAllPieces: () =>
+      getRegisteredPieces: () =>
         Promise.resolve([
           searchablePiece(
             "of:input-match",
@@ -962,7 +962,7 @@ describe("cli piece parsing", () => {
       pull: () => Promise.resolve(value),
     });
     const controller = {
-      getAllPieces: () =>
+      getRegisteredPieces: () =>
         Promise.resolve([{
           id: "of:number-match",
           name: () => "Number match",
@@ -1002,7 +1002,7 @@ describe("cli piece parsing", () => {
       pull: () => Promise.resolve(value),
     });
     const controller = {
-      getAllPieces: () =>
+      getRegisteredPieces: () =>
         Promise.resolve([{
           id: "of:named-array-property",
           name: () => "Named array property",
@@ -1060,7 +1060,7 @@ describe("cli piece parsing", () => {
       result: { getCell: () => Promise.resolve(cell({})) },
     });
     const controller = {
-      getAllPieces: () =>
+      getRegisteredPieces: () =>
         Promise.resolve([
           piece("of:unreadable-array-iterator", unreadableArray),
           piece("of:unreadable-cell-proxy", unreadableCellProxy),
@@ -1093,7 +1093,7 @@ describe("cli piece parsing", () => {
     console.warn = (...values: unknown[]) => warnings.push(values.join(" "));
     try {
       const controller = {
-        getAllPieces: () =>
+        getRegisteredPieces: () =>
           Promise.resolve([{
             id: "of:unreadable-data",
             name: () => "Unreadable data",
@@ -1134,7 +1134,7 @@ describe("cli piece parsing", () => {
       pull: () => Promise.resolve(value),
     });
     const controller = {
-      getAllPieces: () =>
+      getRegisteredPieces: () =>
         Promise.resolve([{
           id: "of:unreadable-metadata",
           name: () => {
@@ -1181,7 +1181,7 @@ describe("cli piece parsing", () => {
       result: { getCell: () => Promise.resolve(cell({})) },
     });
     const controller = {
-      getAllPieces: () =>
+      getRegisteredPieces: () =>
         Promise.resolve([
           piece("of:full-fold", "Maße"),
           piece("of:canonical-equivalence", "café"),
@@ -1289,7 +1289,7 @@ describe("cli piece parsing", () => {
       });
 
       const controller = {
-        getAllPieces: () =>
+        getRegisteredPieces: () =>
           Promise.resolve([{
             id: "of:runtime-cell-piece",
             name: () => "needle only in the piece name",
@@ -1332,7 +1332,7 @@ describe("cli piece parsing", () => {
         nestedSchema,
       );
       const viewController = {
-        getAllPieces: () =>
+        getRegisteredPieces: () =>
           Promise.resolve([{
             id: "of:multiple-runtime-cell-views",
             name: () => "Multiple runtime cell views",
@@ -1370,7 +1370,7 @@ describe("cli piece parsing", () => {
       });
       const nestedErrors: unknown[] = [];
       const partialController = {
-        getAllPieces: () =>
+        getRegisteredPieces: () =>
           Promise.resolve([{
             id: "of:partial-runtime-cell-piece",
             name: () => "Partial runtime cell piece",
@@ -1630,7 +1630,7 @@ describe("cli piece parsing", () => {
         result: { getCell: () => Promise.resolve(result) },
       });
       const controller = {
-        getAllPieces: () =>
+        getRegisteredPieces: () =>
           Promise.resolve([
             piece(referrerId, "Referrer", referrerInput, referrerResult),
             piece(aliasId, "Top-level alias", aliasInput, aliasResult),
@@ -1833,7 +1833,7 @@ describe("cli piece parsing", () => {
         result: { getCell: () => Promise.resolve(cell({})) },
       });
       const controller = {
-        getAllPieces: () =>
+        getRegisteredPieces: () =>
           Promise.resolve([
             piece("of:owned-proxy-referrer", "Referrer", [ownedProxy]),
             piece(ownerId, "Owner", "owned proxy coverage needle"),
@@ -1951,7 +1951,7 @@ describe("cli piece parsing", () => {
         pull: () => Promise.resolve(value),
       });
       const controller = {
-        getAllPieces: () =>
+        getRegisteredPieces: () =>
           Promise.resolve([{
             id: "of:cycle-referrer",
             name: () => "Cycle referrer",
@@ -2075,7 +2075,7 @@ describe("cli piece parsing", () => {
       );
       const empty = reader.getCell(space, "piece-search-cold-empty", true);
       const controller = {
-        getAllPieces: () =>
+        getRegisteredPieces: () =>
           Promise.resolve([{
             id: "of:cold-runtime-piece",
             name: () => "Cold runtime piece",
@@ -2120,7 +2120,7 @@ describe("cli piece parsing", () => {
       pull: () => Promise.resolve(value),
     });
     const controller = {
-      getAllPieces: () =>
+      getRegisteredPieces: () =>
         Promise.resolve([{
           id: "of:large-array",
           name: () => "Large array",
@@ -2201,7 +2201,7 @@ describe("cli piece parsing", () => {
         pull: () => Promise.resolve(value),
       });
       const controller = {
-        getAllPieces: () =>
+        getRegisteredPieces: () =>
           Promise.resolve([{
             id: "of:stale-array-proxy",
             name: () => "Stale array proxy",
@@ -2282,7 +2282,7 @@ describe("cli piece parsing", () => {
       },
     });
     const controller = {
-      getAllPieces: () =>
+      getRegisteredPieces: () =>
         Promise.resolve([
           matchingPiece("of:first-match"),
           {
