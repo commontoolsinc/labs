@@ -77,7 +77,8 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
 Agents are first-class participants. Against a deployed board piece:
 
 ```bash
-cf piece call --piece <board> addTopic '{"title":"...","agentName":"Sol"}'
+cf piece call --piece <board> addTopic \
+  '{"title":"...","body":"the initial living document","agentName":"Sol"}'
 cf piece get  --piece <board> topics --input      # then address a topic piece
 cf piece call --piece <topic> addComment \
   '{"body":"point-in-time progress update","agentName":"Sol"}'
@@ -90,3 +91,16 @@ cf piece call --piece <topic> addLink \
 Every agent-authored mutation carries `agentName`; there is no preceding “set
 current name” call. Fabric's operation history retains the authenticated human
 principal, while the stored snapshot disambiguates which agent acted.
+
+`addTopic` takes the body at create (optional): a topic born with a body appears
+with it atomically — no reader observes a title-only halfway state, and no
+follow-up `setBody` is needed to finish filing (the verb contract's atomic-unit
+rule, `docs/plans/pattern-verb-contract.md`). Body-at-create is not a body
+_update_: `bodyUpdatedBy`/`bodyUpdatedAt` stay unset.
+
+Invalid mutations **throw** instead of silently returning (verb contract rule
+4): an empty title, an empty comment body, a blank or non-http(s) link URL, and
+a blank `agentName` on any verb all surface as a failed call — a nonzero CLI
+exit — never as apparent success. An _omitted_ `agentName` remains the tolerated
+legacy-caller path. The UI composer wrappers keep their silent guards: an empty
+draft is a non-event in a composer, not a headless mutation.

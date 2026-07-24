@@ -236,7 +236,9 @@ return {
 
 In multi-user tests the flags are per participant: one participant opting out
 does not mask another participant's errors. (The same applies to the
-pre-existing `allowRuntimeErrors` flag for scheduler-level errors.)
+pre-existing `allowRuntimeErrors` flag for scheduler-level errors; use
+`expectRuntimeErrors: true | <count>` when the errors are the point — it
+REQUIRES them, failing the run if none fire.)
 
 ## Multi-User Tests
 
