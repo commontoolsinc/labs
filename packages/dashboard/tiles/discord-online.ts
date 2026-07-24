@@ -1,5 +1,5 @@
 // discord online: a one-shot Discord gateway snapshot of currently-online guild
-// members, split into the "Team Member" role and everyone else ("Visitors").
+// members, split into the "Team" role and everyone else ("Visitors").
 // Each poll opens a fresh gateway connection, identifies, waits for the initial
 // GUILD_CREATE, tallies presences against members, then tears the socket and
 // heartbeat down. Successive polls accumulate a rolling history (persisted to
@@ -20,7 +20,7 @@ const INTENTS = 259;
 
 // Online members carrying this role are counted as team; everyone else online is
 // a visitor. Matched against the Discord role name exactly.
-const TEAM_ROLE_NAME = "Team Member";
+const TEAM_ROLE_NAME = "Team";
 const VISITOR_COLOR = "#7c828c";
 // The chart lines fade from this (a shade darker than the good-status tile
 // background) on the far left up to their own color, matching the ci-duration
@@ -35,7 +35,7 @@ const HISTORY_MAX_AGE_DAYS = 60; // ~2 months
 // Cap the plotted points so a long window still renders as a small SVG; the full
 // history feeds the timestamps and span, this only thins the polyline.
 const PLOT_POINTS = 500;
-const HISTORY_FILE = dashboardCacheFile("fabric-wall-discord-history.json");
+const HISTORY_FILE = dashboardCacheFile("fabric-wall-discord-history-v2.json");
 type Point = { t: number; team: number; visitors: number };
 const history: Point[] = [];
 
@@ -112,25 +112,26 @@ function roleColor(color: number): string {
   return "#" + (color & 0xffffff).toString(16).padStart(6, "0");
 }
 
-// Count online users carrying the "Team Member" role as team; everyone else
-// online is a visitor. Also returns the team role's own color. Exported for
-// unit testing.
-export function buildSnapshot(g: GuildCreate): Snapshot {
+// Count online users carrying the "Team" role as team; everyone else online is
+// a visitor. A guild without that exact role has no valid snapshot. Also returns
+// the team role's own color. Exported for unit testing.
+export function buildSnapshot(g: GuildCreate): Snapshot | null {
   const byId = new Map<string, Member>();
   for (const m of g.members) byId.set(m.user.id, m);
   const teamRole = g.roles.find((r) => r.name === TEAM_ROLE_NAME);
+  if (!teamRole) return null;
 
   const online = g.presences.filter((p) => p.status !== "offline");
   let team = 0;
   for (const p of online) {
     const member = byId.get(p.user.id);
-    if (teamRole && member && member.roles.includes(teamRole.id)) team++;
+    if (member && member.roles.includes(teamRole.id)) team++;
   }
   return {
     online: online.length,
     team,
     visitors: online.length - team,
-    teamColor: teamRole ? roleColor(teamRole.color) : VISITOR_COLOR,
+    teamColor: roleColor(teamRole.color),
   };
 }
 
@@ -242,7 +243,7 @@ export const discordOnline: Tile = {
         label,
         status: "unknown",
         value: "—",
-        sub: "enable the presences + members intents on the bot",
+        sub: "enable the presences + members intents and add the exact Team role",
       };
     }
 
