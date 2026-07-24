@@ -974,9 +974,10 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
     "call",
     `Invoke a callable within a piece.
 
-INPUT: Pass one inline JSON value, or put "--" before flags generated from the
-callable's input schema. Handlers interpret piped input using their input
-schema. Tools read piped JSON when called with "-- --json".`,
+INPUT: Pass one inline JSON value, pass "-" to read JSON from stdin, or put
+"--" before flags generated from the callable's input schema. Handlers also
+interpret piped input when no input argument is present. For tools, use "-" or
+"-- --json" to read piped JSON.`,
   )
   .usage(`${pieceUsage} <callable> [input]`)
   .example(
