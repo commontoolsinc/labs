@@ -27,6 +27,7 @@ export interface WorkerOptions {
   experimental?: {
     modernCellRep?: boolean;
     persistentSchedulerState?: boolean;
+    serverPrimaryExecution?: boolean;
   };
 }
 
@@ -141,6 +142,12 @@ export class WorkerController extends EventTarget {
     this.state = WorkerState.Terminated;
   }
 
+  /** Fence a lost/crashed generation without waiting for Worker IPC. */
+  terminateNow(reason: string): void {
+    if (this.state === WorkerState.Terminated) return;
+    this.terminate(reason, WorkerState.Terminated);
+  }
+
   isReady(): boolean {
     return this.state === WorkerState.Ready;
   }
@@ -226,12 +233,23 @@ export class WorkerController extends EventTarget {
     // If not prevented, error is rethrown in this context.
     err.preventDefault();
 
-    // Set state to `Error`, terminating the worker immediately
-    this.state = WorkerState.Error;
-    this.worker.terminate();
+    this.terminate(
+      "Worker terminated after a terminal error.",
+      WorkerState.Error,
+    );
 
     this.dispatchEvent(new WorkerControllerErrorEvent(err));
   };
+
+  private terminate(reason: string, state: WorkerState): void {
+    for (const task of this.pending.values()) {
+      task.deferred.reject(new Error(reason));
+    }
+    this.pending.clear();
+    this.initializeDeferred.reject(new Error(reason));
+    this.worker.terminate();
+    this.state = state;
+  }
 
   private logTaskResults(task: Task, error?: string) {
     const errorMessage = error ? `: ${error}` : "";

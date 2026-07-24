@@ -64,3 +64,9 @@ export type {
   WriteStackTraceMatcher,
   WriteStackTraceMatchMode,
 } from "./storage/write-stack-trace.ts";
+export type {
+  ExecutionRoutingActionDiagnostics,
+  ExecutionRoutingDiagnostics,
+  ExecutionRoutingDiagnosticsQuery,
+  ExecutionRoutingSettlementCounts,
+} from "./storage/interface.ts";

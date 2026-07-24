@@ -45,7 +45,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["count"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: event-handler-no-compute-wrap
 // Verifies: handler invocations in JSX are NOT wrapped in a reactive compute
 // wrapper (formerly derive, now lift-applied post-CT-1615), while

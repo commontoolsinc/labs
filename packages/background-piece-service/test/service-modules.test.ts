@@ -9,6 +9,10 @@ import {
 import { Identity } from "@commonfabric/identity";
 import { EXPERIMENTAL_ENV_VARS, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type {
+  LegacyBackgroundExclusion,
+  LegacyBackgroundExclusionStatus,
+} from "@commonfabric/memory/v2";
 import {
   isWorkerIPCResponse,
   WorkerIPCMessageType,
@@ -537,9 +541,633 @@ describe("BackgroundPieceService", () => {
     assertEquals(stopped, [TEST_DID]);
     assertEquals(watched, [[PIECE_ID]]);
   });
+
+  it("passes target-space exclusion control before starting a flagged manager", async () => {
+    const entry = new FakeEntryCell(pieceEntry());
+    const piecesCell = new FakePiecesCell([entry]);
+    const runtime = fakeRuntime(piecesCell);
+    (runtime.experimental as Record<string, unknown>).serverPrimaryExecution =
+      true;
+    const providerCalls: unknown[] = [];
+    const exclusion: LegacyBackgroundExclusion = {
+      version: 1,
+      space: TEST_DID,
+      branch: "",
+      exclusionGeneration: 1,
+      holderId: "background:service",
+      servicePrincipal: TEST_DID,
+      expiresAt: 1_000,
+    };
+    (runtime.storageManager as never as {
+      open: (did: string) => unknown;
+    }).open = (did) => {
+      providerCalls.push(["open", did]);
+      return {
+        acquireLegacyBackgroundExclusion: (branch: string) => {
+          providerCalls.push(["acquire", branch]);
+          return Promise.resolve({ exclusion, ready: true });
+        },
+        renewLegacyBackgroundExclusion: (
+          branch: string,
+          generation: number,
+        ) => {
+          providerCalls.push(["renew", branch, generation]);
+          return Promise.resolve({ exclusion, ready: true });
+        },
+        releaseLegacyBackgroundExclusion: (
+          branch: string,
+          generation: number,
+        ) => {
+          providerCalls.push(["release", branch, generation]);
+          return Promise.resolve(exclusion);
+        },
+      };
+    };
+    const lifecycle: string[] = [];
+    let managerOptions:
+      | ConstructorParameters<typeof SpaceManager>[0]
+      | undefined;
+    const service = new BackgroundPieceService({
+      identity: await Identity.generate({ implementation: "noble" }),
+      toolshedUrl: "http://localhost:8000",
+      runtime: runtime as never,
+      createSpaceManager: (options) => {
+        managerOptions = options;
+        return {
+          start: () => lifecycle.push("start"),
+          stop: () => Promise.resolve(),
+          watch: () => {
+            lifecycle.push("watch");
+            return () => {};
+          },
+        };
+      },
+    });
+
+    await service.initialize();
+    assertEquals(lifecycle, ["watch", "start"]);
+    assertEquals(providerCalls, [["open", TEST_DID]]);
+    const control = managerOptions?.backgroundExclusion;
+    assert(control);
+    await control.acquire("");
+    await control.renew("", 1);
+    await control.release("", 1);
+    assertEquals(providerCalls, [
+      ["open", TEST_DID],
+      ["acquire", ""],
+      ["renew", "", 1],
+      ["release", "", 1],
+    ]);
+    await service.stop();
+  });
 });
 
 describe("SpaceManager", () => {
+  it("acquires exclusion before worker construction and releases after shutdown", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    const acquired = Promise.withResolvers<
+      LegacyBackgroundExclusionStatus | null | undefined
+    >();
+    const shutdown = Promise.withResolvers<void>();
+    const events: string[] = [];
+    const exclusion: LegacyBackgroundExclusion = {
+      version: 1,
+      space: TEST_DID,
+      branch: "",
+      exclusionGeneration: 1,
+      holderId: "background:test",
+      servicePrincipal: identity.did(),
+      expiresAt: 1_100,
+    };
+    const manager = new SpaceManager({
+      did: TEST_DID,
+      toolshedUrl: "http://localhost:8000",
+      identity,
+      pollingIntervalMs: 1,
+      deactivationTimeoutMs: 1,
+      now: () => 100,
+      setTimer: () => 1,
+      clearTimer: () => {},
+      backgroundExclusion: {
+        acquire: (branch) => {
+          events.push(`acquire:${branch}`);
+          return acquired.promise;
+        },
+        renew: () =>
+          Promise.resolve({ exclusion, ready: true, serverTime: 100 }),
+        release: (_branch, generation) => {
+          events.push(`release:${generation}`);
+          return Promise.resolve(exclusion);
+        },
+      },
+      createWorkerController: () => {
+        events.push("worker:create");
+        return {
+          initializeResolve: Promise.resolve(),
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          isReady: () => true,
+          runPiece: () => Promise.resolve(),
+          shutdown: () => {
+            events.push("worker:shutdown");
+            return shutdown.promise;
+          },
+          terminateNow: () => events.push("worker:terminate"),
+        } as never;
+      },
+    });
+
+    assertEquals(events, []);
+    manager.start();
+    await Promise.resolve();
+    assertEquals(events, ["acquire:"]);
+    assertEquals(events.includes("worker:create"), false);
+
+    acquired.resolve({ exclusion, ready: true, serverTime: 100 });
+    await manager.idle();
+    assertEquals(events, ["acquire:", "worker:create"]);
+
+    const stopping = manager.stop();
+    await Promise.resolve();
+    await Promise.resolve();
+    assertEquals(events.includes("worker:shutdown"), true);
+    assertEquals(events.includes("release:1"), false);
+    shutdown.resolve();
+    await stopping;
+    assertEquals(events.at(-1), "release:1");
+  });
+
+  it("can stop every lifecycle after being restarted", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    let generation = 0;
+    let workers = 0;
+    let shutdowns = 0;
+    let releases = 0;
+    const status = (): LegacyBackgroundExclusionStatus => ({
+      exclusion: {
+        version: 1,
+        space: TEST_DID,
+        branch: "",
+        exclusionGeneration: generation,
+        holderId: "background:restart",
+        servicePrincipal: identity.did(),
+        expiresAt: 1_000,
+      },
+      ready: true,
+      serverTime: 0,
+    });
+    const manager = new SpaceManager({
+      did: TEST_DID,
+      toolshedUrl: "http://localhost:8000",
+      identity,
+      pollingIntervalMs: 1,
+      now: () => 0,
+      setTimer: () => 1,
+      clearTimer: () => {},
+      backgroundExclusion: {
+        acquire: () => {
+          generation++;
+          return Promise.resolve(status());
+        },
+        renew: () => Promise.resolve(status()),
+        release: () => {
+          releases++;
+          return Promise.resolve(status().exclusion);
+        },
+      },
+      createWorkerController: () => {
+        workers++;
+        return {
+          initializeResolve: Promise.resolve(),
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          isReady: () => true,
+          runPiece: () => Promise.resolve(),
+          shutdown: () => {
+            shutdowns++;
+            return Promise.resolve();
+          },
+          terminateNow: () => {},
+        } as never;
+      },
+    });
+
+    manager.start();
+    await manager.idle();
+    await manager.stop();
+    manager.start();
+    await manager.idle();
+    await manager.stop();
+
+    assertEquals(workers, 2);
+    assertEquals(shutdowns, 2);
+    assertEquals(releases, 2);
+  });
+
+  it("defers a restart until an overlapping stop lifecycle finishes", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    const firstShutdown = Promise.withResolvers<void>();
+    const secondShutdown = Promise.withResolvers<void>();
+    let generation = 0;
+    let workers = 0;
+    const releases: number[] = [];
+    const status = (): LegacyBackgroundExclusionStatus => ({
+      exclusion: {
+        version: 1,
+        space: TEST_DID,
+        branch: "",
+        exclusionGeneration: generation,
+        holderId: "background:overlapping-restart",
+        servicePrincipal: identity.did(),
+        expiresAt: 1_000,
+      },
+      ready: true,
+      serverTime: 0,
+    });
+    const manager = new SpaceManager({
+      did: TEST_DID,
+      toolshedUrl: "http://localhost:8000",
+      identity,
+      pollingIntervalMs: 1,
+      deactivationTimeoutMs: 100,
+      now: () => 0,
+      setTimer: () => 1,
+      clearTimer: () => {},
+      backgroundExclusion: {
+        acquire: () => {
+          generation++;
+          return Promise.resolve(status());
+        },
+        renew: () => Promise.resolve(status()),
+        release: (_branch, exclusionGeneration) => {
+          releases.push(exclusionGeneration);
+          return Promise.resolve(status().exclusion);
+        },
+      },
+      createWorkerController: () => {
+        const worker = ++workers;
+        return {
+          initializeResolve: Promise.resolve(),
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          isReady: () => true,
+          runPiece: () => Promise.resolve(),
+          shutdown: () => {
+            if (worker === 1) return firstShutdown.promise;
+            if (worker === 2) return secondShutdown.promise;
+            return Promise.resolve();
+          },
+          terminateNow: () => {},
+        } as never;
+      },
+    });
+
+    manager.start();
+    await manager.idle();
+    (manager as never as { activePiece: FakeEntryCell | null }).activePiece =
+      new FakeEntryCell(pieceEntry());
+
+    const stopping = manager.stop();
+    manager.start();
+    await manager.idle();
+
+    (manager as never as { activePiece: FakeEntryCell | null }).activePiece =
+      null;
+    firstShutdown.resolve();
+    await stopping;
+    await manager.idle();
+
+    assertEquals(
+      (manager as never as { isRunning: boolean }).isRunning,
+      true,
+    );
+    assertEquals(workers, 2);
+    assertEquals(releases, [1]);
+    assertEquals(
+      (manager as never as {
+        backgroundExclusion: LegacyBackgroundExclusion | null;
+      }).backgroundExclusion?.exclusionGeneration,
+      2,
+    );
+
+    const secondStopping = manager.stop();
+    manager.start();
+    const finalStopping = manager.stop();
+    secondShutdown.resolve();
+    await Promise.all([secondStopping, finalStopping]);
+    await manager.idle();
+
+    assertEquals(
+      (manager as never as { isRunning: boolean }).isRunning,
+      false,
+    );
+    assertEquals(workers, 2);
+    assertEquals(releases, [1, 2]);
+    assertEquals(
+      (manager as never as {
+        backgroundExclusion: LegacyBackgroundExclusion | null;
+      }).backgroundExclusion,
+      null,
+    );
+  });
+
+  it("waits for client drain and hard-fences renewal loss", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    let now = 100;
+    let renewals = 0;
+    let nextTimer = 0;
+    const timers = new Map<
+      number,
+      { callback: () => void; delayMs: number; cleared: boolean }
+    >();
+    const events: string[] = [];
+    const exclusion = (expiresAt: number): LegacyBackgroundExclusion => ({
+      version: 1,
+      space: TEST_DID,
+      branch: "",
+      exclusionGeneration: 1,
+      holderId: "background:test",
+      servicePrincipal: identity.did(),
+      expiresAt,
+    });
+    const manager = new SpaceManager({
+      did: TEST_DID,
+      toolshedUrl: "http://localhost:8000",
+      identity,
+      pollingIntervalMs: 1,
+      deactivationTimeoutMs: 1,
+      now: () => now,
+      setTimer: (callback, delayMs) => {
+        const timer = ++nextTimer;
+        timers.set(timer, { callback, delayMs, cleared: false });
+        return timer;
+      },
+      clearTimer: (timer) => {
+        const current = timers.get(timer);
+        if (current) current.cleared = true;
+      },
+      backgroundExclusion: {
+        acquire: () =>
+          Promise.resolve({
+            exclusion: exclusion(1_100),
+            ready: false,
+            blockedUntil: 200,
+            serverTime: 100,
+          }),
+        renew: () => {
+          renewals++;
+          return Promise.resolve(
+            renewals === 1
+              ? {
+                exclusion: exclusion(1_200),
+                ready: true,
+                serverTime: 200,
+              }
+              : null,
+          );
+        },
+        release: () => Promise.resolve(exclusion(now)),
+      },
+      createWorkerController: () => {
+        events.push("worker:create");
+        return {
+          initializeResolve: Promise.resolve(),
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          isReady: () => true,
+          runPiece: () => Promise.resolve(),
+          shutdown: () => Promise.resolve(),
+          terminateNow: (reason: string) => events.push(`terminate:${reason}`),
+        } as never;
+      },
+    });
+
+    const runNextRenewal = async () => {
+      const timer = [...timers.values()]
+        .filter((entry) => !entry.cleared)
+        .toSorted((left, right) => left.delayMs - right.delayMs)[0];
+      assert(timer);
+      timer.cleared = true;
+      timer.callback();
+      await Promise.resolve();
+      await manager.idle();
+    };
+
+    manager.start();
+    await Promise.resolve();
+    await manager.idle();
+    assertEquals(events, []);
+
+    now = 200;
+    await runNextRenewal();
+    assertEquals(events, ["worker:create"]);
+
+    now = 300;
+    await runNextRenewal();
+    assertEquals(events, [
+      "worker:create",
+      "terminate:background exclusion authority lost",
+    ]);
+    await manager.stop();
+  });
+
+  it("hard-fences at local expiry while renewal is hung", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    let now = 100;
+    let nextTimer = 0;
+    const timers = new Map<
+      number,
+      { callback: () => void; delayMs: number; cleared: boolean }
+    >();
+    const events: string[] = [];
+    const hardFenced = Promise.withResolvers<string>();
+    const exclusion: LegacyBackgroundExclusion = {
+      version: 1,
+      space: TEST_DID,
+      branch: "",
+      exclusionGeneration: 1,
+      holderId: "background:hung-renewal",
+      servicePrincipal: identity.did(),
+      expiresAt: 200,
+    };
+    const manager = new SpaceManager({
+      did: TEST_DID,
+      toolshedUrl: "http://localhost:8000",
+      identity,
+      pollingIntervalMs: 1,
+      now: () => now,
+      monotonicNow: () => now,
+      setTimer: (callback, delayMs) => {
+        const timer = ++nextTimer;
+        timers.set(timer, { callback, delayMs, cleared: false });
+        return timer;
+      },
+      clearTimer: (timer) => {
+        const current = timers.get(timer);
+        if (current) current.cleared = true;
+      },
+      backgroundExclusion: {
+        acquire: () =>
+          Promise.resolve({ exclusion, ready: true, serverTime: 100 }),
+        renew: () => new Promise(() => {}),
+        release: () => Promise.resolve(exclusion),
+      },
+      createWorkerController: () =>
+        ({
+          initializeResolve: Promise.resolve(),
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          isReady: () => true,
+          runPiece: () => Promise.resolve(),
+          shutdown: () => Promise.resolve(),
+          terminateNow: (reason: string) => {
+            events.push(reason);
+            hardFenced.resolve(reason);
+          },
+        }) as never,
+    });
+
+    manager.start();
+    await manager.idle();
+    const activeTimers = () =>
+      [...timers.values()].filter((entry) => !entry.cleared)
+        .toSorted((left, right) => left.delayMs - right.delayMs);
+
+    now = 150;
+    const renewal = activeTimers()[0];
+    renewal.cleared = true;
+    renewal.callback();
+
+    now = 200;
+    const expiry = activeTimers()[0];
+    expiry.cleared = true;
+    expiry.callback();
+    assertEquals(
+      await hardFenced.promise,
+      "background exclusion expired locally",
+    );
+    assertEquals(events, ["background exclusion expired locally"]);
+    await manager.stop();
+  });
+
+  it("anchors server-relative exclusion duration at request start despite clock skew", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    const acquired = Promise.withResolvers<
+      LegacyBackgroundExclusionStatus | null | undefined
+    >();
+    let monotonicNow = 0;
+    let nextTimer = 0;
+    const timers = new Map<number, { delayMs: number; cleared: boolean }>();
+    const exclusion: LegacyBackgroundExclusion = {
+      version: 1,
+      space: TEST_DID,
+      branch: "",
+      exclusionGeneration: 1,
+      holderId: "background:skewed-clock",
+      servicePrincipal: identity.did(),
+      expiresAt: 200,
+    };
+    const manager = new SpaceManager({
+      did: TEST_DID,
+      toolshedUrl: "http://localhost:8000",
+      identity,
+      pollingIntervalMs: 1,
+      now: () => -10_000,
+      monotonicNow: () => monotonicNow,
+      setTimer: (_callback, delayMs) => {
+        const timer = ++nextTimer;
+        timers.set(timer, { delayMs, cleared: false });
+        return timer;
+      },
+      clearTimer: (timer) => {
+        const current = timers.get(timer);
+        if (current) current.cleared = true;
+      },
+      backgroundExclusion: {
+        acquire: () => acquired.promise,
+        renew: () => new Promise(() => {}),
+        release: () => Promise.resolve(exclusion),
+      },
+      createWorkerController: () =>
+        ({
+          initializeResolve: Promise.resolve(),
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          isReady: () => true,
+          runPiece: () => Promise.resolve(),
+          shutdown: () => Promise.resolve(),
+          terminateNow: () => {},
+        }) as never,
+    });
+
+    try {
+      manager.start();
+      await Promise.resolve();
+      monotonicNow = 40;
+      acquired.resolve({
+        exclusion,
+        ready: true,
+        serverTime: 100,
+      });
+      await manager.idle();
+      assertEquals(
+        [...timers.values()].filter((timer) => !timer.cleared)
+          .map((timer) => timer.delayMs).toSorted((a, b) => a - b),
+        [30, 60],
+      );
+    } finally {
+      await manager.stop();
+    }
+  });
+
+  it("fails closed when an old server omits relative exclusion time", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    let workers = 0;
+    const exclusion: LegacyBackgroundExclusion = {
+      version: 1,
+      space: TEST_DID,
+      branch: "",
+      exclusionGeneration: 1,
+      holderId: "background:old-server",
+      servicePrincipal: identity.did(),
+      expiresAt: 200,
+    };
+    const manager = new SpaceManager({
+      did: TEST_DID,
+      toolshedUrl: "http://localhost:8000",
+      identity,
+      pollingIntervalMs: 1,
+      now: () => 100,
+      setTimer: () => 1,
+      clearTimer: () => {},
+      backgroundExclusion: {
+        acquire: () => Promise.resolve({ exclusion, ready: true }),
+        renew: () => Promise.resolve({ exclusion, ready: true }),
+        release: () => Promise.resolve(exclusion),
+      },
+      createWorkerController: () => {
+        workers++;
+        return {
+          initializeResolve: Promise.resolve(),
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          isReady: () => true,
+          runPiece: () => Promise.resolve(),
+          shutdown: () => Promise.resolve(),
+          terminateNow: () => {},
+        } as never;
+      },
+    });
+
+    try {
+      manager.start();
+      await manager.idle();
+      assertEquals(workers, 0);
+    } finally {
+      await manager.stop();
+    }
+  });
+
   it("schedules, runs, retries, disables, and removes pieces", async () => {
     await withMockWorker(async () => {
       const entry = new FakeEntryCell(pieceEntry());
@@ -1087,6 +1715,32 @@ describe("WorkerController", () => {
         );
       await controller.shutdown();
       assertEquals(await pending, "Worker shutting down.");
+    });
+  });
+
+  it("terminates immediately when background authority is lost", async () => {
+    await withMockWorker(async () => {
+      const controller = new WorkerController({
+        did: TEST_DID,
+        toolshedUrl: "http://localhost:8000",
+        identity: await Identity.generate({ implementation: "noble" }),
+      });
+      await controller.initializeResolve;
+      const worker = MockWorker.instances.at(-1)!;
+      worker.respond = false;
+      const pending = controller.runPiece(
+        new FakeEntryCell(pieceEntry()) as never,
+      ).then(
+        () => "resolved",
+        (error) => error instanceof Error ? error.message : String(error),
+      );
+
+      controller.terminateNow("background execution authority lost");
+      controller.terminateNow("already terminated");
+
+      assertEquals(worker.terminated, true);
+      assertEquals(controller.isReady(), false);
+      assertEquals(await pending, "background execution authority lost");
     });
   });
 

@@ -120,6 +120,7 @@ export function processStorageNotification(
         action,
         plan,
         { ...change.address, space },
+        { deferClaimedRemote: notification.type === "integrate" },
       );
 
       triggerTraceEntry?.triggered.push(
@@ -335,6 +336,7 @@ export function applyPullTriggeredActionPlan(
   action: Action,
   plan: TriggeredActionPlan,
   cause: IMemorySpaceAddress,
+  options: { readonly deferClaimedRemote?: boolean } = {},
 ): void {
   if (plan.operation === "schedule") {
     state.scheduleWithDebounce(action);
@@ -342,7 +344,9 @@ export function applyPullTriggeredActionPlan(
   }
 
   if (plan.operation === "invalidate") {
-    state.markInvalid(action, cause);
+    state.markInvalid(action, cause, {
+      deferClaimedRemote: options.deferClaimedRemote === true,
+    });
   }
 }
 
@@ -370,6 +374,7 @@ export interface StorageNotificationState {
   readonly markInvalid: (
     action: Action,
     cause: IMemorySpaceAddress,
+    options: { readonly deferClaimedRemote: boolean },
   ) => void;
   readonly isInvalid: (action: Action) => boolean;
   readonly materializerIndex: MaterializerIndexState;

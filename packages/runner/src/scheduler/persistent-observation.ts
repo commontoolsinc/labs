@@ -2,7 +2,12 @@ import type {
   IMemorySpaceAddress,
   TransactionReactivityLog,
 } from "../storage/interface.ts";
-import type { SchedulerExecutionContextKey } from "@commonfabric/memory/v2";
+import type {
+  ActionExecutionProvenance,
+  ExecutionClaimAssertion,
+  InputBasisSeq,
+  SchedulerExecutionContextKey,
+} from "@commonfabric/memory/v2";
 import { isCellScope } from "../scope.ts";
 
 export type SchedulerActionKind =
@@ -56,6 +61,24 @@ export interface SchedulerActionObservation {
   implementationFingerprint: string;
   runtimeFingerprint: string;
   observedAtSeq: number;
+  /**
+   * Maximum durable same-space revision sequence actually consumed by this
+   * action. The memory host overwrites this at acceptance from the validated
+   * commit read set; a runner/client value is never authoritative.
+   */
+  inputBasisSeq?: InputBasisSeq;
+  /** Transient selector for the exact host claim used by this attempt. */
+  executionClaimAssertion?: ExecutionClaimAssertion;
+  /**
+   * C3.5: transient Worker assertion of the stamped foreign point reads
+   * this attempt consumed from its read-only mount ({space, id, seq} in the
+   * READ space's seq domain). The host validates each stamp against its own
+   * served-point-read record and strips the assertion — like
+   * `executionClaimAssertion`, it never persists.
+   */
+  foreignReadStamps?: readonly { space: string; id: string; seq: number }[];
+  /** Present only after an authenticated executor commit is accepted. */
+  executionProvenance?: ActionExecutionProvenance;
   observedAtLocalSeq?: number;
   transactionKind: SchedulerObservationTransactionKind;
   reads: IMemorySpaceAddress[];
@@ -186,6 +209,8 @@ export function isSchedulerActionObservation(
     typeof candidate.implementationFingerprint === "string" &&
     typeof candidate.runtimeFingerprint === "string" &&
     isNonNegativeInteger(candidate.observedAtSeq) &&
+    (candidate.inputBasisSeq === undefined ||
+      isNonNegativeInteger(candidate.inputBasisSeq)) &&
     (candidate.observedAtLocalSeq === undefined ||
       isNonNegativeInteger(candidate.observedAtLocalSeq)) &&
     isSchedulerObservationTransactionKind(candidate.transactionKind) &&

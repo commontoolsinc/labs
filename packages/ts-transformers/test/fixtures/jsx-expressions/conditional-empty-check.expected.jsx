@@ -27,7 +27,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["items"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: conditional-empty-check
 // Verifies: !cell.get().length && <JSX> is transformed to when() with a lift-applied predicate
 //   !items.get().length && <span> → when(lift(({items}) => !items.get().length)({items}), <span>)

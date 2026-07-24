@@ -191,6 +191,10 @@ One line per archived document; each document's header carries the fuller
   and
   [pattern-integration-compile-bound.md](development/performance/pattern-integration-compile-bound.md)
   — June 2026 profiling snapshots.
+- [server-primary-rollout-2026-07-12.md](development/performance/server-primary-rollout-2026-07-12.md)
+  — initial Phase 2 browser CPU and authority-rollout measurement, July 2026.
+- [server-primary-rollout-2026-07-13.md](development/performance/server-primary-rollout-2026-07-13.md)
+  — accepted 500-event Phase 2 browser CPU and authority-rollout measurement.
 - [scoped-cells-field-notes.md](development/scoped-cells-field-notes.md) —
   field journal from the first scoped-cell patterns.
 - [2026-07-02-convergence-evidence-appendix.md](plans/2026-07-02-convergence-evidence-appendix.md)

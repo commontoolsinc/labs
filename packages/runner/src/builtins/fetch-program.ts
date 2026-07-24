@@ -11,6 +11,8 @@ import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { scopedCell } from "./scope-policy.ts";
+import { getPatternEnvironment } from "../builder/env.ts";
+import type { NormalizedFullLink } from "../link-utils.ts";
 
 const PROGRAM_REQUEST_TIMEOUT = 1000 * 10; // 10 seconds for program resolution
 
@@ -134,6 +136,8 @@ export function fetchProgram(
   let cellScope: CellScope | undefined;
   let myRequestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
+  let claimedRerunRequested = false;
+  const serverBuiltinRuntimeWrites: NormalizedFullLink[] = [];
 
   // This is called when the pattern containing this node is being stopped.
   addCancel(() => {
@@ -174,7 +178,7 @@ export function fetchProgram(
     }
   });
 
-  return (tx: IExtendedStorageTransaction) => {
+  const action: Action = (tx: IExtendedStorageTransaction) => {
     tx.resetNarrowestReadScope();
     const requestSnapshot = snapshotFetchProgramInputs(inputsCell.withTx(tx));
     const outputScope = tx.getNarrowestReadScope();
@@ -242,6 +246,14 @@ export function fetchProgram(
       cellsInitialized = true;
       cellScope = outputScope;
     }
+    serverBuiltinRuntimeWrites.splice(
+      0,
+      serverBuiltinRuntimeWrites.length,
+      pending.getAsNormalizedFullLink(),
+      result.getAsNormalizedFullLink(),
+      error.getAsNormalizedFullLink(),
+      cache.getAsNormalizedFullLink(),
+    );
 
     const { url } = requestSnapshot;
     const inputHash = computeInputHashFromValue(requestSnapshot);
@@ -258,7 +270,24 @@ export function fetchProgram(
     // Get current state for this input hash
     const allEntries = cache.withTx(tx).get();
     const cacheEntry = allEntries[inputHash];
-    const state: FetchState = cacheEntry?.state ?? { type: "idle" };
+    let state: FetchState = cacheEntry?.state ?? { type: "idle" };
+    // A shadow incarnation can leave durable pending/error state without a
+    // live request after claim activation aborts its local work. Keep the
+    // marker through an initial idle->fetching transition so a suppressed
+    // shadow outbox entry can be re-opened on the following run. Normal client
+    // incarnations must not take over another incarnation's in-flight fetch.
+    const reopenClaimedWork = claimedRerunRequested && state.type !== "idle" &&
+      (state.type === "error" ||
+        (state.type === "fetching" && myRequestId !== state.requestId));
+    if (claimedRerunRequested && state.type !== "idle") {
+      claimedRerunRequested = false;
+    }
+    if (reopenClaimedWork) {
+      state = { type: "idle" };
+      cache.withTx(tx).update({
+        [inputHash]: { inputHash, state },
+      });
+    }
 
     // State machine transitions
     if (state.type === "idle") {
@@ -283,14 +312,17 @@ export function fetchProgram(
           // wait for the program resolve + writeback; `idle()` does not.
           myRequestId = requestId;
           abortController = new AbortController();
-          runtime.trackAsyncWork(startFetch(
-            runtime,
-            cache,
-            inputHash,
-            url,
-            requestId,
-            abortController.signal,
-          ));
+          runtime.trackAsyncWork(
+            startFetch(
+              runtime,
+              cache,
+              inputHash,
+              url,
+              requestId,
+              abortController.signal,
+            ),
+            { externalEffect: true },
+          );
         },
       );
     } else if (state.type === "fetching") {
@@ -322,6 +354,15 @@ export function fetchProgram(
 
     sendResult(tx, { pending, result, error });
   };
+  return Object.assign(action, {
+    serverBuiltinRuntimeWrites,
+    prepareClaimedRerun: () => {
+      abortController?.abort("fetchProgram claim incarnation changed");
+      abortController = undefined;
+      myRequestId = undefined;
+      claimedRerunRequested = true;
+    },
+  });
 }
 
 /**
@@ -337,8 +378,30 @@ async function startFetch(
   abortSignal: AbortSignal,
 ) {
   try {
+    const mappedHost = runtime.mappedHostFor(cache.space);
+    const apiBase = new URL(mappedHost ?? getPatternEnvironment().apiUrl);
+    const resolvedMain = new URL(url, apiBase);
+    const beganRelative = !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(url.trim()) &&
+      !/^[\\/]{2}/.test(url.trim());
     // Create HTTP program resolver
-    const resolver = new HttpProgramResolver(url);
+    const resolver = new HttpProgramResolver(
+      resolvedMain,
+      (input, init) => {
+        const target = input instanceof URL ? input : new URL(
+          input instanceof Request ? input.url : input,
+          resolvedMain,
+        );
+        const rawTarget = beganRelative && target.origin === resolvedMain.origin
+          ? `${target.pathname}${target.search}`
+          : target.href;
+        return runtime.fetchBuiltin(
+          "fetchProgram",
+          rawTarget,
+          target,
+          { ...init, signal: abortSignal },
+        );
+      },
+    );
 
     // Program resolution parses; load the deferred compiler stack first.
     const { resolveProgram, ts } = await ensureCompilerStack();

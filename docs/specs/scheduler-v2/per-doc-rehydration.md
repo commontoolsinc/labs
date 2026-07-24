@@ -79,10 +79,13 @@ What must be tightened so the mapping is *reliable*:
   `schedulerObservationIdentity` is absent; the fallback function is deleted.
   Every remaining row then satisfies the invariant: `pieceId` names the doc
   its actions derive.
-- The `sendToBindings === false` variant (output binding links an existing
-  non-redirect cell) keeps the invariant: the deriver is still the one
-  instantiating node; the doc id comes from the stable binding rather than a
-  `resultFor` mint.
+- **Enforce one direct-root primary binding.** The transformer emits exactly
+  one root write-redirect for every normal computation, and the runner rejects
+  a missing, nested, or multiple primary binding at registration. The resolved
+  direct binding is therefore the stable output spot used by the `resultFor`
+  mint. General Cell aliases remain supported, while static side writes and
+  materializer envelopes remain separate declared write surfaces; neither is a
+  substitute primary binding.
 
 No *reverse* (deriver→docs) index is required for restore: derivation is
 re-walked top-down at resume (parents instantiate children), so each piece

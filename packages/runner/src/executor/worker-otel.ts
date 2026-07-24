@@ -1,0 +1,152 @@
+import type { OtelBridgeOptions } from "../telemetry-otel-bridge.ts";
+
+type ExecutorTelemetryRuntime = {
+  telemetry: EventTarget;
+  scheduler: {
+    setEventPreflightTelemetryEnabled(enabled: boolean): void;
+  };
+};
+
+type ExecutorOtelDependencies = {
+  tracer: OtelBridgeOptions["tracer"];
+  meter: OtelBridgeOptions["meter"];
+  attach(
+    telemetry: EventTarget,
+    options: OtelBridgeOptions,
+  ): () => void;
+};
+
+type ExecutorOtelOptions = {
+  envGet?: (name: string) => string | undefined;
+  load?: () => Promise<ExecutorOtelDependencies>;
+  spanAttributes?: OtelBridgeOptions["spanAttributes"];
+  warn?: (...args: unknown[]) => void;
+};
+
+type DisposableExecutorRuntime = {
+  dispose(): Promise<void>;
+};
+
+const enabled = (value: string | undefined): boolean =>
+  value === "true" || value === "1";
+
+const report = (
+  warn: (...args: unknown[]) => void,
+  message: string,
+  error: unknown,
+): void => {
+  try {
+    warn(message, error);
+  } catch {
+    // Observability must never interrupt executor initialization or teardown.
+  }
+};
+
+const safeDetach = (
+  detach: () => void,
+  warn: (...args: unknown[]) => void,
+): () => void => {
+  let detached = false;
+  return () => {
+    if (detached) return;
+    detached = true;
+    try {
+      detach();
+    } catch (error) {
+      report(warn, "Executor runtime OTel bridge detach failed:", error);
+    }
+  };
+};
+
+const loadExecutorOtel = async (): Promise<ExecutorOtelDependencies> => {
+  const [{ attachRuntimeTelemetryOtelBridge }, { metrics, trace }] =
+    await Promise.all([
+      import("../telemetry-otel-bridge.ts"),
+      import("@opentelemetry/api"),
+    ]);
+  return {
+    tracer: trace.getTracer("ct-runner-bridge"),
+    meter: metrics.getMeter("ct-runner-bridge"),
+    attach: attachRuntimeTelemetryOtelBridge,
+  };
+};
+
+/**
+ * Attach the executor Worker's isolated Runtime to the host's OTel globals.
+ * Deno Workers do not share the process-global Runtime telemetry bus, so each
+ * worker needs its own bridge under Deno native OTel. A toolshed SDK provider
+ * registered in the main isolate is not visible here. Loading, attachment,
+ * and teardown are fail-open so observability never blocks serving.
+ */
+export async function maybeAttachExecutorOtelBridge(
+  runtime: ExecutorTelemetryRuntime,
+  options: ExecutorOtelOptions = {},
+): Promise<(() => void) | undefined> {
+  const envGet = options.envGet ?? ((name: string) => Deno.env.get(name));
+  const warn = options.warn ?? ((...args: unknown[]) => console.warn(...args));
+  let detach: (() => void) | undefined;
+  try {
+    if (!enabled(envGet("OTEL_DENO"))) {
+      return undefined;
+    }
+
+    const dependencies = await (options.load ?? loadExecutorOtel)();
+    const metricAttributes: NonNullable<OtelBridgeOptions["metricAttributes"]> =
+      {};
+    const serviceName = envGet("OTEL_SERVICE_NAME");
+    const deploymentEnvironment = envGet("ENV");
+    if (serviceName !== undefined) {
+      metricAttributes["service.name"] = serviceName;
+    }
+    if (deploymentEnvironment !== undefined) {
+      metricAttributes["deployment.environment"] = deploymentEnvironment;
+    }
+
+    detach = safeDetach(
+      dependencies.attach(runtime.telemetry, {
+        tracer: dependencies.tracer,
+        meter: dependencies.meter,
+        attributes: {
+          "ct.runtime": "server-executor",
+        },
+        ...(options.spanAttributes !== undefined
+          ? { spanAttributes: options.spanAttributes }
+          : {}),
+        ...(Object.keys(metricAttributes).length > 0
+          ? { metricAttributes }
+          : {}),
+      }),
+      warn,
+    );
+    runtime.scheduler.setEventPreflightTelemetryEnabled(true);
+    return detach;
+  } catch (error) {
+    detach?.();
+    report(warn, "Executor runtime OTel bridge attach failed:", error);
+    return undefined;
+  }
+}
+
+/**
+ * Preserve executor teardown ordering while containing observability cleanup.
+ * The caller receives the Runtime error only after the bridge has detached so
+ * it can finish clearing the rest of the Worker-owned resources before
+ * surfacing the original failure.
+ */
+export async function disposeExecutorRuntimeAndTelemetry(
+  runtime: DisposableExecutorRuntime,
+  detach: (() => void) | undefined,
+  options: Pick<ExecutorOtelOptions, "warn"> = {},
+): Promise<unknown | undefined> {
+  const warn = options.warn ?? ((...args: unknown[]) => console.warn(...args));
+  let runtimeError: unknown;
+  try {
+    await runtime.dispose();
+  } catch (error) {
+    runtimeError = error;
+  }
+  if (detach !== undefined) {
+    safeDetach(detach, warn)();
+  }
+  return runtimeError;
+}

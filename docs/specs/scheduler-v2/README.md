@@ -113,10 +113,10 @@ derives liveness from being read. Registration does not imply a run.
 **P4 — One node, one static write surface.** A computation's writes fall into
 three tiers, all fixed for the node's lifetime: its single primary output
 document (its internal/result cell, per the per-internal-cell model of #3911 —
-the pattern builder structurally allows only one output redirect, so this
-needs no enforcement); statically-resolvable side-write targets (a passed-in
-cell bound to a fixed link — just additional output documents); and declared
-materializer envelopes for dynamic side-writes (§4.3). A registration-time
+the transformer emits exactly one direct-root write-redirect and the runner
+enforces it); statically-resolvable side-write targets (a passed-in cell bound
+to a fixed link — just additional output documents); and declared materializer
+envelopes for dynamic side-writes (§4.3). A registration-time
 immediate `ReactivityLog` is also a declaration channel: when action
 annotations do not supply a write surface, the log's writes seed the same
 static surface, and later run logs never broaden it. What disappears is not
@@ -270,10 +270,11 @@ machinery only for preflight (computing a read closure to pull against).
 A computation's write surface is fixed at registration and has up to three
 parts:
 
-1. **Primary output** — the node's internal/result cell. The pattern builder
-   structurally produces exactly one output redirect per node (the
-   transformer cannot bind to multiple outputs), so this is a given, not an
-   enforced invariant.
+1. **Primary output** — the node's internal/result cell. The transformer emits
+   exactly one write-redirect directly at the computation root, and the runner
+   enforces that contract at registration. Missing, nested, or multiple
+   primary bindings are rejected, including in hand-built Pattern JSON and
+   passthrough nodes.
 2. **Static side-write targets** — writable cells passed in whose links
    resolve at instantiation time (v1's `collectStaticRedirectWriteTargets`).
    These are simply *additional output documents*: they enter the writer map
@@ -289,6 +290,13 @@ parts:
    with declared envelopes treats the envelope as its side-write surface
    (static target resolution is skipped); otherwise statically-resolvable
    writable inputs become tier-2 targets.
+
+The direct-root rule governs the normal computation's primary result binding;
+it does not collapse the action's broader execution envelope. Static side
+writes and materializer envelopes remain permitted under the distinct tier-2
+and tier-3 rules above. General Cell aliases remain valid, effects still have
+no scheduler-visible output, and event handlers retain their separate
+transactional side-write contract.
 
 All three tiers require the §4.2 idempotency contract. Tiers 1–2 are ordinary
 graph participants. Materializers (tier 3) are the one place where "who
@@ -1155,7 +1163,7 @@ Summary table; the full per-mechanism walkthrough with file references is in
 | `populateDependencies` deep prefetch for reactive nodes | `declaredReads` ordering hints | Convergence loop corrects under-approximation (§6.2); outputs no longer need discovery (P4). |
 | `inFlightSources` + change-group self-skip | `tx.nodeId` (P5) | One tx per run already holds; the id is already stamped (`debugActionId`) — promote, don't parallel-track. |
 | unsubscribe/resubscribe around runs + memoized trigger diff | Read-delta application (P6) | The diff already exists (trigger-index memo); make it the primitive. |
-| `SchedulerWriteIndex` current-known/historical/backfill/ancestor-pruning | Static write surface (outputs + envelopes) | P4: the builder already guarantees one primary redirect; static side-write targets and envelopes are fixed at registration (confirmed 2026-06-11). |
+| `SchedulerWriteIndex` current-known/historical/backfill/ancestor-pruning | Static write surface (outputs + envelopes) | P4: the transformer emits and the runner enforces one direct-root primary redirect; static side-write targets and envelopes remain distinct surfaces fixed at registration. |
 | Cycle breaker + cycle-aware debounce + effect pre-clear cycle detection | Budgets + escalating backoff gate (§7.7, §8) | Bounded-rate convergence preserves liveness without bespoke surgery. |
 | 3 timer systems (debounce timers, computation trailing flush, event wake) | One gate + one wake timer (§8) | All were expressions of `eligibleAt`. |
 | Per-action snapshot lookups/rehydration tokens/shared lookup deadlines | Piece-level resume phase (§9.2) | One sync + snapshot listing occurs before registration. The remaining bounded per-action sync hold applies only to conservative fresh fallback and loads no snapshot. |
@@ -1166,17 +1174,18 @@ Summary table; the full per-mechanism walkthrough with file references is in
 
 ### Resolved (2026-06-11)
 
-1. **Write surface (was: single-output enforcement).** Confirmed: the
-   pattern builder already produces exactly one output redirect per node —
-   the transformer cannot bind to multiple outputs, so no corpus audit and
-   no new enforcement is needed. Equally confirmed: computations *also*
-   legally write into passed-in cells under the idempotency contract, and
-   the full v1 taxonomy stays — statically-fixed passed-in cells are just
-   additional outputs; dynamic/broad targets are materializer envelopes with
-   eager-at-idle execution. P4 is therefore "static write surface", not
-   "single write" (§4.3). The idempotency validator (inline re-run + write
-   diff, `cf test` integration) is confirmed kept as the enforcement
-   strategy.
+1. **Write surface (was: single-output enforcement).** Confirmed and enforced:
+   the transformer emits exactly one direct-root primary write-redirect per
+   normal computation, and the runner rejects a missing, nested, or multiple
+   primary binding. No corpus audit or legacy migration is needed; the small
+   hand-built Pattern JSON fixtures conform or assert rejection. Computations
+   *also* legally write into passed-in cells under the idempotency contract,
+   and the full v1 taxonomy stays — statically-fixed passed-in cells are
+   additional side-write outputs; dynamic/broad targets are materializer
+   envelopes with eager-at-idle execution. P4 is therefore "static write
+   surface", not "single write" (§4.3). The idempotency validator (inline
+   re-run + write diff, `cf test` integration) remains the side-write
+   enforcement strategy.
 2. **Server-confirmed dispatch.** Future feature, strictly opt-in — never
    the only mode. Decided now so it stays cheap later: events are specified
    per ordering *lane* with durable event ids (§7.5); a confirmed event

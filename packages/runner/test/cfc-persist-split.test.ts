@@ -206,7 +206,7 @@ describe("CFC observation classes (C2 persist split)", () => {
       { path: [], label: { confidentiality: ["secret"] } },
     ]);
     const first = await launder(rt, sourceId, "ps-idem-out");
-    const before = JSON.stringify(rawDocOf(first.id)?.cfc);
+    const before = structuredClone(rawDocOf(first.id)?.cfc);
 
     // Same read, same write, same derivation → the metadata write must be
     // skipped (canonically identical), not re-split or duplicated.
@@ -217,7 +217,7 @@ describe("CFC observation classes (C2 persist split)", () => {
     tx.prepareCfc();
     expect((await tx.commit()).ok).toBeDefined();
 
-    const after = JSON.stringify(rawDocOf(first.id)?.cfc);
+    const after = structuredClone(rawDocOf(first.id)?.cfc);
     expect(after).toEqual(before);
     const derived = entriesOf(first.id).filter((e) => e.origin === "derived");
     expect(derived.map((e) => e.observes).sort()).toEqual(["shape", "value"]);

@@ -30,7 +30,10 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { RawBuiltinReturnType } from "../module.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
-import { outputSpotFromBinding } from "./scope-policy.ts";
+import {
+  listBuiltinResultContainerCause,
+  outputSpotFromBinding,
+} from "./scope-policy.ts";
 import { listResultSchema } from "./list-result-schema.ts";
 import { inferListOpArgumentUsage } from "./list-op-argument-usage.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
@@ -214,7 +217,7 @@ export function map(
       }
       const baseResult = runtime.getCell<any[]>(
         parentCell.space,
-        { map: parentCell.entityId, outputSpot },
+        listBuiltinResultContainerCause("map", parentCell.entityId, outputSpot),
         resultSchema,
         tx,
       );

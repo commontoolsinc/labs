@@ -160,6 +160,7 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
           branch: string;
           id: string;
           scope: string;
+          scopeKey?: string;
           seq: number;
           doc?: unknown;
           deleted?: true;
@@ -172,6 +173,7 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
       branch: "",
       id: "of:doc:1",
       scope: "space",
+      scopeKey: "space",
       seq: 1,
       doc: {
         value: {
@@ -214,6 +216,7 @@ Deno.test("memory v2 server replaces watch sets and emits session sync effects",
       branch: "",
       id: "of:doc:1",
       scope: "space",
+      scopeKey: "space",
       seq: 2,
       doc: {
         value: {

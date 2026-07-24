@@ -80,8 +80,14 @@ export class FileSystemProgramResolver implements ProgramResolver {
 export class HttpProgramResolver implements ProgramResolver {
   #mainUrl: URL;
   #main?: Promise<Source>;
-  constructor(main: string | URL) {
+  #fetchImpl: typeof globalThis.fetch;
+  constructor(
+    main: string | URL,
+    fetchImpl: typeof globalThis.fetch = (input, init) =>
+      globalThis.fetch(input, init),
+  ) {
     this.#mainUrl = !(main instanceof URL) ? new URL(main) : main;
+    this.#fetchImpl = fetchImpl;
   }
 
   main(): Promise<Source> {
@@ -101,7 +107,7 @@ export class HttpProgramResolver implements ProgramResolver {
   }
 
   async #fetch(url: URL): Promise<Source> {
-    const res = await fetch(url);
+    const res = await this.#fetchImpl(url);
     if (!res.ok) {
       throw new Error(
         `Failed to fetch ${url}: ${res.status} ${res.statusText}`,

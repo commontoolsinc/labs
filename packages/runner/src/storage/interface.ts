@@ -5,12 +5,19 @@ import type {
   SchemaPathSelector,
 } from "@commonfabric/api";
 import type {
+  ActionClaimKey,
+  ActionSettlement,
+  BranchName,
   CommitPrecondition,
   EntityDocument,
+  ExecutionClaim,
+  LegacyBackgroundExclusion,
+  LegacyBackgroundExclusionStatus,
   PatchOp,
   SchedulerActionSnapshotQuery,
   SchedulerExecutionContextKey,
   SchedulerSnapshotListResult,
+  SchedulerWritersForTargetsResult,
   SqliteDbRef,
   SqliteOperation,
   SqliteParamsWire,
@@ -77,6 +84,10 @@ export type {
   URI,
 };
 export type ChangeGroup = unknown;
+export type ExternalSinkDisposition = "allow" | "suppress";
+export type ExternalSinkDispositionPolicy =
+  | ExternalSinkDisposition
+  | ((sourceAction: object | undefined) => ExternalSinkDisposition);
 
 /**
  * Base interface for storage errors. These are lightweight objects (not Error
@@ -126,6 +137,80 @@ export type OptStorageValue<T extends FabricValue = FabricValue> =
   | StorageValue<T>
   | undefined;
 
+/** Read-only filter for one space replica's execution-routing diagnostics. */
+export interface ExecutionRoutingDiagnosticsQuery {
+  readonly space: MemorySpace;
+  readonly branch: BranchName;
+  readonly pieceId?: string;
+  readonly actionId?: string;
+  /** Clear bounded historical counters before taking the snapshot. Live
+   * claims, overlays, and pending settlements are never reset. */
+  readonly resetCounters?: boolean;
+}
+
+/** Bounded outcome counters for settlements accepted by the replica's exact
+ * live claim incarnation. */
+export interface ExecutionRoutingSettlementCounts {
+  readonly committed: number;
+  readonly noOp: number;
+  readonly failed: number;
+  readonly unserved: number;
+}
+
+/** Branch-wide historical routing totals since the last counter reset. Unlike
+ * the bounded per-action records below, these totals survive record eviction. */
+export interface ExecutionRoutingBranchTotals {
+  readonly upstreamRoutes: number;
+  readonly claimedOverlayRoutes: number;
+  readonly settlements: ExecutionRoutingSettlementCounts;
+  readonly basisCoveredOverlayDrops: number;
+  readonly nonAuthoritativeOverlayDrops: number;
+  readonly settlementDiagnostics: Readonly<Record<string, number>>;
+  /** Named client routing fail-opens, keyed by diagnostic code. Includes
+   * `dual-chain-claim-match` — two live claims matching one action on the
+   * client's own chain (context-lattice amendment A3: counted, never a
+   * silent branch). */
+  readonly routeDiagnostics: Readonly<Record<string, number>>;
+}
+
+/** Exact-action execution-routing state and bounded historical counters.
+ * Records are chain-scoped (context-lattice §2): `key` names the logical
+ * action with contextKey pinned to the `"space"` chain representative, and
+ * one record aggregates the action across lane moves. `liveClaim` carries a
+ * chain-matching live claim's true contextKey. */
+export interface ExecutionRoutingActionDiagnostics {
+  readonly key: ActionClaimKey;
+  readonly liveClaim?: ExecutionClaim;
+  readonly upstreamRoutes: number;
+  readonly claimedOverlayRoutes: number;
+  readonly settlements: ExecutionRoutingSettlementCounts;
+  /** Overlays removed only after settlement basis coverage and, for committed
+   * outcomes, accepted data application. */
+  readonly basisCoveredOverlayDrops: number;
+  /** Overlays discarded because their captured authority or source basis was
+   * no longer valid. */
+  readonly nonAuthoritativeOverlayDrops: number;
+  readonly pendingOverlayCount: number;
+  /** Number of pending overlays still awaiting source-basis translation. */
+  readonly unresolvedBasisOverlayCount: number;
+  readonly pendingSettlementCount: number;
+  readonly lastSettlement?: ActionSettlement;
+}
+
+/** Bounded, read-only view of one space/branch execution-routing replica. */
+export interface ExecutionRoutingDiagnostics {
+  readonly space: MemorySpace;
+  readonly branch: BranchName;
+  readonly executionFeedSeq: number;
+  readonly executionAppliedSeq: number;
+  readonly snapshotRequired: boolean;
+  readonly claims: readonly ExecutionClaim[];
+  readonly actions: readonly ExecutionRoutingActionDiagnostics[];
+  readonly branchTotals: ExecutionRoutingBranchTotals;
+  /** Number of historical action records evicted since the last reset. */
+  readonly truncatedActionRecords: number;
+}
+
 export interface IStorageManager extends IStorageSubscriptionCapability {
   id: string;
 
@@ -156,6 +241,56 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * The identity is never used as the principal for ordinary storage work.
    */
   registerSpaceIdentity?(identity: Signer): void;
+
+  /** Register the durable action identity used by ephemeral execution
+   * claims. Scheduler registration calls this before an effect can release an
+   * external request. Registration is chain-scoped (context-lattice §2,
+   * amendment A15): the key's contextKey is the `"space"` chain
+   * representative, not a lane assertion, and claims naming any context on
+   * the client's own chain resolve to this action. */
+  registerExecutionAction?(action: object, key: ActionClaimKey): void;
+  unregisterExecutionAction?(action: object): void;
+  /** Whether this client currently observes exactly one live computation
+   * claim for `action` on its own lattice chain. This is a scheduling hint
+   * only: transaction routing still re-checks the captured claim incarnation
+   * at commit time. Two chain-matching claims (amendment A3) report false —
+   * the fail-open state routes to neither. */
+  hasLiveExecutionClaimForAction?(action: object): boolean;
+  captureExecutionClaim?(
+    action: object | undefined,
+  ): ExecutionClaim | undefined;
+  beginClientExecutionEffect?(action: object): void;
+  endClientExecutionEffect?(action: object): void;
+
+  /** Return a bounded exact-action execution-routing snapshot when supported.
+   * This capability is diagnostic only and must not open a space or mutate
+   * execution authority. */
+  getExecutionRoutingDiagnostics?(
+    query: ExecutionRoutingDiagnosticsQuery,
+  ): ExecutionRoutingDiagnostics;
+
+  /**
+   * C3.13 — the served foreign-read VALUE seam. On the executor Worker, a
+   * cross-space point read that was SERVED (authenticated + authorized) lands
+   * the foreign document in the Worker's read-only foreign mount. A transaction's
+   * `loadRoot` consults this before its home-replica read so the Worker's
+   * derivation folds the REAL foreign value instead of the home replica's absent
+   * `Default<0>` — the VALUE half of a cross-space read. The foreign seq STAMP is
+   * NOT carried here: it rides `foreignReadStamps` on the claimed commit and
+   * never enters home watermark bookkeeping (the seq-domain invariant).
+   *
+   * Optional: only the executor `HostStorageManager` implements it. A base/client
+   * manager leaves it undefined and the caller falls through to the normal
+   * replica read (byte-identical to pre-C3.13). The result discriminates absence
+   * two ways: `undefined` = NO served mount entry for (space, id) → fall through;
+   * `{ document }` = a served entry, where `document: null` is an
+   * AUTHORITATIVELY-ABSENT foreign doc (serve the absence; do NOT fall through).
+   */
+  foreignReadDocument?(
+    space: MemorySpace,
+    id: URI,
+    scope?: CellScope,
+  ): { document: EntityDocument | null } | undefined;
 
   /**
    * Close all storage providers
@@ -259,6 +394,22 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * reserved. Callers pair it with the failure path of the sync they kicked.
    */
   retractDocPullKick?(space: MemorySpace, id: URI, scope?: CellScope): void;
+
+  /**
+   * Subscribe to same-step replica evictions (FA4 membership retraction).
+   * Both `shouldPullDoc`'s reservation and the runtime's missing-doc kick
+   * set are manager-lifetime latches justified by "the first pull leaves a
+   * live server-side watch behind" — an invariant a doc-set membership
+   * retraction breaks. The manager clears its own reservation on eviction
+   * and fans the event out here so runtime-side latches for the evicted
+   * `(space, scope, id)` can be cleared in the same step; otherwise the next
+   * read of the evicted doc is deduped away and goes silently stale (FB7).
+   * Returns an unsubscribe function. Optional: managers without lazy remote
+   * replication never evict and simply don't implement it.
+   */
+  subscribeDocEvictions?(
+    callback: (space: MemorySpace, id: URI, scope?: CellScope) => void,
+  ): () => void;
 
   /**
    * Wait for the currently pending cross-space promises (and any they
@@ -365,6 +516,14 @@ export interface IStorageProvider {
 export interface IStorageProviderWithReplica extends IStorageProvider {
   replica: ISpaceReplica;
 
+  /** Publish the branch-qualified union of client-visible piece roots that
+   * should remain live on the shared server executor. Executor/loopback
+   * providers deliberately omit this client-only capability. */
+  setExecutionDemand?(
+    branch: BranchName,
+    pieces: readonly string[],
+  ): Promise<boolean>;
+
   /**
    * Internal scheduler persistence query. Memory v2 providers implement this
    * so the runner can rebuild scheduler indexes from persisted observations.
@@ -372,6 +531,24 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
   listSchedulerActionSnapshots?(
     query?: SchedulerActionSnapshotQuery,
   ): Promise<SchedulerSnapshotListResult>;
+
+  /** Authenticated durable writer-index lookup for this provider's space. */
+  writersForTargets?(
+    query: SchedulerWritersForTargetsProviderQuery,
+  ): Promise<SchedulerWritersForTargetsResult>;
+
+  /** Service-only durable exclusion for the legacy background runtime. */
+  acquireLegacyBackgroundExclusion?(
+    branch: BranchName,
+  ): Promise<LegacyBackgroundExclusionStatus | null | undefined>;
+  renewLegacyBackgroundExclusion?(
+    branch: BranchName,
+    exclusionGeneration: number,
+  ): Promise<LegacyBackgroundExclusionStatus | null | undefined>;
+  releaseLegacyBackgroundExclusion?(
+    branch: BranchName,
+    exclusionGeneration: number,
+  ): Promise<LegacyBackgroundExclusion | null | undefined>;
 
   /**
    * Conservative scheduler-snapshot currency oracle. Returns true only when
@@ -417,6 +594,11 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
     id: string,
     path: string,
   ): Promise<SqliteRegisterDiskSourceResult>;
+}
+
+export interface SchedulerWritersForTargetsProviderQuery {
+  branch?: BranchName;
+  targets: readonly IMemorySpaceAddress[];
 }
 
 /**
@@ -501,7 +683,18 @@ export type StorageNotification =
   | IPullNotification
   | IIntegrateNotification
   | ISchedulerObservationsNotification
+  | IExecutionClaimInvalidationNotification
   | IResetNotification;
+
+/** A live server authority claim ended or its source basis was rejected.
+ * Storage has already removed the affected overlay; the scheduler must rerun
+ * the exact producing action under the now-current authority snapshot. */
+export interface IExecutionClaimInvalidationNotification {
+  type: "execution-claim-invalidation";
+  space: MemorySpace;
+  sourceAction: object;
+  diagnosticCode: string;
+}
 
 /**
  * This notification is broadcasted after commit on {@link IStorageTransaction}
@@ -715,6 +908,12 @@ export interface IStorageTransaction {
    * across instances.
    */
   sourceAction?: object;
+  /** Frozen authority decision for an external-effect attempt. A client-owned
+   * attempt and all of its async continuations remain upstream even if a claim
+   * arrives mid-flight; a server-owned attempt carries the exact claim that
+   * made its sink passive. */
+  executionEffectAuthority?: "client" | "server";
+  executionClaim?: ExecutionClaim;
   /**
    * Opt the transaction into writing to more than one memory space. By default
    * a transaction may write to a single space only. When enabled, commit()
@@ -1238,6 +1437,9 @@ export interface IExtendedStorageTransaction
    */
   noteCfcDiagnostic(message: string): void;
 
+  /** Runtime-pinned policy for releasing external builtin side effects. */
+  externalSinkDisposition(): ExternalSinkDisposition;
+
   /**
    * Enqueues a side effect to run from the CFC outbox after a successful
    * commit. See ownership note above.
@@ -1663,6 +1865,16 @@ export interface ISpaceReplica extends ISpace {
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>>;
+
+  /**
+   * Run `fn` under an execution lane's acting context (C1.5b): synchronous
+   * reads and commits inside resolve documents by the lane's effective scope
+   * keys instead of the space lane's declared keys.
+   */
+  runWithExecutionLane?<T>(
+    lane: "space" | `user:${string}` | `session:${string}:${string}`,
+    fn: () => T,
+  ): T;
 }
 
 export type PushError =

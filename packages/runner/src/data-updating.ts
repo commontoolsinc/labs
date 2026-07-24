@@ -21,6 +21,7 @@ import { isCellScope, scopeRank } from "./scope.ts";
 import { createRef } from "./create-ref.ts";
 import {
   CellImpl,
+  getRuntimeCellKind,
   isCell,
   recordRelevantSchemaWritePolicyInput,
 } from "./cell.ts";
@@ -102,6 +103,49 @@ const seededDocs = (runtime: Runtime): Set<string> => {
 // seed.
 const seedMemoKey = (link: NormalizedFullLink): string =>
   `${link.space}/${link.scope ?? "space"}/${link.id}`;
+
+/**
+ * A compute-boundary identity-only value is represented as an unknown schema
+ * wrapped in a restricted cell capability. When that Cell is written as data,
+ * `getAsLink({ includeSchema: true })` strips the non-stream `asCell` marker but
+ * would otherwise persist the residual `{ type: "unknown" }` on the link. That
+ * turns an action-local capability view into a durable opaque referent schema,
+ * preventing a later, independently-authorized reader from materializing it.
+ *
+ * Only the exact generated capability-only form is elided. An authored bare
+ * unknown schema remains opaque, and any shape, policy, default, scope, or
+ * other metadata makes the schema meaningful and therefore persistent. Scoped
+ * object-form `asCell` entries are not classified as capability-only and keep
+ * using the existing link-schema serialization path.
+ */
+const isRestrictedNonStreamCellKind = (kind: unknown): boolean =>
+  kind !== undefined && kind !== "cell" && kind !== "stream";
+
+const isNonStreamCellKind = (kind: unknown): boolean =>
+  kind !== undefined && kind !== "stream";
+
+const isCapabilityOnlyUnknownCellSchema = (
+  schema: JSONSchema | undefined,
+  runtimeKind: unknown,
+): boolean => {
+  if (!isRecord(schema) || schema.type !== "unknown") {
+    return false;
+  }
+
+  const keys = Object.keys(schema);
+  if (keys.length === 1) {
+    return isRestrictedNonStreamCellKind(runtimeKind);
+  }
+  if (keys.length !== 2 || !("asCell" in schema)) return false;
+
+  const capabilities = ContextualFlowControl.getAsCellValues(schema);
+  return capabilities.length > 0 && capabilities.every((entry) => {
+    if (typeof entry !== "string") return false;
+    return isNonStreamCellKind(
+      ContextualFlowControl.getAsCellKind(entry),
+    );
+  });
+};
 
 const cfcAddressFromLink = (link: NormalizedFullLink): CfcAddress => ({
   space: link.space,
@@ -681,7 +725,12 @@ export function normalizeAndDiff(
       }
     }
     newValue = attachCfcLabelViewToSigilLink(
-      newValue.getAsLink({ includeSchema: true }),
+      newValue.getAsLink({
+        includeSchema: !isCapabilityOnlyUnknownCellSchema(
+          cellSchema,
+          getRuntimeCellKind(newValue),
+        ),
+      }),
       carriedCfcLabelView,
     );
   }

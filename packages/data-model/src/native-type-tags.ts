@@ -4,6 +4,17 @@ import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricInstance } from "./interface.ts";
+import { createNativeErrorBrandCheck } from "./native-error-brand.ts";
+
+// SES lockdown replaces/tames selected intrinsics, including removing newer
+// Error statics. Capture the host-realm brand check while the module graph is
+// initialized so async builtin error writebacks can still recognize errors
+// after a Runtime installs SES. Browsers without Error.isError retain the
+// intrinsic DOMException check and otherwise fail closed for cross-realm
+// ordinary Errors.
+const isNativeError = createNativeErrorBrandCheck(
+  typeof Error.isError === "function" ? Error.isError.bind(Error) : undefined,
+);
 
 /**
  * Tags identifying classes that the fabric system recognizes for dispatch.
@@ -143,6 +154,11 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     tag = tagFromNativeClass(ctor);
   }
 
+  // A value-controlled `constructor` property is not proof of an Error brand.
+  // Require the captured intrinsic even when constructor dispatch matched a
+  // standard Error class; this also rejects Proxies around real Errors.
+  if (tag === NATIVE_TAGS.Error && !isNativeError(value)) tag = null;
+
   // `tagFromNativeClass()` handles dedicated types (`Error`, `Date`, `Map`, etc.) and
   // returns `HasToJSON` for classes whose prototype has `toJSON()`. For those,
   // return immediately -- no instance-level override needed.
@@ -155,7 +171,7 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
   // Fallbacks for values whose constructor wasn't recognized (tag === null).
   if (tag === null) {
     // Exotic `Error` subclasses (e.g. `DOMException`).
-    if (Error.isError(value)) return NATIVE_TAGS.Error;
+    if (isNativeError(value)) return NATIVE_TAGS.Error;
 
     // `FabricInstance` values (object-like protocol types).
     if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;

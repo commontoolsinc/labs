@@ -14,6 +14,7 @@ import {
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
 import { markRendererTrustedEvent } from "@commonfabric/runner/cfc";
+import { setServerPrimaryExecutionContextLatticeClaimsConfig } from "@commonfabric/memory/v2";
 import { Identity, type KeyPairRaw } from "@commonfabric/identity";
 import {
   initializePiecesController,
@@ -213,6 +214,18 @@ const handlers: Record<
   async init({ rawIdentity, spaceName, apiUrl, diagnostics, wsDelayMs }) {
     const identity = await Identity.deserialize(rawIdentity as KeyPairRaw);
     if (typeof wsDelayMs === "number") installWsDelay(wsDelayMs);
+    // C2.10 session-lane gates: the context-lattice-claims-v1 subcapability's
+    // client-side ambient dial is deliberately programmatic-only (its env
+    // mapping in the canonical EXPERIMENTAL registry is null), so a
+    // worker-realm client cannot offer it in its hello. Session-lane gate
+    // fixtures that self-host a lattice-claims-enabled server set this
+    // HARNESS-LOCAL variable so their worker-realm sessions negotiate the
+    // subcapability and session lanes may open (C2.3's own-session
+    // admission). Only this harness reads it; production wiring stays a
+    // rollout decision.
+    if (Deno.env.get("MULTI_RUNTIME_CONTEXT_LATTICE_CLAIMS") === "true") {
+      setServerPrimaryExecutionContextLatticeClaimsConfig(true);
+    }
     cc = await initializePiecesController({
       apiUrl: new URL(apiUrl as string),
       identity,

@@ -101,6 +101,7 @@ class FlagOffServerTransport implements MemoryV2Client.Transport {
           flags: {
             ...getMemoryProtocolFlags(),
             persistentSchedulerState: false,
+            schedulerWriterLookup: false,
           },
           sessionOpen: TEST_HELLO_SESSION_OPEN,
         });
@@ -215,6 +216,15 @@ type ReplicaSurface = {
     serverSeq: number;
     snapshots: unknown[];
   }>;
+  writersForTargets(query: {
+    branch?: string;
+    targets: Array<{
+      space: string;
+      id: URI;
+      scope?: "space" | "user" | "session";
+      path: string[];
+    }>;
+  }): Promise<{ serverSeq: number; writers: unknown[] }>;
 };
 
 const schedulerObservation = {
@@ -302,9 +312,19 @@ Deno.test("flag-ON client degrades observation traffic against a server that did
     // for a capability it never offered.
     const listed = await replica.listSchedulerActionSnapshots({});
     assertEquals(listed, { serverSeq: 0, snapshots: [] });
+    const writers = await replica.writersForTargets({
+      branch: "",
+      targets: [{
+        space,
+        id: DOC,
+        scope: "space",
+        path: ["value"],
+      }],
+    });
+    assertEquals(writers, { serverSeq: 0, writers: [] });
     assertEquals(
       transport.requestTypes.filter((type) =>
-        type === "scheduler.snapshot.list"
+        type === "scheduler.snapshot.list" || type === "scheduler.writer.list"
       ),
       [],
     );

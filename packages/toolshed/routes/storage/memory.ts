@@ -1,9 +1,21 @@
 import * as MemoryServer from "@commonfabric/memory/v2/server";
+import { applyServerPrimaryExecutionGraphRetirementEnvConfig } from "@commonfabric/memory/v2";
 import { verifySessionOpenAuthorization } from "@commonfabric/memory/v2/session-open-auth";
 import * as FS from "@std/fs";
 import env from "@/env.ts";
 import { memoryEngineStoreUrl } from "./memory-store-url.ts";
 import { identity } from "@/lib/identity.ts";
+import type { Runtime } from "@commonfabric/runner";
+import {
+  type ExecutionPoolMetricsSnapshot,
+  SharedExecutionPool,
+} from "@commonfabric/runner/executor";
+import { DenoSpaceExecutorFactory } from "@commonfabric/runner/executor/deno";
+import {
+  setServerExecutionControlMetricsProvider,
+  setServerExecutionFeedMetricsProvider,
+  setServerExecutionPoolMetricsProvider,
+} from "@/lib/server-execution-observability.ts";
 
 const memoryAudience = identity.did();
 
@@ -26,6 +38,15 @@ if (env.DB_PATH) {
 export { memoryEngineStoreUrl };
 await FS.ensureDir(memoryEngineStoreUrl);
 
+// FW5 (FB10): apply the F5 per-space doc-set admission dial from
+// EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES (comma-
+// separated space DIDs, or `*`) at server construction, so the W2.9
+// measurement protocol is executable against a deployed toolshed. The parser
+// lives in @commonfabric/memory next to the dial; see the
+// `serverPrimaryExecutionGraphRetirement` entry in
+// docs/development/EXPERIMENTAL_OPTIONS.md.
+applyServerPrimaryExecutionGraphRetirementEnvConfig(Deno.env.get);
+
 export const memoryServer = new MemoryServer.Server({
   store: memoryEngineStoreUrl,
   authorizeSessionOpen,
@@ -40,10 +61,77 @@ export const memoryServer = new MemoryServer.Server({
       .filter((did) => did.length > 0),
   },
 });
+let executionPool: SharedExecutionPool | null = null;
+
+export function serverExecutionPoolMetrics():
+  | ExecutionPoolMetricsSnapshot
+  | null {
+  return executionPool?.metrics() ?? null;
+}
+
+setServerExecutionPoolMetricsProvider(serverExecutionPoolMetrics);
+setServerExecutionControlMetricsProvider(() => memoryServer.executionStats);
+setServerExecutionFeedMetricsProvider(() => memoryServer.feedStats);
+
+/** Start client-demand execution after runtime flags are installed, but before
+ * the HTTP server accepts connections. */
+export function startServerExecutionPool(runtime: Runtime): void {
+  if (
+    executionPool !== null ||
+    runtime.experimental.serverPrimaryExecution !== true
+  ) return;
+  executionPool = new SharedExecutionPool({
+    control: memoryServer,
+    // C1.8: user-lane lifecycle engages only with the full dial triple —
+    // this runner dial plus the host's issuance rank dial and the
+    // context-lattice subcapability (checked live via the control).
+    userLaneCandidates:
+      runtime.experimental.serverPrimaryExecutionUserRankCandidates === true,
+    // C2.7: session-lane lifecycle layers on the user leg (the C2.5 rank
+    // ladder) plus the host's session-stage dial, checked live via the
+    // control (`executionSessionLanesEnabled`).
+    sessionLaneCandidates:
+      runtime.experimental.serverPrimaryExecutionSessionRankCandidates ===
+        true,
+    factory: new DenoSpaceExecutorFactory({
+      server: memoryServer,
+      apiUrl: new URL(env.API_URL),
+      patternApiUrl: new URL(env.API_URL),
+      experimental: runtime.experimental,
+      // F1 claim-coverage counters are the evidence channel (surfaced under
+      // /api/health/stats serverExecutionControl); the debug logs remain for
+      // per-candidate detail but are no longer what a measurement greps.
+      onCandidateClaim: (candidate) => {
+        memoryServer.recordExecutionCandidateClaimReady(candidate.claimKey);
+        console.debug(
+          "Memory: Server execution candidate claim-ready",
+          candidate.claimKey,
+        );
+      },
+      onCandidateDiagnostic: (diagnostic) => {
+        memoryServer.recordExecutionCandidateUnserved(diagnostic);
+        console.debug(
+          "Memory: Server execution candidate unserved",
+          diagnostic,
+        );
+      },
+      onWriterDiscovery: (discovery) =>
+        console.debug(
+          "Memory: Server execution writer discovery",
+          discovery,
+        ),
+    }),
+  });
+  executionPool.start();
+  console.log("Memory: Server execution pool started");
+}
+
 export const memory = {
   async close(): Promise<
     { ok: Record<PropertyKey, never> } | { error: unknown }
   > {
+    await executionPool?.close();
+    executionPool = null;
     await memoryServer.close();
     return { ok: {} };
   },

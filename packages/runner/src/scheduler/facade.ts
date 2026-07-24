@@ -1,4 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import type { ActionClaimKey } from "@commonfabric/memory/v2";
 import type { Cancel } from "../cancel.ts";
 import { ConsoleEvent } from "../harness/console.ts";
 import type {
@@ -12,6 +13,7 @@ import type {
   ChangeGroup,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
+  IStorageProviderWithReplica,
   IStorageSubscription,
   MemorySpace,
   StorageNotification,
@@ -28,6 +30,7 @@ import type {
   SchedulerGraphSnapshot,
 } from "../telemetry.ts";
 import {
+  CLAIMED_REMOTE_SPECULATION_GRACE_MS,
   CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
   INITIAL_RUN_SYNC_HOLD_TIMEOUT_MS,
   MAX_SETTLE_STATS_HISTORY,
@@ -73,6 +76,8 @@ import {
   snapshotEventPreflightTraceContext,
 } from "./event-preflight-dependencies.ts";
 import {
+  type ActionCommitRejectionDirective,
+  type ActionCommitRejectionDisposition,
   runSchedulerAction,
   type SchedulerActionRunState,
   schedulerImplementationFingerprint,
@@ -157,6 +162,11 @@ import type {
 } from "./types.ts";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
 import { entityKey } from "./keys.ts";
+import {
+  type SchedulerDurableWriterProvider,
+  type SchedulerWriterCandidate,
+  schedulerWritersForTargets,
+} from "./writer-lookup.ts";
 
 ensureNotRenderThread();
 
@@ -222,14 +232,22 @@ const observationMinimumContextRank = (
   }
   if (crossesSpace && rank === 0) return 2;
 
+  // Dynamic reads outside the static read envelopes are admitted (mirroring
+  // the host's context floor): each must itself be same-space and still
+  // contributes its scope rank. Envelope-covered reads keep the certified
+  // summary judgment above. Writes remain strictly bounded by their declared
+  // envelopes.
+  for (const address of [...observation.reads, ...observation.shallowReads]) {
+    if (summary.reads.some((env) => schedulerEnvelopeCovers(env, address))) {
+      continue;
+    }
+    if (address.space !== summary.piece.space) return 2;
+    rank = Math.max(rank, schedulerAddressScopeRank(address));
+  }
   const runtimeGroups: Array<[
     readonly IMemorySpaceAddress[],
     readonly IMemorySpaceAddress[],
   ]> = [
-    [
-      [...observation.reads, ...observation.shallowReads],
-      summary.reads,
-    ],
     [
       [
         ...observation.actualChangedWrites,
@@ -362,6 +380,11 @@ function observationAdoptionAddresses(
 
 // Re-export types that tests expect from scheduler
 export type { ErrorWithContext };
+export type {
+  LiveSchedulerMatchedWrite,
+  LiveSchedulerWriterEvidence,
+  SchedulerWriterCandidate,
+} from "./writer-lookup.ts";
 export type {
   Action,
   ActionRunTraceAddress,
@@ -554,6 +577,13 @@ export class Scheduler {
   // only event-driven piece-start tasks, which must not pause pull scheduling.
   private initialRehydrationInFlight = 0;
   private errorHandlers = new Set<ErrorHandler>();
+  private actionCommitRejectionHandler?: (
+    action: Action,
+    error: unknown,
+    disposition: ActionCommitRejectionDisposition,
+  ) => ActionCommitRejectionDirective;
+  private actionObservationAdoptionGuard?: (action: Action) => boolean;
+  private actionRunWrapper?: <T>(action: Action, run: () => T) => T;
   private consoleHandler: ConsoleHandler;
   private _running: Promise<unknown> | undefined = undefined;
   private scheduled = false;
@@ -615,6 +645,70 @@ export class Scheduler {
         this._running = undefined;
       });
     }
+  }
+
+  /** Host-only lifecycle hook used by the server executor to release an exact
+   * claim when CFC/ACL rejects before ordinary transaction routing can settle
+   * it. It carries no authority and is unset in ordinary runtimes. */
+  setActionCommitRejectionHandler(
+    handler:
+      | ((
+        action: Action,
+        error: unknown,
+        disposition: ActionCommitRejectionDisposition,
+      ) => ActionCommitRejectionDirective)
+      | undefined,
+  ): void {
+    this.actionCommitRejectionHandler = handler;
+  }
+
+  /**
+   * Host-only per-run wrapper (C1.9c): wraps one action run's synchronous
+   * extent — transaction creation plus the body's synchronous reads. The
+   * executor Worker installs one that resolves the action's execution lane
+   * and runs the body under it as the ambient acting lane, keeping every
+   * rerun path (claimed activation, host wake, local differential, conflict
+   * retry) reading that lane's document instances. The wrapper must invoke
+   * `run` exactly once and return its result.
+   */
+  setActionRunWrapper(
+    wrapper: (<T>(action: Action, run: () => T) => T) | undefined,
+  ): void {
+    this.actionRunWrapper = wrapper;
+  }
+
+  /** Host-only execution guard. A server shadow must independently run clean
+   * durable computations at startup and rerun remote invalidations to assess
+   * current servability and candidate authority. Neither initial rehydration
+   * nor incremental adoption may erase that work. */
+  setActionObservationAdoptionGuard(
+    guard: ((action: Action) => boolean) | undefined,
+  ): void {
+    this.actionObservationAdoptionGuard = guard;
+  }
+
+  /**
+   * Find every live or durable scheduler action whose registered write surface
+   * overlaps one of the requested targets. Durable lookup is optional and
+   * fail-open; live actions remain discoverable before their first run.
+   */
+  async writersForTargets(
+    branch: string,
+    space: MemorySpace,
+    targets: readonly IMemorySpaceAddress[],
+  ): Promise<SchedulerWriterCandidate[]> {
+    const provider = this.runtime.storageManager.open(
+      space,
+    ) as IStorageProviderWithReplica & SchedulerDurableWriterProvider;
+    return await schedulerWritersForTargets(
+      {
+        nodes: this.nodes,
+        writeIndex: this.writeIndex,
+        materializers: this.materializers,
+        getActionId: (action) => this.getActionId(action),
+      },
+      { branch, space, targets, provider },
+    );
   }
 
   /**
@@ -691,6 +785,7 @@ export class Scheduler {
       dependencies,
       subscribeOptions,
     );
+    this.registerExecutionAction(action);
     // Rehydration and the synced-hold are independent: apply the snapshot when
     // one is preloaded for this action (unless the action declares it must
     // always run on resume), and hold the initial run of any action that did
@@ -820,6 +915,14 @@ export class Scheduler {
     if (observation.actionId !== actionId) {
       return false;
     }
+    const annotated = action as Partial<TelemetryAnnotations>;
+    if (
+      annotated.serverBuiltin !== undefined &&
+      observation.completeActionScopeSummary !== undefined
+    ) {
+      annotated.serverBuiltinPreviousScopeSummary =
+        observation.completeActionScopeSummary;
+    }
 
     // Annotation first; otherwise restore the persisted live surface —
     // mirroring registration, where subscribe's ReactivityLog supplies the
@@ -879,6 +982,7 @@ export class Scheduler {
       record.invalidCauses = [];
     }
     this.pending.delete(action);
+    this.gates.releaseClaimedRemoteSpeculation(action);
     return true;
   }
 
@@ -937,6 +1041,19 @@ export class Scheduler {
       );
       if (!snapshot) {
         logger.debug("rehydrate/fallback-run/no-match", () => []);
+        return false;
+      }
+      if (
+        snapshot.observation.actionKind === "computation" &&
+        snapshot.observation.status === "success" &&
+        snapshot.directDirtySeq === undefined &&
+        snapshot.staleSeq === undefined &&
+        snapshot.unknownReason === undefined &&
+        this.actionObservationAdoptionGuard?.(action) === true
+      ) {
+        logger.debug("rehydrate/miss/authority-handoff", () => [
+          snapshot.observation.actionId,
+        ]);
         return false;
       }
       const addresses = observationAdoptionAddresses(snapshot.observation);
@@ -1012,6 +1129,12 @@ export class Scheduler {
       // appended row unregistered — the reload path's always-run guard, live.
       if (this.alwaysRunActions.has(action)) {
         logger.debug("adopt/miss/always-run", () => [observation.actionId]);
+        continue;
+      }
+      if (this.actionObservationAdoptionGuard?.(action) === true) {
+        logger.debug("adopt/miss/authority-handoff", () => [
+          observation.actionId,
+        ]);
         continue;
       }
       let candidates = candidatesByAction.get(action);
@@ -1126,11 +1249,41 @@ export class Scheduler {
     });
   }
 
+  private registerExecutionAction(action: Action): void {
+    const identity = (action as Partial<TelemetryAnnotations>)
+      .schedulerObservationIdentity;
+    if (identity?.ownerSpace === undefined) return;
+    const actionId = this.getActionId(action);
+    const key: ActionClaimKey = {
+      branch: identity.branch ?? "",
+      space: identity.ownerSpace,
+      // Chain-scoped registration (context-lattice §2, amendment A15): the
+      // client cannot reproduce the server's lane choice, so this key
+      // participates by its chain identity (ActionClaimKey minus
+      // contextKey). "space" is the canonical chain representative, not a
+      // lane assertion — claims at user:<myDid> (and session:<myDid>:<id>
+      // once C2 issues them) resolve to this same registration.
+      contextKey: "space",
+      pieceId: identity.pieceId,
+      actionId,
+      actionKind: this.nodes.isKnownEffect(action) ? "effect" : "computation",
+      implementationFingerprint: schedulerImplementationFingerprint(
+        action,
+        actionId,
+        getSchedulerActionTelemetryInfo(action),
+      ),
+      runtimeFingerprint: schedulerRuntimeFingerprint(),
+    };
+    this.runtime.storageManager.registerExecutionAction?.(action, key);
+  }
+
   unsubscribe(
     action: Action,
     options: { preserveChangeGroup?: boolean } = {},
   ): void {
+    this.gates.releaseClaimedRemoteSpeculation(action);
     unsubscribeSchedulerAction(this.unsubscribeState, action, options);
+    this.runtime.storageManager.unregisterExecutionAction?.(action);
     this.materializers.clearAction(action);
     // Drop the adoption index entry only if it still points at this action
     // (a re-registration may have overwritten it). Cancel paths that bypass
@@ -1440,6 +1593,25 @@ export class Scheduler {
    */
   isDirty(action: Action): boolean {
     return this.isInvalidAction(action);
+  }
+
+  /**
+   * At-least-once repair for the executor's durable stale-reader feed. The
+   * ordinary replica differential remains the primary invalidation path; an
+   * exact host wake may repeat it after integration so a refresh racing local
+   * scheduler bookkeeping cannot strand a clean action. Repeated calls are
+   * safe: invalid state and the queued execution turn both coalesce.
+   */
+  invalidateActionForHostWake(action: Action): boolean {
+    if (this.nodes.get(action) === undefined) return false;
+    this.markActionInvalid(action);
+    // staleDemandedReaders is stronger than an ordinary replica
+    // differential: the host's durable index says this exact action is still
+    // demanded. Preserve that proof for the next execution pass even when the
+    // local dependency graph happens to consider the action dormant.
+    this.pending.add(action);
+    this.queueExecution();
+    return true;
   }
 
   /**
@@ -1987,8 +2159,8 @@ export class Scheduler {
       recordTriggerTrace: (entry) =>
         recordTriggerTraceState({ triggerTrace: this.triggerTrace }, entry),
       scheduleWithDebounce: (target) => this.scheduleWithDebounce(target),
-      markInvalid: (target, cause) =>
-        this.markAndScheduleInvalidAction(target, cause),
+      markInvalid: (target, cause, options) =>
+        this.markAndScheduleInvalidAction(target, cause, options),
       isInvalid: (target) => this.isInvalidAction(target),
       materializerIndex: this.materializers,
       queueExecution: () => this.queueExecution(),
@@ -2005,6 +2177,18 @@ export class Scheduler {
   }
 
   private processStorageNotification(notification: StorageNotification): void {
+    if (notification.type === "execution-claim-invalidation") {
+      const action = notification.sourceAction as Action & {
+        prepareClaimedRerun?: () => void;
+      };
+      action.prepareClaimedRerun?.();
+      // Claim loss is an exact host wake, not merely a local differential.
+      // The producing computation may be dormant between temporary pull
+      // consumers, so retain it in the pending set until one fail-open rerun
+      // has had a chance to restore client authority.
+      this.invalidateActionForHostWake(action);
+      return;
+    }
     if (notification.type === "scheduler-observations") {
       // Subscription-carried observations arrive AFTER their sync's
       // integrate notification (same synchronous turn): the writes have been
@@ -2078,6 +2262,8 @@ export class Scheduler {
       hasActiveDebounceTimer: (action) =>
         this.gates.hasActiveDebounceTimer(action),
       getNextEligibleRunTime: (action) => this.getNextEligibleRunTime(action),
+      isClaimedRemoteSpeculationDeferred: (action) =>
+        this.gates.isClaimedRemoteSpeculationDeferred(action),
       // Engaged only while an initial rehydration is being applied (synchronous
       // post-phase-7). MUST NOT read backgroundTasks: its sole populator is now
       // the event-driven piece-start task (events.ts), so gating on it would
@@ -2365,6 +2551,12 @@ export class Scheduler {
         this.executingAction = null;
         this.currentActionId = undefined;
       },
+      handleActionCommitRejected: (target, error, disposition) =>
+        this.actionCommitRejectionHandler?.(target, error, disposition),
+      wrapActionRun: (target, run) =>
+        this.actionRunWrapper === undefined
+          ? run()
+          : this.actionRunWrapper(target, run),
     };
   }
 
@@ -2454,10 +2646,25 @@ export class Scheduler {
   private markActionInvalid(
     action: Action,
     cause?: IMemorySpaceAddress,
+    options: { readonly deferClaimedRemote?: boolean } = {},
   ): void {
     const record = this.nodes.get(action);
     if (!record) return;
     markInvalidRecord(this.nodes, action, cause);
+    const deferClaimedRemote = record.kind === "computation" &&
+      options.deferClaimedRemote === true &&
+      this.runtime.storageManager.hasLiveExecutionClaimForAction?.(action) ===
+        true;
+    if (deferClaimedRemote) {
+      this.gates.holdClaimedRemoteSpeculation(
+        action,
+        performance.now() + CLAIMED_REMOTE_SPECULATION_GRACE_MS,
+      );
+    } else {
+      // Local optimistic writes, authority loss, and every unclaimed/effect
+      // path retain the existing immediate speculative behavior.
+      this.gates.releaseClaimedRemoteSpeculation(action);
+    }
     // Trailing computation debounce re-arms on every invalidation (§8.1:
     // debounceReadyAt resets while gated). Arming here — in the one
     // invalid-setter — covers every path (channel, registration, retry), so
@@ -2478,13 +2685,15 @@ export class Scheduler {
       this.nodes.setStatus(action, "clean");
     }
     record.invalidCauses = [];
+    this.gates.releaseClaimedRemoteSpeculation(action);
   }
 
   private markAndScheduleInvalidAction(
     action: Action,
     cause?: IMemorySpaceAddress,
+    options: { readonly deferClaimedRemote?: boolean } = {},
   ): void {
-    this.markActionInvalid(action, cause);
+    this.markActionInvalid(action, cause, options);
 
     if (this.nodes.effects.has(action) && this.gates.getDebounce(action)) {
       this.scheduleWithDebounce(action);

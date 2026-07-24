@@ -23,7 +23,11 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { fromDID } from "../util.ts";
-import { MEMORY_PROTOCOL, type SessionOpenChallenge } from "../v2.ts";
+import {
+  MEMORY_PROTOCOL,
+  type SessionDescriptor,
+  type SessionOpenChallenge,
+} from "../v2.ts";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -33,18 +37,21 @@ export const authorizationError = (message: string): Error =>
 
 const sameSessionDescriptor = (
   left: Record<string, unknown>,
-  right: { sessionId?: string; seenSeq?: number; sessionToken?: string },
+  right: SessionDescriptor,
 ): boolean =>
   (typeof left.sessionId === "string" ? left.sessionId : undefined) ===
     right.sessionId &&
   (typeof left.seenSeq === "number" ? left.seenSeq : undefined) ===
     right.seenSeq &&
+  (typeof left.executionFeedSeq === "number"
+      ? left.executionFeedSeq
+      : undefined) === right.executionFeedSeq &&
   (typeof left.sessionToken === "string" ? left.sessionToken : undefined) ===
     right.sessionToken;
 
 export type SessionOpenMessage = {
   space: string;
-  session: { sessionId?: string; seenSeq?: number; sessionToken?: string };
+  session: SessionDescriptor;
   invocation?: Record<string, unknown>;
   authorization?: unknown;
 };

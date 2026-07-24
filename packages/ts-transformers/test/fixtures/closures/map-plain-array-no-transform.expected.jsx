@@ -38,7 +38,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["n", "state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: map-plain-array-no-transform
 // Verifies: .map() on a plain (non-reactive) array is NOT transformed to mapWithPattern
 //   plainArray.map(fn) → plainArray.map(fn) (unchanged)

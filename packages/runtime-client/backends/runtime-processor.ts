@@ -71,8 +71,10 @@ import {
   type DetectNonIdempotentRequest,
   type DetectNonIdempotentResponse,
   type EnsureHomePatternRunningRequest,
+  type ExecutionRoutingDiagnosticsResponse,
   type GetActionRunTraceRequest,
   type GetCellRequest,
+  type GetExecutionRoutingDiagnosticsRequest,
   GetGraphSnapshotRequest,
   type GetHomeSpaceCellRequest,
   type GetLoggerCountsRequest,
@@ -1337,6 +1339,17 @@ export class RuntimeProcessor {
     return { snapshot: this.runtime.scheduler.getGraphSnapshot() };
   }
 
+  getExecutionRoutingDiagnostics(
+    request: GetExecutionRoutingDiagnosticsRequest,
+  ): ExecutionRoutingDiagnosticsResponse {
+    const diagnostics = this.runtime.storageManager
+      .getExecutionRoutingDiagnostics?.(request.query);
+    if (diagnostics === undefined) {
+      throw new Error("Execution-routing diagnostics are unavailable");
+    }
+    return { diagnostics };
+  }
+
   getLoggerCounts(_: GetLoggerCountsRequest): LoggerCountsResponse {
     const counts = getLoggerCountsBreakdown();
     const metadata = this.#getLoggerMetadata();
@@ -1625,6 +1638,8 @@ export class RuntimeProcessor {
         return this.handleRegisterSpaceHost(request);
       case RequestType.GetGraphSnapshot:
         return this.getGraphSnapshot(request);
+      case RequestType.GetExecutionRoutingDiagnostics:
+        return this.getExecutionRoutingDiagnostics(request);
       case RequestType.GetLoggerCounts:
         return this.getLoggerCounts(request);
       case RequestType.SetLoggerLevel:

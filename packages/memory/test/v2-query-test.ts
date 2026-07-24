@@ -122,6 +122,7 @@ Deno.test("memory v2 queryGraph reads the declared scoped root instance", async 
       branch: "",
       id: "of:scoped-query-root",
       scope: "user",
+      scopeKey: "user:did%3Akey%3Aalice",
       seq: 1,
       document: { value: { name: "alice" } },
     }]);
@@ -316,6 +317,7 @@ Deno.test("memory v2 query does not include linked opaque cells in graph entitie
     assertEquals(result.entities, [{
       branch: "",
       id: rootId,
+      scopeKey: "space",
       seq: 1,
       document: {
         value: {
@@ -416,6 +418,7 @@ Deno.test("memory v2 query does not walk nested links inside inline opaque cells
     assertEquals(result.entities, [{
       branch: "",
       id: rootId,
+      scopeKey: "space",
       seq: 1,
       document: {
         value: {
@@ -1227,6 +1230,7 @@ Deno.test("memory v2 queryGraph supports branch-scoped atSeq reads", async () =>
     assertEquals(result.entities, [{
       branch: "feature",
       id: rootId,
+      scopeKey: "space",
       seq: 1,
       document: {
         value: {

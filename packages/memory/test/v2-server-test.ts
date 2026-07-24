@@ -5,6 +5,7 @@ import { parseClientMessage, Server, SessionRegistry } from "../v2/server.ts";
 import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
+  type ExecutionClaim,
   getMemoryProtocolFlags,
   type GraphQueryResult,
   type HelloOkMessage,
@@ -14,6 +15,8 @@ import {
   type SessionEffectMessage,
   type SessionOpenAuthMetadata,
   type SessionSync,
+  toAcceptedCommitSeq,
+  toInputBasisSeq,
 } from "../v2.ts";
 import { createGraphFixture } from "./v2-graph.fixture.ts";
 
@@ -212,6 +215,74 @@ Deno.test("memory v2 scheduler listing rejects arbitrary context selectors", () 
   );
 });
 
+Deno.test("memory v2 scheduler writer lookup accepts only server-scoped targets", () => {
+  const request = {
+    type: "scheduler.writer.list",
+    requestId: "scheduler-writer-list",
+    space: "did:key:z6Mk-space",
+    sessionId: "session:alice",
+    query: {
+      branch: "feature",
+      targets: [{
+        id: "of:output",
+        scope: "user",
+        path: ["value", "result"],
+      }],
+    },
+  };
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary(request)),
+    request as unknown as ReturnType<typeof parseClientMessage>,
+  );
+
+  const invalidQueries = [
+    {
+      executionContextKey: "user:did%3Akey%3Abob",
+      targets: [{ id: "of:output", path: ["value"] }],
+    },
+    {
+      targets: [{
+        id: "of:output",
+        path: ["value"],
+        scopeKey: "user:did%3Akey%3Abob",
+      }],
+    },
+    {
+      targets: [{
+        id: "of:output",
+        path: ["value"],
+        execution_context_key: "session:other:session",
+      }],
+    },
+    {
+      targets: [{
+        space: "did:key:z6Mk-other-space",
+        id: "of:output",
+        path: ["value"],
+      }],
+    },
+    {
+      targets: [{ id: "of:output", scope: "global", path: ["value"] }],
+    },
+    {
+      targets: [{ id: "of:output", path: ["value", 0] }],
+    },
+  ];
+
+  for (const [index, query] of invalidQueries.entries()) {
+    assertEquals(
+      parseClientMessage(encodeMemoryBoundary({
+        type: "scheduler.writer.list",
+        requestId: `scheduler-writer-invalid-${index}`,
+        space: "did:key:z6Mk-space",
+        sessionId: "session:alice",
+        query,
+      })),
+      null,
+    );
+  }
+});
+
 Deno.test("memory v2 session registry scopes session ids by space", () => {
   const sessions = new SessionRegistry();
   const first = sessions.open(
@@ -231,6 +302,179 @@ Deno.test("memory v2 session registry scopes session ids by space", () => {
   assertEquals(second.sessionId, "session:fixed");
   assertEquals(second.serverSeq, 0);
   assertExists(second.sessionToken);
+});
+
+Deno.test("memory v2 session registry bounds unacknowledged execution events", () => {
+  const space = "did:key:z6Mk-bounded-execution-events";
+  const sessions = new SessionRegistry({
+    maxExecutionEvents: 2,
+  });
+  const opened = sessions.open(
+    space,
+    { sessionId: "session:bounded-execution-events" },
+    0,
+  );
+  const session = sessions.get(space, opened.sessionId);
+  assertExists(session);
+
+  const append = (claimGeneration: number) => {
+    sessions.appendExecutionEvent(session, {
+      type: "session.execution.claim.revoke",
+      branch: "",
+      claim: {
+        branch: "",
+        space,
+        contextKey: "space",
+        pieceId: "piece:bounded",
+        actionId: "action:bounded",
+        actionKind: "computation",
+        implementationFingerprint: "impl:bounded",
+        runtimeFingerprint: "runtime:bounded",
+      },
+      leaseGeneration: 1,
+      claimGeneration,
+    });
+  };
+
+  append(1);
+  append(2);
+  append(3);
+  assertEquals(
+    session.executionEvents.map((entry) => entry.feedSeq),
+    [2, 3],
+  );
+
+  // Ack pruning replaces the plain array. Subsequent canonical appends must
+  // still enforce the registry's retention bound.
+  sessions.pruneExecutionEvents(session, 2);
+  assertEquals(
+    session.executionEvents.map((entry) => entry.feedSeq),
+    [3],
+  );
+  append(4);
+  append(5);
+  append(6);
+  assertEquals(
+    session.executionEvents.map((entry) => entry.feedSeq),
+    [5, 6],
+  );
+});
+
+Deno.test("memory v2 session registry coalesces and fences successful settlement frontiers", () => {
+  const space = "did:key:z6Mk-settlement-frontier";
+  const sessions = new SessionRegistry({ maxExecutionEvents: 2 });
+  const opened = sessions.open(space, {
+    sessionId: "session:settlement-frontier",
+  }, 0);
+  const session = sessions.get(space, opened.sessionId);
+  assertExists(session);
+  const first: ExecutionClaim = {
+    branch: "",
+    space,
+    contextKey: "space",
+    pieceId: "piece:frontier",
+    actionId: "action:frontier",
+    actionKind: "computation",
+    implementationFingerprint: "impl:frontier",
+    runtimeFingerprint: "runtime:frontier",
+    leaseGeneration: 1,
+    claimGeneration: 1,
+    expiresAt: 10_000,
+  };
+
+  sessions.appendExecutionEvent(session, {
+    type: "session.execution.claim.set",
+    claim: first,
+  });
+  sessions.appendExecutionEvent(session, {
+    type: "session.execution.settlement",
+    settlement: {
+      branch: "",
+      claim: first,
+      inputBasisSeq: toInputBasisSeq(100),
+      outcome: "committed",
+      acceptedCommitSeq: toAcceptedCommitSeq(20),
+    },
+  });
+  sessions.appendExecutionEvent(session, {
+    type: "session.execution.settlement",
+    settlement: {
+      branch: "",
+      claim: first,
+      inputBasisSeq: toInputBasisSeq(50),
+      outcome: "no-op",
+    },
+  });
+  assertEquals([...session.executionSettlementFrontiers.values()], [{
+    branch: "",
+    claim: first,
+    inputBasisSeq: toInputBasisSeq(100),
+    throughFeedSeq: 3,
+    requiredAcceptedCommitSeq: toAcceptedCommitSeq(20),
+  }]);
+
+  // Acking the stronger older settlement must not discard the later lower-
+  // basis success summarized by the same frontier watermark.
+  sessions.pruneExecutionEvents(session, 2);
+  assertEquals(session.executionSettlementFrontiers.size, 1);
+  sessions.appendExecutionEvent(session, {
+    type: "session.execution.claim.set",
+    claim: { ...first, actionId: "action:noise-one" },
+  });
+  sessions.appendExecutionEvent(session, {
+    type: "session.execution.claim.set",
+    claim: { ...first, actionId: "action:noise-two" },
+  });
+  assertEquals(
+    session.executionEvents.some((entry) =>
+      entry.event.type === "session.execution.settlement"
+    ),
+    false,
+  );
+  assertEquals(session.executionSettlementFrontiers.size, 1);
+  sessions.pruneExecutionEvents(session, 3);
+  assertEquals(session.executionSettlementFrontiers.size, 0);
+
+  sessions.appendExecutionEvent(session, {
+    type: "session.execution.settlement",
+    settlement: {
+      branch: "",
+      claim: first,
+      inputBasisSeq: toInputBasisSeq(110),
+      outcome: "no-op",
+    },
+  });
+  const replacement = { ...first, claimGeneration: 2 };
+  sessions.appendExecutionEvent(session, {
+    type: "session.execution.claim.set",
+    claim: replacement,
+  });
+  assertEquals(session.executionSettlementFrontiers.size, 0);
+  sessions.appendExecutionEvent(session, {
+    type: "session.execution.settlement",
+    settlement: {
+      branch: "",
+      claim: replacement,
+      inputBasisSeq: toInputBasisSeq(120),
+      outcome: "no-op",
+    },
+  });
+  sessions.appendExecutionEvent(session, {
+    type: "session.execution.claim.revoke",
+    branch: "",
+    claim: first,
+    leaseGeneration: first.leaseGeneration,
+    claimGeneration: first.claimGeneration,
+  });
+  assertEquals(session.executionSettlementFrontiers.size, 1);
+  sessions.appendExecutionEvent(session, {
+    type: "session.execution.claim.revoke",
+    branch: "",
+    claim: replacement,
+    leaseGeneration: replacement.leaseGeneration,
+    claimGeneration: replacement.claimGeneration,
+  });
+  assertEquals(session.executionSettlementFrontiers.size, 0);
 });
 
 Deno.test("memory v2 server consumes a challenged session open", async () => {
@@ -1114,6 +1358,7 @@ Deno.test("memory v2 server opens sessions, commits documents, and answers graph
       entities: [{
         branch: "",
         id: "of:doc:1",
+        scopeKey: "space",
         seq: 1,
         document: {
           value: {
@@ -2219,6 +2464,9 @@ Deno.test("memory v2 server watch set replacement emits removes for entities tha
       branch: "",
       id: "of:doc:1",
       scope: "space",
+      // F2: removes carry the resolved scope key so they evict exactly the
+      // instance the matching upsert established.
+      scopeKey: "space",
     }]);
   } finally {
     await server.close();
@@ -2317,6 +2565,7 @@ Deno.test("memory v2 server does not echo same-session operation docs through wa
       branch: "",
       id: "of:doc:1",
       scope: "space",
+      scopeKey: "space",
       seq: 1,
       doc: {
         value: { version: 1 },
@@ -2375,6 +2624,7 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
         branch: "",
         id: "of:doc:1",
         scope: "space",
+        scopeKey: "space",
         seq: 0,
         deleted: true,
       },
@@ -2459,6 +2709,7 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
       branch: "",
       id: "of:doc:1",
       scope: "space",
+      scopeKey: "space",
       seq: 2,
       doc: {
         value: { version: 3 },
@@ -2694,6 +2945,7 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
       branch: "",
       id: "of:doc:1",
       scope: "space",
+      scopeKey: "space",
       seq: 2,
       doc: {
         value: { version: 3 },
@@ -2880,6 +3132,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
       branch: "",
       id: "of:doc:1",
       scope: "space",
+      scopeKey: "space",
       seq: 1,
       doc: {
         value: { version: 1 },
@@ -2901,6 +3154,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
       branch: "",
       id: "of:doc:1",
       scope: "space",
+      scopeKey: "space",
       seq: 3,
       doc: {
         value: { version: 3 },
@@ -2909,6 +3163,7 @@ Deno.test("memory v2 server waits for queued receives before rerunning scheduled
       branch: "",
       id: "of:doc:2",
       scope: "space",
+      scopeKey: "space",
       seq: 2,
       doc: {
         value: { version: 2 },
@@ -3096,6 +3351,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
       branch: "",
       id: "of:doc:1",
       scope: "space",
+      scopeKey: "space",
       seq: 1,
       doc: {
         value: { version: 1 },
@@ -3115,6 +3371,7 @@ Deno.test("memory v2 server reruns scheduled watch refresh after max deferral", 
       branch: "",
       id: "of:doc:2",
       scope: "space",
+      scopeKey: "space",
       seq: 2,
       doc: {
         value: { version: 2 },

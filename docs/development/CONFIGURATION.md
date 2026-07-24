@@ -212,6 +212,12 @@ Off by default; flip `OTEL_ENABLED=true` to start exporting.
 | `OTEL_TRACES_SAMPLER` | `always_on` |
 | `OTEL_TRACES_SAMPLER_ARG` | `1.0` |
 
+The toolshed SDK provider registered by `OTEL_ENABLED` lives only in the main
+isolate. Server executor Workers bridge their isolated Runtime telemetry only
+under Deno native OTel (`OTEL_DENO=true|1` with `--unstable-otel`). Attachment
+and teardown are fail-open; spans identify the executor Runtime, served space,
+and sponsoring user while metrics keep those DIDs out of their labels.
+
 ---
 
 ## Build info
@@ -245,6 +251,7 @@ The environment-backed flags (the only ones settable without editing code) are:
 |---|---|
 | `modernCellRep` | `EXPERIMENTAL_MODERN_CELL_REP` |
 | `persistentSchedulerState` | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` |
+| `serverPrimaryExecution` | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` |
 | `eagerSourceAnnotation` | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` |
 
 The runtime-only flags (`commitPreconditions`, the CFC enforcement dials) and the
@@ -266,6 +273,7 @@ Most shell config is **build-time**: esbuild injects defines in
 | `COMMIT_SHA` | `$COMMIT_SHA` | _(unset)_ | Surfaced for debugging. |
 | `EXPERIMENTAL_MODERN_CELL_REP` | `EXPERIMENTAL.modernCellRep` | _(unset)_ | See experimental flags. |
 | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` | `EXPERIMENTAL.persistentSchedulerState` | _(unset = runtime on)_ | See experimental flags. |
+| `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` | `EXPERIMENTAL.serverPrimaryExecution` | _(unset = runtime off)_ | See experimental flags. |
 | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` | `EXPERIMENTAL.eagerSourceAnnotation` | on in dev builds, off in production | See experimental flags. |
 | `SHELL_PORT` | _(server-only)_ | `5173` (from `ports.json`) | Dev server port. |
 
@@ -281,7 +289,7 @@ the labs checkout and dispatches to `packages/cli/mod.ts`.
 
 | Var | Default | Notes |
 |---|---|---|
-| `CF_IDENTITY` | _(none)_ | Path to identity keyfile. Required for `piece`, `acl`, `exec` against a remote toolshed. |
+| `CF_IDENTITY` | _(none)_ | Path to identity keyfile. Required for `piece`, `acl`, `exec`, and `execution` against a remote toolshed. |
 | `CF_API_URL` | _(none)_ | Toolshed URL. Required for the same commands as above. |
 | `CF_LOG_LEVEL` | `error` | `debug` \| `info` \| `warn` \| `error` \| `silent`. Also settable per-invocation with `--log-level`. |
 | `CF_CLI_NAME` | `cf` | Override the displayed CLI name (for branded builds). |
@@ -297,7 +305,7 @@ the labs checkout and dispatches to `packages/cli/mod.ts`.
 
 ### Per-command args
 
-`piece`, `acl`, `exec`, and `fuse` accept their own subcommand options
+`piece`, `acl`, `exec`, `execution`, and `fuse` accept their own subcommand options
 (`-i,--identity`, `-a,--api-url`, `-s,--space`, etc.). Use `cf <command> --help`
 for the authoritative list — it's not duplicated here.
 
@@ -324,6 +332,7 @@ Passed before the CLI args; rarely needed:
 | `API_URL` | `http://localhost:8000` | Toolshed URL the service calls. |
 | `EXPERIMENTAL_MODERN_CELL_REP` | _(unset)_ | See experimental flags. |
 | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` | _(unset = runtime on)_ | See experimental flags. |
+| `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` | _(unset = runtime off)_ | See experimental flags. |
 | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` | _(unset)_ | See experimental flags. |
 
 ---

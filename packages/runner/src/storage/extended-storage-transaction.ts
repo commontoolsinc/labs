@@ -10,6 +10,8 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
 import type {
   CommitError,
+  ExternalSinkDisposition,
+  ExternalSinkDispositionPolicy,
   IAttestation,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
@@ -36,6 +38,7 @@ import type {
 import { createReadOnlyTransactionError, toThrowable } from "./interface.ts";
 import type {
   CommitPrecondition,
+  ExecutionClaim,
   SqliteOperation,
 } from "@commonfabric/memory/v2";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
@@ -49,6 +52,7 @@ import {
   isInternalVerifierRead,
   reactivityLogFromActivities,
 } from "./reactivity-log.ts";
+import { runWithTransactionSourceAction } from "./transaction-source-context.ts";
 
 import {
   type NormalizedFullLink,
@@ -352,7 +356,28 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   constructor(
     public tx: IStorageTransaction,
     private cfcInstrumentation: CfcInstrumentationHooks = {},
+    private readonly sinkDisposition: ExternalSinkDispositionPolicy = "allow",
+    private readonly captureExecutionClaim?: (
+      sourceAction: object | undefined,
+    ) => ExecutionClaim | undefined,
   ) {}
+
+  externalSinkDisposition(): ExternalSinkDisposition {
+    const configured = typeof this.sinkDisposition === "function"
+      ? this.sinkDisposition(this.tx.sourceAction)
+      : this.sinkDisposition;
+    if (configured === "suppress") return configured;
+    if (this.tx.executionEffectAuthority === "server") return "suppress";
+    if (this.tx.executionEffectAuthority === "client") return "allow";
+    const claim = this.captureExecutionClaim?.(this.tx.sourceAction);
+    if (claim?.actionKind === "effect") {
+      this.tx.executionEffectAuthority = "server";
+      this.tx.executionClaim = claim;
+      return "suppress";
+    }
+    this.tx.executionEffectAuthority = "client";
+    return "allow";
+  }
 
   noteCfcSinkReleaseReject(
     info: { sink: string; effectId: string; detail: string },
@@ -1835,7 +1860,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (result.ok && !readOnly) {
       for (const effect of this.#cfcState.outbox) {
         try {
-          await effect.flush(this);
+          await runWithTransactionSourceAction(
+            this.tx.sourceAction,
+            () => effect.flush(this),
+          );
           this.cfcInstrumentation.onOutboxFlush?.(effect);
         } catch (error) {
           logger.error(
@@ -2057,6 +2085,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     info: { sink: string; effectId: string; detail: string },
   ): void {
     this.wrapped.noteCfcSinkReleaseReject(info);
+  }
+
+  externalSinkDisposition(): ExternalSinkDisposition {
+    return this.wrapped.externalSinkDisposition();
   }
 
   enqueuePostCommitEffect(effect: PostCommitSideEffect): void {

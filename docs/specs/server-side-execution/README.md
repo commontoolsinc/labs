@@ -1,12 +1,30 @@
 # Server-Primary Execution
 
-Status: design approved for phased implementation. Author: design session
+Status: Phases 0–2 are implemented behind the default-off flag. W2.4's product
+and deterministic failure gates are locally validated, including the accepted
+500-event counterbalanced browser/CPU gate. The
+[2026-07-15 interactive-latency investigation](../../history/development/performance/server-execution-interactive-latency-2026-07-15.md)
+found flag-on interactive regressions invisible to the CPU gate; the
+implementation plan's Phase 2.5 hardening work orders (tolerant claim
+release, demand-shrink scoping, unservable-diagnostic dedup, wake
+coalescing, latency gates) block the deployed flag-off/flag-on drill, which
+remains pending. Phases 3+ remain design. Terminal crash quarantine and
+hard pool resource caps are later operational hardening tracked as G18, not
+part of the Phase 0–2 acceptance contract.
+Author: design session
 2026-07-06; revised 2026-07-07 (doc-centric demand, SQLite-primary state,
 transient executor passes, reactive interpreter de-scoped); revised
 2026-07-11 after implementation review (scheduler-v2 as the base, user-
 sponsored shared workers, positive per-action authority, writer-index
 producer lookup, scope-safe fallback, causal settlement acknowledgements,
-and server egress parity). No implementation in this spec.
+and server egress parity); revised 2026-07-12 after Phase 2 implementation and
+local rollout validation; revised 2026-07-13 after the parked-worker wake,
+causal-actor, permanent-builtin-failure, bounded-observability, and accepted
+500-event browser/CPU follow-ups.
+Completed work-order status is
+recorded inline; unimplemented phases remain design requirements rather than
+descriptions of current behavior. Operator procedure lives in the
+[server-primary execution runbook](../../development/server-primary-execution.md).
 
 Related specs: `docs/specs/scheduler-v2/`,
 `docs/specs/persistent-scheduler-state.md`,
@@ -21,8 +39,9 @@ Related PRs: #4288 (scheduler-v2 cutover, assumed baseline);
 
 ## 1. Summary
 
-Today the memory server is central but passive: every client runs the full
-reactive graph of every open piece, and clients race each other — N clients
+With the global flag off, the memory server remains central but passive: every
+client runs the full reactive graph of every open piece, and clients race each
+other — N clients
 means N redundant executions of the same computations, write-write conflicts
 on shared derived state, async work (fetch, LLM) that dies with a closed tab,
 and a per-session subscription machinery whose cost is
@@ -52,8 +71,8 @@ Four approaches are explored in depth:
 
 - **A — Server catch-up executor**: run a server participant while clients
   remain authoritative. Low risk, helps async fragility, does *not* kill
-  races. It remains a useful diagnostic mode, but background-registry cleanup
-  is not on the critical path.
+  races. It was a useful implementation-validation milestone, not a supported
+  rollout mode; background-registry cleanup is not on the critical path.
 - **B — Positive derived-authority split** (the proposed model): the server
   claims eligible actions individually; clients commit event-driven writes
   and every unclaimed action, while speculative results for claimed actions
@@ -65,9 +84,10 @@ Four approaches are explored in depth:
 - **D — Thin projector**: no client execution at all; the server computes
   everything including VNode docs; clients materialize DOM.
 
-**Recommendation: fix scheduler-state context keys on top of #4288, build
-the shared client-demand executor in shadow mode, then adopt B one eligible
-action at a time.** B matches the product need: races disappear for claimed
+**Recommendation: use B for every compatible eligible piece whenever the
+global flag is on.** The shared executor may run an action without authority
+while discovering its graph, but it claims the action automatically as soon as
+it proves servable. B matches the product need: races disappear for claimed
 derived data, async survives a tab closing, and clients retain instant local
 feedback. Positive `ExecutionClaim`s make fallback local and structural:
 absence or revocation of a matching claim means today's client-authority
@@ -208,15 +228,10 @@ fingerprint-gated, fail-open
 rehydration. Restart-skip is proven by `reload-rehydration.test.ts` and
 `v2-scheduler-state-test.ts`.
 
-Still missing (G4): durable dirty markers
-consumed as a **wake query** — the tree marks readers dirty *inline* during
-commit (`findSchedulerReadersForWrite` `engine.ts:1849`,
-`markSchedulerReadersDirtyForWrites` `:1912`) but exposes no named
-`staleReadersFor(space, changedIds, seq)` batched query for a *parked*
-space, and no wake-on-commit consumer of it (implementation-plan W1.5). The reverse
-*index* itself (`scheduler_read_index`) exists and is populated; what is
-absent is the query + the consumer. Producer lookup uses the existing
-`scheduler_write_index` (§3.3).
+G4 is now implemented: durable dirty markers are consumed through the indexed
+stale-reader query, and accepted commits selectively wake only demanded
+readers in a parked/live space. The reverse `scheduler_read_index` and producer
+`scheduler_write_index` remain the authoritative lookup surfaces (§3.3).
 
 Contribution: spin-up/spin-down becomes cheap. An idle space's graph is a
 set of observation rows; waking it is `rehydrate` + running only actions
@@ -226,25 +241,27 @@ basis and settlement acknowledgement (§5.B.4).
 
 #### 3.2.1 Prerequisite: context-qualify durable scheduler state
 
-The #4288 schema keys action snapshots and action state by branch, owner
-space, piece, generation, and action identity, but not by the effective
-user/session context. Cell revisions remain correctly partitioned by their
-effective `scope_key`; the bug is in the scheduler projection. Two users or
-sessions running the same scoped action can replace each other's snapshot,
-read/write-index rows, and dirty marker. #4288's fail-open rehydration guard
-prevents adopting another principal's scoped snapshot, but cannot preserve
-the row that was overwritten.
+The updated #4288 baseline fixes the scheduler-projection bug that originally
+left action snapshots, action state, and read/write-index ownership
+unqualified by effective user/session context. Cell revisions were already
+partitioned by effective `scope_key`; the scheduler tables now preserve that
+same separation instead of allowing two users or sessions running the same
+scoped action to replace each other's metadata.
 
-Fix this before server execution relies on these tables for ownership or
-wake decisions:
+The implementation:
 
 - derive an action `context_key` on the server using the shareability lattice
   `space < user < session`, where moving right is narrower;
 - permit a shared `space` or `user` row only when a trusted complete
-  transformer/runner scope summary covers the piece/result plus every possible
-  read, write, materializer envelope, and direct output; incomplete, unknown,
-  or dynamic surfaces start at `session:<principal>:<session-id>`, and observed
-  absence alone can never promote them;
+  transformer/runner scope summary covers the piece/result plus every declared
+  write, materializer envelope, and direct output. Observed reads may extend
+  beyond the summary's read envelopes when each is same-space and effectively
+  space-scoped (dynamic link-following reads — the implemented C0 step of
+  [context-lattice-execution.md](./context-lattice-execution.md)); incomplete
+  or unknown summaries, write surfaces exceeding their envelopes, and scoped
+  or cross-space observed surfaces still start at
+  `session:<principal>:<session-id>`, and observed absence alone can never
+  promote them;
 - include `context_key` in the action snapshot, action-state, read-index,
   and write-index action keys;
 - persist the resolved `read_scope_key` / `write_scope_key` on indexed
@@ -259,9 +276,10 @@ Within one action fingerprint, runtime evidence may only narrow context.
 principal's user row without deleting another principal's independent row.
 Broader classification requires a new implementation/runtime fingerprint.
 
-Regression coverage must run the same action as two users and as two
-sessions, prove their scoped snapshots/index rows/dirty markers coexist, and
-also prove space-only observations continue to coalesce.
+Regression coverage runs the same action as two users and as two sessions,
+proves their scoped snapshots/index rows/dirty markers coexist, proves
+monotonic narrowing and unknown-summary fallback, and keeps a 10k-row indexed
+lookup guard while space-only observations continue to coalesce.
 
 ### 3.3 Producer lookup: durable writer index, not creation provenance
 
@@ -287,15 +305,32 @@ lineage design is separate; creation provenance must not select an executor
 action.
 
 The authoritative producer projection is `scheduler_write_index`, joined to
-`scheduler_action_state` and the durable action snapshot. Lookup is by
+`scheduler_action_state` and the durable action snapshot. The implemented
+`writersForTargets` lookup is by
 effective `(space, scope_key, doc id, path)` with path-overlap semantics and
 returns every candidate writer; it must never choose an arbitrary winner.
 The action snapshot supplies `(pieceId, actionId,
 implementationFingerprint)`, and the piece's `patternIdentity` is the sole
 durable pointer used to load executable code. Implementation-plan W0.3 adds
-target/path lookup over the durable declared, current-known, and materializer
-rows written with scheduler observations. A live worker can also consult its
-registration-time static surface before the first run.
+the named target/path lookup over the durable declared, current-known, and
+materializer rows written with scheduler observations. A live worker can also
+consult its registration-time static surface before the first run.
+
+The durable action id is not an instruction to execute that exact historical
+action, nor is it needed to find the demanded piece. Pull interest carries the
+stable piece-root entity id independently of scheduler metadata. The executor
+reconstructs that root cell directly and reads its current `patternIdentity`;
+it never follows `actionId` as a pointer to code. Pattern updates keep the piece
+root and replace its `patternIdentity`, so starting that root loads the current
+pattern, cancels the old registrations, and registers the current action ids.
+Exact-id snapshot matching makes observations for the previous pattern inert,
+so new actions without matching snapshots start fresh. After instantiation,
+live or live+durable registrations supersede durable-only rows for that same
+piece. Durable-only rows for another piece remain eligible because a redirected
+target may legitimately be owned by that other piece. Thus an old same-piece
+writer row may help diagnose why a target was considered writable, but cannot
+select either the piece or its executable action once the current graph is
+available.
 
 If a demanded piece has no usable writer row yet, the client interest already
 identifies the piece. The executor instantiates that piece, validates its
@@ -308,10 +343,11 @@ than guessing a producer.
 
 Important patterns now go through the transformer. Enforce that every normal
 computation node has exactly one primary output binding, directly to the
-root path of its target cell. The runner must not recursively search the
+root path of its target cell. The runner does not recursively search the
 emitted static output binding for a redirect to determine result identity.
-This is the `firstResolvedOutputRedirect` path; plain lift/computed result
-identity from `_resultFor` does not recurse and is not being replaced.
+This replaces the former `firstResolvedOutputRedirect` path; plain
+lift/computed result identity from `_resultFor` does not recurse and is not
+being replaced.
 Additional static side writes and materializer envelopes remain explicit write
 surfaces and are indexed separately.
 
@@ -404,8 +440,14 @@ scheduler rehydration without transferring authority.
    worker per eligible active space (§6.3).
 2. The worker uses the full executor-grade provider (§6.2) and reports the
    actions it could claim without yet changing client authority.
-3. Async builtins can be exercised in test/opt-in spaces, but authority is
-   not transferred until the corresponding action claim is live.
+3. Async builtins can be exercised by explicit test capabilities, but authority
+   is not transferred until the corresponding action claim is live.
+
+Observe-only execution was a validation milestone, not a persistent rollout
+mode. With the global flag on, authenticated demand drives discovery and the
+server automatically claims every eligible action. Shadow attempts remain only
+while discovering a graph or when an action is unsupported and therefore stays
+client-primary.
 
 **Identity/CFC.** Unchanged for clients. The worker runs on behalf of an
 eligible requesting user, selected as described in §6.1, rather than an
@@ -473,9 +515,21 @@ interface ExecutionClaim {
 ```
 
 Claims ride the authenticated session/control feed and are not ordinary
-space documents. A durable policy may opt a space into server-primary
-execution, but runtime ownership, liveness, generations, and exceptions do
-not belong in mutable user data.
+space documents. Each session retains only a bounded suffix of control
+history; reconnect always installs a complete snapshot of the claims this
+session routes plus a coalesced successful settlement frontier for each exact
+live claim. A cursor older than the suffix therefore resynchronizes both
+authority and overlay reconciliation instead of growing an unbounded queue.
+Runtime ownership, liveness, generations, and exceptions do not belong in
+mutable user data.
+
+The global `serverPrimaryExecution` flag is the sole rollout control. With it
+off, the server starts no execution pool and clients remain primary. With it
+on, compatible sessions export demand and every eligible action is claimed
+automatically; there is no per-space authority document or CLI. Deployment
+flag changes take effect on new negotiated connections (normally after host
+restart/redeploy). Rollout and rollback order is documented in the
+[server-primary execution runbook](../../development/server-primary-execution.md).
 
 The fields from `branch` through `runtimeFingerprint` form the shared
 `ActionClaimKey` that both client and server can derive. `leaseGeneration`
@@ -493,13 +547,20 @@ routes by that exact identity:
 - server-confirmed claim removal/fingerprint mismatch restores client
   authority and dirties the action for a normal rerun/commit.
 
+Claim removal targets the exact currently registered action even when that
+action produced no speculative overlay. Overlay provenance remains useful for
+discarding local pending state, but it is not the producer registry: a dormant
+action between pull consumers must still receive the ordered authority-loss
+wake and get one fail-open rerun opportunity.
+
 Connection loss is not proof that a claim ended: another requester may keep the
 shared Worker and claim alive. While disconnected, a client may continue local
 speculation but must not enqueue previously claimed derived writes. Reconnect
-first negotiates the capability and applies a complete claim snapshot for the
-exact branch at a feed-sequence barrier; only then may newly unclaimed work
-flush. Source, handler, and direct UI commits keep their existing offline
-behavior.
+first negotiates the capability and applies a complete snapshot of the claims
+this session routes for the exact branch at a feed-sequence barrier, followed
+by any missed successful settlement frontiers for those exact live
+incarnations; only then may newly unclaimed work flush. Source, handler, and
+direct UI commits keep their existing offline behavior.
 
 Trusted compatible clients cooperate with this split in the first iteration.
 Later server admission and CFC policy can reject commits that conflict with a
@@ -519,6 +580,17 @@ the lease, the server appends trusted `ActionExecutionProvenance` —
 `onBehalfOf`, lease/claim generations, causal sources, and `inputBasisSeq`.
 Those server-only fields are not inputs a client must predict to recognize a
 claim.
+
+Each executor action attempt does carry a transient
+`executionClaimAssertion` containing the effective context key and exact
+lease/claim generations captured when that attempt started. It is an untrusted
+selector, not provenance: the authenticated host reconstructs the rest of the
+key from the same scheduler observation, requires an exact live claim on the
+bound connection/session-token/principal, and the memory transaction verifies
+that the derived effective context equals the claim. The assertion is stripped
+from accepted scheduler state but retained in request replay identity. Thus a
+late generation cannot be relabeled onto a replacement claim, while an exact
+already-accepted replay remains idempotent after revoke.
 
 Initial eligibility is deliberately narrow: the complete action transaction
 must read and write only the same space's space-scoped cells. Static output
@@ -571,8 +643,12 @@ in which only the handler's *writes* ship, not the event itself.
 
 `observedAtSeq` is the sequence at which an observation commit was accepted;
 it is not proof of which inputs the action consumed. Each server run instead
-tracks `inputBasisSeq`, the maximum confirmed same-space input sequence
-actually read by that action. Derived patches carry that basis, and every
+tracks `inputBasisSeq`, the maximum same-space confirmed-read sequence accepted
+by the engine, with pending local reads translated to their server-assigned
+global sequence. Reads excluded from the canonical conflict set are excluded
+from the basis; no durable reads yields zero. The engine strips any supplied
+basis/provenance and authors the canonical values only after validation.
+Derived patches carry that basis, and every
 claimed run produces an `ActionSettlement` on the control/feed path:
 
 ```ts
@@ -598,12 +674,21 @@ A no-op must still settle; otherwise a correct local overlay can wait forever
 for a derived patch that will never exist. Failure settles the attempt;
 `session.execution.claim.revoke` separately names and removes the currently
 live claimGeneration and dirties the client action. A later claim issuance
-gets the next generation. Cross-space execution, when admitted later, requires
+gets the next generation. Host-authored expiry performs the same revoke,
+removes the claim from reconnect snapshots, and rejects delayed settlements.
+Cross-space execution, when admitted later, requires
 an input-basis vector rather than this scalar. A successful
 settlement is published only after the normal confirmed-read validation has
 accepted the data or observation-only transaction; `inputBasisSeq` is not an
 unverified Worker assertion. Commit patches, claim snapshots/revokes, and every
 settlement outcome share an ordered reconnectable feed with sequence barriers.
+A bounded reconnect snapshot coalesces successful outcomes newer than its
+acknowledged cursor per exact live incarnation: it carries the maximum covered
+input basis, the newest successful feed sequence, and the maximum committed
+data-application gate. Clients install claims first and apply that frontier
+once; ack, revoke, and reclaim prune it. Thus suffix eviction cannot strand an
+overlay or bypass `acceptedCommitSeq`, and retained successes are not delivered
+twice.
 A committed settlement always names its `acceptedCommitSeq`; if control arrives
 first, the client buffers it until its confirmed/feed cursor reaches that
 sequence. This is an additional data-application gate, not a substitute for
@@ -647,6 +732,14 @@ widen network reach relative to browser execution:
 - the worker receives the canonical serving origin explicitly and must not
   infer it from an internal memory-server address.
 
+V1's trusted-client broker deliberately matches browser Fetch redirect-header
+behavior: an origin-changing hop strips `Authorization`, but retains other
+caller-authored headers (including custom API-key headers) and preserves a
+307/308 body. This satisfies the first-round "do not widen client reach" bar;
+it is not the final untrusted-client secret policy. A later hardening pass may
+apply a sensitive-header denylist or explicit allowlist, with compatibility
+handling for APIs that redirect authenticated requests.
+
 A host egress broker is preferred so workers need no broad network
 permission. Direct builtin execution is acceptable only when it enforces the
 identical policy. Pattern code in SES has no raw-fetch escape from the builtin
@@ -655,11 +748,15 @@ breakers follow after the move; v1 need only preserve current retry and
 deduplication behavior without making it worse.
 
 Identity-sensitive first-party calls must not silently use whichever sponsor
-currently owns the space. Their broker request carries the server-derived
-`onBehalfOf` from the authenticated request-producing commit. In v1 that actor
-must match the current lease sponsor; a mismatch or ambiguous origin makes the
-builtin unclaimable (or requires a fenced sponsor handoff). Per-action actor
-multiplexing waits for delegated execution contexts.
+currently owns the space. For every accepted source commit, the host compares
+its authenticated origin session with the exact current lease sponsor. Only
+the resulting match boolean enters Worker claim logic; the broker request
+carries the exact claim but no causal actor identity. A match permits execution
+under the lease sponsor. A mismatch or ambiguous origin reaches no broker
+egress and settles the exact claim canonically unserved with revoke. When a
+relevant commit wakes a parked lane, sponsor acquisition prefers that commit's
+origin session. Dynamic per-action actor multiplexing waits for delegated
+execution contexts.
 
 #### B.6 Scoped state: explicit first-phase boundary
 
@@ -701,20 +798,29 @@ and is separately attributable. It never signs client-pulled work.
 #### B.8 Failure modes
 
 - **Executor down / space not served:** its lease expires or is revoked and
-  claims disappear. Clients dirty those actions and commit them normally.
+  claims actively expire/revoke. Clients dirty those actions and commit them normally.
   No mutable config flip or negative exception propagation is required.
 - **Competing/replaced worker:** every claim and commit is fenced by
   `ExecutionLease.leaseGeneration`; the provider rejects a stale generation.
   Within one lease, revoke names the action's live `claimGeneration` and the
   next claim issuance increments it, so delayed settlement cannot target the
-  new incarnation.
-- **Sponsor disconnect:** the worker finishes a bounded in-flight settle,
-  drains, and restarts under another eligible requester. It does not change
-  Runtime principal mid-settle.
+  new incarnation. The attempt's exact assertion also prevents a delayed write
+  from being attributed to that new incarnation or silently becoming an
+  ordinary unclaimed write. More generally, every first-application semantic
+  transaction on a host-bound executor session must resolve exactly one live
+  claimed-action incarnation inside the lease-fenced transaction; assertion-
+  free semantic writes fail atomically. Exact accepted replay is checked first
+  and remains idempotent after revoke.
+- **Sponsor disconnect:** the lease enters a bounded teardown drain and fences
+  every new first application immediately; exact accepted replays remain
+  idempotent. The worker then restarts under another eligible requester. It
+  does not change Runtime principal mid-settle. A later exact attempt-admission
+  mechanism may safely preserve work proven to have started before the drain.
 - **Client offline:** source writes queue (pending commits) and local overlays
   keep the UI coherent, but previously claimed derived writes do not flush
   merely because the connection disappeared. Reconnect applies the
-  authoritative claim snapshot before derived work resumes. True offline
+  authoritative claim snapshot and any missed successful settlement frontier
+  before derived work resumes. True offline
   (persisted pending queue) remains a separate, orthogonal gap — the replica
   is in-memory today.
 - **Executor crash mid-settle:** observations persist per commit;
@@ -731,10 +837,14 @@ Per space with C connected clients, piece graph of size G, event rate E:
   server compute so it can remove duplicate commits and external effects; it
   does not yet remove N× local speculative computation.
 - Client compute: the complete graph still runs by default so unsupported
-  actions and immediate overlays remain correct. A later, separately gated
-  closure/claim-snapshot optimization may leave remotely owned actions cold
-  until local speculation demands them. First paint therefore retains today's
-  browser compile path; zero-execution first paint requires D/projector output.
+  actions and immediate local-source overlays remain correct. An exactly
+  claimed computation may coalesce remote feed invalidations behind one
+  non-sliding 50 ms observation-adoption grace; `idle()` waits for its bounded
+  local fallback. A later closure/claim-snapshot optimization within the
+  server-primary posture may leave remotely owned actions cold until local
+  speculation demands them.
+  First paint therefore retains today's browser compile path; zero-execution
+  first paint requires D/projector output.
 - Server subscription serving: today's graph-query path remains for unclaimed
   actions. After exact closure parity (§6.4), claimed closures can move toward
   O(commits × sessions × set-membership + patch size).
@@ -863,14 +973,27 @@ multiple processes; a heartbeat document alone is not sufficient.
 
 Background-only demand is a distinct, lower-priority mode. A background
 generation uses the existing service identity and claims only background work;
-it never signs client-pulled execution. Before the registry is unified, a
-mandatory exclusion interlock makes any branch/space with a legacy background
-registration, controller, or lease ineligible for the new client-demand pool.
-It stays on existing behavior and receives no server-primary claim. Phase 3
-imports that demand into this same slot and removes the exclusion; only then
-may client demand preempt a background generation. Registry cleanup is not a
-prerequisite, but preventing two server runtimes is. A subprocess tier remains
-optional for hard isolation.
+it never signs client-pulled execution. Before the registry is unified,
+background-piece-service must acquire a durable service-owned exclusion before
+constructing a Worker. That makes a branch/space with an active legacy
+controller ineligible for the new client-demand pool until the Worker stops and
+releases it. A dormant registration does not block because it has no competing
+runtime. Acquire and renew responses include the server clock sampled with the
+authority transaction. The background manager converts the server-relative
+remaining duration into a request-start-anchored monotonic deadline; a response
+from an older host without that field fails closed. Phase 3 imports that demand
+into this same slot and removes the exclusion; only then may client demand
+preempt a background generation.
+Registry cleanup is not a prerequisite, but preventing two server runtimes is.
+A subprocess tier remains optional for hard isolation.
+
+When Deno native OpenTelemetry is active (`OTEL_DENO=true|1` under
+`--unstable-otel`), each executor Worker attaches its own Runtime telemetry bus
+to that Worker's OTel globals and enables scheduler preflight markers. The
+bridge is fail-open, carries `ct.runtime=server-executor` plus the served space
+and sponsor DID on spans, and detaches only after the Worker Runtime is
+disposed. A toolshed SDK provider registered only in the main isolate is not
+visible inside the Worker.
 
 Threading note: the engine's SQLite reads are synchronous FFI on the engine
 thread; executor workers do **not** open the database. They talk to the
@@ -879,24 +1002,38 @@ engine assumption and keeps WAL discipline in one place.
 
 ### 6.2 Storage transport: in-process, no subscriptions
 
-An initial prototype may connect through the `loopback` transport
-(`packages/memory/v2/client.ts:1299`) to the same `Server`, but authority
-cannot transfer through a raw `Engine` shortcut.
+The implemented **executor-grade provider** gives the Worker an opaque
+`MessagePort`, principal DID, and exact space/branch lane. The host owns the
+real authenticated `Server.connect` session and its grant; neither a private
+key nor raw `Engine` access crosses into the Worker. Reads and commits therefore
+traverse the canonical protocol path, preserving session authentication, ACL
+and CFC validation, conflict handling, scheduler-state updates, and post-commit
+hooks. In-process means transport-efficient, not policy-bypassing.
 
-The production design is an **executor-grade provider** implementing
-`IStorageProviderWithReplica` (`packages/runner/src/storage/interface.ts:264`)
-that (a) reads through the engine's read pool directly
-(`packages/memory/v2/server.ts:711`) with MessageChannel batching, (b)
-commits through the server's canonical validated apply path, and (c) receives
-invalidations from the engine commit stream as a per-space callback — not via
-`session.watch` graph queries. It preserves authenticated `onBehalfOf`, ACL
-checks, CFC preparation/validation, conflict checks, `ExecutionLease`
-fencing, scheduler-state updates, and feed hooks. In-process means
-transport-efficient, not policy-bypassing.
+Every normal replica commit transaction sent through the executor-grade
+provider has its own client-side `storage.push` telemetry span, joined to the
+memory host by space and stable local sequence. That includes the
+observation-only canonical settlement written after a claimed action is
+rejected as unserved: the rejected action attempt and its settlement are two
+transactions with separate terminal markers.
 
-The executor's scheduler trigger index is its subscription; the engine tells
-it "space S, commit at seq N, docs D1..Dk changed". The provider buffers a
-claimed transaction until whole-action scope validation succeeds (§5.B.2).
+The provider does not install a `session.watch` graph query. Instead, the
+server's host-only accepted-commit callback reports successful canonical
+first applications after their scheduler side effects. Its frozen payload is
+limited to scalar revision metadata and changed scheduler-row ids; document
+values never enter the callback surface. Replays, rejected transactions, and
+catch-up reads do not appear as accepted commits. The provider tracks the
+Worker's known roots and performs authenticated point queries for affected
+state, then delivers ordinary replica syncs over the port. Scheduler-adoption
+failure is fail-open for those required data invalidations. Callback failures
+are contained and disposal unregisters the callback. The callback's per-space
+`order` is process-local wake ordering, not the reconnectable execution-control
+feed defined in §6.4/W0.6.
+
+The provider now binds the durable `ExecutionLease` generation, host-derived
+`onBehalfOf`, and atomic fence validation to this same canonical transaction
+path. W1.3 will make it buffer a claimed transaction until
+whole-action scope validation succeeds (§5.B.2).
 
 ### 6.3 What runs: demand, not pieces
 
@@ -960,45 +1097,48 @@ user's ordinary session against the other space.
 
 ### 6.5 Lifecycle: spawn, catch-up, liveness, hibernate
 
-**Spawn triggers** — a space worker starts when any of:
+**Start and keep-live triggers:**
 
 1. **Demand:** a compatible authenticated client session publishes
-   `ExecutionDemand`, or an administrative warm-up supplies an eligible user
-   sponsor.
-2. **Wake-on-commit:** a commit lands whose written docs have stale
-   interested readers per the readers index (§3.2). This subsumes
-   webhook/ingest ingress — ingest is itself a commit.
-3. **Async continuation:** an existing claimed request remains in flight.
+   `ExecutionDemand`. The pool keeps one mapped lane while any reference
+   remains.
+2. **Indexed wake-on-commit:** while that mapped demand exists, an accepted
+   commit whose host-index result names stale demanded readers can retry a
+   parked or draining lane. A live Worker receives the same commit through its
+   provider instead of starting another generation. Unrelated, wrong-branch,
+   and already-settled commits do not wake the lane.
+3. **Async continuation:** existing claimed work keeps its current Worker from
+   completing a graceful drain; it is not a cold-start source.
 4. **Background-only demand (Phase 3):** lower-priority standing registration,
    using the background identity rather than a client sponsor. Until registry
-   import, such a registration triggers the exclusion interlock rather than a
-   second pool Worker.
+   import, its controller acquires the durable exclusion before starting rather
+   than allowing a second pool Worker.
 5. (Future) server-side timers.
 
 **Spawn sequence** (ordered; the order is load-bearing):
 
-1. Pool capacity check; at cap, evict the idlest live worker (eviction =
-   ordinary hibernation, below).
-2. Choose a sponsor, acquire/fence the `ExecutionLease`, then create the
-   Worker with space DID, `onBehalfOf`, lease generation, provider
-   `MessageChannel`, and negotiated flags. No raw user key enters the Worker.
-3. The pool registers the engine's `onSpaceCommit(space)` callback and
-   starts BUFFERING batches for the worker BEFORE the worker settles
-   anything — no notification gap between the rehydration snapshot and
-   the live stream.
-4. The worker builds the runtime through the validated provider and rehydrates
+1. The first demand snapshot maps the branch/space lane and installs its
+   host-only accepted-commit subscription before lease acquisition.
+2. After the legacy-background exclusion check, acquire/fence the
+   `ExecutionLease`. A parked commit wake prefers that commit's authenticated
+   origin session; otherwise sponsor selection remains deterministic among
+   eligible demand sessions.
+3. Construct the host provider before the Worker realm. Its accepted-commit
+   subscription is registered before the Worker endpoint is transferred, so
+   `MessagePort` queues notices across initial point reads without a graph
+   watch or notification gap. No raw user key enters the Worker.
+4. The Worker builds the runtime through that validated provider and rehydrates
    context-qualified observations for the demanded piece set. Dirty state and
    confirmed input revisions determine the stale set; missing/invalid rows
    degrade to a full unclaimed pull (fail-open).
-5. The worker reports "live at seq S"; the pool releases buffered commits
-   from S. Eligible actions shadow-run before claims are published.
+5. A successful start makes the generation live. Graceful settle returns the
+   accepted sequence watermark used to ignore old wake notices; a later
+   indexed-relevant commit above that watermark can start one coalesced
+   replacement generation.
 
-Cold-start cost ≈ pattern load (compileCache by identity,
-single-flighted, plus a process-wide disk byte cache; pre-seed system
-patterns — the browser-wedge follow-up applies server-side directly) +
-observation rehydrate + the stale subset only. Parked→live is therefore
-far below a browser cold boot — which is what makes aggressive
-hibernation viable.
+Cold start consists of pattern load, context-qualified observation rehydrate,
+and the stale demanded subset. Parked-wake and hibernation latency are measured
+by the pool; no comparison with browser cold-boot latency is claimed yet.
 
 The limit case is the **transient executor pass**: because scheduler
 bookkeeping is SQLite-primary (§6.7), a worker need not outlive its work
@@ -1034,25 +1174,32 @@ below are that policy's defaults, not requirements.
   last-settled seq and respawns immediately if any landed during the
   drain. A parked space holds zero memory; its whole scheduler state is
   the observation rows.
-- **Crash and quarantine:** worker error → restart with exponential
-  backoff; after N consecutive failures the space is quarantined (not
-  served) with an operator alert. Revoke its lease and claims first, so
-  clients immediately resume normal commits. Un-quarantine is manual.
+- **Crash handling (implemented):** worker error → revoke its lease and claims
+  first, so clients immediately resume normal commits, then retry with capped
+  exponential backoff. Terminal quarantine, operator alerting, and manual
+  un-quarantine remain later operational hardening (G18); Phase 0–2 does not
+  claim those controls.
 
 ### 6.6 Isolation and resources
+
+This section describes both the implemented isolation boundary and the target
+resource-control envelope. Phase 0–2 implements SES/broker isolation, bounded
+settle passes and control-feed retention, builtin timeouts, and fenced failure
+cleanup. Hard per-Worker memory limits and bounded-LRU pool admission/eviction
+remain later operational hardening (G18).
 
 - Pattern leaf code still runs in SES inside the worker. Pattern network and
   generation operations are exposed only through `fetch*` / `generate*`
   builtins. Prefer a host broker and no broad Worker network permission;
   direct builtin execution is acceptable only with the exact §5.B.5 policy.
-- Budgets per worker: memory cap, settle-pass budget (scheduler-v2), event
-  lane depth, async concurrency (`runtime.getOrCreateQueue`). A space that
-  exhausts budgets degrades to catch-up-on-demand rather than starving the
-  pool.
-- Pool sizing: workers ≈ active spaces, bounded LRU; hibernation makes the
-  bound soft. Multi-machine sharding (space → executor affinity) is a later
-  concern; single-writer-per-space makes it embarrassingly shardable by
-  space DID (G14 notes the coordination primitive).
+- **Target state — per-Worker budgets:** hard memory cap, settle-pass budget
+  (scheduler-v2), event lane depth, and async concurrency
+  (`runtime.getOrCreateQueue`). A space that exhausts budgets degrades to
+  catch-up-on-demand rather than starving the pool.
+- **Target state — pool sizing:** workers ≈ active spaces, bounded LRU;
+  hibernation makes the bound soft. Multi-machine sharding (space → executor
+  affinity) is a later concern; single-writer-per-space makes it embarrassingly
+  shardable by space DID (G14 notes the coordination primitive).
 
 ### 6.7 State residency: SQLite is primary, memory is a cache
 
@@ -1134,20 +1281,50 @@ Rules that keep this sound:
 
 ### 6.8 Cross-space
 
-The scheduler may discover foreign-space reads or writes only at runtime.
-That uncertainty is why v1 authority is positive and whole-action: any known
-cross-space surface prevents a claim, and any dynamically discovered one
-causes the staged transaction to abort and its claim to be revoked. Clients
-then rerun and commit the complete action exactly as today. There is no
-`unservablePieces` document and no stale window waiting for an exception to
-propagate.
+Cross-space **reads** are server-primary as of C3 (landed 2026-07-18/23,
+implementation-plan Phase 4); cross-space **writes** stay
+client-authoritative until C4 (dual leases plus the coordinated-commit
+protocol §5 names as its reviewed entry prerequisite). The mechanism is a
+**protocol between hosts, not in-process calls between engines** — engines
+are passive substrate, and every cross-space touch (foreign-reader
+subscription, authenticated foreign point read, authorization-epoch
+propagation, and the vector input basis) crosses a `CrossSpaceTransport`
+at the `Server`↔`Server` boundary (context-lattice-execution.md §5). Two
+transports implement that protocol *identically*: the **in-process**
+transport (two spaces hosted in one `Server`, FIFO per link) and the
+**co-hosted** link (two `Server` instances joined by a serializing
+duplex). Both target **co-hosted, low-latency, reliable** hosts in the
+same deployment locality — an explicit, load-bearing assumption that
+permits synchronous-ish point reads and epoch checks without
+partition-tolerance machinery. Geo-distributed hosts are a later transport
+with its own design (§9 gap register).
+
+**Trust is link-authoritative (C3A13).** A foreign vector-basis component
+— a `{space, seq}` stamp on a settlement — is admitted only when the home
+host receives it over the authenticated link from the host **routed as
+authoritative for that space**; Worker- and client-supplied components are
+stripped exactly like the scalar, and a component arriving on a link not
+routed to its space is discarded. The link's routing table, not a
+per-stamp signature, is the authority — which is why the co-hosted
+assumption set is load-bearing: a misrouted or compromised host can only
+ever stamp the spaces routed to it. Per-stamp cryptographic signatures,
+which would relax the seam to untrusted transports, are deferred (§9 gap
+register).
+
+Positive authority stays whole-action. A claimed foreign READ is served
+once the settlement carries the vector basis and the executor's provider
+performs the point read under the *acting principal's* authority (the same
+ACL path as that user's client session); permission changes are fenced by
+a per-(space, principal) authorization epoch — an idle ACL revocation
+revokes the claim, and a revocation between the point read and the home
+apply settles the whole attempt canonically unserved. A foreign WRITE
+surface — known, or discovered dynamically at runtime — still prevents or
+revokes the claim, and the client reruns and commits the complete action
+exactly as today. There is no `unservablePieces` document and no stale
+window waiting for an exception to propagate.
 
 Client feeds continue following remote links through the requesting user's
-ordinary sessions. Server-side cross-space reads may be added later after
-permission continuity, multi-space input-basis vectors, wake subscriptions,
-and ownership are specified. Cross-space derived writes additionally need
-coordination between both spaces' executor leases; ordinary convergent
-co-writing is not sufficient for server-primary authority.
+ordinary sessions.
 
 ---
 
@@ -1197,33 +1374,48 @@ Phases build directly on #4288 and its persistent scheduler wiring.
 Executable work orders with per-step success criteria and review
 checklists: [implementation-plan.md](./implementation-plan.md).
 
-- **Phase 0 — scheduler correctness.** Add
+- **Phase 0 — scheduler correctness (implemented).** Add
   `SchedulerExecutionContextKey` and effective scope keys across snapshots,
   state, and indexes (G1); enforce the transformer root binding (G6); add
-  writer lookup (G4). Parked-reader wake is Phase 1.
-- **Phase 1 — shadow client-demand executor.** Add authenticated
+  writer lookup (G4). The authenticated execution handshake, connection-owned
+  demand, and ordered claim/settlement feed are implemented.
+- **Phase 1 — shadow client-demand executor (implemented).** Add authenticated
   `ExecutionDemand`, one fenced user-sponsored `ExecutionLease` per
   branch/space,
   the validated provider, and claim eligibility reporting without authority
   transfer plus indexed parked-reader wake (G0/G2/G3/G4). Background-registry
   consolidation is deferred, but legacy-owned spaces are excluded immediately
   so a second server Worker cannot start.
-- **Phase 2 — positive B claims.** Add client overlay routing, ephemeral
+- **Phase 2 — positive B claims (implemented and locally validated,
+  default-off).** Add client overlay routing, ephemeral
   `ExecutionClaim`, `ActionSettlement.inputBasisSeq`, whole-action scope
   firewall, passive claimed builtins, and egress parity (G5/G10/G11). Measure
   conflict rate, multi-client action volume, divergence, revocations, and
-  fallback latency. Fallback is claim removal.
+  fallback latency. Fallback is claim removal. The operator runbook,
+  product-derived/literal multi-client fixtures, and deterministic local
+  authority and failure drills are complete. The parked-worker
+  claim-readiness failure is fixed, and the 500-event counterbalanced CPU gate
+  passes; only a deployed flag-off/flag-on drill remains pending. The initial,
+  superseded
+  occupancy-proxy measurement is retained only as a historical snapshot in the
+  [initial rollout report](../../history/development/performance/server-primary-rollout-2026-07-12.md),
+  and the accepted result is recorded in the
+  [500-event rollout report](../../history/development/performance/server-primary-rollout-2026-07-13.md).
 - **Phase 3 — background demand + narrower feeds.** Fold existing background
   registrations into the same lower-priority pool and retire graph-query
   subscriptions only after the doc-set feed has parity. Separately gate
   client-compute suppression once claim snapshots and closures are complete;
   that later optimization, not Phase 2, removes N× local compute.
 - **Phase 4 — scoped execution.** User-partition delegation (G16) +
-  per-user demand roots; executor endorsement atom on scoped writes.
+  per-user demand roots; executor endorsement atom on scoped writes. The
+  draft design — extended to session context and cross-space, with
+  dynamic-read admission as its implemented first step — is
+  [context-lattice-execution.md](./context-lattice-execution.md).
 - **Phase 5 — dual handler execution (C).** Signed event envelopes
   (`serialize: "server"` handlers first, then the default event path);
   the server runs handlers authoritatively while clients keep running them
-  speculatively; session-scoped execution rides the event stream.
+  speculatively; handler execution rides the event stream (session-scoped
+  *derivation* moves earlier, with the context lattice).
 
 ---
 
@@ -1234,24 +1426,27 @@ means a design doc/decision is required before implementation.
 
 | # | Gap | Blocks | Status |
 | --- | --- | --- | --- |
-| G0 | Executor-grade provider with canonical ACL/CFC/conflict/apply hooks and commit invalidations | shadow | needs-impl; loopback proves the seam |
-| G1 | `SchedulerExecutionContextKey` and effective scope-qualified snapshots/state/indexes (§3.2.1) | server reliance on durable state | prerequisite; needs-impl |
-| G2 | Branch-qualified authenticated `ExecutionDemand`, sticky sponsor selection, and fenced `ExecutionLease` | shadow | needs-impl |
-| G3 | Branch-qualified ephemeral per-action `ExecutionClaim` with worker lease generation + independent claim generation, revocation, and required client handshake | B | needs-impl |
-| G4 | Named parked-reader wake query plus target/path-overlap `scheduler_write_index` producer lookup | shadow/B | indexes exist; query/consumer needs-impl |
-| G5 | Exact-claim client routing, speculative overlay, read layering, revoke-and-rerun | B | needs-impl |
-| G6 | Transformer/runner enforcement of one direct root result binding; update hand-built tests | producer eligibility | small needs-impl; no migration |
-| G7 | Authenticated branch-qualified demand + reconnect claim snapshots + ordered doc-set delta feed carrying commit/settlement sequence barriers; closure export | B/feed | needs protocol implementation |
+| G0 | Executor-grade provider with canonical ACL/CFC/conflict/apply hooks and commit invalidations | shadow | implemented, including atomic lease fencing |
+| G1 | `SchedulerExecutionContextKey` and effective scope-qualified snapshots/state/indexes (§3.2.1) | server reliance on durable state | implemented |
+| G2 | Branch-qualified authenticated `ExecutionDemand`, sticky sponsor selection, and fenced `ExecutionLease` | shadow | implemented, including client root export, one shared Worker lane, sponsor rotation, and durable legacy-background exclusion |
+| G3 | Branch-qualified ephemeral per-action `ExecutionClaim` with worker lease generation + independent claim generation, revocation, and required client handshake | B | implemented behind the global rollout flag |
+| G4 | Named parked-reader wake query plus target/path-overlap `scheduler_write_index` producer lookup | shadow/B | implemented |
+| G5 | Exact-claim client routing, speculative overlay, read layering, revoke-and-rerun | B | implemented |
+| G6 | Transformer/runner enforcement of one direct root result binding; update hand-built tests | producer eligibility | implemented; no migration |
+| G7 | Authenticated branch-qualified demand + reconnect claim snapshots + ordered doc-set delta feed carrying commit/settlement sequence barriers; closure export | B/feed | demand, reconnect snapshot, and ordered data/control barriers implemented; exact closure export remains later |
 | G8 | (retired — reactive interpreter de-scoped from this design, §3.4; its gates are tracked in its own specs) | — | retired |
-| G9 | Cross-space basis vectors, permissions, wake, and dual-space ownership | later expansion | explicitly client-authority in v1 |
-| G10 | Actual-read `inputBasisSeq` plus no-op/failure/unserved `ActionSettlement` and committed `acceptedCommitSeq` gating | B reconciliation | needs-impl; do not reuse `observedAtSeq` |
-| G11 | Server builtin egress parity, relative serving-origin resolution, redirect/DNS revalidation | claimed async | needs-impl; full hardening may follow |
+| G9 | Cross-space basis vectors, permissions, wake, and dual-space ownership | later expansion | cross-space READS implemented (C3, 2026-07-18/23: vector input basis, foreign-readers wake index, ACL-checked foreign point reads, per-(space,principal) authorization epochs, over the in-process and co-hosted transports); cross-space WRITES remain client-authority pending C4 (dual leases + coordinated commit) |
+| G19 | Geo-distributed cross-space transport (partition-tolerant links across deployment localities) | cross-space beyond co-hosted | needs-spec: §5's protocol targets co-hosted, low-latency, reliable hosts; the in-process and co-hosted transports are built (C3), a WAN transport with its own partition/timeout design is undesigned |
+| G20 | Per-stamp cryptographic signatures on foreign vector-basis components | cross-space trust on untrusted transports | needs-spec: C3 trust is link-authoritative (C3A13 — the routing table gates which host may stamp which space, sound for co-hosted deployments); signing individual `{space, seq}` stamps to relax the seam to untrusted/geo-distributed transports is deferred here and gates G19 |
+| G10 | Actual-read `inputBasisSeq` plus no-op/failure/unserved `ActionSettlement` and committed `acceptedCommitSeq` gating | B reconciliation | accepted-read basis, nominal sequence types, host-derived provenance, committed/no-op/failed run emission, and client data gate implemented; W1.3 and W1.4 emit canonical unserved attempts, including permanent builtin servability failures |
+| G11 | Server builtin egress parity, relative serving-origin resolution, redirect/DNS revalidation | claimed async | implemented for v1; durable quotas/ledger remain G12 |
 | G12 | Durable streaming, quotas, circuit breakers, and cross-engine effect ledger | async hardening/failover | later; v1 preserves current behavior |
 | G13 | Signed event envelope format (serialize trusted-event provenance; replay protection; verify path) — design now, build in Phase 5 | dual handler execution (C) | needs-spec; request-proof precedent exists |
-| G14 | Durable multi-process `ExecutionLease` acquisition/fencing | shadow executor exclusivity | needs-impl in Phase 1; one host/process may be the first deployment |
+| G14 | Durable multi-process `ExecutionLease` acquisition/fencing | shadow executor exclusivity | implemented and covered by a two-Worker shared-store CAS race |
 | G15 | Client pending-commit durability (true offline) | orthogonal | out of scope here; noted |
 | G16 | Principal-aware scoped runtime lanes and delegated user keys | scoped execution | later; context-key prerequisite is G1 |
 | G17 | Complete-closure client-compute suppression with cold remote-owned actions | remove N× local compute | later; Phase 2 only suppresses writes/effects |
+| G18 | Terminal crash quarantine/manual un-quarantine, operator alerting, hard per-Worker memory limits, and bounded-LRU pool admission/eviction | production resource hardening | later; Phase 0–2 fences and revokes failed generations, retries with capped exponential backoff, bounds settle/control-feed work, and preserves correctness through hibernation/wake |
 
 Cross-engine idempotency (the intent/attempt-cell ledger from
 `cfc-runner-future-work.md` Tier 2) is deliberately *not* listed as a B

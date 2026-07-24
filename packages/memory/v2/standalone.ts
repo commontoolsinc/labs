@@ -12,7 +12,10 @@
  * bundles.
  */
 
-import { encodeMemoryBoundary } from "../v2.ts";
+import {
+  applyServerPrimaryExecutionGraphRetirementEnvConfig,
+  encodeMemoryBoundary,
+} from "../v2.ts";
 import * as MemoryServer from "./server.ts";
 import { verifySessionOpenAuthorization } from "./session-open-auth.ts";
 import { Identity } from "@commonfabric/identity";
@@ -53,6 +56,10 @@ export class StandaloneMemoryServer {
       };
     } = {},
   ): StandaloneMemoryServer {
+    // FW5 (FB10): the F5 per-space doc-set admission dial is env-reachable on
+    // every host that constructs a memory server, so the W2.9 measurement
+    // protocol is executable against a real deployment.
+    applyServerPrimaryExecutionGraphRetirementEnvConfig(Deno.env.get);
     const memory = new MemoryServer.Server({
       authorizeSessionOpen,
       sessionOpenAuth: {

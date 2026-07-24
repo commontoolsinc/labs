@@ -32,7 +32,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["state"]
 } as const satisfies __cfHelpers.JSONSchema, {
     "enum": ["Done", "Pending"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: pattern-call-arg-conditional
 // Verifies: top-level ordinary helper calls with reactive arguments are lifted
 //   as whole calls rather than lowering only the inner argument expression.

@@ -30,6 +30,405 @@ export type CPUProfile = {
   endTime: number;
 };
 
+export interface CPUProfileSummary {
+  /** Profiler interval. This is elapsed time, not CPU time. */
+  wallUs: number;
+  /** Sum of valid sample deltas, including V8's explicit idle samples. */
+  sampledUs: number;
+  /** Sample time attributed to V8's explicit `(idle)` node. */
+  idleUs: number;
+  /** Sample time attributed to V8's ambiguous `(program)` node. This can
+   * include native event-loop work or otherwise unattributed time, so it is
+   * not sufficient evidence of JavaScript CPU on its own. */
+  programUs: number;
+  /** Sample time attributed to a concrete JavaScript function or V8 garbage
+   * collection. Excludes `(idle)`, `(program)`, and unknown sample ids. */
+  attributedWorkUs: number;
+  /** Sampling-derived worker CPU occupancy: sampledUs minus idleUs. */
+  busyUs: number;
+  /** busyUs / sampledUs, or zero when the profile has no samples. */
+  busyFraction: number;
+}
+
+/** One cumulative process CPU counter from `SystemInfo.getProcessInfo`. */
+export interface BrowserProcessMetric {
+  type: string;
+  id: number;
+  cpuTimeSeconds: number;
+}
+
+/** Browser-wide process counters, including their type and process id. */
+export interface BrowserProcessMetrics {
+  processes: BrowserProcessMetric[];
+}
+
+/** Renderer CPU consumed between two process snapshots. */
+export interface RendererProcessCpuDelta {
+  totalCpuTimeUs: number;
+  renderers: Array<{
+    id: number;
+    cpuTimeUs: number;
+    startedDuringMeasurement: boolean;
+  }>;
+}
+
+export interface CounterbalancedRendererCpuBlock {
+  readonly disabledMeanUsPerEvent: number;
+  readonly enabledMeanUsPerEvent: number;
+  readonly enabledToDisabledRatio: number;
+  readonly disabledReplicateSpread: number;
+  readonly enabledReplicateSpread: number;
+}
+
+export interface CounterbalancedRendererCpuAnalysis {
+  readonly abba: CounterbalancedRendererCpuBlock;
+  readonly baab: CounterbalancedRendererCpuBlock;
+  readonly combined: Omit<
+    CounterbalancedRendererCpuBlock,
+    "disabledReplicateSpread" | "enabledReplicateSpread"
+  >;
+}
+
+/** Parse the opt-in CPU workload without silently accepting partial numbers. */
+export function parseCpuBenchmarkEventCount(
+  value: string | undefined,
+  options: {
+    defaultValue?: number;
+    minimum?: number;
+    maximum?: number;
+  } = {},
+): number {
+  const defaultValue = options.defaultValue ?? 500;
+  const minimum = options.minimum ?? 500;
+  const maximum = options.maximum ?? 2_000;
+  const label = "CF_SERVER_EXECUTION_CPU_EVENTS";
+  const checkedBound = (bound: number, name: string): void => {
+    if (!Number.isSafeInteger(bound) || bound <= 0) {
+      throw new TypeError(`${label} ${name} must be a positive safe integer`);
+    }
+  };
+  checkedBound(defaultValue, "default");
+  checkedBound(minimum, "minimum");
+  checkedBound(maximum, "maximum");
+  if (minimum > maximum || defaultValue < minimum || defaultValue > maximum) {
+    throw new RangeError(`${label} parser bounds are inconsistent`);
+  }
+  if (value === undefined) return defaultValue;
+  if (!/^[1-9][0-9]*$/.test(value)) {
+    throw new TypeError(`${label} must be a canonical decimal integer`);
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+    throw new RangeError(
+      `${label} must be between ${minimum} and ${maximum}, inclusive`,
+    );
+  }
+  return parsed;
+}
+
+const arithmeticMean = (values: readonly number[]): number =>
+  values.reduce((total, value) => total + value, 0) / values.length;
+
+const replicateSpread = (values: readonly number[]): number => {
+  const minimum = Math.min(...values);
+  return (Math.max(...values) - minimum) / minimum;
+};
+
+const rendererCpuBlock = (
+  disabled: readonly [number, number],
+  enabled: readonly [number, number],
+): CounterbalancedRendererCpuBlock => {
+  const disabledMeanUsPerEvent = arithmeticMean(disabled);
+  const enabledMeanUsPerEvent = arithmeticMean(enabled);
+  return {
+    disabledMeanUsPerEvent,
+    enabledMeanUsPerEvent,
+    enabledToDisabledRatio: enabledMeanUsPerEvent /
+      disabledMeanUsPerEvent,
+    disabledReplicateSpread: replicateSpread(disabled),
+    enabledReplicateSpread: replicateSpread(enabled),
+  };
+};
+
+/**
+ * Interpret eight renderer-CPU phases as ABBA followed by BAAB. Each value is
+ * CPU microseconds per event; A is policy disabled and B is policy enabled.
+ */
+export function analyzeCounterbalancedRendererCpu(
+  phasesUsPerEvent: readonly number[],
+): CounterbalancedRendererCpuAnalysis {
+  if (phasesUsPerEvent.length !== 8) {
+    throw new Error(
+      "counterbalanced CPU analysis requires exactly eight phases",
+    );
+  }
+  for (const value of phasesUsPerEvent) {
+    if (!Number.isFinite(value) || value <= 0) {
+      throw new Error(
+        "counterbalanced CPU phases must be positive finite values",
+      );
+    }
+  }
+  const [p0, p1, p2, p3, p4, p5, p6, p7] = phasesUsPerEvent as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const abba = rendererCpuBlock([p0, p3], [p1, p2]);
+  const baab = rendererCpuBlock([p5, p6], [p4, p7]);
+  const disabledMeanUsPerEvent = arithmeticMean([p0, p3, p5, p6]);
+  const enabledMeanUsPerEvent = arithmeticMean([p1, p2, p4, p7]);
+  return {
+    abba,
+    baab,
+    combined: {
+      disabledMeanUsPerEvent,
+      enabledMeanUsPerEvent,
+      enabledToDisabledRatio: enabledMeanUsPerEvent /
+        disabledMeanUsPerEvent,
+    },
+  };
+}
+
+/** Fail the CPU gate on regression; classify unstable replicates as noisy. */
+export function assertCounterbalancedRendererCpu(
+  phasesUsPerEvent: readonly number[],
+  options: {
+    maximumEnabledRatio?: number;
+    maximumReplicateSpread?: number;
+  } = {},
+): CounterbalancedRendererCpuAnalysis {
+  const maximumEnabledRatio = options.maximumEnabledRatio ?? 1.1;
+  const maximumReplicateSpread = options.maximumReplicateSpread ?? 0.15;
+  const analysis = analyzeCounterbalancedRendererCpu(phasesUsPerEvent);
+  for (
+    const [label, block] of [
+      ["ABBA", analysis.abba],
+      ["BAAB", analysis.baab],
+    ] as const
+  ) {
+    if (
+      block.disabledReplicateSpread > maximumReplicateSpread ||
+      block.enabledReplicateSpread > maximumReplicateSpread
+    ) {
+      throw new Error(
+        `${label} renderer CPU is inconclusive/noisy: replicate spread exceeded ${maximumReplicateSpread}`,
+      );
+    }
+    if (block.enabledToDisabledRatio > maximumEnabledRatio) {
+      throw new Error(
+        `${label} enabled/disabled renderer CPU ratio ${block.enabledToDisabledRatio} exceeded ${maximumEnabledRatio}`,
+      );
+    }
+  }
+  if (analysis.combined.enabledToDisabledRatio > maximumEnabledRatio) {
+    throw new Error(
+      `combined enabled/disabled renderer CPU ratio ${analysis.combined.enabledToDisabledRatio} exceeded ${maximumEnabledRatio}`,
+    );
+  }
+  return analysis;
+}
+
+/**
+ * Parse cumulative process CPU counters from `SystemInfo.getProcessInfo`.
+ * Chrome does not expose the Performance domain on dedicated-worker targets.
+ * A separately launched lazy-client browser nevertheless gives us a reliable
+ * worker-inclusive signal by summing its renderer processes. Invalid process
+ * data and a missing renderer are explicit benchmark failures.
+ */
+export function parseBrowserProcessMetrics(
+  result: unknown,
+): BrowserProcessMetrics {
+  if (
+    typeof result !== "object" || result === null ||
+    !("processInfo" in result) || !Array.isArray(result.processInfo)
+  ) {
+    throw new Error(
+      "CDP SystemInfo.getProcessInfo did not return a processInfo array",
+    );
+  }
+
+  const processes: BrowserProcessMetric[] = [];
+  const ids = new Set<number>();
+  for (const process of result.processInfo) {
+    if (typeof process !== "object" || process === null) {
+      throw new Error(
+        "CDP SystemInfo.getProcessInfo returned an invalid process",
+      );
+    }
+    const type = "type" in process ? process.type : undefined;
+    const id = "id" in process ? process.id : undefined;
+    const cpuTime = "cpuTime" in process ? process.cpuTime : undefined;
+    if (typeof type !== "string" || type.length === 0) {
+      throw new Error(
+        `CDP SystemInfo.getProcessInfo returned invalid process type: ${type}`,
+      );
+    }
+    if (
+      typeof id !== "number" || !Number.isFinite(id) || id < 0 ||
+      !Number.isInteger(id)
+    ) {
+      throw new Error(
+        `CDP SystemInfo.getProcessInfo returned invalid process id: ${id}`,
+      );
+    }
+    if (ids.has(id)) {
+      throw new Error(
+        `CDP SystemInfo.getProcessInfo returned duplicate process id ${id}`,
+      );
+    }
+    if (
+      typeof cpuTime !== "number" || !Number.isFinite(cpuTime) || cpuTime < 0
+    ) {
+      throw new Error(
+        `CDP SystemInfo.getProcessInfo returned invalid cpuTime for process ${id}: ${cpuTime}`,
+      );
+    }
+    ids.add(id);
+    processes.push({ type, id, cpuTimeSeconds: cpuTime });
+  }
+  processes.sort((left, right) => left.id - right.id);
+  if (!processes.some((process) => process.type === "renderer")) {
+    throw new Error(
+      "CDP SystemInfo.getProcessInfo returned no renderer process",
+    );
+  }
+  return { processes };
+}
+
+/**
+ * Match renderer counters by process id and return their CPU delta. A renderer
+ * absent from either snapshot makes the interval incomparable and therefore
+ * fails closed. Counters must also remain monotonic.
+ */
+export function deltaRendererProcessCpu(
+  before: BrowserProcessMetrics,
+  after: BrowserProcessMetrics,
+): RendererProcessCpuDelta {
+  const rendererMap = (
+    snapshot: BrowserProcessMetrics,
+    label: "before" | "after",
+  ): Map<number, number> => {
+    const result = new Map<number, number>();
+    for (const process of snapshot.processes) {
+      if (process.type !== "renderer") continue;
+      if (result.has(process.id)) {
+        throw new Error(
+          `${label} snapshot contains duplicate renderer process ${process.id}`,
+        );
+      }
+      if (
+        !Number.isInteger(process.id) || process.id < 0 ||
+        !Number.isFinite(process.cpuTimeSeconds) || process.cpuTimeSeconds < 0
+      ) {
+        throw new Error(
+          `${label} snapshot contains invalid renderer process ${process.id}`,
+        );
+      }
+      result.set(process.id, process.cpuTimeSeconds);
+    }
+    if (result.size === 0) {
+      throw new Error(`${label} snapshot contains no renderer process`);
+    }
+    return result;
+  };
+
+  const beforeRenderers = rendererMap(before, "before");
+  const afterRenderers = rendererMap(after, "after");
+  const renderers: RendererProcessCpuDelta["renderers"] = [];
+  for (const [id, beforeSeconds] of beforeRenderers) {
+    const afterSeconds = afterRenderers.get(id);
+    if (afterSeconds === undefined) {
+      throw new Error(`renderer process ${id} disappeared during measurement`);
+    }
+    if (afterSeconds < beforeSeconds) {
+      throw new Error(
+        `renderer process ${id} CPU time decreased from ${beforeSeconds}s to ${afterSeconds}s`,
+      );
+    }
+    renderers.push({
+      id,
+      cpuTimeUs: (afterSeconds - beforeSeconds) * 1_000_000,
+      startedDuringMeasurement: false,
+    });
+  }
+  for (const [id] of afterRenderers) {
+    if (!beforeRenderers.has(id)) {
+      throw new Error(`renderer process ${id} started during measurement`);
+    }
+  }
+  renderers.sort((left, right) => left.id - right.id);
+  return {
+    totalCpuTimeUs: renderers.reduce(
+      (total, renderer) => total + renderer.cpuTimeUs,
+      0,
+    ),
+    renderers,
+  };
+}
+
+/**
+ * Distill a worker CPU profile without mistaking the profiling interval for
+ * CPU time. Chrome's `endTime - startTime` is wall time, while `timeDeltas`
+ * attribute the sampling interval to nodes including an explicit `(idle)`
+ * node. Only that node is excluded from busy time: garbage collection,
+ * `(program)`, runtime overhead, and unknown node ids conservatively count as
+ * worker occupancy. `attributedWorkUs` is the narrower CPU signal: it counts
+ * only samples assigned to a concrete JavaScript function or V8 garbage
+ * collection, excluding ambiguous `(program)` and unknown samples.
+ *
+ * CDP emits microseconds for both the profile interval and sample deltas, so
+ * the summary keeps those units and leaves per-invalidation normalization to
+ * the caller that owns the workload barrier.
+ */
+export function summarizeCPUProfile(
+  profile: CPUProfile,
+): CPUProfileSummary {
+  const wallDelta = profile.endTime - profile.startTime;
+  const wallUs = Number.isFinite(wallDelta) && wallDelta > 0 ? wallDelta : 0;
+  const functionByNodeId = new Map(
+    profile.nodes.map((node) => [node.id, node.callFrame.functionName]),
+  );
+  let sampledUs = 0;
+  let idleUs = 0;
+  let programUs = 0;
+  let attributedWorkUs = 0;
+
+  if (profile.samples !== undefined && profile.timeDeltas !== undefined) {
+    for (let index = 0; index < profile.samples.length; index++) {
+      const delta = profile.timeDeltas[index];
+      if (delta === undefined || !Number.isFinite(delta) || delta <= 0) {
+        continue;
+      }
+      sampledUs += delta;
+      const functionName = functionByNodeId.get(profile.samples[index]!);
+      if (functionName === "(idle)") {
+        idleUs += delta;
+      } else if (functionName === "(program)") {
+        programUs += delta;
+      } else if (functionName !== undefined) {
+        attributedWorkUs += delta;
+      }
+    }
+  }
+
+  const busyUs = sampledUs - idleUs;
+  return {
+    wallUs,
+    sampledUs,
+    idleUs,
+    programUs,
+    attributedWorkUs,
+    busyUs,
+    busyFraction: sampledUs === 0 ? 0 : busyUs / sampledUs,
+  };
+}
+
 type AttachedWorker = {
   sessionId: string;
   targetId: string;
@@ -74,14 +473,17 @@ export class CdpWorkerProfiler {
    * `AstralBrowser#wsEndpoint()`), discover all page targets, and auto-attach
    * to their dedicated workers.
    */
-  static async connect(browserWsEndpoint: string): Promise<CdpWorkerProfiler> {
+  static async connect(
+    browserWsEndpoint: string,
+    options: { attachWorkers?: boolean } = {},
+  ): Promise<CdpWorkerProfiler> {
     const ws = new WebSocket(browserWsEndpoint);
     await new Promise<void>((resolve, reject) => {
       ws.onopen = () => resolve();
       ws.onerror = () => reject(new Error("Could not connect to browser CDP"));
     });
     const profiler = new CdpWorkerProfiler(ws);
-    await profiler.#discoverAndAttach();
+    if (options.attachWorkers !== false) await profiler.#discoverAndAttach();
     return profiler;
   }
 
@@ -241,6 +643,22 @@ export class CdpWorkerProfiler {
       worker.sessionId,
     );
     await this.#send("Profiler.start", {}, worker.sessionId);
+  }
+
+  /** Snapshot cumulative CPU time for every process in this browser. */
+  async readBrowserProcessMetrics(): Promise<BrowserProcessMetrics> {
+    try {
+      return parseBrowserProcessMetrics(
+        await this.#send("SystemInfo.getProcessInfo"),
+      );
+    } catch (cause) {
+      throw new Error(
+        `Browser process CPU metrics are unavailable: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+        { cause },
+      );
+    }
   }
 
   /** Stop the profiler started by `start()` and return the profile. */

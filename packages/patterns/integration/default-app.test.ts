@@ -18,6 +18,11 @@ import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { assert, assertEquals } from "@std/assert";
 import { resolveSpaceDid } from "@commonfabric/lib-shell";
+import {
+  beginServerExecutionMeasurement,
+  browserExecutionRoutingProbe,
+  finishServerExecutionMeasurement,
+} from "./server-execution-measurement.ts";
 
 type BrowserWriteTraceEntry = {
   recordedAt: number;
@@ -186,7 +191,13 @@ type NoteCreateTimingEntry = {
   noteCountBefore: number;
   noteCountAfter: number;
   createToViewMs: number;
+  /** click → the app state names the new note view (UI readiness). */
+  viewConditionMs: number;
+  /** view readiness → runtime idle (scheduler/settlement quiescence). */
+  viewIdleWaitMs: number;
   returnToHomeMs: number;
+  /** space-link click → home state + runtime idle, before the list check. */
+  homeIdleWaitMs: number;
   totalMs: number;
 };
 
@@ -237,7 +248,7 @@ describe("default-app flow test", () => {
 
   it("should create a note via default app and see it in the space list", async () => {
     identity = await Identity.generate({ implementation: "noble" });
-
+    const space = await resolveSpaceDid(identity, spaceName);
     const page = shell.page();
 
     // Navigate directly to the new space (no piece creation via cf tools)
@@ -246,6 +257,18 @@ describe("default-app flow test", () => {
       view: { spaceName },
       identity,
     });
+    // Navigation creates the piece demand. In verified server-primary runs,
+    // wait until it has a live Worker, an accepted preflight settlement, and a
+    // claim visible in this browser before sampling the note interactions
+    // below. The post-sample guard proves that this workload then produced
+    // claimed overlays and successful settlements.
+    const executionMeasurement = await beginServerExecutionMeasurement(
+      "default-app-note-create",
+      {
+        query: { space, branch: "" },
+        read: browserExecutionRoutingProbe(page),
+      },
+    );
 
     if (CAPTURE_TRIGGER_TRACE) {
       console.log("Enable trigger trace...");
@@ -406,6 +429,7 @@ describe("default-app flow test", () => {
           typeof state.view.pieceId === "string" &&
           state.view.pieceId.length > 0;
       });
+      const noteViewVisibleAt = performance.now();
 
       await waitForRuntimeIdle(page);
       const noteViewReadyAt = performance.now();
@@ -497,6 +521,7 @@ describe("default-app flow test", () => {
         );
       }
       await waitForRuntimeIdle(page);
+      const homeIdleAt = performance.now();
 
       console.log(`Wait for note count to increase (note ${noteIndex})...`);
       await waitForCondition(page, noteTitlesExceed, {
@@ -521,8 +546,17 @@ describe("default-app flow test", () => {
         createToViewMs: Number(
           (noteViewReadyAt - noteCreateStartedAt).toFixed(3),
         ),
+        viewConditionMs: Number(
+          (noteViewVisibleAt - noteCreateStartedAt).toFixed(3),
+        ),
+        viewIdleWaitMs: Number(
+          (noteViewReadyAt - noteViewVisibleAt).toFixed(3),
+        ),
         returnToHomeMs: Number(
           (noteCreateFinishedAt - noteViewReadyAt).toFixed(3),
+        ),
+        homeIdleWaitMs: Number(
+          (homeIdleAt - noteViewReadyAt).toFixed(3),
         ),
         totalMs: Number(
           (noteCreateFinishedAt - noteCreateStartedAt).toFixed(3),
@@ -665,6 +699,7 @@ describe("default-app flow test", () => {
         JSON.stringify(triggerSummary, null, 2),
       );
     }
+    await finishServerExecutionMeasurement(executionMeasurement);
   });
 
   it("should persist and reload every rapidly created notebook note", async () => {
@@ -3567,19 +3602,56 @@ async function findNoteInList(page: Page): Promise<boolean> {
   return (await collectNoteTitlesInList(page)).length > 0;
 }
 
-// Serialized into the page by waitForCondition: count the unique rendered
-// "📝 New Note #<hash>" titles across the document and every shadow root and
-// report whether more than `minCount` are present. Inlines the collection that
-// collectNoteTitlesInList performs so the wait resolves the instant the list
-// grows rather than on a polling tick.
+// Serialized into the page by waitForCondition: count only note chips rendered
+// in the active home pattern's "Pieces" table. The composed-tree walk crosses
+// cf-render's shadow root without letting stale note-view text elsewhere in the
+// shell satisfy the assertion.
 const noteTitlesExceed = (probe: ProbeApi, minCount: number): boolean => {
-  const titles = new Set<string>();
-  for (const element of probe.collect("*")) {
-    const text = element.textContent;
-    if (!text) continue;
-    for (const match of text.matchAll(/📝 New Note #[A-Za-z0-9_-]+/g)) {
-      titles.add(match[0]);
+  const composedParent = (element: Element): Element | null => {
+    if (element.parentElement) return element.parentElement;
+    const root = element.getRootNode();
+    return root instanceof ShadowRoot ? root.host : null;
+  };
+  const composedContains = (
+    ancestor: Element,
+    descendant: Element,
+  ): boolean => {
+    for (
+      let current: Element | null = descendant;
+      current;
+      current = composedParent(current)
+    ) {
+      if (current === ancestor) return true;
     }
+    return false;
+  };
+
+  const tables = probe.collect("cf-table");
+  let piecesTable: Element | undefined;
+  for (const heading of probe.collect("h3")) {
+    if (heading.textContent?.trim() !== "Pieces") continue;
+    for (
+      let container = composedParent(heading);
+      container;
+      container = composedParent(container)
+    ) {
+      piecesTable = tables.find((table) => composedContains(container, table));
+      if (piecesTable) break;
+    }
+    if (piecesTable) break;
+  }
+  if (!piecesTable) return false;
+
+  const titles = new Set<string>();
+  for (const chip of probe.collect("cf-chip")) {
+    if (!composedContains(piecesTable, chip)) continue;
+    const label = String(
+      (chip as Element & { label?: unknown }).label ||
+        chip.getAttribute("label") ||
+        probe.deepText(chip) ||
+        "",
+    ).trim();
+    if (/^📝 New Note #[A-Za-z0-9_-]+$/.test(label)) titles.add(label);
   }
   return titles.size > minCount;
 };
@@ -3587,25 +3659,67 @@ const noteTitlesExceed = (probe: ProbeApi, minCount: number): boolean => {
 async function collectNoteTitlesInList(page: Page): Promise<string[]> {
   try {
     return await page.evaluate(() => {
-      const titles = new Set<string>();
-
-      function search(root: Document | ShadowRoot): void {
-        const allElements = root.querySelectorAll("*");
-        for (const el of allElements) {
-          const text = el.textContent;
-          if (text) {
-            for (
-              const match of text.matchAll(/📝 New Note #[A-Za-z0-9_-]+/g)
-            ) {
-              titles.add(match[0]);
-            }
-          }
-          if (el.shadowRoot) {
-            search(el.shadowRoot);
-          }
+      const composedParent = (element: Element): Element | null => {
+        if (element.parentElement) return element.parentElement;
+        const root = element.getRootNode();
+        return root instanceof ShadowRoot ? root.host : null;
+      };
+      const composedContains = (
+        ancestor: Element,
+        descendant: Element,
+      ): boolean => {
+        for (
+          let current: Element | null = descendant;
+          current;
+          current = composedParent(current)
+        ) {
+          if (current === ancestor) return true;
         }
+        return false;
+      };
+      const collect = (selector: string): Element[] => {
+        const elements: Element[] = [];
+        const search = (root: Document | ShadowRoot): void => {
+          for (const element of root.querySelectorAll(selector)) {
+            elements.push(element);
+          }
+          for (const element of root.querySelectorAll("*")) {
+            if (element.shadowRoot) search(element.shadowRoot);
+          }
+        };
+        search(document);
+        return elements;
+      };
+
+      const tables = collect("cf-table");
+      let piecesTable: Element | undefined;
+      for (const heading of collect("h3")) {
+        if (heading.textContent?.trim() !== "Pieces") continue;
+        for (
+          let container = composedParent(heading);
+          container;
+          container = composedParent(container)
+        ) {
+          piecesTable = tables.find((table) =>
+            composedContains(container, table)
+          );
+          if (piecesTable) break;
+        }
+        if (piecesTable) break;
       }
-      search(document);
+      if (!piecesTable) return [];
+
+      const titles = new Set<string>();
+      for (const chip of collect("cf-chip")) {
+        if (!composedContains(piecesTable, chip)) continue;
+        const label = String(
+          (chip as Element & { label?: unknown }).label ||
+            chip.getAttribute("label") ||
+            chip.textContent ||
+            "",
+        ).trim();
+        if (/^📝 New Note #[A-Za-z0-9_-]+$/.test(label)) titles.add(label);
+      }
       return [...titles].sort();
     });
   } catch (_) {

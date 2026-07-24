@@ -632,6 +632,8 @@ interface CauseContainer {
   cause: unknown | undefined;
 }
 
+const runtimeCellKind = Symbol("runtimeCellKind");
+
 /**
  * CellImpl - Unified cell implementation that handles both regular cells and
  * streams.
@@ -694,6 +696,10 @@ export class CellImpl<T extends FabricValue>
 
     this._kind = kind ?? "cell";
     this._cfcLabelView = cloneCfcLabelView(_cfcLabelView);
+  }
+
+  [runtimeCellKind](): CellKind {
+    return this._kind;
   }
 
   [cfcLabelViewSymbol](): CfcLabelView | undefined {
@@ -2619,6 +2625,11 @@ function asCellImpl(cell: unknown): CellImpl<FabricValue> | undefined {
     : cell;
   if (!isCell(unproxied)) return undefined;
   return unproxied as unknown as CellImpl<FabricValue>;
+}
+
+/** Internal runtime metadata; unlike schema `asCell`, this survives materialization. */
+export function getRuntimeCellKind(cell: unknown): CellKind | undefined {
+  return asCellImpl(cell)?.[runtimeCellKind]();
 }
 
 function subscribeToReferencedDocs<T>(

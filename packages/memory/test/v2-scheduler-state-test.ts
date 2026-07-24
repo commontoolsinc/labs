@@ -16,11 +16,13 @@ import {
   open as openEngine,
   principalOfSessionKey,
   resolveCommitSessionKey,
+  resolveScopeKey,
   type SchedulerActionObservation,
   serverSeq,
   upsertMirroredSchedulerObservation,
   upsertSchedulerObservation as upsertSchedulerObservationEngine,
   type UpsertSchedulerObservationOptions,
+  writersForTargets,
 } from "../v2/engine.ts";
 import {
   connect,
@@ -30,6 +32,7 @@ import {
 import { Server } from "../v2/server.ts";
 import { resolveSpaceStoreUrl } from "../v2/storage-path.ts";
 import {
+  encodeMemoryBoundary,
   resetPersistentSchedulerStateConfig,
   setPersistentSchedulerStateConfig,
   toDocumentPath,
@@ -232,6 +235,159 @@ Deno.test("memory v2 migrates scheduler read indexes to include owner space", as
       `PRAGMA table_info("scheduler_read_index")`,
     ).all() as Array<{ name: string }>;
     assertEquals(columns.some((column) => column.name === "owner_space"), true);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 migrates canonical replay payload without changing snapshots", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  let engine = await openEngine({ url: toFileUrl(path) });
+  close(engine);
+
+  const legacyDb = new Database(path);
+  try {
+    legacyDb.exec(`
+      ALTER TABLE scheduler_observation_replay
+      DROP COLUMN accepted_payload;
+
+      INSERT INTO scheduler_observation_replay (
+        branch,
+        session_id,
+        local_seq,
+        status,
+        reason,
+        observation_id,
+        observed_at_seq,
+        payload
+      ) VALUES (
+        '',
+        'migration-session',
+        7,
+        'dropped',
+        'stale-confirmed-read',
+        NULL,
+        11,
+        '{}'
+      );
+    `);
+  } finally {
+    legacyDb.close();
+  }
+
+  engine = await openEngine({ url: toFileUrl(path) });
+  try {
+    const replayColumns = engine.database.prepare(
+      `PRAGMA table_info("scheduler_observation_replay")`,
+    ).all() as Array<{ name: string }>;
+    assertEquals(
+      replayColumns.some((column) => column.name === "accepted_payload"),
+      true,
+    );
+    const replay = engine.database.prepare(`
+      SELECT local_seq, status, reason, observed_at_seq, accepted_payload
+      FROM scheduler_observation_replay
+      WHERE session_id = 'migration-session'
+    `).get() as {
+      local_seq: number;
+      status: string;
+      reason: string;
+      observed_at_seq: number;
+      accepted_payload: string | null;
+    };
+    assertEquals(replay, {
+      local_seq: 7,
+      status: "dropped",
+      reason: "stale-confirmed-read",
+      observed_at_seq: 11,
+      accepted_payload: null,
+    });
+
+    const snapshotColumns = engine.database.prepare(
+      `PRAGMA table_info("scheduler_action_snapshot")`,
+    ).all() as Array<{ name: string }>;
+    assertEquals(
+      snapshotColumns.some((column) => column.name === "accepted_payload"),
+      false,
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 adds the scheduler cause table without rebuilding state", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  let engine = await openEngine({ url: toFileUrl(path) });
+  const stored = upsertSchedulerObservation(engine, {
+    observedAtSeq: 0,
+    observation,
+  });
+  close(engine);
+
+  const legacyDb = new Database(path);
+  try {
+    legacyDb.exec(`DROP TABLE scheduler_action_cause;`);
+  } finally {
+    legacyDb.close();
+  }
+
+  engine = await openEngine({ url: toFileUrl(path) });
+  try {
+    assertEquals(
+      engine.database.prepare(`
+        SELECT name
+        FROM sqlite_schema
+        WHERE type = 'table' AND name = 'scheduler_action_cause'
+      `).get(),
+      { name: "scheduler_action_cause" },
+    );
+    assertEquals(
+      getLatestSchedulerActionSnapshot(engine, {
+        pieceId: observation.pieceId,
+        processGeneration: observation.processGeneration,
+        actionId: observation.actionId,
+      })?.observationId,
+      stored.observationId,
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 scheduler causes survive an engine reopen", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  let engine = await openEngine({ url: toFileUrl(path) });
+  upsertSchedulerObservation(engine, {
+    observedAtSeq: 0,
+    observation,
+  });
+  for (const dirtySeq of [7, 9]) {
+    markSchedulerReadersDirtyForWrites(engine, {
+      dirtySeq,
+      writes: [sourceRead],
+    });
+  }
+  close(engine);
+
+  engine = await openEngine({ url: toFileUrl(path) });
+  try {
+    assertEquals(
+      engine.database.prepare(`
+        SELECT source_seq
+        FROM scheduler_action_cause
+        WHERE action_id = :action_id
+        ORDER BY source_seq
+      `).all({ action_id: observation.actionId }),
+      [{ source_seq: 7 }, { source_seq: 9 }],
+    );
+    upsertSchedulerObservation(engine, {
+      observedAtSeq: 9,
+      observation,
+    });
+    assertEquals(countRows(engine, "scheduler_action_cause"), 0);
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -555,6 +711,212 @@ Deno.test("memory v2 accepts observation-only commits without semantic revisions
       `SELECT count(*) AS count FROM scheduler_observation`,
     ).get() as { count: number };
     assertEquals(observationRows.count, 1);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 records the exact accepted input basis independently of head", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:scheduler-input-basis";
+  const sourceId = "of:basis-source";
+  const secondId = "of:basis-second";
+  const semanticActionId = "basis:semantic";
+  const noopActionId = "basis:no-op";
+  const pendingActionId = "basis:pending";
+  const zeroActionId = "basis:zero";
+
+  try {
+    const source = applyCommit(engine, {
+      sessionId: "session:basis-source",
+      space: ownerSpace,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: sourceId, value: { value: 1 } }],
+      },
+    });
+    const second = applyCommit(engine, {
+      sessionId: "session:basis-source",
+      space: ownerSpace,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: secondId, value: { value: 2 } }],
+      },
+    });
+
+    const semantic = applyCommit(engine, {
+      sessionId: "session:basis-action",
+      space: ownerSpace,
+      commit: {
+        localSeq: 1,
+        reads: {
+          confirmed: [{
+            id: sourceId,
+            path: toDocumentPath(["value"]),
+            seq: source.seq,
+          }],
+          pending: [],
+        },
+        operations: [{
+          op: "set",
+          id: "of:basis-output",
+          value: { value: 10 },
+        }],
+        schedulerObservation: observationForAction(semanticActionId, {
+          ownerSpace,
+          reads: [{
+            space: ownerSpace,
+            scope: "space",
+            id: sourceId,
+            path: ["value"],
+          }],
+        }),
+      },
+    });
+    const semanticSnapshot = getLatestSchedulerActionSnapshot(engine, {
+      branch: "",
+      ownerSpace,
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: semanticActionId,
+    });
+    assertEquals(
+      (semanticSnapshot?.observation as
+        | (SchedulerActionObservation & { inputBasisSeq?: number })
+        | undefined)?.inputBasisSeq,
+      source.seq,
+    );
+    assertEquals(semanticSnapshot?.observedAtSeq, semantic.seq);
+    assertEquals(semantic.seq > second.seq, true);
+
+    const noop = applyCommit(engine, {
+      sessionId: "session:basis-action",
+      space: ownerSpace,
+      commit: {
+        localSeq: 2,
+        reads: {
+          confirmed: [
+            {
+              id: sourceId,
+              path: toDocumentPath(["value"]),
+              seq: source.seq,
+            },
+            {
+              id: secondId,
+              path: toDocumentPath(["value"]),
+              seq: second.seq,
+            },
+          ],
+          pending: [],
+        },
+        operations: [],
+        schedulerObservation: observationForAction(noopActionId, {
+          ownerSpace,
+          reads: [
+            {
+              space: ownerSpace,
+              scope: "space",
+              id: sourceId,
+              path: ["value"],
+            },
+            {
+              space: ownerSpace,
+              scope: "space",
+              id: secondId,
+              path: ["value"],
+            },
+          ],
+        }),
+      },
+    });
+    const noopSnapshot = getLatestSchedulerActionSnapshot(engine, {
+      branch: "",
+      ownerSpace,
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: noopActionId,
+    });
+    assertEquals(
+      (noopSnapshot?.observation as
+        | (SchedulerActionObservation & { inputBasisSeq?: number })
+        | undefined)?.inputBasisSeq,
+      second.seq,
+    );
+    assertEquals(noopSnapshot?.observedAtSeq, noop.seq);
+    assertEquals(noop.seq, semantic.seq);
+
+    const pendingSource = applyCommit(engine, {
+      sessionId: "session:basis-pending",
+      space: ownerSpace,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:basis-pending-source",
+          value: { value: 3 },
+        }],
+      },
+    });
+    applyCommit(engine, {
+      sessionId: "session:basis-pending",
+      space: ownerSpace,
+      commit: {
+        localSeq: 2,
+        reads: {
+          confirmed: [],
+          pending: [{
+            id: "of:basis-pending-source",
+            path: toDocumentPath(["value"]),
+            localSeq: 1,
+          }],
+        },
+        operations: [],
+        schedulerObservation: observationForAction(pendingActionId, {
+          ownerSpace,
+          actionKind: "effect",
+          reads: [{
+            space: ownerSpace,
+            scope: "space",
+            id: "of:basis-pending-source",
+            path: ["value"],
+          }],
+        }),
+      },
+    });
+    const pendingSnapshot = getLatestSchedulerActionSnapshot(engine, {
+      branch: "",
+      ownerSpace,
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: pendingActionId,
+    });
+    assertEquals(pendingSnapshot?.observation.inputBasisSeq, pendingSource.seq);
+
+    applyCommit(engine, {
+      sessionId: "session:basis-zero",
+      space: ownerSpace,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [],
+        schedulerObservation: observationForAction(zeroActionId, {
+          ownerSpace,
+          reads: [],
+        }),
+      },
+    });
+    const zeroSnapshot = getLatestSchedulerActionSnapshot(engine, {
+      branch: "",
+      ownerSpace,
+      pieceId: observation.pieceId,
+      processGeneration: observation.processGeneration,
+      actionId: zeroActionId,
+    });
+    assertEquals(zeroSnapshot?.observation.inputBasisSeq, 0);
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -1099,6 +1461,13 @@ Deno.test("memory v2 coalesces identical scheduler observations without leaving 
     assertEquals(countRows(engine, "scheduler_observation"), 1);
     assertEquals(countRows(engine, "scheduler_observation_replay"), 2);
     assertEquals(
+      writersForTargets(engine, {
+        branch: "",
+        targets: [{ ...targetWrite, scopeKey: "space" }],
+      }).map((writer) => writer.actionId),
+      [observation.actionId],
+    );
+    assertEquals(
       getSchedulerActionState(engine, {
         branch: "",
         pieceId: observation.pieceId,
@@ -1399,6 +1768,14 @@ Deno.test("memory v2 bounds retained exact-session scheduler contexts", async ()
       countRows(engine, "scheduler_observation_replay"),
       retainedLimit + 3,
     );
+    const retiredReplayPayloads = engine.database.prepare(`
+      SELECT
+        COUNT(*) AS retired,
+        SUM(CASE WHEN accepted_payload IS NULL THEN 1 ELSE 0 END) AS cleared
+      FROM scheduler_observation_replay
+      WHERE observation_id IS NULL
+    `).get() as { retired: number; cleared: number };
+    assertEquals(retiredReplayPayloads, { retired: 3, cleared: 3 });
     assertEquals(
       snapshots.some((snapshot) =>
         snapshot.executionContextKey.endsWith("session-retention-0")
@@ -1570,6 +1947,582 @@ Deno.test("memory v2 updates scheduler index rows by diff instead of rewriting u
       }).length,
       1,
     );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 writer lookup matches direct, side, and materializer surfaces", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:scheduler-writer-lookup";
+  const directWrite = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:direct-output",
+    path: ["value"],
+  };
+  const sideWrite = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:side-output",
+    path: ["value", "summary"],
+  };
+  const materializerWrite = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:materialized-output",
+    path: ["value", "items"],
+  };
+
+  try {
+    const stored = upsertSchedulerObservation(engine, {
+      branch: "",
+      ownerSpace,
+      observedAtSeq: 7,
+      observation: observationForAction("writer-lookup:surfaces", {
+        ownerSpace,
+        pieceId: "space:of:writer-piece",
+        currentKnownWrites: [directWrite, sideWrite],
+        materializerWriteEnvelopes: [materializerWrite],
+      }),
+    });
+
+    const direct = writersForTargets(engine, {
+      branch: "",
+      targets: [{
+        ...directWrite,
+        scopeKey: "space",
+        path: ["value", "nested", "result"],
+      }],
+    });
+    assertEquals(direct.length, 1);
+    assertEquals(direct[0]?.actionId, "writer-lookup:surfaces");
+    assertEquals(direct[0]?.pieceId, "space:of:writer-piece");
+    assertEquals(direct[0]?.actionKind, "computation");
+    assertEquals(direct[0]?.implementationFingerprint, "impl:v1");
+    assertEquals(direct[0]?.runtimeFingerprint, "runtime:test");
+    assertEquals(direct[0]?.status, "success");
+    assertEquals(direct[0]?.executionContextKey, stored.executionContextKey);
+    assertEquals(direct[0]?.matchedWrites, [{
+      kind: "current-known",
+      write: { ...directWrite, scopeKey: "space" },
+    }]);
+
+    const side = writersForTargets(engine, {
+      branch: "",
+      targets: [{ ...sideWrite, scopeKey: "space" }],
+    });
+    assertEquals(side.length, 1);
+    assertEquals(side[0]?.actionId, "writer-lookup:surfaces");
+    assertEquals(side[0]?.matchedWrites, [{
+      kind: "current-known",
+      write: { ...sideWrite, scopeKey: "space" },
+    }]);
+
+    const materializer = writersForTargets(engine, {
+      branch: "",
+      targets: [{
+        ...materializerWrite,
+        scopeKey: "space",
+        path: ["value", "items", "0"],
+      }],
+    });
+    assertEquals(materializer.length, 1);
+    assertEquals(materializer[0]?.actionId, "writer-lookup:surfaces");
+    assertEquals(materializer[0]?.matchedWrites, [{
+      kind: "materializer",
+      write: { ...materializerWrite, scopeKey: "space" },
+    }]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 writer lookup returns every candidate deterministically", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:scheduler-writer-candidates";
+  const sharedTarget = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:shared-output",
+    path: ["value"],
+  };
+
+  try {
+    for (
+      const actionId of [
+        "writer:z-last",
+        "writer:\u{10000}",
+        "writer:a-first",
+        "writer:\uffff",
+      ]
+    ) {
+      upsertSchedulerObservation(engine, {
+        branch: "",
+        ownerSpace,
+        observedAtSeq: 1,
+        observation: observationForAction(actionId, {
+          ownerSpace,
+          pieceId: `space:of:${actionId}`,
+          currentKnownWrites: [sharedTarget],
+        }),
+      });
+    }
+
+    const candidates = writersForTargets(engine, {
+      branch: "",
+      targets: [{ ...sharedTarget, scopeKey: "space" }],
+    });
+    assertEquals(candidates.map((candidate) => candidate.actionId), [
+      "writer:a-first",
+      "writer:z-last",
+      "writer:\uffff",
+      "writer:\u{10000}",
+    ]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 writer lookup replaces stale targets on re-observation", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:scheduler-writer-reobservation";
+  const retained = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:retained-output",
+    path: ["value"],
+  };
+  const removed = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:removed-output",
+    path: ["value"],
+  };
+  const actionId = "writer-lookup:reobserved";
+
+  try {
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      ownerSpace,
+      observedAtSeq: 1,
+      observation: observationForAction(actionId, {
+        ownerSpace,
+        currentKnownWrites: [retained, removed],
+      }),
+    });
+    assertEquals(
+      writersForTargets(engine, {
+        branch: "",
+        targets: [{ ...removed, scopeKey: "space" }],
+      }).length,
+      1,
+    );
+
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      ownerSpace,
+      observedAtSeq: 2,
+      observation: observationForAction(actionId, {
+        ownerSpace,
+        observedAtSeq: 2,
+        currentKnownWrites: [retained],
+      }),
+    });
+
+    assertEquals(
+      writersForTargets(engine, {
+        branch: "",
+        targets: [{ ...removed, scopeKey: "space" }],
+      }),
+      [],
+    );
+    assertEquals(
+      writersForTargets(engine, {
+        branch: "",
+        targets: [{ ...retained, scopeKey: "space" }],
+      })[0]?.actionId,
+      actionId,
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 writer lookup ignores target creation provenance", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:scheduler-writer-preexisting";
+  const target = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:preexisting-output",
+    path: ["value"],
+  };
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:unrelated-creator",
+      space: ownerSpace,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: target.id,
+          value: { value: { creator: "unrelated" } },
+        }],
+      },
+    });
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      ownerSpace,
+      observedAtSeq: headSeq(engine),
+      observation: observationForAction("writer-lookup:current-producer", {
+        ownerSpace,
+        currentKnownWrites: [target],
+      }),
+    });
+
+    const candidates = writersForTargets(engine, {
+      branch: "",
+      targets: [{ ...target, scopeKey: "space" }],
+    });
+    assertEquals(candidates.length, 1);
+    assertEquals(candidates[0]?.actionId, "writer-lookup:current-producer");
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 writer lookup reports the last failure fingerprint", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:scheduler-writer-failure";
+  const target = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:failed-output",
+    path: ["value"],
+  };
+
+  try {
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      ownerSpace,
+      observedAtSeq: 1,
+      observation: observationForAction("writer-lookup:failed", {
+        ownerSpace,
+        currentKnownWrites: [target],
+        status: "failed",
+        errorFingerprint: "error:stable-fingerprint",
+      }),
+    });
+
+    const candidate = writersForTargets(engine, {
+      branch: "",
+      targets: [{ ...target, scopeKey: "space" }],
+    })[0];
+    assertEquals(candidate?.status, "failed");
+    assertEquals(candidate?.errorFingerprint, "error:stable-fingerprint");
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 writer lookup recovers commit sequence from its observation", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:scheduler-writer-commit-seq";
+  const target = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:commit-seq-output",
+    path: ["value"],
+  };
+  const actionId = "writer-lookup:commit-seq";
+
+  try {
+    const applied = applyCommit(engine, {
+      sessionId: "session:scheduler-writer-commit-seq",
+      space: ownerSpace,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: target.id,
+          value: { value: 1 },
+        }],
+        schedulerObservation: observationForAction(actionId, {
+          ownerSpace,
+          currentKnownWrites: [target],
+        }),
+      },
+    });
+    engine.database.prepare(`
+      UPDATE scheduler_action_snapshot
+      SET commit_seq = NULL
+      WHERE action_id = :action_id
+    `).run({ action_id: actionId });
+
+    const candidate = writersForTargets(engine, {
+      branch: "",
+      targets: [{ ...target, scopeKey: "space" }],
+    })[0];
+    assertEquals(candidate?.commitSeq, applied.seq);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 writer lookup uses a distinct snapshot delivery slot", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:scheduler-writer-delivery-slot";
+  const target = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:delivery-slot-output",
+    path: ["value"],
+  };
+  const actionId = "writer-lookup:delivery-slot";
+
+  try {
+    const semantic = applyCommit(engine, {
+      sessionId: "session:scheduler-writer-delivery-slot",
+      space: ownerSpace,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:semantic-input",
+          value: { value: 1 },
+        }],
+      },
+    });
+    const writerObservation = observationForAction(actionId, {
+      ownerSpace,
+      currentKnownWrites: [target],
+    });
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      ownerSpace,
+      commitSeq: semantic.seq,
+      observedAtSeq: semantic.seq,
+      observation: writerObservation,
+    });
+    const nextSemantic = applyCommit(engine, {
+      sessionId: "session:scheduler-writer-delivery-slot",
+      space: ownerSpace,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:semantic-input",
+          value: { value: 2 },
+        }],
+      },
+    });
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      ownerSpace,
+      commitSeq: nextSemantic.seq,
+      observedAtSeq: nextSemantic.seq,
+      observation: writerObservation,
+    });
+    const delivery = engine.database.prepare(`
+      SELECT
+        o.commit_seq AS observation_commit_seq,
+        s.commit_seq AS snapshot_commit_seq
+      FROM scheduler_observation o
+      JOIN scheduler_action_snapshot s
+        ON s.observation_id = o.observation_id
+      WHERE o.action_id = :action_id
+    `).get({ action_id: actionId }) as {
+      observation_commit_seq: number | null;
+      snapshot_commit_seq: number | null;
+    };
+    assertEquals(delivery, {
+      observation_commit_seq: semantic.seq,
+      snapshot_commit_seq: nextSemantic.seq,
+    });
+
+    const candidate = writersForTargets(engine, {
+      branch: "",
+      targets: [{ ...target, scopeKey: "space" }],
+    })[0];
+    assertEquals(candidate?.actionId, actionId);
+    assertEquals(candidate?.commitSeq, nextSemantic.seq);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 writer lookup fails open on corrupt projections", async () => {
+  const { engine, path } = await createEngine();
+  const ownerSpace = "did:key:scheduler-writer-corruption";
+  const storeWriter = (actionId: string) => {
+    const target = {
+      space: ownerSpace,
+      scope: "space" as const,
+      id: `of:${actionId}`,
+      path: ["value"],
+    };
+    const storedObservation = observationForAction(actionId, {
+      ownerSpace,
+      currentKnownWrites: [target],
+    });
+    upsertSchedulerObservation(engine, {
+      branch: "",
+      ownerSpace,
+      observedAtSeq: 1,
+      observation: storedObservation,
+    });
+    return { target, storedObservation };
+  };
+  const lookup = (
+    target: SchedulerActionObservation["currentKnownWrites"][number],
+  ) =>
+    writersForTargets(engine, {
+      branch: "",
+      targets: [{ ...target, scopeKey: "space" }],
+    });
+
+  try {
+    const missingState = storeWriter("writer-corrupt:missing-state");
+    engine.database.prepare(`
+      DELETE FROM scheduler_action_state
+      WHERE action_id = 'writer-corrupt:missing-state'
+    `).run();
+    assertEquals(lookup(missingState.target), []);
+
+    const missingSnapshot = storeWriter("writer-corrupt:missing-snapshot");
+    engine.database.prepare(`
+      DELETE FROM scheduler_action_snapshot
+      WHERE action_id = 'writer-corrupt:missing-snapshot'
+    `).run();
+    assertEquals(lookup(missingSnapshot.target), []);
+
+    const mismatchedPayload = storeWriter("writer-corrupt:mismatched-payload");
+    engine.database.prepare(`
+      UPDATE scheduler_action_snapshot
+      SET payload = :payload
+      WHERE action_id = 'writer-corrupt:mismatched-payload'
+    `).run({
+      payload: encodeMemoryBoundary({
+        ...mismatchedPayload.storedObservation,
+        actionId: "writer-corrupt:forged-action",
+      }),
+    });
+    assertEquals(lookup(mismatchedPayload.target), []);
+
+    const divergentSnapshot = storeWriter(
+      "writer-corrupt:divergent-snapshot",
+    );
+    engine.database.prepare(`
+      UPDATE scheduler_action_snapshot
+      SET payload = :payload
+      WHERE action_id = 'writer-corrupt:divergent-snapshot'
+    `).run({
+      payload: encodeMemoryBoundary({
+        ...divergentSnapshot.storedObservation,
+        status: "failed",
+        errorFingerprint: "forged-error",
+      }),
+    });
+    assertEquals(lookup(divergentSnapshot.target), []);
+
+    const mismatchedAddress = storeWriter(
+      "writer-corrupt:mismatched-address",
+    );
+    const forgedTarget = {
+      ...mismatchedAddress.target,
+      id: "of:forged-writer-target",
+    };
+    engine.database.prepare(`
+      UPDATE scheduler_write_index
+      SET write_id = :write_id
+      WHERE action_id = 'writer-corrupt:mismatched-address'
+    `).run({ write_id: forgedTarget.id });
+    assertEquals(lookup(forgedTarget), []);
+
+    const mismatchedKind = storeWriter("writer-corrupt:mismatched-kind");
+    engine.database.prepare(`
+      UPDATE scheduler_write_index
+      SET write_kind = 'materializer'
+      WHERE action_id = 'writer-corrupt:mismatched-kind'
+    `).run();
+    assertEquals(lookup(mismatchedKind.target), []);
+
+    const scopedContext = {
+      principal: "did:key:scheduler-writer-corruption-owner",
+      sessionId: "session:scheduler-writer-corruption-owner",
+    };
+    for (const scope of ["user", "session"] as const) {
+      const actionId = `writer-corrupt:mismatched-${scope}-scope-key`;
+      const target = {
+        space: ownerSpace,
+        scope,
+        id: `of:${actionId}`,
+        path: ["value"],
+      };
+      const stored = upsertSchedulerObservation(engine, {
+        branch: "",
+        ownerSpace,
+        observedAtSeq: 1,
+        observation: observationForAction(actionId, {
+          ownerSpace,
+          currentKnownWrites: [target],
+        }),
+        scopeContext: scopedContext,
+      });
+      const forgedScopeKey = resolveScopeKey(scope, {
+        principal: "did:key:scheduler-writer-corruption-forged",
+        sessionId: "session:scheduler-writer-corruption-forged",
+      });
+      engine.database.prepare(`
+        UPDATE scheduler_write_index
+        SET write_scope_key = :write_scope_key
+        WHERE action_id = :action_id
+      `).run({
+        action_id: actionId,
+        write_scope_key: forgedScopeKey,
+      });
+      assertEquals(
+        writersForTargets(engine, {
+          branch: "",
+          targets: [{ ...target, scopeKey: forgedScopeKey }],
+          applicableExecutionContextKeys: [stored.executionContextKey],
+        }),
+        [],
+      );
+    }
+
+    const invalidPath = storeWriter("writer-corrupt:invalid-path");
+    engine.database.prepare(`
+      UPDATE scheduler_write_index
+      SET write_path = :write_path
+      WHERE action_id = 'writer-corrupt:invalid-path'
+    `).run({ write_path: encodeMemoryBoundary([42]) });
+    assertEquals(
+      lookup({ ...invalidPath.target, path: ["42"] }),
+      [],
+    );
+
+    const invalidKind = storeWriter("writer-corrupt:invalid-kind");
+    engine.database.prepare(`
+      UPDATE scheduler_write_index
+      SET write_kind = 'forged-kind'
+      WHERE action_id = 'writer-corrupt:invalid-kind'
+    `).run();
+    assertEquals(lookup(invalidKind.target), []);
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -1818,7 +2771,139 @@ Deno.test("memory v2 keeps scheduler state for two user contexts", async () => {
   }
 });
 
-Deno.test("memory v2 server lists only scheduler contexts applicable to the authenticated session", async () => {
+Deno.test("memory v2 writer lookup derives authenticated action contexts", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const storePath = await Deno.makeTempDir();
+  const store = toFileUrl(`${storePath}/`);
+  const server = new Server({
+    store,
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: testSessionOpenAuth,
+  });
+  const aliceClient = await connect({ transport: loopback(server) });
+  const bobClient = await connect({ transport: loopback(server) });
+  const ownerSpace = "did:key:scheduler-writer-protocol-owner";
+  const alicePrincipal = "did:key:scheduler-writer-protocol-alice";
+  const bobPrincipal = "did:key:scheduler-writer-protocol-bob";
+  const alice = await aliceClient.mount(
+    ownerSpace,
+    {},
+    schedulerAuthFactoryFor(alicePrincipal),
+  );
+  const bob = await bobClient.mount(
+    ownerSpace,
+    {},
+    schedulerAuthFactoryFor(bobPrincipal),
+  );
+  const piece = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:piece",
+    path: [],
+  };
+  const sharedTarget = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:shared-output",
+    path: ["value"],
+  };
+  const userRead = {
+    space: ownerSpace,
+    scope: "user" as const,
+    id: "of:user-input",
+    path: ["value"],
+  };
+  const contextObservation = (
+    actionId: string,
+  ): SchedulerActionObservation => {
+    const implementationFingerprint = `impl:${actionId}`;
+    return observationForAction(actionId, {
+      version: 2,
+      ownerSpace,
+      pieceId: "space:of:piece",
+      implementationFingerprint,
+      reads: [userRead],
+      currentKnownWrites: [sharedTarget],
+      completeActionScopeSummary: {
+        version: 1,
+        complete: true,
+        implementationFingerprint,
+        runtimeFingerprint: observation.runtimeFingerprint,
+        piece,
+        reads: [userRead],
+        writes: [sharedTarget],
+        materializerWriteEnvelopes: [],
+        directOutputs: [sharedTarget],
+      },
+    });
+  };
+  const aliceAction = "pattern.tsx:computed:writer-alice";
+  const bobAction = "pattern.tsx:computed:writer-bob";
+
+  try {
+    await alice.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: contextObservation(aliceAction),
+    });
+    await bob.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: contextObservation(bobAction),
+    });
+
+    const query = {
+      branch: "",
+      targets: [{
+        id: sharedTarget.id,
+        scope: sharedTarget.scope,
+        path: toDocumentPath(sharedTarget.path),
+      }],
+    };
+    const aliceWriters = await alice.writersForTargets(query);
+    const bobWriters = await bob.writersForTargets(query);
+    assertEquals(
+      aliceWriters.writers.map((writer: {
+        actionId: string;
+        executionContextKey: string;
+      }) => ({
+        actionId: writer.actionId,
+        executionContextKey: writer.executionContextKey,
+      })),
+      [{
+        actionId: aliceAction,
+        executionContextKey: `user:${encodeURIComponent(alicePrincipal)}`,
+      }],
+    );
+    assertEquals(
+      bobWriters.writers.map((writer: {
+        actionId: string;
+        executionContextKey: string;
+      }) => ({
+        actionId: writer.actionId,
+        executionContextKey: writer.executionContextKey,
+      })),
+      [{
+        actionId: bobAction,
+        executionContextKey: `user:${encodeURIComponent(bobPrincipal)}`,
+      }],
+    );
+  } finally {
+    await aliceClient.close().catch(() => {});
+    await bobClient.close().catch(() => {});
+    await server.close().catch(() => {});
+    await Deno.remove(storePath, { recursive: true });
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 server lists and looks up only scheduler contexts applicable to the authenticated session", async () => {
   setPersistentSchedulerStateConfig(true);
   const storePath = await Deno.makeTempDir();
   const store = toFileUrl(`${storePath}/`);
@@ -1951,6 +3036,46 @@ Deno.test("memory v2 server lists only scheduler contexts applicable to the auth
       await listedContexts(bob),
       expectedContexts(bobPrincipal, bob.sessionId),
     );
+
+    const listedWriters = async (
+      session: typeof aliceA,
+      scope: "user" | "session",
+    ) =>
+      (await session.writersForTargets({
+        branch: "",
+        targets: [{
+          id: `of:${scope}-value`,
+          scope,
+          path: toDocumentPath(["value"]),
+        }],
+      })).writers.map((writer) =>
+        `${writer.actionId}@${writer.executionContextKey}`
+      );
+
+    assertEquals(
+      await listedWriters(aliceA, "user"),
+      [`${userAction}@${userKey(alicePrincipal)}`],
+    );
+    assertEquals(
+      await listedWriters(aliceB, "user"),
+      [`${userAction}@${userKey(alicePrincipal)}`],
+    );
+    assertEquals(
+      await listedWriters(bob, "user"),
+      [`${userAction}@${userKey(bobPrincipal)}`],
+    );
+    assertEquals(
+      await listedWriters(aliceA, "session"),
+      [`${sessionAction}@${sessionKey(alicePrincipal, aliceA.sessionId)}`],
+    );
+    assertEquals(
+      await listedWriters(aliceB, "session"),
+      [`${sessionAction}@${sessionKey(alicePrincipal, aliceB.sessionId)}`],
+    );
+    assertEquals(
+      await listedWriters(bob, "session"),
+      [`${sessionAction}@${sessionKey(bobPrincipal, bob.sessionId)}`],
+    );
   } finally {
     await aliceAClient.close().catch(() => {});
     await aliceBClient.close().catch(() => {});
@@ -2055,6 +3180,17 @@ Deno.test("memory v2 server does not serve scheduler snapshots while persistent 
   const storePath = await Deno.makeTempDir();
   const store = toFileUrl(`${storePath}/`);
   const ownerSpace = "did:key:scheduler-flag-off-owner-space";
+  const ownerTarget = {
+    space: ownerSpace,
+    scope: "space" as const,
+    id: "of:flag-off-output",
+    path: ["value"],
+  };
+  const storedObservation = {
+    ...observation,
+    ownerSpace,
+    currentKnownWrites: [ownerTarget],
+  } satisfies SchedulerActionObservation;
 
   setPersistentSchedulerStateConfig(true);
   const setupServer = new Server({
@@ -2073,7 +3209,7 @@ Deno.test("memory v2 server does not serve scheduler snapshots while persistent 
       localSeq: 1,
       reads: { confirmed: [], pending: [] },
       operations: [],
-      schedulerObservation: { ...observation, ownerSpace },
+      schedulerObservation: storedObservation,
     });
   } finally {
     await setupClient.close().catch(() => {});
@@ -2097,6 +3233,15 @@ Deno.test("memory v2 server does not serve scheduler snapshots while persistent 
       actionId: observation.actionId,
     });
     assertEquals(listed.snapshots, []);
+    const writers = await owner.writersForTargets({
+      branch: "",
+      targets: [{
+        id: ownerTarget.id,
+        scope: ownerTarget.scope,
+        path: toDocumentPath(ownerTarget.path),
+      }],
+    });
+    assertEquals(writers.writers, []);
   } finally {
     await client.close().catch(() => {});
     await server.close().catch(() => {});
@@ -2447,7 +3592,11 @@ Deno.test("memory v2 server does not resurrect a broader scheduler mirror on rep
     {},
     schedulerAuthFactoryFor(principal),
   );
-  await client.mount(readSpace, {}, schedulerAuthFactoryFor(principal));
+  const read = await client.mount(
+    readSpace,
+    {},
+    schedulerAuthFactoryFor(principal),
+  );
   const actionId = "pattern.tsx:computed:replay-mirror";
   const implementationFingerprint = `impl:${actionId}`;
   const piece = {
@@ -2485,6 +3634,24 @@ Deno.test("memory v2 server does not resurrect a broader scheduler mirror on rep
     pieceId: "space:of:piece",
     actionId,
     implementationFingerprint,
+    inputBasisSeq: 999 as never,
+    executionProvenance: {
+      claim: {
+        branch: "",
+        space: ownerSpace,
+        contextKey: "space" as const,
+        pieceId: "space:of:piece",
+        actionId,
+        actionKind: "computation" as const,
+        implementationFingerprint,
+        runtimeFingerprint: observation.runtimeFingerprint,
+      },
+      onBehalfOf: "did:key:forged-replay-principal",
+      leaseGeneration: 999,
+      claimGeneration: 999,
+      causedBy: [999],
+      inputBasisSeq: 999 as never,
+    },
     reads: [userRead],
     currentKnownWrites: [userWrite],
     completeActionScopeSummary: {
@@ -2530,6 +3697,26 @@ Deno.test("memory v2 server does not resurrect a broader scheduler mirror on rep
 
   try {
     await owner.transact(initialCommit);
+    await owner.transact(initialCommit);
+    const activeReplayMirror = await read.listSchedulerActionSnapshots({
+      actionId,
+      pieceId: userObservation.pieceId,
+      processGeneration: userObservation.processGeneration,
+    });
+    assertEquals(activeReplayMirror.snapshots.length, 1);
+    const mirroredObservation = activeReplayMirror.snapshots[0]
+      ?.observation as {
+        inputBasisSeq?: number;
+        executionProvenance?: unknown;
+      };
+    assertEquals(
+      mirroredObservation.inputBasisSeq,
+      0,
+    );
+    assertEquals(
+      mirroredObservation.executionProvenance,
+      undefined,
+    );
     const sessionResult = await owner.transact(sessionCommit);
     const changedSessionResult = await owner.transact({
       localSeq: 3,

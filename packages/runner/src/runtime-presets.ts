@@ -68,6 +68,8 @@
  * |                            | localhost fallback); constructor default in the  |
  * |                            | local presets (patternTest/localDev/unitTest)    |
  * | fetch                      | real everywhere; patternTest delta (mock)        |
+ * | externalSinkDisposition   | allow everywhere; productionServer delta for     |
+ * |                            | executor shadow suppression                      |
  * | errorHandlers              | delta (collectors/telemetry), per preset         |
  * | consoleHandler             | delta (productionServer, browserWorker)          |
  * | navigateCallback           | delta (patternTest, remoteClient, browserWorker) |
@@ -89,7 +91,10 @@ import type {
   TrustSnapshot,
 } from "./cfc/mod.ts";
 import type { CommitBackpressurePolicy } from "./scheduler/backpressure.ts";
-import type { IStorageManager } from "./storage/interface.ts";
+import type {
+  ExternalSinkDispositionPolicy,
+  IStorageManager,
+} from "./storage/interface.ts";
 import type { RuntimeTelemetry } from "./telemetry.ts";
 import type {
   ConsoleHandler,
@@ -144,6 +149,7 @@ export const RUNTIME_OPTION_KEYS = [
   "commitBackpressure",
   "moduleByteCache",
   "fetch",
+  "externalSinkDisposition",
 ] as const satisfies readonly (keyof RuntimeOptions)[];
 
 export type RuntimeOptionKey = (typeof RUNTIME_OPTION_KEYS)[number];
@@ -179,6 +185,21 @@ export type EnvReader = (name: string) => string | undefined;
 export const EXPERIMENTAL_ENV_VARS = {
   modernCellRep: "EXPERIMENTAL_MODERN_CELL_REP",
   persistentSchedulerState: "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
+  serverPrimaryExecution: "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION",
+  // C1 rollout dial: flipped programmatically by the C1.9 measurement
+  // fixture alongside the memory-side claim-rank dial; no env exposure.
+  serverPrimaryExecutionUserRankCandidates: null,
+  // C2 rollout dial (session rank, C2.5): fixture-only like the user-rank
+  // dial above; the CA4 ordering invariant forbids ambient enablement
+  // before C2.6 lands, so no env exposure.
+  serverPrimaryExecutionSessionRankCandidates: null,
+  // C3 rollout dial (cross-space-read, C3.6): fixture-only like the rank
+  // dials above; the CA4/C3A17 ordering invariant forbids ambient enablement
+  // until the memory-side `cross-space-read` stage AND the
+  // `cross-space-claims-v1` cohort gate are both in place, so no env exposure.
+  serverPrimaryExecutionCrossSpaceReadCandidates: null,
+  serverPrimaryExecutionDocSetWatch:
+    "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH",
   eagerSourceAnnotation: "EXPERIMENTAL_EAGER_SOURCE_ANNOTATION",
   // Scheduler-v2 lineage (#4090) is default-on. Keep a programmatic rollback
   // override while the flag exists; no environment exposure is needed.
@@ -274,6 +295,9 @@ export interface ProductionServerPresetParams extends CoreParams {
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
   telemetry?: RuntimeTelemetry;
+  /** Executor workers inject a deny/broker boundary; ordinary servers omit. */
+  fetch?: typeof globalThis.fetch;
+  externalSinkDisposition?: ExternalSinkDispositionPolicy;
 }
 
 export interface RemoteClientPresetParams extends CoreParams {
@@ -342,6 +366,10 @@ export const runtimePresets = {
         : {}),
       ...(params.telemetry !== undefined
         ? { telemetry: params.telemetry }
+        : {}),
+      ...(params.fetch !== undefined ? { fetch: params.fetch } : {}),
+      ...(params.externalSinkDisposition !== undefined
+        ? { externalSinkDisposition: params.externalSinkDisposition }
         : {}),
     };
   },

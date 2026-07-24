@@ -33,6 +33,243 @@ type CapabilityAnalyzableFunction =
   | ts.FunctionDeclaration
   | ts.MethodDeclaration;
 
+// Captured-receiver methods that are pure reads/traversals: a WRITE through
+// them still surfaces as the chain's outer writer call, so treating them as
+// safe intermediates cannot hide a captured-cell write. Everything else on a
+// captured cell-like receiver fails closed — mirroring the param-side rule
+// that an unknown method on a cell-like receiver poisons write-exhaustiveness.
+const SAFE_CAPTURED_CELL_METHODS = new Set(["get", "key"]);
+
+/**
+ * W2.13 capture-freeness (FB2): whether a callback writes through CAPTURED
+ * identifiers. `analyzeFunctionCapabilities` proves write-completeness over
+ * PARAMETERS only — cell mutator calls are tracked only when the receiver
+ * resolves through aliases seeded from `fn.parameters`, so a write through a
+ * free identifier (a pattern-scope or module-scope cell the builder callback
+ * closes over) is invisible to the summary. The closure strategy is sound by
+ * construction because ClosureTransformer reifies captures into the merged
+ * input param BEFORE analysis; the direct-builder certificate path (W2.13)
+ * runs on callbacks whose captures were never reified, so it must enforce the
+ * gate's second invariant ("no captured-cell writes",
+ * `derive-scheduler-options.ts`) itself and withhold the certificate.
+ *
+ * Fail-closed shape detection:
+ * - a recognized cell-writer method (`set`/`push`/`update`/…) called on a
+ *   chain rooted at any captured identifier;
+ * - any OTHER (unknown/dynamic) method on a captured receiver that types
+ *   cell-like — reads (`get`, `.key(...)` descents) stay safe intermediates;
+ * - an assignment/`delete`/`++`/`--` targeting a captured cell-like chain;
+ * - a captured cell-like identifier passed as a call argument (an opaque
+ *   helper can conceal the mutation);
+ * - a direct call of a same-file helper whose body trips any rule above
+ *   (visited-set bounded).
+ *
+ * Deliberately NOT covered (stays with the runtime write firewall backstop):
+ * writes hidden inside imported/cross-file helpers the checker cannot resolve
+ * to a same-file body — the same open-world boundary the interprocedural
+ * analysis itself has.
+ */
+export function functionWritesCapturedCells(
+  fn: CapabilityAnalyzableFunction,
+  checker: ts.TypeChecker | undefined,
+): boolean {
+  const writerNames = new Set<string>([
+    ...WRITER_METHODS,
+    ...ARRAY_IDENTITY_WRITER_METHODS,
+  ]);
+  const visited = new Set<ts.Node>();
+
+  const cellLike = (expression: ts.Expression): boolean => {
+    if (checker === undefined) return true;
+    try {
+      return isCellLikeType(checker.getTypeAtLocation(expression), checker);
+    } catch {
+      // Type resolution failed (e.g. a synthesized node): fail closed.
+      return true;
+    }
+  };
+
+  const scan = (scope: CapabilityAnalyzableFunction): boolean => {
+    if (visited.has(scope)) return false;
+    visited.add(scope);
+    const body = scope.body;
+    if (body === undefined) return false;
+
+    // Locality by DECLARED NAME, never source positions or node identity:
+    // transformer-lowered callbacks mix authored and synthesized nodes, so
+    // positions can be absent (`getStart()` throws) and the checker's symbol
+    // declarations point at ORIGINAL nodes a rebuilt tree no longer
+    // contains. A name-set over the scope's own declarations is the same
+    // shadowing-approximate notion the analysis's name-keyed aliases use: an
+    // identifier is treated captured iff no declaration of that name exists
+    // anywhere inside the scanned callback.
+    const localNames = new Set<string>();
+    const collectName = (name: ts.Node): void => {
+      if (ts.isIdentifier(name)) {
+        localNames.add(name.text);
+        return;
+      }
+      if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+        for (const element of name.elements) {
+          if (ts.isBindingElement(element)) collectName(element.name);
+        }
+      }
+    };
+    const collectDeclarations = (node: ts.Node): void => {
+      if (
+        ts.isParameter(node) ||
+        ts.isVariableDeclaration(node) ||
+        ts.isBindingElement(node)
+      ) {
+        collectName(node.name);
+      } else if (
+        (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) &&
+        node.name !== undefined
+      ) {
+        localNames.add(node.name.text);
+      }
+      ts.forEachChild(node, collectDeclarations);
+    };
+    collectDeclarations(scope);
+
+    /** The chain-root identifier of `expression` when no declaration of its
+     * name exists inside `scope` (a captured binding). */
+    const capturedRootIdentifier = (
+      expression: ts.Expression,
+    ): ts.Identifier | undefined => {
+      let current: ts.Expression = unwrapExpression(expression);
+      while (true) {
+        if (
+          ts.isPropertyAccessExpression(current) ||
+          ts.isElementAccessExpression(current) ||
+          ts.isNonNullExpression(current)
+        ) {
+          current = unwrapExpression(current.expression);
+          continue;
+        }
+        if (ts.isCallExpression(current)) {
+          current = unwrapExpression(current.expression);
+          continue;
+        }
+        break;
+      }
+      if (!ts.isIdentifier(current)) return undefined;
+      return localNames.has(current.text) ? undefined : current;
+    };
+
+    const resolveCalledFunction = (
+      identifier: ts.Identifier,
+    ): CapabilityAnalyzableFunction | undefined => {
+      if (checker === undefined) return undefined;
+      const symbol = checker.getSymbolAtLocation(identifier);
+      const declaration = symbol?.valueDeclaration ?? symbol?.declarations?.[0];
+      if (declaration === undefined) return undefined;
+      if (ts.isFunctionDeclaration(declaration) && declaration.body) {
+        return declaration;
+      }
+      if (
+        ts.isVariableDeclaration(declaration) &&
+        declaration.initializer !== undefined
+      ) {
+        const initializer = unwrapExpression(declaration.initializer);
+        if (
+          ts.isArrowFunction(initializer) ||
+          ts.isFunctionExpression(initializer)
+        ) {
+          return initializer;
+        }
+      }
+      return undefined;
+    };
+
+    let found = false;
+    const visit = (node: ts.Node): void => {
+      if (found) return;
+      if (ts.isCallExpression(node)) {
+        const callee = unwrapExpression(node.expression);
+        if (
+          ts.isPropertyAccessExpression(callee) ||
+          ts.isElementAccessExpression(callee)
+        ) {
+          const root = capturedRootIdentifier(callee.expression);
+          if (root !== undefined) {
+            const methodName =
+              ts.isPropertyAccessExpression(callee) &&
+                ts.isIdentifier(callee.name)
+                ? callee.name.text
+                : undefined;
+            if (methodName !== undefined && writerNames.has(methodName)) {
+              found = true;
+              return;
+            }
+            if (
+              (methodName === undefined ||
+                !SAFE_CAPTURED_CELL_METHODS.has(methodName)) &&
+              cellLike(callee.expression)
+            ) {
+              found = true;
+              return;
+            }
+          }
+        } else if (ts.isIdentifier(callee)) {
+          const target = resolveCalledFunction(callee);
+          if (
+            target !== undefined && capturedRootIdentifier(callee) !== undefined
+          ) {
+            if (scan(target)) {
+              found = true;
+              return;
+            }
+          }
+        }
+        for (const argument of node.arguments) {
+          const unwrapped = unwrapExpression(argument);
+          if (
+            ts.isIdentifier(unwrapped) &&
+            capturedRootIdentifier(unwrapped) !== undefined &&
+            checker !== undefined &&
+            isCellLikeType(checker.getTypeAtLocation(unwrapped), checker)
+          ) {
+            found = true;
+            return;
+          }
+        }
+      } else if (
+        ts.isBinaryExpression(node) &&
+        ASSIGNMENT_OPERATORS.has(node.operatorToken.kind)
+      ) {
+        const root = capturedRootIdentifier(node.left);
+        if (root !== undefined && cellLike(node.left)) {
+          found = true;
+          return;
+        }
+      } else if (
+        (ts.isPrefixUnaryExpression(node) ||
+          ts.isPostfixUnaryExpression(node)) &&
+        (node.operator === ts.SyntaxKind.PlusPlusToken ||
+          node.operator === ts.SyntaxKind.MinusMinusToken)
+      ) {
+        const root = capturedRootIdentifier(node.operand);
+        if (root !== undefined && cellLike(node.operand)) {
+          found = true;
+          return;
+        }
+      } else if (ts.isDeleteExpression(node)) {
+        const root = capturedRootIdentifier(node.expression);
+        if (root !== undefined && cellLike(node.expression)) {
+          found = true;
+          return;
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(body);
+    return found;
+  };
+
+  return scan(fn);
+}
+
 export interface CapabilityAnalysisOptions {
   readonly checker?: ts.TypeChecker;
   readonly interprocedural?: boolean;
@@ -66,6 +303,13 @@ interface MutableCapabilityState {
   readonly reads: Set<string>;
   readonly fullShapeReads: Set<string>;
   readonly writes: Set<string>;
+  /**
+   * Write ENVELOPES from bounded dynamic `.key(index)` writes — the static
+   * boundary path recorded by {@link recordWriteEnvelope}. Kept separate from
+   * `writes` (exact addresses) because these are prefix-coverage bounds, not
+   * precise targets. See {@link CapabilityParamSummary.writeEnvelopePaths}.
+   */
+  readonly writeEnvelopes: Set<string>;
   readonly rawIdentityPaths: Set<string>;
   readonly rawIdentityCellPaths: Set<string>;
   readonly rawComparablePaths: Set<string>;
@@ -73,6 +317,15 @@ interface MutableCapabilityState {
   readonly rawOpaquePaths: Set<string>;
   passthrough: boolean;
   wildcard: boolean;
+  /**
+   * A dynamic access this analysis could not bound to a param-anchored write
+   * envelope (see {@link CapabilityParamSummary.wildcardUnbounded}). Every
+   * `markWildcard` sets it — the fail-closed default — so any dynamic access an
+   * envelope-completeness consumer has not explicitly proven bounded (via
+   * {@link markBoundedDynamic} / {@link recordWriteEnvelope}) keeps a
+   * materializer certificate closed.
+   */
+  wildcardUnbounded: boolean;
   hasIdentityUse: boolean;
   hasNonIdentityUse: boolean;
   hasNonIdentityRootUse: boolean;
@@ -99,9 +352,11 @@ interface ObservedCapabilityUsage {
   readonly readPaths: readonly (readonly string[])[];
   readonly fullShapePaths: readonly (readonly string[])[];
   readonly writePaths: readonly (readonly string[])[];
+  readonly writeEnvelopePaths: readonly (readonly string[])[];
   readonly opaquePaths: readonly (readonly string[])[];
   readonly passthrough: boolean;
   readonly wildcard: boolean;
+  readonly wildcardUnbounded: boolean;
   readonly hasUnverifiedCellUse: boolean;
   readonly identityOnly: boolean;
   readonly identityPaths: readonly (readonly string[])[];
@@ -123,6 +378,16 @@ interface SourceRef {
   readonly dynamic: boolean;
   readonly arrayElement?: boolean;
   readonly elementResult?: boolean;
+  /**
+   * When this ref became `dynamic` through a bounded `.key(index)` descent, the
+   * static path at the descent point — the tightest prefix that encloses every
+   * possible target of writes through the ref. Absent when the ref is static or
+   * when its dynamism is unbounded (`elementById`, opaque derivation): a write
+   * through such a ref cannot be enveloped and must fail closed. Preserved
+   * verbatim across later static path extensions so the boundary reflects the
+   * FIRST dynamic hop, not the post-hop tail.
+   */
+  readonly dynamicBoundaryPath?: readonly string[];
 }
 
 interface AliasShape {
@@ -140,6 +405,7 @@ function materializeSourceRef(ref: SourceRef): SourceRef {
     path: [...ref.path, "0"],
     dynamic: ref.dynamic,
     elementResult: ref.elementResult,
+    dynamicBoundaryPath: ref.dynamicBoundaryPath,
   };
 }
 
@@ -153,6 +419,10 @@ function extendSourceRef(
     path: [...base.path, ...path],
     dynamic: base.dynamic,
     elementResult: base.elementResult && path.length === 0,
+    // The boundary reflects the FIRST dynamic hop; a later static extension
+    // (`c.key(i).key("backlinks")`) must not overwrite it with the post-hop
+    // tail, so it is carried verbatim.
+    dynamicBoundaryPath: base.dynamicBoundaryPath,
   };
 }
 
@@ -1189,7 +1459,14 @@ function aliasBindingEquals(
       !!left.arrayElement === !!right.arrayElement &&
       !!left.elementResult === !!right.elementResult &&
       left.path.length === right.path.length &&
-      left.path.every((segment, index) => segment === right.path[index]);
+      left.path.every((segment, index) => segment === right.path[index]) &&
+      // A differing write-envelope boundary must not merge as equal — a merge
+      // that kept one boundary could treat an unbounded-dynamic ref as bounded.
+      // Unequal bindings are dropped by the caller, which fails closed.
+      (left.dynamicBoundaryPath ? encodePath(left.dynamicBoundaryPath) : "") ===
+        (right.dynamicBoundaryPath
+          ? encodePath(right.dynamicBoundaryPath)
+          : "");
   }
 
   if (isAliasShape(left) && isAliasShape(right)) {
@@ -1319,6 +1596,7 @@ function normalizeObservedCapabilityUsage(
   const readPaths = Array.from(state.reads).map(decodePath);
   const fullShapePaths = Array.from(state.fullShapeReads).map(decodePath);
   const writePaths = Array.from(state.writes).map(decodePath);
+  const writeEnvelopePaths = Array.from(state.writeEnvelopes).map(decodePath);
   const opaquePaths = Array.from(state.rawOpaquePaths)
     .map(decodePath)
     .filter((opaquePath) =>
@@ -1367,9 +1645,11 @@ function normalizeObservedCapabilityUsage(
     readPaths,
     fullShapePaths,
     writePaths,
+    writeEnvelopePaths,
     opaquePaths,
     passthrough: state.passthrough,
     wildcard: state.wildcard,
+    wildcardUnbounded: state.wildcardUnbounded,
     hasUnverifiedCellUse: state.hasUnverifiedCellUse,
     identityOnly: identityPaths.some((path) => path.length === 0) &&
       !state.hasNonIdentityUse &&
@@ -1466,6 +1746,7 @@ export function analyzeFunctionCapabilities(
           reads: new Set<string>(),
           fullShapeReads: new Set<string>(),
           writes: new Set<string>(),
+          writeEnvelopes: new Set<string>(),
           rawIdentityPaths: new Set<string>(),
           rawIdentityCellPaths: new Set<string>(),
           rawComparablePaths: new Set<string>(),
@@ -1473,6 +1754,7 @@ export function analyzeFunctionCapabilities(
           rawOpaquePaths: new Set<string>(),
           passthrough: false,
           wildcard: false,
+          wildcardUnbounded: false,
           hasIdentityUse: false,
           hasNonIdentityUse: false,
           hasNonIdentityRootUse: false,
@@ -1514,6 +1796,39 @@ export function analyzeFunctionCapabilities(
 
     const markWildcard = (name: string): void => {
       const state = ensureState(name);
+      state.wildcard = true;
+      // Fail-closed default: an un-audited dynamic access could hide a write
+      // outside the recorded envelopes, so it disqualifies a materializer
+      // certificate. The two `markBounded*` helpers below are the only paths
+      // that raise `wildcard` without poisoning envelope-completeness.
+      state.wildcardUnbounded = true;
+      state.hasNonIdentityUse = true;
+    };
+
+    // A dynamic `.key(index)` descent (or a read through one) whose target stays
+    // enclosed by the descent's static prefix. It raises `wildcard` exactly like
+    // `markWildcard` — so shrinking, identity classification, and every existing
+    // consumer are byte-identical — but leaves `wildcardUnbounded` clear, so an
+    // envelope-completeness consumer may still certify. Any WRITE through the
+    // descent is recorded separately by `recordWriteEnvelope`; an unknown/dynamic
+    // mutator through it still routes to `markUnverifiedCellUse`, so no write can
+    // hide behind a bounded read.
+    const markBoundedDynamic = (name: string): void => {
+      const state = ensureState(name);
+      state.wildcard = true;
+      state.hasNonIdentityUse = true;
+    };
+
+    // A write reached through a bounded dynamic `.key(index)` descent. Records
+    // the descent's static boundary as the write ENVELOPE (the tightest prefix
+    // enclosing every possible target) and raises `wildcard` without poisoning
+    // envelope-completeness — the envelope IS the complete bound for this write.
+    const recordWriteEnvelope = (
+      name: string,
+      boundaryPath: readonly string[],
+    ): void => {
+      const state = ensureState(name);
+      state.writeEnvelopes.add(encodePath(boundaryPath));
       state.wildcard = true;
       state.hasNonIdentityUse = true;
     };
@@ -1752,6 +2067,11 @@ export function analyzeFunctionCapabilities(
             path: resolved.path,
             dynamic: resolved.dynamic || info.dynamic,
             elementResult: resolved.elementResult,
+            // Preserve a boundary the alias already carried. A NEW dynamic
+            // element access (`info.dynamic`, e.g. `alias[expr]`) is not a
+            // `.key(index)` descent, so it intentionally adds no boundary and
+            // stays unbounded/fail-closed.
+            dynamicBoundaryPath: resolved.dynamicBoundaryPath,
           };
         }
 
@@ -1820,12 +2140,32 @@ export function analyzeFunctionCapabilities(
               return {
                 ...receiverBinding,
                 dynamic: true,
+                // Record the descent's static prefix as the write-envelope
+                // boundary, so a write through the resulting ref
+                // (`m.key("backlinks").push(...)`) is bounded to
+                // `allPieces[*].mentioned` rather than lost to an unbounded
+                // wildcard. Keep the FIRST boundary if the receiver was already
+                // dynamic (`c.key(i).key(j)` bounds at `i`, not `j`). A
+                // boundary is MANUFACTURED only for a static receiver: when
+                // the receiver is already dynamic WITHOUT a boundary (a raw
+                // `arr[i]` element index — not a keyed descent), its dynamism
+                // is unbounded, and fabricating a boundary from the static
+                // path would launder it into a bounded write envelope that
+                // bypasses the `wildcardUnbounded` fail-closed default (FB21).
+                dynamicBoundaryPath: receiverBinding.dynamicBoundaryPath ??
+                  (receiverBinding.dynamic
+                    ? undefined
+                    : materializeSourceRef(receiverBinding).path),
               };
             }
             return {
               root: receiverBinding.root,
               path: [...receiverBinding.path, ...argPath.path],
               dynamic: receiverBinding.dynamic,
+              // A static `.key` extension preserves the receiver's boundary
+              // verbatim (`m.key("backlinks")` stays bounded at `m`'s dynamic
+              // hop), never overwriting it with the post-hop tail.
+              dynamicBoundaryPath: receiverBinding.dynamicBoundaryPath,
             };
           }
           // elementById addresses a separate, deterministically derived entity,
@@ -2124,7 +2464,11 @@ export function analyzeFunctionCapabilities(
       options?: { identityOnly?: boolean },
     ): void => {
       if (ref.dynamic) {
-        markWildcard(ref.root);
+        // A read through a bounded `.key(index)` descent hides no write (its
+        // `.get()` snapshot is a plain value), so it stays envelope-bounded;
+        // an unbounded dynamic read fails closed.
+        if (ref.dynamicBoundaryPath) markBoundedDynamic(ref.root);
+        else markWildcard(ref.root);
         return;
       }
       trackRead(ref.root, ref.path, options);
@@ -2132,7 +2476,14 @@ export function analyzeFunctionCapabilities(
 
     const trackWriteRef = (ref: SourceRef): void => {
       if (ref.dynamic) {
-        markWildcard(ref.root);
+        // A write through a bounded `.key(index)` descent is recorded as a
+        // prefix-coverage envelope anchored on the descent boundary; a write
+        // whose dynamism the analysis could not bound fails closed.
+        if (ref.dynamicBoundaryPath) {
+          recordWriteEnvelope(ref.root, ref.dynamicBoundaryPath);
+        } else {
+          markWildcard(ref.root);
+        }
         return;
       }
       trackWrite(ref.root, ref.path);
@@ -2140,7 +2491,8 @@ export function analyzeFunctionCapabilities(
 
     const trackFullShapeReadRef = (ref: SourceRef): void => {
       if (ref.dynamic) {
-        markWildcard(ref.root);
+        if (ref.dynamicBoundaryPath) markBoundedDynamic(ref.root);
+        else markWildcard(ref.root);
         return;
       }
       trackFullShapeRead(ref.root, ref.path);
@@ -3068,7 +3420,14 @@ export function analyzeFunctionCapabilities(
                 checker,
               );
               if (argPath.dynamic) {
-                markWildcard(receiver.root);
+                // A `.key(index)` descent is param-anchored (the receiver's
+                // static path is its boundary), so it stays envelope-bounded:
+                // any write through the result is recorded separately by
+                // `trackWriteRef`/`recordWriteEnvelope`, and an unknown mutator
+                // through it still routes to `markUnverifiedCellUse`. Marking it
+                // bounded never clears an unbounded flag an earlier access set,
+                // so it cannot mask a genuine unbounded write.
+                markBoundedDynamic(receiver.root);
               } else {
                 const keyUsage = unwrapExpressionUsageSite(node);
                 const keyUsageParent = keyUsage.parent;
@@ -3083,6 +3442,7 @@ export function analyzeFunctionCapabilities(
                     root: receiver.root,
                     path: [...receiver.path, ...argPath.path],
                     dynamic: receiver.dynamic,
+                    dynamicBoundaryPath: receiver.dynamicBoundaryPath,
                   });
                 }
               }

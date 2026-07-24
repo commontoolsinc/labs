@@ -82,6 +82,7 @@ export const watchIdForEntry = (
   address: ScopedWatchAddress,
   selector: SchemaPathSelector,
   branch = "",
+  lane = "space",
 ): string =>
   `replica:${
     hashStringOf({
@@ -90,5 +91,9 @@ export const watchIdForEntry = (
       scope: address.scope ?? "space",
       type: DOCUMENT_MIME,
       selector: selectorIdentity(selector),
+      // Same address + selector under two acting lanes are two watches: the
+      // host resolves their scoped roots to different instances (C1.5b).
+      // Spread keeps space-lane watch ids byte-identical to pre-lane ids.
+      ...(lane !== "space" ? { lane } : {}),
     })
   }`;

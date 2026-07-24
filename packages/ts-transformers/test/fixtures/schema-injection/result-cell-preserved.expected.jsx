@@ -67,7 +67,7 @@ const passThrough = lift((input: PassThroughInput) => input.cell, {
             required: ["title"]
         }
     }
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 export default pattern((__cf_pattern_input) => {
     const items = __cf_pattern_input.key("items");
     return {

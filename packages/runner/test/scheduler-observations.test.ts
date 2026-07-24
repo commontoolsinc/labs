@@ -49,6 +49,22 @@ const CLEAN_RESTART_PROGRAM: RuntimeProgram = {
   }],
 };
 
+const DIRECT_OUTPUT_WITH_SIDE_WRITE_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      "import { computed, pattern, Writable } from 'commonfabric';",
+      "export default pattern(() => {",
+      "  const source = new Writable<number>(2);",
+      "  const side = new Writable<number>(0);",
+      "  computed(() => side.set(source.get() * 3));",
+      "  return { source, side };",
+      "});",
+    ].join("\n"),
+  }],
+};
+
 const createSchedulerTestRuntime: typeof createBaseSchedulerTestRuntime = (
   apiUrl,
   options = {},
@@ -1330,6 +1346,246 @@ describe("persistent scheduler observations", () => {
     }
   });
 
+  it("does not adopt an action clean during an executor authority handoff", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      const scheduler = testRuntime.runtime.scheduler;
+      const action = Object.assign(function claimedHandoffAction() {}, {
+        writes: [writeLink],
+      });
+      scheduler.subscribe(action, {
+        reads: [],
+        shallowReads: [],
+        writes: [writeAddress],
+      }, {
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:claimed-handoff-piece",
+          processGeneration: 0,
+        },
+      });
+      const snapshot: PersistedSchedulerObservationSnapshot = {
+        executionContextKey: "session:test:test",
+        observation: buildSchedulerActionObservation({
+          ownerSpace: space,
+          branch: "",
+          pieceId: "space:claimed-handoff-piece",
+          processGeneration: 0,
+          actionId: "claimedHandoffAction",
+          actionKind: "computation",
+          implementationFingerprint: schedulerImplementationFingerprint(
+            action,
+            "claimedHandoffAction",
+            undefined,
+          ),
+          runtimeFingerprint: schedulerRuntimeFingerprint(),
+          observedAtSeq: 5,
+          transactionKind: "action-run",
+          transactionLog: {
+            reads: [readAddress],
+            shallowReads: [],
+            writes: [writeAddress],
+          },
+          currentKnownWrites: [writeAddress],
+        }),
+      };
+      const oracle = {
+        readsCurrentAtSeq: () => true,
+        hasPendingLocalWriteOverlapping: () => false,
+      };
+
+      scheduler.setActionObservationAdoptionGuard((candidate) =>
+        candidate === action
+      );
+      expect(scheduler.adoptRemoteObservations([snapshot], oracle)).toBe(0);
+      expect(scheduler.isDirty(action)).toBe(true);
+
+      scheduler.setActionObservationAdoptionGuard(undefined);
+      expect(scheduler.adoptRemoteObservations([snapshot], oracle)).toBe(1);
+      expect(scheduler.isDirty(action)).toBe(false);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
+  it("executor authority reruns initial clean computations without replaying effects", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      const scheduler = testRuntime.runtime.scheduler;
+      let computationRuns = 0;
+      let effectRuns = 0;
+      let dirtyComputationRuns = 0;
+      const computation = Object.assign(
+        function initialHandoffComputation() {
+          computationRuns++;
+        },
+        {
+          writes: [writeLink],
+          implementationHash: "cf:module/test:initial-handoff-computation",
+        },
+      );
+      const effect = Object.assign(
+        function initialHandoffEffect() {
+          effectRuns++;
+        },
+        {
+          writes: [writeLink],
+          implementationHash: "cf:module/test:initial-handoff-effect",
+        },
+      );
+      const dirtyComputation = Object.assign(
+        function initialDirtyHandoffComputation() {
+          dirtyComputationRuns++;
+        },
+        { implementationHash: "cf:module/test:initial-dirty-handoff" },
+      );
+      const snapshot = (
+        action: Action,
+        actionId: string,
+        actionKind: "computation" | "effect",
+        pieceId: string,
+      ): PersistedSchedulerObservationSnapshot => ({
+        // The fixture's read/write addresses intentionally use the shared
+        // scheduler-test address space, so this is a certified cross-space
+        // observation and requires the narrowest persisted context.
+        executionContextKey: "session:did%3Akey%3Aexecutor:authority-handoff",
+        observation: buildSchedulerActionObservation({
+          ownerSpace: space,
+          branch: "",
+          pieceId,
+          processGeneration: 0,
+          actionId,
+          actionKind,
+          implementationFingerprint: schedulerImplementationFingerprint(
+            action,
+            actionId,
+            undefined,
+          ),
+          runtimeFingerprint: schedulerRuntimeFingerprint(),
+          observedAtSeq: 5,
+          transactionKind: "action-run",
+          transactionLog: {
+            reads: [readAddress],
+            shallowReads: [],
+            writes: [writeAddress],
+          },
+          currentKnownWrites: [writeAddress],
+          completeActionScopeSummary: {
+            version: 1,
+            complete: true,
+            piece: {
+              space,
+              scope: "space",
+              id: pieceId.slice("space:".length) as IMemorySpaceAddress["id"],
+              path: [],
+            },
+            reads: [readAddress],
+            writes: [writeAddress],
+            materializerWriteEnvelopes: [],
+            directOutputs: [writeAddress],
+          },
+        }),
+      });
+
+      scheduler.setActionObservationAdoptionGuard(() => true);
+      scheduler.subscribe(computation, {
+        reads: [],
+        shallowReads: [],
+        writes: [writeAddress],
+      }, {
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:of:initial-handoff-computation-piece",
+          processGeneration: 0,
+          ...currentSnapshotOracle,
+          snapshotsByActionId: new Map([[
+            "cf:module/test:initial-handoff-computation",
+            [snapshot(
+              computation,
+              "cf:module/test:initial-handoff-computation",
+              "computation",
+              "space:of:initial-handoff-computation-piece",
+            )],
+          ]]),
+        },
+      });
+      scheduler.subscribe(effect, {
+        reads: [],
+        shallowReads: [],
+        writes: [writeAddress],
+      }, {
+        isEffect: true,
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:of:initial-handoff-effect-piece",
+          processGeneration: 0,
+          ...currentSnapshotOracle,
+          snapshotsByActionId: new Map([[
+            "cf:module/test:initial-handoff-effect",
+            [snapshot(
+              effect,
+              "cf:module/test:initial-handoff-effect",
+              "effect",
+              "space:of:initial-handoff-effect-piece",
+            )],
+          ]]),
+        },
+      });
+      scheduler.subscribe(dirtyComputation, {
+        reads: [],
+        shallowReads: [],
+        writes: [],
+      }, {
+        rehydrateFromStorage: {
+          space,
+          pieceId: "space:of:initial-dirty-handoff-computation-piece",
+          processGeneration: 0,
+          ...currentSnapshotOracle,
+          snapshotsByActionId: new Map([[
+            "cf:module/test:initial-dirty-handoff",
+            [{
+              ...snapshot(
+                dirtyComputation,
+                "cf:module/test:initial-dirty-handoff",
+                "computation",
+                "space:of:initial-dirty-handoff-computation-piece",
+              ),
+              directDirtySeq: 6,
+            }],
+          ]]),
+        },
+      });
+
+      const dirtyNode = scheduler.getGraphSnapshot().nodes.find((node) =>
+        node.id === "cf:module/test:initial-dirty-handoff"
+      );
+      expect(dirtyNode).toMatchObject({
+        type: "computation",
+        isDirty: true,
+      });
+      expect(dirtyNode?.writes).toContain(
+        `${writeAddress.space}/${writeAddress.id}/${writeAddress.scope}/${
+          writeAddress.path.join("/")
+        }`,
+      );
+      expect(scheduler.isDirty(computation)).toBe(true);
+      expect(scheduler.isDirty(effect)).toBe(false);
+
+      // Pull demand drives computations in production. Run the two invalid
+      // computations explicitly here after pinning their restored state; the
+      // clean effect must remain adopted and must never replay.
+      await scheduler.run(computation);
+      await scheduler.run(dirtyComputation);
+
+      await testRuntime.runtime.idle();
+      expect(computationRuns).toBe(1);
+      expect(effectRuns).toBe(0);
+      expect(dirtyComputationRuns).toBe(1);
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
   it("does not adopt a clean broad row past a dirty session candidate", async () => {
     const testRuntime = createSchedulerTestRuntime("https://example.test", {});
     try {
@@ -2266,6 +2522,94 @@ describe("persistent scheduler observations", () => {
     }
   });
 
+  it("indexes a transformed computation's direct output and side write separately", async () => {
+    const testRuntime = createSchedulerTestRuntime("https://example.test", {});
+    try {
+      const { runtime, storageManager, tx } = testRuntime;
+      const compiled = await runtime.patternManager.compilePattern(
+        DIRECT_OUTPUT_WITH_SIDE_WRITE_PROGRAM,
+      );
+      const resultCell = runtime.getCell<{ source: number; side: number }>(
+        space,
+        "persistent scheduler direct output with side write",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, compiled, {}, resultCell);
+      runtime.prepareTxForCommit(tx);
+      await tx.commit();
+
+      expect(await result.pull()).toEqual({ source: 2, side: 6 });
+      await runtime.storageManager.synced();
+
+      const snapshots = await persistedSchedulerSnapshots(
+        runtime,
+        resultCellPieceId(resultCell),
+      );
+      const materializer = snapshots.find((snapshot) =>
+        snapshot.observation.materializerWriteEnvelopes.length > 0
+      )?.observation;
+      expect(materializer).toBeDefined();
+      expect(materializer?.completeActionScopeSummary?.directOutputs.length)
+        .toBe(1);
+      expect(materializer?.materializerWriteEnvelopes.length).toBe(1);
+
+      const directOutput = materializer!.completeActionScopeSummary!
+        .directOutputs[0];
+      const sideWrite = materializer!.materializerWriteEnvelopes[0];
+      expect(directOutput.id).not.toBe(sideWrite.id);
+
+      const provider = runtime.storageManager.open(space);
+      const durableWriters = await provider.writersForTargets?.({
+        branch: "",
+        targets: [
+          { ...directOutput, space },
+          { ...sideWrite, space },
+        ],
+      });
+      expect(durableWriters).toBeDefined();
+      expect(durableWriters?.writers).toHaveLength(1);
+      expect(durableWriters?.writers[0]?.actionId).toBe(materializer!.actionId);
+      expect(
+        durableWriters?.writers[0]?.matchedWrites.map((match) => match.kind),
+      )
+        .toEqual(["current-known", "materializer"]);
+
+      type SchedulerIndexServer = {
+        openEngine(space: string): Promise<{
+          database: {
+            prepare(sql: string): {
+              all(params: Record<string, unknown>): Array<{
+                write_id: string;
+                write_kind: string;
+              }>;
+            };
+          };
+        }>;
+      };
+      const server = (storageManager as unknown as {
+        server(): SchedulerIndexServer;
+      }).server();
+      const engine = await server.openEngine(space);
+      const indexedWrites = engine.database.prepare(`
+        SELECT write_id, write_kind
+        FROM scheduler_write_index
+        WHERE action_id = :action_id
+      `).all({ action_id: materializer!.actionId });
+
+      expect(indexedWrites).toContainEqual({
+        write_id: directOutput.id,
+        write_kind: "current-known",
+      });
+      expect(indexedWrites).toContainEqual({
+        write_id: sideWrite.id,
+        write_kind: "materializer",
+      });
+    } finally {
+      await disposeSchedulerTestRuntime(testRuntime);
+    }
+  });
+
   it("resumes a clean piece without rerunning or fetching cell data", async () => {
     const runtimeAEnv = createSchedulerTestRuntime("https://example.test", {});
     let runtimeBEnv: ReturnType<typeof createSchedulerTestRuntime> | undefined;
@@ -2310,6 +2654,8 @@ describe("persistent scheduler observations", () => {
           path: ["value"],
         },
       });
+      expect(completeObservation?.completeActionScopeSummary?.directOutputs)
+        .toHaveLength(1);
       runtimeA.scheduler.dispose();
 
       const server = (storageManager as unknown as {
@@ -2346,6 +2692,21 @@ describe("persistent scheduler observations", () => {
       expect(resultCellB.get()).toEqual({ doubled: 10 });
       expect(runtimeB.scheduler.getActionRunTrace()).toHaveLength(0);
       expect(cellDataReads).toBe(0);
+
+      const rehydratedAction = runtimeB.scheduler.getGraphSnapshot().nodes.find(
+        (node) => node.id === completeObservation?.actionId,
+      );
+      expect(rehydratedAction).toMatchObject({
+        id: completeObservation?.actionId,
+        type: "computation",
+      });
+      const directOutput = completeObservation!.completeActionScopeSummary!
+        .directOutputs[0];
+      expect(rehydratedAction?.writes).toContain(
+        `${directOutput.space}/${directOutput.id}/${
+          directOutput.scope ?? "space"
+        }/${directOutput.path.join("/")}`,
+      );
     } finally {
       restoreEvaluateWatchSet?.();
       runtimeAEnv.runtime.scheduler.dispose();

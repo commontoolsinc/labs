@@ -25,8 +25,13 @@ export function isIgnorableDenoWarningLine(line: string): boolean {
     /^[└├]/u.test(trimmed);
 }
 
+const EXPERIMENTAL_OVERRIDE_DIAGNOSTIC_PREFIX = "Experimental flag overrides: ";
+
 export function checkStderr(stderr: string[]) {
-  const relevant = stderr.filter((line) => !isIgnorableDenoWarningLine(line));
+  const relevant = stderr.filter((line) =>
+    !isIgnorableDenoWarningLine(line) &&
+    !stripAnsi(line).startsWith(EXPERIMENTAL_OVERRIDE_DIAGNOSTIC_PREFIX)
+  );
   try {
     expect(relevant.length).toBe(1);
   } catch (e) {

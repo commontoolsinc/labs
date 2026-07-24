@@ -35,6 +35,7 @@ Deno.test({
       $API_URL: "http://shell.test/",
       $EXPERIMENTAL_MODERN_CELL_REP: "true",
       $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: "true",
+      $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION: "true",
       // Explicit define overrides the environment-derived default (this
       // unpatched module resolves ENVIRONMENT=development, whose default
       // would otherwise be true).
@@ -44,6 +45,7 @@ Deno.test({
     expect(mod.EXPERIMENTAL).toEqual({
       modernCellRep: true,
       persistentSchedulerState: true,
+      serverPrimaryExecution: true,
       eagerSourceAnnotation: false,
       // Default ON for the non-home root; home stays off.
       systemPatternAutoUpdate: true,

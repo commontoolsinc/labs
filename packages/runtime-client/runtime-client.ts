@@ -8,6 +8,8 @@
 import type { DID, Identity } from "@commonfabric/identity";
 import type {
   ActionRunTraceEntry,
+  ExecutionRoutingDiagnostics,
+  ExecutionRoutingDiagnosticsQuery,
   JSONSchema,
   RuntimeTelemetryMarkerResult,
   SchedulerDiagnosisResult,
@@ -379,6 +381,18 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       type: RequestType.GetGraphSnapshot,
     });
     return res.snapshot;
+  }
+
+  async getExecutionRoutingDiagnostics(
+    query: ExecutionRoutingDiagnosticsQuery,
+  ): Promise<ExecutionRoutingDiagnostics> {
+    const res = await this.#conn.request<
+      RequestType.GetExecutionRoutingDiagnostics
+    >({
+      type: RequestType.GetExecutionRoutingDiagnostics,
+      query,
+    });
+    return res.diagnostics;
   }
 
   getSubscriptionDiagnostics(): SubscriptionDiagnostics {

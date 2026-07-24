@@ -24,7 +24,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["layout"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "number"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // FIXTURE: cell-get-binding-autowrap
 // Verifies: a bare `cell.get()` that feeds a computation at a variable-initializer
 //   binding is auto-wrapped into a lift, the same way it is in a JSX expression.

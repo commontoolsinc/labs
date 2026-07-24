@@ -55,7 +55,6 @@ import {
   getMetaCell,
   getMetaLink,
   isCellLink,
-  isSigilLink,
   isWriteRedirectLink,
   type NormalizedFullLink,
   parseLink,
@@ -99,6 +98,7 @@ import {
   resolveBuiltinImplementationIdentity,
   resolvePolicyFacingImplementationIdentity,
 } from "./cfc/implementation-identity.ts";
+import { CellDataUnavailableError } from "./cell-data-unavailable-error.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type ImplementationIdentity,
@@ -113,6 +113,18 @@ import {
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
+import {
+  builtinImplementationHash,
+  isServerComputationBuiltinId,
+  isServerExecutableBuiltinId,
+  isServerMaterializerBuiltinId,
+  serverBuiltinImplementationHash,
+} from "./builtins/server-execution.ts";
+import {
+  listBuiltinResultContainerCause,
+  outputSpotFromBinding,
+  selectorBuiltinResultCause,
+} from "./builtins/scope-policy.ts";
 export {
   extractDefaultValues,
   mergeObjects,
@@ -120,6 +132,9 @@ export {
 } from "./runner-utils.ts";
 
 const logger = getLogger("runner", { enabled: true, level: "warn" });
+const executionDemandLogger = getLogger("execution.demand", {
+  enabled: false,
+});
 const triggerFlowLogger = getLogger("runner.trigger-flow", {
   enabled: true,
   level: "warn",
@@ -154,6 +169,8 @@ type StartAttempt = {
   readonly lifecycleEpoch: number;
   readonly generationsByDoc: Map<string, number>;
   readonly preResolutionStopKeys: Set<string>;
+  /** Final root after resolving any subpath or slug supplied to start(). */
+  startedRoot?: NormalizedFullLink;
 };
 
 // The debug-name builders reuse the action's already-computed
@@ -423,43 +440,47 @@ const recordRawBuiltinResultSchemaPolicyInput = (
   );
 };
 
+const DIRECT_ROOT_OUTPUT_BINDING_DIAGNOSTIC =
+  "Computation nodes require exactly one direct root write-redirect output binding";
+
 /**
- * Find the first write-redirect link within an output binding and return its
- * FULLY RESOLVED normalized link (`id` and `space` populated). The output spot
- * a pattern node writes through is reserved for that node, so its resolved
- * coordinates form a stable, position-derived, program-independent identity —
- * suitable as the cause for the node's result cell instead of hashing the
- * pattern object (which drags in the session-varying `program`). Returns
- * undefined if the binding contains no write redirect.
+ * Return a computation node's primary output binding without searching its
+ * value shape. Transformer-produced computations bind `node.outputs` itself to
+ * the reserved result cell. Nested objects/arrays are ambiguous (and used to
+ * make identity depend on object traversal order), so reject them at the
+ * runner boundary. Handler output maps are side-write declarations and do not
+ * pass through this helper.
  */
-function firstResolvedOutputRedirect(
+function directRootOutputRedirect(
+  binding: unknown,
+  baseCell: Cell<any>,
+): NormalizedFullLink {
+  if (!isWriteRedirectLink(binding)) {
+    throw new Error(
+      `${DIRECT_ROOT_OUTPUT_BINDING_DIAGNOSTIC}; bind node.outputs itself ` +
+        "to the result cell instead of nesting or multiplying aliases",
+    );
+  }
+  return parseLink(binding, baseCell);
+}
+
+/**
+ * Resolve the direct primary output to its final target. Its coordinates are
+ * the stable, position-derived, program-independent cause used by raw builtin
+ * containers and sub-pattern result cells.
+ */
+function resolveDirectRootOutputRedirect(
   runtime: Runtime,
   tx: IExtendedStorageTransaction,
   binding: unknown,
   baseCell: Cell<any>,
-): NormalizedFullLink | undefined {
-  if (isWriteRedirectLink(binding)) {
-    return resolveLink(
-      runtime,
-      tx,
-      parseLink(binding, baseCell),
-      "writeRedirect",
-    );
-  }
-  if (Array.isArray(binding)) {
-    for (const child of binding) {
-      const found = firstResolvedOutputRedirect(runtime, tx, child, baseCell);
-      if (found) return found;
-    }
-    return undefined;
-  }
-  if (isRecord(binding) && !isCellLink(binding)) {
-    for (const child of Object.values(binding)) {
-      const found = firstResolvedOutputRedirect(runtime, tx, child, baseCell);
-      if (found) return found;
-    }
-  }
-  return undefined;
+): NormalizedFullLink {
+  return resolveLink(
+    runtime,
+    tx,
+    directRootOutputRedirect(binding, baseCell),
+    "writeRedirect",
+  );
 }
 
 const recordSetupProjectionPolicyInputs = (
@@ -705,6 +726,10 @@ export class Runner {
   // Covers the pre-resolution window where a link attempt does not know its
   // eventual target doc and therefore cannot appear in the per-doc index yet.
   private activeStartAttempts = new Set<StartAttempt>();
+  // Client-visible start() calls export only their final piece roots. Internal
+  // child run()/startCore() registrations stay inside that demanded closure.
+  private executionDemandBySpace = new Map<MemorySpace, Set<string>>();
+  private executionDemandTails = new Map<MemorySpace, Promise<void>>();
   private crossSpaceChildSpaces = new WeakMap<
     IExtendedStorageTransaction,
     MemorySpace[]
@@ -1247,9 +1272,16 @@ export class Runner {
     this.activeStartAttempts.add(attempt);
     this.trackStartAttempt(attempt, startKey);
     try {
-      return this.doStart(resultCell, new Set(), attempt).finally(() => {
-        this.finishStartAttempt(attempt);
-      });
+      return this.doStart(resultCell, new Set(), attempt)
+        .then(async (started) => {
+          if (started && attempt.startedRoot !== undefined) {
+            await this.addExecutionDemand(attempt.startedRoot);
+          }
+          return started;
+        })
+        .finally(() => {
+          this.finishStartAttempt(attempt);
+        });
     } catch (error) {
       this.finishStartAttempt(attempt);
       return Promise.reject(error);
@@ -1528,7 +1560,10 @@ export class Runner {
     const wasStoppedLocally = this.locallyStoppedResults.has(key);
 
     // Step 2: Already started? Return success
-    if (this.cancels.has(key)) return Promise.resolve(true);
+    if (this.cancels.has(key)) {
+      attempt.startedRoot = rootCell.getAsNormalizedFullLink();
+      return Promise.resolve(true);
+    }
 
     // Step 3: Not synced yet? Sync and retry
     // Once getRaw() has a value, all properties including source are synced.
@@ -1538,7 +1573,9 @@ export class Runner {
         if (!this.isStartAttemptCurrent(attempt)) return false;
         logger.time(rootSyncStart, "start", "rootCellSync");
         if (rootCell.getRaw() === undefined) {
-          return Promise.reject(new Error("No data at cell"));
+          return Promise.reject(
+            new CellDataUnavailableError(rootCell.getAsNormalizedFullLink()),
+          );
         } else {
           return this.doStart(rootCell, seenCells, attempt);
         }
@@ -1653,6 +1690,7 @@ export class Runner {
         return Promise.reject(err);
       }
 
+      attempt.startedRoot = rootCell.getAsNormalizedFullLink();
       return Promise.resolve(true);
     }
 
@@ -1688,6 +1726,7 @@ export class Runner {
       }
       // we may already be in the midst of starting this, so don't start again
       if (this.cancels.has(this.getDocKey(rootCell))) {
+        attempt.startedRoot = rootCell.getAsNormalizedFullLink();
         return true;
       }
 
@@ -1712,6 +1751,7 @@ export class Runner {
         logger.time(startCoreStart, "start", "startCoreResume");
       }
 
+      attempt.startedRoot = rootCell.getAsNormalizedFullLink();
       return true;
     })();
   }
@@ -2102,6 +2142,103 @@ export class Runner {
   private getDocKey(cell: Cell<any>): `${MemorySpace}/${CellScope}/${URI}` {
     const { space, id, scope } = cell.getAsNormalizedFullLink();
     return `${space}/${scope}/${id}`;
+  }
+
+  private queueExecutionDemand(
+    space: MemorySpace,
+    provider: IStorageProviderWithReplica,
+    pieces: readonly string[],
+  ): Promise<void> {
+    const send = async () => {
+      const startedAt = performance.now();
+      try {
+        await provider.setExecutionDemand?.("", pieces);
+      } catch (error) {
+        // Demand is an optimization/authority offer. A transport or capability
+        // failure must leave today's client execution intact.
+        logger.warn("execution-demand", () => [
+          `Failed to publish execution demand for ${space}`,
+          error,
+        ]);
+      } finally {
+        executionDemandLogger.time(
+          startedAt,
+          pieces.length === 0 ? "publish-empty" : "publish-active",
+        );
+      }
+    };
+    // Invoke immediately so successive snapshots enter the connection in
+    // caller order. The tail is only a lifetime barrier; waiting to invoke the
+    // next call until the previous response arrives would leave a stopped root
+    // advertised during that round trip.
+    const update = send();
+    const previous = this.executionDemandTails.get(space);
+    const barrier = previous === undefined
+      ? update
+      : Promise.allSettled([previous, update]).then(() => undefined);
+    this.executionDemandTails.set(space, barrier);
+    void barrier.finally(() => {
+      if (this.executionDemandTails.get(space) === barrier) {
+        this.executionDemandTails.delete(space);
+      }
+    });
+    return update;
+  }
+
+  private addExecutionDemand(link: NormalizedFullLink): Promise<void> {
+    if (this.runtime.experimental.serverPrimaryExecution !== true) {
+      return Promise.resolve();
+    }
+    const provider = this.runtime.storageManager.open(link.space);
+    if (provider.setExecutionDemand === undefined) return Promise.resolve();
+    let roots = this.executionDemandBySpace.get(link.space);
+    if (roots === undefined) {
+      roots = new Set();
+      this.executionDemandBySpace.set(link.space, roots);
+    }
+    if (roots.has(link.id)) return Promise.resolve();
+    roots.add(link.id);
+    return this.queueExecutionDemand(
+      link.space,
+      provider,
+      [...roots].sort(),
+    );
+  }
+
+  private removeExecutionDemand(link: NormalizedFullLink): void {
+    const roots = this.executionDemandBySpace.get(link.space);
+    if (roots === undefined || !roots.delete(link.id)) return;
+    if (roots.size === 0) this.executionDemandBySpace.delete(link.space);
+    const provider = this.runtime.storageManager.open(link.space);
+    if (provider.setExecutionDemand === undefined) return;
+    this.runtime.storageManager.trackUntilSettled(
+      this.queueExecutionDemand(link.space, provider, [...roots].sort()),
+    );
+  }
+
+  private clearExecutionDemand(): void {
+    for (const space of this.executionDemandBySpace.keys()) {
+      const provider = this.runtime.storageManager.open(space);
+      if (provider.setExecutionDemand === undefined) continue;
+      this.runtime.storageManager.trackUntilSettled(
+        this.queueExecutionDemand(space, provider, []),
+      );
+    }
+    this.executionDemandBySpace.clear();
+  }
+
+  /**
+   * Wait for every execution-demand snapshot queued so far to settle.
+   *
+   * Teardown calls this after {@link stopAll} has queued the final empty
+   * snapshot and before storage closes its transport. Looping is intentional:
+   * tail cleanup runs in promise continuations, and a continuation may replace
+   * the current tail before the previous snapshot finishes.
+   */
+  async executionDemandSettled(): Promise<void> {
+    while (this.executionDemandTails.size > 0) {
+      await Promise.allSettled([...this.executionDemandTails.values()]);
+    }
   }
 
   private schedulerRehydrationOptions(
@@ -2522,9 +2659,9 @@ export class Runner {
         argumentLink,
         resultCell,
       );
-      let spotLink: NormalizedFullLink | undefined;
+      let spotLink: NormalizedFullLink;
       try {
-        spotLink = firstResolvedOutputRedirect(
+        spotLink = resolveDirectRootOutputRedirect(
           this.runtime,
           tx,
           unwrappedOutputs,
@@ -2540,7 +2677,6 @@ export class Runner {
         ]);
         continue;
       }
-      if (spotLink === undefined) continue;
       let childResultCell = this.runtime.getCell(
         targetSpace,
         {
@@ -2580,6 +2716,7 @@ export class Runner {
    * @param resultCell - The result doc or cell to stop.
    */
   stop<T>(resultCell: Cell<T>): void {
+    const resultLink = resultCell.getAsNormalizedFullLink();
     const key = this.getDocKey(resultCell);
     if ((this.activeStartAttemptsByDoc.get(key)?.size ?? 0) > 0) {
       this.startGenerationByDoc.set(
@@ -2609,6 +2746,7 @@ export class Runner {
       this.locallyCommittedHandlerResultStarts.delete(key);
       if (cancel !== undefined) {
         this.allCancels.delete(cancel);
+        this.removeExecutionDemand(resultLink);
         // Only a piece that was actually running is safe to restart from its
         // already-assembled local cells. Stopping an unresolved/storage-only
         // target must not bypass dependency sync and snapshot rehydration on a
@@ -2665,6 +2803,7 @@ export class Runner {
     this.lifecycleEpoch++;
     this.resumeSnapshotsBySpace.clear();
     this.resumeSnapshotLoads.clear();
+    this.clearExecutionDemand();
     // Cancel all tracked operations
     for (const cancel of this.allCancels) {
       try {
@@ -4102,8 +4241,12 @@ export class Runner {
 
     const action: Action & {
       ignoredSchedulingWrites?: NormalizedFullLink[];
+      refreshCompleteSchedulerScopeSummary?: (
+        tx: IExtendedStorageTransaction,
+      ) => void;
     } = (tx: IExtendedStorageTransaction) => {
       action.ignoredSchedulingWrites = [];
+      action.refreshCompleteSchedulerScopeSummary?.(tx);
       const resultFor = { inputs, outputs, fn: fnSource };
       const policyFacingIdentity = resolvePolicyFacingImplementationIdentity(
         module,
@@ -4350,40 +4493,167 @@ export class Runner {
         getDerivedInternalCellLink(patternResultCell, descriptor)
       )
       : [];
+    const baseCompleteSchedulerScopeSummary =
+      module.completeSchedulerScopeSummary === true &&
+        redirectWriteTargets.complete && redirectReadTargets.complete
+        ? {
+          complete: true as const,
+          piece: patternResultCell.getAsNormalizedFullLink(),
+          // Link resolution probes the containing document while deciding
+          // whether a declared path is a redirect. Root envelopes for these
+          // statically named documents cover that deterministic plumbing,
+          // while the exact final targets continue to describe the authored
+          // value reads.
+          reads: dedupeNormalizedLinks([
+            ...reads,
+            ...reads.map((link) => ({ ...link, path: [] })),
+            ...redirectReadTargets.targets,
+            ...redirectReadTargets.targets.map((link) => ({
+              ...link,
+              path: [],
+            })),
+            inputsCell.getAsNormalizedFullLink(),
+            processCell.getAsNormalizedFullLink(),
+            ...structuralMetaLinks,
+            ...(internalMetaLink ? [internalMetaLink] : []),
+            ...derivedInternalLinks,
+            ...schedulingWrites,
+          ]),
+          writes: dedupeNormalizedLinks([
+            ...schedulingWrites,
+            ...redirectWriteTargets.targets,
+          ]),
+          materializerWriteEnvelopes,
+          directOutputs: writes,
+        }
+        : undefined;
+
+    const refreshCompleteSchedulerScopeSummary =
+      baseCompleteSchedulerScopeSummary === undefined
+        ? undefined
+        : (runTx: IExtendedStorageTransaction): void => {
+          const routingReads: NormalizedFullLink[] = [];
+          const resolvedReads: NormalizedFullLink[] = [];
+          const resolvedWrites: NormalizedFullLink[] = [];
+          const resolvedMaterializerWrites: NormalizedFullLink[] = [];
+          let complete = true;
+
+          const resolveStaticLink = (
+            link: NormalizedFullLink,
+            lastNode: "value" | "writeRedirect",
+          ): {
+            target?: NormalizedFullLink;
+            writeRedirectHops: number;
+          } => {
+            routingReads.push({ ...link, path: [] });
+            const state = runTx.getCfcState();
+            const traceStart = state.dereferenceTraces.length;
+            try {
+              const target = runTx.runWithAmbientReadMeta(
+                machineryRead,
+                () => resolveLink(this.runtime, runTx, link, lastNode),
+              );
+              const traces = runTx.getCfcState().dereferenceTraces.slice(
+                traceStart,
+              );
+              for (const trace of traces) {
+                routingReads.push(
+                  { ...trace.source, id: trace.source.id as URI, path: [] },
+                  { ...trace.target, id: trace.target.id as URI, path: [] },
+                );
+              }
+              routingReads.push({ ...target, path: [] });
+              return {
+                target,
+                writeRedirectHops:
+                  traces.filter((trace) => trace.kind === "write-redirect")
+                    .length,
+              };
+            } catch (error) {
+              complete = false;
+              logger.debug("complete-action-static-route", () => [
+                "Unable to resolve a complete action's static route",
+                { link, lastNode, error },
+              ]);
+              return { writeRedirectHops: 0 };
+            }
+          };
+
+          for (const read of reads) {
+            const { target } = resolveStaticLink(read, "value");
+            if (target) resolvedReads.push(target);
+          }
+          for (const write of writes) {
+            const { target, writeRedirectHops } = resolveStaticLink(
+              write,
+              "writeRedirect",
+            );
+            if (!target) continue;
+            // Product bindings are a single direct redirect into a root cell.
+            // Keep that invariant explicit: a redirect chain or sub-path
+            // target remains client-executed instead of receiving a complete
+            // server claim certificate.
+            if (
+              writeRedirectHops > 1 || target.path.length !== 0 ||
+              target.space !== write.space
+            ) {
+              complete = false;
+              continue;
+            }
+            resolvedWrites.push(target);
+          }
+          for (const envelope of materializerWriteEnvelopes) {
+            const { target } = resolveStaticLink(envelope, "writeRedirect");
+            if (!target) continue;
+            if (target.space !== envelope.space) {
+              complete = false;
+              continue;
+            }
+            resolvedMaterializerWrites.push(target);
+          }
+
+          if (!complete) {
+            delete (action as {
+              completeSchedulerScopeSummary?: unknown;
+            }).completeSchedulerScopeSummary;
+            return;
+          }
+          (action as {
+            completeSchedulerScopeSummary?:
+              typeof baseCompleteSchedulerScopeSummary;
+          }).completeSchedulerScopeSummary = {
+            ...baseCompleteSchedulerScopeSummary,
+            reads: dedupeNormalizedLinks([
+              ...baseCompleteSchedulerScopeSummary.reads,
+              ...routingReads,
+              ...resolvedReads,
+              ...resolvedWrites,
+              ...resolvedMaterializerWrites,
+            ]),
+            writes: dedupeNormalizedLinks([
+              ...baseCompleteSchedulerScopeSummary.writes,
+              ...resolvedWrites,
+            ]),
+            materializerWriteEnvelopes: dedupeNormalizedLinks([
+              ...baseCompleteSchedulerScopeSummary
+                .materializerWriteEnvelopes,
+              ...resolvedMaterializerWrites,
+            ]),
+            directOutputs: dedupeNormalizedLinks([
+              ...baseCompleteSchedulerScopeSummary.directOutputs,
+              ...resolvedWrites,
+            ]),
+          };
+        };
     const wrappedAction = Object.assign(action, {
       reads,
       writes: schedulingWrites,
       ...(hasMaterializerWriteEnvelopes ? { materializerWriteEnvelopes } : {}),
-      ...(module.completeSchedulerScopeSummary === true &&
-          redirectWriteTargets.complete && redirectReadTargets.complete
-        ? {
-          completeSchedulerScopeSummary: {
-            complete: true as const,
-            piece: patternResultCell.getAsNormalizedFullLink(),
-            // The callback's declared reads are only part of the action's
-            // structurally fixed read surface. Reads follow static redirects;
-            // the runner also materializes the immutable argument container
-            // and reads direct output cells while diffing/writing their values.
-            // Include those framework reads in the trusted certificate so a
-            // complete space-only lift is not mistaken for a contradiction.
-            reads: dedupeNormalizedLinks([
-              ...reads,
-              ...redirectReadTargets.targets,
-              inputsCell.getAsNormalizedFullLink(),
-              processCell.getAsNormalizedFullLink(),
-              ...structuralMetaLinks,
-              ...(internalMetaLink ? [internalMetaLink] : []),
-              ...derivedInternalLinks,
-              ...schedulingWrites,
-            ]),
-            writes: dedupeNormalizedLinks([
-              ...schedulingWrites,
-              ...redirectWriteTargets.targets,
-            ]),
-            materializerWriteEnvelopes,
-            directOutputs: writes,
-          },
-        }
+      ...(baseCompleteSchedulerScopeSummary
+        ? { completeSchedulerScopeSummary: baseCompleteSchedulerScopeSummary }
+        : {}),
+      ...(refreshCompleteSchedulerScopeSummary
+        ? { refreshCompleteSchedulerScopeSummary }
         : {}),
       module,
       pattern,
@@ -4454,7 +4724,17 @@ export class Runner {
       );
     }
 
-    this.instantiateJavaScriptActionNode(context);
+    // Normal computations have one transformer-produced primary output at the
+    // root. Handler output maps were handled above and remain free to describe
+    // multiple side writes.
+    const primaryOutput = directRootOutputRedirect(
+      io.outputs,
+      processCell,
+    );
+    this.instantiateJavaScriptActionNode({
+      ...context,
+      writes: [primaryOutput],
+    });
   }
 
   private getFallbackJavaScriptImplementation(
@@ -4653,12 +4933,11 @@ export class Runner {
         ? { skipTopLevelKeys: opaqueInputKeys }
         : undefined,
     );
-    // outputCells tracks the static write surface for dependency ordering and
-    // event preflight.
-    const outputCells = findAllWriteRedirectCells(
-      mappedOutputBindings,
-      processCell,
-    );
+    // The root binding is the primary output. Materializer envelopes and the
+    // redirect's resolved target are added as separate write surfaces below.
+    const outputCells = [
+      directRootOutputRedirect(mappedOutputBindings, processCell),
+    ];
 
     const inputsCell = this.runtime.getImmutableCell(
       processCell.space,
@@ -4672,7 +4951,7 @@ export class Runner {
     // program-independent identity. Builtins that mint a result container
     // (map/flatmap/filter) key it on this instead of the serialized op /
     // inputs cell (both of which drag in the session-varying `program`).
-    const resolvedOutputSpot = firstResolvedOutputRedirect(
+    const resolvedOutputSpot = resolveDirectRootOutputRedirect(
       this.runtime,
       tx,
       mappedOutputBindings,
@@ -4685,14 +4964,26 @@ export class Runner {
     // the builtin a fully-normalized output link carrying that scope + schema.
     // Scope-aware builtins (sqliteDatabase) mint their result container at this
     // scope; the rest ignore the extra argument.
-    const outputBinding = resolvedOutputSpot
-      ? {
-        ...resolvedOutputSpot,
-        scope: schemaCellScope(module.resultSchema) ??
-          module.defaultScope ?? resolvedOutputSpot.scope,
-      }
-      : undefined;
+    const outputBinding = {
+      ...resolvedOutputSpot,
+      scope: schemaCellScope(module.resultSchema) ??
+        module.defaultScope ?? resolvedOutputSpot.scope,
+    };
 
+    // The per-node registration cause handed to every raw builtin. Hoisted so
+    // the selector descriptor below can re-derive the minted result document
+    // from the IDENTICAL cause object the builtin keys it on (W2.15a/FB3) —
+    // the same one-source-of-identity contract as
+    // `listBuiltinResultContainerCause` for the list builtins.
+    const builtinCause = {
+      inputs: inputsCell,
+      parents: processCell.entityId,
+      outputSpot: {
+        space: resolvedOutputSpot.space,
+        id: resolvedOutputSpot.id,
+        path: [...resolvedOutputSpot.path],
+      },
+    };
     const builtinFrame = builtinIdentity
       ? pushFrameFromCause(undefined, {
         runtime: this.runtime,
@@ -4736,19 +5027,7 @@ export class Runner {
           );
         },
         addCancel,
-        {
-          inputs: inputsCell,
-          parents: processCell.entityId,
-          ...(resolvedOutputSpot
-            ? {
-              outputSpot: {
-                space: resolvedOutputSpot.space,
-                id: resolvedOutputSpot.id,
-                path: [...resolvedOutputSpot.path],
-              },
-            }
-            : {}),
-        },
+        builtinCause,
         processCell,
         this.runtime,
         outputBinding,
@@ -4828,7 +5107,27 @@ export class Runner {
       }
     };
     setRunnableName(action, rawName, { setSrc: true });
-    this.applyImplementationHash(action, impl);
+    const serverBuiltinId = isServerExecutableBuiltinId(moduleRefName)
+      ? moduleRefName
+      : undefined;
+    if (serverBuiltinId !== undefined) {
+      (action as { implementationHash?: string }).implementationHash =
+        serverBuiltinImplementationHash(serverBuiltinId);
+    } else if (moduleRefName !== undefined) {
+      // Canonical builtin resolved through the registry ref but outside the
+      // server-executable subset: stamp a static per-builtin identity so its
+      // fingerprint clears the servability gate instead of the `action:…`
+      // shape that classifies as `untrusted-implementation`. It then rejects as
+      // `incomplete-static-surface` until a descriptor supplies the surface
+      // (spec §4.6, W2.15) — the honest gap is surface, not trust. Keyed ONLY
+      // on `moduleRefName` (the canonical ref, set exclusively by the ref
+      // resolution path), never `rawTargetName`/`impl`, which fold in
+      // caller-controlled debug metadata (`debugName`/`.src`/`.name`).
+      (action as { implementationHash?: string }).implementationHash =
+        builtinImplementationHash(moduleRefName);
+    } else {
+      this.applyImplementationHash(action, impl);
+    }
     (action as { schedulerInstanceKey?: string }).schedulerInstanceKey =
       rawInstanceKey;
 
@@ -4840,10 +5139,138 @@ export class Runner {
     const schedulingWrites = dedupeNormalizedLinks([
       ...outputCells,
       ...staticRedirectWriteTargets,
+      ...(serverBuiltinId !== undefined ? [outputBinding] : []),
     ]);
+    const serverBuiltinRuntimeWrites = (builtinAction as Action & {
+      serverBuiltinRuntimeWrites?: NormalizedFullLink[];
+    }).serverBuiltinRuntimeWrites ?? [];
+    // W2.15a: the pure structural selectors carry a per-builtin COMPUTATION
+    // descriptor (single direct output, keyed on the same canonical
+    // `moduleRefName` as the identity stamp above). Disjoint from
+    // `serverBuiltinId` (the effect subset), so no action is ever both.
+    const computationBuiltinId = isServerComputationBuiltinId(moduleRefName)
+      ? moduleRefName
+      : undefined;
+    // W2.15a re-open (FB3): every output-producing ifElse/when/unless run
+    // mints and writes a SECOND document — the `{ <builtin>: cause }` result
+    // cell — whose entity id differs from the output spot (the spot stores
+    // only a link to it). Re-derive that minted document's identity from the
+    // SAME cause the builtin keys it on (`selectorBuiltinResultCause` over
+    // the hoisted `builtinCause`) and fold it into the descriptor's write
+    // surface as an EXACT write: the identity is deterministic per node, so
+    // no envelope is needed. Declared at space scope like the materializer
+    // container — the builtin re-addresses the instance at the resolved
+    // condition's scope, which never forks the entity id, and a scoped
+    // actual write fails closed at the firewall's scope check instead of
+    // being served.
+    const selectorMintedResultWrite =
+      ((): NormalizedFullLink | undefined => {
+        if (computationBuiltinId === undefined) return undefined;
+        const mintedLink = this.runtime.getCell(
+          processCell.space,
+          selectorBuiltinResultCause(computationBuiltinId, builtinCause),
+        ).getAsNormalizedFullLink();
+        return { ...mintedLink, scope: "space", path: [] };
+      })();
+    // W2.16: map/filter/flatMap mint a result CONTAINER document (the output
+    // collection) distinct from their direct output and write the whole array
+    // plus per-slot element links into it. Re-derive that container's identity
+    // from the SAME cause the builtin keys it on
+    // (`listBuiltinResultContainerCause`) so its materializer write envelope is a
+    // root prefix over it — the two sites must agree or a claimed run de-claims
+    // fail-closed. Disjoint from `computationBuiltinId`/`serverBuiltinId`. The
+    // per-element child sub-patterns are separate provenance-covered actions
+    // outside this envelope, so a first reconcile that instantiates children
+    // de-claims fail-closed for that run (the client handles it); steady-state
+    // reconciles write only the container and stay claim-served.
+    const materializerBuiltinId = isServerMaterializerBuiltinId(moduleRefName)
+      ? moduleRefName
+      : undefined;
+    const materializerContainerEnvelope =
+      ((): NormalizedFullLink | undefined => {
+        if (materializerBuiltinId === undefined) return undefined;
+        const outputSpot = outputSpotFromBinding(outputBinding);
+        if (outputSpot === undefined) return undefined;
+        const containerLink = this.runtime.getCell(
+          processCell.space,
+          listBuiltinResultContainerCause(
+            materializerBuiltinId,
+            processCell.entityId,
+            outputSpot,
+          ),
+        ).getAsNormalizedFullLink();
+        // Value-root prefix (link path `[]`) at space scope. As a
+        // NormalizedFullLink this is VALUE-relative, so by itself it covers
+        // only the container's `value` subtree (`["value"]`, per-slot
+        // `value[i]`); the summary assembly
+        // (`serverBuiltinMaterializerScopeSummary`) lifts a value-root
+        // envelope to a document-root prefix so the mint branch's
+        // `["result"]`/`["pattern"]` meta writes and the `["cfc"]` label
+        // envelope on the container are covered too (FB19/CA6). The
+        // schema/scope the builtin later applies do not fork the entity id
+        // (see `outputSpotFromBinding`), and a scoped or foreign actual
+        // container fails closed at the firewall rather than being served.
+        return { ...containerLink, scope: "space", path: [] };
+      })();
+    const materializerWriteEnvelopes = materializerContainerEnvelope
+      ? [materializerContainerEnvelope]
+      : undefined;
     Object.assign(action, builtinAction, {
       reads: inputCells,
       writes: schedulingWrites,
+      ...(serverBuiltinId !== undefined
+        ? {
+          serverBuiltin: {
+            version: 1 as const,
+            id: serverBuiltinId,
+            piece: resultCell.getAsNormalizedFullLink(),
+            reads: inputCells,
+            writes: schedulingWrites,
+            runtimeWrites: serverBuiltinRuntimeWrites,
+            directOutputs: [outputBinding],
+          },
+        }
+        : {}),
+      ...(computationBuiltinId !== undefined &&
+          selectorMintedResultWrite !== undefined
+        ? {
+          serverBuiltinComputation: {
+            version: 1 as const,
+            id: computationBuiltinId,
+            piece: resultCell.getAsNormalizedFullLink(),
+            reads: inputCells,
+            // The registered write surface plus the minted `{ <builtin>:
+            // cause }` result document (FB3): a selector writes exactly its
+            // direct root output spot (a stable link to the minted document)
+            // and the minted document itself (the selected branch's
+            // reference), so the fail-closed envelope bounds them exactly.
+            writes: dedupeNormalizedLinks([
+              ...schedulingWrites,
+              selectorMintedResultWrite,
+            ]),
+            directOutputs: outputCells,
+          },
+        }
+        : {}),
+      ...(materializerBuiltinId !== undefined && materializerWriteEnvelopes
+        ? {
+          serverBuiltinMaterializer: {
+            version: 1 as const,
+            id: materializerBuiltinId,
+            piece: resultCell.getAsNormalizedFullLink(),
+            reads: inputCells,
+            // Declared surface + direct output; the envelope-shaped container
+            // writes ride in `materializerWriteEnvelopes` below.
+            writes: schedulingWrites,
+            directOutputs: outputCells,
+            materializerWriteEnvelopes,
+          },
+          // Registering the envelope also indexes the node as a materializer,
+          // so the scheduler runs it dirty-at-idle (the client's policy) — no
+          // executor change needed here.
+          materializerWriteEnvelopes,
+        }
+        : {}),
       ...(module.materializerWriteEnvelopes
         ? { materializerWriteEnvelopes: module.materializerWriteEnvelopes }
         : {}),
@@ -4911,6 +5338,7 @@ export class Runner {
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
+    directRootOutputRedirect(outputs, resultCell);
 
     sendValueToBinding(
       tx,
@@ -4965,78 +5393,52 @@ export class Runner {
       { derivedInternalCells: pattern.derivedInternalCells },
     );
 
-    // If output bindings is a link to a non-redirect cell,
-    // use that instead of creating a new cell.
-    let sendToBindings: boolean;
-    let childResultCell: Cell<any>;
-    if (isSigilLink(outputs) && !isWriteRedirectLink(outputs)) {
-      childResultCell = this.runtime.getCellFromLink(
-        parseLink(outputs, resultCell),
-        patternImpl.resultSchema,
-        tx,
-      );
-      sendToBindings = false;
-    } else {
-      const resultScope = patternDefaultScope(patternImpl) ??
-        module.defaultScope;
-      const targetSpace = module.targetSpace ?? resultCell.space;
-      // CT-1623: identify the result cell by the (fully resolved) output spot
-      // reserved for this node — a stable, position-derived, program-independent
-      // identity — rather than hashing the pattern object (which drags in the
-      // session-varying `program` and forces `materializeRuntimeProgram`). We
-      // still mint a NEW cell and point the binding at it (`sendToBindings`
-      // below); we only borrow the resolved output link's coordinates as the
-      // cause. A pattern node always writes through a write redirect, so the
-      // absence of one is a bug (the legacy non-redirect variants are removed).
-      //
-      // Bind the output bindings first (as `instantiateRawNode` does), so the
-      // `argument`/`internal`/`result` pseudo-cell aliases resolve to their
-      // DISTINCT concrete cells. Resolving the raw bindings would let pseudo
-      // cells at the same path (e.g. `internal.x` vs `result.x`) collapse onto
-      // the base result cell and collide on one shared child cell.
-      // `bindPatterns: false` — output bindings never carry sub-patterns to
-      // instantiate, so skip that work; we only need the pseudo-cell aliases
-      // resolved to their concrete links.
-      const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
-        this.runtime.cfc,
-        outputBindings,
-        argumentCellLink,
-        resultCell,
-      );
-      const outputRedirect = firstResolvedOutputRedirect(
-        this.runtime,
-        tx,
-        mappedOutputBindings,
-        resultCell,
-      );
-      if (!outputRedirect) {
-        throw new Error(
-          "instantiatePatternNode: result cell requires a write-redirect " +
-            "output binding to anchor a reload-stable identity",
-        );
-      }
-      const baseResultCell = this.runtime.getCell(
-        targetSpace,
-        {
-          resultFor: {
-            space: outputRedirect.space,
-            id: outputRedirect.id,
-            path: [...outputRedirect.path],
-          },
+    const resultScope = patternDefaultScope(patternImpl) ?? module.defaultScope;
+    const targetSpace = module.targetSpace ?? resultCell.space;
+    // CT-1623: identify the result cell by the fully resolved direct output
+    // spot reserved for this node — a stable, position-derived,
+    // program-independent identity — rather than hashing the pattern object
+    // (which drags in the session-varying `program` and forces
+    // `materializeRuntimeProgram`). We still mint a NEW cell and point the root
+    // binding at it below; we only borrow the resolved output coordinates as
+    // the cause.
+    //
+    // Bind the output first (as `instantiateRawNode` does), so the
+    // `argument`/`internal`/`result` pseudo-cell aliases resolve to their
+    // DISTINCT concrete cells. Resolving the raw binding would let pseudo
+    // cells at the same path collapse onto the base result cell.
+    const mappedOutputBinding = unwrapOneLevelAndBindtoDoc(
+      this.runtime.cfc,
+      outputBindings,
+      argumentCellLink,
+      resultCell,
+    );
+    const outputRedirect = resolveDirectRootOutputRedirect(
+      this.runtime,
+      tx,
+      mappedOutputBinding,
+      resultCell,
+    );
+    const baseResultCell = this.runtime.getCell(
+      targetSpace,
+      {
+        resultFor: {
+          space: outputRedirect.space,
+          id: outputRedirect.id,
+          path: [...outputRedirect.path],
         },
-        patternImpl.resultSchema,
-        tx,
-      );
+      },
+      patternImpl.resultSchema,
+      tx,
+    );
 
-      childResultCell = baseResultCell;
-      if (resultScope !== undefined && resultScope !== "space") {
-        let resultCellLink = baseResultCell.getAsNormalizedFullLink();
-        resultCellLink = { ...resultCellLink, scope: resultScope };
-        // The result cell's scope isn't "space", so we may have just created
-        // this cell. If so, create the corresponding argument/internal cells.
-        childResultCell = createCell(this.runtime, resultCellLink, tx);
-      }
-      sendToBindings = true;
+    let childResultCell = baseResultCell;
+    if (resultScope !== undefined && resultScope !== "space") {
+      let resultCellLink = baseResultCell.getAsNormalizedFullLink();
+      resultCellLink = { ...resultCellLink, scope: resultScope };
+      // The result cell's scope isn't "space", so we may have just created
+      // this cell. If so, create the corresponding argument/internal cells.
+      childResultCell = createCell(this.runtime, resultCellLink, tx);
     }
 
     const sourceKey = getTxDebugActionId(tx) ?? "none";
@@ -5044,7 +5446,7 @@ export class Runner {
       `[PATTERN-NODE] source=${sourceKey}`,
       `result=${childResultCell.getAsNormalizedFullLink().id}`,
       `pattern=${describePatternOrModule(patternImpl)}`,
-      `sendToBindings=${sendToBindings}`,
+      "sendToBindings=true",
     ]);
 
     if (childResultCell.space !== parentResultCell.space) {
@@ -5073,16 +5475,14 @@ export class Runner {
       ),
     });
 
-    if (sendToBindings) {
-      sendValueToBinding(
-        tx,
-        parentResultCell,
-        argumentCellLink,
-        outputs,
-        childResultCell.getAsLink(),
-        { derivedInternalCells: pattern.derivedInternalCells },
-      );
-    }
+    sendValueToBinding(
+      tx,
+      parentResultCell,
+      argumentCellLink,
+      outputs,
+      childResultCell.getAsLink(),
+      { derivedInternalCells: pattern.derivedInternalCells },
+    );
 
     // TODO(seefeld): Make sure to not cancel after a pattern is elevated to a
     // piece, e.g. via navigateTo. Nothing is cancelling right now, so leaving

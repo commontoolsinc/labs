@@ -41,9 +41,32 @@ export interface CapabilityParamSummary {
   readonly readPaths: readonly (readonly string[])[];
   readonly fullShapePaths?: readonly (readonly string[])[];
   readonly writePaths: readonly (readonly string[])[];
+  /**
+   * Write ENVELOPES for a materializer parameter: the static, param-anchored
+   * prefixes of writes that reach a cell through a bounded dynamic `.key(index)`
+   * descent (`c.key(i).key("backlinks").push(...)`). Unlike `writePaths`, these
+   * are not exact addresses — each is the tightest static path enclosing every
+   * possible target of the dynamically-indexed write, matching the runtime's
+   * prefix-coverage envelope semantics (`materializerWriteInputPaths`). A write
+   * whose dynamism the analysis cannot bound to such a prefix (`elementById`, a
+   * dynamic method name, an opaque derivation) sets `wildcardUnbounded` instead
+   * and never lands here, so the union `writePaths ∪ writeEnvelopePaths` is a
+   * complete write bound exactly when `!wildcardUnbounded`.
+   */
+  readonly writeEnvelopePaths?: readonly (readonly string[])[];
   readonly opaquePaths?: readonly (readonly string[])[];
   readonly passthrough: boolean;
   readonly wildcard: boolean;
+  /**
+   * A dynamic access on this parameter that the analysis could NOT bound to a
+   * param-anchored write envelope — `elementById` (a separately derived
+   * entity), a dynamic method name, an opaque map/flatMap derivation, or a
+   * fully dynamic root. Any such access could hide a write outside
+   * `writePaths ∪ writeEnvelopePaths`, so a materializer certificate must fail
+   * closed on it. A `.key(index)` descent does NOT set this (its target stays
+   * enclosed by the descent's static prefix); it only sets `wildcard`.
+   */
+  readonly wildcardUnbounded?: boolean;
   /**
    * Write-exhaustiveness is unverifiable for this parameter — `writePaths`
    * may be incomplete. Set by unrecognized or dynamic method calls on

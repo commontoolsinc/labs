@@ -93,6 +93,16 @@ export class BuildConfig {
     return this.path("packages", "toolshed", "index.ts");
   }
 
+  toolshedExecutorWorkerPath() {
+    return this.path(
+      "packages",
+      "runner",
+      "src",
+      "executor",
+      "executor-worker.ts",
+    );
+  }
+
   bgPieceServiceEntryPath() {
     return this.path("packages", "background-piece-service", "src", "main.ts");
   }
@@ -216,29 +226,7 @@ async function buildToolshed(config: BuildConfig): Promise<void> {
     env: {
       OTEL_DENO: "true",
     },
-    args: [
-      ...lockedCompileArgs(config),
-      // Run `--no-check` here, as the `--include`'d
-      // `es2023.d.ts` file will attempt to be checked
-      // as a non-static asset. Checking should be done
-      // prior to building.
-      "--no-check",
-      "--unstable-otel",
-      "--output",
-      config.distPath("toolshed"),
-      "--include",
-      config.toolshedShellFrontendPath(),
-      "--include",
-      config.toolshedShellFrontendPathDev(),
-      "--include",
-      config.toolshedEnvPath(),
-      "--include",
-      config.staticAssetsPath(),
-      "--include",
-      config.patternsPath(),
-      ...config.toolshedFlags,
-      config.toolshedEntryPath(),
-    ],
+    args: toolshedCompileArgs(config),
     cwd: config.toolshedProjectPath(),
     stdout: "inherit",
     stderr: "inherit",
@@ -247,6 +235,37 @@ async function buildToolshed(config: BuildConfig): Promise<void> {
     throw new Error("Failed to build toolshed binary");
   }
   console.log("Toolshed binary built successfully");
+}
+
+export function toolshedCompileArgs(config: BuildConfig): string[] {
+  return [
+    ...lockedCompileArgs(config),
+    // Run `--no-check` here, as the `--include`'d
+    // `es2023.d.ts` file will attempt to be checked
+    // as a non-static asset. Checking should be done
+    // prior to building.
+    "--no-check",
+    "--unstable-otel",
+    "--output",
+    config.distPath("toolshed"),
+    "--include",
+    config.toolshedShellFrontendPath(),
+    "--include",
+    config.toolshedShellFrontendPathDev(),
+    "--include",
+    config.toolshedEnvPath(),
+    "--include",
+    config.staticAssetsPath(),
+    "--include",
+    config.patternsPath(),
+    // Worker modules are not followed by `deno compile` static analysis.
+    // Include the server-primary executor realm explicitly so the first
+    // claimed lane can boot in the shipped toolshed binary.
+    "--include",
+    config.toolshedExecutorWorkerPath(),
+    ...config.toolshedFlags,
+    config.toolshedEntryPath(),
+  ];
 }
 
 async function buildBgPieceService(config: BuildConfig): Promise<void> {

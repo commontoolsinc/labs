@@ -28,7 +28,7 @@ const liftWrapped = lift((input: Writable<{
     asCell: ["readonly"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const patternFullShape = pattern((input: Writable<{
     foo: string;
     bar: string;
@@ -91,7 +91,7 @@ const liftPassthrough = lift((input: Writable<{
     },
     required: ["foo", "bar"],
     asCell: ["cell"]
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const helper = __cfHardenFn((value: Writable<{
     foo: string;
     bar: string;

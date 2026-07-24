@@ -1,13 +1,28 @@
 import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
 import {
   applyPatch,
   patchOpChangesParentKeySet,
   touchedPointerPaths,
 } from "./patch.ts";
-import { isPrefixPath, parentPath, pathsOverlap } from "./path.ts";
 import {
+  isPrefixPath,
+  parentPath,
+  parsePointer,
+  pathsOverlap,
+} from "./path.ts";
+import { scopeNamingLinkWriteViolation } from "./scope-naming-link.ts";
+import {
+  ANYONE_USER,
+  type Capability,
+  hasConcreteOwner,
+  isACL,
+} from "../acl.ts";
+import {
+  type AcceptedCommitSeq,
+  type ActionExecutionProvenance,
   type BranchName,
   type CellScope,
   type ClientCommit,
@@ -17,18 +32,40 @@ import {
   encodeMemoryBoundary,
   type EntityDocument,
   type EntityId,
+  type ExecutionClaim,
+  type ExecutionClaimAssertion,
+  type ExecutionLease,
+  type InputBasisSeq,
   isEntityDocument,
+  type LegacyBackgroundExclusion,
+  type LegacyBackgroundExclusionStatus,
   type Operation,
+  parseSessionExecutionContextKey,
   type PatchOp,
+  principalOfUserContextKey,
+  type ProvenanceInputBasisComponent,
   type Reference,
   type SchedulerActionSnapshotCursor,
   type SchedulerExecutionContextKey,
+  sessionExecutionContextKey,
   type SessionId,
   type SqliteOperation,
   tableDeclaresRowLabel,
+  toAcceptedCommitSeq,
+  toInputBasisSeq,
+  userExecutionContextKey,
 } from "../v2.ts";
 
 export type { SchedulerExecutionContextKey } from "../v2.ts";
+// Canonical context-key helpers live in the dependency-light `../v2.ts`
+// (browser-safe for runner clients); this module remains an amendment-18
+// import site for engine/server/executor code.
+export {
+  parseSessionExecutionContextKey,
+  principalOfUserContextKey,
+  sessionExecutionContextKey,
+  userExecutionContextKey,
+} from "../v2.ts";
 
 const DEFAULT_SCOPE: CellScope = "space";
 const DEFAULT_SCOPE_KEY = "space" as const;
@@ -53,20 +90,14 @@ const normalizeScope = (scope: CellScope | undefined): CellScope =>
 
 const encodeScopeKeyPart = (value: string): string => encodeURIComponent(value);
 
-const resolvePrincipalSessionKey = (
-  principal: string,
-  sessionId: SessionId,
-): string =>
-  `session:${encodeScopeKeyPart(principal)}:${encodeScopeKeyPart(sessionId)}`;
-
 export const resolveCommitSessionKey = (
   sessionId: SessionId,
   principal?: string,
 ): string =>
-  principal ? resolvePrincipalSessionKey(principal, sessionId) : sessionId;
+  principal ? sessionExecutionContextKey(principal, sessionId) : sessionId;
 
 // Principal segment of a stored commit/observation session key
-// (`session:<principal>:<sessionId>` per resolvePrincipalSessionKey).
+// (`session:<principal>:<sessionId>` per sessionExecutionContextKey).
 // Principal-less sessions store the bare session id — no principal. The
 // segments are encodeURIComponent-encoded, so splitting on ":" is exact.
 export const principalOfSessionKey = (key: string): string | undefined => {
@@ -94,7 +125,7 @@ export const resolveScopeKey = (
           "user scoped memory operations require a principal",
         );
       }
-      return `user:${encodeScopeKeyPart(options.principal)}`;
+      return userExecutionContextKey(options.principal);
     case "session":
       if (!options.principal) {
         throw new ProtocolError(
@@ -106,7 +137,7 @@ export const resolveScopeKey = (
           "session scoped memory operations require a session id",
         );
       }
-      return resolvePrincipalSessionKey(options.principal, options.sessionId);
+      return sessionExecutionContextKey(options.principal, options.sessionId);
   }
 };
 
@@ -132,6 +163,43 @@ const PRAGMAS = `
 
 const NEW_DB_PRAGMAS = `
   PRAGMA page_size = 32768;
+`;
+
+const SCHEDULER_ACTION_CAUSE_SCHEMA = `
+CREATE TABLE IF NOT EXISTS scheduler_action_cause (
+  branch                 TEXT    NOT NULL DEFAULT '',
+  owner_space            TEXT    NOT NULL DEFAULT '',
+  piece_id               TEXT    NOT NULL,
+  process_generation     INTEGER NOT NULL,
+  action_id              TEXT    NOT NULL,
+  execution_context_key  TEXT    NOT NULL,
+  source_seq             INTEGER NOT NULL,
+  PRIMARY KEY (
+    branch,
+    owner_space,
+    piece_id,
+    process_generation,
+    action_id,
+    execution_context_key,
+    source_seq
+  ),
+  CHECK (source_seq >= 0 AND source_seq <= 9007199254740991),
+  FOREIGN KEY (
+    branch,
+    owner_space,
+    piece_id,
+    process_generation,
+    action_id,
+    execution_context_key
+  ) REFERENCES scheduler_action_state (
+    branch,
+    owner_space,
+    piece_id,
+    process_generation,
+    action_id,
+    execution_context_key
+  ) ON DELETE CASCADE
+);
 `;
 
 const SCHEDULER_SCHEMA = `
@@ -197,6 +265,7 @@ CREATE TABLE IF NOT EXISTS scheduler_observation_replay (
   observation_id      INTEGER,
   observed_at_seq     INTEGER NOT NULL,
   payload             JSON    NOT NULL,
+  accepted_payload    JSON,
   created_at          TEXT    NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (branch, session_id, local_seq),
   FOREIGN KEY (observation_id)
@@ -249,6 +318,8 @@ CREATE TABLE IF NOT EXISTS scheduler_write_index (
   FOREIGN KEY (observation_id, execution_context_key)
     REFERENCES scheduler_observation(observation_id, execution_context_key)
 );
+CREATE INDEX IF NOT EXISTS idx_scheduler_write_index_lookup
+  ON scheduler_write_index (branch, write_space, write_id, write_scope_key);
 CREATE INDEX IF NOT EXISTS idx_scheduler_write_index_action
   ON scheduler_write_index (
     branch,
@@ -281,6 +352,8 @@ CREATE TABLE IF NOT EXISTS scheduler_action_state (
   FOREIGN KEY (latest_observation_id, execution_context_key)
     REFERENCES scheduler_observation(observation_id, execution_context_key)
 );
+
+${SCHEDULER_ACTION_CAUSE_SCHEMA}
 
 CREATE TABLE IF NOT EXISTS scheduler_context_floor (
   branch                     TEXT NOT NULL DEFAULT '',
@@ -400,11 +473,51 @@ CREATE TABLE IF NOT EXISTS branch (
 INSERT OR IGNORE INTO branch (name, created_seq, head_seq, status)
 VALUES ('', 0, 0, 'active');
 
+CREATE TABLE IF NOT EXISTS execution_lease (
+  branch                 TEXT    NOT NULL PRIMARY KEY,
+  lease_generation       INTEGER NOT NULL,
+  host_id                 TEXT    NOT NULL,
+  on_behalf_of            TEXT    NOT NULL,
+  state                   TEXT    NOT NULL,
+  expires_at              REAL    NOT NULL,
+  CHECK (lease_generation > 0),
+  CHECK (state IN ('active', 'draining', 'revoked')),
+  FOREIGN KEY (branch) REFERENCES branch(name)
+);
+
+CREATE TABLE IF NOT EXISTS legacy_background_exclusion (
+  branch                 TEXT    NOT NULL PRIMARY KEY,
+  exclusion_generation   INTEGER NOT NULL,
+  holder_id              TEXT    NOT NULL,
+  service_principal      TEXT    NOT NULL,
+  expires_at             REAL    NOT NULL,
+  CHECK (exclusion_generation > 0),
+  FOREIGN KEY (branch) REFERENCES branch(name)
+);
+
 CREATE TABLE IF NOT EXISTS blob_store (
   hash          TEXT    NOT NULL PRIMARY KEY,
   data          BLOB    NOT NULL,
   content_type  TEXT    NOT NULL,
   size          INTEGER NOT NULL
+);
+
+-- C3.2 (2026-07-18): this space's foreign-authorization-epoch table —
+-- per-principal generations plus the space-wide floor (the reserved ''
+-- row). Written ONLY inside applyCommitTransaction, in the same SQLite
+-- transaction as the ACL-document mutation that motivates the bump
+-- (C3A3: the bump must be transactional with the ACL apply — no window,
+-- crash included, where the ACL changed but the epoch did not). Epochs
+-- are monotonic per space: every bump writes 1 + MAX(epoch) over the
+-- whole table, so a floor bump strictly exceeds every per-principal row
+-- and a per-principal bump strictly exceeds the floor. Effective epoch
+-- of a principal = MAX(its row if any, the floor row); a principal with
+-- no row reports floor-only (C3A3's unknown-fails-closed discipline is
+-- the CONSUMER's — C3.7/C3.8 — this table is the authority side).
+CREATE TABLE IF NOT EXISTS authorization_epoch (
+  principal  TEXT    NOT NULL PRIMARY KEY,
+  epoch      INTEGER NOT NULL,
+  CHECK (epoch >= 1)
 );
 
 ${includeSchedulerSchema ? SCHEDULER_SCHEMA : ""}
@@ -503,6 +616,27 @@ SET head_seq = CASE
   ELSE head_seq
 END
 WHERE name = :branch
+`;
+
+const SELECT_AUTHORIZATION_EPOCH_MAX = `
+SELECT COALESCE(MAX(epoch), 0) AS epoch FROM authorization_epoch
+`;
+
+const SELECT_AUTHORIZATION_EPOCH = `
+SELECT epoch FROM authorization_epoch WHERE principal = :principal
+`;
+
+const SELECT_AUTHORIZATION_EPOCHS = `
+SELECT principal, epoch FROM authorization_epoch ORDER BY principal
+`;
+
+/** MAX() guards monotonicity even under a hypothetical out-of-order
+ * writer; the bump path always writes 1 + table MAX, so in practice the
+ * update value strictly exceeds the existing one. */
+const UPSERT_AUTHORIZATION_EPOCH = `
+INSERT INTO authorization_epoch (principal, epoch)
+VALUES (:principal, :epoch)
+ON CONFLICT (principal) DO UPDATE SET epoch = MAX(epoch, :epoch)
 `;
 
 const SELECT_HEAD = `
@@ -643,6 +777,15 @@ WHERE commit_seq = :commit_seq
 ORDER BY op_index ASC
 `;
 
+/** Authoring session of the commit accepted at `seq` — the merge-rebase
+ * detection input for patch writes (C2.10 defect-1 fix, see writeOperation's
+ * patch case). */
+const SELECT_COMMIT_SESSION_BY_SEQ = `
+SELECT session_id
+FROM "commit"
+WHERE seq = :seq
+`;
+
 const SELECT_BRANCH = `
 SELECT name, parent_branch, fork_seq, created_seq, head_seq, status
 FROM branch
@@ -722,6 +865,7 @@ interface PreparedStatements {
   selectBranchHeadSeq: PreparedStatement;
   selectBranchStatus: PreparedStatement;
   selectCommitRevisions: PreparedStatement;
+  selectCommitSessionBySeq: PreparedStatement;
   selectCurrentLocal: PreparedStatement;
   selectExistingCommit: PreparedStatement;
   selectHead: PreparedStatement;
@@ -734,6 +878,10 @@ interface PreparedStatements {
   selectPendingResolution: PreparedStatement;
   selectServerSeq: PreparedStatement;
   selectSetDeleteConflict: PreparedStatement;
+  selectAuthorizationEpoch: PreparedStatement;
+  selectAuthorizationEpochMax: PreparedStatement;
+  selectAuthorizationEpochs: PreparedStatement;
+  upsertAuthorizationEpoch: PreparedStatement;
   upsertHead: PreparedStatement;
   updateBranchHead: PreparedStatement;
   deleteBranch: PreparedStatement;
@@ -788,6 +936,42 @@ export class ProtocolError extends Error {
   }
 }
 
+/**
+ * Stable rejection for a claimed executor transaction whose exact lease or
+ * claim authority is no longer current. Retrying the same attempt cannot
+ * restore that incarnation; a later run must obtain fresh authority.
+ */
+export class ExecutionLeaseFenceError extends Error {
+  /**
+   * Which fence check refused the commit. Stable, machine-readable — surfaced
+   * per-cause in the host's execution stats so a fenced commit in a measured
+   * run names itself (a claim-shrink race reads very differently from a lapsed
+   * lease heartbeat, and only the cause tells them apart).
+   */
+  readonly fenceCause: string;
+
+  constructor(fenceCause: string, message: string) {
+    super(message);
+    this.name = "ExecutionLeaseFenceError";
+    this.fenceCause = fenceCause;
+  }
+}
+
+/**
+ * Stable, terminal rejection from the claimed whole-action transaction
+ * firewall. The host may use `diagnosticCode` to report an unserved attempt;
+ * it must never retry only a subset of the rejected transaction.
+ */
+export class ExecutionActionFirewallError extends Error {
+  readonly diagnosticCode: string;
+
+  constructor(diagnosticCode: string, message: string) {
+    super(`execution action firewall rejected ${diagnosticCode}: ${message}`);
+    this.name = "ExecutionActionFirewallError";
+    this.diagnosticCode = diagnosticCode;
+  }
+}
+
 export interface OpenOptions {
   url: URL;
   snapshotInterval?: number;
@@ -805,19 +989,190 @@ export interface InvocationRecord {
 
 export type AuthorizationRecord = FabricValue;
 
+export interface AcquireExecutionLeaseOptions {
+  space: string;
+  branch: BranchName;
+  hostId: string;
+  onBehalfOf: string;
+  /** Sampled only after the IMMEDIATE transaction owns the SQLite lock. */
+  nowMs: number | (() => number);
+  ttlMs: number;
+  /** Canonical fresh WRITE check, invoked inside the IMMEDIATE transaction. */
+  authorizeWrite?: (engine: Engine) => boolean;
+}
+
+export interface CurrentExecutionLeaseOptions {
+  space: string;
+  branch: BranchName;
+  nowMs: number | (() => number);
+}
+
+export interface RenewExecutionLeaseOptions {
+  lease: ExecutionLease;
+  /** Sampled only after the IMMEDIATE transaction owns the SQLite lock. */
+  nowMs: number | (() => number);
+  ttlMs: number;
+  /** Canonical fresh WRITE check, invoked inside the IMMEDIATE transaction. */
+  authorizeWrite?: (engine: Engine) => boolean;
+}
+
+export interface BeginExecutionLeaseDrainOptions {
+  lease: ExecutionLease;
+  nowMs: number | (() => number);
+  drainTtlMs: number;
+}
+
+export interface RevokeExecutionLeaseOptions {
+  lease: ExecutionLease;
+  nowMs: number | (() => number);
+}
+
+export interface ExpireExecutionLeaseOptions {
+  /** Expiry may revoke only this exact owner/generation. */
+  lease: ExecutionLease;
+  nowMs: number | (() => number);
+}
+
+export interface AcquireLegacyBackgroundExclusionOptions {
+  space: string;
+  branch: BranchName;
+  holderId: string;
+  servicePrincipal: string;
+  /** Sampled only after the IMMEDIATE transaction owns the SQLite lock. */
+  nowMs: number | (() => number);
+  ttlMs: number;
+  drainTtlMs: number;
+  /** Canonical service-principal check inside the IMMEDIATE transaction. */
+  authorizeService?: (engine: Engine) => boolean;
+}
+
+export interface CurrentLegacyBackgroundExclusionOptions {
+  space: string;
+  branch: BranchName;
+  nowMs: number | (() => number);
+}
+
+export interface RenewLegacyBackgroundExclusionOptions {
+  exclusion: LegacyBackgroundExclusion;
+  nowMs: number | (() => number);
+  ttlMs: number;
+  drainTtlMs: number;
+  authorizeService?: (engine: Engine) => boolean;
+}
+
+export interface ReleaseLegacyBackgroundExclusionOptions {
+  exclusion: LegacyBackgroundExclusion;
+  nowMs: number | (() => number);
+  authorizeService?: (engine: Engine) => boolean;
+}
+
+/** Host-only authority checked against the durable row inside applyCommit. */
+export interface ExecutionLeaseFence {
+  lease: ExecutionLease;
+  /** Sampled after BEGIN IMMEDIATE and the fresh authority callback. */
+  nowMs: number | (() => number);
+  /**
+   * Canonical current server-execution and WRITE check. It is invoked after
+   * exact replay detection but before first-application mutation, inside the
+   * same IMMEDIATE transaction.
+   */
+  authorize?: (engine: Engine) => boolean;
+  /**
+   * Host-supplied lane-grant currency check for scoped (non-space) claims
+   * (C1.3). Lane generations are host-internal — never a wire field on
+   * claims — so the host re-samples its live lane grant against the
+   * generation bound at claim issuance, inside the same IMMEDIATE
+   * transaction as the fence. Returning false fences the commit with the
+   * named cause `lane-generation-stale`. Space-rank claims never consult it.
+   */
+  laneAuthority?: (claim: ExecutionClaim) => boolean;
+  /**
+   * Transaction-time WRITE resolution for a scoped lane's ACTING principal
+   * (C1.4, review amendment 2), consulted inside the same IMMEDIATE
+   * transaction as the sponsor `authorize` checks — a mid-run ACL
+   * revocation of the lane principal fences the in-flight commit instead
+   * of landing rows under her scope. Returning false fences with the named
+   * cause `lane-write-authority`. Space-rank claims never consult it.
+   */
+  authorizeActingPrincipal?: (engine: Engine, principal: string) => boolean;
+}
+
 export interface ApplyCommitOptions {
+  /** Actual request/replay identity for this protocol session. */
   sessionId: SessionId;
+  /** Host-derived session used only to resolve PerSession scope. */
+  scopeSessionId?: SessionId;
   space?: string;
   principal?: string;
   invocation?: InvocationRecord;
   invocationPayload?: FabricValue;
   authorization?: AuthorizationRecord;
   commit: ClientCommit;
+  /**
+   * Host-only exact live claims for scheduler observations in this commit,
+   * keyed by the observation localSeq. This never appears in ClientCommit or
+   * crosses the memory protocol boundary.
+   */
+  executionClaims?: ReadonlyMap<number, ExecutionClaim>;
+  /**
+   * Host-only durable authority for executor writes. Exact transaction
+   * replays return before this fence; first applications validate it inside
+   * the same immediate transaction as the data and scheduler writes.
+   */
+  executionLeaseFence?: ExecutionLeaseFence;
   /** Map of cell-db id -> attach alias for `sqlite` ops in this commit. The
    *  server attaches these BEFORE applyCommit (ATTACH can't run in a txn); the
    *  apply loop executes the SQL inside the commit's transaction against the
    *  alias. (docs/specs/sqlite-builtin/plans/atomic-writes.md) */
   sqliteAttachments?: ReadonlyMap<string, string>;
+  /**
+   * Acting-context seam (C1.4, context-lattice §3): the single execution
+   * lane this commit acts as. Feeds ONLY scope resolution,
+   * effective-context resolution, and CFC label validation; the sponsor
+   * `principal` stays bound to the lease fence, the replay/pending-read
+   * sessionKey namespace, and provenance.onBehalfOf. Host-only — never
+   * ClientCommit wire input. Optional: the engine derives the lane from
+   * the commit's claim assertions and rejects a mismatching value.
+   */
+  actingContext?: SchedulerExecutionContextKey;
+  /**
+   * C3.5: HOST-VALIDATED foreign basis components per claimed observation
+   * localSeq. The engine cannot verify a foreign seq itself (C3A13), so the
+   * host validates the Worker's asserted `foreignReadStamps` against its own
+   * served-point-read records and passes only components it actually served
+   * over the authenticated C3.1 link, at most one per foreign space
+   * (seq = max consumed stamp, epoch = min — see
+   * `ProvenanceInputBasisComponent`). Host-only — never ClientCommit wire
+   * input. The engine authors provenance's vector from these, restricted to
+   * spaces the observation actually declares foreign reads for; the home
+   * component is engine-authored from the accepted scalar.
+   */
+  foreignInputBases?: ReadonlyMap<
+    number,
+    readonly ProvenanceInputBasisComponent[]
+  >;
+  /**
+   * C3.8 (2026-07-18): the home-apply authorization-epoch fence resolver —
+   * the cross-space TOCTOU close. HOST-supplied, synchronous, consulted
+   * INSIDE this commit transaction (once per foreign provenance component,
+   * BEFORE any row applies) for the CURRENT effective authorization epoch of
+   * a foreign `(space, principal)`. The host reads it live at fence time from
+   * the read space's own `authorization_epoch` table (locally-hosted /
+   * in-process) or the peer epoch cache (co-hosted — C3.10b); `undefined`
+   * means the host cannot resolve the epoch at all (unknown / evicted) and
+   * the fence treats it as STALE (fail closed, C3A3). The engine never opens
+   * a foreign engine itself (decision #1, engines stay passive): a foreign
+   * space is the host's to resolve, so this seam is the only path by which
+   * the apply fence learns a foreign space's current epoch. Absent (or
+   * consulted for a same-space attempt with no foreign components) the fence
+   * is dormant and byte-identical to pre-C3.8. See
+   * `assertForeignAuthorizationEpochsCurrent` for the equality rule and the
+   * C3A7 in-process/co-hosted arm ruling.
+   */
+  resolveForeignAuthorizationEpoch?: (
+    space: string,
+    principal: string,
+  ) => number | undefined;
 }
 
 export interface AppliedRevision {
@@ -839,11 +1194,36 @@ export interface AppliedSchedulerObservationResult {
   schedulerObservationId?: number;
   /** Effective owner-derived context; emitted metadata, never client input. */
   executionContextKey?: SchedulerExecutionContextKey;
+  /** Canonical accepted basis/provenance, emitted only for kept rows. */
+  inputBasisSeq?: InputBasisSeq;
+  executionProvenance?: ActionExecutionProvenance;
   reason?:
     | "stale-confirmed-read"
     | "stale-pending-read"
     | "pending-read-missing";
 }
+
+export type AppliedActionAttempt =
+  | {
+    localSeq: number;
+    claim: ExecutionClaim;
+    provenance: ActionExecutionProvenance;
+    outcome: "committed";
+    acceptedCommitSeq: AcceptedCommitSeq;
+  }
+  | {
+    localSeq: number;
+    claim: ExecutionClaim;
+    provenance: ActionExecutionProvenance;
+    outcome: "no-op" | "failed";
+  }
+  | {
+    localSeq: number;
+    claim: ExecutionClaim;
+    provenance: ActionExecutionProvenance;
+    outcome: "unserved";
+    diagnosticCode: string;
+  };
 
 export interface AppliedCommit {
   seq: number;
@@ -851,8 +1231,272 @@ export interface AppliedCommit {
   revisions: AppliedRevision[];
   schedulerObservationId?: number;
   schedulerObservationResults?: AppliedSchedulerObservationResult[];
+  actionAttempts?: AppliedActionAttempt[];
   schedulerDirtiedReaders?: SchedulerReaderIndexEntry[];
 }
+
+// Replay status is process-local engine metadata, deliberately kept outside
+// AppliedCommit's serialized shape. The canonical response to a replay stays
+// byte-compatible while host-side post-commit feeds can avoid publishing the
+// same accepted transaction twice.
+const replayedAppliedCommits = new WeakSet<AppliedCommit>();
+
+const markAppliedCommitReplay = (commit: AppliedCommit): AppliedCommit => {
+  replayedAppliedCommits.add(commit);
+  return commit;
+};
+
+export const isAppliedCommitReplay = (commit: AppliedCommit): boolean =>
+  replayedAppliedCommits.has(commit);
+
+// ---------------------------------------------------------------------------
+// C3.2 (2026-07-18) — foreign authorization epochs, authority side.
+//
+// The per-(space, principal) generation table plus the space-wide floor
+// live in THIS engine's database (`authorization_epoch`), and the bump is
+// computed and written INSIDE `applyCommitTransaction` — the same SQLite
+// transaction that applies the ACL-document mutation. That placement is
+// the transactionality argument in full: there is no ordering to prove
+// and no crash window to reason about, because a commit either lands with
+// its epoch bumps or rolls back with them (the panel's TOCTOU findings —
+// C3A7 context — make "provably no window" load-bearing for the C3.8
+// fence this table feeds).
+//
+// The bump rule is the C3A3-AMENDED decision #2 — amended because
+// effective capability is NOT a function of ACL entries: a missing ACL
+// grants implicit READ/WRITE to principals enumerable in no list, and an
+// invalid (retracted/malformed/ownerless) ACL fails everyone closed, so
+// bare old∪new under-revokes on exactly the transitions that matter
+// (genesis on a populated implicit-access space revokes principals
+// appearing in neither list). Rule, as implemented by
+// `authorizationEpochBumpPlan` on the AUTHORITY-visible ACL state
+// (default branch, space scope — the same read `#resolveCapability`
+// enforcement uses):
+//
+//   pre-state ≠ post-state kind (ANY validity-state transition:
+//     missing→valid genesis, valid→invalid retraction/malform,
+//     invalid→valid repair, …)          → space-wide FLOOR bump
+//   valid→valid                          → per-principal bump for every
+//     concrete principal in old∪new whose capability changed, plus a
+//     FLOOR bump when the ANYONE ('*') entry changed
+//   equal states, equal effective content → NO bump (equality
+//     revalidation: an identical-content rewrite bumps nothing)
+//   missing→missing / invalid→invalid    → NO bump (the capability
+//     function in those states does not depend on ACL content: missing
+//     grants implicitly by serverSeq — which only ever BROADENS
+//     READ→WRITE, never revokes — and invalid fails everyone closed
+//     except structural owners, who are ACL-independent)
+//   undecidable comparison                → FLOOR bump (fail closed)
+//
+// Consumers (all host-local reads; dated 2026-07-18, none built here):
+// C3.7 claim binding revalidates bound epochs by EQUALITY against
+// `effectiveAuthorizationEpoch`; C3.8's apply fence consults the same
+// lookup; the server answers `foreign-authorization-epoch.query` from
+// `authorizationEpochSnapshot` and publishes the per-commit bumps
+// (`authorizationEpochBumpsOf`) as `foreign-authorization-epoch.bump`.
+// ---------------------------------------------------------------------------
+
+/** Engine doc id of a space's ACL document: the doc whose entity id is
+ *  the space DID itself, as managed by the runner's `ACLManager` /
+ *  `cf acl` (runner `toURI` prefixes bare ids with `of:`). */
+export const aclDocId = (space: string): string => `of:${space}`;
+
+/**
+ * Authority-visible validity state of a space's ACL document. ONE
+ * definition shared by the server's enforcement path (`#aclState`) and
+ * the engine's epoch-bump computation, so the two can never drift — a
+ * bump rule computing validity differently from enforcement would
+ * under-revoke, the exact C3A3 class.
+ */
+export type AclValidityState =
+  | { kind: "missing" }
+  | { kind: "invalid" }
+  | { kind: "valid"; acl: Record<string, Capability | undefined> };
+
+export const aclValidityOfEntityState = (
+  state: EntityState | null,
+): AclValidityState => {
+  if (state === null) return { kind: "missing" };
+  // A retracted ACL is not equivalent to a never-created ACL: treating the
+  // tombstone as public would turn deletion into an authorization bypass.
+  if (state.document === null) return { kind: "invalid" };
+  const acl = state.document.value;
+  if (!isACL(acl)) return { kind: "invalid" };
+  const byPrincipal = acl as Record<string, Capability | undefined>;
+  if (!hasConcreteOwner(byPrincipal)) return { kind: "invalid" };
+  return { kind: "valid", acl: byPrincipal };
+};
+
+/** One applied epoch bump — the space is implicit (this engine's). The
+ *  shape mirrors the `foreign-authorization-epoch.bump` wire payload so
+ *  the server publishes exactly what the transaction recorded. */
+export interface AuthorizationEpochBump {
+  target: { kind: "floor" } | { kind: "principal"; principal: string };
+  epoch: number;
+}
+
+/** The reserved floor row's key. Never a valid principal: DIDs are
+ *  non-empty, and the ANYONE wildcard ('*') deliberately bumps the FLOOR
+ *  rather than a row of its own (a wildcard change affects principals no
+ *  row enumerates). */
+const AUTHORIZATION_EPOCH_FLOOR_PRINCIPAL = "";
+
+/**
+ * Epoch bumps applied by a first-application commit, keyed off the exact
+ * AppliedCommit object — the same process-local pattern as replay status
+ * (deliberately outside AppliedCommit's serialized shape: clients never
+ * see epochs on a transact response, and a REPLAY returns a fresh object
+ * that is never in this map, so the host's publication step is
+ * idempotent by construction — fixture "replay does not double-bump").
+ */
+const appliedCommitAuthorizationEpochBumps = new WeakMap<
+  AppliedCommit,
+  readonly AuthorizationEpochBump[]
+>();
+
+/** Bumps the given first-application commit applied, in bump order
+ *  (floor first, then principals lexicographically); undefined for
+ *  replays and for commits that bumped nothing. */
+export const authorizationEpochBumpsOf = (
+  commit: AppliedCommit,
+): readonly AuthorizationEpochBump[] | undefined =>
+  appliedCommitAuthorizationEpochBumps.get(commit);
+
+export interface AuthorizationEpochSnapshot {
+  /** Space-wide epoch floor; 0 at genesis (never bumped). */
+  floor: number;
+  /** Per-principal rows, principal-sorted. Never includes the floor row.
+   *  A principal absent here has effective epoch = floor. */
+  epochs: readonly { principal: string; epoch: number }[];
+}
+
+/** The durable table, as the epoch query answers it (floor + rows). */
+export const authorizationEpochSnapshot = (
+  engine: Engine,
+): AuthorizationEpochSnapshot => {
+  let floor = 0;
+  const epochs: { principal: string; epoch: number }[] = [];
+  for (
+    const row of engine.statements.selectAuthorizationEpochs.all() as {
+      principal: string;
+      epoch: number;
+    }[]
+  ) {
+    if (row.principal === AUTHORIZATION_EPOCH_FLOOR_PRINCIPAL) {
+      floor = row.epoch;
+    } else {
+      epochs.push({ principal: row.principal, epoch: row.epoch });
+    }
+  }
+  return { floor, epochs };
+};
+
+/**
+ * Effective authorization epoch of a principal on this space:
+ * max(the principal's row if any, the space-wide floor). 0 means "never
+ * bumped since this table existed" — consumers binding epochs (C3.7)
+ * compare by EQUALITY, and treat a (space, principal) they cannot
+ * resolve at all as unknown → fail closed (C3A3).
+ */
+export const effectiveAuthorizationEpoch = (
+  engine: Engine,
+  principal: string,
+): number => {
+  const row = engine.statements.selectAuthorizationEpoch.get({
+    principal,
+  }) as { epoch: number } | undefined;
+  const floor = engine.statements.selectAuthorizationEpoch.get({
+    principal: AUTHORIZATION_EPOCH_FLOOR_PRINCIPAL,
+  }) as { epoch: number } | undefined;
+  return Math.max(row?.epoch ?? 0, floor?.epoch ?? 0);
+};
+
+/** The bump targets an ACL transition demands (pure decision table —
+ *  see the section comment above for the rule and its C3A3 rationale). */
+const authorizationEpochBumpPlan = (
+  pre: AclValidityState,
+  post: AclValidityState,
+): { floor: boolean; principals: readonly string[] } => {
+  if (pre.kind !== post.kind) {
+    return { floor: true, principals: [] };
+  }
+  if (pre.kind !== "valid" || post.kind !== "valid") {
+    return { floor: false, principals: [] };
+  }
+  const changed = new Set<string>();
+  let floor = false;
+  for (
+    const principal of new Set([
+      ...Object.keys(pre.acl),
+      ...Object.keys(post.acl),
+    ])
+  ) {
+    if (pre.acl[principal] === post.acl[principal]) continue;
+    if (principal === ANYONE_USER) {
+      // A wildcard change grants/revokes for principals enumerable in no
+      // list — only the floor can cover them.
+      floor = true;
+    } else {
+      changed.add(principal);
+    }
+  }
+  return { floor, principals: [...changed].sort() };
+};
+
+/**
+ * Compute and apply the epoch bumps for an ACL-document transition,
+ * INSIDE the calling commit's transaction. Every bump in one apply
+ * shares the value 1 + MAX(epoch over the whole table), so a floor bump
+ * strictly exceeds every per-principal row (every principal's effective
+ * epoch moves) and a per-principal bump strictly exceeds the floor (the
+ * principal's effective epoch moves) — the monotonicity that makes
+ * equality revalidation sound. Returns undefined when nothing bumps
+ * (equality revalidation / no authority-visible change).
+ */
+const applyAuthorizationEpochBumps = (
+  engine: Engine,
+  pre: EntityState | null,
+  post: EntityState | null,
+): readonly AuthorizationEpochBump[] | undefined => {
+  let plan: { floor: boolean; principals: readonly string[] };
+  try {
+    plan = authorizationEpochBumpPlan(
+      aclValidityOfEntityState(pre),
+      aclValidityOfEntityState(post),
+    );
+  } catch {
+    // An undecidable comparison fails closed to a floor bump (C3A3):
+    // over-revocation is recoverable, under-revocation is a hole.
+    plan = { floor: true, principals: [] };
+  }
+  if (!plan.floor && plan.principals.length === 0) {
+    return undefined;
+  }
+  const epoch = 1 +
+    (engine.statements.selectAuthorizationEpochMax.get() as { epoch: number })
+      .epoch;
+  const bumps: AuthorizationEpochBump[] = [];
+  if (plan.floor) {
+    engine.statements.upsertAuthorizationEpoch.run({
+      principal: AUTHORIZATION_EPOCH_FLOOR_PRINCIPAL,
+      epoch,
+    });
+    bumps.push({ target: { kind: "floor" }, epoch });
+  }
+  for (const principal of plan.principals) {
+    engine.statements.upsertAuthorizationEpoch.run({ principal, epoch });
+    bumps.push({ target: { kind: "principal", principal }, epoch });
+  }
+  return bumps;
+};
+
+/** The authority-visible ACL read: default branch, space scope — exactly
+ *  the read `#resolveCapability` enforcement performs, so the bump can
+ *  never diverge from what enforcement observes. */
+const readAuthorityAclState = (
+  engine: Engine,
+  space: string,
+): EntityState | null => readState(engine, { id: aclDocId(space) });
 
 export type SchedulerActionKind =
   | "computation"
@@ -876,7 +1520,16 @@ export interface ResolvedSchedulerObservationAddress
   scopeKey: string;
 }
 
-type SchedulerWriteAddress = SchedulerObservationAddress & {
+/** C3.5: one Worker-asserted foreign read stamp — see
+ * {@link SchedulerActionObservation.foreignReadStamps}. */
+export interface ForeignReadStampAssertion {
+  space: string;
+  id: EntityId;
+  /** The read space's stamped covering seq (its own domain, positive). */
+  seq: number;
+}
+
+export type SchedulerWriteAddress = SchedulerObservationAddress & {
   scopeKey?: string;
 };
 
@@ -904,6 +1557,29 @@ export interface SchedulerActionObservation {
   runtimeFingerprint: string;
   completeActionScopeSummary?: CompleteActionScopeSummary;
   observedAtSeq: number;
+  /** Host-derived maximum accepted revision sequence in the commit read set. */
+  inputBasisSeq?: InputBasisSeq;
+  /** Transient exact-claim assertion; validated by the bound executor host. */
+  executionClaimAssertion?: ExecutionClaimAssertion;
+  /**
+   * C3.5: transient Worker assertion of the stamped foreign point reads the
+   * attempt consumed from its read-only mount — {space, id, seq} per read,
+   * in the READ space's seq domain. Like `executionClaimAssertion` it is a
+   * request field, never persisted: the HOST validates each stamp against
+   * its own served-point-read records (C3A13 — the engine cannot verify a
+   * foreign seq itself) and passes only host-validated components into the
+   * accept transaction; the engine strips this field from the canonical
+   * accepted observation. An asserted stamp the host never served is
+   * dropped, exactly like the asserted scalar.
+   */
+  foreignReadStamps?: readonly ForeignReadStampAssertion[];
+  /**
+   * Transient report that the host discarded a claimed action as one whole
+   * transaction. Valid only on an observation-only exact claimed attempt and
+   * stripped before scheduler state is persisted.
+   */
+  executionUnservedAttempt?: { diagnosticCode: string };
+  executionProvenance?: ActionExecutionProvenance;
   observedAtLocalSeq?: number;
   transactionKind: SchedulerObservationTransactionKind;
   reads: SchedulerObservationAddress[];
@@ -927,6 +1603,33 @@ const isSchedulerRecord = (
 ): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
+const isSchedulerExecutionContextKey = (
+  value: unknown,
+): value is SchedulerExecutionContextKey =>
+  value === "space" ||
+  (typeof value === "string" &&
+    (principalOfUserContextKey(value) !== undefined ||
+      /^session:[^:]+:[^:]+$/.test(value)));
+
+const isExecutionClaimAssertion = (
+  value: unknown,
+): value is ExecutionClaimAssertion =>
+  isSchedulerRecord(value) &&
+  isSchedulerExecutionContextKey(value.contextKey) &&
+  Number.isSafeInteger(value.leaseGeneration) &&
+  Number(value.leaseGeneration) > 0 &&
+  Number.isSafeInteger(value.claimGeneration) &&
+  Number(value.claimGeneration) > 0;
+
+const isExecutionUnservedAttempt = (
+  value: unknown,
+): value is NonNullable<
+  SchedulerActionObservation["executionUnservedAttempt"]
+> =>
+  isSchedulerRecord(value) &&
+  typeof value.diagnosticCode === "string" &&
+  value.diagnosticCode.length > 0 && value.diagnosticCode.length <= 256;
+
 const isSchedulerObservationAddress = (value: unknown): boolean =>
   isSchedulerRecord(value) &&
   !("scopeKey" in value) &&
@@ -939,6 +1642,16 @@ const isSchedulerObservationAddress = (value: unknown): boolean =>
     value.scope === "user" || value.scope === "session") &&
   Array.isArray(value.path) &&
   value.path.every((part) => typeof part === "string");
+
+const isForeignReadStampAssertion = (value: unknown): boolean =>
+  isSchedulerRecord(value) &&
+  typeof value.space === "string" && value.space.length > 0 &&
+  typeof value.id === "string" && value.id.length > 0 &&
+  Number.isSafeInteger(value.seq) && Number(value.seq) > 0;
+
+const isForeignReadStampAssertionArray = (value: unknown): boolean =>
+  Array.isArray(value) && value.length <= 256 &&
+  value.every(isForeignReadStampAssertion);
 
 const isSchedulerAddressArray = (value: unknown): boolean =>
   Array.isArray(value) && value.every(isSchedulerObservationAddress);
@@ -964,6 +1677,11 @@ export const schedulerObservationFromValue = (
     !isSchedulerRecord(value) ||
     "executionContextKey" in value ||
     "execution_context_key" in value ||
+    // C3.5: the vector basis is host/engine output riding on provenance and
+    // settlements — a wire observation naming it is malformed (reserved),
+    // like the emitted context key above.
+    "inputBasis" in value ||
+    "input_basis" in value ||
     (value.version !== 1 && value.version !== 2) ||
     (value.ownerSpace !== undefined && typeof value.ownerSpace !== "string") ||
     typeof value.branch !== "string" || typeof value.pieceId !== "string" ||
@@ -983,6 +1701,15 @@ export const schedulerObservationFromValue = (
         ))) ||
     !Number.isSafeInteger(value.observedAtSeq) ||
     Number(value.observedAtSeq) < 0 ||
+    (value.inputBasisSeq !== undefined &&
+      (!Number.isSafeInteger(value.inputBasisSeq) ||
+        Number(value.inputBasisSeq) < 0)) ||
+    (value.executionClaimAssertion !== undefined &&
+      !isExecutionClaimAssertion(value.executionClaimAssertion)) ||
+    (value.foreignReadStamps !== undefined &&
+      !isForeignReadStampAssertionArray(value.foreignReadStamps)) ||
+    (value.executionUnservedAttempt !== undefined &&
+      !isExecutionUnservedAttempt(value.executionUnservedAttempt)) ||
     (value.observedAtLocalSeq !== undefined &&
       (!Number.isSafeInteger(value.observedAtLocalSeq) ||
         Number(value.observedAtLocalSeq) < 0)) ||
@@ -1055,6 +1782,41 @@ export interface SchedulerReaderIndexEntry {
   read: ResolvedSchedulerObservationAddress;
 }
 
+export type SchedulerWriteIndexKind =
+  | "current-known"
+  | "declared"
+  | "materializer";
+
+export type SchedulerWriterTarget = SchedulerObservationAddress & {
+  scopeKey?: string;
+};
+
+export interface SchedulerMatchedWrite {
+  kind: SchedulerWriteIndexKind;
+  write: ResolvedSchedulerObservationAddress;
+}
+
+export interface SchedulerWriterCandidate {
+  branch: BranchName;
+  ownerSpace?: string;
+  pieceId: string;
+  processGeneration: number;
+  actionId: string;
+  executionContextKey: SchedulerExecutionContextKey;
+  observationId: number;
+  commitSeq: number | null;
+  observedAtSeq: number;
+  actionKind: SchedulerActionKind;
+  implementationFingerprint: string;
+  runtimeFingerprint: string;
+  status: SchedulerActionObservation["status"];
+  errorFingerprint?: string;
+  directDirtySeq?: number;
+  staleSeq?: number;
+  unknownReason?: string;
+  matchedWrites: SchedulerMatchedWrite[];
+}
+
 export interface SchedulerActionState {
   branch: BranchName;
   ownerSpace?: string;
@@ -1066,6 +1828,23 @@ export interface SchedulerActionState {
   directDirtySeq: number | null;
   staleSeq: number | null;
   unknownReason: string | null;
+}
+
+/**
+ * Host-only wake query over the durable scheduler projections.
+ *
+ * `demandedSchedulerPieceIds` contains canonical scheduler piece identities
+ * (for example `space:of:...`), not raw execution-demand roots. The host owns
+ * that normalization because raw demand remains a protocol granularity hint.
+ */
+export interface SchedulerStaleReadersForTargetsOptions {
+  branch?: BranchName;
+  ownerSpace: string;
+  targets: readonly SchedulerWriteAddress[];
+  demandedSchedulerPieceIds: readonly string[];
+  applicableExecutionContextKeys?: readonly SchedulerExecutionContextKey[];
+  /** Inclusive lower bound for direct-dirty and transitive-stale markers. */
+  dirtySeq: number;
 }
 
 export interface ReadOptions {
@@ -1152,6 +1931,23 @@ type BranchRow = {
   status: string;
 };
 
+type ExecutionLeaseRow = {
+  branch: string;
+  lease_generation: number;
+  host_id: string;
+  on_behalf_of: string;
+  state: ExecutionLease["state"];
+  expires_at: number;
+};
+
+type LegacyBackgroundExclusionRow = {
+  branch: string;
+  exclusion_generation: number;
+  holder_id: string;
+  service_principal: string;
+  expires_at: number;
+};
+
 export const DEFAULT_SNAPSHOT_INTERVAL = 10;
 export const DEFAULT_SNAPSHOT_RETENTION = 2;
 
@@ -1170,6 +1966,7 @@ const prepareStatements = (database: Database): PreparedStatements => ({
   selectBranchHeadSeq: database.prepare(SELECT_BRANCH_HEAD_SEQ),
   selectBranchStatus: database.prepare(SELECT_BRANCH_STATUS),
   selectCommitRevisions: database.prepare(SELECT_COMMIT_REVISIONS),
+  selectCommitSessionBySeq: database.prepare(SELECT_COMMIT_SESSION_BY_SEQ),
   selectCurrentLocal: database.prepare(SELECT_CURRENT_LOCAL),
   selectExistingCommit: database.prepare(SELECT_EXISTING_COMMIT),
   selectHead: database.prepare(SELECT_HEAD),
@@ -1182,6 +1979,12 @@ const prepareStatements = (database: Database): PreparedStatements => ({
   selectPendingResolution: database.prepare(SELECT_PENDING_RESOLUTION),
   selectServerSeq: database.prepare(SELECT_SERVER_SEQ),
   selectSetDeleteConflict: database.prepare(SELECT_SET_DELETE_CONFLICT),
+  selectAuthorizationEpoch: database.prepare(SELECT_AUTHORIZATION_EPOCH),
+  selectAuthorizationEpochMax: database.prepare(
+    SELECT_AUTHORIZATION_EPOCH_MAX,
+  ),
+  selectAuthorizationEpochs: database.prepare(SELECT_AUTHORIZATION_EPOCHS),
+  upsertAuthorizationEpoch: database.prepare(UPSERT_AUTHORIZATION_EPOCH),
   upsertHead: database.prepare(UPSERT_HEAD),
   updateBranchHead: database.prepare(UPDATE_BRANCH_HEAD),
   deleteBranch: database.prepare(DELETE_BRANCH),
@@ -1376,6 +2179,52 @@ FROM snapshot_unscoped_migration;
 DROP TABLE revision_unscoped_migration;
 DROP TABLE head_unscoped_migration;
 DROP TABLE snapshot_unscoped_migration;
+
+COMMIT;
+`);
+};
+
+const migrateExecutionLeaseExpiry = (database: Database): void => {
+  const column = (database.prepare(`PRAGMA table_info("execution_lease")`)
+    .all() as Array<{ name: string; type: string }>).find((row) =>
+      row.name === "expires_at"
+    );
+  if (column?.type.toUpperCase() === "REAL") return;
+  database.exec(`
+BEGIN TRANSACTION;
+
+ALTER TABLE execution_lease RENAME TO execution_lease_expiry_migration;
+
+CREATE TABLE execution_lease (
+  branch                 TEXT NOT NULL PRIMARY KEY,
+  lease_generation       INTEGER NOT NULL,
+  host_id                 TEXT NOT NULL,
+  on_behalf_of            TEXT NOT NULL,
+  state                   TEXT NOT NULL,
+  expires_at              REAL NOT NULL,
+  CHECK (lease_generation > 0),
+  CHECK (state IN ('active', 'draining', 'revoked')),
+  FOREIGN KEY (branch) REFERENCES branch(name)
+);
+
+INSERT INTO execution_lease (
+  branch,
+  lease_generation,
+  host_id,
+  on_behalf_of,
+  state,
+  expires_at
+)
+SELECT
+  branch,
+  lease_generation,
+  host_id,
+  on_behalf_of,
+  state,
+  CAST(expires_at AS REAL)
+FROM execution_lease_expiry_migration;
+
+DROP TABLE execution_lease_expiry_migration;
 
 COMMIT;
 `);
@@ -1611,6 +2460,30 @@ CREATE INDEX idx_scheduler_write_index_action
 `);
 };
 
+const migrateSchedulerWriteLookupIndex = (database: Database): void => {
+  if (
+    hasExactIndex(
+      database,
+      "scheduler_write_index",
+      "idx_scheduler_write_index_lookup",
+      ["branch", "write_space", "write_id", "write_scope_key"],
+      false,
+    )
+  ) {
+    return;
+  }
+
+  // This index is an additive target projection, not part of the scheduler
+  // execution-context table contract. Repair it independently so adding or
+  // correcting the index never triggers the conservative context-table
+  // rebuild used for ownership/schema migrations.
+  database.exec(`
+DROP INDEX IF EXISTS idx_scheduler_write_index_lookup;
+CREATE INDEX idx_scheduler_write_index_lookup
+  ON scheduler_write_index (branch, write_space, write_id, write_scope_key);
+`);
+};
+
 const migrateSchedulerObservationReplayStatus = (database: Database): void => {
   if (hasColumn(database, "scheduler_observation_replay", "status")) {
     return;
@@ -1662,6 +2535,22 @@ DROP TABLE scheduler_observation_replay_legacy;
 
 COMMIT;
 `);
+};
+
+const migrateSchedulerObservationReplayAcceptedPayload = (
+  database: Database,
+): void => {
+  if (hasColumn(database, "scheduler_observation_replay", "accepted_payload")) {
+    return;
+  }
+  database.exec(`
+ALTER TABLE scheduler_observation_replay
+ADD COLUMN accepted_payload JSON;
+`);
+};
+
+const migrateSchedulerActionCauseSchema = (database: Database): void => {
+  database.exec(SCHEDULER_ACTION_CAUSE_SCHEMA);
 };
 
 const SCHEDULER_ACTION_OWNERSHIP_COLUMNS = [
@@ -2105,6 +2994,7 @@ const migrateSchedulerExecutionContextSchema = (database: Database): void => {
   if (!CORE_SCHEDULER_TABLES.every((table) => hasTable(database, table))) {
     database.transaction(() => {
       database.exec(`
+        DROP TABLE IF EXISTS scheduler_action_cause;
         DROP TABLE IF EXISTS scheduler_observation_replay;
         DROP TABLE IF EXISTS scheduler_read_index;
         DROP TABLE IF EXISTS scheduler_write_index;
@@ -2132,6 +3022,7 @@ const migrateSchedulerExecutionContextSchema = (database: Database): void => {
       } => entry.observation !== undefined);
 
     database.exec(`
+      DROP TABLE IF EXISTS scheduler_action_cause;
       DROP INDEX IF EXISTS idx_scheduler_observation_action;
       DROP INDEX IF EXISTS idx_scheduler_observation_id_context;
       DROP INDEX IF EXISTS idx_scheduler_observation_session_local;
@@ -2193,6 +3084,7 @@ export const open = async (
     LIMIT 1
   `).get() !== undefined;
   database.exec(INIT(!schedulerSchemaExists));
+  migrateExecutionLeaseExpiry(database);
   migrateScopedEntityTables(database);
   const completeSchedulerSchema = CORE_SCHEDULER_TABLES.every((table) =>
     hasTable(database, table)
@@ -2206,6 +3098,9 @@ export const open = async (
     migrateSchedulerObservationReplayStatus(database);
   }
   migrateSchedulerExecutionContextSchema(database);
+  migrateSchedulerActionCauseSchema(database);
+  migrateSchedulerObservationReplayAcceptedPayload(database);
+  migrateSchedulerWriteLookupIndex(database);
   migrateSchedulerActionIndexes(database);
   return {
     url,
@@ -2366,6 +3261,873 @@ export const serverSeq = (engine: Engine): number => {
   return (engine.statements.selectServerSeq.get() as { seq: number }).seq;
 };
 
+const SELECT_EXECUTION_LEASE = `
+SELECT
+  branch,
+  lease_generation,
+  host_id,
+  on_behalf_of,
+  state,
+  expires_at
+FROM execution_lease
+WHERE branch = :branch
+`;
+
+const UPSERT_EXECUTION_LEASE = `
+INSERT INTO execution_lease (
+  branch,
+  lease_generation,
+  host_id,
+  on_behalf_of,
+  state,
+  expires_at
+)
+VALUES (
+  :branch,
+  :lease_generation,
+  :host_id,
+  :on_behalf_of,
+  :state,
+  CAST(:expires_at AS REAL)
+)
+ON CONFLICT (branch) DO UPDATE SET
+  lease_generation = excluded.lease_generation,
+  host_id = excluded.host_id,
+  on_behalf_of = excluded.on_behalf_of,
+  state = excluded.state,
+  expires_at = excluded.expires_at
+`;
+
+const UPDATE_EXECUTION_LEASE = `
+UPDATE execution_lease
+SET state = :state,
+    expires_at = CAST(:expires_at AS REAL)
+WHERE branch = :branch
+  AND lease_generation = :lease_generation
+  AND host_id = :host_id
+  AND on_behalf_of = :on_behalf_of
+`;
+
+const SELECT_LEGACY_BACKGROUND_EXCLUSION = `
+SELECT
+  branch,
+  exclusion_generation,
+  holder_id,
+  service_principal,
+  expires_at
+FROM legacy_background_exclusion
+WHERE branch = :branch
+`;
+
+const UPSERT_LEGACY_BACKGROUND_EXCLUSION = `
+INSERT INTO legacy_background_exclusion (
+  branch,
+  exclusion_generation,
+  holder_id,
+  service_principal,
+  expires_at
+)
+VALUES (
+  :branch,
+  :exclusion_generation,
+  :holder_id,
+  :service_principal,
+  CAST(:expires_at AS REAL)
+)
+ON CONFLICT (branch) DO UPDATE SET
+  exclusion_generation = excluded.exclusion_generation,
+  holder_id = excluded.holder_id,
+  service_principal = excluded.service_principal,
+  expires_at = excluded.expires_at
+`;
+
+const UPDATE_LEGACY_BACKGROUND_EXCLUSION = `
+UPDATE legacy_background_exclusion
+SET expires_at = CAST(:expires_at AS REAL)
+WHERE branch = :branch
+  AND exclusion_generation = :exclusion_generation
+  AND holder_id = :holder_id
+  AND service_principal = :service_principal
+`;
+
+const assertLeaseClock = (name: string, value: number): void => {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError(`${name} must be a non-negative integer`);
+  }
+};
+
+const sampleLeaseClock = (
+  name: string,
+  clock: number | (() => number),
+): number => {
+  const value = typeof clock === "function" ? clock() : clock;
+  assertLeaseClock(name, value);
+  return value;
+};
+
+const leaseExpiry = (nowMs: number, ttlMs: number): number => {
+  assertLeaseClock("execution lease server time", nowMs);
+  if (!Number.isSafeInteger(ttlMs) || ttlMs <= 0) {
+    throw new TypeError("execution lease TTL must be a positive integer");
+  }
+  const expiresAt = nowMs + ttlMs;
+  if (!Number.isSafeInteger(expiresAt)) {
+    throw new TypeError("execution lease expiry must be a safe integer");
+  }
+  return expiresAt;
+};
+
+const assertLeaseIdentityPart = (name: string, value: string): void => {
+  if (value.length === 0) {
+    throw new TypeError(`execution lease ${name} must not be empty`);
+  }
+};
+
+const assertLeaseSnapshot = (lease: ExecutionLease): void => {
+  if (lease.version !== 1) {
+    throw new TypeError("unsupported execution lease version");
+  }
+  assertLeaseIdentityPart("space", lease.space);
+  assertLeaseIdentityPart("host id", lease.hostId);
+  assertLeaseIdentityPart("principal", lease.onBehalfOf);
+  if (
+    !Number.isSafeInteger(lease.leaseGeneration) ||
+    lease.leaseGeneration <= 0
+  ) {
+    throw new TypeError(
+      "execution lease generation must be a positive integer",
+    );
+  }
+  assertLeaseClock("execution lease expiry", lease.expiresAt);
+  if (
+    lease.state !== "active" && lease.state !== "draining" &&
+    lease.state !== "revoked"
+  ) {
+    throw new TypeError("unsupported execution lease state");
+  }
+};
+
+const selectExecutionLeaseRow = (
+  engine: Engine,
+  branch: BranchName,
+): ExecutionLeaseRow | null =>
+  (engine.database.prepare(SELECT_EXECUTION_LEASE).get({ branch }) as
+    | ExecutionLeaseRow
+    | undefined) ?? null;
+
+const toExecutionLease = (
+  space: string,
+  row: ExecutionLeaseRow,
+): ExecutionLease => ({
+  version: 1,
+  space,
+  branch: row.branch,
+  leaseGeneration: row.lease_generation,
+  hostId: row.host_id,
+  onBehalfOf: row.on_behalf_of,
+  state: row.state,
+  expiresAt: row.expires_at,
+});
+
+const leaseOwnerMatches = (
+  row: ExecutionLeaseRow,
+  expected: Pick<ExecutionLease, "leaseGeneration" | "hostId" | "onBehalfOf">,
+): boolean =>
+  row.lease_generation === expected.leaseGeneration &&
+  row.host_id === expected.hostId &&
+  row.on_behalf_of === expected.onBehalfOf;
+
+const leaseIsLive = (row: ExecutionLeaseRow, nowMs: number): boolean =>
+  (row.state === "active" || row.state === "draining") &&
+  row.expires_at > nowMs;
+
+const assertLegacyBackgroundExclusion = (
+  exclusion: LegacyBackgroundExclusion,
+): void => {
+  if (exclusion.version !== 1) {
+    throw new TypeError("unsupported legacy background exclusion version");
+  }
+  for (
+    const [name, value] of [
+      ["space", exclusion.space],
+      ["holder id", exclusion.holderId],
+      ["service principal", exclusion.servicePrincipal],
+    ] as const
+  ) {
+    if (value.length === 0) {
+      throw new TypeError(`legacy background exclusion ${name} is required`);
+    }
+  }
+  if (
+    !Number.isSafeInteger(exclusion.exclusionGeneration) ||
+    exclusion.exclusionGeneration <= 0
+  ) {
+    throw new TypeError(
+      "legacy background exclusion generation must be a positive integer",
+    );
+  }
+  assertLeaseClock(
+    "legacy background exclusion expiry",
+    exclusion.expiresAt,
+  );
+};
+
+const backgroundExclusionExpiry = (nowMs: number, ttlMs: number): number => {
+  assertLeaseClock("legacy background exclusion server time", nowMs);
+  if (!Number.isSafeInteger(ttlMs) || ttlMs <= 0) {
+    throw new TypeError(
+      "legacy background exclusion TTL must be a positive integer",
+    );
+  }
+  const expiresAt = nowMs + ttlMs;
+  if (!Number.isSafeInteger(expiresAt)) {
+    throw new TypeError("legacy background exclusion expiry must be safe");
+  }
+  return expiresAt;
+};
+
+const selectLegacyBackgroundExclusionRow = (
+  engine: Engine,
+  branch: BranchName,
+): LegacyBackgroundExclusionRow | null =>
+  (engine.database.prepare(SELECT_LEGACY_BACKGROUND_EXCLUSION).get({
+    branch,
+  }) as LegacyBackgroundExclusionRow | undefined) ?? null;
+
+const toLegacyBackgroundExclusion = (
+  space: string,
+  row: LegacyBackgroundExclusionRow,
+): LegacyBackgroundExclusion => ({
+  version: 1,
+  space,
+  branch: row.branch,
+  exclusionGeneration: row.exclusion_generation,
+  holderId: row.holder_id,
+  servicePrincipal: row.service_principal,
+  expiresAt: row.expires_at,
+});
+
+const backgroundExclusionOwnerMatches = (
+  row: LegacyBackgroundExclusionRow,
+  expected: Pick<
+    LegacyBackgroundExclusion,
+    "exclusionGeneration" | "holderId" | "servicePrincipal"
+  >,
+): boolean =>
+  row.exclusion_generation === expected.exclusionGeneration &&
+  row.holder_id === expected.holderId &&
+  row.service_principal === expected.servicePrincipal;
+
+const backgroundExclusionIsLive = (
+  row: LegacyBackgroundExclusionRow,
+  nowMs: number,
+): boolean => row.expires_at > nowMs;
+
+const drainClientLeaseForBackground = (
+  engine: Engine,
+  branch: BranchName,
+  nowMs: number,
+  drainTtlMs: number,
+): number | undefined => {
+  const current = selectExecutionLeaseRow(engine, branch);
+  if (current === null || !leaseIsLive(current, nowMs)) return undefined;
+  // Validate the configured local drain grace, but do not shorten the durable
+  // row here. Another host can only enforce the expiry in the lease snapshot it
+  // already holds; letting background execution become ready before that
+  // advertised deadline could overlap its Worker and effect claims. A host
+  // that owns this exact lease can still revoke it early after its pool has
+  // stopped, while a remote/stale owner remains fenced by the original expiry.
+  leaseExpiry(nowMs, drainTtlMs);
+  const expiresAt = current.expires_at;
+  engine.database.prepare(UPDATE_EXECUTION_LEASE).run({
+    branch: current.branch,
+    lease_generation: current.lease_generation,
+    host_id: current.host_id,
+    on_behalf_of: current.on_behalf_of,
+    state: "draining",
+    expires_at: String(expiresAt),
+  });
+  return expiresAt;
+};
+
+const branchIsActive = (engine: Engine, branch: BranchName): boolean => {
+  const row = engine.statements.selectBranchStatus.get({ branch }) as
+    | { status: string }
+    | undefined;
+  return row?.status === "active";
+};
+
+const acquireExecutionLeaseTransaction = (
+  engine: Engine,
+  options: AcquireExecutionLeaseOptions,
+): ExecutionLease | null => {
+  assertLeaseIdentityPart("space", options.space);
+  assertLeaseIdentityPart("host id", options.hostId);
+  assertLeaseIdentityPart("principal", options.onBehalfOf);
+  ensureActiveBranch(engine, options.branch);
+  if (options.authorizeWrite?.(engine) !== true) return null;
+  const nowMs = sampleLeaseClock(
+    "execution lease server time",
+    options.nowMs,
+  );
+  const expiresAt = leaseExpiry(nowMs, options.ttlMs);
+
+  const backgroundExclusion = selectLegacyBackgroundExclusionRow(
+    engine,
+    options.branch,
+  );
+  if (
+    backgroundExclusion !== null &&
+    backgroundExclusionIsLive(backgroundExclusion, nowMs)
+  ) {
+    return null;
+  }
+
+  const current = selectExecutionLeaseRow(engine, options.branch);
+  if (current !== null && leaseIsLive(current, nowMs)) {
+    if (
+      current.host_id !== options.hostId ||
+      current.on_behalf_of !== options.onBehalfOf
+    ) {
+      return null;
+    }
+    return toExecutionLease(options.space, current);
+  }
+
+  const leaseGeneration = (current?.lease_generation ?? 0) + 1;
+  if (!Number.isSafeInteger(leaseGeneration)) {
+    throw new TypeError("execution lease generation exhausted");
+  }
+  engine.database.prepare(UPSERT_EXECUTION_LEASE).run({
+    branch: options.branch,
+    lease_generation: leaseGeneration,
+    host_id: options.hostId,
+    on_behalf_of: options.onBehalfOf,
+    state: "active",
+    expires_at: String(expiresAt),
+  });
+  return {
+    version: 1,
+    space: options.space,
+    branch: options.branch,
+    leaseGeneration,
+    hostId: options.hostId,
+    onBehalfOf: options.onBehalfOf,
+    state: "active",
+    expiresAt,
+  };
+};
+
+/** Acquire one durable branch/space lease with a monotonic fence generation. */
+export const acquireExecutionLease = (
+  engine: Engine,
+  options: AcquireExecutionLeaseOptions,
+): ExecutionLease | null =>
+  engine.database.transaction(acquireExecutionLeaseTransaction).immediate(
+    engine,
+    options,
+  );
+
+const currentExecutionLeaseTransaction = (
+  engine: Engine,
+  options: CurrentExecutionLeaseOptions,
+): ExecutionLease | null => {
+  assertLeaseIdentityPart("space", options.space);
+  if (!branchIsActive(engine, options.branch)) return null;
+  const nowMs = sampleLeaseClock(
+    "execution lease server time",
+    options.nowMs,
+  );
+  const row = selectExecutionLeaseRow(engine, options.branch);
+  return row !== null && leaseIsLive(row, nowMs)
+    ? toExecutionLease(options.space, row)
+    : null;
+};
+
+/** Return the unexpired active or draining durable lease for a branch. */
+export const currentExecutionLease = (
+  engine: Engine,
+  options: CurrentExecutionLeaseOptions,
+): ExecutionLease | null =>
+  engine.database.transaction(currentExecutionLeaseTransaction).immediate(
+    engine,
+    options,
+  );
+
+const renewExecutionLeaseTransaction = (
+  engine: Engine,
+  options: RenewExecutionLeaseOptions,
+): ExecutionLease | null => {
+  assertLeaseSnapshot(options.lease);
+  if (!branchIsActive(engine, options.lease.branch)) return null;
+  if (options.authorizeWrite?.(engine) !== true) return null;
+  const nowMs = sampleLeaseClock(
+    "execution lease server time",
+    options.nowMs,
+  );
+  const expiresAt = leaseExpiry(nowMs, options.ttlMs);
+  const backgroundExclusion = selectLegacyBackgroundExclusionRow(
+    engine,
+    options.lease.branch,
+  );
+  if (
+    backgroundExclusion !== null &&
+    backgroundExclusionIsLive(backgroundExclusion, nowMs)
+  ) {
+    return null;
+  }
+  const current = selectExecutionLeaseRow(engine, options.lease.branch);
+  if (
+    current === null || current.state !== "active" ||
+    current.expires_at <= nowMs ||
+    !leaseOwnerMatches(current, options.lease)
+  ) {
+    return null;
+  }
+  engine.database.prepare(UPDATE_EXECUTION_LEASE).run({
+    branch: current.branch,
+    lease_generation: current.lease_generation,
+    host_id: current.host_id,
+    on_behalf_of: current.on_behalf_of,
+    state: "active",
+    expires_at: String(expiresAt),
+  });
+  return {
+    ...toExecutionLease(options.lease.space, current),
+    expiresAt,
+  };
+};
+
+/** Renew an active lease from the supplied server time. */
+export const renewExecutionLease = (
+  engine: Engine,
+  options: RenewExecutionLeaseOptions,
+): ExecutionLease | null =>
+  engine.database.transaction(renewExecutionLeaseTransaction).immediate(
+    engine,
+    options,
+  );
+
+const beginExecutionLeaseDrainTransaction = (
+  engine: Engine,
+  options: BeginExecutionLeaseDrainOptions,
+): ExecutionLease | null => {
+  assertLeaseSnapshot(options.lease);
+  const nowMs = sampleLeaseClock(
+    "execution lease server time",
+    options.nowMs,
+  );
+  const drainDeadline = leaseExpiry(nowMs, options.drainTtlMs);
+  const current = selectExecutionLeaseRow(engine, options.lease.branch);
+  if (
+    current === null || !leaseIsLive(current, nowMs) ||
+    !leaseOwnerMatches(current, options.lease)
+  ) {
+    return null;
+  }
+  const expiresAt = Math.min(current.expires_at, drainDeadline);
+  engine.database.prepare(UPDATE_EXECUTION_LEASE).run({
+    branch: current.branch,
+    lease_generation: current.lease_generation,
+    host_id: current.host_id,
+    on_behalf_of: current.on_behalf_of,
+    state: "draining",
+    expires_at: String(expiresAt),
+  });
+  return {
+    ...toExecutionLease(options.lease.space, current),
+    state: "draining",
+    expiresAt,
+  };
+};
+
+/** Stop issuing work and bound completion of already-started attempts. */
+export const beginExecutionLeaseDrain = (
+  engine: Engine,
+  options: BeginExecutionLeaseDrainOptions,
+): ExecutionLease | null =>
+  engine.database.transaction(beginExecutionLeaseDrainTransaction).immediate(
+    engine,
+    options,
+  );
+
+const revokeExecutionLeaseTransaction = (
+  engine: Engine,
+  options: RevokeExecutionLeaseOptions,
+): ExecutionLease | null => {
+  assertLeaseSnapshot(options.lease);
+  const nowMs = sampleLeaseClock(
+    "execution lease server time",
+    options.nowMs,
+  );
+  const current = selectExecutionLeaseRow(engine, options.lease.branch);
+  if (current === null || !leaseOwnerMatches(current, options.lease)) {
+    return null;
+  }
+  const expiresAt = Math.min(current.expires_at, nowMs);
+  engine.database.prepare(UPDATE_EXECUTION_LEASE).run({
+    branch: current.branch,
+    lease_generation: current.lease_generation,
+    host_id: current.host_id,
+    on_behalf_of: current.on_behalf_of,
+    state: "revoked",
+    expires_at: String(expiresAt),
+  });
+  return {
+    ...toExecutionLease(options.lease.space, current),
+    state: "revoked",
+    expiresAt,
+  };
+};
+
+/** Revoke only the exact durable owner/generation named by the caller. */
+export const revokeExecutionLease = (
+  engine: Engine,
+  options: RevokeExecutionLeaseOptions,
+): ExecutionLease | null =>
+  engine.database.transaction(revokeExecutionLeaseTransaction).immediate(
+    engine,
+    options,
+  );
+
+const expireExecutionLeaseTransaction = (
+  engine: Engine,
+  options: ExpireExecutionLeaseOptions,
+): ExecutionLease | null => {
+  assertLeaseSnapshot(options.lease);
+  const nowMs = sampleLeaseClock(
+    "execution lease server time",
+    options.nowMs,
+  );
+  const current = selectExecutionLeaseRow(engine, options.lease.branch);
+  if (
+    current === null || !leaseOwnerMatches(current, options.lease)
+  ) return null;
+  if (
+    (current.state === "active" || current.state === "draining") &&
+    current.expires_at > nowMs
+  ) {
+    return null;
+  }
+  if (current.state !== "revoked") {
+    engine.database.prepare(UPDATE_EXECUTION_LEASE).run({
+      branch: current.branch,
+      lease_generation: current.lease_generation,
+      host_id: current.host_id,
+      on_behalf_of: current.on_behalf_of,
+      state: "revoked",
+      expires_at: String(current.expires_at),
+    });
+  }
+  return {
+    ...toExecutionLease(options.lease.space, current),
+    state: "revoked",
+  };
+};
+
+/** Mark an elapsed exact owner/generation revoked. */
+export const expireExecutionLease = (
+  engine: Engine,
+  options: ExpireExecutionLeaseOptions,
+): ExecutionLease | null =>
+  engine.database.transaction(expireExecutionLeaseTransaction).immediate(
+    engine,
+    options,
+  );
+
+const acquireLegacyBackgroundExclusionTransaction = (
+  engine: Engine,
+  options: AcquireLegacyBackgroundExclusionOptions,
+): LegacyBackgroundExclusionStatus | null => {
+  assertLeaseIdentityPart("space", options.space);
+  if (options.holderId.length === 0) {
+    throw new TypeError("legacy background exclusion holder id is required");
+  }
+  if (options.servicePrincipal.length === 0) {
+    throw new TypeError(
+      "legacy background exclusion service principal is required",
+    );
+  }
+  ensureActiveBranch(engine, options.branch);
+  if (options.authorizeService?.(engine) !== true) return null;
+  const nowMs = sampleLeaseClock(
+    "legacy background exclusion server time",
+    options.nowMs,
+  );
+  const expiresAt = backgroundExclusionExpiry(nowMs, options.ttlMs);
+  const current = selectLegacyBackgroundExclusionRow(engine, options.branch);
+  let exclusion: LegacyBackgroundExclusion;
+  if (current !== null && backgroundExclusionIsLive(current, nowMs)) {
+    if (
+      current.holder_id !== options.holderId ||
+      current.service_principal !== options.servicePrincipal
+    ) {
+      return null;
+    }
+    exclusion = toLegacyBackgroundExclusion(options.space, current);
+  } else {
+    const exclusionGeneration = (current?.exclusion_generation ?? 0) + 1;
+    if (!Number.isSafeInteger(exclusionGeneration)) {
+      throw new TypeError(
+        "legacy background exclusion generation exhausted",
+      );
+    }
+    engine.database.prepare(UPSERT_LEGACY_BACKGROUND_EXCLUSION).run({
+      branch: options.branch,
+      exclusion_generation: exclusionGeneration,
+      holder_id: options.holderId,
+      service_principal: options.servicePrincipal,
+      expires_at: String(expiresAt),
+    });
+    exclusion = {
+      version: 1,
+      space: options.space,
+      branch: options.branch,
+      exclusionGeneration,
+      holderId: options.holderId,
+      servicePrincipal: options.servicePrincipal,
+      expiresAt,
+    };
+  }
+  const blockedUntil = drainClientLeaseForBackground(
+    engine,
+    options.branch,
+    nowMs,
+    options.drainTtlMs,
+  );
+  return {
+    exclusion,
+    serverTime: nowMs,
+    ready: blockedUntil === undefined,
+    ...(blockedUntil === undefined ? {} : { blockedUntil }),
+  };
+};
+
+/** Reserve one lane for legacy background execution and drain any client. */
+export const acquireLegacyBackgroundExclusion = (
+  engine: Engine,
+  options: AcquireLegacyBackgroundExclusionOptions,
+): LegacyBackgroundExclusionStatus | null =>
+  engine.database.transaction(acquireLegacyBackgroundExclusionTransaction)
+    .immediate(engine, options);
+
+const currentLegacyBackgroundExclusionTransaction = (
+  engine: Engine,
+  options: CurrentLegacyBackgroundExclusionOptions,
+): LegacyBackgroundExclusion | null => {
+  assertLeaseIdentityPart("space", options.space);
+  if (!branchIsActive(engine, options.branch)) return null;
+  const nowMs = sampleLeaseClock(
+    "legacy background exclusion server time",
+    options.nowMs,
+  );
+  const current = selectLegacyBackgroundExclusionRow(engine, options.branch);
+  return current !== null && backgroundExclusionIsLive(current, nowMs)
+    ? toLegacyBackgroundExclusion(options.space, current)
+    : null;
+};
+
+export const currentLegacyBackgroundExclusion = (
+  engine: Engine,
+  options: CurrentLegacyBackgroundExclusionOptions,
+): LegacyBackgroundExclusion | null =>
+  engine.database.transaction(currentLegacyBackgroundExclusionTransaction)
+    .immediate(engine, options);
+
+const renewLegacyBackgroundExclusionTransaction = (
+  engine: Engine,
+  options: RenewLegacyBackgroundExclusionOptions,
+): LegacyBackgroundExclusionStatus | null => {
+  assertLegacyBackgroundExclusion(options.exclusion);
+  if (!branchIsActive(engine, options.exclusion.branch)) return null;
+  if (options.authorizeService?.(engine) !== true) return null;
+  const nowMs = sampleLeaseClock(
+    "legacy background exclusion server time",
+    options.nowMs,
+  );
+  const expiresAt = backgroundExclusionExpiry(nowMs, options.ttlMs);
+  const current = selectLegacyBackgroundExclusionRow(
+    engine,
+    options.exclusion.branch,
+  );
+  if (
+    current === null || !backgroundExclusionIsLive(current, nowMs) ||
+    !backgroundExclusionOwnerMatches(current, options.exclusion)
+  ) {
+    return null;
+  }
+  engine.database.prepare(UPDATE_LEGACY_BACKGROUND_EXCLUSION).run({
+    branch: current.branch,
+    exclusion_generation: current.exclusion_generation,
+    holder_id: current.holder_id,
+    service_principal: current.service_principal,
+    expires_at: String(expiresAt),
+  });
+  const exclusion = {
+    ...toLegacyBackgroundExclusion(options.exclusion.space, current),
+    expiresAt,
+  };
+  const blockedUntil = drainClientLeaseForBackground(
+    engine,
+    current.branch,
+    nowMs,
+    options.drainTtlMs,
+  );
+  return {
+    exclusion,
+    serverTime: nowMs,
+    ready: blockedUntil === undefined,
+    ...(blockedUntil === undefined ? {} : { blockedUntil }),
+  };
+};
+
+/** Refresh one exact background reservation and report client-drain state. */
+export const renewLegacyBackgroundExclusion = (
+  engine: Engine,
+  options: RenewLegacyBackgroundExclusionOptions,
+): LegacyBackgroundExclusionStatus | null =>
+  engine.database.transaction(renewLegacyBackgroundExclusionTransaction)
+    .immediate(engine, options);
+
+const releaseLegacyBackgroundExclusionTransaction = (
+  engine: Engine,
+  options: ReleaseLegacyBackgroundExclusionOptions,
+): LegacyBackgroundExclusion | null => {
+  assertLegacyBackgroundExclusion(options.exclusion);
+  if (options.authorizeService?.(engine) !== true) return null;
+  const nowMs = sampleLeaseClock(
+    "legacy background exclusion server time",
+    options.nowMs,
+  );
+  const current = selectLegacyBackgroundExclusionRow(
+    engine,
+    options.exclusion.branch,
+  );
+  if (
+    current === null ||
+    !backgroundExclusionOwnerMatches(current, options.exclusion)
+  ) {
+    return null;
+  }
+  const expiresAt = Math.min(current.expires_at, nowMs);
+  engine.database.prepare(UPDATE_LEGACY_BACKGROUND_EXCLUSION).run({
+    branch: current.branch,
+    exclusion_generation: current.exclusion_generation,
+    holder_id: current.holder_id,
+    service_principal: current.service_principal,
+    expires_at: String(expiresAt),
+  });
+  return {
+    ...toLegacyBackgroundExclusion(options.exclusion.space, current),
+    expiresAt,
+  };
+};
+
+/** Release only the exact holder/generation named by the trusted host. */
+export const releaseLegacyBackgroundExclusion = (
+  engine: Engine,
+  options: ReleaseLegacyBackgroundExclusionOptions,
+): LegacyBackgroundExclusion | null =>
+  engine.database.transaction(releaseLegacyBackgroundExclusionTransaction)
+    .immediate(engine, options);
+
+const assertExecutionLeaseFenceTransaction = (
+  engine: Engine,
+  options: {
+    fence?: ExecutionLeaseFence;
+    space?: string;
+    branch: BranchName;
+    principal?: string;
+    claims: readonly ExecutionClaim[];
+    requireExactClaim?: boolean;
+  },
+): void => {
+  const fence = options.fence;
+  if (fence === undefined) return;
+  assertLeaseSnapshot(fence.lease);
+  if (
+    options.space === undefined || fence.lease.space !== options.space ||
+    fence.lease.branch !== options.branch ||
+    options.principal !== fence.lease.onBehalfOf
+  ) {
+    throw new ExecutionLeaseFenceError(
+      "lane-principal-mismatch",
+      "execution lease does not match the commit lane and principal",
+    );
+  }
+  if (fence.authorize?.(engine) !== true) {
+    throw new ExecutionLeaseFenceError(
+      "sponsor-authority",
+      "execution sponsor lacks current WRITE authority or execution policy",
+    );
+  }
+  const nowMs = sampleLeaseClock(
+    "execution lease server time",
+    fence.nowMs,
+  );
+  const current = selectExecutionLeaseRow(engine, options.branch);
+  if (
+    current === null || current.state !== "active" ||
+    current.expires_at <= nowMs ||
+    !leaseOwnerMatches(current, fence.lease)
+  ) {
+    throw new ExecutionLeaseFenceError(
+      "lease-stale",
+      "execution lease is stale, expired, or revoked",
+    );
+  }
+  if (options.requireExactClaim === true && options.claims.length !== 1) {
+    throw new ExecutionLeaseFenceError(
+      "claim-arity",
+      "bound executor semantic transaction requires one exact execution claim incarnation",
+    );
+  }
+  for (const claim of options.claims) {
+    if (claim.expiresAt <= nowMs) {
+      throw new ExecutionLeaseFenceError(
+        "claim-expired",
+        "execution claim incarnation is expired",
+      );
+    }
+    if (
+      claim.branch !== options.branch || claim.space !== options.space ||
+      claim.leaseGeneration !== current.lease_generation
+    ) {
+      throw new ExecutionLeaseFenceError(
+        "claim-lease-generation",
+        "execution claim does not match the durable lease generation",
+      );
+    }
+    if (
+      claim.contextKey !== "space" &&
+      fence.laneAuthority?.(claim) === false
+    ) {
+      throw new ExecutionLeaseFenceError(
+        "lane-generation-stale",
+        "execution claim lane grant is fenced or superseded",
+      );
+    }
+    if (claim.contextKey !== "space") {
+      // Amendment 2: the fence resolves WRITE for the ACTING principal in
+      // the same transaction-time authorize as the sponsor lease checks.
+      // C2.1 (amendment CA7): session-rank claims resolve their principal
+      // from the canonical session key — without this the WRITE re-check
+      // would fail OPEN for session lanes.
+      const actingPrincipal = principalOfUserContextKey(claim.contextKey) ??
+        parseSessionExecutionContextKey(claim.contextKey)?.principal;
+      if (
+        actingPrincipal !== undefined &&
+        fence.authorizeActingPrincipal?.(engine, actingPrincipal) === false
+      ) {
+        throw new ExecutionLeaseFenceError(
+          "lane-write-authority",
+          "execution lane acting principal lacks current WRITE authority",
+        );
+      }
+    }
+  }
+};
+
 export const applyCommit = (
   engine: Engine,
   options: ApplyCommitOptions,
@@ -2389,14 +4151,67 @@ export interface UpsertSchedulerObservationOptions {
   /** Canonical commit-session key used only for replay/echo provenance. */
   writerSessionId?: string;
   localSeq?: number;
+  /** Client-request replay identity when canonical host fields differ from the
+   * persisted observation payload. */
+  replayPayload?: string;
+  /** C3.11: the acting claim's host-authored `crossSpaceReadSpaces` (the
+   * cross-space-read stage's foreign-read admission). Passed on the accept
+   * path so an UNSERVED claimed cross-space-read attempt still classifies its
+   * admitted foreign reads space-rank (the action's rank is stage-admitted,
+   * orthogonal to whether this run served a stamp) rather than flooring —
+   * and monotonically poisoning — the durable context floor to session.
+   * Never crosses the protocol boundary; absent for client observations and
+   * same-space claims (byte-identical). */
+  foreignReadAdmittedSpaces?: readonly string[];
   observation: SchedulerActionObservation;
 }
+
+type HostSchedulerObservationOptions = UpsertSchedulerObservationOptions & {
+  /** Exact source frontier covered by a claimed attempt. This never crosses
+   * the protocol boundary; ordinary observations clear all pending causes. */
+  causeCoverageSeq?: number;
+};
 
 export interface UpsertSchedulerObservationResult {
   observationId: number;
   commitSeq: number | null;
   executionContextKey: SchedulerExecutionContextKey;
   invalidatedExecutionContextKeys: SchedulerExecutionContextKey[];
+  /** C3.3a/C3A9: present (as the applied mark seq) when this MIRROR
+   * upsert changed the action's read rows against the mirror-hosting
+   * space and conservatively marked the action direct-dirty at the
+   * hosting space's then-current seq — see the `readToMirrorWindow`
+   * option on {@link upsertMirroredSchedulerObservation}. */
+  readToMirrorWindowDirtySeq?: number;
+}
+
+/**
+ * C3.3a (C3A9) — the read-to-mirror missed-wake window, closed in the
+ * upsert transaction. A mirror describes reads a HOME-side run performed
+ * strictly before this upsert lands here in the READ space's engine; a
+ * read-space commit in that window consulted mirror rows that did not
+ * exist yet, so it dirtied nothing and no notice was emitted. The client
+ * scalar carries no read-space basis (that is C3.5's vector), so the
+ * window's extent in this engine's seq domain is unknowable — the sound
+ * conservative closure: whenever the reconcile CHANGES the action's read
+ * rows naming `readSpace` (creation or re-target; pure retraction is
+ * exempt — nothing left to wake), mark the action direct-dirty at
+ * `windowDirtySeq` (the hosting engine's serverSeq captured at apply
+ * time). Transactionality does the rest: this engine's commits serialize
+ * against the upsert, so a commit lands either before it (seq ≤
+ * `windowDirtySeq`, covered by this mark) or after it (rows now present,
+ * covered by the ordinary dirtying path). Identical re-mirrors skip the
+ * reconcile entirely, so a wake-driven rerun that re-observes the same
+ * payload cannot re-mark — the closure cannot loop.
+ */
+export interface MirroredReadToMirrorWindowOptions {
+  /** The mirror-hosting (read) space — rows with this `read_space` are
+   * the window's subject. The engine has no own-space notion; the server
+   * supplies it. */
+  readSpace: string;
+  /** The hosting engine's serverSeq at apply time; 0 (no commits yet —
+   * no window to miss) suppresses the mark. */
+  windowDirtySeq: number;
 }
 
 export const upsertSchedulerObservation = (
@@ -2419,6 +4234,16 @@ export const upsertMirroredSchedulerObservation = (
   engine: Engine,
   options: UpsertSchedulerObservationOptions & {
     originExecutionContextKey: SchedulerExecutionContextKey;
+    readToMirrorWindow?: MirroredReadToMirrorWindowOptions;
+    /**
+     * C3.5 (C3A16): the mirror-hosting (READ) space's cause-coverage seq —
+     * the vector basis component for that space when the mirrored
+     * observation carries one, else 0 (consume nothing — C3A15 vacuous).
+     * Without it a provenance-carrying mirror would inherit the HOME
+     * scalar and consume read-space cause rows through a foreign-domain
+     * number.
+     */
+    causeCoverageSeq?: number;
   },
 ): UpsertSchedulerObservationResult =>
   engine.database.transaction(upsertSchedulerObservationTransaction).immediate(
@@ -2429,8 +4254,11 @@ export const upsertMirroredSchedulerObservation = (
 const upsertSchedulerObservationTransaction = (
   engine: Engine,
   options:
-    & UpsertSchedulerObservationOptions
-    & { originExecutionContextKey?: SchedulerExecutionContextKey },
+    & HostSchedulerObservationOptions
+    & {
+      originExecutionContextKey?: SchedulerExecutionContextKey;
+      readToMirrorWindow?: MirroredReadToMirrorWindowOptions;
+    },
 ): UpsertSchedulerObservationResult => {
   const branch = options.branch ?? options.observation.branch ?? DEFAULT_BRANCH;
   ensureActiveBranch(engine, branch);
@@ -2477,6 +4305,7 @@ const upsertSchedulerObservationTransaction = (
         ownerSpace: observation.ownerSpace,
         observation,
         scopeContext: options.scopeContext,
+        foreignReadAdmittedSpaces: options.foreignReadAdmittedSpaces,
       })
       : preserveMirroredSchedulerExecutionContext(engine, {
         branch,
@@ -2501,6 +4330,16 @@ const upsertSchedulerObservationTransaction = (
     actionId: observation.actionId,
     executionContextKey,
   };
+  const coveredThroughSeq = options.causeCoverageSeq ??
+    (observation.executionProvenance !== undefined
+      ? observation.inputBasisSeq
+      : undefined) ??
+    Number.MAX_SAFE_INTEGER;
+  consumeSchedulerActionCauses(
+    engine,
+    actionKey,
+    coveredThroughSeq,
+  );
   const latest = selectSchedulerSnapshotRow(engine, actionKey);
   const payloadChanged = latest?.payload !== payload;
   const observationId = latest?.observation_id ??
@@ -2538,6 +4377,51 @@ const upsertSchedulerObservationTransaction = (
     });
   }
 
+  // C3A9 window closure (mirror path only): snapshot the action's read
+  // rows naming the mirror-hosting space before/after the reconcile —
+  // a CHANGE in that restricted set is the window predicate (see
+  // MirroredReadToMirrorWindowOptions).
+  const windowOptions = options.readToMirrorWindow;
+  const windowActive = windowOptions !== undefined &&
+    windowOptions.windowDirtySeq >= 1 &&
+    options.originExecutionContextKey !== undefined && payloadChanged;
+  const windowReadRowKeys = (): string[] =>
+    !windowActive ? [] : (engine.database.prepare(`
+        SELECT read_id, read_scope, read_scope_key, read_path, read_kind
+        FROM scheduler_read_index
+        WHERE branch = :branch
+          AND COALESCE(owner_space, '') = :owner_space
+          AND piece_id = :piece_id
+          AND process_generation = :process_generation
+          AND action_id = :action_id
+          AND execution_context_key = :execution_context_key
+          AND read_space = :read_space
+      `).all({
+      branch,
+      owner_space: normalizeSchedulerOwnerSpace(observation.ownerSpace),
+      piece_id: observation.pieceId,
+      process_generation: observation.processGeneration,
+      action_id: observation.actionId,
+      execution_context_key: executionContextKey,
+      read_space: windowOptions!.readSpace,
+    }) as {
+      read_id: string;
+      read_scope: string;
+      read_scope_key: string;
+      read_path: string;
+      read_kind: string;
+    }[])
+      .map((row) =>
+        [
+          row.read_id,
+          row.read_scope,
+          row.read_scope_key,
+          row.read_path,
+          row.read_kind,
+        ].join("\0")
+      )
+      .sort();
+  const windowRowsBefore = windowReadRowKeys();
   if (payloadChanged) {
     reconcileSchedulerReadRows(engine, {
       branch,
@@ -2554,6 +4438,10 @@ const upsertSchedulerObservationTransaction = (
       scopeContext: options.scopeContext,
     });
   }
+  const windowRowsAfter = windowReadRowKeys();
+  const windowDirtied = windowActive && windowRowsAfter.length > 0 &&
+    (windowRowsBefore.length !== windowRowsAfter.length ||
+      windowRowsBefore.some((key, index) => key !== windowRowsAfter[index]));
   upsertSchedulerSnapshot(engine, {
     branch,
     observationId,
@@ -2574,7 +4462,29 @@ const upsertSchedulerObservationTransaction = (
     observation,
     executionContextKey,
     latestObservationId: observationId,
+    coveredThroughSeq,
   });
+  // C3A9: the conservative window mark — strictly AFTER the action-state
+  // upsert, whose covered-through clearing must not erase it, and inside
+  // this same transaction, so no hosting-space commit can interleave
+  // between the row reconcile above and the mark.
+  if (windowDirtied) {
+    markSchedulerActionsDirectDirty(engine, {
+      branch,
+      ownerSpace: observation.ownerSpace,
+      dirtySeq: windowOptions!.windowDirtySeq,
+      actions: [
+        {
+          branch,
+          ownerSpace: observation.ownerSpace,
+          pieceId: observation.pieceId,
+          processGeneration: observation.processGeneration,
+          actionId: observation.actionId,
+          executionContextKey,
+        } as SchedulerReaderIndexEntry,
+      ],
+    });
+  }
   pruneSchedulerSessionExecutionContexts(engine, {
     branch,
     ownerSpace: observation.ownerSpace,
@@ -2591,7 +4501,10 @@ const upsertSchedulerObservationTransaction = (
       status: "kept",
       observationId,
       observedAtSeq: options.observedAtSeq,
-      payload,
+      payload: options.replayPayload ?? payload,
+      ...(options.replayPayload !== undefined
+        ? { acceptedPayload: payload }
+        : {}),
     });
   }
 
@@ -2600,6 +4513,9 @@ const upsertSchedulerObservationTransaction = (
     commitSeq: options.commitSeq ?? null,
     executionContextKey,
     invalidatedExecutionContextKeys,
+    ...(windowDirtied
+      ? { readToMirrorWindowDirtySeq: windowOptions!.windowDirtySeq }
+      : {}),
   };
 };
 
@@ -2928,6 +4844,522 @@ export const findSchedulerReadersForWrite = (
     });
 };
 
+/**
+ * Returns the distinct demanded actions that are durably dirty or stale at or
+ * after `dirtySeq`, provided at least one changed target overlaps the indexed
+ * read surface for the same owner/context partition.
+ *
+ * The target gate deliberately composes `findSchedulerReadersForWrite`: path
+ * and effective-scope matching therefore cannot drift from commit-time
+ * dirtying. The state lookup is broader than those direct readers because
+ * propagation may cross an undemanded action before reaching a demanded one.
+ */
+export const staleReadersForTargets = (
+  engine: Engine,
+  options: SchedulerStaleReadersForTargetsOptions,
+): SchedulerActionState[] => {
+  if (!Number.isSafeInteger(options.dirtySeq) || options.dirtySeq < 0) {
+    throw new TypeError("scheduler stale-reader dirtySeq must be non-negative");
+  }
+  if (
+    options.targets.length === 0 ||
+    options.demandedSchedulerPieceIds.length === 0
+  ) {
+    return [];
+  }
+
+  const branch = options.branch ?? DEFAULT_BRANCH;
+  const ownerSpace = normalizeSchedulerOwnerSpace(options.ownerSpace);
+  const demandedSchedulerPieceIds = [
+    ...new Set(options.demandedSchedulerPieceIds),
+  ];
+  const applicableContextKeys = options.applicableExecutionContextKeys ===
+      undefined
+    ? undefined
+    : [...new Set(options.applicableExecutionContextKeys)];
+  if (applicableContextKeys?.length === 0) return [];
+  const applicableContextSet = applicableContextKeys === undefined
+    ? undefined
+    : new Set(applicableContextKeys);
+
+  // Repeated patch paths and coalesced commit batches commonly name the same
+  // effective target more than once. Keep one read-index probe per target.
+  const uniqueTargets = new Map<string, SchedulerWriteAddress>();
+  for (const target of options.targets) {
+    const declaredScope = normalizeSchedulerScope(target.scope);
+    if (target.scopeKey === undefined && declaredScope !== "space") {
+      throw new ProtocolError(
+        "scoped scheduler stale-reader targets require a resolved scope key",
+      );
+    }
+    const scopeKey = target.scopeKey ?? DEFAULT_SCOPE_KEY;
+    uniqueTargets.set(
+      [
+        target.space,
+        target.id,
+        declaredScope,
+        scopeKey,
+        encodeSchedulerPath(target.path),
+      ].join("\0"),
+      target,
+    );
+  }
+
+  let relevantTarget = false;
+  for (const target of uniqueTargets.values()) {
+    const readers = findSchedulerReadersForWrite(engine, {
+      branch,
+      write: target,
+    });
+    relevantTarget = readers.some((reader) =>
+      normalizeSchedulerOwnerSpace(reader.ownerSpace) === ownerSpace &&
+      (applicableContextSet === undefined ||
+        applicableContextSet.has(reader.executionContextKey))
+    );
+    if (relevantTarget) break;
+  }
+  if (!relevantTarget) return [];
+
+  const pieceParams = Object.fromEntries(
+    demandedSchedulerPieceIds.map((pieceId, index) => [
+      `demanded_piece_${index}`,
+      pieceId,
+    ]),
+  );
+  const pieceFilter = demandedSchedulerPieceIds
+    .map((_, index) => `:demanded_piece_${index}`)
+    .join(", ");
+  const contextParams = Object.fromEntries(
+    applicableContextKeys?.map((key, index) => [
+      `execution_context_${index}`,
+      key,
+    ]) ?? [],
+  );
+  const contextFilter = applicableContextKeys === undefined
+    ? ""
+    : `AND execution_context_key IN (${
+      applicableContextKeys.map((_, index) => `:execution_context_${index}`)
+        .join(", ")
+    })`;
+
+  const rows = engine.database.prepare(`
+    SELECT
+      branch,
+      owner_space,
+      piece_id,
+      process_generation,
+      action_id,
+      execution_context_key,
+      latest_observation_id,
+      direct_dirty_seq,
+      stale_seq,
+      unknown_reason
+    FROM scheduler_action_state
+    WHERE branch = :branch
+      AND owner_space = :owner_space
+      AND piece_id IN (${pieceFilter})
+      ${contextFilter}
+      AND (
+        direct_dirty_seq >= :dirty_seq OR
+        stale_seq >= :dirty_seq OR
+        unknown_reason IS NOT NULL
+      )
+    ORDER BY
+      piece_id,
+      process_generation,
+      action_id,
+      execution_context_key
+  `).all({
+    branch,
+    owner_space: ownerSpace,
+    dirty_seq: options.dirtySeq,
+    ...pieceParams,
+    ...contextParams,
+  }) as SchedulerActionStateRow[];
+
+  return rows.map(schedulerActionStateFromRow);
+};
+
+/**
+ * C3.3a (C3A10): the post-ack direct-dirty-∩-demand scan. Returns every
+ * demanded action in the owner partition with UNSETTLED durable dirt —
+ * `direct_dirty_seq`/`stale_seq` present or provenance unknown —
+ * regardless of when the dirt landed. Unlike
+ * {@link staleReadersForTargets} there is no changed-target gate and no
+ * seq floor: the scan runs at (re)subscribe time, when the caller cannot
+ * know which read-space commits its dirt corresponds to (the marks were
+ * applied via C3.1b's `ForeignDirtyMark`, whose seqs live in the READ
+ * space's domain). Spurious matches are safe (a wake reconciles to a
+ * no-op); missed ones are not.
+ */
+export const dirtyDemandedSchedulerActions = (
+  engine: Engine,
+  options: {
+    branch?: BranchName;
+    ownerSpace?: string;
+    demandedSchedulerPieceIds: readonly string[];
+    applicableExecutionContextKeys?: readonly SchedulerExecutionContextKey[];
+  },
+): SchedulerActionState[] => {
+  if (options.demandedSchedulerPieceIds.length === 0) return [];
+  const branch = options.branch ?? DEFAULT_BRANCH;
+  const ownerSpace = normalizeSchedulerOwnerSpace(options.ownerSpace);
+  const demandedSchedulerPieceIds = [
+    ...new Set(options.demandedSchedulerPieceIds),
+  ];
+  const applicableContextKeys =
+    options.applicableExecutionContextKeys === undefined
+      ? undefined
+      : [...new Set(options.applicableExecutionContextKeys)];
+  if (applicableContextKeys?.length === 0) return [];
+
+  const pieceParams = Object.fromEntries(
+    demandedSchedulerPieceIds.map((pieceId, index) => [
+      `demanded_piece_${index}`,
+      pieceId,
+    ]),
+  );
+  const pieceFilter = demandedSchedulerPieceIds
+    .map((_, index) => `:demanded_piece_${index}`)
+    .join(", ");
+  const contextParams = Object.fromEntries(
+    applicableContextKeys?.map((key, index) => [
+      `execution_context_${index}`,
+      key,
+    ]) ?? [],
+  );
+  const contextFilter = applicableContextKeys === undefined
+    ? ""
+    : `AND execution_context_key IN (${
+      applicableContextKeys.map((_, index) => `:execution_context_${index}`)
+        .join(", ")
+    })`;
+
+  const rows = engine.database.prepare(`
+    SELECT
+      branch,
+      owner_space,
+      piece_id,
+      process_generation,
+      action_id,
+      execution_context_key,
+      latest_observation_id,
+      direct_dirty_seq,
+      stale_seq,
+      unknown_reason
+    FROM scheduler_action_state
+    WHERE branch = :branch
+      AND owner_space = :owner_space
+      AND piece_id IN (${pieceFilter})
+      ${contextFilter}
+      AND (
+        direct_dirty_seq IS NOT NULL OR
+        stale_seq IS NOT NULL OR
+        unknown_reason IS NOT NULL
+      )
+    ORDER BY
+      piece_id,
+      process_generation,
+      action_id,
+      execution_context_key
+  `).all({
+    branch,
+    owner_space: ownerSpace,
+    ...pieceParams,
+    ...contextParams,
+  }) as SchedulerActionStateRow[];
+
+  return rows.map(schedulerActionStateFromRow);
+};
+
+/**
+ * C3.3a subscription source: which foreign spaces do the demanded pieces'
+ * indexed reads name? Consults the owner partition of the durable
+ * read-index — the same rows client observations reconcile transactionally
+ * on accept — so the answer is exactly the current accepted read surface,
+ * with no dependence on mirror fan-out timing or a peer engine. Returns
+ * read space → the demanded piece ids reading it (foreign spaces only:
+ * `read_space` different from the owner partition's own space name).
+ */
+export const schedulerForeignReadSpacesForPieces = (
+  engine: Engine,
+  options: {
+    branch?: BranchName;
+    ownerSpace: string;
+    demandedSchedulerPieceIds: readonly string[];
+  },
+): Map<string, string[]> => {
+  const byReadSpace = new Map<string, string[]>();
+  if (options.demandedSchedulerPieceIds.length === 0) return byReadSpace;
+  const branch = options.branch ?? DEFAULT_BRANCH;
+  const demandedSchedulerPieceIds = [
+    ...new Set(options.demandedSchedulerPieceIds),
+  ];
+  const pieceParams = Object.fromEntries(
+    demandedSchedulerPieceIds.map((pieceId, index) => [
+      `demanded_piece_${index}`,
+      pieceId,
+    ]),
+  );
+  const pieceFilter = demandedSchedulerPieceIds
+    .map((_, index) => `:demanded_piece_${index}`)
+    .join(", ");
+  const rows = engine.database.prepare(`
+    SELECT DISTINCT read_space, piece_id
+    FROM scheduler_read_index
+    WHERE branch = :branch
+      AND COALESCE(owner_space, '') = :owner_space
+      AND read_space <> :own_space
+      AND piece_id IN (${pieceFilter})
+    ORDER BY read_space, piece_id
+  `).all({
+    branch,
+    owner_space: normalizeSchedulerOwnerSpace(options.ownerSpace),
+    own_space: options.ownerSpace,
+    ...pieceParams,
+  }) as { read_space: string; piece_id: string }[];
+  for (const row of rows) {
+    const pieces = byReadSpace.get(row.read_space);
+    if (pieces === undefined) byReadSpace.set(row.read_space, [row.piece_id]);
+    else pieces.push(row.piece_id);
+  }
+  return byReadSpace;
+};
+
+/**
+ * Returns every current durable action whose indexed write surface overlaps
+ * one of `targets`.
+ *
+ * Target scope keys are resolved by the authenticated caller before reaching
+ * this engine seam. `applicableExecutionContextKeys` is likewise
+ * server-derived; omitting it is reserved for trusted internal scans.
+ */
+export const writersForTargets = (
+  engine: Engine,
+  options: {
+    branch?: BranchName;
+    ownerSpace?: string;
+    targets: readonly SchedulerWriterTarget[];
+    applicableExecutionContextKeys?: readonly SchedulerExecutionContextKey[];
+  },
+): SchedulerWriterCandidate[] => {
+  if (options.targets.length === 0) return [];
+
+  const branch = options.branch ?? DEFAULT_BRANCH;
+  const applicableContextKeys = options.applicableExecutionContextKeys ===
+      undefined
+    ? undefined
+    : [...new Set(options.applicableExecutionContextKeys)];
+  if (applicableContextKeys?.length === 0) return [];
+
+  const contextFilter = applicableContextKeys === undefined
+    ? ""
+    : `AND w.execution_context_key IN (${
+      applicableContextKeys.map((_, index) => `:context_${index}`).join(", ")
+    })`;
+  const contextParams = Object.fromEntries(
+    applicableContextKeys?.map((key, index) => [`context_${index}`, key]) ?? [],
+  );
+  const candidates = new Map<
+    string,
+    {
+      candidate: Omit<SchedulerWriterCandidate, "matchedWrites">;
+      matchedWrites: Map<string, SchedulerMatchedWrite>;
+    }
+  >();
+
+  for (const requestedTarget of options.targets) {
+    const declaredScope = normalizeSchedulerScope(requestedTarget.scope);
+    if (
+      requestedTarget.scopeKey === undefined && declaredScope !== "space"
+    ) {
+      throw new ProtocolError(
+        "scoped scheduler writer targets require a resolved scope key",
+      );
+    }
+    const target: ResolvedSchedulerObservationAddress = {
+      ...normalizeSchedulerAddress(requestedTarget),
+      scopeKey: requestedTarget.scopeKey ?? DEFAULT_SCOPE_KEY,
+    };
+    const rows = engine.database.prepare(`
+      SELECT
+        w.branch,
+        w.owner_space,
+        w.write_space,
+        w.write_id,
+        w.write_scope,
+        w.write_scope_key,
+        w.write_path,
+        w.write_kind,
+        w.piece_id,
+        w.process_generation,
+        w.action_id,
+        w.execution_context_key,
+        w.observation_id,
+        COALESCE(s.commit_seq, o.commit_seq) AS commit_seq,
+        s.observed_at_seq,
+        s.payload,
+        a.direct_dirty_seq,
+        a.stale_seq,
+        a.unknown_reason
+      FROM scheduler_write_index w
+      JOIN scheduler_action_snapshot s
+        ON s.branch = w.branch
+        AND s.owner_space = w.owner_space
+        AND s.piece_id = w.piece_id
+        AND s.process_generation = w.process_generation
+        AND s.action_id = w.action_id
+        AND s.execution_context_key = w.execution_context_key
+        AND s.observation_id = w.observation_id
+      JOIN scheduler_observation o
+        ON o.observation_id = s.observation_id
+        AND o.execution_context_key = s.execution_context_key
+        AND o.branch = s.branch
+        AND o.piece_id = s.piece_id
+        AND o.process_generation = s.process_generation
+        AND o.action_id = s.action_id
+        AND o.payload = s.payload
+      JOIN scheduler_action_state a
+        ON a.branch = w.branch
+        AND a.owner_space = w.owner_space
+        AND a.piece_id = w.piece_id
+        AND a.process_generation = w.process_generation
+        AND a.action_id = w.action_id
+        AND a.execution_context_key = w.execution_context_key
+        AND a.latest_observation_id = w.observation_id
+      WHERE w.branch = :branch
+        AND w.write_space = :write_space
+        AND w.write_id = :write_id
+        AND w.write_scope_key = :write_scope_key
+        AND w.write_scope = :write_scope
+        AND (:owner_space IS NULL OR w.owner_space = :owner_space)
+        ${contextFilter}
+    `).all({
+      branch,
+      write_space: target.space,
+      write_id: target.id,
+      write_scope_key: target.scopeKey,
+      write_scope: declaredScope,
+      owner_space: options.ownerSpace === undefined
+        ? null
+        : normalizeSchedulerOwnerSpace(options.ownerSpace),
+      ...contextParams,
+    }) as SchedulerWriterLookupRow[];
+
+    for (const row of rows) {
+      if (!isSchedulerWriteIndexKind(row.write_kind)) continue;
+      let writePath: string[];
+      try {
+        writePath = decodeSchedulerPath(row.write_path);
+      } catch {
+        continue;
+      }
+      if (!schedulerPathsOverlap(writePath, target.path, false)) continue;
+
+      let observation: SchedulerActionObservation | undefined;
+      try {
+        observation = schedulerObservationFromValue(
+          decodeSchedulerSnapshotObservation(
+            row.payload,
+            row.observed_at_seq,
+          ),
+        );
+      } catch {
+        // Indexes are projections, never ground truth. A corrupt snapshot row
+        // is an index miss so callers can fail open to piece instantiation.
+        continue;
+      }
+      if (
+        observation === undefined ||
+        observation.branch !== row.branch ||
+        normalizeSchedulerOwnerSpace(observation.ownerSpace) !==
+          row.owner_space ||
+        observation.pieceId !== row.piece_id ||
+        observation.processGeneration !== row.process_generation ||
+        observation.actionId !== row.action_id ||
+        !schedulerObservationContainsIndexedWrite(
+          observation,
+          row,
+          writePath,
+        )
+      ) {
+        continue;
+      }
+
+      const ownerSpace = denormalizeSchedulerOwnerSpace(row.owner_space);
+      const candidateKey = schedulerWriterCandidateKey({
+        branch: row.branch,
+        ownerSpace,
+        pieceId: row.piece_id,
+        processGeneration: row.process_generation,
+        actionId: row.action_id,
+        executionContextKey: row.execution_context_key,
+      });
+      let accumulated = candidates.get(candidateKey);
+      if (!accumulated) {
+        accumulated = {
+          candidate: {
+            branch: row.branch,
+            ...(ownerSpace !== undefined ? { ownerSpace } : {}),
+            pieceId: row.piece_id,
+            processGeneration: row.process_generation,
+            actionId: row.action_id,
+            executionContextKey: row.execution_context_key,
+            observationId: row.observation_id,
+            commitSeq: row.commit_seq,
+            observedAtSeq: row.observed_at_seq,
+            actionKind: observation.actionKind,
+            implementationFingerprint: observation.implementationFingerprint,
+            runtimeFingerprint: observation.runtimeFingerprint,
+            status: observation.status,
+            ...(observation.errorFingerprint !== undefined
+              ? { errorFingerprint: observation.errorFingerprint }
+              : {}),
+            ...(row.direct_dirty_seq !== null
+              ? { directDirtySeq: row.direct_dirty_seq }
+              : {}),
+            ...(row.stale_seq !== null ? { staleSeq: row.stale_seq } : {}),
+            ...(row.unknown_reason !== null
+              ? { unknownReason: row.unknown_reason }
+              : {}),
+          },
+          matchedWrites: new Map(),
+        };
+        candidates.set(candidateKey, accumulated);
+      }
+
+      const match: SchedulerMatchedWrite = {
+        kind: row.write_kind,
+        write: {
+          space: row.write_space,
+          id: row.write_id,
+          scope: row.write_scope as CellScope,
+          scopeKey: row.write_scope_key,
+          path: writePath,
+        },
+      };
+      accumulated.matchedWrites.set(schedulerMatchedWriteKey(match), match);
+    }
+  }
+
+  return [...candidates.values()]
+    .map(({ candidate, matchedWrites }) => ({
+      ...candidate,
+      matchedWrites: [...matchedWrites.values()].sort((left, right) =>
+        compareSchedulerKeys(
+          schedulerMatchedWriteKey(left),
+          schedulerMatchedWriteKey(right),
+        )
+      ),
+    }))
+    .sort((left, right) =>
+      compareSchedulerKeys(
+        schedulerWriterCandidateKey(left),
+        schedulerWriterCandidateKey(right),
+      )
+    );
+};
+
 export const markSchedulerReadersDirtyForWrites = (
   engine: Engine,
   options: {
@@ -2935,6 +5367,9 @@ export const markSchedulerReadersDirtyForWrites = (
     ownerSpace?: string;
     dirtySeq: number;
     writes: readonly SchedulerWriteAddress[];
+    /** The accepted action producing these writes. Scheduler self-writes do
+     * not schedule another run or become causal source provenance. */
+    ignoredAction?: SchedulerActionCauseKey;
   },
 ): SchedulerReaderIndexEntry[] => {
   const branch = options.branch ?? DEFAULT_BRANCH;
@@ -2946,6 +5381,12 @@ export const markSchedulerReadersDirtyForWrites = (
         write,
       })
     ) {
+      if (
+        options.ignoredAction !== undefined &&
+        schedulerActionCauseKeyEquals(reader, options.ignoredAction)
+      ) {
+        continue;
+      }
       const key = schedulerActionKey(reader);
       if (!dirtied.has(key)) {
         dirtied.set(key, reader);
@@ -2973,6 +5414,7 @@ export const markSchedulerActionsDirectDirty = (
   },
 ): void => {
   const branch = options.branch ?? DEFAULT_BRANCH;
+  assertSchedulerActionCauseSeq(options.dirtySeq);
   const direct = dedupeSchedulerActions(options.actions, branch);
   for (const action of direct) {
     markSchedulerActionDirectDirty(engine, action, options.dirtySeq);
@@ -2984,6 +5426,234 @@ export const markSchedulerActionsDirectDirty = (
     actions: direct,
   });
 };
+
+const MAX_PENDING_SCHEDULER_ACTION_CAUSES = 64;
+
+type SchedulerActionCauseKey = {
+  branch: BranchName;
+  ownerSpace?: string | null;
+  pieceId: string;
+  processGeneration: number;
+  actionId: string;
+  executionContextKey: SchedulerExecutionContextKey;
+};
+
+const schedulerActionCauseParams = (key: SchedulerActionCauseKey) => ({
+  branch: key.branch,
+  owner_space: normalizeSchedulerOwnerSpace(key.ownerSpace),
+  piece_id: key.pieceId,
+  process_generation: key.processGeneration,
+  action_id: key.actionId,
+  execution_context_key: key.executionContextKey,
+});
+
+const schedulerActionCauseKeyEquals = (
+  left: SchedulerActionCauseKey,
+  right: SchedulerActionCauseKey,
+): boolean =>
+  left.branch === right.branch &&
+  normalizeSchedulerOwnerSpace(left.ownerSpace) ===
+    normalizeSchedulerOwnerSpace(right.ownerSpace) &&
+  left.pieceId === right.pieceId &&
+  left.processGeneration === right.processGeneration &&
+  left.actionId === right.actionId &&
+  left.executionContextKey === right.executionContextKey;
+
+const assertSchedulerActionCauseSeq = (sourceSeq: number): void => {
+  if (!Number.isSafeInteger(sourceSeq) || sourceSeq <= 0) {
+    throw new TypeError(
+      "scheduler action cause sequence must be a positive safe integer",
+    );
+  }
+};
+
+/**
+ * Retain the newest exact causes while bounding durable state. A zero row is
+ * the honest overflow marker: once any exact cause has been folded into it,
+ * provenance stays unknown until one accepted run covers the entire pending
+ * dirty frontier.
+ */
+function recordSchedulerActionCause(
+  engine: Engine,
+  action: SchedulerActionCauseKey,
+  sourceSeq: number,
+): void {
+  const params = schedulerActionCauseParams(action);
+  engine.database.prepare(`
+    INSERT OR IGNORE INTO scheduler_action_cause (
+      branch,
+      owner_space,
+      piece_id,
+      process_generation,
+      action_id,
+      execution_context_key,
+      source_seq
+    ) VALUES (
+      :branch,
+      :owner_space,
+      :piece_id,
+      :process_generation,
+      :action_id,
+      :execution_context_key,
+      :source_seq
+    )
+  `).run({ ...params, source_seq: sourceSeq });
+
+  const rowCount = (engine.database.prepare(`
+    SELECT COUNT(*) AS count
+    FROM scheduler_action_cause
+    WHERE branch = :branch
+      AND owner_space = :owner_space
+      AND piece_id = :piece_id
+      AND process_generation = :process_generation
+      AND action_id = :action_id
+      AND execution_context_key = :execution_context_key
+  `).get(params) as { count: number }).count;
+  if (rowCount <= MAX_PENDING_SCHEDULER_ACTION_CAUSES) return;
+
+  engine.database.prepare(`
+    INSERT OR IGNORE INTO scheduler_action_cause (
+      branch,
+      owner_space,
+      piece_id,
+      process_generation,
+      action_id,
+      execution_context_key,
+      source_seq
+    ) VALUES (
+      :branch,
+      :owner_space,
+      :piece_id,
+      :process_generation,
+      :action_id,
+      :execution_context_key,
+      0
+    )
+  `).run(params);
+  const boundedCount = (engine.database.prepare(`
+    SELECT COUNT(*) AS count
+    FROM scheduler_action_cause
+    WHERE branch = :branch
+      AND owner_space = :owner_space
+      AND piece_id = :piece_id
+      AND process_generation = :process_generation
+      AND action_id = :action_id
+      AND execution_context_key = :execution_context_key
+  `).get(params) as { count: number }).count;
+  engine.database.prepare(`
+    DELETE FROM scheduler_action_cause
+    WHERE rowid IN (
+      SELECT rowid
+      FROM scheduler_action_cause
+      WHERE branch = :branch
+        AND owner_space = :owner_space
+        AND piece_id = :piece_id
+        AND process_generation = :process_generation
+        AND action_id = :action_id
+        AND execution_context_key = :execution_context_key
+        AND source_seq > 0
+      ORDER BY source_seq ASC
+      LIMIT :excess
+    )
+  `).run({
+    ...params,
+    excess: boundedCount - MAX_PENDING_SCHEDULER_ACTION_CAUSES,
+  });
+}
+
+type SchedulerActionCauseCoverage = {
+  causedBy: number[];
+  overflowed: boolean;
+  clearsOverflow: boolean;
+};
+
+function schedulerActionCauseCoverage(
+  engine: Engine,
+  key: SchedulerActionCauseKey,
+  throughSeq: number,
+): SchedulerActionCauseCoverage {
+  const params = schedulerActionCauseParams(key);
+  const rows = engine.database.prepare(`
+    SELECT source_seq
+    FROM scheduler_action_cause
+    WHERE branch = :branch
+      AND owner_space = :owner_space
+      AND piece_id = :piece_id
+      AND process_generation = :process_generation
+      AND action_id = :action_id
+      AND execution_context_key = :execution_context_key
+    ORDER BY source_seq ASC
+  `).all(params) as Array<{ source_seq: number }>;
+  const overflowed = rows.some((row) => row.source_seq === 0);
+  const exact = [...new Set(rows.map((row) => row.source_seq))]
+    .filter((sourceSeq) =>
+      Number.isSafeInteger(sourceSeq) && sourceSeq > 0 &&
+      sourceSeq <= throughSeq
+    )
+    .sort((left, right) => left - right);
+  if (!overflowed) {
+    return { causedBy: exact, overflowed: false, clearsOverflow: false };
+  }
+
+  const state = engine.database.prepare(`
+    SELECT direct_dirty_seq, stale_seq
+    FROM scheduler_action_state
+    WHERE branch = :branch
+      AND owner_space = :owner_space
+      AND piece_id = :piece_id
+      AND process_generation = :process_generation
+      AND action_id = :action_id
+      AND execution_context_key = :execution_context_key
+  `).get(params) as {
+    direct_dirty_seq: number | null;
+    stale_seq: number | null;
+  } | undefined;
+  const pendingFrontier = [state?.direct_dirty_seq, state?.stale_seq]
+    .filter((seq): seq is number => seq !== null && seq !== undefined)
+    .reduce<number | undefined>(
+      (maximum, seq) => maximum === undefined ? seq : Math.max(maximum, seq),
+      undefined,
+    );
+  return {
+    causedBy: [],
+    overflowed: true,
+    clearsOverflow: pendingFrontier !== undefined &&
+      Number.isSafeInteger(pendingFrontier) && pendingFrontier <= throughSeq,
+  };
+}
+
+function consumeSchedulerActionCauses(
+  engine: Engine,
+  key: SchedulerActionCauseKey,
+  throughSeq: number,
+): void {
+  const coverage = schedulerActionCauseCoverage(engine, key, throughSeq);
+  const params = schedulerActionCauseParams(key);
+  if (coverage.overflowed) {
+    if (!coverage.clearsOverflow) return;
+    engine.database.prepare(`
+      DELETE FROM scheduler_action_cause
+      WHERE branch = :branch
+        AND owner_space = :owner_space
+        AND piece_id = :piece_id
+        AND process_generation = :process_generation
+        AND action_id = :action_id
+        AND execution_context_key = :execution_context_key
+    `).run(params);
+    return;
+  }
+  engine.database.prepare(`
+    DELETE FROM scheduler_action_cause
+    WHERE branch = :branch
+      AND owner_space = :owner_space
+      AND piece_id = :piece_id
+      AND process_generation = :process_generation
+      AND action_id = :action_id
+      AND execution_context_key = :execution_context_key
+      AND source_seq > 0
+      AND source_seq <= :through_seq
+  `).run({ ...params, through_seq: throughSeq });
+}
 
 export const getSchedulerActionState = (
   engine: Engine,
@@ -3028,7 +5698,12 @@ export const getSchedulerActionState = (
   }) as SchedulerActionStateRow[];
 
   if (rows.length !== 1) return undefined;
-  const row = rows[0];
+  return schedulerActionStateFromRow(rows[0]);
+};
+
+function schedulerActionStateFromRow(
+  row: SchedulerActionStateRow,
+): SchedulerActionState {
   const ownerSpace = denormalizeSchedulerOwnerSpace(row.owner_space);
   return {
     branch: row.branch,
@@ -3042,7 +5717,7 @@ export const getSchedulerActionState = (
     staleSeq: row.stale_seq,
     unknownReason: row.unknown_reason,
   };
-};
+}
 
 function dedupeSchedulerActions(
   actions: readonly SchedulerReaderIndexEntry[],
@@ -3106,6 +5781,7 @@ function markSchedulerActionDirectDirty(
     execution_context_key: action.executionContextKey,
     direct_dirty_seq: dirtySeq,
   });
+  recordSchedulerActionCause(engine, action, dirtySeq);
 }
 
 function markSchedulerActionStale(
@@ -3155,6 +5831,7 @@ function markSchedulerActionStale(
     execution_context_key: action.executionContextKey,
     stale_seq: staleSeq,
   });
+  recordSchedulerActionCause(engine, action, staleSeq);
 }
 
 function propagateSchedulerStaleFromActions(
@@ -3280,6 +5957,15 @@ type SchedulerWriteIndexRow = {
   action_id: string;
   execution_context_key: SchedulerExecutionContextKey;
   observation_id: number;
+};
+
+type SchedulerWriterLookupRow = SchedulerWriteIndexRow & {
+  commit_seq: number | null;
+  observed_at_seq: number;
+  payload: string;
+  direct_dirty_seq: number | null;
+  stale_seq: number | null;
+  unknown_reason: string | null;
 };
 
 type SchedulerSnapshotRow = {
@@ -3440,26 +6126,47 @@ const narrowerSchedulerContext = (
 ): SchedulerContextScope =>
   schedulerContextRank(left) >= schedulerContextRank(right) ? left : right;
 
-const schedulerSummaryAddresses = (
+/** READ-side summary surface (piece + certified reads). Split from the
+ * write side because the per-address lane firewall admits a lane's §2 READ
+ * chain (CA3) while writes stay exact-lane (§4). */
+const schedulerSummaryReadAddresses = (
   summary: CompleteActionScopeSummary,
 ): SchedulerObservationAddress[] => [
   summary.piece,
   ...summary.reads,
+];
+
+const schedulerSummaryWriteAddresses = (
+  summary: CompleteActionScopeSummary,
+): SchedulerObservationAddress[] => [
   ...summary.writes,
   ...summary.materializerWriteEnvelopes,
   ...summary.directOutputs,
 ];
 
-const schedulerObservationAddresses = (
+/** READ-side observed surface — see {@link schedulerSummaryReadAddresses}. */
+const schedulerObservationReadAddresses = (
   observation: SchedulerActionObservation,
 ): SchedulerObservationAddress[] => [
   ...observation.reads,
   ...observation.shallowReads,
+];
+
+const schedulerObservationWriteAddresses = (
+  observation: SchedulerActionObservation,
+): SchedulerObservationAddress[] => [
   ...observation.actualChangedWrites,
   ...observation.currentKnownWrites,
   ...(observation.declaredWrites ?? []),
   ...observation.materializerWriteEnvelopes,
   ...(observation.ignoredSchedulingWrites ?? []),
+];
+
+const schedulerObservationAddresses = (
+  observation: SchedulerActionObservation,
+): SchedulerObservationAddress[] => [
+  ...schedulerObservationReadAddresses(observation),
+  ...schedulerObservationWriteAddresses(observation),
 ];
 
 function trustedSchedulerScopeSummary(
@@ -3497,24 +6204,48 @@ function schedulerAddressCoveredBy(
   });
 }
 
-function schedulerRuntimeExceedsSummary(
+/**
+ * Writes must stay inside their declared envelopes: an out-of-envelope write
+ * means the trusted static summary does not bound the action's authority
+ * footprint. Reads are deliberately NOT checked against envelopes — dynamic
+ * link-following reads are admitted as long as they stay same-space and
+ * space-scoped, which the context floor and the execution firewall enforce
+ * per address.
+ */
+function schedulerRuntimeWritesExceedSummary(
   observation: SchedulerActionObservation,
   summary: CompleteActionScopeSummary,
+  options?: { admitUserOutputWidening?: boolean },
 ): boolean {
   const writeEnvelopes = [
     ...summary.writes,
     ...summary.materializerWriteEnvelopes,
     ...summary.directOutputs,
   ];
-  return [...observation.reads, ...observation.shallowReads].some((address) =>
-    !schedulerAddressCoveredBy(address, summary.reads)
-  ) ||
-    [
-      ...observation.actualChangedWrites,
-      ...observation.currentKnownWrites,
-      ...(observation.declaredWrites ?? []),
-      ...(observation.ignoredSchedulingWrites ?? []),
-    ].some((address) => !schedulerAddressCoveredBy(address, writeEnvelopes)) ||
+  // §4 output widening (context-lattice C1.2/C1.9c): a user-context run
+  // writes each broad direct output TWICE — the broad instance as a
+  // scope-naming self-redirect link plus the value at the acting
+  // principal's user instance — while the transformer certificate declares
+  // that output ONCE, at the broad address. For CONTEXT-FLOOR derivation
+  // the user leg of such a pair is the same logical output, not evidence
+  // that the certificate under-declares the action (which would wrongly
+  // narrow the floor to session rank). Claimed-commit validation stays
+  // strict: the executor router presents claimed summaries with the lane
+  // instance added explicitly (A7 lockstep).
+  const covered = (address: SchedulerObservationAddress): boolean =>
+    schedulerAddressCoveredBy(address, writeEnvelopes) ||
+    (options?.admitUserOutputWidening === true &&
+      normalizeSchedulerScope(address.scope) === "user" &&
+      schedulerAddressCoveredBy(
+        { ...address, scope: "space" },
+        writeEnvelopes,
+      ));
+  return [
+    ...observation.actualChangedWrites,
+    ...observation.currentKnownWrites,
+    ...(observation.declaredWrites ?? []),
+    ...(observation.ignoredSchedulingWrites ?? []),
+  ].some((address) => !covered(address)) ||
     observation.materializerWriteEnvelopes.some((address) =>
       !schedulerAddressCoveredBy(
         address,
@@ -3523,8 +6254,574 @@ function schedulerRuntimeExceedsSummary(
     );
 }
 
+type ExecutionActionTransaction = Pick<
+  ClientCommit,
+  "reads" | "operations" | "preconditions" | "merge"
+>;
+
+const rejectExecutionAction = (
+  diagnosticCode: string,
+  message: string,
+): never => {
+  throw new ExecutionActionFirewallError(diagnosticCode, message);
+};
+
+/**
+ * The scope keys one claimed lane may touch: the shared space scope, plus —
+ * for a scoped lane — exactly that lane's own scope key. `undefined` is the
+ * space lane, whose checks stay byte-identical to the pre-lane firewall.
+ * The claim contextKey doubles as the lane scope key because both use the
+ * canonical `user:<encodeURIComponent(principal)>` encoding
+ * (`userExecutionContextKey`).
+ */
+type LaneScopeKey = string | undefined;
+
+const laneScopeKeyForClaimContext = (
+  contextKey: SchedulerExecutionContextKey,
+): LaneScopeKey => {
+  if (contextKey === "space") return undefined;
+  if (principalOfUserContextKey(contextKey) !== undefined) return contextKey;
+  // C2.1b: a canonical session claim context doubles as its lane scope key,
+  // exactly like the user encoding above (`resolveScopeKey("session", …)`
+  // produces the same canonical `session:<enc>:<enc>` string).
+  if (parseSessionExecutionContextKey(contextKey) !== undefined) {
+    return contextKey;
+  }
+  // Malformed scoped keys keep the defensive fail-closed backstop: claim
+  // admission already fences them upstream.
+  return rejectExecutionAction(
+    "non-lane-scope",
+    `claim context ${contextKey} has no servable lane`,
+  );
+};
+
+/**
+ * CA3 broader-in-chain READ collapse (context-lattice §2, C2 review): the
+ * resolved scope keys a claimed lane may READ. A session lane's chain adds
+ * the LANE principal's user instance beside its own session instance (the
+ * shared space scope is admitted separately as `DEFAULT_SCOPE_KEY`); a user
+ * lane's chain is exactly its own key, and the space lane stays `undefined`
+ * (space-only) — both byte-identical to the pre-CA3 checks. The chain-user
+ * key derives from the LANE key's principal segment, never from the request
+ * scope context, so a mis-threaded context can never widen the chain.
+ * WRITES never widen: the write-side checks keep exact-lane admission (§4 —
+ * the output pair's broad leg is the only second instance, and it must be a
+ * conforming scope-naming link). The client-replica twin of this collapse
+ * (v2.ts `laneScopeKey`/`laneOf`) is C2.5's.
+ */
+const laneChainReadScopeKeys = (
+  laneScopeKey: LaneScopeKey,
+): ReadonlySet<string> | undefined => {
+  if (laneScopeKey === undefined) return undefined;
+  const sessionIdentity = parseSessionExecutionContextKey(laneScopeKey);
+  return sessionIdentity === undefined ? new Set([laneScopeKey]) : new Set([
+    laneScopeKey,
+    userExecutionContextKey(sessionIdentity.principal),
+  ]);
+};
+
+const rejectNonLaneScope = (
+  laneScopeKey: LaneScopeKey,
+  kind: string,
+  id: string,
+): never =>
+  laneScopeKey === undefined
+    ? rejectExecutionAction(
+      "non-space-scope",
+      `${kind} ${id} does not resolve to the space scope`,
+    )
+    : rejectExecutionAction(
+      "non-lane-scope",
+      `${kind} ${id} resolves outside the space and lane scopes`,
+    );
+
+const assertLaneScopedAddress = (
+  address: SchedulerObservationAddress,
+  servedSpace: string,
+  scopeContext: SchedulerScopeContext,
+  laneScopeKey: LaneScopeKey,
+  /** Which §4 surface class the address belongs to. READ side carries the
+   * lane's admissible read chain (CA3) — undefined for the space lane,
+   * which has no chain; WRITE side keeps exact-lane admission. The side
+   * marker is explicit (not inferred from the chain set) because C3.5's
+   * foreign-read relax must apply on the SPACE lane too, whose chain set
+   * is undefined. */
+  side:
+    | { surface: "read"; chainReadScopeKeys?: ReadonlySet<string> }
+    | { surface: "write" },
+): void => {
+  if (address.space !== servedSpace) {
+    // C3.5 (blocker C3A2): the fourth reject site relaxes for READ
+    // addresses ONLY — a space-scoped foreign READ (summary reads and
+    // observation reads) is admitted, because C3.4 gives claimed attempts
+    // an authenticated, ACL-checked, stamped read path into foreign spaces
+    // and C3.5's vector basis accounts for what was consumed. Everything
+    // else keeps the reject byte-identical: write-side surfaces, and
+    // user/session-scoped foreign reads (decision #3: v1 foreign reads
+    // are space-scoped only — the read host cannot resolve a foreign lane
+    // instance). "Default branch" needs no check here: the address carries
+    // no branch dimension, and C3.4's point read resolves the read space's
+    // default branch by construction (decision #4 — the wire has no branch
+    // field). A foreign PIECE cannot reach this site: the trusted summary
+    // requires piece.space === ownerSpace === servedSpace upstream.
+    if (
+      side.surface === "read" &&
+      resolveScopeKey(address.scope, scopeContext) === DEFAULT_SCOPE_KEY
+    ) {
+      return;
+    }
+    rejectExecutionAction(
+      "foreign-space-surface",
+      `surface ${address.id} belongs to ${address.space}, not ${servedSpace}`,
+    );
+  }
+  const resolved = resolveScopeKey(address.scope, scopeContext);
+  if (resolved === DEFAULT_SCOPE_KEY) return;
+  const chainReadScopeKeys = side.surface === "read"
+    ? side.chainReadScopeKeys
+    : undefined;
+  if (
+    chainReadScopeKeys !== undefined
+      ? !chainReadScopeKeys.has(resolved)
+      : laneScopeKey === undefined || resolved !== laneScopeKey
+  ) {
+    rejectNonLaneScope(laneScopeKey, "surface", address.id);
+  }
+};
+
+/**
+ * Broad-instance scope-naming-link backstop (context-lattice §4 / C1.2): a
+ * scoped lane may write a broad document only as the conforming self-scoping
+ * link the runner's output-scoping step emits — the shared wire contract in
+ * `scope-naming-link.ts`. A broad value write from a lane means
+ * output-scoping failed and rejects the whole transaction.
+ */
+const assertLaneBroadScopeNamingWrite = (
+  operation: Exclude<Operation, SqliteOperation>,
+  laneScope: "user" | "session" = "user",
+): void => {
+  const reject: (code: string, detail: string) => never = (code, detail) =>
+    rejectExecutionAction(code, `broad lane write ${operation.id}: ${detail}`);
+  if (operation.op === "delete") {
+    return reject(
+      "broad-lane-value-write",
+      "broad deletes are value mutations",
+    );
+  }
+  if (operation.op === "set") {
+    const document = operation.value ?? {};
+    for (const key of Object.keys(document)) {
+      if (key !== "value") {
+        reject(
+          "broad-lane-value-write",
+          `document field "${key}" is not a scope-naming link position`,
+        );
+      }
+    }
+    const violation = scopeNamingLinkWriteViolation({
+      value: document.value,
+      documentPath: ["value"],
+      writtenDocId: operation.id,
+      laneScope,
+    });
+    if (violation !== undefined) reject(violation.code, violation.detail);
+    return;
+  }
+  // op === "patch": only exact-position writes can prove the self-redirect
+  // property at commit time; positional and merge kinds stay value writes.
+  for (const patch of operation.patches) {
+    if (patch.op !== "replace" && patch.op !== "add") {
+      return reject(
+        "broad-lane-value-write",
+        `patch op ${patch.op} is not a scope-naming link write`,
+      );
+    }
+    const documentPath = parsePointer(patch.path);
+    if (documentPath[0] !== "value") {
+      reject(
+        "broad-lane-value-write",
+        `patch at ${patch.path} is outside the document value`,
+      );
+    }
+    const violation = scopeNamingLinkWriteViolation({
+      value: patch.value,
+      documentPath,
+      writtenDocId: operation.id,
+      laneScope,
+    });
+    if (violation !== undefined) reject(violation.code, violation.detail);
+  }
+};
+
+/**
+ * Validate the complete static and observed surface plus the actual commit
+ * shape for one positively claimed action. This function is pure; callers run
+ * it inside the same IMMEDIATE transaction before any commit row, revision,
+ * scheduler row, SQLite statement, or merge state can be applied.
+ */
+const assertExecutionActionTransaction = (
+  options: {
+    servedSpace: string;
+    branch: BranchName;
+    scopeContext: SchedulerScopeContext;
+    /** The asserted claim's lane; `"space"` keeps the pre-lane firewall. */
+    claimContextKey: SchedulerExecutionContextKey;
+    transaction: ExecutionActionTransaction;
+    observation: SchedulerActionObservation;
+  },
+): void => {
+  const { observation, transaction } = options;
+  const laneScopeKey = laneScopeKeyForClaimContext(options.claimContextKey);
+  // CA3: READ surfaces admit the lane's §2 chain (a session lane may read
+  // the lane principal's user instances); WRITE surfaces stay exact-lane.
+  const chainReadScopeKeys = laneChainReadScopeKeys(laneScopeKey);
+  if (
+    observation.ownerSpace !== options.servedSpace ||
+    observation.branch !== options.branch
+  ) {
+    rejectExecutionAction(
+      "claim-lane-mismatch",
+      "observation owner space or branch does not match the served lane",
+    );
+  }
+  const summary = trustedSchedulerScopeSummary(observation);
+  if (summary === undefined) {
+    return rejectExecutionAction(
+      "incomplete-static-scope",
+      "execution claim context requires a complete trusted static scope summary",
+    );
+  }
+
+  for (const address of schedulerSummaryReadAddresses(summary)) {
+    assertLaneScopedAddress(
+      address,
+      options.servedSpace,
+      options.scopeContext,
+      laneScopeKey,
+      { surface: "read", chainReadScopeKeys },
+    );
+  }
+  for (const address of schedulerSummaryWriteAddresses(summary)) {
+    assertLaneScopedAddress(
+      address,
+      options.servedSpace,
+      options.scopeContext,
+      laneScopeKey,
+      { surface: "write" },
+    );
+  }
+  for (const address of schedulerObservationReadAddresses(observation)) {
+    assertLaneScopedAddress(
+      address,
+      options.servedSpace,
+      options.scopeContext,
+      laneScopeKey,
+      { surface: "read", chainReadScopeKeys },
+    );
+  }
+  for (const address of schedulerObservationWriteAddresses(observation)) {
+    assertLaneScopedAddress(
+      address,
+      options.servedSpace,
+      options.scopeContext,
+      laneScopeKey,
+      { surface: "write" },
+    );
+  }
+  if (schedulerRuntimeWritesExceedSummary(observation, summary)) {
+    rejectExecutionAction(
+      "runtime-exceeds-static-scope",
+      "observed action writes exceed the complete static summary",
+    );
+  }
+
+  if (transaction.merge !== undefined) {
+    rejectExecutionAction(
+      "merge-commit",
+      "claimed actions may not carry branch merge metadata",
+    );
+  }
+  for (const precondition of transaction.preconditions ?? []) {
+    if (precondition.kind !== "entity-absent") continue;
+    const resolved = resolveScopeKey(precondition.scope, options.scopeContext);
+    if (
+      resolved !== DEFAULT_SCOPE_KEY &&
+      (laneScopeKey === undefined || resolved !== laneScopeKey)
+    ) {
+      rejectNonLaneScope(laneScopeKey, "precondition", precondition.id);
+    }
+  }
+
+  // Framework-owned piece/argument/internal reads are deliberately excluded
+  // from the scheduler's reactive read log, but the trusted complete summary
+  // includes them. Claimed admission therefore accepts a canonical commit
+  // read when either runtime evidence or that exhaustive certificate covers
+  // it; reads outside both remain unobserved and fail closed.
+  const observedReads = [
+    ...observation.reads,
+    ...observation.shallowReads,
+    ...summary.reads,
+  ];
+  for (const read of transaction.reads.confirmed) {
+    if ((read.branch ?? options.branch) !== options.branch) {
+      rejectExecutionAction(
+        "cross-branch-read",
+        `confirmed read ${read.id} belongs to another branch`,
+      );
+    }
+    const resolved = resolveScopeKey(read.scope, options.scopeContext);
+    if (
+      resolved !== DEFAULT_SCOPE_KEY &&
+      (chainReadScopeKeys === undefined || !chainReadScopeKeys.has(resolved))
+    ) {
+      rejectNonLaneScope(laneScopeKey, "confirmed read", read.id);
+    }
+    const address: SchedulerObservationAddress = {
+      space: options.servedSpace,
+      id: read.id,
+      scope: read.scope,
+      path: read.path,
+    };
+    if (!schedulerAddressCoveredBy(address, observedReads)) {
+      rejectExecutionAction(
+        "unobserved-read",
+        `confirmed read ${read.id} is absent from the action observation`,
+      );
+    }
+  }
+  for (const read of transaction.reads.pending) {
+    const resolved = resolveScopeKey(read.scope, options.scopeContext);
+    if (
+      resolved !== DEFAULT_SCOPE_KEY &&
+      (chainReadScopeKeys === undefined || !chainReadScopeKeys.has(resolved))
+    ) {
+      rejectNonLaneScope(laneScopeKey, "pending read", read.id);
+    }
+    const address: SchedulerObservationAddress = {
+      space: options.servedSpace,
+      id: read.id,
+      scope: read.scope,
+      path: read.path,
+    };
+    if (!schedulerAddressCoveredBy(address, observedReads)) {
+      rejectExecutionAction(
+        "unobserved-read",
+        `pending read ${read.id} is absent from the action observation`,
+      );
+    }
+  }
+
+  for (const operation of transaction.operations) {
+    if (operation.op === "sqlite") {
+      rejectExecutionAction(
+        "sqlite-operation",
+        "claimed actions may not execute folded SQLite writes",
+      );
+      continue;
+    }
+    const resolvedScope = resolveScopeKey(
+      operation.scope,
+      options.scopeContext,
+    );
+    if (
+      resolvedScope !== DEFAULT_SCOPE_KEY &&
+      (laneScopeKey === undefined || resolvedScope !== laneScopeKey)
+    ) {
+      rejectNonLaneScope(laneScopeKey, "write", operation.id);
+    }
+    if (laneScopeKey !== undefined && resolvedScope === DEFAULT_SCOPE_KEY) {
+      // CA2 (C2.2): the admissible link scopes are the lane's non-space chain
+      // — a session lane's broad self-scoping link may name "user" or
+      // "session"; a user lane's only "user".
+      assertLaneBroadScopeNamingWrite(
+        operation,
+        laneScopeKey.startsWith("session:") ? "session" : "user",
+      );
+    }
+    const matchingWrites = observation.actualChangedWrites.filter((write) =>
+      write.space === options.servedSpace && write.id === operation.id &&
+      resolveScopeKey(write.scope, options.scopeContext) === resolvedScope
+    );
+    if (matchingWrites.length === 0) {
+      rejectExecutionAction(
+        "unobserved-write",
+        `write ${operation.id} is absent from the action observation`,
+      );
+    }
+    if (
+      operation.op === "patch" &&
+      operation.patches.flatMap(touchedPointerPaths).some((path) =>
+        !matchingWrites.some((write) => pathsOverlap(write.path, path))
+      )
+    ) {
+      rejectExecutionAction(
+        "unobserved-write",
+        `patch write ${operation.id} exceeds the observed changed paths`,
+      );
+    }
+  }
+};
+
+// ---------------------------------------------------------------------------
+// C3.8 (2026-07-18) — the home-apply authorization-epoch fence (the
+// cross-space TOCTOU close).
+//
+// C3.5 stamps every foreign provenance component with the authorization
+// epoch the read host served it under (`authorizationEpoch`), a value that
+// is READ-TIME-CONSISTENT ONLY (C3.4's flag): it certifies the granting
+// ACL's generation at the instant of the point read, and nothing more. C3.7
+// binds those epochs to the claim and revokes it when a bump arrives WHILE
+// THE CLAIM IS IDLE (the §7 "revocation while idle" gate). This fence is the
+// SECOND, distinct §7 gate: the read-to-APPLY window. A bump can land after
+// the foreign read is stamped but before the home commit applies, with the
+// claim never idle in between — C3.7 never fires, yet the attempt is about to
+// commit rows derived from an authority it no longer holds. So the accept
+// transaction re-validates every carried foreign epoch, by EQUALITY against
+// the CURRENT effective epoch, BEFORE any row of a claimed attempt applies.
+//
+// EQUALITY, not monotone (`>=`). The forward bump (current > carried) is
+// exactly the TOCTOU case: the ACL moved on between the read and the apply, so
+// the stamped authority is stale even though it is numerically LOWER than
+// current. A monotone "current is at least as new as carried" check accepts
+// precisely that case and is the bug this fence exists to prevent (the
+// discrimination leg). Equality also fails closed on a BACKWARD move — a host
+// restart / epoch-table reset makes current < carried — which over-revokes,
+// never under-revokes (C3A3). And an epoch the host cannot resolve at all
+// (`undefined` — peer/unknown/evicted) is stale by the same fail-closed rule.
+//
+// A stale component settles the WHOLE attempt canonically unserved, no
+// partial apply: the fence throws the fence-error family's new constant cause
+// `foreign-authorization-stale` from inside the IMMEDIATE transaction, which
+// rolls the whole commit back exactly as the lease/lane fences and the
+// `foreign-space-surface` firewall reject do — the §B.2 whole-action rule. The
+// client reruns fail-open: a fresh run re-reads B under the new ACL and either
+// re-stamps at the current epoch or is denied at read time.
+//
+// C3A7 — the forced-binary ruling, recorded here IN CODE. Over the co-hosted
+// link, apply-time revalidation reads the home host's LAST-RECEIVED epoch for
+// the peer space, and FIFO-per-link does not order a peer ACL bump (a
+// different link/direction) against this point read — a bump in flight can
+// land AFTER the apply, leaving a bounded residual window. That is a real
+// window with two resolutions (i: a synchronous apply-time epoch RPC adding an
+// RTT to every cross-space claimed commit; ii: ordering pinned to a single
+// link plus a bounded residual window the gate honestly restates). C3.8's
+// acceptance is IN-PROCESS ONLY (C3A8): over the in-process transport the C3.2
+// bump is applied in the read space's own SAME-PROCESS transaction and this
+// fence reads that SAME `authorization_epoch` table synchronously, both on one
+// event loop — so the bump and the read sit on ONE ordered path and no bump
+// can interleave the home apply's synchronous section. The in-process arm is
+// therefore option (ii) with a ZERO-WIDTH residual window: the fence is EXACT.
+// The co-hosted arm (the residual window, or the synchronous-RPC alternative)
+// is C3.10b's to resolve and bind; C3.11 folds this fixture in over both
+// transports.
+const assertForeignAuthorizationEpochsCurrent = (
+  provenance: ActionExecutionProvenance,
+  resolveForeignAuthorizationEpoch:
+    | ((space: string, principal: string) => number | undefined)
+    | undefined,
+): void => {
+  const components = provenance.inputBasis;
+  if (components === undefined) return;
+  for (const component of components) {
+    const stamp = component.authorizationEpoch;
+    // The home component carries no stamp — home authority is fenced by the
+    // lease/claim machinery, not epochs. Only foreign components are fenced.
+    if (stamp === undefined) continue;
+    const current = resolveForeignAuthorizationEpoch?.(
+      component.space,
+      stamp.principal,
+    );
+    // `undefined` = the host cannot resolve this (space, principal) =
+    // unknown = stale (fail closed). Otherwise EQUALITY: any drift from the
+    // read-time stamp — the forward TOCTOU bump above all — is stale.
+    if (current === undefined || current !== stamp.epoch) {
+      throw new ExecutionLeaseFenceError(
+        "foreign-authorization-stale",
+        `foreign authorization epoch for ${stamp.principal} on ` +
+          `${component.space} changed between the stamped read (epoch ` +
+          `${stamp.epoch}) and the home apply (` +
+          `${current === undefined ? "unknown" : `epoch ${current}`}) — ` +
+          "the whole claimed attempt settles unserved",
+      );
+    }
+  }
+};
+
+/**
+ * C3.5: true for the addresses whose foreignness no longer demotes the
+ * context floor of a HOST-ACCEPTED claimed attempt — space-scoped foreign
+ * READS. The gate is the observation's `executionProvenance`, which only the
+ * engine's accept path attaches (asserted values are stripped): a claimed
+ * attempt's foreign reads went through C3.4's per-read ACL check for the
+ * acting principal and settle with a vector basis, so they are not evidence
+ * of session-private observation. CLIENT observations keep the conservative
+ * crossesSpace → session demotion byte-identically — a client's cross-space
+ * read is performed under its own session credentials and stays
+ * session-owned (the pre-C3.6 posture the C3.3a wake fixtures pin).
+ */
+function claimedForeignReadFloorExempt(
+  observation: SchedulerActionObservation,
+  address: SchedulerObservationAddress,
+  admittedForeignReadSpaces?: readonly string[],
+): boolean {
+  if (normalizeSchedulerScope(address.scope) !== "space") return false;
+  // A SERVED claimed attempt carries the engine accept-path provenance
+  // (C3.5): its foreign read went through the per-read ACL check and settled
+  // into the vector basis. Byte-identical to the pre-C3.11 gate.
+  if (observation.executionProvenance !== undefined) return true;
+  // C3.11: an UNSERVED claimed cross-space-read attempt carries no
+  // provenance (the accept path strips it — engine `acceptedScheduler
+  // Observation`), yet the ACTION is still SPACE-rank. Its foreign read was
+  // admitted by the cross-space-read STAGE — the host authored
+  // `claim.crossSpaceReadSpaces` only AFTER the C3A17 issuance preflight
+  // bound the acting principal's READ per read space — and that admission is
+  // orthogonal to lane rank; it is NOT a session-scoped read. Exempt exactly
+  // the host-admitted read spaces so an unserved rerun classifies space-rank
+  // and fails CLOSED (settles unserved, no vector basis) WITHOUT writing a
+  // session floor that would monotonically poison the durable
+  // `scheduler_context_floor` and fence the next served run
+  // `claim-context-mismatch` (the C3.5 posture bug). A CLIENT cross-space
+  // read carries no claim and no admission, so it keeps the conservative
+  // session demotion byte-identically (the C3.3a wake fixtures pin this).
+  return admittedForeignReadSpaces !== undefined &&
+    admittedForeignReadSpaces.includes(address.space);
+}
+
+/**
+ * C3.11: the space-scoped FOREIGN read spaces this observation names — across
+ * its runtime reads/shallowReads and its trusted summary reads — deduped, home
+ * space excluded. The admitted-posture GLOBAL context floor exempts these so an
+ * unadmitted observer's conservative crossesSpace demotion never poisons the
+ * durable floor a served space-rank claim reads (see
+ * `resolveSchedulerExecutionContext`).
+ */
+function schedulerObservationForeignReadSpaces(
+  observation: SchedulerActionObservation,
+): string[] {
+  const ownerSpace = observation.ownerSpace;
+  if (ownerSpace === undefined) return [];
+  const summary = trustedSchedulerScopeSummary(observation);
+  const spaces = new Set<string>();
+  for (
+    const address of [
+      ...observation.reads,
+      ...observation.shallowReads,
+      ...(summary ? schedulerSummaryReadAddresses(summary) : []),
+    ]
+  ) {
+    if (
+      address.space !== ownerSpace &&
+      normalizeSchedulerScope(address.scope) === "space"
+    ) {
+      spaces.add(address.space);
+    }
+  }
+  return [...spaces];
+}
+
 function schedulerStaticContextFloor(
   observation: SchedulerActionObservation,
+  admittedForeignReadSpaces?: readonly string[],
 ): SchedulerContextScope {
   const summary = trustedSchedulerScopeSummary(observation);
   const ownerSpace = observation.ownerSpace;
@@ -3532,12 +6829,28 @@ function schedulerStaticContextFloor(
     return "session";
   }
 
-  const addresses = schedulerSummaryAddresses(summary).map(
+  const readAddresses = schedulerSummaryReadAddresses(summary).map(
     normalizeSchedulerAddress,
   );
-  const crossesSpace = addresses.some((address) =>
-    address.space !== ownerSpace
+  const writeAddresses = schedulerSummaryWriteAddresses(summary).map(
+    normalizeSchedulerAddress,
   );
+  const addresses = [...readAddresses, ...writeAddresses];
+  // C3.5: summary READS are floor-exempt when claimedForeignReadFloorExempt
+  // admits them; every non-read summary surface (writes, envelopes, direct
+  // outputs) keeps demoting on foreignness — foreign writes have no v1
+  // story and reject at the firewall anyway. (The piece rides the read
+  // list but is never foreign here: the trusted summary requires
+  // piece.space === ownerSpace.)
+  const crossesSpace =
+    readAddresses.some((address) =>
+      address.space !== ownerSpace &&
+      !claimedForeignReadFloorExempt(
+        observation,
+        address,
+        admittedForeignReadSpaces,
+      )
+    ) || writeAddresses.some((address) => address.space !== ownerSpace);
   if (
     addresses.some((address) =>
       normalizeSchedulerScope(address.scope) === "session"
@@ -3557,14 +6870,37 @@ function schedulerStaticContextFloor(
 
 function schedulerRuntimeContextFloor(
   observation: SchedulerActionObservation,
+  admittedForeignReadSpaces?: readonly string[],
 ): SchedulerContextScope {
   const ownerSpace = observation.ownerSpace;
   const addresses = schedulerObservationAddresses(observation);
   const summary = trustedSchedulerScopeSummary(observation);
+  // Reads are no longer required to sit inside the static read envelopes, so
+  // the summary alone no longer proves same-space-ness of the observed set:
+  // a dynamic (envelope-uncovered) read must itself be same-space, while an
+  // envelope-covered surface keeps the static floor's certified judgment.
   if (
     ownerSpace === undefined ||
     (summary !== undefined &&
-      schedulerRuntimeExceedsSummary(observation, summary)) ||
+      (schedulerRuntimeWritesExceedSummary(observation, summary, {
+        admitUserOutputWidening: true,
+      }) ||
+        [...observation.reads, ...observation.shallowReads].some((address) =>
+          normalizeSchedulerAddress(address).space !== ownerSpace &&
+          // C3.5: a host-accepted claimed attempt's space-scoped foreign
+          // READ no longer demotes to session — envelope-covered or not
+          // (dynamic link-following foreign reads are part of the admitted
+          // class and enter the vector basis). C3.11: an unserved claimed
+          // cross-space-read attempt is exempt on the host-admitted read
+          // spaces too (space-rank, no provenance yet). Client observations
+          // keep the conservative demotion byte-identically.
+          !claimedForeignReadFloorExempt(
+            observation,
+            address,
+            admittedForeignReadSpaces,
+          ) &&
+          !schedulerAddressCoveredBy(address, summary.reads)
+        ))) ||
     (summary === undefined &&
       addresses.some((address) => address.space !== ownerSpace)) ||
     addresses.some((address) =>
@@ -3799,6 +7135,13 @@ function resolveSchedulerExecutionContext(
     ownerSpace?: string;
     observation: SchedulerActionObservation;
     scopeContext: SchedulerScopeContext;
+    /** C3.11: the host-authored cross-space-read admission of this attempt's
+     * live claim (`ExecutionClaim.crossSpaceReadSpaces`). Threaded so an
+     * unserved claimed cross-space-read attempt — which carries no accepted
+     * provenance — still classifies its admitted foreign reads space-rank
+     * and does not poison the durable context floor. Absent for client
+     * observations and same-space claims (byte-identical). */
+    foreignReadAdmittedSpaces?: readonly string[];
   },
 ): {
   executionContextKey: SchedulerExecutionContextKey;
@@ -3815,17 +7158,59 @@ function resolveSchedulerExecutionContext(
     runtimeFingerprint: observation.runtimeFingerprint,
   };
   const principalKey = resolveScopeKey("user", scopeContext);
-  const staticFloor = schedulerStaticContextFloor(observation);
-  const runtimeFloor = schedulerRuntimeContextFloor(observation);
+  const staticFloor = schedulerStaticContextFloor(
+    observation,
+    options.foreignReadAdmittedSpaces,
+  );
+  const runtimeFloor = schedulerRuntimeContextFloor(
+    observation,
+    options.foreignReadAdmittedSpaces,
+  );
+  // C3.11: the GLOBAL floor is "the narrowest scope this action's DECLARED
+  // shape forces on EVERY principal". A cross-space space-scoped READ does
+  // NOT force session on every principal — a claimed principal whose read the
+  // cross-space-read STAGE admitted runs it space-rank — so the conservative
+  // crossesSpace demotion an UNADMITTED observer (a client, or the executor's
+  // pre-claim discovery run) computes is OBSERVER-SPECIFIC, not a global
+  // property. Writing it globally monotonically poisons the durable floor to
+  // session and fences the later served space-rank claim
+  // `claim-context-mismatch` (the same posture bug the unserved-rerun leg of
+  // C3.11 fixes, here for an observation with NO claim at all). The global
+  // write therefore exempts the observation's OWN space-scoped foreign reads
+  // (the admitted posture): a genuine session/user DECLARED scope still floors
+  // globally (it is not a foreign read), while the crossesSpace demotion stays
+  // where it belongs — this observation's effective floor below (which keeps
+  // the client at session byte-identically) and the principal-scoped session
+  // write. Foreign WRITES keep demoting globally (no v1 story; firewall reject).
+  const ownForeignReadSpaces = schedulerObservationForeignReadSpaces(
+    observation,
+  );
+  const globalStaticFloor = ownForeignReadSpaces.length > 0
+    ? schedulerStaticContextFloor(observation, ownForeignReadSpaces)
+    : staticFloor;
+  const globalRuntimeFloor = ownForeignReadSpaces.length > 0
+    ? schedulerRuntimeContextFloor(observation, ownForeignReadSpaces)
+    : runtimeFloor;
 
   // Static completeness applies to every principal for the fingerprint.
-  upsertSchedulerContextFloor(engine, floorKey, "", staticFloor);
+  upsertSchedulerContextFloor(engine, floorKey, "", globalStaticFloor);
   // Runtime evidence that disproves sharing is global at least through user;
   // PerSession/cross-space narrowing remains scoped to this principal lineage.
-  if (schedulerContextRank(runtimeFloor) >= schedulerContextRank("user")) {
+  if (
+    schedulerContextRank(globalRuntimeFloor) >= schedulerContextRank("user")
+  ) {
     upsertSchedulerContextFloor(engine, floorKey, "", "user");
   }
-  if (runtimeFloor === "session") {
+  // C3.11: the per-principal session narrowing is likewise the admitted
+  // posture. A genuine PerSession read narrows every run of this action by this
+  // principal (durable, principal-scoped). The crossesSpace demotion does NOT —
+  // it is observer-specific, and writing it here would poison a SERVED claim of
+  // the SAME principal (a dynamic/envelope-uncovered client foreign read reaches
+  // this on `runtimeFloor === "session"`; the gate's covered read does not, but
+  // it is the same poison class). `globalRuntimeFloor` fires only on a genuine
+  // session scope (foreign reads exempt), so the client still floors session via
+  // its own effective floor above without narrowing the shared principal floor.
+  if (globalRuntimeFloor === "session") {
     upsertSchedulerContextFloor(
       engine,
       floorKey,
@@ -3939,12 +7324,13 @@ function retireSchedulerObservationIfOrphaned(
   `).get({ observation_id: observationId }) as { active: number };
   if (row.active !== 0) return;
 
-  // Replay rows retain status, sequence, and the normalized payload needed to
-  // reject mismatched retries. Nulling only the retired active-row identity
-  // preserves idempotency without retaining the observation payload twice.
+  // Replay rows retain status, sequence, and the requested payload needed to
+  // reject mismatched retries. Once the active observation is retired, its
+  // canonical accepted payload is unreachable and would duplicate that data.
   engine.database.prepare(`
     UPDATE scheduler_observation_replay
-    SET observation_id = NULL
+    SET observation_id = NULL,
+        accepted_payload = NULL
     WHERE observation_id = :observation_id
   `).run({ observation_id: observationId });
   engine.database.prepare(`
@@ -3955,6 +7341,84 @@ function retireSchedulerObservationIfOrphaned(
 
 function normalizeSchedulerScope(scope: CellScope | undefined): CellScope {
   return scope ?? DEFAULT_SCOPE;
+}
+
+function isSchedulerWriteIndexKind(
+  value: string,
+): value is SchedulerWriteIndexKind {
+  return value === "current-known" || value === "declared" ||
+    value === "materializer";
+}
+
+function schedulerObservationContainsIndexedWrite(
+  observation: SchedulerActionObservation,
+  row: SchedulerWriterLookupRow,
+  writePath: readonly string[],
+): boolean {
+  const writes = row.write_kind === "current-known"
+    ? observation.currentKnownWrites
+    : row.write_kind === "declared"
+    ? observation.declaredWrites ?? []
+    : row.write_kind === "materializer"
+    ? observation.materializerWriteEnvelopes
+    : [];
+
+  return writes.some((write) => {
+    const scope = normalizeSchedulerScope(write.scope);
+    return write.space === row.write_space &&
+      write.id === row.write_id &&
+      scope === row.write_scope &&
+      schedulerScopeKeyForExecutionContext(
+          scope,
+          row.execution_context_key,
+        ) === row.write_scope_key &&
+      write.path.length === writePath.length &&
+      write.path.every((part, index) => part === writePath[index]);
+  });
+}
+
+function schedulerScopeKeyForExecutionContext(
+  scope: CellScope,
+  executionContextKey: SchedulerExecutionContextKey,
+): string | undefined {
+  const parts = executionContextKey.split(":");
+  let encodedPrincipal: string | undefined;
+  let contextScope: "space" | "user" | "session";
+  if (executionContextKey === "space") {
+    contextScope = "space";
+  } else if (principalOfUserContextKey(executionContextKey) !== undefined) {
+    contextScope = "user";
+    encodedPrincipal = executionContextKey.slice("user:".length);
+  } else if (
+    parts.length === 3 && parts[0] === "session" && parts[1] !== "" &&
+    parts[2] !== ""
+  ) {
+    contextScope = "session";
+    encodedPrincipal = parts[1];
+  } else {
+    return undefined;
+  }
+
+  try {
+    if (contextScope === "session") {
+      decodeURIComponent(encodedPrincipal!);
+      decodeURIComponent(parts[2]);
+    }
+  } catch {
+    return undefined;
+  }
+
+  if (scope === "space") return DEFAULT_SCOPE_KEY;
+  if (scope === "user" && encodedPrincipal !== undefined) {
+    // The segment is already canonically encoded (it comes from a stored
+    // context key), so re-attach the rank prefix rather than re-encoding a
+    // decoded principal through userExecutionContextKey.
+    return `user:${encodedPrincipal}`;
+  }
+  if (scope === "session" && contextScope === "session") {
+    return executionContextKey;
+  }
+  return undefined;
 }
 
 function selectSchedulerSnapshotRow(
@@ -4193,6 +7657,7 @@ function recordSchedulerObservationReplay(
     observationId?: number;
     observedAtSeq: number;
     payload: string;
+    acceptedPayload?: string;
   },
 ): void {
   runSchedulerObservationStatement("record observation replay", () => {
@@ -4205,7 +7670,8 @@ function recordSchedulerObservationReplay(
         reason,
         observation_id,
         observed_at_seq,
-        payload
+        payload,
+        accepted_payload
       )
       VALUES (
         :branch,
@@ -4215,7 +7681,8 @@ function recordSchedulerObservationReplay(
         :reason,
         :observation_id,
         :observed_at_seq,
-        :payload
+        :payload,
+        :accepted_payload
       )
       ON CONFLICT (branch, session_id, local_seq)
       DO UPDATE SET
@@ -4223,7 +7690,8 @@ function recordSchedulerObservationReplay(
         reason = excluded.reason,
         observation_id = excluded.observation_id,
         observed_at_seq = excluded.observed_at_seq,
-        payload = excluded.payload
+        payload = excluded.payload,
+        accepted_payload = excluded.accepted_payload
     `).run({
       branch: options.branch,
       session_id: options.sessionId,
@@ -4233,6 +7701,7 @@ function recordSchedulerObservationReplay(
       observation_id: options.observationId ?? null,
       observed_at_seq: options.observedAtSeq,
       payload: options.payload,
+      accepted_payload: options.acceptedPayload ?? null,
     });
   });
 }
@@ -4251,6 +7720,7 @@ function getSchedulerObservationReplay(
   execution_context_key: SchedulerExecutionContextKey | null;
   observed_at_seq: number;
   payload: string;
+  accepted_payload: string | null;
 } | undefined {
   return engine.database.prepare(`
     SELECT
@@ -4258,6 +7728,7 @@ function getSchedulerObservationReplay(
       replay.reason,
       replay.observation_id,
       active_snapshot.execution_context_key,
+      active_snapshot.payload AS accepted_payload,
       replay.observed_at_seq,
       replay.payload
     FROM scheduler_observation_replay replay
@@ -4267,7 +7738,8 @@ function getSchedulerObservationReplay(
       ON active_snapshot.observation_id = observation.observation_id
       AND active_snapshot.execution_context_key =
         observation.execution_context_key
-      AND active_snapshot.payload = replay.payload
+      AND active_snapshot.payload =
+        COALESCE(replay.accepted_payload, replay.payload)
       AND active_snapshot.observed_at_seq = replay.observed_at_seq
       AND observation.session_id = replay.session_id
     WHERE replay.branch = :branch
@@ -4284,6 +7756,7 @@ function getSchedulerObservationReplay(
     execution_context_key: SchedulerExecutionContextKey | null;
     observed_at_seq: number;
     payload: string;
+    accepted_payload: string | null;
   } | undefined;
 }
 
@@ -4772,6 +8245,7 @@ function upsertSchedulerActionState(
     observation: SchedulerActionObservation;
     executionContextKey: SchedulerExecutionContextKey;
     latestObservationId: number;
+    coveredThroughSeq: number;
   },
 ): void {
   engine.database.prepare(`
@@ -4809,8 +8283,14 @@ function upsertSchedulerActionState(
     )
     DO UPDATE SET
       latest_observation_id = excluded.latest_observation_id,
-      direct_dirty_seq = NULL,
-      stale_seq = NULL,
+      direct_dirty_seq = CASE
+        WHEN direct_dirty_seq > :covered_through_seq THEN direct_dirty_seq
+        ELSE NULL
+      END,
+      stale_seq = CASE
+        WHEN stale_seq > :covered_through_seq THEN stale_seq
+        ELSE NULL
+      END,
       unknown_reason = NULL
   `).run({
     branch: options.branch,
@@ -4820,6 +8300,7 @@ function upsertSchedulerActionState(
     action_id: options.observation.actionId,
     execution_context_key: options.executionContextKey,
     latest_observation_id: options.latestObservationId,
+    covered_through_seq: options.coveredThroughSeq,
   });
 }
 
@@ -4835,10 +8316,13 @@ function encodeSchedulerPath(path: readonly string[]): string {
 
 function decodeSchedulerPath(payload: string): string[] {
   const path = decodeMemoryBoundary(payload);
-  if (!Array.isArray(path)) {
-    throw new Error("scheduler paths must be arrays");
+  if (
+    !Array.isArray(path) ||
+    !path.every((part): part is string => typeof part === "string")
+  ) {
+    throw new Error("scheduler paths must be arrays of strings");
   }
-  return path.map((part) => String(part));
+  return path;
 }
 
 function schedulerPathsOverlap(
@@ -4876,14 +8360,186 @@ function schedulerActionKey(entry: {
   }\0${entry.pieceId}\0${entry.processGeneration}\0${entry.actionId}\0${entry.executionContextKey}`;
 }
 
+function schedulerWriterCandidateKey(entry: {
+  branch: BranchName;
+  ownerSpace?: string | null;
+  pieceId: string;
+  processGeneration: number;
+  actionId: string;
+  executionContextKey: SchedulerExecutionContextKey;
+}): string {
+  return [
+    entry.branch,
+    normalizeSchedulerOwnerSpace(entry.ownerSpace),
+    entry.pieceId,
+    String(entry.processGeneration),
+    entry.actionId,
+    entry.executionContextKey,
+  ].join("\0");
+}
+
+function schedulerMatchedWriteKey(match: SchedulerMatchedWrite): string {
+  return [
+    match.kind,
+    match.write.space,
+    match.write.scopeKey,
+    match.write.id,
+    encodeSchedulerPath(match.write.path),
+  ].join("\0");
+}
+
+function compareSchedulerKeys(left: string, right: string): number {
+  return utf8Compare(left, right);
+}
+
+/** Wire-shape-tolerant read of an observation's asserted claim lane. */
+const assertedLaneOfObservation = (
+  observation: unknown,
+): SchedulerExecutionContextKey | undefined => {
+  if (
+    typeof observation !== "object" || observation === null ||
+    Array.isArray(observation)
+  ) {
+    return undefined;
+  }
+  const assertion = (observation as { executionClaimAssertion?: unknown })
+    .executionClaimAssertion;
+  if (typeof assertion !== "object" || assertion === null) return undefined;
+  const contextKey = (assertion as { contextKey?: unknown }).contextKey;
+  return typeof contextKey === "string"
+    ? contextKey as SchedulerExecutionContextKey
+    : undefined;
+};
+
+const commitLaneAssertions = (
+  commit: ClientCommit,
+): { localSeq: number; contextKey: SchedulerExecutionContextKey }[] => {
+  const assertions: {
+    localSeq: number;
+    contextKey: SchedulerExecutionContextKey;
+  }[] = [];
+  const single = assertedLaneOfObservation(commit.schedulerObservation);
+  if (single !== undefined) {
+    assertions.push({ localSeq: commit.localSeq, contextKey: single });
+  }
+  for (const item of commit.schedulerObservationBatch ?? []) {
+    const contextKey = assertedLaneOfObservation(item.schedulerObservation);
+    if (contextKey !== undefined) {
+      assertions.push({ localSeq: item.localSeq, contextKey });
+    }
+  }
+  return assertions;
+};
+
+/**
+ * C1.4 lane admission (C1 review amendments 5/6): resolve the asserted
+ * execution lane BEFORE any scoped-state validation (preconditions,
+ * confirmed reads, pending reads) runs, so a forged or fenced lane
+ * assertion learns nothing about scoped state — every rejection here is a
+ * constant-shape fence cause. One commit — schedulerObservationBatch
+ * included — may assert claims of exactly one lane. Space-lane commits
+ * pass through byte-identically (their claim checks keep today's later
+ * loci and ordering). The returned acting lane identity feeds ONLY scope
+ * resolution, effective-context resolution, and CFC label validation; the
+ * sponsor `principal` keeps the lease fence, the replay/pending-read
+ * sessionKey namespace, and provenance.onBehalfOf. For a session lane
+ * (C2.1b, amendment CA1) the identity also carries the LANE's sessionId,
+ * parsed from the canonical claim contextKey — never the sponsor's session
+ * — so session-scope resolution and the claim-context-mismatch fence
+ * compare against the lane's own session context. Exact observation
+ * replays are exempt from the liveness checks so a lost-response replay
+ * stays idempotent after a lane drain, mirroring the replay-before-fence
+ * ordering of the per-observation apply paths.
+ */
+const admitExecutionCommitLanes = (
+  engine: Engine,
+  options: {
+    branch: BranchName;
+    sessionKey: string;
+    commit: ClientCommit;
+    actingContext?: SchedulerExecutionContextKey;
+    executionClaims?: ReadonlyMap<number, ExecutionClaim>;
+    executionLeaseFence?: ExecutionLeaseFence;
+  },
+): { principal: string; sessionId?: SessionId } | undefined => {
+  const assertions = commitLaneAssertions(options.commit);
+  const lanes = new Set(assertions.map((assertion) => assertion.contextKey));
+  if (lanes.size > 1) {
+    throw new ExecutionLeaseFenceError(
+      "mixed-lane-commit",
+      "memory v2 commit may assert execution claims of exactly one lane",
+    );
+  }
+  const lane = assertions.length > 0 ? assertions[0].contextKey : undefined;
+  if (options.actingContext !== undefined && options.actingContext !== lane) {
+    // A host-supplied acting context that disagrees with the asserted lane
+    // is a host bug, never a client-reachable state.
+    throw new ProtocolError(
+      "acting context does not match the commit's asserted execution lane",
+    );
+  }
+  if (lane === undefined || lane === "space") return undefined;
+  const userPrincipal = principalOfUserContextKey(lane);
+  const sessionIdentity = userPrincipal === undefined
+    ? parseSessionExecutionContextKey(lane)
+    : undefined;
+  // Malformed scoped-lane keys keep today's claim-observation-mismatch
+  // rejection path unchanged (the accepted-observation guard fences them).
+  if (userPrincipal === undefined && sessionIdentity === undefined) {
+    return undefined;
+  }
+  // With-operations commits already passed commit-table replay detection;
+  // observation-shaped commits are replay-checked per asserted item.
+  const checked = options.commit.operations.length > 0
+    ? assertions
+    : assertions.filter((assertion) =>
+      getSchedulerObservationReplay(engine, {
+        branch: options.branch,
+        sessionId: options.sessionKey,
+        localSeq: assertion.localSeq,
+      }) === undefined
+    );
+  for (const assertion of checked) {
+    const claim = options.executionClaims?.get(assertion.localSeq);
+    if (claim === undefined) {
+      throw new ExecutionLeaseFenceError(
+        "claim-not-live",
+        "execution claim incarnation is not live for this action attempt",
+      );
+    }
+    if (claim.contextKey !== lane) {
+      throw new ExecutionLeaseFenceError(
+        "claim-observation-mismatch",
+        "execution claim incarnation does not match the accepted scheduler action",
+      );
+    }
+    if (options.executionLeaseFence?.laneAuthority?.(claim) === false) {
+      throw new ExecutionLeaseFenceError(
+        "lane-generation-stale",
+        "execution claim lane grant is fenced or superseded",
+      );
+    }
+  }
+  return userPrincipal !== undefined ? { principal: userPrincipal } : {
+    principal: sessionIdentity!.principal,
+    sessionId: sessionIdentity!.sessionId,
+  };
+};
+
 const applyCommitTransaction = (
   engine: Engine,
   {
     sessionId,
+    scopeSessionId = sessionId,
     space,
     principal,
     commit,
+    executionClaims,
+    executionLeaseFence,
     sqliteAttachments,
+    actingContext,
+    foreignInputBases,
+    resolveForeignAuthorizationEpoch,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
   const sessionKey = resolveCommitSessionKey(sessionId, principal);
@@ -4945,7 +8601,7 @@ const applyCommitTransaction = (
         observationReplay,
       )
       : undefined;
-    return {
+    return markAppliedCommitReplay({
       seq: existing.seq,
       branch: existing.branch,
       revisions: selectCommitRevisions(engine, existing.seq),
@@ -4955,50 +8611,173 @@ const applyCommitTransaction = (
       ...(observationResult
         ? { schedulerObservationResults: [observationResult] }
         : {}),
-    };
+    });
   }
+
+  // C1.4 lane admission runs BEFORE preconditions and read validation: a
+  // scoped lane assertion resolves against its live claim and lane grant
+  // first, so scoped-state validation can never leak through a forged or
+  // fenced lane's error shape. The acting identity it yields feeds only
+  // scope resolution, effective-context resolution, and CFC label
+  // validation below; `principal` (the sponsor) keeps every other role.
+  // C2.1b: a session lane substitutes ITS OWN sessionId (from the claim
+  // contextKey) for scope resolution — the sponsor's scopeSessionId would
+  // resolve session scope at the executor session, not the served one.
+  const actingLane = admitExecutionCommitLanes(engine, {
+    branch,
+    sessionKey,
+    commit,
+    actingContext,
+    executionClaims,
+    executionLeaseFence,
+  });
+  const actingPrincipal = actingLane?.principal;
+  const laneScopeSessionId = actingLane?.sessionId ?? scopeSessionId;
+  const scopePrincipal = actingPrincipal ?? principal;
+  const scopeContext = {
+    principal: scopePrincipal,
+    sessionId: laneScopeSessionId,
+  };
 
   // Preconditions gate every commit shape, including the observation-only
   // fast paths below — a descendant of an uncommitted origin must not
   // persist anything, observations included.
-  validateCommitPreconditions(engine, sessionKey, branch, commit, {
-    principal,
-    sessionId,
-  });
+  validateCommitPreconditions(engine, sessionKey, branch, commit, scopeContext);
 
   if (commit.operations.length === 0 && hasSchedulerObservationBatch) {
     return applySchedulerObservationBatchCommit(engine, {
       sessionId,
+      scopeSessionId: laneScopeSessionId,
       sessionKey,
       space,
       principal,
+      actingPrincipal,
       branch,
       batch: schedulerObservationBatch,
+      executionClaims,
+      executionLeaseFence,
+      foreignInputBases,
+      resolveForeignAuthorizationEpoch,
     });
   }
 
   if (commit.operations.length === 0 && schedulerObservation) {
     return applySchedulerObservationOnlyCommit(engine, {
       sessionId,
+      scopeSessionId: laneScopeSessionId,
       sessionKey,
       space,
       principal,
+      actingPrincipal,
       branch,
       localSeq: commit.localSeq,
-      reads: commit.reads,
+      transaction: commit,
       schedulerObservation,
+      executionClaim: executionClaims?.get(commit.localSeq),
+      executionLeaseFence,
+      foreignInputBasis: foreignInputBases?.get(commit.localSeq),
+      resolveForeignAuthorizationEpoch,
     });
   }
 
-  validateConfirmedReads(engine, branch, commit, { principal, sessionId });
+  validateConfirmedReads(engine, branch, commit, scopeContext);
   const resolvedPendingReads = resolvePendingReads(
     engine,
     sessionKey,
-    sessionId,
-    principal,
+    scopeContext,
     branch,
     commit,
   );
+  const inputBasisSeq = acceptedInputBasisSeq(
+    commit.reads.confirmed,
+    resolvedPendingReads,
+  );
+  const executionClaim = executionClaims?.get(commit.localSeq);
+  const acceptedObservation = schedulerObservation
+    ? acceptedSchedulerObservation(schedulerObservation, {
+      branch,
+      space,
+      principal,
+      inputBasisSeq,
+      foreignInputBasis: foreignInputBases?.get(commit.localSeq),
+      executionClaim,
+      ...(executionClaim !== undefined
+        ? {
+          causedBy: schedulerActionCauseCoverage(engine, {
+            branch,
+            ownerSpace: space ?? schedulerObservation.ownerSpace,
+            pieceId: schedulerObservation.pieceId,
+            processGeneration: schedulerObservation.processGeneration,
+            actionId: schedulerObservation.actionId,
+            executionContextKey: executionClaim.contextKey,
+          }, inputBasisSeq).causedBy,
+        }
+        : {}),
+    })
+    : undefined;
+  if (
+    acceptedObservation?.provenance !== undefined &&
+    schedulerObservation?.status === "failed"
+  ) {
+    throw new ProtocolError(
+      "failed claimed actions must not include semantic operations",
+    );
+  }
+  if (acceptedObservation?.provenance !== undefined) {
+    if (acceptedObservation.unservedDiagnosticCode !== undefined) {
+      rejectExecutionAction(
+        "unserved-marker-with-operations",
+        "an unserved attempt marker is valid only without semantic operations",
+      );
+    }
+    assertExecutionActionTransaction({
+      servedSpace: space!,
+      branch,
+      scopeContext: {
+        principal: scopePrincipal!,
+        sessionId: laneScopeSessionId,
+      },
+      claimContextKey: executionClaim!.contextKey,
+      transaction: commit,
+      observation: schedulerObservation!,
+    });
+  }
+
+  assertExecutionLeaseFenceTransaction(engine, {
+    fence: executionLeaseFence,
+    space,
+    branch,
+    principal,
+    claims: executionClaims === undefined ? [] : [...executionClaims.values()],
+    requireExactClaim: commit.operations.length > 0,
+  });
+
+  // C3.8: the home-apply epoch fence — after the lease/lane authority fences
+  // and the whole-action firewall, before any row applies. Dormant for a
+  // same-space attempt (no foreign components); a stale foreign epoch rolls
+  // the whole transaction back unserved (`foreign-authorization-stale`).
+  if (acceptedObservation?.provenance !== undefined) {
+    assertForeignAuthorizationEpochsCurrent(
+      acceptedObservation.provenance,
+      resolveForeignAuthorizationEpoch,
+    );
+  }
+
+  // C3.2: capture the authority-visible ACL state BEFORE the operations
+  // apply. The predicate matches the server's `commitTouchesAclDoc`
+  // byte-for-byte (any operation naming the ACL doc id), and the read is
+  // the enforcement read (default branch, space scope) — a commit on
+  // another branch or scope that names the id still diffs to "no
+  // authority change" and bumps nothing. `space` is host-supplied on
+  // every server apply path; a space-less direct engine apply cannot
+  // name an ACL doc to diff against and maintains no epochs.
+  const aclTouchedForEpochs = space !== undefined &&
+    commit.operations.some((operation) =>
+      "id" in operation && operation.id === aclDocId(space)
+    );
+  const aclStatePreCommit = aclTouchedForEpochs
+    ? readAuthorityAclState(engine, space!)
+    : null;
 
   const seq = (engine.statements.selectNextSeq.get() as { seq: number }).seq;
   const invocationRef = engine.legacyCommitMetadataRefsRequired
@@ -5044,8 +8823,7 @@ const applyCommitTransaction = (
       // ops). It is NOT an entity revision — do not push to `revisions[]` so the
       // revision/head/snapshot/dirty machinery never sees it.
       applySqliteOperation(engine, operation, sqliteAttachments, {
-        principal,
-        sessionId,
+        ...scopeContext,
       });
       continue;
     }
@@ -5054,11 +8832,12 @@ const applyCommitTransaction = (
       seq,
       opIndex,
       operation,
-      principal,
-      sessionId,
+      ...scopeContext,
+      commitSessionKey: sessionKey,
     });
     revisions.push(revision);
   }
+  ensureMergedPatchDocumentOnLastRevision(engine, branch, revisions);
 
   engine.statements.updateBranchHead.run({ branch, seq });
   materializeSnapshots(engine, branch, revisions);
@@ -5073,23 +8852,82 @@ const applyCommitTransaction = (
       ownerSpace: space,
       dirtySeq: seq,
       writes: changedSchedulerWrites,
+      ...(acceptedObservation?.provenance !== undefined
+        ? {
+          ignoredAction: {
+            branch,
+            ownerSpace: space ?? acceptedObservation.observation.ownerSpace,
+            pieceId: acceptedObservation.observation.pieceId,
+            processGeneration:
+              acceptedObservation.observation.processGeneration,
+            actionId: acceptedObservation.observation.actionId,
+            executionContextKey:
+              acceptedObservation.provenance.claim.contextKey,
+          },
+        }
+        : {}),
     });
   }
 
-  const schedulerObservationResult = schedulerObservation
+  const schedulerObservationResult = acceptedObservation
     ? upsertSchedulerObservationTransaction(engine, {
       branch,
-      ownerSpace: space ?? schedulerObservation.ownerSpace,
+      ownerSpace: space ?? acceptedObservation.observation.ownerSpace,
       commitSeq: seq,
       observedAtSeq: seq,
-      scopeContext: { principal: principal!, sessionId },
+      scopeContext: {
+        principal: scopePrincipal!,
+        sessionId: laneScopeSessionId,
+      },
       writerSessionId: sessionKey,
       localSeq: commit.localSeq,
-      observation: schedulerObservation,
+      ...(acceptedObservation.provenance !== undefined
+        ? { causeCoverageSeq: inputBasisSeq }
+        : {}),
+      // C3.11: carry the live claim's stage-admitted cross-space-read spaces
+      // so an unserved claimed attempt classifies space-rank and never
+      // poisons the durable floor to session (byte-identical when absent).
+      ...(executionClaim?.crossSpaceReadSpaces !== undefined
+        ? { foreignReadAdmittedSpaces: executionClaim.crossSpaceReadSpaces }
+        : {}),
+      replayPayload: schedulerObservationReplayPayload({
+        branch,
+        observedAtSeq: seq,
+        ownerSpace: space ?? schedulerObservation!.ownerSpace,
+        observation: schedulerObservation!,
+      }),
+      observation: acceptedObservation.observation,
     })
     : undefined;
+  if (
+    acceptedObservation?.provenance !== undefined &&
+    schedulerObservationResult?.executionContextKey !==
+      acceptedObservation.provenance.claim.contextKey
+  ) {
+    // Same semantic condition as the observation-only twin below: one fence
+    // cause keeps stats counting, the R7 measurement tolerance, and executor
+    // rejection handling identical across both commit shapes.
+    throw new ExecutionLeaseFenceError(
+      "claim-context-mismatch",
+      "execution claim context does not match the effective scheduler context",
+    );
+  }
 
-  return {
+  // C3.2: the epoch bump, in the SAME transaction as the ACL apply — a
+  // rollback after this point takes the bumps with it, and a commit
+  // lands them atomically with the ACL document (no window, crash
+  // included). This runs on FIRST application only: an exact replay
+  // returned above without re-entering this path, so a replayed ACL
+  // commit never double-bumps.
+  const authorizationEpochBumps = aclTouchedForEpochs
+    ? applyAuthorizationEpochBumps(
+      engine,
+      aclStatePreCommit,
+      readAuthorityAclState(engine, space!),
+    )
+    : undefined;
+
+  const applied: AppliedCommit = {
     seq,
     branch,
     revisions,
@@ -5101,6 +8939,22 @@ const applyCommitTransaction = (
           status: "kept" as const,
           schedulerObservationId: schedulerObservationResult.observationId,
           executionContextKey: schedulerObservationResult.executionContextKey,
+          inputBasisSeq,
+          ...(acceptedObservation?.provenance !== undefined
+            ? { executionProvenance: acceptedObservation.provenance }
+            : {}),
+        }],
+      }
+      : {}),
+    ...(acceptedObservation?.provenance !== undefined &&
+        executionClaims?.get(commit.localSeq) !== undefined
+      ? {
+        actionAttempts: [{
+          localSeq: commit.localSeq,
+          claim: executionClaims.get(commit.localSeq)!,
+          provenance: acceptedObservation.provenance,
+          outcome: "committed" as const,
+          acceptedCommitSeq: toAcceptedCommitSeq(seq),
         }],
       }
       : {}),
@@ -5108,6 +8962,10 @@ const applyCommitTransaction = (
       ? { schedulerDirtiedReaders }
       : {}),
   };
+  if (authorizationEpochBumps !== undefined) {
+    appliedCommitAuthorizationEpochBumps.set(applied, authorizationEpochBumps);
+  }
+  return applied;
 };
 
 /**
@@ -5197,6 +9055,12 @@ const writeOperation = (
     operation: Exclude<Operation, SqliteOperation>;
     principal?: string;
     sessionId: SessionId;
+    /** The committing session's canonical commit-table identity
+     * (`resolveCommitSessionKey`) — the merge-rebase detection input for
+     * patch writes. Optional so host-internal writers keep their shape; when
+     * absent every patch is treated as merge-rebased (fail toward carrying
+     * the authoritative document). */
+    commitSessionKey?: string;
   },
 ): AppliedRevision => {
   const { branch, seq, opIndex, operation, principal, sessionId } = options;
@@ -5241,6 +9105,36 @@ const writeOperation = (
       };
     }
     case "patch": {
+      // Merge-rebase detection (C2.10 defect-1 root fix): a patch landing on
+      // a head that ANOTHER session authored is applied by the engine against
+      // a base the origin client may never have seen — its locally
+      // materialized post-commit value (own patch over its own stale base)
+      // then diverges from the accepted head, permanently: the FA14 echo
+      // suppression correctly withholds the origin's own seq from the dirty
+      // feed, and any older interleaved upsert is refused by the client's
+      // monotonic-confirmed guard. So the RESPONSE must carry the truth: read
+      // the pre-apply head's author (before upsertHead moves it) and, when it
+      // is foreign — or unknown, failing toward delivery — materialize the
+      // post-apply document into the revision so the origin's confirmPending
+      // adopts the authoritative merged value instead of its local replay.
+      // Same-session heads skip the materialization: the origin's local chain
+      // replay is byte-equal by induction, keeping the uncontended hot path
+      // slim.
+      const preApplyHead = engine.statements.selectHead.get({
+        branch,
+        id: operation.id,
+        scope_key: scopeKey,
+      }) as { seq: number; op_index: number } | undefined;
+      let mergeRebased = false;
+      if (preApplyHead !== undefined) {
+        const author = options.commitSessionKey === undefined
+          ? undefined
+          : engine.statements.selectCommitSessionBySeq.get({
+            seq: preApplyHead.seq,
+          }) as { session_id: string } | undefined;
+        mergeRebased = author === undefined ||
+          author.session_id !== options.commitSessionKey;
+      }
       engine.statements.insertRevision.run({
         branch,
         id: operation.id,
@@ -5267,6 +9161,17 @@ const writeOperation = (
         commitSeq: seq,
         op: "patch",
         patches: operation.patches,
+        ...(mergeRebased
+          ? {
+            document: reconstructPatchedDocument(engine, {
+              id: operation.id,
+              scopeKey,
+              branch,
+              seq,
+              opIndex,
+            }),
+          }
+          : {}),
       };
     }
     case "delete": {
@@ -5395,7 +9300,7 @@ const validateCommitPreconditions = (
 const validateConfirmedReads = (
   engine: Engine,
   branch: BranchName,
-  commit: ClientCommit,
+  commit: Pick<ClientCommit, "reads">,
   scopeContext: { principal?: string; sessionId: SessionId },
 ): void => {
   // A commit is evaluated under one connection principal/session context.
@@ -5427,10 +9332,9 @@ const validateConfirmedReads = (
 const resolvePendingReads = (
   engine: Engine,
   sessionKey: string,
-  sessionId: SessionId,
-  principal: string | undefined,
+  scopeContext: { principal?: string; sessionId: SessionId },
   branch: BranchName,
-  commit: ClientCommit,
+  commit: Pick<ClientCommit, "reads">,
 ): Array<{ localSeq: number; seq: number }> => {
   const resolutions = new Map<number, { localSeq: number; seq: number }>();
 
@@ -5457,7 +9361,7 @@ const resolvePendingReads = (
       engine,
       branch,
       read.id,
-      resolveScopeKey(read.scope, { principal, sessionId }),
+      resolveScopeKey(read.scope, scopeContext),
       resolution.seq,
       read.path,
       read.nonRecursive ?? false,
@@ -5470,6 +9374,246 @@ const resolvePendingReads = (
   }
 
   return [...resolutions.values()].sort((a, b) => a.localSeq - b.localSeq);
+};
+
+/**
+ * Compute the scalar basis from reads whose revision identities are accepted
+ * by the canonical transaction path. Confirmed reads already name their
+ * durable sequence; pending reads use the server-assigned sequence of the
+ * source commit. The accepting head/commit sequence is deliberately absent.
+ */
+const acceptedInputBasisSeq = (
+  confirmed: ClientCommit["reads"]["confirmed"],
+  resolvedPending: readonly { seq: number }[],
+): InputBasisSeq => {
+  let basis = 0;
+  for (const read of confirmed) basis = Math.max(basis, read.seq);
+  for (const read of resolvedPending) basis = Math.max(basis, read.seq);
+  return toInputBasisSeq(basis);
+};
+
+const resolvedPendingReadsForBasis = (
+  engine: Engine,
+  sessionKey: string,
+  reads: ClientCommit["reads"]["pending"],
+): { seq: number }[] => {
+  const resolutions = new Map<number, { seq: number }>();
+  for (const read of reads) {
+    if (resolutions.has(read.localSeq)) continue;
+    const row = engine.statements.selectPendingResolution.get({
+      session_id: sessionKey,
+      local_seq: read.localSeq,
+    }) as { seq: number } | undefined;
+    // A missing dependency is handled by the existing observation validation
+    // and the observation is dropped. It contributes no accepted basis.
+    if (row !== undefined) resolutions.set(read.localSeq, row);
+  }
+  return [...resolutions.values()];
+};
+
+// Claim-rank admission is shape-only: the shared space lane plus well-formed
+// canonical user-rank keys (`user:<encodeURIComponent(principal)>`) and —
+// since C2.1 — canonical session-rank keys
+// (`session:<enc(principal)>:<enc(sessionId)>`), so a colon-bearing DID
+// never appears raw. Malformed keys stay rejected. Effective-context
+// EQUALITY is owned by the claim-context-mismatch fence once the
+// observation's context resolves. Amendment 8's computation-only conjunct
+// was LIFTED by C2.8 (2026-07-18, context-lattice OQ6/R12): scoped ranks
+// admit effect claims too — a scoped-lane builtin is the lane principal's
+// own standing side effect executing under the lane grant, so user- and
+// session-rank claims admit `computation` and `effect` alike
+// (event-handler claims stay rejected at issuance for every rank).
+const isAdmissibleExecutionClaimContextKey = (
+  contextKey: SchedulerExecutionContextKey,
+  actionKind: ExecutionClaim["actionKind"],
+): boolean =>
+  contextKey === "space" ||
+  ((actionKind === "computation" || actionKind === "effect") &&
+    (principalOfUserContextKey(contextKey) !== undefined ||
+      parseSessionExecutionContextKey(contextKey) !== undefined));
+
+const claimKeyFromExecutionClaim = (
+  claim: ExecutionClaim,
+): ActionExecutionProvenance["claim"] => ({
+  branch: claim.branch,
+  space: claim.space,
+  contextKey: claim.contextKey,
+  pieceId: claim.pieceId,
+  actionId: claim.actionId,
+  actionKind: claim.actionKind,
+  implementationFingerprint: claim.implementationFingerprint,
+  runtimeFingerprint: claim.runtimeFingerprint,
+});
+
+/**
+ * C3.5: author the accepted vector basis for one served claimed attempt.
+ * Foreign components come ONLY from `hostComponents` — the host-validated
+ * served-point-read stamps (never the Worker's assertion, which was
+ * stripped) — and are further restricted to spaces the observation actually
+ * declares space-scoped foreign READS for: a component naming a space the
+ * commit declared no read for is dropped here (the C3A13 fixture leg — a
+ * validated stamp is authority to READ, not license to widen the basis).
+ * The home component is engine-authored from the accepted scalar, so
+ * `scalar ≡ home component` holds by construction. Components sort by space
+ * for a deterministic wire shape. Returns undefined when no foreign
+ * component survives — scalar-only attempts stay byte-identical.
+ */
+const authorAcceptedInputBasis = (
+  observation: SchedulerActionObservation,
+  servedSpace: string | undefined,
+  inputBasisSeq: InputBasisSeq,
+  hostComponents: readonly ProvenanceInputBasisComponent[] | undefined,
+): readonly ProvenanceInputBasisComponent[] | undefined => {
+  if (
+    hostComponents === undefined || hostComponents.length === 0 ||
+    servedSpace === undefined
+  ) {
+    return undefined;
+  }
+  const declaredForeignReadSpaces = new Set<string>();
+  const summary = trustedSchedulerScopeSummary(observation);
+  for (
+    const address of [
+      ...observation.reads,
+      ...observation.shallowReads,
+      ...(summary?.reads ?? []),
+    ]
+  ) {
+    if (
+      address.space !== servedSpace &&
+      normalizeSchedulerScope(address.scope) === "space"
+    ) {
+      declaredForeignReadSpaces.add(address.space);
+    }
+  }
+  const kept = new Map<string, ProvenanceInputBasisComponent>();
+  for (const component of hostComponents) {
+    if (
+      component.space === servedSpace ||
+      !declaredForeignReadSpaces.has(component.space)
+    ) {
+      continue;
+    }
+    const held = kept.get(component.space);
+    if (held === undefined || component.seq > held.seq) {
+      kept.set(component.space, component);
+    }
+  }
+  if (kept.size === 0) return undefined;
+  return [
+    { space: servedSpace, seq: inputBasisSeq },
+    ...kept.values(),
+  ].sort((a, b) => a.space < b.space ? -1 : a.space > b.space ? 1 : 0);
+};
+
+const acceptedSchedulerObservation = (
+  observation: SchedulerActionObservation,
+  options: {
+    branch: BranchName;
+    space?: string;
+    principal?: string;
+    inputBasisSeq: InputBasisSeq;
+    /** C3.5 host-validated foreign components (see
+     * `ApplyCommitOptions.foreignInputBases`). */
+    foreignInputBasis?: readonly ProvenanceInputBasisComponent[];
+    executionClaim?: ExecutionClaim;
+    causedBy?: readonly number[];
+  },
+): {
+  observation: SchedulerActionObservation;
+  provenance?: ActionExecutionProvenance;
+  unservedDiagnosticCode?: string;
+} => {
+  const assertedClaim = observation.executionClaimAssertion;
+  const unservedAttempt = observation.executionUnservedAttempt;
+  // Reserved fields are host outputs. Strip any wire/Worker assertion before
+  // constructing the canonical accepted observation. `foreignReadStamps` is
+  // the Worker's REQUEST-side stamp assertion (C3.5): the host already
+  // validated it into `options.foreignInputBasis`, so the raw assertion is
+  // stripped exactly like the asserted scalar.
+  const {
+    inputBasisSeq: _assertedBasis,
+    executionClaimAssertion: _assertedClaim,
+    executionUnservedAttempt: _unservedAttempt,
+    executionProvenance: _assertedProvenance,
+    foreignReadStamps: _assertedForeignReadStamps,
+    ...untrustedObservation
+  } = observation;
+  const claim = options.executionClaim;
+  if (claim === undefined) {
+    if (assertedClaim !== undefined || unservedAttempt !== undefined) {
+      throw new ExecutionLeaseFenceError(
+        "claim-not-live",
+        "execution claim incarnation is not live for this action attempt",
+      );
+    }
+    return {
+      observation: {
+        ...untrustedObservation,
+        inputBasisSeq: options.inputBasisSeq,
+      },
+    };
+  }
+  if (
+    assertedClaim === undefined ||
+    assertedClaim.contextKey !== claim.contextKey ||
+    assertedClaim.leaseGeneration !== claim.leaseGeneration ||
+    assertedClaim.claimGeneration !== claim.claimGeneration ||
+    options.principal === undefined || options.space === undefined ||
+    claim.branch !== options.branch || claim.space !== options.space ||
+    !isAdmissibleExecutionClaimContextKey(claim.contextKey, claim.actionKind) ||
+    claim.pieceId !== observation.pieceId ||
+    claim.actionId !== observation.actionId ||
+    claim.actionKind !== observation.actionKind ||
+    claim.implementationFingerprint !== observation.implementationFingerprint ||
+    claim.runtimeFingerprint !== observation.runtimeFingerprint ||
+    observation.actionKind === "event-handler" ||
+    observation.transactionKind !== "action-run"
+  ) {
+    throw new ExecutionLeaseFenceError(
+      "claim-observation-mismatch",
+      "execution claim incarnation does not match the accepted scheduler action",
+    );
+  }
+  // C3.5: the vector authors only for SERVED attempts (committed / no-op /
+  // failed). An unserved attempt discarded the authority transfer whole —
+  // its settlement's basis stays the scalar, and its provenance never
+  // claims foreign coverage the discarded run did not apply.
+  const inputBasis = unservedAttempt === undefined
+    ? authorAcceptedInputBasis(
+      observation,
+      options.space,
+      options.inputBasisSeq,
+      options.foreignInputBasis,
+    )
+    : undefined;
+  const provenance: ActionExecutionProvenance = {
+    claim: claimKeyFromExecutionClaim(claim),
+    onBehalfOf: options.principal,
+    leaseGeneration: claim.leaseGeneration,
+    claimGeneration: claim.claimGeneration,
+    causedBy: [...new Set(options.causedBy ?? [])]
+      .filter((sourceSeq) => Number.isSafeInteger(sourceSeq) && sourceSeq > 0)
+      .sort((left, right) => left - right),
+    inputBasisSeq: options.inputBasisSeq,
+    ...(inputBasis !== undefined ? { inputBasis } : {}),
+  };
+  return {
+    provenance,
+    ...(unservedAttempt !== undefined
+      ? { unservedDiagnosticCode: unservedAttempt.diagnosticCode }
+      : {}),
+    observation: {
+      ...untrustedObservation,
+      inputBasisSeq: options.inputBasisSeq,
+      // An unserved attempt may have discovered a narrower/foreign surface.
+      // Persist that scheduler evidence under its derived context without
+      // falsely labeling the observation as a space-scoped accepted execution.
+      ...(unservedAttempt === undefined
+        ? { executionProvenance: provenance }
+        : {}),
+    },
+  };
 };
 
 const findConflictSeq = (
@@ -5527,14 +9671,12 @@ const schedulerObservationReadDropReason = (
   engine: Engine,
   {
     sessionKey,
-    sessionId,
-    principal,
+    scopeContext,
     branch,
     reads,
   }: {
     sessionKey: string;
-    sessionId: SessionId;
-    principal: string | undefined;
+    scopeContext: { principal?: string; sessionId: SessionId };
     branch: BranchName;
     reads: ClientCommit["reads"];
   },
@@ -5542,7 +9684,7 @@ const schedulerObservationReadDropReason = (
   for (const read of reads.confirmed) {
     const readBranch = read.branch ?? branch;
     ensureReadableBranch(engine, readBranch);
-    const scopeKey = resolveScopeKey(read.scope, { principal, sessionId });
+    const scopeKey = resolveScopeKey(read.scope, scopeContext);
     const conflictSeq = findConflictSeq(
       engine,
       readBranch,
@@ -5579,7 +9721,7 @@ const schedulerObservationReadDropReason = (
       engine,
       branch,
       read.id,
-      resolveScopeKey(read.scope, { principal, sessionId }),
+      resolveScopeKey(read.scope, scopeContext),
       resolution.seq,
       read.path,
       read.nonRecursive ?? false,
@@ -5599,6 +9741,7 @@ const replayedSchedulerObservationResult = (
     reason: AppliedSchedulerObservationResult["reason"] | null;
     observation_id: number | null;
     execution_context_key: SchedulerExecutionContextKey | null;
+    accepted_payload: string | null;
   },
 ): AppliedSchedulerObservationResult => {
   if (replay.status === "dropped") {
@@ -5608,6 +9751,9 @@ const replayedSchedulerObservationResult = (
       reason: replay.reason ?? "stale-confirmed-read",
     };
   }
+  const accepted = replay.accepted_payload === null
+    ? undefined
+    : decodeSchedulerObservation(replay.accepted_payload);
   return {
     localSeq,
     status: "kept",
@@ -5616,6 +9762,12 @@ const replayedSchedulerObservationResult = (
       : {}),
     ...(replay.execution_context_key !== null
       ? { executionContextKey: replay.execution_context_key }
+      : {}),
+    ...(accepted?.inputBasisSeq !== undefined
+      ? { inputBasisSeq: accepted.inputBasisSeq }
+      : {}),
+    ...(accepted?.executionProvenance !== undefined
+      ? { executionProvenance: accepted.executionProvenance }
       : {}),
   };
 };
@@ -5627,39 +9779,70 @@ const schedulerObservationReplayPayload = (
     ownerSpace?: string;
     observation: SchedulerActionObservation;
   },
-): string =>
-  encodeSchedulerDependencySnapshot(
+): string => {
+  // Replay identity is the client/Worker request, not host-derived acceptance
+  // metadata. A reconnect may reconstruct the same authority separately.
+  const {
+    inputBasisSeq: _acceptedBasis,
+    executionProvenance: _acceptedProvenance,
+    ...requestedObservation
+  } = options.observation;
+  return encodeSchedulerDependencySnapshot(
     normalizeSchedulerObservation(
-      options.observation,
+      requestedObservation as SchedulerActionObservation,
       options.branch,
       options.observedAtSeq,
       options.ownerSpace,
     ),
   );
+};
 
 const applySchedulerObservationOnlyCommit = (
   engine: Engine,
   {
     sessionId,
+    scopeSessionId,
     sessionKey,
     space,
     principal,
+    actingPrincipal,
     branch,
     localSeq,
-    reads,
+    transaction,
     schedulerObservation,
+    executionClaim,
+    executionLeaseFence,
+    foreignInputBasis,
+    resolveForeignAuthorizationEpoch,
   }: {
     sessionId: SessionId;
+    scopeSessionId: SessionId;
     sessionKey: string;
     space?: string;
     principal?: string;
+    /** C1.4: scope/effective-context resolution only; sponsor roles stay
+     * on `principal` and the sponsor-derived `sessionKey`. */
+    actingPrincipal?: string;
     branch: BranchName;
     localSeq: number;
-    reads: ClientCommit["reads"];
+    transaction: ExecutionActionTransaction;
     schedulerObservation: SchedulerActionObservation;
+    executionClaim?: ExecutionClaim;
+    executionLeaseFence?: ExecutionLeaseFence;
+    /** C3.5 host-validated foreign components for THIS observation. */
+    foreignInputBasis?: readonly ProvenanceInputBasisComponent[];
+    /** C3.8 apply-fence resolver (see `ApplyCommitOptions`). */
+    resolveForeignAuthorizationEpoch?: (
+      space: string,
+      principal: string,
+    ) => number | undefined;
   },
 ): AppliedCommit => {
+  const scopePrincipal = actingPrincipal ?? principal;
   const observedAtSeq = headSeq(engine, branch);
+  // Request replay identity retains the transient exact-claim assertion while
+  // excluding only host-authored acceptance fields. Check it before the live
+  // claim fence so a lost-response replay remains idempotent after revoke.
   const replayPayload = schedulerObservationReplayPayload({
     branch,
     observedAtSeq,
@@ -5681,7 +9864,7 @@ const applySchedulerObservationOnlyCommit = (
       localSeq,
       existingReplay,
     );
-    return {
+    return markAppliedCommitReplay({
       seq: existingReplay.observed_at_seq,
       branch,
       revisions: [],
@@ -5689,16 +9872,114 @@ const applySchedulerObservationOnlyCommit = (
         ? { schedulerObservationId: replayed.schedulerObservationId }
         : {}),
       schedulerObservationResults: [replayed],
-    };
+    });
   }
 
-  const dropReason = schedulerObservationReadDropReason(engine, {
-    sessionKey,
-    sessionId,
-    principal,
+  const unservedAttempt =
+    schedulerObservation.executionUnservedAttempt !== undefined;
+  const strictReadValidation = unservedAttempt || executionClaim !== undefined;
+  let dropReason: SchedulerObservationDropReason | undefined;
+  let inputBasisSeq: InputBasisSeq;
+  if (strictReadValidation) {
+    // Every claimed settlement is authoritative only after the same canonical
+    // conflict path has accepted every input revision. Never turn a stale
+    // claimed no-op into a successful dropped observation: reject it so the
+    // scheduler catches up and retries. Unserved attempts require the same
+    // strict basis even though they do not persist execution provenance.
+    validateConfirmedReads(
+      engine,
+      branch,
+      transaction,
+      { principal: scopePrincipal, sessionId: scopeSessionId },
+    );
+    const resolvedPending = resolvePendingReads(
+      engine,
+      sessionKey,
+      { principal: scopePrincipal, sessionId: scopeSessionId },
+      branch,
+      transaction,
+    );
+    inputBasisSeq = acceptedInputBasisSeq(
+      transaction.reads.confirmed,
+      resolvedPending,
+    );
+  } else {
+    inputBasisSeq = acceptedInputBasisSeq(
+      transaction.reads.confirmed,
+      resolvedPendingReadsForBasis(
+        engine,
+        sessionKey,
+        transaction.reads.pending,
+      ),
+    );
+    dropReason = schedulerObservationReadDropReason(engine, {
+      sessionKey,
+      scopeContext: { principal: scopePrincipal, sessionId: scopeSessionId },
+      branch,
+      reads: transaction.reads,
+    });
+  }
+  const accepted = acceptedSchedulerObservation(schedulerObservation, {
     branch,
-    reads,
+    space,
+    principal,
+    inputBasisSeq,
+    foreignInputBasis,
+    executionClaim,
+    ...(executionClaim !== undefined
+      ? {
+        causedBy: schedulerActionCauseCoverage(engine, {
+          branch,
+          ownerSpace: space ?? schedulerObservation.ownerSpace,
+          pieceId: schedulerObservation.pieceId,
+          processGeneration: schedulerObservation.processGeneration,
+          actionId: schedulerObservation.actionId,
+          executionContextKey: executionClaim.contextKey,
+        }, inputBasisSeq).causedBy,
+      }
+      : {}),
   });
+  if (accepted.provenance !== undefined) {
+    if (accepted.unservedDiagnosticCode === undefined) {
+      assertExecutionActionTransaction({
+        servedSpace: space!,
+        branch,
+        scopeContext: {
+          principal: scopePrincipal!,
+          sessionId: scopeSessionId,
+        },
+        claimContextKey: executionClaim!.contextKey,
+        transaction,
+        observation: schedulerObservation,
+      });
+    } else if (transaction.merge !== undefined) {
+      rejectExecutionAction(
+        "merge-commit",
+        "an unserved attempt marker may not carry branch merge metadata",
+      );
+    }
+  }
+  assertExecutionLeaseFenceTransaction(engine, {
+    fence: executionLeaseFence,
+    space,
+    branch,
+    principal,
+    claims: executionClaim === undefined ? [] : [executionClaim],
+  });
+  // C3.8: the home-apply epoch fence for a served observation-only attempt
+  // (no-op / failed with foreign reads). An unserved-attempt marker authors
+  // no foreign basis (its `inputBasis` is undefined), so the fence is
+  // dormant for it; a same-space attempt likewise carries no foreign
+  // component. Runs before the observation row is upserted.
+  if (
+    accepted.provenance !== undefined &&
+    accepted.unservedDiagnosticCode === undefined
+  ) {
+    assertForeignAuthorizationEpochsCurrent(
+      accepted.provenance,
+      resolveForeignAuthorizationEpoch,
+    );
+  }
   if (dropReason) {
     recordSchedulerObservationReplay(engine, {
       branch,
@@ -5723,7 +10004,7 @@ const applySchedulerObservationOnlyCommit = (
 
   const observationResult = upsertSchedulerObservationTransaction(engine, {
     branch,
-    ownerSpace: space ?? schedulerObservation.ownerSpace,
+    ownerSpace: space ?? accepted.observation.ownerSpace,
     // An observation-only commit advances no semantic sequence, so reserve the
     // next GLOBAL server sequence as its delivery slot. `observedAtSeq` is the
     // selected branch's head and can lag the space-wide sync watermark after a
@@ -5732,11 +10013,35 @@ const applySchedulerObservationOnlyCommit = (
     // exactly serverSeq + 1 and its advancing sync window can carry this row.
     deliveryCommitSeq: serverSeq(engine) + 1,
     observedAtSeq,
-    scopeContext: { principal: principal!, sessionId },
+    scopeContext: { principal: scopePrincipal!, sessionId: scopeSessionId },
     writerSessionId: sessionKey,
     localSeq,
-    observation: schedulerObservation,
+    replayPayload,
+    ...(accepted.provenance !== undefined
+      ? { causeCoverageSeq: inputBasisSeq }
+      : {}),
+    // C3.11: an UNSERVED claimed cross-space-read attempt reaches the engine
+    // through this observation-only path (unserved markers carry no semantic
+    // operations). Carry the live claim's stage-admitted read spaces so its
+    // discovery row classifies space-rank instead of writing a session floor
+    // that monotonically poisons the durable `scheduler_context_floor` and
+    // fences the next served run `claim-context-mismatch`.
+    ...(executionClaim?.crossSpaceReadSpaces !== undefined
+      ? { foreignReadAdmittedSpaces: executionClaim.crossSpaceReadSpaces }
+      : {}),
+    observation: accepted.observation,
   });
+  if (
+    accepted.provenance !== undefined &&
+    accepted.unservedDiagnosticCode === undefined &&
+    observationResult.executionContextKey !==
+      accepted.provenance.claim.contextKey
+  ) {
+    throw new ExecutionLeaseFenceError(
+      "claim-context-mismatch",
+      "execution claim context does not match the effective scheduler context",
+    );
+  }
   return {
     seq: observedAtSeq,
     branch,
@@ -5747,7 +10052,31 @@ const applySchedulerObservationOnlyCommit = (
       status: "kept",
       schedulerObservationId: observationResult.observationId,
       executionContextKey: observationResult.executionContextKey,
+      inputBasisSeq,
+      ...(accepted.provenance !== undefined &&
+          accepted.unservedDiagnosticCode === undefined
+        ? { executionProvenance: accepted.provenance }
+        : {}),
     }],
+    ...(accepted.provenance !== undefined && executionClaim !== undefined
+      ? {
+        actionAttempts: [{
+          localSeq,
+          claim: executionClaim,
+          provenance: accepted.provenance,
+          ...(accepted.unservedDiagnosticCode !== undefined
+            ? {
+              outcome: "unserved" as const,
+              diagnosticCode: accepted.unservedDiagnosticCode,
+            }
+            : {
+              outcome: schedulerObservation.status === "failed"
+                ? "failed" as const
+                : "no-op" as const,
+            }),
+        }],
+      }
+      : {}),
   };
 };
 
@@ -5755,42 +10084,79 @@ const applySchedulerObservationBatchCommit = (
   engine: Engine,
   {
     sessionId,
+    scopeSessionId,
     sessionKey,
     space,
     principal,
+    actingPrincipal,
     branch,
     batch,
+    executionClaims,
+    executionLeaseFence,
+    foreignInputBases,
+    resolveForeignAuthorizationEpoch,
   }: {
     sessionId: SessionId;
+    scopeSessionId: SessionId;
     sessionKey: string;
     space?: string;
     principal?: string;
+    /** C1.4: one acting principal for the WHOLE batch — lane admission has
+     * already enforced that the batch asserts exactly one lane. */
+    actingPrincipal?: string;
     branch: BranchName;
     batch: NonNullable<ClientCommit["schedulerObservationBatch"]>;
+    executionClaims?: ReadonlyMap<number, ExecutionClaim>;
+    executionLeaseFence?: ExecutionLeaseFence;
+    /** C3.5 host-validated foreign components, keyed by item localSeq. */
+    foreignInputBases?: ReadonlyMap<
+      number,
+      readonly ProvenanceInputBasisComponent[]
+    >;
+    /** C3.8 apply-fence resolver (see `ApplyCommitOptions`). */
+    resolveForeignAuthorizationEpoch?: (
+      space: string,
+      principal: string,
+    ) => number | undefined;
   },
 ): AppliedCommit => {
   const results: AppliedSchedulerObservationResult[] = [];
+  const actionAttempts: AppliedActionAttempt[] = [];
+  let hasNewObservation = false;
   for (const item of batch) {
     const result = applySchedulerObservationOnlyCommit(engine, {
       sessionId,
+      scopeSessionId,
       sessionKey,
       space,
       principal,
+      actingPrincipal,
       branch,
       localSeq: item.localSeq,
-      reads: item.reads,
+      transaction: {
+        reads: item.reads,
+        operations: [],
+      },
       schedulerObservation: item
         .schedulerObservation as SchedulerActionObservation,
+      executionClaim: executionClaims?.get(item.localSeq),
+      executionLeaseFence,
+      foreignInputBasis: foreignInputBases?.get(item.localSeq),
+      resolveForeignAuthorizationEpoch,
     });
+    hasNewObservation ||= !isAppliedCommitReplay(result);
     results.push(result.schedulerObservationResults![0]);
+    actionAttempts.push(...(result.actionAttempts ?? []));
   }
 
-  return {
+  const commit: AppliedCommit = {
     seq: headSeq(engine, branch),
     branch,
     revisions: [],
     schedulerObservationResults: results,
+    ...(actionAttempts.length > 0 ? { actionAttempts } : {}),
   };
+  return hasNewObservation ? commit : markAppliedCommitReplay(commit);
 };
 
 // The COMMIT conflict matcher uses LEAF-ONLY touched paths (no add/remove/move
@@ -5925,13 +10291,63 @@ const selectCommitRevisions = (
       } satisfies AppliedRevision;
     }
     if (row.op === "patch") {
+      // Replays are off the hot path and cannot cheaply re-derive whether the
+      // original apply was merge-rebased, so fail toward authority: always
+      // carry the post-apply document. A retried merge-rebased commit whose
+      // replayed response lacked it would re-open the permanent divergence
+      // this field exists to close (C2.10 defect-1).
       return {
         ...base,
         patches: decodeStoredPatchList(row.data),
+        document: reconstructPatchedDocument(engine, {
+          id: row.id,
+          scopeKey: row.scope_key,
+          branch: row.branch,
+          seq: row.seq,
+          opIndex: row.op_index,
+        }),
       } satisfies AppliedRevision;
     }
     return base as AppliedRevision;
   });
+};
+
+/**
+ * The client adopts a merge-rebased authoritative document from the doc's
+ * LAST revision in the commit (later local patches replay on top of whatever
+ * the last revision left). A multi-op commit that merge-rebased an EARLIER
+ * patch of a doc and then patched the same doc again would otherwise leave
+ * the last revision document-free — materialize it there too so the adoption
+ * rule stays a single "last revision carries the truth" contract. One op per
+ * doc per commit is the norm, so this pass almost never does work.
+ */
+const ensureMergedPatchDocumentOnLastRevision = (
+  engine: Engine,
+  branch: BranchName,
+  revisions: readonly AppliedRevision[],
+): void => {
+  const revisionDocKey = (revision: AppliedRevision): string =>
+    revisionKey(branch, revision.id, revision.scopeKey ?? DEFAULT_SCOPE_KEY);
+  const mergedDocs = new Set<string>();
+  const lastByDoc = new Map<string, AppliedRevision>();
+  for (const revision of revisions) {
+    const key = revisionDocKey(revision);
+    if (revision.op === "patch" && revision.document !== undefined) {
+      mergedDocs.add(key);
+    }
+    lastByDoc.set(key, revision);
+  }
+  for (const key of mergedDocs) {
+    const last = lastByDoc.get(key)!;
+    if (last.op !== "patch" || last.document !== undefined) continue;
+    last.document = reconstructPatchedDocument(engine, {
+      id: last.id,
+      scopeKey: last.scopeKey ?? DEFAULT_SCOPE_KEY,
+      branch,
+      seq: last.seq,
+      opIndex: last.opIndex,
+    });
+  }
 };
 
 const materializeSnapshots = (

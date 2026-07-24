@@ -105,8 +105,33 @@ export class BackgroundPieceService {
     const [cancel, addCancel] = useCancelGroup();
 
     for (const did of dids) {
+      // we are only filtering pieces because until the FIXME above is fixed
+      const didPieces = pieces.filter((c) => c.get()?.space === did);
       let scheduler = this.pieceSchedulers.get(did);
       if (!scheduler) {
+        const backgroundExclusion = this.runtime.experimental
+            .serverPrimaryExecution
+          ? (() => {
+            const provider = this.runtime.storageManager.open(
+              did as MemorySpace,
+            );
+            return {
+              acquire: (branch: string) =>
+                provider.acquireLegacyBackgroundExclusion?.(branch) ??
+                  Promise.resolve(undefined),
+              renew: (branch: string, exclusionGeneration: number) =>
+                provider.renewLegacyBackgroundExclusion?.(
+                  branch,
+                  exclusionGeneration,
+                ) ?? Promise.resolve(undefined),
+              release: (branch: string, exclusionGeneration: number) =>
+                provider.releaseLegacyBackgroundExclusion?.(
+                  branch,
+                  exclusionGeneration,
+                ) ?? Promise.resolve(undefined),
+            };
+          })()
+          : undefined;
         // Should send a derived/non-top-level key
         // to each space once delegation is working.
         scheduler = this.createSpaceManager({
@@ -115,14 +140,14 @@ export class BackgroundPieceService {
           identity: this.identity,
           timeoutMs: this.workerTimeoutMs,
           experimental: this.runtime.experimental,
+          ...(backgroundExclusion === undefined ? {} : { backgroundExclusion }),
         });
         this.pieceSchedulers.set(did, scheduler);
+        addCancel(scheduler.watch(didPieces));
         scheduler.start();
+      } else {
+        addCancel(scheduler.watch(didPieces));
       }
-
-      // we are only filtering pieces because until the FIXME above is fixed
-      const didPieces = pieces.filter((c) => c.get()?.space === did);
-      addCancel(scheduler.watch(didPieces));
     }
 
     const removedSpaces = new Set(this.pieceSchedulers.keys()).difference(dids);

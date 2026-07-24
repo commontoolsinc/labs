@@ -28,6 +28,20 @@ Use enableMockMode() and addMockResponse() to set up mocks.
 When mock mode is enabled via `enableMockMode()`, the mock interception runs
 first and the guard is never reached.
 
+Supplying `LLMClientRequestOptions.fetch` does **not** authorize a request in a
+test environment. This is intentional: `fetch: globalThis.fetch`, an ordinary
+wrapper, and a test double all remain behind the same live-call guard. Tests
+that need LLM behavior should use mock mode and registered responses.
+
+The server executor is the narrow exception. Its in-process LLM builtin routes
+through a host egress broker and passes an opaque options object minted by
+`createInternalLLMBrokerRequestOptions` from the explicit
+`@commonfabric/llm/internal` entry point. The client recognizes only that exact
+frozen object identity; copying or spreading it loses authorization. The
+factory is for trusted Common Fabric broker plumbing and focused transport
+tests, not a general test escape hatch or a security boundary against code that
+deliberately imports the internal module.
+
 ## Writing tests that use LLM
 
 ```ts

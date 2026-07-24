@@ -1,5 +1,7 @@
 import type {
   ActionRunTraceEntry,
+  ExecutionRoutingDiagnostics,
+  ExecutionRoutingDiagnosticsQuery,
   JSONSchema,
   JSONValue,
   NormalizedFullLink,
@@ -56,6 +58,7 @@ export enum RequestType {
   RegisterSpaceHost = "runtime:registerSpaceHost",
   FlushCompileCacheWrites = "runtime:flushCompileCacheWrites",
   GetGraphSnapshot = "runtime:getGraphSnapshot",
+  GetExecutionRoutingDiagnostics = "runtime:getExecutionRoutingDiagnostics",
   GetLoggerCounts = "runtime:getLoggerCounts",
   SetLoggerLevel = "runtime:setLoggerLevel",
   SetLoggerEnabled = "runtime:setLoggerEnabled",
@@ -165,6 +168,7 @@ export interface InitializationData {
   experimental?: {
     modernCellRep?: boolean;
     persistentSchedulerState?: boolean;
+    serverPrimaryExecution?: boolean;
     eagerSourceAnnotation?: boolean;
     // Roll a space's system root pattern forward in place when its toolshed
     // serves a newer identity. Default off; home held behind the second flag.
@@ -346,6 +350,11 @@ export interface FlushCompileCacheWritesRequest extends BaseRequest {
 
 export interface GetGraphSnapshotRequest extends BaseRequest {
   type: RequestType.GetGraphSnapshot;
+}
+
+export interface GetExecutionRoutingDiagnosticsRequest extends BaseRequest {
+  type: RequestType.GetExecutionRoutingDiagnostics;
+  query: ExecutionRoutingDiagnosticsQuery;
 }
 
 export interface GetLoggerCountsRequest extends BaseRequest {
@@ -738,6 +747,7 @@ export type IPCClientRequest =
   | GetHomeSpaceCellRequest
   | EnsureHomePatternRunningRequest
   | GetGraphSnapshotRequest
+  | GetExecutionRoutingDiagnosticsRequest
   | GetLoggerCountsRequest
   | SetLoggerLevelRequest
   | SetLoggerEnabledRequest
@@ -815,6 +825,10 @@ export interface SpaceResponse {
 
 export interface GraphSnapshotResponse {
   snapshot: SchedulerGraphSnapshot;
+}
+
+export interface ExecutionRoutingDiagnosticsResponse {
+  diagnostics: ExecutionRoutingDiagnostics;
 }
 
 export interface LoggerCountsResponse {
@@ -938,6 +952,7 @@ export type RemoteResponse =
   | CellResponse
   | CfcLabelViewResponse
   | GraphSnapshotResponse
+  | ExecutionRoutingDiagnosticsResponse
   | LoggerCountsResponse
   | SettleStatsResponse
   | SettleStatsHistoryResponse
@@ -994,6 +1009,10 @@ export type Commands = {
   [RequestType.GetGraphSnapshot]: {
     request: GetGraphSnapshotRequest;
     response: GraphSnapshotResponse;
+  };
+  [RequestType.GetExecutionRoutingDiagnostics]: {
+    request: GetExecutionRoutingDiagnosticsRequest;
+    response: ExecutionRoutingDiagnosticsResponse;
   };
   [RequestType.GetLoggerCounts]: {
     request: GetLoggerCountsRequest;

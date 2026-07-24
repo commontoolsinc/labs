@@ -426,7 +426,7 @@ describe("CFC template population (Stage A): the two under-taints", () => {
   });
 
   // SC-11 with templates present: an identical re-declaration (same
-  // criteria, same members, no value write) re-derives byte-identical
+  // criteria, same members, no value write) re-derives canonically identical
   // metadata and must not write the ["cfc"] envelope at all.
   it("recompute with templates present is a no-op (SC-11: zero cfc writes)", async () => {
     const rt = makeRuntime();
@@ -435,7 +435,7 @@ describe("CFC template population (Stage A): the two under-taints", () => {
       { path: [], label: { confidentiality: ["memb-secret"] } },
     ]);
     const listId = await buildList(rt, "tp-list-i", criteriaId, ["tp-el-i"]);
-    const before = JSON.stringify(entriesOf(listId));
+    const before = structuredClone(entriesOf(listId));
 
     const again = rt.edit();
     again.readOrThrow(readAddress(criteriaId, []));
@@ -451,7 +451,7 @@ describe("CFC template population (Stage A): the two under-taints", () => {
     );
     expect(wroteCfc).toBe(false);
     expect((await again.commit()).ok).toBeDefined();
-    expect(JSON.stringify(entriesOf(listId))).toEqual(before);
+    expect(entriesOf(listId)).toEqual(before);
   });
 
   // The §8.12.8 replace-from-criteria READBACK EXCLUSION, pinned at the

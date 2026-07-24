@@ -4,6 +4,10 @@ import { Identity } from "@commonfabric/identity";
 import { RuntimeClient } from "./runtime-client.ts";
 import { NotificationType, RequestType } from "./protocol/mod.ts";
 import type { RuntimeTransport } from "./client/transport.ts";
+import type {
+  ExecutionRoutingDiagnostics,
+  ExecutionRoutingDiagnosticsQuery,
+} from "@commonfabric/runner/shared";
 
 describe("RuntimeClient.initialize option validation", () => {
   it("rejects an unknown renderDeclassificationPolicy loudly", async () => {
@@ -104,6 +108,56 @@ describe("RuntimeClient.resolveSpaceName", () => {
     expect(requests).toEqual([{
       type: RequestType.ResolveSpaceName,
       name: "notebook",
+    }]);
+  });
+});
+
+describe("RuntimeClient execution routing diagnostics", () => {
+  it("sends the scoped query and returns the worker diagnostic snapshot", async () => {
+    const query: ExecutionRoutingDiagnosticsQuery = {
+      space: "did:key:z6Mk-runtime-routing-diagnostics",
+      branch: "",
+      pieceId: "space:of:piece",
+      actionId: "action:derive",
+      resetCounters: true,
+    };
+    const diagnostics: ExecutionRoutingDiagnostics = {
+      space: query.space,
+      branch: query.branch,
+      executionFeedSeq: 7,
+      executionAppliedSeq: 11,
+      snapshotRequired: false,
+      claims: [],
+      actions: [],
+      branchTotals: {
+        upstreamRoutes: 0,
+        claimedOverlayRoutes: 0,
+        settlements: { committed: 0, noOp: 0, failed: 0, unserved: 0 },
+        basisCoveredOverlayDrops: 0,
+        nonAuthoritativeOverlayDrops: 0,
+        settlementDiagnostics: {},
+        routeDiagnostics: {},
+      },
+      truncatedActionRecords: 0,
+    };
+    const requests: unknown[] = [];
+    const conn = {
+      on: () => {},
+      request: (message: unknown) => {
+        requests.push(message);
+        return Promise.resolve({ diagnostics });
+      },
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+
+    expect(await client.getExecutionRoutingDiagnostics(query)).toEqual(
+      diagnostics,
+    );
+    expect(requests).toEqual([{
+      type: RequestType.GetExecutionRoutingDiagnostics,
+      query,
     }]);
   });
 });

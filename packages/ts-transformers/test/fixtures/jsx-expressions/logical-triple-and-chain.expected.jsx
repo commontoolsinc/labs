@@ -33,7 +33,7 @@ const __cfLift_1 = __cfHelpers.lift<{
     required: ["user"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_2 = __cfHelpers.lift<{
     user: __cfHelpers.Cell<{ active: boolean; verified: boolean; name: string; }>;
 }, string>(({ user }) => user.get().name, {
@@ -53,7 +53,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     required: ["user"]
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "string"
-} as const satisfies __cfHelpers.JSONSchema);
+} as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 // Tests triple && chain: a && b && c
 // Should produce nested when calls or lower the entire chain to a lift-applied computation
 // FIXTURE: logical-triple-and-chain

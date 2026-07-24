@@ -85,6 +85,7 @@ function makeNotificationState(args: {
   action: Action;
   triggerIndex: SchedulerTriggerIndex;
   actionChangeGroups?: WeakMap<Action, ChangeGroup>;
+  onMarkInvalid?: (options: { deferClaimedRemote: boolean }) => void;
 }): StorageNotificationState {
   const nodes = new NodeRegistry();
   nodes.register(args.action, "effect");
@@ -102,7 +103,8 @@ function makeNotificationState(args: {
     recordCellUpdate: () => {},
     recordTriggerTrace: () => {},
     scheduleWithDebounce: () => {},
-    markInvalid: (action, cause) => {
+    markInvalid: (action, cause, options) => {
+      args.onMarkInvalid?.(options);
       markInvalid(nodes, action, cause);
     },
     isInvalid: (action) => {
@@ -121,7 +123,7 @@ function makeNotificationState(args: {
 
 function makeCommitNotification(
   source: IStorageTransaction,
-): StorageNotification {
+): Extract<StorageNotification, { type: "commit" }> {
   // Document-root change: before/after are walked into by the registered
   // trigger paths, so ["value"] must differ between them.
   return {
@@ -205,6 +207,28 @@ describe("trigger reads follow the scheduling decision", () => {
         id: "of:cell",
         path: [],
       });
+    });
+
+    it(`${mode}: only a remote integrate requests claimed speculation grace`, () => {
+      const action: Action = () => {};
+      const origins: boolean[] = [];
+      const state = makeNotificationState({
+        action,
+        triggerIndex: makeTriggerIndexFor(action),
+        onMarkInvalid: ({ deferClaimedRemote }) =>
+          origins.push(deferClaimedRemote),
+      });
+      const commit = makeCommitNotification({} as IStorageTransaction);
+
+      process(state, commit);
+      state.nodes.setStatus(action, "clean");
+      process(state, {
+        type: "integrate",
+        space: commit.space,
+        changes: commit.changes,
+      });
+
+      expect(origins).toEqual([false, true]);
     });
   }
 });

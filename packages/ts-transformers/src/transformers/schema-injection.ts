@@ -40,7 +40,12 @@ import {
   TransformationContext,
   type TypeRegistry,
 } from "../core/mod.ts";
-import { analyzeFunctionCapabilities } from "../policy/mod.ts";
+import {
+  analyzeFunctionCapabilities,
+  createDeriveSchedulerOptions,
+  functionWritesCapturedCells,
+  hasCompleteSchedulerScopeSummary,
+} from "../policy/mod.ts";
 import {
   applyShrinkAndWrap,
   type CapabilitySummaryApplicationMode,
@@ -212,6 +217,13 @@ interface CapabilitySummaryMemo {
   readonly nested: WeakMap<ts.Node, FunctionCapabilitySummary>;
   /** Non-nested analyses (fallback after a recorded-summary miss). */
   readonly fallback: WeakMap<ts.Node, FunctionCapabilitySummary>;
+  /**
+   * `{ includeNestedCallbacks: true, interprocedural: true }` analyses for the
+   * scheduler-scope certificate decision. Kept separate from `nested` because
+   * interprocedural summaries are strictly more conservative (they follow calls
+   * into helpers) and must not leak into the shrinking analyses.
+   */
+  readonly certificate: WeakMap<ts.Node, FunctionCapabilitySummary>;
 }
 
 const capabilitySummaryMemos = new WeakMap<
@@ -224,7 +236,11 @@ function capabilitySummaryMemoFor(
 ): CapabilitySummaryMemo {
   let memo = capabilitySummaryMemos.get(context);
   if (!memo) {
-    memo = { nested: new WeakMap(), fallback: new WeakMap() };
+    memo = {
+      nested: new WeakMap(),
+      fallback: new WeakMap(),
+      certificate: new WeakMap(),
+    };
     capabilitySummaryMemos.set(context, memo);
   }
   return memo;
@@ -1406,6 +1422,96 @@ function resolveDualSchemaBuilderTypes(
   };
 }
 
+/**
+ * The trailing `DeriveSchedulerOptions` argument for a direct lift/derive
+ * computation builder — the W2.13 certificate path. Runs the same capability
+ * analysis and (W2.12-relaxed) completeness gate the closure strategy applies
+ * to capture-merged computeds, but over the builder callback the closure
+ * strategy never sees: a module-scope `lift((input) => …)` and the no-capture
+ * lift-applied form an auto-lowered reactive expression (`?? new Writable()`)
+ * produces. Returns `undefined` when no computation callback resolves or when
+ * the callback does not certify. The no-input `lift(cb, false)()` form is
+ * certified separately in `prependSchemaArguments`, so it is not handled here.
+ *
+ * Options are emitted only for a certifying callback. Unlike the closure
+ * strategy — which has always attached `materializerWriteInputPaths` to a
+ * capture-merged computed regardless of completeness — a direct builder emitted
+ * nothing before this path existed, so emitting a partial write surface for an
+ * *uncertified* one (e.g. backlinks-index `computeIndex`'s wildcard `.key(i)`
+ * writes) would newly narrow the runtime's conservative opaque-result
+ * materializer fallback (`runner.ts:4444-4458`) to an under-declared set. Gating
+ * on the certificate keeps the write paths complete when present and leaves
+ * every non-certifying builder exactly as it was.
+ */
+function schedulerOptionsForComputationBuilder(
+  node: ts.CallExpression,
+  context: TransformationContext,
+  checker: ts.TypeChecker,
+): ts.ObjectLiteralExpression | undefined {
+  const callKind = detectCallKind(node, checker);
+  let callback: ts.ArrowFunction | ts.FunctionExpression | undefined;
+  if (callKind?.kind === "lift-applied") {
+    const inner = getLiftAppliedInnerCall(node);
+    const callbackExpression = inner?.arguments[0];
+    callback = callbackExpression
+      ? resolveFunctionLikeExpression(
+        callbackExpression,
+        checker,
+        context.sourceFile,
+      )
+      : undefined;
+  } else if (callKind?.kind === "builder" && callKind.builderName === "lift") {
+    callback = findFunctionArgument(
+      node.arguments,
+      checker,
+      context.sourceFile,
+    )?.callback;
+  }
+  if (!callback) return undefined;
+
+  // W2.13 capture-freeness (FB2): the capability analysis below proves
+  // write-completeness over PARAMETERS only, and — unlike the closure
+  // strategy — this path runs on callbacks whose captures were never reified
+  // into a param. A callback that writes a CAPTURED cell (pattern-scope or
+  // module-scope) would therefore summarize write-free and receive an unsound
+  // certificate. Enforce the gate's stated invariant ("no captured-cell
+  // writes") fail-closed: any detected captured-identifier write withholds
+  // the certificate entirely.
+  if (functionWritesCapturedCells(callback, checker)) return undefined;
+
+  // Interprocedural: unlike shrinking, the certificate needs the callback's
+  // whole write surface, so it must follow calls into helper functions. A
+  // recursive helper (backlinks-index `computeMentionable`) or one that passes a
+  // cell through a dynamic access (its `collect(mentionable.key(i), …)`) then
+  // surfaces as `recursive`/`wildcard` and fails the gate closed, instead of
+  // looking write-free because the analysis stopped at the call boundary. A
+  // dedicated cache keeps these conservative summaries out of the shrinking
+  // memos, which intentionally analyze non-interprocedurally.
+  const summary = analyzeFunctionCapabilities(callback, {
+    checker,
+    typeRegistry: context.options.state?.typeRegistry,
+    includeNestedCallbacks: true,
+    interprocedural: true,
+    summaryCache: capabilitySummaryMemoFor(context).certificate,
+  });
+  if (!hasCompleteSchedulerScopeSummary(summary)) {
+    return undefined;
+  }
+  const firstParameter = callback.parameters[0];
+  const firstParameterName = firstParameter &&
+      ts.isIdentifier(firstParameter.name)
+    ? firstParameter.name.text
+    : "__param0";
+  const inputParamSummary = summary.params.find(
+    (param) => param.name === firstParameterName,
+  );
+  return createDeriveSchedulerOptions(
+    inputParamSummary,
+    true,
+    context.factory,
+  );
+}
+
 function visitInjectedDualSchemaBuilderCall(
   node: ts.CallExpression,
   argumentTypeNode: ts.TypeNode,
@@ -1427,6 +1533,7 @@ function visitInjectedDualSchemaBuilderCall(
     resultTypeValue,
     typeRegistry,
     checker,
+    schedulerOptionsForComputationBuilder(node, context, checker),
   );
   registerInjectedCallResultType(
     node,
@@ -2328,6 +2435,12 @@ function prependSchemaArguments(
   resultType: ts.Type | undefined,
   typeRegistry?: TypeRegistry,
   checker?: ts.TypeChecker,
+  // A trailing DeriveSchedulerOptions object for lift/derive computation
+  // builders (W2.13). It is only appended when the emitted call does not
+  // already carry closure-produced trailing options — the closure strategy
+  // owns the certificate for capture-merged computeds; this covers the
+  // no-capture lift-applied and direct-builder forms it never sees.
+  schedulerOptions?: ts.Expression,
 ): ts.CallExpression {
   const argSchemaCall = checker
     ? createSchemaCallWithRegistryTransfer(
@@ -2376,13 +2489,30 @@ function prependSchemaArguments(
     // runtime semantics — keeps the no-arg application valid) and no outer
     // input. We deliberately omit the result schema, again matching computed.
     if (isSingleEmptyObjectInput(node.arguments)) {
-      const completeSchedulerScopeSummary = context.factory
-        .createObjectLiteralExpression([
-          context.factory.createPropertyAssignment(
-            "completeSchedulerScopeSummary",
-            context.factory.createTrue(),
-          ),
-        ], false);
+      // W2.13 capture-freeness (FB2): "zero captures reified" is
+      // ClosureTransformer's notion of capture, which excludes module-scope
+      // bindings — a no-input computation can still WRITE a module-scope
+      // cell through a free identifier. Certify only a callback proven
+      // capture-write-free; when the callback cannot be resolved, fail
+      // closed (no certificate) rather than assume.
+      const resolvedInnerCallback = innerCallback && checker !== undefined
+        ? resolveFunctionLikeExpression(
+          innerCallback,
+          checker,
+          context.sourceFile,
+        )
+        : undefined;
+      const certifiable = resolvedInnerCallback !== undefined &&
+        !functionWritesCapturedCells(resolvedInnerCallback, checker);
+      const completeSchedulerScopeSummary = certifiable
+        ? context.factory
+          .createObjectLiteralExpression([
+            context.factory.createPropertyAssignment(
+              "completeSchedulerScopeSummary",
+              context.factory.createTrue(),
+            ),
+          ], false)
+        : context.factory.createIdentifier("undefined");
       const rebuiltInner = context.factory.createCallExpression(
         innerLiftCall.expression,
         innerLiftCall.typeArguments,
@@ -2407,10 +2537,19 @@ function prependSchemaArguments(
       );
     }
 
+    // Preserve any closure-produced trailing options; otherwise fall back to
+    // the W2.13-computed options for a lift-applied call the closure strategy
+    // never processed (e.g. an auto-lowered `?? new Writable()` whose param is
+    // its whole input, so it had no free captures).
+    const liftAppliedTrailingArgs = trailingInnerArgs.length > 0
+      ? trailingInnerArgs
+      : schedulerOptions
+      ? [schedulerOptions]
+      : [];
     const rebuiltInner = context.factory.createCallExpression(
       innerLiftCall.expression,
       innerLiftCall.typeArguments,
-      [...calleeArgs, argSchemaCall, resSchemaCall, ...trailingInnerArgs],
+      [...calleeArgs, argSchemaCall, resSchemaCall, ...liftAppliedTrailingArgs],
     );
     // The inner lift is fully schema-injected now; mark it so the re-descent
     // does not re-enter the builder-lift branch and inject a second pair.
@@ -2425,7 +2564,12 @@ function prependSchemaArguments(
   return context.factory.createCallExpression(
     node.expression,
     undefined,
-    [...node.arguments, argSchemaCall, resSchemaCall],
+    [
+      ...node.arguments,
+      argSchemaCall,
+      resSchemaCall,
+      ...(schedulerOptions ? [schedulerOptions] : []),
+    ],
   );
 }
 

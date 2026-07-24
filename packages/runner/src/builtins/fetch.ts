@@ -24,6 +24,7 @@ import {
 } from "./fetch-utils.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { scopedCell } from "./scope-policy.ts";
+import type { NormalizedFullLink } from "../link-utils.ts";
 
 type FetchRequestOptions = {
   body?: any;
@@ -307,6 +308,7 @@ function fetchBuiltin(kind: FetchKind) {
     let cellScope: CellScope | undefined;
     let myRequestId: string | undefined = undefined;
     let abortController: AbortController | undefined = undefined;
+    const serverBuiltinRuntimeWrites: NormalizedFullLink[] = [];
 
     // This is called when the pattern containing this node is being stopped.
     addCancel(() => {
@@ -336,7 +338,7 @@ function fetchBuiltin(kind: FetchKind) {
       }
     });
 
-    return (tx: IExtendedStorageTransaction) => {
+    const action: Action = (tx: IExtendedStorageTransaction) => {
       tx.resetNarrowestReadScope();
       const inputsSnapshot = snapshotInputs(inputsCell.withTx(tx));
       const mutexTimeoutMs = mutexTimeoutForCell(kind, inputsCell.withTx(tx));
@@ -400,6 +402,14 @@ function fetchBuiltin(kind: FetchKind) {
         cellsInitialized = true;
         cellScope = outputScope;
       }
+      serverBuiltinRuntimeWrites.splice(
+        0,
+        serverBuiltinRuntimeWrites.length,
+        pending.getAsNormalizedFullLink(),
+        result.getAsNormalizedFullLink(),
+        error.getAsNormalizedFullLink(),
+        internal.getAsNormalizedFullLink(),
+      );
 
       // Set results to links to our cells. We have to do this outside of
       // isInitialized since the write could conflict, and then this code will run
@@ -543,11 +553,12 @@ function fetchBuiltin(kind: FetchKind) {
                 );
               },
             );
-            runtime.trackAsyncWork(work);
+            runtime.trackAsyncWork(work, { externalEffect: true });
           },
         );
       }
     };
+    return Object.assign(action, { serverBuiltinRuntimeWrites });
   };
 }
 
@@ -609,14 +620,27 @@ async function startFetch(
     // default memory host, so hostForSpace's fallback is NOT used here.
     const mappedHost = runtime.mappedHostFor(inputsCell.space);
     const apiBase = new URL(mappedHost ?? getPatternEnvironment().apiUrl);
-    const resolvedUrl = new URL(url!, apiBase);
-    const requestOptions = await signedToolshedFetchOptions(
-      runtime,
-      resolvedUrl,
-      apiBase,
-      options,
-    );
-    const response = await runtime.fetch(
+    const hasServerBuiltinFetch = runtime.hasServerBuiltinFetch();
+    let resolvedUrl: URL | undefined;
+    try {
+      resolvedUrl = new URL(url!, apiBase);
+    } catch (error) {
+      // The host egress classifier owns URL syntax for server execution so a
+      // malformed request becomes a permanent unserved attempt. Preserve the
+      // ordinary client runtime's existing local failure behavior.
+      if (!hasServerBuiltinFetch) throw error;
+    }
+    const requestOptions = hasServerBuiltinFetch
+      ? options
+      : await signedToolshedFetchOptions(
+        runtime,
+        resolvedUrl!,
+        apiBase,
+        options,
+      );
+    const response = await runtime.fetchBuiltin(
+      kind.name,
+      url!,
       resolvedUrl,
       {
         signal: abortSignal,

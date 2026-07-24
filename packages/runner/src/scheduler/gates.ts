@@ -155,8 +155,37 @@ export class SchedulerGates {
 
   markActionHasRun(action: Action): void {
     const gate = this.gate(action);
-    if (gate) delete gate.debounceReadyAt;
+    if (gate) {
+      delete gate.debounceReadyAt;
+      delete gate.claimedRemoteSpeculationReadyAt;
+    }
     this.armThrottleFromStats(action);
+  }
+
+  /**
+   * Hold only the first remote invalidation in a claimed speculation wave.
+   * Repeated invalidations retain the original deadline so authority loss can
+   * never postpone the fail-open local run indefinitely.
+   */
+  holdClaimedRemoteSpeculation(action: Action, notBefore: number): void {
+    const gate = this.mutableGate(action);
+    if (gate.claimedRemoteSpeculationReadyAt !== undefined) return;
+    gate.claimedRemoteSpeculationReadyAt = notBefore;
+    this.scheduleWake(notBefore);
+  }
+
+  releaseClaimedRemoteSpeculation(action: Action): void {
+    const gate = this.gate(action);
+    if (gate?.claimedRemoteSpeculationReadyAt === undefined) return;
+    delete gate.claimedRemoteSpeculationReadyAt;
+    this.recomputeWakeAfterClear();
+  }
+
+  isClaimedRemoteSpeculationDeferred(
+    action: Action,
+    now = performance.now(),
+  ): boolean {
+    return (this.gate(action)?.claimedRemoteSpeculationReadyAt ?? 0) > now;
   }
 
   onInvalidated(
@@ -302,6 +331,7 @@ export class SchedulerGates {
     return Math.max(
       node.gate.debounceReadyAt ?? 0,
       node.gate.throttleReadyAt ?? 0,
+      node.gate.claimedRemoteSpeculationReadyAt ?? 0,
       node.gate.backoffUntil ?? 0,
     );
   }

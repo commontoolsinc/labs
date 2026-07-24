@@ -107,6 +107,7 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
   commitBackpressure: { treat: "absent" },
   moduleByteCache: { treat: "absent" },
   fetch: { treat: "absent" },
+  externalSinkDisposition: { treat: "absent" },
 };
 
 describe("runtimePresets conformance (CT-1814)", () => {
@@ -199,12 +200,14 @@ describe("runtimePresets conformance (CT-1814)", () => {
         consoleHandler,
         errorHandlers,
         telemetry,
+        externalSinkDisposition: "suppress",
       })).toEqual({
         ...minimalOutputs.productionServer,
         patternEnvironment: { apiUrl: patternApiUrl },
         consoleHandler,
         errorHandlers,
         telemetry,
+        externalSinkDisposition: "suppress",
       });
     });
 
@@ -295,6 +298,28 @@ describe("runtimePresets conformance (CT-1814)", () => {
   });
 
   describe("experimentalOptionsFromEnv", () => {
+    // C3A20 (FB14 discipline): the FULL flag keyset is a committed golden. A
+    // new ExperimentalOptions flag must be registered in EXPERIMENTAL_ENV_VARS
+    // (the `satisfies Record<keyof ExperimentalOptions, ...>` clause enforces
+    // that at compile time) AND appear here — so a flag added without a
+    // deliberate registry decision fails by design. C3.6 adds
+    // `serverPrimaryExecutionCrossSpaceReadCandidates`.
+    it("pins the exhaustive experimental flag keyset (C3A20)", () => {
+      expect(Object.keys(EXPERIMENTAL_ENV_VARS).toSorted()).toEqual([
+        "commitPreconditions",
+        "eagerSourceAnnotation",
+        "modernCellRep",
+        "persistentSchedulerState",
+        "serverPrimaryExecution",
+        "serverPrimaryExecutionCrossSpaceReadCandidates",
+        "serverPrimaryExecutionDocSetWatch",
+        "serverPrimaryExecutionSessionRankCandidates",
+        "serverPrimaryExecutionUserRankCandidates",
+        "systemPatternAutoUpdate",
+        "systemPatternAutoUpdateHome",
+      ].toSorted());
+    });
+
     it("consults exactly the env-wired canonical mapping", () => {
       const read: string[] = [];
       experimentalOptionsFromEnv((name) => {
@@ -310,10 +335,12 @@ describe("runtimePresets conformance (CT-1814)", () => {
       const env: Record<string, string> = {
         EXPERIMENTAL_MODERN_CELL_REP: "true",
         EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: "false",
+        EXPERIMENTAL_SERVER_PRIMARY_EXECUTION: "true",
       };
       expect(experimentalOptionsFromEnv((name) => env[name])).toEqual({
         modernCellRep: true,
         persistentSchedulerState: false,
+        serverPrimaryExecution: true,
       });
       expect(experimentalOptionsFromEnv(() => undefined)).toEqual({});
     });

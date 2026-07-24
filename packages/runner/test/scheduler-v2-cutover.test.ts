@@ -18,6 +18,7 @@ import type {
 } from "./scheduler-test-utils.ts";
 import {
   BACKOFF_BASE_MS,
+  CLAIMED_REMOTE_SPECULATION_GRACE_MS,
   CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES,
   PASS_RUN_BUDGET,
 } from "../src/scheduler/constants.ts";
@@ -266,6 +267,118 @@ describe("scheduler v2 cutover fixtures", () => {
       expect(output.get()).toBe(0);
     } finally {
       computeCancel();
+      effectCancel();
+    }
+  });
+
+  it("coalesces remote claimed invalidations but keeps local speculation immediate", async () => {
+    const source = runtime.getCell<number>(
+      space,
+      "v2-cutover-claimed-grace-source",
+      undefined,
+      tx,
+    );
+    const output = runtime.getCell<number>(
+      space,
+      "v2-cutover-claimed-grace-output",
+      undefined,
+      tx,
+    );
+    source.set(1);
+    output.set(2);
+    await tx.commit();
+    tx = runtime.edit();
+
+    let computationRuns = 0;
+    const outputLink = output.getAsNormalizedFullLink();
+    const computation = Object.assign(
+      ((actionTx: IExtendedStorageTransaction) => {
+        computationRuns++;
+        output.withTx(actionTx).send(source.withTx(actionTx).get() * 2);
+      }) as Action,
+      { writes: [outputLink] },
+    );
+    const effect: Action = (actionTx) => {
+      output.withTx(actionTx).get();
+    };
+    const computationCancel = runtime.scheduler.subscribe(computation, {
+      reads: [toMemorySpaceAddress(source.getAsNormalizedFullLink())],
+      shallowReads: [],
+      writes: [toMemorySpaceAddress(outputLink)],
+    });
+    const effectCancel = runtime.scheduler.subscribe(effect, {
+      reads: [toMemorySpaceAddress(outputLink)],
+      shallowReads: [],
+      writes: [],
+    }, { isEffect: true });
+
+    const scheduler = runtime.scheduler as unknown as {
+      markAndScheduleInvalidAction(
+        action: Action,
+        cause: ReturnType<typeof toMemorySpaceAddress>,
+        options?: { readonly deferClaimedRemote?: boolean },
+      ): void;
+      nodes: {
+        get(action: Action): {
+          kind: "computation" | "effect";
+          status: "never-ran" | "clean" | "invalid";
+          gate: { claimedRemoteSpeculationReadyAt?: number };
+        } | undefined;
+      };
+    };
+    const manager = storageManager as SchedulerTestStorageManager & {
+      hasLiveExecutionClaimForAction(action: object): boolean;
+    };
+    let claimChecks = 0;
+    manager.hasLiveExecutionClaimForAction = (action) => {
+      claimChecks++;
+      return action === computation;
+    };
+    const sourceAddress = toMemorySpaceAddress(
+      source.getAsNormalizedFullLink(),
+    );
+
+    try {
+      await runtime.scheduler.idle();
+      computationRuns = 0;
+
+      scheduler.markAndScheduleInvalidAction(computation, sourceAddress, {
+        deferClaimedRemote: true,
+      });
+      await Promise.resolve();
+      expect(computationRuns).toBe(0);
+      expect(claimChecks).toBe(1);
+      expect(scheduler.nodes.get(computation)?.kind).toBe("computation");
+      expect(scheduler.nodes.get(computation)?.status).toBe("invalid");
+      expect(
+        scheduler.nodes.get(computation)?.gate
+          .claimedRemoteSpeculationReadyAt,
+      ).toBeGreaterThan(performance.now());
+
+      let idleResolved = false;
+      const idleAfterRemoteInvalidation = runtime.scheduler.idle().then(() => {
+        idleResolved = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(idleResolved).toBe(false);
+      await new Promise((resolve) =>
+        setTimeout(resolve, CLAIMED_REMOTE_SPECULATION_GRACE_MS + 25)
+      );
+      await idleAfterRemoteInvalidation;
+      expect(computationRuns).toBe(1);
+
+      scheduler.markAndScheduleInvalidAction(computation, sourceAddress, {
+        deferClaimedRemote: true,
+      });
+      scheduler.markAndScheduleInvalidAction(computation, sourceAddress);
+      await runtime.scheduler.idle();
+      expect(computationRuns).toBe(2);
+      expect(
+        scheduler.nodes.get(computation)?.gate
+          .claimedRemoteSpeculationReadyAt,
+      ).toBeUndefined();
+    } finally {
+      computationCancel();
       effectCancel();
     }
   });

@@ -9,7 +9,9 @@ import {
   type EntitySnapshot,
   getMemoryProtocolFlags,
   MEMORY_PROTOCOL,
+  resetPersistentSchedulerStateConfig,
   type SessionSync,
+  setPersistentSchedulerStateConfig,
   toDocumentPath,
 } from "../v2.ts";
 import {
@@ -578,6 +580,7 @@ Deno.test("memory v2 client watch views expose incremental sync effects", async 
         branch: "",
         id: "of:doc:1",
         scope: "space",
+        scopeKey: "space",
         seq: 2,
         doc: {
           value: {
@@ -2113,6 +2116,7 @@ Deno.test(
         branch: "",
         id: "of:doc:1",
         scope: "space",
+        scopeKey: "space",
         seq: 1,
         doc: {
           value: {
@@ -3013,6 +3017,303 @@ Deno.test("memory v2 client stores the server's advertised flags (capability han
     assertEquals(legacy.serverFlags?.sqliteCommitRowLabelEval, false);
   } finally {
     await legacy.close();
+  }
+});
+
+Deno.test("memory v2 writer lookup fails open when the server omits its capability", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const requestTypes: string[] = [];
+  const legacyFlags = {
+    ...getMemoryProtocolFlags(),
+  } as unknown as Record<string, boolean>;
+  delete legacyFlags.schedulerWriterLookup;
+  let receiver = (_payload: string) => {};
+  const transport: Transport = {
+    send(payload): Promise<void> {
+      const message = decodeMemoryBoundary(payload) as {
+        type?: string;
+        requestId?: string;
+      };
+      requestTypes.push(message.type ?? "<missing>");
+      switch (message.type) {
+        case "hello":
+          receiver(encodeMemoryBoundary({
+            type: "hello.ok",
+            protocol: MEMORY_PROTOCOL,
+            flags: legacyFlags,
+            sessionOpen: {
+              audience: TEST_SESSION_OPEN_AUDIENCE,
+              challenge: sessionOpenChallenge,
+            },
+          }));
+          return Promise.resolve();
+        case "session.open":
+          receiver(encodeMemoryBoundary({
+            type: "response",
+            requestId: message.requestId!,
+            ok: {
+              sessionId: "session:writer-capability",
+              sessionToken: "token:writer-capability",
+              serverSeq: 17,
+              sessionOpen: sessionOpenFor(message.requestId!),
+            },
+          }));
+          return Promise.resolve();
+        default:
+          throw new Error(`unexpected memory request: ${message.type}`);
+      }
+    },
+    async close() {},
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver() {},
+  };
+
+  const client = await connect({ transport });
+  try {
+    assertEquals(client.serverFlags?.schedulerWriterLookup, false);
+    const session = await client.mount(
+      "did:key:z6Mk-writer-capability-space",
+      {},
+      testSessionOpenAuthFactory,
+    );
+    const result = await session.writersForTargets({
+      branch: "",
+      targets: [{
+        id: "of:output",
+        path: toDocumentPath(["value"]),
+      }],
+    });
+    assertEquals(result, { serverSeq: 17, writers: [] });
+    assertEquals(requestTypes, ["hello", "session.open"]);
+  } finally {
+    await client.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 writer lookup rechecks capability after reconnect", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const currentFlags = getMemoryProtocolFlags();
+  const legacyFlags = { ...currentFlags } as Record<string, boolean>;
+  delete legacyFlags.schedulerWriterLookup;
+  const secondHelloSent = defer<void>();
+  const releaseLegacyHello = defer<void>();
+  let helloCount = 0;
+  let writerLookupCount = 0;
+  let receiver = (_payload: string) => {};
+  let closeReceiver = (_error?: Error) => {};
+  const respond = (message: FabricValue) =>
+    receiver(encodeMemoryBoundary(message));
+  const transport: Transport & { disconnect(): void } = {
+    send(payload): Promise<void> {
+      const message = decodeMemoryBoundary(payload) as {
+        type?: string;
+        requestId?: string;
+      };
+      switch (message.type) {
+        case "hello": {
+          helloCount += 1;
+          if (helloCount === 1) {
+            respond(HELLO_OK);
+          } else {
+            secondHelloSent.resolve();
+            void releaseLegacyHello.promise.then(() =>
+              respond({
+                ...HELLO_OK,
+                flags: legacyFlags,
+              })
+            );
+          }
+          return Promise.resolve();
+        }
+        case "session.open":
+          respond({
+            type: "response",
+            requestId: message.requestId!,
+            ok: {
+              sessionId: "session:writer-reconnect-capability",
+              sessionToken: "token:writer-reconnect-capability",
+              serverSeq: helloCount === 1 ? 17 : 23,
+              resumed: helloCount > 1,
+              sessionOpen: sessionOpenFor(message.requestId!),
+            },
+          });
+          return Promise.resolve();
+        case "scheduler.writer.list":
+          writerLookupCount += 1;
+          respond({
+            type: "response",
+            requestId: message.requestId!,
+            error: {
+              name: "ProtocolError",
+              message: "legacy server does not support scheduler.writer.list",
+            },
+          });
+          return Promise.resolve();
+        default:
+          throw new Error(`unexpected memory request: ${message.type}`);
+      }
+    },
+    async close() {},
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver(next) {
+      closeReceiver = next;
+    },
+    disconnect() {
+      closeReceiver(new Error("switch to legacy server"));
+    },
+  };
+
+  const client = await connect({ transport });
+  try {
+    const session = await client.mount(
+      "did:key:z6Mk-writer-reconnect-capability-space",
+    );
+    transport.disconnect();
+    await secondHelloSent.promise;
+    const lookup = session.writersForTargets({
+      branch: "",
+      targets: [{
+        id: "of:output",
+        path: toDocumentPath(["value"]),
+      }],
+    });
+    releaseLegacyHello.resolve();
+
+    assertEquals(await lookup, { serverSeq: 23, writers: [] });
+    assertEquals(writerLookupCount, 0);
+    assertEquals(client.serverFlags?.schedulerWriterLookup, false);
+  } finally {
+    releaseLegacyHello.resolve();
+    await client.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
+Deno.test("memory v2 execution RPCs recheck capability after reconnect", async () => {
+  const capableFlags = {
+    ...getMemoryProtocolFlags(),
+    serverPrimaryExecutionV1: true,
+    serverPrimaryExecutionClaimRoutingV1: true,
+    serverPrimaryExecutionBuiltinPassivityV1: true,
+  };
+  const legacyFlags = { ...capableFlags } as Record<string, boolean>;
+  delete legacyFlags.serverPrimaryExecutionV1;
+  delete legacyFlags.serverPrimaryExecutionClaimRoutingV1;
+  delete legacyFlags.serverPrimaryExecutionBuiltinPassivityV1;
+  const secondHelloSent = defer<void>();
+  const releaseLegacyHello = defer<void>();
+  let helloCount = 0;
+  let receiver = (_payload: string) => {};
+  let closeReceiver = (_error?: Error) => {};
+  const executionRequests: string[] = [];
+  const respond = (message: FabricValue) =>
+    receiver(encodeMemoryBoundary(message));
+  const transport: Transport & { disconnect(): void } = {
+    send(payload): Promise<void> {
+      const message = decodeMemoryBoundary(payload) as {
+        type?: string;
+        requestId?: string;
+      };
+      switch (message.type) {
+        case "hello": {
+          helloCount++;
+          if (helloCount === 1) {
+            respond({ ...HELLO_OK, flags: capableFlags });
+          } else {
+            secondHelloSent.resolve();
+            void releaseLegacyHello.promise.then(() =>
+              respond({ ...HELLO_OK, flags: legacyFlags })
+            );
+          }
+          return Promise.resolve();
+        }
+        case "session.open":
+          respond({
+            type: "response",
+            requestId: message.requestId!,
+            ok: {
+              sessionId: "session:execution-reconnect-capability",
+              sessionToken: "token:execution-reconnect-capability",
+              serverSeq: helloCount === 1 ? 17 : 23,
+              resumed: helloCount > 1,
+              sessionOpen: sessionOpenFor(message.requestId!),
+            },
+          });
+          return Promise.resolve();
+        case "session.execution.demand.set":
+          executionRequests.push(message.type);
+          respond({
+            type: "response",
+            requestId: message.requestId!,
+            ok: { serverSeq: 23, references: 1 },
+          });
+          return Promise.resolve();
+        case "session.execution.legacy-background.acquire":
+        case "session.execution.legacy-background.renew":
+          executionRequests.push(message.type);
+          respond({
+            type: "response",
+            requestId: message.requestId!,
+            ok: { serverSeq: 23, status: null },
+          });
+          return Promise.resolve();
+        case "session.execution.legacy-background.release":
+          executionRequests.push(message.type);
+          respond({
+            type: "response",
+            requestId: message.requestId!,
+            ok: { serverSeq: 23, released: null },
+          });
+          return Promise.resolve();
+        default:
+          throw new Error(`unexpected memory request: ${message.type}`);
+      }
+    },
+    async close() {},
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver(next) {
+      closeReceiver = next;
+    },
+    disconnect() {
+      closeReceiver(new Error("switch to legacy execution server"));
+    },
+  };
+
+  const client = await connect({
+    transport,
+    protocolFlags: {
+      serverPrimaryExecutionV1: true,
+      serverPrimaryExecutionClaimRoutingV1: true,
+      serverPrimaryExecutionBuiltinPassivityV1: true,
+    },
+  });
+  try {
+    const session = await client.mount(
+      "did:key:z6Mk-execution-reconnect-capability-space",
+    );
+    transport.disconnect();
+    await secondHelloSent.promise;
+    const results = Promise.all([
+      session.setExecutionDemand("", ["piece:one"]),
+      session.acquireLegacyBackgroundExclusion(""),
+      session.renewLegacyBackgroundExclusion("", 1),
+      session.releaseLegacyBackgroundExclusion("", 1),
+    ]);
+    releaseLegacyHello.resolve();
+
+    assertEquals(await results, [false, undefined, undefined, undefined]);
+    assertEquals(executionRequests, []);
+    assertEquals(client.serverPrimaryExecutionV1, false);
+  } finally {
+    releaseLegacyHello.resolve();
+    await client.close();
   }
 });
 
