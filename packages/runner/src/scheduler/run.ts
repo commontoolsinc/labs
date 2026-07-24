@@ -201,11 +201,12 @@ export function watchReactiveActionCommit(state: {
     }
 
     // Non-conflict failures are NOT re-triggered by reader-dirty — a transient
-    // transport error, or the path-blind local StorageTransactionInconsistent
-    // guard that fires before the engine's granular matcher — so they still
-    // warrant a bounded retry. On every attempt we still resubscribe, so even
-    // after the budget is exhausted the action is re-triggered when its input
-    // data changes.
+    // transport or malformed-store error — so they still warrant a bounded
+    // retry to make progress. Unlike a stale basis (a conflict or the local
+    // same-replica-race guard, both handled off-budget above), re-running does
+    // not resolve them, so the budget bounds the wasted attempts. On every
+    // attempt we still resubscribe, so even after the budget is exhausted the
+    // action is re-triggered when its input data changes.
     const retries = (state.retries.get(state.action) ?? 0) + 1;
     state.retries.set(state.action, retries);
     if (retries < MAX_RETRIES_FOR_REACTIVE) {
