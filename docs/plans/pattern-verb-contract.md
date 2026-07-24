@@ -3,6 +3,16 @@
 **Status:** design draft — not implemented, not agreed. This document exists to
 be argued with before any code is written.
 
+**Summary.** A pattern's declared verbs are its agent API: the CLI is a generic
+projection of them, so each pattern defines its own command surface and no
+pattern-specific CLI code exists to write or drift. Today that projection is
+lossy — a create returns no handle, a rejection looks like success, a retry can
+duplicate. Part 1 is the authoring contract for verbs: named fields, atomic
+units, declared results, typed rejections, no call-order dependence. Part 2
+makes results durable and retries idempotent by exposing the scheduler's
+existing event-id and receipt machinery through the callable layer. One small
+runtime change; everything else is exposure.
+
 ## Goal
 
 Any pattern drivable by an agent, with no pattern-specific CLI code. Filing one
