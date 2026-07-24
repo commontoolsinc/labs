@@ -6,7 +6,7 @@ import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 import {
   findPendingComputeWrapCandidate,
   isJsxLocalRewriteContainer,
-  validateComputeWrapCandidate,
+  resolveComputeWrapCandidate,
 } from "./compute-wrap-invariants.ts";
 import { isValueComputationExpressionKind } from "../../../utils/expression.ts";
 import type { Emitter } from "../types.ts";
@@ -104,15 +104,15 @@ export function rewriteHelperOwnedExpression(
     !hasSyntheticComputeCallbackAncestor(pendingRewrite, context) &&
     !isAlreadySyntheticComputeOwned(pendingRewrite, context)
   ) {
-    const valid = validateComputeWrapCandidate(
+    const decision = resolveComputeWrapCandidate(
       pendingRewrite,
       assertContainer ?? expression,
       containerLabel,
       context,
     );
-    if (!valid) {
-      // Reported as an author-facing diagnostic. Skip the forced value-lift
-      // below as well — it would wrap the very computation the guard refused.
+    if (decision.kind === "skip-reported") {
+      // Skip the forced value-lift below too — it would wrap the very
+      // computation the guard refused.
       return expression;
     }
 

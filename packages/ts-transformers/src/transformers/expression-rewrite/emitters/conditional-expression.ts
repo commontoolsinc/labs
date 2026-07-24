@@ -11,7 +11,7 @@ import { createReactiveWrapperForExpression } from "../rewrite-helpers.ts";
 import {
   findPendingComputeWrapCandidate,
   isJsxLocalRewriteContainer,
-  validateComputeWrapCandidate,
+  resolveComputeWrapCandidate,
 } from "./compute-wrap-invariants.ts";
 import { unwrapExpression } from "../../../utils/expression.ts";
 
@@ -94,14 +94,13 @@ function processBranch(
       return rewriteChildren(expr) || expr;
     }
 
-    const valid = validateComputeWrapCandidate(
+    const decision = resolveComputeWrapCandidate(
       pendingRewrite,
       expr,
       "ternary branch",
       context,
     );
-    if (!valid) {
-      // Reported as an author-facing diagnostic; skip the branch wrap.
+    if (decision.kind === "skip-reported") {
       return rewriteChildren(expr) || expr;
     }
 

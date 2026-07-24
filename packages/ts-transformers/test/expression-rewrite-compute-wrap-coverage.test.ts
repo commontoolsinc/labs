@@ -5,7 +5,7 @@ import { createDataFlowAnalyzer } from "../src/ast/mod.ts";
 import { CrossStageState, TransformationContext } from "../src/core/mod.ts";
 import {
   findPendingComputeWrapCandidate,
-  validateComputeWrapCandidate,
+  resolveComputeWrapCandidate,
 } from "../src/transformers/expression-rewrite/emitters/compute-wrap-invariants.ts";
 import { rewriteHelperOwnedExpression } from "../src/transformers/expression-rewrite/emitters/helper-owned-expression.ts";
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
@@ -16,8 +16,9 @@ import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 // emitter's wrap decision and the shared reactive-context classifier is
 // handled two ways: an AUTHORED culprit inside an owned pattern boundary is
 // reported as the author-facing `reactive:call-argument-computation`
-// diagnostic (the guard returns false and the caller skips the wrap), while
-// every synthetic-culprit disagreement stays a loud "compiler bug" error.
+// diagnostic (the guard returns a `{ kind: "skip-reported" }` verdict and the
+// caller skips the wrap), while every synthetic-culprit disagreement stays a
+// loud "compiler bug" error (thrown, never returned).
 // Each test pins one of those behaviors: which node the search selects, when
 // it yields nothing, which path reports vs throws, and what the messages
 // contain.
@@ -213,7 +214,7 @@ Deno.test(
 );
 
 Deno.test(
-  "validateComputeWrapCandidate returns true when the wrap agrees with the classification",
+  "resolveComputeWrapCandidate returns a wrap verdict when the wrap agrees with the classification",
   () => {
     const { sourceFile, checker: _checker, context } = createContext(
       HEADER +
@@ -225,20 +226,20 @@ Deno.test(
     );
     const branch = findInitializer(sourceFile, "branch");
     assertStrictEquals(
-      validateComputeWrapCandidate(
+      resolveComputeWrapCandidate(
         branch,
         branch,
         "binary expression",
         context,
-      ),
-      true,
+      ).kind,
+      "wrap",
     );
     assertStrictEquals(context.diagnostics.length, 0);
   },
 );
 
 Deno.test(
-  "validateComputeWrapCandidate throws when the culprit is already classified as compute",
+  "resolveComputeWrapCandidate throws when the culprit is already classified as compute",
   () => {
     const { sourceFile, checker: _checker, context } = createContext(
       HEADER +
@@ -254,7 +255,7 @@ Deno.test(
     // emitter that still tried to wrap it, so the guard reports the bug.
     let message = "";
     try {
-      validateComputeWrapCandidate(
+      resolveComputeWrapCandidate(
         branch,
         branch,
         "binary expression",
@@ -272,7 +273,7 @@ Deno.test(
 );
 
 Deno.test(
-  "validateComputeWrapCandidate reports the call-argument diagnostic for an authored culprit inside an owned pattern boundary",
+  "resolveComputeWrapCandidate reports the call-argument diagnostic for an authored culprit inside an owned pattern boundary",
   () => {
     const { sourceFile, checker: _checker, context } = createContext(
       HEADER +
@@ -296,13 +297,13 @@ Deno.test(
         ts.isObjectLiteralExpression(node),
     );
     assertStrictEquals(
-      validateComputeWrapCandidate(
+      resolveComputeWrapCandidate(
         culprit,
         branch,
         "binary expression",
         context,
-      ),
-      false,
+      ).kind,
+      "skip-reported",
     );
     assertStrictEquals(context.diagnostics.length, 1);
     const diagnostic = context.diagnostics[0]!;
@@ -320,7 +321,7 @@ Deno.test(
 );
 
 Deno.test(
-  "validateComputeWrapCandidate still throws for a synthetic culprit inside an owned pattern boundary",
+  "resolveComputeWrapCandidate still throws for a synthetic culprit inside an owned pattern boundary",
   () => {
     const { sourceFile, checker: _checker, context } = createContext(
       HEADER +
@@ -348,7 +349,7 @@ Deno.test(
     (synthesized as { parent: ts.Node }).parent = authored.parent;
     let message = "";
     try {
-      validateComputeWrapCandidate(
+      resolveComputeWrapCandidate(
         synthesized,
         branch,
         "binary expression",
@@ -422,7 +423,7 @@ Deno.test(
     context.markSyntheticComputeOwnedSubtree(branch);
     let message = "";
     try {
-      validateComputeWrapCandidate(
+      resolveComputeWrapCandidate(
         branch,
         branch,
         "binary expression",
@@ -460,7 +461,7 @@ Deno.test(
     context.markSyntheticComputeOwnedSubtree(synthesized);
     let message = "";
     try {
-      validateComputeWrapCandidate(
+      resolveComputeWrapCandidate(
         synthesized,
         branch,
         "binary expression",

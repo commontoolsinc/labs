@@ -2,6 +2,7 @@ import ts from "typescript";
 
 import {
   detectCallKind,
+  hasAuthoredSourceSite,
   isSimpleReactiveAccessExpression,
 } from "../../../ast/mod.ts";
 import type { TransformationContext } from "../../../core/mod.ts";
@@ -100,23 +101,6 @@ function throwComputeWrapCompilerBug(
   );
 }
 
-/**
- * True when the node (or its original) carries a real source range — i.e. it
- * is authored pattern code the author can act on, not a compiler-synthesized
- * tree. Mirrors `hasAuthoredSourceSite` in expression-site-policy.ts, which
- * cannot be imported here because that module already imports from this one.
- */
-function hasAuthoredSourceRange(node: ts.Node): boolean {
-  if (node.getSourceFile() && node.pos >= 0) {
-    return true;
-  }
-
-  const original = ts.getOriginalNode(node);
-  return original !== node &&
-    !!original.getSourceFile() &&
-    original.pos >= 0;
-}
-
 function reportOwnedBoundaryComputationDiagnostic(
   culprit: ts.Expression,
   boundary: ts.Expression,
@@ -166,30 +150,43 @@ function findSupportedPatternBoundaryAncestor(
 }
 
 /**
- * Guard consulted before an emitter adds a compute wrapper around `culprit`.
- * Returns true when the wrap is consistent with the shared reactive-context
- * classification.
+ * Outcome of {@link resolveComputeWrapCandidate}. The genuine compiler-bug
+ * shapes throw rather than returning, so the caller only ever sees these two:
  *
- * Two disagreement shapes exist:
- *
- * - The culprit is already classified compute. Always an internal invariant
- *   violation (synthetic-marking / classifier drift) — throws.
- * - The culprit sits inside an owned pattern boundary (a builder,
- *   lift-applied, or array-method call), which owns lowering for its own
- *   argument subtree. An *authored* culprit here is reachable from the
- *   language surface — e.g. a reactive computation written inline in a
- *   bound-handler's builder arguments (`join({ profile: profile ??
- *   profileWish.result })`) — so it is reported as an author-facing
- *   `reactive:call-argument-computation` diagnostic and the caller must skip
- *   the wrap (returns false). A synthetic culprit in that position is still
- *   an internal bug — throws.
+ * - `wrap` — the compute wrapper is consistent with the shared classification;
+ *   the emitter should proceed.
+ * - `skip-reported` — the wrap was refused and an author-facing diagnostic has
+ *   already been reported; the emitter must bail without wrapping.
  */
-export function validateComputeWrapCandidate(
+export type ComputeWrapDecision =
+  | { readonly kind: "wrap" }
+  | { readonly kind: "skip-reported" };
+
+/**
+ * Guard consulted before an emitter adds a compute wrapper around `culprit`.
+ *
+ * Three outcomes, two of them returned and one thrown:
+ *
+ * - Returns `{ kind: "wrap" }` when the wrap agrees with the shared
+ *   reactive-context classification.
+ * - Returns `{ kind: "skip-reported" }` when the culprit sits inside an owned
+ *   pattern boundary (a builder, lift-applied, or array-method call) that owns
+ *   lowering for its own argument subtree AND the culprit is authored — a shape
+ *   reachable from the language surface, e.g. a reactive computation written
+ *   inline in a bound-handler's builder arguments (`join({ profile: profile ??
+ *   profileWish.result })`). An author-facing `reactive:call-argument-computation`
+ *   diagnostic is reported here and the caller skips the wrap.
+ * - Throws the internal compiler-bug error for the two invariant-violation
+ *   shapes: the culprit is already classified compute (synthetic-marking /
+ *   classifier drift), or a *synthetic* culprit sits inside an owned boundary
+ *   (the pipeline mis-synthesized something).
+ */
+export function resolveComputeWrapCandidate(
   culprit: ts.Expression,
   container: ts.Expression,
   containerLabel: string,
   context: TransformationContext,
-): boolean {
+): ComputeWrapDecision {
   const culpritContext = context.getReactiveContext(culprit);
 
   if (culpritContext.kind === "compute") {
@@ -208,13 +205,13 @@ export function validateComputeWrapCandidate(
     context,
   );
   if (supportedBoundary) {
-    if (hasAuthoredSourceRange(culprit)) {
+    if (hasAuthoredSourceSite(culprit)) {
       reportOwnedBoundaryComputationDiagnostic(
         culprit,
         supportedBoundary,
         context,
       );
-      return false;
+      return { kind: "skip-reported" };
     }
 
     throwComputeWrapCompilerBug(
@@ -228,7 +225,7 @@ export function validateComputeWrapCandidate(
     );
   }
 
-  return true;
+  return { kind: "wrap" };
 }
 
 export function findPendingComputeWrapCandidate(
