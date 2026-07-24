@@ -142,6 +142,9 @@ describe("memory v2 flags", () => {
       syncSchemaTable: false,
       // Build-inherent capability, not configuration: always advertised.
       sqliteCommitRowLabelEval: true,
+      entityIdListing: true,
+      entityIdPagination: true,
+      entityIdLookup: true,
       syncSchemaTableV2: false,
     });
 
@@ -156,6 +159,9 @@ describe("memory v2 flags", () => {
       commitPreconditions: true,
       syncSchemaTable: false,
       sqliteCommitRowLabelEval: true,
+      entityIdListing: true,
+      entityIdPagination: true,
+      entityIdLookup: true,
       syncSchemaTableV2: true,
     });
 
@@ -174,6 +180,9 @@ describe("memory v2 flags", () => {
         syncSchemaTable: true,
         syncSchemaTableV2: true,
         sqliteCommitRowLabelEval: true,
+        entityIdListing: true,
+        entityIdPagination: true,
+        entityIdLookup: true,
       },
       {
         modernCellRep: true,
@@ -185,6 +194,9 @@ describe("memory v2 flags", () => {
         // compatible — the capability only gates the runner's write-gate
         // relaxation, never the connection.
         sqliteCommitRowLabelEval: false,
+        entityIdListing: false,
+        entityIdPagination: false,
+        entityIdLookup: false,
       },
     ));
   });
@@ -199,6 +211,9 @@ describe("parseMemoryProtocolFlags", () => {
       syncSchemaTable: false,
       syncSchemaTableV2: false,
       sqliteCommitRowLabelEval: false,
+      entityIdListing: false,
+      entityIdPagination: false,
+      entityIdLookup: false,
     });
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: false }), {
       modernCellRep: false,
@@ -207,6 +222,9 @@ describe("parseMemoryProtocolFlags", () => {
       syncSchemaTable: false,
       syncSchemaTableV2: false,
       sqliteCommitRowLabelEval: false,
+      entityIdListing: false,
+      entityIdPagination: false,
+      entityIdLookup: false,
     });
   });
 
@@ -222,6 +240,9 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTable: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
+        entityIdListing: false,
+        entityIdPagination: false,
+        entityIdLookup: false,
       },
     );
   });
@@ -238,6 +259,9 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTable: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
+        entityIdListing: false,
+        entityIdPagination: false,
+        entityIdLookup: false,
       },
     );
   });
@@ -254,6 +278,9 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTable: true,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
+        entityIdListing: false,
+        entityIdPagination: false,
+        entityIdLookup: false,
       },
     );
   });
@@ -270,6 +297,9 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTable: false,
         syncSchemaTableV2: true,
         sqliteCommitRowLabelEval: false,
+        entityIdListing: false,
+        entityIdPagination: false,
+        entityIdLookup: false,
       },
     );
   });
@@ -286,6 +316,46 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTable: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: true,
+        entityIdListing: false,
+        entityIdPagination: false,
+        entityIdLookup: false,
+      },
+    );
+  });
+
+  it("accepts the entityIdListing capability key", () => {
+    assertEquals(
+      parseMemoryProtocolFlags({ entityIdListing: true }),
+      {
+        modernCellRep: false,
+        persistentSchedulerState: false,
+        commitPreconditions: false,
+        syncSchemaTable: false,
+        syncSchemaTableV2: false,
+        sqliteCommitRowLabelEval: false,
+        entityIdListing: true,
+        entityIdPagination: false,
+        entityIdLookup: false,
+      },
+    );
+  });
+
+  it("accepts entity identifier pagination and lookup capability keys", () => {
+    assertEquals(
+      parseMemoryProtocolFlags({
+        entityIdPagination: true,
+        entityIdLookup: true,
+      }),
+      {
+        modernCellRep: false,
+        persistentSchedulerState: false,
+        commitPreconditions: false,
+        syncSchemaTable: false,
+        syncSchemaTableV2: false,
+        sqliteCommitRowLabelEval: false,
+        entityIdListing: false,
+        entityIdPagination: true,
+        entityIdLookup: true,
       },
     );
   });
@@ -302,6 +372,12 @@ describe("parseMemoryProtocolFlags", () => {
       parseMemoryProtocolFlags({ sqliteCommitRowLabelEval: "true" }),
       null,
     );
+    assertEquals(parseMemoryProtocolFlags({ entityIdListing: "true" }), null);
+    assertEquals(
+      parseMemoryProtocolFlags({ entityIdPagination: "true" }),
+      null,
+    );
+    assertEquals(parseMemoryProtocolFlags({ entityIdLookup: "true" }), null);
     assertEquals(
       parseMemoryProtocolFlags({
         modernCellRep: true,

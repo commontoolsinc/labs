@@ -80,6 +80,7 @@ export interface SpaceConfig {
   apiUrl: string;
   space: string;
   identity: string;
+  deferSpaceCellSync?: boolean;
 }
 
 /** Metadata returned for a piece whose stored data matches a search query. */
@@ -352,13 +353,18 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
 
     const pieceManager = await timeCliPhase(
       "loadManager.pieceManager",
-      () => new PieceManager(session, runtime),
+      () =>
+        new PieceManager(session, runtime, {
+          deferSpaceCellSync: config.deferSpaceCellSync,
+        }),
     );
     pieceManagerRef.current = pieceManager;
-    await timeCliPhase(
-      "loadManager.synced",
-      () => awaitSyncWithTimeout(pieceManager.synced()),
-    );
+    if (!config.deferSpaceCellSync) {
+      await timeCliPhase(
+        "loadManager.synced",
+        () => awaitSyncWithTimeout(pieceManager.synced()),
+      );
+    }
     return pieceManager;
   });
 }

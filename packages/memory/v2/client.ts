@@ -3,11 +3,16 @@ import {
   compatibleMemoryProtocolFlags,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
+  type EntityId,
+  type EntityIdListOptions,
+  type EntityIdListResult,
+  type EntityIdLookupResult,
   type EntitySnapshot,
   getMemoryProtocolFlags,
   getPersistentSchedulerStateConfig,
   type GraphQuery,
   type GraphQueryResult,
+  MAX_ENTITY_ID_PAGE_SIZE,
   MEMORY_PROTOCOL,
   type MemoryProtocolFlags,
   parseMemoryProtocolFlags,
@@ -568,6 +573,50 @@ export class SpaceSession {
       space: this.space,
       sessionId: this.#sessionId,
       query,
+    });
+
+    this.noteResult(result.serverSeq);
+    return result;
+  }
+
+  async listEntityIds(
+    options: EntityIdListOptions = {},
+  ): Promise<EntityIdListResult | undefined> {
+    this.#assertOpen();
+    if (this.client.serverFlags?.entityIdListing !== true) {
+      return undefined;
+    }
+    const pagination = this.client.serverFlags.entityIdPagination === true;
+    if (!pagination && Object.keys(options).length > 0) {
+      return undefined;
+    }
+    const result = await this.client.request<EntityIdListResult>({
+      type: "entity-id.list",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      ...(pagination
+        ? { ...options, limit: options.limit ?? MAX_ENTITY_ID_PAGE_SIZE }
+        : {}),
+    });
+
+    this.noteResult(result.serverSeq);
+    return result;
+  }
+
+  async entityIdExists(
+    id: EntityId,
+  ): Promise<EntityIdLookupResult | undefined> {
+    this.#assertOpen();
+    if (this.client.serverFlags?.entityIdLookup !== true) {
+      return undefined;
+    }
+    const result = await this.client.request<EntityIdLookupResult>({
+      type: "entity-id.exists",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      id,
     });
 
     this.noteResult(result.serverSeq);

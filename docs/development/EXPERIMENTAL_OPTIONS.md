@@ -602,6 +602,17 @@ the per-epic implementation notes).
 >   keeps its write gate failing closed. It was added by Bernhard Seefeld in
 >   "server-side commit-time row-label re-derivation (Epic E4, Phase 3.c)"
 >   (#4552). It is permanent.
+> - **`entityIdListing`** is a build-inherent capability, hardwired to `true`.
+>   It advertises that the memory server can list live space-scoped entity
+>   identifiers without returning stored values. Older servers omit it, which
+>   parses as `false`. It is permanent.
+> - **`entityIdPagination`** is a build-inherent capability, hardwired to
+>   `true`. It advertises snapshot-checked, server-capped pages for
+>   `entity-id.list`. Older servers return the historical complete response.
+>   It is permanent.
+> - **`entityIdLookup`** is a build-inherent capability, hardwired to `true`.
+>   It advertises identifier-only `entity-id.exists` point lookup. Older
+>   servers omit it, which parses as `false`. It is permanent.
 
 ### `experimentalConcurrentWatchRefresh`
 

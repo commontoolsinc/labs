@@ -9,11 +9,16 @@ import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
   type EntityDocument,
+  type EntityIdListRequest,
+  type EntityIdListResult,
+  type EntityIdLookupRequest,
+  type EntityIdLookupResult,
   getPersistentSchedulerStateConfig,
   type GraphQuery,
   type GraphQueryRequest,
   type GraphQueryResult,
   type HelloMessage,
+  MAX_ENTITY_ID_PAGE_SIZE,
   type Operation,
   parseMemoryProtocolFlags,
   type ResponseMessage,
@@ -114,7 +119,6 @@ const SLOW_QUERY_THRESHOLD_MS = 100;
 const SLOW_QUERY_BUFFER_SIZE = 100;
 const DEFAULT_SESSION_OPEN_CHALLENGE_TTL_SECONDS = 300;
 const SESSION_OPEN_CHALLENGE_BYTES = 32;
-
 // SQLite resource caps (mirror the `sqlite.query` wire-parse caps; also applied
 // to the folded-write path, which is parsed loosely as part of a `transact`).
 const MAX_SQLITE_SQL_LENGTH = 100_000;
@@ -650,6 +654,46 @@ class Connection {
         }
         {
           const response = await this.server.graphQuery(parsed);
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
+        return;
+      case "entity-id.list":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        {
+          const response = await this.server.listEntityIds(parsed);
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
+        return;
+      case "entity-id.exists":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        {
+          const response = await this.server.entityIdExists(parsed);
           this.sendSessionResponse(
             parsed.space,
             parsed.sessionId,
@@ -2251,6 +2295,144 @@ export class Server {
     }
   }
 
+  async listEntityIds(
+    message: EntityIdListRequest,
+  ): Promise<ResponseMessage<EntityIdListResult>> {
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session === null) {
+      return respondTypedError<EntityIdListResult>(
+        message.requestId,
+        toError("SessionError", "Unknown session for space"),
+      );
+    }
+
+    try {
+      const engine = await this.openEngine(message.space);
+      const deny = this.#authorizeCurrentSessionWithEngine(
+        engine,
+        message.space,
+        message.sessionId,
+        session,
+        "READ",
+      );
+      if (deny) {
+        return respondTypedError<EntityIdListResult>(message.requestId, deny);
+      }
+
+      const serverSeq = Engine.serverSeq(engine);
+      if (
+        message.expectedServerSeq !== undefined &&
+        message.expectedServerSeq !== serverSeq
+      ) {
+        return respondTypedError<EntityIdListResult>(
+          message.requestId,
+          toError(
+            "SnapshotChangedError",
+            `entity identifier snapshot changed from server sequence ${message.expectedServerSeq} to ${serverSeq}`,
+          ),
+        );
+      }
+
+      if (
+        message.after === undefined && message.limit === undefined &&
+        message.expectedServerSeq === undefined
+      ) {
+        const ids = Engine.listEntityIdPage(engine, {
+          limit: MAX_ENTITY_ID_PAGE_SIZE + 1,
+        });
+        if (ids.length > MAX_ENTITY_ID_PAGE_SIZE) {
+          return respondTypedError<EntityIdListResult>(
+            message.requestId,
+            toError(
+              "ProtocolError",
+              `unpaginated entity identifier listing exceeds ${MAX_ENTITY_ID_PAGE_SIZE} entries; use pagination`,
+            ),
+          );
+        }
+        return {
+          type: "response",
+          requestId: message.requestId,
+          ok: {
+            serverSeq,
+            ids,
+          },
+        };
+      }
+
+      const limit = Math.min(
+        message.limit ?? MAX_ENTITY_ID_PAGE_SIZE,
+        MAX_ENTITY_ID_PAGE_SIZE,
+      );
+      const rows = Engine.listEntityIdPage(engine, {
+        after: message.after,
+        limit: limit + 1,
+      });
+      const ids = rows.slice(0, limit);
+      const nextAfter = rows.length > limit ? ids.at(-1) : undefined;
+
+      return {
+        type: "response",
+        requestId: message.requestId,
+        ok: {
+          serverSeq,
+          ids,
+          ...(nextAfter === undefined ? {} : { nextAfter }),
+        },
+      };
+    } catch (error) {
+      return respondTypedError<EntityIdListResult>(
+        message.requestId,
+        toError(
+          "QueryError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
+  async entityIdExists(
+    message: EntityIdLookupRequest,
+  ): Promise<ResponseMessage<EntityIdLookupResult>> {
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session === null) {
+      return respondTypedError<EntityIdLookupResult>(
+        message.requestId,
+        toError("SessionError", "Unknown session for space"),
+      );
+    }
+
+    try {
+      const engine = await this.openEngine(message.space);
+      const deny = this.#authorizeCurrentSessionWithEngine(
+        engine,
+        message.space,
+        message.sessionId,
+        session,
+        "READ",
+      );
+      if (deny) {
+        return respondTypedError<EntityIdLookupResult>(message.requestId, deny);
+      }
+
+      return {
+        type: "response",
+        requestId: message.requestId,
+        ok: {
+          serverSeq: Engine.serverSeq(engine),
+          exists: Engine.entityIdExists(engine, message.id),
+        },
+      };
+    } catch (error) {
+      return respondTypedError<EntityIdLookupResult>(
+        message.requestId,
+        toError(
+          "QueryError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
   async listSchedulerActionSnapshots(
     message: SchedulerSnapshotListRequest,
   ): Promise<ResponseMessage<SchedulerSnapshotListResult>> {
@@ -3592,6 +3774,48 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       query: parsed.query as unknown as GraphQueryRequest["query"],
+    };
+  }
+
+  if (
+    parsed.type === "entity-id.list" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    (parsed.after === undefined || typeof parsed.after === "string") &&
+    (parsed.limit === undefined ||
+      (isNonNegativeInteger(parsed.limit) && parsed.limit > 0)) &&
+    (parsed.expectedServerSeq === undefined ||
+      isNonNegativeInteger(parsed.expectedServerSeq))
+  ) {
+    return {
+      type: "entity-id.list",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      ...(parsed.after === undefined
+        ? {}
+        : { after: parsed.after as EntityIdListRequest["after"] }),
+      ...(parsed.limit === undefined ? {} : { limit: parsed.limit }),
+      ...(parsed.expectedServerSeq === undefined
+        ? {}
+        : { expectedServerSeq: parsed.expectedServerSeq }),
+    };
+  }
+
+  if (
+    parsed.type === "entity-id.exists" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    typeof parsed.id === "string"
+  ) {
+    return {
+      type: "entity-id.exists",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      id: parsed.id as EntityIdLookupRequest["id"],
     };
   }
 

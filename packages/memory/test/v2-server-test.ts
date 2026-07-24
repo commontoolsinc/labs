@@ -8,6 +8,7 @@ import {
   getMemoryProtocolFlags,
   type GraphQueryResult,
   type HelloOkMessage,
+  MAX_ENTITY_ID_PAGE_SIZE,
   MEMORY_PROTOCOL,
   type ResponseMessage,
   type ServerMessage,
@@ -130,6 +131,223 @@ Deno.test("memory v2 server parser ignores transact invocation and authorization
       },
     },
   );
+});
+
+Deno.test("memory v2 server parses entity identifier listing requests", () => {
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      type: "entity-id.list",
+      requestId: "entity-list-1",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:1",
+    })),
+    {
+      type: "entity-id.list",
+      requestId: "entity-list-1",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:1",
+    },
+  );
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      type: "entity-id.list",
+      requestId: "entity-list-page",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:1",
+      after: "of:fid1:first",
+      limit: 100,
+      expectedServerSeq: 42,
+    })),
+    {
+      type: "entity-id.list",
+      requestId: "entity-list-page",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:1",
+      after: "of:fid1:first",
+      limit: 100,
+      expectedServerSeq: 42,
+    },
+  );
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      type: "entity-id.list",
+      requestId: "entity-list-2",
+      space: "did:key:z6Mk-space",
+    })),
+    null,
+  );
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      type: "entity-id.exists",
+      requestId: "entity-exists-1",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:1",
+      id: "of:fid1:first",
+    })),
+    {
+      type: "entity-id.exists",
+      requestId: "entity-exists-1",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:1",
+      id: "of:fid1:first",
+    },
+  );
+});
+
+Deno.test("memory v2 server rejects unknown entity identifier sessions before dispatch", async () => {
+  const server = createServer("memory://memory-v2-entity-id-dispatch-session");
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+
+  try {
+    await connection.receive(encodeMemoryBoundary(HELLO));
+    expectHelloOk(messages);
+
+    for (
+      const request of [{
+        type: "entity-id.list",
+        requestId: "entity-list-unknown-session",
+        space: "did:key:z6Mk-entity-list-unknown-session",
+        sessionId: "session:missing",
+      }, {
+        type: "entity-id.exists",
+        requestId: "entity-exists-unknown-session",
+        space: "did:key:z6Mk-entity-list-unknown-session",
+        sessionId: "session:missing",
+        id: "of:fid1:first",
+      }]
+    ) {
+      await connection.receive(encodeMemoryBoundary(request));
+      const response = assertResponse<unknown>(shiftMessage(messages));
+      assertEquals(response.requestId, request.requestId);
+      assertEquals(response.error?.name, "SessionError");
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 entity identifier methods report session and query errors", async () => {
+  const sessions = new SessionRegistry();
+  const server = new Server({
+    sessions,
+    store: new URL("memory://memory-v2-entity-id-method-errors"),
+    authorizeSessionOpen: () =>
+      "did:key:z6Mk-memory-v2-entity-id-method-errors",
+    sessionOpenAuth: { audience: TEST_AUDIENCE },
+  });
+  const validSpace = "did:key:z6Mk-entity-id-method-errors";
+  const invalidSpace = "invalid/space";
+
+  try {
+    const unknownList = await server.listEntityIds({
+      type: "entity-id.list",
+      requestId: "entity-list-method-unknown-session",
+      space: validSpace,
+      sessionId: "session:missing",
+    });
+    assertEquals(unknownList.error?.name, "SessionError");
+
+    const unknownLookup = await server.entityIdExists({
+      type: "entity-id.exists",
+      requestId: "entity-exists-method-unknown-session",
+      space: validSpace,
+      sessionId: "session:missing",
+      id: "of:fid1:first",
+    });
+    assertEquals(unknownLookup.error?.name, "SessionError");
+
+    sessions.open(
+      invalidSpace,
+      { sessionId: "session:invalid-space" },
+      0,
+      "entity-id-method-errors",
+      "did:key:z6Mk-memory-v2-entity-id-method-errors",
+    );
+    const failedList = await server.listEntityIds({
+      type: "entity-id.list",
+      requestId: "entity-list-method-query-error",
+      space: invalidSpace,
+      sessionId: "session:invalid-space",
+    });
+    assertEquals(failedList.error?.name, "QueryError");
+
+    const failedLookup = await server.entityIdExists({
+      type: "entity-id.exists",
+      requestId: "entity-exists-method-query-error",
+      space: invalidSpace,
+      sessionId: "session:invalid-space",
+      id: "of:fid1:first",
+    });
+    assertEquals(failedLookup.error?.name, "QueryError");
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server rejects oversized unpaginated identifier responses", async () => {
+  const sessions = new SessionRegistry();
+  const server = new Server({
+    sessions,
+    store: new URL("memory://memory-v2-bounded-legacy-entity-list"),
+    authorizeSessionOpen: () => "did:key:z6Mk-bounded-legacy-entity-list",
+    sessionOpenAuth: { audience: TEST_AUDIENCE },
+  });
+  const space = "did:key:z6Mk-bounded-legacy-entity-list";
+  const sessionId = "session:bounded-legacy-entity-list";
+  sessions.open(
+    space,
+    { sessionId },
+    0,
+    "bounded-legacy-entity-list",
+    "did:key:z6Mk-bounded-legacy-entity-list",
+  );
+
+  try {
+    const committed = await server.transact({
+      type: "transact",
+      requestId: "bounded-legacy-entity-list-commit",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: Array.from(
+          { length: MAX_ENTITY_ID_PAGE_SIZE + 1 },
+          (_, index) => ({
+            op: "set" as const,
+            id: `of:fid1:bounded-${index.toString().padStart(4, "0")}`,
+            value: { value: { index } },
+          }),
+        ),
+      },
+    });
+    assertExists(committed.ok);
+
+    const unpaginated = await server.listEntityIds({
+      type: "entity-id.list",
+      requestId: "bounded-legacy-entity-list-unpaginated",
+      space,
+      sessionId,
+    });
+    assertEquals(unpaginated.error?.name, "ProtocolError");
+    assertEquals(
+      unpaginated.error?.message,
+      `unpaginated entity identifier listing exceeds ${MAX_ENTITY_ID_PAGE_SIZE} entries; use pagination`,
+    );
+
+    const page = await server.listEntityIds({
+      type: "entity-id.list",
+      requestId: "bounded-legacy-entity-list-page",
+      space,
+      sessionId,
+      limit: MAX_ENTITY_ID_PAGE_SIZE,
+    });
+    assertEquals(page.ok?.ids.length, MAX_ENTITY_ID_PAGE_SIZE);
+    assertExists(page.ok?.nextAfter);
+  } finally {
+    await server.close();
+  }
 });
 
 Deno.test("memory v2 scheduler listing rejects arbitrary context selectors", () => {

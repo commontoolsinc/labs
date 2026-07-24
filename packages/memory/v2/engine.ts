@@ -377,6 +377,7 @@ CREATE TABLE IF NOT EXISTS head (
   scope_key TEXT    NOT NULL DEFAULT 'space',
   seq       INTEGER NOT NULL,
   op_index  INTEGER NOT NULL,
+  op        TEXT    NOT NULL CHECK (op IN ('set', 'patch', 'delete')),
   PRIMARY KEY (branch, id, scope_key)
 );
 CREATE INDEX IF NOT EXISTS idx_head_branch ON head (branch);
@@ -474,10 +475,10 @@ VALUES (
 `;
 
 const UPSERT_HEAD = `
-INSERT INTO head (branch, id, scope_key, seq, op_index)
-VALUES (:branch, :id, :scope_key, :seq, :op_index)
+INSERT INTO head (branch, id, scope_key, seq, op_index, op)
+VALUES (:branch, :id, :scope_key, :seq, :op_index, :op)
 ON CONFLICT (branch, id, scope_key) DO UPDATE
-SET seq = :seq, op_index = :op_index
+SET seq = :seq, op_index = :op_index, op = :op
 `;
 
 const INSERT_SNAPSHOT = `
@@ -526,6 +527,46 @@ JOIN revision r
  AND r.seq = h.seq
  AND r.op_index = h.op_index
 WHERE h.branch = :branch AND h.id = :id AND h.scope_key = :scope_key
+`;
+
+const SELECT_CURRENT_ENTITY_IDS = `
+SELECT id
+FROM head
+WHERE branch = :branch
+  AND scope_key = :scope_key
+  AND op <> 'delete'
+ORDER BY id ASC
+`;
+
+const SELECT_CURRENT_ENTITY_ID_PAGE = `
+SELECT id
+FROM head
+WHERE branch = :branch
+  AND scope_key = :scope_key
+  AND op <> 'delete'
+ORDER BY id ASC
+LIMIT :limit
+`;
+
+const SELECT_CURRENT_ENTITY_ID_PAGE_AFTER = `
+SELECT id
+FROM head
+WHERE branch = :branch
+  AND scope_key = :scope_key
+  AND op <> 'delete'
+  AND id > :after
+ORDER BY id ASC
+LIMIT :limit
+`;
+
+const SELECT_CURRENT_ENTITY_ID = `
+SELECT 1 AS present
+FROM head
+WHERE branch = :branch
+  AND scope_key = :scope_key
+  AND id = :id
+  AND op <> 'delete'
+LIMIT 1
 `;
 
 const SELECT_AT_SEQ_LOCAL = `
@@ -728,6 +769,10 @@ interface PreparedStatements {
   selectBranchStatus: PreparedStatement;
   selectCommitRevisions: PreparedStatement;
   selectCurrentLocal: PreparedStatement;
+  selectCurrentEntityId: PreparedStatement;
+  selectCurrentEntityIds: PreparedStatement;
+  selectCurrentEntityIdPage: PreparedStatement;
+  selectCurrentEntityIdPageAfter: PreparedStatement;
   selectExistingCommit: PreparedStatement;
   selectHead: PreparedStatement;
   selectLatestBase: PreparedStatement;
@@ -1178,6 +1223,12 @@ const prepareStatements = (database: Database): PreparedStatements => ({
   selectBranchStatus: database.prepare(SELECT_BRANCH_STATUS),
   selectCommitRevisions: database.prepare(SELECT_COMMIT_REVISIONS),
   selectCurrentLocal: database.prepare(SELECT_CURRENT_LOCAL),
+  selectCurrentEntityId: database.prepare(SELECT_CURRENT_ENTITY_ID),
+  selectCurrentEntityIds: database.prepare(SELECT_CURRENT_ENTITY_IDS),
+  selectCurrentEntityIdPage: database.prepare(SELECT_CURRENT_ENTITY_ID_PAGE),
+  selectCurrentEntityIdPageAfter: database.prepare(
+    SELECT_CURRENT_ENTITY_ID_PAGE_AFTER,
+  ),
   selectExistingCommit: database.prepare(SELECT_EXISTING_COMMIT),
   selectHead: database.prepare(SELECT_HEAD),
   selectLatestBase: database.prepare(SELECT_LATEST_BASE),
@@ -1204,6 +1255,17 @@ const hasColumn = (
     { name: string }
   >;
   return rows.some((row) => row.name === column);
+};
+
+const columnDefault = (
+  database: Database,
+  table: string,
+  column: string,
+): string | null | undefined => {
+  const rows = database.prepare(`PRAGMA table_info("${table}")`).all() as Array<
+    { name: string; dflt_value: string | null }
+  >;
+  return rows.find((row) => row.name === column)?.dflt_value;
 };
 
 const hasTable = (database: Database, table: string): boolean =>
@@ -1353,6 +1415,7 @@ CREATE TABLE head (
   scope_key TEXT    NOT NULL DEFAULT 'space',
   seq       INTEGER NOT NULL,
   op_index  INTEGER NOT NULL,
+  op        TEXT    NOT NULL CHECK (op IN ('set', 'patch', 'delete')),
   PRIMARY KEY (branch, id, scope_key)
 );
 CREATE INDEX idx_head_branch ON head (branch);
@@ -1372,9 +1435,15 @@ INSERT INTO revision (branch, id, scope_key, seq, op_index, op, data, commit_seq
 SELECT branch, id, 'space', seq, op_index, op, data, commit_seq
 FROM revision_unscoped_migration;
 
-INSERT INTO head (branch, id, scope_key, seq, op_index)
-SELECT branch, id, 'space', seq, op_index
-FROM head_unscoped_migration;
+INSERT INTO head (branch, id, scope_key, seq, op_index, op)
+SELECT h.branch, h.id, 'space', h.seq, h.op_index, r.op
+FROM head_unscoped_migration h
+JOIN revision r
+  ON r.branch = h.branch
+  AND r.id = h.id
+  AND r.scope_key = 'space'
+  AND r.seq = h.seq
+  AND r.op_index = h.op_index;
 
 INSERT INTO snapshot (branch, id, scope_key, seq, value)
 SELECT branch, id, 'space', seq, value
@@ -1385,6 +1454,61 @@ DROP TABLE head_unscoped_migration;
 DROP TABLE snapshot_unscoped_migration;
 
 COMMIT;
+`);
+};
+
+const migrateHeadCurrentOp = (database: Database): void => {
+  if (
+    !hasColumn(database, "head", "op") ||
+    columnDefault(database, "head", "op") !== null
+  ) {
+    database.exec(`
+BEGIN TRANSACTION;
+
+DROP INDEX IF EXISTS idx_head_branch;
+DROP INDEX IF EXISTS idx_head_live_entity_ids;
+
+ALTER TABLE head RENAME TO head_current_op_migration;
+
+CREATE TABLE head (
+  branch    TEXT    NOT NULL,
+  id        TEXT    NOT NULL,
+  scope_key TEXT    NOT NULL DEFAULT 'space',
+  seq       INTEGER NOT NULL,
+  op_index  INTEGER NOT NULL,
+  op        TEXT    NOT NULL CHECK (op IN ('set', 'patch', 'delete')),
+  PRIMARY KEY (branch, id, scope_key)
+);
+CREATE INDEX idx_head_branch ON head (branch);
+
+INSERT INTO head (branch, id, scope_key, seq, op_index, op)
+SELECT
+  h.branch,
+  h.id,
+  h.scope_key,
+  h.seq,
+  h.op_index,
+  (
+  SELECT r.op
+  FROM revision r
+  WHERE r.branch = h.branch
+    AND r.id = h.id
+    AND r.scope_key = h.scope_key
+    AND r.seq = h.seq
+    AND r.op_index = h.op_index
+  )
+FROM head_current_op_migration h;
+
+DROP TABLE head_current_op_migration;
+
+COMMIT;
+`);
+  }
+
+  database.exec(`
+CREATE INDEX IF NOT EXISTS idx_head_live_entity_ids
+  ON head (branch, scope_key, id, op)
+  WHERE op <> 'delete';
 `);
 };
 
@@ -2201,6 +2325,7 @@ export const open = async (
   `).get() !== undefined;
   database.exec(INIT(!schedulerSchemaExists));
   migrateScopedEntityTables(database);
+  migrateHeadCurrentOp(database);
   const completeSchedulerSchema = CORE_SCHEDULER_TABLES.every((table) =>
     hasTable(database, table)
   );
@@ -2269,6 +2394,46 @@ export const listBranches = (engine: Engine): BranchState[] => {
   return (engine.statements.selectBranches.all() as BranchRow[]).map(
     toBranchState,
   );
+};
+
+export const listEntityIds = (
+  engine: Engine,
+): EntityId[] => {
+  return (engine.statements.selectCurrentEntityIds.all({
+    branch: DEFAULT_BRANCH,
+    scope_key: DEFAULT_SCOPE_KEY,
+  }) as { id: EntityId }[]).map(({ id }) => id);
+};
+
+export interface EntityIdPageOptions {
+  after?: EntityId;
+  limit: number;
+}
+
+export const listEntityIdPage = (
+  engine: Engine,
+  { after, limit }: EntityIdPageOptions,
+): EntityId[] => {
+  const statement = after === undefined
+    ? engine.statements.selectCurrentEntityIdPage
+    : engine.statements.selectCurrentEntityIdPageAfter;
+  return (statement.all({
+    branch: DEFAULT_BRANCH,
+    scope_key: DEFAULT_SCOPE_KEY,
+    limit,
+    ...(after === undefined ? {} : { after }),
+  }) as { id: EntityId }[]).map(({ id }) => id);
+};
+
+export const entityIdExists = (
+  engine: Engine,
+  id: EntityId,
+): boolean => {
+  return engine.statements.selectCurrentEntityId.get({
+    branch: DEFAULT_BRANCH,
+    scope_key: DEFAULT_SCOPE_KEY,
+    id,
+  }) !== undefined;
 };
 
 export const read = (
@@ -5237,6 +5402,7 @@ const writeOperation = (
         scope_key: scopeKey,
         seq,
         op_index: opIndex,
+        op: "set",
       });
       return {
         id: operation.id,
@@ -5266,6 +5432,7 @@ const writeOperation = (
         scope_key: scopeKey,
         seq,
         op_index: opIndex,
+        op: "patch",
       });
       return {
         id: operation.id,
@@ -5295,6 +5462,7 @@ const writeOperation = (
         scope_key: scopeKey,
         seq,
         op_index: opIndex,
+        op: "delete",
       });
       return {
         id: operation.id,

@@ -19,7 +19,10 @@ import {
   createBranch,
   deleteBranch,
   type Engine,
+  entityIdExists,
   listBranches,
+  listEntityIdPage,
+  listEntityIds,
   open,
   ProtocolError,
   read,
@@ -537,6 +540,98 @@ Deno.test("memory v2 engine reserves request CAS schema reference strings", asyn
   }
 });
 
+Deno.test("memory v2 engine lists live space-scoped entity identifiers", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:alice",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: "of:fid1:second",
+            value: toEntityDocument({ payload: "second" }),
+          },
+          {
+            op: "set",
+            id: "of:fid1:first",
+            value: toEntityDocument({ payload: "first" }),
+          },
+          {
+            op: "set",
+            id: "of:fid1:user-only",
+            scope: "user",
+            value: toEntityDocument({ payload: "private" }),
+          },
+        ],
+      },
+    });
+
+    assertEquals(listEntityIds(engine), [
+      "of:fid1:first",
+      "of:fid1:second",
+    ]);
+    assertEquals(listEntityIdPage(engine, { limit: 1 }), ["of:fid1:first"]);
+    assertEquals(
+      listEntityIdPage(engine, { after: "of:fid1:first", limit: 1 }),
+      ["of:fid1:second"],
+    );
+    assertEquals(entityIdExists(engine, "of:fid1:first"), true);
+    assertEquals(entityIdExists(engine, "of:fid1:missing"), false);
+
+    applyCommit(engine, {
+      sessionId: "session:alice",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "delete", id: "of:fid1:first" }],
+      },
+    });
+
+    assertEquals(listEntityIds(engine), ["of:fid1:second"]);
+    assertEquals(entityIdExists(engine, "of:fid1:first"), false);
+    assertEquals(
+      engine.database.prepare(`
+        SELECT id, scope_key, op
+        FROM head
+        ORDER BY id, scope_key
+      `).all(),
+      [
+        { id: "of:fid1:first", scope_key: "space", op: "delete" },
+        { id: "of:fid1:second", scope_key: "space", op: "set" },
+        {
+          id: "of:fid1:user-only",
+          scope_key: "user:did%3Akey%3Aalice",
+          op: "set",
+        },
+      ],
+    );
+
+    const plan = engine.database.prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT id
+      FROM head
+      WHERE branch = :branch
+        AND scope_key = :scope_key
+        AND op <> 'delete'
+      ORDER BY id ASC
+    `).all({ branch: "", scope_key: "space" }) as Array<{ detail: string }>;
+    assertEquals(plan.length, 1);
+    assertMatch(
+      plan[0].detail,
+      /^SEARCH head USING COVERING INDEX idx_head_live_entity_ids /,
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 engine stores independent scoped instances for the same id", async () => {
   const { engine, path } = await createEngine();
 
@@ -915,6 +1010,175 @@ Deno.test("memory v2 engine migrates pre-scope entity tables to space scope", as
     assertEquals(read(engine, { id: "entity:legacy", scope: "space" }), {
       value: { migrated: true },
     });
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine backfills current head operations", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const url = toFileUrl(path);
+  let engine = await open({ url });
+  try {
+    applyCommit(engine, {
+      sessionId: "session:migration",
+      principal: "did:key:migration",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: "entity:migrated-live",
+            value: toEntityDocument({ live: true }),
+          },
+          {
+            op: "set",
+            id: "entity:migrated-deleted",
+            value: toEntityDocument({ live: false }),
+          },
+          {
+            op: "set",
+            id: "entity:migrated-user",
+            scope: "user",
+            value: toEntityDocument({ private: true }),
+          },
+        ],
+      },
+    });
+    applyCommit(engine, {
+      sessionId: "session:migration",
+      principal: "did:key:migration",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "delete", id: "entity:migrated-deleted" }],
+      },
+    });
+  } finally {
+    close(engine);
+  }
+
+  const legacyDb = new Database(path);
+  try {
+    legacyDb.exec(`
+      DROP INDEX idx_head_live_entity_ids;
+      ALTER TABLE head DROP COLUMN op;
+    `);
+    assertEquals(
+      legacyDb.prepare(`PRAGMA table_info("head")`).all().some(
+        (row) => (row as { name: string }).name === "op",
+      ),
+      false,
+    );
+  } finally {
+    legacyDb.close();
+  }
+
+  engine = await open({ url });
+  try {
+    assertEquals(listEntityIds(engine), ["entity:migrated-live"]);
+    assertEquals(
+      engine.database.prepare(`
+        SELECT id, scope_key, op
+        FROM head
+        ORDER BY id, scope_key
+      `).all(),
+      [
+        {
+          id: "entity:migrated-deleted",
+          scope_key: "space",
+          op: "delete",
+        },
+        { id: "entity:migrated-live", scope_key: "space", op: "set" },
+        {
+          id: "entity:migrated-user",
+          scope_key: "user:did%3Akey%3Amigration",
+          op: "set",
+        },
+      ],
+    );
+    assertEquals(
+      engine.database.prepare(`
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'index' AND name = 'idx_head_live_entity_ids'
+      `).get(),
+      { name: "idx_head_live_entity_ids" },
+    );
+    assertEquals(
+      (engine.database.prepare(`PRAGMA table_info("head")`).all() as Array<{
+        name: string;
+        dflt_value: string | null;
+      }>).find(({ name }) => name === "op")?.dflt_value,
+      null,
+    );
+    assertThrows(
+      () =>
+        engine.database.prepare(`
+          INSERT INTO head (branch, id, scope_key, seq, op_index)
+          VALUES ('', 'entity:migrated-live', 'space', 1, 0)
+          ON CONFLICT (branch, id, scope_key) DO UPDATE
+          SET seq = excluded.seq, op_index = excluded.op_index
+        `).run(),
+      Error,
+      "NOT NULL constraint failed: head.op",
+    );
+  } finally {
+    close(engine);
+  }
+
+  const defaultedDb = new Database(path);
+  try {
+    defaultedDb.exec(`
+      DROP INDEX idx_head_live_entity_ids;
+      DROP INDEX idx_head_branch;
+      ALTER TABLE head RENAME TO head_defaulted_migration;
+      CREATE TABLE head (
+        branch    TEXT    NOT NULL,
+        id        TEXT    NOT NULL,
+        scope_key TEXT    NOT NULL DEFAULT 'space',
+        seq       INTEGER NOT NULL,
+        op_index  INTEGER NOT NULL,
+        op        TEXT    NOT NULL DEFAULT 'set'
+          CHECK (op IN ('set', 'patch', 'delete')),
+        PRIMARY KEY (branch, id, scope_key)
+      );
+      CREATE INDEX idx_head_branch ON head (branch);
+      INSERT INTO head (branch, id, scope_key, seq, op_index)
+      SELECT branch, id, scope_key, seq, op_index
+      FROM head_defaulted_migration;
+      DROP TABLE head_defaulted_migration;
+    `);
+    assertEquals(
+      defaultedDb.prepare(`
+        SELECT op FROM head
+        WHERE id = 'entity:migrated-deleted' AND scope_key = 'space'
+      `).get(),
+      { op: "set" },
+    );
+  } finally {
+    defaultedDb.close();
+  }
+
+  engine = await open({ url });
+  try {
+    assertEquals(listEntityIds(engine), ["entity:migrated-live"]);
+    assertEquals(
+      engine.database.prepare(`
+        SELECT op FROM head
+        WHERE id = 'entity:migrated-deleted' AND scope_key = 'space'
+      `).get(),
+      { op: "delete" },
+    );
+    assertEquals(
+      (engine.database.prepare(`PRAGMA table_info("head")`).all() as Array<{
+        name: string;
+        dflt_value: string | null;
+      }>).find(({ name }) => name === "op")?.dflt_value,
+      null,
+    );
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -2623,17 +2887,27 @@ Deno.test("memory v2 engine supports branch inheritance, divergence, and deletio
       },
     });
 
+    assertEquals(createBranch(engine, DEFAULT_BRANCH), {
+      name: DEFAULT_BRANCH,
+      parentBranch: null,
+      forkSeq: null,
+      createdSeq: 0,
+      headSeq: 1,
+      status: "active",
+    });
+    const featureBranch = {
+      name: "feature",
+      parentBranch: DEFAULT_BRANCH,
+      forkSeq: 1,
+      createdSeq: 1,
+      headSeq: 1,
+      status: "active" as const,
+    };
     assertEquals(
       createBranch(engine, "feature"),
-      {
-        name: "feature",
-        parentBranch: DEFAULT_BRANCH,
-        forkSeq: 1,
-        createdSeq: 1,
-        headSeq: 1,
-        status: "active",
-      },
+      featureBranch,
     );
+    assertEquals(createBranch(engine, "feature"), featureBranch);
     assertEquals(
       read(engine, { id: "entity:branch-doc", branch: "feature" }),
       toEntityDocument({ count: 1 }),
@@ -2732,6 +3006,26 @@ Deno.test("memory v2 engine supports branch inheritance, divergence, and deletio
         }),
       Error,
       "branch is not active",
+    );
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:branch",
+          invocation: invocationFor(5),
+          authorization,
+          commit: {
+            localSeq: 5,
+            branch: "missing",
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "set",
+              id: "entity:branch-doc",
+              value: toEntityDocument({ count: 12 }),
+            }],
+          },
+        }),
+      Error,
+      "unknown branch: missing",
     );
   } finally {
     close(engine);

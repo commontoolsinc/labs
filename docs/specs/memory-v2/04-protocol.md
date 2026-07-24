@@ -28,7 +28,8 @@ rewrite. In particular:
 - route-level `Origin` enforcement remains deferred
 - session resume remains keyed by caller-supplied `(space, sessionId)` rather
   than a server-issued, principal-bound identifier
-- the public one-shot read surface is currently `graph.query`
+- the public one-shot read surfaces are `graph.query`, `entity-id.list`, and
+  `entity-id.exists`
 - watch-set mutations return inline `sync` payloads, and steady-state topology
   shrink does not yet guarantee automatic `removes`
 
@@ -51,7 +52,10 @@ The client MUST declare its protocol version in the first WebSocket message:
   "flags": {
     "modernCellRep": true,
     "persistentSchedulerState": true,
-    "syncSchemaTableV2": true
+    "syncSchemaTableV2": true,
+    "entityIdListing": true,
+    "entityIdPagination": true,
+    "entityIdLookup": true
   }
 }
 ```
@@ -65,7 +69,10 @@ If the server accepts the protocol, it returns:
   "flags": {
     "modernCellRep": true,
     "persistentSchedulerState": true,
-    "syncSchemaTableV2": true
+    "syncSchemaTableV2": true,
+    "entityIdListing": true,
+    "entityIdPagination": true,
+    "entityIdLookup": true
   },
   "sessionOpen": {
     "audience": "did:key:z6Mk...",
@@ -136,6 +143,16 @@ when absent. The server sends compact sync payloads only when both peers
 advertise the capability; otherwise it sends the historical fully expanded
 shape. The older `syncSchemaTable` flag names an incompatible, index-keyed draft
 and does not enable the v2 encoding.
+
+`entityIdListing` advertises support for `entity-id.list`. It defaults to
+`false` when absent. A client must not send the request unless the server
+advertises the capability.
+
+`entityIdPagination` advertises support for the pagination fields on
+`entity-id.list`. `entityIdLookup` advertises support for
+`entity-id.exists`. Both default to `false` when absent. A client connected to
+an older server may make the historical unpaginated list request, but must not
+send continuation fields or an existence request.
 
 ### 4.1.2 Logical Sessions and Resume
 
@@ -243,6 +260,9 @@ interface HelloMessage {
     modernCellRep: boolean;
     persistentSchedulerState?: boolean;
     syncSchemaTableV2?: boolean;
+    entityIdListing?: boolean;
+    entityIdPagination?: boolean;
+    entityIdLookup?: boolean;
   };
 }
 
@@ -251,6 +271,8 @@ interface RequestMessage {
     | "session.open"
     | "transact"
     | "graph.query"
+    | "entity-id.list"
+    | "entity-id.exists"
     | "session.watch.set"
     | "session.watch.add"
     | "session.ack";
@@ -497,7 +519,71 @@ The selector path is relative to `document.value`, not the full stored document
 root. The server converts it to a document path by prepending `"value"` before
 running shared traversal.
 
-### 4.3.4 `session.watch.set` — Replace the Session Watch Set
+### 4.3.4 Entity Identifier Discovery and Lookup
+
+#### `entity-id.list` — List Live Entity Identifiers
+
+`entity-id.list` returns the identifiers of live entities in the default branch
+and space scope. The server reads the current entity index and does not select
+or return stored entity values. The result is sorted by identifier.
+
+```typescript
+// Shown at module scope.
+interface EntityIdListRequest {
+  type: "entity-id.list";
+  requestId: string;
+  space: SpaceId;
+  sessionId: SessionId;
+  after?: EntityId;
+  limit?: number;
+  expectedServerSeq?: number;
+}
+
+interface EntityIdListResult {
+  serverSeq: number;
+  ids: EntityId[];
+  nextAfter?: EntityId;
+}
+```
+
+The command requires `READ` access to the space. Deleted entities, user-scoped
+entities, and session-scoped entities do not appear in the result.
+
+The server caps `limit` at 1,000 identifiers. `nextAfter` is present when
+another page exists. The client sends that value as `after` and sends the first
+page's `serverSeq` as `expectedServerSeq` on every continuation. If the space
+changes between pages, the server returns `SnapshotChangedError`. It does not
+silently restart the enumeration or combine pages from different snapshots.
+
+A request without pagination fields retains the original protocol behavior and
+returns the complete list. This compatibility path is for clients connected to
+servers that advertise `entityIdListing` without `entityIdPagination`.
+
+#### `entity-id.exists` — Test One Live Entity Identifier
+
+`entity-id.exists` tests the same live, default-branch, space-scoped identifier
+index without selecting an entity value.
+
+```typescript
+// Shown at module scope.
+interface EntityIdLookupRequest {
+  type: "entity-id.exists";
+  requestId: string;
+  space: SpaceId;
+  sessionId: SessionId;
+  id: EntityId;
+}
+
+interface EntityIdLookupResult {
+  serverSeq: number;
+  exists: boolean;
+}
+```
+
+The command requires `READ` access to the space. It does not reveal user- or
+session-scoped instances of the same identifier.
+
+### 4.3.5 `session.watch.set` — Replace the Session Watch Set
 
 The watch set defines the union of queries whose results the session wants kept
 up to date.
@@ -532,7 +618,7 @@ Semantics:
   line with the new interest set
 - later committed changes continue to arrive via `session/effect`
 
-### 4.3.5 `session.watch.add` — Extend the Session Watch Set
+### 4.3.6 `session.watch.add` — Extend the Session Watch Set
 
 `session.watch.add` incrementally adds new watch specs into the existing
 session watch set by `id`.
@@ -572,7 +658,7 @@ Semantics:
 - watch mutations are applied in order per session; clients must serialize
   `session.watch.set` and `session.watch.add`
 
-### 4.3.6 Branch Lifecycle Commands
+### 4.3.7 Branch Lifecycle Commands
 
 Branch create / delete / merge lifecycle commands are not currently exposed on
 the v2 wire. The engine already carries branch state internally, but public wire

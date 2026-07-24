@@ -21,6 +21,8 @@
               |   - inode management       |
               |   - JSON-to-tree mapping   |
               |   - write buffering        |
+              |   - bounded entity views  |
+              |   - virtual handle entries |
               |                            |
               |  Session / Runtime         |
               |   - PieceManager           |
@@ -96,6 +98,14 @@ All FUSE callbacks run on the main thread and can directly access the
 in-memory tree. No thread safety concerns. The tradeoff is no parallelism
 for FUSE operations, which is fine for this use case — we're serving `cat`
 and `ls` against cached JSON, not high-throughput I/O.
+
+Dynamic directory preparation is tracked per open directory handle. The first
+`readdir` prepares the view; continuation offsets reuse it, and `releasedir`
+discards the preparation state. In particular, a large `entities/` listing
+uses stable protocol pages once and does not add an inode to the filesystem
+tree for every identifier. Exact entity paths use a bounded projection cache.
+See [Entity Lookup, Enumeration, and Performance](./11-entity-lookup-enumeration.md)
+for the storage and hydration boundaries behind that rule.
 
 **Option B — Worker threads with SharedArrayBuffer:**
 
@@ -211,6 +221,7 @@ packages/
     tree.ts                      # In-memory filesystem tree + inode mgmt
     tree-builder.ts              # JSON value -> FsNode conversion
     cell-bridge.ts               # Maps FUSE ops to cell ops
+    directory-handles.ts         # Per-open dynamic-directory preparation
     types.ts                     # Shared types
     cli.ts                       # CLI command handlers (mount/unmount)
     tests/

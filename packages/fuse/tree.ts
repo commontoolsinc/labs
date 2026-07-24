@@ -66,8 +66,14 @@ export class FsTree {
   paths: Map<string, bigint> = new Map();
   /** Reverse map: inode → path string (O(1) lookup). */
   private inoPaths: Map<bigint, string> = new Map();
+  /**
+   * Reverse map from inode to registered child name for constant-time lookup.
+   */
+  private inoNames: Map<bigint, string> = new Map();
   /** Renderers for inodes added by `addGeneratedFile`. */
   private generated: Map<bigint, () => Uint8Array | string> = new Map();
+  private cfcEntryIndexes = new Map<bigint, Map<string, number>>();
+  private unsortedCfcEntryDirectories = new Set<bigint>();
   private nextIno = 2n;
   private now: () => number;
 
@@ -96,6 +102,7 @@ export class FsTree {
     const path = parentPath === "/" ? `/${name}` : `${parentPath}/${name}`;
     this.paths.set(path, ino);
     this.inoPaths.set(ino, path);
+    this.inoNames.set(ino, name);
   }
 
   private untrackPath(ino: bigint): void {
@@ -105,6 +112,7 @@ export class FsTree {
         this.paths.delete(path);
       }
       this.inoPaths.delete(ino);
+      this.inoNames.delete(ino);
     }
   }
 
@@ -297,10 +305,50 @@ export class FsTree {
       throw new Error(`Inode ${ino} does not exist`);
     }
     node.cfc = annotation;
+    this.rebuildCfcEntryIndex(ino, annotation);
   }
 
   getCfcAnnotation(ino: bigint): CfcNodeAnnotation | undefined {
+    this.sortCfcEntries(ino);
     return this.inodes.get(ino)?.cfc;
+  }
+
+  private rebuildCfcEntryIndex(
+    ino: bigint,
+    annotation: CfcNodeAnnotation | undefined,
+  ): void {
+    this.unsortedCfcEntryDirectories.delete(ino);
+    const entries = annotation?.entries?.entries;
+    if (!entries) {
+      this.cfcEntryIndexes.delete(ino);
+      return;
+    }
+    this.cfcEntryIndexes.set(
+      ino,
+      new Map(entries.map((entry, index) => [entry.name, index])),
+    );
+  }
+
+  private cfcEntryIndex(
+    ino: bigint,
+    entries: readonly CfcDirectoryEntryAnnotation[],
+  ): Map<string, number> {
+    let index = this.cfcEntryIndexes.get(ino);
+    if (!index) {
+      index = new Map(entries.map((entry, offset) => [entry.name, offset]));
+      this.cfcEntryIndexes.set(ino, index);
+    }
+    return index;
+  }
+
+  private sortCfcEntries(ino: bigint): void {
+    if (!this.unsortedCfcEntryDirectories.delete(ino)) return;
+    const node = this.inodes.get(ino);
+    if (!node || node.kind !== "dir" || !node.cfc?.entries) return;
+    node.cfc.entries.entries.sort((left, right) =>
+      left.nameDigest.localeCompare(right.nameDigest)
+    );
+    this.rebuildCfcEntryIndex(ino, node.cfc);
   }
 
   setCfcEntryAnnotation(
@@ -310,27 +358,34 @@ export class FsTree {
   ): void {
     const parent = this.inodes.get(parentIno);
     if (!parent || parent.kind !== "dir" || !parent.cfc?.entries) return;
-    const entries = parent.cfc.entries.entries.filter((candidate) =>
-      candidate.name !== name
-    );
-    entries.push(entry);
-    parent.cfc.entries = {
-      version: 1,
-      entries: entries.sort((left, right) =>
-        left.nameDigest.localeCompare(right.nameDigest)
-      ),
-    };
+    const entries = parent.cfc.entries.entries;
+    const index = this.cfcEntryIndex(parentIno, entries);
+    const existing = index.get(name);
+    if (existing === undefined) {
+      index.set(name, entries.length);
+      entries.push(entry);
+    } else {
+      entries[existing] = entry;
+    }
+    this.unsortedCfcEntryDirectories.add(parentIno);
   }
 
   private removeCfcEntryAnnotation(parentIno: bigint, name: string): void {
     const parent = this.inodes.get(parentIno);
     if (!parent || parent.kind !== "dir" || !parent.cfc?.entries) return;
-    parent.cfc.entries = {
-      version: 1,
-      entries: parent.cfc.entries.entries.filter((entry) =>
-        entry.name !== name
-      ),
-    };
+    const entries = parent.cfc.entries.entries;
+    const index = this.cfcEntryIndex(parentIno, entries);
+    const removedIndex = index.get(name);
+    if (removedIndex === undefined) return;
+    const lastIndex = entries.length - 1;
+    const last = entries[lastIndex];
+    entries.pop();
+    index.delete(name);
+    if (removedIndex !== lastIndex) {
+      entries[removedIndex] = last;
+      index.set(last.name, removedIndex);
+    }
+    this.unsortedCfcEntryDirectories.add(parentIno);
   }
 
   private getCfcEntryAnnotation(
@@ -341,7 +396,9 @@ export class FsTree {
     if (!parent || parent.kind !== "dir" || !parent.cfc?.entries) {
       return undefined;
     }
-    return parent.cfc.entries.entries.find((entry) => entry.name === name);
+    const entries = parent.cfc.entries.entries;
+    const index = this.cfcEntryIndex(parentIno, entries).get(name);
+    return index === undefined ? undefined : entries[index];
   }
 
   getChildren(ino: bigint): [string, bigint][] {
@@ -398,6 +455,23 @@ export class FsTree {
     return childIno;
   }
 
+  /**
+   * Remove a directory entry while retaining its inode subtree.
+   *
+   * FUSE can keep an inode alive after its final directory entry disappears.
+   * The caller clears the detached subtree after the kernel releases its
+   * lookup and open references.
+   */
+  detachChild(parentIno: bigint, name: string): bigint | undefined {
+    const parent = this.inodes.get(parentIno);
+    if (!parent || parent.kind !== "dir") return undefined;
+    const childIno = parent.children.get(name);
+    if (childIno === undefined) return undefined;
+    parent.children.delete(name);
+    this.removeCfcEntryAnnotation(parentIno, name);
+    return childIno;
+  }
+
   /** Recursively remove an inode and all its descendants from tracking maps. */
   private clearSubtree(ino: bigint): void {
     const node = this.inodes.get(ino);
@@ -410,6 +484,8 @@ export class FsTree {
     this.inodes.delete(ino);
     this.parents.delete(ino);
     this.generated.delete(ino);
+    this.cfcEntryIndexes.delete(ino);
+    this.unsortedCfcEntryDirectories.delete(ino);
     this.untrackPath(ino);
   }
 
@@ -481,16 +557,9 @@ export class FsTree {
     }
   }
 
-  /** Get the child name for an inode by scanning its parent's children map. */
+  /** Get the registered child name for an inode. */
   getNameForIno(ino: bigint): string | undefined {
-    const parentIno = this.parents.get(ino);
-    if (parentIno === undefined) return undefined;
-    const parent = this.inodes.get(parentIno);
-    if (!parent || parent.kind !== "dir") return undefined;
-    for (const [name, childIno] of parent.children) {
-      if (childIno === ino) return name;
-    }
-    return undefined;
+    return this.inoNames.get(ino);
   }
 
   /**
@@ -548,8 +617,12 @@ export class FsTree {
     // Move the replacement's annotation onto the surviving node and clear it
     // from the replacement so discarding the replacement's children can't
     // mutate the now-shared entries list out from under the survivor.
+    this.sortCfcEntries(newIno);
     oldNode.cfc = newNode.cfc;
     newNode.cfc = undefined;
+    this.rebuildCfcEntryIndex(oldIno, oldNode.cfc);
+    this.cfcEntryIndexes.delete(newIno);
+    this.unsortedCfcEntryDirectories.delete(newIno);
 
     if (this.adoptContent(oldNode, newNode)) {
       this.bumpMtime(oldNode);
@@ -676,6 +749,8 @@ export class FsTree {
     this.inodes.delete(ino);
     this.parents.delete(ino);
     this.generated.delete(ino);
+    this.cfcEntryIndexes.delete(ino);
+    this.unsortedCfcEntryDirectories.delete(ino);
     this.untrackPath(ino);
   }
 
