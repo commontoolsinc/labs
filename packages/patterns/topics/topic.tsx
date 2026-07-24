@@ -96,7 +96,7 @@ export interface TopicInput {
    * tracker's array, wired at creation like `myName` (and backfillable as a
    * one-time link-bind on pieces created before it existed). Absent, the
    * detail page simply derives no connections. */
-  mentionable?: Writable<TopicPiece[] | Default<[]>>;
+  mentionable?: Writable<TopicReference[] | Default<[]>>;
 }
 
 /**
@@ -111,7 +111,7 @@ export interface TopicInput {
  * controls are intentionally excluded: a TopicPiece can be followed from a
  * shared list even when the viewer has no matching session-local cells.
  */
-export interface TopicPiece {
+export interface TopicReference {
   [NAME]: string;
   title: string;
   body: string;
@@ -127,6 +127,17 @@ export interface TopicPiece {
   commentCount: number;
   /** Max of creation, comments, body saves, and link additions. */
   lastActivityAt: number;
+  addComment: Stream<AddCommentEvent>;
+  addLink: Stream<AddLinkEvent>;
+  setBody: Stream<SetBodyEvent>;
+}
+
+/**
+ * The board-facing Topic projection. Crossref targets deliberately use the
+ * non-recursive TopicReference contract: a Topic needs enough sibling data to
+ * render and navigate chips, not each sibling's entire crossref graph.
+ */
+export interface TopicPiece extends TopicReference {
   /** This topic's own place in the board's prose graph, derived read-side
    * from `mentionable` (the sibling pieces it links, resolved from the
    * board's own list). Both sets stay empty until `mentionable` is wired.
@@ -135,12 +146,9 @@ export interface TopicPiece {
    * undefined outside the minting session; the list projection must accept
    * that rather than fail argument validation. */
   crossrefs?:
-    | { refsOut: TopicPiece[]; referencedBy: TopicPiece[] }
+    | { refsOut: TopicReference[]; referencedBy: TopicReference[] }
     | Default<{ refsOut: []; referencedBy: [] }>
     | undefined;
-  addComment: Stream<AddCommentEvent>;
-  addLink: Stream<AddLinkEvent>;
-  setBody: Stream<SetBodyEvent>;
 }
 
 /** The complete result available when a Topic is instantiated directly. */
@@ -248,7 +256,9 @@ export const topicAuthorLabel = (
   author: TopicAuthor | undefined,
   legacyName: string | undefined = "",
 ): string => {
-  const name = (author?.name ?? legacyName ?? "").trim() || "someone";
+  const name = (author?.name ?? "").trim() ||
+    (legacyName ?? "").trim() ||
+    "someone";
   return author?.kind === "agent" ? `${name} (agent)` : name;
 };
 
@@ -336,7 +346,7 @@ export const crossrefJoin = (
 /** Row navigation, bound per topic card and per crossref chip. Module-scope
  * handler (not an inline closure) so embedders and tests can bind and drive
  * it directly. */
-export const openTopic = handler<void, { topic: TopicPiece }>(
+export const openTopic = handler<void, { topic: TopicReference }>(
   (_, { topic }) => {
     navigateTo(topic);
   },
@@ -354,7 +364,7 @@ export const openTopic = handler<void, { topic: TopicPiece }>(
 export const crossrefChipRow = (
   caption: string,
   accent: boolean,
-  pieces: TopicPiece[],
+  pieces: TopicReference[],
 ) =>
   pieces.length === 0
     ? null
@@ -508,6 +518,17 @@ export default pattern<TopicInput, TopicOutput>(
     const hasProfile = computed(() =>
       profileName.trim().length > 0 && profileWish.result !== undefined
     );
+    // A legacy Topic has only `createdByName`. Project that snapshot into the
+    // structured result instead of returning a dangling link to an absent
+    // optional input path; sibling Topic schemas can then validate the piece.
+    const createdByView = computed(() => {
+      const name = (createdBy?.name ?? "").trim();
+      if (name) return createdBy;
+      const legacyName = (createdByName ?? "").trim();
+      return legacyName
+        ? { kind: "person" as const, name: legacyName }
+        : undefined;
+    });
 
     // --- Streams (external API; also usable headlessly via CLI) ---
 
@@ -662,7 +683,7 @@ export default pattern<TopicInput, TopicOutput>(
               />
               <cf-hstack justify="between" align="center">
                 <cf-text variant="caption" tone="muted">
-                  started by {topicAuthorLabel(createdBy, createdByName)}
+                  started by {topicAuthorLabel(createdByView, createdByName)}
                   {createdAt ? ` · ${whenLabel(createdAt)}` : ""}
                 </cf-text>
                 <cf-hstack gap="2" align="center">
@@ -913,7 +934,7 @@ export default pattern<TopicInput, TopicOutput>(
       comments,
       links,
       createdAt,
-      createdBy,
+      createdBy: createdByView,
       createdByName,
       bodyUpdatedBy,
       bodyUpdatedAt,
