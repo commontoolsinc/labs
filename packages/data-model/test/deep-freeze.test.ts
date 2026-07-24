@@ -42,22 +42,19 @@ describe("deep-freeze", () => {
       });
     });
 
-    describe("functions", () => {
-      // `isDeepFrozen()` answers the strict query -- a function is never deeply
-      // immutable (mutable `prototype`/closure), so `false`. `deepFreeze()` is
-      // separately permissive: it treats a function as an opaque immutable leaf
-      // (a code reference, not fabric data) so general-purpose callers that
-      // freeze objects-with-methods (e.g. `api/cfc.ts`'s `cfcPattern`) keep
-      // working. Reconciling the two under a strict `FabricValue`-only contract
-      // is a separate follow-up.
-      it("returns `false` from `isDeepFrozen()` for a function", () => {
-        expect(isDeepFrozen(() => {})).toBe(false);
-        expect(isDeepFrozen(function () {})).toBe(false);
-        expect(isDeepFrozen(Object.freeze(() => {}))).toBe(false);
+    describe("functions (opaque immutable leaves)", () => {
+      // `deepFreeze()`/`isDeepFrozen()` treat a function as an opaque immutable
+      // leaf -- a code reference, not fabric data -- so general-purpose callers
+      // that freeze objects-with-methods (e.g. `api/cfc.ts`'s `cfcPattern`) keep
+      // working. Its internal `prototype`/closure mutability is a known
+      // limitation, closed by the strict `FabricValue`-only migration follow-up.
+      it("returns `true` for a function", () => {
+        expect(isDeepFrozen(() => {})).toBe(true);
+        expect(isDeepFrozen(function () {})).toBe(true);
       });
 
-      it("returns `false` for an uncached frozen graph reaching a function", () => {
-        expect(isDeepFrozen(Object.freeze({ fn: () => {} }))).toBe(false);
+      it("returns `true` for a frozen graph containing a function", () => {
+        expect(isDeepFrozen(Object.freeze({ a: 1, fn: () => {} }))).toBe(true);
       });
 
       it("returns the function unchanged from `deepFreeze()` (does not throw)", () => {

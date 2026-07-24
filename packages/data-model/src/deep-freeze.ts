@@ -45,12 +45,12 @@ function isInDeepFrozenCache(obj: object): boolean {
  * `Object.freeze()` and their `[IS_DEEP_FROZEN]` report).
  *
  * A function reports `true` here (its `typeof` is not `"object"`): `deepFreeze()`
- * relies on that to treat a function as an opaque immutable leaf -- a code
+ * and `isDeepFrozen()` treat a function as an opaque immutable leaf -- a code
  * reference, not fabric data -- so general-purpose callers that freeze
- * objects-with-methods keep working. `isDeepFrozen()` answers the stricter query
- * separately and reports `false` for a function (its `prototype`/closure state
- * is mutable). Making `deepFreeze()` strictly `FabricValue`-only is a separate
- * follow-up.
+ * objects-with-methods (e.g. `api/cfc.ts`'s `cfcPattern`) keep working. Its
+ * internal (`prototype`/closure) mutability is a deliberate known limitation;
+ * making `deepFreeze()`/`isDeepFrozen()` strictly `FabricValue`-only (which would
+ * exclude functions) is a separate follow-up.
  */
 function isNecessarilyFrozenValue(value: unknown): boolean {
   if (typeof value === "object") {
@@ -79,16 +79,6 @@ function isNecessarilyOrKnownDeepFrozen(value: unknown): boolean {
  * Handles circular references and sparse arrays.
  */
 export function isDeepFrozen(value: unknown): boolean {
-  // A function is never deep-frozen: its `prototype` object and closure state
-  // are mutable and unprovable, so freezing its shell does not make it deeply
-  // immutable. (`deepFreeze()` is separately permissive -- it treats a function
-  // as an opaque immutable leaf so general-purpose callers that freeze
-  // objects-with-methods keep working; this stricter query still answers
-  // `false`.)
-  if (typeof value === "function") {
-    return false;
-  }
-
   // Fast leaf paths first, so a primitive or already-cached value answers
   // without allocating the cycle-tracking set or the recursion closure below.
   if (isNecessarilyOrKnownDeepFrozen(value)) {
@@ -102,10 +92,6 @@ export function isDeepFrozen(value: unknown): boolean {
   // layer rather than allocating an equivalent `(v) => …` per descent.
   const inProgress = new Set<object>();
   const check = (value: unknown): boolean => {
-    if (typeof value === "function") {
-      // Never deep-frozen (see the entry check).
-      return false;
-    }
     if (isNecessarilyOrKnownDeepFrozen(value)) {
       return true;
     } else if (!Object.isFrozen(value)) {
