@@ -187,6 +187,59 @@ Deno.test("memory v2 diagnostics wait for an active receive", async () => {
   }
 });
 
+Deno.test("memory v2 diagnostics flush stops when the server closes", async () => {
+  const authorizationStarted = Promise.withResolvers<void>();
+  const releaseAuthorization = Promise.withResolvers<string>();
+  const server = new Server({
+    store: new URL("memory://memory-v2-server-close-receive-fence"),
+    subscriptionRefreshDelayMs: 0,
+    authorizeSessionOpen() {
+      authorizationStarted.resolve();
+      return releaseAuthorization.promise;
+    },
+    sessionOpenAuth: { audience: TEST_AUDIENCE },
+  });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  let receive: Promise<void> | undefined;
+  try {
+    await connection.receive(encodeMemoryBoundary(HELLO));
+    const sessionOpen = expectHelloOk(messages);
+    receive = connection.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open",
+      space: "did:key:z6Mk-memory-v2-server-close-receive-fence",
+      session: {},
+      invocation: authInvocation(sessionOpen),
+    }));
+    await authorizationStarted.promise;
+
+    const waitStarted = Promise.withResolvers<void>();
+    const waitForDiagnosticsReceives = server.waitForDiagnosticsReceives.bind(
+      server,
+    );
+    server.waitForDiagnosticsReceives = () => {
+      waitStarted.resolve();
+      return waitForDiagnosticsReceives();
+    };
+    let flushComplete = false;
+    const flush = server.flushDiagnosticsSessions().then(() => {
+      flushComplete = true;
+    });
+    await waitStarted.promise;
+    assertEquals(flushComplete, false);
+
+    const close = server.close();
+    releaseAuthorization.resolve("did:key:z6Mk-memory-v2-server-principal");
+    await Promise.all([receive, flush, close]);
+    assertEquals(flushComplete, true);
+  } finally {
+    releaseAuthorization.resolve("did:key:z6Mk-memory-v2-server-principal");
+    await server.close();
+    if (receive) await receive;
+  }
+});
+
 Deno.test("memory v2 server parser ignores transact invocation and authorization payloads", () => {
   assertEquals(
     parseClientMessage(encodeMemoryBoundary({

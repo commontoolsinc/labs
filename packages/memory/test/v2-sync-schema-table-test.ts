@@ -877,24 +877,30 @@ Deno.test("memory server negotiates schema-table v2 sync frames per connection",
 });
 
 Deno.test("findSyncSchemaRef ignores inherited object properties", () => {
-  // The traversal must only follow own properties: an enumerable INHERITED
-  // key carrying a link-payload shape must not surface as a reserved
-  // reference. Built on a custom prototype so the test never touches
-  // Object.prototype.
-  const pollutedProto = {
-    polluted: {
-      $alias: { id: "of:polluted", path: [], schema: "schema-ref@2:fid1:evil" },
-    },
+  const inheritedKey = "__cf_sync_schema_ref_pollution__";
+  const inheritedValue = {
+    $alias: { id: "of:polluted", path: [], schema: "schema-ref@2:fid1:evil" },
   };
-  const doc = Object.assign(Object.create(pollutedProto), {
-    value: { plain: "doc" },
-  }) as Record<string, unknown>;
-  assertEquals(findSyncSchemaRef(doc), undefined);
-  // Sanity: the same shape as an OWN property is found.
-  assertEquals(
-    findSyncSchemaRef({ nested: pollutedProto.polluted }),
-    "schema-ref@2:fid1:evil",
-  );
+  Object.defineProperty(Object.prototype, inheritedKey, {
+    value: inheritedValue,
+    enumerable: true,
+    configurable: true,
+  });
+  try {
+    // The traversal must only follow own properties: an enumerable inherited
+    // key carrying an alias payload must not surface as a reserved reference.
+    const doc = {
+      value: { plain: "doc" },
+    };
+    assertEquals(findSyncSchemaRef(doc), undefined);
+    // Sanity: the same shape as an own property is found.
+    assertEquals(
+      findSyncSchemaRef({ nested: inheritedValue }),
+      "schema-ref@2:fid1:evil",
+    );
+  } finally {
+    Reflect.deleteProperty(Object.prototype, inheritedKey);
+  }
 });
 
 Deno.test("sync schema table compression preserves own __proto__ keys", () => {
