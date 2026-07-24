@@ -461,6 +461,17 @@ describe("createRuntimeTelemetryOtelBridge", () => {
     expect(spans).toHaveLength(0);
   });
 
+  it("ignores detailed event drops with private event IDs", () => {
+    bridge.handleMarker(marker({
+      type: "scheduler.event.drop",
+      eventId: "evt:private:0:of:stream",
+      reason: "preflight",
+    }));
+
+    expect(meterCalls).toHaveLength(0);
+    expect(spans).toHaveLength(0);
+  });
+
   it("stamps base attributes on spans and metrics alike", () => {
     setup({ attributes: { "user.did": "did:key:alice" } });
     bridge.handleMarker(marker({ type: "cell.update" }));
