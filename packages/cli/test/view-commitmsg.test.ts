@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
+  commitSubjects,
   extractMessage,
   findCommitHeaders,
   findCommitMessages,
@@ -129,6 +130,71 @@ Deno.test("findCommitMessages: a commit with no message body yields no region", 
   const lines = ["commit deadbeef", "Author: A", "", "diff --git a/f b/f"];
   assertEquals(findCommitMessages(lines).length, 0);
   assertEquals(findCommitHeaders(lines), [{ sha: "deadbeef", line: 0 }]);
+});
+
+Deno.test("commitSubjects: the first indented body line of a standard commit", () => {
+  const subjects = commitSubjects(SHOW);
+  assertEquals(
+    subjects.get("0123456789abcdef0123456789abcdef01234567"),
+    "Subject line",
+  );
+});
+
+Deno.test("commitSubjects: the text after the hash of a compact header", () => {
+  const full = "0123456789abcdef0123456789abcdef01234567";
+  assertEquals(
+    commitSubjects([`${full} Add the feature`, "diff --git a/f b/f"]).get(full),
+    "Add the feature",
+  );
+});
+
+Deno.test("commitSubjects: the Subject header of an email patch, prefix stripped", () => {
+  const full = "0123456789abcdef0123456789abcdef01234567";
+  const subjects = commitSubjects([
+    `From ${full} Mon Sep 17 00:00:00 2001`,
+    "From: A B <a@b.example>",
+    "Date: Wed, 1 Jul 2026 12:00:00 -0700",
+    "Subject: [PATCH] Fix the alignment",
+    "",
+    "diff --git a/f b/f",
+  ]);
+  assertEquals(subjects.get(full), "Fix the alignment");
+});
+
+Deno.test("commitSubjects: an email Subject wrapped over continuation lines", () => {
+  const full = "0123456789abcdef0123456789abcdef01234567";
+  const subjects = commitSubjects([
+    `From ${full} Mon Sep 17 00:00:00 2001`,
+    "From: A B <a@b.example>",
+    "Date: Wed, 1 Jul 2026 12:00:00 -0700",
+    "Subject: [PATCH v2 2/3] Rework the reconciliation path so that it",
+    " no longer drops pending writes",
+    "",
+    "diff --git a/f b/f",
+  ]);
+  assertEquals(
+    subjects.get(full),
+    "Rework the reconciliation path so that it no longer drops pending writes",
+  );
+});
+
+Deno.test("commitSubjects: a header after the email Subject ends it", () => {
+  const full = "0123456789abcdef0123456789abcdef01234567";
+  const subjects = commitSubjects([
+    `From ${full} Mon Sep 17 00:00:00 2001`,
+    "From: A B <a@b.example>",
+    "Date: Wed, 1 Jul 2026 12:00:00 -0700",
+    "Subject: [PATCH] Fix it",
+    "Content-Type: text/plain; charset=UTF-8",
+    "",
+    "diff --git a/f b/f",
+  ]);
+  assertEquals(subjects.get(full), "Fix it");
+});
+
+Deno.test("commitSubjects: a commit with no discernible subject is absent", () => {
+  const lines = ["commit deadbeef", "Author: A", "", "diff --git a/f b/f"];
+  assertEquals(commitSubjects(lines).has("deadbeef"), false);
 });
 
 Deno.test("messageAt: maps a row to its region or null", () => {
