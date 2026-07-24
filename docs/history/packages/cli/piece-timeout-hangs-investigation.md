@@ -3,6 +3,7 @@ status: historical
 created: 2026-07-22
 archived: 2026-07-22
 reason: "Investigation of the three CLI piece-library timeouts; records why the tool-result poll was replaced event-driven and why the piece-start and sync bounds could not be removed at the CLI layer."
+superseded-by: docs/development/authorization-failure-surfacing.md
 ---
 
 # CLI piece-library timeouts: which are removable, and why

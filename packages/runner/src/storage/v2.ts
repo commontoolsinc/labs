@@ -7,6 +7,7 @@ import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
 import type { Entity } from "@commonfabric/memory/interface";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import {
+  type AuthorizationError as IAuthorizationError,
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
   type MemorySpace,
@@ -1024,6 +1025,18 @@ export class StorageManager implements IStorageManager {
     return promise;
   }
 
+  /**
+   * A throwable `AuthorizationError` when `space` is under a permanent
+   * authorization denial (an ACL shortfall, an audience or protocol mismatch),
+   * or undefined when it is authorized or was never opened. Scoped to one space
+   * on purpose: `synced()` stays silent so a denied cross-space link does not
+   * fail an unrelated caller, and a caller that must access a specific space
+   * reads this after `synced()` to surface the real failure.
+   */
+  authorizationError(space: MemorySpace): Error | undefined {
+    return this.#providers.get(space)?.authorizationError();
+  }
+
   trackPendingCommit(promise: Promise<unknown>): void {
     // Normalize so a rejected commit settles the barrier instead of leaking an
     // unhandled rejection; the caller keeps the original promise for results.
@@ -1537,6 +1550,10 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.synced();
   }
 
+  authorizationError(): Error | undefined {
+    return this.replica.authorizationError();
+  }
+
   listSchedulerActionSnapshots(
     query: SchedulerActionSnapshotQuery = {},
   ): Promise<SchedulerSnapshotListResult> {
@@ -1703,6 +1720,14 @@ class SpaceReplica implements ISpaceReplica {
   // otherwise) so a large incrementally-discovered wave cannot put an unbounded
   // number of requests on the wire.
   #watchRefreshInFlight = 0;
+  // The current PERMANENT authorization denial for this space (an ACL shortfall,
+  // an audience or protocol mismatch), or null when the space is authorized. A
+  // non-retriable AuthorizationError from a watch refresh sets it; a successful
+  // refresh clears it; a retriable auth race and a transient transport error
+  // leave it untouched, so a blip or token-refresh window does not register as a
+  // denial. `authorizationError()` reports it as a throwable error; `synced()`
+  // stays silent so a denied cross-space link remains a silent absent read.
+  #lastAuthorizationError: IAuthorizationError | null = null;
 
   #settings: IRemoteStorageProviderSettings;
 
@@ -1775,6 +1800,43 @@ class SpaceReplica implements ISpaceReplica {
       await this.flushSchedulerObservationBatch();
     }
     await Promise.all([...this.#syncPromises, ...this.#commitPromises]);
+  }
+
+  /**
+   * A real, throwable `AuthorizationError` when this space is under a permanent
+   * authorization denial, or undefined when it is authorized. `synced()`
+   * deliberately does NOT throw this: a denied cross-space link must stay a
+   * silent absent read (the sync-load-failure surfacing contract), and the
+   * global sync barrier aggregates every space, so throwing there would fail a
+   * whole runtime settle on an incidental unauthorized link. A caller that cares
+   * about a SPECIFIC space — the CLI, opening the space it was asked to act on —
+   * reads this after `synced()` and surfaces it deliberately.
+   */
+  authorizationError(): Error | undefined {
+    return this.#lastAuthorizationError === null
+      ? undefined
+      : authorizationErrorToThrow(this.#lastAuthorizationError);
+  }
+
+  /**
+   * Record the authorization status a watch refresh result implies. A permanent
+   * (non-retriable) AuthorizationError becomes the sticky failure
+   * `authorizationError()` reports; a successful refresh proves the session is
+   * authorized and clears it. A transient connection error or a retriable auth
+   * race leaves the last known status unchanged, so a blip does not mask or
+   * manufacture a denial.
+   */
+  private noteAuthorizationStatus(result: Result<Unit, PullError>): void {
+    if (result.error) {
+      if (
+        result.error.name === "AuthorizationError" &&
+        (result.error as { retriable?: unknown }).retriable !== true
+      ) {
+        this.#lastAuthorizationError = result.error as IAuthorizationError;
+      }
+      return;
+    }
+    this.#lastAuthorizationError = null;
   }
 
   async sqliteQuery(
@@ -2273,7 +2335,7 @@ class SpaceReplica implements ISpaceReplica {
       }
       return { ok: {} };
     } catch (error) {
-      return { error: toConnectionError(error) };
+      return { error: toPullError(error) };
     }
   }
 
@@ -2355,11 +2417,16 @@ class SpaceReplica implements ISpaceReplica {
     batch: WatchRefreshBatch,
   ): Promise<void> {
     try {
-      batch.pending.resolve(
-        await this.refreshWatchSet(batch.entries.values(), batch.type),
+      const result = await this.refreshWatchSet(
+        batch.entries.values(),
+        batch.type,
       );
+      this.noteAuthorizationStatus(result);
+      batch.pending.resolve(result);
     } catch (error) {
-      batch.pending.resolve({ error: toConnectionError(error) });
+      const result: Result<Unit, PullError> = { error: toPullError(error) };
+      this.noteAuthorizationStatus(result);
+      batch.pending.resolve(result);
     } finally {
       this.#watchRefreshInFlight -= 1;
       this.scheduleWatchRefreshFlush();
@@ -3487,6 +3554,26 @@ const toConnectionError = (error: unknown): IConnectionError =>
       code: 500,
     },
   }) as IConnectionError;
+
+// Preserve a real AuthorizationError (name, message, and the server's retriable
+// marker) instead of flattening it to a generic ConnectionError, so a caller can
+// tell an authorization denial apart from a transport failure. Everything else
+// remains a ConnectionError.
+const toPullError = (error: unknown): PullError =>
+  error instanceof Error && error.name === "AuthorizationError"
+    ? ({
+      name: "AuthorizationError",
+      message: error.message,
+      ...((error as { retriable?: unknown }).retriable === true
+        ? { retriable: true }
+        : {}),
+    }) as unknown as IAuthorizationError
+    : toConnectionError(error);
+
+// Rebuild a throwable Error from a stored AuthorizationError result so `synced()`
+// rejects with a proper Error instance a caller can match on by name.
+const authorizationErrorToThrow = (error: IAuthorizationError): Error =>
+  Object.assign(new Error(error.message), { name: "AuthorizationError" });
 
 const toRejectedError = (
   error: unknown,

@@ -177,6 +177,17 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   synced(): Promise<void>;
 
   /**
+   * A throwable `AuthorizationError` when `space` is under a permanent
+   * authorization denial (an ACL shortfall, an audience or protocol mismatch),
+   * or undefined when it is authorized or was never opened. Scoped to one space
+   * on purpose: `synced()` stays silent so a denied cross-space link stays a
+   * silent absent read, and a caller that must reach a specific space reads this
+   * after `synced()` to surface the real failure. Optional: emulated/test
+   * managers may omit it.
+   */
+  authorizationError?(space: MemorySpace): Error | undefined;
+
+  /**
    * Register an in-flight commit so the durability barrier
    * (`hasPendingCommits` / `pendingCommitsSettled`) covers it. Called by the
    * transaction layer at `commit()` entry, synchronously with the commit

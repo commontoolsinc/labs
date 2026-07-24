@@ -465,19 +465,27 @@ class Connection {
 
     const challenge = this.#sessionOpenChallenge;
     if (challenge === null) {
-      throw authorizationError("memory session.open challenge unavailable");
+      throw authorizationError("memory session.open challenge unavailable", {
+        retriable: true,
+      });
     }
     if (challenge.consumed) {
-      throw authorizationError("memory session.open challenge already used");
+      throw authorizationError("memory session.open challenge already used", {
+        retriable: true,
+      });
     }
     if (challenge.expiresAt <= this.server.nowSeconds()) {
-      throw authorizationError("memory session.open challenge expired");
+      throw authorizationError("memory session.open challenge expired", {
+        retriable: true,
+      });
     }
     if (typeof invocation.challenge !== "string") {
       throw authorizationError("memory session.open requires challenge");
     }
     if (invocation.challenge !== challenge.value) {
-      throw authorizationError("memory session.open challenge mismatch");
+      throw authorizationError("memory session.open challenge mismatch", {
+        retriable: true,
+      });
     }
 
     return {
@@ -1881,17 +1889,25 @@ export class Server {
         },
       };
     } catch (error) {
-      return respondTypedError<SessionOpenResult>(
-        message.requestId,
-        toError(
-          error instanceof Error && error.name === "AuthorizationError"
-            ? "AuthorizationError"
-            : error instanceof Error && error.name === "SessionRevokedError"
-            ? "SessionRevokedError"
-            : "ProtocolError",
-          error instanceof Error ? error.message : String(error),
-        ),
+      const name = error instanceof Error && error.name === "AuthorizationError"
+        ? "AuthorizationError"
+        : error instanceof Error && error.name === "SessionRevokedError"
+        ? "SessionRevokedError"
+        : "ProtocolError";
+      const wireError = toError(
+        name,
+        error instanceof Error ? error.message : String(error),
       );
+      // Carry the retriable marker (an anti-replay race a fresh handshake heals)
+      // so the client distinguishes it from a permanent denial without parsing
+      // the message.
+      if (
+        name === "AuthorizationError" &&
+        (error as { retriable?: unknown }).retriable === true
+      ) {
+        wireError.retriable = true;
+      }
+      return respondTypedError<SessionOpenResult>(message.requestId, wireError);
     }
   }
 
