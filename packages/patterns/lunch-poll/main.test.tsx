@@ -11,7 +11,7 @@
  * are covered by multi-user.test.tsx.
  */
 
-import { action, computed, pattern, UI, wish } from "commonfabric";
+import { action, computed, pattern, UI, wish, Writable } from "commonfabric";
 import {
   findNode,
   hasExactText,
@@ -20,6 +20,7 @@ import {
 } from "../test/vnode-helpers.ts";
 import CozyPoll, {
   dayKeyOf,
+  type LunchProfile,
   type Option,
   type User,
   type Vote,
@@ -65,97 +66,81 @@ const COLLIDING_INITIAL_USERS: User[] = [
     name: "Daffodil",
     avatar: "",
     color: "#2f6f4e",
-    joinedAt: 1,
   },
   {
     name: "Dragonfly",
     avatar: "",
     color: "#c2573a",
-    joinedAt: 2,
   },
   {
     name: "Dan",
     avatar: "",
     color: "#3b4a6b",
-    joinedAt: 3,
   },
   {
     name: "Dana",
     avatar: "",
     color: "#a33b35",
-    joinedAt: 4,
   },
   {
     name: "dan",
     avatar: "",
     color: "#b27722",
-    joinedAt: 5,
   },
   {
     name: "A",
     avatar: "",
     color: "#7c3aed",
-    joinedAt: 6,
   },
   {
     name: "a",
     avatar: "",
     color: "#2f6f4e",
-    joinedAt: 7,
   },
   {
     name: "A1",
     avatar: "",
     color: "#c2573a",
-    joinedAt: 8,
   },
   {
     name: "Bob Smith",
     avatar: "",
     color: "#3b4a6b",
-    joinedAt: 9,
   },
   {
     name: "Bob  Smith",
     avatar: "",
     color: "#a33b35",
-    joinedAt: 10,
   },
   {
     name: "👩🏽‍💻Alice",
     avatar: "",
     color: "#7c3aed",
-    joinedAt: 11,
   },
   {
     name: "👩🏽‍💻Bob",
     avatar: "",
     color: "#2f6f4e",
-    joinedAt: 12,
   },
   {
     name: "🇺🇸Alice",
     avatar: "",
     color: "#c2573a",
-    joinedAt: 13,
   },
   {
     name: "🇺🇸Bob",
     avatar: "",
     color: "#3b4a6b",
-    joinedAt: 14,
   },
   {
     name: "e\u0301Alice",
     avatar: "",
     color: "#a33b35",
-    joinedAt: 15,
   },
   {
     name: "e\u0301Bob",
     avatar: "",
     color: "#b27722",
-    joinedAt: 16,
   },
 ];
 
@@ -301,7 +286,31 @@ export default pattern(() => {
     ],
   });
 
+  // A poll whose profile-first join runs through the PRODUCTION write path:
+  // the injected `profile` override stands in for the `#profile` wish (the
+  // injection seam), and the join action below stores the live cell into the
+  // shared directory exactly as a deployed join would. The strip and the
+  // header viewer chip must then render from the STORED directory entry —
+  // the seeded guest renders as a plain chip beside the badge.
+  const caseyProfile = Writable.perSpace.of<LunchProfile>({
+    initialNameApplied: "Casey",
+    name: "Casey Original",
+    avatar: "casey.png",
+  });
+  const profilePoll = CozyPoll({
+    users: [
+      { name: "Guest Gil", avatar: "", color: "#c2573a" },
+    ],
+    profile: caseyProfile,
+  });
+
   // === Actions ===
+
+  const action_join_profile_poll_as_casey = action(() => {
+    // No name: the profile-first path — joins as the profile's display name
+    // and stores the live profile cell into the shared directory.
+    profilePoll.joinAs.send({});
+  });
 
   const action_try_add_before_join = action(() => {
     poll.addOption.send({ title: "Should not appear" });
@@ -703,6 +712,28 @@ export default pattern(() => {
     stalePoll.todayVoteCount === 0
   );
 
+  // === Canonical profile rendering (seeded profilePoll) ===
+
+  // The participants strip renders every profile-backed participant from
+  // their STORED live cell and every guest as a plain chip.
+  const assert_participants_strip_renders = computed(() => {
+    const ui = profilePoll[UI];
+    return findNodeByProp(ui, "data-participants-strip", true) !== undefined &&
+      findNodeByProp(ui, "data-participant-badge", "Casey") !== undefined &&
+      findNodeByProp(ui, "data-participant-guest", "Guest Gil") !== undefined;
+  });
+
+  // The joined viewer's header chip binds the STORED directory entry (a
+  // static-position `$profile` binding — the guide's forbidden-computed case
+  // is exactly what this pins against), and the guest fallback chip does NOT
+  // render alongside it.
+  const assert_viewer_chip_binds_stored_profile = computed(() => {
+    const ui = profilePoll[UI];
+    return findNodeByProp(ui, "data-viewer-badge", true) !== undefined &&
+      profilePoll.participantProfiles.length === 1 &&
+      profilePoll.participantProfiles[0]?.name === "Casey";
+  });
+
   return {
     tests: [
       // Admin-gated handlers are no-ops before anyone joins (myName empty).
@@ -811,6 +842,9 @@ export default pattern(() => {
       // …and a second same-color click toggles today's vote off as usual.
       { action: action_stale_vote_green },
       { assertion: assert_stale_recast_cleared },
+      { action: action_join_profile_poll_as_casey },
+      { assertion: assert_participants_strip_renders },
+      { assertion: assert_viewer_chip_binds_stored_profile },
     ],
     poll,
     stalePoll,

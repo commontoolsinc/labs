@@ -63,7 +63,6 @@ import {
   type Cell,
   computed,
   Default,
-  equals,
   handler,
   NAME,
   pattern,
@@ -84,7 +83,6 @@ export interface User {
   /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
   avatar?: string;
   color: string;
-  joinedAt: number;
 }
 
 /** Canonical profile fields consumed by Lunch Poll's identity UI. */
@@ -309,11 +307,20 @@ const unusedId = (
   return id;
 };
 
+// Guard against live options AND every optionId still referenced by a vote:
+// without the vote sweep, a remove→re-add of the same (name, title) would mint
+// the removed option's id again and adopt any stray votes that merged in after
+// the removal cascade's read.
 const newOptionId = (
   options: readonly Option[],
+  votes: readonly Vote[],
   addedByName: string,
   title: string,
-): string => unusedId("o", [addedByName, title], options.map((o) => o.id));
+): string =>
+  unusedId("o", [addedByName, title], [
+    ...options.map((o) => o.id),
+    ...votes.map((v) => v.optionId),
+  ]);
 
 // The deterministic key a vote is addressed by: a voter's vote for one option.
 // castVote, clearMyVote, and the removeOption cascade all derive the same key,
@@ -552,10 +559,11 @@ const visitLabel = (wentAt: number): string => {
 
 const addOption = handler<AddOptionEvent, {
   options: OptionsCell;
+  votes: VotesCell;
   myName: NameCell;
   adminName: NameCell;
   optionDraft: NameCell;
-}>(({ title }, { options, myName, adminName, optionDraft }) => {
+}>(({ title }, { options, votes, myName, adminName, optionDraft }) => {
   const me = trimmedName(myName.get());
   const admin = trimmedName(adminName.get());
   if (!me || me !== admin) return;
@@ -563,8 +571,9 @@ const addOption = handler<AddOptionEvent, {
   if (!trimmed) return;
   // Address the option by its id so later edits and removal reach it without a
   // positional index. addUnique merges concurrent adds (distinct ids) and is
-  // idempotent on the id.
-  const id = newOptionId(options.get(), me, trimmed);
+  // idempotent on the id. The votes read joins the id-freshness guard into
+  // this transaction's conflict set — a concurrent cast retries the add.
+  const id = newOptionId(options.get(), votes.get(), me, trimmed);
   const option = options.elementById(id);
   option.set({
     id,
@@ -897,6 +906,13 @@ export interface CozyPollInput {
   users?: PerSpace<User[] | Default<[]>>;
   /** Canonical live profile links for profile-backed users; guests are absent. */
   participantProfiles?: PerSpace<ParticipantProfileDirectoryValue>;
+  /**
+   * Optional canonical-profile override forwarded to the identity card —
+   * the injection seam tests use to drive a profile-first join without a
+   * resolving `#profile` wish environment. Production never sets it; the
+   * card resolves its own wish.
+   */
+  profile?: LunchProfileCell;
   adminName?: PerSpace<string | Default<"">>;
   myName?: PerUser<string | Default<"">>;
   // Durable "we went here" log; each entry embeds its own vote snapshot. Capped
@@ -970,6 +986,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       votes,
       users,
       participantProfiles,
+      profile,
       adminName,
       myName,
       visits,
@@ -1005,18 +1022,19 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     >(null);
     const resetConfirmPending = Writable.perSession.of<boolean>(false);
     const clearHistoryConfirmPending = Writable.perSession.of<boolean>(false);
-    // The live cell is the stable identity. Its current name/avatar are only
-    // snapshotted into the legacy name-keyed poll state when this viewer joins.
-    const profileWish = wish<LunchProfile>({ query: "#profile" });
+    // The identity card owns the `#profile` wish (join lifecycle + directory
+    // write). This pattern renders identity only from the STORED directory
+    // entries, so a later profile switch cannot orphan the joined identity.
     const participantIdentity = ParticipantIdentityCard({
       users,
       myName,
       adminName,
       participantProfiles,
-      profile: profileWish.result,
+      profile,
     });
     const boundAddOption = addOption({
       options,
+      votes,
       myName,
       adminName,
       optionDraft,
@@ -1099,14 +1117,31 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const me = participantIdentity.me;
     const isJoined = participantIdentity.isJoined;
     const isAdmin = participantIdentity.isAdmin;
-    const viewerUsesCanonicalProfile = computed(() => {
-      const viewerProfile = profileWish.result;
+    // Normalize the Default<>-wrapped directory once: downstream maps need
+    // one concrete element type, not the raw schema union.
+    const participantLinks = computed((): readonly ParticipantProfileLink[] =>
+      participantProfiles.participants ?? EMPTY_PARTICIPANT_PROFILE_LINKS
+    );
+    // The viewer's stored canonical profile link(s) — the STORED entry (not
+    // the live `#profile` wish) is the rendered identity source, so switching
+    // the active profile after joining keeps the joined badge. An array of
+    // 0-or-1 entries: the header chip renders it with a plain static map,
+    // which keeps the `$profile` binding free of conditionals.
+    const viewerLinks = computed((): readonly ParticipantProfileLink[] => {
       const viewerName = participantIdentity.me;
-      if (!viewerProfile || !viewerName) return false;
-      return participantProfiles.participants.some((entry) =>
-        entry.name === viewerName && equals(entry.profile, viewerProfile)
-      );
+      if (!viewerName) return EMPTY_PARTICIPANT_PROFILE_LINKS;
+      return participantLinks.filter((entry) => entry.name === viewerName);
     });
+    const viewerHasStoredProfile = computed(() => viewerLinks.length > 0);
+    // Guests (typed-name joins) have no directory entry; the participants
+    // strip renders them as plain name chips next to the profile badges.
+    const guestUsers = computed(() => {
+      const linked = new Set(participantLinks.map((entry) => entry.name));
+      return users.filter((u) => !linked.has(u.name));
+    });
+    // Hoisted booleans for the JSX ternaries below (the file's reset-confirm
+    // idiom): conditions in JSX stay bare computed refs.
+    const hasParticipants = computed(() => users.length > 0);
     // Hoist a boolean cell for the reset-confirm JSX ternary so TS doesn't
     // narrow `resetConfirmPending` itself and lose the `.set` method in
     // the false branch.
@@ -1186,12 +1221,69 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       </div>
                     );
                   })}
+                  {hasParticipants
+                    ? (
+                      <div
+                        data-participants-strip
+                        style={{
+                          marginTop: "8px",
+                          display: "flex",
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                          gap: "6px",
+                        }}
+                      >
+                        {
+                          /* Every profile-backed participant renders from
+                            their STORED live cell (the canonical-roster
+                            idiom, multi-user-patterns.md#presenting-identity);
+                            guests keep plain name chips. Static maps on
+                            purpose — `$profile` bindings cannot live inside
+                            the tally computed below. These badges navigate;
+                            only the viewer's own chip is noNavigate. */
+                        }
+                        {participantLinks.map((entry) => (
+                          <cf-profile-badge
+                            variant="chip"
+                            size="sm"
+                            $profile={entry.profile}
+                            data-participant-badge={entry.name}
+                          />
+                        ))}
+                        {guestUsers.map((u) => (
+                          <span
+                            data-participant-guest={u.name}
+                            title={u.name}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              padding: "2px 8px",
+                              borderRadius: "9999px",
+                              background: "#f3f4f6",
+                              border: "1px solid #e5e7eb",
+                              fontSize: "11px",
+                              fontWeight: 600,
+                              color: "#374151",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {u.name}
+                          </span>
+                        ))}
+                      </div>
+                    )
+                    : null}
                 </div>
-                {computed(() => {
-                  const viewer = me;
-                  if (viewer === "") return null;
-                  const amAdmin = isAdmin;
-                  return (
+                {
+                  /* Static JSX only in this cluster: the viewer badge carries
+                    a `$profile` binding, and a `$`-binding inside an authored
+                    `computed(() => …)` VNode is materialized by the lift and
+                    blanks the whole render (pattern-critique-guide §5). JSX
+                    ternaries compile to static-branch `ifElse`, the safe
+                    conditional shape at a `$`-binding position. */
+                }
+                {isJoined
+                  ? (
                     <div
                       style={{
                         display: "flex",
@@ -1199,7 +1291,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                         alignItems: "center",
                       }}
                     >
-                      {amAdmin
+                      {isAdmin
                         ? (
                           <span
                             style={{
@@ -1220,43 +1312,48 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           </span>
                         )
                         : null}
-                      {viewerUsesCanonicalProfile
-                        ? (
-                          <cf-profile-badge
-                            variant="chip"
-                            size="sm"
-                            $profile={profileWish.result}
-                            noNavigate
-                          />
-                        )
-                        : (
-                          <span
-                            title={viewer}
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              gap: "6px",
-                              padding: "4px 10px",
-                              borderRadius: "9999px",
-                              background: "#f3f4f6",
-                              border: "1px solid #e5e7eb",
-                              fontSize: "12px",
-                              fontWeight: 600,
-                              color: "#374151",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            <span
-                              style={{ fontSize: "10px", color: "#10b981" }}
-                            >
-                              ●
-                            </span>
-                            {viewer}
+                      {
+                        /* The viewer's chip binds the STORED directory entry
+                          (never the live `#profile` wish), so a profile
+                          switch after joining keeps the joined identity.
+                          `viewerLinks` is pre-filtered to 0-or-1 entries, so
+                          this map stays conditional-free at the binding. */
+                      }
+                      {viewerLinks.map((entry) => (
+                        <cf-profile-badge
+                          variant="chip"
+                          size="sm"
+                          $profile={entry.profile}
+                          noNavigate
+                          data-viewer-badge
+                        />
+                      ))}
+                      {viewerHasStoredProfile ? null : (
+                        <span
+                          title={me}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            padding: "4px 10px",
+                            borderRadius: "9999px",
+                            background: "#f3f4f6",
+                            border: "1px solid #e5e7eb",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            color: "#374151",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          <span style={{ fontSize: "10px", color: "#10b981" }}>
+                            ●
                           </span>
-                        )}
+                          {me}
+                        </span>
+                      )}
                     </div>
-                  );
-                })}
+                  )
+                  : null}
               </div>
             </div>
 
@@ -1869,9 +1966,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       options: computed(() => options ?? EMPTY_OPTIONS),
       votes: computed(() => votes ?? EMPTY_VOTES),
       users: computed(() => users ?? EMPTY_USERS),
-      participantProfiles: computed(() =>
-        participantProfiles.participants ?? EMPTY_PARTICIPANT_PROFILE_LINKS
-      ),
+      participantProfiles: participantLinks,
       adminName: computed(() => trimmedName(adminName)),
       myName: participantIdentity.me,
       userCount,

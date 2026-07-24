@@ -101,7 +101,7 @@ export default pattern(() => {
     const button = findByProp(
       profileIdentity[UI],
       "aria-label",
-      "Use my profile name instead",
+      "Back to profile join",
     );
     const onClick = propsOf(button)?.onClick;
     if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
@@ -127,7 +127,6 @@ export default pattern(() => {
       name: "Blair",
       avatar: "",
       color: "#c2573a",
-      joinedAt: 1,
     });
     myName.set("Blair");
   });
@@ -144,24 +143,18 @@ export default pattern(() => {
   );
 
   // With no profile resolved and nobody joined, the join surface shows the
-  // manual-name fallback: the text input and Join button render, the "First to
-  // join becomes the host." hint shows, and neither profile-first control (the
-  // "Use a different name" toggle nor the "Cancel" escape hatch) is present.
-  // Walking the tree materializes showManualEntry, hasProfile, and joinHint.
-  const assert_manual_fallback_renders = computed(() => {
+  // profile-setup branch: the wish's built-in [UI] slot plus the explicit
+  // "Continue as guest" button. The typed-name input is NOT present — the
+  // guest path never appears automatically (it needs the explicit toggle).
+  // Walking the tree materializes showProfileSetup, hasProfile, and joinHint.
+  const assert_guest_setup_renders = computed(() => {
     const ui = participantIdentity[UI];
+    const guestButton = findByProp(ui, "id", "lp-guest-button");
     const input = findByProp(ui, "id", "lp-join-name");
-    const joinButton = findByProp(ui, "id", "lp-join-button");
-    const useDifferentName = findByProp(
-      ui,
-      "aria-label",
-      "Use a different name",
-    );
-    const cancel = findByProp(ui, "aria-label", "Use my profile name instead");
-    return input !== undefined &&
-      joinButton !== undefined &&
-      useDifferentName === undefined &&
-      cancel === undefined &&
+    const setupSlot = findByProp(ui, "data-profile-setup", true);
+    return guestButton !== undefined &&
+      input === undefined &&
+      setupSlot !== undefined &&
       hasText(ui, "First to join becomes the host.");
   });
 
@@ -175,8 +168,7 @@ export default pattern(() => {
   const assert_profile_manual_entry_renders = computed(() => {
     const ui = profileIdentity[UI];
     return findByProp(ui, "id", "lp-join-name") !== undefined &&
-      findByProp(ui, "aria-label", "Use my profile name instead") !==
-        undefined &&
+      findByProp(ui, "aria-label", "Back to profile join") !== undefined &&
       findByProp(ui, "data-profile-identity", "canonical") === undefined;
   });
 
@@ -190,7 +182,6 @@ export default pattern(() => {
     const currentUsers = users.get();
     return currentUsers.length === 1 &&
       currentUsers[0]?.name === "Alex" &&
-      currentUsers[0]?.joinedAt === 0 &&
       myName.get() === "Alex" &&
       adminName.get() === "Alex" &&
       participantProfiles.get().participants.length === 0 &&
@@ -245,7 +236,7 @@ export default pattern(() => {
   return {
     tests: [
       { assertion: assert_initial },
-      { assertion: assert_manual_fallback_renders },
+      { assertion: assert_guest_setup_renders },
       { assertion: assert_profile_first_renders },
       { action: action_use_different_name },
       { assertion: assert_profile_manual_entry_renders },
