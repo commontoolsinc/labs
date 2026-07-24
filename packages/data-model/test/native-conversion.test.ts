@@ -1598,6 +1598,16 @@ describe("native-conversion", () => {
         const out = fabricFromNativeValue(Symbol.for("identity-check"));
         expect(Object.is(out, Symbol.for("identity-check"))).toBe(true);
       });
+
+      it("throws on a top-level unique symbol (freeze default)", () => {
+        // A unique symbol is not a `FabricValue`; conversion rejects it
+        // regardless of the `freeze` flag -- the deep-frozen fast-path
+        // (`isDeepFrozenFabricValue`) must not admit it and short-circuit the
+        // validation that `freeze=false` performs (see below).
+        expect(() => fabricFromNativeValue(Symbol("bad"))).toThrow(
+          "Cannot store unique (uninterned) symbol",
+        );
+      });
     });
 
     describe("`freeze` parameter", () => {

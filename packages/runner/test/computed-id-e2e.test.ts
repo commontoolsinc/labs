@@ -1,6 +1,6 @@
 /**
  * End-to-end storage test for computed-cell id minting
- * (docs/specs/computed-cell-identity.md): a flag-on pattern instantiation
+ * (docs/specs/computed-cell-identity.md): a default-on pattern instantiation
  * mints a derived internal cell under the `computed:` URI scheme, and the
  * doc flows through the real memory-v2 server (emulated storage manager)
  * with no special routing.
@@ -20,7 +20,7 @@ import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { testSessionOpenAuthFactory } from "./memory-v2-test-utils.ts";
 
 /**
- * End-to-end proof that a flag-on pattern instantiation mints a derived
+ * End-to-end proof that a default-on pattern instantiation mints a derived
  * internal cell with a `computed:fid1:` id and that the doc flows through
  * storage WITHOUT any special routing: it commits, syncs to the memory-v2
  * server, and reads back through a completely independent session exactly
@@ -29,7 +29,7 @@ import { testSessionOpenAuthFactory } from "./memory-v2-test-utils.ts";
 const e2eSigner = await Identity.fromPassphrase("computed-id-e2e");
 const e2eSpace = e2eSigner.did();
 
-describe("computed-cell id end-to-end (flag-on instantiation)", () => {
+describe("computed-cell id end-to-end (default-on instantiation)", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let remoteClient: MemoryV2Client.Client;
@@ -40,7 +40,6 @@ describe("computed-cell id end-to-end (flag-on instantiation)", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { computedCellIds: true },
     });
     const candidate = storageManager as unknown as {
       server?: () => MemoryV2Server;
