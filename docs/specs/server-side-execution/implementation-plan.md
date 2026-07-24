@@ -2319,6 +2319,63 @@ recorded in its header. The co-hosted gate leg is likewise owed (blocked by
 `v2-execution-cross-space-cohosted*` suites). CI-budget clause (C3A23): the
 gate carries a named 90 s ceiling in its file header (actual ~1–2 s).
 
+##### C3.12 — client cross-space reactivity: work-order decomposition (2026-07-24)
+
+Scouted (`.agents/c3-12-scout-report-2026-07-24.md`) and adversarially
+panel-reviewed
+([the review record](../../history/development/design/c3-12-adversarial-review-2026-07-24.md),
+CR1–CR10 binding). **Panel rulings (read before building):** the root
+diagnosis is CONFIRMED — a real space-B replica *is* opened, its foreign
+cell's sink fires exactly once and never on a later B change, and an
+explicit re-sync no-ops because the pull dedup treats coverage as
+liveness (`storage/v2.ts:3291`); this is a genuine DESIGN gap (the client
+analog of C3.3a's server wake subscription, on the client→foreign-host
+axis), NOT plumbing, and CT-1667's "materialize-once, accept-staleness"
+posture is the mechanism to extend, not reuse-as-is. **The load-bearing
+correction (CR2/CR3):** the scout's "B1" silently spans a client layer
+(watch torn-down / authority-swallowed / dedup-blocked re-pull) AND a
+server-push layer (space B's origin may push no third-party commits to
+the reader's foreign session at all — `link-resolution.ts:321` says as
+much), and every client-internal probe sits downstream of that boundary
+— so **WO-0 must return a three-way verdict {B2 / B1-client / B1-server}
+and a B1-server outcome gets an owned server-side row (C3.12.1s), not a
+silent gap.** Two owner defaults were corrected: standing-push's rationale
+was backwards (wake-and-repull does NOT reintroduce CT-1667 staleness —
+it retracts the pull-kick latch exactly as FB7 eviction-rekick already
+does), so the push-vs-repull choice is deferred into WO-0's evidence; and
+the client-side keep-alive/subscription behavior is gated behind a NEW
+client EXPERIMENTAL_OPTIONS flag (CR10) held OFF through 12.0–12.4 —
+**the flag is the correctness/containment mechanism that makes the 0→5
+order safe, not doc polish.**
+
+Same-space byte-identical is the #1 constraint (CR1): a `space !==
+homeSpace` guard is *uncomputable* at the named seams (StorageManager has
+no `#homeSpace`; a SpaceReplica knows only its own `#space`), so the
+foreign path is threaded from the one seam that has the discriminator —
+`crossSpace` at `link-resolution.ts:311/333` — via a manager-owned
+keep-alive reservation, and same-space is preserved by simply NOT
+emitting foreign dependency edges for same-space reads (no guard needed
+at the delivery/scheduler seams). `#docPullKicks` is NOT a target — it is
+same-space-only (its sole caller is under `!crossSpace`); `#watchSelectorTracker`
+is the foreign re-fetch dedup to back with a standing subscription.
+
+| WO | Title / mechanism | Depends on | Acceptance sketch |
+| --- | --- | --- | --- |
+| C3.12.0 | **Three-way diagnostic repro** (CR2/CR7): a committed RED test in the two-runtime separate-replica shape (reader holds B READ), asserting the foreign sink fires once today, and a transport-boundary probe returning **{B2** = delivered, no reactive dirty / **B1-client** = deliverable to the session but replica torn-down/authority-swallowed/dedup-blocked / **B1-server** = origin emits no third-party push to the reader's B session**}**. Acceptance stated in OBSERVABLE terms (sink refire count; `doubled` recompute; `pendingCrossSpacePromiseCount()`/`crossSpaceSettled()`, `v2.ts:1743/1747`) — never against private `#` fields; a test-only SpaceReplica accessor is an explicit deliverable if needed. Also answers the read-log keying question (are foreign reads recorded under their own `(space,id,scope)` or normalized onto home — the input to CR5). | — | RED test committed; the three-way verdict + the keying answer decide the rows below |
+| C3.12.1 | **Foreign-read replica keep-alive + refcount + the client flag** (CR1/CR10): a manager-owned keep-alive reservation keyed off the `crossSpace` kick (`link-resolution.ts:333`) holds the foreign SpaceReplica + its `#updatePromises`/`consumeUpdates` lifecycle alive while any reactive dependency reads it; refcounted, released on last drop, eviction teardown keyed off the reservation table (NOT the same-space `handleDocEviction`→`retractDocPullKick` path). Introduces the client EXPERIMENTAL_OPTIONS gate, held OFF. | C3.12.0 (client-side verdict) | foreign replica stays open with a live watch + non-empty update-promises after a cross-space reactive read; last-drop releases it; same-space eviction/rekick byte-identical (`fresh-replica-read-asymmetry`, `client-doc-set-watch` unchanged); flag-off ⇒ byte-identical to today |
+| C3.12.1s | **(contingent on WO-0 = B1-server)** server-side third-party push to a foreign read session: space B's origin delivers third-party commits to a reader's standing foreign-read watch (the missing server surface `link-resolution.ts:321` names). Only built if WO-0 pins B1-server; otherwise struck. | C3.12.0 | a third-party B commit reaches the reader's B session's watch delivery |
+| C3.12.2 | **Standing foreign-read subscription → reactive-dirty delivery** (CR9 boundary; CR5 regression): register the standing watch over the foreign-read docs and wire delivery (`v2.ts:4985`) → scheduler (`facade.ts:2179`, already space-agnostic) so a foreign change marks the dependent derivation dirty; preserve observer-own `(space,id,scope)` keying so the defect-(i) exemption (`engine.ts:7185`) still fires. If WO-0 pinned B2, split into 2a (delivery reaches `processStorageNotification` for B) + 2b (correct-keyed dirty). | C3.12.1 | C3.12.0's sink REFIRES on the later B change and `doubled` recomputes; **no-floor-poison regression:** N successive foreign-driven recomputes leave `scheduler_context_floor` space-rank and a later served claim resolves `executionContextKey=space`, `claim-context-mismatch==0` — through the LIVE client, not a `PushView`; same-space regression guard alongside |
+| C3.12.3 | **Client-subscription authority + revocation** (CR4): a home-replica epoch-bump / B-READ-retraction observer tears down the standing subscription + evicts the foreign replica (hands back the CR1 reservation) INDEPENDENTLY of the claim lifecycle, re-checking READ per subscription-driven recompute, fail-closed. `v2-execution-cross-space-{epoch,idle-revocation}-test.ts` are the authority SOURCE, not the acceptance vehicle. | C3.12.2 (co-land or hold behind the flag) | new two-runtime fixture: retract B-READ mid-subscription ⇒ delivery stops, no further recompute, held overlay dropped, fail-closed |
+| C3.12.4 | **Overlay hold/drop/suppress on the REAL change** (CR8): the live recompute drives `recordClaimedOverlay`→`captureOverlayForeignBasis` (`v2.ts:5767`) from the now-current replica → holds → drops exactly once on the host's committed vector settlement → suppresses; replace the C3.9 synthetic `PushView` drive with the real path. **Replica-AHEAD leg:** a B change between the speculative run and the host commit makes the first settlement's B component older than the captured basis ⇒ overlay HELD (`settlementCoversOverlay` false, `v2.ts:6290`), a later ≥-basis settlement drops it once, `cross-space-basis-divergence` fires but never blocks. | C3.12.2 (revocation edge C3.12.3) | the composed gate's delegated clause (a): reader recomputes on the B commit, `claimedOverlayRoutes≥1`, overlay drops exactly once, suppresses thereafter — plus the replica-ahead self-healing leg |
+| C3.12.4c | **Co-hosted client foreign subscription + reconnect** (CR6, the C3.10a/b-split lesson): the client foreign subscription over `crossSpaceLinkSocketPair`/`CoHostedCrossSpaceTransport`; reconnect re-establishes the standing watch and re-pulls B changes missed during the gap (a reconnect-snapshot fixture analogous to C3A12/C3A14a). | C3.12.4 | the clause-(a) loop green over the co-hosted transport; link-loss→reconnect re-establishes and re-pulls exactly once |
+| C3.12.5 | **Un-delegate + flip the flag + doc closeout** (CR6-narrowed): flip clause (a) from delegated to bound in `server-execution-cross-space-gate.test.ts` on BOTH transports; flip the client EXPERIMENTAL_OPTIONS flag ON (only after authority 12.3 lands); update the C3.12 status paragraph + EXPERIMENTAL_OPTIONS posture — the user-visible loop now works. | C3.12.4, C3.12.4c | gate green with clause (a) asserted directly over both transports; `check-docs` green |
+
+Amendment references CR1–CR10 are archived in full in the review record;
+build prompts carry the full text for their WO. The composed gate
+(`server-execution-cross-space-gate.test.ts`) is the standing red harness
+throughout — its currently-delegated clause (a) is the top-level
+acceptance C3.12.4/C3.12.5 flip to bound.
+
 Mapped against the landed substrate, which carries more than §5's wording
 admits: cross-space read **indexing already exists** —
 `scheduler_read_index` rows carry a `read_space` distinct from
