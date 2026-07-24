@@ -296,6 +296,7 @@ Deno.test("memory v2 server consumes a challenged session open", async () => {
       error: {
         name: "AuthorizationError",
         message: "memory session.open challenge mismatch",
+        retriable: true,
       },
     });
   } finally {
@@ -342,6 +343,7 @@ Deno.test("memory v2 server rejects an expired session open challenge", async ()
       error: {
         name: "AuthorizationError",
         message: "memory session.open challenge expired",
+        retriable: true,
       },
     });
   } finally {
@@ -389,6 +391,8 @@ Deno.test("memory v2 server rejects invalid session open auth metadata", async (
           challenge: "challenge:wrong",
         },
         message: "memory session.open challenge mismatch",
+        // A stale challenge is an anti-replay race a fresh handshake heals.
+        retriable: true,
       },
     ];
 
@@ -406,6 +410,9 @@ Deno.test("memory v2 server rejects invalid session open auth metadata", async (
         error: {
           name: "AuthorizationError",
           message: testCase.message,
+          ...((testCase as { retriable?: boolean }).retriable
+            ? { retriable: true }
+            : {}),
         },
       });
     }
@@ -437,6 +444,7 @@ Deno.test("memory v2 server rejects session open before issuing challenge", asyn
       error: {
         name: "AuthorizationError",
         message: "memory session.open challenge unavailable",
+        retriable: true,
       },
     });
   } finally {
@@ -493,6 +501,7 @@ Deno.test("memory v2 server consumes challenge before denied session open", asyn
       error: {
         name: "AuthorizationError",
         message: "memory session.open challenge already used",
+        retriable: true,
       },
     });
   } finally {

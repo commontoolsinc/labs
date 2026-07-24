@@ -637,6 +637,16 @@ export interface V2Error {
   message: string;
   precondition?: string;
   retryAfterSeq?: number;
+  /**
+   * Present on an `AuthorizationError` that a fresh handshake can heal — the
+   * connection-challenge and invocation-freshness anti-replay races (an expired,
+   * already-used, or mismatched challenge; a stale signed `exp`). Each reconnect
+   * runs a new `hello` that issues a fresh challenge, so these do not recur. Its
+   * absence marks a permanent denial (an audience mismatch, a malformed
+   * invocation, or an ACL capability shortfall) that retrying cannot fix — the
+   * client stops reopening the session and surfaces the error instead of looping.
+   */
+  retriable?: boolean;
 }
 
 export type V2Result<Value> = { ok: Value } | { error: V2Error };

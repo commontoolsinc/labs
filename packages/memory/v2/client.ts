@@ -112,6 +112,13 @@ export class Client {
   #cancelReconnectDelay: (() => void) | null = null;
   #connected = false;
   #closed = false;
+  // Set when a reconnect handshake fails for a reason retrying cannot change (a
+  // protocol-flag mismatch — the transport is fundamentally incompatible). The
+  // client stops reconnecting and fails every further request with it, instead
+  // of looping forever. A per-session authorization denial does NOT land here:
+  // it terminates only that session (see SpaceSession.restore), leaving sessions
+  // for other spaces on this client alive.
+  #fatalError: Error | null = null;
 
   private constructor(
     private readonly transport: Transport,
@@ -195,6 +202,10 @@ export class Client {
       if (result.error.retryAfterSeq !== undefined) {
         (error as Error & { retryAfterSeq?: number }).retryAfterSeq =
           result.error.retryAfterSeq;
+      }
+      if (result.error.retriable !== undefined) {
+        (error as Error & { retriable?: boolean }).retriable =
+          result.error.retriable;
       }
       throw error;
     }
@@ -285,12 +296,15 @@ export class Client {
       if (helloOk !== null) {
         const expectedFlags = getMemoryProtocolFlags();
         if (!compatibleMemoryProtocolFlags(helloOk.flags, expectedFlags)) {
-          const error = new Error(
+          // A data-model wire-contract mismatch: this client and server cannot
+          // talk at all, and no retry changes that. Mark it permanent so a
+          // reconnect that hits it gives up rather than retrying a doomed
+          // handshake.
+          const error = permanentProtocolError(
             `memory flag mismatch: client=${
               toCompactDebugString(expectedFlags)
             } server=${toCompactDebugString(helloOk.flags)}`,
           );
-          error.name = "ProtocolError";
           this.#helloPending.reject(error);
           return;
         }
@@ -371,10 +385,18 @@ export class Client {
     if (this.#closed) {
       throw new Error("memory client is closed");
     }
+    if (this.#fatalError) {
+      throw this.#fatalError;
+    }
     if (this.#connected) {
       return;
     }
     await this.reconnect();
+    // reconnect() resolves without connecting when it gives up on a permanent
+    // handshake failure; surface it here rather than returning as if connected.
+    if (this.#fatalError) {
+      throw this.#fatalError;
+    }
   }
 
   private onClose(error?: Error): void {
@@ -393,6 +415,9 @@ export class Client {
     if (this.#closed) {
       throw new Error("memory client is closed");
     }
+    if (this.#fatalError) {
+      throw this.#fatalError;
+    }
     if (this.#reconnecting) {
       return await this.#reconnecting;
     }
@@ -407,9 +432,16 @@ export class Client {
           return;
         } catch (error) {
           this.#connected = false;
-          this.rejectPending(
-            error instanceof Error ? error : new Error(String(error)),
-          );
+          const err = error instanceof Error ? error : new Error(String(error));
+          if (isPermanentConnectionFailure(err)) {
+            // A handshake the server refuses identically every time (a
+            // protocol-flag mismatch). Stop looping and remember the failure so
+            // every present and future request fails fast with it.
+            this.#fatalError = err;
+            this.rejectPending(err);
+            return;
+          }
+          this.rejectPending(err);
           await this.waitForReconnectDelay(reconnectDelayMs(attempt));
           attempt += 1;
         }
@@ -815,6 +847,19 @@ export class SpaceSession {
         }
       }
       await Promise.all(replayTasks);
+    } catch (error) {
+      // A permanent authorization denial ANYWHERE in the reopen — the initial
+      // session.open OR the watch re-establishment (watchSetSync) that follows a
+      // fresh, non-resumed session — terminates just this session with the real
+      // error: its pending commits and waiters reject with it, and its next watch
+      // or transact rethrows it. It must NOT propagate to the client-wide
+      // reconnect loop, which would then fail sessions for other spaces on the
+      // same client. Every other error propagates so the loop retries it.
+      if (isPermanentAuthorizationError(error)) {
+        this.terminateSession(error as Error);
+        return;
+      }
+      throw error;
     } finally {
       this.#restoring = false;
       if (!this.#closed && this.#outstandingCommits.size > 0) {
@@ -850,6 +895,17 @@ export class SpaceSession {
     }
     const error = new Error(`memory session revoked: ${reason}`);
     error.name = "SessionRevokedError";
+    this.terminateSession(error);
+  }
+
+  /**
+   * Close this session terminally with `error`: reject its outstanding commits
+   * and caught-up waiters, forget it from the client, and drop its watch state.
+   * The stored error is what `#assertOpen()` rethrows for any later call, so a
+   * storage subscriber observes the real cause on its next watch or transact.
+   * Shared by session revocation and a permanent reopen authorization denial.
+   */
+  private terminateSession(error: Error): void {
     this.#closed = true;
     this.#closeError = error;
     this.#readyOnConnection = false;
@@ -1449,6 +1505,27 @@ const protocolError = (message: string): Error => {
   error.name = "ProtocolError";
   return error;
 };
+
+// A ProtocolError that no retry can heal (the peers disagree on a data-model
+// wire contract). Tagged so the reconnect loop gives up rather than retrying it.
+const permanentProtocolError = (message: string): Error =>
+  Object.assign(new Error(message), { name: "ProtocolError", permanent: true });
+
+// An authorization denial retrying cannot change. A retriable auth failure — an
+// anti-replay race the server marked `retriable` (an expired/used/mismatched
+// challenge, a stale signed `exp`) — is excluded, so the client keeps reopening
+// through a token-refresh window or a challenge race a fresh handshake heals.
+const isPermanentAuthorizationError = (error: unknown): boolean =>
+  error instanceof Error && error.name === "AuthorizationError" &&
+  (error as { retriable?: unknown }).retriable !== true;
+
+// A reconnect handshake failure the whole client must give up on rather than
+// retry: an incompatible protocol negotiation at hello. An authorization denial
+// is deliberately NOT here — it is per-space, handled inside restore() by
+// terminating just that session, so it never escalates to a client-wide failure
+// that would take down sessions for other spaces.
+const isPermanentConnectionFailure = (error: Error): boolean =>
+  (error as { permanent?: unknown }).permanent === true;
 
 const requireSessionOpenAuthMetadata = (
   value: unknown,
