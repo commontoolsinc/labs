@@ -1070,6 +1070,28 @@ describe("scheduler event receipts", () => {
     await plainReceipt.pull();
     expect(plainReceipt.get()).toEqual({ ok: true, n: 42 });
 
+    // Same-id redelivery with a DIFFERENT payload: the body re-runs (exactly-
+    // once is per commit, not per execution) but loses the create-only race,
+    // so the receipt retains the ORIGINAL result — the retry/readback promise
+    // this flag exists to serve, and the first-payload-wins semantics the
+    // verb-contract obligations record.
+    runtime.scheduler.queueEvent(
+      resolvedStreamLink(root.key("plain"), runtime),
+      { value: 99 },
+      undefined,
+      undefined,
+      false,
+      { eventId: plainEventId },
+    );
+    await waitForSchedulerCondition(
+      runtime,
+      () => handlerInvocations === 2,
+      "plain-return redelivery did not run",
+    );
+    await runtime.scheduler.idleWithPendingCommits();
+    await plainReceipt.pull();
+    expect(plainReceipt.get()).toEqual({ ok: true, n: 42 });
+
     // Value-less handlers keep the empty witness.
     const emptyReceipt = receiptCellForEvent<Record<string, never>>(
       runtime,
