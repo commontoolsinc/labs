@@ -53,6 +53,7 @@ import {
   callableCommandSpec,
   type CallableExecutionDeps,
   type CallableResolution,
+  type CallableResultRef,
   CF_RUNTIME_ERROR_LOG,
   type CliRuntimeErrorRecord,
   detectCallableKind,
@@ -162,6 +163,8 @@ export interface PieceCallableDependencies extends CallableExecutionDeps {
 export interface ExecutedPieceCallable {
   helpText?: string;
   outputText?: string;
+  /** Tool result cell address, passed through from ExecutedCallable. */
+  resultRef?: CallableResultRef;
   parsed: ParsedExecArgs;
   resolved: ResolvedPieceCallable;
 }

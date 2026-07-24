@@ -127,6 +127,12 @@ describe("executePieceCallable", () => {
       summary: "bound-source:tea",
       source: "bound-source",
     });
+    // The result cell's durable address rides along — the handle a caller can
+    // revisit instead of re-running the tool (verb contract Part 2).
+    expect(result.resultRef).toEqual({
+      id: "of:tool-result-cell",
+      space: "did:key:test-home",
+    });
   });
 
   it("passes the configured piece scope when resolving callables", async () => {
@@ -688,6 +694,10 @@ function createPieceCallableHarness(options: {
     pull: () => Promise.resolve(state.value),
     key: (_key: string) => resultCell,
     asSchemaFromLinks: () => resultCell,
+    getAsNormalizedFullLink: () => ({
+      id: "of:tool-result-cell",
+      space: "did:key:test-home",
+    }),
   };
 
   const piece = {

@@ -1060,6 +1060,13 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
       }
       if (result.outputText) {
         render(result.outputText);
+        if (result.resultRef) {
+          // stderr, so stdout stays exactly the tool's JSON result.
+          hint(
+            `Tool result cell: ${result.resultRef.id} (space ${result.resultRef.space})`,
+            false,
+          );
+        }
         return;
       }
       render(`Called handler "${callableName}" on piece ${pieceConfig.piece}`);

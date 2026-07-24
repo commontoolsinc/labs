@@ -382,9 +382,11 @@ This is not a new semantic — it is when the receipt commits today. The work is
 exposure: the CLI currently awaits the commit and then discards everything
 (`callable.ts:294-320`).
 
-Waiting is a caller-side choice — whether to wait at all, and for how long. This
-replaces the current fixed 15 s `DEFAULT_TOOL_RESULT_TIMEOUT_MS`, and the wait
-observes settlement rather than polling for it.
+Waiting is a caller-side choice — whether to wait at all, and for how long. The
+tool path already observes settlement rather than polling for it —
+`runtime.settled()` drains scheduler, storage, and in-flight async builtins
+with no interval under it and no deadline over it (#4946); what remains is
+making the wait bound caller-controlled.
 
 ### Choosing an id
 
@@ -568,17 +570,14 @@ fabric-side naming within a space; a binding supplies the host and space half.
 
 ## Defects and unknowns in the current machinery
 
-- **The tool result wait is a poll.** `defaultWaitForResult`
-  (`packages/cli/lib/callable.ts:206-222`) calls `resultCell.pull()` every 25 ms
-  up to a 15 s timeout, then throws — a timeout, a sleep, and a retry loop, the
-  trio `AGENTS.md` says to flag. An observation mechanism is already present:
-  `running.sink(…)` at `:353` is used as a fast path when it fires before
-  commit. Settlement should await the sink.
 - **Tool result cells are unlinked, and their collection status is unknown.**
-  Created with a random UUID whose address is never returned. A search of the
+  Created with a random UUID; the CLI hands the address back to the caller
+  (`resultRef`), but nothing in the fabric links the cell. A search of the
   memory and storage layers turned up no collection of unreferenced cells; that
   search was not exhaustive, and the answer should be confirmed before the
-  retention design is settled.
+  retention design is settled. (A second defect once listed here — the tool
+  result wait was a 25 ms poll under a 15 s deadline — is fixed: the wait is
+  `runtime.settled()`, #4946.)
 
 ## Checking the design against other patterns
 

@@ -57,13 +57,16 @@ Size S (~1–2 days). No dependencies. `packages/patterns/topics`.
 
 Size S (~1 day). No dependencies. `packages/cli`.
 
-- Replace `defaultWaitForResult` (25 ms poll, 15 s ceiling,
-  `lib/callable.ts:206-222`) with settlement observed through the existing
-  `running.sink(…)` path. The default time bound remains until WS-F makes the
-  wait caller-controlled, but it bounds an observation, not a poll.
-- Surface the tool result cell's address in `ExecutedCallable` output.
-- **Exit:** no sleep/poll in the callable wait path; `deno task test` in
-  `packages/cli` green.
+- ~~Replace the `defaultWaitForResult` poll with observed settlement~~ —
+  **landed independently as #4946** (2026-07-24): the wait is
+  `runtime.settled()`, draining scheduler, storage, and in-flight async
+  builtins with no poll interval and no deadline. Scope change recorded; this
+  workstream shrank to the second bullet.
+- Surface the tool result cell's address in `ExecutedCallable` output
+  (`resultRef`), threaded through the exec/piece-call wrappers and printed to
+  stderr so stdout stays exactly the tool's JSON result.
+- **Exit:** no sleep/poll in the callable wait path (met by #4946);
+  `resultRef` returned and printed; `deno task test` in `packages/cli` green.
 
 ### WS-C — verb results authoring surface *(critical path)*
 
