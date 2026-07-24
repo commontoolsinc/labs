@@ -1313,22 +1313,32 @@ export class CellImpl<T extends FabricValue>
         resolvedToValueLink.schema ?? this.schema,
       );
 
+      const writeLink = resolveLink(
+        this.runtime,
+        this.tx,
+        this.link,
+        "writeRedirect",
+      );
+
       // TODO(@ubik2) investigate whether i need to check confidential as i walk down my own obj
       diffAndUpdate(
         this.runtime,
         this.tx,
-        resolveLink(this.runtime, this.tx, this.link, "writeRedirect"),
+        writeLink,
         transformedValue,
         this._frame?.cause,
       );
 
-      // A whole-value set over a path that already carries a mergeable op intent
-      // (an earlier push / addUnique / increment / removeByValue in this
-      // transaction) reshapes what the op's recorded tail refers to. Poison the
-      // intent so the commit emits this set's whole-array diff rather than a stale
-      // tail op. A set to a child path (an element edit) carries no intent at that
-      // path, so poisonMergeableOp is a no-op there and the append still composes.
-      this.tx.poisonMergeableOp?.(resolvedToValueLink);
+      // A whole-value set over the path it writes reshapes what a mergeable op
+      // intent recorded there (an earlier push / addUnique / increment /
+      // removeByValue in this transaction) refers to. Poison that intent —
+      // keyed on `writeLink`, the exact path diffAndUpdate wrote — so the commit
+      // emits this set's whole-array diff rather than a stale tail op. Keying on
+      // the written path is what keeps this correct across aliases and child
+      // writes: a set that lands on a different slot than the op's target (a
+      // non-redirect alias) or on a child path (an element edit) finds no intent
+      // there, so poisonMergeableOp is a no-op and the append stays mergeable.
+      this.tx.poisonMergeableOp?.(writeLink);
 
       // Register commit callback if provided.
       if (onCommit) {
