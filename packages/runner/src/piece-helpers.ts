@@ -2,17 +2,21 @@ import {
   entityRefToString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
-// TODO(@ubik2): Ideally this would import from "@commonfabric/utils/types",
-// but rollup has issues
+// Relative import (not "@commonfabric/utils/types") for the same rollup
+// reason as traverse.ts.
 import { isRecord } from "../../utils/src/types.ts";
+import { getLogger } from "../../utils/src/logger.ts";
 import { type Cell, isCell } from "./cell.ts";
 import { isSigilLink } from "./link-types.ts";
 import { parseLink } from "./link-utils.ts";
+import { resolveLink } from "./link-resolution.ts";
 import { DEFAULT_CELL_SCOPE, scopeRank } from "./scope.ts";
 import type { MemorySpace } from "./storage/interface.ts";
 import type { JSONSchema, Pattern } from "./builder/types.ts";
 import type { Runtime } from "./runtime.ts";
 import type { RuntimeProgram } from "./harness/types.ts";
+
+const logger = getLogger("piece-helpers");
 
 export type CellPath = (string | number)[];
 
@@ -101,9 +105,19 @@ export function cellEntityIdString(cell: Cell<unknown>): string | undefined {
  * doing exactly that, driven by the stored links' own declared scopes.
  *
  * Deliberately NOT relaxed: plain (non-link) missing properties, properties
- * whose links are space-scoped, and anything inside arrays (#4746 restored
- * strict required semantics for array elements; nothing here reopens that).
- * Recurses only through inline records — links are boundaries.
+ * whose links resolve entirely within space scope, and anything inside
+ * arrays (#4746 restored strict required semantics for array elements;
+ * nothing here reopens that). Recurses only through inline records — links
+ * are boundaries.
+ *
+ * Known structural limits (both degrade to the pre-existing strict void, and
+ * both are properly fixed by the schema-generator emitting honest
+ * optionality for scoped-derived outputs): (1) a space-scoped link to a doc
+ * whose OWN schema requires a scoped member still voids that doc's read —
+ * the traverser combines schemas across link hops and `required` survives
+ * from either side, so a boundary-derived relaxation cannot reach it;
+ * (2) a result doc whose root value is itself a link is left unrelaxed for
+ * the same combine reason.
  *
  * Returns the input schema by reference when there is nothing to relax, so
  * schema identity (and downstream hash caching) is preserved.
@@ -123,33 +137,36 @@ export function schemaWithScopedLinkRequiredsRelaxed(
   // A scoped output does not carry its scope on the first link: the result
   // doc's property links (scope "space") redirect to an intermediate doc
   // whose value is the actual `{scope: "session"|"user"}` redirect into the
-  // scoped instance. Walk the redirect chain (bounded) and flag the property
-  // if ANY hop declares a narrower-than-space scope. A hop whose doc is not
-  // locally readable ends the walk as "not narrow" — the conservative
-  // fallback is the pre-existing strict behavior.
+  // scoped instance. Resolve the stored link to its terminal target with the
+  // standard resolver (real cycle detection, and the same fresh-replica pull
+  // kick every read path uses) and inspect the terminal scope. A chain the
+  // resolver cannot complete (cycle, iteration limit) counts as "not narrow"
+  // — the conservative fallback is the pre-existing strict behavior.
   const isNarrowScopedLink = (value: unknown): boolean => {
-    let current = value;
-    let currentBase = base;
-    for (let hop = 0; hop < 8; hop++) {
-      if (!isSigilLink(current)) return false;
-      // Parsing against the containing cell resolves "inherit" to the
-      // containing scope, so the normalized scope is always concrete.
-      const link = parseLink(current, currentBase);
-      if (link === undefined) return false;
-      const scope = link.scope ?? DEFAULT_CELL_SCOPE;
-      if (scopeRank(scope) > scopeRank(DEFAULT_CELL_SCOPE)) return true;
-      let next: Cell<unknown>;
-      let raw: unknown;
-      try {
-        next = currentBase.runtime.getCellFromLink(link);
-        raw = next.getRaw();
-      } catch {
-        return false;
-      }
-      current = raw;
-      currentBase = next;
+    if (!isSigilLink(value)) return false;
+    // Parsing against the containing cell resolves "inherit" to the
+    // containing scope, so the normalized scope is always concrete.
+    const first = parseLink(value, base);
+    if (first === undefined) return false;
+    if (
+      scopeRank(first.scope ?? DEFAULT_CELL_SCOPE) >
+        scopeRank(DEFAULT_CELL_SCOPE)
+    ) {
+      return true;
     }
-    return false;
+    try {
+      const runtime = base.runtime;
+      const terminal = resolveLink(runtime, runtime.readTx(), first, "value");
+      return scopeRank(terminal.scope ?? DEFAULT_CELL_SCOPE) >
+        scopeRank(DEFAULT_CELL_SCOPE);
+    } catch (error) {
+      logger.debug("piece-helpers", () => [
+        "scoped-link relax: chain resolution failed; keeping strict required",
+        first,
+        error,
+      ]);
+      return false;
+    }
   };
 
   let changed = false;
@@ -213,7 +230,11 @@ export function cellWithScopedLinkRequiredsRelaxed<T>(
   let raw: unknown;
   try {
     raw = cell.getRaw();
-  } catch {
+  } catch (error) {
+    logger.debug("piece-helpers", () => [
+      "scoped-link relax: raw read failed; keeping strict schema",
+      error,
+    ]);
     return cell;
   }
   const relaxed = schemaWithScopedLinkRequiredsRelaxed(

@@ -329,3 +329,34 @@ Phase 2 (CLI signal gap for schema-less results) and Phase 3 (schema-generator
 emitting honest optionality) remain follow-ups; Phase 2's urgency is reduced
 because the projection now returns partial objects instead of `undefined` for
 this class.
+
+## Adversarial review outcome (post-implementation)
+
+A devil's-advocate review of the first implementation found no blockers but
+four should-fixes, all addressed in the follow-up commit:
+
+1. **Hand-rolled hop-walk duplicated `resolveLink`** (with cell-minting side
+   effects and a latent wrong-parse-base bug) → replaced with
+   `resolveLink(runtime, runtime.readTx(), link, "value")`: real cycle
+   detection, no side effects, and the standard fresh-replica pull kick.
+2. **Bare catches swallowed diagnostics** → `logger.debug` on both fallback
+   paths (fallback remains the strict pre-existing behavior).
+3. **The walk loop had no unit coverage past hop 0** → added multi-hop,
+   user-scope, nested-inline-record, and stored-cycle tests (14 steps
+   total in `scoped-link-whole-object-read.test.ts`).
+4. **Two structural limits were undocumented** → now documented in the
+   helper's doc comment and pinned by a characterization test: (a) a
+   space-scoped link to a doc whose own schema requires a scoped member
+   still voids that doc's read (schema combine keeps `required` from either
+   side across link hops — unreachable from a boundary derivation); (b) a
+   result root that is itself a link is left unrelaxed for the same reason.
+   Both degrade to the pre-existing strict void and both are properly fixed
+   by Phase 3 (schema-generator emitting honest optionality).
+
+Reviewer also verified: writes untouched (`PiecePropIo.set` re-derives its
+target; `getCell()` hands out the un-relaxed cell), schema interning absorbs
+the per-read schema mint (content-keyed dedupe), no reactive/scheduler path
+is affected, and the input-side application makes `cf piece link` target
+verification strictly better. FUSE (`cell-bridge.ts`) is the one non-CLI
+consumer of `PiecePropIo.get` — its suite runs in the final gate; profile
+there first if mounted-space listings ever slow down.

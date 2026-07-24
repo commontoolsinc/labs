@@ -296,6 +296,297 @@ describe("whole-object read over a session-scoped link", () => {
     }
   });
 
+  it("multi-hop: scope declared one redirect hop deep is detected (the real piece-result shape)", async () => {
+    // Live pieces don't put the scope on the first link: result.prop links
+    // (scope "space") to an intermediate doc whose VALUE is the
+    // session-scoped redirect. The detector must resolve the chain, not just
+    // parse hop 0.
+    const tx = writerRt.edit();
+    const deepDraft = writerRt.getCell<string>(
+      space,
+      "hop-draft",
+      { type: "string" } as const,
+      tx,
+      "session",
+    );
+    deepDraft.set("deep-session-value");
+    const mid = writerRt.getCell(
+      space,
+      "hop-mid",
+      { type: "string" } as const,
+      tx,
+    );
+    mid.set(deepDraft as never);
+    const holder = writerRt.getCell(
+      space,
+      "hop-holder",
+      {
+        type: "object",
+        properties: requiredResultSchema.properties,
+      } as const,
+      tx,
+    );
+    holder.set({
+      question: "hop question",
+      count: 1,
+      myDraft: mid,
+    } as never);
+    const result = await tx.commit();
+    expect(result.error).toBeUndefined();
+    await writerStorage.synced();
+
+    const { rt, close } = freshReader();
+    try {
+      const cell = rt.getCell(space, "hop-holder", requiredResultSchema);
+      await cell.pull();
+      const relaxed = schemaWithScopedLinkRequiredsRelaxed(
+        requiredResultSchema,
+        cell.getRaw(),
+        cell as unknown as Cell<unknown>,
+      ) as { required?: string[] };
+      expect(relaxed.required).toEqual(["question", "count"]);
+      const projected = cellWithScopedLinkRequiredsRelaxed(cell);
+      const value = (await projected.pull()) as { question?: string };
+      expect(value?.question).toBe("hop question");
+    } finally {
+      await close();
+    }
+  });
+
+  it("user scope is detected, not just session", async () => {
+    const tx = writerRt.edit();
+    const userDraft = writerRt.getCell<string>(
+      space,
+      "user-draft",
+      { type: "string" } as const,
+      tx,
+      "user",
+    );
+    userDraft.set("per-user-value");
+    const holder = writerRt.getCell(
+      space,
+      "user-holder",
+      {
+        type: "object",
+        properties: requiredResultSchema.properties,
+      } as const,
+      tx,
+    );
+    holder.set({
+      question: "user question",
+      count: 2,
+      myDraft: userDraft,
+    } as never);
+    const result = await tx.commit();
+    expect(result.error).toBeUndefined();
+    await writerStorage.synced();
+
+    const { rt, close } = freshReader();
+    try {
+      const cell = rt.getCell(space, "user-holder", requiredResultSchema);
+      await cell.pull();
+      const relaxed = schemaWithScopedLinkRequiredsRelaxed(
+        requiredResultSchema,
+        cell.getRaw(),
+        cell as unknown as Cell<unknown>,
+      ) as { required?: string[] };
+      expect(relaxed.required).toEqual(["question", "count"]);
+    } finally {
+      await close();
+    }
+  });
+
+  it("nested inline record: a scoped link below the root relaxes only that level", async () => {
+    const nestedSchema = {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        inner: {
+          type: "object",
+          properties: {
+            plain: { type: "string" },
+            scoped: { type: "string" },
+          },
+          required: ["plain", "scoped"],
+        },
+      },
+      required: ["title", "inner"],
+    } as const satisfies JSONSchema;
+
+    const tx = writerRt.edit();
+    const scoped = writerRt.getCell<string>(
+      space,
+      "nested-draft",
+      { type: "string" } as const,
+      tx,
+      "session",
+    );
+    scoped.set("nested-session-value");
+    const holder = writerRt.getCell(
+      space,
+      "nested-holder",
+      {
+        type: "object",
+        properties: nestedSchema.properties,
+      } as const,
+      tx,
+    );
+    holder.set({
+      title: "nested",
+      inner: { plain: "visible", scoped },
+    } as never);
+    const result = await tx.commit();
+    expect(result.error).toBeUndefined();
+    await writerStorage.synced();
+
+    const { rt, close } = freshReader();
+    try {
+      const cell = rt.getCell(space, "nested-holder", nestedSchema);
+      await cell.pull();
+      const relaxed = schemaWithScopedLinkRequiredsRelaxed(
+        nestedSchema,
+        cell.getRaw(),
+        cell as unknown as Cell<unknown>,
+      ) as {
+        required?: string[];
+        properties?: { inner?: { required?: string[] } };
+      };
+      // Root required untouched; only the nested level drops `scoped`.
+      expect(relaxed.required).toEqual(["title", "inner"]);
+      expect(relaxed.properties?.inner?.required).toEqual(["plain"]);
+      const projected = cellWithScopedLinkRequiredsRelaxed(cell);
+      const value = (await projected.pull()) as {
+        title?: string;
+        inner?: { plain?: string };
+      };
+      expect(value?.title).toBe("nested");
+      expect(value?.inner?.plain).toBe("visible");
+    } finally {
+      await close();
+    }
+  });
+
+  it("cycle in the stored chain: detector stays strict and does not hang", async () => {
+    const tx = writerRt.edit();
+    const cellA = writerRt.getCell(
+      space,
+      "cycle-a",
+      { type: "string" } as const,
+      tx,
+    );
+    const cellB = writerRt.getCell(
+      space,
+      "cycle-b",
+      { type: "string" } as const,
+      tx,
+    );
+    cellA.set(cellB as never);
+    cellB.set(cellA as never);
+    const holder = writerRt.getCell(
+      space,
+      "cycle-holder",
+      {
+        type: "object",
+        properties: requiredResultSchema.properties,
+      } as const,
+      tx,
+    );
+    holder.set({
+      question: "cycle question",
+      count: 3,
+      myDraft: cellA,
+    } as never);
+    const result = await tx.commit();
+    expect(result.error).toBeUndefined();
+    await writerStorage.synced();
+
+    const { rt, close } = freshReader();
+    try {
+      const cell = rt.getCell(space, "cycle-holder", requiredResultSchema);
+      await cell.pull();
+      // Chain resolution hits the resolver's cycle detection; the catch keeps
+      // the schema strict (identity-preserved) instead of hanging or relaxing.
+      expect(
+        schemaWithScopedLinkRequiredsRelaxed(
+          requiredResultSchema,
+          cell.getRaw(),
+          cell as unknown as Cell<unknown>,
+        ),
+      ).toBe(requiredResultSchema);
+    } finally {
+      await close();
+    }
+  });
+
+  it("characterization: strictness one link deep is out of reach (schema combine keeps required)", async () => {
+    // A space-scoped link to a doc whose OWN read applies a schema requiring
+    // a scoped member: the boundary relaxation cannot reach it (the traverser
+    // combines schemas across link hops and `required` survives from either
+    // side). This pins the known limit — the proper fix is schema-generator
+    // optionality (see the helper's doc comment).
+    const innerSchema = {
+      type: "object",
+      properties: {
+        plain: { type: "string" },
+        scoped: { type: "string" },
+      },
+      required: ["plain", "scoped"],
+    } as const satisfies JSONSchema;
+    const outerSchema = {
+      type: "object",
+      properties: { title: { type: "string" }, sub: innerSchema },
+      required: ["title", "sub"],
+    } as const satisfies JSONSchema;
+
+    const tx = writerRt.edit();
+    const scoped = writerRt.getCell<string>(
+      space,
+      "deep-scoped",
+      { type: "string" } as const,
+      tx,
+      "session",
+    );
+    scoped.set("deep");
+    const sub = writerRt.getCell(
+      space,
+      "deep-sub",
+      {
+        type: "object",
+        properties: innerSchema.properties,
+      } as const,
+      tx,
+    );
+    sub.set({ plain: "p", scoped } as never);
+    const holder = writerRt.getCell(
+      space,
+      "deep-holder",
+      {
+        type: "object",
+        properties: outerSchema.properties,
+      } as const,
+      tx,
+    );
+    holder.set({ title: "t", sub } as never);
+    const result = await tx.commit();
+    expect(result.error).toBeUndefined();
+    await writerStorage.synced();
+
+    const { rt, close } = freshReader();
+    try {
+      const cell = rt.getCell(space, "deep-holder", outerSchema);
+      await cell.pull();
+      const projected = cellWithScopedLinkRequiredsRelaxed(cell);
+      const value = await projected.pull();
+      // `sub` is a LINK: the relaxation treats links as boundaries, the
+      // linked doc's required check voids `sub`, and the outer required check
+      // (which still requires `sub` — its stored link terminates space-scoped
+      // at the sub doc) voids the whole object. Documented limitation.
+      expect(value).toBeUndefined();
+    } finally {
+      await close();
+    }
+  });
+
   it("strictness preserved: a genuinely missing plain required property still voids", async () => {
     // A doc that simply lacks a required (non-link) property must keep strict
     // semantics through the relaxed projection — the grace is scoped-link
