@@ -18,11 +18,6 @@ import {
 } from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
-// 60s (was 30s): the imported-message authorship row completes in ~17s locally
-// but exceeds 30s on slower CI runners, causing intermittent timeouts in
-// `waitForInvalidAuthorshipState`. Bumping the headroom stabilizes CI; the test
-// logic is unchanged.
-const CFC_GROUP_CHAT_TIMEOUT = 60_000;
 const IMPORTED_MESSAGE_MARKERS = [
   "Jumping in late here.",
   "I think we already covered this above.",
@@ -87,7 +82,6 @@ describe("cfc group chat demo integration test", () => {
     await waitForText(page, "#group-chat-manager-chip", "No profile");
     await waitForDisabled(page, "#trusted-send-button", true);
 
-    await scrollIntoView(page, "#trusted-profile-name");
     await fillCfInput(
       page,
       "#trusted-profile-name",
@@ -108,14 +102,12 @@ describe("cfc group chat demo integration test", () => {
     );
     await waitForRuntimeIdle(page);
 
-    await scrollIntoView(page, "#trusted-room-name");
     await fillCfInput(
       page,
       "#trusted-room-name",
       "Ops",
     );
     await waitForDisabled(page, "#trusted-room-add-button", false);
-    await scrollIntoView(page, "#trusted-admin-panel");
     await waitForText(
       page,
       '[data-ui-control="admin-user-toggle"]',
@@ -132,7 +124,6 @@ describe("cfc group chat demo integration test", () => {
     await waitForText(page, "#rooms-panel", "1 room");
     await waitForText(page, "#rooms-panel", "Ops");
 
-    await scrollIntoView(page, "#host-message-draft");
     await fillCfInput(
       page,
       "#host-message-draft",
@@ -146,7 +137,6 @@ describe("cfc group chat demo integration test", () => {
       "Fake hello from Alice",
     );
 
-    await scrollIntoView(page, "#trusted-message-draft");
     await fillCfInput(
       page,
       "#trusted-message-draft",
@@ -187,7 +177,6 @@ describe("cfc group chat demo integration test", () => {
     );
     await waitForDisabled(page, "#trusted-send-button", true);
 
-    await scrollIntoView(page, "#trusted-profile-name");
     await fillCfInput(
       page,
       "#trusted-profile-name",
@@ -198,7 +187,6 @@ describe("cfc group chat demo integration test", () => {
     await waitForText(page, "#trusted-profile-status", "Bob");
     await waitForRuntimeIdle(page);
 
-    await scrollIntoView(page, "#trusted-message-draft");
     await fillCfInput(
       page,
       "#trusted-message-draft",
@@ -234,7 +222,6 @@ describe("cfc group chat demo integration test", () => {
       "#trusted-conversation-preview",
     );
 
-    await scrollIntoView(page, "#trusted-message-draft");
     await fillCfInput(
       page,
       "#trusted-message-draft",
@@ -254,19 +241,6 @@ describe("cfc group chat demo integration test", () => {
     );
   });
 });
-
-async function scrollIntoView(page: Page, selector: string) {
-  const node = await page.waitForSelector(selector, {
-    strategy: "pierce",
-    timeout: CFC_GROUP_CHAT_TIMEOUT,
-  });
-  await node.evaluate(async (element: Element) => {
-    element.scrollIntoView({ block: "center", inline: "center" });
-    await new Promise((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(resolve))
-    );
-  });
-}
 
 async function waitForAuthorshipState(
   page: Page,
