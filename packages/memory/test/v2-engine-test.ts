@@ -20,6 +20,7 @@ import {
   deleteBranch,
   type Engine,
   entityIdExists,
+  entitySetSeq,
   listBranches,
   listEntityIdPage,
   listEntityIds,
@@ -582,6 +583,7 @@ Deno.test("memory v2 engine lists live space-scoped entity identifiers", async (
     );
     assertEquals(entityIdExists(engine, "of:fid1:first"), true);
     assertEquals(entityIdExists(engine, "of:fid1:missing"), false);
+    assertEquals(entitySetSeq(engine), 1);
 
     applyCommit(engine, {
       sessionId: "session:alice",
@@ -589,12 +591,48 @@ Deno.test("memory v2 engine lists live space-scoped entity identifiers", async (
       commit: {
         localSeq: 2,
         reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:fid1:second",
+          value: toEntityDocument({ payload: "updated" }),
+        }],
+      },
+    });
+    assertEquals(entitySetSeq(engine), 1);
+
+    applyCommit(engine, {
+      sessionId: "session:alice",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
         operations: [{ op: "delete", id: "of:fid1:first" }],
       },
     });
 
     assertEquals(listEntityIds(engine), ["of:fid1:second"]);
     assertEquals(entityIdExists(engine, "of:fid1:first"), false);
+    assertEquals(entitySetSeq(engine), 2);
+
+    applyCommit(engine, {
+      sessionId: "session:alice",
+      principal: "did:key:alice",
+      commit: {
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:fid1:transient",
+          value: toEntityDocument({ payload: "transient" }),
+        }, {
+          op: "delete",
+          id: "of:fid1:transient",
+        }],
+      },
+    });
+    assertEquals(entityIdExists(engine, "of:fid1:transient"), false);
+    assertEquals(entitySetSeq(engine), 2);
+
     assertEquals(
       engine.database.prepare(`
         SELECT id, scope_key, op
@@ -604,6 +642,7 @@ Deno.test("memory v2 engine lists live space-scoped entity identifiers", async (
       [
         { id: "of:fid1:first", scope_key: "space", op: "delete" },
         { id: "of:fid1:second", scope_key: "space", op: "set" },
+        { id: "of:fid1:transient", scope_key: "space", op: "delete" },
         {
           id: "of:fid1:user-only",
           scope_key: "user:did%3Akey%3Aalice",

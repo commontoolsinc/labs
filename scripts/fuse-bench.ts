@@ -77,7 +77,7 @@ OPTIONS:
   --n <count>           Iteration count for latency ops (default: 10)
   --timeout <ms>        Per-iteration timeout ms for write op (default: 5000)
   --ops <list>          Comma-separated ops to run (default: all)
-                        Available: readdir,stat,read_scalar,read_json,write,grep,concurrent_read
+                        Available: readdir,stat,read_scalar,read_json,write,grep,concurrent_read,entity_find
   --write-piece <name>  Piece name for write benchmark (default: first piece found)
   --input-path <rel>    Relative path to write (default: input/content)
   --result-path <rel>   Relative path to poll  (default: result/content)
@@ -101,6 +101,7 @@ const ALL_OPS = [
   "write",
   "grep",
   "concurrent_read",
+  "entity_find",
 ] as const;
 type Op = typeof ALL_OPS[number];
 
@@ -414,6 +415,50 @@ async function benchConcurrentRead(
   };
 }
 
+interface EntityFindResult {
+  elapsed_ms: number;
+  exit_code: number;
+  status_before: Record<string, unknown> | null;
+  status_after: Record<string, unknown> | null;
+  stderr: string;
+}
+
+async function readMountStatus(
+  mount: string,
+): Promise<Record<string, unknown> | null> {
+  const text = await readFileSafe(join(mount, ".status"));
+  if (text === null) return null;
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+async function benchEntityFind(
+  mount: string,
+  space: string,
+): Promise<EntityFindResult> {
+  const entitiesDir = join(mount, space, "entities");
+  const statusBefore = await readMountStatus(mount);
+  const started = performance.now();
+  const output = await new Deno.Command("find", {
+    args: [entitiesDir, "-type", "d"],
+    stdout: "null",
+    stderr: "piped",
+  }).output();
+  const elapsed = Math.round((performance.now() - started) * 10) / 10;
+  const statusAfter = await readMountStatus(mount);
+  console.error("[entity_find] done");
+  return {
+    elapsed_ms: elapsed,
+    exit_code: output.code,
+    status_before: statusBefore,
+    status_after: statusAfter,
+    stderr: new TextDecoder().decode(output.stderr).trim(),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -475,6 +520,9 @@ if (ops.has("grep")) {
 }
 if (ops.has("concurrent_read")) {
   results.concurrent_read = await benchConcurrentRead(piecesDir, pieceDirs);
+}
+if (ops.has("entity_find")) {
+  results.entity_find = await benchEntityFind(opts.mount, opts.space);
 }
 
 console.log(

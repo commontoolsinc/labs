@@ -1797,14 +1797,16 @@ class SpaceReplica implements ISpaceReplica {
 
     const ids: string[] = [];
     let after: string | undefined;
-    let expectedServerSeq: number | undefined;
+    let expectedEntitySetSeq: number | undefined;
     for (;;) {
-      const page = await session.listEntityIds({
-        ...(after === undefined ? {} : { after }),
-        ...(expectedServerSeq === undefined ? {} : { expectedServerSeq }),
-      });
+      const page = after === undefined
+        ? await session.listEntityIds()
+        : await session.listEntityIds({
+          after,
+          expectedEntitySetSeq: expectedEntitySetSeq!,
+        });
       if (page === undefined) return undefined;
-      expectedServerSeq ??= page.serverSeq;
+      expectedEntitySetSeq ??= page.entitySetSeq;
       ids.push(...page.ids);
       if (page.nextAfter === undefined) return ids;
       after = page.nextAfter;

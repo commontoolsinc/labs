@@ -9,6 +9,14 @@ export interface DirectoryPreparer {
   prepareDirectorySnapshot?(
     ino: bigint,
   ): Promise<readonly DirectorySnapshotEntry[] | undefined>;
+  retainDirectorySnapshot?(
+    ino: bigint,
+    entries: readonly DirectorySnapshotEntry[],
+  ): void;
+  releaseDirectorySnapshot?(
+    ino: bigint,
+    entries: readonly DirectorySnapshotEntry[],
+  ): void;
 }
 
 /** Bridge operations used directly by the FUSE lookup and directory callbacks. */
@@ -137,8 +145,10 @@ export class DirectoryHandleMap {
     }
   }
 
-  close(fh: bigint): void {
+  close(fh: bigint): readonly DirectorySnapshotEntry[] | undefined {
+    const entries = this.#handles.get(fh)?.entries;
     this.#handles.delete(fh);
+    return entries;
   }
 
   has(fh: bigint, ino: bigint): boolean {
@@ -246,7 +256,8 @@ export class FuseOperationState {
 
   closeDirectory(fh: bigint, ino: bigint): void {
     if (!this.directoryHandles.has(fh, ino)) return;
-    this.directoryHandles.close(fh);
+    const entries = this.directoryHandles.close(fh);
+    if (entries) this.preparer?.releaseDirectorySnapshot?.(ino, entries);
     this.preparer?.releaseEntityProjectionOpen?.(ino);
   }
 }
@@ -302,8 +313,11 @@ export function prepareDirectoryForHandle(
       ? preparer.prepareDirectorySnapshot(ino)
       : preparer.prepareDirectory(ino).then(() => undefined)
   ).then((entries) => {
-    if (tracked) {
-      if (entries) handles.setSnapshot(fh, ino, entries);
+    if (tracked && handles.has(fh, ino)) {
+      if (entries) {
+        handles.setSnapshot(fh, ino, entries);
+        preparer.retainDirectorySnapshot?.(ino, entries);
+      }
       handles.markPrepared(fh, ino);
     }
     return entries;

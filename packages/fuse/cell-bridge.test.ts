@@ -3,6 +3,7 @@ import {
   assertEquals,
   assertNotEquals,
   assertRejects,
+  assertStrictEquals,
   assertThrows,
 } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
@@ -363,7 +364,11 @@ Deno.test("CellBridge entity directory snapshots do not hydrate values", async (
     },
     listEntityIdPage: () => {
       identifierRequests++;
-      return Promise.resolve({ serverSeq: 7, ids: [...entityIds] });
+      return Promise.resolve({
+        serverSeq: 7,
+        entitySetSeq: 1,
+        ids: [...entityIds],
+      });
     },
     entityIdExists: (id: string) => {
       identifierLookups++;
@@ -414,7 +419,7 @@ Deno.test("CellBridge entity directory snapshots do not hydrate values", async (
   assertEquals(state.allPieceIds, new Set());
 });
 
-Deno.test("CellBridge rejects invalid entity projection cache limits", () => {
+Deno.test("CellBridge rejects invalid entity cache limits", () => {
   for (const maxEntityProjections of [0, -1, 1.5, Number.NaN]) {
     assertThrows(
       () =>
@@ -423,6 +428,16 @@ Deno.test("CellBridge rejects invalid entity projection cache limits", () => {
         }),
       RangeError,
       "maxEntityProjections must be a positive integer",
+    );
+  }
+  for (const maxEntitySnapshotBytes of [0, -1, 1.5, Number.NaN]) {
+    assertThrows(
+      () =>
+        new CellBridge(new FsTree(), "/tmp/cf-exec", {
+          maxEntitySnapshotBytes,
+        }),
+      RangeError,
+      "maxEntitySnapshotBytes must be a positive safe integer",
     );
   }
 });
@@ -536,7 +551,7 @@ Deno.test("CellBridge prepares a stable paginated entity identifier snapshot", a
     listEntityIdPage: (options: {
       after?: string;
       limit?: number;
-      expectedServerSeq?: number;
+      expectedEntitySetSeq?: number;
     }) => {
       requests.push({ ...options });
       const start = options.after === undefined
@@ -546,6 +561,7 @@ Deno.test("CellBridge prepares a stable paginated entity identifier snapshot", a
       const hasMore = start + pageIds.length < ids.length;
       return Promise.resolve({
         serverSeq: 9,
+        entitySetSeq: 9,
         ids: pageIds,
         ...(hasMore ? { nextAfter: pageIds.at(-1)! } : {}),
       });
@@ -565,11 +581,115 @@ Deno.test("CellBridge prepares a stable paginated entity identifier snapshot", a
     entries.slice(2).map(({ name }) => name),
     ids.map((id) => encodeFuseComponent(id)),
   );
+  const reusedEntries = await openDirectorySnapshot(
+    bridge,
+    state.entitiesIno,
+  );
+  assertStrictEquals(reusedEntries, entries);
   assertEquals(requests, [
     { limit: 1_000 },
-    { after: ids[999], limit: 1_000, expectedServerSeq: 9 },
+    { after: ids[999], limit: 1_000, expectedEntitySetSeq: 9 },
+    { limit: 1_000 },
   ]);
   assertEquals(tree.getChildren(state.entitiesIno), []);
+});
+
+Deno.test("CellBridge coalesces concurrent entity snapshot discovery", async () => {
+  const ids = ["of:fid1:first", "of:fid1:second"];
+  const page = defer<{
+    serverSeq: number;
+    entitySetSeq: number;
+    ids: string[];
+  }>();
+  let requests = 0;
+  const manager = {
+    getSpace: () => "did:key:zCoalescedEntitySpace",
+    listEntityIdPage: () => {
+      requests++;
+      return page.promise;
+    },
+  } as unknown as SpaceState["manager"];
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    loadManager: () => Promise.resolve(manager),
+  });
+  bridge.init({ apiUrl: "https://example.invalid", identity: "test" });
+  const state = await bridge.connectSpace("home");
+
+  const first = openDirectorySnapshot(bridge, state.entitiesIno);
+  const second = openDirectorySnapshot(bridge, state.entitiesIno);
+  assertEquals(requests, 1);
+  page.resolve({ serverSeq: 4, entitySetSeq: 2, ids });
+
+  assertStrictEquals(await first, await second);
+  assertEquals(requests, 1);
+});
+
+Deno.test("CellBridge enforces its entity snapshot byte budget", async () => {
+  const manager = {
+    getSpace: () => "did:key:zBoundedEntitySnapshotSpace",
+    listEntityIdPage: () =>
+      Promise.resolve({
+        serverSeq: 1,
+        entitySetSeq: 1,
+        ids: ["of:fid1:larger-than-one-byte"],
+      }),
+  } as unknown as SpaceState["manager"];
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    loadManager: () => Promise.resolve(manager),
+    maxEntitySnapshotBytes: 1,
+  });
+  bridge.init({ apiUrl: "https://example.invalid", identity: "test" });
+  const state = await bridge.connectSpace("home");
+
+  await assertRejects(
+    () => openDirectorySnapshot(bridge, state.entitiesIno),
+    RangeError,
+    "entity directory snapshot requires approximately",
+  );
+});
+
+Deno.test("CellBridge counts handle-pinned generations against the snapshot budget", async () => {
+  let entitySetSeq = 1;
+  let ids = ["of:fid1:first-generation"];
+  const manager = {
+    getSpace: () => "did:key:zPinnedEntitySnapshotSpace",
+    listEntityIdPage: () =>
+      Promise.resolve({
+        serverSeq: entitySetSeq,
+        entitySetSeq,
+        ids,
+      }),
+  } as unknown as SpaceState["manager"];
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    loadManager: () => Promise.resolve(manager),
+    maxEntitySnapshotBytes: 300,
+  });
+  bridge.init({ apiUrl: "https://example.invalid", identity: "test" });
+  const state = await bridge.connectSpace("home");
+  const operations = new FuseOperationState(tree, bridge);
+
+  const firstHandle = operations.openDirectory(state.entitiesIno)!;
+  await operations.prepareDirectory(firstHandle, state.entitiesIno);
+  entitySetSeq++;
+  ids = ["of:fid1:second-generation"];
+
+  const secondHandle = operations.openDirectory(state.entitiesIno)!;
+  await assertRejects(
+    () => operations.prepareDirectory(secondHandle, state.entitiesIno)!,
+    RangeError,
+    "total resident limit",
+  );
+
+  operations.closeDirectory(firstHandle, state.entitiesIno);
+  const refreshed = await operations.prepareDirectory(
+    secondHandle,
+    state.entitiesIno,
+  );
+  assertEquals(refreshed?.at(2)?.name, encodeFuseComponent(ids[0]));
+  operations.closeDirectory(secondHandle, state.entitiesIno);
 });
 
 Deno.test("CellBridge exact entity lookup is targeted and projection cache is bounded", async () => {
@@ -584,7 +704,7 @@ Deno.test("CellBridge exact entity lookup is targeted and projection cache is bo
     getSpace: () => "did:key:zTargetedEntitySpace",
     listEntityIdPage: () => {
       listRequests++;
-      return Promise.resolve({ serverSeq: 1, ids });
+      return Promise.resolve({ serverSeq: 1, entitySetSeq: 1, ids });
     },
     entityIdExists: (id: string) => {
       existenceRequests.push(id);
@@ -871,6 +991,7 @@ Deno.test("CellBridge releases descendant references after reactive removal", as
 Deno.test("CellBridge removes an entity deleted during root hydration", async () => {
   const entityId = "of:fid1:deleted-during-hydration";
   let entityIds = [entityId];
+  let entitySetSeq = 1;
   const pendingPiece = defer<unknown>();
   const hydrationStarted = defer<void>();
   const piece = {
@@ -891,7 +1012,11 @@ Deno.test("CellBridge removes an entity deleted during root hydration", async ()
   const state = buildTestSpace(bridge, "home", []);
   state.manager = {
     listEntityIdPage: () =>
-      Promise.resolve({ serverSeq: 1, ids: [...entityIds] }),
+      Promise.resolve({
+        serverSeq: 1,
+        entitySetSeq,
+        ids: [...entityIds],
+      }),
     entityIdExists: (id: string) => Promise.resolve(entityIds.includes(id)),
   } as unknown as SpaceState["manager"];
   state.pieces = {
@@ -914,6 +1039,7 @@ Deno.test("CellBridge removes an entity deleted during root hydration", async ()
   await hydrationStarted.promise;
 
   entityIds = [];
+  entitySetSeq++;
   await openDirectorySnapshot(bridge, state.entitiesIno);
   assertEquals(
     tree.lookup(state.entitiesIno, encodeFuseComponent(entityId)),
@@ -990,7 +1116,11 @@ Deno.test("CellBridge keeps a mounted space visible when identifier listing fail
             listRequests++;
             return listRequests === 1
               ? Promise.reject(new Error("identifier list unavailable"))
-              : Promise.resolve({ serverSeq: 1, ids: [entityId] });
+              : Promise.resolve({
+                serverSeq: 1,
+                entitySetSeq: 1,
+                ids: [entityId],
+              });
           },
         } as unknown as SpaceState["manager"],
       );
@@ -1021,7 +1151,11 @@ Deno.test("CellBridge keeps a mounted space visible when identifier listing fail
 Deno.test("CellBridge connects before an entity directory snapshot finishes", async () => {
   const tree = new FsTree();
   const discoveryStarted = defer();
-  const identifiers = defer<{ serverSeq: number; ids: string[] }>();
+  const identifiers = defer<{
+    serverSeq: number;
+    entitySetSeq: number;
+    ids: string[];
+  }>();
   const entityId = "of:fid1:delayed-entity";
   let managerLoads = 0;
   const manager = {
@@ -1049,7 +1183,7 @@ Deno.test("CellBridge connects before an entity directory snapshot finishes", as
 
   const secondState = await bridge.connectSpace("home");
   assertEquals(managerLoads, 1);
-  identifiers.resolve({ serverSeq: 1, ids: [entityId] });
+  identifiers.resolve({ serverSeq: 1, entitySetSeq: 1, ids: [entityId] });
 
   assertEquals(firstState.spaceIno, secondState.spaceIno);
   assertEquals(bridge.isConnecting("home"), false);
@@ -1387,13 +1521,14 @@ Deno.test("CellBridge materializes allPieces when /pieces is first read", async 
 Deno.test("CellBridge refreshes /entities from the complete identifier list", async () => {
   const tree = new FsTree();
   let entityIds = ["of:fid1:original"];
+  let entitySetSeq = 1;
   const piecesCell = { sink: () => () => {} };
   const manager = {
     getSpace: () => "did:key:zEntityRefreshSpace",
     getPieces: () => Promise.resolve(piecesCell),
     syncPieces: () => Promise.resolve([]),
     listEntityIdPage: () =>
-      Promise.resolve({ serverSeq: 1, ids: [...entityIds] }),
+      Promise.resolve({ serverSeq: 1, entitySetSeq, ids: [...entityIds] }),
     entityIdExists: (id: string) => Promise.resolve(entityIds.includes(id)),
   } as unknown as SpaceState["manager"];
   const bridge = new CellBridge(tree, "/tmp/cf-exec", {
@@ -1415,6 +1550,7 @@ Deno.test("CellBridge refreshes /entities from the complete identifier list", as
   );
 
   entityIds = ["of:fid1:replacement"];
+  entitySetSeq++;
   assertEquals(
     (await openDirectorySnapshot(bridge, state.entitiesIno)).slice(2).map(
       ({ name }) => name,
@@ -1428,6 +1564,7 @@ Deno.test("CellBridge removes property indexes with a deleted entity", async () 
   const tree = new FsTree();
   const entityId = "of:fid1:removed-entity";
   let entityIds = [entityId];
+  let entitySetSeq = 1;
   const piece = {
     id: entityId,
     name: () => "Removed Entity",
@@ -1445,7 +1582,7 @@ Deno.test("CellBridge removes property indexes with a deleted entity", async () 
   const state = buildTestSpace(bridge, "home", []);
   state.manager = {
     listEntityIdPage: () =>
-      Promise.resolve({ serverSeq: 1, ids: [...entityIds] }),
+      Promise.resolve({ serverSeq: 1, entitySetSeq, ids: [...entityIds] }),
     entityIdExists: (id: string) => Promise.resolve(entityIds.includes(id)),
   } as unknown as SpaceState["manager"];
   state.pieces = {
@@ -1471,6 +1608,7 @@ Deno.test("CellBridge removes property indexes with a deleted entity", async () 
   assertEquals(bridge.shouldPrepareDirectory(resultIno), true);
 
   entityIds = [];
+  entitySetSeq++;
   await openDirectorySnapshot(bridge, state.entitiesIno);
   assertEquals(tree.getNode(inputIno), undefined);
   assertEquals(tree.getNode(resultIno), undefined);
@@ -4360,6 +4498,33 @@ Deno.test("CellBridge.status reports state that moved since the last read", () =
 
   bridge.setDebug(true);
   assertEquals(readStatus().debug, true);
+});
+
+Deno.test("CellBridge.status exposes entity projection retention", async () => {
+  const entityId = "of:fid1:status-retention";
+  const tree = new FsTree();
+  const bridge = makeStatusBridge(tree, () => ({}));
+  const state = buildTestSpace(bridge, "home", [entityId]);
+  state.manager = {
+    entityIdExists: (id: string) => Promise.resolve(id === entityId),
+  } as unknown as SpaceState["manager"];
+  const operations = new FuseOperationState(tree, bridge);
+
+  const ino = await operations.prepareLookup(
+    state.entitiesIno,
+    encodeFuseComponent(entityId),
+  );
+  assertNotEquals(ino, undefined);
+
+  const retained = JSON.parse(readStatusFile(tree)).entityProjection;
+  assertEquals(retained.cachedRoots, 1);
+  assertEquals(retained.lookupRefs, "1");
+  assertEquals(retained.lookupOwnerInodes, 1);
+
+  operations.forget(ino!, 1n);
+  const released = JSON.parse(readStatusFile(tree)).entityProjection;
+  assertEquals(released.lookupRefs, "0");
+  assertEquals(released.lookupOwnerInodes, 0);
 });
 
 Deno.test("CellBridge.status sizes .status from the bytes a read serves", () => {

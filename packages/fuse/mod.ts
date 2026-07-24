@@ -48,6 +48,7 @@ import {
 } from "./cfc-writeback.ts";
 import {
   EACCES,
+  EAGAIN,
   EFBIG,
   EINVAL,
   EIO,
@@ -92,6 +93,12 @@ import { buildNodeStat, getMountOwnership } from "./stat.ts";
 import { ReverseInvalidationQueue } from "./invalidation.ts";
 
 const encoder = new TextEncoder();
+
+export function directoryPreparationErrno(error: unknown): number {
+  return error instanceof Error && error.name === "SnapshotChangedError"
+    ? EAGAIN
+    : EIO;
+}
 // Operation ring buffer — last 50 ops for crash diagnostics
 const OP_RING: string[] = [];
 const OP_RING_SIZE = 50;
@@ -1178,8 +1185,8 @@ export async function main(argv: string[] = Deno.args) {
             fuse.symbols.fuse_reply_err(req, ENOENT);
           }
           finishPendingReply();
-        }).catch(() => {
-          fuse.symbols.fuse_reply_err(req, ENOENT);
+        }).catch((error) => {
+          fuse.symbols.fuse_reply_err(req, directoryPreparationErrno(error));
           finishPendingReply();
         });
         return;
@@ -1206,8 +1213,8 @@ export async function main(argv: string[] = Deno.args) {
             replyEntry(req, ino, tree.getNode(ino), true);
           }
           finishPendingReply();
-        }).catch(() => {
-          fuse.symbols.fuse_reply_err(req, ENOENT);
+        }).catch((error) => {
+          fuse.symbols.fuse_reply_err(req, directoryPreparationErrno(error));
           finishPendingReply();
         });
         return;

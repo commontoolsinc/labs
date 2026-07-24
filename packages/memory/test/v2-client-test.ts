@@ -475,7 +475,11 @@ Deno.test("memory v2 entity identifier listing transfers identifiers without ent
     ).filter((message) => Array.isArray(message.ok?.ids));
     assertEquals(listResponses.length, 1);
     const response = listResponses[0];
-    assertEquals(Object.keys(response.ok ?? {}).sort(), ["ids", "serverSeq"]);
+    assertEquals(Object.keys(response.ok ?? {}).sort(), [
+      "entitySetSeq",
+      "ids",
+      "serverSeq",
+    ]);
 
     const serverFlags = client.serverFlags;
     assertExists(serverFlags);
@@ -486,17 +490,38 @@ Deno.test("memory v2 entity identifier listing transfers identifiers without ent
     serverFlags.entityIdPagination = true;
 
     const firstPage = await space.listEntityIds({ limit: 1 });
+    assertExists(firstPage);
+    assertExists(firstPage.nextAfter);
+    const firstCursor = firstPage.nextAfter;
     assertEquals(firstPage?.ids, ["of:fid1:first"]);
     assertEquals(firstPage?.nextAfter, "of:fid1:first");
     const secondPage = await space.listEntityIds({
-      after: firstPage?.nextAfter,
+      after: firstCursor,
       limit: 1,
-      expectedServerSeq: firstPage?.serverSeq,
+      expectedEntitySetSeq: firstPage.entitySetSeq,
     });
     assertEquals(secondPage?.ids, ["of:fid1:second"]);
     assertEquals(secondPage?.nextAfter, undefined);
     await space.transact({
       localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:fid1:first",
+        value: { value: { payload: "updated first" } },
+      }],
+    });
+    assertEquals(
+      (await space.listEntityIds({
+        after: firstCursor,
+        limit: 1,
+        expectedEntitySetSeq: firstPage.entitySetSeq,
+      }))?.ids,
+      ["of:fid1:second"],
+    );
+
+    await space.transact({
+      localSeq: 3,
       reads: { confirmed: [], pending: [] },
       operations: [{
         op: "set",
@@ -507,9 +532,9 @@ Deno.test("memory v2 entity identifier listing transfers identifiers without ent
     await assertRejects(
       () =>
         space.listEntityIds({
-          after: firstPage?.nextAfter,
+          after: firstCursor,
           limit: 1,
-          expectedServerSeq: firstPage?.serverSeq,
+          expectedEntitySetSeq: firstPage.entitySetSeq,
         }),
       Error,
       "entity identifier snapshot changed",

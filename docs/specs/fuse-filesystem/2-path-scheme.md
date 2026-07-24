@@ -310,9 +310,10 @@ Mounting does not read the space root, its default pattern, or `allPieces`.
 The named projections under `pieces/` are built when that directory is first
 accessed. This keeps every entity value out of the mount and `entities/`
 listing path, including values for the space root and entities that also appear
-in `allPieces`. When the memory server does not support identifier listing,
-`entities/` remains empty. Opening `pieces/` does not turn it into an
-`allPieces`-only enumeration.
+in `allPieces`. When the memory server does not support bounded identifier
+listing, reading `entities/` fails instead of presenting an authoritative empty
+directory. Opening `pieces/` does not turn it into an `allPieces`-only
+enumeration.
 
 The hydration boundary is safe for recursive tools: a crawler can list and
 open every entity directory without requesting entity values because those

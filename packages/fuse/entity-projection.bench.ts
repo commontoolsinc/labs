@@ -12,6 +12,7 @@ import {
   collectDirectorySnapshot,
   DirectoryHandleMap,
   type DirectorySnapshotEntry,
+  FuseOperationState,
   prepareDirectoryForHandle,
 } from "./directory-handles.ts";
 import { encodeFuseComponent } from "./path-codec.ts";
@@ -109,7 +110,7 @@ async function connect(
     listEntityIdPage: (options: {
       after?: string;
       limit?: number;
-      expectedServerSeq?: number;
+      expectedEntitySetSeq?: number;
     }) => {
       requests++;
       const start = firstIndexAfter(ids, options.after);
@@ -117,6 +118,7 @@ async function connect(
       const hasMore = start + pageIds.length < ids.length;
       const result = {
         serverSeq: 1,
+        entitySetSeq: 1,
         ids: pageIds,
         ...(hasMore ? { nextAfter: pageIds.at(-1)! } : {}),
       };
@@ -258,11 +260,103 @@ async function measureDirectoryOpen(
   };
 }
 
+async function measureLookupLifecycle(
+  benchmark: Deno.BenchContext,
+  ids: string[],
+  forgetImmediately: boolean,
+): Promise<Measurement & { retainedProjections: number }> {
+  const fixture = await connect(ids, false);
+  const operations = new FuseOperationState(fixture.tree, fixture.bridge);
+  forceGc();
+  const before = Deno.memoryUsage();
+  const { wallMs } = await measureOperation(benchmark, async () => {
+    for (const id of ids) {
+      const ino = await operations.prepareLookup(
+        fixture.state.entitiesIno,
+        encodeFuseComponent(id),
+      );
+      if (ino === undefined) throw new Error(`lookup failed for ${id}`);
+      if (forgetImmediately) operations.forget(ino, 1n);
+    }
+  });
+  forceGc();
+  const after = Deno.memoryUsage();
+  const expectedProjections = forgetImmediately
+    ? Math.min(ids.length, 128)
+    : ids.length;
+  if (fixture.state.entityIds.size !== expectedProjections) {
+    throw new Error(
+      `expected ${expectedProjections} retained projections, got ${fixture.state.entityIds.size}`,
+    );
+  }
+  return {
+    existenceRequests: fixture.existenceRequests(),
+    heapMiB: mib(after.heapUsed - before.heapUsed),
+    inodes: fixture.tree.inodes.size,
+    listRequests: fixture.listRequests(),
+    retainedProjections: fixture.state.entityIds.size,
+    rssMiB: mib(after.rss - before.rss),
+    wallMs: Math.round(wallMs * 10) / 10,
+    wireMiB: mib(fixture.wireBytes()),
+  };
+}
+
+async function measureConcurrentDirectoryOpens(
+  benchmark: Deno.BenchContext,
+  ids: string[],
+  handleCount: number,
+): Promise<Measurement & { entries: number; handles: number }> {
+  const fixture = await connect(ids, false);
+  const handles = new DirectoryHandleMap();
+  const fileHandles = Array.from(
+    { length: handleCount },
+    () => handles.open(fixture.state.entitiesIno),
+  );
+  forceGc();
+  const before = Deno.memoryUsage();
+  const { value: snapshots, wallMs } = await measureOperation(
+    benchmark,
+    () =>
+      Promise.all(
+        fileHandles.map((fh) =>
+          createEntityDirectorySnapshot(fixture, handles, fh)
+        ),
+      ),
+  );
+  forceGc();
+  const after = Deno.memoryUsage();
+  const first = snapshots[0];
+  if (
+    first === undefined ||
+    first.length !== ids.length + 2 ||
+    snapshots.some((snapshot) => snapshot !== first)
+  ) {
+    throw new Error("concurrent handles did not share one complete snapshot");
+  }
+  const expectedRequests = Math.max(1, Math.ceil(ids.length / PAGE_SIZE));
+  if (fixture.listRequests() !== expectedRequests) {
+    throw new Error(
+      `expected ${expectedRequests} coalesced list requests, got ${fixture.listRequests()}`,
+    );
+  }
+  return {
+    entries: first.length,
+    existenceRequests: fixture.existenceRequests(),
+    handles: handleCount,
+    heapMiB: mib(after.heapUsed - before.heapUsed),
+    inodes: fixture.tree.inodes.size,
+    listRequests: fixture.listRequests(),
+    rssMiB: mib(after.rss - before.rss),
+    wallMs: Math.round(wallMs * 10) / 10,
+    wireMiB: mib(fixture.wireBytes()),
+  };
+}
+
 for (const count of [1_000, 10_000, 100_000]) {
   let invocation = 0;
   Deno.bench({
-    name: `stubs-${count}`,
-    group: "entity projection cfc off",
+    name: `exact-lookups-${count}`,
+    group: "entity projection exact lookup cfc off",
     n: 1,
     fn: async (benchmark) => {
       diagnostic(
@@ -277,8 +371,8 @@ for (const count of [1_000, 10_000, 100_000]) {
 for (const count of [1_000, 5_000, 10_000, 20_000]) {
   let invocation = 0;
   Deno.bench({
-    name: `stubs-${count}`,
-    group: "entity projection cfc on",
+    name: `exact-lookups-${count}`,
+    group: "entity projection exact lookup cfc on",
     n: 1,
     fn: async (benchmark) => {
       diagnostic(
@@ -288,6 +382,29 @@ for (const count of [1_000, 5_000, 10_000, 20_000]) {
       );
     },
   });
+}
+
+for (const count of [1_000, 10_000, 100_000]) {
+  for (const forgetImmediately of [false, true]) {
+    let invocation = 0;
+    const lifecycle = forgetImmediately ? "forgotten" : "retained";
+    Deno.bench({
+      name: `${lifecycle}-${count}`,
+      group: "entity projection kernel lookup lifecycle",
+      n: 1,
+      fn: async (benchmark) => {
+        diagnostic(
+          `kernel-lookups-${lifecycle}-${count}`,
+          invocation++,
+          await measureLookupLifecycle(
+            benchmark,
+            entityIds(count),
+            forgetImmediately,
+          ),
+        );
+      },
+    });
+  }
 }
 
 for (const count of [1_000, 10_000, 100_000]) {
@@ -304,6 +421,28 @@ for (const count of [1_000, 10_000, 100_000]) {
       );
     },
   });
+}
+
+for (const count of [10_000, 100_000]) {
+  for (const handles of [1, 10, 100]) {
+    let invocation = 0;
+    Deno.bench({
+      name: `${count}-ids-${handles}-handles`,
+      group: "entity projection concurrent directory opens",
+      n: 1,
+      fn: async (benchmark) => {
+        diagnostic(
+          `directory-open-concurrent-${count}-${handles}`,
+          invocation++,
+          await measureConcurrentDirectoryOpens(
+            benchmark,
+            entityIds(count),
+            handles,
+          ),
+        );
+      },
+    });
+  }
 }
 
 for (

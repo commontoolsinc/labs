@@ -18,6 +18,8 @@ import {
   type GraphQueryRequest,
   type GraphQueryResult,
   type HelloMessage,
+  MAX_ENTITY_ID_BYTES,
+  MAX_ENTITY_ID_PAGE_BYTES,
   MAX_ENTITY_ID_PAGE_SIZE,
   type Operation,
   parseMemoryProtocolFlags,
@@ -53,6 +55,39 @@ import {
   type WireMemoryProtocolFlags,
 } from "../v2.ts";
 import * as Engine from "./engine.ts";
+
+const protocolTextEncoder = new TextEncoder();
+
+function entityIdUtf8Bytes(id: string): number {
+  return protocolTextEncoder.encode(id).length;
+}
+
+function takeBoundedEntityIdPage(
+  rows: readonly string[],
+  limit: number,
+): { ids: string[]; hasMore: boolean } {
+  const ids: string[] = [];
+  let serializedBytes = 2; // JSON array brackets.
+  for (const id of rows) {
+    const rawBytes = entityIdUtf8Bytes(id);
+    if (rawBytes > MAX_ENTITY_ID_BYTES) {
+      throw new RangeError(
+        `entity identifier is ${rawBytes} bytes; maximum is ${MAX_ENTITY_ID_BYTES}`,
+      );
+    }
+    const entryBytes = protocolTextEncoder.encode(JSON.stringify(id)).length +
+      (ids.length === 0 ? 0 : 1);
+    if (
+      ids.length >= limit ||
+      serializedBytes + entryBytes > MAX_ENTITY_ID_PAGE_BYTES
+    ) {
+      break;
+    }
+    ids.push(id);
+    serializedBytes += entryBytes;
+  }
+  return { ids, hasMore: ids.length < rows.length };
+}
 import {
   ANYONE_USER,
   type Capability,
@@ -2320,32 +2355,37 @@ export class Server {
       }
 
       const serverSeq = Engine.serverSeq(engine);
+      const entitySetSeq = Engine.entitySetSeq(engine);
       if (
-        message.expectedServerSeq !== undefined &&
-        message.expectedServerSeq !== serverSeq
+        message.expectedEntitySetSeq !== undefined &&
+        message.expectedEntitySetSeq !== entitySetSeq
       ) {
         return respondTypedError<EntityIdListResult>(
           message.requestId,
           toError(
             "SnapshotChangedError",
-            `entity identifier snapshot changed from server sequence ${message.expectedServerSeq} to ${serverSeq}`,
+            `entity identifier snapshot changed from entity-set sequence ${message.expectedEntitySetSeq} to ${entitySetSeq}`,
           ),
         );
       }
 
       if (
         message.after === undefined && message.limit === undefined &&
-        message.expectedServerSeq === undefined
+        message.expectedEntitySetSeq === undefined
       ) {
         const ids = Engine.listEntityIdPage(engine, {
           limit: MAX_ENTITY_ID_PAGE_SIZE + 1,
         });
-        if (ids.length > MAX_ENTITY_ID_PAGE_SIZE) {
+        const bounded = takeBoundedEntityIdPage(
+          ids,
+          MAX_ENTITY_ID_PAGE_SIZE,
+        );
+        if (bounded.hasMore) {
           return respondTypedError<EntityIdListResult>(
             message.requestId,
             toError(
               "ProtocolError",
-              `unpaginated entity identifier listing exceeds ${MAX_ENTITY_ID_PAGE_SIZE} entries; use pagination`,
+              `unpaginated entity identifier listing exceeds the ${MAX_ENTITY_ID_PAGE_SIZE}-entry or ${MAX_ENTITY_ID_PAGE_BYTES}-byte page bound; use pagination`,
             ),
           );
         }
@@ -2354,7 +2394,8 @@ export class Server {
           requestId: message.requestId,
           ok: {
             serverSeq,
-            ids,
+            entitySetSeq,
+            ids: bounded.ids,
           },
         };
       }
@@ -2367,15 +2408,16 @@ export class Server {
         after: message.after,
         limit: limit + 1,
       });
-      const ids = rows.slice(0, limit);
-      const nextAfter = rows.length > limit ? ids.at(-1) : undefined;
+      const bounded = takeBoundedEntityIdPage(rows, limit);
+      const nextAfter = bounded.hasMore ? bounded.ids.at(-1) : undefined;
 
       return {
         type: "response",
         requestId: message.requestId,
         ok: {
           serverSeq,
-          ids,
+          entitySetSeq,
+          ids: bounded.ids,
           ...(nextAfter === undefined ? {} : { nextAfter }),
         },
       };
@@ -3782,24 +3824,30 @@ export const parseClientMessage = (
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
-    (parsed.after === undefined || typeof parsed.after === "string") &&
+    (parsed.after === undefined ||
+      (typeof parsed.after === "string" &&
+        entityIdUtf8Bytes(parsed.after) <= MAX_ENTITY_ID_BYTES)) &&
     (parsed.limit === undefined ||
       (isNonNegativeInteger(parsed.limit) && parsed.limit > 0)) &&
-    (parsed.expectedServerSeq === undefined ||
-      isNonNegativeInteger(parsed.expectedServerSeq))
+    (
+      (parsed.after === undefined &&
+        parsed.expectedEntitySetSeq === undefined) ||
+      (typeof parsed.after === "string" &&
+        isNonNegativeInteger(parsed.expectedEntitySetSeq))
+    )
   ) {
-    return {
+    const base = {
       type: "entity-id.list",
       requestId: parsed.requestId,
       space: parsed.space,
       sessionId: parsed.sessionId,
-      ...(parsed.after === undefined
-        ? {}
-        : { after: parsed.after as EntityIdListRequest["after"] }),
       ...(parsed.limit === undefined ? {} : { limit: parsed.limit }),
-      ...(parsed.expectedServerSeq === undefined
-        ? {}
-        : { expectedServerSeq: parsed.expectedServerSeq }),
+    } as const;
+    if (parsed.after === undefined) return base;
+    return {
+      ...base,
+      after: parsed.after,
+      expectedEntitySetSeq: parsed.expectedEntitySetSeq as number,
     };
   }
 
@@ -3808,7 +3856,8 @@ export const parseClientMessage = (
     typeof parsed.requestId === "string" &&
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
-    typeof parsed.id === "string"
+    typeof parsed.id === "string" &&
+    entityIdUtf8Bytes(parsed.id) <= MAX_ENTITY_ID_BYTES
   ) {
     return {
       type: "entity-id.exists",

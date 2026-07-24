@@ -350,18 +350,30 @@ export interface GraphQueryResult {
 
 export interface EntityIdListResult {
   serverSeq: number;
+  /** Changes only when default-branch, space-scoped live membership changes. */
+  entitySetSeq: number;
   ids: EntityId[];
   nextAfter?: EntityId;
 }
 
 /** Maximum number of entity identifiers carried by one protocol response. */
 export const MAX_ENTITY_ID_PAGE_SIZE = 1_000;
+/** Maximum UTF-8 bytes in one entity identifier accepted by ID RPCs. */
+export const MAX_ENTITY_ID_BYTES = 16 * 1_024;
+/** Maximum serialized UTF-8 bytes in the `ids` array of one list page. */
+export const MAX_ENTITY_ID_PAGE_BYTES = 256 * 1_024;
 
-export interface EntityIdListOptions {
-  after?: EntityId;
-  limit?: number;
-  expectedServerSeq?: number;
-}
+export type EntityIdListOptions =
+  | {
+    after?: undefined;
+    expectedEntitySetSeq?: undefined;
+    limit?: number;
+  }
+  | {
+    after: EntityId;
+    expectedEntitySetSeq: number;
+    limit?: number;
+  };
 
 export interface EntityIdLookupResult {
   serverSeq: number;
@@ -445,15 +457,16 @@ export interface GraphQueryRequest {
   query: GraphQuery;
 }
 
-export interface EntityIdListRequest {
+interface EntityIdListRequestBase {
   type: "entity-id.list";
   requestId: string;
   space: string;
   sessionId: SessionId;
-  after?: EntityId;
-  limit?: number;
-  expectedServerSeq?: number;
 }
+
+export type EntityIdListRequest =
+  & EntityIdListRequestBase
+  & EntityIdListOptions;
 
 export interface EntityIdLookupRequest {
   type: "entity-id.exists";

@@ -367,7 +367,12 @@ export interface IStorageProvider {
 export interface IStorageProviderWithReplica extends IStorageProvider {
   replica: ISpaceReplica;
 
-  /** List live space-scoped entity identifiers without loading their values. */
+  /**
+   * List every live space-scoped entity identifier without loading values.
+   *
+   * @deprecated This materializes the complete namespace. Use
+   * `listEntityIdPage()` for cardinality-bounded work.
+   */
   listEntityIds?(): Promise<string[] | undefined>;
 
   /** List one page from a stable live entity-identifier snapshot. */

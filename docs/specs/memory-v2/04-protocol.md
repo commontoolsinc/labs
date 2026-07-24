@@ -529,18 +529,22 @@ or return stored entity values. The result is sorted by identifier.
 
 ```typescript
 // Shown at module scope.
-interface EntityIdListRequest {
+interface EntityIdListRequestBase {
   type: "entity-id.list";
   requestId: string;
   space: SpaceId;
   sessionId: SessionId;
-  after?: EntityId;
   limit?: number;
-  expectedServerSeq?: number;
 }
+
+type EntityIdListRequest = EntityIdListRequestBase & (
+  | { after?: undefined; expectedEntitySetSeq?: undefined }
+  | { after: EntityId; expectedEntitySetSeq: number }
+);
 
 interface EntityIdListResult {
   serverSeq: number;
+  entitySetSeq: number;
   ids: EntityId[];
   nextAfter?: EntityId;
 }
@@ -549,15 +553,27 @@ interface EntityIdListResult {
 The command requires `READ` access to the space. Deleted entities, user-scoped
 entities, and session-scoped entities do not appear in the result.
 
-The server caps `limit` at 1,000 identifiers. `nextAfter` is present when
-another page exists. The client sends that value as `after` and sends the first
-page's `serverSeq` as `expectedServerSeq` on every continuation. If the space
-changes between pages, the server returns `SnapshotChangedError`. It does not
-silently restart the enumeration or combine pages from different snapshots.
+The server caps `limit` at 1,000 identifiers, each identifier at 16 KiB of
+UTF-8, and the serialized `ids` array at 256 KiB. A page may therefore contain
+fewer identifiers than requested. `nextAfter` is present when another page
+exists. The client sends that value as `after` and sends the first page's
+`entitySetSeq` as `expectedEntitySetSeq` on every continuation.
+`entitySetSeq` advances once per committed transaction that changes membership
+in the live, default-branch, space-scoped entity set. Value-only sets and
+patches do not advance it. This lets long listings continue while unrelated
+entity values change, while additions, deletions, and resurrections fail with
+`SnapshotChangedError`. The server does not silently restart the enumeration
+or combine pages from different entity sets.
+
+`serverSeq` remains the canonical data sequence at which the page was served.
+It is useful for diagnostics but is deliberately not the pagination-consistency
+token.
 
 A request without pagination fields retains the original protocol behavior and
 returns the complete list. This compatibility path is for clients connected to
-servers that advertise `entityIdListing` without `entityIdPagination`.
+servers that advertise `entityIdListing` without `entityIdPagination`. The
+server rejects an unpaginated result that exceeds either the entry or byte
+bound rather than returning one unbounded response.
 
 #### `entity-id.exists` — Test One Live Entity Identifier
 

@@ -34,7 +34,7 @@ servers that advertise `entityIdListing`. It returns sorted, live entity IDs
 from the default branch and space scope. It excludes deleted, user-scoped, and
 session-scoped entities. The operation is authorized as a space `READ`.
 Servers that advertise `entityIdPagination` accept a cursor, a capped page
-size, and the server sequence from the first page.
+size, and the entity-set sequence from the first page.
 
 The operation deliberately returns IDs rather than entity documents. Complete
 discovery is still inherently linear in the number and encoded length of live
@@ -131,12 +131,16 @@ The daemon tracks preparation per directory file handle:
 
 1. `opendir` allocates a directory handle.
 2. The first `readdir` for that handle prepares the dynamic directory. For
-   `entities/`, preparation requests stable identifier pages and stores virtual
-   directory entries on the handle.
+   `entities/`, preparation requests stable identifier pages. The bridge
+   coalesces concurrent preparation and keeps one immutable identifier snapshot
+   per connected space and entity-set generation.
 3. Continuation `readdir` calls for the same handle read the already prepared
    in-memory directory and do not issue another identifier-list request.
 4. `releasedir` discards the handle state.
-5. A later `opendir` gets a new handle and may refresh the identifier set.
+5. A later `opendir` gets a new handle and requests the first page. If its
+   entity-set generation is unchanged, the handle shares the existing entry
+   array by identity. If membership changed, the bridge completes a new scan,
+   publishes it atomically, and later handles share that replacement.
 
 Preparation failures do not mark a handle prepared. The next operation on that
 handle may try again after the caller observes the failure. This is not an
@@ -150,10 +154,16 @@ new opens can observe additions and deletions. Subscription-driven updates may
 still invalidate live tree entries as described in
 [Reactivity and Caching](./6-reactivity.md).
 
-The first page fixes `serverSeq`. Every later page sends that value as
-`expectedServerSeq`. A change fails with `SnapshotChangedError`; the bridge
-does not restart or retry the scan. The server caps each page at 1,000 IDs.
-The FUSE handle publishes no partial listing when any page fails.
+The first page fixes `entitySetSeq`. Every later page sends that value as
+`expectedEntitySetSeq`. The token advances only when live entity membership
+changes, so unrelated value writes do not invalidate a long scan. Additions,
+deletions, and resurrections fail with `SnapshotChangedError`; the bridge does
+not restart or retry the scan. The server caps each page at 1,000 IDs, its
+serialized ID array at 256 KiB, and one ID at 16 KiB. The FUSE handle publishes
+no partial listing when any page fails. The callback maps
+this race to `EAGAIN`, allowing the caller to retry the operation explicitly;
+other preparation failures return `EIO` rather than making a failed listing
+look like a missing directory.
 
 ## CFC Entry Metadata
 
@@ -207,14 +217,17 @@ results show trends but do not cause changes to fail CI:
   directory annotations, and a recursive metadata walk with a fake manager;
   and
 - `packages/memory/test/v2-entity-id-list.bench.ts` measures the SQLite list
-  query across live-count, payload-size, and tombstone-count fixtures, and
-  compares it with the live-head index.
+  query, a capped first page, and exact existence lookup across live-count,
+  payload-size, and tombstone-count fixtures, and compares the full-list query
+  with the former revision join.
 
 Representative commands are:
 
 ```bash
 deno task --cwd packages/fuse bench:entity-projection
 deno task --cwd packages/memory bench:entity-id-list
+deno run -A scripts/fuse-bench.ts \
+  --mount /path/to/mount --space my-space --ops entity_find
 ```
 
 The workflow's JSON artifact records only the operations named by each
@@ -232,9 +245,8 @@ scaling and relative cost, not portable latency budgets.
 ### FUSE projection
 
 Mount construction now creates eight fixed inodes, transfers no identifiers,
-and makes no list request. The historical `stubs-*` benchmark series now
-measures a stream of targeted exact lookups so the chart keeps its existing
-series names while exercising bounded projection churn:
+and makes no list request. The `exact-lookups-*` benchmark series measures a
+stream of targeted exact lookups while exercising bounded projection churn:
 
 | Exact lookups | CFC off | CFC on | Final inodes | List requests |
 | ---: | ---: | ---: | ---: | ---: |
@@ -247,6 +259,17 @@ stayed fixed because only the 128 most recently used exact projections
 remained. CFC annotations add work per projection but no longer make retained
 state proportional to the space's live-entity count.
 
+The production lookup/forget benchmark makes the remaining lifetime constraint
+explicit. With 100,000 lookup replies retained, the bridge held 100,000
+projections and 100,008 total inodes, adding about 110 MiB of V8 heap in
+965–986 ms. When every lookup received its matching `forget`, the same workload
+finished with 128 projections and 136 inodes in 1.61–1.67 s. The retained case
+is expected FUSE correctness: userspace cannot delete an inode while the kernel
+still references it. The mitigation is to keep those projections
+identifier-only, make retention observable, and reclaim them immediately after
+`forget`; it is not safe to impose a hard inode cap that violates kernel
+references.
+
 The first `entities/` directory read retains one virtual entry object per ID on
 the open handle. It does not add those entries to `FsTree`:
 
@@ -256,10 +279,25 @@ the open handle. It does not add those entries to `FsTree`:
 | 10,000 | 12.4–12.7 ms | 10 | about 0.6 MiB | 8 |
 | 100,000 | 119.7–120.3 ms | 100 | about 5.5 MiB | 8 |
 
-The snapshot remains live until `releasedir`, and concurrent handles own
-independent snapshots. This memory is linear in the listing size but has the
-same lifetime as the directory handle. No permanent identifier-inode tree
-remains after the handle closes.
+The snapshot is shared across handles and retained until its space disconnects
+or a newer entity-set generation replaces it. This memory is linear in the
+listing size, but ten concurrent handles no longer retain ten arrays or perform
+ten complete scans. No permanent identifier-inode tree is created by
+enumeration. The bridge applies a 64 MiB default estimated-byte budget across
+cached snapshots and older generations still pinned by directory handles.
+Unpinned least-recently-used snapshots are discarded to make room; if one
+snapshot or the remaining handle-pinned generations exceed the budget, the new
+listing fails closed. The estimate includes both raw and encoded identifier
+strings plus fixed per-entry overhead.
+
+In the shared-snapshot benchmark, ten concurrent handles over 100,000 IDs
+completed one 100-page scan, transferred about 5.5 MiB of identifier JSON,
+retained about 6.5 MiB of additional V8 heap, and created no entity inodes.
+Measured preparation took 240–244 ms. Increasing the handle count from 1 to
+100 kept page count, wire bytes, heap, and time effectively flat (100 handles
+measured 239–263 ms). The benchmark asserts object identity
+between all ten handle snapshots, so a regression to ten scans or ten arrays
+fails deterministically without relying on a timing threshold.
 
 The recursive-walk fixture listed and opened 1,000 entity directories. It made
 one paginated list request and 1,000 point-existence requests. It made zero
@@ -274,6 +312,30 @@ copy-and-sort behavior, which took more than a second at 10,000 entries.
 The fake transport excludes database time, network framing, JSON decoding,
 and FUSE buffer-copy cost. The measurements establish scaling shape rather
 than deployment latency.
+
+The benchmark also exercises the actual lookup/forget bookkeeping used by the
+FUSE callbacks. Its `retained-*` series deliberately withholds kernel `forget`
+notifications and therefore shows the unavoidable pinned-inode case; its
+`forgotten-*` series releases every lookup immediately and must return to the
+configured 128-projection cache. The `concurrent directory opens` series
+requires every handle to receive the same entry-array object and requires only
+one set of protocol pages. These are regression checks on lifecycle and
+coalescing, not latency thresholds.
+
+The `entity_find` operation in `scripts/fuse-bench.ts` runs the host's real
+`find` command against a mounted `entities/` directory and captures `.status`
+before and after. The status high-water fields preserve peak cached roots,
+lookup/open references, and resident snapshot bytes even if the kernel sends
+`forget` before the final sample. This mount-dependent check is intentionally
+separate from the hermetic scheduled benchmark: it needs a populated space,
+working FUSE installation, and live daemon.
+
+The root `.status` file exposes `entityProjection` counters for field
+diagnostics: cache limit and roots, eviction candidates, lookup/open references
+and owners, pending removals, resident/cached snapshot count, handles, entries,
+estimated bytes and byte limit, and in-flight snapshot discovery. A large
+`lookupRefs` value with few eviction candidates means the kernel or a crawler
+is retaining dentries; it is not evidence that entity values were hydrated.
 
 ### Storage query
 
@@ -300,6 +362,13 @@ tombstone-heavy fixture by over two orders of magnitude. Rebuilding a local
 100,000-head tombstone-heavy database with the current migration took about
 93 ms in one run. This is a one-time, open-time write-lock cost rather than
 steady-state listing work.
+
+On the same 100,000-live fixture, capped 1,000-ID first and continuation pages
+measured about 165–168 µs, a complete 100-page traversal measured about 16.3 ms,
+and an indexed exact-existence hit measured about 5.4 µs. These figures exclude
+WebSocket framing and network latency, but they verify that knowing an ID uses
+one indexed point query and that opening a listing does not require a
+100,000-row database result before returning its first page.
 
 ## Acceptance Invariants
 
@@ -331,6 +400,9 @@ Changes to the entity projection must preserve all of the following:
    the configured cache limit. Referenced projections are removed after their
    lookup and open references close. Interrupted FUSE replies do not retain
    lookup references or handles.
+10. **One shared discovery snapshot.** Concurrent directory handles coalesce
+    discovery and share one immutable entry array. A value-only commit preserves
+    the entity-set token; a membership change invalidates it.
 
 Performance tests should prefer deterministic counters and query-plan
 assertions over wall-clock CI thresholds. Useful scale fixtures are 1,000,

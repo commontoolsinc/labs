@@ -170,6 +170,7 @@ type ResolveLink = (value: unknown, depth: number) => string | null;
 export interface CellBridgeOptions {
   cfcAnnotations?: boolean;
   maxEntityProjections?: number;
+  maxEntitySnapshotBytes?: number;
   projectionGeneration?: string;
   statusProvider?: () => Record<string, unknown>;
   onCfcProjectionRebuilt?: () => void;
@@ -266,6 +267,13 @@ interface UnhydratedEntityRootInfo {
   entityId: string;
 }
 
+interface EntityDirectorySnapshot {
+  entitySetSeq: number;
+  ids: readonly string[];
+  entries: readonly DirectorySnapshotEntry[];
+  estimatedBytes: number;
+}
+
 interface EntityProjectionLookupOwner {
   rootIno: bigint;
   count: bigint;
@@ -278,6 +286,14 @@ interface EntityProjectionOpenOwner {
 
 const ENTITY_ID_PAGE_SIZE = 1_000;
 export const DEFAULT_MAX_ENTITY_PROJECTIONS = 128;
+export const DEFAULT_MAX_ENTITY_SNAPSHOT_BYTES = 64 * 1024 * 1024;
+const entitySnapshotEncoder = new TextEncoder();
+
+function snapshotChangedError(message: string): Error {
+  const error = new Error(message);
+  error.name = "SnapshotChangedError";
+  return error;
+}
 
 interface ScheduledPropRebuild {
   cell: Cell<unknown>;
@@ -341,6 +357,22 @@ export class CellBridge {
     UnhydratedEntityRootInfo
   >();
   private pendingEntityHydrations = new Map<bigint, Promise<boolean>>();
+  private entityDirectorySnapshots = new Map<
+    SpaceState,
+    EntityDirectorySnapshot
+  >();
+  private residentEntityDirectorySnapshots = new Map<
+    EntityDirectorySnapshot,
+    number
+  >();
+  private entityDirectorySnapshotByEntries = new Map<
+    readonly DirectorySnapshotEntry[],
+    EntityDirectorySnapshot
+  >();
+  private pendingEntityDirectorySnapshots = new Map<
+    SpaceState,
+    Promise<EntityDirectorySnapshot>
+  >();
   private entityProjectionLru = new Map<bigint, UnhydratedEntityRootInfo>();
   private entityProjectionEvictionCandidates = new Map<
     bigint,
@@ -349,12 +381,17 @@ export class CellBridge {
   private entityProjectionUseOrder = new Map<bigint, number>();
   private nextEntityProjectionUseOrder = 0;
   private entityProjectionLookupRefs = new Map<bigint, bigint>();
+  private entityProjectionLookupRefCount = 0n;
+  private maxEntityProjectionLookupRefCount = 0n;
+  private maxEntityProjectionCachedRoots = 0;
   private entityProjectionLookupOwners = new Map<
     bigint,
     EntityProjectionLookupOwner
   >();
   private entityProjectionLookupOwnerInodes = new Map<bigint, Set<bigint>>();
   private entityProjectionOpenRefs = new Map<bigint, number>();
+  private entityProjectionOpenRefCount = 0;
+  private maxEntityProjectionOpenRefCount = 0;
   private entityProjectionOpenOwners = new Map<
     bigint,
     EntityProjectionOpenOwner
@@ -380,6 +417,8 @@ export class CellBridge {
   private onCfcProjectionRebuilt: (() => void) | undefined;
   private managerLoader: CellBridgeOptions["loadManager"];
   private maxEntityProjections: number;
+  private maxEntitySnapshotBytes: number;
+  private maxResidentEntitySnapshotBytes = 0;
 
   private startedAt = new Date().toISOString();
   /**
@@ -481,6 +520,16 @@ export class CellBridge {
       this.maxEntityProjections < 1
     ) {
       throw new RangeError("maxEntityProjections must be a positive integer");
+    }
+    this.maxEntitySnapshotBytes = options.maxEntitySnapshotBytes ??
+      DEFAULT_MAX_ENTITY_SNAPSHOT_BYTES;
+    if (
+      !Number.isSafeInteger(this.maxEntitySnapshotBytes) ||
+      this.maxEntitySnapshotBytes < 1
+    ) {
+      throw new RangeError(
+        "maxEntitySnapshotBytes must be a positive safe integer",
+      );
     }
   }
 
@@ -612,6 +661,24 @@ export class CellBridge {
         piecesLoaded: state.piecesHydrated,
       };
     }
+    let entityProjectionLookupRefs = 0n;
+    for (const count of this.entityProjectionLookupRefs.values()) {
+      entityProjectionLookupRefs += count;
+    }
+    let entityProjectionOpenRefs = 0;
+    for (const count of this.entityProjectionOpenRefs.values()) {
+      entityProjectionOpenRefs += count;
+    }
+    let entityDirectorySnapshotEntries = 0;
+    let entityDirectorySnapshotBytes = 0;
+    let entityDirectorySnapshotHandles = 0;
+    for (
+      const [snapshot, handles] of this.residentEntityDirectorySnapshots
+    ) {
+      entityDirectorySnapshotEntries += snapshot.ids.length;
+      entityDirectorySnapshotBytes += snapshot.estimatedBytes;
+      entityDirectorySnapshotHandles += handles;
+    }
     const extra = this.statusProvider?.() ?? {};
     return JSON.stringify(
       {
@@ -634,6 +701,29 @@ export class CellBridge {
           disconnected: this._disconnected,
           disconnectCount: this._disconnectCount,
           lastDisconnectReason: this._lastDisconnectReason,
+        },
+        entityProjection: {
+          cacheLimit: this.maxEntityProjections,
+          cachedRoots: this.entityProjectionLru.size,
+          evictionCandidates: this.entityProjectionEvictionCandidates.size,
+          lookupRefs: entityProjectionLookupRefs.toString(),
+          lookupOwnerInodes: this.entityProjectionLookupOwners.size,
+          openRefs: entityProjectionOpenRefs,
+          openOwnerInodes: this.entityProjectionOpenOwners.size,
+          pendingRemovals: this.pendingEntityRemovals.size,
+          directorySnapshots: this.residentEntityDirectorySnapshots.size,
+          cachedDirectorySnapshots: this.entityDirectorySnapshots.size,
+          directorySnapshotHandles: entityDirectorySnapshotHandles,
+          directorySnapshotEntries: entityDirectorySnapshotEntries,
+          directorySnapshotBytes: entityDirectorySnapshotBytes,
+          directorySnapshotByteLimit: this.maxEntitySnapshotBytes,
+          pendingDirectorySnapshots: this.pendingEntityDirectorySnapshots.size,
+          highWater: {
+            cachedRoots: this.maxEntityProjectionCachedRoots,
+            lookupRefs: this.maxEntityProjectionLookupRefCount.toString(),
+            openRefs: this.maxEntityProjectionOpenRefCount,
+            residentSnapshotBytes: this.maxResidentEntitySnapshotBytes,
+          },
         },
         ...extra,
       },
@@ -854,6 +944,8 @@ export class CellBridge {
       this.unregisterPieceRoot(ino);
     }
     this.pendingPieceHydrations.delete(spaceName);
+    this.dropCachedEntityDirectorySnapshot(state);
+    this.pendingEntityDirectorySnapshots.delete(state);
     this.pieceSyncs.delete(spaceName);
     this.syncAgain.delete(spaceName);
     this.tree.removeChild(
@@ -983,6 +1075,14 @@ export class CellBridge {
       rootIno,
       (this.entityProjectionLookupRefs.get(rootIno) ?? 0n) + count,
     );
+    this.entityProjectionLookupRefCount += count;
+    if (
+      this.entityProjectionLookupRefCount >
+        this.maxEntityProjectionLookupRefCount
+    ) {
+      this.maxEntityProjectionLookupRefCount =
+        this.entityProjectionLookupRefCount;
+    }
     this.entityProjectionEvictionCandidates.delete(rootIno);
   }
 
@@ -1007,6 +1107,7 @@ export class CellBridge {
     }
     const remaining =
       (this.entityProjectionLookupRefs.get(owner.rootIno) ?? 0n) - released;
+    this.entityProjectionLookupRefCount -= released;
     if (remaining > 0n) {
       this.entityProjectionLookupRefs.set(owner.rootIno, remaining);
     } else {
@@ -1036,6 +1137,11 @@ export class CellBridge {
       rootIno,
       (this.entityProjectionOpenRefs.get(rootIno) ?? 0) + 1,
     );
+    this.entityProjectionOpenRefCount++;
+    this.maxEntityProjectionOpenRefCount = Math.max(
+      this.maxEntityProjectionOpenRefCount,
+      this.entityProjectionOpenRefCount,
+    );
     this.entityProjectionEvictionCandidates.delete(rootIno);
   }
 
@@ -1057,6 +1163,7 @@ export class CellBridge {
     }
     const remaining = (this.entityProjectionOpenRefs.get(owner.rootIno) ?? 0) -
       1;
+    this.entityProjectionOpenRefCount--;
     if (remaining > 0) {
       this.entityProjectionOpenRefs.set(owner.rootIno, remaining);
     } else {
@@ -1092,6 +1199,10 @@ export class CellBridge {
   }
 
   private clearEntityProjectionReferences(rootIno: bigint): void {
+    this.entityProjectionLookupRefCount -=
+      this.entityProjectionLookupRefs.get(rootIno) ?? 0n;
+    this.entityProjectionOpenRefCount -=
+      this.entityProjectionOpenRefs.get(rootIno) ?? 0;
     this.entityProjectionLookupRefs.delete(rootIno);
     this.entityProjectionOpenRefs.delete(rootIno);
     for (
@@ -1232,13 +1343,9 @@ export class CellBridge {
   ): Promise<readonly DirectorySnapshotEntry[] | undefined> {
     const entities = this.stateForEntitiesDir(ino);
     if (entities) {
-      const ids = await this.listEntityIdsForSnapshot(entities.state);
-      this.pruneEntityProjections(entities.state, ids);
-      return collectVirtualDirectorySnapshot(
-        this.tree,
-        ino,
-        ids.map((id) => encodeFuseComponent(id)),
-      );
+      const snapshot = await this.entityDirectorySnapshot(entities.state);
+      this.pruneEntityProjections(entities.state, snapshot.ids);
+      return snapshot.entries;
     }
 
     if (this.isEntityProjectionDirectory(ino)) {
@@ -2581,6 +2688,10 @@ export class CellBridge {
     );
     this.refreshEntityProjectionEvictionCandidate(ino);
     this.trimEntityProjectionCache(ino);
+    this.maxEntityProjectionCachedRoots = Math.max(
+      this.maxEntityProjectionCachedRoots,
+      this.entityProjectionLru.size,
+    );
   }
 
   private refreshEntityProjectionEvictionCandidate(ino: bigint): void {
@@ -2723,33 +2834,190 @@ export class CellBridge {
     return false;
   }
 
-  private async listEntityIdsForSnapshot(state: SpaceState): Promise<string[]> {
+  private entityDirectorySnapshot(
+    state: SpaceState,
+  ): Promise<EntityDirectorySnapshot> {
+    const existing = this.pendingEntityDirectorySnapshots.get(state);
+    if (existing) return existing;
+    const pending = this.loadEntityDirectorySnapshot(state).finally(() => {
+      if (this.pendingEntityDirectorySnapshots.get(state) === pending) {
+        this.pendingEntityDirectorySnapshots.delete(state);
+      }
+    });
+    this.pendingEntityDirectorySnapshots.set(state, pending);
+    return pending;
+  }
+
+  private cacheEntityDirectorySnapshot(
+    state: SpaceState,
+    snapshot: EntityDirectorySnapshot,
+  ): void {
+    let residentBytes = 0;
+    for (const resident of this.residentEntityDirectorySnapshots.keys()) {
+      residentBytes += resident.estimatedBytes;
+    }
+    const reclaimable: EntityDirectorySnapshot[] = [];
+    if (residentBytes + snapshot.estimatedBytes > this.maxEntitySnapshotBytes) {
+      for (const cached of this.entityDirectorySnapshots.values()) {
+        if (
+          (this.residentEntityDirectorySnapshots.get(cached) ?? 0) === 0 &&
+          !reclaimable.includes(cached)
+        ) {
+          reclaimable.push(cached);
+          residentBytes -= cached.estimatedBytes;
+          if (
+            residentBytes + snapshot.estimatedBytes <=
+              this.maxEntitySnapshotBytes
+          ) {
+            break;
+          }
+        }
+      }
+    }
+    if (residentBytes + snapshot.estimatedBytes > this.maxEntitySnapshotBytes) {
+      throw new RangeError(
+        `entity directory snapshots would require approximately ${
+          residentBytes + snapshot.estimatedBytes
+        } bytes; total resident limit is ${this.maxEntitySnapshotBytes}`,
+      );
+    }
+    for (const evicted of reclaimable) {
+      for (const [cachedState, cached] of this.entityDirectorySnapshots) {
+        if (cached === evicted) {
+          this.entityDirectorySnapshots.delete(cachedState);
+        }
+      }
+      this.removeResidentEntityDirectorySnapshot(evicted);
+    }
+    this.dropCachedEntityDirectorySnapshot(state);
+    this.residentEntityDirectorySnapshots.set(snapshot, 0);
+    this.entityDirectorySnapshotByEntries.set(snapshot.entries, snapshot);
+    this.entityDirectorySnapshots.set(state, snapshot);
+    let currentResidentBytes = 0;
+    for (const resident of this.residentEntityDirectorySnapshots.keys()) {
+      currentResidentBytes += resident.estimatedBytes;
+    }
+    this.maxResidentEntitySnapshotBytes = Math.max(
+      this.maxResidentEntitySnapshotBytes,
+      currentResidentBytes,
+    );
+  }
+
+  private dropCachedEntityDirectorySnapshot(state: SpaceState): void {
+    const snapshot = this.entityDirectorySnapshots.get(state);
+    if (!snapshot) return;
+    this.entityDirectorySnapshots.delete(state);
+    if ((this.residentEntityDirectorySnapshots.get(snapshot) ?? 0) === 0) {
+      this.removeResidentEntityDirectorySnapshot(snapshot);
+    }
+  }
+
+  private removeResidentEntityDirectorySnapshot(
+    snapshot: EntityDirectorySnapshot,
+  ): void {
+    this.residentEntityDirectorySnapshots.delete(snapshot);
+    this.entityDirectorySnapshotByEntries.delete(snapshot.entries);
+  }
+
+  private isCachedEntityDirectorySnapshot(
+    snapshot: EntityDirectorySnapshot,
+  ): boolean {
+    for (const cached of this.entityDirectorySnapshots.values()) {
+      if (cached === snapshot) return true;
+    }
+    return false;
+  }
+
+  retainDirectorySnapshot(
+    ino: bigint,
+    entries: readonly DirectorySnapshotEntry[],
+  ): void {
+    if (!this.isEntitiesDir(ino)) return;
+    const snapshot = this.entityDirectorySnapshotByEntries.get(entries);
+    if (!snapshot) return;
+    this.residentEntityDirectorySnapshots.set(
+      snapshot,
+      (this.residentEntityDirectorySnapshots.get(snapshot) ?? 0) + 1,
+    );
+  }
+
+  releaseDirectorySnapshot(
+    ino: bigint,
+    entries: readonly DirectorySnapshotEntry[],
+  ): void {
+    if (!this.isEntitiesDir(ino)) return;
+    const snapshot = this.entityDirectorySnapshotByEntries.get(entries);
+    if (!snapshot) return;
+    const remaining = Math.max(
+      0,
+      (this.residentEntityDirectorySnapshots.get(snapshot) ?? 0) - 1,
+    );
+    this.residentEntityDirectorySnapshots.set(snapshot, remaining);
+    if (remaining === 0 && !this.isCachedEntityDirectorySnapshot(snapshot)) {
+      this.removeResidentEntityDirectorySnapshot(snapshot);
+    }
+  }
+
+  private async loadEntityDirectorySnapshot(
+    state: SpaceState,
+  ): Promise<EntityDirectorySnapshot> {
     if (typeof state.manager.listEntityIdPage !== "function") {
       throw new Error(
         "memory server does not support paginated entity identifier listing",
       );
     }
 
-    const ids: string[] = [];
-    let after: string | undefined;
-    let expectedServerSeq: number | undefined;
+    const firstPage = await state.manager.listEntityIdPage({
+      limit: ENTITY_ID_PAGE_SIZE,
+    });
+    if (firstPage === undefined) {
+      throw new Error(
+        "memory server does not support paginated entity identifier listing",
+      );
+    }
+    if (!Number.isInteger(firstPage.entitySetSeq)) {
+      throw new Error("entity identifier page omitted its entity-set sequence");
+    }
+
+    const cached = this.entityDirectorySnapshots.get(state);
+    if (cached?.entitySetSeq === firstPage.entitySetSeq) {
+      this.entityDirectorySnapshots.delete(state);
+      this.entityDirectorySnapshots.set(state, cached);
+      return cached;
+    }
+
+    const ids = [...firstPage.ids];
+    let after = firstPage.nextAfter;
+    const expectedEntitySetSeq = firstPage.entitySetSeq;
     let previousId: string | undefined;
-    for (;;) {
+    for (const id of ids) {
+      if (previousId !== undefined && id <= previousId) {
+        throw new Error("entity identifier pages are not strictly sorted");
+      }
+      previousId = id;
+    }
+
+    if (
+      after !== undefined &&
+      (ids.length === 0 || ids.at(-1) !== after)
+    ) {
+      throw new Error("entity identifier page did not advance");
+    }
+
+    while (after !== undefined) {
       const page = await state.manager.listEntityIdPage({
-        ...(after === undefined ? {} : { after }),
+        after,
         limit: ENTITY_ID_PAGE_SIZE,
-        ...(expectedServerSeq === undefined ? {} : { expectedServerSeq }),
+        expectedEntitySetSeq,
       });
       if (page === undefined) {
         throw new Error(
           "memory server does not support paginated entity identifier listing",
         );
       }
-      if (expectedServerSeq === undefined) {
-        expectedServerSeq = page.serverSeq;
-      } else if (page.serverSeq !== expectedServerSeq) {
-        throw new Error(
-          `entity identifier snapshot changed from server sequence ${expectedServerSeq} to ${page.serverSeq}`,
+      if (page.entitySetSeq !== expectedEntitySetSeq) {
+        throw snapshotChangedError(
+          `entity identifier snapshot changed from entity-set sequence ${expectedEntitySetSeq} to ${page.entitySetSeq}`,
         );
       }
       for (const id of page.ids) {
@@ -2759,7 +3027,10 @@ export class CellBridge {
         ids.push(id);
         previousId = id;
       }
-      if (page.nextAfter === undefined) return ids;
+      if (page.nextAfter === undefined) {
+        after = undefined;
+        break;
+      }
       if (
         page.ids.length === 0 || page.nextAfter === after ||
         page.ids.at(-1) !== page.nextAfter
@@ -2768,6 +3039,31 @@ export class CellBridge {
       }
       after = page.nextAfter;
     }
+
+    const names = ids.map((id) => encodeFuseComponent(id));
+    const estimatedBytes = names.reduce(
+      (total, name, index) =>
+        total + 64 + entitySnapshotEncoder.encode(ids[index]).length +
+        entitySnapshotEncoder.encode(name).length,
+      128,
+    );
+    if (estimatedBytes > this.maxEntitySnapshotBytes) {
+      throw new RangeError(
+        `entity directory snapshot requires approximately ${estimatedBytes} bytes; cache limit is ${this.maxEntitySnapshotBytes}`,
+      );
+    }
+    const snapshot: EntityDirectorySnapshot = {
+      entitySetSeq: expectedEntitySetSeq,
+      ids,
+      estimatedBytes,
+      entries: collectVirtualDirectorySnapshot(
+        this.tree,
+        state.entitiesIno,
+        names,
+      ),
+    };
+    this.cacheEntityDirectorySnapshot(state, snapshot);
+    return snapshot;
   }
 
   private hydrateEntityRoot(entityIno: bigint): Promise<boolean> {

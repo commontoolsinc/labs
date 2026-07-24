@@ -252,6 +252,7 @@ export interface FusePlatform {
 
 // Errno constants (POSIX-standard values)
 export const ENOENT = 2;
+export const EAGAIN = 11;
 export const EIO = 5;
 export const EACCES = 13;
 export const EEXIST = 17;

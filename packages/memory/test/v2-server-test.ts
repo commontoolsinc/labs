@@ -8,6 +8,8 @@ import {
   getMemoryProtocolFlags,
   type GraphQueryResult,
   type HelloOkMessage,
+  MAX_ENTITY_ID_BYTES,
+  MAX_ENTITY_ID_PAGE_BYTES,
   MAX_ENTITY_ID_PAGE_SIZE,
   MEMORY_PROTOCOL,
   type ResponseMessage,
@@ -151,12 +153,23 @@ Deno.test("memory v2 server parses entity identifier listing requests", () => {
   assertEquals(
     parseClientMessage(encodeMemoryBoundary({
       type: "entity-id.list",
+      requestId: "entity-list-unsafe-continuation",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:1",
+      after: "of:fid1:first",
+      limit: 100,
+    })),
+    null,
+  );
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      type: "entity-id.list",
       requestId: "entity-list-page",
       space: "did:key:z6Mk-space",
       sessionId: "session:1",
       after: "of:fid1:first",
       limit: 100,
-      expectedServerSeq: 42,
+      expectedEntitySetSeq: 42,
     })),
     {
       type: "entity-id.list",
@@ -165,7 +178,7 @@ Deno.test("memory v2 server parses entity identifier listing requests", () => {
       sessionId: "session:1",
       after: "of:fid1:first",
       limit: 100,
-      expectedServerSeq: 42,
+      expectedEntitySetSeq: 42,
     },
   );
   assertEquals(
@@ -191,6 +204,28 @@ Deno.test("memory v2 server parses entity identifier listing requests", () => {
       sessionId: "session:1",
       id: "of:fid1:first",
     },
+  );
+  const oversizedId = `of:fid1:${"x".repeat(MAX_ENTITY_ID_BYTES)}`;
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      type: "entity-id.list",
+      requestId: "entity-list-oversized-cursor",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:1",
+      after: oversizedId,
+      expectedEntitySetSeq: 42,
+    })),
+    null,
+  );
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      type: "entity-id.exists",
+      requestId: "entity-exists-oversized",
+      space: "did:key:z6Mk-space",
+      sessionId: "session:1",
+      id: oversizedId,
+    })),
+    null,
   );
 });
 
@@ -333,7 +368,7 @@ Deno.test("memory v2 server rejects oversized unpaginated identifier responses",
     assertEquals(unpaginated.error?.name, "ProtocolError");
     assertEquals(
       unpaginated.error?.message,
-      `unpaginated entity identifier listing exceeds ${MAX_ENTITY_ID_PAGE_SIZE} entries; use pagination`,
+      `unpaginated entity identifier listing exceeds the ${MAX_ENTITY_ID_PAGE_SIZE}-entry or ${MAX_ENTITY_ID_PAGE_BYTES}-byte page bound; use pagination`,
     );
 
     const page = await server.listEntityIds({
@@ -345,6 +380,72 @@ Deno.test("memory v2 server rejects oversized unpaginated identifier responses",
     });
     assertEquals(page.ok?.ids.length, MAX_ENTITY_ID_PAGE_SIZE);
     assertExists(page.ok?.nextAfter);
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server bounds serialized identifier page bytes", async () => {
+  const sessions = new SessionRegistry();
+  const server = new Server({
+    sessions,
+    store: new URL("memory://memory-v2-byte-bounded-entity-list"),
+    authorizeSessionOpen: () => "did:key:z6Mk-byte-bounded-entity-list",
+    sessionOpenAuth: { audience: TEST_AUDIENCE },
+  });
+  const space = "did:key:z6Mk-byte-bounded-entity-list";
+  const sessionId = "session:byte-bounded-entity-list";
+  sessions.open(
+    space,
+    { sessionId },
+    0,
+    "byte-bounded-entity-list",
+    "did:key:z6Mk-byte-bounded-entity-list",
+  );
+
+  try {
+    const committed = await server.transact({
+      type: "transact",
+      requestId: "byte-bounded-entity-list-commit",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: Array.from({ length: 100 }, (_, index) => ({
+          op: "set" as const,
+          id: `of:fid1:${index.toString().padStart(3, "0")}-${
+            "x".repeat(4_000)
+          }`,
+          value: { value: { index } },
+        })),
+      },
+    });
+    assertExists(committed.ok);
+
+    const unpaginated = await server.listEntityIds({
+      type: "entity-id.list",
+      requestId: "byte-bounded-entity-list-unpaginated",
+      space,
+      sessionId,
+    });
+    assertEquals(unpaginated.error?.name, "ProtocolError");
+
+    const page = await server.listEntityIds({
+      type: "entity-id.list",
+      requestId: "byte-bounded-entity-list-page",
+      space,
+      sessionId,
+      limit: MAX_ENTITY_ID_PAGE_SIZE,
+    });
+    assertExists(page.ok);
+    assertExists(page.ok.nextAfter);
+    assertEquals(page.ok.ids.length < 100, true);
+    assertEquals(
+      new TextEncoder().encode(JSON.stringify(page.ok.ids)).length <=
+        MAX_ENTITY_ID_PAGE_BYTES,
+      true,
+    );
   } finally {
     await server.close();
   }

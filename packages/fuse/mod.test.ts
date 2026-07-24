@@ -8,6 +8,7 @@ import {
   decodeFuseNamespaceName,
   DEFAULT_CFC_XATTR_NAMESPACE,
   defaultCfcWritebackStatePath,
+  directoryPreparationErrno,
   disconnectedWriteErrno,
   isConnectionWriteFailure,
   parseCfcXattrNamespace,
@@ -29,7 +30,14 @@ import {
 } from "./mount-options.ts";
 import darwinPlatform, { libfusePaths } from "./platform-darwin.ts";
 import linuxPlatform from "./platform-linux.ts";
-import { EACCES, EINVAL, EROFS, FILE_MODE_RW } from "./platform.ts";
+import {
+  EACCES,
+  EAGAIN,
+  EINVAL,
+  EIO,
+  EROFS,
+  FILE_MODE_RW,
+} from "./platform.ts";
 import { FsTree } from "./tree.ts";
 
 function env(values: Record<string, string | undefined>) {
@@ -112,6 +120,13 @@ Deno.test("default CFC writeback state path avoids /tmp fallback", () => {
     ),
     "/home/alice/.cache/commonfabric-fuse/cfc-writeback-_2Fmnt_2Fcf.json",
   );
+});
+
+Deno.test("directory snapshot changes surface as retryable", () => {
+  const snapshotChanged = new Error("entity identifier snapshot changed");
+  snapshotChanged.name = "SnapshotChangedError";
+  assertEquals(directoryPreparationErrno(snapshotChanged), EAGAIN);
+  assertEquals(directoryPreparationErrno(new Error("backend failed")), EIO);
 });
 
 Deno.test("FUSE namespace writeback decodes path component names", () => {

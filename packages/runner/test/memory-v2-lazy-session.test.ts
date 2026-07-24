@@ -287,7 +287,7 @@ describe("Memory v2 entity identifier capabilities", () => {
     const { storage, provider } = entityListingStorage({}, {
       listEntityIds: () => {
         listCalls++;
-        return Promise.resolve({ serverSeq: 1, ids: [] });
+        return Promise.resolve({ serverSeq: 1, entitySetSeq: 1, ids: [] });
       },
       entityIdExists: () => {
         lookupCalls++;
@@ -349,7 +349,7 @@ describe("Memory v2 entity identifier capabilities", () => {
 
     try {
       expect(await provider.listEntityIds!()).toBeUndefined();
-      expect(requests).toEqual([{}]);
+      expect(requests).toEqual([undefined]);
     } finally {
       await storage.close();
     }

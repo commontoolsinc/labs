@@ -5,6 +5,9 @@ import {
   applyCommit,
   close,
   type Engine,
+  entityIdExists,
+  entitySetSeq,
+  listEntityIdPage,
   listEntityIds,
   open,
 } from "../v2/engine.ts";
@@ -245,6 +248,75 @@ for (const fixture of fixtures) {
         throw new Error(`unexpected live id count: ${ids.length}`);
       }
       observedCount ^= ids.length;
+    },
+  });
+
+  Deno.bench({
+    name: `first page ${fixture.name}`,
+    group: "v2-entity-id-page",
+    baseline: fixture.name === "live-1k-small",
+    fn() {
+      const ids = listEntityIdPage(fixture.engine, { limit: BATCH_SIZE });
+      if (ids.length !== Math.min(BATCH_SIZE, fixture.liveCount)) {
+        throw new Error(`unexpected first-page id count: ${ids.length}`);
+      }
+      observedCount ^= ids.length;
+    },
+  });
+
+  const continuationCursor = listEntityIdPage(fixture.engine, {
+    limit: Math.min(500, fixture.liveCount),
+  }).at(-1);
+  if (continuationCursor !== undefined) {
+    Deno.bench({
+      name: `continuation page ${fixture.name}`,
+      group: "v2-entity-id-page",
+      fn() {
+        const ids = listEntityIdPage(fixture.engine, {
+          after: continuationCursor,
+          limit: BATCH_SIZE,
+        });
+        if (ids.length > BATCH_SIZE) {
+          throw new Error(`oversized continuation page: ${ids.length}`);
+        }
+        observedCount ^= ids.length;
+      },
+    });
+  }
+
+  Deno.bench({
+    name: `complete pages ${fixture.name}`,
+    group: "v2-entity-id-page-traversal",
+    baseline: fixture.name === "live-1k-small",
+    fn() {
+      let after: URI | undefined;
+      let count = 0;
+      for (;;) {
+        const ids = listEntityIdPage(fixture.engine, {
+          ...(after === undefined ? {} : { after }),
+          limit: BATCH_SIZE,
+        });
+        count += ids.length;
+        if (ids.length < BATCH_SIZE) break;
+        after = ids.at(-1) as URI | undefined;
+      }
+      if (count !== fixture.liveCount) {
+        throw new Error(`unexpected paginated live id count: ${count}`);
+      }
+      observedCount ^= count;
+    },
+  });
+
+  const lastLiveId = idFor(fixture.headCount - 1);
+  Deno.bench({
+    name: `exists hit ${fixture.name}`,
+    group: "v2-entity-id-exists",
+    baseline: fixture.name === "live-1k-small",
+    fn() {
+      if (!entityIdExists(fixture.engine, lastLiveId)) {
+        throw new Error(`expected live ID ${lastLiveId}`);
+      }
+      observedCount ^= entitySetSeq(fixture.engine);
     },
   });
 

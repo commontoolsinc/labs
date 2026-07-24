@@ -406,6 +406,14 @@ CREATE TABLE IF NOT EXISTS branch (
 INSERT OR IGNORE INTO branch (name, created_seq, head_seq, status)
 VALUES ('', 0, 0, 'active');
 
+CREATE TABLE IF NOT EXISTS entity_index_state (
+  branch      TEXT    NOT NULL PRIMARY KEY,
+  generation  INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY (branch) REFERENCES branch(name)
+);
+INSERT OR IGNORE INTO entity_index_state (branch, generation)
+VALUES ('', 0);
+
 CREATE TABLE IF NOT EXISTS blob_store (
   hash          TEXT    NOT NULL PRIMARY KEY,
   data          BLOB    NOT NULL,
@@ -509,6 +517,18 @@ SET head_seq = CASE
   ELSE head_seq
 END
 WHERE name = :branch
+`;
+
+const SELECT_ENTITY_SET_GENERATION = `
+SELECT generation
+FROM entity_index_state
+WHERE branch = :branch
+`;
+
+const BUMP_ENTITY_SET_GENERATION = `
+UPDATE entity_index_state
+SET generation = generation + 1
+WHERE branch = :branch
 `;
 
 const SELECT_HEAD = `
@@ -773,6 +793,7 @@ interface PreparedStatements {
   selectCurrentEntityIds: PreparedStatement;
   selectCurrentEntityIdPage: PreparedStatement;
   selectCurrentEntityIdPageAfter: PreparedStatement;
+  selectEntitySetGeneration: PreparedStatement;
   selectExistingCommit: PreparedStatement;
   selectHead: PreparedStatement;
   selectLatestBase: PreparedStatement;
@@ -786,6 +807,7 @@ interface PreparedStatements {
   selectSetDeleteConflict: PreparedStatement;
   upsertHead: PreparedStatement;
   updateBranchHead: PreparedStatement;
+  bumpEntitySetGeneration: PreparedStatement;
   deleteBranch: PreparedStatement;
   deleteOldSnapshots: PreparedStatement;
 }
@@ -1229,6 +1251,7 @@ const prepareStatements = (database: Database): PreparedStatements => ({
   selectCurrentEntityIdPageAfter: database.prepare(
     SELECT_CURRENT_ENTITY_ID_PAGE_AFTER,
   ),
+  selectEntitySetGeneration: database.prepare(SELECT_ENTITY_SET_GENERATION),
   selectExistingCommit: database.prepare(SELECT_EXISTING_COMMIT),
   selectHead: database.prepare(SELECT_HEAD),
   selectLatestBase: database.prepare(SELECT_LATEST_BASE),
@@ -1242,6 +1265,7 @@ const prepareStatements = (database: Database): PreparedStatements => ({
   selectSetDeleteConflict: database.prepare(SELECT_SET_DELETE_CONFLICT),
   upsertHead: database.prepare(UPSERT_HEAD),
   updateBranchHead: database.prepare(UPDATE_BRANCH_HEAD),
+  bumpEntitySetGeneration: database.prepare(BUMP_ENTITY_SET_GENERATION),
   deleteBranch: database.prepare(DELETE_BRANCH),
   deleteOldSnapshots: database.prepare(DELETE_OLD_SNAPSHOTS),
 });
@@ -2434,6 +2458,14 @@ export const entityIdExists = (
     scope_key: DEFAULT_SCOPE_KEY,
     id,
   }) !== undefined;
+};
+
+/** Generation of the default branch's live, space-scoped entity-ID set. */
+export const entitySetSeq = (engine: Engine): number => {
+  const row = engine.statements.selectEntitySetGeneration.get({
+    branch: DEFAULT_BRANCH,
+  }) as { generation: number } | undefined;
+  return row?.generation ?? 0;
 };
 
 export const read = (
@@ -5172,6 +5204,33 @@ const applyCommitTransaction = (
     commit,
   );
 
+  const entityMembershipBefore = new Map<EntityId, boolean>();
+  const entityMembershipAfter = new Map<EntityId, boolean>();
+  if (branch === DEFAULT_BRANCH) {
+    for (const operation of commit.operations) {
+      if (
+        operation.op === "sqlite" ||
+        normalizeScope(operation.scope) !== DEFAULT_SCOPE ||
+        entityMembershipBefore.has(operation.id)
+      ) {
+        continue;
+      }
+      entityMembershipBefore.set(
+        operation.id,
+        entityIdExists(engine, operation.id),
+      );
+      entityMembershipAfter.set(operation.id, operation.op !== "delete");
+    }
+    for (const operation of commit.operations) {
+      if (
+        operation.op !== "sqlite" &&
+        normalizeScope(operation.scope) === DEFAULT_SCOPE
+      ) {
+        entityMembershipAfter.set(operation.id, operation.op !== "delete");
+      }
+    }
+  }
+
   const seq = (engine.statements.selectNextSeq.get() as { seq: number }).seq;
   const invocationRef = engine.legacyCommitMetadataRefsRequired
     ? LEGACY_EMPTY_INVOCATION_REF
@@ -5230,6 +5289,16 @@ const applyCommitTransaction = (
       sessionId,
     });
     revisions.push(revision);
+  }
+
+  if (
+    [...entityMembershipBefore].some(([id, wasLive]) =>
+      entityMembershipAfter.get(id) !== wasLive
+    )
+  ) {
+    engine.statements.bumpEntitySetGeneration.run({
+      branch: DEFAULT_BRANCH,
+    });
   }
 
   validateStoredSyncSchemaRefs(engine, branch, revisions, original);
