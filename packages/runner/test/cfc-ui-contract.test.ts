@@ -231,16 +231,26 @@ describe("CFC UI contract matching", () => {
     }]);
   });
 
-  it("mints no wildcard entry for items beside prefixItems", () => {
-    // Same rule as the ifc walker: a `*` entry matches ANY index including
-    // the tuple slots, but `items` governs only the indices past them.
+  it("keeps the items wildcard entry beside prefixItems", () => {
+    // PR #4969 review: dropping the `*` entry silently dropped the tail
+    // elements' declared contract (fail-open). The `*` stays — it
+    // over-enforces the rest contract on tuple slots, the fail-safe
+    // direction.
     const contracts = uiContractsFromSchema({
       type: "array",
       prefixItems: [{ type: "number" }],
       items: trustedPatternUiActionSchema,
     });
 
-    expect(contracts).toEqual([]);
+    expect(contracts).toEqual([{
+      path: ["*"],
+      contract: {
+        helper: "UiAction",
+        action: "SubmitDirectCommand",
+        trustedPattern: "TrustedDirectCommandSurface",
+        requiredEventIntegrity: ["TrustedDirectCommandSurface"],
+      },
+    }]);
   });
 
   it("keeps sibling ifc metadata when resolving local $refs", () => {

@@ -299,17 +299,15 @@ const uiContractsFromSchemaInternal = (
     );
   }
 
-  // `items` mints a `*` entry, subject to the same limitation as the ifc
-  // walker (walkIfcSchema): with prefixItems present, `items` governs only
-  // the indices past the tuple slots, but `pathPatternMatches`' `*` matches
-  // ANY index — so the mixed tuple-plus-rest shape mints no `*` entry, and
-  // the slots mint at their concrete index below.
-  const tupleFree = !Array.isArray(resolvedSchema.prefixItems) ||
-    resolvedSchema.prefixItems.length === 0;
+  // `items` keeps its `*` entry even beside prefixItems, mirroring
+  // walkIfcSchema (PR #4969 review): the `*` over-enforces the rest
+  // contract on tuple slots, but minting nothing would silently drop the
+  // tail elements' declared contract — fail-open, strictly worse. A
+  // precise "past the slots" representation needs a path grammar beyond
+  // `*`.
   if (
-    tupleFree &&
-    (isRecord(resolvedSchema.items) ||
-      typeof resolvedSchema.items === "boolean")
+    isRecord(resolvedSchema.items) ||
+    typeof resolvedSchema.items === "boolean"
   ) {
     entries.push(
       ...uiContractsFromSchemaInternal(

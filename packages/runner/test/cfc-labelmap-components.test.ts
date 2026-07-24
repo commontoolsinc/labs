@@ -242,12 +242,11 @@ describe("CFC labelMap component origins", () => {
     }
   });
 
-  it("a labeled items rest schema beside prefixItems mints no wildcard entry", async () => {
-    // `items`' `*` entry matches ANY index, including the tuple slots — but
-    // with prefixItems present, `items` covers only the indices past the
-    // slots. Like additionalProperties beside named properties, the mixed
-    // shape mints no `*` entry (exclusion semantics §3.3 forbids expressing
-    // "every index except the slots"); the slots still mint at their index.
+  it("a labeled items rest schema beside prefixItems keeps its wildcard entry", async () => {
+    // PR #4969 review: dropping the `*` entry for the mixed tuple-plus-rest
+    // shape silently dropped the tail elements' declared labels (fail-open).
+    // The `*` stays — it over-taints the slots with the rest labels, the
+    // fail-safe direction — and the slots still mint at their index.
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -289,9 +288,11 @@ describe("CFC labelMap component origins", () => {
       );
       expect(slot).toBeDefined();
       expect(slot!.label.confidentiality).toEqual(["secret"]);
-      expect(
-        entries.some((e) => e.path[0] === "pair" && e.path[1] === "*"),
-      ).toBe(false);
+      const wildcard = entries.find((e) =>
+        e.path.length === 2 && e.path[0] === "pair" && e.path[1] === "*"
+      );
+      expect(wildcard).toBeDefined();
+      expect(wildcard!.label.confidentiality).toEqual(["rest"]);
     } finally {
       await runtime.dispose();
       await storageManager.close();

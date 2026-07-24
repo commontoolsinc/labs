@@ -2110,15 +2110,17 @@ const walkIfcSchema = (
     // review on this PR).
     const recordOnly = resolved.properties === undefined ||
       Object.keys(resolved.properties).length === 0;
-    // `items` is subject to the same limitation as `additionalProperties`:
-    // with `prefixItems` present it covers only the indices PAST the tuple
-    // slots, but a `*` entry matches ANY index — including the slots — so a
-    // mixed tuple-plus-rest schema would over-taint the slot positions.
-    // Expressing "every index except the slots" needs the exclusion
-    // semantics §3.3 forbids, so the mixed case mints no `*` entry for the
-    // rest schema (the slots still mint at their concrete indices below).
-    const tupleFree = !Array.isArray(resolved.prefixItems) ||
-      resolved.prefixItems.length === 0;
+    // `items` keeps its `*` entry even beside `prefixItems` (PR #4969
+    // review). The `*` matches ANY index — including the tuple slots — so
+    // the mixed tuple-plus-rest shape over-taints the slots with the rest
+    // labels; but the alternative (minting nothing, as additionalProperties
+    // does beside named properties) silently DROPS the tail elements'
+    // declared labels — fail-open, strictly worse than over-taint.
+    // Expressing "every index past the slots" precisely needs a path
+    // grammar beyond `*`; until then the wildcard stays. The record-side
+    // no-mint rule is unchanged: there the `*` entry would misassign
+    // through schemaAtPath's properties-first resolution, a trade that
+    // predates tuple support.
     forEachSubschema(resolved, (child, keyword, key, index) => {
       switch (keyword) {
         case "properties":
@@ -2130,15 +2132,7 @@ const walkIfcSchema = (
           walkIfcSchema(child, path, entries, childRoot, nextActive);
           break;
         case "items":
-          if (tupleFree) {
-            walkIfcSchema(
-              child,
-              [...path, "*"],
-              entries,
-              childRoot,
-              nextActive,
-            );
-          }
+          walkIfcSchema(child, [...path, "*"], entries, childRoot, nextActive);
           break;
         case "prefixItems":
           // Tuple slots mint at their concrete index — unlike `items`' `*`
