@@ -36,11 +36,7 @@
 
 // The generated child import map resolves the transitive
 // `data-model`/`content-hash`/`leb128` graph these pull in.
-import {
-  type FabricValue,
-  valueEqual,
-} from "@commonfabric/data-model/fabric-value";
-export { valueEqual };
+export { valueEqual } from "@commonfabric/data-model/fabric-value";
 export {
   toCompactDebugString,
   toIndentedDebugString,
@@ -136,18 +132,18 @@ export class Writable<T = unknown> {
     if (!Array.isArray(this.#value)) {
       throw new Error("addUnique requires an array value");
     }
-    const current = this.#value as FabricValue[];
+    const current = this.#value as unknown[];
     for (const value of values) {
-      if (!current.some((item) => valueEqual(item, value as FabricValue))) {
-        current.push(value as FabricValue);
+      if (!current.some((item) => equals(item, value))) {
+        current.push(value);
       }
     }
   }
 
   removeByValue(value: unknown): void {
     if (!Array.isArray(this.#value)) return;
-    this.#value = (this.#value as FabricValue[]).filter((item) =>
-      !valueEqual(item, value as FabricValue)
+    this.#value = (this.#value as unknown[]).filter((item) =>
+      !equals(item, value)
     ) as T;
   }
 

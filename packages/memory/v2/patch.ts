@@ -4,9 +4,9 @@ import {
   cloneForMutation,
   CloneForMutationError,
   cloneIfNecessary,
-  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { isInstance, isObject } from "@commonfabric/utils/types";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 import type { PatchOp } from "../v2.ts";
 import { encodePointer, parsePointer } from "./path.ts";
 
@@ -270,9 +270,9 @@ const appendAtPath = (
 };
 
 // Set-add by identity: append each value to the tail only if no existing element
-// equals it (by stored-value content equality), creating the array if absent.
-// The dedup runs against durable state on the server, so it is idempotent and
-// merges with concurrent adds of distinct elements.
+// equals it (by stored-value deep equality), creating the array if absent. The
+// dedup runs against durable state on the server, so it is idempotent and merges
+// with concurrent adds of distinct elements.
 const addUniqueAtPath = (
   root: FabricValue,
   path: string[],
@@ -289,7 +289,7 @@ const addUniqueAtPath = (
     );
   }
   for (const value of values) {
-    if (!container.some((existing) => valueEqual(existing, value))) {
+    if (!container.some((existing) => deepEqual(existing, value))) {
       container.push(cloneValue(value));
     }
   }
@@ -297,7 +297,7 @@ const addUniqueAtPath = (
 };
 
 // Remove every element of the array at `path` that equals `value` by stored-value
-// content equality. A missing path or non-array target is a no-op (nothing to
+// deep equality. A missing path or non-array target is a no-op (nothing to
 // remove). Resolved against durable state, so it never clobbers via a whole-array
 // rewrite.
 const removeByValueAtPath = (
@@ -309,7 +309,7 @@ const removeByValueAtPath = (
   if (!Array.isArray(existing)) {
     return root;
   }
-  if (!existing.some((element) => valueEqual(element, value))) {
+  if (!existing.some((element) => deepEqual(element, value))) {
     return root;
   }
   const { root: newRoot, container } = thawSpine(root, path, path);
@@ -317,7 +317,7 @@ const removeByValueAtPath = (
   // container is that same array.
   const array = container as FabricValue[];
   for (let index = array.length - 1; index >= 0; index -= 1) {
-    if (valueEqual(array[index], value)) {
+    if (deepEqual(array[index], value)) {
       array.splice(index, 1);
     }
   }

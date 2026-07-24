@@ -174,11 +174,10 @@ optimistic-replay switch cases — differing only in the op they emit and how it
 applies:
 
 - **`add-unique`** (`{ op: "add-unique"; path; values }`, `addUniqueAtPath`) —
-  appends each value only if no existing element equals it by stored-value
-  content equality (`valueEqual`), creating the array if absent.
-  `Cell.addUnique(...)` does the same dedup locally (against its
-  possibly-incomplete view) and records the count it added; the server re-dedups
-  against durable state. Suppression is identical to
+  appends each value only if no existing element equals it by stored-value deep
+  equality, creating the array if absent. `Cell.addUnique(...)` does the same
+  dedup locally (against its possibly-incomplete view) and records the count it
+  added; the server re-dedups against durable state. Suppression is identical to
   `append` (the added elements are at the tail). A `Cell` argument dedups by its
   link rather than by value (see below), so re-adding the same entity is a no-op.
 
@@ -195,19 +194,18 @@ applies:
 
 - **`remove-by-value`** (`{ op: "remove-by-value"; path; value }`,
   `removeByValueAtPath`) — removes every element of the array at `path` that
-  equals `value` by stored-value content equality (`valueEqual`); absent or
-  non-array is a no-op. `Cell.removeByValue(ref)` matches by link when `ref` is a
-  `Cell` and by value otherwise, filters the matches locally, and records one op
-  per removed element, carrying the element's stored representation so the server
-  matches the durable element exactly. Because it identifies what to remove by
-  value rather than by position, concurrent removes of distinct entries merge
-  instead of clobbering through a whole-array rewrite. Suppression drops the
-  whole subtree at the array path that the local positional removal produced.
+  equals `value` by stored-value deep equality; absent or non-array is a no-op.
+  `Cell.removeByValue(ref)` matches by link when `ref` is a `Cell` and by value
+  otherwise, filters the matches locally, and records one op per removed element,
+  carrying the element's stored representation so the server matches the durable
+  element exactly. Because it identifies what to remove by value rather than by
+  position, concurrent removes of distinct entries merge instead of clobbering
+  through a whole-array rewrite. Suppression drops the whole subtree at the array
+  path that the local positional removal produced.
 
-`add-unique` and `remove-by-value` compare by stored-value content equality. For
-an element that is a separate entity, that stored value is a link, so the
-comparison is by same-target — identity, not deep content.
-`Cell.addUnique`/`removeByValue`
+`add-unique` and `remove-by-value` compare by stored-value deep equality. For an
+element that is a separate entity, that stored value is a link, so the comparison
+is by same-target — identity, not deep content. `Cell.addUnique`/`removeByValue`
 accept either a plain value (compared by content) or a `Cell` (compared by its
 link); passing the cell returned by `elementById` is how a handler adds or
 removes a keyed element by identity (see `keyed-collection-writes.md`). Because a
