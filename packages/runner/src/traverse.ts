@@ -1529,7 +1529,7 @@ export abstract class BaseObjectTraverser {
       // that is read back through here), so unlike the schema-`default`
       // paths it cannot fail loudly yet: the instance leafs through whole.
       return doc.value;
-    } else if (isRecord(doc.value) || isSigilLink(doc.value)) {
+    } else if (isRecord(doc.value)) {
       // First, see if we need special handling
       if (isSigilLink(doc.value)) {
         // Check coverage before getAtPath/followPointer adds this link target
