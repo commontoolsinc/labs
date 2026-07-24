@@ -43,6 +43,7 @@ was last checked against the code.
 | [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection) | `RuntimeOptions.cfcLabelMetadataProtection` | `off` | Bernhard Seefeld (#4638) | `observe` (divergence counting) first, then `enforce` | implemented, staged rollout |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237) | keep as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative or neutral |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
+| [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings` (runner mirrors it onto the session via `setConcurrentWatchRefresh()`) | off | Ben Follington (#4937) | graduate to always-on after live measurement, or remove if superseded | implemented behind the flag, off by default, not yet measured over real latency |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
 
@@ -601,6 +602,36 @@ the per-epic implementation notes).
 >   keeps its write gate failing closed. It was added by Bernhard Seefeld in
 >   "server-side commit-time row-label re-derivation (Epic E4, Phase 3.c)"
 >   (#4552). It is permanent.
+
+### `experimentalConcurrentWatchRefresh`
+
+- **Toggle via.** `experimentalConcurrentWatchRefresh` on
+  `IRemoteStorageProviderSettings`
+  ([`packages/runner/src/storage/interface.ts`](../../packages/runner/src/storage/interface.ts)),
+  passed through `StorageManager` settings. The runner mirrors it onto each
+  memory session via `SpaceSession.setConcurrentWatchRefresh()`
+  ([`packages/memory/v2/client.ts`](../../packages/memory/v2/client.ts)) —
+  per-session, not a process global.
+- **Added by.** Ben Follington (#4937).
+- **Purpose.** By default watch acquisition is strict single-flight per space: a
+  guard holds every watch refresh after the first until the prior response
+  lands, so traversal-driven pulls discovered a tick apart serialize into
+  one-round-trip-each frames even when nothing depends on the prior response. On
+  a high-RTT link this dominates cold-load wall-clock. With the flag on,
+  refreshes overlap up to a bounded window (`CONCURRENT_WATCH_REFRESH_WINDOW`,
+  currently 8) in `storage/v2.ts`, and the memory client issues the whole
+  watch-mutation family (`watch.set` + `watch.add`) in an ordered issue phase so
+  wire order is preserved and application stays ordered. Same-tick microtask
+  coalescing is unchanged.
+- **Current default and planned end state.** Off by default. It is a spike
+  pending live measurement on a real (estuary-latency) load; the window size is
+  a tuning value. End state is either graduation to always-on with a settled
+  window, or removal if the render-side fix (initial-render descent) makes the
+  waterfall shallow enough that concurrency no longer pays.
+- **Status.** Implemented behind the flag, off by default; not yet measured
+  end-to-end over real latency.
+- **Path to removal.** Graduate to always-on once measured safe and beneficial,
+  or remove if superseded by reducing the round-trip count at the source.
 
 ---
 

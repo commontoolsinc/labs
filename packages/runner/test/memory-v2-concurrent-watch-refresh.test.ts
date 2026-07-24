@@ -1,15 +1,14 @@
 /**
- * EXPERIMENT: does lifting the single-flight `#watchRefreshFlushing` guard let
- * watch-refresh round trips overlap?
+ * `experimentalConcurrentWatchRefresh` at the RUNNER storage layer: watch-
+ * refresh round trips may overlap up to a bounded window instead of the default
+ * strict single-flight. (The memory-client ordering guarantees — wire order
+ * across the set/add family and ordered delivery through the real server — are
+ * covered in packages/memory/test/v2-concurrent-watch-refresh-test.ts, where
+ * the in-package server/loopback helpers are available.)
  *
- * Measured motivation: in mobile-Loom HAR captures, per-space watch acquisition
- * is strict single-flight — 0 overlapping requests within a space across 154
- * round trips — so traversal-driven pulls discovered a tick apart serialize
- * into one-RTT-each frames. This pins the current behavior and the behavior
- * under `experimentalConcurrentWatchRefresh`.
- *
- * The transport holds every `watch.add` response open and signals on receipt,
- * so the test can observe how many refreshes are in flight at once.
+ * Everything here is event-driven (no wall-clock sleeps): progress is awaited
+ * on transport signals, and the "nothing more happens" assertions use a
+ * deterministic microtask drain, not a timer.
  */
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
@@ -21,7 +20,6 @@ import {
 } from "@commonfabric/memory/v2";
 import type { IStorageProviderWithReplica } from "../src/storage/interface.ts";
 import { defaultSettings } from "../src/storage/v2.ts";
-import { __setConcurrentWatchRefresh } from "@commonfabric/memory/v2/client";
 import {
   ScriptedSessionTransport,
   type ScriptedTransportMessage,
@@ -31,6 +29,10 @@ import {
 
 const signer = await Identity.fromPassphrase("memory-v2-concurrent-refresh");
 const space = signer.did();
+
+// CONCURRENT_WATCH_REFRESH_WINDOW in storage/v2.ts. Kept in sync by assertion:
+// the concurrency test proves the observed max equals this.
+const WINDOW = 8;
 
 type TestProvider = IStorageProviderWithReplica & {
   get(uri: URI): EntityDocument | undefined;
@@ -49,20 +51,34 @@ const doc = (
 const fullSync = (
   toSeq: number,
   upserts: SessionSyncUpsert[],
-): SessionSync => ({ type: "sync", fromSeq: 0, toSeq, upserts, removes: [] });
+): SessionSync => ({
+  type: "sync",
+  fromSeq: 0,
+  toSeq,
+  upserts,
+  removes: [],
+});
+
+/** Flush pending microtasks deterministically (no timers). */
+async function drainMicrotasks(turns = 50): Promise<void> {
+  for (let i = 0; i < turns; i++) await Promise.resolve();
+}
 
 /**
- * Holds every `watch.add` response open. Records how many are in flight
- * simultaneously (the whole point of the measurement) and lets the test
- * release them explicitly.
+ * Holds every watch.add response open. Records how many are in flight at once
+ * (the whole point), signals on the Nth request, and releases held responses
+ * on demand. Event-driven: `receivedAtLeast(n)` resolves exactly when the Nth
+ * request lands.
  */
 class HoldingTransport extends ScriptedSessionTransport {
   watchAddCount = 0;
   inFlight = 0;
   maxConcurrent = 0;
-  rootCounts: number[] = [];
   #held: Array<() => void> = [];
-  #sentSignals = new Map<number, ReturnType<typeof Promise.withResolvers<void>>>();
+  #receivedWaiters = new Map<
+    number,
+    ReturnType<typeof Promise.withResolvers<void>>
+  >();
 
   constructor() {
     super({
@@ -72,12 +88,12 @@ class HoldingTransport extends ScriptedSessionTransport {
     });
   }
 
-  /** Resolves when the Nth `watch.add` has been received. */
-  sent(n: number): Promise<void> {
-    let d = this.#sentSignals.get(n);
+  receivedAtLeast(n: number): Promise<void> {
+    if (this.watchAddCount >= n) return Promise.resolve();
+    let d = this.#receivedWaiters.get(n);
     if (!d) {
       d = Promise.withResolvers<void>();
-      this.#sentSignals.set(n, d);
+      this.#receivedWaiters.set(n, d);
     }
     return d.promise;
   }
@@ -99,17 +115,17 @@ class HoldingTransport extends ScriptedSessionTransport {
     this.watchAddCount += 1;
     this.inFlight += 1;
     this.maxConcurrent = Math.max(this.maxConcurrent, this.inFlight);
-    const roots = message.watches?.flatMap((w) =>
-      w.query?.roots?.map((r) => r.id as URI) ?? []
-    ) ?? [];
-    this.rootCounts.push(roots.length);
+    const roots =
+      message.watches?.flatMap((w) =>
+        w.query?.roots?.map((r) => r.id as URI) ?? []
+      ) ?? [];
 
-    (this.#sentSignals.get(this.watchAddCount) ??
-      (() => {
-        const d = Promise.withResolvers<void>();
-        this.#sentSignals.set(this.watchAddCount, d);
-        return d;
-      })()).resolve();
+    for (const [n, waiter] of this.#receivedWaiters) {
+      if (this.watchAddCount >= n) {
+        waiter.resolve();
+        this.#receivedWaiters.delete(n);
+      }
+    }
 
     this.#held.push(() => {
       this.inFlight -= 1;
@@ -129,10 +145,6 @@ class HoldingTransport extends ScriptedSessionTransport {
 }
 
 function makeProvider(concurrent: boolean) {
-  // Both serialization layers must lift together: the SpaceReplica flush guard
-  // (settings flag) AND the client session's runWatchMutation chain (this
-  // toggle). Lifting only one leaves the other serializing.
-  __setConcurrentWatchRefresh(concurrent);
   const transport = new HoldingTransport();
   const storageManager = TestStorageManager.create({
     as: signer,
@@ -142,69 +154,92 @@ function makeProvider(concurrent: boolean) {
       experimentalConcurrentWatchRefresh: concurrent,
     },
   }, new SingleSessionFactory(transport));
-  return { transport, storageManager,
-    provider: storageManager.open(space) as TestProvider };
+  return {
+    transport,
+    storageManager,
+    provider: storageManager.open(space) as TestProvider,
+  };
 }
 
-/**
- * Issue N pulls one microtask-wave apart (each after the previous refresh has
- * been *sent* but not answered), simulating traversal that discovers the next
- * cell only after the prior request goes out.
- */
-async function drive(provider: TestProvider, transport: HoldingTransport, n: number) {
-  const pulls: Promise<unknown>[] = [];
-  for (let i = 0; i < n; i++) {
-    const uri = `of:concurrent-${i}-${crypto.randomUUID()}` as unknown as URI;
-    pulls.push(provider.sync(uri, { path: [], schema: false }));
-    // Wait until this pull's refresh has actually been sent before issuing the
-    // next, so they are genuinely discovered a wave apart (not same-tick
-    // coalesced). Under the single-flight guard the send blocks until release,
-    // so bound the wait so the guarded run doesn't hang.
-    await Promise.race([
-      transport.sent(i + 1),
-      new Promise((r) => setTimeout(r, 25)),
-    ]);
+const uri = (tag: string) =>
+  `of:${tag}-${crypto.randomUUID()}` as unknown as URI;
+
+/** Release held responses until every pull settles. Signal-driven: after each
+ * release, wait for either all pulls to settle or the next batch to be sent
+ * (a freed slot flushing more work) — never a fixed iteration/time budget. */
+async function drainAllPulls(
+  transport: HoldingTransport,
+  pulls: Promise<unknown>[],
+): Promise<void> {
+  const all = Promise.all(pulls);
+  let done = false;
+  void all.then(() => (done = true));
+  while (!done) {
+    const nextSent = transport.receivedAtLeast(transport.watchAddCount + 1);
+    transport.releaseAll();
+    // Releasing frees window slots, which may flush the next coalesced batch
+    // (its watch.add arrives) — or all pulls settle. Await whichever happens.
+    await Promise.race([all, nextSent]);
   }
-  return pulls;
+  await all;
 }
 
-Deno.test("single-flight by default: watch refreshes do NOT overlap", async () => {
+Deno.test("single-flight by default: watch refreshes never overlap", async () => {
   const { transport, storageManager, provider } = makeProvider(false);
   try {
-    const pulls = drive(provider, transport, 4);
-    // Give the guarded pipeline time to send whatever it will while held.
-    await new Promise((r) => setTimeout(r, 60));
-    assertEquals(transport.maxConcurrent, 1, "guard should serialize to 1");
-    assertEquals(transport.watchAddCount, 1, "only the first refresh is sent");
-    transport.releaseAll();
-    // As each response lands the next flush drains; keep releasing.
-    for (let i = 0; i < 6; i++) {
-      await new Promise((r) => setTimeout(r, 10));
-      transport.releaseAll();
-    }
-    await Promise.all(await pulls);
+    const pulls: Promise<unknown>[] = [];
+    // First pull's refresh is sent and held.
+    pulls.push(provider.sync(uri("sf-a"), { path: [], schema: false }));
+    await transport.receivedAtLeast(1);
+    // A second pull discovered a wave later (after the first was sent) must NOT
+    // be sent while the first is still in flight — that is single-flight.
+    pulls.push(provider.sync(uri("sf-b"), { path: [], schema: false }));
+    await drainMicrotasks();
+    assertEquals(transport.watchAddCount, 1, "second refresh is not sent yet");
     assertEquals(transport.maxConcurrent, 1, "never more than 1 in flight");
+
+    await drainAllPulls(transport, pulls);
+    assertEquals(
+      transport.maxConcurrent,
+      1,
+      "still never more than 1 in flight",
+    );
+    assertEquals(transport.watchAddCount, 2, "both refreshes eventually sent");
   } finally {
     await storageManager.close();
   }
 });
 
-Deno.test("experimentalConcurrentWatchRefresh: refreshes overlap", async () => {
+Deno.test("concurrent refresh overlaps up to the bounded window", async () => {
   const { transport, storageManager, provider } = makeProvider(true);
   try {
-    const pulls = drive(provider, transport, 4);
-    await new Promise((r) => setTimeout(r, 60));
-    assert(
-      transport.maxConcurrent >= 2,
-      `expected overlapping refreshes, got maxConcurrent=${transport.maxConcurrent}`,
+    const pulls: Promise<unknown>[] = [];
+    // Issue pulls one wave apart (each after the prior was SENT) so each is its
+    // own frame. The first WINDOW stay in flight together.
+    for (let i = 1; i <= WINDOW; i++) {
+      pulls.push(provider.sync(uri(`win-${i}`), { path: [], schema: false }));
+      await transport.receivedAtLeast(i);
+    }
+    assertEquals(
+      transport.maxConcurrent,
+      WINDOW,
+      "concurrency reaches exactly the window",
     );
-    transport.releaseAll();
-    await new Promise((r) => setTimeout(r, 20));
-    transport.releaseAll();
-    await Promise.all(await pulls);
-    console.log(
-      `[concurrent] watchAdds=${transport.watchAddCount} ` +
-        `maxConcurrent=${transport.maxConcurrent} rootCounts=${transport.rootCounts}`,
+    assertEquals(transport.watchAddCount, WINDOW, "window is full");
+
+    // One more while the window is full: issued but held back (not sent).
+    pulls.push(provider.sync(uri("win-extra"), { path: [], schema: false }));
+    await drainMicrotasks();
+    assertEquals(
+      transport.watchAddCount,
+      WINDOW,
+      "the over-window pull is not sent until a slot frees",
+    );
+
+    await drainAllPulls(transport, pulls);
+    assert(
+      transport.maxConcurrent === WINDOW,
+      `bounded at the window, saw ${transport.maxConcurrent}`,
     );
   } finally {
     await storageManager.close();

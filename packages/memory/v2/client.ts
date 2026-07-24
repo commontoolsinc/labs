@@ -34,16 +34,6 @@ import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { expandServerMessageSchemas } from "./sync-schema-table.ts";
 import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
 
-// EXPERIMENT toggle (default off): when true, `watchAddSync` fires its network
-// request outside the serialized watch-mutation chain so multiple watch.add
-// round trips overlap on the wire. Module-level so it can be flipped for
-// measurement without threading a setting through the runner; a real rollout
-// would gate this off the storage settings flag instead.
-export let __concurrentWatchRefresh = false;
-export function __setConcurrentWatchRefresh(value: boolean): void {
-  __concurrentWatchRefresh = value;
-}
-
 export interface Transport {
   send(payload: string): Promise<void>;
   close(): Promise<void>;
@@ -480,7 +470,20 @@ export class SpaceSession {
   #ackScheduled = false;
   #ackFlushing = false;
   #background = new Set<Promise<void>>();
-  #watchMutation: Promise<void> = Promise.resolve();
+  // Watch-mutation ordering. `#watchApply` serializes the APPLICATION of watch
+  // responses (the `#watchSpecs` / `#watchView` mutations) in call order.
+  // `#watchIssue` serializes REQUEST ISSUE in call order and, in concurrent
+  // mode, advances as soon as a request has been *sent* (not answered), so
+  // multiple watch round trips overlap on the wire while application stays
+  // ordered. In single-flight mode `#watchIssue` is unused and each mutation's
+  // request+apply run together on `#watchApply` (byte-identical to the pre-
+  // concurrency behavior).
+  #watchApply: Promise<void> = Promise.resolve();
+  #watchIssue: Promise<void> = Promise.resolve();
+  // Per-session (default off): allow watch-refresh round trips to overlap.
+  // Set by the runner from the `experimentalConcurrentWatchRefresh` storage
+  // setting; see docs/development/EXPERIMENTAL_OPTIONS.md. NOT a process global.
+  #concurrentWatchRefresh = false;
   #closed = false;
   #closeError: Error | null = null;
   #readyOnConnection = true;
@@ -644,27 +647,30 @@ export class SpaceSession {
 
   async watchSetSync(watches: WatchSpec[]): Promise<WatchMutationResult> {
     this.#assertOpen();
-    return await this.runWatchMutation(async () => {
-      const result = await this.client.request<WatchSetResult>({
-        type: "session.watch.set",
-        requestId: crypto.randomUUID(),
-        space: this.space,
-        sessionId: this.#sessionId,
-        watches,
-      });
-      this.noteResult(result.serverSeq);
-      this.#watchSpecs = watches;
-      if (this.#watchView === null) {
-        this.#watchView = WatchView.fromSync(result.sync);
-      } else {
-        this.#watchView.applySync(result.sync, false);
-      }
-      this.scheduleAck(result.serverSeq);
-      return {
-        view: this.#watchView,
-        sync: result.sync,
-      };
-    });
+    return await this.runWatchMutation(
+      () =>
+        this.client.request<WatchSetResult>({
+          type: "session.watch.set",
+          requestId: crypto.randomUUID(),
+          space: this.space,
+          sessionId: this.#sessionId,
+          watches,
+        }),
+      (result) => {
+        this.noteResult(result.serverSeq);
+        this.#watchSpecs = watches;
+        if (this.#watchView === null) {
+          this.#watchView = WatchView.fromSync(result.sync);
+        } else {
+          this.#watchView.applySync(result.sync, false);
+        }
+        this.scheduleAck(result.serverSeq);
+        return {
+          view: this.#watchView,
+          sync: result.sync,
+        };
+      },
+    );
   }
 
   async watchAdd(watches: WatchSpec[]): Promise<WatchView> {
@@ -679,41 +685,34 @@ export class SpaceSession {
 
   async watchAddSync(watches: WatchSpec[]): Promise<WatchMutationResult> {
     this.#assertOpen();
-    const sendRequest = () =>
-      this.client.request<WatchAddResult>({
-        type: "session.watch.add",
-        requestId: crypto.randomUUID(),
-        space: this.space,
-        sessionId: this.#sessionId,
-        watches,
-      });
-    // EXPERIMENT (concurrent watch refresh): fire the network request BEFORE
-    // entering the serialized mutation chain, so multiple watch.add round trips
-    // overlap on the wire. The chain still serializes the VIEW application
-    // (`#watchSpecs` / `#watchView.applySync`) in request-issue order, so
-    // ordering guarantees are preserved — only the request/response wait is
-    // lifted out of the critical section. Default path (flag off) is unchanged:
-    // request and apply both run inside the serialized section.
-    const eager = __concurrentWatchRefresh ? sendRequest() : undefined;
-    return await this.runWatchMutation(async () => {
-      const result = await (eager ?? sendRequest());
-      this.noteResult(result.serverSeq);
-      this.#watchSpecs = [
-        ...new Map(
-          [...this.#watchSpecs, ...watches].map((watch) => [watch.id, watch]),
-        ).values(),
-      ];
-      if (this.#watchView === null) {
-        this.#watchView = WatchView.fromSync(result.sync);
-      } else {
-        this.#watchView.applySync(result.sync, false);
-      }
-      this.scheduleAck(result.serverSeq);
-      return {
-        view: this.#watchView,
-        sync: result.sync,
-      };
-    });
+    return await this.runWatchMutation(
+      () =>
+        this.client.request<WatchAddResult>({
+          type: "session.watch.add",
+          requestId: crypto.randomUUID(),
+          space: this.space,
+          sessionId: this.#sessionId,
+          watches,
+        }),
+      (result) => {
+        this.noteResult(result.serverSeq);
+        this.#watchSpecs = [
+          ...new Map(
+            [...this.#watchSpecs, ...watches].map((watch) => [watch.id, watch]),
+          ).values(),
+        ];
+        if (this.#watchView === null) {
+          this.#watchView = WatchView.fromSync(result.sync);
+        } else {
+          this.#watchView.applySync(result.sync, false);
+        }
+        this.scheduleAck(result.serverSeq);
+        return {
+          view: this.#watchView,
+          sync: result.sync,
+        };
+      },
+    );
   }
 
   async ack(seenSeq: number): Promise<void> {
@@ -932,11 +931,66 @@ export class SpaceSession {
     }
   }
 
-  private async runWatchMutation<T>(work: () => Promise<T>): Promise<T> {
+  /**
+   * Enable/disable concurrent watch refresh for THIS session (default off).
+   * Set by the runner from the `experimentalConcurrentWatchRefresh` storage
+   * setting. Per-session by design — no process global — so one storage
+   * manager's choice never leaks to another client in the same process.
+   */
+  setConcurrentWatchRefresh(enabled: boolean): void {
+    this.#concurrentWatchRefresh = enabled;
+  }
+
+  /**
+   * Serialize a watch mutation (`watch.set` / `watch.add`). `send` issues the
+   * request; `apply` mutates the session view (`#watchSpecs` / `#watchView`)
+   * from the response. Splitting them lets concurrent mode overlap the request
+   * round trips while keeping application ordered.
+   */
+  private async runWatchMutation<R, T>(
+    send: () => Promise<R>,
+    apply: (result: R) => T,
+  ): Promise<T> {
     this.#assertOpen();
-    const previous = this.#watchMutation;
-    const current = previous.catch(() => undefined).then(work);
-    this.#watchMutation = current.then(() => undefined, () => undefined);
+    if (!this.#concurrentWatchRefresh) {
+      // Single-flight (default): send + apply run together, chained on the
+      // prior mutation's completion. Nothing is issued until the previous
+      // mutation fully resolves. Structurally identical to the pre-concurrency
+      // path (a single `work` closure chained on the mutation promise, then
+      // `await`-ed) so its microtask timing — which some downstream ordering
+      // depends on — is unchanged.
+      const previous = this.#watchApply;
+      const current = previous.catch(() => undefined).then(async () =>
+        apply(await send())
+      );
+      this.#watchApply = current.then(() => undefined, () => undefined);
+      return await current;
+    }
+    // Concurrent: preserve wire order across the WHOLE watch-mutation family
+    // (set + add) by issuing requests in call order, while applying responses
+    // in that same order.
+    //  - `#watchIssue` advances as soon as `send()` has been CALLED (its frame
+    //    scheduled ahead of the next mutation's), so an earlier `watch.set` can
+    //    never be overtaken on the wire by a later `watch.add`.
+    //  - the apply step waits for [prior apply, this response], so `#watchSpecs`
+    //    / `#watchView` mutate in call order regardless of which response lands
+    //    first.
+    let response!: Promise<R>;
+    const issued = this.#watchIssue.catch(() => undefined).then(() => {
+      response = send();
+      // Attach a rejection handler immediately: a later request may reject
+      // while an earlier mutation is still pending, which would otherwise
+      // surface as an unhandled rejection even though the caller-facing
+      // apply-chain promise below has its own catch.
+      response.catch(() => undefined);
+    });
+    this.#watchIssue = issued.then(() => undefined, () => undefined);
+
+    const current = Promise.all([
+      this.#watchApply.catch(() => undefined),
+      issued,
+    ]).then(() => response).then((result) => apply(result));
+    this.#watchApply = current.then(() => undefined, () => undefined);
     return await current;
   }
 

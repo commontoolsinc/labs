@@ -320,13 +320,15 @@ export interface IRemoteStorageProviderSettings {
 
   /**
    * EXPERIMENTAL (default off): allow more than one watch-refresh round trip
-   * to be in flight per space at once. Today a single-flight guard
-   * (`#watchRefreshFlushing`) holds every refresh after the first until the
-   * prior response lands, so traversal-driven pulls discovered a tick apart —
-   * even with no data dependency between them — serialize into one-RTT-each
-   * frames instead of fanning out. With this on, a batch flushes as soon as it
-   * is scheduled; same-tick microtask coalescing is unchanged. Off preserves
-   * the exact current behavior.
+   * to be in flight per space at once, up to a bounded window
+   * (`CONCURRENT_WATCH_REFRESH_WINDOW`). By default watch acquisition is strict
+   * single-flight, so traversal-driven pulls discovered a tick apart — even
+   * with no data dependency between them — serialize into one-RTT-each frames
+   * instead of fanning out. With this on, refreshes overlap up to the window
+   * and the memory client issues the watch-mutation family (set + add) in an
+   * ordered issue phase so wire order is preserved. Same-tick microtask
+   * coalescing is unchanged. Off preserves the exact current behavior. See
+   * docs/development/EXPERIMENTAL_OPTIONS.md.
    */
   experimentalConcurrentWatchRefresh?: boolean;
 }

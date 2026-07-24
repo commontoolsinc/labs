@@ -575,6 +575,15 @@ export const defaultSettings: IRemoteStorageProviderSettings = {
   connectionTimeout: 30_000,
 };
 
+/**
+ * Max concurrent watch-refresh round trips per space when
+ * `experimentalConcurrentWatchRefresh` is on. Bounds how many requests a
+ * traversal-discovered wave may have outstanding at once — high enough to hide
+ * per-request latency behind a deep waterfall, low enough to keep the server's
+ * receive queue and the client's outstanding-request set bounded.
+ */
+const CONCURRENT_WATCH_REFRESH_WINDOW = 8;
+
 const comparePath = (left: readonly string[], right: readonly string[]) => {
   if (left.length !== right.length) {
     return left.length - right.length;
@@ -1689,7 +1698,11 @@ class SpaceReplica implements ISpaceReplica {
   #staleFloor = new Map<string, number>();
   #queuedWatchRefresh: WatchRefreshBatch | null = null;
   #queuedWatchRefreshScheduled = false;
-  #watchRefreshFlushing = false;
+  // Number of watch-refresh round trips currently awaiting a response. Capped
+  // at `#maxWatchRefreshInFlight()` (1 = single-flight; the concurrent window
+  // otherwise) so a large incrementally-discovered wave cannot put an unbounded
+  // number of requests on the wire.
+  #watchRefreshInFlight = 0;
 
   #settings: IRemoteStorageProviderSettings;
 
@@ -2212,6 +2225,14 @@ class SpaceReplica implements ISpaceReplica {
   ): Promise<Result<Unit, PullError>> {
     try {
       const { session } = await this.sessionHandle();
+      // Per-session (no global): mirror the storage setting onto the session so
+      // its watch-mutation family (set + add) uses the ordered-issue concurrent
+      // path. Idempotent; cheap to re-assert each refresh. Optional-chained so
+      // lightweight session doubles in tests (which never opt into concurrency)
+      // are unaffected.
+      session.setConcurrentWatchRefresh?.(
+        this.#settings.experimentalConcurrentWatchRefresh === true,
+      );
       const rawEntries = [...entries];
       const watchEntries = compactWatchEntries(rawEntries);
       if (watchEntries.length === 0) {
@@ -2286,19 +2307,27 @@ class SpaceReplica implements ISpaceReplica {
     return batch.pending.promise;
   }
 
+  /**
+   * Max watch-refresh round trips allowed in flight at once. 1 preserves the
+   * historical strict single-flight behavior; with
+   * `experimentalConcurrentWatchRefresh` on, refreshes overlap up to a bounded
+   * window so traversal-discovered waves fan out WITHOUT an unbounded number of
+   * outstanding requests (backpressure).
+   */
+  #maxWatchRefreshInFlight(): number {
+    return this.#settings.experimentalConcurrentWatchRefresh === true
+      ? CONCURRENT_WATCH_REFRESH_WINDOW
+      : 1;
+  }
+
   private scheduleWatchRefreshFlush(): void {
-    // EXPERIMENTAL: when concurrent refresh is enabled, the single-flight
-    // `#watchRefreshFlushing` gate is ignored so a batch flushes as soon as it
-    // is scheduled, even while a prior refresh is still awaiting its response.
-    // Same-tick coalescing (via `#queuedWatchRefreshScheduled` + the merge in
-    // `enqueueWatchRefresh`) is unchanged; only the cross-RTT serialization is
-    // lifted.
-    const singleFlight = this.#settings.experimentalConcurrentWatchRefresh !==
-      true;
+    // Flush the queued batch when a slot is free. Same-tick coalescing (via
+    // `#queuedWatchRefreshScheduled` + the merge in `enqueueWatchRefresh`) is
+    // unchanged; the window bounds cross-RTT concurrency (1 = single-flight).
     if (
       this.#queuedWatchRefresh === null ||
       this.#queuedWatchRefreshScheduled ||
-      (singleFlight && this.#watchRefreshFlushing)
+      this.#watchRefreshInFlight >= this.#maxWatchRefreshInFlight()
     ) {
       return;
     }
@@ -2306,15 +2335,19 @@ class SpaceReplica implements ISpaceReplica {
     queueMicrotask(() => {
       this.#queuedWatchRefreshScheduled = false;
       if (
-        (singleFlight && this.#watchRefreshFlushing) ||
-        this.#queuedWatchRefresh === null
+        this.#queuedWatchRefresh === null ||
+        this.#watchRefreshInFlight >= this.#maxWatchRefreshInFlight()
       ) {
         return;
       }
       const batch = this.#queuedWatchRefresh;
       this.#queuedWatchRefresh = null;
-      this.#watchRefreshFlushing = true;
+      this.#watchRefreshInFlight += 1;
       void this.flushWatchRefreshBatch(batch);
+      // If the window admits more and another batch has already coalesced,
+      // schedule it now; otherwise the flush's `finally` re-schedules as slots
+      // free.
+      this.scheduleWatchRefreshFlush();
     });
   }
 
@@ -2328,7 +2361,7 @@ class SpaceReplica implements ISpaceReplica {
     } catch (error) {
       batch.pending.resolve({ error: toConnectionError(error) });
     } finally {
-      this.#watchRefreshFlushing = false;
+      this.#watchRefreshInFlight -= 1;
       this.scheduleWatchRefreshFlush();
     }
   }
