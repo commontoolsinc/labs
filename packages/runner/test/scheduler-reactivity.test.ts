@@ -1,11 +1,19 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type {
+  Activity,
   IMemorySpaceAddress,
+  ITransactionJournal,
   MemorySpace,
   URI,
 } from "../src/storage/interface.ts";
-import { classifyTelemetryWriteCounts } from "../src/scheduler/reactivity.ts";
+import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
+import {
+  classifyTelemetryWriteCounts,
+  eventCommitTelemetryWriteCounts,
+} from "../src/scheduler/reactivity.ts";
+import { markReadAsAttemptedWrite } from "../src/storage/reactivity-log.ts";
+import { ManagedStorageTransaction } from "../src/traverse.ts";
 
 const space = "did:key:telemetry" as MemorySpace;
 
@@ -19,6 +27,44 @@ function address(path: string[]): IMemorySpaceAddress {
 }
 
 describe("event commit telemetry write counts", () => {
+  it("counts an attempted no-op write through the transaction wrapper", () => {
+    const attempted = address(["value", "title"]);
+    const activity: Activity[] = [{
+      read: { ...attempted, meta: markReadAsAttemptedWrite },
+    }];
+    const journal: ITransactionJournal = {
+      activity: () => activity,
+      history: () => [],
+      novelty: () => [],
+    };
+    const tx = new ExtendedStorageTransaction(
+      new ManagedStorageTransaction({ load: () => null }, journal),
+    );
+
+    expect(eventCommitTelemetryWriteCounts(tx, [])).toEqual({
+      changedWriteCount: 0,
+      writeCount: 1,
+    });
+  });
+
+  it("derives attempted writes from a transaction journal fallback", () => {
+    const attempted = address(["value", "title"]);
+    const activity: Activity[] = [{
+      read: { ...attempted, meta: markReadAsAttemptedWrite },
+    }];
+    const journal: ITransactionJournal = {
+      activity: () => activity,
+      history: () => [],
+      novelty: () => [],
+    };
+    const tx = new ManagedStorageTransaction({ load: () => null }, journal);
+
+    expect(eventCommitTelemetryWriteCounts(tx, [])).toEqual({
+      changedWriteCount: 0,
+      writeCount: 1,
+    });
+  });
+
   it("counts an exact same-value leaf set as one no-op candidate", () => {
     expect(
       classifyTelemetryWriteCounts([], [

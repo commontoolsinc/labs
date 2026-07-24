@@ -8,6 +8,7 @@ import { normalizeCellScope } from "../scope.ts";
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
+  IStorageTransaction,
   TransactionReactivityLog,
 } from "../storage/interface.ts";
 import { reactivityLogFromActivities } from "../storage/reactivity-log.ts";
@@ -143,7 +144,7 @@ export function txToReactivityLog(
  * attempted targets that do not overlap a changed write are no-op candidates.
  */
 export function eventCommitTelemetryWriteCounts(
-  tx: IExtendedStorageTransaction,
+  tx: IStorageTransaction | IExtendedStorageTransaction,
   changedWrites: readonly IMemorySpaceAddress[],
 ): { writeCount: number; changedWriteCount: number } {
   return classifyTelemetryWriteCounts(
@@ -219,7 +220,7 @@ function normalizedDocumentKey(address: IMemorySpaceAddress): string {
 }
 
 function txToTransactionReactivityLog(
-  tx: IExtendedStorageTransaction,
+  tx: IStorageTransaction | IExtendedStorageTransaction,
 ): TransactionReactivityLog {
   const direct = getDirectTransactionReactivityLog(tx);
   if (direct) {
