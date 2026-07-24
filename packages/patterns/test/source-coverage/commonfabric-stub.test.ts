@@ -354,6 +354,11 @@ export function equals(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+export function valueEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 export function toIndentedDebugString(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
