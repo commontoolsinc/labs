@@ -53,8 +53,12 @@ export function isTerminalRejection(
  * wait-for-catch-up, not a failure. (Reader-dirty propagation re-triggers it too
  * when the catch-up write lands as a fresh notification, but that does not cover
  * a conflict whose triggering write was already delivered, so the re-queue is
- * what guarantees re-evaluation.) Other non-permanent errors are not
- * catch-up-recoverable and keep their bounded retry instead.
+ * what guarantees re-evaluation.) The reactive path recovers the local
+ * stale-basis guard (`isStorageTransactionInconsistent`) the same way — it too
+ * converges by re-running, so it re-queues off the budget rather than stranding
+ * a compute as a zombie under a contention burst. Only a non-permanent error
+ * that re-running cannot resolve — a transport or malformed-store error — keeps
+ * the bounded retry.
  *
  * The event-handler commit path treats the same rejection as the signal to
  * apply committed-write backpressure: re-running the handler against fresh

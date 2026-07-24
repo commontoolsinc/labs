@@ -163,6 +163,20 @@ describe("reactive retries", () => {
   );
 
   it(
+    "retries a same-replica-race rejection off the bounded budget",
+    async () => {
+      // StorageTransactionInconsistent is a stale-basis rejection, like a
+      // conflict: re-running against the settled replica resolves it. It re-arms
+      // and re-queues WITHOUT charging the counter, so a burst longer than the
+      // budget cannot strand the compute as a zombie. Contrast the generic
+      // TransactionError above, which does charge the counter.
+      const r = await runWatcher("StorageTransactionInconsistent", 0);
+      expect(r.queued).toBe(1);
+      expect(r.retries.has(r.action)).toBe(false);
+    },
+  );
+
+  it(
     "should preserve dependencies when retrying failed commits",
     async () => {
       // This test documents expected behavior for the conflict storm fix:
