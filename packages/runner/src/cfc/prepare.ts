@@ -1053,28 +1053,51 @@ export const storedSchemaCoversCandidateEnvelope = (
       return false;
     }
     const storedProperties = stored.properties;
-    return Object.entries(candidate.properties).every(([key, child]) =>
-      storedSchemaCoversCandidateEnvelope(
-        storedProperties[key] as JSONSchema | undefined,
-        child as JSONSchema,
+    if (
+      !Object.entries(candidate.properties).every(([key, child]) =>
+        storedSchemaCoversCandidateEnvelope(
+          storedProperties[key] as JSONSchema | undefined,
+          child as JSONSchema,
+        )
       )
-    );
+    ) {
+      return false;
+    }
+    // Rest claims (PR #4969 review): a candidate additionalProperties is a
+    // claim about every undeclared key — an early return here would judge
+    // it "covered" without comparing, dropping it from the merge. No
+    // candidate rest claim means the properties coverage above suffices;
+    // boolean forms must match exactly; a schema-valued claim needs a
+    // covering stored one.
+    const candidateRest = candidate.additionalProperties;
+    if (candidateRest === undefined) {
+      return true;
+    }
+    if (typeof candidateRest === "boolean") {
+      return stored.additionalProperties === candidateRest;
+    }
+    return typeof stored.additionalProperties === "object" &&
+      stored.additionalProperties !== null &&
+      storedSchemaCoversCandidateEnvelope(
+        stored.additionalProperties,
+        candidateRest,
+      );
   }
 
   // Tuple slots: when either side declares prefixItems, coverage requires
   // slot-wise coverage — otherwise the items branch below would judge
   // envelopes "covered" while their tuple slots differ, and the candidate's
-  // slot info would be dropped instead of merged (fail-open). A stored side
-  // with slots the candidate lacks also fails closed: the stored rest
-  // `items` does not speak for the slot positions the candidate's `items`
-  // covers.
+  // slot info would be dropped instead of merged (fail-open). Arities must
+  // be EQUAL (PR #4969 review): with differing arities, one side's rest
+  // `items` claims positions the other covers with slots, and the shared
+  // items branch below cannot compare those — fail closed and merge.
   if (
     candidate.prefixItems !== undefined || stored.prefixItems !== undefined
   ) {
     if (
       !Array.isArray(candidate.prefixItems) ||
       !Array.isArray(stored.prefixItems) ||
-      candidate.prefixItems.length > stored.prefixItems.length
+      candidate.prefixItems.length !== stored.prefixItems.length
     ) {
       return false;
     }

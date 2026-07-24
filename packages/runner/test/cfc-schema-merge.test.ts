@@ -843,7 +843,24 @@ describe("storedSchemaCoversCandidateEnvelope (merge-skip decision)", () => {
     expect(storedSchemaCoversCandidateEnvelope(stored, candidate)).toBe(false);
   });
 
-  it("covers slot-wise when stored slots cover every candidate slot", () => {
+  it("covers slot-wise when arities are equal and slots cover", () => {
+    const stored = {
+      type: "array",
+      prefixItems: [{ type: "string" }, { type: "number" }],
+      items: { type: "number" },
+    } as const;
+    const candidate = {
+      type: "array",
+      prefixItems: [{ type: "string" }, { type: "number" }],
+      items: { type: "number" },
+    } as const;
+    expect(storedSchemaCoversCandidateEnvelope(stored, candidate)).toBe(true);
+  });
+
+  it("fails closed on differing tuple arities (PR #4969 review)", () => {
+    // With differing arities, the candidate's `items` claims positions the
+    // stored side covers with slots — the shared items branch cannot
+    // compare those, so coverage must fail closed and merge.
     const stored = {
       type: "array",
       prefixItems: [{ type: "string" }, { type: "number" }],
@@ -853,6 +870,47 @@ describe("storedSchemaCoversCandidateEnvelope (merge-skip decision)", () => {
       type: "array",
       prefixItems: [{ type: "string" }],
       items: { type: "number" },
+    } as const;
+    expect(storedSchemaCoversCandidateEnvelope(stored, candidate)).toBe(false);
+  });
+
+  it("does not judge a candidate additionalProperties claim covered via properties alone", () => {
+    // PR #4969 review: the properties branch early-returned without
+    // comparing rest claims, so a candidate map-value claim was dropped
+    // instead of merged.
+    const stored = {
+      type: "object",
+      properties: { a: { type: "string" } },
+    } as const;
+    const candidate = {
+      type: "object",
+      properties: { a: { type: "string" } },
+      additionalProperties: {
+        type: "string",
+        ifc: { confidentiality: ["x"] },
+      },
+    } as const;
+    expect(storedSchemaCoversCandidateEnvelope(stored, candidate)).toBe(false);
+  });
+
+  it("covers a candidate additionalProperties claim the stored side carries", () => {
+    // Stored differs (extra declared property) so the deep-equality
+    // shortcut misses and the rest-claim comparison actually runs.
+    const stored = {
+      type: "object",
+      properties: { a: { type: "string" }, b: { type: "number" } },
+      additionalProperties: {
+        type: "string",
+        ifc: { confidentiality: ["x"] },
+      },
+    } as const;
+    const candidate = {
+      type: "object",
+      properties: { a: { type: "string" } },
+      additionalProperties: {
+        type: "string",
+        ifc: { confidentiality: ["x"] },
+      },
     } as const;
     expect(storedSchemaCoversCandidateEnvelope(stored, candidate)).toBe(true);
   });
