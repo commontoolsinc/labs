@@ -23,6 +23,7 @@ import {
 } from "@commonfabric/runner";
 import { validateSchemaValue } from "@commonfabric/runner/cfc";
 import type { CellScope, JSONSchema } from "@commonfabric/api";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
   assignSlug,
@@ -1496,8 +1497,13 @@ export async function listPieceCallables(
   const { piece } = await loadPieceForCallables(config, deps);
 
   const listings = new Map<string, PieceCallableListing>();
+  // Names ordinary detection rejected: candidates for the forced-stream
+  // fallback below, so the listing covers every path `cf piece call` resolves.
+  const rejected = new Set<string>();
+  let resultRoot: any;
   for (const cellProp of ["result", "input"] as const) {
     const rootCell = await piece[cellProp].getCell();
+    if (cellProp === "result") resultRoot = rootCell;
     const value = rootCell.get?.();
     const schema = rootCell.schema;
     const schemaKeys = isRecord(schema) && isRecord(schema.properties)
@@ -1511,7 +1517,11 @@ export async function listPieceCallables(
         getCallableValue(value, name),
         callableCell,
       );
-      if (!kind) continue;
+      if (!kind) {
+        rejected.add(name);
+        continue;
+      }
+      rejected.delete(name);
       const spec = callableCommandSpec(callableCell, kind);
       listings.set(name, {
         name,
@@ -1524,7 +1534,43 @@ export async function listPieceCallables(
       });
     }
   }
-  return [...listings.values()].sort((a, b) => a.name.localeCompare(b.name));
+
+  // Third resolution path, mirrored from resolvePieceCallable: a handler whose
+  // schema lost the stream marker still dispatches via the forced stream cast
+  // (tryResolvePieceHandler). Probe every rejected name the same way so a
+  // callable-by-name verb can never be absent from the listing.
+  const pieceCell = typeof piece.getCell === "function"
+    ? piece.getCell()
+    : undefined;
+  if (pieceCell && typeof pieceCell.asSchema === "function") {
+    const pieceValue = pieceCell.get?.();
+    if (isRecord(pieceValue)) {
+      for (const name of Object.keys(pieceValue)) {
+        if (!listings.has(name)) rejected.add(name);
+      }
+    }
+    for (const name of rejected) {
+      if (listings.has(name)) continue;
+      const streamRoot = pieceCell.asSchema({
+        type: "object",
+        properties: { [name]: { asCell: ["stream"] } },
+        required: [name],
+      });
+      if (!isHandlerCell(streamRoot.key(name))) continue;
+      const callableCell = resultRoot.key(name).asSchemaFromLinks();
+      const spec = callableCommandSpec(callableCell, "handler");
+      listings.set(name, {
+        name,
+        kind: "handler",
+        on: "result",
+        inputSchema: spec.inputSchema,
+      });
+    }
+  }
+
+  // Byte-order, not locale collation: this is a machine-readable surface and
+  // must sort identically on every host (utf8Compare is the repo comparator).
+  return [...listings.values()].sort((a, b) => utf8Compare(a.name, b.name));
 }
 
 export async function executePieceCallable(

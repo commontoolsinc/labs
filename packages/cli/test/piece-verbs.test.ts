@@ -104,9 +104,23 @@ describe("listPieceCallables", () => {
       },
     );
 
+    // "hiddenPing" defeats ordinary detection (plain object value/schema) but
+    // succeeds through the forced stream cast — resolvePieceCallable's third
+    // path — so the listing must include it. "\u00e9dit" pins byte ordering:
+    // utf8Compare puts it AFTER "setup"/"search" (0xC3 > s), where locale
+    // collation would interleave it linguistically.
+    const pieceRootValue = { hiddenPing: {}, "\u00e9dit": { $stream: true } };
     const piece = {
       result: { getCell: () => Promise.resolve(resultRoot) },
       input: { getCell: () => Promise.resolve(inputRoot) },
+      getCell: () => ({
+        get: () => pieceRootValue,
+        asSchema: (_s: unknown) => ({
+          key: (name: string) => ({
+            isStream: () => name === "hiddenPing" || name === "\u00e9dit",
+          }),
+        }),
+      }),
     };
     const manager = { getSpace: () => "home" };
 
@@ -123,9 +137,20 @@ describe("listPieceCallables", () => {
       },
     );
 
-    expect(verbs.map((v) => v.name)).toEqual(["addTopic", "search", "setup"]);
+    expect(verbs.map((v) => v.name)).toEqual([
+      "addTopic",
+      "hiddenPing",
+      "search",
+      "setup",
+      "\u00e9dit",
+    ]);
 
-    const [addTopic, search, setup] = verbs;
+    const [addTopic, hiddenPing, search, setup, accented] = verbs;
+    // Fallback-resolved handlers are listed as handlers on the result cell,
+    // exactly as tryResolvePieceHandler dispatches them.
+    expect(hiddenPing.kind).toBe("handler");
+    expect(hiddenPing.on).toBe("result");
+    expect(accented.kind).toBe("handler");
     expect(addTopic).toEqual({
       name: "addTopic",
       kind: "handler",
