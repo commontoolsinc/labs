@@ -109,6 +109,28 @@ each finding:
   unsupported call roots remain unsupported for their existing reason.
   Function-valued reactive data remains outside the storable data model whether
   invoked with `()` or `?.()`.
+  - **Carried-forward open sub-finding: no diagnostic enforces the
+    function-valued-data boundary.** The earlier revision of this finding
+    recorded that lift lowering drops function-typed captures from input
+    schemas, so an invocation of a function value from reactive data compiles
+    without diagnostics and is dead code at runtime (current-behavior spec
+    §19.6). That behavior predates the orthogonality change for plain `()`
+    calls and now uniformly covers `?.()` forms, which previously errored at
+    top-level, statement, and collection-callback sites — as an accident of
+    the removed optional-call bucket, not as a considered rejection of the
+    callable-root family. The open decision is where enforcement belongs:
+    a call-site diagnostic for callable roots that resolve to reactive-data
+    function values (ts-transformers scope, diagnoses the symptom), a
+    declaration-site diagnostic where schema generation drops a function-typed
+    property (schema-generator scope, diagnoses the root cause and also
+    catches stored-but-never-called function values), or both. Any
+    enforcement must not fire for legal callable families: pattern factories,
+    cell/stream-branded values, registered runtime exports, and module-scope
+    captures. Decided 2026-07-23: the call-site diagnostic proceeds as
+    CT-1905 (a corpus sweep found zero authored occurrences of the family,
+    so error severity is safe); the declaration-site option stays open as a
+    schema-generator design question (no diagnostics channel exists there
+    today).
 - **Residual pass-through emits runnable-looking output alongside errors.**
   Both documented bucket-4 forms are alive: `forEach`-in-JSX survives
   verbatim as plain JS and promise-`.then` gets compute-island-wrapped, in

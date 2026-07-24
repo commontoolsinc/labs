@@ -124,7 +124,8 @@ The top-level pattern body should stay declarative.
 ```ts
 // Shown for illustration only.
 pattern(({ items, show }) => ({
-  upper: items[0]?.name?.toUpperCase?.(),
+  upper: items[0].name.toUpperCase(),
+  maybeUpper: items[0]?.name?.toUpperCase?.(),
   title: show ? "Visible" : "Hidden",
   visibleCount: ifElse(show, items.length, 0),
   [UI]: <div>{items.map((item) => item.name)}</div>,

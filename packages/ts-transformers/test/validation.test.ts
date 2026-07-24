@@ -3510,6 +3510,84 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
+    "errors on optional-receiver .get() for the get-call reason, not optionality",
+    async () => {
+      const source = `      import { pattern } from "commonfabric";
+
+      export default pattern<{ items: string[] }>(({ items }) => {
+        items?.get();
+        return {};
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:get-call");
+      assertEquals(
+        errors.some((error) =>
+          error.type === "pattern-context:optional-chaining"
+        ),
+        false,
+        "Optionality should not be the reason the .get() is rejected",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on optional-invocation .get?.() for the get-call reason, not optionality",
+    async () => {
+      const source = `      import { pattern } from "commonfabric";
+
+      export default pattern<{ items: string[] }>(({ items }) => {
+        items.get?.();
+        return {};
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:get-call");
+      assertEquals(
+        errors.some((error) =>
+          error.type === "pattern-context:optional-chaining"
+        ),
+        false,
+        "Optionality should not be the reason the .get() is rejected",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on combined optional .get() chain for the get-call reason, not optionality",
+    async () => {
+      const source = `      import { pattern } from "commonfabric";
+
+      export default pattern<{ items: string[] }>(({ items }) => {
+        items?.get?.();
+        return {};
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:get-call");
+      assertEquals(
+        errors.some((error) =>
+          error.type === "pattern-context:optional-chaining"
+        ),
+        false,
+        "Optionality should not be the reason the .get() is rejected",
+      );
+    },
+  );
+
+  await t.step(
     "allows direct access on computed result (correct usage)",
     async () => {
       const source = `      import { pattern, computed } from "commonfabric";

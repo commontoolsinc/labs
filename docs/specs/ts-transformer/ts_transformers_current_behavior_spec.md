@@ -2808,6 +2808,17 @@ pipeline. Current built-in behavior:
    schema generation resolves the resulting exact manifest marker. The
    `WriteAuthorizedBy` validation remains a separate transformer rather than a
    schema-generator responsibility.
+6. Invoking a function value that flows through reactive pattern data (for
+   example a function-typed input property called as `input.fn(...)` or
+   `input.fn?.(...)`) produces no diagnostic at any expression site. Function
+   values are not schema-representable, so synthesized lift input schemas
+   silently drop function-typed captures; the lowered closure then reads an
+   absent property at runtime, making the call dead code (`undefined` under
+   optional invocation, a runtime `TypeError` when a plain invocation is
+   reached). The target language classifies such callable roots as
+   unsupported — the problem is the unstorable function value, not the call
+   syntax — but that classification is not yet surfaced as an authoring-time
+   diagnostic. The open follow-up is recorded in the design-deltas addendum.
 
 ## 20. Test Coverage Snapshot
 

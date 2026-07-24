@@ -109,6 +109,25 @@ combined chain, the lowered form must preserve:
 The compiler should lower the whole call rather than extract a function-valued
 member into reactive data.
 
+Two boundaries of that obligation are deliberate:
+
+- The four properties govern value evaluation inside the lowered computation.
+  Reactive dependency subscription stays eager: capability analysis captures
+  every dependency mentioned in the authored expression regardless of control
+  flow, so a dependency that appears only after a short-circuit point (for
+  example `state.suffix` in `value.replace?.("x", state.suffix)`) is still
+  subscribed, and a change to it re-runs the computation even while the chain
+  short-circuits. Short-circuiting constrains evaluation of the authored
+  expression, not the dependency set — the same rule as the untaken branches
+  of conditional and logical expressions.
+- On total navigation into cell space, authored `?.` may be absorbed rather
+  than preserved verbatim: `key(...)` navigation cannot throw on missing
+  values, so an optional navigation step lowered to `key(...)` (for example
+  `state.items?.[0]`, or the receiver path of `value.auth?.get?.()`) carries
+  no residual short-circuit point, and reads of absent members yield
+  `undefined` through the read itself. Value-space chains inside lowered
+  closures keep their authored `?.` tokens verbatim.
+
 ## 3.5 Collection Operator Ownership Must Stay Coherent
 
 For collection operators:
