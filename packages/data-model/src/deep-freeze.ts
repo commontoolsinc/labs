@@ -44,13 +44,17 @@ function isInDeepFrozenCache(obj: object): boolean {
  * `false`, as are `FabricInstance`s (whose frozen-ness depends on
  * `Object.freeze()` and their `[IS_DEEP_FROZEN]` report).
  *
- * A function reports `true` here (its `typeof` is not `"object"`): `deepFreeze()`
- * and `isDeepFrozen()` treat a function as an opaque immutable leaf -- a code
- * reference, not fabric data -- so general-purpose callers that freeze
- * objects-with-methods (e.g. `api/cfc.ts`'s `cfcPattern`) keep working. Its
- * internal (`prototype`/closure) mutability is a deliberate known limitation;
- * making `deepFreeze()`/`isDeepFrozen()` strictly `FabricValue`-only (which would
- * exclude functions) is a separate follow-up.
+ * KNOWN LIMITATION -- these do the wrong thing for `function`s, specifically. A
+ * function reports `true` here (its `typeof` is not `"object"`), so `deepFreeze()`
+ * and `isDeepFrozen()` treat it as an opaque immutable leaf: `isDeepFrozen(fn)` is
+ * `true`, and a frozen graph reaching a function reads as deep-frozen, even
+ * though the function's internals -- its `prototype` object and closure state --
+ * remain mutable. This is deliberate, so general-purpose callers that freeze
+ * objects-with-methods (e.g. `api/cfc.ts`'s `cfcPattern`) keep working; the
+ * honest fix is a strict `FabricValue`-only `deepFreeze()` migration (tracked as
+ * TASK-0086).
+ *
+ * TODO(danfuzz): Fix the problem.
  */
 function isNecessarilyFrozenValue(value: unknown): boolean {
   if (typeof value === "object") {
