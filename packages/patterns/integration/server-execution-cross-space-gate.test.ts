@@ -35,17 +35,32 @@
  *      now FIXED — the durable floor is no longer poisoned; see below);
  *   7. a space-B commit WAKES the home reader (the C3.3a foreign wake, composed).
  *
- * WHAT IS NOT COMPOSED HERE (and why — do NOT read this file as binding these):
- * the CLIENT-side tail of clause (a) — the reader speculatively recomputing
- * `doubled` on the foreign change, HOLDING a claimed overlay and DROPPING it
- * exactly once when the committed settlement lands — is NOT bindable here,
- * blocked by DEFECT (ii), a design gap below the patterns layer (see below): a
- * client's replica of a foreign space keeps no live subscription, so a foreign
- * (B) change never reaches the reader's reactive graph and no client overlay
- * ever forms. The revocation / fence / write-authoritative / mixed-version /
- * both-halves-wake clauses (b)–(f) also stay bound by their memory/runner
- * fixtures (the fixture map is in the report); this gate does NOT re-assert them
- * here (no fake green).
+ * WHAT NOW BINDS ON THE CLIENT TAIL — clause (a)'s overlay LIFECYCLE (unblocked
+ * by the WO-0 reconciliation that FALSIFIED defect (ii); see below). With the
+ * gate's OWN clause-(e) non-negotiating probe ISOLATED after the clause-(a)
+ * observation (the fix task 1 below), the reader's cross-space claim stays live
+ * across the space-B change and the real two-space client tail composes for the
+ * first time with a real Worker: the reader's foreign (B) replica DELIVERS the B
+ * commit, the reader speculatively RECOMPUTES `doubled`, HOLDS a claimed overlay
+ * (`claimedOverlayRoutes` 0→≥1), and DROPS it EXACTLY ONCE when the covered
+ * settlement lands (`basisCoveredOverlayDrops` == `claimedOverlayRoutes`,
+ * `nonAuthoritativeOverlayDrops` == 0) — the C3.9 client-suppression + vector-
+ * overlay drop, exercised over a REAL foreign-replica reactive path for the
+ * first time (the C3.9 fixtures used a synthetic hand-driven `PushView`).
+ *
+ * WHAT STILL DOES NOT BIND (and why — do NOT read this as green): the served
+ * VALUE half of clause (a). The reader's revealed committed `doubled` is 0, NOT
+ * the arithmetic 2×foreign, because the SERVER itself commits `doubled`=0 —
+ * DEFECT (iii) below: the served foreign point read validates the vector BASIS
+ * but its VALUE never reaches the Worker's derivation read of `source`. The
+ * overlay lifecycle above is real and green; the served value is defect (iii)
+ * and is deliberately NOT asserted here (asserting the known-wrong 0 as correct
+ * is exactly the fake-green this gate refuses). The revocation / write-
+ * authoritative / mixed-version / both-halves-wake clauses (b)–(d),(f) stay
+ * bound by their memory/runner fixtures (the fixture map is in the report);
+ * clause (e) — the C3.6b non-negotiating cohort fence — IS re-asserted here, in
+ * ISOLATION (below): a non-negotiating attach both fails to receive the claim
+ * (delivery narrowing) AND revokes the reader's live cross-space claim.
  *
  * DEFECT (i) — FIXED (the floor-poisoning class that fenced the committed serve):
  *   an UNADMITTED cross-space-read observation (a client read, the executor's
@@ -67,19 +82,43 @@
  *   earlier necessary-but-insufficient leg, `hydrateForeignReadMount` in
  *   executor-worker.ts, stamps the FIRST claimed run; it landed with the gate.)
  *
- * DEFECT (ii) — DESIGN GAP (the client overlay half cannot be driven):
- *   the reader's client-side foreign (B) replica does not RESYNC the read-space
- *   change. Isolated repro + this gate both show a live sink on the reader's
- *   foreign source firing ONCE with the initial value and NEVER again on a later
- *   foreign change (the replica stays stale; an explicit re-sync does not
- *   re-fetch). So the reader never recomputes `doubled`, never holds/drops an
- *   overlay, never suppresses (`claimedOverlayRoutes` stays 0). The C3.9
- *   client-suppression + vector-overlay fixtures used SYNTHETIC settlements (a
- *   hand-driven `PushView`), so the real two-space client's foreign-replica
- *   reactivity was never exercised. The missing mechanism — a client-side live
- *   foreign-read subscription delivering a foreign change to the reactive graph
- *   — is a CT-1667-class cross-space-reactivity gap, orthogonal to the C3
- *   execution mechanism, reported as a design finding rather than hacked around.
+ * DEFECT (ii) — FALSIFIED (2026-07-24, the WO-0 diagnostic
+ *   `cross-space-reactive-read.test.ts`): the premise "a client's foreign-space
+ *   replica keeps no live subscription, so a foreign change never reaches the
+ *   reader's reactive graph" does NOT reproduce. The origin PUSHES third-party B
+ *   commits to the reader's B-session standing watch, the foreign sink REFIRES,
+ *   the B replica advances, and (client-primary) `doubled` recomputes to the
+ *   correct 2×foreign. The scout's "fires once, never again" conflated the
+ *   reader's home-A session (cannot carry B) with its separate B session opened
+ *   by the cross-space kick (does). This gate confirms it end-to-end with a real
+ *   Worker: the overlay lifecycle above forms and drops — the reader DOES
+ *   recompute and hold/drop an overlay. The earlier `claimedOverlayRoutes`=0 was
+ *   the gate's OWN clause-(e) probe over-revoking the reader's claim before the B
+ *   commit (task 1's isolation fixes it), NOT a client-reactivity gap.
+ *
+ * DEFECT (iii) — OPEN (the served-VALUE carriage gap; the real blocker of clause
+ *   (a)'s VALUE half — found by THIS gate, 2026-07-24). The host serves the
+ *   authenticated foreign point read and validates the vector BASIS
+ *   (`foreignBasisComponentsValidated` ≥1), and the executor lands the served
+ *   document in its read-only foreign MOUNT (`#foreignMounts`) — but the mount is
+ *   consumed ONLY as provenance (`foreignReadStampsForAction` emits
+ *   {space,id,seq}, never the value). The Worker's derivation read of `source`
+ *   resolves through the executor provider, which is HARD-BOUND to the home space
+ *   A (`create()` throws for any other space), so `source.get()` reads A's home
+ *   replica — which never holds the foreign value — and folds `Default<0>`. The
+ *   server therefore commits `doubled`=0 on the INITIAL serve (deterministic —
+ *   no wake race, no `claim-not-live` mount-refresh involved) and every rerun.
+ *   Because the CLIENT already computes the correct value client-primary (defect
+ *   (ii) falsified), the broken serve (0) then CLOBBERS the reader's correct
+ *   local value via the covered overlay drop — server-primary cross-space serve
+ *   is a live regression. This is NOT harness fragility: the single in-process
+ *   Server collapse would only make the value MORE reachable, and the gap is
+ *   present on the pre-wake initial serve. The fix is a real, unbuilt
+ *   C3.6/C3.7-scope mechanism — thread the served mount VALUE into the Worker's
+ *   pre-run cross-space read resolution, respecting the "foreign stamps never
+ *   merge into home watermarks" seq-domain invariant — reported for an owner
+ *   decision rather than hacked around here (no fake green: the gate binds the
+ *   overlay lifecycle, and leaves the served value UNASSERTED and documented).
  *
  * TRANSPORT: the in-process leg (one Server hosting A+B over the default
  * InProcessCrossSpaceTransport) is asserted here. The co-hosted transport leg
@@ -88,9 +127,12 @@
  * — the transport crossing itself (mirror/wake/point-read over the link) is
  * those fixtures' contract. Parameterizing THIS gate over both transports is
  * owed: the composed serve it would layer on is capped at the same
- * server-committed-settlement + wake surface asserted here (the client overlay
- * tail is blocked by defect (ii) on BOTH transports), so it re-crosses the same
- * server-side clauses over the link rather than unlocking a new one.
+ * server-committed-settlement + wake + overlay-lifecycle surface asserted here.
+ * The served VALUE is blocked by defect (iii) on BOTH transports (the mount→run
+ * carriage gap is in the executor, transport-independent — the co-hosted leg
+ * would re-confirm defect (iii), not unlock the value), so parameterizing re-
+ * crosses the same server-side clauses + overlay lifecycle over the link rather
+ * than binding a new one; it is left owed pending the defect (iii) decision.
  *
  * CI-budget clause (C3A23): named runtime ceiling in this header —
  * CROSS_SPACE_GATE_BUDGET_MS below, logged per test; the suite stays a single
@@ -387,7 +429,7 @@ const writeAcl = async (
 
 Deno.test({
   name:
-    "C3.11 cross-space-read gate [in-process]: authored foreign read composes issuance + delivery + subscription + served point read + committed vector settlement + wake",
+    "C3.11 cross-space-read gate [in-process]: authored foreign read composes issuance + delivery + subscription + served point read + committed vector settlement + wake + client overlay lifecycle (served VALUE is defect (iii), unasserted) + non-negotiating cohort fence in isolation",
   async fn() {
     const startedAt = performance.now();
     await withExecutorTeardownBarrier(async () => {
@@ -440,6 +482,7 @@ async function runInProcessGate(storeDir: string): Promise<void> {
   let reader: GateClient | null = null;
   let writer: GateClient | null = null;
   let nonNeg: GateClient | null = null;
+  let cancelDoubledSink: (() => void) | null = null;
   const candidateEvents: Array<
     {
       contextKey: string;
@@ -550,6 +593,31 @@ async function runInProcessGate(storeDir: string): Promise<void> {
       result.getAsNormalizedFullLink() as any,
     );
     assertEquals(await reader.runtime.start(resultRoot), true);
+    // Clause (a) client tail: go LIVE on the `doubled` derivation and sink it, so
+    // a foreign (B) change drives a real reader recompute + claimed overlay (a
+    // receiver only gets standing pushes once `start()` establishes its live
+    // reactive session — the scheduler-cold-replica idiom). The sink values are
+    // diagnostic; the overlay LIFECYCLE is read from the routing diagnostics.
+    assertEquals(await reader.runtime.start(handle), true);
+    const readerDoubledSeen: unknown[] = [];
+    cancelDoubledSink = handle.key("doubled").sink((value: unknown) => {
+      readerDoubledSeen.push(value);
+    });
+    // The reader's client-side execution-routing overlay counters (C3.9): the
+    // space-A branch totals for the claimed cross-space-read derivation.
+    const readerOverlayTotals = () =>
+      (reader!.storage as unknown as {
+        getExecutionRoutingDiagnostics?: (
+          query: { space: string; branch: string },
+        ) => {
+          branchTotals: {
+            claimedOverlayRoutes: number;
+            basisCoveredOverlayDrops: number;
+            nonAuthoritativeOverlayDrops: number;
+          };
+        };
+      }).getExecutionRoutingDiagnostics?.({ space: spaceA, branch: "" })
+        ?.branchTotals;
     await waitForCondition(
       "reader demand",
       () => server.listExecutionDemands(spaceA, "").length > 0,
@@ -608,8 +676,11 @@ async function runInProcessGate(storeDir: string): Promise<void> {
     );
 
     // ---- (3) delivery: the negotiating reader RECEIVES the cross-space-read
-    // claim; a non-negotiating session does NOT (the C3.6b delivery gate,
-    // composed). ----
+    // claim (the C3.6b delivery gate, composed). The non-negotiating-session
+    // discrimination (clause (e)) is asserted LATER, in ISOLATION, AFTER the
+    // clause-(a) overlay observation — its cohort fence revokes the reader's own
+    // cross-space claim, so attaching it here would kill the claim before the B
+    // wake and prevent the reader's overlay from ever forming (task 1). ----
     await waitForCondition(
       "the negotiating client receives the cross-space-read claim",
       () =>
@@ -618,26 +689,11 @@ async function runInProcessGate(storeDir: string): Promise<void> {
         ),
       () => ({ readerClaimSets: reader!.claimSets }),
     );
-    // A routing-but-non-cross-space session attaches to A: it must NOT receive
-    // the cross-space-read claim (delivery narrowing / C3.6b).
-    nonNeg = openClient(serverForSpace, nonNegId, false, FLAGS_NON_CROSS_SPACE);
-    {
-      const cell = nonNeg.runtime.getCell<Record<string, unknown>>(
-        spaceA,
-        "xsp-gate-result",
-        undefined,
-      );
-      await cell.sync();
-    }
-    await pool.idle();
-    assert(
-      !nonNeg.claimSets.some((c) =>
-        (c.crossSpaceReadSpaces ?? []).includes(spaceB)
-      ),
-      `a non-negotiating session must NOT receive the cross-space-read claim: ${
-        JSON.stringify(nonNeg.claimSets)
-      }`,
-    );
+    // The reader's overlay counters BEFORE the B wake: no cross-space overlay has
+    // formed yet (the initial serve is same-basis; the reader speculates only on
+    // the foreign change below).
+    const overlayBeforeWake = readerOverlayTotals();
+    const doubledSeenBeforeWake = readerDoubledSeen.length;
 
     // ---- (6) foreign wake: a space-B commit wakes the home reader (C3.3a). ----
     const wakesBefore = pool.metrics().foreignWakeNotifications;
@@ -662,6 +718,72 @@ async function runInProcessGate(storeDir: string): Promise<void> {
         wakesNow: pool!.metrics().foreignWakeNotifications,
       }),
     );
+
+    // ---- (a) CLIENT tail — the overlay LIFECYCLE, composed DIRECTLY (defect
+    // (ii) falsified). The B change reaches the reader's reactive graph: the
+    // reader speculatively recomputes `doubled`, HOLDS a claimed overlay, and
+    // DROPS it EXACTLY ONCE when the covered settlement lands. This is the C3.9
+    // client-suppression + vector-overlay drop, exercised over a REAL two-space
+    // foreign-replica reactive path for the first time (the C3.9 fixtures used a
+    // synthetic `PushView`). NOTE: the reader's revealed committed VALUE is the
+    // SERVER-authoritative `doubled`, which is defect (iii) (=0, not 2×foreign) —
+    // the served foreign VALUE never reaches the Worker's derivation read. The
+    // lifecycle below is real and green; the VALUE is deliberately NOT asserted
+    // here (see the header's defect (iii) — no fake green). ----
+    await waitForCondition(
+      "the reader recomputes on the B change and holds a claimed overlay",
+      () => {
+        const totals = readerOverlayTotals();
+        return totals !== undefined &&
+          totals.claimedOverlayRoutes >
+            (overlayBeforeWake?.claimedOverlayRoutes ?? 0) &&
+          readerDoubledSeen.length > doubledSeenBeforeWake;
+      },
+      () => ({
+        overlayBeforeWake,
+        overlayNow: readerOverlayTotals(),
+        doubledSeenBeforeWake,
+        readerDoubledSeen,
+      }),
+    );
+    await waitForCondition(
+      "the claimed overlay drops exactly once when the covered settlement lands",
+      () => {
+        const totals = readerOverlayTotals();
+        return totals !== undefined &&
+          totals.claimedOverlayRoutes >= 1 &&
+          totals.basisCoveredOverlayDrops === totals.claimedOverlayRoutes;
+      },
+      () => ({ overlayNow: readerOverlayTotals() }),
+    );
+    {
+      const totals = readerOverlayTotals();
+      assert(totals !== undefined, "reader execution routing is unavailable");
+      // Every claimed overlay the reader held dropped COVERED (a committed / no-op
+      // settlement whose vector basis covered the overlay's basis), and NONE
+      // dropped non-authoritatively (a producer-dirty invalidation) — the C3.9
+      // drop rule under a real vector settlement.
+      assert(
+        totals.claimedOverlayRoutes >= 1,
+        `the reader must hold ≥1 claimed cross-space overlay: ${
+          JSON.stringify(totals)
+        }`,
+      );
+      assertEquals(
+        totals.basisCoveredOverlayDrops,
+        totals.claimedOverlayRoutes,
+        `every claimed overlay must drop covered exactly once: ${
+          JSON.stringify(totals)
+        }`,
+      );
+      assertEquals(
+        totals.nonAuthoritativeOverlayDrops,
+        0,
+        `no claimed overlay may drop non-authoritatively: ${
+          JSON.stringify(totals)
+        }`,
+      );
+    }
 
     // ---- (a) committed vector settlement (defect (i) fix, composed DIRECTLY).
     // The served claim survives the real Worker's alternating served/unserved
@@ -709,6 +831,50 @@ async function runInProcessGate(storeDir: string): Promise<void> {
       () => ({ readerSettlements: reader!.settlements }),
     );
 
+    // ---- (e) the C3.6b non-negotiating cohort fence, asserted in ISOLATION —
+    // AFTER clause (a) is fully observed, so its cohort revoke of the reader's
+    // own cross-space claim cannot suppress the reader's overlay above (task 1).
+    // A routing-but-non-cross-space session attaches to A: it must NOT receive
+    // the cross-space-read claim (delivery narrowing), AND its attach must REVOKE
+    // the reader's live cross-space claim (the cohort fence,
+    // #fenceCrossSpaceReadClaimsForNonNegotiatingAttach — space-lane cohort, so a
+    // routing session is in-cohort). ----
+    const readerHeldCrossSpaceClaim = reader.claimSets.some((c) =>
+      (c.crossSpaceReadSpaces ?? []).includes(spaceB)
+    );
+    assert(
+      readerHeldCrossSpaceClaim,
+      "clause (e) precondition: the reader must hold a live cross-space claim " +
+        "for the cohort fence to revoke",
+    );
+    const claimsRevokedBeforeNonNeg = server.executionStats.claimsRevoked;
+    nonNeg = openClient(serverForSpace, nonNegId, false, FLAGS_NON_CROSS_SPACE);
+    {
+      const cell = nonNeg.runtime.getCell<Record<string, unknown>>(
+        spaceA,
+        "xsp-gate-result",
+        undefined,
+      );
+      await cell.sync();
+    }
+    await pool.idle();
+    assert(
+      !nonNeg.claimSets.some((c) =>
+        (c.crossSpaceReadSpaces ?? []).includes(spaceB)
+      ),
+      `a non-negotiating session must NOT receive the cross-space-read claim: ${
+        JSON.stringify(nonNeg.claimSets)
+      }`,
+    );
+    await waitForCondition(
+      "the non-negotiating attach revokes the reader's cohort cross-space claim",
+      () => server.executionStats.claimsRevoked > claimsRevokedBeforeNonNeg,
+      () => ({
+        claimsRevokedBeforeNonNeg,
+        claimsRevokedNow: server.executionStats.claimsRevoked,
+      }),
+    );
+
     // Final assertions on the settled facts.
     assert(
       candidateEvents.some((c) =>
@@ -741,9 +907,17 @@ async function runInProcessGate(storeDir: string): Promise<void> {
           (c.crossSpaceReadSpaces ?? []).includes(spaceB)
         ),
         foreignWakeNotifications: pool.metrics().foreignWakeNotifications,
+        // Clause (a) client tail (overlay LIFECYCLE) + clause (e) fence.
+        readerOverlay: readerOverlayTotals(),
+        claimsRevoked: server.executionStats.claimsRevoked,
+        // Defect (iii): the SERVER-authoritative served value is 0, not
+        // 2×foreign — recorded, NOT asserted (see header). The reader's revealed
+        // value tracks it.
+        readerDoubledSeen,
       }),
     );
   } finally {
+    cancelDoubledSink?.();
     await pool?.close();
     await reader?.storage.close().catch(() => undefined);
     await writer?.storage.close().catch(() => undefined);
