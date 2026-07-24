@@ -82,6 +82,7 @@ import { isTrustedPattern, setPatternProgram } from "./pattern-metadata.ts";
 import {
   FabricInstance,
   FabricPrimitive,
+  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import {
   FabricEpochDays,
@@ -296,6 +297,9 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     // Debug stringifiers (helpers exposed for pattern code)
     toCompactDebugString,
     toIndentedDebugString,
+
+    // Value comparison helper exposed for pattern code
+    valueEqual,
   } as BuilderFunctionsAndConstants & {
     __cfHelpers?: BuilderFunctionsAndConstants;
   };
