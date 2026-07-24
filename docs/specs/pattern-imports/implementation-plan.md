@@ -26,32 +26,49 @@ These were settled in the spec + design review. Implement as stated:
 
 1. **One grammar, no type tag**: `cf:<ref>`, `cf:/<space>/<ref>`,
    `cf://<host>/<space>/<ref>`, trailing `@<pin>`. Resolution chases pointers
-   to an entry-module identity.
+   and selects a module identity.
 2. **Pin-in-source** (rewrite the import specifier at pin time). No lockfile
    side-table. No pin resolution at compile time for stored programs.
-3. **Imported subtrees keep their published identities.** Mounted files hash
-   with their original authored paths (per-subtree prefix strip), so
-   identities, cache docs, and live modules dedupe with the already-deployed
-   pattern. This is Strategy A; the "fresh identities per importer" variant
-   (A′) was considered and rejected (no dedupe, divergent CFC provenance).
-4. **Self-contained bundles**: imported modules ARE compiled and emitted as
+3. **Type-only fabric references are pinned.** Supported ESM-style
+   `import type`, type-only named imports and exports, and inline
+   `import("cf:…").Type` references follow the same deploy-time rewrite and
+   frozen-compile rules as value imports. The transformer uses imported types
+   to generate runtime schemas, so an unpinned type could change executable
+   behavior under unchanged stored source. Reject the unsupported CommonJS-style
+   `import type Alias = require("cf:…")` form before resolution or identity
+   calculation.
+4. **Imported subtrees keep their published identities.** Mounted files hash
+   with their original authored paths and each source document's effective
+   identity fingerprint. Identities, cache docs, and live modules therefore
+   dedupe with the already-deployed pattern. This is Strategy A; the "fresh
+   identities per importer" variant (A′) was considered and rejected (no
+   dedupe, divergent CFC provenance).
+5. **Self-contained bundles**: imported modules ARE compiled and emitted as
    part of the importer's record graph (no lazy cross-bundle loading at
    evaluation time). Dedup happens via identity (cache hits, idempotent
    write-back, `modulesByIdentity`), not via emission-skipping.
-5. **Source set stays per-program**: an importer's source docs do NOT link to
+6. **Source set stays per-program**: an importer's source docs do NOT link to
    the imported subtree's source docs (the `cf:` specifier itself carries the
    target identity; loaders parse it). The **compiled** set DOES link across
    the boundary (it has no Merkle-union verification, and the link gives the
    warm loader the full closure for free).
-6. **No service endpoints.** All resolution and fetch are cell reads through
+7. **No service endpoints.** All resolution and fetch are cell reads through
    the compiling runtime's storage session.
-7. **v1 limitation**: an imported subtree whose modules use root-absolute
+8. **v1 limitation**: an imported subtree whose modules use root-absolute
    internal imports (`import … from "/utils.ts"`) is rejected at fetch time
    with a clear error. Relative (`./`, `../`) imports only inside subtrees.
-8. **CFC provenance of fetched source is follow-up work** (spec § Security).
+9. **CFC provenance of fetched source is follow-up work** (spec § Security).
    Do not build label propagation now; do not silently strip it either —
    the write-back path reuses existing write machinery so labels flow (or
    fail) exactly as any cell write does today.
+10. **Subpaths use explicit public exports.** The immutable
+    `cf/authored-program-manifest/v1` value maps exact public subpaths to
+    authored filenames. The entry is public without a map entry. There are no
+    wildcard or conditional entries in version 1, and arbitrary files are not
+    addressable. Pin time writes the selected file's module identity. Frozen
+    compilation does not consult the map. A direct `cf:pattern:<identity>`
+    names one exact module and never accepts a subpath. The manifest identity
+    and runtime-neutral program digest include the map.
 
 ## Architecture recap (what plugs in where)
 
@@ -67,7 +84,8 @@ engine.resolve(resolver)  ◄── FabricAwareResolver wraps EngineProgramResol
 resolved program (authored ∪ mounted files)
       │
       ├─ computeFabricModuleIdentities: authored set stripped /<id>,            [M1.3]
-      │  each subtree stripped /~cf/<hash> → PUBLISHED identities, merged map
+      │  each subtree stripped /~cf/<hash>; each document verifies under
+      │  its PUBLISHED identity fingerprint; verified identities form merged map
       │
       ├─ compiler.compileToModules(..., { specifierAliases })                   [M1.1]
       │     TypeScriptHost maps "cf:…" → mounted entry path (type-check)
@@ -75,17 +93,18 @@ resolved program (authored ∪ mounted files)
       ├─ compileSourcesToRecords(..., { specifierAliases, identityByPath })     [M1.2]
       │     record resolutions: "cf:…" → "cf:module/<published-identity>"
       │
-      └─ CacheableModule[]: mounted modules carry original filenames;           [M1.5]
-         importer modules gain fabric edges {specifier, targetIdentity}
-              │
-              ├─ writeSourceDocs: fabric edges NOT stored as links              [M1.6]
-              └─ writeCompiledDocs: fabric edges stored as links (warm walk)
+      ├─ source-persistence descriptors: all authored/mounted identity nodes,   [M1.5]
+      │  including declarations; fabric edges are not stored as source links    [M1.6]
+      │
+      └─ emitted CacheableModule[]: mounted implementation modules keep their   [M1.5]
+         original filenames; emitted runtime fabric edges become compiled links [M1.6]
 ```
 
 Reload paths:
-- **Warm** (compiled docs): `loadCompiledClosure` follows the fabric link →
-  full closure → `evaluateCachedModules`. Verify this works; small fixes only.
-  [M1.7]
+- **Warm** (compiled docs): for a value import, `loadCompiledClosure` follows
+  the fabric link to the full runtime closure and then calls
+  `evaluateCachedModules`. A type-only edge is absent from compiled runtime
+  links. Verify both cases. [M1.7]
 - **Cold** (source docs): importer closure excludes subtrees by design; the
   same `FabricAwareResolver` wrapped around `compileResolvedToRecordGraph`'s
   resolver re-fetches each subtree by the hash in the specifier. [M1.7]
@@ -93,14 +112,16 @@ Reload paths:
 ## Glossary (use these exact terms in code comments)
 
 - **fabric ref / fabric specifier** — an authored import specifier under the
-  `cf:` grammar (`cf:pattern:<hash>`, `cf:/kitchen/todo-list@<hash>`, …).
-- **pin** — the trailing `@<hash>` entry-module identity on a mutable ref.
+  `cf:` grammar
+  (`cf:pattern:<hash>`, `cf:/did:key:z6Mk…/todo-list@<hash>`, …).
+- **pin** — the trailing `@<hash>` selected-module identity on a mutable ref.
 - **hash** — 43 base64url chars (`[A-Za-z0-9_-]`, case-SENSITIVE, no
   padding), the unprefixed output of `hashStringOf`/`hashOf`
   (`packages/data-model/src/value-hash.ts:553`). NOT hex — e.g.
   `Avcny13Rj8q-2ClANy_-k0ikWWQcXx7QTdsiqGfrC1c`. Never lowercase or
   otherwise normalize a hash.
-- **terminal identity** — the entry-module identity a ref resolves to.
+- **terminal identity** — the selected-module identity after pointer and
+  subpath resolution. It is the entry-module identity when no subpath exists.
 - **subtree** — the source closure of one imported pattern (its own program).
 - **mount** — a subtree's files spliced into a compilation under
   `/~cf/<terminalIdentity>/<storedFilename>`.
@@ -124,12 +145,12 @@ export interface FabricRef {
   ref:
     | { kind: "slug"; slug: string }
     // "of" = entity URI (stored/spelled "of:fid1:<hash>"); "pattern" =
-    // entry-module identity ("pattern:<hash>"). hash is the bare base64url
+    // exact module identity ("pattern:<hash>"). hash is the bare base64url
     // part (no "fid1:" tag) in both cases.
     | { kind: "uri"; scheme: "of" | "pattern"; hash: string };
-  /** Path inside the target program (phase 4; parsed, rejected downstream). */
+  /** Exact public name in the target manifest (phase 4; currently rejected). */
   subpath?: string;
-  /** Trailing @<hash> pin (base64url — see glossary; never normalized). */
+  /** Trailing selected-module @<hash> pin; never normalized. */
   pin?: string;
 }
 
@@ -382,21 +403,31 @@ File: `packages/runner/src/sandbox/module-record-compiler.ts` (next to
 // Shown for illustration only.
 export const FABRIC_MOUNT_ROOT = "/~cf/";
 
+export interface PublishedFabricModule {
+  /** Published identity that the verified source document was stored under. */
+  identity: string;
+  /** Effective fingerprint used to verify this document's identity. */
+  identityRuntimeFingerprint: string;
+}
+
 export interface FabricMount {
   /** Terminal identity the subtree was fetched by (and must hash back to). */
   entryIdentity: string;
   /** Mounted path of the subtree's entry file. */
   entryPath: string;          // `${FABRIC_MOUNT_ROOT}${entryIdentity}${storedEntryFilename}`
+  /** Verified published identity and effective fingerprint for each mounted path. */
+  publishedModules: ReadonlyMap<string, PublishedFabricModule>;
   /** The fabric specifiers that resolve to this mount (≥1). */
   specifiers: string[];
 }
 
 /**
  * Identity map for a program containing fabric mounts. Authored files hash
- * with `idPrefix` stripped (status quo); each mount's files hash as their own
- * standalone program with `/~cf/<entryIdentity>` stripped, so they reproduce
- * their PUBLISHED identities. Throws if a mount's entry does not hash back to
- * `entryIdentity` (integrity failure — wrong bytes mounted).
+ * with `idPrefix` stripped (status quo). Each mounted source document verifies
+ * under its published effective fingerprint with `/~cf/<entryIdentity>`
+ * stripped, so mixed legacy and current documents preserve their published
+ * identities. Throws if any mounted source does not hash back to its recorded
+ * identity or the entry does not match `entryIdentity`.
  */
 export function computeFabricModuleIdentities(
   sources: Source[],
@@ -414,16 +445,24 @@ Implementation:
    (The fabric edges inside authored sources resolve as EXTERNAL deps because
    the mounted file names never match the specifier — this is what folds the
    pin into the importer's hash. Do not "fix" that.)
-3. Each mount → `computeModuleIdentities(mountFiles,
-   { idPrefix: `/~cf/${m.entryIdentity}`, runtimeFingerprint })`.
+3. For each mount, require the mounted path set to equal the keys of
+   `m.publishedModules`. Group those entries by effective fingerprint. For each
+   distinct value, run `computeModuleIdentities` over the mounted view with
+   `idPrefix` set to `/~cf/${m.entryIdentity}` and that fingerprint. Compare the
+   recomputed identity for every entry in the group with its recorded identity.
+   Merge the recorded identities only after all comparisons succeed. This
+   preserves the identity of every published document instead of applying the
+   entry document's fingerprint to the entire closure. The authored importer
+   uses the current fingerprint through `options`, so its own identity changes
+   after a runtime upgrade without changing the pin.
    **Note**: subtree files may themselves contain fabric specifiers
    (transitive imports) — those are external deps within the subtree
    computation, exactly as they were when the subtree was published. Files of
    a TRANSITIVE mount are NOT part of this mount's partition (they live under
    their own `/~cf/<h2>/` prefix).
-4. Verify `result.get(m.entryPath) === m.entryIdentity`; throw with both
-   values on mismatch.
-5. Merge all maps (key sets are disjoint by construction) and return.
+4. Verify that `m.publishedModules.get(m.entryPath)?.identity` equals
+   `m.entryIdentity`; throw with both values on mismatch.
+5. Merge all maps. The key sets are disjoint by construction.
 
 Tests (new file `packages/runner/test/fabric-module-identity.test.ts`):
 - Two-file subtree published standalone (compute identities with no prefix),
@@ -433,6 +472,129 @@ Tests (new file `packages/runner/test/fabric-module-identity.test.ts`):
 - Mount entry mismatch (tampered byte) → throws.
 - File under `/~cf/` with no matching mount → throws.
 - Two mounts whose subtrees both contain `/main.tsx` → no interference.
+- A mount with an affected entry and a pure internal module verifies the
+  entry under its non-empty fingerprint and the pure module under the canonical
+  empty value.
+- Synthetic root links and documents outside the entry's authored-import view
+  do not become mounted modules. Two retained generations with the same
+  filename therefore cannot overwrite one another in a mount.
+
+#### Authored declaration-file integration
+
+Authored `.d.ts` files participate in module identity and source history even
+though they do not emit JavaScript records. Production `Engine` paths currently
+remove declarations before `computeFabricModuleIdentities`, build
+`CacheableModule` values only for emitted modules, and therefore omit
+declarations from `writeSourceDocs`.
+
+Required changes:
+
+1. Preserve source provenance before resolver output is merged. Distinguish
+   explicitly enumerated authored files, verified mounted files, and declaration
+   stubs supplied by `EngineProgramResolver` for runtime modules. A filename or
+   `.d.ts` suffix alone does not establish provenance.
+2. Extend production graph discovery to follow string-literal inline import-type
+   references such as `import("./types.d.ts").Foo`. `collectImportSpecifiers`
+   already includes these edges for identity, while `resolveProgram()`
+   deliberately does not fetch their targets. Load relative, authored, mounted,
+   and fabric inline type targets before identity calculation and type checking.
+   Apply the ordinary fabric pin and alias rules to a fabric target. When an
+   allowed bare runtime target is unresolved, preserve the existing
+   `resolveProgram()` fallback that asks the resolver for
+   `${identifier}.d.ts`. Apply that fallback to an inline-only reference too.
+   The returned runtime stub belongs only to the type-check set. Continue to
+   reject or ignore dynamic import expressions according to the existing
+   policy; they are not type-only edges.
+3. Build three sets. The type-check set contains all resolved inputs, including
+   runtime declaration stubs. The identity and source-history set contains the
+   implementation sources already identified today plus authored and mounted
+   declarations. The emitted and compiled-cache set contains only modules that
+   produce JavaScript records.
+4. Exclude runtime-provided declaration stubs from the identity set. An authored
+   import of `commonfabric` must remain an external leaf containing the runtime
+   fingerprint even though TypeScript reads a supplied `commonfabric.d.ts`.
+5. Keep authored and mounted declarations in the identity set. A type-import
+   edge contributes the declaration identity to its importer like any other
+   internal edge. Persist and verify those declarations through `SourceDoc` and
+   include them in immutable authored-program manifests.
+6. Restrict record assembly, compiled-cache lookup, compiled-document writes,
+   compiled synthetic roots, and compiled import links to the emitted set. No
+   compiled document or runtime record exists for a declaration. Derive direct
+   compiled links only from import specifiers present in emitted JavaScript.
+   Keep the broader value-and-type graph for source identity and source links.
+7. Add a production-engine regression in which an entry uses
+   `import("./types.d.ts").Foo`. Prove that resolution fetches the declaration,
+   changing it changes the entry identity and compiled bytes, and both revisions
+   remain restorable from source history. Run the corresponding case through a
+   pinned fabric inline type reference as well. Also prove follower propagation,
+   that `commonfabric` remains an external fingerprinted leaf, and that a cold
+   write followed by a warm load succeeds without requesting a compiled
+   declaration document. Add a separate inline-only
+   `import("commonfabric/schema").Schema` regression. It must find the existing
+   runtime declaration through the `${identifier}.d.ts` fallback without
+   turning the bare runtime module into an authored identity node or broadening
+   the sandbox import allowlist. This is distinct from the helper-injected
+   `commonfabric` import.
+
+#### Runtime-fingerprint integration
+
+A current runtime fingerprint is part of the executable identity of an authored
+importer because a fabric specifier is an external-dependency leaf. A fingerprint
+change therefore creates a new importer identity even when its source and pins
+are unchanged. Every document in a pinned mount keeps the identity and effective
+fingerprint under which it was published. It is not re-identified under the
+importing runtime. The current runtime must reject the import with an actionable
+republish-and-repin error when it cannot execute a recorded fingerprint.
+
+The hash primitive already accepts an optional `runtimeFingerprint`, and
+`module-identity.test.ts` proves that changing it changes a module that imports
+an external dependency. The production engine, entry-identity helper, source
+verification, and replication paths currently use the empty default. Source
+documents do not record which non-empty fingerprint created an identity. The
+piece lifecycle has no revision metadata or separate operation and cause for a
+runtime rebuild.
+
+Before enabling a non-empty production fingerprint:
+
+1. Implement the authoritative `getExecutableRuntimeFingerprint()` provider
+   defined in [module-loading.md](../module-loading.md). Version 1 hashes the
+   existing broad compile-cache runtime version, the scheduler fingerprint, and
+   automatic catalogs of pattern-facing runtime modules and execution-policy
+   inputs. Inability to calculate the value fails closed. The empty value is
+   reserved for legacy source verification.
+2. Thread the provider's current value through authored identity calculation,
+   source-document construction, compilation, and cache lookup.
+3. Add optional normative `identityRuntimeFingerprint` fields to `SourceDoc`
+   and `StoredSourceDoc`. Use the effective value when verifying a retained or
+   mounted closure. An absent legacy field has the canonical empty value. A
+   newly published module whose reachable graph contains an external dependency
+   stores the non-empty provider value.
+   Verification recomputes under the effective value, so removing or changing a
+   required value creates an ordinary identity mismatch. Reject a non-empty
+   value for an unaffected module because that representation is not canonical.
+4. Carry each source document's recorded fingerprint separately from the
+   current fingerprint used for the importer. Treat equality as compatible by
+   default. Permit another fingerprint only through a versioned runtime
+   compatibility declaration.
+5. Compute `cf/runtime-neutral-program-digest/v1` exactly as defined in
+   [module-loading.md](../module-loading.md): hash the canonical main filename
+   and the UTF-8 filename-sorted runtime-neutral identities of every authored
+   file. Also hash the UTF-8 key-sorted public exports map. Do not include
+   mounted files or synthetic retention links. Piece history uses this
+   comparison value with the selected export and active origin to distinguish
+   a runtime rebuild from a source edit.
+6. Record the accepted runtime fingerprint and a separate revision cause. A
+   detached piece or resolved web origin may publish an authorized runtime
+   rebuild. A mutable fabric follower only adopts the revision advertised by
+   its upstream origin. An immutable fabric-origin piece does not move while
+   retaining that origin. Every accepted revision can then propagate to that
+   piece's own downstream followers through the ordinary guarded update.
+7. Test source verification across mixed fingerprints, unchanged-pin importer
+   invalidation, compatible and incompatible old-fingerprint pins, legacy
+   documents, cache misses, lifecycle history, authorized upstream rebuild
+   propagation through a multi-piece follow chain, detach-and-rebuild recovery
+   for a first immutable-origin revision, and revert that rebuilds an earlier
+   retained authored program under the current runtime.
 
 ### M1.4 The resolver wrapper: `FabricAwareResolver`
 
@@ -481,21 +643,29 @@ export class FabricAwareResolver implements ProgramResolver {
       ctx.space, hash, tx)`. `undefined` → throw
       `"source for pattern:<hash> not found in space <space> (or failed
       integrity verification)"`.
-   e. **Root-absolute import check** (decision 7): for every doc, run
-      `collectImportSpecifiers` (from `@commonfabric/js-compiler`); any
-      specifier starting with `"/"` → throw `"imported pattern <hash> uses
-      root-absolute imports; not supported"`. (Relative and fabric and
-      runtime-module specifiers pass.)
-   f. Mount: for each doc, `mountedFiles.set("/~cf/" + hash + doc.filename,
+   e. Starting at the entry document, walk authored import links and exclude
+      `ROOT_LINK_SPECIFIER` retention links. Mount only that entry view. This
+      prevents unreachable documents and sibling retained generations from
+      becoming executable mount files.
+   f. **Root-absolute import check** (decision 8): for every document in that
+      entry view, run `collectImportSpecifiers` (from
+      `@commonfabric/js-compiler`). Any specifier starting with `"/"` throws
+      `"imported pattern <hash> uses root-absolute imports; not supported"`.
+      Relative, fabric, and runtime-module specifiers pass. Do not inspect an
+      excluded synthetic root because it cannot execute through this mount.
+   g. For each document in the entry view,
+      `mountedFiles.set("/~cf/" + hash + doc.filename,
       { name: …, contents: doc.code })`. Entry path =
       `/~cf/<hash><entryFilename>` where `entryFilename` comes from
       `verifySourceDocs`'s `entryFilename` (already returned inside
       `loadVerifiedSourceClosure` — if not surfaced, extend
-      `loadVerifiedSourceClosure` to return `{ docs, entryFilename }`; check
-      its callers: `replicateClosures` and the pattern-manager cold path —
-      adjust both destructurings).
-   g. Record `FabricMount` + alias (`identifier → entryPath`); return the
-      entry Source.
+      `loadVerifiedSourceClosure` to return `{ docs, entryFilename }`; check its
+      callers: `replicateClosures` and the pattern-manager cold path — adjust
+      both destructurings). For each mounted path, record the source document's
+      verified identity and effective identity fingerprint in
+      `publishedModules`. An absent legacy field contributes the empty value.
+   h. Record `FabricMount`, including `publishedModules`, plus the alias
+      (`identifier → entryPath`); return the entry Source.
 
 Pitfalls to encode as comments + tests:
 - The walk calls `resolveSource` with the verbatim specifier text (bare
@@ -505,9 +675,9 @@ Pitfalls to encode as comments + tests:
   texts pinning the same hash (e.g. `cf:pattern:<h>` and a pinned slug form
   in M2) → step (b) returns the same Source object, and `resolveProgram`
   stores it under BOTH identifiers → **duplicate entries in
-  `program.files`**. Therefore M1.5 must dedupe `moduleFiles` by name (see
-  there). Write the test now (two import lines, same hash) and let it go
-  green in M1.5.
+  `program.files`**. Therefore M1.5 must dedupe the identity and source-history
+  set by name (see there). Write the test now with two import lines and the same
+  hash. Let it go green in M1.5.
 - Authored programs must not collide with the mount root: in
   `compileToRecordGraph` authored names carry the `/<id>/` prefix so they
   can't start with `/~cf/`; in `compileResolvedToRecordGraph` they are
@@ -520,8 +690,9 @@ in-process runtime (mirror the setup of existing cell-cache tests — find
 bootstrap). Seed source docs by running `writeSourceDocs` with a small
 hand-built module set. Cover: fetch+mount happy path; missing hash; tampered
 doc (flip a byte in a stored cell → verification failure surfaces as
-not-found error); root-absolute rejection; dedupe-by-identity; M2/M3/M4
-scope errors.
+not-found error); root-absolute rejection in the entry view; acceptance of a
+root-absolute import in an excluded synthetic root; dedupe-by-identity;
+M2/M3/M4 scope errors.
 
 ### M1.5 Engine integration
 
@@ -557,55 +728,97 @@ File: `packages/runner/src/harness/engine.ts`.
    - After `this.resolve(resolver)`: collect
      `const mounts = options.fabricImports ? resolver.mounts() : []` and
      `const aliases = …specifierAliases()`.
-   - **Dedupe `moduleFiles` by `name`** after the `.d.ts` filter, asserting
-     equal contents on duplicates (see M1.4 pitfall):
+   - Preserve provenance while assembling the resolved program. Files from the
+     explicit authored `Program` are authored. Files created from verified
+     `SourceDoc` values are mounted. Declaration stubs returned only by
+     `EngineProgramResolver` are runtime type inputs. Carry this classification
+     separately from each `Source.name`.
+   - Build the three sets from the declaration-file integration section. Pass
+     the full type-check set to TypeScript. Pass the identity and source-history
+     set to `computeFabricModuleIdentities`. Pass only the emitted set to record
+     assembly and compiled-cache operations.
+   - **Dedupe the identity and source-history set by `name`**, asserting equal
+     contents and equal provenance on duplicates (see M1.4 pitfall). Reject a
+     provenance mismatch before projecting the wrapper back to `Source`:
      ```ts
      // Shown for illustration only.
-     const byName = new Map<string, Source>();
-     for (const f of moduleFiles) {
-       const prev = byName.get(f.name);
-       if (prev !== undefined && prev.contents !== f.contents) throw new Error(…);
-       byName.set(f.name, f);
+     type IdentitySourceInput = {
+       source: Source;
+       provenance: "authored" | "mounted";
+     };
+     const byName = new Map<string, IdentitySourceInput>();
+     for (const input of identitySourceInputs) {
+       const prev = byName.get(input.source.name);
+       if (
+         prev !== undefined &&
+         (prev.source.contents !== input.source.contents ||
+           prev.provenance !== input.provenance)
+       ) throw new Error(…);
+       byName.set(input.source.name, input);
      }
-     const uniqueModuleFiles = [...byName.values()];
+     const uniqueIdentitySourceFiles = [...byName.values()]
+       .map(({ source }) => source);
      ```
    - Guard: any file of the ORIGINAL `program.files` (pre-pretransform input)
      named under `/~cf/` → throw `"/~cf/ is a reserved namespace"`.
    - Identity computation (line 242): replace `computeModuleIdentities(…)`
-     with `computeFabricModuleIdentities(uniqueModuleFiles, mounts,
+     with `computeFabricModuleIdentities(uniqueIdentitySourceFiles, mounts,
      { idPrefix: \`/${id}\` })`. (With zero mounts it must behave byte-for-byte
      like today — M1.3 guarantees it; add a regression assertion to an
      existing engine test rather than trusting it.)
-   - Pass `specifierAliases: aliases` into BOTH `compiler.compileToModules`
-     (line 282) and `compileSourcesToRecords` (line 324).
-   - Fabric edges into write-back descriptors (line 407): `importEdges` comes
-     from `resolveModuleImports` whose `externalDeps` include fabric
-     specifiers. Extend the `modules` mapping:
+   - Pass `specifierAliases: aliases` into `compiler.compileToModules` over the
+     type-check set and into `compileSourcesToRecords` over the emitted set.
+     Derive `emittedIdentityByPath` by restricting `identityByPath` to emitted
+     modules. Give record assembly only that restricted map.
+   - Restrict `precompiledModulesFor` requests and module-byte-cache completeness
+     checks to emitted identities. An authored declaration has a source identity
+     but never has a compiled body.
+   - Split source and compiled edges in write-back descriptors.
+     `resolveModuleImports` includes type-only edges and therefore supplies the
+     source identity and source-history descriptors. It must not directly
+     supply compiled links. Derive compiled import specifiers from the emitted
+     JavaScript, using the same `importSpecs` extraction persisted on compiled
+     documents. Resolve only those runtime specifiers through internal paths or
+     `specifierAliases`, and map their targets through
+     `emittedIdentityByPath`:
      ```ts
      // Shown for illustration only.
-     const fabricEdges = (importEdges.get(file.name)?.externalDeps ?? [])
-       .filter((s) => isFabricImportSpecifier(s))
-       .map((s) => {
-         const target = aliases.get(s);
-         if (target === undefined) throw new Error(`unresolved fabric specifier '${s}' survived compile`);
-         return { specifier: s, targetIdentity: identityByPath.get(target)! };
-       });
-     // imports: [...internalDeps-mapped, ...fabricEdges]
+     const runtimeSpecifiers = deriveModuleRecordFields(compiledJs).importSpecs;
+     const compiledImports = runtimeSpecifiers.flatMap((specifier) => {
+       const target = resolveInternalOrAliasTarget(file, specifier, aliases);
+       if (target === undefined) return []; // A runtime-provided module.
+       const targetIdentity = emittedIdentityByPath.get(target);
+       if (targetIdentity === undefined) {
+         throw new Error(
+           `emitted module '${file.name}' imports declaration-only target '${specifier}'`,
+         );
+       }
+       return [{
+         specifier,
+         targetIdentity,
+       }];
+     });
      ```
+     Build source-persistence descriptors from the identity and source-history
+     set with the complete value-and-type edge graph. Build compiled descriptors
+     from emitted records and `compiledImports` only. A source descriptor may
+     represent a declaration and have no compiled counterpart. A type-only edge
+     between two emitted `.ts` modules remains a source link but is not a direct
+     compiled link. Fail clearly if emitted JavaScript names a declaration-only
+     target instead of manufacturing a compiled link for it.
    - `filename` for mounted files (line 422): `stripModuleIdPrefix(file.name,
      id)` only strips `/<id>`; mounted names need the mount prefix stripped
      instead. Write a small helper
      `storedFilenameFor(name, id, mounts)` → authored: status quo; mounted:
      `name.slice(("/~cf/" + m.entryIdentity).length)`.
-3. `compileResolvedToRecordGraph` (engine.ts:454): same wrapper + same merged
-   identity computation + same aliases into `compileToModules` + same fabric
-   edges, with `idPrefix` ABSENT for the authored set (stored names are
-   prefix-free) and `space` from a new optional parameter
-   `options?: { fabricImports?: { space: MemorySpace } }`. The caller
-   (pattern-manager, M1.7) threads the space it already has. NOTE: this path
-   builds no record graph itself — it returns `CacheableModule[]`; the
-   emitted set now contains mounted modules too, which is exactly what the
-   cached-module evaluator needs (self-contained closure).
+3. `compileResolvedToRecordGraph` (engine.ts:454): use the same provenance
+   classification, three sets, merged identity computation, aliases, and fabric
+   edges, with `idPrefix` absent for the authored set because stored names are
+   prefix-free. Add `options?: { fabricImports?: { space: MemorySpace } }`; the
+   pattern-manager caller in M1.7 threads the space it already has. Return
+   separate source-persistence descriptors and emitted `CacheableModule`
+   values. The emitted set contains mounted implementation modules for the
+   self-contained cached-module evaluator. It excludes all declarations.
 
 Tests (`packages/runner/test/fabric-imports-engine.test.ts`, in-process
 runtime):
@@ -638,7 +851,9 @@ runtime):
 
 File: `packages/runner/src/compilation-cache/cell-cache.ts`.
 
-1. `storedImportRefs` (line 119): skip fabric edges when building SOURCE
+1. Source-document construction consumes the identity and source-history set,
+   including authored and mounted declarations. `storedImportRefs` (line 119)
+   keeps internal declaration edges but skips fabric edges when building source
    links:
    ```ts
    // Shown for illustration only.
@@ -649,28 +864,48 @@ File: `packages/runner/src/compilation-cache/cell-cache.ts`.
    `unreachedRoots` (line 96) stays UNTOUCHED — it must keep seeing fabric
    edges as reachability (otherwise every mounted module gets a synthetic
    root link from the importer's entry, dragging subtrees back into the
-   importer's source closure — the exact thing decision 5 forbids).
-2. **Compiled side**: find `writeCompiledDocs` / the compiled-doc builder in
-   this file (below the source-set section). Confirm which import list it
-   stores. Required end state: compiled docs DO carry fabric edges as links
+   importer's source closure — the exact thing decision 6 forbids).
+2. **Compiled side**: `writeCompiledDocs`, compiled synthetic roots, and
+   compiled import links consume only the emitted set. Direct compiled links
+   come only from runtime imports extracted from emitted JavaScript. A
+   declaration identity is never a compiled-cache member or link target. A
+   value fabric import between emitted modules becomes a link
    (`{specifier: "cf:pattern:…", link → compiledDocKey(rtv, <identity>)}`).
-   If it shares `storedImportRefs`, give that function an
-   `{ includeFabricEdges: boolean }` parameter rather than duplicating it.
-3. `verifySourceDocs` needs NO change (importer closures no longer contain
-   subtree docs). Add a regression test proving it: write back an importer's
-   modules, `loadVerifiedSourceClosure(importerEntry)` → returns ONLY the
-   importer's own docs, verification ok, and the importer doc's stored
-   imports contain no fabric specifier.
+   An erased type-only import does not. Use separate source and compiled
+   descriptor fields rather than assuming both stores have the same membership
+   or edge graph. The compiled synthetic-root pass may still link an otherwise
+   unreachable emitted module under `cf:cache-root/`; that is not the erased
+   type-only specifier.
+3. `verifySourceDocs` still verifies only the importer's closure because that
+   closure no longer contains subtree docs. It must also read the normative
+   identity fingerprint from each source document and use it when recomputing
+   the identity. Add a regression test proving both properties: write back an
+   importer's modules, `loadVerifiedSourceClosure(importerEntry)` returns only
+   the importer's own docs, verification succeeds under the recorded
+   fingerprint, and the importer doc's stored imports contain no fabric
+   specifier.
 
-Tests (extend the existing cell-cache test file): the regression above; plus
-compiled-closure walk: `loadCompiledClosure(importerEntry)` returns importer
-AND subtree compiled docs (fabric link followed); plus `replicateClosures`
-of an importer — **expected to fail or lose the subtree** (source closure
-excludes it). Fix inside `replicateClosures`: after replicating the
-importer's closure, parse each replicated source doc's external specifiers
-(`collectImportSpecifiers` + `isFabricImportSpecifier` + `pinnedIdentity`)
-and recurse per subtree identity (visited-set on identities). Test: replicate
-importer to a second space → importer loads cold in that space.
+Tests (extend the existing cell-cache and module-byte-cache test files): the
+regression above; a program with an authored declaration writes declaration
+source but no declaration compiled document, then obtains a warm compiled-cache
+hit without requesting one; a runtime declaration stub does not appear in the
+source set and its module remains an external fingerprinted leaf; a compiled
+closure walk returns importer and subtree emitted docs but no declaration docs;
+and a type-only relative edge between two emitted `.ts` modules appears under
+its authored specifier in the source links but not the compiled runtime links.
+The emitted target may still be retained by a synthetic compiled root. Also
+show that `replicateClosures` of an importer initially fails or loses the
+subtree because the source closure excludes it. Fix `replicateClosures` by
+parsing each replicated source doc's external specifiers with
+`collectImportSpecifiers`, `isFabricImportSpecifier`, and `pinnedIdentity`, then
+recurse per subtree identity with a visited set. Test that an importer replicated
+to a second space loads cold in that space.
+
+The piece-lifecycle manifest writer reuses this recursive pinned-dependency walk
+as a retention walk. It records each dependency identity once and retains the
+complete transitive graph. A regression removes every incidental source root
+after retaining an importer whose pinned dependency has another pinned
+dependency, then restores and compiles the importer from its revision manifest.
 
 ### M1.7 Reload paths (warm + cold)
 
@@ -768,10 +1003,20 @@ export async function resolveFabricRefToIdentity(
 
 Algorithm (spec § Resolution rule — implement hops exactly):
 
-1. Space: `ref.space` undefined → `compilingSpace`; a DID → use as-is; a name
-   → M2 throws `"space names require name→DID resolution (open question 2);
-   use a DID"` (names are NOT in M2 scope — spec open question).
-2. Start cell:
+1. Scope guard: when `ref.subpath` is present, throw
+   `"subpaths not yet supported (M4): <specifier>"` before resolving the space,
+   slug, piece, or entry identity. This guard is shared by deployment pinning
+   and `cf deps update`; otherwise those paths can silently write the entry
+   identity as the pin for an unsupported subpath. M4 replaces this guard with
+   manifest lookup. Keep the independent `FabricAwareResolver` guard until M4
+   also teaches frozen compilation to mount a selected subpath module.
+2. Space: `ref.space` undefined → `compilingSpace`; a DID → use as-is; a name
+   → M2 throws
+   `"space names are currently unsupported; resolve the name to a DID first"`.
+   The tentative identifier-only policy keeps name resolution outside the
+   fabric resolver. README Open question 1 retains that policy for further
+   study and places human-readable aliases in a future shortlink service.
+3. Start cell:
    - slug → M2.1 resolver (wrap `SlugResolutionError` with the chain so far).
    - `of:` URI → reconstruct the entity id from the parsed hash via the
      `uri-utils.ts` helpers (`fromURI("of:fid1:" + hash)` / the `{"/": id}`
@@ -779,17 +1024,17 @@ Algorithm (spec § Resolution rule — implement hops exactly):
      hand-building the string), then `sync()`.
    - `pattern:` → already terminal (return immediately; callers normally
      short-circuit via `pinnedIdentity` and never get here).
-3. Piece hop: if the cell has pattern metadata — use the SAME accessors the
+4. Piece hop: if the cell has pattern metadata — use the SAME accessors the
    runner uses (`getPatternIdentityRef` / `getPatternId` around
    `packages/runner/src/runner.ts:4137`; export them if module-private):
    - `patternIdentity` present → its `.identity` IS the terminal identity;
      append hops; done.
    - else `patternId` present → load the pattern meta cell by that URI
      (mirror how `PatternManager` reads meta cells — `patternMetaSchema`),
-     continue at 4.
+     continue at 5.
    - neither, and the cell itself is not a pattern meta cell → throw
      `"cf:… does not resolve to a pattern (chain: …)"`.
-4. Pattern-meta hop: `entryIdentity` field present → done. Absent → throw
+5. Pattern-meta hop: `entryIdentity` field present → done. Absent → throw
    `"pattern meta for cf:… has no entryIdentity (legacy pattern; re-deploy
    it)"`. (Computing it from `program` requires a full pretransform+hash
    pass — deliberately out of scope; the error names the remedy.)
@@ -803,7 +1048,10 @@ setters from runner.ts — find `setMetaRaw("pattern", …)` usage at
 runner.ts:901 and mirror it); slug → piece; slug → pattern meta directly;
 slug → plain data cell (error + chain); missing slug; `of:` directly to meta
 cell; piece with only legacy `patternId`; meta without `entryIdentity`
-(error message).
+(error message). Add a direct `pattern:` subpath test that proves the scope
+guard runs before the otherwise-terminal identity is returned. Add a CLI
+pin/update regression that resolves a valid slug but rejects its subpath rather
+than writing the slug target's entry identity.
 
 ### M2.3 Pin rewriting (byte-precise source surgery)
 
@@ -835,11 +1083,19 @@ on the original string. Skip non-fabric specifiers; skip refs where
 `import()` expression? — dynamic imports are unsupported by the compiler
 (resolver.ts comment) so they cannot occur in valid programs; ignore.
 
+Detect an `ImportEqualsDeclaration` whose external module reference is a
+`cf:` string and reject it with
+`"fabric import-equals syntax is unsupported; use an ESM import type"`.
+Apply the same validation in graph discovery and identity collection so this
+syntax cannot bypass the pin or become an unhashed runtime dependency.
+
 Tests: fixtures with weird-but-valid formatting (multiline imports, comments
 between clause and specifier, `export * from`, `import type`, single vs
 double quotes — PRESERVE the original quote character: detect from the
 literal's raw text). Assert byte-identity outside the replaced spans
-(compare prefix/suffix slices, not just "compiles").
+(compare prefix/suffix slices, not just "compiles"). Add a rejection test for
+`import type Alias = require("cf:dep")` in rewriting, graph discovery, and
+identity calculation.
 
 ### M2.4 Engine: unpinned refs in dev mode
 
@@ -854,7 +1110,7 @@ literal's raw text). Assert byte-identity outside the replaced spans
     `resolvedPins()` accessor.
   - cross-space (`ref.space` a DID ≠ compiling space): fetch via
     `loadVerifiedSourceClosure(runtime, refSpace, …)` — the storage session
-    routes; CFC caveat is documented follow-up (decision 8). The write-back
+    routes; CFC caveat is documented follow-up (decision 9). The write-back
     then copies the docs into the compiling space (this is `replicateClosures`
     semantics through the normal compile path — no extra code, but ADD a test
     asserting it happens, and a `logger.info` naming source space → dest
@@ -871,13 +1127,17 @@ the slug cell after pinning, recompile → still works).
 Read `packages/cli/` command structure first (mirror an existing command's
 file layout, e.g. how `dev.ts` registers).
 
-- **Deploy pinning**: find the deploy path (`cf` skill docs:
-  `pattern-deploy`; the CLI command that writes a pattern's program to the
-  pattern meta). Before writing the program: run `rewriteFabricPins` over
-  every file, with `resolvePin` = M2.2 chase via the connected runtime; if
-  any rewrite happened, print each (`pinned cf:/kitchen/todo-list →
-  @AvcnyZ…`). The STORED program is the pinned one. Deploying with an
-  unresolvable ref fails the deploy with the chase's error.
+- **Deploy pinning**: `getPinnedProgramFromFile()` currently calls
+  `getProgramFromFile()`. Its ordinary harness resolver has no fabric-aware
+  layer, so it rejects every fabric import or export declaration before
+  `pinProgramFabricImports()` runs. An already-pinned declaration fails too,
+  and an unpinned declaration never reaches the rewriter. Replace that ordering
+  with the `cf deps update` pattern: call `collectLocalProgram()` with fabric
+  imports allowed, run `pinProgramFabricImports()` over every collected file,
+  then pass the pinned program through the frozen compile path. If any rewrite
+  happened, print each (`pinned cf:/did:key:z6Mk…/todo-list → @AvcnyZ…`). The
+  stored program is the pinned one. Deploying with an unresolvable reference
+  fails with the chase's error.
 - **`cf deps update [file] [--import <specifier>]`**: new command; operates
   on the local working files (filesystem), not deployed state: parse, chase
   every mutable fabric ref (or just `--import`), rewrite pins in place,
@@ -889,7 +1149,12 @@ file layout, e.g. how `dev.ts` registers).
 
 Tests: CLI-level tests follow whatever harness existing cli tests use (look
 in `packages/cli` for test conventions; if commands are thin over lib
-functions, test the lib functions and add one smoke test per command).
+functions, test the lib functions and add one smoke test per command). Add
+pin-on-deploy regressions for an unpinned value import, `import type`, a
+type-only export, and an inline import type. Each unpinned reference must reach
+the rewriter before the frozen compile. Add an already-pinned import regression
+that reaches the frozen compile without local-resolution failure. Keep the
+existing `cf deps update` coverage.
 
 ### M2.6 End-to-end snapshot-semantics test (the spec's core scenario)
 
@@ -915,30 +1180,94 @@ One integration test (runner-level, in-process, two "deploys"):
 
 ## M3 / M4 — sketches only (do NOT implement)
 
-- **M3 cross-host + publish**: `cf publish` (write source docs + meta + slug
-  to a target space), host-qualified refs (needs dynamic space→host routes —
-  spec open question 8; `spaceHostMap` is interim), CFC label propagation for
-  fetched source (spec § Security), possible public-pattern HTTP endpoint
-  (spec open question 7 — left open).
-- **M4 subpaths + npm vendoring**: subpath = alias to a non-entry mounted
-  file (grammar already parses it); `npm:` = fetch via esm.sh → vendor as a
-  content-addressed source set → same rails.
+- **M3 cross-host + publish**: `cf publish` verifies source-read authorization,
+  destination-write authorization, and the CFC flow. It copies the verified
+  source closure, creates a lightweight patternIdentity-bearing publication
+  cell, and optionally assigns a slug in the target space. It does not copy the
+  source piece or its state. The resulting replica uses the destination space's
+  ACL. Host-qualified refs register their accepted hint through the ordinary
+  per-space storage manager before opening the target space. Do not use a
+  secondary session. A seeded route can only be confirmed. Once a late hint is
+  accepted, a different hint is a conflict even before the space opens. After
+  the space opens, only the hint already in effect can be confirmed. The
+  current registry still needs the pre-open conflict guard. Dynamic
+  registration and site-table hydration exist as foundations, but
+  import-resolver integration, host failure, and space relocation remain work.
+  Cross-host publication also needs CFC label propagation for fetched source
+  (spec § Security). A possible public-pattern HTTP endpoint remains open under
+  the public distribution question in the spec.
+- **M4 explicit subpaths**: extend lifecycle source ingestion and retained
+  publications with the following behavior.
+
+  1. Add an `exports` map to `cf/authored-program-manifest/v1`. The empty
+     subpath implicitly selects `main` and cannot appear in the map. Require
+     each key to be a canonical slash-separated public name with no leading or
+     trailing slash, empty segment, `.` segment, `..` segment, or `@`
+     character. Reject noncanonical keys, duplicate keys, wildcards,
+     conditions, and targets that are not canonical authored filenames in the
+     manifest. Compare the parsed subpath exactly. Do not percent-decode or
+     fold case.
+  2. Include the UTF-8 key-sorted map in the manifest identity and
+     `cf/runtime-neutral-program-digest/v1`. A map-only edit creates a new
+     source revision even when all module identities and the executable entry
+     identity stay equal. Revert restores the previous map. Followers observe
+     the new revision.
+  3. Make each mutable import target expose its current immutable manifest
+     through the source revision. This applies to pieces and future lightweight
+     publication pointers. A target that exposes only `patternIdentity` cannot
+     resolve an unpinned subpath.
+  4. At pin time, chase the mutable locator to its current source revision.
+     Look up the exact public subpath, load the mapped file's verified
+     source-document identity, and write that selected module identity as the
+     trailing pin. Preserve the locator and subpath before the pin. `cf deps
+     update` repeats the lookup against the current manifest. Replace the M2
+     subpath guard in `resolveFabricRefToIdentity()` with this branch. Extend
+     `FabricChaseResult` with `selectedIdentity`; keep `entryIdentity` as the
+     identity reached by the pointer chase. The two values are equal without a
+     subpath. Pin rewriting must use `selectedIdentity`.
+  5. During frozen compilation, let the existing `pinnedIdentity()` fast path
+     mount the selected module closure directly. Do not read the mutable target
+     or manifest. An entry import continues to pin
+     `patternIdentity.identity`, so M1 and M2 behavior stays unchanged.
+  6. Reject any subpath on a direct `cf:pattern:<identity>` reference. One
+     module source identity does not bind an authoritative manifest. A caller
+     that knows the target module identity uses it directly. Do not infer
+     public names from entry-module re-exports or expose a file merely because
+     its source document is readable.
+  7. Permit an exports-map target to be an authored `.d.ts` file. Type-only
+     imports retain and hash that declaration normally. Reject a value import
+     from a declaration-only target because it has no emitted runtime module.
+  8. Test exact selection, selected-module pin rewrite, frozen resolution after
+     the mutable target disappears, explicit dependency updates, invalid map
+     entries, arbitrary-file rejection, direct-pattern subpath rejection,
+     declaration targets, map-only revision propagation, and revert.
+- **Later npm vendoring**: `npm:` fetches through the selected package source,
+  vendors a content-addressed source set, and then uses the same identity and
+  mounting machinery. Its design remains separate from explicit fabric
+  subpaths.
 
 ## Invariants checklist (the reviewer will check every one)
 
-1. A compile with zero fabric imports is byte-for-byte unchanged (identities,
-   records, cache docs, behavior). Guard: run the existing engine + cache
-   test suites untouched; they must pass without edits (any needed edit =
-   design smell, stop and flag).
+1. Fabric resolution does not otherwise change a compile with zero fabric
+   imports. The declaration-identity and runtime-fingerprint integrations in
+   this plan intentionally change identities and source persistence when their
+   inputs require it. Outside those migrations, identities, records, cache
+   documents, and behavior remain byte-for-byte unchanged. Guard this boundary
+   with the existing engine and cache suites plus the migration tests specified
+   above.
 2. A mounted module's computed identity ALWAYS equals the identity it was
    fetched by (M1.3 throws otherwise) — never trust, always recompute.
-3. The importer's module identity changes iff its own bytes change — and the
-   pin is part of its bytes. No identity input lives outside `program.files`.
+3. The importer's module identity changes when its own source, a transitive
+   authored dependency, a fabric pin, or its effective runtime fingerprint
+   changes. Runtime-provided declaration stubs remain external fingerprinted
+   dependencies rather than internal authored files.
 4. Source closures never span programs; compiled closures may (links).
 5. Fabric specifiers never appear in: emitted record KEYS (only
    `cf:module/<hash>`), source-doc links, slug cells. They appear verbatim
-   in: authored source, record `resolutions` keys, compiled require() calls,
-   CacheableModule/compiled-doc import edges.
+   in authored source and identity inputs. A value import also appears in record
+   `resolutions`, compiled `require()` calls, and emitted-module compiled edges.
+   A type-only import may be erased from JavaScript but still affects identity
+   and retains its pinned source dependency.
 6. Every error message names the failing specifier and (where applicable) the
    chain of hops — copy the exact strings from this plan.
 7. No new HTTP surface, no new authz checks — reads go through normal cell
@@ -949,8 +1278,8 @@ One integration test (runner-level, in-process, two "deploys"):
 
 | Risk | Check | Fallback |
 |---|---|---|
-| Injected helper module (`transformInjectHelperModule` → `transformCfDirective`) references a path that breaks under mount prefixing | FIRST test in M1.4: mount a closure produced by a real `compileToRecordGraph` write-back (which contains whatever the helper injects), not a hand-built one | If the helper import is non-relative and path-ambiguous: serve it from the wrapper by suffix-matching within the requesting subtree — but ESCALATE first; this needs a design look |
-| `loadCompiledClosure` verifies link/edge consistency in a way fabric links violate | M1.6 compiled-walk test before any M1.7 work | Teach its check the fabric branch (same shape as verifySourceDocs partition — but escalate; the compiled set's integrity model is CFC labels, changes there are security-sensitive |
+| Injected helper module (`transformInjectHelperModule` → `transformCfDirective`) references a path that breaks under mount prefixing | FIRST test in M1.4: mount pristine source produced by a real `compileToRecordGraph` write-back and assert that the ordinary compile-time helper transform runs exactly once. Cover the tolerated legacy envelope in a separate fixture. | If the helper import is non-relative and path-ambiguous: serve it from the wrapper by suffix-matching within the requesting subtree — but ESCALATE first; this needs a design look |
+| `loadCompiledClosure` verifies link/edge consistency in a way fabric links violate | M1.6 compiled-walk test before any M1.7 work | Teach its check the fabric branch. Use the same shape as the `verifySourceDocs` partition, but escalate first because the compiled set's integrity model uses CFC labels and is security-sensitive. |
 | `evaluateCachedModules` record building can't map fabric edges | M1.7 step 2 test-first | Small resolution branch keyed on `isFabricImportSpecifier` |
 | Engine cache-hit (`fullHit`) misbehaves with mounted identities | M1.5 test: SECOND compile of the importer is a full hit (no TS compile — assert via the `compile-cache-hit` log or `esmCacheStats`) | — |
 | TS extension inference for mounted entry (`.tsx` vs `.ts`) | M1.1 alias test uses a `.tsx` target | use stored filename's real extension (already in plan) |
@@ -964,9 +1293,11 @@ One integration test (runner-level, in-process, two "deploys"):
   the explicit pin-rewrite tool (M2.3) invoked by deploy/`deps update`.
 - Do NOT add fabric links to SOURCE docs or "fix" `verifySourceDocs` to
   union across programs.
-- Do NOT re-pretransform mounted sources (they are stored post-pretransform;
-  they enter via the resolver, which naturally skips pretransform).
+- Do NOT pretransform mounted source before storing or mounting it. Source
+  documents retain pristine authored bytes. After resolution, the engine
+  applies the ordinary compile-time helper transform exactly once. Preserve the
+  existing tolerance for source stored in the legacy envelope.
 - Do NOT thread a space through globals/singletons — it rides options.
-- Do NOT touch CFC label code paths in this work (decision 8); if a test
+- Do NOT touch CFC label code paths in this work (decision 9); if a test
   fails on labels, stop and escalate rather than loosening a check.
 - Do NOT introduce new CLI flags beyond `cf deps update`'s listed ones.
