@@ -127,6 +127,13 @@ describe("executePieceCallable", () => {
       summary: "bound-source:tea",
       source: "bound-source",
     });
+    // The result cell's durable address rides along — the handle a caller can
+    // revisit instead of re-running the tool (verb contract Part 2).
+    expect(result.resultRef).toEqual({
+      id: "of:tool-result-cell",
+      space: "did:key:test-home",
+      scope: "space",
+    });
   });
 
   it("passes the configured piece scope when resolving callables", async () => {
@@ -190,7 +197,7 @@ describe("executePieceCallable", () => {
       toolResult: { ok: true },
     });
 
-    await executePieceCallable(
+    const result = await executePieceCallable(
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
@@ -207,6 +214,9 @@ describe("executePieceCallable", () => {
     );
 
     expect(harness.tracker.toolResultScope).toBe("user");
+    // The returned handle preserves the scope — dropping it would silently
+    // retarget a user-scoped result to the space-scoped instance.
+    expect(result.resultRef?.scope).toBe("user");
   });
 
   it("reads primitive handler input from --value-file", async () => {
@@ -688,6 +698,11 @@ function createPieceCallableHarness(options: {
     pull: () => Promise.resolve(state.value),
     key: (_key: string) => resultCell,
     asSchemaFromLinks: () => resultCell,
+    getAsNormalizedFullLink: () => ({
+      id: "of:tool-result-cell",
+      space: "did:key:test-home",
+      scope: options.callableScope ?? "space",
+    }),
   };
 
   const piece = {
