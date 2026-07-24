@@ -3445,6 +3445,30 @@ class SpaceReplica implements ISpaceReplica {
     });
   }
 
+  /**
+   * TEST-ONLY (C3.12.0 diagnostic, adversarial-review CR7). Observable snapshot
+   * of this replica's standing-watch liveness — the count of in-flight
+   * update-consumption promises, whether a subscribed watch view is live, and
+   * the active doc-set membership watch id. WHY it exists: WO-0's three-way
+   * verdict must split "the foreign read replica's standing watch was torn down"
+   * (B1-client) from "the watch is alive but the origin pushes no third-party
+   * commit" (B1-server), and both live behind hard-private `#` fields a Deno
+   * test cannot read. This is a pure read of existing state — no behavior
+   * change, no lifecycle effect — and exists solely for the diagnostic;
+   * production code must not depend on it.
+   */
+  crossSpaceWatchDiagnostics(): {
+    updatePromiseCount: number;
+    hasSubscribedWatch: boolean;
+    docSetWatchId: string | undefined;
+  } {
+    return {
+      updatePromiseCount: this.#updatePromises.size,
+      hasSubscribedWatch: this.#subscribedWatchView !== null,
+      docSetWatchId: this.#docSetWatchId,
+    };
+  }
+
   private async refreshWatchSet(
     entries: Iterable<
       [{ id: URI; type: MIME; scope?: CellScope }, SchemaPathSelector]
