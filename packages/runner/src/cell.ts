@@ -20,7 +20,6 @@ import {
   linkRefFrom,
 } from "@commonfabric/data-model/cell-rep";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   deepFrozenCloneAndInternSchema,
   internSchema,
@@ -1534,7 +1533,7 @@ export class CellImpl<T extends FabricValue>
     });
     const cause = this._frame?.cause;
 
-    let array = currentValue as unknown[];
+    let array = currentValue as FabricValue[];
     if (array !== undefined && !Array.isArray(array)) {
       throw new Error(
         "Cell.addUnique() requires transaction and array value\n" +
@@ -1559,14 +1558,14 @@ export class CellImpl<T extends FabricValue>
     // server re-dedups against durable state, catching elements the local
     // replica had not loaded.
     const anchored = recursivelyAddIDIfNeeded(
-      value as unknown[],
+      value as FabricValue[],
       this._frame,
-    ) as unknown[];
+    );
     const existing = array;
     // A cell candidate matches an existing element by its (deterministic) link,
     // so re-adding the same keyed entity is a local no-op; a plain value matches
-    // by stored-value equality, mirroring the server's keyless dedup.
-    const alreadyPresent = (candidate: unknown) =>
+    // by content, mirroring the server's keyless dedup.
+    const alreadyPresent = (candidate: FabricValue) =>
       existing.some((element) =>
         isCell(candidate)
           ? areLinksSame(
@@ -1577,7 +1576,7 @@ export class CellImpl<T extends FabricValue>
             this.tx!,
             this.runtime,
           )
-          : deepEqual(element, candidate)
+          : valueEqual(element, candidate)
       );
     const toAdd = anchored.filter((candidate) => !alreadyPresent(candidate));
     if (toAdd.length === 0) {
@@ -1661,7 +1660,7 @@ export class CellImpl<T extends FabricValue>
     const currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
-    const array = currentValue as unknown[];
+    const array = currentValue as FabricValue[];
     if (array === undefined) {
       return;
     }
@@ -1675,7 +1674,7 @@ export class CellImpl<T extends FabricValue>
     // matches by stored-value equality. The removed elements are the array's
     // stored representations (links stay as their sigil), so recording each one
     // as the op's value lets the server match the durable element exactly.
-    const matches = (element: unknown) =>
+    const matches = (element: FabricValue) =>
       isCell(ref)
         ? areLinksSame(
           element,
@@ -1685,7 +1684,7 @@ export class CellImpl<T extends FabricValue>
           this.tx!,
           this.runtime,
         )
-        : deepEqual(element, ref);
+        : valueEqual(element, ref as FabricValue);
     const removed = array.filter(matches);
     if (removed.length === 0) {
       return;
@@ -2160,11 +2159,7 @@ export class CellImpl<T extends FabricValue>
     // is marked `ignoreReadForScheduling` (it must not register a
     // self-dependency that would re-trigger the writer) and
     // `internalVerifierRead` (it must not taint the transaction's CFC labels
-    // with this cell's own value). Comparison uses `valueEqual`, the
-    // `Fabric`-aware content equality the storage no-op gates rely on:
-    // `deepEqual` walks enumerable own-props and so conflates distinct
-    // same-class `FabricSpecialObject`s (e.g. `FabricBytes`/`FabricHash`),
-    // which would drop a real change.
+    // with this cell's own value).
     if (onlyIfDifferent) {
       const current = this.tx.readValueOrThrow(this.link, {
         meta: { ...ignoreReadForScheduling, ...internalVerifierRead },

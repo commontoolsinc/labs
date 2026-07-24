@@ -29,7 +29,9 @@ This shift has several benefits:
 
 ## The `equals()` Function
 
-Use `equals()` to compare cells or values. For cells, this checks reference equality (same object in the graph). For plain values, it checks structural equality.
+Use `equals()` to ask whether two things are the *same* thing. It resolves each side to what it points at in the graph — following links — and compares those referents. It never compares contents: two separately-created values are not `equals()` however identical they look, and a value with no place in the graph (a fresh object literal, say) has nothing to compare, so it is never `equals()` to anything but itself.
+
+To compare *contents* instead, use `valueEqual()`, also exported from `commonfabric`.
 
 ```typescript
 // Shown for illustration only.
@@ -47,6 +49,9 @@ equals(data, data.get());              // => true
 
 // Does not compare cell values!
 equals(new Writable({ name: "Gideon" }), { name: "Gideon" });  // => false
+
+// Two object literals have no referents to compare
+equals({ name: "Gideon" }, { name: "Gideon" });  // => false
 
 // Works when navigating via .key()
 const deepData = new Writable({ address: { street: "123 Main" } });
