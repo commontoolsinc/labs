@@ -8,6 +8,7 @@ import {
 import { Identity } from "@commonfabric/identity";
 import {
   attachOtelBridgeWhenInitialized,
+  cleanup,
   executeWorkerRequest,
   formatConsoleMessage,
   handleWorkerMessage,
@@ -280,6 +281,39 @@ try {
     `runtime failed @ ${TEST_DID}:${PIECE_ID} running pattern`,
   );
   assertEquals(state.sends.length, 2);
+
+  let detachCalls = 0;
+  setWorkerStateForTesting({
+    initialized: true,
+    runtime: null,
+    detachOtelBridge: () => {
+      detachCalls++;
+    },
+  });
+  await cleanup();
+  await cleanup();
+  assertEquals(detachCalls, 1);
+
+  let disposeCalls = 0;
+  setWorkerStateForTesting({
+    initialized: true,
+    runtime: {
+      storageManager: {
+        synced: () => Promise.reject(new Error("sync failed")),
+      },
+      dispose: () => {
+        disposeCalls++;
+        return Promise.resolve();
+      },
+    } as never,
+    detachOtelBridge: () => {
+      detachCalls++;
+    },
+  });
+  await assertRejects(() => cleanup(), Error, "sync failed");
+  await cleanup();
+  assertEquals(disposeCalls, 1);
+  assertEquals(detachCalls, 2);
 } finally {
   resetWorkerStateForTesting();
 }

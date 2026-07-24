@@ -143,6 +143,7 @@ export function setWorkerStateForTesting(
       [string, Cell<{ bgUpdater: Stream<unknown> }>]
     >;
     streamValidator?: typeof isStream;
+    detachOtelBridge?: (() => void) | null;
   },
 ): void {
   if ("initialized" in state) initialized = state.initialized ?? false;
@@ -159,6 +160,9 @@ export function setWorkerStateForTesting(
   }
   if ("streamValidator" in state) {
     streamValidator = state.streamValidator ?? isStream;
+  }
+  if ("detachOtelBridge" in state) {
+    detachOtelBridge = state.detachOtelBridge ?? null;
   }
 }
 
@@ -244,30 +248,34 @@ export async function cleanup(): Promise<void> {
   currentSession = null;
   manager = null;
 
-  // Ensure storage is synced before cleanup
-  if (runtime) {
-    await runtime.storageManager.synced();
-    await runtime.dispose();
-    runtime = null;
-  }
-
-  // Detach the OTel bridge only after the runtime is fully torn down, so the
-  // final sync/dispose telemetry (storage completions, subscription removals)
-  // is still observed; detaching closes any spans left in flight.
-  if (detachOtelBridge) {
-    detachOtelBridge();
-    detachOtelBridge = null;
-  }
-
-  // Flush buffered spans/metrics before the controller terminates this worker;
-  // fail-open — telemetry teardown must never block cleanup.
   try {
-    await shutdownOpenTelemetry();
-  } catch (error) {
-    console.error("Failed to shut down OpenTelemetry:", error);
-  }
+    if (runtime) {
+      try {
+        await runtime.storageManager.synced();
+      } finally {
+        await runtime.dispose();
+      }
+    }
+  } finally {
+    runtime = null;
 
-  initialized = false;
+    // Detach only after runtime teardown so final sync/dispose telemetry is
+    // observed. The finally block also closes spans when teardown rejects.
+    if (detachOtelBridge) {
+      detachOtelBridge();
+      detachOtelBridge = null;
+    }
+
+    // Flush before the controller terminates this worker. Telemetry teardown
+    // remains fail-open and must not replace a runtime cleanup failure.
+    try {
+      await shutdownOpenTelemetry();
+    } catch (error) {
+      console.error("Failed to shut down OpenTelemetry:", error);
+    }
+
+    initialized = false;
+  }
 }
 
 export async function runPiece(data: RunData): Promise<void> {
