@@ -150,11 +150,12 @@ range + default and read-and-expire; retire `AgentAuthoredEvent` in `topics`
 
 Size M, mostly parallel. `packages/cli`, `skills/cf`.
 
-- `cf piece verbs --json` — name, kind, input schema per verb from the
-  existing classification (`packages/fuse/callables.ts:88`); result schemas
-  appear once WS-C lands; v1 lists everything, per the decided semantics
-  (every verb listable; tier filtering arrives with the marker, later).
-  **Independent — can ship first.**
+- ~~`cf piece verbs --json`~~ — **shipped** (F1): name, kind, on
+  (result/input), input schema per verb; tools carry their output schema.
+  Walks result-then-input with the same classification `cf piece call`
+  resolves through. v1 lists everything per the decided semantics; handler
+  result schemas appear once WS-C lands, tier filtering with the marker,
+  later.
 - `@name` client-side binding: `cf bind <name> <url>`, resolution in
   `piece call` / `piece get`; stored client-side (it must resolve before the
   fabric is reachable).

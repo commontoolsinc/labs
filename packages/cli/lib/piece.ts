@@ -22,7 +22,8 @@ import {
   VNode,
 } from "@commonfabric/runner";
 import { validateSchemaValue } from "@commonfabric/runner/cfc";
-import type { CellScope } from "@commonfabric/api";
+import type { CellScope, JSONSchema } from "@commonfabric/api";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
   assignSlug,
@@ -1371,11 +1372,18 @@ async function tryResolveLivePieceToolCallable(
   return callableKind === "tool" ? callableCell : null;
 }
 
-async function resolvePieceCallable(
+/** Load the target piece and its manager for callable resolution/listing —
+ * one shared path so `cf piece call` and `cf piece verbs` always see the same
+ * piece state. */
+async function loadPieceForCallables(
   config: PieceConfig,
-  callableName: string,
   deps: PieceCallableDependencies = {},
-): Promise<ResolvedPieceCallable> {
+): Promise<{
+  manager: any;
+  piece: any;
+  space: string;
+  resolvedConfig: Awaited<ReturnType<typeof resolvePieceConfigWithManager>>;
+}> {
   const manager = await (deps.loadManager ?? loadManager)(config);
   const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
   const pieces = new PiecesController(manager);
@@ -1405,6 +1413,18 @@ async function resolvePieceCallable(
       resolvedConfig.pieceScope,
     ));
   const space = manager.getSpace?.() ?? config.space;
+  return { manager, piece, space, resolvedConfig };
+}
+
+async function resolvePieceCallable(
+  config: PieceConfig,
+  callableName: string,
+  deps: PieceCallableDependencies = {},
+): Promise<ResolvedPieceCallable> {
+  const { manager, piece, space, resolvedConfig } = await loadPieceForCallables(
+    config,
+    deps,
+  );
 
   const resolved = (await tryResolvePieceCallableAt(
     piece,
@@ -1445,6 +1465,112 @@ async function resolvePieceCallable(
   }
 
   return resolved;
+}
+
+/** One row of `cf piece verbs`: a callable the piece exposes. */
+export interface PieceCallableListing {
+  name: string;
+  kind: "handler" | "tool";
+  /** Which cell the callable lives on. `result` shadows `input` on a name
+   * collision, matching `cf piece call`'s resolution order. */
+  on: "result" | "input";
+  /** The verb's input schema — the same schema `call <verb> --help --json`
+   * serves. `true` means unconstrained. */
+  inputSchema: JSONSchema | true;
+  /** Tools only, until handlers gain declared results (verb contract WS-C). */
+  outputSchema?: JSONSchema;
+}
+
+/**
+ * Enumerate every callable a piece exposes (verb contract: Verb discovery,
+ * docs/plans/pattern-verb-contract.md). Everything in the durable schema is
+ * listed — hiding is a display default that arrives with the wrapper-tier
+ * marker, never a capability boundary; until the marker exists, the list IS
+ * the full surface. Walks result then input with the same classification
+ * `cf piece call` resolves through, so the listing and the dispatcher can
+ * never disagree about what is callable.
+ */
+export async function listPieceCallables(
+  config: PieceConfig,
+  deps: PieceCallableDependencies = {},
+): Promise<PieceCallableListing[]> {
+  const { piece } = await loadPieceForCallables(config, deps);
+
+  const listings = new Map<string, PieceCallableListing>();
+  // Names ordinary detection rejected: candidates for the forced-stream
+  // fallback below, so the listing covers every path `cf piece call` resolves.
+  const rejected = new Set<string>();
+  let resultRoot: any;
+  for (const cellProp of ["result", "input"] as const) {
+    const rootCell = await piece[cellProp].getCell();
+    if (cellProp === "result") resultRoot = rootCell;
+    const value = rootCell.get?.();
+    const schema = rootCell.schema;
+    const schemaKeys = isRecord(schema) && isRecord(schema.properties)
+      ? Object.keys(schema.properties)
+      : [];
+    const valueKeys = isRecord(value) ? Object.keys(value) : [];
+    for (const name of new Set([...valueKeys, ...schemaKeys])) {
+      if (listings.has(name)) continue; // result shadows input, like call
+      const callableCell = rootCell.key(name).asSchemaFromLinks();
+      const kind = detectCallableKind(
+        getCallableValue(value, name),
+        callableCell,
+      );
+      if (!kind) {
+        rejected.add(name);
+        continue;
+      }
+      rejected.delete(name);
+      const spec = callableCommandSpec(callableCell, kind);
+      listings.set(name, {
+        name,
+        kind,
+        on: cellProp,
+        inputSchema: spec.inputSchema,
+        ...(spec.outputSchemaSummary !== undefined
+          ? { outputSchema: spec.outputSchemaSummary }
+          : {}),
+      });
+    }
+  }
+
+  // Third resolution path, mirrored from resolvePieceCallable: a handler whose
+  // schema lost the stream marker still dispatches via the forced stream cast
+  // (tryResolvePieceHandler). Probe every rejected name the same way so a
+  // callable-by-name verb can never be absent from the listing.
+  const pieceCell = typeof piece.getCell === "function"
+    ? piece.getCell()
+    : undefined;
+  if (pieceCell && typeof pieceCell.asSchema === "function") {
+    const pieceValue = pieceCell.get?.();
+    if (isRecord(pieceValue)) {
+      for (const name of Object.keys(pieceValue)) {
+        if (!listings.has(name)) rejected.add(name);
+      }
+    }
+    for (const name of rejected) {
+      if (listings.has(name)) continue;
+      const streamRoot = pieceCell.asSchema({
+        type: "object",
+        properties: { [name]: { asCell: ["stream"] } },
+        required: [name],
+      });
+      if (!isHandlerCell(streamRoot.key(name))) continue;
+      const callableCell = resultRoot.key(name).asSchemaFromLinks();
+      const spec = callableCommandSpec(callableCell, "handler");
+      listings.set(name, {
+        name,
+        kind: "handler",
+        on: "result",
+        inputSchema: spec.inputSchema,
+      });
+    }
+  }
+
+  // Byte-order, not locale collation: this is a machine-readable surface and
+  // must sort identically on every host (utf8Compare is the repo comparator).
+  return [...listings.values()].sort((a, b) => utf8Compare(a.name, b.name));
 }
 
 export async function executePieceCallable(

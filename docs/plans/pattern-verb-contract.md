@@ -507,19 +507,18 @@ without reading pattern source. The pieces exist:
 - **Per verb**, `cf piece call <piece> <verb> --help --json` already emits the
   machine-readable command spec — kind, default verb, input schema — derived
   from the pattern's own types (`packages/cli/lib/callable.ts:260-286`).
-- **Enumeration** exists only through FUSE, which classifies a piece's result
-  entries (`packages/fuse/callables.ts:88`) and projects `.handler` / `.tool`
-  files plus a `.handlers` listing — flagged on the board as neither universal
-  nor complete. The CLI has no listing at all; `cf piece call` requires the
-  name. The topics skill compensates by hand-listing the verbs in prose — a
-  maintained copy of what the durable result schema already knows.
+- **Enumeration**: `cf piece verbs --json` lists every callable — name, kind
+  (handler/tool), which cell it lives on, and its input schema (tools also
+  carry their output schema) — walking result-then-input with the same
+  classification `cf piece call` resolves through, so the listing and the
+  dispatcher cannot disagree. FUSE independently classifies the same entries
+  (`packages/fuse/callables.ts:88`) into `.handler` / `.tool` files plus a
+  `.handlers` listing — flagged on the board as neither universal nor
+  complete.
 
-Two additions close it:
+What remains:
 
-1. A CLI listing (`cf piece verbs --json`, or a `callables` section in
-   `piece inspect --json`): name, kind, and schemas per verb in one read —
-   the same classification FUSE already performs, exposed generically.
-2. **Result schemas for handlers.** The command spec carries an output schema
+1. **Result schemas for handlers.** The command spec carries an output schema
    only for tools, because handlers return nothing today. Rule 3's declared
    result must reach the piece's **durable schema** — otherwise introspection
    can name a verb and its arguments but never what it returns. This rides
