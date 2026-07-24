@@ -543,33 +543,178 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
   );
 
   await t.step(
-    "errors on top-level optional call in pattern body",
+    "allows optional receiver calls inside JSX expressions",
     async () => {
-      const source = `      import { pattern } from "commonfabric";
+      const source = `      import { pattern, h } from "commonfabric";
 
-      export default pattern((input) => input?.foo());
+      interface Item { name?: string; }
+
+      export default pattern<{ item: Item }>(({ item }) => {
+        return <div>{item.name?.trim()}</div>;
+      });
     `;
       const { diagnostics } = await validateSource(source, {
         types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertHasErrorType(errors, "pattern-context:optional-chaining");
       assertEquals(
-        errors.some((error) => error.message.includes("Optional chaining")),
-        true,
-        "Optional call diagnostics should explain the optional chaining restriction",
+        errors.length,
+        0,
+        "JSX lowering should preserve optional receiver-call semantics",
       );
     },
   );
 
   await t.step(
-    "errors on statement-position optional call in pattern body",
+    "allows optional callable invocation inside JSX expressions",
+    async () => {
+      const source = `      import { pattern, h } from "commonfabric";
+
+      interface Item { name?: string; }
+
+      export default pattern<{ item: Item }>(({ item }) => {
+        return <div>{item.name?.toUpperCase?.()}</div>;
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "JSX lowering should preserve optional callable-invocation semantics",
+      );
+    },
+  );
+
+  await t.step(
+    "allows optional receiver calls inside computed callbacks",
+    async () => {
+      const source = `      import { computed, pattern } from "commonfabric";
+
+      interface Item { name?: string; }
+
+      export default pattern<{ item: Item }>(({ item }) => ({
+        normalized: computed(() => item.name?.trim()),
+      }));
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "computed() lowering should preserve optional receiver-call semantics",
+      );
+    },
+  );
+
+  await t.step(
+    "allows optional callable invocation inside computed callbacks",
+    async () => {
+      const source = `      import { computed, pattern } from "commonfabric";
+
+      interface Item { name?: string; }
+
+      export default pattern<{ item: Item }>(({ item }) => ({
+        normalized: computed(() => item.name?.toUpperCase?.()),
+      }));
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "computed() lowering should preserve optional callable-invocation semantics",
+      );
+    },
+  );
+
+  await t.step(
+    "allows optional calls in ordinary module-scope JavaScript",
+    async () => {
+      const source = `      export function normalize(
+        value?: string,
+        callback?: (value: string) => string,
+      ) {
+        return callback?.(value?.trim() ?? "");
+      }
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Ordinary JavaScript execution should retain optional-call semantics",
+      );
+    },
+  );
+
+  await t.step(
+    "allows top-level optional receiver call in pattern body",
     async () => {
       const source = `      import { pattern } from "commonfabric";
 
-      export default pattern((input) => {
-        input?.foo();
+      interface Input {
+        name?: string;
+      }
+
+      export default pattern<Input>((input) => input.name?.trim());
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Pattern lowering should preserve optional receiver-call semantics",
+      );
+    },
+  );
+
+  await t.step(
+    "allows top-level optional callable invocation in pattern body",
+    async () => {
+      const source = `      import { pattern } from "commonfabric";
+
+      interface Input {
+        name?: string;
+      }
+
+      export default pattern<Input>((input) =>
+        input.name?.toUpperCase?.()
+      );
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Pattern lowering should preserve optional callable-invocation semantics",
+      );
+    },
+  );
+
+  await t.step(
+    "optional invocation does not make an unsupported call position lowerable",
+    async () => {
+      const source = `      import { pattern } from "commonfabric";
+
+      interface Input {
+        name?: string;
+      }
+
+      export default pattern<Input>((input) => {
+        input.name?.toUpperCase?.();
         return {};
       });
     `;
@@ -577,8 +722,15 @@ Deno.test("Pattern Context Validation - Restricted Contexts", async (t) => {
         types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertHasErrorType(errors, "pattern-context:optional-chaining");
+      assertGreater(errors.length, 0, "Expected the statement-position error");
+      assertHasErrorType(errors, "pattern-context:computation");
+      assertEquals(
+        errors.some((error) =>
+          error.type === "pattern-context:optional-chaining"
+        ),
+        false,
+        "Optionality should not be the reason the call is rejected",
+      );
     },
   );
 
@@ -1506,7 +1658,7 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
   );
 
   await t.step(
-    "still errors on optional receiver-call root inside pattern-owned array-method callbacks",
+    "allows optional receiver-call roots inside pattern-owned array-method callbacks",
     async () => {
       const source = `      import { pattern } from "commonfabric";
 
@@ -1518,8 +1670,32 @@ Deno.test("Pattern Context Validation - Receiver Method Calls", async (t) => {
         types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertGreater(errors.length, 0, "Expected at least one error");
-      assertHasErrorType(errors, "pattern-context:optional-chaining");
+      assertEquals(
+        errors.length,
+        0,
+        "Collection callback lowering should preserve optional receiver-call semantics",
+      );
+    },
+  );
+
+  await t.step(
+    "allows optional callable invocation inside pattern-owned array-method callbacks",
+    async () => {
+      const source = `      import { pattern } from "commonfabric";
+
+      export default pattern<{ items: Array<string | undefined> }>(({ items }) => {
+        return items.map((item) => item?.toUpperCase?.());
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "Collection callback lowering should preserve optional callable-invocation semantics",
+      );
     },
   );
 
@@ -1636,6 +1812,32 @@ Deno.test("Pattern Context Validation - Safe Wrappers", async (t) => {
       "Reading opaques inside action() should be allowed",
     );
   });
+
+  await t.step(
+    "allows optional calls inside execution callbacks",
+    async () => {
+      const source =
+        `      import { action, handler, lift } from "commonfabric";
+
+      export const normalize = lift((value: string | undefined) => value?.trim());
+      export const logAction = action((event: { value?: string }) => {
+        console.log(event.value?.trim());
+      });
+      export const logHandler = handler((event: { value?: string }, _state: {}) => {
+        console.log(event.value?.trim());
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "action(), lift(), and handler() should retain JavaScript optional-call semantics",
+      );
+    },
+  );
 
   await t.step("allows reading opaques inside computed()", async () => {
     const source =
@@ -3304,6 +3506,84 @@ Deno.test("Reactive .get() Validation", async (t) => {
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
       assertHasErrorType(errors, "pattern-context:get-call");
+    },
+  );
+
+  await t.step(
+    "errors on optional-receiver .get() for the get-call reason, not optionality",
+    async () => {
+      const source = `      import { pattern } from "commonfabric";
+
+      export default pattern<{ items: string[] }>(({ items }) => {
+        items?.get();
+        return {};
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:get-call");
+      assertEquals(
+        errors.some((error) =>
+          error.type === "pattern-context:optional-chaining"
+        ),
+        false,
+        "Optionality should not be the reason the .get() is rejected",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on optional-invocation .get?.() for the get-call reason, not optionality",
+    async () => {
+      const source = `      import { pattern } from "commonfabric";
+
+      export default pattern<{ items: string[] }>(({ items }) => {
+        items.get?.();
+        return {};
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:get-call");
+      assertEquals(
+        errors.some((error) =>
+          error.type === "pattern-context:optional-chaining"
+        ),
+        false,
+        "Optionality should not be the reason the .get() is rejected",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on combined optional .get() chain for the get-call reason, not optionality",
+    async () => {
+      const source = `      import { pattern } from "commonfabric";
+
+      export default pattern<{ items: string[] }>(({ items }) => {
+        items?.get?.();
+        return {};
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:get-call");
+      assertEquals(
+        errors.some((error) =>
+          error.type === "pattern-context:optional-chaining"
+        ),
+        false,
+        "Optionality should not be the reason the .get() is rejected",
+      );
     },
   );
 

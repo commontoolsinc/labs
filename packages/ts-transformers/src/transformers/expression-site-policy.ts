@@ -235,10 +235,6 @@ function classifyCallExpressionRoot(
   context: TransformationContext,
   analyze: AnalyzeFn,
 ): ExpressionSiteCallRootKind {
-  if (expression.questionDotToken) {
-    return "optional-call";
-  }
-
   const callKind = detectCallKind(expression, context.checker);
   switch (callKind?.kind) {
     case "ifElse":

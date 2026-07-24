@@ -471,18 +471,14 @@ Diagnostics emitted in all modes:
   - message instructs the author to move the use into a nested
     `computed(() => ...)` or module-scope `lift()`
 - **Error** `pattern-context:optional-chaining`
-  - optional calls in restricted reactive context **outside JSX and outside
-    explicit compute callbacks** — top-level (`input?.foo()`), statement
-    position, and collection callbacks (`items.map((item) =>
-    item?.toUpperCase())`) all error (`test/validation.test.ts:546,567,1509`)
-  - inside JSX expressions (`{maybeFn?.(1)}`, `{text?.trim()}`) and inside
-    `computed(...)` bodies the same shapes are accepted and lowered intact —
-    an unratified delta from the target-language matrix's unconditional
-    "Unsupported" (see the design-deltas 2026-07-10 record; note the
-    lowering drops function-typed captures from the lift input schema, so an
-    accepted reactive optional-call is dead code at runtime)
   - optional property / element access that appears outside a supported
     lowerable expression site
+  - optional calls do not receive this diagnostic merely because they are
+    optional: their underlying call root is classified by the same policy as a
+    non-optional call
+  - at supported expression sites, receiver optionality (`value?.method()`),
+    invocation optionality (`value.method?.()`), and combined chains lower as
+    whole calls with JavaScript short-circuit and receiver semantics intact
 - **Error** `pattern-context:computation`
   - binary/unary/conditional computations using opaque dependencies outside
     wrappers
@@ -926,8 +922,10 @@ Primary behaviors:
   access in pattern contexts
 - preserves terminal path methods (`get`, `set`, `update`, etc.) and rewrites
   only the receiver path portion when needed
-- treats dynamic key access, spread, and optional-call forms as non-lowerable in
-  pattern context with diagnostics
+- treats dynamic key access and spread as non-lowerable in unsupported pattern
+  contexts with diagnostics
+- classifies optional calls by their underlying call kind and expression site;
+  optionality itself neither admits nor rejects a call
 - treats wildcard traversals (`Object.keys/values/entries`, `JSON.stringify`) as
   broad/full-shape access for capability analysis, but allows whole-call
   lowering when they appear in supported expression-root positions
@@ -1111,6 +1109,10 @@ adjustments:
 - capability analysis resolves member access through `.get()` when the member
   access itself is observed (`notes.get().length` records `["length"]` rather
   than a blanket root read) and suppresses the redundant blanket `.get()` read
+- optional `.get()` chains retain an explicit readonly read of the receiver
+  Cell even when a projected result member is observed; this preserves the
+  nested Cell in synthesized closure schemas without widening the enclosing
+  root to wildcard
 - array-like roots whose observed paths only touch non-item properties
   (`length`, `get`, `set`, `key`, `update`) keep array shape but shrink their
   item type to `unknown`
@@ -2830,21 +2832,14 @@ pipeline. Current built-in behavior:
    intentionally omitted).
 2. Action and JSX inline handler callback extraction currently unwraps arrow
    functions only.
-3. Optional-call forms on opaque pattern roots report
-   `pattern-context:optional-chaining` at top level, statement position, and
-   inside collection callbacks — but are accepted and lowered inside JSX
-   expressions and `computed(...)` bodies (see §6.5; unratified language
-   delta). Optional property/element access is supported only in explicit
-   lowerable expression sites; statement-position optional access still
-   errors.
-4. Non-static destructuring defaults, rest destructuring, and unsupported
+3. Non-static destructuring defaults, rest destructuring, and unsupported
    computed destructuring keys in pattern callbacks remain non-lowerable and
    produce pattern-context diagnostics.
-5. Interprocedural capability propagation applies only when a resolved callee
+4. Interprocedural capability propagation applies only when a resolved callee
    declaration is analyzable in-proc (arrow/function
    expression/declaration/method); external/unresolved calls remain
    conservative.
-6. The CFC authoring contract under `docs/specs/ts-transformer/cfc_*.md` is
+5. The CFC authoring contract under `docs/specs/ts-transformer/cfc_*.md` is
    implemented for the canonical alias set: the schema-generator's
    common-fabric formatter lowers `Cfc` payloads, the wrapper aliases, the
    projection helpers, and the `WriteAuthorizedBy` writer-identity marker into
@@ -2856,6 +2851,17 @@ pipeline. Current built-in behavior:
    schema generation resolves the resulting exact manifest marker. The
    `WriteAuthorizedBy` validation remains a separate transformer rather than a
    schema-generator responsibility.
+6. Invoking a function value that flows through reactive pattern data (for
+   example a function-typed input property called as `input.fn(...)` or
+   `input.fn?.(...)`) produces no diagnostic at any expression site. Function
+   values are not schema-representable, so synthesized lift input schemas
+   silently drop function-typed captures; the lowered closure then reads an
+   absent property at runtime, making the call dead code (`undefined` under
+   optional invocation, a runtime `TypeError` when a plain invocation is
+   reached). The target language classifies such callable roots as
+   unsupported — the problem is the unstorable function value, not the call
+   syntax — but that classification is not yet surfaced as an authoring-time
+   diagnostic. The open follow-up is recorded in the design-deltas addendum.
 
 ## 20. Test Coverage Snapshot
 

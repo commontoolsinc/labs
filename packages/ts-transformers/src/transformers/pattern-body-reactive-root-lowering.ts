@@ -841,10 +841,6 @@ function rewriteTrackedOpaquePatternBody(
         if (
           KNOWN_PATH_TERMINAL_METHODS.has(visited.name.text) && parentCall
         ) {
-          if (unsupportedCallRoot === "optional-call") {
-            return visited;
-          }
-
           if (info.path.length <= 1) {
             return visited;
           }
@@ -866,7 +862,6 @@ function rewriteTrackedOpaquePatternBody(
 
         if (parentCall) {
           if (
-            unsupportedCallRoot === "optional-call" ||
             unsupportedCallRoot === "unsupported-receiver-method"
           ) {
             return visited;

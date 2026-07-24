@@ -296,11 +296,14 @@ When capability/path analysis is uncertain, behavior must degrade safely toward
 broader types and fewer aggressive rewrites rather than risking unsound
 narrowing.
 
-## C-008 Optional-Chain Navigation Semantics
+## C-008 Optional-Chain Navigation And Call Semantics
 
 If property-navigation optional chains are lowered to `key(...)` on opaque
-receivers, lowering must preserve no-throw navigation semantics. Optional-call
-forms remain explicitly out of scope until modeled.
+receivers, lowering must preserve no-throw navigation semantics. Optional
+receiver and invocation forms follow the same support policy as their
+non-optional call root. Whole-call lowering must preserve receiver binding,
+single evaluation, authored nullish short-circuit points, and skipped argument
+evaluation.
 
 ## C-009 Destructuring Lowering Semantics
 
