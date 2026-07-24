@@ -2321,6 +2321,45 @@ gate carries a named 90 s ceiling in its file header (actual ~1–2 s).
 
 ##### C3.12 — client cross-space reactivity: work-order decomposition (2026-07-24)
 
+**SUPERSEDED 2026-07-24 by the WO-0 diagnostic verdict + gate
+reconciliation — the 8-WO subsystem below is STRUCK; kept as the
+reviewed record.** The panel made WO-0 a real three-way diagnostic gate
+before committing to a mechanism, and it earned its keep: the C3.12.0
+diagnostic (`cross-space-reactive-read.test.ts`, 4848705ff) proved
+cross-space reactive DELIVERY already works — the origin pushes
+third-party space-B commits to the reader's standing B-watch, the
+foreign sink refires, the B replica advances, and the derivation
+recomputes on a correctly B-keyed invalidation. The scout's "the
+foreign replica never resyncs" (defect (ii)) was an untested
+architectural inference that conflated the reader's home-A session
+(cannot carry B) with its separate B session opened by the crossSpace
+kick (does). A follow-up reconciliation against the composed gate's own
+pool-served habitat confirmed it end-to-end: with a real Worker, the
+reader delivers, recomputes, holds a claimed overlay, and drops it
+exactly once — the gate's `claimedOverlayRoutes=0` was caused by the
+gate's OWN non-negotiating-attach probe (clause (e)) firing
+`#fenceCrossSpaceReadClaimsForNonNegotiatingAttach`, whose space-lane
+cohort test over-revokes the reader's own claim host-wide before the B
+commit; disabling that one probe block flips the client tail green in
+the same gate. **Real remaining scope (targeted, NOT a subsystem):**
+(1) isolate the gate's clause-(e) non-negotiating probe from the
+clause-(a) assertion (separate reader/space or ordering) so clause (a)
+binds directly — demonstrated green; (2) an owner decision on the
+space-lane cohort fence's over-revoke posture — in a real mixed fleet
+any routing-but-non-cross-space session in the space revokes the
+cross-space claim for everyone (this is C3.6b cohort integrity working
+as specified — the same stay-off-until-the-cohort-is-uniform staging as
+every other rank — but its fragility for cross-space should be recorded
+or the fence narrowed/re-issued; server-side, small); (3) confirm
+whether a secondary settlement→client-visible-value seam observed with
+the claim live (the committed `doubled` stayed 0, co-occurring with a
+pre-existing in-process foreign-mount-refresh fail-closed line) is a
+real product defect or in-process-harness fragility. C3.12.1s
+(server-push) and the whole keep-alive/standing-subscription build
+(C3.12.1/.2/.3/.4) are struck as building machinery that already exists.
+
+The reviewed decomposition, for the record:
+
 Scouted (`.agents/c3-12-scout-report-2026-07-24.md`) and adversarially
 panel-reviewed
 ([the review record](../../history/development/design/c3-12-adversarial-review-2026-07-24.md),
