@@ -2,11 +2,22 @@ import {
   entityRefToString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
+// Relative import (not "@commonfabric/utils/types") for the same rollup
+// reason as traverse.ts.
+import { isRecord } from "../../utils/src/types.ts";
+import { getLogger } from "../../utils/src/logger.ts";
 import { type Cell, isCell } from "./cell.ts";
+import { isSigilLink } from "./link-types.ts";
+import { parseLink } from "./link-utils.ts";
+import { resolveLink } from "./link-resolution.ts";
+import { DEFAULT_CELL_SCOPE, scopeRank } from "./scope.ts";
+import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import type { MemorySpace } from "./storage/interface.ts";
 import type { JSONSchema, Pattern } from "./builder/types.ts";
 import type { Runtime } from "./runtime.ts";
 import type { RuntimeProgram } from "./harness/types.ts";
+
+const logger = getLogger("piece-helpers");
 
 export type CellPath = (string | number)[];
 
@@ -77,6 +88,185 @@ export function resolveCellPath<T>(
 export function cellEntityIdString(cell: Cell<unknown>): string | undefined {
   const id = cell.entityId;
   return isEntityRef(id) ? entityRefToString(id) : undefined;
+}
+
+/**
+ * Derive a read-time projection schema in which `required` no longer claims
+ * properties whose STORED value is a link into a narrower-than-space scope
+ * (user/session).
+ *
+ * Why: pattern result schemas mark every output property `required`, but an
+ * output derived from a scoped cell lives in a session/user-scoped doc that
+ * only the owning session can materialize. For every other session the strict
+ * schema projection finds the required property unresolvable and voids the
+ * ENTIRE object (`traverseObjectWithSchema`'s required check) — so a path-less
+ * piece read returns `undefined` while every child-path read works. Per the
+ * #4746 contract, partial visibility must be expressed in the schema rather
+ * than special-cased in the traverser; this helper is the piece read boundary
+ * doing exactly that, driven by the stored links' own declared scopes.
+ *
+ * Also relaxed: a property whose chain resolution is SCOPE-BLOCKED (a schema
+ * scope cap forbade following a narrower link, CT-1642) — the member is just
+ * as unreachable for this read as a plainly narrow terminal.
+ *
+ * Deliberately NOT relaxed: plain (non-link) missing properties, properties
+ * whose links resolve entirely within space scope, and anything inside
+ * arrays (#4746 restored strict required semantics for array elements;
+ * nothing here reopens that). Recurses only through inline records — links
+ * are boundaries.
+ *
+ * Known structural limits (both degrade to the pre-existing strict void, and
+ * both are properly fixed by the schema-generator emitting honest
+ * optionality for scoped-derived outputs): (1) a space-scoped link to a doc
+ * whose OWN schema requires a scoped member still voids that doc's read —
+ * the traverser combines schemas across link hops and `required` survives
+ * from either side, so a boundary-derived relaxation cannot reach it;
+ * (2) a result doc whose root value is itself a link is left unrelaxed for
+ * the same combine reason.
+ *
+ * Returns the input schema by reference when there is nothing to relax, so
+ * schema identity (and downstream hash caching) is preserved.
+ */
+export function schemaWithScopedLinkRequiredsRelaxed(
+  schema: JSONSchema | undefined,
+  rawValue: unknown,
+  base: Cell<unknown>,
+  tx?: IExtendedStorageTransaction,
+): JSONSchema | undefined {
+  if (
+    !isRecord(schema) || !isRecord(rawValue) || isSigilLink(rawValue) ||
+    Array.isArray(rawValue)
+  ) {
+    return schema;
+  }
+
+  // One read tx per derivation, honoring the cell's own bound transaction so
+  // the chain walk sees the same (possibly uncommitted) state getRaw() does.
+  // Recursion into inline records threads it through.
+  tx ??= base.runtime.readTx(base.tx);
+
+  // A scoped output does not carry its scope on the first link: the result
+  // doc's property links (scope "space") redirect to an intermediate doc
+  // whose value is the actual `{scope: "session"|"user"}` redirect into the
+  // scoped instance. Resolve the stored link to its terminal target with the
+  // standard resolver (real cycle detection, and the same fresh-replica pull
+  // kick every read path uses) and inspect the terminal. Narrow means either
+  // a terminal in a narrower-than-space scope, or a resolution the resolver
+  // scope-blocked (a schema scope cap forbade following a narrower link,
+  // CT-1642) — in both cases the member is unreachable for this read, which
+  // is exactly what the relaxation expresses. (The blocked branch warns once
+  // inside resolveLink during this derivation and again during the real
+  // read; the duplication is accepted noise for a rare, already-loud case.)
+  // A chain the resolver cannot complete (cycle, iteration limit) counts as
+  // "not narrow" — the conservative fallback is the pre-existing strict
+  // behavior.
+  const isNarrowScopedLink = (value: unknown): boolean => {
+    if (!isSigilLink(value)) return false;
+    // Parsing against the containing cell resolves "inherit" to the
+    // containing scope, so the normalized scope is always concrete.
+    const first = parseLink(value, base);
+    if (first === undefined) return false;
+    if (
+      scopeRank(first.scope ?? DEFAULT_CELL_SCOPE) >
+        scopeRank(DEFAULT_CELL_SCOPE)
+    ) {
+      return true;
+    }
+    try {
+      let blocked = false;
+      const terminal = resolveLink(base.runtime, tx!, first, "value", {
+        onScopeBlocked: () => {
+          blocked = true;
+        },
+      });
+      return blocked ||
+        scopeRank(terminal.scope ?? DEFAULT_CELL_SCOPE) >
+          scopeRank(DEFAULT_CELL_SCOPE);
+    } catch (error) {
+      logger.debug("scoped-link-relax-chain", () => [
+        "chain resolution failed; keeping strict required",
+        first,
+        error,
+      ]);
+      return false;
+    }
+  };
+
+  let changed = false;
+
+  let required = schema.required;
+  if (Array.isArray(required)) {
+    const kept = required.filter(
+      (prop) =>
+        typeof prop !== "string" ||
+        !isNarrowScopedLink((rawValue as Record<string, unknown>)[prop]),
+    );
+    if (kept.length !== required.length) {
+      required = kept;
+      changed = true;
+    }
+  }
+
+  let properties = schema.properties;
+  if (isRecord(properties)) {
+    let newProperties: Record<string, JSONSchema> | undefined;
+    for (const [key, propSchema] of Object.entries(properties)) {
+      const propValue = (rawValue as Record<string, unknown>)[key];
+      // Links are boundaries: a linked doc's own read applies its own schema.
+      if (isSigilLink(propValue)) continue;
+      const relaxed = schemaWithScopedLinkRequiredsRelaxed(
+        propSchema as JSONSchema,
+        propValue,
+        base,
+        tx,
+      );
+      if (relaxed !== propSchema) {
+        newProperties ??= { ...(properties as Record<string, JSONSchema>) };
+        newProperties[key] = relaxed as JSONSchema;
+      }
+    }
+    if (newProperties !== undefined) {
+      properties = newProperties;
+      changed = true;
+    }
+  }
+
+  if (!changed) return schema;
+  return {
+    ...schema,
+    ...(properties !== undefined ? { properties } : {}),
+    ...(required !== undefined ? { required } : {}),
+  } as JSONSchema;
+}
+
+/**
+ * Return `cell` re-schema'd for a terminal whole-object read: `required`
+ * entries that point at narrower-scoped stored links are relaxed via
+ * {@link schemaWithScopedLinkRequiredsRelaxed}. Returns the cell unchanged
+ * when it carries no schema, the raw value is unreadable, or nothing needed
+ * relaxing.
+ */
+export function cellWithScopedLinkRequiredsRelaxed<T>(
+  cell: Cell<T>,
+): Cell<T> {
+  const schema = cell.schema;
+  if (schema === undefined) return cell;
+  let raw: unknown;
+  try {
+    raw = cell.getRaw();
+  } catch (error) {
+    logger.debug("scoped-link-relax-raw", () => [
+      "raw read failed; keeping strict schema",
+      error,
+    ]);
+    return cell;
+  }
+  const relaxed = schemaWithScopedLinkRequiredsRelaxed(
+    schema,
+    raw,
+    cell as Cell<unknown>,
+  );
+  return relaxed === schema ? cell : cell.asSchema<T>(relaxed);
 }
 
 export function getResultCellWithSourceSchema<T = unknown>(

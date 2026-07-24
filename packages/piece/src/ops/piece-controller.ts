@@ -1,6 +1,7 @@
 import {
   Cell,
   type CellPath,
+  cellWithScopedLinkRequiredsRelaxed,
   ContextualFlowControl,
   deepEqual,
   extractDefaultValues,
@@ -2210,7 +2211,16 @@ class PiecePropIo implements PieceCellIo {
   async get(path?: CellPath) {
     const targetCell = await this.#getTargetCell();
     await targetCell.pull();
-    return resolveCellPath(targetCell, path ?? []);
+    // Terminal read boundary: relax `required` for properties whose stored
+    // value links into a scope this session may not be able to materialize
+    // (perSession/perUser-derived outputs), so a whole-object read degrades
+    // those members instead of voiding to `undefined` while every child-path
+    // read succeeds. See schemaWithScopedLinkRequiredsRelaxed for the
+    // #4746-compatible rationale.
+    return resolveCellPath(
+      cellWithScopedLinkRequiredsRelaxed(targetCell),
+      path ?? [],
+    );
   }
 
   getCell(): Promise<Cell<unknown>> {

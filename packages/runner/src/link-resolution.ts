@@ -124,7 +124,11 @@ const canFollowLinkHop = (
  * @param tx - The storage transaction to read from.
  * @param link - The link to read.
  * @param lastNode - The last node in the path.
- * @param options - Allows you to preserve the `overwrite` field if needed
+ * @param options - `preserveOverwrite` keeps the `overwrite` field if needed.
+ *   `onScopeBlocked` is invoked when a narrower-scope follow is blocked by a
+ *   schema scope cap (the chain then terminates at an undefined-data link);
+ *   it is the only way to distinguish that cut from a chain that genuinely
+ *   ends at a stored undefined-data link.
  * @returns The resolved link.
  */
 export function resolveLink(
@@ -132,7 +136,7 @@ export function resolveLink(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   lastNode: LastNode = "value",
-  options: { preserveOverwrite?: boolean } = {},
+  options: { preserveOverwrite?: boolean; onScopeBlocked?: () => void } = {},
 ): ResolvedFullLink {
   const seen = new Set<string>();
 
@@ -268,6 +272,7 @@ export function resolveLink(
             target: cfcAddressFromLink(nextHop.link),
           },
         ]);
+        options.onScopeBlocked?.();
         link = undefinedDataLink(link);
         break;
       }
