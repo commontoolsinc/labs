@@ -3,6 +3,7 @@ import { pino } from "pino";
 import pretty from "pino-pretty";
 
 import env from "@/env.ts";
+import { backgroundLogFile, backgroundLogStream } from "@/background.ts";
 
 const SENSITIVE_HEADERS = new Set([
   "authorization",
@@ -47,6 +48,14 @@ export function serializeResponse(response: {
 }
 
 export function pinoLogger() {
+  // A background launch reserves stdout for its readiness marker, so the
+  // request logger writes to the launch's log file instead of stdout there.
+  const backgroundLog = backgroundLogFile();
+  const destination = backgroundLog
+    ? backgroundLogStream(backgroundLog)
+    : env.ENV === "production"
+    ? undefined
+    : pretty();
   return logger({
     pino: pino({
       level: env.LOG_LEVEL || "info",
@@ -65,7 +74,7 @@ export function pinoLogger() {
           };
         },
       },
-    }, env.ENV === "production" ? undefined : pretty()),
+    }, destination),
     http: {
       reqId: () => crypto.randomUUID(),
     },
