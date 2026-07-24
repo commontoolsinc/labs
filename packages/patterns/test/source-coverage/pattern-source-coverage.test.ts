@@ -9,7 +9,7 @@ function sourceCoveragePath(name: string): string {
  *
  * The child runs changed pattern modules as plain code under Deno's V8 coverage,
  * with the pattern runtime (transformer + sandbox) out of the picture. The
- * `commonfabric` reactive surface is swapped for `commonfabric-stub.test.ts`
+ * `commonfabric` reactive surface is swapped for `commonfabric-shim.test.ts`
  * (those primitives need the real runtime), but the pure `data-model` helpers
  * stay real, so the child also produces coverage for the `data-model`/
  * `content-hash`/`leb128` code the pattern runtime exercises.
@@ -21,15 +21,16 @@ function sourceCoveragePath(name: string): string {
  * truth and cannot drift — adds a trailing-slash form per npm/jsr entry so
  * package subpaths (e.g. `@noble/hashes/sha2.js`) resolve under the flat map,
  * then layers on the `commonfabric` overrides and the per-package `@/` scopes
- * the foundation packages use internally. Relative root targets are absolutized
- * so the map works from its temp location. A foundation package that later
- * enters the graph with its own `@/` alias fails loudly here until added.
+ * the foundation packages use internally (derived by reading each workspace
+ * member's own config, so a package joining the graph needs no change here).
+ * Relative root targets are absolutized so the map works from its temp location.
  */
 async function writeChildImportMap(): Promise<string> {
   const here = new URL("./", import.meta.url);
   const rootUrl = new URL("../../../../deno.jsonc", import.meta.url);
   const root = parseJsonc(await Deno.readTextFile(rootUrl)) as {
     imports: Record<string, string>;
+    workspace?: string[];
   };
 
   const imports: Record<string, string> = {};
@@ -46,20 +47,29 @@ async function writeChildImportMap(): Promise<string> {
       }
     }
   }
-  imports["commonfabric"] = new URL("commonfabric-stub.test.ts", here).href;
+  imports["commonfabric"] = new URL("commonfabric-shim.test.ts", here).href;
   imports["@commonfabric/html/jsx-runtime"] =
     new URL("jsx-runtime-stub.test.ts", here).href;
 
-  const scopeFor = (pkgSrc: string) => new URL(pkgSrc, here).href;
+  // Re-establish each workspace member's own `@/` self-alias as a scope, read
+  // from its config so the set tracks the packages rather than a fixed list.
   const scopes: Record<string, Record<string, string>> = {};
-  for (
-    const src of [
-      "../../../data-model/src/",
-      "../../../content-hash/src/",
-      "../../../leb128/src/",
-    ]
-  ) {
-    const url = scopeFor(src);
+  for (const member of root.workspace ?? []) {
+    const memberUrl = new URL(`${member}/`, rootUrl);
+    let config: { imports?: Record<string, string> } | undefined;
+    for (const name of ["deno.jsonc", "deno.json"]) {
+      try {
+        config = parseJsonc(
+          await Deno.readTextFile(new URL(name, memberUrl)),
+        ) as { imports?: Record<string, string> };
+        break;
+      } catch {
+        // Try the other config name, then give up on this member.
+      }
+    }
+    const selfAlias = config?.imports?.["@/"];
+    if (selfAlias === undefined) continue;
+    const url = new URL(selfAlias, memberUrl).href;
     scopes[url] = { "@/": url };
   }
 

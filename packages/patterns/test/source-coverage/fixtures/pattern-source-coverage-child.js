@@ -8,7 +8,7 @@ import {
   textContent,
   UI,
   Writable,
-} from "../commonfabric-stub.test.ts";
+} from "../commonfabric-shim.test.ts";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
