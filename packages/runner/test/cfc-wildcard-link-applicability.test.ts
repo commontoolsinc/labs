@@ -101,6 +101,22 @@ describe("CFC policy value-conditions on tuple (prefixItems) schemas", () => {
       .toBe(false);
   });
 
+  it("a closed tuple (items: false) rejects extra elements", () => {
+    // PR #4969 review: the shared matcher skipped boolean `items`, so a
+    // closed tuple vacuously accepted arrays with extra elements — the
+    // policy entry applied where its condition excluded the value shape.
+    const schema = {
+      type: "array",
+      prefixItems: [{ const: "cmd" }],
+      items: false,
+    } as const satisfies JSONSchema;
+
+    expect(wildcardPolicyMatchesValue(tx, target, schema, ["cmd"]))
+      .toBe(true);
+    expect(wildcardPolicyMatchesValue(tx, target, schema, ["cmd", "extra"]))
+      .toBe(false);
+  });
+
   it("conditions items only past the tuple slots", () => {
     const schema = {
       type: "array",

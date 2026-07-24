@@ -26,7 +26,10 @@ export const arrayMatchesPositionally = (
       if (!matches(prefixItems[index], value[index])) return false;
     }
   }
-  if (typeof schema.items === "object" && schema.items !== null) {
+  if (schema.items === false) {
+    // A closed tuple: `items: false` forbids any element past the slots.
+    if (value.length > (prefixItems?.length ?? 0)) return false;
+  } else if (typeof schema.items === "object" && schema.items !== null) {
     for (
       let index = prefixItems?.length ?? 0;
       index < value.length;

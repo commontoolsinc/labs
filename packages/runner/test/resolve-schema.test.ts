@@ -190,6 +190,30 @@ describe("resolveSchema", () => {
       expect(narrowed.ifc).toEqual({ integrity: ["label-branch"] });
     });
 
+    it("a closed tuple (items: false) does not match arrays with extras", () => {
+      // PR #4969 review: boolean `items` was skipped, so a closed-tuple
+      // branch matched arrays with extra elements and could win the union.
+      const schema: JSONSchema = {
+        anyOf: [
+          {
+            type: "array",
+            prefixItems: [{ const: "cmd" }],
+            items: false,
+            ifc: { integrity: ["closed-tuple-branch"] },
+          },
+          {
+            type: "array",
+            ifc: { integrity: ["open-array-branch"] },
+          },
+        ],
+      };
+
+      const narrowed = expectNontrivial(
+        resolveSchemaForValue(schema, ["cmd", "extra"]),
+      );
+      expect(narrowed.ifc).toEqual({ integrity: ["open-array-branch"] });
+    });
+
     it("matches items only past the tuple slots", () => {
       const schema: JSONSchema = {
         anyOf: [
