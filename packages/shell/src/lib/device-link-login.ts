@@ -14,6 +14,16 @@ import "../views/DeviceLinkView.ts";
 // It also runs at BOOTSTRAP rather than from LoginView, because LoginView never
 // mounts when a stale identity auto-logs in — which is exactly the re-pair case.
 // A LoginView-only handler would silently no-op there.
+//
+// TODO(device-link-pwa): pairing does NOT reach an INSTALLED home-screen PWA.
+// This flow lands in a Safari tab; iOS partitions storage per-app, so the
+// identity written here is invisible to the installed app, AND the manifest's
+// `start_url: "/"` means "Add to Home Screen" loses the deep link too — the
+// installed app opens logged-out at Register/Login. Confirmed on iPhone,
+// iOS 17.5 (2026-07-22). LEFT AS-IS deliberately: nobody uses the installed-PWA
+// entry today, and the Safari-tab bookmark works. Fixing it is a product +
+// manifest decision (change start_url, or an in-PWA scan/paste path), not a
+// tweak here — revisit if the installed PWA becomes a real target.
 
 /**
  * Result of an attempted device-link login.
