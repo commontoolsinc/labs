@@ -1733,6 +1733,72 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(message).toContain("could not be compiled");
   });
 
+  it("surfaces a clear error when the official pattern yields no entry identity", async () => {
+    // Defensive branch: compile succeeds but the artifact has no entry ref.
+    // The heal must not proceed with an undefined identity — clear error.
+    const { oldRef } = await pinOldRequiredHome();
+    const pm = runtime.patternManager as unknown as {
+      getArtifactEntryRef: (p: unknown) => unknown;
+    };
+    const realGetRef = pm.getArtifactEntryRef.bind(runtime.patternManager);
+    pm.getArtifactEntryRef = () => undefined;
+    const restore = patchRunSynced((opts) =>
+      opts?.expectedPatternIdentity?.identity === oldRef.identity
+        ? Promise.reject(new Error(MIGRATION_REJECTION))
+        : "real"
+    );
+    let thrown: unknown;
+    try {
+      await controller.ensureDefaultPattern();
+    } catch (error) {
+      thrown = error;
+    } finally {
+      restore();
+      pm.getArtifactEntryRef = realGetRef;
+    }
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    expect(message).toContain("default-root heal failed");
+    expect(message).toContain("did not yield an entry identity");
+  });
+
+  it("surfaces a clear error when the identity swap cannot commit", async () => {
+    // Defensive branch: the swap transaction itself fails to commit (a storage
+    // fault, not the precondition abort). The underlying error is chained and
+    // the pinned identity is left untouched.
+    const { oldRef } = await pinOldRequiredHome();
+    const realEdit = runtime.editWithRetry.bind(runtime);
+    (runtime as unknown as {
+      editWithRetry: (fn: (tx: unknown) => unknown) => Promise<unknown>;
+    }).editWithRetry = (fn) =>
+      // Only the roll-forward swap records `displacedPattern`, so its callback
+      // source uniquely identifies it — force THAT commit to fail, leaving
+      // every other edit (pins, setup) real.
+      typeof fn === "function" && fn.toString().includes("displacedPattern")
+        ? Promise.resolve({ error: new Error("swap backend down") })
+        : realEdit(fn as never);
+    const restore = patchRunSynced((opts) =>
+      opts?.expectedPatternIdentity?.identity === oldRef.identity
+        ? Promise.reject(new Error(MIGRATION_REJECTION))
+        : "real"
+    );
+    let thrown: unknown;
+    try {
+      await controller.ensureDefaultPattern();
+    } catch (error) {
+      thrown = error;
+    } finally {
+      restore();
+      (runtime as unknown as { editWithRetry: unknown }).editWithRetry =
+        realEdit;
+    }
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    expect(message).toContain("default-root heal failed");
+    expect(message).toContain("identity swap could not commit");
+    expect(message).toContain("swap backend down");
+    const after = (await manager.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(oldRef.identity);
+  });
+
   it("failed cold-start repair stays fail-closed and leaves the doc healable", async () => {
     // The repair's own failure contract: when the one-shot setup repair
     // cannot commit, the ORIGINAL start error must surface (not the repair's),
