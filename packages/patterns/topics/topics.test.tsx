@@ -353,7 +353,8 @@ export default pattern(() => {
 
   const assert_legacy_fields_load = computed(() =>
     legacy.createdByName === "Legacy Person" &&
-    legacy.createdBy === undefined &&
+    legacy.createdBy?.kind === "person" &&
+    legacy.createdBy?.name === "Legacy Person" &&
     legacy.comments?.[0]?.authorName === "Old Agent" &&
     legacy.comments?.[0]?.author === undefined &&
     topicAuthorLabel(legacy.createdBy, legacy.createdByName) ===
@@ -371,7 +372,8 @@ export default pattern(() => {
   const assert_legacy_topic_created = computed(() =>
     legacyBoard.topicCount === 1 &&
     legacyBoard.topics?.[0]?.title === "Legacy-shaped topic" &&
-    legacyBoard.topics?.[0]?.createdBy === undefined &&
+    legacyBoard.topics?.[0]?.createdBy?.kind === "person" &&
+    legacyBoard.topics?.[0]?.createdBy?.name === "Legacy User" &&
     legacyBoard.topics?.[0]?.createdByName === "Legacy User"
   );
 
@@ -448,7 +450,11 @@ export default pattern(() => {
     isSafeLinkUrl("https://example.com") === true &&
     isSafeLinkUrl("HTTP://EXAMPLE.COM") === true &&
     isSafeLinkUrl("javascript:alert(1)") === false &&
-    isSafeLinkUrl("   ") === false
+    isSafeLinkUrl("   ") === false &&
+    topicAuthorLabel(
+        { kind: "person", name: "" },
+        "Legacy Person",
+      ) === "Legacy Person"
   );
 
   // --- crossrefs: the derived prose reference graph ---
