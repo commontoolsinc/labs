@@ -1877,6 +1877,30 @@ inside the isolated worktree. The gate:
    `/api/health/stats` mean the surface demoted; both flat at 0 mean the
    client flag or the dial leg is miswired (the 2026-07-17 run's failure
    mode).
+
+   > **Real-harness finding (2026-07-24, `deno task integration` — real
+   > toolshed + headless Chrome + CDP).** Step 1's "both flat at 0" case is
+   > not a miswire of a working knob — **the browser client dial does not
+   > exist to wire.** `packages/shell/felt.config.ts` bakes only
+   > `$EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` into the worker bundle (no
+   > `_DOC_SET_WATCH` define), and `packages/shell/src/lib/env.ts` has no
+   > `serverPrimaryExecutionDocSetWatch` global at all. So a browser build
+   > **cannot** negotiate `serverPrimaryExecutionDocSetWatchV1`; per the
+   > both-peers-enable rule in `EXPERIMENTAL_OPTIONS.md`, F5 retirement can
+   > never engage end-to-end from a browser regardless of the two server
+   > env legs. Observed: with all three env legs set and the app driven,
+   > `docSetMembersTracked = 0`, `refreshFullyDocSetSessions = 0`, and
+   > `session.watch.refresh` stayed at ~54k DAG traversals flag-on (the
+   > server-side executor *Worker* did negotiate `docs` — `docs.read` 23
+   > calls / 0 traversal — but the human browser session never demoted).
+   > The mechanism is built and unit-proven (`v2-feed-retirement-test.ts`
+   > plus the two-sided `v2-feed-retirement-delta-test.ts`), but F5's
+   > server-side win is **unreachable in a real deployment** until the shell
+   > build exposes the doc-set-watch flag. Concrete next F5 step: add the
+   > `$EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH` define to
+   > `felt.config.ts` and the matching global to `env.ts`, then re-run this
+   > protocol. This is the "harness/frontend wiring is the next F5 task"
+   > item, now pinned to two named files.
 2. **Run the flag-on / flag-off note-create pair** — the same default-app
    note-create series as the FA12 archived baseline
    (`docs/history/development/performance/server-execution-feed-baseline-2026-07-16.md`,
