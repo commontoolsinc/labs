@@ -43,7 +43,7 @@ was last checked against the code.
 | [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection) | `RuntimeOptions.cfcLabelMetadataProtection` | `off` | Bernhard Seefeld (#4638) | `observe` (divergence counting) first, then `enforce` | implemented, staged rollout |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237) | keep as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative or neutral |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
-| [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings` (runner mirrors it onto the session via `setConcurrentWatchRefresh()`) | off | Ben Follington (#4937) | graduate to always-on after live measurement, or remove if superseded | implemented behind the flag, off by default, not yet measured over real latency |
+| [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off | Ben Follington (#4937; shell toggle #4974) | graduate to always-on after live measurement, or remove if superseded | implemented behind the flag, off by default, not yet measured over real latency |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
 
@@ -611,8 +611,15 @@ the per-epic implementation notes).
   passed through `StorageManager` settings. The runner mirrors it onto each
   memory session via `SpaceSession.setConcurrentWatchRefresh()`
   ([`packages/memory/v2/client.ts`](../../packages/memory/v2/client.ts)) —
-  per-session, not a process global.
-- **Added by.** Ben Follington (#4937).
+  per-session, not a process global. In the **shell** it is a per-browser-profile
+  dogfood toggle: run `commonfabric.concurrentWatchRefresh(true)` in the console
+  and reload. The flag crosses the worker IPC in `InitializationData` and is
+  fixed at `StorageManager.open` time, so — like the render ceiling — it takes
+  effect on the next runtime (reload), not live. Threaded shell → worker via
+  `runtimeHostFlags()`
+  ([`packages/shell/src/lib/host-toggles.ts`](../../packages/shell/src/lib/host-toggles.ts))
+  → `RuntimeInternals.create` → `runtime-processor.ts`'s storage settings.
+- **Added by.** Ben Follington (#4937; shell dogfood toggle #4974).
 - **Purpose.** By default watch acquisition is strict single-flight per space: a
   guard holds every watch refresh after the first until the prior response
   lands, so traversal-driven pulls discovered a tick apart serialize into
