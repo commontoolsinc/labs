@@ -1,5 +1,5 @@
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import type { FabricValue } from "@commonfabric/api";
+import type { FabricValueLayer } from "@commonfabric/data-model/interface";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { createFrozenRequestSnapshot } from "./request-snapshot.ts";
 import type { CfcPrepareState, WritePolicyInput } from "./types.ts";
@@ -27,7 +27,7 @@ const preparedSinkRequestInputs = (
 export function createSinkRequestPolicyInput(
   sink: string,
   effectId: string,
-  request: FabricValue,
+  request: FabricValueLayer,
 ): SinkRequestPolicyInput {
   return {
     kind: "sink-request",
@@ -41,7 +41,7 @@ export function recordSinkRequestPolicyInput(
   tx: Pick<IExtendedStorageTransaction, "recordCfcWritePolicyInput">,
   sink: string,
   effectId: string,
-  request: FabricValue,
+  request: FabricValueLayer,
 ): void {
   tx.recordCfcWritePolicyInput(
     createSinkRequestPolicyInput(sink, effectId, request),
@@ -52,7 +52,7 @@ export function verifySinkRequestRelease(
   tx: { getCfcState(): SinkRequestPolicyState },
   sink: string,
   effectId: string,
-  request: FabricValue,
+  request: FabricValueLayer,
   preparedInput?: SinkRequestPolicyInput,
 ): string | undefined {
   const state = tx.getCfcState();
@@ -88,7 +88,7 @@ export function enqueueSinkRequestPostCommitEffect(
   >,
   sink: string,
   effectId: string,
-  request: FabricValue,
+  request: FabricValueLayer,
   kind: string,
   flush: (tx: IExtendedStorageTransaction) => void | Promise<void>,
 ): void {

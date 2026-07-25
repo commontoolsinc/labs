@@ -1,4 +1,5 @@
 import type { CellScope, JSONSchema } from "../builder/types.ts";
+import type { FabricValueLayer } from "@commonfabric/data-model/interface";
 import type { FabricValue } from "@commonfabric/api";
 import type { CfcModulePolicyRefAtom } from "@commonfabric/api/cfc";
 import type { MemorySpace } from "@commonfabric/memory/interface";
@@ -425,7 +426,9 @@ export type WritePolicyInput =
     readonly kind: "sink-request";
     readonly effectId: string;
     readonly sink: string;
-    readonly request: FabricValue;
+    // A request as authored: its contents may still hold native values
+    // awaiting conversion (see `createFrozenRequestSnapshot`).
+    readonly request: FabricValueLayer;
   }
   | {
     readonly kind: "custom";
