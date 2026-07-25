@@ -3,7 +3,7 @@
  *
  * This module provides a reusable Gmail client that handles:
  * - Token refresh on 401 errors
- * - Rate limit handling (429) with exponential backoff
+ * - Rate limit handling (429) with immediate retry
  * - Configurable retry logic
  * - Batch API requests for efficiency
  *
