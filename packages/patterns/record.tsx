@@ -63,6 +63,21 @@ export interface RecordOutput {
     initialData?: Record<string, unknown>;
     result?: Writable<unknown>;
   }>;
+  /** Writes a structured summary of every module into the result cell. */
+  getSummary?: Stream<{ result?: Writable<unknown> }>;
+  /** Sets a directly-settable field on the module at the given index. */
+  updateModule?: Stream<{
+    index: number;
+    field: string;
+    value: unknown;
+    result?: Writable<unknown>;
+  }>;
+  /** Moves the module at the given index to the trash. */
+  removeModule?: Stream<{ index: number; result?: Writable<unknown> }>;
+  /** Sets this record's title. */
+  setTitle?: Stream<{ newTitle: string; result?: Writable<unknown> }>;
+  /** Writes the list of addable module types into the result cell. */
+  listModuleTypes?: Stream<{ result?: Writable<unknown> }>;
 }
 
 // ===== Auto-initialize Notes + TypePicker =====
@@ -422,13 +437,23 @@ const toggleTrashExpanded = handler<unknown, { expanded: Writable<boolean> }>(
 // IMPORTANT: Handlers must use result.set() to return data to the LLM.
 // The 'result' Cell is injected by llm-dialog.ts invoke() - return statements are ignored!
 
+// SubPieceEntry as an LLM handler that touches the piece must type it. The
+// shared SubPieceEntry declares `piece: unknown`, and a field typed `unknown`
+// reads back across the handler boundary as undefined, so a handler that needs
+// to read the piece's fields or write them types the piece as a live Cell
+// instead. The handler still receives the same `subPieces` cell; the call site
+// casts to bridge the two views.
+type SubPieceEntryHandle =
+  & Omit<SubPieceEntry, "piece">
+  & { piece: Cell<Record<string, unknown>> };
+
 // Get a structured summary of all modules in this record
 // Returns module types, their data, and schemas for LLM context
 const handleGetSummary = handler<
   { result?: Writable<unknown> },
   {
     title: Writable<string>;
-    subPieces: Writable<SubPieceEntry[]>;
+    subPieces: Writable<SubPieceEntryHandle[]>;
   }
 >(({ result }, { title, subPieces }) => {
   const modules = subPieces.get() || [];
@@ -437,38 +462,20 @@ const handleGetSummary = handler<
     moduleCount: modules.length,
     modules: modules.map((entry, index) => {
       const def = getDefinition(entry.type);
-      // Extract data from piece - access common fields reactively
-      // deno-lint-ignore no-explicit-any
-      const piece = entry.piece as any;
+      // Read the piece's current field values. The piece is a live Cell here,
+      // so `get()` resolves the whole module value; a plain read off the
+      // `unknown`-typed handle would come back undefined. Every own field is
+      // reported except callable outputs (streams); a module whose value cannot
+      // be resolved contributes empty data rather than failing the whole
+      // summary.
       const moduleData: Record<string, unknown> = {};
-
-      // Try to extract common fields based on module type
       try {
-        // Most modules have a primary value field
-        if (piece?.label !== undefined) moduleData.label = piece.label;
-        if (piece?.value !== undefined) moduleData.value = piece.value;
-        if (piece?.content !== undefined) moduleData.content = piece.content;
-        if (piece?.address !== undefined) moduleData.address = piece.address;
-        if (piece?.email !== undefined) moduleData.email = piece.email;
-        if (piece?.phone !== undefined) moduleData.phone = piece.phone;
-        if (piece?.rating !== undefined) moduleData.rating = piece.rating;
-        if (piece?.tags !== undefined) moduleData.tags = piece.tags;
-        if (piece?.status !== undefined) moduleData.status = piece.status;
-        if (piece?.nickname !== undefined) moduleData.nickname = piece.nickname;
-        if (piece?.icon !== undefined) moduleData.icon = piece.icon;
-        if (piece?.birthDate !== undefined) {
-          moduleData.birthDate = piece.birthDate;
-        }
-        if (piece?.birthYear !== undefined) {
-          moduleData.birthYear = piece.birthYear;
-        }
-        if (piece?.url !== undefined) moduleData.url = piece.url;
-        if (piece?.notes !== undefined) moduleData.notes = piece.notes;
-        if (piece?.occurrences !== undefined) {
-          moduleData.occurrences = piece.occurrences;
+        const pieceValue = entry.piece?.get() ?? {};
+        for (const [key, fieldValue] of Object.entries(pieceValue)) {
+          if (typeof fieldValue !== "function") moduleData[key] = fieldValue;
         }
       } catch {
-        // Ignore errors from pieces without expected fields
+        // A module whose value cannot be resolved contributes no data.
       }
 
       return {
@@ -585,7 +592,7 @@ const handleAddModule = handler<
 // value: new value
 const handleUpdateModule = handler<
   { index: number; field: string; value: unknown; result?: Writable<unknown> },
-  { subPieces: Writable<SubPieceEntry[]> }
+  { subPieces: Writable<SubPieceEntryHandle[]> }
 >(({ index, field, value, result }, { subPieces: sc }) => {
   const current = sc.get() || [];
 
@@ -602,42 +609,40 @@ const handleUpdateModule = handler<
   }
 
   const entry = current[index];
-  // deno-lint-ignore no-explicit-any
-  const piece = entry.piece as any;
+  const piece = entry.piece;
 
   if (!piece) {
     if (result) result.set({ success: false, error: "Module piece not found" });
     return;
   }
 
+  // Only the piece's own, non-callable fields may be written. A path write
+  // through `piece.key(field)` would otherwise create whatever field it is
+  // handed; `Object.hasOwn` keeps a caller to the module's real fields (an `in`
+  // test would also admit inherited names like `constructor`), and the callable
+  // check keeps it off the module's streams.
+  const pieceValue = piece.get();
+  if (
+    !pieceValue || !Object.hasOwn(pieceValue, field) ||
+    typeof pieceValue[field] === "function"
+  ) {
+    if (result) {
+      result.set({
+        success: false,
+        error:
+          `Field ${field} is not a settable field on module type ${entry.type}`,
+      });
+    }
+    return;
+  }
+
   try {
-    // Try to access the field as a Cell and set it
-    const fieldCell = piece[field];
-    if (fieldCell && typeof fieldCell.set === "function") {
-      fieldCell.set(value);
-      if (result) {
-        result.set({
-          success: true,
-          message: `Updated ${field} to ${toCompactDebugString(value)}`,
-        });
-      }
-    } else if (fieldCell && typeof fieldCell.key === "function") {
-      // It might be a nested cell - try setting via parent
-      if (result) {
-        result.set({
-          success: false,
-          error:
-            `Field ${field} exists but is not directly settable. Try a more specific path.`,
-        });
-      }
-    } else {
-      if (result) {
-        result.set({
-          success: false,
-          error:
-            `Field ${field} not found or not a Cell on module type ${entry.type}`,
-        });
-      }
+    piece.key(field).set(value);
+    if (result) {
+      result.set({
+        success: true,
+        message: `Updated ${field} to ${toCompactDebugString(value)}`,
+      });
     }
   } catch (err) {
     if (result) {
@@ -2194,9 +2199,15 @@ const Record = pattern<RecordInput, RecordOutput>(
       "#record": true,
       // LLM-callable streams for Omnibot integration
       // Omnibot can invoke these via: invoke({ "@link": "/of:record-id/getSummary" }, {})
-      getSummary: handleGetSummary({ title, subPieces }),
+      // getSummary and updateModule read the piece handles the list holds, so
+      // they take the `SubPieceEntryHandle` view of `subPieces`, which types
+      // the piece as a live Cell. The cell is the same either way; the cast
+      // only bridges the two static views.
+      // deno-lint-ignore no-explicit-any
+      getSummary: handleGetSummary({ title, subPieces: subPieces as any }),
       addModule: handleAddModule({ subPieces, trashedSubPieces, title }),
-      updateModule: handleUpdateModule({ subPieces }),
+      // deno-lint-ignore no-explicit-any
+      updateModule: handleUpdateModule({ subPieces: subPieces as any }),
       removeModule: handleRemoveModule({ subPieces, trashedSubPieces }),
       setTitle: handleSetTitle({ title }),
       listModuleTypes: handleListModuleTypes({}),
