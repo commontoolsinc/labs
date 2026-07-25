@@ -14,6 +14,7 @@ import { languageForFile } from "../lib/view/languages/language.ts";
 import { parseDiff } from "../lib/view/diff.ts";
 import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { createDiffHighlighter } from "../lib/view/diffedit.ts";
+import { spanStyle } from "../lib/view/highlight.ts";
 
 Deno.test("markdown: isMarkdownPath recognises markdown extensions", () => {
   assert(isMarkdownPath("README.md"));
@@ -57,8 +58,9 @@ deno task cf
   assertEquals(lines[3].spans.map((s) => s.cls), ["punctuation"]); // ```bash
   assertEquals(lines[4].spans.map((s) => s.cls), ["string"]); // deno task cf
   assertEquals(lines[5].spans.map((s) => s.cls), ["punctuation"]); // ```
-  // A block quote is a comment.
-  assertEquals(lines[6].spans.map((s) => s.cls), ["comment"]);
+  // A block quote has its own muted style, separate from source comments.
+  assertEquals(lines[6].spans.map((s) => s.cls), ["markdownQuote"]);
+  assertEquals(spanStyle(lines[6].spans[0]).fg, [92, 99, 112]);
 });
 
 Deno.test("markdown: a link's URL is a string, brackets/parens punctuation", () => {

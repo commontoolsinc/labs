@@ -15,6 +15,7 @@
     // Held at the release candidate alongside @cliffy/command; the two share
     // internal packages and resolve as a set.
     "@cliffy/table": "jsr:@cliffy/table@1.0.0-rc.8",
+    "@node/child_process": "node:child_process",
     // Pinned to @cliffy/command's own dependency range so lib/color-mode.ts
     // shares Cliffy's module instance — setColorEnabled() on a second copy
     // would not de-colorize Cliffy help/version/usage output. Guarded by the

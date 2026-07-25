@@ -47,6 +47,8 @@ export interface DiffFile {
   readonly oldPath?: string;
   /** Path on the new side (`b/…` stripped), absent for a deleted file. */
   readonly newPath?: string;
+  /** Old blob named by a Git `index old..new` header, when present. */
+  readonly oldObject?: string;
   /** 0-based diff-text line index where this file's headers begin. */
   readonly headerLine: number;
   /** 0-based diff-text line index of the file's last line. */
@@ -96,6 +98,7 @@ export function parseDiff(text: string): DiffModel | null {
   interface OpenFile {
     oldPath?: string;
     newPath?: string;
+    oldObject?: string;
     headerLine: number;
     hunks: DiffHunk[];
     endLine: number;
@@ -113,6 +116,7 @@ export function parseDiff(text: string): DiffModel | null {
       files.push({
         oldPath: file.oldPath,
         newPath: file.newPath,
+        oldObject: file.oldObject,
         headerLine: file.headerLine,
         endLine: file.endLine,
         hunks: file.hunks,
@@ -168,6 +172,12 @@ export function parseDiff(text: string): DiffModel | null {
     }
 
     if (file && isFileMeta(line)) {
+      const objects = line.match(
+        /^index ([0-9a-f]{4,64})\.\.[0-9a-f]{4,64}(?:\s|$)/,
+      );
+      if (objects) {
+        file.oldObject = objects[1];
+      }
       lines[i] = { kind: "meta" };
       file.endLine = i;
       i++;
