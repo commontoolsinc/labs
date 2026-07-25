@@ -10,8 +10,8 @@ import {
   pathTouchesCompileCacheKey,
   recordUnstampedBaselineRunState,
   uniformCacheStates,
-} from "./perf-cache-state.ts";
-import type { CompileCacheStates } from "./perf-lib.ts";
+} from "./compile-cache-state.ts";
+import type { CompileCacheStates } from "./ci-check-lib.ts";
 
 async function captureLogs(fn: () => void | Promise<void>): Promise<string[]> {
   const logs: string[] = [];

@@ -1,8 +1,8 @@
 /**
- * Shared library for CI performance regression detection.
+ * Shared library for the CI coverage-debt gate.
  *
  * Used by:
- *   - perf-check.ts            (per-PR CI gate)
+ *   - coverage-check.ts        (per-PR coverage-debt gate)
  *   - post-coverage-comment.ts (posts the gate's coverage comment)
  */
 
@@ -13,10 +13,19 @@
 export const REPO = Deno.env.get("GITHUB_REPOSITORY") ?? "commontoolsinc/labs";
 export const TOKEN = Deno.env.get("GITHUB_TOKEN");
 export const WORKFLOW_FILE = "deno.yml";
+
+/**
+ * The per-run artifact and file the coverage check writes: this run's
+ * coverage-debt metrics and its per-family compile cache states, so a later PR
+ * run can read a recent main run's coverage as the ratchet baseline and know
+ * whether that run was cold. The name `perf-metrics` is historical — the
+ * artifact once also carried CI timing metrics for the removed performance gate
+ * — and is kept so the ratchet baseline needs no migration. A run from before
+ * the gate was removed recorded the same coverage metrics and cache states here
+ * in the identical JSON shape, so it reads as a valid baseline unchanged.
+ */
 export const PERF_METRICS_ARTIFACT_NAME = "perf-metrics";
 export const PERF_METRICS_FILE = "perf-metrics.json";
-export const PERF_METRICS_BACKFILL_ARTIFACT_NAME = "perf-metrics-backfill";
-export const PERF_METRICS_BACKFILL_FILE = "perf-metrics-backfill.json";
 
 /**
  * Prefix of the per-shard artifacts the pattern jobs upload to record whether
@@ -83,18 +92,6 @@ export const COVERAGE_LOCAL_CHECK_COMMAND = [
   '  --profile-dir="$(pwd)/coverage/raw/local" --root="$(pwd)"',
 ].join("\n");
 
-/** Minimum number of historical samples before we compute a baseline. */
-export const MIN_SAMPLES = 5;
-
-/** Standard deviations above the median to flag a regression. */
-export const STDDEV_FACTOR = 3;
-
-/** Minimum percentage increase over median to flag a regression. */
-export const MIN_REGRESSION_PCT = 0.50;
-
-/** Minimum absolute increase (in seconds) over median. */
-export const MIN_ABSOLUTE_DELTA = 2;
-
 /** Concurrency limit for API calls. */
 export const API_CONCURRENCY = 5;
 
@@ -109,20 +106,6 @@ export interface WorkflowRun {
   created_at: string;
   conclusion: string;
   event: string;
-}
-
-export interface Job {
-  id: number;
-  name: string;
-  started_at: string | null;
-  completed_at: string | null;
-  steps: Step[];
-}
-
-export interface Step {
-  name: string;
-  started_at: string | null;
-  completed_at: string | null;
 }
 
 export interface Artifact {
@@ -145,7 +128,7 @@ export interface TimingSample {
   durationSeconds: number;
 }
 
-export interface PerfMetricRecord extends TimingSample {
+export interface MetricRecord extends TimingSample {
   name: string;
 }
 
@@ -171,9 +154,9 @@ export type CompileCacheFamily = (typeof COMPILE_CACHE_FAMILIES)[number];
 export type CompileCacheState = "cold" | "warm";
 
 /**
- * Per-family compile cache states for a run. An absent family is unknown
- * (pre-rollout runs, backfill-derived runs) and is treated like today: no
- * filtering, no special status.
+ * Per-family compile cache states for a run. An absent family is unknown (a
+ * run whose cache-state artifact never recorded or could not be read) and is
+ * treated as not-cold: it is not excluded from the coverage ratchet baseline.
  */
 export type CompileCacheStates = Partial<
   Record<CompileCacheFamily, CompileCacheState>
@@ -193,50 +176,20 @@ export interface CacheStateRecord {
   exactHit: boolean;
 }
 
-export interface PerfMetricsFile {
+export interface CoverageBaselineFile {
   version: 1;
   generatedAt: string;
-  metrics: PerfMetricRecord[];
+  metrics: MetricRecord[];
   /**
    * Per-family compile cache states for the run this file describes. Absent
-   * in files written before cache-state tagging rolled out.
+   * when no cache-state artifact recorded for the run.
    */
   compileCacheStates?: CompileCacheStates;
-}
-
-export interface PerfMetricsBackfillRun {
-  runId: number;
-  metrics: PerfMetricRecord[];
-}
-
-export interface PerfMetricsBackfillFile {
-  version: 1;
-  generatedAt: string;
-  runs: PerfMetricsBackfillRun[];
 }
 
 export interface MetricTimeline {
   name: string;
   samples: TimingSample[];
-}
-
-export interface Baseline {
-  median: number;
-  stddev: number;
-  variance: number;
-  count: number;
-  threshold: number;
-}
-
-export interface JUnitTestSuite {
-  name: string;
-  time: number;
-  tests: { name: string; time: number }[];
-}
-
-export interface ParsedTimingArtifact {
-  name: string;
-  suites: JUnitTestSuite[];
 }
 
 export interface PRInfo {
@@ -267,21 +220,10 @@ export interface CurrentPRBody {
 }
 
 export interface BaselineOverrides {
-  /** Metric name -> value in the metric's native unit. */
+  /** Coverage-debt metric name -> accepted uncovered-line count. */
   metrics: Map<string, number>;
   /** Reset all coverage-debt metrics at the commit carrying this marker. */
   coverageBaselineReset: boolean;
-}
-
-export type CiWallTimeRevisitSignalKind =
-  | "slow-job"
-  | "job-imbalance"
-  | "required-wall-time";
-
-export interface CiWallTimeRevisitSignal {
-  kind: CiWallTimeRevisitSignalKind;
-  title: string;
-  detail: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -450,15 +392,8 @@ export async function mapConcurrent<T, R>(
 }
 
 // ---------------------------------------------------------------------------
-// Fetch jobs / artifacts
+// Fetch artifacts
 // ---------------------------------------------------------------------------
-
-export async function fetchJobsForRun(runId: number): Promise<Job[]> {
-  const data = await githubGet<{ jobs: Job[] }>(
-    `/repos/${REPO}/actions/runs/${runId}/jobs?per_page=100`,
-  );
-  return data.jobs;
-}
 
 export async function fetchArtifactsForRun(
   runId: number,
@@ -505,44 +440,11 @@ export function newestArtifactsByName(artifacts: Artifact[]): Artifact[] {
   return [...byName.values()];
 }
 
-export function newestTimingArtifacts(artifacts: Artifact[]): Artifact[] {
-  return newestArtifactsByName(
-    artifacts.filter((artifact) =>
-      artifact.name.startsWith("test-timing-") && !artifact.expired
-    ),
-  );
-}
-
-// ---------------------------------------------------------------------------
-// JUnit artifact parsing
-// ---------------------------------------------------------------------------
-
-export async function downloadAndParseJUnit(
-  artifactId: number,
-): Promise<JUnitTestSuite[]> {
-  const tmpDir = await downloadAndExtractArtifact(artifactId, "perf-junit-");
-  if (!tmpDir) return [];
-  try {
-    const suites: JUnitTestSuite[] = [];
-    for await (const entry of walkFiles(tmpDir)) {
-      if (entry.endsWith(".xml")) {
-        const content = await Deno.readTextFile(entry);
-        suites.push(...parseJUnitXml(content));
-      }
-    }
-    return suites;
-  } finally {
-    try {
-      await Deno.remove(tmpDir, { recursive: true });
-    } catch { /* ignore cleanup errors */ }
-  }
-}
-
-export function serializePerfMetrics(
+export function serializeCoverageBaseline(
   metrics: Map<string, TimingSample>,
   compileCacheStates?: CompileCacheStates,
-): PerfMetricsFile {
-  const file: PerfMetricsFile = {
+): CoverageBaselineFile {
+  const file: CoverageBaselineFile = {
     version: 1,
     generatedAt: new Date().toISOString(),
     metrics: metricsToRecords(metrics),
@@ -555,18 +457,18 @@ export function serializePerfMetrics(
 
 function metricsToRecords(
   metrics: Map<string, TimingSample>,
-): PerfMetricRecord[] {
+): MetricRecord[] {
   return [...metrics.entries()]
     .map(([name, sample]) => ({ name, ...sample }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function parsePerfMetricsFile(
+export function parseCoverageBaseline(
   content: string,
 ): Map<string, TimingSample> {
-  const parsed = JSON.parse(content) as Partial<PerfMetricsFile>;
+  const parsed = JSON.parse(content) as Partial<CoverageBaselineFile>;
   if (parsed.version !== 1 || !Array.isArray(parsed.metrics)) {
-    throw new Error("Unsupported perf metrics file format.");
+    throw new Error("Unsupported coverage baseline file format.");
   }
 
   const metrics = new Map<string, TimingSample>();
@@ -579,7 +481,7 @@ export function parsePerfMetricsFile(
       typeof metric.createdAt !== "string" ||
       typeof metric.durationSeconds !== "number"
     ) {
-      throw new Error("Invalid perf metric record.");
+      throw new Error("Invalid coverage baseline metric record.");
     }
 
     metrics.set(metric.name, {
@@ -593,10 +495,10 @@ export function parsePerfMetricsFile(
   return metrics;
 }
 
-/** Parsed perf metrics plus the run's compile cache states, when tagged. */
-export interface PerfMetricsDetailed {
+/** Parsed coverage baseline plus the run's compile cache states, when tagged. */
+export interface CoverageBaselineDetailed {
   metrics: Map<string, TimingSample>;
-  /** Null when the file predates cache-state tagging. */
+  /** Null when the file recorded no compile cache states. */
   compileCacheStates: CompileCacheStates | null;
 }
 
@@ -606,15 +508,15 @@ const COMPILE_CACHE_FAMILY_SET: ReadonlySet<string> = new Set(
 
 /**
  * Parse a perf metrics file, also surfacing its optional compile cache
- * states. Metric validation matches {@link parsePerfMetricsFile}; unknown
+ * states. Metric validation matches {@link parseCoverageBaseline}; unknown
  * families and invalid state values are dropped rather than failing, so a
  * malformed tag degrades to "unknown" instead of losing the run's metrics.
  */
-export function parsePerfMetricsFileDetailed(
+export function parseCoverageBaselineDetailed(
   content: string,
-): PerfMetricsDetailed {
-  const metrics = parsePerfMetricsFile(content);
-  const parsed = JSON.parse(content) as Partial<PerfMetricsFile>;
+): CoverageBaselineDetailed {
+  const metrics = parseCoverageBaseline(content);
+  const parsed = JSON.parse(content) as Partial<CoverageBaselineFile>;
 
   const rawStates = parsed.compileCacheStates;
   if (rawStates === undefined || rawStates === null) {
@@ -632,48 +534,7 @@ export function parsePerfMetricsFileDetailed(
   return { metrics, compileCacheStates };
 }
 
-export function serializePerfMetricsBackfill(
-  metricsByRunId: Map<number, Map<string, TimingSample>>,
-): PerfMetricsBackfillFile {
-  return {
-    version: 1,
-    generatedAt: new Date().toISOString(),
-    runs: [...metricsByRunId.entries()]
-      .map(([runId, metrics]) => ({
-        runId,
-        metrics: metricsToRecords(metrics),
-      }))
-      .sort((a, b) => a.runId - b.runId),
-  };
-}
-
-export function parsePerfMetricsBackfillFile(
-  content: string,
-): Map<number, Map<string, TimingSample>> {
-  const parsed = JSON.parse(content) as Partial<PerfMetricsBackfillFile>;
-  if (parsed.version !== 1 || !Array.isArray(parsed.runs)) {
-    throw new Error("Unsupported perf metrics backfill file format.");
-  }
-
-  const metricsByRunId = new Map<number, Map<string, TimingSample>>();
-  for (const run of parsed.runs) {
-    if (typeof run.runId !== "number" || !Array.isArray(run.metrics)) {
-      throw new Error("Invalid perf metrics backfill run.");
-    }
-
-    metricsByRunId.set(
-      run.runId,
-      parsePerfMetricsFile(JSON.stringify({
-        version: 1,
-        generatedAt: parsed.generatedAt ?? "",
-        metrics: run.metrics,
-      })),
-    );
-  }
-  return metricsByRunId;
-}
-
-export async function writePerfMetricsFile(
+export async function writeCoverageBaselineFile(
   path: string,
   metrics: Map<string, TimingSample>,
   compileCacheStates?: CompileCacheStates,
@@ -682,22 +543,10 @@ export async function writePerfMetricsFile(
     path,
     `${
       JSON.stringify(
-        serializePerfMetrics(metrics, compileCacheStates),
+        serializeCoverageBaseline(metrics, compileCacheStates),
         null,
         2,
       )
-    }\n`,
-  );
-}
-
-export async function writePerfMetricsBackfillFile(
-  path: string,
-  metricsByRunId: Map<number, Map<string, TimingSample>>,
-): Promise<void> {
-  await Deno.writeTextFile(
-    path,
-    `${
-      JSON.stringify(serializePerfMetricsBackfill(metricsByRunId), null, 2)
     }\n`,
   );
 }
@@ -796,42 +645,18 @@ export async function downloadAndExtractArtifact(
 }
 
 /**
- * Download a perf-metrics artifact and parse its metrics along with the run's
- * compile cache states (null when the file predates cache-state tagging).
+ * Download the per-run perf-metrics artifact and parse the coverage baseline it
+ * records — its coverage-debt metrics along with the run's compile cache states
+ * (null when the file recorded no cache states).
  */
-export async function downloadAndParsePerfMetricsDetailed(
+export async function downloadAndParseCoverageBaseline(
   artifactId: number,
-): Promise<PerfMetricsDetailed | null> {
-  const tmpDir = await downloadAndExtractArtifact(
-    artifactId,
-    "perf-metrics-",
-  );
+): Promise<CoverageBaselineDetailed | null> {
+  const tmpDir = await downloadAndExtractArtifact(artifactId, "perf-metrics-");
   if (!tmpDir) return null;
   try {
-    const jsonPath = `${tmpDir}/${PERF_METRICS_FILE}`;
-    const content = await Deno.readTextFile(jsonPath);
-    return parsePerfMetricsFileDetailed(content);
-  } catch {
-    return null;
-  } finally {
-    try {
-      await Deno.remove(tmpDir, { recursive: true });
-    } catch { /* ignore cleanup errors */ }
-  }
-}
-
-export async function downloadAndParsePerfMetricsBackfill(
-  artifactId: number,
-): Promise<Map<number, Map<string, TimingSample>> | null> {
-  const tmpDir = await downloadAndExtractArtifact(
-    artifactId,
-    "perf-metrics-backfill-",
-  );
-  if (!tmpDir) return null;
-  try {
-    const jsonPath = `${tmpDir}/${PERF_METRICS_BACKFILL_FILE}`;
-    const content = await Deno.readTextFile(jsonPath);
-    return parsePerfMetricsBackfillFile(content);
+    const content = await Deno.readTextFile(`${tmpDir}/${PERF_METRICS_FILE}`);
+    return parseCoverageBaselineDetailed(content);
   } catch {
     return null;
   } finally {
@@ -847,433 +672,6 @@ export async function* walkFiles(dir: string): AsyncGenerator<string> {
     if (entry.isDirectory) yield* walkFiles(full);
     else yield full;
   }
-}
-
-export function parseJUnitXml(xml: string): JUnitTestSuite[] {
-  const suites: JUnitTestSuite[] = [];
-
-  const suiteRegex =
-    /<testsuite\s[^>]*?name="([^"]*)"[^>]*?time="([^"]*)"[^>]*?>([\s\S]*?)<\/testsuite>/g;
-  const caseRegex =
-    /<testcase\s[^>]*?name="([^"]*)"[^>]*?time="([^"]*)"[^>]*?\/?>(?:<\/testcase>)?/g;
-
-  let suiteMatch;
-  while ((suiteMatch = suiteRegex.exec(xml)) !== null) {
-    const [, suiteName, suiteTime, suiteBody] = suiteMatch;
-    const tests: { name: string; time: number }[] = [];
-
-    let caseMatch;
-    while ((caseMatch = caseRegex.exec(suiteBody)) !== null) {
-      tests.push({
-        name: caseMatch[1],
-        time: parseFloat(caseMatch[2]) || 0,
-      });
-    }
-
-    suites.push({
-      name: suiteName,
-      time: parseFloat(suiteTime) || 0,
-      tests,
-    });
-  }
-
-  return suites;
-}
-
-export function timingArtifactLabel(artifactName: string): string {
-  const label = artifactName.replace(/^test-timing-/, "");
-  return label
-    .replace(/^package-integration-.+$/, "package-integration")
-    .replace(/^pattern-integration-\d+$/, "pattern-integration")
-    .replace(/^generated-patterns-\d+$/, "generated-patterns");
-}
-
-// ---------------------------------------------------------------------------
-// Metric extraction from jobs/steps
-// ---------------------------------------------------------------------------
-
-function durationSeconds(
-  start: string | null,
-  end: string | null,
-): number {
-  if (!start || !end) return 0;
-  return (new Date(end).getTime() - new Date(start).getTime()) / 1000;
-}
-
-function normalizeName(name: string): string {
-  return name
-    .replace(
-      /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1FA00}-\u{1FAFF}]/gu,
-      "",
-    )
-    .trim();
-}
-
-const JOB_METRIC_NAMES: Record<string, string> = {
-  "Package Integration Tests": "job: Package Integration Tests",
-  "CLI Integration Tests (core)": "job: CLI Integration Tests (core)",
-  "CLI Integration Tests (core-piece-basics)":
-    "job: CLI Integration Tests (core-piece-basics)",
-  "CLI Integration Tests (core-piece-values)":
-    "job: CLI Integration Tests (core-piece-values)",
-  "CLI Integration Tests (core-piece-links)":
-    "job: CLI Integration Tests (core-piece-links)",
-  "CLI Integration Tests (core-piece-call)":
-    "job: CLI Integration Tests (core-piece-call)",
-  "CLI Integration Tests (fuse)": "job: CLI Integration Tests (fuse)",
-  // Legacy pre-matrix job name retained for older baselines and overrides.
-  "CLI Integration Tests": "job: CLI Integration Tests",
-  "Pattern Integration Tests": "job: Pattern Integration Tests",
-  "Pattern Reload Integration Tests": "job: Pattern Reload Integration Tests",
-  "Generated Patterns Integration Tests":
-    "job: Generated Patterns Integration Tests",
-  "Runner Tests": "job: Runner Tests",
-  "Build Binary (toolshed)": "job: Build Binary (toolshed)",
-  "Build Binary (bg-piece-service)": "job: Build Binary (bg-piece-service)",
-  "Build Binary (cf)": "job: Build Binary (cf)",
-  "Build Binaries": "job: Build Binaries",
-  "Test": "job: Test",
-  "Check": "job: Check",
-  "Test and Build": "job: Test and Build",
-};
-
-/** Pattern for matrix jobs like "Pattern Unit Tests (1/5)". */
-export const PACKAGE_INTEGRATION_RE = /Package Integration Tests\s*\(([^)]+)\)/;
-export const PATTERN_UNIT_RE = /Pattern Unit Tests\s*\((\d+)\/(\d+)\)/;
-export const PATTERN_INTEGRATION_RE =
-  /Pattern Integration Tests\s*\((\d+)\/(\d+)\)/;
-export const GENERATED_PATTERNS_RE =
-  /Generated Patterns Integration Tests\s*\((\d+)\/(\d+)\)/;
-export const RUNNER_TEST_RE = /Runner Tests\s*\((\d+)\/(\d+)\)/;
-export const CLI_CORE_SPLIT_RE = /CLI Integration Tests\s*\((core-[^)]+)\)/;
-// Anchored so it does not match the other sharded "... Tests (n/m)" jobs.
-export const WORKSPACE_TEST_RE = /^Test\s*\((\d+)\/(\d+)\)$/;
-
-interface StepMetricMatcher {
-  jobName: string;
-  stepKeyword: string;
-  metricName: string;
-}
-
-const STEP_METRIC_MATCHERS: StepMetricMatcher[] = [
-  {
-    jobName: "Package Integration Tests",
-    stepKeyword: "runner integration",
-    metricName: "step: runner integration",
-  },
-  {
-    jobName: "Package Integration Tests",
-    stepKeyword: "runtime-client integration",
-    metricName: "step: runtime-client integration",
-  },
-  {
-    jobName: "Package Integration Tests",
-    stepKeyword: "shell integration",
-    metricName: "step: shell integration",
-  },
-  {
-    jobName: "Package Integration Tests",
-    stepKeyword: "background worker integration",
-    metricName: "step: background worker integration",
-  },
-  {
-    jobName: "Pattern Integration Tests",
-    stepKeyword: "patterns integration",
-    metricName: "step: patterns integration",
-  },
-  {
-    jobName: "Pattern Reload Integration Tests",
-    stepKeyword: "pattern reload integration",
-    metricName: "step: pattern reload integration",
-  },
-  {
-    jobName: "Generated Patterns Integration Tests",
-    stepKeyword: "generated patterns integration",
-    metricName: "step: generated patterns integration",
-  },
-  {
-    jobName: "Runner Tests",
-    stepKeyword: "runner tests",
-    metricName: "step: runner tests",
-  },
-  {
-    jobName: "CLI Integration Tests (core)",
-    stepKeyword: "cli integration suite",
-    metricName: "step: CLI integration (core)",
-  },
-  {
-    jobName: "CLI Integration Tests (fuse)",
-    stepKeyword: "cli fuse integration suite",
-    metricName: "step: CLI integration (fuse)",
-  },
-  {
-    jobName: "CLI Integration Tests",
-    stepKeyword: "cli integration suite",
-    metricName: "step: CLI integration",
-  },
-  {
-    jobName: "Pattern Unit Tests",
-    stepKeyword: "pattern unit tests",
-    metricName: "step: pattern unit tests",
-  },
-  {
-    jobName: "Check",
-    stepKeyword: "type check",
-    metricName: "step: Type check",
-  },
-  {
-    jobName: "Test",
-    stepKeyword: "workspace tests",
-    metricName: "step: workspace tests",
-  },
-  {
-    jobName: "Build Binaries",
-    stepKeyword: "build application",
-    metricName: "step: Build application",
-  },
-  {
-    jobName: "Build Binary (toolshed)",
-    stepKeyword: "build toolshed binary",
-    metricName: "step: Build toolshed binary",
-  },
-  {
-    jobName: "Build Binary (bg-piece-service)",
-    stepKeyword: "build bg-piece-service binary",
-    metricName: "step: Build bg-piece-service binary",
-  },
-  {
-    jobName: "Build Binary (cf)",
-    stepKeyword: "build cf binary",
-    metricName: "step: Build cf binary",
-  },
-];
-
-const BUILD_BINARY_RE = /^Build Binary \((toolshed|bg-piece-service|cf)\)$/;
-
-export function extractMetrics(
-  run: WorkflowRun,
-  jobs: Job[],
-): Map<string, TimingSample> {
-  const metrics = new Map<string, TimingSample>();
-
-  const makeSample = (duration: number): TimingSample => ({
-    runId: run.id,
-    runUrl: run.html_url,
-    sha: run.head_sha,
-    createdAt: run.created_at,
-    durationSeconds: duration,
-  });
-
-  const setMaxMetric = (name: string, sample: TimingSample) => {
-    const existing = metrics.get(name);
-    if (!existing || sample.durationSeconds > existing.durationSeconds) {
-      metrics.set(name, sample);
-    }
-  };
-
-  for (const job of jobs) {
-    const jobDuration = durationSeconds(job.started_at, job.completed_at);
-    if (jobDuration <= 0) continue;
-
-    const normalizedJobName = normalizeName(job.name);
-    const buildBinaryMatch = BUILD_BINARY_RE.exec(normalizedJobName);
-
-    const jobMetricName = JOB_METRIC_NAMES[normalizedJobName];
-    if (jobMetricName) {
-      const sample = makeSample(jobDuration);
-      metrics.set(jobMetricName, sample);
-      if (buildBinaryMatch) {
-        setMaxMetric("job: Build Binaries", sample);
-      }
-    }
-
-    const packageIntegrationMatch = PACKAGE_INTEGRATION_RE.exec(
-      normalizedJobName,
-    );
-    const unitMatch = PATTERN_UNIT_RE.exec(normalizedJobName);
-    const patternIntegrationMatch = PATTERN_INTEGRATION_RE.exec(
-      normalizedJobName,
-    );
-    const generatedPatternsMatch = GENERATED_PATTERNS_RE.exec(
-      normalizedJobName,
-    );
-    const runnerTestMatch = RUNNER_TEST_RE.exec(normalizedJobName);
-    const cliCoreSplitMatch = CLI_CORE_SPLIT_RE.exec(normalizedJobName);
-    const workspaceTestMatch = WORKSPACE_TEST_RE.exec(normalizedJobName);
-
-    const matcherJobName = packageIntegrationMatch
-      ? "Package Integration Tests"
-      : unitMatch
-      ? "Pattern Unit Tests"
-      : patternIntegrationMatch
-      ? "Pattern Integration Tests"
-      : generatedPatternsMatch
-      ? "Generated Patterns Integration Tests"
-      : runnerTestMatch
-      ? "Runner Tests"
-      : cliCoreSplitMatch
-      ? "CLI Integration Tests (core)"
-      : workspaceTestMatch
-      ? "Test"
-      : normalizedJobName;
-
-    if (packageIntegrationMatch) {
-      const sample = makeSample(jobDuration);
-      metrics.set(
-        `job: Package Integration Tests (${packageIntegrationMatch[1]})`,
-        sample,
-      );
-      setMaxMetric("job: Package Integration Tests", sample);
-    }
-
-    if (unitMatch) {
-      metrics.set(
-        `job: Pattern Unit Tests (${unitMatch[1]}/${unitMatch[2]})`,
-        makeSample(jobDuration),
-      );
-    }
-
-    if (patternIntegrationMatch) {
-      const sample = makeSample(jobDuration);
-      metrics.set(
-        `job: Pattern Integration Tests (${patternIntegrationMatch[1]}/${
-          patternIntegrationMatch[2]
-        })`,
-        sample,
-      );
-      setMaxMetric("job: Pattern Integration Tests", sample);
-    }
-
-    if (generatedPatternsMatch) {
-      const sample = makeSample(jobDuration);
-      metrics.set(
-        `job: Generated Patterns Integration Tests (${
-          generatedPatternsMatch[1]
-        }/${generatedPatternsMatch[2]})`,
-        sample,
-      );
-      setMaxMetric("job: Generated Patterns Integration Tests", sample);
-    }
-
-    if (runnerTestMatch) {
-      const sample = makeSample(jobDuration);
-      metrics.set(
-        `job: Runner Tests (${runnerTestMatch[1]}/${runnerTestMatch[2]})`,
-        sample,
-      );
-      setMaxMetric("job: Runner Tests", sample);
-    }
-
-    if (workspaceTestMatch) {
-      const sample = makeSample(jobDuration);
-      metrics.set(
-        `job: Test (${workspaceTestMatch[1]}/${workspaceTestMatch[2]})`,
-        sample,
-      );
-      // Rolls up to the pre-shard "job: Test" metric so the sharded jobs
-      // compare against the existing single-job baselines.
-      setMaxMetric("job: Test", sample);
-    }
-
-    if (cliCoreSplitMatch) {
-      const sample = makeSample(jobDuration);
-      metrics.set(
-        `job: CLI Integration Tests (${cliCoreSplitMatch[1]})`,
-        sample,
-      );
-      setMaxMetric("job: CLI Integration Tests (core)", sample);
-    }
-
-    if (normalizedJobName.includes("Test and Build")) {
-      metrics.set("job: Test and Build", makeSample(jobDuration));
-    }
-
-    for (const step of job.steps) {
-      const stepDuration = durationSeconds(step.started_at, step.completed_at);
-      if (stepDuration <= 0) continue;
-
-      const normalizedStepName = normalizeName(step.name).toLowerCase();
-      if (
-        buildBinaryMatch && normalizedStepName.includes("build") &&
-        normalizedStepName.includes("binary")
-      ) {
-        setMaxMetric("step: Build application", makeSample(stepDuration));
-      }
-      for (const matcher of STEP_METRIC_MATCHERS) {
-        if (
-          matcher.jobName === matcherJobName &&
-          normalizedStepName.includes(matcher.stepKeyword)
-        ) {
-          const sample = makeSample(stepDuration);
-          if (
-            packageIntegrationMatch || patternIntegrationMatch ||
-            generatedPatternsMatch || runnerTestMatch || cliCoreSplitMatch ||
-            workspaceTestMatch
-          ) {
-            setMaxMetric(matcher.metricName, sample);
-          } else {
-            metrics.set(matcher.metricName, sample);
-          }
-        }
-      }
-    }
-  }
-
-  return metrics;
-}
-
-export function extractTestFileMetrics(
-  run: WorkflowRun,
-  artifactName: string,
-  suites: JUnitTestSuite[],
-): Map<string, TimingSample> {
-  const metrics = new Map<string, TimingSample>();
-
-  const makeSample = (duration: number): TimingSample => ({
-    runId: run.id,
-    runUrl: run.html_url,
-    sha: run.head_sha,
-    createdAt: run.created_at,
-    durationSeconds: duration,
-  });
-
-  for (const suite of suites) {
-    if (suite.time <= 0) continue;
-    const key = `test: ${artifactName}/${suite.name}`;
-    metrics.set(key, makeSample(suite.time));
-
-    for (const test of suite.tests) {
-      if (test.time <= 0) continue;
-      const testKey = `subtest: ${artifactName}/${suite.name} > ${test.name}`;
-      metrics.set(testKey, makeSample(test.time));
-    }
-  }
-
-  return metrics;
-}
-
-/** Keeps the longest slice when normalized artifact labels share a metric. */
-export function extractTimingArtifactMetrics(
-  run: WorkflowRun,
-  artifacts: Iterable<ParsedTimingArtifact>,
-): Map<string, TimingSample> {
-  const metrics = new Map<string, TimingSample>();
-
-  for (const artifact of artifacts) {
-    const artifactMetrics = extractTestFileMetrics(
-      run,
-      timingArtifactLabel(artifact.name),
-      artifact.suites,
-    );
-    for (const [name, sample] of artifactMetrics) {
-      const existing = metrics.get(name);
-      if (!existing || sample.durationSeconds > existing.durationSeconds) {
-        metrics.set(name, sample);
-      }
-    }
-  }
-
-  return metrics;
 }
 
 // ---------------------------------------------------------------------------
@@ -1348,194 +746,6 @@ export function aggregateCacheStates(
     );
   }
   return states;
-}
-
-/** Job-metric prefixes (aggregate and per-shard forms) per cache family. */
-const COMPILE_CACHE_JOB_METRIC_PREFIXES: readonly (readonly [
-  string,
-  CompileCacheFamily,
-])[] = [
-  ["job: Generated Patterns Integration Tests", "generated-patterns"],
-  ["job: Pattern Integration Tests", "pattern-integration"],
-  ["job: Pattern Unit Tests", "pattern-unit"],
-];
-
-/** The exact step-metric names emitted for the cache-restoring jobs. */
-const COMPILE_CACHE_STEP_METRIC_FAMILIES: Record<string, CompileCacheFamily> = {
-  "step: generated patterns integration": "generated-patterns",
-  "step: patterns integration": "pattern-integration",
-  "step: pattern unit tests": "pattern-unit",
-};
-
-/** Extracts the timing-artifact label from a `test:`/`subtest:` metric. */
-const COMPILE_CACHE_TEST_LABEL_RE = /^(?:sub)?test: ([^/]+)\//;
-
-/**
- * Map a metric name to the compile-cache family whose cold cache inflates
- * it, or null for metrics with no compile cache (Runner Tests,
- * pattern-reload-integration, `coverage-debt:`, ...). The mapping
- * mirrors the names `extractMetrics` and `extractTestFileMetrics` emit.
- */
-export function compileCacheFamilyForMetric(
-  metric: string,
-): CompileCacheFamily | null {
-  for (const [prefix, family] of COMPILE_CACHE_JOB_METRIC_PREFIXES) {
-    if (
-      metric === prefix ||
-      (metric.startsWith(prefix) && metric[prefix.length] === " ")
-    ) {
-      return family;
-    }
-  }
-
-  const stepFamily = COMPILE_CACHE_STEP_METRIC_FAMILIES[metric];
-  if (stepFamily) return stepFamily;
-
-  const labelMatch = COMPILE_CACHE_TEST_LABEL_RE.exec(metric);
-  if (labelMatch) {
-    const label = labelMatch[1];
-    if (label === "generated-patterns") return "generated-patterns";
-    if (label === "pattern-integration") return "pattern-integration";
-    if (/^pattern-unit-\d+$/.test(label)) return "pattern-unit";
-  }
-
-  return null;
-}
-
-// ---------------------------------------------------------------------------
-// CI wall-time revisit signals
-// ---------------------------------------------------------------------------
-
-export const CI_WALL_TIME_SLOW_JOB_SECONDS = 180;
-export const CI_WALL_TIME_REQUIRED_CHECK_SECONDS = 8 * 60;
-export const CI_WALL_TIME_IMBALANCE_RATIO = 1.5;
-export const CI_WALL_TIME_IMBALANCE_MIN_DELTA_SECONDS = 30;
-export const CI_WALL_TIME_COMPARABLE_JOB_COUNT = 5;
-
-const CI_WALL_TIME_EXCLUDED_JOB_PATTERNS = [
-  /^Deploy /,
-  /^Attest and Upload Binaries$/,
-  /^Toolshed Post-Deploy Patterns Test$/,
-];
-
-function medianNumber(values: number[]): number {
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0
-    ? (sorted[mid - 1] + sorted[mid]) / 2
-    : sorted[mid];
-}
-
-function shouldIncludeCiWallTimeJob(name: string): boolean {
-  return !CI_WALL_TIME_EXCLUDED_JOB_PATTERNS.some((re) => re.test(name));
-}
-
-export function computeCiWallTimeRevisitSignals(
-  jobs: Job[],
-): CiWallTimeRevisitSignal[] {
-  const measuredJobs = jobs
-    .map((job) => {
-      const name = normalizeName(job.name);
-      const startMs = job.started_at ? Date.parse(job.started_at) : NaN;
-      const endMs = job.completed_at ? Date.parse(job.completed_at) : NaN;
-      return {
-        name,
-        startMs,
-        endMs,
-        durationSeconds: durationSeconds(job.started_at, job.completed_at),
-      };
-    })
-    .filter((job) =>
-      shouldIncludeCiWallTimeJob(job.name) &&
-      Number.isFinite(job.startMs) &&
-      Number.isFinite(job.endMs) &&
-      job.durationSeconds > 0
-    );
-
-  if (measuredJobs.length === 0) return [];
-
-  const signals: CiWallTimeRevisitSignal[] = [];
-  const sortedByDuration = [...measuredJobs].sort((a, b) =>
-    b.durationSeconds - a.durationSeconds
-  );
-  const slowest = sortedByDuration[0];
-
-  if (slowest.durationSeconds >= CI_WALL_TIME_SLOW_JOB_SECONDS) {
-    signals.push({
-      kind: "slow-job",
-      title: "Slowest required CI job is over 3m",
-      detail: `${slowest.name} took ${formatDuration(slowest.durationSeconds)}`,
-    });
-  }
-
-  const comparableJobs = sortedByDuration.slice(
-    0,
-    Math.min(CI_WALL_TIME_COMPARABLE_JOB_COUNT, sortedByDuration.length),
-  );
-  const comparableMedian = medianNumber(
-    comparableJobs.map((job) => job.durationSeconds),
-  );
-  if (
-    slowest.durationSeconds >=
-      comparableMedian * CI_WALL_TIME_IMBALANCE_RATIO &&
-    slowest.durationSeconds - comparableMedian >=
-      CI_WALL_TIME_IMBALANCE_MIN_DELTA_SECONDS
-  ) {
-    signals.push({
-      kind: "job-imbalance",
-      title: "One required CI job is much slower than nearby jobs",
-      detail: `${slowest.name} took ${
-        formatDuration(slowest.durationSeconds)
-      }; top-${comparableJobs.length} median is ${
-        formatDuration(comparableMedian)
-      }`,
-    });
-  }
-
-  const requiredStartMs = Math.min(...measuredJobs.map((job) => job.startMs));
-  const requiredEndMs = Math.max(...measuredJobs.map((job) => job.endMs));
-  const requiredWallTimeSeconds = (requiredEndMs - requiredStartMs) / 1000;
-  if (requiredWallTimeSeconds >= CI_WALL_TIME_REQUIRED_CHECK_SECONDS) {
-    signals.push({
-      kind: "required-wall-time",
-      title: "Required CI checks are over the wall-time budget",
-      detail: `Required non-deploy jobs took ${
-        formatDuration(requiredWallTimeSeconds)
-      } from first start to last completion`,
-    });
-  }
-
-  return signals;
-}
-
-// ---------------------------------------------------------------------------
-// Statistics
-// ---------------------------------------------------------------------------
-
-export function computeBaseline(
-  samples: number[],
-  minAbsoluteDelta = 0,
-): Baseline | null {
-  if (samples.length < MIN_SAMPLES) return null;
-
-  const sorted = [...samples].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  const median = sorted.length % 2 === 0
-    ? (sorted[mid - 1] + sorted[mid]) / 2
-    : sorted[mid];
-
-  const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
-  const variance = samples.reduce((sum, v) => sum + (v - mean) ** 2, 0) /
-    samples.length;
-  const stddev = Math.sqrt(variance);
-
-  const threshold = Math.max(
-    median + STDDEV_FACTOR * stddev,
-    median * (1 + MIN_REGRESSION_PCT),
-    median + minAbsoluteDelta,
-  );
-
-  return { median, stddev, variance, count: samples.length, threshold };
 }
 
 // ---------------------------------------------------------------------------
@@ -1790,7 +1000,7 @@ export function buildCoverageDebtSuggestionComment(
   out.push("");
   out.push(
     "This PR adds source lines that no test exercises, so the coverage gate in " +
-      "the **Performance Check** job is failing. The gate ratchets each changed " +
+      "the **Coverage Check** job is failing. The gate ratchets each changed " +
       "source group against its uncovered-line count on `main`: the group must " +
       "not end up with more uncovered lines than that baseline.",
   );
@@ -1888,14 +1098,14 @@ export function buildCoverageResolvedComment(
   out.push("");
   out.push(
     overridden
-      ? "The coverage gate in the **Performance Check** job passes because this " +
+      ? "The coverage gate in the **Coverage Check** job passes because this " +
         "PR's coverage debt was accepted with an override rather than covered " +
         "by new tests. Here is where it left each changed source group:"
       : improvedLines > 0
-      ? "The coverage gate in the **Performance Check** job passes again. This " +
+      ? "The coverage gate in the **Coverage Check** job passes again. This " +
         `PR now covers ${uncoveredLineCount(improvedLines)} that no test ` +
         "reached on `main`. Here is where it left each changed source group:"
-      : "The coverage gate in the **Performance Check** job passes again. Here " +
+      : "The coverage gate in the **Coverage Check** job passes again. Here " +
         "is where this PR left each changed source group:",
   );
   out.push("");
@@ -1920,21 +1130,6 @@ export function buildCoverageResolvedComment(
   out.push("</details>");
 
   return out.join("\n");
-}
-
-export function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${seconds.toFixed(1)}s`;
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}m ${s.toFixed(0)}s`;
-}
-
-export function formatMetricValue(name: string, value: number): string {
-  if (isCoverageDebtMetric(name)) {
-    const rounded = Math.round(value);
-    return `${rounded} ${rounded === 1 ? "line" : "lines"}`;
-  }
-  return formatDuration(value);
 }
 
 // ---------------------------------------------------------------------------
@@ -2035,24 +1230,36 @@ export async function fetchCurrentPRBody(
 }
 
 // ---------------------------------------------------------------------------
-// Baseline override parsing
+// Coverage override parsing
 // ---------------------------------------------------------------------------
 
 /**
- * Parse a PR body for performance baseline overrides.
+ * Parse a PR body for coverage-debt overrides.
  *
  * Format (visible markdown, one per line):
- *   NEW_PERF_BASELINE: job: Package Integration Tests = 300s
+ *   ACCEPT_COVERAGE_DEBT: coverage-debt: packages/runner uncovered lines = 123 lines
  *   NEW_COVERAGE_BASELINE
  *
- * Values require a unit suffix: s, ms, us/µs, ns, line, or lines.
- * The value is stored in the metric's native unit.
- * Coverage-debt metrics must use line units; non-coverage metrics must use
- * time units.
+ * `ACCEPT_COVERAGE_DEBT` accepts one metric's uncovered-line count. Its value
+ * must use line units and its metric must be a `coverage-debt:` metric.
  * `NEW_COVERAGE_BASELINE` is a whole-coverage ratchet reset marker; it has no
  * value and lets the PR's/main run's coverage metrics become the next baseline.
+ *
+ * `includeLegacyCoverageAcceptance` additionally reads the marker's former name,
+ * `NEW_PERF_BASELINE: <coverage-debt metric> = N lines`. Merged PRs from before
+ * the rename accepted coverage debt that way, and their acceptance still has to
+ * truncate the baseline timeline — otherwise a previously accepted increase
+ * re-gates once its group's recent `main` runs go cold, because the ratchet
+ * reaches back past the acceptance to a lower pre-acceptance sample. It is
+ * enabled only when rebuilding merged-PR baselines, never for the current PR:
+ * new PRs must use `ACCEPT_COVERAGE_DEBT`. The timing forms `NEW_PERF_BASELINE`
+ * also carried gate nothing now, so any non-coverage-debt legacy line is
+ * ignored rather than rejected.
  */
-export function parseBaselineOverrides(body: string): BaselineOverrides {
+export function parseBaselineOverrides(
+  body: string,
+  includeLegacyCoverageAcceptance = false,
+): BaselineOverrides {
   const result: BaselineOverrides = {
     metrics: new Map(),
     coverageBaselineReset: new RegExp(
@@ -2061,67 +1268,44 @@ export function parseBaselineOverrides(body: string): BaselineOverrides {
     ).test(body),
   };
 
-  const re =
-    /NEW_PERF_BASELINE:\s*(.+?)\s*=\s*(\d+(?:\.\d+)?)\s*(ns|µs|us|ms|s|lines?)/g;
+  const re = /ACCEPT_COVERAGE_DEBT:\s*(.+?)\s*=\s*(\d+(?:\.\d+)?)\s*(lines?)/g;
   let match;
   while ((match = re.exec(body)) !== null) {
     const metric = match[1].trim();
-    let value = parseFloat(match[2]);
-    const unit = match[3];
-    const isLineUnit = unit === "line" || unit === "lines";
-    const isCoverageMetric = isCoverageDebtMetric(metric);
+    const value = parseFloat(match[2]);
 
-    if (isLineUnit && !isCoverageMetric) {
+    if (!isCoverageDebtMetric(metric)) {
       throw new Error(
-        `Invalid NEW_PERF_BASELINE override for "${metric}": line units are only valid for coverage-debt metrics.`,
+        `Invalid ACCEPT_COVERAGE_DEBT override for "${metric}": only coverage-debt metrics can be accepted.`,
       );
-    }
-    if (!isLineUnit && isCoverageMetric) {
-      throw new Error(
-        `Invalid NEW_PERF_BASELINE override for "${metric}": coverage-debt metrics must use line units.`,
-      );
-    }
-
-    if (isLineUnit) {
-      result.metrics.set(metric, value);
-      continue;
-    }
-
-    switch (unit) {
-      case "ns":
-        value /= 1e9;
-        break;
-      case "us":
-      case "µs":
-        value /= 1e6;
-        break;
-      case "ms":
-        value /= 1e3;
-        break;
-      case "s":
-        break;
     }
 
     result.metrics.set(metric, value);
+  }
+
+  if (includeLegacyCoverageAcceptance) {
+    const legacyRe =
+      /NEW_PERF_BASELINE:\s*(.+?)\s*=\s*(\d+(?:\.\d+)?)\s*lines?\b/g;
+    let legacyMatch;
+    while ((legacyMatch = legacyRe.exec(body)) !== null) {
+      const metric = legacyMatch[1].trim();
+      if (!isCoverageDebtMetric(metric)) continue;
+      if (!result.metrics.has(metric)) {
+        result.metrics.set(metric, parseFloat(legacyMatch[2]));
+      }
+    }
   }
 
   return result;
 }
 
 /**
- * Format a metric value as a suggested override string for PR descriptions.
- * Uses a human-friendly unit.
+ * Format a coverage-debt value as a suggested override string for PR
+ * descriptions, rounded up to whole lines.
  */
-export function formatOverrideSuggestion(
-  metric: string,
-  value: number,
-): string {
-  if (isCoverageDebtMetric(metric)) {
-    const rounded = Math.ceil(value);
-    return `${rounded} ${rounded === 1 ? "line" : "lines"}`;
-  }
-  // value is in seconds
-  return `${Math.ceil(value)}s`;
+export function formatOverrideSuggestion(value: number): string {
+  const rounded = Math.ceil(value);
+  return `${rounded} ${rounded === 1 ? "line" : "lines"}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -2181,23 +1365,12 @@ export function applyBaselineOverrides(
 }
 
 /**
- * Drop samples from runs whose compile cache is known-cold for the metric's
- * family, so a warm (or unknown) current run is not gated against inflated
- * cold baselines. Unknown runs are kept — pre-rollout baselines behave
- * exactly as they do today.
- */
-export function dropColdSamples(
-  samples: TimingSample[],
-  stateOfRun: (runId: number) => CompileCacheState | undefined,
-): TimingSample[] {
-  return samples.filter((sample) => stateOfRun(sample.runId) !== "cold");
-}
-
-/**
- * The latest sample whose run is not known-cold, for ratchets that compare
- * against the most recent baseline (the coverage-debt gate). Falls back to
- * the last sample when every sample is known-cold, preserving the
- * override-truncation reset semantics of `samples.at(-1)`.
+ * The latest sample whose run is not known-cold, for the coverage-debt ratchet
+ * that compares against the most recent baseline. A cold main run covers
+ * cold-compile-only branches, so ratcheting against its lower debt would fail
+ * later warm PRs with phantom regressions. Falls back to the last sample when
+ * every sample is known-cold, preserving the override-truncation reset
+ * semantics of `samples.at(-1)`.
  */
 export function latestNonColdSample(
   samples: TimingSample[],

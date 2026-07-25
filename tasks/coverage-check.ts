@@ -1,12 +1,13 @@
 #!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-run --allow-write
 
 /**
- * PR Performance Check
+ * PR Coverage Check
  *
- * Runs as part of PR CI after all test jobs complete. Compares the current
- * run's job/step timings against a baseline computed from recent main-branch
- * push runs.  Fails (exit 1) if any metric exceeds the baseline threshold,
- * unless the PR description contains an override.
+ * Runs as part of PR CI after all test jobs complete. Joins the coverage
+ * profiles every test job uploaded and gates the PR on coverage debt: for each
+ * source group the PR changed, the count of uncovered lines must not rise above
+ * the latest non-cold `main` run's count, unless the PR description accepts the
+ * increase. Fails (exit 1) when a changed group regresses.
  *
  * Environment:
  *   GITHUB_TOKEN        - Required.
@@ -27,14 +28,10 @@ import {
   buildCoverageDebtSuggestionComment,
   CACHE_STATE_ARTIFACT_PREFIX,
   COMPILE_CACHE_FAMILIES,
-  type CompileCacheFamily,
-  compileCacheFamilyForMetric,
-  type CompileCacheState,
   type CompileCacheStates,
-  computeBaseline,
-  computeCiWallTimeRevisitSignals,
   COVERAGE_BASELINE_RESET_MARKER,
   COVERAGE_COMMENT_FILE,
+  type CoverageBaselineDetailed,
   type CoverageCommentPayload,
   coverageGroupForChangedFile,
   coverageGroupsForChangedFiles,
@@ -43,55 +40,38 @@ import {
   type CoverageSuggestionFileLines,
   type CoverageSuggestionGroup,
   downloadAndExtractArtifact,
-  downloadAndParseJUnit,
-  downloadAndParsePerfMetricsBackfill,
-  downloadAndParsePerfMetricsDetailed,
-  dropColdSamples,
-  extractMetrics,
-  extractTimingArtifactMetrics,
+  downloadAndParseCoverageBaseline,
   fetchArtifactsForRun,
   fetchCurrentPRBody,
-  fetchJobsForRun,
   fetchPRFiles,
-  formatMetricValue,
   formatOverrideSuggestion,
   githubGet,
   isCoverageDebtMetric,
   latestNonColdSample,
   mapConcurrent,
   type MetricTimeline,
-  MIN_ABSOLUTE_DELTA,
-  MIN_REGRESSION_PCT,
-  MIN_SAMPLES,
   newestArtifactsByName,
-  newestTimingArtifacts,
   parseAddedLinesFromPatch,
   parseBaselineOverrides,
   parseCacheStateFiles,
-  type ParsedTimingArtifact,
   PERF_METRICS_ARTIFACT_NAME,
-  PERF_METRICS_BACKFILL_ARTIFACT_NAME,
-  PERF_METRICS_BACKFILL_FILE,
   PERF_METRICS_FILE,
-  type PerfMetricsDetailed,
   type PRFile,
   type PRInfo,
   readAndParseEvent,
   REPO,
   shouldGateCoverageDebtMetric,
-  STDDEV_FACTOR,
   type TimingSample,
   walkFiles,
   WORKFLOW_FILE,
   type WorkflowRun,
-  writePerfMetricsBackfillFile,
-  writePerfMetricsFile,
-} from "./perf-lib.ts";
+  writeCoverageBaselineFile,
+} from "./ci-check-lib.ts";
 import {
   fillMissingFamiliesFromFingerprint,
   inferCurrentRunFallbackState,
   recordUnstampedBaselineRunState,
-} from "./perf-cache-state.ts";
+} from "./compile-cache-state.ts";
 import * as path from "@std/path";
 import {
   collectCoverageDebtMetricsFromLcov,
@@ -100,11 +80,8 @@ import {
   lcovFromCoverageProfile,
 } from "./coverage-metrics.ts";
 
-/** How many recent main-branch runs to use for baseline. */
+/** How many recent main-branch runs to scan for the coverage baseline. */
 const BASELINE_RUNS = 20;
-
-/** Recent completed workflow runs to scan for fallback backfill artifacts. */
-const BACKFILL_SOURCE_RUNS = 20;
 
 export function currentWorkflowRunFromEvent(
   event: object | undefined,
@@ -151,12 +128,12 @@ export async function githubApiOrSkip<T>(
     console.warn(
       `  Warning: GitHub API rate limit while ${description}: ${error}`,
     );
-    await writePerfMetricsFile(PERF_METRICS_FILE, metricsForArtifact);
+    await writeCoverageBaselineFile(PERF_METRICS_FILE, metricsForArtifact);
     console.log(
       `Wrote ${PERF_METRICS_FILE} with ${metricsForArtifact.size} metrics.`,
     );
     console.log(
-      "Skipping performance regression check because GitHub API rate limits prevent collecting required CI timing data.",
+      "Skipping coverage check because GitHub API rate limits prevent collecting the baseline data.",
     );
     Deno.exit(0);
   }
@@ -167,7 +144,10 @@ export function parseMergedBaselineOverrides(
   warn: (message: string) => void = console.warn,
 ): BaselineOverrides | null {
   try {
-    return parseBaselineOverrides(pr.body ?? "");
+    // Merged baseline PRs predating the marker rename accepted coverage debt
+    // with NEW_PERF_BASELINE; still honor that so their acceptance truncates
+    // the baseline timeline (see parseBaselineOverrides).
+    return parseBaselineOverrides(pr.body ?? "", true);
   } catch (error) {
     warn(
       `  Warning: ignoring invalid baseline override in merged PR #${pr.number}: ${error}`,
@@ -373,7 +353,7 @@ export function logBaselineSourceRuns(
   for (
     const { run, artifacts, pr, prLookupError, commitsBehindMain } of contexts
   ) {
-    const perfMetricsArtifact = newestArtifactNamed(
+    const baselineArtifact = newestArtifactNamed(
       artifacts,
       PERF_METRICS_ARTIFACT_NAME,
     );
@@ -382,8 +362,8 @@ export function logBaselineSourceRuns(
       : prLookupError
       ? "PR lookup failed"
       : "no PR found";
-    const artifactLabel = perfMetricsArtifact
-      ? `perf-metrics artifact ${perfMetricsArtifact.id}`
+    const artifactLabel = baselineArtifact
+      ? `perf-metrics artifact ${baselineArtifact.id}`
       : "no perf-metrics artifact";
     const ageLabel = formatBaselineSourceRunAge(
       run.created_at,
@@ -483,7 +463,6 @@ export async function fetchBaselineRunsForCheck(
 export function reportBaselineRunAvailability(
   baselineRuns: WorkflowRun[],
   mainHeadSha: string,
-  minSamples = MIN_SAMPLES,
   warn: (message: string) => void = console.warn,
 ): BaselineMainHeadValidation {
   const baselineMainHead = validateBaselineRunsForMainHead(
@@ -499,9 +478,9 @@ export function reportBaselineRunAvailability(
     }
   }
 
-  if (baselineRuns.length < minSamples) {
+  if (baselineRuns.length === 0) {
     warn(
-      `  Warning: only ${baselineRuns.length} baseline runs available (need ${minSamples}). Metrics with too few samples will be reported as n/a.`,
+      "  Warning: no baseline runs available; coverage debt will bootstrap from this run.",
     );
   }
 
@@ -549,25 +528,6 @@ export async function buildBaselineRunContexts(
   );
 }
 
-export async function buildExtraBackfillContexts(
-  runs: WorkflowRun[],
-  fetchArtifactsForRun: (run: WorkflowRun) => Promise<Artifact[]> =
-    fetchArtifactsForRunBestEffort,
-  concurrency = API_CONCURRENCY,
-): Promise<BaselineRunContext[]> {
-  return await mapConcurrent(
-    runs,
-    concurrency,
-    async (run): Promise<BaselineRunContext> => ({
-      run,
-      artifacts: await fetchArtifactsForRun(run),
-      pr: null,
-      prLookupError: null,
-      commitsBehindMain: null,
-    }),
-  );
-}
-
 export function reportBaselineContextResults(
   contexts: BaselineRunContext[],
   currentRunCreatedAt: string,
@@ -576,35 +536,19 @@ export function reportBaselineContextResults(
   const prLookupFailures = reportPRLookupResults(contexts);
   if (prLookupFailures > 0) {
     console.warn(
-      "  Warning: running performance regression check with incomplete PR metadata. Some merged baseline overrides may be missing.",
+      "  Warning: running the coverage check with incomplete PR metadata. Some merged baseline overrides may be missing.",
     );
   }
   return prLookupFailures;
 }
 
-export async function parsePerfMetricBackfillFromArtifacts(
-  artifacts: Artifact[],
-  parseBackfill: (
-    artifactId: number,
-  ) => Promise<Map<number, Map<string, TimingSample>> | null> =
-    downloadAndParsePerfMetricsBackfill,
-): Promise<Map<number, Map<string, TimingSample>> | null> {
-  const artifact = newestArtifactNamed(
-    artifacts,
-    PERF_METRICS_BACKFILL_ARTIFACT_NAME,
-  );
-  if (!artifact) return null;
-
-  return await parseBackfill(artifact.id);
-}
-
-export async function parsePerfMetricsFromArtifacts(
+export async function parseCoverageBaselineFromArtifacts(
   artifacts: Artifact[],
   parseMetrics: (
     artifactId: number,
-  ) => Promise<PerfMetricsDetailed | null> =
-    downloadAndParsePerfMetricsDetailed,
-): Promise<PerfMetricsDetailed | null> {
+  ) => Promise<CoverageBaselineDetailed | null> =
+    downloadAndParseCoverageBaseline,
+): Promise<CoverageBaselineDetailed | null> {
   const artifact = newestArtifactNamed(
     artifacts,
     PERF_METRICS_ARTIFACT_NAME,
@@ -614,19 +558,20 @@ export async function parsePerfMetricsFromArtifacts(
   return await parseMetrics(artifact.id);
 }
 
-export interface AddPerfMetricsResult {
+export interface AddCoverageBaselineResult {
   added: boolean;
   /** Null when the run has no perf-metrics artifact or an untagged one. */
   compileCacheStates: CompileCacheStates | null;
 }
 
-export async function addPerfMetricsFromArtifacts(
+export async function addCoverageBaselineFromArtifacts(
   timelines: Map<string, MetricTimeline>,
   artifacts: Artifact[],
   parseMetrics: (
     artifacts: Artifact[],
-  ) => Promise<PerfMetricsDetailed | null> = parsePerfMetricsFromArtifacts,
-): Promise<AddPerfMetricsResult> {
+  ) => Promise<CoverageBaselineDetailed | null> =
+    parseCoverageBaselineFromArtifacts,
+): Promise<AddCoverageBaselineResult> {
   const detailed = await parseMetrics(artifacts);
   if (!detailed) return { added: false, compileCacheStates: null };
 
@@ -711,16 +656,6 @@ export async function collectCurrentCacheStates(
     return {};
   }
 }
-
-/**
- * Metrics to exclude from regression checks because their aggregate values
- * naturally grow as new tests are added.  Per-test timings from JUnit
- * artifacts are tracked instead.
- */
-const EXCLUDED_METRIC_PATTERNS = [
-  /^job: Pattern Unit Tests/,
-  /^step: pattern unit tests$/,
-];
 
 const EXPECTED_COVERAGE_ARTIFACT_NAMES = [
   ...[1, 2, 3, 4, 5, 6].map((shard) => `coverage-profile-workspace-${shard}`),
@@ -835,10 +770,8 @@ async function readCombinedLcov(lcovDir: string): Promise<string> {
 type TableAlign = "left" | "right";
 export type Status =
   | "OVER"
-  | "CLOSE"
   | "OK"
   | "ovrd"
-  | "COLD"
   | "excl"
   | "n/a";
 
@@ -868,28 +801,19 @@ function printTextTable(
   }
 }
 
-function trimTrailingZero(value: string): string {
-  return value.replace(/\.0(?=[a-z])/g, "");
-}
-
 export function formatMetricValueForTable(
-  metric: string,
   value: number | undefined,
 ): string {
   if (value === undefined) return "-";
-  if (isCoverageDebtMetric(metric)) return `${Math.round(value)}`;
-  return trimTrailingZero(formatMetricValue(metric, value));
+  return `${Math.round(value)}`;
 }
 
-export function formatMetricDelta(metric: string, row: Row): string {
+export function formatMetricDelta(row: Row): string {
   if (row.median === undefined || row.pctIncrease === undefined) return "-";
 
   const delta = row.current - row.median;
   const sign = delta >= 0 ? "+" : "-";
-  const absolute = Math.abs(delta);
-  const formattedAbsolute = isCoverageDebtMetric(metric)
-    ? `${Math.round(absolute)}`
-    : trimTrailingZero(formatMetricValue(metric, absolute));
+  const formattedAbsolute = `${Math.round(Math.abs(delta))}`;
   const pctSign = row.pctIncrease >= 0 ? "+" : "";
   const pctDigits = row.pctIncrease !== 0 && Math.abs(row.pctIncrease) < 1
     ? 1
@@ -907,15 +831,6 @@ export function metricDisplayParts(
 
   const kind = metric.slice(0, colon);
   const rest = metric.slice(colon + 1).trim();
-  const subtaskSeparator = " > ";
-
-  if (
-    (kind === "test" || kind === "subtest") &&
-    rest.includes(subtaskSeparator)
-  ) {
-    const [task, ...metricParts] = rest.split(subtaskSeparator);
-    return { task, metric: metricParts.join(subtaskSeparator) };
-  }
 
   if (kind === "coverage-debt") {
     return {
@@ -931,18 +846,10 @@ export interface Row {
   metric: string;
   status: Status;
   current: number;
+  /** Latest non-cold `main` ratchet baseline (uncovered lines). */
   median?: number;
-  variance?: number;
-  stddev?: number;
-  threshold?: number;
   n: number;
   pctIncrease?: number;
-  /**
-   * How much of the median-to-threshold margin the current value has consumed,
-   * as a percentage. 0 percent means the current value is at the median.
-   * 100 percent means the current value is at the threshold.
-   */
-  headroomPct?: number;
 }
 
 export function metricTableRows(
@@ -952,9 +859,9 @@ export function metricTableRows(
   return rows.map((row) => {
     const display = metricDisplayParts(row.metric);
     const cells = [
-      formatMetricValueForTable(row.metric, row.median),
-      formatMetricValueForTable(row.metric, row.current),
-      formatMetricDelta(row.metric, row),
+      formatMetricValueForTable(row.median),
+      formatMetricValueForTable(row.current),
+      formatMetricDelta(row),
       display.task,
       display.metric,
     ];
@@ -970,116 +877,6 @@ export function printMetricTable(rows: Row[], includeStatus = false): void {
     ? ["left", "right", "right", "right", "left", "left"] as TableAlign[]
     : ["right", "right", "right", "left", "left"] as TableAlign[];
   printTextTable(headers, metricTableRows(rows, includeStatus), align);
-}
-
-export interface EvaluateTimingMetricOptions {
-  metric: string;
-  current: number;
-  timeline: MetricTimeline | undefined;
-  prOverrides: BaselineOverrides;
-  /** The current run's per-family compile cache states. */
-  currentCacheStates: CompileCacheStates;
-  /** Baseline-run cache state lookup, per family. */
-  stateOfRunForFamily: (
-    family: CompileCacheFamily,
-  ) => (runId: number) => CompileCacheState | undefined;
-}
-
-export interface TimingMetricEvaluation {
-  row: Row;
-  failure: boolean;
-}
-
-/**
- * Evaluate one timing (non-coverage) metric against its baseline timeline.
- *
- * Compile-cache handling: when the metric maps to a cache family whose cache
- * is cold this run, the metric gets a non-blocking `COLD` status — a full
- * recompile inflates it, and cold baselines essentially never reach
- * MIN_SAMPLES, so there is no cold-vs-cold gating. When the current run is
- * warm or unknown, known-cold baseline samples are dropped before computing
- * the baseline; too few remaining samples fall back to the `n/a` path.
- * Metrics excluded via EXCLUDED_METRIC_PATTERNS stay `excl` even when cold.
- */
-export function evaluateTimingMetric(
-  options: EvaluateTimingMetricOptions,
-): TimingMetricEvaluation {
-  const { metric, current, timeline, prOverrides } = options;
-
-  const family = compileCacheFamilyForMetric(metric);
-  const currentIsCold = family !== null &&
-    options.currentCacheStates[family] === "cold";
-  const samples = family !== null && !currentIsCold
-    ? dropColdSamples(
-      timeline?.samples ?? [],
-      options.stateOfRunForFamily(family),
-    )
-    : timeline?.samples ?? [];
-  const n = samples.length;
-
-  const baseline = computeBaseline(
-    samples.map((s) => s.durationSeconds),
-    MIN_ABSOLUTE_DELTA,
-  );
-
-  const stats = baseline && {
-    median: baseline.median,
-    variance: baseline.variance,
-    stddev: baseline.stddev,
-    threshold: baseline.threshold,
-    pctIncrease: ((current - baseline.median) / baseline.median) * 100,
-    headroomPct: baseline.threshold > baseline.median
-      ? ((current - baseline.median) /
-        (baseline.threshold - baseline.median)) * 100
-      : 0,
-  };
-
-  // Metrics whose aggregate values grow as tests are added — never fail,
-  // but still shown so the log has full context. Takes precedence over COLD.
-  if (EXCLUDED_METRIC_PATTERNS.some((re) => re.test(metric))) {
-    return {
-      row: { metric, status: "excl", current, n, ...(stats ?? {}) },
-      failure: false,
-    };
-  }
-
-  // Cold compile cache for this metric's job family — report without gating.
-  if (currentIsCold) {
-    return { row: { metric, status: "COLD", current, n }, failure: false };
-  }
-
-  // Not enough baseline data — show anyway.
-  if (!baseline) {
-    return { row: { metric, status: "n/a", current, n }, failure: false };
-  }
-
-  // PR has an override saving this metric.
-  if (prOverrides.metrics.has(metric)) {
-    const override = prOverrides.metrics.get(metric)!;
-    if (current <= override) {
-      return {
-        row: { metric, status: "ovrd", current, n, ...stats! },
-        failure: false,
-      };
-    }
-  }
-
-  if (current > baseline.threshold) {
-    return {
-      row: { metric, status: "OVER", current, n, ...stats! },
-      failure: true,
-    };
-  }
-  if ((stats!.headroomPct ?? 0) >= 50) {
-    return {
-      row: { metric, status: "CLOSE", current, n, ...stats! },
-      failure: false,
-    };
-  }
-  return {
-    row: { metric, status: "OK", current, n, ...stats! },
-    failure: false,
-  };
 }
 
 async function extractCoverageDebtSamples(
@@ -1400,7 +1197,7 @@ export async function main() {
 
   if (prOverrides.metrics.size > 0) {
     console.log(
-      `PR description contains ${prOverrides.metrics.size} NEW_PERF_BASELINE override(s).`,
+      `PR description contains ${prOverrides.metrics.size} ACCEPT_COVERAGE_DEBT override(s).`,
     );
   }
   if (prOverrides.coverageBaselineReset) {
@@ -1409,18 +1206,12 @@ export async function main() {
     );
   }
 
-  // 2. Get current run's job/step metrics and per-test timing artifacts
-  console.log(`Fetching jobs for current run ${runId}...`);
+  // 2. Extract the current run's coverage.
   const runIdNum = parseInt(runId);
   const currentMetrics = new Map<string, TimingSample>();
-  const currentJobs = await githubApiOrSkip(
-    `fetching jobs for current run ${runId}`,
-    () => fetchJobsForRun(runIdNum),
-    currentMetrics,
-  );
 
   // The event payload has the metadata needed for samples, so avoid spending
-  // another API request on the current workflow run.
+  // an API request on the current workflow run.
   const currentRunInfo = currentWorkflowRunFromEvent(event, runIdNum);
   let changedCoverageGroups: Set<string> | undefined;
   let prFiles: PRFile[] = [];
@@ -1450,16 +1241,9 @@ export async function main() {
     }
   }
 
-  // Extract job/step metrics
-  for (const [name, sample] of extractMetrics(currentRunInfo, currentJobs)) {
-    currentMetrics.set(name, sample);
-  }
-
   let currentArtifacts: Artifact[] = [];
   let currentArtifactsError: unknown;
 
-  // Fetch artifacts once; coverage extraction depends on this, while timing
-  // artifact parsing below is best-effort.
   try {
     currentArtifacts = await fetchArtifactsForRun(runIdNum);
     console.log(
@@ -1471,8 +1255,8 @@ export async function main() {
   }
 
   // Aggregate the current run's compile cache states so this run's
-  // perf-metrics artifact is tagged (main-push runs included — future
-  // baselines must know whether this run was cold).
+  // perf-metrics artifact is tagged (main-push runs included — a later
+  // PR's coverage ratchet must know whether this run was cold).
   const currentCacheStates = await collectCurrentCacheStates(currentArtifacts);
   console.log(
     `Compile cache states: ${formatCompileCacheStates(currentCacheStates)}`,
@@ -1491,29 +1275,6 @@ export async function main() {
     fetchLatestBaselineSha: fetchLatestBaselineRunSha,
   });
   fillMissingFamiliesFromFingerprint(currentCacheStates, inferredRunState);
-
-  // Extract per-test metrics from JUnit artifacts.
-  const parsedTimingArtifacts: ParsedTimingArtifact[] = [];
-  try {
-    // Newest per name: a re-run of a flagged test job must refresh its metric.
-    const timingArtifacts = newestTimingArtifacts(currentArtifacts);
-    for (const artifact of timingArtifacts) {
-      const suites = await downloadAndParseJUnit(artifact.id);
-      parsedTimingArtifacts.push({ name: artifact.name, suites });
-    }
-  } catch (e) {
-    console.warn(
-      `  Warning: could not extract timing metrics from current run artifacts: ${e}`,
-    );
-  }
-  for (
-    const [name, sample] of extractTimingArtifactMetrics(
-      currentRunInfo,
-      parsedTimingArtifacts,
-    )
-  ) {
-    currentMetrics.set(name, sample);
-  }
 
   // Extract coverage debt metrics from coverage profile artifacts.
   let coverageDataError: unknown;
@@ -1540,7 +1301,7 @@ export async function main() {
     );
   }
 
-  await writePerfMetricsFile(
+  await writeCoverageBaselineFile(
     PERF_METRICS_FILE,
     currentMetrics,
     currentCacheStates,
@@ -1557,12 +1318,15 @@ export async function main() {
   }
 
   if (currentMetrics.size === 0) {
-    console.log("No metrics extracted from current run. Nothing to check.");
+    console.log(
+      "No coverage metrics extracted from current run. Nothing to check.",
+    );
     Deno.exit(0);
   }
 
-  console.log(`Extracted ${currentMetrics.size} metrics from current run.`);
-  const wallTimeSignals = computeCiWallTimeRevisitSignals(currentJobs);
+  console.log(
+    `Extracted ${currentMetrics.size} coverage metrics from current run.`,
+  );
 
   // 3. Fetch recent main-branch push runs for baseline
   const { mainHeadSha, baselineRuns } = await fetchBaselineRunsForCheck(
@@ -1572,13 +1336,14 @@ export async function main() {
 
   console.log(`Using ${baselineRuns.length} main-branch runs as baseline.`);
 
-  // 4. Fetch job/step metrics for baseline runs + check for baseline overrides
+  // 4. Read each recent main run's coverage metrics and compile cache states
+  // as the ratchet baseline, and pick up any coverage ratchet resets or
+  // per-metric acceptances from the merged PRs.
   const timelines = new Map<string, MetricTimeline>();
   const overridesBySha = new Map<string, BaselineOverrides>();
   const prInfoBySha = new Map<string, PRInfo>();
-  const newBackfills = new Map<number, Map<string, TimingSample>>();
   // Compile cache states per baseline run, from tagged perf-metrics
-  // artifacts. Backfill and jobs-API fallback runs stay absent (unknown).
+  // artifacts. Runs with no artifact stay absent (unknown).
   const cacheStatesByRunId = new Map<number, CompileCacheStates>();
 
   const baselineContexts = await githubApiOrSkip(
@@ -1589,62 +1354,10 @@ export async function main() {
 
   reportBaselineContextResults(baselineContexts, currentRunInfo.created_at);
 
-  console.log("Fetching recent perf metric backfills...");
-  const backfillSourceData = await githubApiOrSkip(
-    "fetching recent perf metric backfill sources",
-    () =>
-      githubGet<{ workflow_runs: WorkflowRun[] }>(
-        workflowRunsPathForBaseline(BACKFILL_SOURCE_RUNS),
-      ),
-    currentMetrics,
-  );
-  const baselineRunIds = new Set(baselineRuns.map((run) => run.id));
-  const backfillSourceRuns = backfillSourceData.workflow_runs.filter((run) =>
-    !baselineRunIds.has(run.id) && run.id !== runIdNum
-  );
-  const extraBackfillContexts = await githubApiOrSkip(
-    "fetching extra perf metric backfill context",
-    () => buildExtraBackfillContexts(backfillSourceRuns),
-    currentMetrics,
-  );
-
-  const backfilledMetricsByRunId = new Map<number, Map<string, TimingSample>>();
-  const backfillSourceContexts = [
-    ...baselineContexts,
-    ...extraBackfillContexts,
-  ].sort((a, b) =>
-    b.run.created_at.localeCompare(a.run.created_at) || b.run.id - a.run.id
-  );
-  const parsedBackfillSources = await githubApiOrSkip(
-    "downloading perf metric backfills",
-    () =>
-      mapConcurrent(
-        backfillSourceContexts,
-        API_CONCURRENCY,
-        ({ artifacts }) => parsePerfMetricBackfillFromArtifacts(artifacts),
-      ),
-    currentMetrics,
-  );
-
-  for (const backfills of parsedBackfillSources) {
-    if (!backfills) continue;
-
-    for (const [backfilledRunId, metrics] of backfills) {
-      if (!backfilledMetricsByRunId.has(backfilledRunId)) {
-        backfilledMetricsByRunId.set(backfilledRunId, metrics);
-      }
-    }
-  }
-  if (backfilledMetricsByRunId.size > 0) {
-    console.log(
-      `Loaded perf metric backfills for ${backfilledMetricsByRunId.size} run(s).`,
-    );
-  }
-
   // For each baseline run, its predecessor in the (newest-first) baseline
   // list — the run whose saved compile cache it would have restored. Fuels
-  // retro-classification of runs whose artifacts predate the recorded stamp;
-  // once stamped artifacts fill the window this map goes unused.
+  // retro-classification of a run whose perf-metrics artifact carries no
+  // recorded cache state.
   const runsNewestFirst = [...baselineRuns].sort((a, b) =>
     b.created_at.localeCompare(a.created_at) || b.id - a.id
   );
@@ -1673,16 +1386,17 @@ export async function main() {
           }
         }
 
-        const artifactResult = await addPerfMetricsFromArtifacts(
+        const artifactResult = await addCoverageBaselineFromArtifacts(
           timelines,
           artifacts,
         );
         if (artifactResult.added && artifactResult.compileCacheStates) {
           cacheStatesByRunId.set(run.id, artifactResult.compileCacheStates);
         } else {
-          // Unstamped run (an artifact carrying no recorded stamp — a backfill
-          // or a live extraction): retro-classify it from the compile
-          // fingerprint against its predecessor (see
+          // A run whose perf-metrics artifact is missing or carries no
+          // recorded cache state: retro-classify it from the compile
+          // fingerprint against its predecessor, so a cold main run is not
+          // picked as the coverage ratchet baseline (see
           // recordUnstampedBaselineRunState).
           await recordUnstampedBaselineRunState(
             cacheStatesByRunId,
@@ -1691,76 +1405,15 @@ export async function main() {
             pr ? `PR #${pr.number}` : run.head_sha.slice(0, 8),
           );
         }
-        if (artifactResult.added) {
-          return;
-        }
-
-        const backfilledMetrics = backfilledMetricsByRunId.get(run.id);
-        if (backfilledMetrics) {
-          for (const [name, sample] of backfilledMetrics) {
-            addSample(timelines, name, sample);
-          }
-          return;
-        }
-
-        const jobs = await fetchJobsForRun(run.id);
-        const metrics = new Map(extractMetrics(run, jobs));
-        for (const [name, sample] of metrics) {
-          addSample(timelines, name, sample);
-        }
-
-        // Fetch per-test timing artifacts
-        let canBackfill = true;
-        const parsedTimingArtifacts: ParsedTimingArtifact[] = [];
-        try {
-          const timingArtifacts = newestTimingArtifacts(artifacts);
-          for (const artifact of timingArtifacts) {
-            const suites = await downloadAndParseJUnit(artifact.id);
-            if (suites.length === 0) {
-              canBackfill = false;
-              continue;
-            }
-            parsedTimingArtifacts.push({ name: artifact.name, suites });
-          }
-        } catch {
-          // Artifacts may not exist for older runs
-          canBackfill = false;
-        }
-        const testMetrics = extractTimingArtifactMetrics(
-          run,
-          parsedTimingArtifacts,
-        );
-        for (const [name, sample] of testMetrics) {
-          metrics.set(name, sample);
-          addSample(timelines, name, sample);
-        }
-
-        if (metrics.size > 0 && canBackfill) {
-          newBackfills.set(run.id, metrics);
-        }
       }),
     currentMetrics,
   );
-
-  if (newBackfills.size > 0) {
-    await writePerfMetricsBackfillFile(
-      PERF_METRICS_BACKFILL_FILE,
-      newBackfills,
-    );
-    console.log(
-      `Wrote ${PERF_METRICS_BACKFILL_FILE} for ${newBackfills.size} fallback run(s).`,
-    );
-  }
 
   // Sort timelines chronologically
   for (const timeline of timelines.values()) {
     timeline.samples.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
-  const stateOfRunForFamily =
-    (family: CompileCacheFamily) =>
-    (runId: number): CompileCacheState | undefined =>
-      cacheStatesByRunId.get(runId)?.[family];
   const isRunCold = (runId: number): boolean => {
     const states = cacheStatesByRunId.get(runId);
     return states !== undefined && Object.values(states).includes("cold");
@@ -1773,108 +1426,83 @@ export async function main() {
   // Apply baseline overrides from merged PRs
   if (overridesBySha.size > 0) {
     console.log(
-      `Found ${overridesBySha.size} baseline override(s) from merged PRs.`,
+      `Found ${overridesBySha.size} coverage baseline override(s) from merged PRs.`,
     );
     applyBaselineOverrides(timelines, overridesBySha);
   }
 
-  // 5. Compare current metrics against baseline
+  // 5. Compare the current run's coverage debt against the ratchet baseline.
   const rows: Row[] = [];
   const failures: Row[] = [];
 
   for (const [metric, currentSample] of currentMetrics) {
     const current = currentSample.durationSeconds;
     const timeline = timelines.get(metric);
-    const isCoverageMetric = isCoverageDebtMetric(metric);
+    const n = timeline?.samples.length ?? 0;
+    // Ratchet against the latest run that was not known-cold: a cold main
+    // run covers rare cold-compile-only branches, and ratcheting against
+    // its lower debt would fail later warm PRs with phantom regressions.
+    const latestBaseline = timeline
+      ? latestNonColdSample(timeline.samples, isRunCold)?.durationSeconds
+      : undefined;
+    const override = prOverrides.metrics.get(metric);
+    const coverageReset = prOverrides.coverageBaselineReset;
+    const shouldGateCoverage = shouldGateCoverageDebtMetric(
+      metric,
+      changedCoverageGroups,
+    );
 
-    if (isCoverageMetric) {
-      const n = timeline?.samples.length ?? 0;
-      // Ratchet against the latest run that was not known-cold: a cold main
-      // run covers rare cold-compile-only branches, and ratcheting against
-      // its lower debt would fail later warm PRs with phantom regressions.
-      const latestBaseline = timeline
-        ? latestNonColdSample(timeline.samples, isRunCold)?.durationSeconds
-        : undefined;
-      const override = prOverrides.metrics.get(metric);
-      const coverageReset = prOverrides.coverageBaselineReset;
-      const shouldGateCoverage = shouldGateCoverageDebtMetric(
-        metric,
-        changedCoverageGroups,
-      );
-
-      if (latestBaseline === undefined) {
-        if (
-          coverageReset || (override !== undefined && current <= override)
-        ) {
-          rows.push({ metric, status: "ovrd", current, n });
-        } else if (!shouldGateCoverage) {
-          rows.push({ metric, status: "excl", current, n });
-        } else if (current > 0) {
-          const row: Row = {
-            metric,
-            status: "OVER",
-            current,
-            median: 0,
-            variance: 0,
-            stddev: 0,
-            threshold: 0,
-            n,
-            pctIncrease: 100,
-          };
-          rows.push(row);
-          failures.push(row);
-        } else {
-          rows.push({ metric, status: "n/a", current, n });
-        }
-        continue;
-      }
-
-      const pctIncrease = latestBaseline === 0
-        ? current > 0 ? 100 : 0
-        : ((current - latestBaseline) / latestBaseline) * 100;
-      const stats = {
-        median: latestBaseline,
-        variance: 0,
-        stddev: 0,
-        threshold: latestBaseline,
-        pctIncrease,
-      };
-
-      if (coverageReset) {
-        rows.push({ metric, status: "ovrd", current, n, ...stats });
-        continue;
-      }
-
-      if (override !== undefined && current <= override) {
-        rows.push({ metric, status: "ovrd", current, n, ...stats });
-        continue;
-      }
-
-      if (!shouldGateCoverage) {
-        rows.push({ metric, status: "excl", current, n, ...stats });
-        continue;
-      }
-
-      if (current > latestBaseline) {
-        const row: Row = { metric, status: "OVER", current, n, ...stats };
+    if (latestBaseline === undefined) {
+      if (
+        coverageReset || (override !== undefined && current <= override)
+      ) {
+        rows.push({ metric, status: "ovrd", current, n });
+      } else if (!shouldGateCoverage) {
+        rows.push({ metric, status: "excl", current, n });
+      } else if (current > 0) {
+        const row: Row = {
+          metric,
+          status: "OVER",
+          current,
+          median: 0,
+          n,
+          pctIncrease: 100,
+        };
         rows.push(row);
         failures.push(row);
       } else {
-        rows.push({ metric, status: "OK", current, n, ...stats });
+        rows.push({ metric, status: "n/a", current, n });
       }
       continue;
     }
 
-    const { row, failure } = evaluateTimingMetric({
-      metric,
-      current,
-      timeline,
-      prOverrides,
-      currentCacheStates,
-      stateOfRunForFamily,
-    });
-    rows.push(row);
-    if (failure) failures.push(row);
+    const pctIncrease = latestBaseline === 0
+      ? current > 0 ? 100 : 0
+      : ((current - latestBaseline) / latestBaseline) * 100;
+    const stats = { median: latestBaseline, pctIncrease };
+
+    if (coverageReset) {
+      rows.push({ metric, status: "ovrd", current, n, ...stats });
+      continue;
+    }
+
+    if (override !== undefined && current <= override) {
+      rows.push({ metric, status: "ovrd", current, n, ...stats });
+      continue;
+    }
+
+    if (!shouldGateCoverage) {
+      rows.push({ metric, status: "excl", current, n, ...stats });
+      continue;
+    }
+
+    if (current > latestBaseline) {
+      const row: Row = { metric, status: "OVER", current, n, ...stats };
+      rows.push(row);
+      failures.push(row);
+    } else {
+      rows.push({ metric, status: "OK", current, n, ...stats });
+    }
   }
 
   // 6. Report results
@@ -1883,26 +1511,14 @@ export async function main() {
   if (failures.length > 0) {
     console.log(
       "\n!!!" +
-        `\n!!! PERFORMANCE REGRESSION DETECTED in ${failures.length} metric(s) !!!` +
+        `\n!!! COVERAGE DEBT REGRESSION in ${failures.length} source group(s) !!!` +
         "\n!!!",
     );
   }
 
-  // 6b. Informational CI wall-time policy signals. These are intentionally
-  // non-blocking; they tell us when to consider CI split/rebalance work again.
-  if (wallTimeSignals.length > 0) {
-    console.log("\n## CI Wall-Time Revisit Signals");
-    console.log(
-      "Informational only. See docs/development/CI_PERFORMANCE.md before starting CI-splitting work.",
-    );
-    printTextTable(
-      ["Signal", "Detail"],
-      wallTimeSignals.map((signal) => [signal.title, signal.detail]),
-    );
-  }
-
-  // 6c. Cold compile cache callout — the affected timing metrics are shown
-  // as COLD and not gated this run.
+  // 6b. Cold compile cache note. A cold run covers cold-compile-only branches,
+  // so it is recorded cold and a later PR's coverage ratchet skips it as a
+  // baseline in favour of the latest warm main run.
   const coldFamilies = COMPILE_CACHE_FAMILIES.filter(
     (family) => currentCacheStates[family] === "cold",
   );
@@ -1912,183 +1528,72 @@ export async function main() {
       `The pattern compile byte cache missed for: ${coldFamilies.join(", ")}.`,
     );
     console.log(
-      "Timing metrics for these job families run a full recompile (~1.7-2x slower per test),",
+      "This run is recorded cold. A cold run covers cold-compile-only branches,",
     );
     console.log(
-      "so they are reported as COLD and not gated — comparing them against warm baselines",
+      "so a later PR's coverage ratchet skips it and uses the latest warm main run",
     );
     console.log(
-      "would flag phantom regressions, and cold baselines are too rare to gate against.",
-    );
-    console.log(
-      "To get a warm, fully gated run, re-run the pattern jobs: this cold run already saved the new compile cache.",
+      "instead — otherwise warm PRs would be held to a stricter, unreachable bar.",
     );
   }
 
-  // 6d. Full metric table — always emitted, grouped by metric kind.
+  // 6c. Full coverage-debt table.
   console.log(
-    "\n::group::All collected metrics:" +
-      `\nThresholds: median + ${STDDEV_FACTOR}σ or +${
-        MIN_REGRESSION_PCT * 100
-      }% (whichever is higher); timing metrics also require at least +${MIN_ABSOLUTE_DELTA}s.`,
+    "\n::group::All coverage debt metrics:\n" +
+      "Ratchet: for a source group the PR changed, uncovered lines must not rise\n" +
+      "above the latest non-cold main run's count.\n" +
+      "Status key: OVER = above baseline (fails); OK = at or below baseline;\n" +
+      "  ovrd = accepted by a PR override/reset; excl = not gated for this PR;\n" +
+      "  n/a = no baseline yet and no new uncovered lines.",
   );
-  console.log(
-    "Coverage debt metrics use a latest-main ratchet for changed source groups.",
-  );
-  console.log(
-    "Status key: OVER = over threshold (fails); CLOSE = ≥50% of margin consumed;",
-  );
-  console.log(
-    "  OK = <50% consumed; ovrd = saved by a PR override/reset;",
-  );
-  console.log(
-    "  COLD = compile cache cold for this metric's job family; not gated (rerun to go warm);",
-  );
-  console.log(
-    "  excl = metric excluded from the check;",
-  );
-  console.log(
-    `  n/a = fewer than ${MIN_SAMPLES} baseline samples.`,
-  );
-  console.log(
-    `  head% = fraction of the median→threshold margin currently consumed.`,
-  );
-
-  const kindOf = (metric: string): string => {
-    const colon = metric.indexOf(":");
-    if (colon < 0) return "other";
-    const prefix = metric.slice(0, colon);
-    switch (prefix) {
-      case "job":
-        return "Jobs";
-      case "step":
-        return "Steps";
-      case "test":
-        return "Test files";
-      case "subtest":
-        return "Subtests";
-      case "coverage-debt":
-        return "Coverage Debt";
-      default:
-        return prefix;
-    }
-  };
-  const KIND_ORDER = [
-    "Jobs",
-    "Steps",
-    "Test files",
-    "Subtests",
-    "Coverage Debt",
-  ];
-  // Sort order within each kind: most at-risk of failing the check first.
-  // `ovrd` sits below `OK` because an override-protected metric is at strictly
-  // lower risk of tripping the check than an unguarded OK metric — the author
-  // has already authorized its current level. `COLD` sits below `ovrd`: a
-  // cold metric is not gated this run at all.
+  // Sort order: most at-risk of failing first. `ovrd` sits below `OK` because
+  // an override-protected metric is at strictly lower risk than an unguarded OK
+  // metric — the author has already authorized its current level.
   const STATUS_ORDER: Record<Status, number> = {
-    OVER: 6,
-    CLOSE: 5,
-    OK: 4,
-    ovrd: 3,
-    COLD: 2,
+    OVER: 4,
+    OK: 3,
+    ovrd: 2,
     excl: 1,
     "n/a": 0,
   };
 
-  const byKind = new Map<string, Row[]>();
-  for (const r of rows) {
-    const k = kindOf(r.metric);
-    if (!byKind.has(k)) byKind.set(k, []);
-    byKind.get(k)!.push(r);
-  }
-  const kindsSeen = [
-    ...KIND_ORDER.filter((k) => byKind.has(k)),
-    ...[...byKind.keys()].filter((k) => !KIND_ORDER.includes(k)).sort(),
-  ];
-
   const counts = {
     OVER: 0,
-    CLOSE: 0,
     OK: 0,
     ovrd: 0,
-    COLD: 0,
     excl: 0,
     "n/a": 0,
   } as Record<Status, number>;
   for (const r of rows) counts[r.status]++;
 
   console.log(
-    `\n## All metrics checked  (${rows.length} total — OVER: ${counts.OVER}, CLOSE: ${counts.CLOSE}, OK: ${counts.OK}, ovrd: ${counts.ovrd}, COLD: ${counts.COLD}, excl: ${counts.excl}, n/a: ${
+    `\n## Coverage debt metrics  (${rows.length} total — OVER: ${counts.OVER}, OK: ${counts.OK}, ovrd: ${counts.ovrd}, excl: ${counts.excl}, n/a: ${
       counts["n/a"]
     })`,
   );
 
-  for (const kind of kindsSeen) {
-    const rs = byKind.get(kind)!;
-    rs.sort((a, b) => {
-      const s = STATUS_ORDER[b.status] - STATUS_ORDER[a.status];
-      if (s !== 0) return s;
-      return (b.headroomPct ?? -Infinity) - (a.headroomPct ?? -Infinity);
-    });
-    console.log(`\n### ${kind}  (${rs.length})`);
-    printMetricTable(rs, true);
-  }
+  const sortedRows = [...rows].sort((a, b) => {
+    const s = STATUS_ORDER[b.status] - STATUS_ORDER[a.status];
+    if (s !== 0) return s;
+    return (b.pctIncrease ?? -Infinity) - (a.pctIncrease ?? -Infinity);
+  });
+  printMetricTable(sortedRows, true);
 
   console.log("::endgroup::");
 
-  // 6e. Failure metric details.
+  // 6d. Failure detail.
   if (failures.length > 0) {
     failures.sort((a, b) => (b.pctIncrease ?? 0) - (a.pctIncrease ?? 0));
 
-    console.log("\n## Performance regression details:\n");
+    console.log("\n## Coverage debt regression details:\n");
     printMetricTable(failures);
-
-    console.log("\n::group::Baseline sample breakdown:\n");
-    for (const f of failures) {
-      const timeline = timelines.get(f.metric);
-      if (!timeline) continue;
-
-      // Show the samples the gate actually used: for cache-family metrics
-      // that is the timeline minus known-cold runs (a failing metric was
-      // gated warm — cold current runs never fail). Runs cold in any family
-      // keep a [cold] suffix so the warm-run stats stay auditable.
-      const family = compileCacheFamilyForMetric(f.metric);
-      const samples = family !== null
-        ? dropColdSamples(timeline.samples, stateOfRunForFamily(family))
-        : timeline.samples;
-
-      const fmt = (v: number) => formatMetricValue(f.metric, v);
-      console.log(
-        `  ${f.metric} (n=${samples.length}, median=${
-          fmt(f.median!)
-        }, variance=${fmt(f.variance!)}, stddev=${fmt(f.stddev!)}):`,
-      );
-      for (const s of samples) {
-        const pr = prInfoBySha.get(s.sha);
-        const prStr = pr ? `PR #${pr.number}` : s.sha.slice(0, 8);
-        const coldSuffix = isRunCold(s.runId) ? " [cold]" : "";
-        console.log(
-          `    ${fmt(s.durationSeconds)} — ${prStr} (${
-            s.createdAt.slice(0, 10)
-          })${coldSuffix}`,
-        );
-      }
-    }
-
-    console.log("::endgroup::");
   }
 
-  // 6f. Pass/fail outcome + override copy-paste block pinned at the bottom.
+  // 6e. Pass/fail outcome + acceptance copy-paste block pinned at the bottom.
   if (informationalOnly) {
     console.log("\nInformational Only:");
   }
-
-  const coverageFailures = failures.filter((f) =>
-    isCoverageDebtMetric(f.metric)
-  );
-  const perMetricFailures = failures.filter((f) =>
-    !isCoverageDebtMetric(f.metric)
-  );
 
   // Coverage-debt PR comment, written for the coverage-comment workflow to post
   // (fork PRs get a read-only token on pull_request and cannot comment here).
@@ -2097,56 +1602,35 @@ export async function main() {
   if (prNumber) {
     await writeCoverageComment(
       parseInt(prNumber),
-      coverageFailures,
-      rows.filter((row) => isCoverageDebtMetric(row.metric)),
+      failures,
+      rows,
       prFiles,
       coverageLcov,
     );
   }
 
   if (failures.length === 0) {
-    console.log("\nAll metrics within normal range.");
+    console.log("\nCoverage debt within the ratchet for every changed group.");
     Deno.exit(0);
   } else if (informationalOnly) {
-    console.log("\nOne or more metrics are out-of-range.");
+    console.log("\nOne or more changed groups regressed coverage debt.");
     console.log("This build would fail if it were a PR.");
     Deno.exit(0);
   }
 
-  if (coverageFailures.length > 0) {
-    const verb = coverageBaselineAvailable ? "reset" : "bootstrap";
-    console.log(
-      `\nTo ${verb} the coverage ratchet for one cycle, add the coverage reset marker to your PR description.`,
-    );
-    console.log(
-      "Coverage debt can still be accepted one metric at a time with NEW_PERF_BASELINE when that is the narrower change.",
-    );
-  }
-
+  const verb = coverageBaselineAvailable ? "reset" : "bootstrap";
   console.log(
-    "\nTo accept these regressions, add the following to your PR description:\n",
+    `\nTo ${verb} the coverage ratchet for one cycle, add ${COVERAGE_BASELINE_RESET_MARKER} to your PR description.`,
+  );
+  console.log(
+    "\nTo accept these coverage regressions one metric at a time, add the following to your PR description:\n",
   );
   console.log("---BEGIN COPY-PASTE---");
-  if (coverageFailures.length > 0) {
-    console.log(COVERAGE_BASELINE_RESET_MARKER);
-  }
-  for (const f of perMetricFailures) {
-    const suggested = formatOverrideSuggestion(f.metric, f.current);
-    console.log(`NEW_PERF_BASELINE: ${f.metric} = ${suggested}`);
+  for (const f of failures) {
+    const suggested = formatOverrideSuggestion(f.current);
+    console.log(`ACCEPT_COVERAGE_DEBT: ${f.metric} = ${suggested}`);
   }
   console.log("---END COPY-PASTE---");
-
-  if (coverageFailures.length > 0) {
-    console.log(
-      "\nIndividual coverage override alternatives:",
-    );
-    console.log("---BEGIN COPY-PASTE---");
-    for (const f of coverageFailures) {
-      const suggested = formatOverrideSuggestion(f.metric, f.current);
-      console.log(`NEW_PERF_BASELINE: ${f.metric} = ${suggested}`);
-    }
-    console.log("---END COPY-PASTE---");
-  }
 
   Deno.exit(1);
 }
