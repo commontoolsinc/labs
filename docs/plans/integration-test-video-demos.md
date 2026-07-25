@@ -98,11 +98,12 @@ parallel infrastructure:
   browser and one initial page; multi-user tests create multiple
   `ShellIntegration` instances.
 - `packages/integration/page.ts` wraps Astral's page, already provides
-  screenshot capture, and already uses raw Celestial/CDP bindings for
+  screenshot capture, and already uses Astral's raw protocol bindings for
   event-driven condition notifications.
-- `packages/vendor-astral/bindings/celestial.ts` exposes
-  `Page.startScreencast`, `Page.screencastFrame`,
-  `Page.screencastFrameAck`, and `Page.stopScreencast`.
+- `packages/integration/astral-adapter.ts` defines the local screencast frame
+  shape. Astral's raw protocol bindings expose `Page.startScreencast`,
+  `Page.screencastFrame`, `Page.screencastFrameAck`, and
+  `Page.stopScreencast`.
 - Astral's keyboard supports a per-character delay. Its mouse can move in
   steps, but CDP-generated mouse movement is not rendered as a visible system
   cursor in page screenshots or screencasts.
@@ -169,7 +170,8 @@ parallel infrastructure:
 
 ### Recording and encoding
 
-- [ ] Use Chrome's CDP screencast stream through the vendored Astral bindings.
+- [ ] Use Chrome's CDP screencast stream through Astral's raw protocol
+  bindings.
   Do not add Playwright solely for video recording.
 - [ ] Acknowledge every screencast frame promptly, independently of disk and
   encoder work, so capture backpressure cannot stall the browser.
@@ -295,7 +297,8 @@ Expected new or expanded files:
 - `packages/integration/presentation/manifest.ts` — versioned manifest types
   and validation.
 - `packages/integration/page.ts` — narrow screencast and viewport operations,
-  plus presentation hook installation; do not expose Celestial generally.
+  plus presentation hook installation; do not expose raw protocol bindings
+  generally.
 - `packages/integration/shell-utils.ts` — participant registration and
   lifecycle start/finalize integration.
 - `packages/integration/env.ts` and `packages/integration/index.ts` — public
@@ -305,7 +308,7 @@ If implementation tests are added under `packages/integration/test/`, replace
 the package's current stub `test` task with a real `deno test` task. Keep the
 package's required workspace test entry.
 
-### Vendored Astral seam
+### Astral integration seam
 
 The preferred seam is a generic, optional interaction observer owned by an
 Astral page:
@@ -316,16 +319,15 @@ Astral page:
   and operation outcome;
 - the observer is unset by default and adds no delays or DOM changes;
 - product-specific presentation behavior remains in
-  `packages/integration/presentation/`, not in vendored Astral;
+  `packages/integration/presentation/`, not in the Astral package;
 - `ElementHandle.click()` and `ElementHandle.type()` invoke the observer so
   direct element operations cannot bypass presentation mode;
 - direct `page.keyboard.type()` receives the presentation default character
   delay through an optional keyboard default, but tests needing a cursor move
   to an input should prefer element-based typing.
 
-Before modifying vendored Astral, verify that the same complete coverage can be
-achieved by the integration wrappers without a second interaction vocabulary.
-If not, make the observer hook small, generic, and independently tested.
+Keep this behavior in the integration wrapper. The observer hook is small,
+generic, and independently tested.
 
 ### Task runner
 
@@ -370,7 +372,7 @@ accumulate millisecond literals.
 ### WP0.1 — Implement a focused CDP screencast spike
 
 - [ ] Add a temporary or focused test-only recorder around one integration
-  page using the existing raw Celestial bindings.
+  page using Astral's existing raw protocol bindings.
 - [ ] Capture navigation, a stable initial state, one trusted click, its
   asserted result, and a final hold from the CFC render-policy demo.
 - [ ] Verify frame events are acknowledged immediately and continue across UI
@@ -410,7 +412,8 @@ accumulate millisecond literals.
 
 - [ ] Add typed methods to start and stop screencast capture, subscribe and
   unsubscribe frame events, acknowledge frames, and set viewport size.
-- [ ] Keep raw Celestial bindings private to `Page`.
+- [ ] Keep raw protocol bindings private to `Page` and
+  `astral-adapter.ts`.
 - [ ] Make start/stop idempotence and invalid lifecycle transitions explicit.
 - [ ] Ensure listeners are removed on stop, failure, navigation teardown, and
   page close.
