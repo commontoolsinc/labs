@@ -34,7 +34,6 @@
     "./packages/toolshed",
     "./packages/ui",
     "./packages/utils",
-    "./packages/vendor-astral",
     "./packages/leb128",
     "./packages/fuse",
     "./packages/fs-sync-example",
@@ -93,7 +92,6 @@
       ".claude/",
       ".beads/",
       "./packages/static/assets",
-      "./packages/vendor-astral",
       "./tmp/",
       "./packages/patterns/record/"
     ],
@@ -134,7 +132,6 @@
       "packages/ui/src/v2/components/cf-toggle/cf-toggle.ts",
       "packages/ui/src/v2/components/cf-checkbox/cf-checkbox.ts",
       "packages/ui/src/v2/components/cf-select/cf-select.ts",
-      "packages/vendor-astral",
       "docs/history/"
     ]
   },

@@ -17,7 +17,6 @@ const EXCLUDED_PATH_PARTS = new Set([
   "node_modules",
   "test",
   "tests",
-  "vendor-astral",
 ]);
 
 const EXCLUDED_RELATIVE_PREFIXES = [
