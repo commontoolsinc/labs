@@ -142,7 +142,7 @@
     "core-js/proposals/explicit-resource-management": "https://esm.sh/core-js@3.46.0/proposals/explicit-resource-management",
     "core-js/proposals/async-explicit-resource-management": "https://esm.sh/core-js@3.46.0/proposals/async-explicit-resource-management",
     "@commonfabric/ports": "./ports.json",
-    "@astral/astral": "./packages/vendor-astral/mod.ts",
+    "@astral/astral": "jsr:@astral/astral@0.5.6",
     // Held at the release candidate: 1.2.1 changes how a required argument
     // followed by a variadic one is parsed, and `cf piece call` stops seeing its
     // first argument. Pinned exact so the within-range refresh cannot pull it.
