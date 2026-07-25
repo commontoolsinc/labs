@@ -2,7 +2,13 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
 import type { CellHandle } from "@commonfabric/runtime-client";
-import { CFRender, hasVariantValue, normalizeVariant } from "./index.ts";
+import {
+  CFRender,
+  hasVariantValue,
+  normalizeVariant,
+  PIECE_CONTEXT_MENU_EVENT,
+  type PieceContextMenuDetail,
+} from "./index.ts";
 
 // NOTE: Full rendering lifecycle tests (cell swap cleanup, subscription
 // management, render-into-container) require a real DOM with document.body
@@ -162,5 +168,131 @@ describe("CFRender disconnectedCallback", () => {
     const element = new CFRender();
     // Should not throw even with no cell
     element.disconnectedCallback();
+  });
+});
+
+describe("CFRender piece context menu", () => {
+  /** A right-click, recording whether the platform menu was suppressed. */
+  function contextMenuEvent(
+    deepestTarget?: EventTarget,
+    modifiers: { shiftKey?: boolean } = {},
+  ): MouseEvent & { defaultPrevented: boolean; propagationStopped: boolean } {
+    const event = {
+      clientX: 120,
+      clientY: 48,
+      shiftKey: modifiers.shiftKey ?? false,
+      defaultPrevented: false,
+      propagationStopped: false,
+      composedPath: () => (deepestTarget ? [deepestTarget] : []),
+      preventDefault() {
+        event.defaultPrevented = true;
+      },
+      stopPropagation() {
+        event.propagationStopped = true;
+      },
+    };
+    return event as unknown as MouseEvent & {
+      defaultPrevented: boolean;
+      propagationStopped: boolean;
+    };
+  }
+
+  /**
+   * Right-click `element`, with a listener that cancels the announcement — what
+   * a host showing its own menu does, and what these tests use because opening
+   * the built-in menu needs a real DOM (see the shell's integration test).
+   */
+  function rightClick(
+    element: CFRender,
+    event: ReturnType<typeof contextMenuEvent>,
+  ): PieceContextMenuDetail | undefined {
+    let detail: PieceContextMenuDetail | undefined;
+    element.addEventListener(PIECE_CONTEXT_MENU_EVENT, (e: Event) => {
+      detail = (e as CustomEvent<PieceContextMenuDetail>).detail;
+      e.preventDefault();
+    });
+    (element as unknown as { _onContextMenu(e: MouseEvent): void })
+      ._onContextMenu(event);
+    return detail;
+  }
+
+  it("announces the piece under the pointer and takes the click", () => {
+    const element = new CFRender();
+    element.cell = createMockCellHandle({ name: "piece" }, {
+      id: "of:fid1:piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    const event = contextMenuEvent();
+    const detail = rightClick(element, event);
+
+    expect(detail).toEqual({
+      space: "did:key:zSpace",
+      pieceId: "of:fid1:piece",
+      x: 120,
+      y: 48,
+      variant: "full",
+    });
+    // The platform menu is suppressed, and an enclosing piece does not also
+    // claim the click.
+    expect(event.defaultPrevented).toBe(true);
+    expect(event.propagationStopped).toBe(true);
+  });
+
+  it("leaves the click alone when the rendered cell is not a whole piece", () => {
+    const element = new CFRender();
+    element.cell = createMockCellHandle({ name: "piece" }, {
+      id: "of:fid1:piece" as never,
+      space: "did:key:zSpace" as never,
+      path: ["items", "0"],
+    }) as CellHandle;
+    const event = contextMenuEvent();
+
+    expect(rightClick(element, event)).toBeUndefined();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("leaves text entry to the platform menu", () => {
+    const element = new CFRender();
+    element.cell = createMockCellHandle({ name: "piece" }, {
+      id: "of:fid1:piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    const event = contextMenuEvent(
+      { tagName: "TEXTAREA" } as unknown as EventTarget,
+    );
+
+    expect(rightClick(element, event)).toBeUndefined();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("leaves a shift-held click to the platform menu", () => {
+    const element = new CFRender();
+    element.cell = createMockCellHandle({ name: "piece" }, {
+      id: "of:fid1:piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    const event = contextMenuEvent(undefined, { shiftKey: true });
+
+    expect(rightClick(element, event)).toBeUndefined();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("reports the resolved root when a chip or tile resolved a link", () => {
+    const element = new CFRender();
+    element.variant = "tile";
+    element.cell = createMockCellHandle({ name: "link" }, {
+      id: "of:fid1:list" as never,
+      space: "did:key:zSpace" as never,
+      path: ["0"],
+    }) as CellHandle;
+    (element as unknown as { _resolvedCell?: CellHandle })._resolvedCell =
+      createMockCellHandle({ name: "piece" }, {
+        id: "of:fid1:tile-piece" as never,
+        space: "did:key:zSpace" as never,
+      }) as CellHandle;
+
+    const detail = rightClick(element, contextMenuEvent());
+    expect(detail?.pieceId).toBe("of:fid1:tile-piece");
+    expect(detail?.variant).toBe("tile");
   });
 });

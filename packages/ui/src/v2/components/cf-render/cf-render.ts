@@ -6,8 +6,11 @@ import { render } from "@commonfabric/html/client";
 import type { CellHandle } from "@commonfabric/runtime-client";
 import { CHIP_UI, TILE_UI, type VNode } from "@commonfabric/runtime-client";
 import { navigate, openInNewTab } from "@commonfabric/shell/shared";
+import type { DID } from "@commonfabric/identity";
 import "../cf-loader/index.ts";
 import "../cf-cell-link/index.ts";
+import "../cf-piece-menu/index.ts";
+import { openPieceMenu } from "../cf-piece-menu/cf-piece-menu.ts";
 
 // Set to true to enable debug logging
 const DEBUG_LOGGING = false;
@@ -26,6 +29,43 @@ const DEBUG_LOGGING = false;
  *              Default: the full [UI] rendered small at ~0.5 scale.
  */
 export type UIVariant = "full" | "chip" | "tile";
+
+/**
+ * The event a right-click on a rendered piece dispatches, announcing which
+ * piece the pointer is over before the piece menu opens.
+ *
+ * It is cancellable: a host that calls `preventDefault()` takes the click and
+ * is responsible for what happens next, and the built-in menu does not open.
+ */
+export const PIECE_CONTEXT_MENU_EVENT = "cf-piece-context-menu";
+
+/** Where the click landed, and which piece it landed on. */
+export interface PieceContextMenuDetail {
+  /** The space holding the piece. */
+  space: DID;
+  /** The piece's full schemed id. */
+  pieceId: string;
+  /** Client coordinates of the click, for placing the menu. */
+  x: number;
+  y: number;
+  /** The variant the piece was rendered at. */
+  variant: UIVariant;
+}
+
+/**
+ * True for a target whose own context menu is the useful one: text editing
+ * offers cut, copy, and paste, which a piece menu would replace. Read
+ * structurally, so a target from another document or realm still matches.
+ */
+function isTextEntry(target: EventTarget | undefined): boolean {
+  const element = target as
+    | { tagName?: unknown; isContentEditable?: unknown }
+    | undefined;
+  if (!element || typeof element.tagName !== "string") return false;
+  const tag = element.tagName.toUpperCase();
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" ||
+    element.isContentEditable === true;
+}
 
 /**
  * Normalize the `variant` attribute to the size spectrum. Anything unrecognized
@@ -343,6 +383,69 @@ export class CFRender extends BaseElement {
     };
   }
 
+  /**
+   * The piece this element renders, when the rendered cell IS a piece: a
+   * whole result cell, not a value inside one. A chip or tile resolves its
+   * (possibly link) cell during render, so that resolved root is the target.
+   */
+  private _pieceTarget(): CellHandle | undefined {
+    const cell = this._resolvedCell ?? this.cell;
+    if (!cell) return undefined;
+    try {
+      return cell.ref().path.length === 0 ? cell : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Open the piece's menu on right-click. The innermost rendered piece claims
+   * the click, so right-clicking a tile inside a piece addresses the tile.
+   *
+   * The announcement goes out first, so a host can cancel it and show its own
+   * menu for the piece instead. Either way the platform menu is suppressed,
+   * because either way something replaces it.
+   *
+   * A click with no piece target, one on a text entry, and one held with Shift
+   * are not announced at all; Shift is how to reach the browser's own menu over
+   * piece content.
+   */
+  private _onContextMenu = (e: MouseEvent) => {
+    if (e.shiftKey || isTextEntry(e.composedPath()[0])) return;
+    const target = this._pieceTarget();
+    if (!target) return;
+    const detail: PieceContextMenuDetail = {
+      space: target.space(),
+      pieceId: target.id(),
+      x: e.clientX,
+      y: e.clientY,
+      variant: normalizeVariant(this.variant),
+    };
+    const claimed = !this.dispatchEvent(
+      new CustomEvent<PieceContextMenuDetail>(PIECE_CONTEXT_MENU_EVENT, {
+        detail,
+        bubbles: true,
+        composed: true,
+        cancelable: true,
+      }),
+    );
+    e.preventDefault();
+    e.stopPropagation();
+    // A host that cancelled is showing its own menu for this piece.
+    if (claimed) return;
+    openPieceMenu({
+      cell: target,
+      x: e.clientX,
+      y: e.clientY,
+      themeFrom: this,
+    });
+  };
+
+  override connectedCallback() {
+    super.connectedCallback();
+    this.addEventListener("contextmenu", this._onContextMenu);
+  }
+
   /** Navigate to the rendered piece (same behavior as cf-cell-link). */
   private _navigateToPiece(e: MouseEvent) {
     e.stopPropagation();
@@ -388,6 +491,7 @@ export class CFRender extends BaseElement {
 
   override disconnectedCallback() {
     this._log("disconnectedCallback called");
+    this.removeEventListener("contextmenu", this._onContextMenu);
     super.disconnectedCallback();
     this._renderingCellId = undefined;
     this._resolvedCell = undefined;

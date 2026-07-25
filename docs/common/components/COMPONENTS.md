@@ -441,6 +441,24 @@ See `packages/patterns/examples/ui-variants-demo.tsx` for a full example.
 > separate concept — not size variants. A vended `uiVariant()` helper for
 > render paths outside `cf-render` is a planned follow-up and does not exist yet.
 
+### The piece context menu
+
+Right-clicking a rendered piece opens `cf-piece-menu` for it, with two entries:
+**View source** shows the piece's retained authored files, and **Origin and
+history** shows the origin it records and the pattern identities it has run. The
+menu comes with `cf-render` — importing the component registers it — and mounts
+itself on `document.body` so a piece's clipping or a tile's scaling cannot reach
+it.
+
+The innermost rendered piece claims the click, so right-clicking a tile inside a
+piece addresses the tile. Three cases keep the browser's own menu instead: a
+click on a text entry, a click held with Shift, and a `cf-render` whose cell is a
+value inside a piece rather than a whole piece.
+
+Before opening, `cf-render` announces the click as `cf-piece-context-menu`; a host
+can cancel that event to show its own menu for the piece instead. The seam is
+written up in [HOST_EMBEDDING.md §3a](../../development/HOST_EMBEDDING.md).
+
 ---
 
 ## cf-screen

@@ -241,6 +241,12 @@ This happens when OAuth or API calls hit port 5173 (frontend) instead of port 80
 
 When editing `cf-*` components in `packages/ui/`, restart the local dev server to ensure the updated code is running.
 
+The shell's dev server watches `packages/shell/src` only, so a change anywhere
+else in the workspace — `packages/ui`, `packages/runtime-client`, and the rest —
+does not trigger a rebuild, and the browser keeps serving the previous bundle.
+Touching any file under `packages/shell/src` rebuilds everything the shell
+bundles, which is quicker than a restart.
+
 ---
 
 ## Background Piece Service (Optional)

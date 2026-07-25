@@ -37,6 +37,7 @@ export * from "./components/cf-canvas/index.ts";
 export * from "./components/cf-card/index.ts";
 export * from "./components/cf-chart/index.ts";
 export * from "./components/cf-piece/index.ts";
+export * from "./components/cf-piece-menu/index.ts";
 export * from "./components/cf-chat/index.ts";
 export * from "./components/cf-chat-message/index.ts";
 export * from "./components/cf-checkbox/index.ts";
