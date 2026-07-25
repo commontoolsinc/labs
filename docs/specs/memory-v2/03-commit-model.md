@@ -211,9 +211,14 @@ set/delete check false-conflicts with the reader's own stack.
 The array form is a negotiated capability (`pendingReadStacks` in the hello
 flags). Toward a server that does not advertise it, the client MUST send
 scalar reads, collapsing each array to its top-of-stack element — the
-pre-capability wire shape. The lower-layer dependency check is knowingly
-absent on such servers; the client-side drop cascade still covers those
-edges locally.
+pre-capability wire shape. Because the omitted lower layers are then
+invisible to the server, the client MUST NOT send such a commit while any
+omitted dependency is unsettled: the server could durably accept a commit
+the client is about to cascade-reject, and the caller would observe a
+conflict for a write that landed. The client holds the send until every
+omitted dependency settles — a dropped one dooms the commit locally before
+it reaches the wire, and all-accepted makes the scalar shape sound (each
+omitted layer's resolution is already durable).
 
 ## 3.6 Server Validation
 
@@ -258,14 +263,23 @@ function validatePendingReads(
   serverState: ServerState,
 ): ValidationResult {
   for (const read of commit.reads.pending) {
-    const resolution = serverState.resolveLocalSeq(sessionId, read.localSeq);
+    const layers = Array.isArray(read.localSeq)
+      ? read.localSeq
+      : [read.localSeq];
 
-    if (resolution === null) {
-      return pendingDependency(read.localSeq);
-    }
+    // Every listed layer must resolve to an ACCEPTED commit. The staleness
+    // check (§3.6.1/§3.6.2) then runs once per read, based at the HIGHEST
+    // element's resolution — the reader's top-of-stack layer (§3.5).
+    for (const localSeq of layers) {
+      const resolution = serverState.resolveLocalSeq(sessionId, localSeq);
 
-    if (resolution.rejected) {
-      return cascadedRejection(read.localSeq);
+      if (resolution === null) {
+        return pendingDependency(localSeq);
+      }
+
+      if (resolution.rejected) {
+        return cascadedRejection(localSeq);
+      }
     }
   }
 

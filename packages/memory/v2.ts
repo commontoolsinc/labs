@@ -276,10 +276,11 @@ export interface MemoryProtocolFlags {
    * `localSeq` naming every pending layer the read sat on (resolution
    * required for each element; staleness based at the highest — see
    * `PendingRead.localSeq`). A client that sees this absent (an older
-   * server) falls back to scalar top-of-stack emission, keeping wire compat
-   * at the cost of the lower-layer dependency check on that server (the
-   * client-side drop cascade still applies locally). Inherent to the build,
-   * so a server of this version always advertises it.
+   * server) falls back to scalar top-of-stack emission, and MUST hold each
+   * such send until every omitted lower dependency has settled — otherwise
+   * the old server could durably accept a commit the client cascade-rejects
+   * (03-commit-model.md §3.5). Inherent to the build, so a server of this
+   * version always advertises it.
    */
   pendingReadStacks: boolean;
 }

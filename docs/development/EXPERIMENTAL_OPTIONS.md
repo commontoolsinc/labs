@@ -610,9 +610,12 @@ the per-epic implementation notes).
 >   scalarizes each dependency array to its top-of-stack element before sending
 >   (`scalarizePendingReadStacks` in
 >   [`packages/runner/src/storage/v2.ts`](../../packages/runner/src/storage/v2.ts)),
->   which keeps wire compatibility while knowingly forgoing the lower-layer
->   dependency check on that server — the client-side drop cascade still covers
->   those edges locally. Added on CT-1872 (PR #4606). Path to removal: retire
+>   and HOLDS the send until every omitted lower dependency has settled — a
+>   dropped one dooms the commit locally before it reaches the wire; once all
+>   are accepted the scalar shape is sound. (Sending while an omitted
+>   dependency is unsettled would let the old server durably accept a commit
+>   the client cascade-rejects — a split-brain where the caller sees a
+>   conflict for a write that landed.) Added on CT-1872 (PR #4606). Path to removal: retire
 >   the scalarization fallback once every server in the fleet advertises the
 >   capability; the flag itself then reads as permanent documentation of the
 >   wire shape, and the successor design is tracked as CT-1910.

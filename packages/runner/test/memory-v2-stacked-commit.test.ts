@@ -2017,6 +2017,110 @@ Deno.test("memory v2 stacked commits: a server without pendingReadStacks receive
   }
 });
 
+Deno.test("memory v2 stacked commits: old-server hold — a dropped omitted dependency dooms the commit before it is ever sent", async () => {
+  const harness = await createHarness({
+    transport: (model) => new PreStackTransport(model),
+  });
+  const g1 = Promise.withResolvers<void>();
+  try {
+    // The reviewer's split-brain shape: lower layer rejects, blind top layer
+    // accepts, and the dependant WOULD be accepted by the old server (its
+    // scalar wire read names only the accepted top). The hold must keep the
+    // dependant off the wire until c1 settles, so the server never gets the
+    // chance to accept what the client cascade-rejects.
+    const c1 = beginSet(harness, DOCS.A, valueFor("c1"));
+    harness.model.setOutcome(c1.localSeq, {
+      kind: "rejectConflict",
+      message: "c1 loses",
+      responseGate: g1.promise,
+    });
+    const c2 = beginSet(harness, DOCS.A, valueFor("c2"));
+    harness.model.setOutcome(c2.localSeq, { kind: "accept" });
+    const c3 = beginSet(
+      harness,
+      DOCS.D,
+      valueFor("c3-d"),
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+    harness.model.setOutcome(c3.localSeq, {
+      kind: "accept",
+      skipReadValidation: true,
+    });
+
+    // The blind top layer settles while c1's verdict is still gated…
+    await assertResultOk(c2.promise);
+    // …and c3 must be HELD off the wire (its omitted dependency c1 is
+    // unsettled). A send would surface within microtasks of the hold being
+    // wrongly absent.
+    for (let turn = 0; turn < 32; turn += 1) {
+      await Promise.resolve();
+    }
+    assertEquals(harness.model.transactLocalSeqs.includes(c3.localSeq), false);
+
+    // c1 drops: the cascade dooms c3 at the pre-send checkpoint. Nothing
+    // ever reaches the server, so a durable accept of a client-rejected
+    // commit — the split-brain — is structurally impossible.
+    g1.resolve();
+    await assertConflict(c1.promise, "c1 loses");
+    await assertConflict(
+      c3.promise,
+      `pending dependency dropped locally: localSeq=${c1.localSeq}`,
+    );
+    assertEquals(harness.model.transactLocalSeqs.includes(c3.localSeq), false);
+    assertEquals(harness.model.applied.has(c3.localSeq), false);
+  } finally {
+    g1.resolve();
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: old-server hold releases once every omitted dependency is accepted", async () => {
+  const harness = await createHarness({
+    transport: (model) => new PreStackTransport(model),
+  });
+  const g1 = Promise.withResolvers<void>();
+  try {
+    const c1 = beginSet(harness, DOCS.A, valueFor("c1"));
+    harness.model.setOutcome(c1.localSeq, {
+      kind: "accept",
+      responseGate: g1.promise,
+    });
+    const c2 = beginSet(harness, DOCS.A, valueFor("c2"));
+    harness.model.setOutcome(c2.localSeq, { kind: "accept" });
+    const c3 = beginSet(
+      harness,
+      DOCS.D,
+      valueFor("c3-d"),
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+    harness.model.setOutcome(c3.localSeq, {
+      kind: "accept",
+      skipReadValidation: true,
+    });
+
+    await assertResultOk(c2.promise);
+    for (let turn = 0; turn < 32; turn += 1) {
+      await Promise.resolve();
+    }
+    assertEquals(harness.model.transactLocalSeqs.includes(c3.localSeq), false);
+
+    // c1 accepts: every omitted dependency is durable, the scalar shape is
+    // sound, and the held send proceeds.
+    g1.resolve();
+    await assertResultOk(c1.promise);
+    await assertResultOk(c3.promise);
+    const sent = harness.model.applied.get(c3.localSeq);
+    assertExists(sent);
+    assertEquals(
+      sent.commit.reads.pending.map((read) => read.localSeq),
+      [c2.localSeq],
+    );
+  } finally {
+    g1.resolve();
+    await harness.close();
+  }
+});
+
 Deno.test("memory v2 stacked commits: dropped dependency locally rejects the in-flight dependant before its server verdict", async () => {
   const harness = await createHarness();
   const g1 = Promise.withResolvers<void>();

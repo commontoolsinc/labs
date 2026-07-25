@@ -320,8 +320,9 @@ type PendingCommitRead = {
    * the doc's top-of-stack layer below the reader, which the array always
    * includes (CT-1872 1c; 03-commit-model.md §3.5). Scalarized to the
    * top-of-stack element at send time when the server does not advertise
-   * `pendingReadStacks` — the pre-stack wire shape, which keeps compat at
-   * the cost of the lower-layer dependency check on that server.
+   * `pendingReadStacks` — the pre-stack wire shape — and in that case the
+   * send is HELD until every omitted lower dependency settles, so the old
+   * server can never durably accept a commit the client cascade-rejects.
    */
   localSeq: number | number[];
   nonRecursive?: boolean;
@@ -742,8 +743,10 @@ const toCommitReadPath = (
 // including those inside batched scheduler observations — to its
 // top-of-stack element (the highest localSeq, i.e. the staleness basis).
 // The lower-layer dependency check is lost against such servers by design
-// (CT-1872 1c stays open there); the client-side drop cascade still covers
-// those edges locally.
+// (CT-1872 1c stays open there). pushCommit compensates by HOLDING the send
+// until every omitted lower dependency settles — without the hold, the old
+// server could durably accept a commit the client cascade-rejects (a
+// split-brain: caller sees ConflictError for a write that landed).
 const scalarizeLocalSeq = (localSeq: number | number[]): number =>
   Array.isArray(localSeq) ? Math.max(...localSeq) : localSeq;
 
@@ -1785,6 +1788,14 @@ class SpaceReplica implements ISpaceReplica {
   // are dropped. See the InFlightCommit doc for why zero-pending-read commits
   // are never registered.
   readonly #inFlightCommits = new Map<number, InFlightCommit>();
+  // Every unsettled commit's outcome promise, keyed by localSeq (a superset
+  // of #inFlightCommits: zero-read commits appear here too). The old-server
+  // scalarization hold awaits these for the OMITTED lower dependencies —
+  // entries are removed on settlement, so an absent key means "settled".
+  readonly #commitOutcomeBySeq = new Map<
+    number,
+    Promise<unknown>
+  >();
   // Server verdict promises superseded by a local rejection. Kept OUT of
   // #commitPromises so synced() never blocks on a verdict the server may
   // withhold indefinitely; close()/closeNow() drain the set after client
@@ -2773,6 +2784,16 @@ class SpaceReplica implements ISpaceReplica {
         ),
     );
     this.#commitPromises.add(promise);
+    // Keyed registration for the old-server scalarization hold: a later
+    // stacked commit awaits its omitted lower dependencies' outcomes here.
+    // Removed on settlement (absent key = settled); the .catch keeps the
+    // tracking copy from surfacing as an unhandled rejection.
+    this.#commitOutcomeBySeq.set(
+      localSeq,
+      promise.catch(() => {}).finally(() => {
+        this.#commitOutcomeBySeq.delete(localSeq);
+      }),
+    );
     const result = await promise;
     this.#commitPromises.delete(promise);
     return result;
@@ -2996,6 +3017,33 @@ class SpaceReplica implements ISpaceReplica {
         const wireCommit = client.serverFlags?.pendingReadStacks === true
           ? commit
           : scalarizePendingReadStacks(commit);
+        if (wireCommit !== commit && inFlight !== undefined) {
+          // Old-server hold (split-brain guard): the scalarized wire omits
+          // the lower layers, so the server could durably ACCEPT a commit
+          // this client is about to cascade-reject — the caller would see a
+          // ConflictError for a write that landed. Do not send until every
+          // omitted dependency settles: a dropped one trips the doom
+          // checkpoint below before anything reaches the wire, and
+          // all-accepted makes the scalar shape sound (their resolution is
+          // already durable). Verdicts arrive in submission order, so this
+          // adds at most roughly one verdict round-trip, only against
+          // pre-`pendingReadStacks` servers, only for stacked commits.
+          const waits: Promise<unknown>[] = [];
+          for (const read of commit.reads.pending) {
+            if (!Array.isArray(read.localSeq)) continue;
+            const top = scalarizeLocalSeq(read.localSeq);
+            for (const layer of read.localSeq) {
+              if (layer === top) continue;
+              const outcome = this.#commitOutcomeBySeq.get(layer);
+              if (outcome !== undefined) {
+                waits.push(outcome);
+              }
+            }
+          }
+          if (waits.length > 0) {
+            await Promise.all(waits);
+          }
+        }
         if (inFlight?.localRejectionValue !== undefined) {
           // A pending dependency was dropped while we awaited the scheduler
           // batch flush or the session handshake — do not send a commit whose

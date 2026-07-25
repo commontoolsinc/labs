@@ -5433,6 +5433,29 @@ const validateConfirmedReads = (
   }
 };
 
+// Shared normalization/validation for a pending read's dependency set: a
+// non-empty array (or scalar) of integer localSeqs. Malformed shapes are a
+// protocol violation regardless of which validator (ordinary commit or
+// scheduler observation) encounters them.
+const pendingReadLayers = (
+  read: { id: string; localSeq: number | number[] },
+): number[] => {
+  const layers = Array.isArray(read.localSeq) ? read.localSeq : [read.localSeq];
+  if (layers.length === 0) {
+    throw new ProtocolError(
+      `pending read on ${read.id} names no localSeq`,
+    );
+  }
+  for (const layer of layers) {
+    if (!Number.isInteger(layer)) {
+      throw new ProtocolError(
+        `pending read on ${read.id} names a non-integer localSeq`,
+      );
+    }
+  }
+  return layers;
+};
+
 const resolvePendingReads = (
   engine: Engine,
   sessionKey: string,
@@ -5449,14 +5472,7 @@ const resolvePendingReads = (
     // is checked exactly once, based at the HIGHEST element — the document's
     // top-of-stack layer below the reader, which the array MUST include
     // (03-commit-model.md §3.5). A scalar is the single-layer form.
-    const layers = Array.isArray(read.localSeq)
-      ? read.localSeq
-      : [read.localSeq];
-    if (layers.length === 0) {
-      throw new ProtocolError(
-        `pending read on ${read.id} names no localSeq`,
-      );
-    }
+    const layers = pendingReadLayers(read);
     let basis: { localSeq: number; seq: number } | undefined;
     for (const localSeq of layers) {
       let resolution = resolutions.get(localSeq);
@@ -5587,13 +5603,10 @@ const schedulerObservationReadDropReason = (
   const resolutions = new Map<number, { localSeq: number; seq: number }>();
   for (const read of reads.pending) {
     // Same contract as resolvePendingReads: every listed layer must have
-    // resolved; staleness is checked once, based at the highest layer.
-    const layers = Array.isArray(read.localSeq)
-      ? read.localSeq
-      : [read.localSeq];
-    if (layers.length === 0) {
-      return "pending-read-missing";
-    }
+    // resolved; staleness is checked once, based at the highest layer. A
+    // malformed dependency set throws the same ProtocolError as on the
+    // ordinary-commit path rather than degrading to a drop reason.
+    const layers = pendingReadLayers(read);
     let basis: { localSeq: number; seq: number } | undefined;
     for (const localSeq of layers) {
       let resolution = resolutions.get(localSeq);
