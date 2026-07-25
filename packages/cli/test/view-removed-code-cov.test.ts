@@ -53,28 +53,30 @@ Deno.test("diffdoc cov: Git batch output accepts blobs and rejects malformed rec
 });
 
 Deno.test("diffdoc cov: Git blob reads stay local and return empty results after command failures", () => {
+  type GitBatchRunner = NonNullable<
+    Parameters<typeof _dd.readGitBlobs>[2]
+  >;
+  const invocations: Parameters<GitBatchRunner>[] = [];
   const failed = _dd.readGitBlobs(
     "/repo",
     ["aaaa"],
     (command, args, options) => {
-      assertEquals(command, "git");
-      assertEquals(args, ["cat-file", "--batch"]);
-      assertEquals(options.cwd, "/repo");
-      assertEquals(options.env?.GIT_NO_LAZY_FETCH, "1");
-      assertEquals(options.input, "aaaa\n");
-      assertEquals(options.maxBuffer, Number.MAX_SAFE_INTEGER);
-      const empty = new Uint8Array();
+      invocations.push([command, args, options]);
       return {
-        pid: 1,
-        output: [null, empty, empty],
-        stdout: empty,
-        stderr: empty,
+        stdout: new Uint8Array(),
         status: 1,
-        signal: null,
       };
     },
   );
   assertEquals(failed.size, 0, "a nonzero Git result returns no blobs");
+  assertEquals(invocations.length, 1);
+  const [command, args, options] = invocations[0];
+  assertEquals(command, "git");
+  assertEquals(args, ["cat-file", "--batch"]);
+  assertEquals(options.cwd, "/repo");
+  assertEquals(options.env.GIT_NO_LAZY_FETCH, "1");
+  assertEquals(options.input, "aaaa\n");
+  assertEquals(options.maxBuffer, Number.MAX_SAFE_INTEGER);
 
   assertEquals(
     _dd.readGitBlobs("/repo", ["aaaa"], () => {
