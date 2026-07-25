@@ -3,7 +3,7 @@
 /**
  * PR Coverage Check
  *
- * Runs as part of PR CI after all test jobs complete. Joins the coverage
+ * Runs as a PR CI job after all test jobs complete. Joins the coverage
  * profiles every test job uploaded and gates the PR on coverage debt: for each
  * source group the PR changed, the count of uncovered lines must not rise above
  * the latest non-cold `main` run's count, unless the PR description accepts the
