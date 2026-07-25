@@ -315,7 +315,7 @@ jobs:
           restore-keys: |
             cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
 
-      - name: 🧾 Record compile cache state for the Performance Check
+      - name: 🧾 Record compile cache state for the Coverage Check
         uses: ./.github/actions/record-compile-cache-state
         with:
           family: generated-patterns
@@ -677,7 +677,7 @@ jobs:
           restore-keys: |
             cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
 
-      - name: 🧾 Record compile cache state for the Performance Check
+      - name: 🧾 Record compile cache state for the Coverage Check
         uses: ./.github/actions/record-compile-cache-state
         with:
           family: pattern-integration
@@ -743,7 +743,7 @@ jobs:
         run: deno run --allow-read --allow-write --allow-run tasks/write-coverage-lcov.ts coverage/raw/pattern-integration-${{ matrix.shard }} coverage/lcov/pattern-integration-${{ matrix.shard }}.lcov
 
       # The whole directory: the V8 report plus the authored-pattern LCOV the
-      # harness wrote under pattern-runtime/. perf-check joins every .lcov in
+      # harness wrote under pattern-runtime/. coverage-check joins every .lcov in
       # the artifact, so both streams reach the gate.
       - name: 📤 Upload coverage report
         if: always()
@@ -851,7 +851,7 @@ jobs:
           restore-keys: |
             cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.chunk }}-
 
-      - name: 🧾 Record compile cache state for the Performance Check
+      - name: 🧾 Record compile cache state for the Coverage Check
         uses: ./.github/actions/record-compile-cache-state
         with:
           family: pattern-unit
@@ -901,8 +901,8 @@ jobs:
   # Tier 2 – Post-test gates and deployments
   # ---------------------------------------------------------------------------
 
-  perf-check:
-    name: "Performance Check"
+  coverage-check:
+    name: "Coverage Check"
     if: (github.event_name == 'pull_request') || (github.ref_name == 'main')
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
@@ -945,13 +945,13 @@ jobs:
           skip-decompress: false
           digest-mismatch: error
 
-      - name: 📊 Run performance check
+      - name: 📊 Run coverage check
         env:
           COVERAGE_ARTIFACTS_DIR: coverage-artifacts
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: deno run --allow-net --allow-env --allow-read --allow-run --allow-write tasks/perf-check.ts
+        run: deno run --allow-net --allow-env --allow-read --allow-run --allow-write tasks/coverage-check.ts
 
       - name: 📤 Upload coverage regression comment
         if: always()
@@ -962,21 +962,16 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-      - name: 📤 Upload performance metrics
+      # The per-run coverage baseline (this run's coverage-debt metrics and
+      # compile cache states). Named perf-metrics for historical continuity —
+      # the coverage ratchet reads recent main runs' artifacts by this name, so
+      # keeping it avoids a baseline migration.
+      - name: 📤 Upload coverage baseline
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: perf-metrics
           path: perf-metrics.json
-          retention-days: 90
-          if-no-files-found: ignore
-
-      - name: 📤 Upload performance metrics backfill
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: perf-metrics-backfill
-          path: perf-metrics-backfill.json
           retention-days: 90
           if-no-files-found: ignore
 

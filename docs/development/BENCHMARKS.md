@@ -18,11 +18,10 @@ The team ops dashboard charts benchmark trends on its `/bench` page, sampling
 one successful run per four-hour window from those artifacts. Each
 benchmark's series is identified by its origin file, group, and name.
 
-Benchmark numbers are not gated: the per-PR performance gate
-(`tasks/perf-check.ts`) covers CI job, step, and test timings plus the
-coverage-debt ratchet, and never ingests benchmark results, so a bench
-regression shows up as trend drift on the dashboard rather than as a failing
-check.
+Benchmark numbers are not gated, and neither is CI wall time. The only per-PR
+gate is the coverage-debt ratchet (`tasks/coverage-check.ts`), which never
+ingests benchmark results, so a bench regression shows up as trend drift on the
+dashboard rather than as a failing check.
 
 Most packages with benches define a `bench` task for running them locally
 (see `packages/runner/deno.jsonc`); otherwise invoke `deno bench` on a

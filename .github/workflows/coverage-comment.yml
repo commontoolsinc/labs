@@ -1,6 +1,6 @@
 name: Coverage Comment
 
-# Posts the coverage-debt suggestion comment produced by the Performance Check
+# Posts the coverage-debt suggestion comment produced by the Coverage Check
 # gate in the Deno Workflow. That gate runs on `pull_request`, where fork PRs
 # only get a read-only token, so it cannot comment directly — it uploads the
 # comment as the `coverage-comment` artifact instead. This workflow runs in the

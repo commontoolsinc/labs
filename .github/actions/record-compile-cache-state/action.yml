@@ -1,20 +1,20 @@
 name: "Record compile cache state"
 description: >
   Record a pattern job's compile-byte-cache restore result and upload it as a
-  cache-state artifact for the Performance Check. The cache file exists on
+  cache-state artifact for the Coverage Check. The cache file exists on
   disk iff the restore found something (primary key or restore key); any
   restore implies the compiler fingerprint is unchanged, so cold := file
   absent. The combined actions/cache action only exposes cache-hit (exact
   match), not the matched key, so file presence is the restore signal.
   Family names must stay in sync with COMPILE_CACHE_FAMILIES in
-  tasks/perf-lib.ts — a family emitted here but unknown there is silently
-  ignored (reports as unknown, gates normally), so adding a pattern job
-  family means updating both places.
+  tasks/ci-check-lib.ts — a family emitted here but unknown there is silently
+  ignored (reports as unknown, does not affect the coverage ratchet), so adding
+  a pattern job family means updating both places.
 inputs:
   family:
     description: >
       Compile-cache job family (one of COMPILE_CACHE_FAMILIES in
-      tasks/perf-lib.ts, e.g. pattern-unit).
+      tasks/ci-check-lib.ts, e.g. pattern-unit).
     required: true
   shard:
     description: "Matrix shard/chunk number for this job."

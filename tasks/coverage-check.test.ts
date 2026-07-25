@@ -7,24 +7,20 @@ import {
 import * as path from "@std/path";
 import {
   type Artifact,
-  type BaselineOverrides,
-  type CompileCacheState,
-  type MetricTimeline,
+  COVERAGE_SUGGESTION_MARKER,
+  type CoverageCommentPayload,
   PERF_METRICS_ARTIFACT_NAME,
-  PERF_METRICS_BACKFILL_ARTIFACT_NAME,
   type PRInfo,
   type TimingSample,
   type WorkflowRun,
-} from "./perf-lib.ts";
+} from "./ci-check-lib.ts";
 import {
-  addPerfMetricsFromArtifacts,
+  addCoverageBaselineFromArtifacts,
   type BaselineRunContext,
   buildBaselineRunContexts,
-  buildExtraBackfillContexts,
   collectCurrentCacheStates,
   copyCoverageArtifactFiles,
   currentWorkflowRunFromEvent,
-  evaluateTimingMetric,
   fetchArtifactsForRunBestEffort,
   fetchBaselineRunsForCheck,
   fetchCommitsBehindMain,
@@ -45,9 +41,8 @@ import {
   metricDisplayParts,
   metricTableRows,
   newestArtifactNamed,
+  parseCoverageBaselineFromArtifacts,
   parseMergedBaselineOverrides,
-  parsePerfMetricBackfillFromArtifacts,
-  parsePerfMetricsFromArtifacts,
   printMetricTable,
   reportBaselineContextResults,
   reportBaselineRunAvailability,
@@ -60,11 +55,7 @@ import {
   writeCoverageComment,
   writeCoverageDebtSuggestion,
   writeCoverageResolved,
-} from "./perf-check.ts";
-import {
-  COVERAGE_SUGGESTION_MARKER,
-  type CoverageCommentPayload,
-} from "./perf-lib.ts";
+} from "./coverage-check.ts";
 
 const SHA_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const SHA_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -212,20 +203,20 @@ Deno.test("copyCoverageArtifactFiles rejects an empty pre-downloaded artifact", 
   }
 });
 
-Deno.test("performance check pre-downloads coverage with strict integrity checks", async () => {
+Deno.test("coverage check pre-downloads coverage with strict integrity checks", async () => {
   const workflow = await Deno.readTextFile(
     new URL("../.github/workflows/deno.yml", import.meta.url),
   );
-  const start = workflow.indexOf("  perf-check:\n");
+  const start = workflow.indexOf("  coverage-check:\n");
   const end = workflow.indexOf("\n  attest-binaries:", start);
-  assert(start >= 0 && end > start, "Performance Check job not found");
+  assert(start >= 0 && end > start, "Coverage Check job not found");
 
   const job = workflow.slice(start, end);
   const downloadStart = job.indexOf("- name: 📥 Download coverage reports");
-  const checkStart = job.indexOf("- name: 📊 Run performance check");
+  const checkStart = job.indexOf("- name: 📊 Run coverage check");
   assert(
     downloadStart >= 0 && checkStart > downloadStart,
-    "coverage reports must be downloaded before Performance Check runs",
+    "coverage reports must be downloaded before Coverage Check runs",
   );
 
   const downloadStep = job.slice(downloadStart, checkStart);
@@ -375,7 +366,8 @@ Deno.test("invalid merged PR baseline override metadata is ignored", () => {
   const overrides = parseMergedBaselineOverrides(
     {
       number: 123,
-      body: "NEW_PERF_BASELINE: job: Check = 7 lines",
+      // "job: Check" is not a coverage-debt metric, so accepting it throws.
+      body: "ACCEPT_COVERAGE_DEBT: job: Check = 7 lines",
     },
     (message) => warnings.push(message),
   );
@@ -385,17 +377,21 @@ Deno.test("invalid merged PR baseline override metadata is ignored", () => {
   assertStringIncludes(warnings[0], "merged PR #123");
   assertStringIncludes(
     warnings[0],
-    "line units are only valid for coverage-debt metrics",
+    "only coverage-debt metrics can be accepted",
   );
 });
 
 Deno.test("valid merged PR baseline override metadata is parsed", () => {
   const overrides = parseMergedBaselineOverrides({
     number: 124,
-    body: "NEW_PERF_BASELINE: job: Check = 7s",
+    body:
+      "ACCEPT_COVERAGE_DEBT: coverage-debt: packages/runner uncovered lines = 7 lines",
   });
 
-  assertEquals(overrides?.metrics.get("job: Check"), 7);
+  assertEquals(
+    overrides?.metrics.get("coverage-debt: packages/runner uncovered lines"),
+    7,
+  );
 });
 
 function coverageRow(
@@ -420,7 +416,7 @@ function coverageRow(
 async function payloadFrom(
   write: () => Promise<void>,
 ): Promise<CoverageCommentPayload | null> {
-  const dir = await Deno.makeTempDir({ prefix: "perf-check-comment-" });
+  const dir = await Deno.makeTempDir({ prefix: "coverage-check-comment-" });
   const file = path.join(dir, "coverage-comment.json");
   Deno.env.set("COVERAGE_COMMENT_FILE", file);
   try {
@@ -796,7 +792,10 @@ Deno.test("githubApiOrSkip writes metrics and exits on rate limits", async () =>
 
     assertEquals(captured.result, 0);
     assertStringIncludes(captured.warnings.join("\n"), "rate limit");
-    assertStringIncludes(captured.logs.join("\n"), "Wrote perf-metrics.json");
+    assertStringIncludes(
+      captured.logs.join("\n"),
+      "Wrote perf-metrics.json",
+    );
     const file = JSON.parse(await Deno.readTextFile("perf-metrics.json"));
     assertEquals(file.metrics[0].name, "job: Check");
   } finally {
@@ -823,9 +822,6 @@ Deno.test("metric table helpers format task and metric details", () => {
     status: "OK" as const,
     current: 12.4,
     median: 10,
-    variance: 0,
-    stddev: 0,
-    threshold: 10,
     n: 5,
     pctIncrease: 24,
   };
@@ -836,20 +832,10 @@ Deno.test("metric table helpers format task and metric details", () => {
     n: 0,
   };
 
-  assertEquals(
-    formatMetricValueForTable(coverageRow.metric, coverageRow.current),
-    "12",
-  );
-  assertEquals(formatMetricValueForTable("job: Check", undefined), "-");
-  assertEquals(formatMetricDelta("job: Check", pendingRow), "-");
-  assertEquals(
-    formatMetricDelta(coverageRow.metric, coverageRow),
-    "+2 (+24%)",
-  );
-  assertEquals(metricDisplayParts("test: runner > file.test.ts"), {
-    task: "runner",
-    metric: "file.test.ts",
-  });
+  assertEquals(formatMetricValueForTable(coverageRow.current), "12");
+  assertEquals(formatMetricValueForTable(undefined), "-");
+  assertEquals(formatMetricDelta(pendingRow), "-");
+  assertEquals(formatMetricDelta(coverageRow), "+2 (+24%)");
   assertEquals(metricDisplayParts("coverage-debt: tasks uncovered lines"), {
     task: "coverage-debt",
     metric: "tasks",
@@ -876,9 +862,6 @@ Deno.test("printMetricTable renders status and non-status tables", () => {
     status: "OK" as const,
     current: 9,
     median: 8,
-    variance: 0,
-    stddev: 0,
-    threshold: 10,
     n: 5,
     pctIncrease: 12.5,
   };
@@ -1090,18 +1073,31 @@ Deno.test("baseline main validation accepts current main as newest run", () => {
   assertEquals(result, { ok: true, issues: [] });
 });
 
-Deno.test("reportBaselineRunAvailability warns for stale and sparse baselines", () => {
+Deno.test("reportBaselineRunAvailability warns when newest run is not current main head", () => {
   const warnings: string[] = [];
   const result = reportBaselineRunAvailability(
     [makeRun(1, SHA_A)],
     SHA_B,
-    5,
     (message) => warnings.push(message),
   );
 
   assertEquals(result.ok, false);
   assertStringIncludes(warnings.join("\n"), "current main head");
-  assertStringIncludes(warnings.join("\n"), "only 1 baseline runs available");
+});
+
+Deno.test("reportBaselineRunAvailability warns when no baseline runs exist", () => {
+  const warnings: string[] = [];
+  const result = reportBaselineRunAvailability(
+    [],
+    SHA_B,
+    (message) => warnings.push(message),
+  );
+
+  assertEquals(result.ok, false);
+  assertStringIncludes(
+    warnings.join("\n"),
+    "no baseline runs available; coverage debt will bootstrap from this run.",
+  );
 });
 
 Deno.test("fetchArtifactsForRunBestEffort returns artifacts or an empty fallback", async () => {
@@ -1166,64 +1162,14 @@ Deno.test("buildBaselineRunContexts collects artifacts, PRs, and commit distance
   ]);
 });
 
-Deno.test("buildExtraBackfillContexts creates context shells", async () => {
-  const run = makeRun(12, SHA_B);
-  const artifact = makeArtifact(6, PERF_METRICS_BACKFILL_ARTIFACT_NAME);
-
-  const contexts = await buildExtraBackfillContexts(
-    [run],
-    (requestedRun) => {
-      assertEquals(requestedRun, run);
-      return Promise.resolve([artifact]);
-    },
-    1,
-  );
-
-  assertEquals(contexts, [
-    {
-      run,
-      artifacts: [artifact],
-      pr: null,
-      prLookupError: null,
-      commitsBehindMain: null,
-    },
-  ]);
-});
-
-Deno.test("parsePerfMetricBackfillFromArtifacts uses newest backfill artifact", async () => {
-  const parsed = new Map<number, Map<string, TimingSample>>([[1, new Map()]]);
-  let parsedArtifactId = 0;
-
-  const result = await parsePerfMetricBackfillFromArtifacts(
-    [
-      makeArtifact(1, PERF_METRICS_BACKFILL_ARTIFACT_NAME),
-      makeArtifact(3, PERF_METRICS_BACKFILL_ARTIFACT_NAME),
-      makeArtifact(4, PERF_METRICS_BACKFILL_ARTIFACT_NAME, true),
-    ],
-    (artifactId) => {
-      parsedArtifactId = artifactId;
-      return Promise.resolve(parsed);
-    },
-  );
-
-  assertEquals(result, parsed);
-  assertEquals(parsedArtifactId, 3);
-  assertEquals(
-    await parsePerfMetricBackfillFromArtifacts([], () => {
-      throw new Error("should not parse without an artifact");
-    }),
-    null,
-  );
-});
-
-Deno.test("parsePerfMetricsFromArtifacts uses newest perf metrics artifact", async () => {
+Deno.test("parseCoverageBaselineFromArtifacts uses newest coverage baseline artifact", async () => {
   const parsed = {
     metrics: new Map<string, TimingSample>([["job: Check", makeSample()]]),
     compileCacheStates: { "pattern-unit": "warm" as const },
   };
   let parsedArtifactId = 0;
 
-  const result = await parsePerfMetricsFromArtifacts(
+  const result = await parseCoverageBaselineFromArtifacts(
     [
       makeArtifact(1, PERF_METRICS_ARTIFACT_NAME),
       makeArtifact(3, PERF_METRICS_ARTIFACT_NAME),
@@ -1238,33 +1184,37 @@ Deno.test("parsePerfMetricsFromArtifacts uses newest perf metrics artifact", asy
   assertEquals(result, parsed);
   assertEquals(parsedArtifactId, 3);
   assertEquals(
-    await parsePerfMetricsFromArtifacts([], () => {
+    await parseCoverageBaselineFromArtifacts([], () => {
       throw new Error("should not parse without an artifact");
     }),
     null,
   );
 });
 
-Deno.test("addPerfMetricsFromArtifacts adds parsed samples to timelines", async () => {
+Deno.test("addCoverageBaselineFromArtifacts adds parsed samples to timelines", async () => {
   const artifacts = [makeArtifact(1, PERF_METRICS_ARTIFACT_NAME)];
   const sample = makeSample();
   const timelines = new Map();
 
   assertEquals(
-    await addPerfMetricsFromArtifacts(timelines, artifacts, (requested) => {
-      assertEquals(requested, artifacts);
-      return Promise.resolve({
-        metrics: new Map([["job: Check", sample]]),
-        compileCacheStates: { "generated-patterns": "cold" as const },
-      });
-    }),
+    await addCoverageBaselineFromArtifacts(
+      timelines,
+      artifacts,
+      (requested) => {
+        assertEquals(requested, artifacts);
+        return Promise.resolve({
+          metrics: new Map([["job: Check", sample]]),
+          compileCacheStates: { "generated-patterns": "cold" as const },
+        });
+      },
+    ),
     { added: true, compileCacheStates: { "generated-patterns": "cold" } },
   );
   assertEquals(timelines.get("job: Check")?.samples, [sample]);
 
   // An untagged (pre-rollout) artifact still adds samples, with null states.
   assertEquals(
-    await addPerfMetricsFromArtifacts(
+    await addCoverageBaselineFromArtifacts(
       timelines,
       artifacts,
       () =>
@@ -1277,7 +1227,7 @@ Deno.test("addPerfMetricsFromArtifacts adds parsed samples to timelines", async 
   );
 
   assertEquals(
-    await addPerfMetricsFromArtifacts(
+    await addCoverageBaselineFromArtifacts(
       timelines,
       [],
       () => Promise.resolve(null),
@@ -1413,182 +1363,14 @@ Deno.test("formatCompileCacheStates shows every family, absent as unknown", () =
   );
 });
 
-const NO_OVERRIDES: BaselineOverrides = {
-  metrics: new Map(),
-  coverageBaselineReset: false,
-};
-
-function timingSampleAt(runId: number, durationSeconds: number): TimingSample {
-  return {
-    runId,
-    runUrl: `https://github.com/commontoolsinc/labs/actions/runs/${runId}`,
-    sha: SHA_A,
-    createdAt: `2026-06-18T10:00:${String(runId).padStart(2, "0")}Z`,
-    durationSeconds,
-  };
-}
-
-function timingTimeline(name: string, samples: TimingSample[]): MetricTimeline {
-  return { name, samples };
-}
-
-/** Runs 1-6 are warm at 10s; runs 7-8 are known-cold at 30s. */
-const MIXED_COLD_SAMPLES = [
-  ...[1, 2, 3, 4, 5, 6].map((runId) => timingSampleAt(runId, 10)),
-  timingSampleAt(7, 30),
-  timingSampleAt(8, 30),
-];
-
-function coldForRuns(
-  coldRunIds: number[],
-): (runId: number) => CompileCacheState | undefined {
-  return (runId) => coldRunIds.includes(runId) ? "cold" : undefined;
-}
-
-Deno.test("evaluateTimingMetric reports a cold-family metric as COLD, never a failure", () => {
-  const { row, failure } = evaluateTimingMetric({
-    metric: "step: patterns integration",
-    // Far over any threshold the warm baseline would allow.
-    current: 25,
-    timeline: timingTimeline(
-      "step: patterns integration",
-      [1, 2, 3, 4, 5].map((runId) => timingSampleAt(runId, 10)),
-    ),
-    prOverrides: NO_OVERRIDES,
-    currentCacheStates: { "pattern-integration": "cold" },
-    stateOfRunForFamily: () => () => undefined,
-  });
-
-  assertEquals(row.status, "COLD");
-  assertEquals(failure, false);
-  assertEquals(row.median, undefined);
-  // A COLD row renders with a `-` baseline and no change column.
-  assertEquals(metricTableRows([row], true)[0], [
-    "COLD",
-    "-",
-    "25s",
-    "-",
-    "step",
-    "patterns integration",
-  ]);
-});
-
-Deno.test("evaluateTimingMetric reports COLD even without baseline samples", () => {
-  const { row, failure } = evaluateTimingMetric({
-    metric: "test: generated-patterns/foo.test.tsx",
-    current: 12,
-    timeline: undefined,
-    prOverrides: NO_OVERRIDES,
-    currentCacheStates: { "generated-patterns": "cold" },
-    stateOfRunForFamily: () => () => undefined,
-  });
-
-  assertEquals(row.status, "COLD");
-  assertEquals(failure, false);
-});
-
-Deno.test("evaluateTimingMetric keeps excl precedence over COLD", () => {
-  const { row, failure } = evaluateTimingMetric({
-    metric: "step: pattern unit tests",
-    current: 100,
-    timeline: undefined,
-    prOverrides: NO_OVERRIDES,
-    currentCacheStates: { "pattern-unit": "cold" },
-    stateOfRunForFamily: () => () => undefined,
-  });
-
-  assertEquals(row.status, "excl");
-  assertEquals(failure, false);
-});
-
-Deno.test("evaluateTimingMetric excludes known-cold baseline samples for a warm run", () => {
-  const { row, failure } = evaluateTimingMetric({
-    metric: "step: patterns integration",
-    current: 20,
-    timeline: timingTimeline("step: patterns integration", MIXED_COLD_SAMPLES),
-    prOverrides: NO_OVERRIDES,
-    currentCacheStates: { "pattern-integration": "warm" },
-    stateOfRunForFamily: () => coldForRuns([7, 8]),
-  });
-
-  // Against the six warm 10s samples the threshold is 15s, so 20s fails.
-  // With the two cold 30s samples included, the inflated stddev would have
-  // pushed the threshold past 35s and hidden the regression.
-  assertEquals(row.status, "OVER");
-  assertEquals(failure, true);
-  assertEquals(row.median, 10);
-  assertEquals(row.n, 6);
-});
-
-Deno.test("evaluateTimingMetric falls back to n/a when too few warm samples remain", () => {
-  const { row, failure } = evaluateTimingMetric({
-    metric: "step: patterns integration",
-    current: 20,
-    timeline: timingTimeline("step: patterns integration", MIXED_COLD_SAMPLES),
-    prOverrides: NO_OVERRIDES,
-    currentCacheStates: {},
-    stateOfRunForFamily: () => coldForRuns([3, 4, 5, 6, 7, 8]),
-  });
-
-  assertEquals(row.status, "n/a");
-  assertEquals(failure, false);
-  assertEquals(row.n, 2);
-});
-
-Deno.test("evaluateTimingMetric with all-unknown states matches pre-rollout behavior", () => {
-  const unknownEverywhere = {
-    metric: "step: patterns integration",
-    current: 20,
-    timeline: timingTimeline("step: patterns integration", MIXED_COLD_SAMPLES),
-    prOverrides: NO_OVERRIDES,
-    currentCacheStates: {},
-    stateOfRunForFamily: () => () => undefined,
-  };
-  const { row, failure } = evaluateTimingMetric(unknownEverywhere);
-
-  // All eight samples gate as before tagging: median 10s, stddev ~8.66s,
-  // threshold ~36s, so 20s stays OK.
-  assertEquals(row.status, "OK");
-  assertEquals(failure, false);
-  assertEquals(row.median, 10);
-  assertEquals(row.n, 8);
-
-  // A metric with no compile cache family ignores cache states entirely.
-  const noFamily = evaluateTimingMetric({
-    ...unknownEverywhere,
-    metric: "step: runner tests",
-    timeline: timingTimeline("step: runner tests", MIXED_COLD_SAMPLES),
-    currentCacheStates: {
-      "generated-patterns": "cold",
-      "pattern-integration": "cold",
-      "pattern-unit": "cold",
-    },
-    stateOfRunForFamily: () => coldForRuns([7, 8]),
-  });
-  assertEquals(noFamily.row.status, "OK");
-  assertEquals(noFamily.row.n, 8);
-});
-
-Deno.test("main runs informational check with mocked latest baseline data", async () => {
+Deno.test("main reports no coverage data and exits cleanly without coverage artifacts", async () => {
   const eventPath = await Deno.makeTempFile({ suffix: ".json" });
   await Deno.writeTextFile(eventPath, JSON.stringify({ after: SHA_C }));
 
   const currentRunId = 123;
-  const baselineRuns = [
-    makeRun(201, SHA_A, "2026-06-18T10:00:00Z"),
-    makeRun(202, SHA_B, "2026-06-18T09:00:00Z"),
-    makeRun(203, SHA_C, "2026-06-18T08:00:00Z"),
-    makeRun(
-      204,
-      "dddddddddddddddddddddddddddddddddddddddd",
-      "2026-06-18T07:00:00Z",
-    ),
-    makeRun(
-      205,
-      "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-      "2026-06-18T06:00:00Z",
-    ),
-  ];
+  // The newest main-push run seeds the compile-fingerprint fallback; its head
+  // differs from this run's SHA, so the classifier compares them.
+  const latestBaselineRun = makeRun(201, SHA_A, "2026-06-18T10:00:00Z");
   const jobsForRun = (runId: number) => ({
     jobs: [
       {
@@ -1622,24 +1404,15 @@ Deno.test("main runs informational check with mocked latest baseline data", asyn
           withMockFetch(
             (input) => {
               const url = String(input);
-              if (url.endsWith("/branches/main")) {
-                return jsonResponse({ commit: { sha: SHA_A } });
-              }
               if (url.includes("/actions/workflows/deno.yml/runs?")) {
-                return jsonResponse({ workflow_runs: baselineRuns });
+                return jsonResponse({ workflow_runs: [latestBaselineRun] });
               }
               if (url.includes(`/actions/runs/${currentRunId}/jobs`)) {
                 return jsonResponse(jobsForRun(currentRunId));
               }
-              const baselineRun = baselineRuns.find((run) =>
-                url.includes(`/actions/runs/${run.id}/jobs`)
-              );
-              if (baselineRun) return jsonResponse(jobsForRun(baselineRun.id));
+              // No coverage-profile artifacts were uploaded for this run.
               if (url.includes("/artifacts?")) {
                 return jsonResponse({ total_count: 0, artifacts: [] });
-              }
-              if (url.includes("/commits/") && url.endsWith("/pulls")) {
-                return jsonResponse([]);
               }
               if (url.includes("/compare/")) {
                 return jsonResponse({ ahead_by: 1 });
@@ -1654,19 +1427,24 @@ Deno.test("main runs informational check with mocked latest baseline data", asyn
     );
     const output = captured.logs.join("\n");
 
+    // With no coverage-profile artifacts, extraction fails and the run has no
+    // coverage metrics to gate, so the informational run exits cleanly.
     assertEquals(captured.result, 0);
-    assertStringIncludes(output, "Current main head is");
     assertStringIncludes(
       output,
       "Compile cache states: generated-patterns=unknown, pattern-integration=unknown, pattern-unit=unknown",
     );
-    assertStringIncludes(output, "Using 5 main-branch runs as baseline.");
-    assertStringIncludes(output, "Baseline source runs:");
-    assertStringIncludes(output, "All metrics within normal range.");
+    assertStringIncludes(
+      captured.errors.join("\n"),
+      "could not extract coverage debt metrics for current run",
+    );
+    assertStringIncludes(
+      output,
+      "No coverage metrics extracted from current run. Nothing to check.",
+    );
   } finally {
     await Deno.remove(eventPath).catch(() => {});
     await Deno.remove("perf-metrics.json").catch(() => {});
-    await Deno.remove("perf-metrics-backfill.json").catch(() => {});
   }
 });
 
