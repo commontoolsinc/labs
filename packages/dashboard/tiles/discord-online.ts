@@ -247,7 +247,8 @@ export const discordOnline: Tile = {
         label,
         status: "unknown",
         value: "—",
-        sub: "enable the presences + members intents on the bot",
+        sub:
+          "enable the presences + members intents; add a Team or Team Member role",
       };
     }
 
