@@ -269,19 +269,14 @@ export type Task<Return, Command = never> = Iterable<Command, Return>;
  * value (`task/return`) or an effect it produced along the way
  * (`task/effect`).
  *
- * `Result` is deliberately unconstrained, which deserves explanation, since
- * what actually flows through it is narrower: a receipt reports an `Ok`/`Fail`
- * outcome, possibly awaited (see `AwaitResult`).
+ * `Result` is unconstrained, though what flows through it is narrower: a
+ * receipt reports an `Ok`/`Fail` outcome, possibly awaited (see
+ * `AwaitResult`). It is not a `FabricValue` -- a receipt is in-process
+ * transport rather than stored data, and a `Fail` carries an `Error`, which is
+ * a `FabricNativeObject`.
  *
- * It is *not* a `FabricValue`. A receipt is in-process transport rather than
- * stored data -- a `Fail` carries an `Error`, which is a `FabricNativeObject`
- * and never a `FabricValue` -- and nothing durably stores a receipt. The
- * `extends FabricValue` this parameter used to carry was therefore untrue; it
- * type-checked only because `FabricSpecialObject` is declared with no members,
- * which makes `FabricValue` structurally satisfied by any object.
- *
- * Nor can it say `extends AwaitResult<Unit, Error>`, true though that is.
- * `ProviderCommand` reaches this parameter through inference:
+ * The narrower constraint cannot be stated here. `ProviderCommand` reaches this
+ * parameter through inference:
  *
  * ```ts
  * ProtocolMethod<Protocol> extends {
@@ -289,16 +284,13 @@ export type Task<Return, Command = never> = Iterable<Command, Return>;
  * } ? Receipt<Command, Result, Effect> : never
  * ```
  *
- * and a constraint inside an `infer ... extends ...` position is enforced by
- * silent non-match, not by a diagnostic: a method whose result did not conform
- * would drop to the `never` arm and vanish from the protocol type, with the
- * damage surfacing far away as member access on `never`. That is exactly the
- * failure the old `FabricValue` constraint produced once `FabricValue` meant
- * something. An unconstrained parameter reports a wrong result type at the use
- * site instead, noisily.
- *
- * Constraining it becomes safe once the inference in `InferProtoMethods` is
- * total -- i.e. once a non-conforming method is reported rather than dropped.
+ * A constraint in an `infer ... extends ...` position is enforced by silent
+ * non-match rather than by a diagnostic: a method whose result does not conform
+ * drops to the `never` arm and vanishes from the protocol type, surfacing far
+ * away as member access on `never`. Unconstrained, a wrong result type is
+ * reported at the use site instead. Constraining becomes safe once the
+ * inference in `InferProtoMethods` is total -- that is, once a non-conforming
+ * method is reported rather than dropped.
  */
 export type Receipt<
   Command extends NonNullable<unknown>,
