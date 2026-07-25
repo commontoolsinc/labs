@@ -595,21 +595,21 @@ export type Result<T extends Unit = Unit, E extends Error = Error> =
   | Ok<T>
   | Fail<E>;
 
-export interface Ok<T extends Unit> {
+export type Ok<T extends Unit> = {
   ok: T;
   /**
    * Discriminant to differentiate between Ok and Fail.
    */
   error?: undefined;
-}
+};
 
-export interface Fail<E extends Error> {
+export type Fail<E extends Error> = {
   error: E;
   /**
    * Discriminant to differentiate between Ok and Fail.
    */
   ok?: undefined;
-}
+};
 
 export type Conflict = {
   /**
