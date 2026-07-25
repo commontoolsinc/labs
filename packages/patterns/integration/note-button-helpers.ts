@@ -3,14 +3,19 @@ import {
   type ProbeApi,
   waitForCondition,
 } from "@commonfabric/integration";
-import { settleView } from "./cfc-browser-helpers.ts";
+import {
+  CLICK_TARGET_ATTR,
+  clickMarked,
+  settleView,
+} from "./cfc-browser-helpers.ts";
 
 // Find-and-click-a-button-by-text helpers shared by the default-app
-// integration tests. A click predicate stamps the button it resolved with a
-// marker attribute, so the test can then resolve that exact element and
-// dispatch a single trusted click on it. Mirrors the CLICK_TARGET_ATTR flow of
-// clickCfButton in cfc-browser-helpers.ts.
-const NOTE_BUTTON_CLICK_TARGET_ATTR = "data-cfc-note-button-target";
+// integration tests. The predicate below stamps the button it resolved with
+// CLICK_TARGET_ATTR, and clickMarked then resolves that exact element and
+// dispatches a single trusted click on it. The predicate is what this module
+// adds: it picks a button by its text, its exact text, or its title, where the
+// predicates in cfc-browser-helpers.ts pick one by CSS selector, by index
+// within a selector, or by data-ui-action value.
 
 // Serialized into the page by waitForCondition: find the first rendered
 // button/link whose text or title matches and stamp its inner click target with
@@ -44,26 +49,6 @@ const markNoteButton = (
   return true;
 };
 
-// Remove every element carrying `attr=token`, descending through shadow roots.
-async function clearNoteButtonMark(
-  page: Page,
-  token: string,
-): Promise<void> {
-  await page.evaluate((targetToken, targetAttr) => {
-    function collect(root: Document | ShadowRoot, result: Element[]): void {
-      for (const element of root.querySelectorAll("*")) {
-        if (element.getAttribute(targetAttr) === targetToken) {
-          result.push(element);
-        }
-        if (element.shadowRoot) collect(element.shadowRoot, result);
-      }
-    }
-    const matches: Element[] = [];
-    collect(document, matches);
-    for (const element of matches) element.removeAttribute(targetAttr);
-  }, { args: [token, NOTE_BUTTON_CLICK_TARGET_ATTR] }).catch(() => {});
-}
-
 // Settle the view, tag a matching button, and dispatch a single trusted click
 // on it. Throws if no matching button becomes clickable.
 async function settleAndClickNoteButton(
@@ -78,7 +63,7 @@ async function settleAndClickNoteButton(
   const token = `cfc-note-button-${crypto.randomUUID()}`;
   try {
     await waitForCondition(page, markNoteButton, {
-      args: [selector, match, needle, token, NOTE_BUTTON_CLICK_TARGET_ATTR],
+      args: [selector, match, needle, token, CLICK_TARGET_ATTR],
     });
   } catch (cause) {
     throw new Error(
@@ -88,15 +73,7 @@ async function settleAndClickNoteButton(
       { cause },
     );
   }
-  try {
-    const clickTarget = await page.waitForSelector(
-      `[${NOTE_BUTTON_CLICK_TARGET_ATTR}="${token}"]`,
-      { strategy: "pierce" },
-    );
-    await clickTarget.click();
-  } finally {
-    await clearNoteButtonMark(page, token);
-  }
+  await clickMarked(page, token);
 }
 
 // The click helpers resolve `true` once the single click has landed (they throw
