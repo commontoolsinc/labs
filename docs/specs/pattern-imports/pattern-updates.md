@@ -1,11 +1,18 @@
-# Pattern Updates — rolling a running piece forward
+# System-source pattern updates — rolling running pieces forward
 
-How a running piece moves from the pattern version it was created with to a
-newer one — automatically for patterns backed by a same-toolshed **system
-source** (including home and default-app), and (a later phase) on demand for
-**published** patterns. Companion to `README.md`
-(which covers `cf:` imports and publishing-as-naming); this doc covers the
-*update propagation* side.
+How the currently implemented, specialized updater moves pieces backed by a
+same-toolshed **system source** from one pattern version to another. This
+includes home, default-app, and other successfully instantiated system-source
+patterns. The general lifecycle for ordinary pieces, including external
+`https://` origins, fabric `cf://` origins, following another piece, source
+history, revert, and repoint, is specified in
+[`../piece-source-lifecycle.md`](../piece-source-lifecycle.md).
+The specialized root path is transitional. In the target model, a space root
+uses the same source lifecycle as every other piece.
+
+This document is also a companion to `README.md`, which covers static `cf:`
+imports and publication through naming and placement. Static imports remain
+pinned and do not adopt the live update behavior specified for piece origins.
 
 ## Status
 
@@ -24,7 +31,9 @@ and an unloadable tracked root is repaired before bootstrap through the same
 found during implementation are archived at
 [`docs/history/specs/pattern-imports/system-pattern-updates-implementation-plan.md`](../../history/specs/pattern-imports/system-pattern-updates-implementation-plan.md).
 The home root rides the shipped root machinery since the second flag's removal;
-published-pattern updates remain design.
+general piece origins and source history remain design. When that work lands,
+new roots use the ordinary piece creation transition and existing roots migrate
+into the same active-origin and revision model.
 
 ## Last Updated
 
@@ -45,18 +54,22 @@ published-pattern updates remain design.
   background and lets the existing pattern watcher apply a verified move. The
   current instantiation never waits for network or compilation.
 - **Two hazard cases to handle explicitly.** (1) We shipped a broken system
-  pattern — once a fix ships, recovery must be automatic. (2) An
+  pattern — once a fix ships, recovery must be automatic. (2) A
   schema-incompatible update slips through — the damage must be *bounded*
   (fast rollback), because the schema-valid-but-semantically-wrong case is not
   reliably detectable.
-- **One mechanism, two audiences.** The same "resolve a source pointer to a
-  current identity, swap in place" loop serves system patterns (auto) now and
-  published patterns (on click) later; they differ only in the resolver.
+- **A reusable mechanism.** The existing "resolve a source pointer to a current
+  identity, then swap in place" loop is a foundation for general piece origins.
+  Roots and other pieces need the same history, detach, compatibility,
+  authorization, and concurrency guarantees before they can share one path.
 
 ## Non-goals (this doc / v1)
 
-- **Published-pattern update UX** (a shell "update available" affordance) —
-  designed-*for* here, implemented later (§ Phasing).
+- **General piece origins and source history.** This specialized updater does
+  not provide the ordinary lifecycle that roots will eventually use. Web URL
+  origins, fabric URLs that name pieces or content-addressed patterns, detach,
+  fork, revert, and repoint are specified in
+  [`../piece-source-lifecycle.md`](../piece-source-lifecycle.md).
 - **Lineage / fork detection.** No substrate exists today — `parents` was
   deleted with the pattern-id retirement, and `pieceLineageSchema`
   (`packages/runner/src/schemas.ts`) is dead code, referenced nowhere.
@@ -95,7 +108,7 @@ piece, its verified source-doc closure supplies the authored entry path; the
 runtime persists that path on the piece only after the matching same-toolshed
 `?identity` route succeeds.
 
-## The model
+## The implemented specialized model
 
 Two decisions carry the whole design:
 
@@ -147,13 +160,20 @@ The exception's semantics are deliberately narrow:
   space — not (yet) an automated restoration mechanism.
 
 Default system roots run this loop before bootstrap. Every other pattern runs it
-after successful instantiation, without delaying that instantiation. Published
-patterns will use a separate explicit action (§ Phasing).
+after successful instantiation, without delaying that instantiation. The
+general lifecycle replaces this specialized path after its source-state and
+history requirements are implemented.
 
-### `patternSource`: one field, two variants
+This specialized implementation does not define different target semantics for
+roots. Under the general lifecycle, every piece with an active origin,
+including a space root, reconciles through the ordinary piece path.
 
-A string meta on the piece result cell (space root: on the root piece).
-Dispatched by the `cf:` prefix:
+### Legacy `patternSource` and planned migration
+
+`patternSource` is currently a string meta on the piece result cell. For a space
+root it is stored on the root piece. Once ordinary lifecycle storage is
+available, this string is migration input only. It is dispatched by the `cf:`
+prefix:
 
 - **`cf:` fabric ref** (published) → resolve via the fabric chase
   (`fabric-ref-resolution.ts`: slug → piece → `patternIdentity`). A
@@ -163,16 +183,51 @@ Dispatched by the `cf:` prefix:
   `/api/patterns/system/default-app.tsx`) → use `?identity` against the space's
   host, then fetch and compile whenever the persisted artifact needs an update
   or repair.
+- **General source URL origins** use the discriminated active-origin and
+  revision schemas defined by the piece source lifecycle spec. They must not
+  overload the raw string with origin-kind-specific behavior. A fabric
+  `cf://` URL that is unpinned and resolves to a mutable
+  `patternIdentity`-bearing entity stores the stable entity rather than a slug
+  and follows its current pattern. A fabric URL that resolves to
+  `pattern:<hash>` or carries a trailing pin on an entity FID stores exact,
+  immutable source and cannot update. The tentative piece-origin policy rejects
+  slug-shaped URLs even when pinned. Static imports may still use pinned slugs.
 
-**Born-from determinism.** Once recorded, the *string* is frozen (which source);
-the *resolved identity* is live (which version). A non-home space's root
-`patternSource` is seeded at creation from home's `defaultAppUrl`, then frozen —
-so editing `defaultAppUrl` later does **not** silently migrate existing spaces
-(pushing a new default app to them is an explicit re-point).
+Baseline migration preserves the current pattern independently from update
+authority. It creates an active origin only when a durable tracking choice can
+be established under the ordinary consent rule. Otherwise it keeps the legacy
+locator only as inactive historical provenance and migrates the piece as
+detached. Rollout flags are not durable per-piece consent.
 
-`defaultAppUrl` (on the space cell) is thus the **template** that seeds new
-spaces' root `patternSource`; it is distinct from the per-piece frozen
-`patternSource`, and it itself migrates to a `cf:` ref under the grammar below.
+Migration resolves a relative system path against the currently accepted
+toolshed route for the space and stores the resulting absolute web URL. If no
+accepted host can be established, migration does not invent an active origin.
+A later host remapping does not rewrite the stored URL; that requires an
+ordinary repoint.
+
+A source-less legacy root does not gain an origin merely because it is a root.
+The specialized updater can derive an official candidate path, but ordinary
+migration keeps the root detached unless a durable tracking choice explicitly
+supplies and authorizes an origin.
+
+**Born-from determinism.** The system chooses a root's initial source when it
+creates the space. In the target model, it passes that source through the same
+creation transition used for any other piece. That transition writes the first
+revision. It writes a normalized active origin only when creation also makes
+the ordinary explicit choice to accept future updates from a mutable default.
+The current implementation instead seeds a non-home root's raw `patternSource`
+from the home root's `defaultAppUrl`. Editing that template later does **not**
+change an existing root. Changing that root's source is an ordinary repoint,
+edit, revert, or other lifecycle operation. Under the tentative identifier-only
+URL policy, a template stores a canonical space DID with a stable entity FID,
+or it stores a space-free content identity. A future shortlink service resolves
+a custom string before the template reaches the lifecycle operation.
+
+Today `defaultAppUrl` is output state on the home root. That is not a durable
+home for creation configuration once the home root can be repointed or
+relinked like any other piece. Root lifecycle unification moves the value into
+space-creation configuration outside any root piece. It is never origin state
+for an existing root.
 
 ### Grammar extension: host as a hint
 
@@ -183,23 +238,42 @@ new per-ref storage:
 cf:[[//toolshed.url]/space/][slug]
 ```
 
+These are fabric-internal source URLs as well as import specifiers. When used
+as a piece origin, an unpinned URL that resolves to a piece or another mutable
+pattern-bearing entity follows its current `patternIdentity`. A URL that
+resolves directly to a content-addressed pattern is immutable. A trailing pin
+on an entity-FID URL makes that URL immutable, including when its unpinned ref
+names a piece. The piece-origin validator rejects a slug-shaped form even when
+it has a pin.
+
 - The `//toolshed.url` host means *"this space lived at this URL at least at
   some point"* — a bootstrap hint for when the runtime does not already know
   where a space is hosted (we have not built host-discovery-without-hints yet;
   this is a first step toward it).
-- **On ingest**, a host-bearing ref is normalized: extract the host →
-  `runtime.registerSpaceHost(space, host)` (feeds the learned site-table) →
-  store the **canonical host-less form** `cf:/<space-did>/<slug>`. The host is
-  routing, not identity; it is never smeared across every provenance ref.
+- **On ingest**, a host-bearing resolver input registers the host with
+  `runtime.registerSpaceHost(space, host)`, which changes only the live runtime.
+  The lifecycle operation separately writes the accepted space DID to host
+  route into the home-space site table before it commits a canonical host-less
+  target. A template may then keep the form `cf:/<space-did>/<ref>`. The
+  revision also retains the supplied `cf://` URL. A lifecycle follow resolves
+  and stores the piece named by a stable entity FID. Under the tentative
+  identifier-only policy, a human-readable shortlink resolves before this
+  operation. A pin on an entity-FID ref normalizes to exact pattern source. The
+  host is routing, not identity; it is not copied into every canonical target.
 - Host **hints belong to the space**, not to each cross-space link — a
-  per-space host-hint store is the right long-term home (and the seed of
-  host-discovery). Deferred; v1 needs none.
-- **Optional slug**: `cf://toolshed/space/` (no slug) = *that space's root
-  pattern* (resolve via the space cell's `defaultPattern` → its
-  `patternIdentity`). This is how a template like `defaultAppUrl` says "point
-  at another space and track whatever it runs as its root."
-- Space is a **DID** (names still require name→DID resolution — README open
-  question).
+  home-space site table is the current durable store and the seed of later host
+  discovery. The runtime processor hydrates its entries on startup. Writing it
+  from a host-qualified lifecycle operation remains required work.
+- **Optional ref**: `cf://toolshed/space/` with no ref resolves that space's
+  current root pattern through the space cell's `defaultPattern` and then its
+  `patternIdentity`. Static resolution pins that result. Under the tentative
+  identifier-only piece-origin policy, the lifecycle resolver rejects this
+  root shorthand. An outer authoring layer may resolve it to the current root
+  piece FID before invoking the lifecycle. Later relinking of the space root
+  then does not redirect the follower.
+- Space is a **DID**. The tentative policy rejects names in fabric URLs and
+  leaves human-readable aliases to a future shortlink service. README Open
+  question 1 retains this decision for further study.
 
 ## In-place apply
 
@@ -212,13 +286,23 @@ the piece is already running, the
 watcher cancels its old reactive nodes and re-instantiates the new pattern onto
 the **same result cell**.
 
-- **Survives**: the result cell's entity and inbound links; any state cells the
-  new pattern still reads (addressed by stable key/cause).
-- **Does not survive**: data under keys the new pattern drops or renames — the
-  **schema-compat crux**, and the boundary between the two hazard cases
-  ("missing data" vs "stuck/wrong"). The mitigating discipline is an authoring
-  one: durable state addressed by stable key/cause, not positionally. We do
-  **not** gate on a pre-apply schema dry-run in v1.
+- **Survives**: the result cell's entity and inbound links. State remains
+  reachable when the new pattern reads it through the same stable keys and
+  causes.
+- **Can become unreachable**: data under keys the new pattern drops or
+  renames. This continuity is a semantic contract. CI and golden replay tests
+  must exercise representative prior state and verify that the proposed source
+  still reads and preserves it. The deployment runtime does not try to infer
+  stable-key or stable-cause compatibility.
+
+The specialized system-source updater does not perform the complete pre-apply
+structural comparison specified for the general piece lifecycle. Automatic
+origin updates in that lifecycle reject known argument, result, or
+retained-input incompatibilities and keep the last accepted source. A manual
+source replacement reports a known incompatibility as a warning and can proceed
+only after explicit acceptance. Neither structural check proves semantic state
+continuity. The root-interface contract remains mandatory in both cases. See
+the [`Compatibility policy`](../piece-source-lifecycle.md#compatibility-policy).
 
 ## System-source patterns — the loop
 
@@ -342,7 +426,10 @@ binary populates from baked build metadata; the updater does not consult it.
 
 - **CI golden replay** against the short, controlled system list before
   shipping — the primary defense (feasible precisely because the list is short
-  and we own the source).
+  and we own the source). Synthetic home-shaped and default-app-shaped replays
+  prove that the update mechanism preserves representative stable-key state.
+  Broader release coverage still needs fixtures for each supported
+  version-to-version transition.
 - **Self-heal from a borked ship**: fix source → new identity → a root's next
   space open compiles and swaps it before bootstrap; an ordinary pattern's next
   instantiation starts its current graph and then rolls it forward in place.
@@ -369,8 +456,10 @@ binary populates from baked build metadata; the updater does not consult it.
   and recreation from the applicable source (system path, or a `cf:` ref derived
   from `defaultAppUrl`). Custom `RuntimeProgram` recreation remains unstamped;
   its optional repository locator is separate provenance.
-- **Space cell**: `defaultAppUrl` generalizes to a `cf:` ref (template). A
-  per-space host-hint store is a later addition.
+- **Home root and creation configuration**: `defaultAppUrl` currently lives on
+  the home root. Root lifecycle unification moves it into durable
+  space-creation configuration outside any root piece. A per-space host-hint
+  store is a later addition.
 - **Grammar/resolver**: implement `cf://host/...` (register-on-ingest; today
   it throws "M3 not yet supported"); slug-optional = space root.
 
@@ -379,29 +468,63 @@ binary populates from baked build metadata; the updater does not consult it.
 1. **Default (non-home) space root, always-update.** Least risky —
    `default-app.tsx` carries little durable state. `patternSource` field +
    in-place swap + toolshed `?identity` + local compiled-identity check.
-2. **Home root.** Carries real user data (favorites/journal/spaces) → depends
-   on the stable-addressing discipline and golden coverage of `home.tsx`.
+2. **Home root.** Carries real user data (favorites/journal/spaces). A
+   representative golden replay enabled its rollout with the other system
+   roots. Broader version-to-version CI coverage remains release discipline,
+   not a deployment-time semantic check.
 3. **Other system-source patterns.** Recover a non-root's verified authored
    entry path at instantiation, recognize a system source by its same-toolshed
    `?identity` route, and check it without delaying the current graph.
-4. **Published-pattern updates.** `patternSource` = `cf:` ref; lazy check +
-   shell "update available" + click-to-apply; fork/lineage handling
-   (needs the deferred lineage substrate).
-5. **Cross-host published** + persisted space→host hints + CFC provenance
-   labels on fetched source.
+4. **General piece source lifecycle.** Create every new space root through the
+   ordinary piece source transition using the system-selected default. Move the
+   home root's `defaultAppUrl` into creation configuration outside any root.
+   Migrate existing roots into baseline revisions without treating
+   `patternSource`, rollout flags, or the root role as consent to future
+   updates. Reconcile external web URLs and fabric URLs before the ordinary
+   start of any piece, including a root. Add atomic revision history, detach,
+   fork, revert, and repoint semantics as specified in
+   [`../piece-source-lifecycle.md`](../piece-source-lifecycle.md). Retire the
+   specialized root lifecycle path after migration. Validate the root-interface
+   contract whenever `defaultPattern` is created or relinked.
+5. **Cross-host origins.** Validate and register the supplied space-to-host hint
+   through the ordinary per-space storage manager before opening the origin
+   space. After registration accepts it, persist it before committing a
+   hostless canonical origin, and hydrate it before later resolution. Do not
+   create a secondary session. A seeded route can only be confirmed. Once a
+   late hint is accepted, a different hint is a conflict even before the space
+   opens. After the space opens, only the hint already in effect can be
+   confirmed. Any other route attempt fails the transition. Add ordinary
+   authorization checks. Cross-host routing uses the same provenance checks as
+   a source flow between spaces on one toolshed. Reliable recovery from an
+   unavailable host or a moved space remains open design work.
 
-## Open questions
+## Resolved questions
 
-1. **`?identity` vs ETag/HEAD.** Resolved 2026-07-22: they are complementary.
-   `?identity` remains the explicit closure-identity value used for update
-   authorization; checksum `ETag`s plus mandatory conditional revalidation keep
-   its body and every source module cacheable without allowing stale replay.
-2. **Where the root's `patternSource` lives** — the root piece meta (general;
-   recommended) vs the space cell (co-located with `defaultPattern`). Recommend
-   the piece; the space cell holds only the `defaultAppUrl` template.
-3. **Home-data stable addressing** — verify `home.tsx` addresses its durable
-   state by stable key/cause before enabling always-update on the home root
-   (Phase 2 gate). Resolved 2026-07-21: `home-golden-replay.test.ts` pins state
-   survival across an in-place N→N+1 roll over representative favorites /
-   journal / spaces data, and the home-specific flag was removed on its
-   strength (with the estuary home-brick incident as the forcing event).
+1. **System-pattern identity query.** Keep the implemented `GET …?identity`
+   application protocol. It returns the identity of the complete authored
+   pattern closure, so neither a raw source-file `ETag` nor a `HEAD` request can
+   replace it. Strong `ETag`s and conditional revalidation apply independently
+   to each HTTP representation and complement the closure identity.
+2. **Space-root lifecycle and migration.** A space root is an ordinary piece.
+   The system chooses its initial source when creating the space and uses the
+   same source-creation transition as every other piece. The configured default
+   affects only future roots. Existing roots migrate into the ordinary revision
+   and active-origin model. Migration does not infer tracking consent from a raw
+   `patternSource`, a rollout flag, or the root role. After creation or
+   migration, update, detach, follow, fork, revert, and repoint use the ordinary
+   piece rules. Assigning the root role separately requires root-interface
+   compatibility.
+3. **Home-data stable addressing.** `home-golden-replay.test.ts` pins
+   representative favorites, journal, and spaces state across an in-place
+   update. That evidence allowed the home root to use the same updater as other
+   system roots. Future supported source transitions need CI fixtures using
+   representative prior state.
+4. **Compatibility checks and deployment boundary.** Publishing or uploading
+   pattern source does not compare it with an existing piece. A manual
+   replacement compares argument, result, and retained-input schemas, warns on
+   a known incompatibility, and requires explicit acceptance to continue. An
+   automatic origin update blocks the same known structural incompatibility
+   because no user is present to accept it. The root-interface contract remains
+   mandatory. Stable keys, stable causes, intended migration, and behavior are
+   verified by CI audits and golden replays. The runtime does not try to infer
+   those semantic contracts during deployment.

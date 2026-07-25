@@ -112,6 +112,23 @@ describe("cli fabric deps", () => {
     expect(result.program.files[1].contents).toContain(`cf:dep@${ENTRY}`);
   });
 
+  it("rejects subpaths instead of pinning them to the entry", async () => {
+    await writePatternSlug("dep");
+
+    await expect(
+      pinProgramFabricImports(runtime, space, {
+        main: "/main.tsx",
+        files: [
+          {
+            name: "/main.tsx",
+            contents:
+              `import schema from "cf:dep/schemas";\nexport default schema;`,
+          },
+        ],
+      }),
+    ).rejects.toThrow("subpaths not yet supported (M4): cf:dep/schemas");
+  });
+
   it("collectLocalProgram walks local files and dispatches on fabric refs", async () => {
     const resolver = new InMemoryProgram("/main.tsx", {
       "/main.tsx": `import { s } from "./schemas.tsx";\nexport default s;`,

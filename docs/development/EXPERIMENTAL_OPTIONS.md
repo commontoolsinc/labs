@@ -256,6 +256,17 @@ propagate](#how-flags-propagate).
   identity/source/import revisions fails closed at the compiled-identity
   comparison. See
   [`docs/specs/pattern-imports/pattern-updates.md`](../specs/pattern-imports/pattern-updates.md).
+
+  **Current behavior.** Before a release, the existing golden replay tests load
+  representative state written by the previous pattern version. They verify
+  that the new version preserves the state's intended meaning and behavior. The
+  updater itself does not infer stable-key, stable-cause, migration, or
+  behavioral compatibility during deployment.
+
+  **Planned behavior.** The general piece-source lifecycle will reject known
+  structural schema incompatibilities before applying an unattended source
+  transition. Semantic compatibility will continue to be checked before release
+  rather than inferred by the runtime.
 - **Current default and planned end state.** The runner built-in default is off
   like every flag in this category; the shell build injects `true` unless the
   define is set to `"false"`, so the deployed product (and local shell dev

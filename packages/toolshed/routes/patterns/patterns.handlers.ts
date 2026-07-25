@@ -64,9 +64,9 @@ export const getPattern = async (
       );
     }
 
-    // `?identity`: return the file's content-addressed identity (the value the
-    // runtime would store as patternIdentity.identity for this authored import
-    // closure) as plain text, instead of the source itself.
+    // `?identity`: return the complete authored pattern closure's identity (the
+    // value the runtime would store as patternIdentity.identity) as plain text,
+    // instead of the entry file's source.
     if (new URL(c.req.url).searchParams.has("identity")) {
       const identity = await patternsServer.identity(filename);
       return patternResponse(

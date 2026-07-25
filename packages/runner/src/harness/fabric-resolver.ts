@@ -205,7 +205,7 @@ export class FabricAwareResolver implements ProgramResolver {
     if (refSpace === undefined) return this.ctx.space;
     if (DID_RE.test(refSpace)) return refSpace as MemorySpace;
     throw new Error(
-      "space names require name→DID resolution (open question 2); use a DID",
+      "space names are currently unsupported; resolve the name to a DID first",
     );
   }
 }
