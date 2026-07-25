@@ -1,23 +1,29 @@
 import {
   ConsoleEvent,
   DialogEvent,
-  ElementHandle,
+  ElementHandle as AstralElementHandle,
   EvaluateFunction,
   EvaluateOptions,
   GoToOptions,
-  InteractionObserver,
   Keyboard,
+  KeyboardTypeOptions,
   Page as AstralPage,
   PageEventMap,
   ScreenshotOptions,
-  SelectorOptions,
   WaitForOptions,
   WaitForSelectorOptions,
 } from "@astral/astral";
 import type {
-  Page_screencastFrame,
-  Page_screencastFrameEvent,
-} from "../vendor-astral/bindings/celestial.ts";
+  ElementHandle,
+  InteractionObserver,
+  ScreencastFrame,
+  SelectorOptions,
+} from "./astral-adapter.ts";
+import {
+  queryAllPierce,
+  queryPierce,
+  waitForPierceSelector,
+} from "./astral-adapter.ts";
 import { sleep } from "@commonfabric/utils/sleep";
 import { Mutable } from "@commonfabric/utils/types";
 import * as path from "@std/path";
@@ -60,6 +66,11 @@ export class Page extends EventTarget {
   private page: AstralPage | null;
   private timeout: number;
   private afterNavigation?: () => Promise<void> | void;
+  private interactionObserver?: InteractionObserver;
+  private defaultTypeDelay = 0;
+  private decoratedElements = new WeakSet<AstralElementHandle>();
+  private patchedKeyboard?: Keyboard;
+  private originalKeyboardType?: Keyboard["type"];
 
   constructor(page: AstralPage, options: { timeout: number }) {
     super();
@@ -227,17 +238,34 @@ export class Page extends EventTarget {
   // Passthru of `@astral/astral`'s `Page#keyboard`
   get keyboard(): Keyboard {
     this.checkIsOk();
-    return this.page!.keyboard;
+    const keyboard = this.page!.keyboard;
+    if (this.patchedKeyboard !== keyboard) {
+      this.patchedKeyboard = keyboard;
+      this.originalKeyboardType = keyboard.type.bind(keyboard);
+      Object.defineProperty(keyboard, "type", {
+        configurable: true,
+        writable: true,
+        value: (
+          text: Parameters<Keyboard["type"]>[0],
+          options: KeyboardTypeOptions = {},
+        ) =>
+          this.originalKeyboardType!(text, {
+            ...options,
+            delay: options.delay ?? this.defaultTypeDelay,
+          }),
+      });
+    }
+    return keyboard;
   }
 
   setInteractionObserver(observer?: InteractionObserver): void {
     this.checkIsOk();
-    this.page!.setInteractionObserver(observer);
+    this.interactionObserver = observer;
   }
 
   setDefaultTypeDelay(delay: number): void {
     this.checkIsOk();
-    this.page!.keyboard.setDefaultTypeDelay(delay);
+    this.defaultTypeDelay = delay;
   }
 
   setAfterNavigationHook(hook?: () => Promise<void> | void): void {
@@ -277,12 +305,12 @@ export class Page extends EventTarget {
   }
 
   onScreencastFrame(
-    listener: (frame: Page_screencastFrame) => void,
+    listener: (frame: ScreencastFrame) => void,
   ): () => void {
     this.checkIsOk();
     const celestial = this.page!.unsafelyGetCelestialBindings();
     const handler: EventListener = (event) => {
-      listener((event as Page_screencastFrameEvent).detail);
+      listener((event as CustomEvent<ScreencastFrame>).detail);
     };
     celestial.addEventListener("Page.screencastFrame", handler);
     return () => celestial.removeEventListener("Page.screencastFrame", handler);
@@ -317,7 +345,22 @@ export class Page extends EventTarget {
     options?: WaitForSelectorOptions & SelectorOptions,
   ): Promise<ElementHandle> {
     this.checkIsOk();
-    return await this.page!.waitForSelector(selector, options);
+    if (options?.strategy === "pierce") {
+      if (options.timeout !== undefined) {
+        throw new TypeError(
+          "Pierce-selector waits are event-driven and do not accept a timeout",
+        );
+      }
+      return this.decorateElement(
+        await waitForPierceSelector(this.page!, selector),
+      );
+    }
+    const astralOptions = options?.timeout === undefined
+      ? undefined
+      : { timeout: options.timeout };
+    return this.decorateElement(
+      await this.page!.waitForSelector(selector, astralOptions),
+    );
   }
 
   // Passthru of `@astral/astral`'s `Page#waitForFunction`
@@ -374,13 +417,19 @@ export class Page extends EventTarget {
     opts?: SelectorOptions,
   ): Promise<ElementHandle | null> {
     this.checkIsOk();
-    return await this.page!.$(selector, opts);
+    const element = opts?.strategy === "pierce"
+      ? await queryPierce(this.page!, selector)
+      : await this.page!.$(selector);
+    return this.decorateElement(element);
   }
 
   // Passthru of `@astral/astral`'s `Page#$$`
   async $$(selector: string, opts?: SelectorOptions): Promise<ElementHandle[]> {
     this.checkIsOk();
-    return await this.page!.$$(selector, opts);
+    const elements = opts?.strategy === "pierce"
+      ? await queryAllPierce(this.page!, selector)
+      : await this.page!.$$(selector);
+    return elements.map((element) => this.decorateElement(element));
   }
 
   // Passthru of `@astral/astral`'s `Page#close`
@@ -395,5 +444,154 @@ export class Page extends EventTarget {
     if (!this.page) {
       throw new Error("Page is already closed.");
     }
+  }
+
+  private decorateElement(element: null): null;
+  private decorateElement(element: AstralElementHandle): ElementHandle;
+  private decorateElement(
+    element: AstralElementHandle | null,
+  ): ElementHandle | null;
+  private decorateElement(
+    element: AstralElementHandle | null,
+  ): ElementHandle | null {
+    if (!element) return null;
+    if (this.decoratedElements.has(element)) return element as ElementHandle;
+    this.decoratedElements.add(element);
+
+    const nativeQuery = element.$.bind(element);
+    const nativeQueryAll = element.$$.bind(element);
+    const nativeWaitForSelector = element.waitForSelector.bind(element);
+    Object.defineProperties(element, {
+      $: {
+        configurable: true,
+        value: async (selector: string, options?: SelectorOptions) => {
+          this.checkIsOk();
+          const child = options?.strategy === "pierce"
+            ? await queryPierce(this.page!, selector, element)
+            : await nativeQuery(selector);
+          return this.decorateElement(child);
+        },
+      },
+      $$: {
+        configurable: true,
+        value: async (selector: string, options?: SelectorOptions) => {
+          this.checkIsOk();
+          const children = options?.strategy === "pierce"
+            ? await queryAllPierce(this.page!, selector, false, element)
+            : await nativeQueryAll(selector);
+          return children.map((child) => this.decorateElement(child));
+        },
+      },
+      click: {
+        configurable: true,
+        value: (
+          options?: Parameters<AstralElementHandle["click"]>[0],
+        ) => this.clickElement(element, options),
+      },
+      type: {
+        configurable: true,
+        value: (text: string, options?: KeyboardTypeOptions) =>
+          this.typeIntoElement(element, text, options),
+      },
+      waitForSelector: {
+        configurable: true,
+        value: async (
+          selector: string,
+          options?: WaitForSelectorOptions & SelectorOptions,
+        ) => {
+          this.checkIsOk();
+          if (options?.strategy === "pierce") {
+            if (options.timeout !== undefined) {
+              throw new TypeError(
+                "Pierce-selector waits are event-driven and do not accept a timeout",
+              );
+            }
+            return this.decorateElement(
+              await waitForPierceSelector(this.page!, selector, element),
+            );
+          }
+          const astralOptions = options?.timeout === undefined
+            ? undefined
+            : { timeout: options.timeout };
+          return this.decorateElement(
+            await nativeWaitForSelector(selector, astralOptions),
+          );
+        },
+      },
+    });
+    return element as ElementHandle;
+  }
+
+  private async clickElement(
+    element: AstralElementHandle,
+    options?: Parameters<AstralElementHandle["click"]>[0],
+  ): Promise<void> {
+    await element.scrollIntoView();
+    const model = await element.boxModel();
+    if (!model) throw new Error("Unable to get stable box model to click on");
+
+    const topLeft = model.content.reduce((result, point) =>
+      point.x < result.x && point.y < result.y ? point : result
+    );
+    const top = topLeft.y;
+    const left = topLeft.x;
+    const point = options?.offset
+      ? {
+        x: left + options.offset.x,
+        y: top + options.offset.y,
+      }
+      : {
+        x: left + model.width / 2,
+        y: top + model.height / 2,
+      };
+
+    await this.interactionObserver?.beforeClick?.(
+      element as ElementHandle,
+      point,
+    );
+    let actionError: unknown;
+    try {
+      await this.page!.mouse.click(point.x, point.y, options);
+    } catch (error) {
+      actionError = error;
+    }
+    try {
+      await this.interactionObserver?.afterClick?.(
+        element as ElementHandle,
+        point,
+        actionError,
+      );
+    } catch (observerError) {
+      if (actionError === undefined) throw observerError;
+    }
+    if (actionError !== undefined) throw actionError;
+  }
+
+  private async typeIntoElement(
+    element: AstralElementHandle,
+    text: string,
+    options?: KeyboardTypeOptions,
+  ): Promise<void> {
+    await element.focus();
+    await this.interactionObserver?.beforeType?.(
+      element as ElementHandle,
+      text,
+    );
+    let actionError: unknown;
+    try {
+      await this.keyboard.type(text, options);
+    } catch (error) {
+      actionError = error;
+    }
+    try {
+      await this.interactionObserver?.afterType?.(
+        element as ElementHandle,
+        text,
+        actionError,
+      );
+    } catch (observerError) {
+      if (actionError === undefined) throw observerError;
+    }
+    if (actionError !== undefined) throw actionError;
   }
 }
