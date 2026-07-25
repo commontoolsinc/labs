@@ -3601,3 +3601,102 @@ for (
     await runStressSeed(seed);
   });
 }
+
+// Integrated from PR #4961 (Hixie's repro for the cf-render counter flake):
+// a foreground editWithRetry write that reads documents the scheduler is
+// concurrently writing declares pending reads on still-unconfirmed optimistic
+// writes. When one of those is rejected, the dependant is doomed — its
+// pending read names a localSeq that will never become a confirmed seq — and
+// a client without the cascade leaves it in flight awaiting its own verdict,
+// burning editWithRetry's bounded retry budget and surfacing the raw
+// "pending dependency not resolved" ConflictError to the caller.
+//
+// Distinct from the basic cascade test above: T2's OWN verdict stays gated
+// for the whole test, so the ONLY thing that can settle it is the client-side
+// cascade off T1's drop — pinning that the settle is entirely local (the
+// server never judges T2 at all). Adapted from the original's 2s wall-clock
+// absence bound to a settled-flag + microtask drain: the clock preload
+// freezes test-file timers, and the cascade path is pure promise flow, so a
+// missing cascade surfaces within microtasks as a failed assertion instead
+// of a hang.
+Deno.test("memory v2 stacked commits: a dependant stranded by a dropped optimistic sibling is rejected off the drop alone, without its own server verdict", async () => {
+  const harness = await createHarness();
+  const g1 = Promise.withResolvers<void>();
+  const g2 = Promise.withResolvers<void>();
+  try {
+    // T1 optimistically writes A and B. It is destined to be rejected, but
+    // its verdict is gated on g1 so T2 is built and put on the wire while T1
+    // is still in flight.
+    const t1 = beginBatch(harness, [
+      { op: "set", id: DOCS.A, value: valueFor("t1-a") },
+      { op: "set", id: DOCS.B, value: valueFor("t1-b") },
+    ]);
+    harness.model.setOutcome(t1.localSeq, {
+      kind: "rejectConflict",
+      message: "synthetic conflict on T1",
+      responseGate: g1.promise,
+    });
+
+    // T2 writes D but READS A, so its commit declares a pending read on T1's
+    // still-unconfirmed optimistic write. T2's verdict gate (g2) is NEVER
+    // resolved until teardown.
+    const t2 = beginSet(
+      harness,
+      DOCS.D,
+      valueFor("t2-d"),
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+    harness.model.setOutcome(t2.localSeq, {
+      kind: "accept",
+      responseGate: g2.promise,
+    });
+    let settledFromDropAlone = false;
+    void t2.promise.then(() => {
+      settledFromDropAlone = true;
+    });
+
+    await waitForCondition(
+      () => harness.model.transactLocalSeqs.includes(t2.localSeq),
+      "t2 to reach the wire",
+    );
+
+    // Drop T1. T2 is now provably doomed: its pending read names T1's
+    // dropped optimistic write, which can never become a confirmed seq.
+    g1.resolve();
+    await assertConflict(t1.promise, "synthetic conflict on T1");
+
+    // The cascade fires synchronously inside T1's drop and T2's settle is
+    // pure promise flow from there — give the microtask queue ample turns,
+    // then require the settle. A cascade-less client leaves T2 pending here.
+    for (let turn = 0; turn < 32; turn += 1) {
+      await Promise.resolve();
+    }
+    assert(
+      settledFromDropAlone,
+      "the doomed dependant was NOT rejected by a client-side " +
+        "pending-dependency cascade; it stayed in flight awaiting its own " +
+        "server verdict. On the real editWithRetry path this is exactly what " +
+        "makes a foreground piece.result.set() burn its bounded retry budget " +
+        'and surface "pending dependency not resolved".',
+    );
+
+    const t2Result = await t2.promise;
+    assertExists(t2Result.error);
+    assertEquals(t2Result.error.name, "ConflictError");
+    assert(
+      String(t2Result.error.message).includes(
+        `dropped locally: localSeq=${t1.localSeq}`,
+      ),
+      `unexpected dependant rejection message: ${
+        JSON.stringify(t2Result.error.message)
+      }`,
+    );
+    // The server never judged T2: it was settled entirely client-side.
+    assertEquals(harness.model.rejected.has(t2.localSeq), false);
+    assertEquals(harness.model.applied.has(t2.localSeq), false);
+  } finally {
+    g1.resolve();
+    g2.resolve();
+    await harness.close();
+  }
+});
