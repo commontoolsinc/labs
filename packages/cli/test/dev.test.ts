@@ -1,8 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { join } from "@std/path";
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import { bytesToLines, cf, checkStderr, stripAnsi } from "./utils.ts";
-import { Console as RuntimeConsole } from "@commonfabric/runner";
-import { createRuntime, serializeMainExport } from "../lib/dev.ts";
+import { serializeMainExport } from "../lib/dev.ts";
+
+const cliPackageDir = join(import.meta.dirname!, "..");
+const repoRoot = join(cliPackageDir, "..", "..");
 
 describe("cli check", () => {
   it("rejects main exports that do not serialize as JSON", () => {
@@ -28,45 +32,26 @@ describe("cli check", () => {
   });
 
   it("keeps serialization callbacks off JSON stdout", async () => {
-    const stdout: string[] = [];
-    const stderr: string[] = [];
-    const originalStdoutWrite = Deno.stdout.writeSync;
-    const originalStderrWrite = Deno.stderr.writeSync;
-    Deno.stdout.writeSync = (bytes: Uint8Array) => {
-      stdout.push(new TextDecoder().decode(bytes));
-      return bytes.length;
-    };
-    Deno.stderr.writeSync = (bytes: Uint8Array) => {
-      stderr.push(new TextDecoder().decode(bytes));
-      return bytes.length;
-    };
+    const output = await runDenoCommandWithTemporaryLock({
+      root: repoRoot,
+      cwd: cliPackageDir,
+      args: (lockPath) => [
+        "run",
+        `--lock=${lockPath}`,
+        "--frozen=true",
+        "--allow-env",
+        "--allow-ffi",
+        "--allow-read",
+        join(import.meta.dirname!, "fixtures", "dev-json-output.ts"),
+      ],
+    });
+    const stdout = new TextDecoder().decode(output.stdout);
+    const stderr = new TextDecoder().decode(output.stderr);
 
-    const runtime = await createRuntime({ consoleToStderr: true });
-    try {
-      const sandboxConsole = new RuntimeConsole(runtime.harness);
-      const serialized = serializeMainExport({
-        default: {
-          toJSON() {
-            sandboxConsole.log("check JSON serialized");
-            Promise.resolve().then(() =>
-              sandboxConsole.log("check JSON serialization deferred")
-            );
-            return 1;
-          },
-        },
-      });
-      await Promise.resolve();
-
-      expect(serialized).toBe("1");
-    } finally {
-      await runtime.dispose();
-      Deno.stdout.writeSync = originalStdoutWrite;
-      Deno.stderr.writeSync = originalStderrWrite;
-    }
-
-    expect(stdout).toEqual([]);
-    expect(stderr.join("")).toContain("check JSON serialized");
-    expect(stderr.join("")).toContain("check JSON serialization deferred");
+    expect(output.code).toBe(0);
+    expect(stdout).toBe("1\n");
+    expect(stderr).toContain("check JSON serialized");
+    expect(stderr).toContain("check JSON serialization deferred");
   });
 
   it("Executes a package", async () => {

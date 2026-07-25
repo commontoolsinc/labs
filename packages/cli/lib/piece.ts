@@ -1465,7 +1465,7 @@ export async function executePieceCallable(
   deps: PieceCallableDependencies = {},
 ): Promise<ExecutedPieceCallable> {
   const resolved = await resolvePieceCallable(
-    { ...config, jsonOutput: true },
+    config,
     callableName,
     deps,
   );

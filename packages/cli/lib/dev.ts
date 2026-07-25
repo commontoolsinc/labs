@@ -117,7 +117,7 @@ export async function process(
     );
   for (const pin of resolvedPins) {
     console.error(
-      `resolved ${pin.specifier} -> @${pin.resolvedIdentity} (not pinned; deploy or run cf deps update to pin)`,
+      `resolved ${pin.specifier} -> @${pin.resolvedIdentity} (not pinned; run cf deps update to pin)`,
     );
   }
 

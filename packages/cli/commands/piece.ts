@@ -296,6 +296,23 @@ export function pieceCallRawArgs(
   return ["--json", tail[0]];
 }
 
+export function pieceCallInvocation(
+  tail: string[],
+  literalArgs: string[],
+): { rawArgs: string[]; jsonOutput: boolean } {
+  const rawArgs = pieceCallRawArgs(tail, literalArgs);
+  const argumentOffset = rawArgs[0] === "invoke" || rawArgs[0] === "run"
+    ? 1
+    : 0;
+  const firstArgument = rawArgs[argumentOffset];
+  const jsonOutput = firstArgument === "--json" ||
+    firstArgument === "--json-file" ||
+    (firstArgument === "--help" &&
+      rawArgs.length === argumentOffset + 2 &&
+      rawArgs[argumentOffset + 1] === "--json");
+  return { rawArgs, jsonOutput };
+}
+
 export function writePieceRenderStatus(
   message: string,
   jsonOutput: boolean,
@@ -1099,12 +1116,18 @@ after --. Handlers interpret piped input when no input argument is present.`,
   .action(async function (options, callableName, ...tail) {
     try {
       setQuietMode(!!options.quiet);
-      const rawArgs = pieceCallRawArgs(tail, this.getLiteralArgs());
-      const pieceConfig = parsePieceOptions(options);
+      const invocation = pieceCallInvocation(
+        tail,
+        this.getLiteralArgs(),
+      );
+      const pieceConfig = parsePieceOptions({
+        ...options,
+        json: invocation.jsonOutput,
+      });
       const result = await executePieceCallable(
         pieceConfig,
         callableName,
-        rawArgs,
+        invocation.rawArgs,
       );
       if (result.helpText) {
         render(result.helpText);
