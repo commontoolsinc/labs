@@ -1,4 +1,5 @@
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 import {
   type AtomPatternBindings,
@@ -209,9 +210,16 @@ const extendThroughPattern = (
   pool: readonly unknown[],
 ): AtomPatternBindings[] => {
   const next: AtomPatternBindings[] = [];
+  // TODO(danfuzz): drop the cast once clause alternatives are typed as
+  // `CfcAtom`.
+  const atoms = pool as readonly CfcAtom[];
   for (const environment of environments) {
     for (
-      const extended of matchAtomPatternAgainstAtoms(pattern, pool, environment)
+      const extended of matchAtomPatternAgainstAtoms(
+        pattern,
+        atoms,
+        environment,
+      )
     ) {
       if (!next.some((existing) => deepEqual(existing, extended))) {
         next.push(extended);
@@ -589,7 +597,8 @@ const matchRule = (
     if (homeClauses !== undefined && !homeClauses.has(clauseIndex)) continue;
     const alternatives = clauseAlternatives(confidentiality[clauseIndex]);
     for (const alternative of alternatives) {
-      const target = matchAtomPattern(rule.appliesTo, alternative);
+      // TODO(danfuzz): drop the cast once clause alternatives are typed.
+      const target = matchAtomPattern(rule.appliesTo, alternative as CfcAtom);
       if (target === null) continue;
 
       let environments: AtomPatternBindings[] = [target];

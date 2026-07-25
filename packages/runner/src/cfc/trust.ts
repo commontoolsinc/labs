@@ -1,4 +1,5 @@
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isRecord } from "@commonfabric/utils/types";
 import { type AtomPattern, matchAtomPattern } from "./atom-pattern.ts";
@@ -278,9 +279,10 @@ export const createTrustResolver = (
     const reached = new Set<string>();
     for (const statement of admissible) {
       if (reached.has(statement.implements)) continue;
+      // TODO(danfuzz): drop the cast once clause alternatives are typed.
       if (
         integrityAtoms.some((atom) =>
-          matchAtomPattern(statement.concrete, atom) !== null
+          matchAtomPattern(statement.concrete, atom as CfcAtom) !== null
         )
       ) {
         reached.add(statement.implements);
