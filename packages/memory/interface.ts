@@ -266,7 +266,12 @@ export type Task<Return, Command = never> = Iterable<Command, Return>;
 
 export type Receipt<
   Command extends NonNullable<unknown>,
-  Result extends FabricValue,
+  // A receipt is in-process transport, not stored data: its result is an
+  // `Ok`/`Fail` outcome, and a `Fail` carries an `Error` -- a
+  // `FabricNativeObject`, never a `FabricValue`. Constraining this to
+  // `FabricValue` was only ever satisfiable because an unbranded
+  // `FabricSpecialObject` made every object one.
+  Result,
   Effect,
 > =
   | {
