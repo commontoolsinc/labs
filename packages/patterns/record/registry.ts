@@ -8,8 +8,8 @@
 // 2. Add it to the registry built below (around line 90)
 // 3. Add it to SubPieceType in ./types.ts
 //
-// AI extraction schema is discovered dynamically from pattern.resultSchema
-// at creation time - no manual schema maintenance needed!
+// A module's extraction fields come from its registry entry: the `schema` and
+// `fieldMapping` set here are the source of truth that extraction reads.
 // =============================================================================
 
 import type { SubPieceType } from "./types.ts";
@@ -281,63 +281,6 @@ export function createSubPiece(
     throw new Error(`Unknown sub-piece type: ${type}`);
   }
   return def.createInstance(initialValues);
-}
-
-// Phase 2: Build combined extraction schema
-export function buildExtractionSchema(): {
-  type: "object";
-  properties: Record<string, unknown>;
-} {
-  const properties: Record<string, unknown> = {
-    // Record's own title field - for extracting names/titles
-    // Use "name" as field since LLMs naturally extract person names to "name"
-    name: {
-      type: "string",
-      description:
-        "The primary name for this record - person's full name, recipe name, place name, project name, etc. This becomes the record's title.",
-    },
-  };
-
-  for (const def of getAvailableTypes()) {
-    if (!def.schema) continue;
-
-    // Add primary schema fields
-    Object.assign(properties, def.schema);
-
-    // Add fieldMapping aliases to schema for LLM flexibility
-    // This allows LLMs to extract to natural field names like "email" instead of just "address"
-    if (def.fieldMapping && def.fieldMapping.length > 0) {
-      // First entry in fieldMapping is the primary field (already in schema)
-      const primaryField = def.fieldMapping[0];
-      const primarySchema = def.schema[primaryField];
-
-      // Add aliases (indices 1+) that reference the same type/format
-      for (let i = 1; i < def.fieldMapping.length; i++) {
-        const aliasField = def.fieldMapping[i];
-
-        // Skip if alias already exists in properties (avoid conflicts)
-        if (properties[aliasField]) continue;
-
-        // Create alias schema entry with clear description
-        if (primarySchema && typeof primarySchema === "object") {
-          properties[aliasField] = {
-            ...primarySchema,
-            description: `${
-              (primarySchema as { description?: string }).description || ""
-            } (alias for ${primaryField})`.trim(),
-          };
-        } else {
-          // Fallback if primary schema is malformed
-          properties[aliasField] = {
-            type: "string",
-            description: `Alias for ${primaryField} in ${def.type} module`,
-          };
-        }
-      }
-    }
-  }
-
-  return { type: "object", properties };
 }
 
 // Phase 2: Get field to sub-piece type mapping
