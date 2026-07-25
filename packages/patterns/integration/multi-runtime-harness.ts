@@ -393,6 +393,13 @@ export class MultiRuntimeHarness {
     }
   }
 
+  /** The self-hosted storage server, when this harness created one (absent
+   * when `apiUrl` targeted an external toolshed). Gates read its advertised
+   * capability posture and feed counters; it is not a mutation surface. */
+  get memoryServer(): StandaloneMemoryServer | undefined {
+    return this.#server;
+  }
+
   session(label: string): MultiRuntimeSession {
     const session = this.sessions.find((s) => s.label === label);
     if (!session) {

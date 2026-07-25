@@ -1697,6 +1697,74 @@ export function applyServerPrimaryExecutionGraphRetirementEnvConfig(
   );
 }
 
+/** Canonical env name for the base server-primary execution dial. Owned here
+ * (next to the ambient dial it feeds) because the memory package cannot see
+ * the runner's `EXPERIMENTAL_ENV_VARS`; the runner's canonical mapping
+ * imports THIS constant so the two spellings cannot drift. */
+export const SERVER_PRIMARY_EXECUTION_ENV =
+  "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION";
+
+/** Canonical env name for the F3/F4 doc-set-watch subcapability dial; same
+ * ownership arrangement as {@link SERVER_PRIMARY_EXECUTION_ENV}. */
+export const SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH_ENV =
+  "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH";
+
+/** Canonical boolean-env semantics (mirrors the runner's
+ * `experimentalOptionsFromEnv`): exactly `"true"`/`"false"` apply; unset
+ * leaves the current value; anything else is ignored WITH a warning, never
+ * coerced. */
+const applyBooleanEnvFlag = (
+  readEnv: (name: string) => string | undefined,
+  name: string,
+  set: (enabled: boolean) => void,
+): void => {
+  const raw = readEnv(name);
+  if (raw === undefined) return;
+  if (raw === "true" || raw === "false") {
+    set(raw === "true");
+    return;
+  }
+  console.warn(
+    `[memory] Ignoring ${name}="${raw}" — ` +
+      `expected "true" or "false" (unset = default).`,
+  );
+};
+
+/**
+ * Apply the server-primary execution protocol dials (the base capability and
+ * the layered doc-set-watch subcapability) from the environment.
+ *
+ * WHY (feed FW6, from the 2026-07-24 F5-unreachable-from-browser finding):
+ * these ambient dials drive `getMemoryProtocolFlags()` — the capabilities a
+ * server ADVERTISES in `hello.ok` — but they were only ever installed as a
+ * side effect of constructing a runner `Runtime` in the same realm. Every
+ * realm-separated deployment shape (browser ↔ toolshed, worker runtimes ↔
+ * the standalone server) has NO Runtime in the server realm, so a
+ * dial-driven fleet advertised every server-primary capability false and
+ * clients negotiated nothing. Hosts that construct a memory server
+ * (toolshed's storage route, the standalone server) call this at
+ * construction — the same one-line wiring as
+ * {@link applyServerPrimaryExecutionGraphRetirementEnvConfig} — so the
+ * advertisement derives from the env directly, not from whether a Runtime
+ * happens to live (or has been disposed) in the server's realm. Unset env ⇒
+ * dials untouched (default off) ⇒ the advertisement is byte-identical to
+ * the pre-bridge behavior.
+ */
+export function applyServerPrimaryExecutionEnvConfig(
+  readEnv: (name: string) => string | undefined,
+): void {
+  applyBooleanEnvFlag(
+    readEnv,
+    SERVER_PRIMARY_EXECUTION_ENV,
+    (enabled) => setServerPrimaryExecutionConfig(enabled),
+  );
+  applyBooleanEnvFlag(
+    readEnv,
+    SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH_ENV,
+    (enabled) => setServerPrimaryExecutionDocSetWatchConfig(enabled),
+  );
+}
+
 /**
  * Ambient runtime flag for commit preconditions. The runner owns the feature,
  * but the memory protocol needs the value during client/server handshakes.

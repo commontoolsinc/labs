@@ -13,6 +13,7 @@
  */
 
 import {
+  applyServerPrimaryExecutionEnvConfig,
   applyServerPrimaryExecutionGraphRetirementEnvConfig,
   encodeMemoryBoundary,
 } from "../v2.ts";
@@ -46,6 +47,13 @@ export class StandaloneMemoryServer {
     this.url = new URL(`http://127.0.0.1:${address.port}/`);
   }
 
+  /** Live feed counters of the wrapped server — the same object toolshed
+   * exports via /api/health/stats. Read-only observability for multi-runtime
+   * harnesses and gates; not a mutation surface. */
+  get feedStats(): MemoryServer.Server["feedStats"] {
+    return this.#memory.feedStats;
+  }
+
   static start(
     options: {
       /** Space ACL config, passed through to the memory server. Default:
@@ -60,6 +68,12 @@ export class StandaloneMemoryServer {
     // every host that constructs a memory server, so the W2.9 measurement
     // protocol is executable against a real deployment.
     applyServerPrimaryExecutionGraphRetirementEnvConfig(Deno.env.get);
+    // FW6: the ADVERTISEMENT dials too — this realm hosts no runner Runtime
+    // (whose constructor is the only other installer), so without this the
+    // server advertises every server-primary capability false whatever the
+    // env says, and realm-separated clients can never negotiate the
+    // protocol (the 2026-07-24 F5-unreachable finding).
+    applyServerPrimaryExecutionEnvConfig(Deno.env.get);
     const memory = new MemoryServer.Server({
       authorizeSessionOpen,
       sessionOpenAuth: {

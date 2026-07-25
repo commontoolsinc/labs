@@ -31,6 +31,10 @@ export type ExperimentalRuntimeFlags = {
   modernCellRep?: boolean;
   persistentSchedulerState?: boolean;
   serverPrimaryExecution?: boolean;
+  // Browser own-side half of the F5 doc-set-watch subcapability, layered
+  // above serverPrimaryExecution; threaded to the worker Runtime like the
+  // base flag.
+  serverPrimaryExecutionDocSetWatch?: boolean;
   eagerSourceAnnotation?: boolean;
   systemPatternAutoUpdate?: boolean;
   systemPatternAutoUpdateHome?: boolean;

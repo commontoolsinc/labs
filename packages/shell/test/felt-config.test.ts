@@ -45,12 +45,17 @@ describe("shell felt config", () => {
       EXPERIMENTAL_MODERN_CELL_REP: "true",
       EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: "true",
       EXPERIMENTAL_SERVER_PRIMARY_EXECUTION: "true",
+      EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH: "true",
     }, importFreshConfig);
 
     expect(config.esbuild?.define).toMatchObject({
       $EXPERIMENTAL_MODERN_CELL_REP: "true",
       $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: "true",
       $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION: "true",
+      // The F5 doc-set-watch subcap's browser own-side dial: without this
+      // define the browser build cannot negotiate the subcapability at all
+      // (the 2026-07-24 integration finding).
+      $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH: "true",
     });
     const compileCacheVersion = config.esbuild?.define[
       "globalThis.__cfCompileCacheRuntimeVersion"

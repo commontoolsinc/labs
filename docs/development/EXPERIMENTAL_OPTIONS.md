@@ -29,11 +29,11 @@ was last checked against the code.
 |------|-----------|---------------|---------------------|-------------------|---------------------|
 | [`modernCellRep`](#moderncellrep) | `EXPERIMENTAL_MODERN_CELL_REP` env, or `RuntimeOptions.experimental` | off | Dan Bornstein (#3818) | graduate to always-on, then delete flag | implemented, off by default |
 | [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | on | Bernhard Seefeld (#3646) | graduate to always-on | implemented, on by default, rollback override retained |
-| [`serverPrimaryExecution`](#serverprimaryexecution) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (server-primary execution W0.6) | graduate after the phased authority rollout, then delete flag | implemented, off by default |
+| [`serverPrimaryExecution`](#serverprimaryexecution) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION` env (applied at memory-server construction AND bridged from `RuntimeOptions.experimental`) | off | Bernhard Seefeld (server-primary execution W0.6) | graduate after the phased authority rollout, then delete flag | implemented, off by default |
 | [`serverPrimaryExecutionUserRankCandidates`](#serverprimaryexecutionuserrankcandidates) | `RuntimeOptions.experimental` only (mapped `null` in the canonical env registry) | off | Bernhard Seefeld (server-side execution C1.5a) | fold into `serverPrimaryExecution` once user lanes graduate | implemented, off by default |
 | [`serverPrimaryExecutionSessionRankCandidates`](#serverprimaryexecutionsessionrankcandidates) | `RuntimeOptions.experimental` only (mapped `null` in the canonical env registry) | off | Bernhard Seefeld (server-side execution C2.5) | fold into `serverPrimaryExecution` once session lanes graduate | implemented and gate-bound (C2 complete 2026-07-18), off by default |
 | [`serverPrimaryExecutionCrossSpaceReadCandidates`](#serverprimaryexecutioncrossspacereadcandidates) | `RuntimeOptions.experimental` only (mapped `null` in the canonical env registry) | off | Bernhard Seefeld (server-side execution C3.6) | fold into `serverPrimaryExecution` once cross-space reads graduate | implemented, off by default (CA4/C3A17 ordering-bound: inert until the `cross-space-read` claim-rank stage AND the `cross-space-claims-v1` cohort gate are both live) |
-| [`serverPrimaryExecutionDocSetWatch`](#serverprimaryexecutiondocsetwatch) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH` env, or `RuntimeOptions.experimental`; bridges the memory-side `setServerPrimaryExecutionDocSetWatchConfig()` (negotiated per connection, absent-false) | off | Bernhard Seefeld (server-side execution F3 server / F4 client) | fold into `serverPrimaryExecution` once the feed graduates, then retire the negotiation | implemented, off by default |
+| [`serverPrimaryExecutionDocSetWatch`](#serverprimaryexecutiondocsetwatch) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH` env (applied at memory-server construction, bridged from `RuntimeOptions.experimental`, and exposed to browser builds via the shell define) — the memory-side ambient is `setServerPrimaryExecutionDocSetWatchConfig()` (negotiated per connection, absent-false) | off | Bernhard Seefeld (server-side execution F3 server / F4 client) | fold into `serverPrimaryExecution` once the feed graduates, then retire the negotiation | implemented, off by default |
 | [`serverPrimaryExecutionGraphRetirement`](#serverprimaryexecutiongraphretirement) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES` env (comma-separated space DIDs or `*`), applied at server construction; ambient `setServerPrimaryExecutionGraphRetirementConfig(spaces)` (host-internal, per-space, not negotiated) | empty set (absent-false: no space admitted to the doc-set surface) | Bernhard Seefeld (server-side execution F5; FW5 admission redesign) | fold into `serverPrimaryExecution` once the feed graduates | implemented, empty by default |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
@@ -78,12 +78,24 @@ The mapping from environment variable to flag is defined once, canonically, as
 and read by `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and
 the background piece service all go through that one mapping, so their wirings
 cannot drift; the shell reads the same variables from its build-time defines.
-Six flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
-`serverPrimaryExecution`, `eagerSourceAnnotation`, `systemPatternAutoUpdate`,
-`systemPatternAutoUpdateHome`); `commitPreconditions` and
-`serverPrimaryExecutionUserRankCandidates` are deliberately mapped to `null`
-there, which records "not env-reachable" as a decision rather than an
-omission.
+Seven flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
+`serverPrimaryExecution`, `serverPrimaryExecutionDocSetWatch`,
+`eagerSourceAnnotation`, `systemPatternAutoUpdate`,
+`systemPatternAutoUpdateHome`); `commitPreconditions` and the three rank/
+cross-space candidate dials are deliberately mapped to `null` there, which
+records "not env-reachable" as a decision rather than an omission.
+
+The two server-primary env NAMES are owned by
+[`packages/memory/v2.ts`](../../packages/memory/v2.ts)
+(`SERVER_PRIMARY_EXECUTION_ENV`,
+`SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH_ENV`) and imported into the canonical
+mapping, because memory servers apply the same variables THEMSELVES at
+construction (`applyServerPrimaryExecutionEnvConfig`, called by toolshed's
+storage route and the standalone server): a server's advertised capabilities
+must derive from its environment directly, not from whether a runner Runtime
+happens to be constructed — or disposed — in the server's realm. FW6 closed
+exactly that gap (advertisement stuck all-false in every realm-separated
+topology).
 The mapping accepts exactly `"true"` and `"false"`; any other value is ignored
 with a warning rather than coerced. See [How flags
 propagate](#how-flags-propagate).
@@ -155,7 +167,12 @@ propagate](#how-flags-propagate).
   `RuntimeOptions.experimental.serverPrimaryExecution`. The ambient control
   point is `setServerPrimaryExecutionConfig` in
   [`packages/memory/v2.ts`](../../packages/memory/v2.ts), because both sides of
-  the memory handshake must advertise whether they participate.
+  the memory handshake must advertise whether they participate. Since FW6 the
+  env variable reaches that ambient on BOTH kinds of host: memory servers
+  apply it at construction (`applyServerPrimaryExecutionEnvConfig` — toolshed
+  storage route, standalone server), and runner Runtimes bridge
+  `experimental.serverPrimaryExecution` at construction, so a server's
+  advertisement no longer depends on a Runtime living in its realm.
 - **Added by.** Bernhard Seefeld, in server-primary execution W0.6
   (2026-07-12).
 - **Purpose.** Gates the trusted-client server-primary execution protocol:
@@ -389,12 +406,22 @@ propagate](#how-flags-propagate).
   `RuntimeOptions.experimental.serverPrimaryExecutionDocSetWatch`. The ambient
   control point is `setServerPrimaryExecutionDocSetWatchConfig` in
   [`packages/memory/v2.ts`](../../packages/memory/v2.ts); the runtime bridges
-  the runner option into it exactly like `serverPrimaryExecution`. On a server
-  build the ambient decides whether `getMemoryProtocolFlags` advertises the
-  `serverPrimaryExecutionDocSetWatchV1` subcapability (folded with the base
-  `serverPrimaryExecutionV1` flag, absent-false); on a client build it is the
-  own-side gate the replica ANDs with the negotiated peer flag before it
-  exports doc-set membership.
+  the runner option into it exactly like `serverPrimaryExecution`, and memory
+  servers apply the env variable directly at construction
+  (`applyServerPrimaryExecutionEnvConfig`, FW6 — see the base flag's entry).
+  On a server build the ambient decides whether `getMemoryProtocolFlags`
+  advertises the `serverPrimaryExecutionDocSetWatchV1` subcapability (folded
+  with the base `serverPrimaryExecutionV1` flag, absent-false); on a client
+  build it is the own-side gate the replica ANDs with the negotiated peer
+  flag before it exports doc-set membership. Browser builds get the own-side
+  half through the shell define
+  `$EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH`
+  ([`packages/shell/felt.config.ts`](../../packages/shell/felt.config.ts) →
+  `EXPERIMENTAL.serverPrimaryExecutionDocSetWatch` in
+  [`packages/shell/src/lib/env.ts`](../../packages/shell/src/lib/env.ts) →
+  the worker Runtime's `experimental`); before FW6 the define did not exist,
+  so no browser build could negotiate the subcapability — the 2026-07-24
+  F5-unreachable-from-browser finding.
 - **Added by.** Bernhard Seefeld, in server-side execution F3 (server-side
   `docs` WatchSpec kind, 2026-07-17) and F4 (the client replica's closure
   export / boot-root demotion).

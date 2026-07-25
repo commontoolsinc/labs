@@ -85,6 +85,10 @@
  * | hideInternalStackFrames    | core-default everywhere                          |
  */
 
+import {
+  SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH_ENV,
+  SERVER_PRIMARY_EXECUTION_ENV,
+} from "@commonfabric/memory/v2";
 import type {
   CfcEnforcementMode,
   CfcFlowLabelsMode,
@@ -185,7 +189,12 @@ export type EnvReader = (name: string) => string | undefined;
 export const EXPERIMENTAL_ENV_VARS = {
   modernCellRep: "EXPERIMENTAL_MODERN_CELL_REP",
   persistentSchedulerState: "EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE",
-  serverPrimaryExecution: "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION",
+  // The two server-primary names are imported from @commonfabric/memory/v2:
+  // memory owns the spelling (its `applyServerPrimaryExecutionEnvConfig`
+  // applies the same vars at server construction, and memory cannot import
+  // the runner), so referencing the constants here keeps the one mapping
+  // canonical without a second copy that could drift.
+  serverPrimaryExecution: SERVER_PRIMARY_EXECUTION_ENV,
   // C1 rollout dial: flipped programmatically by the C1.9 measurement
   // fixture alongside the memory-side claim-rank dial; no env exposure.
   serverPrimaryExecutionUserRankCandidates: null,
@@ -198,8 +207,7 @@ export const EXPERIMENTAL_ENV_VARS = {
   // until the memory-side `cross-space-read` stage AND the
   // `cross-space-claims-v1` cohort gate are both in place, so no env exposure.
   serverPrimaryExecutionCrossSpaceReadCandidates: null,
-  serverPrimaryExecutionDocSetWatch:
-    "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH",
+  serverPrimaryExecutionDocSetWatch: SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH_ENV,
   eagerSourceAnnotation: "EXPERIMENTAL_EAGER_SOURCE_ANNOTATION",
   // Scheduler-v2 lineage (#4090) is default-on. Keep a programmatic rollback
   // override while the flag exists; no environment exposure is needed.

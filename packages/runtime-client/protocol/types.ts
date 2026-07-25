@@ -169,6 +169,10 @@ export interface InitializationData {
     modernCellRep?: boolean;
     persistentSchedulerState?: boolean;
     serverPrimaryExecution?: boolean;
+    // Browser own-side half of the F5 doc-set-watch subcapability (layered
+    // above serverPrimaryExecution); installed as worker-realm ambient
+    // config by the Runtime constructor.
+    serverPrimaryExecutionDocSetWatch?: boolean;
     eagerSourceAnnotation?: boolean;
     // Roll a space's system root pattern forward in place when its toolshed
     // serves a newer identity. Default off; home held behind the second flag.

@@ -5,6 +5,7 @@ declare global {
   var $EXPERIMENTAL_MODERN_CELL_REP: string | undefined;
   var $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: string | undefined;
   var $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION: string | undefined;
+  var $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH: string | undefined;
   var $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION: string | undefined;
   var $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE: string | undefined;
   var $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME: string | undefined;
@@ -28,6 +29,10 @@ const EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE_DEFINE =
 const EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DEFINE =
   typeof $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION === "string"
     ? $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION
+    : undefined;
+const EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH_DEFINE =
+  typeof $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH === "string"
+    ? $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH
     : undefined;
 const EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE =
   typeof $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION === "string"
@@ -81,6 +86,15 @@ export const EXPERIMENTAL = {
   serverPrimaryExecution: flagValue(
     "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION",
     EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DEFINE,
+  ),
+  // The browser's own-side half of the F5 doc-set-watch dial: the worker
+  // Runtime installs it as its ambient config, and the replica ANDs it with
+  // the server-advertised subcapability. Layered above serverPrimaryExecution
+  // (enabling the base flag alone never turns it on); without this key a
+  // browser build can never negotiate the subcap, whatever the server says.
+  serverPrimaryExecutionDocSetWatch: flagValue(
+    "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH",
+    EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH_DEFINE,
   ),
   // Debug `.src` source annotation: ON in development builds (so per-primitive
   // source locations keep working for debugging), OFF in production (it is the

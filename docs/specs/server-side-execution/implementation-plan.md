@@ -1901,6 +1901,29 @@ inside the isolated worktree. The gate:
    > `felt.config.ts` and the matching global to `env.ts`, then re-run this
    > protocol. This is the "harness/frontend wiring is the next F5 task"
    > item, now pinned to two named files.
+   >
+   > **RESOLVED — FW6 (2026-07-24).** The shell define + `env.ts` global
+   > landed, and the deeper cause behind them: the server-primary ambient
+   > dials that drive `getMemoryProtocolFlags()` (a server's advertised
+   > capabilities) were only ever installed as a side effect of constructing
+   > a runner `Runtime` in the server's realm — so every realm-separated
+   > topology (browser ↔ toolshed, harness ↔ standalone server) advertised
+   > every server-primary capability **false** whatever the env said, and
+   > clients negotiated nothing. `applyServerPrimaryExecutionEnvConfig` now
+   > installs the base + doc-set dials from the env at memory-server
+   > construction (toolshed storage route, standalone server), independent of
+   > any Runtime; the Runtime constructor installs the doc-set dial
+   > symmetrically with the base flag for client/worker realms. Gated by
+   > `server-execution-f5-env-bridge-gate.test.ts` (real StandaloneMemory
+   > server + real Deno Worker clients + real WebSocket `hello`, env dials
+   > only, no injected flags): dials on ⇒ `serverPrimaryExecutionDocSetWatchV1`
+   > advertised AND `docSetMembersTracked > 0` (F4b closure export engages);
+   > doc-set dial off ⇒ subcap false, membership stays 0. Also
+   > `v2-standalone-env-advertisement-test.ts` (byte-identical default-flags
+   > golden). Note: this closes the *negotiation/advertisement* gap end-to-end
+   > in-harness; the browser wall-time re-run of steps 2–4 against a real
+   > `deno task integration` toolshed is still owed to confirm the
+   > `session.watch.refresh` DAG actually falls to ~0 in the browser session.
 2. **Run the flag-on / flag-off note-create pair** — the same default-app
    note-create series as the FA12 archived baseline
    (`docs/history/development/performance/server-execution-feed-baseline-2026-07-16.md`,

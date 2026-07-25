@@ -11,9 +11,11 @@ import {
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   getServerPrimaryExecutionConfig,
+  getServerPrimaryExecutionDocSetWatchConfig,
   resetCommitPreconditionsConfig,
   resetPersistentSchedulerStateConfig,
   resetServerPrimaryExecutionConfig,
+  resetServerPrimaryExecutionDocSetWatchConfig,
 } from "@commonfabric/memory/v2";
 
 const signer = await Identity.fromPassphrase("test experimental");
@@ -29,6 +31,7 @@ describe("ExperimentalOptions", () => {
     resetCommitPreconditionsConfig();
     resetPersistentSchedulerStateConfig();
     resetServerPrimaryExecutionConfig();
+    resetServerPrimaryExecutionDocSetWatchConfig();
   });
 
   describe("Runtime construction", () => {
@@ -183,6 +186,34 @@ describe("ExperimentalOptions", () => {
       expect(runtime.experimental.serverPrimaryExecution).toBe(true);
 
       await runtime.dispose();
+      await sm.close();
+    });
+
+    // The browser own-side leg of the F5 doc-set-watch subcapability: the
+    // shell worker constructs its Runtime from host-passed experimental
+    // flags (build-time defines), and THIS propagation is what installs the
+    // ambient dial the replica ANDs with the server-advertised subcap. Also
+    // pins the layering: dispose returns both dials to their defaults.
+    it("constructing Runtime with serverPrimaryExecutionDocSetWatch sets global config", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: {
+          serverPrimaryExecution: true,
+          serverPrimaryExecutionDocSetWatch: true,
+        },
+      });
+
+      expect(getServerPrimaryExecutionConfig()).toBe(true);
+      expect(getServerPrimaryExecutionDocSetWatchConfig()).toBe(true);
+      expect(runtime.experimental.serverPrimaryExecutionDocSetWatch).toBe(
+        true,
+      );
+
+      await runtime.dispose();
+      expect(getServerPrimaryExecutionConfig()).toBe(false);
+      expect(getServerPrimaryExecutionDocSetWatchConfig()).toBe(false);
       await sm.close();
     });
 

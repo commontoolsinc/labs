@@ -2132,7 +2132,10 @@ export class Runtime {
     host: string | URL,
     url: string,
   ): Promise<string | undefined> {
-    const key = `${host.toString()} ${url}`;
+    // \u0000 as the joiner (written as an escape: a raw NUL byte here made
+    // grep classify this entire module as binary and silently skip it in
+    // repo-wide searches).
+    const key = `${host.toString()}\u0000${url}`;
     return this.#cachedLookup(
       this.#patternIdentityCache,
       key,

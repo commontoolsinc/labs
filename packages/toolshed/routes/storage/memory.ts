@@ -1,5 +1,8 @@
 import * as MemoryServer from "@commonfabric/memory/v2/server";
-import { applyServerPrimaryExecutionGraphRetirementEnvConfig } from "@commonfabric/memory/v2";
+import {
+  applyServerPrimaryExecutionEnvConfig,
+  applyServerPrimaryExecutionGraphRetirementEnvConfig,
+} from "@commonfabric/memory/v2";
 import { verifySessionOpenAuthorization } from "@commonfabric/memory/v2/session-open-auth";
 import * as FS from "@std/fs";
 import env from "@/env.ts";
@@ -46,6 +49,13 @@ await FS.ensureDir(memoryEngineStoreUrl);
 // `serverPrimaryExecutionGraphRetirement` entry in
 // docs/development/EXPERIMENTAL_OPTIONS.md.
 applyServerPrimaryExecutionGraphRetirementEnvConfig(Deno.env.get);
+
+// FW6: install the server-primary ADVERTISEMENT dials from the env at server
+// construction, not as a side effect of the later `initializeRuntime()` —
+// the advertisement must not depend on whether (or when) a runner Runtime is
+// constructed in this process, and must survive its disposal. Unset env
+// leaves the dials at their defaults (everything advertised false).
+applyServerPrimaryExecutionEnvConfig(Deno.env.get);
 
 export const memoryServer = new MemoryServer.Server({
   store: memoryEngineStoreUrl,

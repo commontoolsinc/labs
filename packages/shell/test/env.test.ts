@@ -36,6 +36,7 @@ Deno.test({
       $EXPERIMENTAL_MODERN_CELL_REP: "true",
       $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: "true",
       $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION: "true",
+      $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH: "true",
       // Explicit define overrides the environment-derived default (this
       // unpatched module resolves ENVIRONMENT=development, whose default
       // would otherwise be true).
@@ -46,6 +47,7 @@ Deno.test({
       modernCellRep: true,
       persistentSchedulerState: true,
       serverPrimaryExecution: true,
+      serverPrimaryExecutionDocSetWatch: true,
       eagerSourceAnnotation: false,
       // Default ON for the non-home root; home stays off.
       systemPatternAutoUpdate: true,
@@ -74,6 +76,44 @@ Deno.test({
       $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION: undefined,
     }, importFreshEnvModule);
     expect(prod.EXPERIMENTAL.eagerSourceAnnotation).toBe(false);
+  },
+});
+
+Deno.test({
+  // The browser's own-side half of the F5 doc-set-watch dial (server-side
+  // execution feed): without this key the browser build can never negotiate
+  // the subcapability, whatever the server advertises — the 2026-07-24
+  // integration finding. Layered above serverPrimaryExecution exactly like
+  // the runner option; no build-environment default.
+  name: "shell env exposes the server-primary doc-set-watch flag with exact override semantics",
+  permissions: { read: true },
+  async fn() {
+    const unset = await withPatchedGlobals({
+      $API_URL: "http://shell.test/",
+      $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH: undefined,
+    }, importFreshEnvModule);
+    // The key must EXIST (so the worker init data always carries the
+    // decision) while an unset define means "runtime default".
+    expect("serverPrimaryExecutionDocSetWatch" in unset.EXPERIMENTAL).toBe(
+      true,
+    );
+    expect(unset.EXPERIMENTAL.serverPrimaryExecutionDocSetWatch)
+      .toBeUndefined();
+
+    const explicitFalse = await withPatchedGlobals({
+      $API_URL: "http://shell.test/",
+      $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH: "false",
+    }, importFreshEnvModule);
+    expect(explicitFalse.EXPERIMENTAL.serverPrimaryExecutionDocSetWatch).toBe(
+      false,
+    );
+
+    const invalid = await withPatchedGlobals({
+      $API_URL: "http://shell.test/",
+      $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH: "1",
+    }, importFreshEnvModule);
+    expect(invalid.EXPERIMENTAL.serverPrimaryExecutionDocSetWatch)
+      .toBeUndefined();
   },
 });
 
