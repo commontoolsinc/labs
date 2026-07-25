@@ -183,19 +183,30 @@ describe("Chat Note pattern test", () => {
         "Editor should contain AI header after clicking Generate",
       );
 
-      // Wait for generation to complete (or timeout)
-      // The Cancel button should appear during generation
-      try {
-        const cancelButton = await page.waitForSelector(
-          'cf-button:has-text("Cancel")',
-          { strategy: "pierce", timeout: 5000 },
-        );
-        if (cancelButton) {
-          // Generation is in progress, wait for it to complete
-          await sleep(10000);
-        }
-      } catch {
-        // Cancel button not found, generation might have completed quickly
+      const generationInProgress = await page.evaluate(() => {
+        const containsCancelButton = (
+          root: Document | ShadowRoot,
+        ): boolean => {
+          for (const element of root.querySelectorAll("*")) {
+            if (
+              element.tagName.toLowerCase() === "cf-button" &&
+              element.textContent?.trim() === "Cancel"
+            ) {
+              return true;
+            }
+            if (
+              element.shadowRoot &&
+              containsCancelButton(element.shadowRoot)
+            ) {
+              return true;
+            }
+          }
+          return false;
+        };
+        return containsCancelButton(document);
+      });
+      if (generationInProgress) {
+        await sleep(10000);
       }
 
       // After generation, check that we have a response

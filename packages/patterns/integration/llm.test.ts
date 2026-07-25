@@ -138,7 +138,6 @@ describe("LLM pattern test", () => {
       // The response appears in a <pre> element
       const responseElement = await page.waitForSelector("pre", {
         strategy: "pierce",
-        timeout: 30000, // 30 second timeout for LLM response
       });
       assert(responseElement, "Should find LLM response element");
 
@@ -196,10 +195,9 @@ describe("LLM pattern test", () => {
       );
       assertEquals(questionText?.trim(), secondQuestion);
 
-      // Wait for new response - increased timeout for LLM
+      // Wait for the new response.
       const responseElement = await page.waitForSelector("pre", {
         strategy: "pierce",
-        timeout: 60000, // 60 second timeout for LLM response
       });
       const responseText = await responseElement.evaluate((el: HTMLElement) =>
         el.textContent
