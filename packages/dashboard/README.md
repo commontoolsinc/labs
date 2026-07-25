@@ -310,6 +310,9 @@ Use a normal key, not a **Management** key — management keys can't call
 
 Powers **discord online**. Needs a bot with the **Server Members** and
 **Presence** privileged intents, invited to the server, plus the server id.
+The guild must contain a role named exactly `Team` or `Team Member`; without
+either, the tile remains unknown. The names are equivalent. Online members with
+either role count as team; every other online member counts as a visitor.
 
 1. **discord.com/developers/applications → New Application**, name it, **Create**.
 2. **Bot** (left sidebar) → **Reset Token** → copy the token (shown once).
