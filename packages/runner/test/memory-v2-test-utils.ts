@@ -157,6 +157,12 @@ export abstract class ScriptedSessionTransport
   /** Called for each hello before hello.ok goes out (e.g. count connections). */
   protected onHello(_helloCount: number): void {}
 
+  /** Flags advertised on hello.ok — override to script an older server
+   * (e.g. one without `pendingReadStacks`). */
+  protected helloFlags(): ReturnType<typeof getMemoryProtocolFlags> {
+    return getMemoryProtocolFlags();
+  }
+
   /** Wire codec seams — override together when a harness needs a specific
    * reconstruction context. */
   protected decode(payload: string): ScriptedTransportMessage {
@@ -183,7 +189,7 @@ export abstract class ScriptedSessionTransport
         this.respond({
           type: "hello.ok",
           protocol: "memory",
-          flags: getMemoryProtocolFlags(),
+          flags: this.helloFlags(),
           sessionOpen: this.#sessionOpen,
         });
         return;

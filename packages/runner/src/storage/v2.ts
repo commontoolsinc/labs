@@ -326,7 +326,18 @@ type PendingCommitRead = {
   id: URI;
   scope?: CellScope;
   path: DocumentPath;
-  localSeq: number;
+  /**
+   * Every pending layer the read's materialized view sat on, as an array —
+   * each must resolve to an accepted commit (server pending-dependency
+   * check; client cascade), and staleness is based at the HIGHEST element,
+   * the doc's top-of-stack layer below the reader, which the array always
+   * includes (CT-1872 1c; 03-commit-model.md §3.5). Scalarized to the
+   * top-of-stack element at send time when the server does not advertise
+   * `pendingReadStacks` — the pre-stack wire shape — and in that case the
+   * send is HELD until every omitted lower dependency settles, so the old
+   * server can never durably accept a commit the client cascade-rejects.
+   */
+  localSeq: number | number[];
   nonRecursive?: boolean;
 };
 
@@ -612,6 +623,11 @@ const comparePath = (left: readonly string[], right: readonly string[]) => {
   return 0;
 };
 
+// Canonical grouping/sort key for a pending read's dependency set: arrays
+// are ascending, so the join is order-stable per identical stack.
+const localSeqKey = (localSeq: number | number[]): string =>
+  Array.isArray(localSeq) ? localSeq.join(",") : String(localSeq);
+
 const compactCommitReads = <
   Read extends ConfirmedCommitRead | PendingCommitRead,
 >(
@@ -633,11 +649,12 @@ const compactCommitReads = <
       return left.seq - right.seq;
     }
 
-    if (
-      "localSeq" in left && "localSeq" in right &&
-      left.localSeq !== right.localSeq
-    ) {
-      return left.localSeq - right.localSeq;
+    if ("localSeq" in left && "localSeq" in right) {
+      const leftKey = localSeqKey(left.localSeq);
+      const rightKey = localSeqKey(right.localSeq);
+      if (leftKey !== rightKey) {
+        return leftKey < rightKey ? -1 : 1;
+      }
     }
 
     if (left.nonRecursive !== right.nonRecursive) {
@@ -656,9 +673,9 @@ const compactCommitReads = <
       ? `confirmed:${
         normalizeCellScope(candidate.scope)
       }:${candidate.id}:${candidate.seq}`
-      : `pending:${
-        normalizeCellScope(candidate.scope)
-      }:${candidate.id}:${candidate.localSeq}`;
+      : `pending:${normalizeCellScope(candidate.scope)}:${candidate.id}:${
+        localSeqKey(candidate.localSeq)
+      }`;
     let group = grouped.get(dependencyKey);
     if (!group) {
       group = {
@@ -714,11 +731,12 @@ const compactCommitReads = <
       return left.seq - right.seq;
     }
 
-    if (
-      "localSeq" in left && "localSeq" in right &&
-      left.localSeq !== right.localSeq
-    ) {
-      return left.localSeq - right.localSeq;
+    if ("localSeq" in left && "localSeq" in right) {
+      const leftKey = localSeqKey(left.localSeq);
+      const rightKey = localSeqKey(right.localSeq);
+      if (leftKey !== rightKey) {
+        return leftKey < rightKey ? -1 : 1;
+      }
     }
 
     if (left.nonRecursive !== right.nonRecursive) {
@@ -732,6 +750,66 @@ const compactCommitReads = <
 const toCommitReadPath = (
   path: readonly (string | number)[],
 ): DocumentPath => toDocumentPath(path.map(String));
+
+// Wire-compat downgrade for servers that do not advertise the
+// `pendingReadStacks` hello flag: collapse every array dependency set —
+// including those inside batched scheduler observations — to its
+// top-of-stack element (the highest localSeq, i.e. the staleness basis).
+// The lower-layer dependency check is lost against such servers by design
+// (CT-1872 1c stays open there). pushCommit compensates by HOLDING the send
+// until every omitted lower dependency settles — without the hold, the old
+// server could durably accept a commit the client cascade-rejects (a
+// split-brain: caller sees ConflictError for a write that landed).
+const scalarizeLocalSeq = (localSeq: number | number[]): number =>
+  Array.isArray(localSeq) ? Math.max(...localSeq) : localSeq;
+
+const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
+  const hasStack = (reads: { localSeq: number | number[] }[]): boolean =>
+    reads.some((read) => Array.isArray(read.localSeq));
+  const scalarizeReads = <Read extends { localSeq: number | number[] }>(
+    reads: Read[],
+  ): Read[] =>
+    reads.map((read) =>
+      Array.isArray(read.localSeq)
+        ? { ...read, localSeq: scalarizeLocalSeq(read.localSeq) }
+        : read
+    );
+  const needsCommit = hasStack(commit.reads.pending);
+  const needsBatch =
+    commit.schedulerObservationBatch?.some((entry) =>
+      hasStack(entry.reads.pending)
+    ) === true;
+  if (!needsCommit && !needsBatch) {
+    return commit;
+  }
+  return {
+    ...commit,
+    ...(needsCommit
+      ? {
+        reads: {
+          confirmed: commit.reads.confirmed,
+          pending: scalarizeReads(commit.reads.pending),
+        },
+      }
+      : {}),
+    ...(needsBatch
+      ? {
+        schedulerObservationBatch: commit.schedulerObservationBatch!.map(
+          (entry) =>
+            hasStack(entry.reads.pending)
+              ? {
+                ...entry,
+                reads: {
+                  confirmed: entry.reads.confirmed,
+                  pending: scalarizeReads(entry.reads.pending),
+                },
+              }
+              : entry,
+        ),
+      }
+      : {}),
+  };
+};
 
 export class StorageManager implements IStorageManager {
   readonly id: string;
@@ -1670,6 +1748,48 @@ type SchedulerObservationBatchEntry = {
   pending: PromiseWithResolvers<Result<Unit, StorageTransactionRejected>>;
 };
 
+/**
+ * A commit that has been issued (optimistic write applied, verdict not yet
+ * settled) and that carries PENDING reads — i.e. its read set depends on
+ * another in-flight commit's optimistic state. Tracked in `#inFlightCommits`
+ * so that when a dependency's optimistic writes are dropped (`dropPending`),
+ * the dependants can be rejected locally instead of waiting for the server's
+ * inevitable "pending dependency not resolved" (CT-1872 1b).
+ *
+ * Commits with NO pending reads are deliberately never registered: a
+ * zero-read mergeable/blind commit is DESIGNED to survive a parent drop (the
+ * server materializes its spine via createMissing — CT-1872 1a), and the
+ * scheduler-observation batch wrapper carries no reads at all. Cascading
+ * either would break intended semantics.
+ */
+type InFlightCommit = {
+  readonly localSeq: number;
+  /**
+   * The unique localSeqs named by `commit.reads.pending` — every in-flight
+   * commit this one's read view sits on (resolution-only lower-layer reads
+   * carry the same `localSeq` field, so they contribute here too).
+   */
+  readonly dependencies: ReadonlySet<number>;
+  readonly operations: NativeCommitOperation[];
+  readonly source?: IStorageTransaction;
+  readonly commit: ClientCommit;
+  /**
+   * Resolves when a rejection is fabricated locally for this commit (a
+   * pending dependency was dropped, or the replica reset). Raced against the
+   * server verdict in `pushCommit`.
+   */
+  readonly localRejection: PromiseWithResolvers<StorageTransactionRejected>;
+  /**
+   * Set synchronously BEFORE `localRejection` resolves, so `pushCommit`'s
+   * pre-send checkpoints can observe the rejection without racing the
+   * microtask queue. `undefined` means "not locally rejected".
+   */
+  localRejectionValue?: StorageTransactionRejected;
+  /** True once `pushCommit`'s finally ran — the outcome is finalized and the
+   * entry can no longer be cascaded. */
+  settled: boolean;
+};
+
 const docKey = (id: URI, scope?: CellScope): string =>
   `${normalizeCellScope(scope)}\0${id}`;
 
@@ -1697,6 +1817,24 @@ class SpaceReplica implements ISpaceReplica {
   readonly #commitPromises = new Set<
     Promise<Result<Unit, StorageTransactionRejected>>
   >();
+  // Issued-but-unsettled commits that carry pending reads, keyed by localSeq.
+  // Scanned by cascadeDroppedDependency when a dependency's optimistic writes
+  // are dropped. See the InFlightCommit doc for why zero-pending-read commits
+  // are never registered.
+  readonly #inFlightCommits = new Map<number, InFlightCommit>();
+  // Every unsettled commit's outcome promise, keyed by localSeq (a superset
+  // of #inFlightCommits: zero-read commits appear here too). The old-server
+  // scalarization hold awaits these for the OMITTED lower dependencies —
+  // entries are removed on settlement, so an absent key means "settled".
+  readonly #commitOutcomeBySeq = new Map<
+    number,
+    Promise<unknown>
+  >();
+  // Server verdict promises superseded by a local rejection. Kept OUT of
+  // #commitPromises so synced() never blocks on a verdict the server may
+  // withhold indefinitely; close()/closeNow() drain the set after client
+  // teardown rejects every in-flight request.
+  readonly #suppressedVerdicts = new Set<Promise<void>>();
   readonly #schedulerObservationBatch: SchedulerObservationBatchEntry[] = [];
   #schedulerObservationFlushScheduled = false;
   #schedulerObservationFlushPromise:
@@ -2006,10 +2144,12 @@ class SpaceReplica implements ISpaceReplica {
     // With the client closed, every in-flight commit and read/watch pull has
     // been rejected and now settles promptly. Awaiting them here can no longer
     // hang and guarantees no transport promise is left pending when close()
-    // resolves.
+    // resolves. Suppressed verdicts (server responses superseded by a local
+    // rejection) live outside #commitPromises and join the same drain.
     await Promise.allSettled([
       ...(observationFlush ? [observationFlush] : []),
       ...this.#commitPromises,
+      ...this.#suppressedVerdicts,
     ]);
     await Promise.allSettled([...this.#syncPromises]);
     await Promise.allSettled([...this.#updatePromises]);
@@ -2087,9 +2227,11 @@ class SpaceReplica implements ISpaceReplica {
       });
     }
     // The fire-and-forget client.close() above rejects in-flight requests; drain
-    // their read pulls too so no transport promise is left pending.
+    // their read pulls too so no transport promise is left pending. Suppressed
+    // verdicts settle off the same teardown rejection.
     void Promise.allSettled([...this.#syncPromises]);
     void Promise.allSettled([...this.#updatePromises]);
+    void Promise.allSettled([...this.#suppressedVerdicts]);
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     this.#syncTasks.clear();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
@@ -2301,6 +2443,17 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   reset(): void {
+    // Every unsettled in-flight commit's optimistic pending write is about to
+    // be wiped by #docs.clear(); locally reject each so its pushCommit
+    // finalizes promptly instead of waiting on a server verdict for state
+    // that no longer exists. readyToRetry resolves immediately (nothing to
+    // repair — the replica is being rebuilt from scratch).
+    for (const entry of [...this.#inFlightCommits.values()]) {
+      this.rejectInFlightCommitLocally(
+        entry,
+        this.makeLocalRejection(entry.commit, "memory replica reset"),
+      );
+    }
     this.#docs.clear();
     this.#watchedIds.clear();
     this.resetConflictAdmissionState();
@@ -2591,7 +2744,36 @@ class SpaceReplica implements ISpaceReplica {
       if (client.serverFlags?.persistentSchedulerState !== true) {
         return { ok: {} };
       }
-      return await this.pushCommit(localSeq, [], commit, undefined);
+      // Same fail-closed degradation for the OTHER capability gap: against a
+      // server without `pendingReadStacks`, an observation whose read sat on
+      // MORE than one pending layer cannot be expressed soundly — the scalar
+      // wire would omit lower layers, and the old server could persist an
+      // observation that observed a dropped write (data commits get the
+      // pushCommit hold instead; observations are droppable bookkeeping, so
+      // dropping beats holding — a held envelope would chain verdict latency
+      // into every semantic commit awaiting this flush). Resolve the dropped
+      // entries {ok} and send the rest.
+      let wireEntries = entries;
+      if (client.serverFlags?.pendingReadStacks !== true) {
+        const expressible = (entry: SchedulerObservationBatchEntry): boolean =>
+          entry.commit.reads.pending.every((read) =>
+            !Array.isArray(read.localSeq) || read.localSeq.length <= 1
+          );
+        wireEntries = entries.filter(expressible);
+        for (const entry of entries) {
+          if (!expressible(entry)) {
+            entry.pending.resolve({ ok: {} });
+          }
+        }
+        if (wireEntries.length === 0) {
+          return { ok: {} };
+        }
+      }
+      const wireBatch: ClientCommit = wireEntries === entries ? commit : {
+        ...commit,
+        schedulerObservationBatch: wireEntries.map((entry) => entry.commit),
+      };
+      return await this.pushCommit(localSeq, [], wireBatch, undefined);
     })()
       .then((result) => {
         for (const entry of entries) {
@@ -2732,9 +2914,122 @@ class SpaceReplica implements ISpaceReplica {
         ),
     );
     this.#commitPromises.add(promise);
+    // Keyed registration for the old-server scalarization hold: a later
+    // stacked commit awaits its omitted lower dependencies' outcomes here.
+    // Removed on settlement (absent key = settled); the .catch keeps the
+    // tracking copy from surfacing as an unhandled rejection.
+    this.#commitOutcomeBySeq.set(
+      localSeq,
+      promise.catch(() => {}).finally(() => {
+        this.#commitOutcomeBySeq.delete(localSeq);
+      }),
+    );
     const result = await promise;
     this.#commitPromises.delete(promise);
     return result;
+  }
+
+  /**
+   * Register a commit in `#inFlightCommits` so a dropped dependency can
+   * reject it locally. Returns undefined — no registration — when the commit
+   * has no pending reads: with nothing read from another commit's optimistic
+   * state there is no dependency to cascade on, and this is the natural
+   * exemption for zero-read/mergeable/blind commits and the
+   * scheduler-observation batch wrapper (all DESIGNED to survive a parent
+   * drop; see the InFlightCommit doc).
+   */
+  private registerInFlightCommit(
+    localSeq: number,
+    operations: NativeCommitOperation[],
+    commit: ClientCommit,
+    source?: IStorageTransaction,
+  ): InFlightCommit | undefined {
+    if (commit.reads.pending.length === 0) {
+      return undefined;
+    }
+    const dependencies = new Set<number>();
+    for (const read of commit.reads.pending) {
+      if (Array.isArray(read.localSeq)) {
+        for (const layer of read.localSeq) {
+          dependencies.add(layer);
+        }
+      } else {
+        dependencies.add(read.localSeq);
+      }
+    }
+    const entry: InFlightCommit = {
+      localSeq,
+      dependencies,
+      operations,
+      source,
+      commit,
+      localRejection: Promise.withResolvers<StorageTransactionRejected>(),
+      settled: false,
+    };
+    this.#inFlightCommits.set(localSeq, entry);
+    return entry;
+  }
+
+  /**
+   * Mark a commit's outcome as finalized and remove it from the cascade scan
+   * set. Idempotent — pushCommit's finally may run after reset() already
+   * signalled a local rejection for the same entry.
+   */
+  private settleInFlightCommit(localSeq: number): void {
+    const entry = this.#inFlightCommits.get(localSeq);
+    if (entry === undefined) {
+      return;
+    }
+    entry.settled = true;
+    this.#inFlightCommits.delete(localSeq);
+  }
+
+  /**
+   * Signal a locally-fabricated rejection for an in-flight commit. Invariant
+   * holder: `localRejectionValue` must be observable synchronously BEFORE
+   * `localRejection` resolves — pushCommit's pre-send checkpoints read the
+   * field directly; the promise only feeds the transact race.
+   */
+  private rejectInFlightCommitLocally(
+    entry: InFlightCommit,
+    rejection: StorageTransactionRejected,
+  ): void {
+    if (entry.settled || entry.localRejectionValue !== undefined) {
+      return;
+    }
+    entry.localRejectionValue = rejection;
+    entry.localRejection.resolve(rejection);
+  }
+
+  /**
+   * A server verdict superseded by a local rejection: consume it off the
+   * books. Late reject is the expected outcome (the server eventually agrees
+   * the dependency never resolved) and is swallowed. Late ACCEPT is
+   * deterministically impossible once resolution-only pending reads are
+   * emitted — the server cannot accept a commit whose pending dependency has
+   * no commit row — so it warns to flag a bug; the write is NOT promoted
+   * (its pending entries were already dropped by finalizeRejection).
+   */
+  private suppressLateVerdict(
+    verdict: Promise<AppliedCommit>,
+    localSeq: number,
+  ): void {
+    const settled = verdict.then(() => {
+      logger.warn("cascade-late-accept", () => [
+        "server accepted a commit after its local rejection; write not promoted",
+        { localSeq },
+      ]);
+    }, (error) => {
+      logger.debug("cascade-late-reject", () => [
+        `late server verdict after local rejection: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { localSeq },
+      ]);
+    }).finally(() => {
+      this.#suppressedVerdicts.delete(settled);
+    });
+    this.#suppressedVerdicts.add(settled);
   }
 
   private async pushCommit(
@@ -2743,32 +3038,71 @@ class SpaceReplica implements ISpaceReplica {
     commit: ClientCommit,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
-    // Strategy 1: a commit whose read set lands on a still-catching-up id.
-    const admissionMode = conflictAdmissionMode();
-    if (admissionMode !== "off") {
-      const threshold = this.preemptThreshold(commit);
-      if (threshold !== undefined) {
-        if (admissionMode === "hold") {
-          const rejection = this.makePreemptRejection(commit, threshold);
-          // Precise mode: hold until the catch-up is applied, then run the
-          // server's stale-read check locally. Revert only the genuinely stale
-          // commits; fall through to send the ones whose reads still hold.
-          try {
-            await this.waitForCaughtUpLocalSeq(threshold);
-          } catch {
-            // Session/replica closing or reset: do not open/send a new session
-            // while shutdown is in progress. Finalize the held rejection so the
-            // optimistic write is dropped and close can drain promptly.
-            return await this.finalizeRejection(
-              localSeq,
-              operations,
-              source,
-              rejection,
-            );
-          }
-          if (!this.#closed && this.commitReadsStaleLocally(commit)) {
-            logger.debug("commit-held-revert", () => [
-              `held commit reverted (locally stale) at caughtUpLocalSeq>=${threshold}`,
+    // Register BEFORE any await: commitOperations calls pushCommit
+    // synchronously after applyPending, so registration is atomic with the
+    // optimistic write — a dependency drop can never slip between the two.
+    const inFlight = this.registerInFlightCommit(
+      localSeq,
+      operations,
+      commit,
+      source,
+    );
+    try {
+      // Strategy 1: a commit whose read set lands on a still-catching-up id.
+      const admissionMode = conflictAdmissionMode();
+      if (admissionMode !== "off") {
+        const threshold = this.preemptThreshold(commit);
+        if (threshold !== undefined) {
+          if (admissionMode === "hold") {
+            const rejection = this.makePreemptRejection(commit, threshold);
+            // Precise mode: hold until the catch-up is applied, then run the
+            // server's stale-read check locally. Revert only the genuinely stale
+            // commits; fall through to send the ones whose reads still hold.
+            try {
+              await this.waitForCaughtUpLocalSeq(threshold);
+            } catch {
+              // Session/replica closing or reset: do not open/send a new session
+              // while shutdown is in progress. Finalize the held rejection so the
+              // optimistic write is dropped and close can drain promptly.
+              return await this.finalizeRejection(
+                localSeq,
+                operations,
+                source,
+                rejection,
+              );
+            }
+            if (inFlight?.localRejectionValue !== undefined) {
+              // A pending dependency was dropped while we held for catch-up;
+              // the commit is provably doomed — finalize without sending.
+              return await this.finalizeRejection(
+                localSeq,
+                operations,
+                source,
+                inFlight.localRejectionValue,
+              );
+            }
+            if (!this.#closed && this.commitReadsStaleLocally(commit)) {
+              logger.debug("commit-held-revert", () => [
+                `held commit reverted (locally stale) at caughtUpLocalSeq>=${threshold}`,
+                { localSeq, operations: operations.length },
+              ]);
+              return await this.finalizeRejection(
+                localSeq,
+                operations,
+                source,
+                rejection,
+              );
+            }
+            logger.debug("commit-held-sent", () => [
+              `held commit sent after catch-up (reads still valid)`,
+              { localSeq, operations: operations.length },
+            ]);
+            // fall through to send
+          } else {
+            // Coarse mode: assume conflict and pre-empt without sending.
+            const rejection = this.makePreemptRejection(commit, threshold);
+            logger.debug("commit-preempted", () => [
+              `commit preempted: stale until caughtUpLocalSeq>=${threshold}`,
               { localSeq, operations: operations.length },
             ]);
             return await this.finalizeRejection(
@@ -2778,93 +3112,164 @@ class SpaceReplica implements ISpaceReplica {
               rejection,
             );
           }
-          logger.debug("commit-held-sent", () => [
-            `held commit sent after catch-up (reads still valid)`,
-            { localSeq, operations: operations.length },
-          ]);
-          // fall through to send
-        } else {
-          // Coarse mode: assume conflict and pre-empt without sending.
-          const rejection = this.makePreemptRejection(commit, threshold);
-          logger.debug("commit-preempted", () => [
-            `commit preempted: stale until caughtUpLocalSeq>=${threshold}`,
-            { localSeq, operations: operations.length },
-          ]);
+        }
+      }
+      // The push marker window covers observation flush + (re)dial + send +
+      // confirm: the full client-side cost of durably landing this commit.
+      // (space.did, commit.local_seq) joins to the server's memory.transact span.
+      const telemetry = this.#getTelemetry();
+      const pushOpId = `push:${this.#space}:${localSeq}`;
+      telemetry?.submit({
+        type: "storage.push.start",
+        id: pushOpId,
+        operation: "transact",
+        localSeq,
+        spaceDid: this.#space,
+      });
+      try {
+        if (
+          operations.length > 0 &&
+          (this.#schedulerObservationBatch.length > 0 ||
+            this.#schedulerObservationFlushPromise)
+        ) {
+          const flushResult = await this.flushSchedulerObservationBatch();
+          const rejection = flushResult.error;
+          if (rejection !== undefined) {
+            const error = new Error(rejection.message);
+            error.name = rejection.name ?? "TransactionError";
+            throw error;
+          }
+        }
+        const { client, session } = await this.sessionHandle();
+        // Wire-compat: only a server advertising `pendingReadStacks` can
+        // resolve array dependency sets — otherwise collapse each to its
+        // top-of-stack element before sending.
+        const wireCommit = client.serverFlags?.pendingReadStacks === true
+          ? commit
+          : scalarizePendingReadStacks(commit);
+        if (wireCommit !== commit && inFlight !== undefined) {
+          // Old-server hold (split-brain guard): the scalarized wire omits
+          // the lower layers, so the server could durably ACCEPT a commit
+          // this client is about to cascade-reject — the caller would see a
+          // ConflictError for a write that landed. Do not send until every
+          // omitted dependency settles: a dropped one trips the doom
+          // checkpoint below before anything reaches the wire, and
+          // all-accepted makes the scalar shape sound (their resolution is
+          // already durable). Verdicts arrive in submission order, so this
+          // adds at most roughly one verdict round-trip, only against
+          // pre-`pendingReadStacks` servers, only for stacked commits.
+          const waits: Promise<unknown>[] = [];
+          for (const read of commit.reads.pending) {
+            if (!Array.isArray(read.localSeq)) continue;
+            const top = scalarizeLocalSeq(read.localSeq);
+            for (const layer of read.localSeq) {
+              if (layer === top) continue;
+              const outcome = this.#commitOutcomeBySeq.get(layer);
+              if (outcome !== undefined) {
+                waits.push(outcome);
+              }
+            }
+          }
+          if (waits.length > 0) {
+            await Promise.all(waits);
+          }
+        }
+        if (inFlight?.localRejectionValue !== undefined) {
+          // A pending dependency was dropped while we awaited the scheduler
+          // batch flush or the session handshake — do not send a commit whose
+          // doom is already provable.
+          telemetry?.submit({
+            type: "storage.push.error",
+            id: pushOpId,
+            sessionId: session.sessionId,
+            error: inFlight.localRejectionValue.name ?? "TransactionError",
+          });
           return await this.finalizeRejection(
             localSeq,
             operations,
             source,
-            rejection,
+            inFlight.localRejectionValue,
           );
         }
-      }
-    }
-    // The push marker window covers observation flush + (re)dial + send +
-    // confirm: the full client-side cost of durably landing this commit.
-    // (space.did, commit.local_seq) joins to the server's memory.transact span.
-    const telemetry = this.#getTelemetry();
-    const pushOpId = `push:${this.#space}:${localSeq}`;
-    telemetry?.submit({
-      type: "storage.push.start",
-      id: pushOpId,
-      operation: "transact",
-      localSeq,
-      spaceDid: this.#space,
-    });
-    try {
-      if (
-        operations.length > 0 &&
-        (this.#schedulerObservationBatch.length > 0 ||
-          this.#schedulerObservationFlushPromise)
-      ) {
-        const flushResult = await this.flushSchedulerObservationBatch();
-        const rejection = flushResult.error;
-        if (rejection !== undefined) {
-          const error = new Error(rejection.message);
-          error.name = rejection.name ?? "TransactionError";
-          throw error;
+        if (inFlight === undefined) {
+          // No pending reads → no dependency that can be dropped from under
+          // this commit; keep the direct await.
+          const applied = await session.transact(wireCommit);
+          this.confirmPending(localSeq, operations, applied);
+          telemetry?.submit({
+            type: "storage.push.complete",
+            id: pushOpId,
+            sessionId: session.sessionId,
+          });
+          return { ok: {} };
         }
+        // Race the server verdict against a locally-fabricated rejection (a
+        // dependency dropped mid-flight, or a replica reset). A server
+        // rejection wins the race by REJECTING it, landing in the catch below.
+        const verdict = session.transact(wireCommit);
+        const outcome = await Promise.race([
+          verdict.then((applied) => ({ applied })),
+          inFlight.localRejection.promise.then((rejection) => ({ rejection })),
+        ]);
+        if ("rejection" in outcome) {
+          // Local rejection won: the eventual server verdict is moot. Do NOT
+          // recordStaleFloor — a locally fabricated rejection carries no server
+          // catch-up point (parity with the preempt path above).
+          this.suppressLateVerdict(verdict, localSeq);
+          telemetry?.submit({
+            type: "storage.push.error",
+            id: pushOpId,
+            sessionId: session.sessionId,
+            error: outcome.rejection.name ?? "TransactionError",
+          });
+          return await this.finalizeRejection(
+            localSeq,
+            operations,
+            source,
+            outcome.rejection,
+          );
+        }
+        this.confirmPending(localSeq, operations, outcome.applied);
+        telemetry?.submit({
+          type: "storage.push.complete",
+          id: pushOpId,
+          sessionId: session.sessionId,
+        });
+        return { ok: {} };
+      } catch (error) {
+        const rejection = toRejectedError(error, commit, this.#space);
+        telemetry?.submit({
+          type: "storage.push.error",
+          id: pushOpId,
+          error: rejection.name ?? "TransactionError",
+        });
+        this.attachProviderReadyToRetry(rejection, localSeq);
+        if (admissionMode !== "off" && rejection.name === "ConflictError") {
+          this.recordStaleFloor(commit, localSeq);
+        }
+        // Counted (even while silent) so multi-writer churn can be read back via
+        // getLoggerCounts(): "commit-conflict" is a stale-seq-basis rejection that
+        // drops only the optimistic pending write and re-derives from confirmed
+        // state; a non-falling count under load means conflicts ratchet rather
+        // than storm.
+        logger.debug(
+          rejection.name === "ConflictError"
+            ? "commit-conflict"
+            : "commit-rejected",
+          () => [
+            `commit ${rejection.name ?? "rejected"}: ${rejection.message}`,
+            { localSeq, operations: operations.length },
+          ],
+        );
+        return await this.finalizeRejection(
+          localSeq,
+          operations,
+          source,
+          rejection,
+        );
       }
-      const { session } = await this.sessionHandle();
-      const applied = await session.transact(commit);
-      this.confirmPending(localSeq, operations, applied);
-      telemetry?.submit({
-        type: "storage.push.complete",
-        id: pushOpId,
-        sessionId: session.sessionId,
-      });
-      return { ok: {} };
-    } catch (error) {
-      const rejection = toRejectedError(error, commit, this.#space);
-      telemetry?.submit({
-        type: "storage.push.error",
-        id: pushOpId,
-        error: rejection.name ?? "TransactionError",
-      });
-      this.attachProviderReadyToRetry(rejection, localSeq);
-      if (admissionMode !== "off" && rejection.name === "ConflictError") {
-        this.recordStaleFloor(commit, localSeq);
-      }
-      // Counted (even while silent) so multi-writer churn can be read back via
-      // getLoggerCounts(): "commit-conflict" is a stale-seq-basis rejection that
-      // drops only the optimistic pending write and re-derives from confirmed
-      // state; a non-falling count under load means conflicts ratchet rather
-      // than storm.
-      logger.debug(
-        rejection.name === "ConflictError"
-          ? "commit-conflict"
-          : "commit-rejected",
-        () => [
-          `commit ${rejection.name ?? "rejected"}: ${rejection.message}`,
-          { localSeq, operations: operations.length },
-        ],
-      );
-      return await this.finalizeRejection(
-        localSeq,
-        operations,
-        source,
-        rejection,
-      );
+    } finally {
+      this.settleInFlightCommit(localSeq);
     }
   }
 
@@ -2894,6 +3299,11 @@ class SpaceReplica implements ISpaceReplica {
       : undefined;
     await this.waitForConflictReadRepair(rejection);
     this.dropPending(localSeq);
+    // Every drop funnels through here (server conflict, preempt, cascade,
+    // reset — this is dropPending's only call site), so scanning right after
+    // the drop catches every dependant; transitivity emerges from recursion
+    // (a victim's own finalizeRejection lands back here with its localSeq).
+    this.cascadeDroppedDependency(localSeq);
     if (before !== undefined) {
       const changes = before.compare(this);
       // The revert snapshots CURRENT confirmed state (which already includes
@@ -2955,12 +3365,29 @@ class SpaceReplica implements ISpaceReplica {
       confirmedSeq?: number,
     ) => {
       const record = this.#docs.get(docKey(id, scope));
-      const pendingLocalSeq = record?.pending
-        .filter((version) => version.localSeq < localSeq)
-        .at(-1)?.localSeq;
+      // The read's materialized view sat on EVERY lower pending layer, not
+      // just the nearest one: name them ALL (ascending; the last element is
+      // the doc's top-of-stack below this commit) so a dropped deeper layer
+      // still dooms this commit (server: pending-dependency resolution;
+      // client: cascade). Staleness is based at the highest element only —
+      // a staleness basis on a lower layer would false-conflict with the
+      // session's own later stacked writes (CT-1872 1c).
+      const layers = [
+        ...new Set(
+          record?.pending
+            .filter((version) => version.localSeq < localSeq)
+            .map((version) => version.localSeq) ?? [],
+        ),
+      ].sort((left, right) => left - right);
       const shape = nonRecursive ? { nonRecursive: true } : {};
-      if (pendingLocalSeq !== undefined) {
-        pending.push({ id, scope, path, localSeq: pendingLocalSeq, ...shape });
+      if (layers.length > 0) {
+        pending.push({
+          id,
+          scope,
+          path,
+          localSeq: layers.length === 1 ? layers[0] : layers,
+          ...shape,
+        });
       } else {
         confirmed.push({
           id,
@@ -3279,6 +3706,84 @@ class SpaceReplica implements ISpaceReplica {
       // to wrap, so we do NOT call attachProviderReadyToRetry here).
       readyToRetry: () => this.waitForCaughtUpLocalSeq(threshold),
     };
+  }
+
+  // Locally-fabricated rejection for a commit whose doom is provable
+  // client-side (dropped pending dependency, or replica reset). Modeled on
+  // makePreemptRejection. readyToRetry resolves immediately: the PRIMARY
+  // rejection's finalizeRejection already awaited its read repair (or reset
+  // wiped the replica outright), so a cascaded victim adds no wait of its own.
+  private makeLocalRejection(
+    commit: ClientCommit,
+    message: string,
+  ): StorageTransactionRejected {
+    let firstId: URI | undefined;
+    for (const operation of commit.operations) {
+      if (operation.op !== "sqlite") {
+        firstId = operation.id as URI;
+        break;
+      }
+    }
+    return {
+      name: "ConflictError",
+      message,
+      transaction: commit as unknown as Transaction,
+      conflict: {
+        space: this.#space,
+        the: DOCUMENT_MIME,
+        of: firstId ?? "of:unknown",
+        expected: null,
+        actual: null,
+        existsInHistory: false,
+        history: [],
+      },
+      readyToRetry: () => Promise.resolve(),
+    };
+  }
+
+  private makeCascadeRejection(
+    entry: InFlightCommit,
+    droppedLocalSeq: number,
+  ): StorageTransactionRejected {
+    return this.makeLocalRejection(
+      entry.commit,
+      `pending dependency dropped locally: localSeq=${droppedLocalSeq}`,
+    );
+  }
+
+  /**
+   * CT-1872 1b: when a commit's optimistic writes are dropped, every
+   * in-flight commit whose pending reads name that localSeq is provably
+   * doomed — the dropped commit will never gain a commit row in the
+   * per-session commit table, so the server would reject each dependant with
+   * "pending dependency not resolved" only after a full round trip (a window
+   * of up to 30s+ per commit). Fabricate that rejection locally instead.
+   *
+   * Commits with no pending reads never enter `#inFlightCommits`, so
+   * zero-read mergeable/blind commits are structurally exempt — they are
+   * DESIGNED to survive a parent drop (the server materializes their spine
+   * via createMissing). Resolving the promises here queues the victims'
+   * continuations on later microtasks; each victim snapshots its own revert
+   * Differential before its own drop, so the scan itself never re-enters.
+   */
+  private cascadeDroppedDependency(droppedLocalSeq: number): void {
+    for (const entry of [...this.#inFlightCommits.values()]) {
+      if (
+        entry.settled ||
+        entry.localRejectionValue !== undefined ||
+        !entry.dependencies.has(droppedLocalSeq)
+      ) {
+        continue;
+      }
+      this.rejectInFlightCommitLocally(
+        entry,
+        this.makeCascadeRejection(entry, droppedLocalSeq),
+      );
+      logger.debug("commit-cascade-rejected", () => [
+        `commit locally rejected: pending dependency localSeq=${droppedLocalSeq} was dropped`,
+        { localSeq: entry.localSeq, operations: entry.operations.length },
+      ]);
+    }
   }
 
   private attachProviderReadyToRetry(

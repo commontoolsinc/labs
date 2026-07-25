@@ -5433,6 +5433,29 @@ const validateConfirmedReads = (
   }
 };
 
+// Shared normalization/validation for a pending read's dependency set: a
+// non-empty array (or scalar) of integer localSeqs. Malformed shapes are a
+// protocol violation regardless of which validator (ordinary commit or
+// scheduler observation) encounters them.
+const pendingReadLayers = (
+  read: { id: string; localSeq: number | number[] },
+): number[] => {
+  const layers = Array.isArray(read.localSeq) ? read.localSeq : [read.localSeq];
+  if (layers.length === 0) {
+    throw new ProtocolError(
+      `pending read on ${read.id} names no localSeq`,
+    );
+  }
+  for (const layer of layers) {
+    if (!Number.isInteger(layer)) {
+      throw new ProtocolError(
+        `pending read on ${read.id} names a non-integer localSeq`,
+      );
+    }
+  }
+  return layers;
+};
+
 const resolvePendingReads = (
   engine: Engine,
   sessionKey: string,
@@ -5444,22 +5467,31 @@ const resolvePendingReads = (
   const resolutions = new Map<number, { localSeq: number; seq: number }>();
 
   for (const read of commit.reads.pending) {
-    let resolution = resolutions.get(read.localSeq);
-    if (!resolution) {
-      const row = engine.statements.selectPendingResolution.get({
-        session_id: sessionKey,
-        local_seq: read.localSeq,
-      }) as { seq: number } | undefined;
-      if (!row) {
-        throw new ConflictError(
-          `pending dependency not resolved: ${read.localSeq}`,
-        );
+    // An array localSeq names EVERY pending layer the read's view sat on:
+    // each element must have resolved to an accepted commit, and staleness
+    // is checked exactly once, based at the HIGHEST element — the document's
+    // top-of-stack layer below the reader, which the array MUST include
+    // (03-commit-model.md §3.5). A scalar is the single-layer form.
+    const layers = pendingReadLayers(read);
+    let basis: { localSeq: number; seq: number } | undefined;
+    for (const localSeq of layers) {
+      let resolution = resolutions.get(localSeq);
+      if (!resolution) {
+        const row = engine.statements.selectPendingResolution.get({
+          session_id: sessionKey,
+          local_seq: localSeq,
+        }) as { seq: number } | undefined;
+        if (!row) {
+          throw new ConflictError(
+            `pending dependency not resolved: ${localSeq}`,
+          );
+        }
+        resolution = { localSeq, seq: row.seq };
+        resolutions.set(localSeq, resolution);
       }
-      resolution = {
-        localSeq: read.localSeq,
-        seq: row.seq,
-      };
-      resolutions.set(read.localSeq, resolution);
+      if (basis === undefined || localSeq > basis.localSeq) {
+        basis = resolution;
+      }
     }
 
     const conflictSeq = findConflictSeq(
@@ -5467,13 +5499,15 @@ const resolvePendingReads = (
       branch,
       read.id,
       resolveScopeKey(read.scope, { principal, sessionId }),
-      resolution.seq,
+      basis!.seq,
       read.path,
       read.nonRecursive ?? false,
     );
     if (conflictSeq !== null) {
       throw new ConflictError(
-        `stale pending read: ${read.id} via localSeq ${read.localSeq} conflicted with seq ${conflictSeq}`,
+        `stale pending read: ${read.id} via localSeq ${
+          basis!.localSeq
+        } conflicted with seq ${conflictSeq}`,
       );
     }
   }
@@ -5568,20 +5602,28 @@ const schedulerObservationReadDropReason = (
 
   const resolutions = new Map<number, { localSeq: number; seq: number }>();
   for (const read of reads.pending) {
-    let resolution = resolutions.get(read.localSeq);
-    if (!resolution) {
-      const row = engine.statements.selectPendingResolution.get({
-        session_id: sessionKey,
-        local_seq: read.localSeq,
-      }) as { seq: number } | undefined;
-      if (!row) {
-        return "pending-read-missing";
+    // Same contract as resolvePendingReads: every listed layer must have
+    // resolved; staleness is checked once, based at the highest layer. A
+    // malformed dependency set throws the same ProtocolError as on the
+    // ordinary-commit path rather than degrading to a drop reason.
+    const layers = pendingReadLayers(read);
+    let basis: { localSeq: number; seq: number } | undefined;
+    for (const localSeq of layers) {
+      let resolution = resolutions.get(localSeq);
+      if (!resolution) {
+        const row = engine.statements.selectPendingResolution.get({
+          session_id: sessionKey,
+          local_seq: localSeq,
+        }) as { seq: number } | undefined;
+        if (!row) {
+          return "pending-read-missing";
+        }
+        resolution = { localSeq, seq: row.seq };
+        resolutions.set(localSeq, resolution);
       }
-      resolution = {
-        localSeq: read.localSeq,
-        seq: row.seq,
-      };
-      resolutions.set(read.localSeq, resolution);
+      if (basis === undefined || localSeq > basis.localSeq) {
+        basis = resolution;
+      }
     }
 
     const conflictSeq = findConflictSeq(
@@ -5589,7 +5631,7 @@ const schedulerObservationReadDropReason = (
       branch,
       read.id,
       resolveScopeKey(read.scope, { principal, sessionId }),
-      resolution.seq,
+      basis!.seq,
       read.path,
       read.nonRecursive ?? false,
     );
