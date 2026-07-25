@@ -28,7 +28,7 @@ export interface SchedulerActionOptions {
  * binds the proof to the exact implementation/runtime fingerprints. Runtime
  * observations without this object are deliberately incomplete.
  */
-export interface CompleteActionScopeSummary {
+export type CompleteActionScopeSummary = {
   version: 1;
   complete: true;
   implementationFingerprint: string;
@@ -38,14 +38,14 @@ export interface CompleteActionScopeSummary {
   writes: IMemorySpaceAddress[];
   materializerWriteEnvelopes: IMemorySpaceAddress[];
   directOutputs: IMemorySpaceAddress[];
-}
+};
 
 export type CompleteActionScopeSummaryInput = Omit<
   CompleteActionScopeSummary,
   "implementationFingerprint" | "runtimeFingerprint"
 >;
 
-export interface SchedulerActionObservation {
+export type SchedulerActionObservation = {
   version: 1 | 2;
   ownerSpace?: string;
   branch: string;
@@ -69,7 +69,7 @@ export interface SchedulerActionObservation {
   actionOptions?: SchedulerActionOptions;
   status: "success" | "failed";
   errorFingerprint?: string;
-}
+};
 
 export interface PersistedSchedulerObservationSnapshot {
   executionContextKey: SchedulerExecutionContextKey;

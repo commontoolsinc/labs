@@ -799,14 +799,14 @@ export interface OpenOptions {
   snapshotRetention?: number;
 }
 
-export interface InvocationRecord {
+export type InvocationRecord = {
   iss: string;
   aud?: string | null;
   cmd: string;
   sub: string;
   args?: FabricValue;
   [key: string]: unknown;
-}
+};
 
 export type AuthorizationRecord = FabricValue;
 
@@ -871,12 +871,12 @@ export type SchedulerObservationTransactionKind =
   | "action-run"
   | "event-preflight";
 
-export interface SchedulerObservationAddress {
+export type SchedulerObservationAddress = {
   space: string;
   id: EntityId;
   scope?: CellScope;
   path: readonly string[];
-}
+};
 
 export interface ResolvedSchedulerObservationAddress
   extends SchedulerObservationAddress {
@@ -887,7 +887,7 @@ type SchedulerWriteAddress = SchedulerObservationAddress & {
   scopeKey?: string;
 };
 
-export interface CompleteActionScopeSummary {
+export type CompleteActionScopeSummary = {
   version: 1;
   complete: true;
   implementationFingerprint: string;
@@ -897,9 +897,9 @@ export interface CompleteActionScopeSummary {
   writes: SchedulerObservationAddress[];
   materializerWriteEnvelopes: SchedulerObservationAddress[];
   directOutputs: SchedulerObservationAddress[];
-}
+};
 
-export interface SchedulerActionObservation {
+export type SchedulerActionObservation = {
   version: 1 | 2;
   ownerSpace?: string;
   branch: BranchName;
@@ -927,7 +927,7 @@ export interface SchedulerActionObservation {
   };
   status: "success" | "failed";
   errorFingerprint?: string;
-}
+};
 
 const isSchedulerRecord = (
   value: unknown,
