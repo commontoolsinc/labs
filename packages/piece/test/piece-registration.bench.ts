@@ -19,17 +19,17 @@ const createDefaultPattern = () => {
   const { handler, pattern } = commonfabric;
   const addPiece = handler<
     { piece: Cell<unknown> },
-    { allPieces: Cell<Cell<unknown>[]> }
+    { pieceRegistry: Cell<Cell<unknown>[]> }
   >(
-    ({ piece }, { allPieces }) => {
-      allPieces.push(piece);
+    ({ piece }, { pieceRegistry }) => {
+      pieceRegistry.push(piece);
     },
     { proxy: true },
   );
-  return pattern<{ allPieces: Cell<unknown>[] }>(
-    ({ allPieces }) => ({
-      allPieces,
-      addPiece: addPiece({ allPieces }),
+  return pattern<{ pieceRegistry: Cell<unknown>[] }>(
+    ({ pieceRegistry }) => ({
+      pieceRegistry,
+      addPiece: addPiece({ pieceRegistry }),
     }),
   );
 };
@@ -68,7 +68,7 @@ async function createBenchEnv(pieceCount: number): Promise<BenchEnv> {
 
   const defaultPatternPiece = await manager.runPersistent(
     createDefaultPattern(),
-    { allPieces: [] },
+    { pieceRegistry: [] },
     "piece-registration-default-pattern",
   );
   await manager.linkDefaultPattern(defaultPatternPiece);

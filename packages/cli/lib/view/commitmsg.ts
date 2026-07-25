@@ -14,6 +14,8 @@ export const MESSAGE_INDENT = "    ";
 const OBJECT_ID = "[0-9a-f]{4,64}";
 const COMMIT_RE = new RegExp(`^commit (${OBJECT_ID})\\b`);
 const ONELINE_COMMIT_RE = new RegExp(`^(${OBJECT_ID})\\s+\\S`);
+// The subject text of a compact one-line header: everything after the hash.
+const ONELINE_SUBJECT_RE = new RegExp(`^${OBJECT_ID}\\s+(\\S.*)$`);
 const EMAIL_COMMIT_RE = new RegExp(
   `^From (${OBJECT_ID}) Mon Sep 17 00:00:00 2001$`,
 );
@@ -172,6 +174,57 @@ export function extractMessage(
     );
   }
   return body.join("\n");
+}
+
+/**
+ * Each commit's subject line, keyed by hash. The subject is the first line of
+ * the indented message (standard `git show` / `git log -p`), the text after the
+ * hash on a compact one-line header, or the `Subject:` header of a
+ * `git format-patch` email — whichever the input carries. Absent for a commit
+ * whose subject cannot be found.
+ */
+export function commitSubjects(lines: readonly string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const m of findCommitMessages(lines)) {
+    const first = withoutTransportCR(lines[m.start] ?? "").trim();
+    if (first.length > 0 && !out.has(m.sha)) out.set(m.sha, first);
+  }
+  // The compact and email formats have no indented body; their subject rides the
+  // header itself, so fill only the commits the message scan did not cover.
+  for (const header of findCommitHeaders(lines)) {
+    if (out.has(header.sha)) continue;
+    const subject = inlineSubject(lines, header);
+    if (subject.length > 0) out.set(header.sha, subject);
+  }
+  return out;
+}
+
+/** The subject a header carries inline: the text after the hash on a compact
+ * (`git log --oneline`) header, or the `Subject:` header of a `git format-patch`
+ * email with its `[PATCH …]` prefix removed. Empty when neither shape applies. */
+function inlineSubject(
+  lines: readonly string[],
+  header: CommitHeader,
+): string {
+  const line = withoutTransportCR(lines[header.line] ?? "");
+  const compact = ONELINE_SUBJECT_RE.exec(line);
+  if (compact) return compact[1];
+  if (!EMAIL_COMMIT_RE.test(line)) return "";
+  // The email envelope runs to the first blank line; the Subject may wrap onto
+  // continuation lines (leading whitespace), which join with a single space.
+  let subject: string | null = null;
+  for (let i = header.line + 1; i < lines.length; i++) {
+    const h = withoutTransportCR(lines[i]);
+    if (h === "") break;
+    if (subject !== null) {
+      if (/^\s/.test(h)) subject += ` ${h.trim()}`;
+      else break; // a later header ends the Subject
+    } else {
+      const m = /^Subject:\s*(.*)$/.exec(h);
+      if (m) subject = m[1];
+    }
+  }
+  return subject === null ? "" : subject.replace(/^\[[^\]]*\]\s*/, "").trim();
 }
 
 /** Whether `sha` names the same commit as `head` (either may be abbreviated). */

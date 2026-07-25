@@ -7,6 +7,8 @@ import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { setPatternEnvironment } from "../src/env.ts";
+import { schemaWithOpenObjects } from "../src/builtins/fetch.ts";
+import type { JSONSchema } from "@commonfabric/api";
 
 const signer = await Identity.fromPassphrase("test fetch builtins");
 const space = signer.did();
@@ -40,7 +42,7 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
 
     fetchCalls = [];
     originalFetch = globalThis.fetch;
-    globalThis.fetch = async (
+    globalThis.fetch = (
       input: string | URL | Request,
       init?: RequestInit,
     ) => {
@@ -52,26 +54,38 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
 
       fetchCalls.push({ url, init });
 
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
       if (url.endsWith("/text")) {
-        return new Response("hello fetch builtins", {
-          status: 200,
-          headers: { "Content-Type": "text/plain; charset=utf-8" },
-        });
+        return Promise.resolve(
+          new Response("hello fetch builtins", {
+            status: 200,
+            headers: { "Content-Type": "text/plain; charset=utf-8" },
+          }),
+        );
       }
       if (url.endsWith("/binary")) {
-        return new Response(BINARY_BODY.slice(), {
-          status: 200,
-          headers: { "Content-Type": "Image/PNG; some=param" },
-        });
+        return Promise.resolve(
+          new Response(BINARY_BODY.slice(), {
+            status: 200,
+            headers: { "Content-Type": "Image/PNG; some=param" },
+          }),
+        );
       }
-      return new Response(
-        JSON.stringify({ name: "widget", count: 3, extra: "ignored" }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        },
+      if (url.endsWith("/tuple")) {
+        return Promise.resolve(
+          new Response(JSON.stringify([{ id: "a", extra: 1 }, 42]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ name: "widget", count: 3, extra: "ignored" }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
       );
     };
   });
@@ -100,9 +114,7 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
     tx.commit();
     tx = runtime.edit();
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
     await result.pull();
-    await new Promise((resolve) => setTimeout(resolve, 200));
     await result.pull();
 
     return result.get() as { pending: any; result: any; error: any };
@@ -245,6 +257,28 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
     });
   });
 
+  it("fetchJson accepts a tuple (prefixItems) result schema", async () => {
+    // Tuple slots are not validated on this path today: `prefixItems` sits in
+    // the strict-constraints tier and fetch verification runs non-strict. This
+    // pins that a tuple result schema doesn't reject the fetch outright; the
+    // open-objects rewrite of tuple slots is pinned by the
+    // schemaWithOpenObjects unit tests below.
+    const data = await runFetch("fetchJson", {
+      url: "http://mock-test-server.local/tuple",
+      schema: {
+        type: "array",
+        prefixItems: [
+          { type: "object", properties: { id: { type: "string" } } },
+          { type: "number" },
+        ],
+      },
+    }, "fetch-json-tuple-schema-test");
+
+    expect(data.error).toBeUndefined();
+    expect(data.pending).toBe(false);
+    expect(data.result).toEqual([{ id: "a", extra: 1 }, 42]);
+  });
+
   it("clears a prior result when the URL becomes empty", async () => {
     const urlCell = runtime.getCell<string>(
       space,
@@ -272,7 +306,6 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
     tx = runtime.edit();
 
     await resultCell.pull();
-    await new Promise((resolve) => setTimeout(resolve, 200));
     await resultCell.pull();
 
     expect((resultCell.get() as { result: unknown }).result).toBe(
@@ -286,7 +319,6 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
     tx = runtime.edit();
 
     await resultCell.pull();
-    await new Promise((resolve) => setTimeout(resolve, 100));
     await resultCell.pull();
 
     const cleared = resultCell.get() as {
@@ -297,5 +329,57 @@ describe("fetch builtins (fetchBinary / fetchText / fetchJson)", () => {
     expect(cleared.result).toBeUndefined();
     expect(cleared.pending).toBe(false);
     expect(cleared.error).toBeUndefined();
+  });
+});
+
+describe("schemaWithOpenObjects", () => {
+  it("opens object schemas inside prefixItems slots (CT-1895)", () => {
+    const opened = schemaWithOpenObjects({
+      type: "array",
+      prefixItems: [
+        { type: "object", properties: { id: { type: "string" } } },
+        { type: "number" },
+      ],
+    }) as Record<string, any>;
+
+    expect(opened.prefixItems[0].additionalProperties).toBe(true);
+    expect(opened.prefixItems[1].additionalProperties).toBeUndefined();
+  });
+
+  it("leaves never-emitted keywords untouched", () => {
+    // `contains`/`if`/`then`/`else` are in schema-walk's unused tier — our
+    // schemas never emit them, and rewriting them here would make those paths
+    // look supported. If one becomes emitted it moves to the used tier and
+    // this walk picks it up.
+    const opened = schemaWithOpenObjects({
+      type: "array",
+      contains: { type: "object", properties: { x: { type: "number" } } },
+      if: { type: "object", properties: { kind: { const: "a" } } },
+      then: { type: "object", properties: { a: { type: "string" } } },
+    } as JSONSchema) as Record<string, any>;
+
+    expect(opened.contains.additionalProperties).toBeUndefined();
+    expect(opened.if.additionalProperties).toBeUndefined();
+    expect(opened.then.additionalProperties).toBeUndefined();
+  });
+
+  it("still opens nested objects and leaves non-object shapes alone", () => {
+    const opened = schemaWithOpenObjects({
+      type: "object",
+      properties: {
+        list: {
+          type: "array",
+          items: { type: "object", properties: { y: { type: "string" } } },
+        },
+      },
+      $defs: {
+        Def: { type: "object", properties: { z: { type: "number" } } },
+      },
+    }) as Record<string, any>;
+
+    expect(opened.additionalProperties).toBe(true);
+    expect(opened.properties.list.additionalProperties).toBeUndefined();
+    expect(opened.properties.list.items.additionalProperties).toBe(true);
+    expect(opened.$defs.Def.additionalProperties).toBe(true);
   });
 });

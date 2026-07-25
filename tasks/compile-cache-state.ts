@@ -1,15 +1,15 @@
 /**
- * Compile-cache key state derivation for perf-check.
+ * Compile-cache key state derivation for the coverage check.
  *
  * The pattern-test jobs restore a compile byte cache under keys whose PREFIX
  * hashes a transformer-adjacent path set (the `cc-*` cache keys in
  * .github/workflows/deno.yml). The restore-keys prefix includes that hash, so
  * a run whose commit changes any file in the set gets no cache fallback at
- * all: every pattern compiles cold, and compile-dominated wall times inflate
- * roughly 1.6-1.9x. Gating such a run against warm baselines is a false
- * positive by construction — and the first main-branch run after such a merge
- * is equally cold, polluting the baseline history the same way (observed as
- * the recurring "single-test outlier" spikes).
+ * all: every pattern compiles cold. A cold run also covers cold-compile-only
+ * branches, which lowers its coverage debt. The coverage ratchet must not use
+ * such a run as its baseline, or later warm PRs fail against a stricter,
+ * unreachable bar — and the first main-branch run after a fingerprint-changing
+ * merge is equally cold, so its coverage baseline is tainted the same way.
  *
  * Only the prefix inputs matter for coldness: each job's key suffix (its
  * pattern sources) still restores through the prefix restore-key when it
@@ -28,14 +28,14 @@ import {
   type CompileCacheStates,
   githubGet,
   REPO,
-} from "./perf-lib.ts";
+} from "./ci-check-lib.ts";
 
 /** Run-level fingerprint verdict; "unknown" must fail open (keep + gate). */
 export type CacheKeyState = "cold" | "warm";
 
 /**
  * Mirror of the FIRST hashFiles(...) argument list of every `cc-*` compile
- * cache key in .github/workflows/deno.yml. perf-cache-state.test.ts parses
+ * cache key in .github/workflows/deno.yml. compile-cache-state.test.ts parses
  * the workflow and asserts set equality, so the two cannot drift silently.
  */
 export const COMPILE_CACHE_KEY_GLOBS = [

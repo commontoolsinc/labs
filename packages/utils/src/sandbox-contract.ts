@@ -21,6 +21,10 @@ export const SHADOWED_FACTORY_BINDINGS = [
  * against a real compartment. Endowing one of these globals means dropping it
  * from this list and restoring its declaration; the test fails until both
  * happen.
+ *
+ * Changing this list also affects the `ts-transformers` and `schema-generator`
+ * fixture suites, which type-check their fixtures against the type libraries and
+ * are checked only in CI; see `packages/static/README.md`.
  */
 export const SANDBOX_WITHHELD_GLOBALS = Object.freeze(
   [

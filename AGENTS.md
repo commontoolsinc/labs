@@ -114,7 +114,7 @@ For reading or changing Topics on Estuary, use `skills/topics/SKILL.md`.
 - `docs/common/capabilities/llm.md` - Using generateText and generateObject for
   LLM integration
 - `docs/common/conventions/adding-pieces.md` - How to add pieces (use addPiece
-  handler, not allPieces.push)
+  handler, not pieceRegistry.push)
 
 **Reference:**
 

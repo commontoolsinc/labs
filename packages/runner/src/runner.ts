@@ -14,6 +14,7 @@ import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
 import { rendererVDOMSchema } from "./schemas.ts";
+import { forEachSubschema } from "./schema-walk.ts";
 import {
   type CellScope,
   type Frame,
@@ -580,6 +581,10 @@ type SetupValidationOptions = {
   ) => void;
   /** Optional repository locator written atomically with pattern setup. */
   patternRepository?: string;
+  /** Rebuild stored setup state even when patternIdentity already matches. */
+  reapplyStoredSetup?: boolean;
+  /** Keep the next start on the persisted-result dependency-sync path. */
+  prepareForResume?: boolean;
 };
 
 type RunResult<R> = {
@@ -1196,7 +1201,7 @@ export class Runner {
     tx: IExtendedStorageTransaction,
     pattern: Pattern,
     entryRef: { identity: string; symbol: string } | undefined,
-    samePattern: boolean,
+    sameStoredSetup: boolean,
     argument: T,
     resultCell: Cell<R>,
   ): void {
@@ -1244,7 +1249,7 @@ export class Runner {
       if (argumentLink === undefined) {
         throw new Error("Invalid argument link in updateArgument");
       }
-    } else if (!samePattern) {
+    } else if (!sameStoredSetup) {
       const previousArgumentCell = this.runtime.getCellFromLink(
         argumentLink,
         undefined,
@@ -1296,7 +1301,7 @@ export class Runner {
     if (nextArgument !== undefined && !argumentUpdated) {
       // A changed pattern with an existing argument either validated above or
       // produced no value to write, so this branch is only reachable for new
-      // argument cells and same-pattern replay. Piece API argument mutations
+      // argument cells and same-setup replay. Piece API argument mutations
       // validate their exact supplied value before entering Runner.
       this.updateArgument(
         tx,
@@ -1325,8 +1330,18 @@ export class Runner {
     }
 
     this.updateResultProjection(tx, pattern, resultCell.withTx(tx), {
-      preserveName: samePattern,
+      preserveName: sameStoredSetup,
     });
+
+    // This completion marker records the identity whose schema, arguments,
+    // internal cells, and result projection were staged by setup(). Pattern
+    // loading continues to use patternIdentity.
+    if (entryRef) {
+      resultCell.withTx(tx).setMetaRaw("patternSetupIdentity", {
+        identity: entryRef.identity,
+        symbol: entryRef.symbol,
+      });
+    }
   }
 
   /**
@@ -1367,6 +1382,8 @@ export class Runner {
     const samePattern = previousIdentityRef !== undefined &&
       entryRef.identity === previousIdentityRef.identity &&
       entryRef.symbol === previousIdentityRef.symbol;
+    const sameStoredSetup = samePattern &&
+      !validationOptions.reapplyStoredSetup;
     const sourceKey = getTxDebugActionId(tx) ?? "none";
     triggerFlowLogger.debug(`setup-internal/${sourceKey}`, () => [
       `[SETUP] source=${sourceKey}`,
@@ -1404,7 +1421,7 @@ export class Runner {
       resultCell,
       argument,
       pattern,
-      samePattern,
+      sameStoredSetup,
     );
     if (runningSetup) {
       return runningSetup;
@@ -1414,7 +1431,7 @@ export class Runner {
       tx,
       pattern,
       entryRef,
-      samePattern,
+      sameStoredSetup,
       argument,
       resultCell,
     );
@@ -1428,17 +1445,19 @@ export class Runner {
       );
     }
 
-    const key = this.getDocKey(resultCell);
-    const preparedPatternKey = patternIdentityKey(entryRef);
-    this.locallyPreparedResults.set(key, preparedPatternKey);
-    tx.addCommitCallback((_tx, result) => {
-      if (
-        result.error &&
-        this.locallyPreparedResults.get(key) === preparedPatternKey
-      ) {
-        this.locallyPreparedResults.delete(key);
-      }
-    });
+    if (!validationOptions.prepareForResume) {
+      const key = this.getDocKey(resultCell);
+      const preparedPatternKey = patternIdentityKey(entryRef);
+      this.locallyPreparedResults.set(key, preparedPatternKey);
+      tx.addCommitCallback((_tx, result) => {
+        if (
+          result.error &&
+          this.locallyPreparedResults.get(key) === preparedPatternKey
+        ) {
+          this.locallyPreparedResults.delete(key);
+        }
+      });
+    }
 
     return { resultCell, pattern, needsStart: true };
   }
@@ -2632,6 +2651,41 @@ export class Runner {
     return load;
   }
 
+  /** Load the stored argument and return a transaction guard for that state. */
+  async syncStoredSetupArgument(
+    resultCell: Cell<unknown>,
+  ): Promise<(candidate: Cell<unknown>) => boolean> {
+    await resultCell.sync();
+    const argumentLink = getMetaLink(resultCell, "argument");
+    if (argumentLink === undefined) {
+      return (candidate) => getMetaLink(candidate, "argument") === undefined;
+    }
+
+    const argumentCell = this.runtime.getCellFromLink(argumentLink);
+    await argumentCell.sync();
+    const argumentValue = argumentCell.getRawUntyped();
+    await this.syncArgumentLinkTargets(
+      [argumentCell],
+      "setupArgumentLinkTargetSync",
+      [argumentValue],
+    );
+    return (candidate) => {
+      const candidateLink = getMetaLink(candidate, "argument");
+      if (
+        candidateLink === undefined ||
+        !areNormalizedLinksSame(candidateLink, argumentLink)
+      ) {
+        return false;
+      }
+      const candidateArgument = this.runtime.getCellFromLink(
+        candidateLink,
+        undefined,
+        candidate.tx,
+      );
+      return valueEqual(candidateArgument.getRawUntyped(), argumentValue);
+    };
+  }
+
   private async syncCellsForRunningPattern(
     resultCell: Cell<any>,
     pattern: Module | Pattern,
@@ -2821,6 +2875,23 @@ export class Runner {
     // doc); deeper or wider walks were measured to add loads without
     // removing further conflicts. Deduped, values only, schema-less doc
     // syncs; an unloadable target is skipped rather than failing the resume.
+    await this.syncArgumentLinkTargets(
+      argumentCells,
+      "resumeArgumentLinkTargetSync",
+    );
+
+    return true;
+  }
+
+  /**
+   * Load two levels of documents linked from stored arguments. This covers the
+   * measured defaultProfile container chain without loading an unbounded graph.
+   */
+  private async syncArgumentLinkTargets(
+    argumentCells: Cell<any>[],
+    timingLabel: "resumeArgumentLinkTargetSync" | "setupArgumentLinkTargetSync",
+    initialValues?: readonly (FabricValue | undefined)[],
+  ): Promise<void> {
     const seenTargets = new Set<string>();
     let frontier: Cell<any>[] = argumentCells;
     for (let depth = 0; depth < 2 && frontier.length > 0; depth++) {
@@ -2847,7 +2918,7 @@ export class Runner {
                 logger.time(
                   targetSyncStart,
                   "start",
-                  "resumeArgumentLinkTargetSync",
+                  timingLabel,
                 )
               ),
           );
@@ -2855,9 +2926,12 @@ export class Runner {
           for (const key in value) collectLinkTargets(value[key], base);
         }
       };
-      for (const cell of frontier) {
+      for (const [index, cell] of frontier.entries()) {
         try {
-          collectLinkTargets(cell.getRawUntyped(), cell);
+          const value = depth === 0 && initialValues !== undefined
+            ? initialValues[index]
+            : cell.getRawUntyped();
+          collectLinkTargets(value, cell);
         } catch (error) {
           // A shape the raw read cannot resolve contributes nothing rather
           // than breaking the resume; log so a skipped target is diagnosable.
@@ -2870,8 +2944,6 @@ export class Runner {
       await Promise.all(targetPromises);
       frontier = targets;
     }
-
-    return true;
   }
 
   // Walk the pattern tree — this pattern and every nested sub-pattern — and
@@ -3433,27 +3505,69 @@ export class Runner {
         return;
       }
 
-      // TODO(danfuzz): This descends live `FabricValue` action inputs via
-      // `Object.entries` with no `FabricSpecialObject` guard, decomposing
-      // `FabricPrimitive` values and walking `FabricInstance` values by internal
-      // slots.
-      if (isRecord(schema.properties) && isRecord(currentValue)) {
-        for (const [key, propertySchema] of Object.entries(schema.properties)) {
-          visit(propertySchema, currentValue[key], [...path, key]);
+      // Keyword descent via the shared walk (a keyword missed here means
+      // asCell markers escaping write tracking — the prefixItems gap,
+      // CT-1895). The value-position keywords align value and path — a
+      // named property or undeclared-key (`additionalProperties`) at its
+      // key, a tuple slot at its index, `items` elements past the slots at
+      // theirs — falling back to the conservative same-value/same-path
+      // visit when value and schema misalign. Combinator branches and
+      // `not` genuinely describe the same position: same value, same path.
+      // `not` is included deliberately: a nested `not` (not-of-not)
+      // re-selects values that DO match the inner subschema, so skipping it
+      // could let an asCell marker escape tracking; over-collection is this
+      // walker's safe direction (mirrors joinSchema's `not` union).
+      //
+      // TODO(danfuzz): The properties/additionalProperties cases descend
+      // live `FabricValue` action inputs with no `FabricSpecialObject`
+      // guard, decomposing `FabricPrimitive` values and walking
+      // `FabricInstance` values by internal slots.
+      forEachSubschema(schema as JSONSchema, (child, keyword, key, index) => {
+        switch (keyword) {
+          case "properties":
+            if (isRecord(currentValue)) {
+              visit(child, currentValue[key!], [...path, key!]);
+            }
+            return;
+          case "prefixItems":
+            visit(
+              child,
+              Array.isArray(currentValue) ? currentValue[index!] : currentValue,
+              [...path, String(index!)],
+            );
+            return;
+          case "items":
+            if (Array.isArray(currentValue)) {
+              // `items` covers the elements past the tuple slots (2020-12).
+              const start = Array.isArray(schema.prefixItems)
+                ? schema.prefixItems.length
+                : 0;
+              for (let i = start; i < currentValue.length; i++) {
+                visit(child, currentValue[i], [...path, String(i)]);
+              }
+            } else {
+              visit(child, currentValue, path);
+            }
+            return;
+          case "additionalProperties":
+            if (isRecord(currentValue) && !Array.isArray(currentValue)) {
+              // Covers only the keys `properties` does not declare.
+              const declaredKeys = isRecord(schema.properties)
+                ? new Set(Object.keys(schema.properties))
+                : undefined;
+              for (const [k, v] of Object.entries(currentValue)) {
+                if (declaredKeys?.has(k)) continue;
+                visit(child, v, [...path, k]);
+              }
+            } else {
+              visit(child, currentValue, path);
+            }
+            return;
+          default:
+            visit(child, currentValue, path);
+            return;
         }
-      }
-
-      for (const key of ["items", "additionalProperties"] as const) {
-        if (schema[key] !== undefined) {
-          visit(schema[key], currentValue, path);
-        }
-      }
-      for (const key of ["anyOf", "oneOf", "allOf"] as const) {
-        const branches = schema[key];
-        if (Array.isArray(branches)) {
-          for (const branch of branches) visit(branch, currentValue, path);
-        }
-      }
+      });
     };
 
     visit(argumentSchema, value, []);
@@ -3527,8 +3641,22 @@ export class Runner {
         }
       }
 
-      if (Array.isArray(currentValue) && schema.items !== undefined) {
-        for (const item of currentValue) visit(schema.items, item);
+      if (Array.isArray(currentValue)) {
+        // A tuple slot covers its exact index; `items` covers the indices
+        // past the slots (2020-12). prefixItems-only schemas previously
+        // skipped elements entirely.
+        const prefixItems = Array.isArray(schema.prefixItems)
+          ? schema.prefixItems
+          : undefined;
+        for (let index = 0; index < currentValue.length; index++) {
+          const slotSchema =
+            prefixItems !== undefined && index < prefixItems.length
+              ? prefixItems[index]
+              : schema.items;
+          if (slotSchema !== undefined) {
+            visit(slotSchema, currentValue[index]);
+          }
+        }
       }
       if (
         schema.additionalProperties !== undefined &&
@@ -5589,6 +5717,19 @@ export function getPatternIdentityRef(
   resultCell: Cell<unknown>,
 ): { identity: string; symbol: string } | undefined {
   const raw = resultCell.getMetaRaw("patternIdentity", {
+    meta: ignoreReadForScheduling,
+  });
+  return asPatternIdentityRef(raw);
+}
+
+/**
+ * Read the identity whose complete setup state was installed on a result cell.
+ * This is a setup-completion marker; pattern loading uses `patternIdentity`.
+ */
+export function getPatternSetupIdentityRef(
+  resultCell: Cell<unknown>,
+): { identity: string; symbol: string } | undefined {
+  const raw = resultCell.getMetaRaw("patternSetupIdentity", {
     meta: ignoreReadForScheduling,
   });
   return asPatternIdentityRef(raw);

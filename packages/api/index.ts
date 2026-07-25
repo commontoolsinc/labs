@@ -161,6 +161,7 @@ export type FabricValue =
   | number
   | string
   | bigint
+  | symbol
   | FabricSpecialObject
   | FabricArray
   | FabricPlainObject
@@ -356,6 +357,8 @@ export type MetaLinkField =
  * The `argument` field links a result cell to its argument cell
  * The `internal` field contains a manifest with links to derived internal cells.
  * The `schema` field stores the schema for a result cell
+ * The `patternSetupIdentity` field records the pattern identity whose complete
+ * setup state was installed on a result cell.
  * The `result` field lets a result cell link to its parent result cell,
  * and also lets the argument and derived internal cells link back to the result cell.
  *
@@ -368,6 +371,7 @@ export type MetaLinkField =
 export type MetaField =
   | MetaLinkField
   | "patternIdentity" // content-addressed {identity, symbol} pattern reference
+  | "patternSetupIdentity" // setup-completion {identity, symbol} marker
   | "patternSource" // provenance: the source a piece tracks for updates (a
   // toolshed pattern path, or later a `cf:` fabric ref)
   | "patternRepository" // optional caller-supplied repository locator
@@ -2249,12 +2253,24 @@ export type ActionFunction = {
 export type ComputedFunction = <T>(fn: () => T) => Reactive<T>;
 
 /**
- * One operand recorded while an `assert` body ran: the operand's authored
- * source text, and its value rendered with `toCompactDebugString`.
+ * One operand of a failed `assert` body: the operand's authored source text,
+ * and its value rendered with `toCompactDebugString`. Only a failing assertion
+ * carries these; a passing one records nothing to render.
  */
 export type AssertPart = {
   src: string;
   rendered: string;
+};
+
+/**
+ * One operand captured while an `assert` body runs, holding the resolved value
+ * itself rather than a rendering of it. The value is rendered into an
+ * `AssertPart` only if the assertion fails, so a passing assertion never pays
+ * for rendering an operand it will not report.
+ */
+export type AssertRawPart = {
+  src: string;
+  value: unknown;
 };
 
 /**
@@ -2289,15 +2305,29 @@ export type AssertFunction = (fn: () => boolean) => Reactive<AssertRecord>;
 
 /**
  * Records one operand of an `assert` body and returns it unchanged, so that
- * wrapping an operand does not change evaluation order or semantics. The
- * assert-diagnostics transformer emits the calls; authored code does not call
- * it directly.
+ * wrapping an operand does not change evaluation order or semantics. It stores
+ * the resolved value; rendering is deferred to `assertRenderParts`, which runs
+ * only when the assertion fails. The assert-diagnostics transformer emits the
+ * calls; authored code does not call it directly.
  */
 export type AssertCaptureFunction = <T>(
-  parts: AssertPart[],
+  parts: AssertRawPart[],
   src: string,
   value: T,
 ) => T;
+
+/**
+ * Renders the operands captured while an `assert` body ran into the record's
+ * `parts`, but only when the assertion failed: for a passing assertion
+ * (`ok === true`) it returns an empty list without rendering anything, so the
+ * common case pays nothing for diagnostics it will not show. The
+ * assert-diagnostics transformer emits the call around the record's `parts`;
+ * authored code does not call it directly.
+ */
+export type AssertRenderPartsFunction = (
+  ok: boolean,
+  parts: AssertRawPart[],
+) => AssertPart[];
 
 export type StrFunction = (
   strings: TemplateStringsArray,

@@ -124,6 +124,7 @@ export {
   extractDefaultValues,
   getPatternIdentityRef,
   getPatternRepository,
+  getPatternSetupIdentityRef,
   getPatternSource,
   mergeSchemaDefaults,
   patternIdentityKey,
@@ -238,6 +239,7 @@ export { ACLManager } from "./acl-manager.ts";
 export {
   cellEntityIdString,
   type CellPath,
+  cellWithScopedLinkRequiredsRelaxed,
   compileAndSavePattern,
   parseCellPath,
   resolveCellPath,

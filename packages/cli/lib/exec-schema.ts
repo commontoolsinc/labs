@@ -1,5 +1,6 @@
 import type { JSONSchema } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { schemaToTypeString } from "@commonfabric/runner";
 import { cliCommand } from "./cli-name.ts";
 
 export interface ExecCommandSpec {
@@ -1031,70 +1032,19 @@ export function renderExecHelp(
   return lines.join("\n");
 }
 
-function schemaShapeString(
-  schema: JSONSchema,
-  depth = 0,
-): string {
+function schemaShapeString(schema: JSONSchema): string {
   if (isSchemaLessHandlerInput(schema)) {
     return "void";
   }
-
-  if (depth >= 4) {
-    return "{...}";
-  }
-
-  if (!isSchemaObject(schema)) {
-    return "unknown";
-  }
-
-  if (Array.isArray(schema.enum)) {
-    return schema.enum.map((value) => toCompactDebugString(value)).join(" | ");
-  }
-
-  const unionSchemas = Array.isArray(schema.anyOf)
-    ? schema.anyOf
-    : Array.isArray(schema.oneOf)
-    ? schema.oneOf
-    : null;
-  if (unionSchemas) {
-    return unionSchemas.map((variant) =>
-      schemaShapeString(variant as JSONSchema, depth + 1)
-    ).join(" | ");
-  }
-
-  const type = schemaType(schema);
-  if (type === "string") return "string";
-  if (type === "number" || type === "integer") return "number";
-  if (type === "boolean") return "boolean";
-  if (type === "null") return "null";
-
-  if (type === "array") {
-    // We don't handle tuples here (prefixItems)
-    const items = isSchemaObject(schema)
-      ? schema.items as JSONSchema
-      : undefined;
-    return `${items ? schemaShapeString(items, depth + 1) : "unknown"}[]`;
-  }
-
-  const properties = objectProperties(schema);
-  if (!properties) {
-    return "unknown";
-  }
-
-  const keys = Object.keys(properties).filter((key) => !key.startsWith("$"));
-  if (keys.length === 0) {
-    return "{}";
-  }
-
-  const required = requiredFlags(schema);
-  const lines = keys.map((key) => {
-    const propSchema = properties[key];
-    return `${"  ".repeat(depth + 1)}${key}${required.has(key) ? "" : "?"}: ${
-      schemaShapeString(propSchema, depth + 1)
-    }`;
+  // Same TS-like rendering the runner uses for LLM context; CLI help only adds
+  // the "void" spelling for schema-less handler inputs above. The formatter
+  // resolves $refs against options.defs, not the schema's own $defs, so
+  // thread them through.
+  return schemaToTypeString(schema, {
+    defs: isSchemaObject(schema)
+      ? schema.$defs as Record<string, JSONSchema> | undefined
+      : undefined,
   });
-
-  return `{\n${lines.join("\n")}\n${"  ".repeat(depth)}}`;
 }
 
 function pieceJsonUsageLine(commandPrefix: string): string {

@@ -65,8 +65,8 @@ These properties of this mechanism are worth keeping in mind:
   stream on the node's prop: a test walks the rendered tree to the node, reads
   the prop, and sends it an event. A derived expression such as `{count * 2}`
   runs when a test reads the node it builds. So UI raises the uncovered-line
-  count only until a test drives it; write that test rather than taking a
-  `NEW_PERF_BASELINE` marker.
+  count only until a test drives it; write that test rather than taking an
+  `ACCEPT_COVERAGE_DEBT` marker.
   [pattern-testing.md](../common/workflows/pattern-testing.md) shows how.
 
 `CF_PATTERN_COVERAGE_DIR` names the directory the `*.pattern-coverage.lcov`
@@ -79,16 +79,16 @@ jobs collect authored-pattern coverage").
 
 ## How the two feed the coverage gate
 
-The Performance Check job downloads every `coverage-profile-*` artifact with
+The Coverage Check job downloads every `coverage-profile-*` artifact with
 `actions/download-artifact`. The action checks each artifact's recorded digest.
-`tasks/perf-check.ts` verifies that every expected artifact is present. It joins
-all the downloaded LCOV files together and hands them to
+`tasks/coverage-check.ts` verifies that every expected artifact is present. It
+joins all the downloaded LCOV files together and hands them to
 `tasks/coverage-metrics.ts`. That code walks the tracked source files under
 `packages` and `tasks`. For each file, it counts how many lines no test covered.
 The top-level `scripts` directory is excluded from this gate. The counts roll up
 into
 `coverage-debt: <group> uncovered lines` metrics, for example
-`coverage-debt: packages/patterns uncovered lines`, and the performance check
+`coverage-debt: packages/patterns uncovered lines`, and the coverage check
 gates a pull request on them.
 
 Authored pattern files under `packages/patterns` are tracked source files, so
@@ -115,6 +115,85 @@ of the file's lines and the rest stop being counted, so it settles at a lower �
 and therefore stricter — bar rather than failing anything. The instrumented
 statements are also the only lines this mechanism can speak to: a line the
 instrumentation cannot reach is not a line a pattern test could cover.
+
+## Ratchet baselines and accepting debt
+
+The ratchet applies per source group and only to the groups a PR changes: for
+each such group the uncovered-line count must not rise above the latest non-cold
+`main` run's count. Debt in unchanged groups is still reported, but does not
+block the PR.
+
+Accept one metric's increase with the narrow per-metric marker in the PR
+description:
+
+```text
+ACCEPT_COVERAGE_DEBT: coverage-debt: packages/runner uncovered lines = 123 lines
+```
+
+Use the broad reset marker only to bootstrap coverage data for the first time,
+or when the `main` baseline is known to be bogus and should be re-seeded for one
+cycle:
+
+```text
+NEW_COVERAGE_BASELINE
+```
+
+When that PR merges, the main run's coverage metrics become the new ratchet
+baseline for later PRs. The check still requires the full expected coverage
+artifact set during that reset cycle. Jobs with no reportable covered files
+upload an empty LCOV report, so a missing artifact means the report upload
+itself failed.
+
+Each run writes a per-run baseline artifact recording its coverage-debt metrics
+and its compile cache states. It is named `perf-metrics` for historical reasons
+— it once also carried CI timing metrics for the removed performance gate — and
+keeps that name so the ratchet needs no migration; a run from before the gate
+was removed reads as a valid baseline unchanged. A later PR run reads the most
+recent `main` run's `perf-metrics` artifact as its ratchet baseline; there is no
+separate history store. The workflow downloads the current run's
+`coverage-profile-*` artifacts before starting `tasks/coverage-check.ts`.
+`COVERAGE_ARTIFACTS_DIR` points the script at one subdirectory per artifact. The
+download step checks the artifact digests. The script separately checks the
+expected artifact names (`EXPECTED_COVERAGE_ARTIFACT_NAMES`). It also rejects an
+artifact containing no coverage files. A manual run without the environment
+variable uses the GitHub API download path instead.
+
+## Compile cache state and cold runs
+
+The pattern test jobs restore a compile byte cache keyed on a fingerprint hash
+over the compiler packages. A PR that changes that fingerprint runs cold: every
+pattern compiles from scratch. A cold run covers compile branches that only
+execute on a cold cache, which lowers its coverage debt, so ratcheting a warm PR
+against a cold `main` run would fail it with phantom uncovered lines.
+
+The pattern-integration process owns one shared cache in
+`packages/patterns/integration/pieces-controller.ts`. Its controller helper and
+the capability-gate controller both inject that cache into every runtime they
+create. A custom runtime in this suite must do the same. Setting
+`CF_COMPILE_CACHE_FILE` only tells the test-support cache where to persist its
+bytes; a runtime uses those bytes only when it receives the cache through its
+`moduleByteCache` option.
+
+To tell cold from warm, each pattern job uploads a small `cache-state-*`
+artifact recording its cache restore result. The coverage check aggregates those
+into `compileCacheStates` in `perf-metrics.json`. A job family is cold when
+any of its shards had a full cache miss, detected as the cache file being absent
+after the restore step (the combined `actions/cache` action does not expose the
+matched key). A partial hit through a restore key counts as warm: both key forms
+start with the fingerprint hash, so any restore means the compiled bytes are
+current. The ratchet then uses the latest non-cold `main` sample, so a cold
+`main` run cannot lower the baseline that warm PRs are held to.
+
+A run without a recorded cache state — an artifact carrying no stamp, or a run
+whose cache-state artifact failed to upload — is retro-classified from the
+compile fingerprint (`tasks/compile-cache-state.ts` mirrors the `cc-*` key globs,
+drift-guarded by a test that parses the workflow): if the fingerprint paths
+changed against the run's predecessor, every family is treated as cold; if
+unchanged, warm. The same fingerprint inference backstops the current run when
+its cache-state artifact is missing. Fingerprint inference cannot see
+non-fingerprint cold causes (cache eviction, cache-service outages): a run cold
+for those reasons and lacking a recorded state stays unknown, so it is treated
+as not-cold and may still be used as a baseline.
 
 ## A combined report for IDEs
 
@@ -277,9 +356,7 @@ like a pattern nobody tested. Writing one warns.
 
 - [TESTING.md](TESTING.md) — how to run the test suites whose execution this
   coverage is measured from.
-- [CI_PERFORMANCE.md](CI_PERFORMANCE.md) — the coverage-debt baseline and ratchet
-  markers (`NEW_PERF_BASELINE` and `NEW_COVERAGE_BASELINE`) that gate a pull
-  request on the metrics described here.
+- [CI_PERFORMANCE.md](CI_PERFORMANCE.md) — CI wall-time optimization policy.
 - [../common/workflows/pattern-testing.md](../common/workflows/pattern-testing.md)
   — writing the pattern unit tests that the `pattern-unit-test` job runs through
   `cf test`, the source of the gated authored-pattern coverage.

@@ -35,7 +35,7 @@ const removePiece = handler({
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "object",
     properties: {
-        allPieces: {
+        pieceRegistry: {
             type: "array",
             items: {
                 type: "unknown",
@@ -45,12 +45,12 @@ const removePiece = handler({
             asCell: ["cell"]
         }
     },
-    required: ["allPieces"]
-} as const satisfies __cfHelpers.JSONSchema, ({ piece }, { allPieces }) => {
-    const current = allPieces.get();
+    required: ["pieceRegistry"]
+} as const satisfies __cfHelpers.JSONSchema, ({ piece }, { pieceRegistry }) => {
+    const current = pieceRegistry.get();
     const idx = current.findIndex((c) => equals(c, piece));
     if (idx >= 0)
-        allPieces.set(current.toSpliced(idx, 1));
+        pieceRegistry.set(current.toSpliced(idx, 1));
 });
 // FIXTURE: identity-only-handler-default-array
 // Verifies: a `Writable<T[] | Default<[]>>` array used only for identity removal

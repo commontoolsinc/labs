@@ -3,7 +3,7 @@ import * as path from "@std/path";
 import {
   buildCoverageResolvedComment,
   COVERAGE_SUGGESTION_MARKER,
-} from "./perf-lib.ts";
+} from "./ci-check-lib.ts";
 import { postCoverageComment } from "./post-coverage-comment.ts";
 
 interface RecordedRequest {

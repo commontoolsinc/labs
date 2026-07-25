@@ -1,4 +1,4 @@
-import { computed, handler, pattern } from "commonfabric";
+import { assert, handler, pattern } from "commonfabric";
 import {
   CustomerSupportRecipientConfirmExample,
   FinanceRecipientConfirmExample,
@@ -49,25 +49,25 @@ export default pattern(() => {
   const patient = PatientCaseRedactedReleaseExample({});
   const incident = SecurityIncidentRedactedReleaseExample({});
 
-  const assert_finance_confirmed = computed(() =>
+  const assert_finance_confirmed = assert(() =>
     finance.decoyStatus === "Host finance send shortcut is untrusted." &&
     finance.confirmedRecipientRelease!.includes("finance@example.com") &&
     finance.confirmedRecipientRelease!.includes("budget packet")
   );
 
-  const assert_support_confirmed = computed(() =>
+  const assert_support_confirmed = assert(() =>
     support.decoyStatus === "Host support reply shortcut is untrusted." &&
     support.confirmedRecipientRelease!.includes("support lead") &&
     support.confirmedRecipientRelease!.includes("case transcript excerpt")
   );
 
-  const assert_patient_redacted = computed(() =>
+  const assert_patient_redacted = assert(() =>
     patient.decoyStatus === "Host patient export did not release content." &&
     patient.releasedRedactedContent!.includes("[redacted-secret]") &&
     patient.releasedRedactedContent!.includes("[redacted-id]")
   );
 
-  const assert_incident_redacted = computed(() =>
+  const assert_incident_redacted = assert(() =>
     incident.decoyStatus === "Host incident export did not release content." &&
     incident.releasedRedactedContent!.includes("Released redacted incident") &&
     incident.releasedRedactedContent!.includes("[redacted-secret]")

@@ -1,5 +1,4 @@
 import {
-  assertAlmostEquals,
   assertEquals,
   assertExists,
   assertFalse,
@@ -13,575 +12,33 @@ import {
   type Artifact,
   buildCoverageDebtSuggestionComment,
   buildCoverageResolvedComment,
-  compileCacheFamilyForMetric,
-  type CompileCacheState,
   type CompileCacheStates,
-  computeBaseline,
-  computeCiWallTimeRevisitSignals,
   COVERAGE_BASELINE_RESET_MARKER,
   COVERAGE_SUGGESTION_MARKER,
   coverageGroupsForChangedFiles,
   coverageMetricGroupName,
   downloadAndExtractArtifact,
-  dropColdSamples,
-  extractMetrics,
-  extractTimingArtifactMetrics,
   fetchArtifactsForRun,
   fetchCurrentPRBody,
   fetchPRBody,
   fetchPRFiles,
-  formatMetricValue,
   formatOverrideSuggestion,
   githubGet,
   githubPatch,
   githubPost,
-  type Job,
   latestNonColdSample,
   newestArtifactsByName,
-  newestTimingArtifacts,
   parseAddedLinesFromPatch,
   parseBaselineOverrides,
   parseCacheStateFiles,
-  parsePerfMetricsBackfillFile,
-  parsePerfMetricsFile,
-  parsePerfMetricsFileDetailed,
-  serializePerfMetrics,
-  serializePerfMetricsBackfill,
+  parseCoverageBaseline,
+  parseCoverageBaselineDetailed,
+  serializeCoverageBaseline,
   shouldGateCoverageDebtMetric,
-  type Step,
-  timingArtifactLabel,
   type TimingSample,
-  type WorkflowRun,
-} from "./perf-lib.ts";
+} from "./ci-check-lib.ts";
 
-function makeRun(): WorkflowRun {
-  return {
-    id: 1,
-    html_url: "https://example.test/run/1",
-    head_sha: "deadbeef",
-    created_at: "2026-01-01T00:00:00Z",
-    conclusion: "success",
-    event: "push",
-  };
-}
-
-function makeStep(
-  name: string,
-  started_at: string,
-  completed_at: string,
-): Step {
-  return { name, started_at, completed_at };
-}
-
-function makeJob(
-  id: number,
-  name: string,
-  started_at: string,
-  completed_at: string,
-  steps: Step[],
-): Job {
-  return { id, name, started_at, completed_at, steps };
-}
-
-Deno.test("extractMetrics keeps CLI core and fuse timings separate", () => {
-  const metrics = extractMetrics(makeRun(), [
-    makeJob(
-      1,
-      "CLI Integration Tests (core)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:03:20Z",
-      [
-        makeStep(
-          "🧪 Run CLI integration suite",
-          "2026-01-01T00:01:00Z",
-          "2026-01-01T00:03:00Z",
-        ),
-      ],
-    ),
-    makeJob(
-      2,
-      "CLI Integration Tests (fuse)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:35Z",
-      [
-        makeStep(
-          "🧪 Run CLI FUSE integration suite",
-          "2026-01-01T00:01:00Z",
-          "2026-01-01T00:01:30Z",
-        ),
-      ],
-    ),
-  ]);
-
-  assertEquals(
-    metrics.get("job: CLI Integration Tests (core)")?.durationSeconds,
-    200,
-  );
-  assertEquals(
-    metrics.get("job: CLI Integration Tests (fuse)")?.durationSeconds,
-    95,
-  );
-  assertEquals(
-    metrics.get("step: CLI integration (core)")?.durationSeconds,
-    120,
-  );
-  assertEquals(
-    metrics.get("step: CLI integration (fuse)")?.durationSeconds,
-    30,
-  );
-  assertEquals(metrics.has("job: CLI Integration Tests"), false);
-  assertEquals(metrics.has("step: CLI integration"), false);
-});
-
-Deno.test("extractMetrics aggregates split CLI core jobs", () => {
-  const metrics = extractMetrics(makeRun(), [
-    makeJob(
-      1,
-      "CLI Integration Tests (core-piece-values)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:40Z",
-      [
-        makeStep(
-          "🧪 Run CLI integration suite",
-          "2026-01-01T00:00:10Z",
-          "2026-01-01T00:01:20Z",
-        ),
-      ],
-    ),
-    makeJob(
-      2,
-      "CLI Integration Tests (core-piece-links)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:03:20Z",
-      [
-        makeStep(
-          "🧪 Run CLI integration suite",
-          "2026-01-01T00:01:00Z",
-          "2026-01-01T00:03:00Z",
-        ),
-      ],
-    ),
-    makeJob(
-      3,
-      "CLI Integration Tests (core-piece-call)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:02:40Z",
-      [
-        makeStep(
-          "🧪 Run CLI integration suite",
-          "2026-01-01T00:01:00Z",
-          "2026-01-01T00:02:30Z",
-        ),
-      ],
-    ),
-  ]);
-
-  assertEquals(
-    metrics.get("job: CLI Integration Tests (core-piece-values)")
-      ?.durationSeconds,
-    100,
-  );
-  assertEquals(
-    metrics.get("job: CLI Integration Tests (core-piece-links)")
-      ?.durationSeconds,
-    200,
-  );
-  assertEquals(
-    metrics.get("job: CLI Integration Tests (core-piece-call)")
-      ?.durationSeconds,
-    160,
-  );
-  assertEquals(
-    metrics.get("job: CLI Integration Tests (core)")?.durationSeconds,
-    200,
-  );
-  assertEquals(
-    metrics.get("step: CLI integration (core)")?.durationSeconds,
-    120,
-  );
-  assertEquals(metrics.has("job: CLI Integration Tests"), false);
-  assertEquals(metrics.has("step: CLI integration"), false);
-});
-
-Deno.test("extractMetrics aggregates package integration matrix jobs", () => {
-  const metrics = extractMetrics(makeRun(), [
-    makeJob(
-      1,
-      "Package Integration Tests (runner)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:20Z",
-      [
-        makeStep(
-          "🧪 Run runner integration tests",
-          "2026-01-01T00:00:10Z",
-          "2026-01-01T00:01:00Z",
-        ),
-      ],
-    ),
-    makeJob(
-      2,
-      "Package Integration Tests (shell)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:40Z",
-      [
-        makeStep(
-          "🧪 Run shell integration tests",
-          "2026-01-01T00:00:10Z",
-          "2026-01-01T00:01:30Z",
-        ),
-      ],
-    ),
-  ]);
-
-  assertEquals(
-    metrics.get("job: Package Integration Tests (runner)")?.durationSeconds,
-    80,
-  );
-  assertEquals(
-    metrics.get("job: Package Integration Tests (shell)")?.durationSeconds,
-    100,
-  );
-  assertEquals(
-    metrics.get("job: Package Integration Tests")?.durationSeconds,
-    100,
-  );
-  assertEquals(metrics.get("step: runner integration")?.durationSeconds, 50);
-  assertEquals(metrics.get("step: shell integration")?.durationSeconds, 80);
-});
-
-Deno.test("extractMetrics aggregates pattern integration matrix shards", () => {
-  const metrics = extractMetrics(makeRun(), [
-    makeJob(
-      1,
-      "Pattern Integration Tests (1/4)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:40Z",
-      [
-        makeStep(
-          "🧩 Run end-to-end patterns integration tests",
-          "2026-01-01T00:00:10Z",
-          "2026-01-01T00:01:30Z",
-        ),
-      ],
-    ),
-    makeJob(
-      2,
-      "Pattern Integration Tests (2/4)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:10Z",
-      [
-        makeStep(
-          "🧩 Run end-to-end patterns integration tests",
-          "2026-01-01T00:00:10Z",
-          "2026-01-01T00:01:00Z",
-        ),
-      ],
-    ),
-  ]);
-
-  assertEquals(
-    metrics.get("job: Pattern Integration Tests (1/4)")?.durationSeconds,
-    100,
-  );
-  assertEquals(
-    metrics.get("job: Pattern Integration Tests (2/4)")?.durationSeconds,
-    70,
-  );
-  assertEquals(
-    metrics.get("job: Pattern Integration Tests")?.durationSeconds,
-    100,
-  );
-  assertEquals(
-    metrics.get("step: patterns integration")?.durationSeconds,
-    80,
-  );
-});
-
-Deno.test("extractMetrics records pattern reload integration job", () => {
-  const metrics = extractMetrics(makeRun(), [
-    makeJob(
-      1,
-      "Pattern Reload Integration Tests",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:20Z",
-      [
-        makeStep(
-          "🧩 Run pattern reload integration tests",
-          "2026-01-01T00:00:10Z",
-          "2026-01-01T00:01:10Z",
-        ),
-      ],
-    ),
-  ]);
-
-  assertEquals(
-    metrics.get("job: Pattern Reload Integration Tests")?.durationSeconds,
-    80,
-  );
-  assertEquals(
-    metrics.get("step: pattern reload integration")?.durationSeconds,
-    60,
-  );
-});
-
-Deno.test("extractMetrics aggregates generated patterns matrix shards", () => {
-  const metrics = extractMetrics(makeRun(), [
-    makeJob(
-      1,
-      "Generated Patterns Integration Tests (1/4)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:40Z",
-      [
-        makeStep(
-          "🧪 Run generated patterns integration tests",
-          "2026-01-01T00:00:10Z",
-          "2026-01-01T00:01:30Z",
-        ),
-      ],
-    ),
-    makeJob(
-      2,
-      "Generated Patterns Integration Tests (2/4)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:10Z",
-      [
-        makeStep(
-          "🧪 Run generated patterns integration tests",
-          "2026-01-01T00:00:10Z",
-          "2026-01-01T00:01:00Z",
-        ),
-      ],
-    ),
-  ]);
-
-  assertEquals(
-    metrics.get("job: Generated Patterns Integration Tests (1/4)")
-      ?.durationSeconds,
-    100,
-  );
-  assertEquals(
-    metrics.get("job: Generated Patterns Integration Tests (2/4)")
-      ?.durationSeconds,
-    70,
-  );
-  assertEquals(
-    metrics.get("job: Generated Patterns Integration Tests")?.durationSeconds,
-    100,
-  );
-  assertEquals(
-    metrics.get("step: generated patterns integration")?.durationSeconds,
-    80,
-  );
-});
-
-Deno.test("extractMetrics aggregates runner test matrix shards", () => {
-  const metrics = extractMetrics(makeRun(), [
-    makeJob(
-      1,
-      "Runner Tests (1/5)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:40Z",
-      [
-        makeStep(
-          "🧪 Run runner tests",
-          "2026-01-01T00:00:10Z",
-          "2026-01-01T00:01:30Z",
-        ),
-      ],
-    ),
-    makeJob(
-      2,
-      "Runner Tests (2/5)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:10Z",
-      [
-        makeStep(
-          "🧪 Run runner tests",
-          "2026-01-01T00:00:10Z",
-          "2026-01-01T00:01:00Z",
-        ),
-      ],
-    ),
-  ]);
-
-  assertEquals(
-    metrics.get("job: Runner Tests (1/5)")?.durationSeconds,
-    100,
-  );
-  assertEquals(
-    metrics.get("job: Runner Tests (2/5)")?.durationSeconds,
-    70,
-  );
-  assertEquals(metrics.get("job: Runner Tests")?.durationSeconds, 100);
-  assertEquals(metrics.get("step: runner tests")?.durationSeconds, 80);
-});
-
-Deno.test("extractMetrics aggregates workspace test matrix shards", () => {
-  const metrics = extractMetrics(makeRun(), [
-    makeJob(
-      1,
-      "Test (1/4)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:03:20Z",
-      [
-        makeStep(
-          "🧪 Run parallel workspace tests",
-          "2026-01-01T00:00:10Z",
-          "2026-01-01T00:03:10Z",
-        ),
-      ],
-    ),
-    makeJob(
-      2,
-      "Test (2/4)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:02:30Z",
-      [
-        makeStep(
-          "🧪 Run parallel workspace tests",
-          "2026-01-01T00:00:10Z",
-          "2026-01-01T00:02:00Z",
-        ),
-      ],
-    ),
-  ]);
-
-  assertEquals(metrics.get("job: Test (1/4)")?.durationSeconds, 200);
-  assertEquals(metrics.get("job: Test (2/4)")?.durationSeconds, 150);
-  assertEquals(metrics.get("job: Test")?.durationSeconds, 200);
-  assertEquals(metrics.get("step: workspace tests")?.durationSeconds, 180);
-});
-
-Deno.test("extractMetrics records separate binary builds and their critical path", () => {
-  const metrics = extractMetrics(makeRun(), [
-    makeJob(
-      1,
-      "Build Binary (toolshed)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:03:20Z",
-      [
-        makeStep(
-          "🏗️ Build toolshed binary",
-          "2026-01-01T00:00:20Z",
-          "2026-01-01T00:03:00Z",
-        ),
-      ],
-    ),
-    makeJob(
-      2,
-      "Build Binary (bg-piece-service)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:40Z",
-      [
-        makeStep(
-          "🏗️ Build bg-piece-service binary",
-          "2026-01-01T00:00:20Z",
-          "2026-01-01T00:01:20Z",
-        ),
-      ],
-    ),
-    makeJob(
-      3,
-      "Build Binary (cf)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:02:30Z",
-      [
-        makeStep(
-          "🏗️ Build cf binary",
-          "2026-01-01T00:00:20Z",
-          "2026-01-01T00:02:10Z",
-        ),
-      ],
-    ),
-  ]);
-
-  assertEquals(
-    metrics.get("job: Build Binary (toolshed)")?.durationSeconds,
-    200,
-  );
-  assertEquals(
-    metrics.get("job: Build Binary (bg-piece-service)")?.durationSeconds,
-    100,
-  );
-  assertEquals(metrics.get("job: Build Binary (cf)")?.durationSeconds, 150);
-  assertEquals(metrics.get("job: Build Binaries")?.durationSeconds, 200);
-  assertEquals(
-    metrics.get("step: Build toolshed binary")?.durationSeconds,
-    160,
-  );
-  assertEquals(
-    metrics.get("step: Build bg-piece-service binary")?.durationSeconds,
-    60,
-  );
-  assertEquals(metrics.get("step: Build cf binary")?.durationSeconds, 110);
-  assertEquals(metrics.get("step: Build application")?.durationSeconds, 160);
-});
-
-Deno.test("timingArtifactLabel normalizes matrix shard artifacts", () => {
-  assertEquals(
-    timingArtifactLabel("test-timing-package-integration-runner"),
-    "package-integration",
-  );
-  assertEquals(
-    timingArtifactLabel("test-timing-pattern-integration-1"),
-    "pattern-integration",
-  );
-  assertEquals(
-    timingArtifactLabel("test-timing-pattern-reload-integration"),
-    "pattern-reload-integration",
-  );
-  assertEquals(
-    timingArtifactLabel("test-timing-generated-patterns-1"),
-    "generated-patterns",
-  );
-  assertEquals(
-    timingArtifactLabel("test-timing-package-integration"),
-    "package-integration",
-  );
-});
-
-Deno.test("timing artifacts combine internally sharded suites once per run", () => {
-  const suiteName =
-    "packages/patterns/integration/time-capability-full.test.ts";
-  const metrics = extractTimingArtifactMetrics(makeRun(), [
-    {
-      name: "test-timing-pattern-integration-1",
-      suites: [{
-        name: suiteName,
-        time: 117,
-        tests: [{ name: "case a", time: 30 }],
-      }],
-    },
-    {
-      name: "test-timing-pattern-integration-2",
-      suites: [{
-        name: suiteName,
-        time: 50,
-        tests: [{ name: "case b", time: 20 }],
-      }],
-    },
-  ]);
-
-  assertEquals(
-    metrics.get(`test: pattern-integration/${suiteName}`)?.durationSeconds,
-    117,
-  );
-  assertEquals(
-    metrics.get(
-      `subtest: pattern-integration/${suiteName} > case a`,
-    )?.durationSeconds,
-    30,
-  );
-  assertEquals(
-    metrics.get(
-      `subtest: pattern-integration/${suiteName} > case b`,
-    )?.durationSeconds,
-    20,
-  );
-  assertEquals(metrics.size, 3);
-});
-
-Deno.test("perf metrics files round-trip stable metric samples", () => {
+Deno.test("coverage baseline files round-trip stable metric samples", () => {
   const metrics = new Map([
     [
       "step: Type check",
@@ -605,48 +62,19 @@ Deno.test("perf metrics files round-trip stable metric samples", () => {
     ],
   ]);
 
-  const serialized = serializePerfMetrics(metrics);
+  const serialized = serializeCoverageBaseline(metrics);
   assertEquals(
     serialized.metrics.map((metric) => metric.name),
     ["job: Check", "step: Type check"],
   );
 
   assertEquals(
-    parsePerfMetricsFile(JSON.stringify(serialized)),
+    parseCoverageBaseline(JSON.stringify(serialized)),
     metrics,
   );
 });
 
-Deno.test("perf metrics backfill files round-trip run-keyed samples", () => {
-  const runMetrics = new Map([
-    [
-      123,
-      new Map([
-        [
-          "job: Check",
-          {
-            runId: 123,
-            runUrl: "https://example.test/run/123",
-            sha: "abc123",
-            createdAt: "2026-01-01T00:00:00Z",
-            durationSeconds: 60,
-          },
-        ],
-      ]),
-    ],
-  ]);
-
-  const serialized = serializePerfMetricsBackfill(runMetrics);
-  assertEquals(serialized.runs.map((run) => run.runId), [123]);
-  assertEquals(serialized.runs[0].metrics[0].name, "job: Check");
-
-  assertEquals(
-    parsePerfMetricsBackfillFile(JSON.stringify(serialized)),
-    runMetrics,
-  );
-});
-
-Deno.test("perf metrics files round-trip compile cache states", () => {
+Deno.test("coverage baseline files round-trip compile cache states", () => {
   const metrics = new Map<string, TimingSample>([
     [
       "job: Check",
@@ -664,32 +92,32 @@ Deno.test("perf metrics files round-trip compile cache states", () => {
     "pattern-unit": "warm",
   };
 
-  const serialized = JSON.stringify(serializePerfMetrics(metrics, states));
+  const serialized = JSON.stringify(serializeCoverageBaseline(metrics, states));
 
-  const detailed = parsePerfMetricsFileDetailed(serialized);
+  const detailed = parseCoverageBaselineDetailed(serialized);
   assertEquals(detailed.metrics, metrics);
   assertEquals(detailed.compileCacheStates, states);
 
   // The tagged file stays version 1, so the legacy parser still accepts it.
-  assertEquals(parsePerfMetricsFile(serialized), metrics);
+  assertEquals(parseCoverageBaseline(serialized), metrics);
 });
 
-Deno.test("parsePerfMetricsFileDetailed treats legacy files as untagged", () => {
-  const legacy = JSON.stringify(serializePerfMetrics(new Map()));
+Deno.test("parseCoverageBaselineDetailed treats legacy files as untagged", () => {
+  const legacy = JSON.stringify(serializeCoverageBaseline(new Map()));
   assertFalse(legacy.includes("compileCacheStates"));
 
-  const detailed = parsePerfMetricsFileDetailed(legacy);
+  const detailed = parseCoverageBaselineDetailed(legacy);
   assertEquals(detailed.compileCacheStates, null);
   assertEquals(detailed.metrics.size, 0);
 
   // Empty states are omitted too, so an all-unknown run stays untagged.
   assertFalse(
-    JSON.stringify(serializePerfMetrics(new Map(), {}))
+    JSON.stringify(serializeCoverageBaseline(new Map(), {}))
       .includes("compileCacheStates"),
   );
 });
 
-Deno.test("parsePerfMetricsFileDetailed drops invalid compile cache states", () => {
+Deno.test("parseCoverageBaselineDetailed drops invalid compile cache states", () => {
   const file = JSON.stringify({
     version: 1,
     generatedAt: "2026-01-01T00:00:00Z",
@@ -701,85 +129,9 @@ Deno.test("parsePerfMetricsFileDetailed drops invalid compile cache states", () 
     },
   });
 
-  assertEquals(parsePerfMetricsFileDetailed(file).compileCacheStates, {
+  assertEquals(parseCoverageBaselineDetailed(file).compileCacheStates, {
     "pattern-unit": "warm",
   });
-});
-
-Deno.test("compileCacheFamilyForMetric maps job, step, and test metrics to families", () => {
-  // Aggregate and per-shard job metrics.
-  assertEquals(
-    compileCacheFamilyForMetric("job: Generated Patterns Integration Tests"),
-    "generated-patterns",
-  );
-  assertEquals(
-    compileCacheFamilyForMetric(
-      "job: Generated Patterns Integration Tests (2/4)",
-    ),
-    "generated-patterns",
-  );
-  assertEquals(
-    compileCacheFamilyForMetric("job: Pattern Integration Tests"),
-    "pattern-integration",
-  );
-  assertEquals(
-    compileCacheFamilyForMetric("job: Pattern Integration Tests (3/4)"),
-    "pattern-integration",
-  );
-  assertEquals(
-    compileCacheFamilyForMetric("job: Pattern Unit Tests (3/5)"),
-    "pattern-unit",
-  );
-
-  // Step metrics.
-  assertEquals(
-    compileCacheFamilyForMetric("step: generated patterns integration"),
-    "generated-patterns",
-  );
-  assertEquals(
-    compileCacheFamilyForMetric("step: patterns integration"),
-    "pattern-integration",
-  );
-  assertEquals(
-    compileCacheFamilyForMetric("step: pattern unit tests"),
-    "pattern-unit",
-  );
-
-  // Per-test and per-subtest metrics keyed by timing-artifact label.
-  assertEquals(
-    compileCacheFamilyForMetric(
-      "test: generated-patterns/packages/patterns/foo.test.tsx",
-    ),
-    "generated-patterns",
-  );
-  assertEquals(
-    compileCacheFamilyForMetric(
-      "subtest: pattern-integration/packages/patterns/foo.test.tsx > case",
-    ),
-    "pattern-integration",
-  );
-  assertEquals(
-    compileCacheFamilyForMetric(
-      "test: pattern-unit-3/packages/patterns/foo.test.tsx",
-    ),
-    "pattern-unit",
-  );
-});
-
-Deno.test("compileCacheFamilyForMetric returns null for metrics without a compile cache", () => {
-  for (
-    const metric of [
-      "job: Runner Tests",
-      "job: Pattern Reload Integration Tests",
-      "step: runner tests",
-      "test: pattern-reload-integration/packages/patterns/foo.test.tsx",
-      "test: package-integration/packages/runner/foo.test.ts",
-      "subtest: pattern-unit/packages/patterns/foo.test.tsx > case",
-      "coverage-debt: workspace uncovered lines",
-    ]
-  ) {
-    assertEquals(compileCacheFamilyForMetric(metric), null, metric);
-  }
 });
 
 Deno.test("cache state aggregation treats any restore hit as warm", () => {
@@ -852,28 +204,6 @@ Deno.test("cache state parsing keeps valid unknown-family records inert", () => 
   });
 });
 
-Deno.test("dropColdSamples removes known-cold runs and keeps unknown ones", () => {
-  const sample = (runId: number): TimingSample => ({
-    runId,
-    runUrl: `https://example.test/run/${runId}`,
-    sha: `sha${runId}`,
-    createdAt: `2026-01-0${runId}T00:00:00Z`,
-    durationSeconds: runId,
-  });
-  const states = new Map<number, CompileCacheState>([
-    [1, "warm"],
-    [2, "cold"],
-    // Run 3 has no recorded state: unknown runs are kept.
-  ]);
-
-  const kept = dropColdSamples(
-    [sample(1), sample(2), sample(3)],
-    (runId) => states.get(runId),
-  );
-
-  assertEquals(kept.map((s) => s.runId), [1, 3]);
-});
-
 Deno.test("latestNonColdSample skips trailing cold runs and falls back when all are cold", () => {
   const sample = (runId: number): TimingSample => ({
     runId,
@@ -895,180 +225,70 @@ Deno.test("latestNonColdSample skips trailing cold runs and falls back when all 
   assertEquals(latestNonColdSample([], () => false), undefined);
 });
 
-Deno.test("computeCiWallTimeRevisitSignals stays quiet for balanced CI", () => {
-  const signals = computeCiWallTimeRevisitSignals([
-    makeJob(
-      1,
-      "Pattern Integration Tests (1/4)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:02:00Z",
-      [],
-    ),
-    makeJob(
-      2,
-      "CLI Integration Tests (core-piece-call)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:50Z",
-      [],
-    ),
-    makeJob(
-      3,
-      "Package Integration Tests (shell)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:45Z",
-      [],
-    ),
-    makeJob(
-      4,
-      "Generated Patterns Integration Tests (1/4)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:40Z",
-      [],
-    ),
-    makeJob(
-      5,
-      "Runner Tests (1/5)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:35Z",
-      [],
-    ),
-  ]);
-
-  assertEquals(signals, []);
-});
-
-Deno.test("computeCiWallTimeRevisitSignals flags slow and imbalanced jobs", () => {
-  const signals = computeCiWallTimeRevisitSignals([
-    makeJob(
-      1,
-      "Pattern Integration Tests (2/4)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:04:00Z",
-      [],
-    ),
-    makeJob(
-      2,
-      "CLI Integration Tests (core-piece-call)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:40Z",
-      [],
-    ),
-    makeJob(
-      3,
-      "Package Integration Tests (shell)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:35Z",
-      [],
-    ),
-    makeJob(
-      4,
-      "Generated Patterns Integration Tests (1/4)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:30Z",
-      [],
-    ),
-    makeJob(
-      5,
-      "Runner Tests (1/5)",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:25Z",
-      [],
-    ),
-  ]);
-
-  assertEquals(
-    signals.map((signal) => signal.kind),
-    ["slow-job", "job-imbalance"],
-  );
-  assertEquals(
-    signals[0].detail,
-    "Pattern Integration Tests (2/4) took 4m 0s",
-  );
-});
-
-Deno.test("computeCiWallTimeRevisitSignals flags long required wall time", () => {
-  const signals = computeCiWallTimeRevisitSignals([
-    makeJob(
-      1,
-      "Check",
-      "2026-01-01T00:00:00Z",
-      "2026-01-01T00:01:00Z",
-      [],
-    ),
-    makeJob(
-      2,
-      "Pattern Integration Tests (1/4)",
-      "2026-01-01T00:07:30Z",
-      "2026-01-01T00:08:30Z",
-      [],
-    ),
-    makeJob(
-      3,
-      "Deploy to Toolshed (Staging)",
-      "2026-01-01T00:20:00Z",
-      "2026-01-01T00:25:00Z",
-      [],
-    ),
-  ]);
-
-  assertEquals(
-    signals.map((signal) => signal.kind),
-    ["required-wall-time"],
-  );
-  assertEquals(
-    signals[0].detail,
-    "Required non-deploy jobs took 8m 30s from first start to last completion",
-  );
-});
-
-Deno.test("computeBaseline enforces the 50 percent floor for low-variance samples", () => {
-  const baseline = computeBaseline([100, 100, 100, 100, 100]);
-
-  assertEquals(baseline?.median, 100);
-  assertEquals(baseline?.stddev, 0);
-  assertAlmostEquals(baseline?.threshold ?? 0, 150, 1e-9);
-});
-
-Deno.test("computeBaseline uses the 3 sigma threshold when it exceeds 50 percent", () => {
-  const baseline = computeBaseline([100, 100, 100, 100, 150]);
-
-  assertEquals(baseline?.median, 100);
-  assertAlmostEquals(baseline?.stddev ?? 0, 20, 1e-9);
-  assertEquals(baseline?.threshold, 160);
-});
-
 Deno.test("coverage debt metrics format and parse line units", () => {
   const metric = "coverage-debt: workspace uncovered lines";
-  assertEquals(formatMetricValue(metric, 12), "12 lines");
-  assertEquals(formatMetricValue(metric, 1), "1 line");
-  assertEquals(formatOverrideSuggestion(metric, 12.2), "13 lines");
+  assertEquals(formatOverrideSuggestion(12.2), "13 lines");
+  assertEquals(formatOverrideSuggestion(1), "1 line");
 
   const overrides = parseBaselineOverrides(
-    "NEW_PERF_BASELINE: coverage-debt: workspace uncovered lines = 7 lines",
+    "ACCEPT_COVERAGE_DEBT: coverage-debt: workspace uncovered lines = 7 lines",
   );
   assertEquals(overrides.metrics.get(metric), 7);
   assertEquals(overrides.coverageBaselineReset, false);
 });
 
-Deno.test("baseline override parser rejects line units for non-coverage metrics", () => {
+Deno.test("baseline override parser accepts coverage-debt line overrides", () => {
+  const overrides = parseBaselineOverrides(
+    "ACCEPT_COVERAGE_DEBT: coverage-debt: packages/runner uncovered lines = 123 lines",
+  );
+
+  assertEquals(
+    overrides.metrics.get("coverage-debt: packages/runner uncovered lines"),
+    123,
+  );
+  assertEquals(overrides.coverageBaselineReset, false);
+});
+
+Deno.test("baseline override parser rejects non-coverage-debt metrics", () => {
   assertThrows(
     () =>
       parseBaselineOverrides(
-        "NEW_PERF_BASELINE: job: Check = 7 lines",
+        "ACCEPT_COVERAGE_DEBT: job: Check = 7 lines",
       ),
     Error,
-    "line units are only valid for coverage-debt metrics",
+    "only coverage-debt metrics can be accepted",
   );
 });
 
-Deno.test("baseline override parser rejects time units for coverage metrics", () => {
-  assertThrows(
-    () =>
-      parseBaselineOverrides(
-        "NEW_PERF_BASELINE: coverage-debt: workspace uncovered lines = 7s",
-      ),
-    Error,
-    "coverage-debt metrics must use line units",
+Deno.test("baseline override parser reads legacy coverage-debt acceptance only when asked", () => {
+  const body =
+    "NEW_PERF_BASELINE: coverage-debt: packages/runner uncovered lines = 123 lines";
+
+  // New PRs must use ACCEPT_COVERAGE_DEBT: the legacy form is ignored by default.
+  assertEquals(parseBaselineOverrides(body).metrics.size, 0);
+
+  // Merged baseline PRs from before the rename still count, so their
+  // acceptance truncates the baseline timeline.
+  const legacy = parseBaselineOverrides(body, true);
+  assertEquals(
+    legacy.metrics.get("coverage-debt: packages/runner uncovered lines"),
+    123,
+  );
+});
+
+Deno.test("legacy override parsing ignores the defunct timing form", () => {
+  // NEW_PERF_BASELINE once accepted timing regressions too; those gate nothing
+  // now, so a legacy timing line is ignored rather than rejected — a merged PR
+  // that carried one must still yield its coverage-debt acceptance.
+  const overrides = parseBaselineOverrides(
+    "NEW_PERF_BASELINE: job: Check = 7s\n" +
+      "NEW_PERF_BASELINE: coverage-debt: packages/runner uncovered lines = 9 lines",
+    true,
+  );
+  assertEquals(overrides.metrics.size, 1);
+  assertEquals(
+    overrides.metrics.get("coverage-debt: packages/runner uncovered lines"),
+    9,
   );
 });
 
@@ -1140,7 +360,7 @@ Deno.test("coverage debt gating follows changed source groups", () => {
     "packages/runner/src/cell.ts",
     "packages/patterns/README.md",
     "packages/ui/src/button.test.tsx",
-    "tasks/perf-check.ts",
+    "tasks/coverage-check.ts",
     "scripts/build.ts",
   ]);
 
@@ -1805,34 +1025,6 @@ Deno.test("newestArtifactsByName keeps the latest re-run upload per name", () =>
     [
       ["test-timing-pattern-unit-1", 150],
       ["test-timing-pattern-unit-4", 200],
-    ],
-  );
-});
-
-Deno.test("newestTimingArtifacts drops stale, expired, and unrelated artifacts", () => {
-  const artifact = (
-    id: number,
-    name: string,
-    expired = false,
-  ): Artifact => ({
-    id,
-    name,
-    size_in_bytes: 1,
-    expired,
-  });
-  const result = newestTimingArtifacts([
-    artifact(200, "test-timing-pattern-integration-3"),
-    artifact(150, "test-timing-pattern-integration-1"),
-    artifact(100, "test-timing-pattern-integration-3"),
-    artifact(300, "test-timing-pattern-integration-4", true),
-    artifact(400, "coverage-profile-pattern-integration-2"),
-  ]);
-
-  assertEquals(
-    result.map((item) => [item.name, item.id]).sort(),
-    [
-      ["test-timing-pattern-integration-1", 150],
-      ["test-timing-pattern-integration-3", 200],
     ],
   );
 });

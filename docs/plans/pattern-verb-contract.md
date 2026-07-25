@@ -10,8 +10,15 @@ lossy — a create returns no handle, a rejection looks like success, a retry ca
 duplicate. Part 1 is the authoring contract for verbs: named fields, atomic
 units, declared results, typed rejections, no call-order dependence. Part 2
 makes results durable and retries idempotent by exposing the scheduler's
-existing event-id and receipt machinery through the callable layer. One small
-runtime change; everything else is exposure.
+existing event-id and receipt machinery through the callable layer. The core
+invocation path needs one small runtime change; general execution attribution
+is a separate, CFC-gated track.
+
+**Review update (2026-07-24).** Post-merge review of PR #4968 corrected three
+boundaries in the draft: generic actor attribution belongs in CFC provenance,
+not a parallel invocation field; patterns return child references while clients
+render their ids and paths; and client-local `@name` bindings are deferred
+because they overlap confusingly with fabric-side slugs.
 
 ## Goal
 
@@ -195,7 +202,14 @@ relies on. Closing them is safe; what it costs is two commitments:
 
 1. **Named fields only.** Every argument is a named field in a declared input
    schema. A client may offer positional sugar when the schema has exactly one
-   required field; the contract itself stays named.
+   required field; the contract itself stays named. **An undeclared field is a
+   typed rejection, never ignored**: input schemas are closed-world, and a
+   client validates against the *deployed* schema before dispatch, so a caller
+   targeting a newer contract than the live piece fails loudly instead of
+   silently losing data — the live board accepted and discarded `agentName`
+   exactly this way. A transitional compatibility field is declared like any
+   other; tolerated-but-undeclared is the failure mode this rule exists to
+   kill.
 2. **Valid on its own.** A verb leaves the piece in a state a reader can accept,
    without depending on a follow-up call to become correct.
 3. **Declared result.** A verb that produces something declares a result schema
@@ -204,10 +218,10 @@ relies on. Closing them is safe; what it costs is two commitments:
    typed error with a stable code. (Authorization is not the contract's job:
    CFC already rejects unauthorized commits and the runner surfaces the error,
    `packages/runner/src/runner.ts:835-840`.)
-5. **Address by identity, never by position.** `{ topicFid }`, not `{ index }`;
-   indices shift under concurrent writes. `topics` already works this way —
-   `crossrefs` rows carry their topic precisely so consumers never correlate by
-   index.
+5. **Address by identity, never by position.** Pass a child reference, or a
+   client-rendered fid/path derived from one, never `{ index }`; indices shift
+   under concurrent writes. A pattern need not and generally cannot manufacture
+   its own runtime fid.
 6. **No implicit dependence on state set by an earlier call.** A verb may take a
    cell reference as an explicit argument; what it may not do is read state that
    some prior verb was expected to set. Verbs written for UI convenience may
@@ -217,12 +231,12 @@ relies on. Closing them is safe; what it costs is two commitments:
 Rule 6 has teeth: any "call A, then call B" sequence where A configures B is a
 race under concurrency. Its canonical instance is attribution.
 
-### Attribution: two parties, not one
+### Attribution: principal and execution provenance
 
 A write carries two attributions — who authorized it and who performed it.
 Conflating them in one settable display-name cell that each caller resets
 before mutating is the rule 6 race in its purest form. They are separate
-facts and are carried separately; `topics` is the template:
+facts and belong at different layers:
 
 - The **principal** — whose key authorized the write — stays fabric-level:
   CFC carries it in its integrity labels (`packages/api/cfc.ts:829-841`). For
@@ -231,29 +245,59 @@ facts and are carried separately; `topics` is the template:
   `docs/common/patterns/multi-user-patterns.md:263-272` — "the viewer is
   whoever the runtime says they are") and stamps a structured
   `TopicAuthor { kind: "person", name, avatar? }`.
-- The **actor** — what performed the write on the principal's behalf — is a
-  required field on every mutating event (`AgentAuthoredEvent { agentName }`),
-  stored as `TopicAuthor { kind: "agent", … }`. Its own doc comment states the
-  contract: display attribution only; write authority remains the principal's.
+- The **execution provenance** — what performed the write on the principal's
+  behalf and in what context — belongs in CFC labels. The intended general
+  mechanism is a trusted-ingress-minted atom, provisionally `AgentActor`, whose
+  metadata can carry more than a display name: for example an agent role,
+  session/tool context, or a protected reference to the triggering request.
+  CFC already has runtime-minted provenance families such as `ExternalIngest`,
+  `LlmDerived`, and `TransformedBy` (`packages/api/cfc.ts:66-85,111-113`), but
+  no `AgentActor` atom exists and the external `cf` call path does not yet
+  preserve this distinction.
 
-The actor as an explicit verb argument — per call, no prelude, no shared cell
-to interleave on — is the interim form. The end state is Part 2's: carry the
-actor in the invocation envelope, so `AgentAuthoredEvent` stops being
-boilerplate every pattern re-declares on every mutating event. Either way the
-actor is a claim, not an authenticated fact — the principal vouches for it,
-the way a git signature vouches for an unverified author string. Whether an
-actor can ever be *authenticated* is a separate question about keys (open
-question 2).
+Until that ingress path exists, `topics` keeps the explicit per-call
+`AgentAuthoredEvent { agentName }`, stored as
+`TopicAuthor { kind: "agent", … }`. Its own doc comment states the interim
+contract: display attribution only; write authority remains the principal's.
+This keeps attribution atomic with the mutation without pretending that a
+topic-specific string is the generic provenance model.
+
+The invocation protocol must not create a second canonical actor record.
+Invocation output may eventually expose a policy-safe view extracted from CFC
+provenance, but CFC remains the source of truth. Rich provenance metadata can
+itself be confidential — a prompt or triggering user request is the obvious
+case — so extraction and display are gated on the label-metadata confidentiality
+rules, not merely on an open-world JSON shape. Authentication through a separate
+agent key or delegation remains useful when cryptographic agent identity is
+required, but is not a prerequisite for runtime-attested execution provenance
+(open question 2).
 
 ### Discovery
 
 A client holding only a board URL must reach the board's children without an
 O(children) sweep of per-child reads. So a parent exposes a **compact index** on
-its result — one row per child carrying its fid and the summary fields a survey
-needs (name, author, timestamps, counts) — making the whole board one read and
-every child addressable by the fid in its row. `topics` already has the shape in
-`crossrefs`; the step is to treat that as the deliberate discovery surface, not
-a by-product of the cross-reference graph.
+its result — one row per child carrying a stable child reference and the summary
+fields a survey needs (name, author, timestamps, counts) — making the whole
+board one read. The pattern owns the reference and summary; the client, which
+can inspect the backing cells, owns rendering the reference as a fid or full
+path.
+
+`topics.crossrefs` already carries each `topic` reference, but it is the
+cross-reference graph, not a compact index: each row's `topic`, `refsOut`, and
+`referencedBy` expand to full pieces on read
+(`packages/patterns/topics/main.tsx:70-78`), and a headless survey of the live
+board through it produced over 300k tokens of output. Its explicit `fid` field
+is not the general model either: it is derived indirectly from runtime-only
+cell surface, reads `""` while unresolved, and a pattern cannot reliably see
+its own runtime address. The index is therefore a separate result — one
+reference-plus-summary row per child, reference edges as sibling references,
+never expanded pieces — and generic clients render identity on top: a coarse
+exploration mode such as `--include-ids` can annotate every point where the
+backing identity changes, with a narrower path-selected form to follow if the
+broad form proves too noisy. Both are projections of existing references, not
+fields every pattern must maintain. Acceptance for an index: its serialization
+contains no expanded piece, action, or runtime values, and a full-board read
+stays bounded.
 
 Discovery is the parent's job; the child's own verbs are the child's. A comment
 is addressed to the topic, not routed through the board — **but that depends on
@@ -305,13 +349,14 @@ required field later stops the sugar applying rather than silently misbinding.
 
 ### Applied to `topics`
 
-`topics` already satisfies the attribution rules; filing is six invocations.
-The rest of Part 1 — a body argument on `addTopic` so `setBody` becomes an
-editing verb rather than part of every create, and thrown rejections in place
-of silent early-returns — makes it five. The remaining waste — the fid lookup
-and the verification read — is exactly what a returned result removes, and
-that is Part 2's job: with it, filing is `addTopic`, `addComment`, `addLink` —
-one call per thing the author meant to do.
+`topics` already satisfies the interim atomic-attribution rule; filing is six
+invocations. The rest of Part 1 — a body argument on `addTopic` so `setBody`
+becomes an editing verb rather than part of every create, and thrown rejections
+in place of silent early-returns — makes it five. The remaining waste — the
+handle lookup and the verification read — is exactly what a returned child
+reference removes, and that is Part 2's job: with it, filing is `addTopic`,
+`addComment`, `addLink` — one call per thing the author meant to do. The CLI
+renders the returned reference as a usable fid/path.
 
 ## Part 2 — the invocation protocol
 
@@ -329,15 +374,6 @@ builds the `Invocation` and hands it back as the verb's return value:
 interface Invocation<Out> {
   /** Caller-supplied. Doubles as the idempotency key. */
   id: string;
-  /**
-   * The second attribution party — the agent when acting under a human's key,
-   * the human when the agent holds its own. The principal always comes from
-   * the write, never from here. An object rather than a bare string so a
-   * `verified: true` field can be added once delegation exists (absent means
-   * unverified) — additive only because this schema is authored open-world
-   * (see Results and schema evolution).
-   */
-  actor?: { name: string };
   status: "pending" | "settled" | "failed";
   result?: Out;
   error?: { code: string; message: string };
@@ -351,8 +387,10 @@ durable entry that same caller can revisit later by id — deliberately not
 named a result, which would capture only the first half. It is a **view over
 the existing receipt cell** — per the
 scheduler spec, "the receipt is the handling's result cell", not a new document
-kind — plus envelope fields (`actor`, timestamps, the error shape) that the
-receipt does not carry today.
+kind — plus envelope fields (timestamps and the error shape) that the receipt
+does not carry today. Actor/execution attribution is deliberately absent: CFC
+provenance is canonical, and a client may later render an authorized extracted
+view beside this record.
 
 What it provides:
 
@@ -378,9 +416,16 @@ transaction committed: `return` settles, `throw` fails. Effects that propagate
 downstream are not part of settlement, which keeps the term bounded for verbs
 with fan-out.
 
-This is not a new semantic — it is when the receipt commits today. The work is
-exposure: the CLI currently awaits the commit and then discards everything
-(`callable.ts:294-320`).
+This is not a new semantic — it is when the receipt commits today. But the CLI
+waits for far more than that: the handler branch awaits `runtime.idle()` and
+`manager.synced()` — the whole reactive graph quiescing, then full sync — so
+acknowledgement of an already-committed write is held hostage to every derived
+recomputation it triggered. On the live topics board that is `crossrefs`
+re-deriving over the whole board; mutations were observed taking 60–80 s. The
+work is exposure *and narrowing*: await this handling's commit, sync the
+receipt, return — never the graph going quiet. An acceptance test must prove a
+slow derived recomputation cannot delay acknowledgement (implementation plan,
+WS-D).
 
 Waiting is a caller-side choice — whether to wait at all, and for how long. This
 replaces the current fixed 15 s `DEFAULT_TOOL_RESULT_TIMEOUT_MS`, and the wait
@@ -435,7 +480,11 @@ Scope is not the whole confidentiality story: a result derived from labelled
 data carries CFC confidentiality labels of its own, so a stored invocation
 record is subject to the same label rules as any other cell
 (`docs/specs/cfc-label-metadata-confidentiality.md`). Retention and readback
-therefore need checking against those rules, not only against cell scope.
+therefore need checking against those rules, not only against cell scope. The
+same is true of any extracted execution-provenance view: rich `AgentActor`
+metadata may contain a role, tool/session context, or a reference to a
+confidential prompt, so the invocation record must not copy it into ordinary
+payload fields by default.
 
 ### Retries and failure
 
@@ -476,7 +525,8 @@ and results in **opposite directions** (`:151-183`):
 That second direction matters here: a declared result is easier to shrink than
 to extend, so the result shape wants to be right early, or deliberately
 open-world. The `Invocation` shape is the first schema this applies to — it
-must be authored open-world so fields like `verified` can be added later.
+must be authored open-world so protocol fields such as a payload digest or
+retention metadata can be added later.
 
 ### Authoring
 
@@ -516,7 +566,10 @@ Two additions close it:
 
 1. A CLI listing (`cf piece verbs --json`, or a `callables` section in
    `piece inspect --json`): name, kind, and schemas per verb in one read —
-   the same classification FUSE already performs, exposed generically.
+   the same classification FUSE already performs, exposed generically. The
+   listing also carries the deployed pattern's source identity, so a client or
+   skill can detect that it targets a newer contract than the live piece
+   instead of discovering skew through a silently dropped field.
 2. **Result schemas for handlers.** The command spec carries an output schema
    only for tools, because handlers return nothing today. Rule 3's declared
    result must reach the piece's **durable schema** — otherwise introspection
@@ -543,28 +596,41 @@ contract.
 ### Client surface
 
 ```text
-$ cf @topics addTopic --title "Verb contract" --body @body.md
+$ cf piece call --url "$TOPICS_BOARD_URL" addTopic \
+    --title "Verb contract" --body @body.md
 { "invocation": "inv_7f3a", "status": "settled",
   "result": { "topic": "fid1:abc" } }
 
 # The client mints the id before sending and prints it even when its wait
 # times out. Retrying with it returns the original — no re-execution.
-$ cf @topics addTopic --title "Verb contract" --invocation inv_7f3a
+$ cf piece call --url "$TOPICS_BOARD_URL" addTopic \
+    --title "Verb contract" --invocation inv_7f3a
 { "invocation": "inv_7f3a", "status": "settled",
   "result": { "topic": "fid1:abc" } }
 
 # The caller chooses whether and how long to wait
-$ cf @topics summarize --topic fid1:abc --no-wait
+$ cf piece call --url "$TOPICS_BOARD_URL" summarize \
+    --topic fid1:abc --no-wait
 { "invocation": "inv_9c1b", "status": "pending" }
-$ cf @topics invocation inv_9c1b --await
+$ cf piece invocation --url "$TOPICS_BOARD_URL" inv_9c1b --await
 { "invocation": "inv_9c1b", "status": "settled",
   "result": { "summary": "..." } }
 ```
 
-`@topics` is a client-side binding of a name to a piece URL, stored by the
-invoking tool: different clients may want different names, and the binding has
-to resolve before the fabric is reachable. Slugs (`cf piece set-slug`) provide
-fabric-side naming within a space; a binding supplies the host and space half.
+Client-local `@name` bindings are deferred. They can encode host + space +
+piece, while slugs (`cf piece set-slug`) are fabric-side names within a space,
+but two overlapping naming systems are too easy to confuse and aliases are not
+required for agent-drivable verbs. Revisit them separately only after concrete
+usage shows that full URLs, configured host/space, and slugs are insufficient.
+
+On any early exit — a timed-out wait, a lost connection — the client reports
+the furthest phase it observed as a structured field beside the invocation id
+it printed before network work began:
+`initial_sync | dispatched | committed | readback`. Phase is diagnosis, not a
+safety gate: with a caller-supplied id, a retry of that id is safe in every
+phase — before dispatch nothing committed; after it, the retry collides on the
+receipt and reads the original back. A `retrySafe` flag is derivable
+client-side sugar, not protocol.
 
 ## Defects and unknowns in the current machinery
 
@@ -600,12 +666,12 @@ The loom fuse-fabric-access arc (loom PR 4183) reached this territory first: it
 put an agent handle on loom's mobile root piece and wrote down the conventions
 that made it drivable. Its topics-board incarnation — the board topic *"Give
 the topics board an agent handle"* (Ben + Claude, 2026-07-22) — asks for five
-things: atomic `addTopic {title, body?}` returning the new fid, idempotency on
-create, a board index cell, board-level `addComment {topicFid}`, and an
-identity guard on mutating verbs. Every ask maps to a section above — the
-identity guard is the required `agentName` on every mutating event. This
-document is their pattern-agnostic generalization. Deeper detail lives in the
-arc's defect register and
+things: atomic `addTopic {title, body?}` returning the new topic reference,
+idempotency on create, a board index cell, board-level
+`addComment {topicFid}`, and an identity guard on mutating verbs. Every ask maps to a section above — the
+identity guard is the interim required `agentName` on every mutating event,
+pending general CFC ingress provenance. This document is their pattern-agnostic
+generalization. Deeper detail lives in the arc's defect register and
 `docs/development/projects/fuse-fabric-access/topics-agent-ergonomics.md` on
 the loom PR.
 
@@ -614,12 +680,26 @@ absorbed into the atomic-unit rule (Composition), and child-owned verbs are
 preferred to parent-routed ones, with board-level routing as the documented
 workaround until nested-stream dispatch lands (Discovery).
 
+A second, independent confirmation arrived 2026-07-24: the first headless
+session driving the live board through the current CLI needed ~24 remote
+operations to create a three-topic graph — every extra call a handle lookup, a
+`setBody` that could not ride the create, or a verification read — with four
+fixed-timeout sync failures, roughly six minutes of mutation waits, and one
+field silently discarded by a stale deployed schema. Each failure maps to a
+section above, and the session's three-topic scenario is adopted as the
+end-to-end acceptance fixture in the implementation plan.
+
 ## Open questions
 
 1. **What is the right default retention window**, given that it bounds the
    idempotency guarantee?
-2. **Can the actor ever be authenticated — does an invocation need two keys?**
-   Three arrangements, unequal:
+2. **What does `AgentActor` provenance attest, and when does it need a key?**
+   Runtime-minted ingress provenance can attest that a trusted boundary
+   observed a particular execution context without making the agent a
+   cryptographic principal. That is enough for honest provenance and richer
+   than an invocation-owned display name, but it does not authenticate a
+   self-asserted real-world identity. When cryptographic agent identity is
+   required, three arrangements remain unequal:
 
    | arrangement | cost | authenticated |
    | --- | --- | --- |
@@ -627,17 +707,18 @@ workaround until nested-stream dispatch lands (Discovery).
    | agent holds its own key | a DID, home space and profile per agent | agent only |
    | agent signs under a delegation from its human | delegation credentials | both |
 
-   Only delegation authenticates both, and it is infrastructure — issuance,
-   expiry, revocation. A standalone agent key is cheaper but inverts the
-   problem, leaving the accountable human unverified; it is also not small,
+   Only delegation cryptographically authenticates both, and it is
+   infrastructure — issuance, expiry, revocation. A standalone agent key is
+   cheaper but inverts the problem, leaving the accountable human unverified;
+   it is also not small,
    since a key is a DID, a DID is a home space
    (`getHomeSpaceCell = getCell(did, did)`), and homes are private under
    now-default ACL enforcement — an agent key implies a home and profile, not
-   just a credential. Until this settles, every actor claim is unverified: the
-   record stores the actor as an object so a `verified` field can be added
-   without migration, and a renderer should lead with the authenticated
-   principal and mark the actor unverified. Nothing here forecloses delegation
-   or delivers it.
+   just a credential. The CFC design must specify the atom's trusted mint,
+   propagation, metadata confidentiality, and extraction helpers. A renderer
+   should lead with the authenticated principal and distinguish
+   runtime-attested execution context from cryptographically authenticated
+   agent identity. Nothing here forecloses delegation or delivers it.
 3. **How do plain JSON returns reach the receipt?** A return value containing
    reactives/cells projects into the receipt, while a **plain JSON return is
    discarded** (the receipt-only branch writes `{}`, `runner.ts:3713-3725`).
@@ -670,6 +751,15 @@ workaround until nested-stream dispatch lands (Discovery).
   verb to any reader, and permission stays with CFC at commit. Patterns may
   mark UI-convenience wrappers so the default view shows the contract tier;
   `--all` always shows everything.
+- **Execution attribution is CFC provenance, not an invocation payload field.**
+  `topics.agentName` remains an atomic interim argument until trusted `cf`
+  ingress can mint and propagate the general provenance.
+- **Patterns return references; clients render identities.** A compact index
+  carries stable child references and summaries. Generic `--include-ids`
+  annotation belongs to the CLI because the pattern cannot reliably author its
+  own fid.
+- **Client-local `@name` bindings are deferred.** Their distinction from slugs
+  is real but confusing, and they are unnecessary for the core contract.
 
 ## Staging
 
@@ -680,10 +770,11 @@ the steps below are the design-level order.
 1. Agree this document — particularly the open questions.
 2. Finish the Part 1 rework of `topics` / `topic` — the attribution rules
    already hold. Remaining, with no runtime change: a body argument on
-   `addTopic`, and thrown rejections in place of silent early-returns — empty
-   titles and blank agent names both drop without a trace today. (A thrown
-   handler error already surfaces as a nonzero CLI exit; stable codes arrive
-   with the protocol.)
+   `addTopic`, thrown rejections in place of silent early-returns — empty
+   titles and blank agent names both drop without a trace today — and the
+   reference-plus-summary discovery index (Discovery). (A thrown handler
+   error already surfaces as a nonzero CLI exit; stable codes arrive with the
+   protocol.)
 3. Replace the tool-result poll with sink-based settlement and return the
    result cell's address to the caller. Standing fix, useful regardless.
 4. Plumb the id and the readback: pass a caller-supplied `eventId` from
@@ -693,11 +784,12 @@ the steps below are the design-level order.
    returns `undefined`), and reclassify `precondition: "receipt-exists"` as
    success-with-readback rather than failure. Plus the one runtime change from
    open question 3 if plain returns are to survive.
-5. Add the envelope fields the receipt does not carry — `actor`, timestamps,
-   the typed error shape, the linked retention collection — and retire the
-   per-event `agentName` fields (`AgentAuthoredEvent`) in its favor.
-6. Add the client-side binding (`@name`), the client surface around invocation
-   ids (mint-and-print, `--invocation`, `--await` / `--no-wait`), and the verb
-   listing (Verb discovery).
+5. Add timestamps, the typed error shape, and the linked retention collection.
+   In a separate CFC-gated track, design trusted `cf` ingress provenance,
+   `AgentActor` propagation, metadata protection, and extraction. Retire
+   per-event `agentName` fields only after that path is proven end to end.
+6. Add the client surface around invocation ids (mint-and-print,
+   `--invocation`, `--await` / `--no-wait`), verb listing, and generic
+   identity annotation for returned references and discovery indexes.
 
 Steps 2 and 3 stand on their own regardless of how the open questions land.

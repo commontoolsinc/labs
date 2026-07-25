@@ -313,6 +313,12 @@ const EX_ID = `--identity ./my.key`;
 const EX_URL = `--url ${RAW_EX_URL}`;
 const EX_COMP = `--api-url ${RAW_EX_COMP.apiUrl} --space ${RAW_EX_COMP.space}`;
 const EX_COMP_PIECE = `${EX_COMP} --piece ${RAW_EX_COMP.piece!}`;
+const PIECE_REGISTRY_LINK_EXAMPLE = [
+  cliText(
+    `cf piece link ${EX_ID} ${EX_COMP} fid1:abc123 fid1:piece1/pieceRegistry`,
+  ),
+  `Link the well-known "pieceRegistry" list to a piece field.`,
+] as const;
 
 // Enhanced description with workflow tips
 function pieceEnvStatus(): string {
@@ -394,7 +400,7 @@ export const piece = new Command()
   .action(searchPiecesFromCommand)
   /* piece new */
   .command("new", "Create a new piece with a pattern.")
-  .usage(spaceUsage)
+  .usage(`${spaceUsage} <main>`)
   .example(
     cliText(`cf piece new ${EX_ID} ${EX_COMP} ./main.tsx`),
     `Create a new piece, using ./main.tsx as source.`,
@@ -452,7 +458,7 @@ export const piece = new Command()
     "set-slug",
     "Set a slug redirect to a piece or cell link.",
   )
-  .usage(spaceUsage)
+  .usage(`${spaceUsage} <slug> <source>`)
   .example(
     cliText(`cf piece set-slug ${EX_ID} ${EX_COMP} project-notes fid1:piece1`),
     `Set slug "project-notes" to piece "fid1:piece1".`,
@@ -516,7 +522,7 @@ export const piece = new Command()
   )
   /* piece getsrc */
   .command("getsrc", "Retrieve the pattern source for the given piece.")
-  .usage(pieceUsage)
+  .usage(`${pieceUsage} <outpath>`)
   .example(
     cliText(`cf piece getsrc ${EX_ID} ${EX_COMP_PIECE} ./out`),
     `Retrieve the source for "${RAW_EX_COMP.piece!}" and place in ./out`,
@@ -532,7 +538,7 @@ export const piece = new Command()
   )
   /* piece setsrc */
   .command("setsrc", "Update the pattern source for the given piece.")
-  .usage(pieceUsage)
+  .usage(`${pieceUsage} <main>`)
   .example(
     cliText(`cf piece setsrc ${EX_ID} ${EX_COMP_PIECE} ./main.tsx`),
     `Update the source for "${RAW_EX_COMP.piece!}" with ./main.tsx`,
@@ -770,10 +776,10 @@ Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
     "link",
     `Link a field from one piece to another for reactive data flow.
 
-WELL-KNOWN IDS: System-level data (like allPieces) can be linked using
+WELL-KNOWN IDS: System-level data (like pieceRegistry) can be linked using
 well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
   )
-  .usage(spaceUsage)
+  .usage(`${spaceUsage} <source> <target>`)
   .example(
     cliText(
       `cf piece link ${EX_ID} ${EX_COMP} fid1:piece1/outputEmails fid1:piece2/emails`,
@@ -792,12 +798,7 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     ),
     `Link scoped cell instances using @user or @session on the piece ID.`,
   )
-  .example(
-    cliText(
-      `cf piece link ${EX_ID} ${EX_COMP} fid1:abc123 fid1:piece1/allPieces`,
-    ),
-    `Link well-known "allPieces" list to a piece field.`,
-  )
+  .example(...PIECE_REGISTRY_LINK_EXAMPLE)
   .example(
     cliText(
       `cf piece link ${EX_ID} ${EX_COMP} sqlite:/data/reference.db fid1:piece1/refDb`,
@@ -895,7 +896,7 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
 PATH FORMAT: Use forward slashes and numeric indices for arrays.
   ✓ items/0/name    ✓ config/db/host    ✗ items[0].name`,
   )
-  .usage(pieceUsage)
+  .usage(`${pieceUsage} [path]`)
   .example(
     cliText(`cf piece get ${EX_ID} ${EX_COMP_PIECE} name`),
     `Get the "name" field from piece result "${RAW_EX_COMP.piece!}".`,
@@ -961,7 +962,7 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
 
 JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
   )
-  .usage(pieceUsage)
+  .usage(`${pieceUsage} <path>`)
   .example(
     cliText(`echo '"New Name"' | cf piece set ${EX_ID} ${EX_COMP_PIECE} name`),
     `Set the "name" field in piece result "${RAW_EX_COMP.piece!}".`,
@@ -1014,8 +1015,16 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
     render(map);
   })
   /* piece call */
-  .command("call", "Invoke a callable within a piece")
-  .usage(pieceUsage)
+  .command(
+    "call",
+    `Invoke a callable within a piece.
+
+INPUT: Pass one inline JSON value, pass "-" to read JSON from stdin, or put
+"--" before flags generated from the callable's input schema. Handlers also
+interpret piped input when no input argument is present. For tools, use "-" or
+"-- --json" to read piped JSON.`,
+  )
+  .usage(`${pieceUsage} <callable> [input]`)
   .example(
     cliText(`cf piece call ${EX_ID} ${EX_COMP_PIECE} increment`),
     `Call the "increment" handler on piece "${RAW_EX_COMP.piece!}".`,

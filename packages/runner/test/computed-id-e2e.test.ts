@@ -61,7 +61,7 @@ describe("computed-cell id end-to-end (default-on instantiation)", () => {
     await runtime.dispose();
     await remoteClient.close();
     await storageManager.close();
-    await new Promise((resolve) => setTimeout(resolve, 1));
+    await clock.settle();
   });
 
   it("stores and syncs a computed:fid1: doc as an ordinary document", async () => {

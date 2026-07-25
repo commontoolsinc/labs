@@ -13,8 +13,15 @@ import {
   start,
   tick,
 } from "./server.ts";
-import { LOOM_CI_WORKFLOW, LOOM_REPO, PORT } from "./config.ts";
+import {
+  CI_WORKFLOW,
+  LOOM_CI_WORKFLOW,
+  LOOM_REPO,
+  PORT,
+  REPO,
+} from "./config.ts";
 import { TILES } from "./registry.ts";
+import { labsCi } from "./tiles/main-build.ts";
 import type { Ctx, Run, RunSource, Tile, TileView } from "./types.ts";
 
 const req = (path: string) => new Request(`http://localhost${path}`);
@@ -377,6 +384,47 @@ Deno.test("each run source publishes its dependent tiles as one batch", async ()
     loom.resolve([]);
     await refresh;
   }
+});
+
+Deno.test("a new source snapshot keeps the prior CI verdict during a rerun", async () => {
+  const failure = {
+    ...sourceRun(81, "failed build"),
+    conclusion: "failure",
+  };
+  const olderSuccess = sourceRun(82, "older passing build");
+  let runs = [failure, olderSuccess];
+  const sourceCtx: Ctx = {
+    runs: () => Promise.resolve(runs),
+    runsFor: (repo, workflow) => {
+      assertEquals(repo, REPO);
+      assertEquals(workflow, CI_WORKFLOW);
+      return Promise.resolve(runs);
+    },
+    env: () => undefined,
+  };
+  const tile = { ...labsCi, intervalMs: 0 };
+
+  await tick([tile], sourceCtx);
+  assertStringIncludes(
+    page(),
+    `<a class="tile bad link" data-tile-id="labs-ci"`,
+  );
+
+  runs = [{
+    ...failure,
+    status: "in_progress",
+    conclusion: null,
+    run_attempt: 2,
+    display_title: "rerun failed build",
+  }, olderSuccess];
+  await tick([tile], sourceCtx);
+  const rerunning = page();
+  assertStringIncludes(
+    rerunning,
+    `<a class="tile bad link" data-tile-id="labs-ci"`,
+  );
+  assertStringIncludes(rerunning, "failure");
+  assertStringIncludes(rerunning, "build rerunning");
 });
 
 Deno.test("a ready source publishes while an older combined collection is still running", async () => {

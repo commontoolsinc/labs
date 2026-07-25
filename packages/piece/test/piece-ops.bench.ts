@@ -37,22 +37,22 @@ async function createBenchEnv(): Promise<BenchEnv> {
 
   const addPiece = handler<
     { piece: Cell<unknown> },
-    { allPieces: Cell<Cell<unknown>[]> }
+    { pieceRegistry: Cell<Cell<unknown>[]> }
   >(
-    ({ piece }, { allPieces }) => {
-      allPieces.push(piece);
+    ({ piece }, { pieceRegistry }) => {
+      pieceRegistry.push(piece);
     },
     { proxy: true },
   );
-  const defaultPattern = pattern<{ allPieces: Cell<unknown>[] }>(
-    ({ allPieces }) => ({
-      allPieces,
-      addPiece: addPiece({ allPieces }),
+  const defaultPattern = pattern<{ pieceRegistry: Cell<unknown>[] }>(
+    ({ pieceRegistry }) => ({
+      pieceRegistry,
+      addPiece: addPiece({ pieceRegistry }),
     }),
   );
   const defaultPatternPiece = await manager.runPersistent(
     defaultPattern,
-    { allPieces: [] },
+    { pieceRegistry: [] },
     "piece-bench-default-pattern",
   );
   await manager.linkDefaultPattern(defaultPatternPiece);

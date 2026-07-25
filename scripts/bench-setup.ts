@@ -237,7 +237,7 @@ async function main() {
 
   const pieces: Array<{ name: string; id: string; pattern: string }> = [];
 
-  // Sequential deployment. Concurrent writes cause allPieces O(n^2) traversal
+  // Sequential deployment. Concurrent writes cause registry O(n^2) traversal
   // and transaction retry overhead — sequential is faster in practice.
   log(`[bench-setup] Deploying ${NOTES.length} notes...`);
   for (const note of NOTES) {

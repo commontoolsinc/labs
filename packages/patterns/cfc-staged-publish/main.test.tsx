@@ -1,4 +1,4 @@
-import { computed, handler, pattern, Writable } from "commonfabric";
+import { assert, handler, pattern, Writable } from "commonfabric";
 import {
   PUBLISH_SNAPSHOT_ACTION,
   REVIEW_SNAPSHOT_ACTION,
@@ -56,23 +56,23 @@ export default pattern(() => {
     body: "Edited after save but before review.",
   });
 
-  const assert_initial_stage = computed(() => instance.stage === "drafting");
-  const assert_saved_snapshot = computed(() =>
+  const assert_initial_stage = assert(() => instance.stage === "drafting");
+  const assert_saved_snapshot = assert(() =>
     savedTitle.get() === "Launch checklist" &&
     savedBody.get() === "Ship the staged publish demo with trusted UI gates." &&
     instance.stage === "saved"
   );
-  const assert_saved_stays_stable_after_edit = computed(() =>
+  const assert_saved_stays_stable_after_edit = assert(() =>
     savedTitle.get() === "Launch checklist" &&
     savedBody.get() === "Ship the staged publish demo with trusted UI gates."
   );
-  const assert_reviewed_snapshot = computed(() =>
+  const assert_reviewed_snapshot = assert(() =>
     reviewedTitle.get() === "Launch checklist" &&
     reviewedBody.get() ===
       "Ship the staged publish demo with trusted UI gates." &&
     instance.stage === "reviewed"
   );
-  const assert_published_snapshot = computed(() =>
+  const assert_published_snapshot = assert(() =>
     publishedTitle.get() === "Launch checklist" &&
     publishedBody.get() ===
       "Ship the staged publish demo with trusted UI gates." &&

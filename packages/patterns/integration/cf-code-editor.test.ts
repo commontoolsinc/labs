@@ -1238,6 +1238,167 @@ describe("cf-code-editor cursor stability", () => {
   });
 });
 
+describe("cf-code-editor backlink title sync", () => {
+  const shell = new ShellIntegration();
+  shell.bindLifecycle();
+
+  let identity: Identity;
+  let cc: PiecesController;
+  let piece: PieceController;
+  let sinkCancel: (() => void) | undefined;
+  // The piece's committed content value, tracked by the result-cell sink below,
+  // and a one-shot waiter the sink resolves when the value reaches a target.
+  let latestContent: string | undefined;
+  let contentWaiter: { target: string; deferred: Deferred } | undefined;
+
+  // Resolve once the committed content equals `target`. A browser-side value-
+  // cell write reaches this controller asynchronously, so read the value
+  // through this waiter rather than a bare get(), which can still return the
+  // pre-write value.
+  const awaitCellContent = (target: string): Promise<void> => {
+    if (latestContent === target) return Promise.resolve();
+    const deferred = defer();
+    contentWaiter = { target, deferred };
+    return deferred.promise;
+  };
+
+  beforeAll(async () => {
+    identity = await Identity.generate({ implementation: "noble" });
+    cc = await initializePiecesController({
+      spaceName: SPACE_NAME,
+      apiUrl: new URL(API_URL),
+      identity,
+    });
+    piece = await cc.create(
+      await Deno.readTextFile(
+        join(import.meta.dirname!, "..", "examples", "cf-code-editor-cell.tsx"),
+      ),
+      { start: true },
+    );
+
+    await cc.acl().set(ANYONE_USER, "WRITE");
+
+    // Keep the piece reactive (pull mode) and track its committed content, so a
+    // browser-side write to the value cell is observed here.
+    const resultCell = cc.manager().getResult(piece.getCell());
+    sinkCancel = resultCell.sink((value) => {
+      latestContent = (value as { content?: string } | undefined)?.content;
+      if (contentWaiter && latestContent === contentWaiter.target) {
+        contentWaiter.deferred.resolve();
+        contentWaiter = undefined;
+      }
+    });
+
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: { spaceName: SPACE_NAME, pieceId: piece.id },
+      identity,
+    });
+    await waitForCondition(shell.page(), editorReady);
+  });
+
+  afterAll(async () => {
+    sinkCancel?.();
+    if (cc) await cc.dispose();
+  });
+
+  // The linked piece's real title is not synced to the editor's runtime in
+  // these tests: the editor's mentionable projection carries only NAME, so a
+  // cross-document linked piece's title only reaches the editor inside the full
+  // default-app. The remote rename is instead delivered by invoking the
+  // editor's own _handleExternalTitleChange with a stand-in piece cell whose
+  // title and NAME are the renamed values, exactly what a real title
+  // subscription would call.
+
+  it("preserves a remote title change over a pending local edit in the debounce window", async () => {
+    const page = shell.page();
+    const pieceId = "backlink-debounce-piece";
+    const pill = `[[📝 Target (${pieceId})]]`;
+    const renamedPill = `[[📝 New Target (${pieceId})]]`;
+
+    // A very long debounce parks the typed edit so nothing commits on its own
+    // timer; the test controls when it flushes (via blur).
+    await configureTiming(page, { strategy: "debounce", delay: 100000 });
+
+    await piece.result.set(pill, ["content"]);
+    await waitForEditorContent(page, pill);
+
+    // Begin a local edit: append a character after the pill. Its Cell write
+    // stays parked in the debounce window — nothing commits yet.
+    await focusEditor(page);
+    await setCursorPosition(page, pill.length);
+    await page.keyboard.type("X");
+    await waitForEditorContent(page, `${pill}X`);
+
+    // The linked piece is renamed while the local edit is pending.
+    assert(
+      await invokeExternalTitleChange(
+        page,
+        pieceId,
+        "New Target",
+        "📝 New Target",
+      ),
+      "editor did not expose _handleExternalTitleChange",
+    );
+
+    // Flush any pending debounced write by blurring, then let it reach storage.
+    await blurEditor(page);
+    await waitForRuntimeSynced(page);
+    await awaitViewSettled(page);
+
+    // The editor and the committed cell converge on one value. Wait for the
+    // committed cell to catch up to the editor's document, then assert that
+    // value carries BOTH the remote title change and the pending local edit.
+    // The rewrite must merge with the pending edit; otherwise the flushed
+    // keystroke buffer commits last and reverts the title to `📝 Target`.
+    const editorContent = await getEditorContent(page);
+    await awaitCellContent(editorContent);
+    assertEquals(
+      editorContent,
+      `${renamedPill}X`,
+      "Debounced write overwrote the remote title change with a stale buffer",
+    );
+  });
+
+  it("persists a remote title change under the blur strategy without user interaction", async () => {
+    const page = shell.page();
+    const pieceId = "backlink-blur-piece";
+    const pill = `[[📝 Target (${pieceId})]]`;
+    const renamedPill = `[[📝 New Target (${pieceId})]]`;
+
+    // Under the blur strategy a user edit commits only on blur. A remote title
+    // change is not user input: it must persist even though the editor is never
+    // focused or blurred in this test.
+    await configureTiming(page, { strategy: "blur" });
+
+    await piece.result.set(pill, ["content"]);
+    await waitForEditorContent(page, pill);
+
+    // Deliver the remote rename with no focus, typing, or blur.
+    assert(
+      await invokeExternalTitleChange(
+        page,
+        pieceId,
+        "New Target",
+        "📝 New Target",
+      ),
+      "editor did not expose _handleExternalTitleChange",
+    );
+    await waitForRuntimeSynced(page);
+
+    // The rewrite must reach the committed cell on its own. Without the flush it
+    // would sit in controller state awaiting a focus/blur cycle that never
+    // comes, and this wait would never resolve.
+    await awaitCellContent(renamedPill);
+    const editorContent = await getEditorContent(page);
+    assertEquals(
+      editorContent,
+      renamedPill,
+      "Editor should show the renamed pill under the blur strategy",
+    );
+  });
+});
+
 /**
  * Get current cursor position in the cf-code-editor
  */
@@ -1322,6 +1483,106 @@ async function focusEditor(page: Page): Promise<void> {
       }
     })()
   `);
+}
+
+/**
+ * Blur the CodeMirror editor, flushing any pending debounced Cell write.
+ */
+async function blurEditor(page: Page): Promise<void> {
+  await page.evaluate(`
+    (() => {
+      function findCfCodeEditor(root) {
+        if (!root) return null;
+        const editor = root.querySelector?.('cf-code-editor');
+        if (editor) return editor;
+        const allElements = root.querySelectorAll?.('*') || [];
+        for (const el of allElements) {
+          if (el.shadowRoot) {
+            const found = findCfCodeEditor(el.shadowRoot);
+            if (found) return found;
+          }
+        }
+        return null;
+      }
+
+      const cfEditor = findCfCodeEditor(document);
+      if (cfEditor && cfEditor._editorView) {
+        cfEditor._editorView.contentDOM.blur();
+      }
+    })()
+  `);
+}
+
+/**
+ * Set the editor's input-timing strategy (and optional delay) at runtime.
+ */
+async function configureTiming(
+  page: Page,
+  options: { strategy: string; delay?: number },
+): Promise<void> {
+  await page.evaluate(`
+    ((options) => {
+      function findCfCodeEditor(root) {
+        if (!root) return null;
+        const editor = root.querySelector?.('cf-code-editor');
+        if (editor) return editor;
+        const allElements = root.querySelectorAll?.('*') || [];
+        for (const el of allElements) {
+          if (el.shadowRoot) {
+            const found = findCfCodeEditor(el.shadowRoot);
+            if (found) return found;
+          }
+        }
+        return null;
+      }
+
+      const cfEditor = findCfCodeEditor(document);
+      if (cfEditor && cfEditor._cellController) {
+        cfEditor._cellController.updateTimingOptions(options);
+      }
+    })(${JSON.stringify(options)})
+  `);
+}
+
+/**
+ * Invoke the editor's remote-title-change handler with a stand-in piece cell:
+ * key('title') returns the raw title and any other key (the NAME symbol)
+ * returns the display name, exactly what a real piece-title subscription
+ * delivers. Returns false if the handler is not exposed.
+ */
+async function invokeExternalTitleChange(
+  page: Page,
+  pieceId: string,
+  title: string,
+  name: string,
+): Promise<boolean> {
+  return await page.evaluate(`
+    ((id, title, name) => {
+      function findCfCodeEditor(root) {
+        if (!root) return null;
+        const editor = root.querySelector?.('cf-code-editor');
+        if (editor) return editor;
+        const allElements = root.querySelectorAll?.('*') || [];
+        for (const el of allElements) {
+          if (el.shadowRoot) {
+            const found = findCfCodeEditor(el.shadowRoot);
+            if (found) return found;
+          }
+        }
+        return null;
+      }
+
+      const ed = findCfCodeEditor(document);
+      if (!ed || typeof ed._handleExternalTitleChange !== 'function') return false;
+      const renamed = {
+        key: (k) => ({ get: () => k === 'title' ? title : name }),
+      };
+      ed._handleExternalTitleChange(id, renamed);
+      return true;
+    })(${JSON.stringify(pieceId)}, ${JSON.stringify(title)}, ${
+    JSON.stringify(name)
+  })
+  `) as boolean;
 }
 
 /**

@@ -5,7 +5,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/experimental/gmail-sender.test.tsx --root packages/patterns --verbose
  */
-import { action, computed, pattern, UI } from "commonfabric";
+import { action, assert, pattern, UI } from "commonfabric";
 import {
   findElementByText,
   propsOf,
@@ -38,9 +38,9 @@ export default pattern(() => {
     }
   });
 
-  const assert_result_initially_empty = computed(() => sender.result === null);
+  const assert_result_initially_empty = assert(() => sender.result === null);
 
-  const assert_review_button_disabled_without_auth = computed(() => {
+  const assert_review_button_disabled_without_auth = assert(() => {
     const reviewButton = findElementByText(
       sender[UI],
       "button",
@@ -49,7 +49,7 @@ export default pattern(() => {
     return readValue(propsOf(reviewButton)?.disabled) === true;
   });
 
-  const assert_confirmation_explains_missing_auth = computed(() =>
+  const assert_confirmation_explains_missing_auth = assert(() =>
     findElementByText(sender[UI], "div", "Google connection required") !==
       undefined &&
     findElementByText(
@@ -60,7 +60,7 @@ export default pattern(() => {
       undefined
   );
 
-  const assert_send_button_disabled_without_auth = computed(() => {
+  const assert_send_button_disabled_without_auth = assert(() => {
     const sendButton = findElementByText(sender[UI], "button", "Send Email");
     return readValue(propsOf(sendButton)?.disabled) === true;
   });
