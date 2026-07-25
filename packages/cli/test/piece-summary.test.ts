@@ -85,6 +85,7 @@ Deno.test("piece search command parses options and renders matches", async () =>
         apiUrl: string;
         space: string;
         identity: string;
+        jsonOutput?: boolean;
       };
       query: string;
     }
@@ -120,10 +121,40 @@ Deno.test("piece search command parses options and renders matches", async () =>
       apiUrl: "https://cf.dev",
       space: "common-knowledge",
       identity: "/tmp/estuary.key",
+      jsonOutput: true,
     },
     query: "Hixie",
   });
   expect(rendered).toEqual({ pieces: matches, json: true });
+
+  let humanConfig:
+    | {
+      apiUrl: string;
+      space: string;
+      identity: string;
+      jsonOutput?: boolean;
+    }
+    | undefined;
+  await searchPiecesFromCommand(
+    {
+      apiUrl: "https://cf.dev/",
+      space: "common-knowledge",
+      identity: "/tmp/estuary.key",
+    },
+    "Hixie",
+    {
+      searchPieces: (config) => {
+        humanConfig = config;
+        return Promise.resolve(matches);
+      },
+      renderPieceSummaries: () => {},
+    },
+  );
+  expect(humanConfig).toEqual({
+    apiUrl: "https://cf.dev",
+    space: "common-knowledge",
+    identity: "/tmp/estuary.key",
+  });
 });
 
 Deno.test("piece list command parses options and renders pieces", async () => {

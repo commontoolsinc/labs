@@ -105,7 +105,7 @@ describe("main command", () => {
     );
     const normalizedHelp = help.replaceAll(/\s+/g, " ");
     expect(normalizedHelp).toContain(
-      `INPUT: Pass one inline JSON value, pass "-" to read JSON from stdin, or put "--" before flags generated from the callable's input schema. Handlers also interpret piped input when no input argument is present. For tools, use "-" or "-- --json" to read piped JSON.`,
+      `The callable name separates piece-call options from the callable's arguments. Arguments after the callable use the same parser as cf exec. Use --json with an optional inline value for complete JSON input; bare --json reads JSON from stdin. A single positional JSON value or "-" stdin sentinel is also accepted. Use --help --json for machine-readable schema help. Put schema-derived flags after --. Handlers interpret piped input when no input argument is present.`,
     );
     expect(code).toBe(0);
 
@@ -138,34 +138,28 @@ describe("main command", () => {
     const { main } = await import(
       "../commands/main.ts?piece-call-inline-validation-test"
     );
-    const errors = await withCapturedErrors(async () => {
-      const code = await withMockExit(async () => {
-        await main.parse([
-          "piece",
-          "--identity",
-          "./identity.key",
-          "--api-url",
-          "https://cf.dev",
-          "--space",
-          "common-knowledge",
-          "call",
-          "--piece",
-          "abcdefghijklmnopqrstuvwxyz",
-          "search",
-          '{"query":"tea"}',
-          '{"limit":5}',
-        ]);
-      });
-
-      expect(code).toBe(1);
-    });
-
-    expect(errors).toEqual([
+    await expect(
+      main.parse([
+        "piece",
+        "--identity",
+        "./identity.key",
+        "--api-url",
+        "https://cf.dev",
+        "--space",
+        "common-knowledge",
+        "call",
+        "--piece",
+        "abcdefghijklmnopqrstuvwxyz",
+        "search",
+        '{"query":"tea"}',
+        '{"limit":5}',
+      ]),
+    ).rejects.toThrow(
       'Use a single inline JSON argument or "--" before schema-derived flags.',
-    ]);
+    );
   });
 
-  it("registers view and reports configured environment defaults", async () => {
+  it("registers visible commands and reports configured environment defaults", async () => {
     await withEnv("CF_IDENTITY", "./identity.key", async () => {
       await withEnv("CF_API_URL", "http://127.0.0.1:8000", async () => {
         const { main } = await import(
@@ -176,6 +170,17 @@ describe("main command", () => {
           command.getName()
         );
         expect(commandNames).toContain("view");
+        expect(commandNames).toContain("fuse-daemon");
+        expect(commandNames).toContain("fuse-supervisor");
+        expect(commandNames).not.toContain("dev");
+        expect(commandNames).not.toContain("deploy");
+
+        const allCommandNames = main.getCommands(true).map((command) =>
+          command.getName()
+        );
+        expect(allCommandNames).not.toContain("dev");
+        expect(allCommandNames).not.toContain("deploy");
+        main.getHelp();
 
         const description = main.getDescription();
         expect(description).toContain("ENVIRONMENT:");
@@ -185,23 +190,37 @@ describe("main command", () => {
         expect(description).toContain(
           "CF_API_URL  = http://127.0.0.1:8000 (set, no need to pass --api-url)",
         );
-
-        const logs: string[] = [];
-        const originalLog = console.log;
-        console.log = (...args: unknown[]) => {
-          logs.push(args.join(" "));
-        };
-        try {
-          await main.parse(["deploy"]);
-        } finally {
-          console.log = originalLog;
-        }
-
-        expect(logs).toEqual([
-          "The 'deploy' command does not exist. Use 'cf piece new' to deploy a pattern.",
-        ]);
       });
     });
+  });
+
+  it("shows exec command help before trying to resolve a mounted file", async () => {
+    const { code, stdout } = await cf("exec --help");
+
+    expect(code).toBe(0);
+    expect(stdout.join("\n")).toContain(
+      "Execute a mounted callable file from a Common Fabric FUSE mount.",
+    );
+    expect(stdout.join("\n")).not.toContain("not within a mounted cf fuse");
+  });
+
+  it("shows help for the direct FUSE daemon entry point", async () => {
+    const { code, stdout } = await cf("fuse-daemon --help");
+
+    expect(code).toBe(0);
+    expect(stdout.join("\n")).toContain(
+      "Usage:   cf fuse-daemon <mountpoint> [options]",
+    );
+  });
+
+  it("keeps rejection help off stdout when --json is unsupported", async () => {
+    const { code, stdout, stderr } = await cf("acl --json");
+
+    expect(code).not.toBe(0);
+    expect(stdout).toEqual([]);
+    expect(stripAnsi(stderr.join("\n"))).toContain(
+      'Unknown option "--json"',
+    );
   });
 
   it("reports mounted exec errors without a stack", async () => {

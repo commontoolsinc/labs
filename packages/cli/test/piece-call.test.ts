@@ -9,6 +9,7 @@ import {
 import {
   exitWithDataError,
   isPieceGetDataError,
+  pieceCallInvocation,
   pieceCallRawArgs,
   pieceGetDataErrorReport,
   pieceLinkDataErrorReport,
@@ -16,6 +17,84 @@ import {
 import { LinkValidationError } from "../lib/piece.ts";
 
 describe("executePieceCallable", () => {
+  it("preserves plain-text mode while resolving a callable", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "refresh",
+      inputSchema: {
+        type: "object",
+        properties: {},
+      },
+    });
+    let managerConfig: unknown;
+
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "refresh",
+      [],
+      {
+        loadManager: (config) => {
+          managerConfig = config;
+          return Promise.resolve(harness.manager);
+        },
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => true,
+      },
+    );
+
+    expect(managerConfig).toEqual({
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/test-identity.pem",
+      piece: "fid1:piece-123",
+      space: "home",
+    });
+  });
+
+  it("preserves JSON output mode while resolving a callable", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "refresh",
+      inputSchema: {
+        type: "object",
+        properties: {},
+      },
+    });
+    let managerConfig: unknown;
+
+    await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        jsonOutput: true,
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "refresh",
+      [],
+      {
+        loadManager: (config) => {
+          managerConfig = config;
+          return Promise.resolve(harness.manager);
+        },
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => true,
+      },
+    );
+
+    expect(managerConfig).toEqual({
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/test-identity.pem",
+      jsonOutput: true,
+      piece: "fid1:piece-123",
+      space: "home",
+    });
+  });
+
   it("invokes handlers from schema-derived flags", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",
@@ -542,7 +621,12 @@ describe("executePieceCallable", () => {
       "cf piece call ... search -- [run] --query <string>",
     );
     expect(result.helpText).toContain("JSON input:");
-    expect(result.helpText).toContain("Pass inline JSON as the next argument");
+    expect(result.helpText).toContain(
+      "Pass inline JSON as one positional argument or after `--json`",
+    );
+    expect(result.helpText).toContain(
+      "cf piece call ... search --json [<json>]",
+    );
     expect(result.helpText).toContain("query: string");
     expect(result.helpText).toContain("Flags after `--`:");
     expect(result.helpText).not.toContain(
@@ -816,6 +900,35 @@ function getChildSchema(
 }
 
 describe("piece call stdin payloads", () => {
+  it("identifies JSON output without treating delimited fields as selectors", () => {
+    expect(
+      pieceCallInvocation(["--json", '{"query":"milk"}'], []),
+    ).toEqual({
+      rawArgs: ["--json", '{"query":"milk"}'],
+      jsonOutput: true,
+    });
+    expect(
+      pieceCallInvocation([], ["--json-file", "/tmp/input.json"]),
+    ).toEqual({
+      rawArgs: ["--json-file", "/tmp/input.json"],
+      jsonOutput: true,
+    });
+    expect(pieceCallInvocation([], ["run", "--json", "{}"])).toEqual({
+      rawArgs: ["run", "--json", "{}"],
+      jsonOutput: true,
+    });
+    expect(pieceCallInvocation([], ["--query", "--json"])).toEqual({
+      rawArgs: ["--query", "--json"],
+      jsonOutput: false,
+    });
+    expect(
+      pieceCallInvocation([], ["invoke", "--query", "--json"]),
+    ).toEqual({
+      rawArgs: ["invoke", "--query", "--json"],
+      jsonOutput: false,
+    });
+  });
+
   it('maps a bare "-" payload onto the --json-file stdin path', () => {
     expect(pieceCallRawArgs(["-"], [])).toEqual(["--json-file", "-"]);
   });

@@ -452,10 +452,10 @@ Mechanics:
    re-runs pointer and exports-map resolution and rewrites the pin — an
    ordinary source edit. The unpinned form never reaches
    deployed storage: deploying with an unpinned mutable reference pins it; a
-   stored program containing one is a compile error. `cf dev`/`cf check`
-   resolve unpinned references live against the connected toolshed and print
-   what they resolved to. `cf:pattern:<hash>` refs are born pinned (the ref
-   *is* the pin; no rewrite).
+   stored program containing one is a compile error. `cf check` resolves
+   unpinned references live against the connected toolshed and prints what they
+   resolved to. `cf:pattern:<hash>` refs are born pinned (the ref *is* the pin;
+   no rewrite).
 
 Why not continuous tracking: re-snapshotting on target change would make the
 importer's identity (and therefore its compiled artifacts, scheduler keys, and
@@ -591,9 +591,9 @@ Engine wraps the authored resolver; on a `cf:` specifier:
      and rejects a subpath.
    - An unpinned entry reference runs the uniform chase **as ordinary cell
      reads through the compiling runtime's storage** (slug cell redirect → the
-     piece's `patternIdentity`). `cf check` and `cf dev` already construct a
-     runtime (`packages/cli/lib/dev.ts`), and every production compile happens
-     inside one, so space authorization is exactly memory-read authorization.
+     piece's `patternIdentity`). `cf check` constructs a runtime
+     (`packages/cli/lib/dev.ts`), and every production compile happens inside
+     one, so space authorization is exactly memory-read authorization.
    - In M4, an unpinned subpath continues from the mutable target to its current
      source revision and immutable manifest. It performs an exact exports-map
      lookup and selects the mapped file's source-document identity.
@@ -707,8 +707,7 @@ unchanged.
   `pattern:<identity>` source documents. Before M4, it rejects a public subpath
   without rewriting it. In M4, it re-resolves the pointer and public subpath,
   then rewrites the selected module pin.
-- Automatic pinning during piece deployment remains required work. The CLI
-  intentionally has no `cf deploy` command.
+- Automatic pinning when creating a piece remains required work.
 - `cf publish <pattern> [--slug name] [--space …]` *(not yet built)*: after
   source-read authorization, destination-write authorization, and CFC
   approval, copy the verified source closure and create a lightweight
@@ -716,9 +715,9 @@ unchanged.
   optionally assign the slug. Do not copy the source piece or its state. The
   subpath phase also copies the immutable authored-program manifest and makes
   the publication expose its current source revision.
-- `cf dev` / `cf check`: live-resolve unpinned refs against the connected
-  toolshed; `--frozen` to forbid (CI). `--show-transformed` shows mounted
-  files like any other program file.
+- `cf check`: live-resolve unpinned refs against the connected toolshed;
+  `--frozen` to forbid (CI). `--show-transformed` shows mounted files like any
+  other program file.
 - Shell iterate flow: show pins; "update dependencies" action mirrors
   `cf deps update`.
 
