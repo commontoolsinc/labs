@@ -1687,6 +1687,11 @@ class SpaceReplica implements ISpaceReplica {
   /** The client of the last RESOLVED session handle — for synchronous
    *  capability reads (`sqliteServerCommitRowLabelEval`). */
   #sessionClient?: MemoryV2Client.Client;
+  /** The session of the last RESOLVED handle — read synchronously so
+   *  `authorizationError()` can observe a denial that terminated the session
+   *  during reconnect, which closes its watch view without a fresh watch result
+   *  to record. */
+  #sessionSession?: MemoryV2Client.SpaceSession;
   readonly #docs = new Map<string, DocumentRecord>();
   readonly #syncTasks = new Map<string, SyncTask>();
   readonly #commitPromises = new Set<
@@ -1823,11 +1828,28 @@ class SpaceReplica implements ISpaceReplica {
    * whole runtime settle on an incidental unauthorized link. A caller that cares
    * about a SPECIFIC space — the CLI, opening the space it was asked to act on —
    * reads this after `synced()` and surfaces it deliberately.
+   *
+   * A watch refresh records the denial in most cases. A permanent denial during
+   * RECONNECT is the exception: the memory client terminates the session and
+   * closes its watch view without another refresh result (see the client's
+   * `SpaceSession.restore`), so `#lastAuthorizationError` never captures it and a
+   * caller that only reaches `synced()` without a further pull would see the
+   * space as authorized. Consult the terminated session directly for that case.
    */
   authorizationError(): Error | undefined {
-    return this.#lastAuthorizationError === null
-      ? undefined
-      : authorizationErrorToThrow(this.#lastAuthorizationError);
+    if (this.#lastAuthorizationError !== null) {
+      return authorizationErrorToThrow(this.#lastAuthorizationError);
+    }
+    // `terminateSession` stores a permanent AuthorizationError as the session's
+    // close error; a graceful close ("memory session closed") or a takeover
+    // revocation (SessionRevokedError) carries a different name and is not an
+    // authorization denial for this space, so only the AuthorizationError is
+    // surfaced here.
+    const closeError = this.#sessionSession?.closeError;
+    if (closeError !== undefined && closeError.name === "AuthorizationError") {
+      return closeError;
+    }
+    return undefined;
   }
 
   /**
@@ -3538,6 +3560,7 @@ class SpaceReplica implements ISpaceReplica {
       const handle = Promise.resolve().then(() => this.#createSession()).then(
         (resolved) => {
           this.#sessionClient = resolved.client;
+          this.#sessionSession = resolved.session;
           return resolved;
         },
       ).catch((error) => {

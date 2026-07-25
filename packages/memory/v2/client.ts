@@ -558,6 +558,15 @@ export class SpaceSession {
     return this.#serverSeq;
   }
 
+  /** The error this session was terminated with, or undefined while it is open.
+   *  A permanent reopen denial stores its `AuthorizationError` here (see
+   *  `restore`), which is what `#assertOpen` rethrows; a storage subscriber reads
+   *  it to observe a denial that terminated the session without a fresh watch
+   *  result to carry it. */
+  get closeError(): Error | undefined {
+    return this.#closeError ?? undefined;
+  }
+
   #assertOpen(): void {
     if (this.#closed) {
       throw this.#closeError ?? new Error("memory session closed");
