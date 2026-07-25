@@ -1,26 +1,6 @@
 // types.ts - Shared types for the record pattern system
 
-import type { JSONSchema } from "./extraction/schema-utils-pure.ts";
-
 // ===== Sub-Piece Architecture Types =====
-
-/**
- * Expected schema shape for extraction.
- *
- * When sub-pieces are created, their resultSchema is captured and stored.
- * This enables dynamic schema discovery for LLM extraction.
- *
- * Schema should be JSON Schema-like:
- * ```
- * {
- *   type: "object",
- *   properties: {
- *     email: { type: "string", description: "Email address" },
- *     phone: { type: "string", description: "Phone number" },
- *   }
- * }
- * ```
- */
 
 /**
  * SubPieceEntry - An entry in the Record's sub-pieces array.
@@ -31,7 +11,6 @@ export interface SubPieceEntry {
   pinned: boolean; // Pin state owned by Record (not the sub-piece)
   collapsed?: boolean; // Collapse state - when true, only header is shown (default: false/expanded)
   piece: unknown; // Reference to the actual sub-piece pattern instance
-  schema?: JSONSchema; // Schema captured at creation time for dynamic discovery
   note?: string; // User annotation about this module (visible to LLM reads, not extraction)
   label?: string; // Standard label chosen for this module at creation (e.g. email "Personal"/"Work"), used to pick the next unused default
 }
