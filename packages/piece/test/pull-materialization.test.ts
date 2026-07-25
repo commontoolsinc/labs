@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { FabricValue } from "@commonfabric/data-model/interface";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   getPatternIdentityRef,
@@ -1451,7 +1452,7 @@ describe("piece pull materialization", () => {
             includeSchema: true,
           }),
         },
-        ...(originalInternal as unknown[]),
+        ...(originalInternal as FabricValue[]),
       ]);
       orphan.withTx(tx).setMetaRaw(
         "result",
