@@ -161,6 +161,7 @@ export type FabricValue =
   | number
   | string
   | bigint
+  | symbol
   | FabricSpecialObject
   | FabricArray
   | FabricPlainObject
