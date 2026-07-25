@@ -2643,7 +2643,36 @@ class SpaceReplica implements ISpaceReplica {
       if (client.serverFlags?.persistentSchedulerState !== true) {
         return { ok: {} };
       }
-      return await this.pushCommit(localSeq, [], commit, undefined);
+      // Same fail-closed degradation for the OTHER capability gap: against a
+      // server without `pendingReadStacks`, an observation whose read sat on
+      // MORE than one pending layer cannot be expressed soundly — the scalar
+      // wire would omit lower layers, and the old server could persist an
+      // observation that observed a dropped write (data commits get the
+      // pushCommit hold instead; observations are droppable bookkeeping, so
+      // dropping beats holding — a held envelope would chain verdict latency
+      // into every semantic commit awaiting this flush). Resolve the dropped
+      // entries {ok} and send the rest.
+      let wireEntries = entries;
+      if (client.serverFlags?.pendingReadStacks !== true) {
+        const expressible = (entry: SchedulerObservationBatchEntry): boolean =>
+          entry.commit.reads.pending.every((read) =>
+            !Array.isArray(read.localSeq) || read.localSeq.length <= 1
+          );
+        wireEntries = entries.filter(expressible);
+        for (const entry of entries) {
+          if (!expressible(entry)) {
+            entry.pending.resolve({ ok: {} });
+          }
+        }
+        if (wireEntries.length === 0) {
+          return { ok: {} };
+        }
+      }
+      const wireBatch: ClientCommit = wireEntries === entries ? commit : {
+        ...commit,
+        schedulerObservationBatch: wireEntries.map((entry) => entry.commit),
+      };
+      return await this.pushCommit(localSeq, [], wireBatch, undefined);
     })()
       .then((result) => {
         for (const entry of entries) {

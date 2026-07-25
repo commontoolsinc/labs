@@ -615,7 +615,10 @@ the per-epic implementation notes).
 >   are accepted the scalar shape is sound. (Sending while an omitted
 >   dependency is unsettled would let the old server durably accept a commit
 >   the client cascade-rejects — a split-brain where the caller sees a
->   conflict for a write that landed.) Added on CT-1872 (PR #4606). Path to removal: retire
+>   conflict for a write that landed.) Scheduler observations degrade instead
+>   of holding: a multi-layer observation is dropped client-side (flag-off
+>   semantics), so the flush that semantic commits await never waits on
+>   verdicts. Added on CT-1872 (PR #4606). Path to removal: retire
 >   the scalarization fallback once every server in the fleet advertises the
 >   capability; the flag itself then reads as permanent documentation of the
 >   wire shape, and the successor design is tracked as CT-1910.

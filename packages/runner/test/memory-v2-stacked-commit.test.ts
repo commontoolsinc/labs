@@ -2017,6 +2017,62 @@ Deno.test("memory v2 stacked commits: a server without pendingReadStacks receive
   }
 });
 
+Deno.test("memory v2 stacked commits: old-server flush drops multi-layer observations client-side and sends the rest", async () => {
+  setPersistentSchedulerStateConfig(true);
+  const harness = await createHarness({
+    transport: (model) => new PreStackTransport(model),
+  });
+  const g1 = Promise.withResolvers<void>();
+  const g2 = Promise.withResolvers<void>();
+  try {
+    // Two pending layers on A: an observation reading A carries the array
+    // [t1, t2], which a pre-`pendingReadStacks` server cannot receive
+    // soundly (the scalar wire would omit t1 — if t1 drops, the old server
+    // would persist an observation that observed a dropped write).
+    const t1 = beginSet(harness, DOCS.A, valueFor("t1"));
+    harness.model.setOutcome(t1.localSeq, {
+      kind: "accept",
+      responseGate: g1.promise,
+    });
+    const t2 = beginSet(harness, DOCS.A, valueFor("t2"));
+    harness.model.setOutcome(t2.localSeq, {
+      kind: "accept",
+      responseGate: g2.promise,
+    });
+    const multiLayer = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:multi-layer"),
+    }, sourceFromReads([{ id: DOCS.A }]));
+    const zeroRead = harness.replica.commitNative({
+      operations: [],
+      schedulerObservation: schedulerObservationFor("action:zero-read"),
+    });
+
+    // The multi-layer entry resolves {ok} from the client-side drop alone —
+    // BEFORE t1/t2 settle (their gates are still held): flag-off semantics
+    // for that observation, not a wait.
+    assertEquals(await multiLayer, { ok: {} });
+    assertEquals(await zeroRead, { ok: {} });
+
+    // The wire batch carried only the expressible entry.
+    const batches = [...harness.model.applied.values()].filter((record) =>
+      record.commit.schedulerObservationBatch !== undefined
+    );
+    assertEquals(batches.length, 1);
+    assertEquals(
+      batches[0].commit.schedulerObservationBatch?.map((entry) =>
+        (entry.schedulerObservation as { actionId: string }).actionId
+      ),
+      ["action:zero-read"],
+    );
+  } finally {
+    g1.resolve();
+    g2.resolve();
+    await harness.close();
+    resetPersistentSchedulerStateConfig();
+  }
+});
+
 Deno.test("memory v2 stacked commits: old-server hold — a dropped omitted dependency dooms the commit before it is ever sent", async () => {
   const harness = await createHarness({
     transport: (model) => new PreStackTransport(model),

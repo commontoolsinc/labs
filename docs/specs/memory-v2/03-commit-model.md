@@ -218,7 +218,11 @@ the client is about to cascade-reject, and the caller would observe a
 conflict for a write that landed. The client holds the send until every
 omitted dependency settles — a dropped one dooms the commit locally before
 it reaches the wire, and all-accepted makes the scalar shape sound (each
-omitted layer's resolution is already durable).
+omitted layer's resolution is already durable). Scheduler observations,
+being droppable bookkeeping, degrade instead of holding: an observation
+whose read sat on more than one pending layer is dropped client-side
+(flag-off semantics — the resume re-runs fresh) rather than delaying the
+flush that semantic commits await.
 
 ## 3.6 Server Validation
 
