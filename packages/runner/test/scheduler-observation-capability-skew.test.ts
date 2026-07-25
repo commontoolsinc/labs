@@ -82,7 +82,11 @@ class FlagOffServerTransport implements MemoryV2Client.Transport {
   }
 
   send(payload: string): Promise<void> {
-    const message = valueFromJson(payload, reconstructionContext) as {
+    // Decoded wire payload, asserted to the shape this fake expects.
+    const message = valueFromJson(
+      payload,
+      reconstructionContext,
+    ) as unknown as {
       type: string;
       requestId?: string;
       session?: { sessionId?: string };
