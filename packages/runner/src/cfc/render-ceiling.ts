@@ -1,5 +1,4 @@
-import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
-import type { CfcAtom } from "@commonfabric/api/cfc";
+import { CFC_ATOM_TYPE, type CfcAtom, cfcAtom } from "@commonfabric/api/cfc";
 import type { CfcConfClause } from "./clause.ts";
 import { isRecord } from "@commonfabric/utils/types";
 import {

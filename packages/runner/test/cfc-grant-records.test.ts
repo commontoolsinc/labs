@@ -1,10 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
-import type { CfcAtom } from "@commonfabric/api/cfc";
 import { type CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
+import { CFC_ATOM_TYPE, type CfcAtom, cfcAtom } from "@commonfabric/api/cfc";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { evaluateExchangeRules } from "../src/cfc/exchange-eval.ts";
