@@ -531,20 +531,26 @@ export class Page extends EventTarget {
     const model = await element.boxModel();
     if (!model) throw new Error("Unable to get stable box model to click on");
 
-    const topLeft = model.content.reduce((result, point) =>
-      point.x < result.x && point.y < result.y ? point : result
-    );
-    const top = topLeft.y;
-    const left = topLeft.x;
-    const point = options?.offset
-      ? {
-        x: left + options.offset.x,
-        y: top + options.offset.y,
-      }
-      : {
-        x: left + model.width / 2,
-        y: top + model.height / 2,
+    const origin = model.content[0];
+    let point: { x: number; y: number };
+    if (options?.offset) {
+      point = {
+        x: origin.x + options.offset.x,
+        y: origin.y + options.offset.y,
       };
+    } else {
+      const total = model.content.reduce(
+        (result, vertex) => ({
+          x: result.x + vertex.x,
+          y: result.y + vertex.y,
+        }),
+        { x: 0, y: 0 },
+      );
+      point = {
+        x: total.x / model.content.length,
+        y: total.y / model.content.length,
+      };
+    }
 
     await this.interactionObserver?.beforeClick?.(
       element as ElementHandle,

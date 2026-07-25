@@ -1313,10 +1313,10 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
     );
 
     const content = [
-      { x: 90, y: 40 },
-      { x: 160, y: 70 },
-      { x: 140, y: 110 },
-      { x: 70, y: 80 },
+      { x: 160, y: 60 },
+      { x: 200, y: 100 },
+      { x: 130, y: 160 },
+      { x: 70, y: 100 },
     ];
     const boxModel = {
       border: content,
@@ -1344,14 +1344,20 @@ Deno.test("Page preserves Common Tools behavior on published Astral", async () =
         return Promise.resolve();
       },
     });
+    await clickTarget.click();
+    assertEquals(mousePoint, { x: 140, y: 105 });
+    assertEquals(clickPoints[1], { x: 140, y: 105 });
+
     await clickTarget.click({ offset: { x: 0, y: 0 } });
-    assertEquals(mousePoint, { x: 90, y: 40 });
-    assertEquals(clickPoints[1], { x: 90, y: 40 });
+    assertEquals(mousePoint, { x: 160, y: 60 });
+    assertEquals(clickPoints[2], { x: 160, y: 60 });
 
     const typeTarget = await page.waitForSelector("#type-target");
     await typeTarget.type("text");
     assertEquals(keyboardOptions, { delay: 17 });
     assertEquals(interactions, [
+      "beforeClick",
+      "afterClick",
       "beforeClick",
       "afterClick",
       "beforeClick",
