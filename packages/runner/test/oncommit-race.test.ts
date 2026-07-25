@@ -47,13 +47,13 @@ describe("onCommit callback final outcome", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    const allPiecesCell = runtime.getCell<string[]>(
+    const pieceRegistryCell = runtime.getCell<string[]>(
       space,
-      "all-pieces-list",
+      "piece-registry-list",
       undefined,
       tx,
     );
-    allPiecesCell.set([]);
+    pieceRegistryCell.set([]);
     await tx.commit();
     tx = runtime.edit();
 
@@ -84,7 +84,7 @@ describe("onCommit callback final outcome", () => {
     // onCommit fires exactly once with the failed final status.
     expect(statuses).toEqual(["error"]);
     expect(handlerCallCount).toBe(1);
-    expect(allPiecesCell.get()).toEqual([]);
+    expect(pieceRegistryCell.get()).toEqual([]);
   });
 
   it("fires onCommit once after a conflict is retried and lands", async () => {

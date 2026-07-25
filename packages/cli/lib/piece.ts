@@ -317,7 +317,7 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
               .then(async () => {
                 try {
                   const mgr = pieceManagerRef.current!;
-                  const piecesCell = await mgr.getPieces();
+                  const piecesCell = await mgr.getPieceRegistry();
                   const list = piecesCell.get();
                   const exists = list.some((c) => pieceId(c) === id);
                   if (!exists) {
@@ -402,9 +402,9 @@ export async function listPieces(
   const manager = await (deps.loadManager ?? loadManager)(config);
   const pieces = deps.createController?.(manager) ??
     new PiecesController(manager);
-  const allPieces = await pieces.getAllPieces();
+  const registeredPieces = await pieces.getRegisteredPieces();
   return Promise.all(
-    allPieces.map(async (piece) => {
+    registeredPieces.map(async (piece) => {
       try {
         const livePiece = await pieces.get(piece.id, true);
         const name = (await (
@@ -892,14 +892,16 @@ export async function searchPieces(
   const manager = await (deps.loadManager ?? loadManager)(config);
   const pieces = deps.createController?.(manager) ??
     new PiecesController(manager);
-  const allPieces = await pieces.getAllPieces();
-  const registeredPieceIds = new Set(allPieces.map((piece) => piece.id));
+  const registeredPieces = await pieces.getRegisteredPieces();
+  const registeredPieceIds = new Set(
+    registeredPieces.map((piece) => piece.id),
+  );
   const ownerCache: PieceOwnerCache = {
     cells: new Map(),
     documents: new Map(),
   };
   const matches: Array<PieceSearchResult | undefined> = new Array(
-    allPieces.length,
+    registeredPieces.length,
   );
   const reportSearchError = deps.reportSearchError ??
     ((
@@ -916,9 +918,9 @@ export async function searchPieces(
   let nextPieceIndex = 0;
 
   const searchNextPiece = async (): Promise<void> => {
-    while (nextPieceIndex < allPieces.length) {
+    while (nextPieceIndex < registeredPieces.length) {
       const index = nextPieceIndex++;
-      const piece = allPieces[index];
+      const piece = registeredPieces[index];
 
       let inputMatches = false;
       try {
@@ -970,7 +972,12 @@ export async function searchPieces(
 
   await Promise.all(
     Array.from(
-      { length: Math.min(PIECE_SEARCH_CONCURRENCY, allPieces.length) },
+      {
+        length: Math.min(
+          PIECE_SEARCH_CONCURRENCY,
+          registeredPieces.length,
+        ),
+      },
       searchNextPiece,
     ),
   );
@@ -1117,7 +1124,7 @@ export async function newPiece(
     );
   }
 
-  // Explicitly add the piece to the space's allPieces list
+  // Explicitly add the piece to the space's registry.
   await timeCliPhase(
     "newPiece.addToDefaultPattern",
     () => manager.add([piece.getCell()]),

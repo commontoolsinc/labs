@@ -168,6 +168,11 @@ export interface CellBridgeOptions {
   projectionGeneration?: string;
   statusProvider?: () => Record<string, unknown>;
   onCfcProjectionRebuilt?: () => void;
+  reconnectManagerLoader?: (config: {
+    apiUrl: string;
+    space: string;
+    identity: string;
+  }) => Promise<PieceManager>;
 }
 
 /** Result of resolving an inode to a writable cell path. */
@@ -315,6 +320,7 @@ export class CellBridge {
   private explicitCfcProjectionGeneration: string | undefined;
   private statusProvider: (() => Record<string, unknown>) | undefined;
   private onCfcProjectionRebuilt: (() => void) | undefined;
+  private reconnectManagerLoader: CellBridgeOptions["reconnectManagerLoader"];
 
   private startedAt = new Date().toISOString();
   /**
@@ -364,7 +370,8 @@ export class CellBridge {
   private async _attemptReconnect(): Promise<void> {
     for (const [spaceName, state] of this.spaces) {
       try {
-        const { loadManager } = await import("../cli/lib/piece.ts");
+        const loadManager = this.reconnectManagerLoader ??
+          (await import("../cli/lib/piece.ts")).loadManager;
         const manager = await loadManager({
           apiUrl: this.apiUrl,
           space: spaceName,
@@ -372,7 +379,7 @@ export class CellBridge {
         });
         try {
           await manager.synced();
-          await state.pieces.getAllPieces();
+          await state.pieces.getRegisteredPieces();
           // If a fresh manager can connect and the existing pieces view can sync,
           // connection is back. manager.synced() alone can succeed from local
           // state while the backend is still unavailable.
@@ -414,6 +421,7 @@ export class CellBridge {
     this.explicitCfcProjectionGeneration = options.projectionGeneration;
     this.statusProvider = options.statusProvider;
     this.onCfcProjectionRebuilt = options.onCfcProjectionRebuilt;
+    this.reconnectManagerLoader = options.reconnectManagerLoader;
   }
 
   init(config: {
@@ -2098,14 +2106,16 @@ export class CellBridge {
     };
 
     // Fetch all pieces and populate tree
-    const allPieces = await pieces.getAllPieces();
-    this.debugLog(`[${spaceName}] Found ${allPieces.length} pieces`);
+    const registeredPieces = await pieces.getRegisteredPieces();
+    this.debugLog(`[${spaceName}] Found ${registeredPieces.length} pieces`);
 
     // Warm the NAME docs in parallel so the awaited per-piece name sync in
     // addPieceToSpace below doesn't serialize one roundtrip per piece.
-    await Promise.all(allPieces.map((piece) => this.syncPieceName(piece)));
+    await Promise.all(
+      registeredPieces.map((piece) => this.syncPieceName(piece)),
+    );
 
-    for (const piece of allPieces) {
+    for (const piece of registeredPieces) {
       await this.addPieceToSpace(state, piece, spaceName);
     }
 
@@ -2114,7 +2124,7 @@ export class CellBridge {
     this.updatePiecesJson(state);
 
     // Subscribe to piece list changes so new/removed pieces update the tree
-    const piecesCell = await manager.getPieces();
+    const piecesCell = await manager.getPieceRegistry();
     const piecesListCancel = piecesCell.sink(() => {
       setTimeout(() => {
         this.syncPieceList(state, spaceName).catch((e) => {
@@ -2401,13 +2411,13 @@ export class CellBridge {
     state: SpaceState,
     spaceName: string,
   ): Promise<void> {
-    const allPieces = await state.pieces.getAllPieces();
+    const registeredPieces = await state.pieces.getRegisteredPieces();
     this.debugLog(
-      `[${spaceName}] syncPieceListOnce: live=${allPieces.length} tracked=${state.pieceMap.size}`,
+      `[${spaceName}] syncPieceListOnce: live=${registeredPieces.length} tracked=${state.pieceMap.size}`,
     );
 
     // Build set of current entity IDs
-    const liveIds = new Set(allPieces.map((p) => p.id));
+    const liveIds = new Set(registeredPieces.map((p) => p.id));
 
     // Find pieces to remove (in our tree but no longer in the live list)
     const toRemove: string[] = [];
@@ -2417,7 +2427,7 @@ export class CellBridge {
 
     // Find pieces to add (in the live list but not in our tree)
     const knownIds = new Set(state.pieceMap.values());
-    const toAdd = allPieces.filter((p) => !knownIds.has(p.id));
+    const toAdd = registeredPieces.filter((p) => !knownIds.has(p.id));
 
     if (toRemove.length === 0 && toAdd.length === 0) return;
 

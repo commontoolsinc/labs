@@ -1520,7 +1520,9 @@ export abstract class BaseObjectTraverser {
       // An opaque leaf: return it intact ahead of the record branch below.
       // Placed after the array arm so array reads skip the `instanceof`.
       return doc.value;
-    } else if (doc.value instanceof FabricInstance) {
+    } else if (
+      doc.value instanceof FabricInstance && !isSigilLink(doc.value)
+    ) {
       // TODO(danfuzz): a `FabricInstance` should be descended by its codec
       // contents, which does not exist yet. This path carries live instance
       // traffic today (the fetch builtins store a `FabricError` result value
@@ -3483,6 +3485,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
           this.isValidType(schemaObj, "boolean")
         ? { ok: this.traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
+    } else if (isSigilLink(doc.value)) {
+      this.tx.read(doc.address, READ_FOR_SCHEDULING);
+      // When traversing a pointer, use the unresolved schema, so we have
+      // the same values in the schema tracker.
+      return this.traversePointerWithSchema(doc, schema, link);
     } else if (Array.isArray(doc.value)) {
       const valid = this.isValidType(schemaObj, "array");
       if (valid === TypeValidity.False) {
@@ -3538,44 +3545,37 @@ export class SchemaObjectTraverser<V extends FabricValue>
           "`FabricInstance`) in schema traversal.",
       );
     } else if (isRecord(doc.value)) {
-      if (isSigilLink(doc.value)) {
-        this.tx.read(doc.address, READ_FOR_SCHEDULING);
-        // When traversing a pointer, use the unresolved schema, so we have
-        // the same values in the schema tracker.
-        return this.traversePointerWithSchema(doc, schema, link);
-      } else {
-        const valid = this.isValidType(schemaObj, "object");
-        if (valid === TypeValidity.False) {
-          return fail(TRAVERSE_FAILURES.invalidType);
-        }
-        const newValue: Record<string, Immutable<FabricValue>> = {};
-        // Our link is based on the last link in the chain and not the first.
-        const newLink = link ?? getNormalizedLink(doc.address, schemaObj);
-        using t = this.tracker.include(doc.value, schemaObj, newValue, doc);
-        if (t === null) {
-          // newValue will be converted to a createObject result by the
-          // function that added it to the tracker, so don't do that here
-          return { ok: this.tracker.getExisting(doc.value, schemaObj) };
-        }
-        if (valid === TypeValidity.Unknown) {
-          return { ok: this.objectCreator.createObject(newLink, undefined) };
-        }
-        const entries = this.traverseObjectWithSchema(doc, schemaObj, newLink);
-        if (entries === undefined || entries === null) {
-          return fail(TRAVERSE_FAILURES.invalidObject);
-        }
-        for (const [k, v] of Object.entries(entries)) {
-          newValue[k] = v;
-        }
-        // TODO(@ubik2): We should be able to remove this cast when we make
-        // our return types more correct (we can hold cells/functions).
-        return {
-          ok: this.objectCreator.createObject(
-            newLink,
-            newValue as FabricValue,
-          ),
-        };
+      const valid = this.isValidType(schemaObj, "object");
+      if (valid === TypeValidity.False) {
+        return fail(TRAVERSE_FAILURES.invalidType);
       }
+      const newValue: Record<string, Immutable<FabricValue>> = {};
+      // Our link is based on the last link in the chain and not the first.
+      const newLink = link ?? getNormalizedLink(doc.address, schemaObj);
+      using t = this.tracker.include(doc.value, schemaObj, newValue, doc);
+      if (t === null) {
+        // newValue will be converted to a createObject result by the
+        // function that added it to the tracker, so don't do that here
+        return { ok: this.tracker.getExisting(doc.value, schemaObj) };
+      }
+      if (valid === TypeValidity.Unknown) {
+        return { ok: this.objectCreator.createObject(newLink, undefined) };
+      }
+      const entries = this.traverseObjectWithSchema(doc, schemaObj, newLink);
+      if (entries === undefined || entries === null) {
+        return fail(TRAVERSE_FAILURES.invalidObject);
+      }
+      for (const [k, v] of Object.entries(entries)) {
+        newValue[k] = v;
+      }
+      // TODO(@ubik2): We should be able to remove this cast when we make
+      // our return types more correct (we can hold cells/functions).
+      return {
+        ok: this.objectCreator.createObject(
+          newLink,
+          newValue as FabricValue,
+        ),
+      };
     }
     return fail(TRAVERSE_FAILURES.unexpectedDocValue);
   }

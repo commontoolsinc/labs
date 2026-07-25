@@ -2,6 +2,7 @@
 import { assertEquals, assertNotEquals } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { defer } from "@commonfabric/utils/defer";
+import { PiecesController } from "@commonfabric/piece/ops";
 import { FsTree } from "./tree.ts";
 import {
   CellBridge,
@@ -170,7 +171,7 @@ function buildTestSpace(
   const state: SpaceState = {
     manager: null as unknown as SpaceState["manager"],
     pieces: {
-      getAllPieces: () => Promise.resolve(fakePieces),
+      getRegisteredPieces: () => Promise.resolve(fakePieces),
     } as unknown as SpaceState["pieces"],
     spaceIno,
     piecesIno,
@@ -258,6 +259,113 @@ type WriteFsFile = (
   writePath: unknown,
   text: string,
 ) => Promise<boolean>;
+
+type BuildSpaceTree = (
+  spaceName: string,
+  manager: SpaceState["manager"],
+) => Promise<SpaceState>;
+
+type AttemptReconnect = () => Promise<void>;
+
+Deno.test("CellBridge reconnect validates the existing piece registry", async () => {
+  const tree = new FsTree();
+  let managerSyncs = 0;
+  let managerDisposals = 0;
+  let registeredPieceReads = 0;
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    reconnectManagerLoader: ({ apiUrl, space, identity }) => {
+      assertEquals(apiUrl, "https://api.example.test/");
+      assertEquals(space, "home");
+      assertEquals(identity, "/tmp/test-identity.pem");
+      return Promise.resolve(
+        {
+          synced: () => {
+            managerSyncs++;
+            return Promise.resolve();
+          },
+          runtime: {
+            dispose: () => {
+              managerDisposals++;
+              return Promise.resolve();
+            },
+          },
+        } as unknown as SpaceState["manager"],
+      );
+    },
+  });
+  bridge.init({
+    apiUrl: "https://api.example.test/",
+    identity: "/tmp/test-identity.pem",
+  });
+  const state = buildTestSpace(bridge, "home", []);
+  state.pieces = {
+    getRegisteredPieces: () => {
+      registeredPieceReads++;
+      return Promise.resolve([]);
+    },
+  } as unknown as SpaceState["pieces"];
+  (bridge as unknown as { _disconnected: boolean })._disconnected = true;
+
+  await (bridge as unknown as { _attemptReconnect: AttemptReconnect })
+    ._attemptReconnect();
+
+  assertEquals(managerSyncs, 1);
+  assertEquals(registeredPieceReads, 1);
+  assertEquals(managerDisposals, 1);
+  assertEquals(bridge.disconnected, false);
+});
+
+Deno.test("CellBridge.buildSpaceTree reads and subscribes to pieceRegistry", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const originalGetRegisteredPieces =
+    PiecesController.prototype.getRegisteredPieces;
+  let registeredPieceReads = 0;
+  let registryReads = 0;
+  let registrySink: (() => void) | undefined;
+  let registryCancelCalls = 0;
+
+  PiecesController.prototype.getRegisteredPieces = () => {
+    registeredPieceReads++;
+    return Promise.resolve([]);
+  };
+
+  const manager = {
+    getSpace: () => "did:key:zPieceRegistryTest",
+    getPieceRegistry: () => {
+      registryReads++;
+      return Promise.resolve({
+        sink(callback: () => void) {
+          registrySink = callback;
+          return () => registryCancelCalls++;
+        },
+      });
+    },
+  } as unknown as SpaceState["manager"];
+
+  try {
+    const state = await (bridge as unknown as {
+      buildSpaceTree: BuildSpaceTree;
+    }).buildSpaceTree("registry-space", manager);
+
+    assertEquals(registeredPieceReads, 1);
+    assertEquals(registryReads, 1);
+    assertEquals(typeof registrySink, "function");
+    assertEquals(state.did, "did:key:zPieceRegistryTest");
+    assertEquals(state.unsubscribes.length, 1);
+    assertEquals(
+      tree.lookup(tree.rootIno, encodeFuseComponent("registry-space")) !==
+        undefined,
+      true,
+    );
+
+    state.unsubscribes[0]();
+    assertEquals(registryCancelCalls, 1);
+  } finally {
+    PiecesController.prototype.getRegisteredPieces =
+      originalGetRegisteredPieces;
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Group 1: loadPieceTree — initial tree structure
@@ -2539,7 +2647,7 @@ Deno.test("CellBridge.syncPieceListOnce adds a new piece to the tree", async () 
     .addPieceToSpace.bind(bridge);
   await addPiece(state, existingPiece, "home");
 
-  // Now the getAllPieces mock already returns both pieces; sync should add p2
+  // The registry mock now returns both pieces, so sync should add p2.
   await (bridge as unknown as { syncPieceListOnce: SyncPieceListOnce })
     .syncPieceListOnce.call(bridge, state, "home");
 
@@ -2583,9 +2691,9 @@ Deno.test("CellBridge.syncPieceListOnce removes a deleted piece from the tree", 
     "Piece should exist before sync",
   );
 
-  // Now getAllPieces returns empty — piece was deleted
+  // The registry mock now returns empty because the piece was deleted.
   state.pieces = {
-    getAllPieces: () => Promise.resolve([]),
+    getRegisteredPieces: () => Promise.resolve([]),
   } as unknown as SpaceState["pieces"];
 
   await (bridge as unknown as { syncPieceListOnce: SyncPieceListOnce })

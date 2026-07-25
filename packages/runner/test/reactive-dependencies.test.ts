@@ -1671,9 +1671,9 @@ describe("determineTriggeredActions", () => {
 
     it("real-world case: triggers when __#0 key appears in internal", () => {
       // Simplified version of the real bug from production
-      // Action B watches a path through __#0.allPieces
+      // Action B watches a path through __#0.pieceRegistry
       // Before: internal doesn't have __#0
-      // After: internal has __#0 (but no allPieces inside)
+      // After: internal has __#0 (but no pieceRegistry inside)
       const actionA = createAction("actionA");
       const actionB = createAction("actionB");
       const actionC = createAction("actionC");
@@ -1688,13 +1688,13 @@ describe("determineTriggeredActions", () => {
         [actionB, [
           ["value", "internal", "$alias", "path"],
           ["value", "internal", "/", "link@1"],
-          ["value", "internal", "__#0", "allPieces"],
+          ["value", "internal", "__#0", "pieceRegistry"],
           ["value", "internal", "cell", "/"],
         ]],
         [actionC, [
           ["value", "internal", "$alias", "path"],
           ["value", "internal", "/", "link@1"],
-          ["value", "internal", "__#0", "allPieces"],
+          ["value", "internal", "__#0", "pieceRegistry"],
           ["value", "internal", "cell", "/"],
         ]],
       ]);
@@ -1714,7 +1714,7 @@ describe("determineTriggeredActions", () => {
           internal: {
             backlinksIndex: { "/": { "link@1": { path: [], id: "of:123" } } },
             "__#2": { "/": { "link@1": { path: [], id: "of:456" } } },
-            // __#0 now exists! (but doesn't have allPieces)
+            // __#0 now exists! (but doesn't have pieceRegistry)
             "__#0": {
               "/": {
                 "link@1": { path: [], id: "of:789", space: "did:key:abc" },
@@ -1731,7 +1731,7 @@ describe("determineTriggeredActions", () => {
       );
 
       // Action B and C should trigger because __#0 appeared,
-      // even though allPieces is still undefined in both cases
+      // even though pieceRegistry is still undefined in both cases
       expect(result).toContain(actionB);
       expect(result).toContain(actionC);
       // Action A should NOT trigger (none of its paths changed)
