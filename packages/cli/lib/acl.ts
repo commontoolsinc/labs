@@ -13,7 +13,7 @@ import {
   type Capability,
   isACLUser,
 } from "@commonfabric/memory/acl";
-import { awaitSyncWithTimeout } from "./utils.ts";
+import { throwOnSpaceAuthorizationError } from "./utils.ts";
 
 export interface SpaceConfig {
   apiUrl: URL;
@@ -56,7 +56,7 @@ export async function createRuntime(
     throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
   }
 
-  await awaitSyncWithTimeout(runtime.storageManager.synced());
+  await runtime.storageManager.synced();
   return runtime;
 }
 
@@ -71,6 +71,10 @@ export async function setAclEntry(
   await using runtime = await createRuntime(config, session);
   const aclManager = new ACLManager(runtime, session.space);
   await aclManager.set(userDid, capability);
+  // Checked AFTER the ACL access, which is what pulls the space and records any
+  // denial. A denied write already rejects above; this also fails a read that
+  // otherwise collapses to a silent "no ACL".
+  throwOnSpaceAuthorizationError(runtime.storageManager, session.space);
 }
 
 // Remove an ACL entry for a DID
@@ -83,6 +87,7 @@ export async function removeAclEntry(
   await using runtime = await createRuntime(config, session);
   const aclManager = new ACLManager(runtime, session.space);
   await aclManager.remove(userDid);
+  throwOnSpaceAuthorizationError(runtime.storageManager, session.space);
 }
 
 // Get the current ACL for a space
@@ -92,7 +97,9 @@ export async function getAcl(
   const session = await loadSession(config);
   await using runtime = await createRuntime(config, session);
   const aclManager = new ACLManager(runtime, session.space);
-  return await aclManager.get();
+  const acl = await aclManager.get();
+  throwOnSpaceAuthorizationError(runtime.storageManager, session.space);
+  return acl;
 }
 
 // Use "ANYONE" on the command line to map to "*"

@@ -1,4 +1,5 @@
 import { isAbsolute, join } from "@std/path";
+import type { MemorySpace } from "@commonfabric/runner";
 
 export function absPath(relpath: string, cwd = Deno.cwd()): string {
   // TODO(js): homedir check is not cross platform
@@ -9,32 +10,23 @@ export function absPath(relpath: string, cwd = Deno.cwd()): string {
   return join(cwd, relpath);
 }
 
-const SYNC_TIMEOUT_MS = 30_000;
-
 /**
- * Await a `synced()` promise with a timeout. If sync takes too long,
- * throw with an actionable error message instead of hanging silently.
+ * Surface a permanent authorization denial for `space` by throwing the storage
+ * layer's real `AuthorizationError`. The storage manager records a permanent
+ * denial (an ACL shortfall, an audience or protocol mismatch) per space but
+ * keeps `synced()` quiet — a denied cross-space link must stay a silent absent
+ * read — so a caller that must reach a specific space reads the per-space status
+ * after `synced()` and rethrows the real error here. A no-op when the space is
+ * authorized, or when the storage manager does not expose the status.
  */
-export async function awaitSyncWithTimeout(
-  syncPromise: Promise<void>,
-  timeoutMs: number = SYNC_TIMEOUT_MS,
-): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      reject(
-        new Error(
-          `Sync timed out after ${timeoutMs / 1000}s. ` +
-            `This often indicates a client/server configuration mismatch ` +
-            `(e.g., an EXPERIMENTAL_* option enabled on the server but not the CLI). ` +
-            `Check toolshed logs for AuthorizationError details.`,
-        ),
-      );
-    }, timeoutMs);
-  });
-  try {
-    await Promise.race([syncPromise, timeout]);
-  } finally {
-    clearTimeout(timer);
+export function throwOnSpaceAuthorizationError(
+  storageManager: {
+    authorizationError?: (space: MemorySpace) => Error | undefined;
+  },
+  space: MemorySpace,
+): void {
+  const authError = storageManager.authorizationError?.(space);
+  if (authError) {
+    throw authError;
   }
 }
