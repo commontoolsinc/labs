@@ -1184,6 +1184,7 @@ export const _internal = {
   pendingAmend,
   dropHeaderBetween,
   joinAdjacent,
+  oldLineSpansAt,
 };
 
 function reparse(

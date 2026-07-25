@@ -121,40 +121,48 @@ function validGitObject(object: string): boolean {
 function readGitBlobs(
   repoRoot: string,
   objects: readonly string[],
+  run: typeof spawnSync = spawnSync,
 ): Map<string, string> {
   const blobs = new Map<string, string>();
   if (objects.length === 0) return blobs;
   try {
-    const result = spawnSync("git", ["cat-file", "--batch"], {
+    const result = run("git", ["cat-file", "--batch"], {
       cwd: repoRoot,
       env: { ...Deno.env.toObject(), GIT_NO_LAZY_FETCH: "1" },
       input: `${objects.join("\n")}\n`,
       maxBuffer: Number.MAX_SAFE_INTEGER,
     });
     if (result.status !== 0 || !result.stdout) return blobs;
-    const output = new Uint8Array(result.stdout);
-    const decoder = new TextDecoder();
-    let offset = 0;
-    for (const object of objects) {
-      const headerEnd = output.indexOf(10, offset);
-      if (headerEnd < 0) break;
-      const header = decoder.decode(output.subarray(offset, headerEnd));
-      offset = headerEnd + 1;
-      const match = header.match(/^[0-9a-f]{4,64} ([^ ]+) ([0-9]+)$/);
-      if (!match) continue;
-      const size = Number(match[2]);
-      if (
-        !Number.isSafeInteger(size) || size < 0 ||
-        offset + size >= output.length || output[offset + size] !== 10
-      ) {
-        break;
-      }
-      const content = output.subarray(offset, offset + size);
-      offset += size + 1;
-      if (match[1] === "blob") blobs.set(object, decoder.decode(content));
-    }
+    return parseGitBatchOutput(objects, new Uint8Array(result.stdout));
   } catch {
     return blobs;
+  }
+}
+
+function parseGitBatchOutput(
+  objects: readonly string[],
+  output: Uint8Array,
+): Map<string, string> {
+  const blobs = new Map<string, string>();
+  const decoder = new TextDecoder();
+  let offset = 0;
+  for (const object of objects) {
+    const headerEnd = output.indexOf(10, offset);
+    if (headerEnd < 0) break;
+    const header = decoder.decode(output.subarray(offset, headerEnd));
+    offset = headerEnd + 1;
+    const match = header.match(/^[0-9a-f]{4,64} ([^ ]+) ([0-9]+)$/);
+    if (!match) continue;
+    const size = Number(match[2]);
+    if (
+      !Number.isSafeInteger(size) ||
+      offset + size >= output.length || output[offset + size] !== 10
+    ) {
+      break;
+    }
+    const content = output.subarray(offset, offset + size);
+    offset += size + 1;
+    if (match[1] === "blob") blobs.set(object, decoder.decode(content));
   }
   return blobs;
 }
@@ -1048,3 +1056,10 @@ function lineEndOffset(
   if (line + 1 < lineStarts.length) return lineStarts[line + 1] - 1;
   return text.length;
 }
+
+export const _internal = {
+  parseGitBatchOutput,
+  readGitBlobs,
+  reconstructOldFile,
+  shiftCompleteLineSpans,
+};
