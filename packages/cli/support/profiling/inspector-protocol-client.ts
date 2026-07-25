@@ -13,6 +13,21 @@ type ProtocolEvent = {
   params?: unknown;
 };
 
+function isProtocolMessage(
+  message: unknown,
+): message is ProtocolResponse | ProtocolEvent {
+  if (
+    typeof message !== "object" ||
+    message === null ||
+    Array.isArray(message)
+  ) {
+    return false;
+  }
+
+  if ("id" in message) return typeof message.id === "number";
+  return "method" in message && typeof message.method === "string";
+}
+
 type PendingCommand = {
   resolve(value: unknown): void;
   reject(reason: unknown): void;
@@ -103,7 +118,7 @@ export class InspectorProtocolClient extends EventTarget {
   }
 
   #handleMessage = (event: MessageEvent): void => {
-    let message: ProtocolResponse | ProtocolEvent;
+    let message: unknown;
     try {
       message = JSON.parse(String(event.data));
     } catch (error) {
@@ -111,6 +126,13 @@ export class InspectorProtocolClient extends EventTarget {
         new Error("Inspector sent an invalid protocol message", {
           cause: error,
         }),
+      );
+      return;
+    }
+
+    if (!isProtocolMessage(message)) {
+      this.#rejectPending(
+        new Error("Inspector sent an invalid protocol message"),
       );
       return;
     }

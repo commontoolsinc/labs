@@ -185,6 +185,35 @@ Deno.test("InspectorProtocolClient rejects pending commands after an invalid mes
   assertInstanceOf(error.cause, SyntaxError);
 });
 
+Deno.test("InspectorProtocolClient rejects malformed protocol message values", async (t) => {
+  const malformedMessages = [
+    { name: "null", value: null },
+    { name: "primitive", value: "not a protocol message" },
+    { name: "array", value: [] },
+    { name: "object without an id or method", value: {} },
+    {
+      name: "response with a nonnumeric id",
+      value: { id: "1", result: {} },
+    },
+  ];
+
+  for (const { name, value } of malformedMessages) {
+    await t.step(name, async () => {
+      const socket = new FakeInspectorSocket();
+      const client = new InspectorProtocolClient(socket.asWebSocket());
+      const enable = client.Runtime.enable();
+
+      socket.receive(value);
+
+      await assertRejects(
+        () => enable,
+        Error,
+        "Inspector sent an invalid protocol message",
+      );
+    });
+  }
+});
+
 Deno.test("InspectorProtocolClient ignores responses for unknown command IDs", async () => {
   const socket = new FakeInspectorSocket();
   const client = new InspectorProtocolClient(socket.asWebSocket());
