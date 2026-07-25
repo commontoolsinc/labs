@@ -1924,6 +1924,82 @@ inside the isolated worktree. The gate:
    > in-harness; the browser wall-time re-run of steps 2–4 against a real
    > `deno task integration` toolshed is still owed to confirm the
    > `session.watch.refresh` DAG actually falls to ~0 in the browser session.
+   >
+   > **EXECUTED — the first real-browser W2.9 run (2026-07-24 late, post-FW6,
+   > `deno task integration patterns default-app`, all three env legs set).**
+   > The very first fully-negotiated browser engagement of F5 immediately
+   > surfaced two CLIENT reconcile defects the scripted clause-level fixtures
+   > structurally missed (every fixture flow settled between membership
+   > changes): (i) a make-before-break gap — FW1's server-side member-remove
+   > suppression cannot protect a doc delivered AFTER the reconcile's member
+   > snapshot was taken (demand-pull result or push-delivered closure growth
+   > landing while the replacing `watch.set` was in flight); the server
+   > diffed it out, the client evicted a HELD doc, patterns read `undefined`
+   > mid-derivation (summary-index/default-app crashes), re-pulled, and the
+   > re-pull orphaned the next delivery — a self-sustaining storm degrading
+   > note-creates 1.4s → 17s by note 7 with 434 watch.sets in 10 notes; and
+   > (ii) no reconcile serialization — changes landing mid-round-trip started
+   > additional reconciles whose stale snapshots drained through the client's
+   > watch-mutation mutex as redundant O(members) replaces. Both fixed
+   > red-first in `client-doc-set-watch.test.ts` (hold-the-replace transport
+   > windows; original code fails each on the exact defect assert) — the
+   > remove-apply guard keeps a held doc the registered membership merely
+   > lags and schedules the healing reconcile; `runSpaceDocSetReconcile`
+   > serializes to one in-flight replace with a trailing coalesced re-run.
+   >
+   > **Post-fix results (n=10 flag-on vs n=10 flag-off, same code, same
+   > machine):** the composed run PASSES end-to-end (measurement guard
+   > included — zero unexpected lease-fence rejects). Flag-on steady-avg
+   > 3952ms / p50 3402ms vs flag-off 4273ms / 3260ms — **parity within
+   > noise** (both legs are noisy on a loaded dev machine; flag-off spiked
+   > to 12.7s once). Step-3 mechanism counters, flag-on run: `session.watch.
+   > refresh` 69 calls / 1,550 DAG (vs 10,078 DAG flag-off — the retirement
+   > win, was ~54k pre-F5); `session.docset.read` 69 calls / 1,443 member
+   > deliveries / **0 DAG**; executor `docs.read` 0-DAG. Residual graph
+   > watches are the pull watches awaiting their coalesced demotion
+   > (mixed-mode fails open as designed). A n=20 flag-on probe holds the
+   > pattern (refresh 1,654 DAG total) but exposes the next scaler —
+   > `session.watch.add` closure re-resolution DAG grows with space size
+   > (37.8k @ n=10 → 127.9k @ n=20, ~270 DAG/registration and climbing),
+   > with e2e drift 16-20 ≈ 7.5s avg.
+   >
+   > **Three-way attribution (n=20 each, same machine window, quartile
+   > avgs):** flag-OFF 1547/2062/2226/2491ms (all-avg 2082); BASE (server-
+   > primary only, no doc-set) 2373/3243/2969/3778 (avg 3091); ON+DOCSET
+   > 4342/5600/4379/7466 (avg 5447). The earlier n=10 "parity" read was a
+   > noise artifact (the flag-off leg caught a loaded machine); with the
+   > clean control the **flag-on-fully-engaged leg is ~2.6× slower e2e and
+   > widening**, decomposed into two named scalers:
+   >
+   > 1. **+~1s: base server-primary** (claims/executor active; the C2.10
+   >    latency budget's real-browser counterpart). Its watch.adds stay
+   >    cheap — `coveredSelectorSkips` 1544, 5.6k DAG ≈ flag-off's 5.6k —
+   >    so this is claim/settlement overhead, not read amplification.
+   > 2. **+~2.4s and growing: the doc-set leg's revisit-pull amplification.**
+   >    Same watch.add call count as BASE (474 vs 519) but 23× the DAG
+   >    (127.9k vs 5.6k) and 12× the reads: the docs-watch REPLACE destroys
+   >    the server-side selector coverage that BASE's standing graph watches
+   >    accumulate, so the covered-selector fast path (FA5) never engages —
+   >    every navigation-driven release + revisit becomes a full cold
+   >    closure re-resolution (~270 DAG and growing with space size)
+   >    instead of a covered skip, plus a membership shrink/regrow cycle.
+   >    F5's own steady-state counters stay excellent throughout (refresh
+   >    1,654 DAG total @ n=20 vs 15,450 flag-off; `session.docset.read`
+   >    0-DAG; guard clean) — the cost is the pull path AROUND the doc-set
+   >    surface, not the surface itself.
+   >
+   > **Owed follow-up (F7, needs its own scout+panel — client reactive
+   > hot path):** make revisits cheap under doc-set mode — candidates:
+   > exact point reads (`docs.read`, F2 parity for the browser client) for
+   > roots the client recently held, membership retention across releases
+   > (tension with FB27 aged-set parity to resolve), or preserving
+   > server-side selector coverage across the docs-watch replace.
+   > Acceptance: ON+DOCSET watch.add DAG ≈ BASE's; e2e ON+DOCSET ≈ BASE;
+   > then close the remaining BASE-vs-OFF claim-overhead gap under the
+   > C2.10 budget. Until F7 lands, the graph-retirement dial should stay
+   > off for browser-facing spaces: the retirement win (session.watch.
+   > refresh ~0) is real but currently purchased with a larger pull-path
+   > regression.
 2. **Run the flag-on / flag-off note-create pair** — the same default-app
    note-create series as the FA12 archived baseline
    (`docs/history/development/performance/server-execution-feed-baseline-2026-07-16.md`,
