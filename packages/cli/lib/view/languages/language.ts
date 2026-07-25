@@ -1,21 +1,26 @@
 /**
  * The contract every source language plugs into so the `cf view` pager can
- * colour, navigate, edit and (optionally) reason about it. A language is a
- * stateless strategy object: one instance describes TypeScript, one Markdown,
- * one JSON. The pager selects the right one for a file ONCE (see
- * {@link ./registry.ts}) and then dispatches every operation through that
- * object's methods — there is no per-operation branch on the file extension.
+ * colour, navigate, edit and (optionally) reason about it, plus selecting the
+ * right language for a file. A language is a stateless strategy object: one
+ * instance describes TypeScript, one Markdown, one JSON. The pager selects the
+ * right one for a file ONCE (via {@link languageForFile}) and then dispatches
+ * every operation through that object's methods — there is no per-operation
+ * branch on the file extension.
  *
  * Per-file mutable state (a warm incremental parse, a language service) is not
  * held on the language; the language is a factory for the small stateful
  * objects that hold it ({@link Highlighter}, {@link Semantics}).
  *
- * The contract lives here, apart from any concrete language, so the neutral core
- * (renderer, pager, diff builder, editor) can depend on it without depending on
- * a specific language.
+ * A neutral core file (renderer, pager, diff builder, editor) that needs only
+ * the contract imports its types with `import type`, which is erased, so it
+ * does not depend on any concrete language at run time; only the selection
+ * functions below pull the concrete languages in.
  */
 import type { Definition, Document, Line, StructureNode } from "../model.ts";
 import type { DiffMaps } from "../diffdoc.ts";
+import { typeScriptLanguage } from "./typescript/language.ts";
+import { markdownLanguage } from "./markdown/language.ts";
+import { jsonLanguage } from "./json/language.ts";
 
 /**
  * Live syntax highlighting that re-highlights only the region an edit touches,
@@ -102,9 +107,9 @@ export interface Language {
   /** Stable identifier, e.g. `"typescript"`, `"markdown"`, `"json"`. */
   readonly id: string;
 
-  /** Does this language claim `fileName`? The catch-all language returns true
-   * for everything (it is the fallback), so more specific languages must be
-   * consulted before it — see {@link ./registry.ts}. */
+  /** Does this language claim `fileName`? Consulted in order by {@link
+   * languageForFile}; TypeScript claims its own family and also backstops
+   * anything unclaimed. */
   matches(fileName: string | undefined): boolean;
 
   /** Parse `text` into the full document model: coloured lines, a structure
@@ -141,4 +146,79 @@ export interface Language {
     maps: DiffMaps,
     options: SemanticsOptions,
   ): Semantics | undefined;
+}
+
+// --- selection ---------------------------------------------------------------
+
+/**
+ * Every language the pager knows, most specific first, built on first use.
+ * TypeScript comes last: it claims the TypeScript family and is also the
+ * fallback (below) for anything unclaimed.
+ *
+ * The list is lazy so this module's top level never reads the concrete language
+ * singletons: they and this module form an import cycle (a language's semantic
+ * layer resolves external files back through {@link languageForFile}), and
+ * building the array eagerly would read a singleton that a cycle-first load had
+ * not yet initialised. By first use every module has finished evaluating.
+ */
+let languages: readonly Language[] | undefined;
+function allLanguages(): readonly Language[] {
+  return languages ??= [markdownLanguage, jsonLanguage, typeScriptLanguage];
+}
+
+/** The language for `fileName` — the first that claims it. TypeScript is the
+ * fallback, so a pipe (no name) or an unrecognised extension resolves to it. */
+export function languageForFile(fileName: string | undefined): Language {
+  for (const language of allLanguages()) {
+    if (language.matches(fileName)) return language;
+  }
+  return typeScriptLanguage;
+}
+
+/** The distinct languages a set of files resolves to, in first-seen order. */
+export function distinctLanguages(
+  fileNames: readonly (string | undefined)[],
+): Language[] {
+  const seen = new Set<string>();
+  const out: Language[] = [];
+  for (const name of fileNames) {
+    const language = languageForFile(name);
+    if (!seen.has(language.id)) {
+      seen.add(language.id);
+      out.push(language);
+    }
+  }
+  return out;
+}
+
+/**
+ * The semantic service for a diff view, from the languages the diff touches. A
+ * diff spans potentially many files of different languages; the service is the
+ * first language present that offers one, scoped to just its own files (so a
+ * TypeScript program is not seeded with the diff's Markdown or JSON files).
+ * Only TypeScript offers one today, so this resolves to it whenever the diff
+ * includes a TypeScript file and to nothing otherwise. When a second semantic
+ * language appears this becomes a per-file composite; the per-language slot the
+ * pager dispatches through is already here.
+ */
+export function diffSemanticsFor(
+  languages: readonly Language[],
+  diffText: string,
+  maps: DiffMaps,
+  options: SemanticsOptions,
+): Semantics | undefined {
+  for (const language of languages) {
+    if (!language.createDiffSemantics) continue;
+    const rootFiles = maps.rootFiles.filter((path) =>
+      languageForFile(path) === language
+    );
+    if (rootFiles.length === 0) continue;
+    const semantics = language.createDiffSemantics(
+      diffText,
+      { ...maps, rootFiles },
+      options,
+    );
+    if (semantics) return semantics;
+  }
+  return undefined;
 }

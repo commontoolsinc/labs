@@ -197,15 +197,15 @@ Deno.test("diff semantics: a hostile cwd is rejected by containment before build
   }
 });
 
-Deno.test("diff semantics: no in-workspace root file means a null service (not a failed build)", () => {
-  // With every root file filtered out, the factory returns null up front — the
+Deno.test("diff semantics: no in-workspace root file means no service (not a failed build)", () => {
+  // With every root file filtered out, the factory returns undefined up front — the
   // service is never constructed, so build()'s failure guards are not in play.
   const sem = createDiffSemantics(
     "difftext",
     { rootFiles: [], toFile: () => null, fromFile: () => null },
     { cwd: CWD },
   );
-  assertEquals(sem, null);
+  assertEquals(sem, undefined);
 });
 
 // lazyProgram is the shared build/cache/latch both factories use. The

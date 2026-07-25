@@ -781,7 +781,7 @@ Deno.test("diff semantics: root files outside the config root are dropped", () =
     assert(maps.rootFiles.length > 0, "the stub resolved the file");
     assertEquals(
       createDiffSemantics(DIFF, maps, { cwd: configRoot }),
-      null,
+      undefined,
       "out-of-root roots leave no service",
     );
   } finally {

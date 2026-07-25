@@ -31,7 +31,7 @@ import {
   sameCommit,
 } from "./commitmsg.ts";
 import type { Highlighter } from "./languages/language.ts";
-import { languageForFile } from "./languages/registry.ts";
+import { languageForFile } from "./languages/language.ts";
 import type {
   EditableSource,
   EditPolicy,

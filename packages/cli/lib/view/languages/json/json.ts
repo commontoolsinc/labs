@@ -276,8 +276,9 @@ function buildStructure(
 ): StructureNode[] {
   const lineStarts = computeLineStarts(text);
   const cur: Cursor = { toks: significantTokens(text), i: 0 };
-  if (cur.toks.length === 0) return [];
   const ctx = { text, lineStarts, definitions };
+  // Text with no significant tokens (empty, all whitespace, all comments) has no
+  // first token, which `parseValue` reports as an empty value with no members.
   const root = parseValue(cur, 0, ctx);
   // The nav tree is the top value's members/elements; a bare scalar has none.
   return root.children;

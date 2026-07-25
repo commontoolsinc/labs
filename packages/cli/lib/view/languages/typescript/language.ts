@@ -19,10 +19,12 @@ import { createDiffSemantics, createSemantics } from "./semantics.ts";
 export const typeScriptLanguage: Language = {
   id: "typescript",
 
-  // The catch-all: the registry consults it last, so returning true here means
-  // "everything no other language claimed". A pipe of transformed output (no
-  // file name) lands here too.
-  matches: () => true,
+  // Claims the TypeScript / JavaScript family (`.ts`, `.tsx`, `.mts`, `.cts`,
+  // `.js`, `.jsx`, `.mjs`, `.cjs`). It is also the fallback in `languageForFile`
+  // for anything unclaimed — a pipe of transformed output, an unknown extension
+  // — so those resolve here too, just via that fallback rather than this test.
+  matches: (fileName) =>
+    fileName !== undefined && /\.[cm]?[jt]sx?$/i.test(fileName),
 
   parseDocument: (text, fileName) => parseDocument(text, fileName),
 
@@ -32,9 +34,9 @@ export const typeScriptLanguage: Language = {
 
   hunkStructure: (ctx) => remapStructure(ctx),
 
-  createSemantics: (text, options) =>
-    createSemantics(text, options) ?? undefined,
+  // The semantic factories already return `Semantics | undefined`, matching the
+  // interface, so they are the methods directly.
+  createSemantics,
 
-  createDiffSemantics: (diffText, maps, options) =>
-    createDiffSemantics(diffText, maps, options) ?? undefined,
+  createDiffSemantics,
 };

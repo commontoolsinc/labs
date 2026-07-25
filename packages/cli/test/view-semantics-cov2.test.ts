@@ -71,12 +71,12 @@ function cwdThatThrows(): string {
 
 // --- createSemantics: setup-time guards -------------------------------------
 
-Deno.test("semantics: a text that throws while splitting yields a null service", () => {
+Deno.test("semantics: a text that throws while splitting yields no service", () => {
   // `splitSections` reads `text.length` first; that throw is caught and the
   // factory returns null — the documented "returns null only when even the
   // lightweight setup is impossible" path.
   const sem = createSemantics(textThatThrows(), { cwd: CWD });
-  assertEquals(sem, null, "an unsplittable text gives no service at all");
+  assertEquals(sem, undefined, "an unsplittable text gives no service at all");
 });
 
 Deno.test("semantics: an un-discoverable config falls back to an empty import map", () => {

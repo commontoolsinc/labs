@@ -599,7 +599,11 @@ Deno.test("diff semantics: returns null when no root file is in the workspace", 
   const { maps } = buildDiffDocument(DIFF, model, noWs);
   assertEquals(maps.rootFiles.length, 0);
   const sem = createDiffSemantics(DIFF, maps, { cwd: CWD });
-  assertEquals(sem, null, "no in-workspace root files means no diff service");
+  assertEquals(
+    sem,
+    undefined,
+    "no in-workspace root files means no diff service",
+  );
 });
 
 Deno.test("diff semantics: stays silent on a drifted (unverified) hunk", () => {

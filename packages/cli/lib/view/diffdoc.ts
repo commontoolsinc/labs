@@ -25,7 +25,7 @@ import { flattenStructure } from "./model.ts";
 import type { DiffHunk, DiffModel } from "./diff.ts";
 import { computeLineStarts, lineIndexOf } from "./lines.ts";
 import type { Language } from "./languages/language.ts";
-import { languageForFile } from "./languages/registry.ts";
+import { languageForFile } from "./languages/language.ts";
 import { cpLen } from "./ansi.ts";
 import { dirname, isAbsolute, join, relative } from "@std/path";
 

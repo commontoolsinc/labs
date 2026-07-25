@@ -9,7 +9,7 @@
  */
 import type { Document, Line } from "./model.ts";
 import type { Highlighter } from "./languages/language.ts";
-import { languageForFile } from "./languages/registry.ts";
+import { languageForFile } from "./languages/language.ts";
 
 /** How much a revert restores: the cursor's hunk, the cursor's file, the commit
  * message the cursor is in, or all. */

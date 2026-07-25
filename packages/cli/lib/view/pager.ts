@@ -16,7 +16,7 @@ import { cursorScreenPos, renderFrame, type ViewState } from "./render.ts";
 import { Session, type SessionOptions } from "./session.ts";
 import { ui } from "./theme.ts";
 import type { Semantics } from "./languages/language.ts";
-import { languageForFile } from "./languages/registry.ts";
+import { languageForFile } from "./languages/language.ts";
 import type { EditableSource } from "./editsource.ts";
 import { realFileGateway } from "./filegateway.ts";
 import { ViewError } from "./errors.ts";

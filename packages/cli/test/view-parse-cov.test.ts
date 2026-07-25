@@ -33,7 +33,7 @@ import {
   highlightDocument,
   parseDocument,
 } from "../lib/view/languages/typescript/parse.ts";
-import { languageForFile } from "../lib/view/languages/registry.ts";
+import { languageForFile } from "../lib/view/languages/language.ts";
 import type { Document, StructureNode, TokenClass } from "../lib/view/model.ts";
 
 /** Every token class a given literal text is assigned across the document. */

@@ -14,7 +14,7 @@ import {
   jsonDocument,
   jsonHighlightLines,
 } from "../lib/view/languages/json/json.ts";
-import { languageForFile } from "../lib/view/languages/registry.ts";
+import { languageForFile } from "../lib/view/languages/language.ts";
 import type { Line, TokenClass } from "../lib/view/model.ts";
 import { parseDiff } from "../lib/view/diff.ts";
 import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
@@ -115,6 +115,43 @@ Deno.test("json: colouring is byte-for-byte lossless", () => {
   "nested": { "deep": { "x": true } }
 }`;
   assertEquals(verbatim(jsonHighlightLines(src)), src);
+});
+
+Deno.test("json: strings with escapes and signed-exponent numbers tokenise", () => {
+  // A backslash escapes the next character, so an embedded quote does not end
+  // the string; signed exponents scan their sign.
+  const src = '{ "path": "a\\"b\\\\c", "big": 1e+9, "small": -2.5e-3 }';
+  const lines = jsonHighlightLines(src);
+  assertEquals([...classesOf(lines, '"a\\"b\\\\c"')], ["string"]);
+  assertEquals([...classesOf(lines, "1e+9")], ["number"]);
+  assertEquals([...classesOf(lines, "-2.5e-3")], ["number"]);
+  assertEquals(verbatim(lines), src);
+});
+
+Deno.test("json: a comment between a key and its colon still marks the key", () => {
+  // `nextSignificantIs` skips block and line comments while looking for the `:`
+  // that proves a string is an object key.
+  const src = '{\n  "a" /* c */: 1,\n  "b" // note\n  : 2\n}';
+  const lines = jsonHighlightLines(src);
+  assertEquals([...classesOf(lines, '"a"')], ["propertyName"]);
+  assertEquals([...classesOf(lines, '"b"')], ["propertyName"]);
+  assertEquals(verbatim(lines), src);
+});
+
+Deno.test("json: a non-string object key is skipped, not treated as a member", () => {
+  // `{ 42: 1 }` is invalid JSON; the structure walk skips the number where a key
+  // is expected rather than wedging, so the object contributes no members.
+  const doc = jsonDocument('{ 42: 1, "ok": 2 }');
+  assertEquals(doc.structure.map((n) => n.label), ["ok"]);
+});
+
+Deno.test("json: pathologically deep nesting degrades to no structure", () => {
+  // Deep enough to overflow the structure walk's recursion; `jsonDocument`
+  // catches it and returns colouring with an empty tree rather than throwing.
+  const deep = "[".repeat(100000);
+  const doc = jsonDocument(deep);
+  assertEquals(doc.structure, []);
+  assertEquals(doc.lines.length, 1);
 });
 
 Deno.test("json: object keys form the navigation tree", () => {

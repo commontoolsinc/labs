@@ -10,7 +10,7 @@ import {
   isMarkdownPath,
   markdownDocument,
 } from "../lib/view/languages/markdown/markdown.ts";
-import { languageForFile } from "../lib/view/languages/registry.ts";
+import { languageForFile } from "../lib/view/languages/language.ts";
 import { parseDiff } from "../lib/view/diff.ts";
 import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { createDiffHighlighter } from "../lib/view/diffedit.ts";

@@ -28,7 +28,7 @@ import type {
   Semantics,
   SemanticsOptions as Options,
 } from "../language.ts";
-import { languageForFile } from "../registry.ts";
+import { languageForFile } from "../language.ts";
 
 interface SectionFile {
   /** Virtual file name (the section header path, or `fileName`). */
@@ -41,18 +41,18 @@ interface SectionFile {
 
 /**
  * Build a semantic service over `text`. Returns a service whose queries are
- * always safe to call; returns `null` only when even the lightweight setup is
- * impossible. The TypeScript program is not built until the first query.
+ * always safe to call; returns `undefined` only when even the lightweight setup
+ * is impossible. The TypeScript program is not built until the first query.
  */
 export function createSemantics(
   text: string,
   options: Options,
-): Semantics | null {
+): Semantics | undefined {
   let sections: SectionFile[];
   try {
     sections = splitSections(text, options.fileName ?? "transformed.tsx");
   } catch {
-    return null;
+    return undefined;
   }
 
   const { importMap, root } = safe(() => discoverConfig(options.cwd)) ??
@@ -159,12 +159,12 @@ export function createDiffSemantics(
   diffText: string,
   maps: DiffMaps,
   options: Options,
-): Semantics | null {
+): Semantics | undefined {
   const { importMap, root } = safe(() => discoverConfig(options.cwd)) ??
     { importMap: {}, root: options.cwd };
   const libDir = safe(() => defaultLibDir());
   const rootFiles = maps.rootFiles.filter((p) => within(p, root));
-  if (rootFiles.length === 0) return null;
+  if (rootFiles.length === 0) return undefined;
 
   let service: ts.LanguageService | undefined;
   const { build, prewarm } = lazyProgram(() => {

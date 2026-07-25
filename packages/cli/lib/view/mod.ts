@@ -20,7 +20,7 @@ import {
   diffSemanticsFor,
   distinctLanguages,
   languageForFile,
-} from "./languages/registry.ts";
+} from "./languages/language.ts";
 import {
   type EditableSource,
   fileSource,
