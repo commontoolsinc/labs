@@ -1773,7 +1773,6 @@ export const ExtractorModule = pattern<
         ocr: generateText({
           system: OCR_SYSTEM_PROMPT,
           prompt: prompt as any,
-          model: "anthropic:claude-sonnet-4-5",
         }),
       };
     });

@@ -1724,7 +1724,6 @@ Respond with:
 - classification: true for YES, false for NO
 - confidence: a number between 0 and 1 indicating your confidence
 - reasoning: a brief explanation of why you classified it this way`,
-      model: "anthropic:claude-sonnet-4-5",
     });
 
     // When LLM result arrives, compute the classification result
@@ -1972,7 +1971,6 @@ Each suggestion should have:
 - pattern: a regex pattern (without delimiters)
 - predicts: true for YES, false for NO
 - reasoning: why this pattern indicates the classification`,
-      model: "anthropic:claude-sonnet-4-5",
     });
 
     // Derive visible suggestions from LLM result, filtered by dismissed indices
