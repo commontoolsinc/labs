@@ -1,4 +1,5 @@
 import type { ImmutableJSONValue, JSONSchema } from "@commonfabric/api";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
@@ -228,7 +229,8 @@ const integrityAtomSatisfies = (
         trust.actingPrincipal,
       );
   }
-  return matchAtomPattern(required, actual) !== null ||
+  // TODO(danfuzz): drop the cast once clause alternatives are typed.
+  return matchAtomPattern(required, actual as CfcAtom) !== null ||
     atomEntails(actual, required);
 };
 
