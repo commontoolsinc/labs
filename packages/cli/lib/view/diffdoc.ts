@@ -117,6 +117,14 @@ function validGitObject(object: string): boolean {
   return /^[0-9a-f]{4,64}$/.test(object) && !/^0+$/.test(object);
 }
 
+function tryOrNull<T>(operation: () => T): T | null {
+  try {
+    return operation();
+  } catch {
+    return null;
+  }
+}
+
 interface GitBatchOptions {
   cwd: string;
   env: Record<string, string>;
@@ -139,7 +147,7 @@ function readGitBlobs(
 ): Map<string, string> {
   const blobs = new Map<string, string>();
   if (objects.length === 0) return blobs;
-  try {
+  return tryOrNull(() => {
     const result = run("git", ["cat-file", "--batch"], {
       cwd: repoRoot,
       env: { ...Deno.env.toObject(), GIT_NO_LAZY_FETCH: "1" },
@@ -148,9 +156,7 @@ function readGitBlobs(
     });
     if (result.status !== 0 || !result.stdout) return blobs;
     return parseGitBatchOutput(objects, new Uint8Array(result.stdout));
-  } catch {
-    return blobs;
-  }
+  }) ?? blobs;
 }
 
 function parseGitBatchOutput(
@@ -182,11 +188,7 @@ function parseGitBatchOutput(
 }
 
 function safeRealPath(path: string): string | null {
-  try {
-    return Deno.realPathSync(path);
-  } catch {
-    return null;
-  }
+  return tryOrNull(() => Deno.realPathSync(path));
 }
 
 /** Nearest ancestor of `cwd` containing `.git` (a directory or a file). */
