@@ -210,12 +210,14 @@ const extendThroughPattern = (
   pool: readonly unknown[],
 ): AtomPatternBindings[] => {
   const next: AtomPatternBindings[] = [];
+  // TODO(danfuzz): drop the cast once clause alternatives are typed as
+  // `CfcAtom`.
+  const atoms = pool as readonly CfcAtom[];
   for (const environment of environments) {
     for (
       const extended of matchAtomPatternAgainstAtoms(
         pattern,
-        // TODO(danfuzz): drop once clause alternatives are typed as `CfcAtom`.
-        pool as readonly CfcAtom[],
+        atoms,
         environment,
       )
     ) {
@@ -596,10 +598,7 @@ const matchRule = (
     const alternatives = clauseAlternatives(confidentiality[clauseIndex]);
     for (const alternative of alternatives) {
       // TODO(danfuzz): drop the cast once clause alternatives are typed.
-      const target = matchAtomPattern(
-        rule.appliesTo,
-        alternative as CfcAtom,
-      );
+      const target = matchAtomPattern(rule.appliesTo, alternative as CfcAtom);
       if (target === null) continue;
 
       let environments: AtomPatternBindings[] = [target];
