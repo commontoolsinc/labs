@@ -1244,8 +1244,22 @@ export async function fetchCurrentPRBody(
  * must use line units and its metric must be a `coverage-debt:` metric.
  * `NEW_COVERAGE_BASELINE` is a whole-coverage ratchet reset marker; it has no
  * value and lets the PR's/main run's coverage metrics become the next baseline.
+ *
+ * `includeLegacyCoverageAcceptance` additionally reads the marker's former name,
+ * `NEW_PERF_BASELINE: <coverage-debt metric> = N lines`. Merged PRs from before
+ * the rename accepted coverage debt that way, and their acceptance still has to
+ * truncate the baseline timeline — otherwise a previously accepted increase
+ * re-gates once its group's recent `main` runs go cold, because the ratchet
+ * reaches back past the acceptance to a lower pre-acceptance sample. It is
+ * enabled only when rebuilding merged-PR baselines, never for the current PR:
+ * new PRs must use `ACCEPT_COVERAGE_DEBT`. The timing forms `NEW_PERF_BASELINE`
+ * also carried gate nothing now, so any non-coverage-debt legacy line is
+ * ignored rather than rejected.
  */
-export function parseBaselineOverrides(body: string): BaselineOverrides {
+export function parseBaselineOverrides(
+  body: string,
+  includeLegacyCoverageAcceptance = false,
+): BaselineOverrides {
   const result: BaselineOverrides = {
     metrics: new Map(),
     coverageBaselineReset: new RegExp(
@@ -1267,6 +1281,19 @@ export function parseBaselineOverrides(body: string): BaselineOverrides {
     }
 
     result.metrics.set(metric, value);
+  }
+
+  if (includeLegacyCoverageAcceptance) {
+    const legacyRe =
+      /NEW_PERF_BASELINE:\s*(.+?)\s*=\s*(\d+(?:\.\d+)?)\s*lines?\b/g;
+    let legacyMatch;
+    while ((legacyMatch = legacyRe.exec(body)) !== null) {
+      const metric = legacyMatch[1].trim();
+      if (!isCoverageDebtMetric(metric)) continue;
+      if (!result.metrics.has(metric)) {
+        result.metrics.set(metric, parseFloat(legacyMatch[2]));
+      }
+    }
   }
 
   return result;

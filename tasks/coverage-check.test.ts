@@ -394,6 +394,22 @@ Deno.test("valid merged PR baseline override metadata is parsed", () => {
   );
 });
 
+Deno.test("merged PR legacy coverage-debt acceptance is honored", () => {
+  // A baseline PR merged before the marker rename accepted debt with
+  // NEW_PERF_BASELINE; its acceptance must still register so it truncates the
+  // baseline timeline.
+  const overrides = parseMergedBaselineOverrides({
+    number: 125,
+    body:
+      "NEW_PERF_BASELINE: coverage-debt: packages/runner uncovered lines = 7 lines",
+  });
+
+  assertEquals(
+    overrides?.metrics.get("coverage-debt: packages/runner uncovered lines"),
+    7,
+  );
+});
+
 function coverageRow(
   metric: string,
   current: number,

@@ -260,6 +260,38 @@ Deno.test("baseline override parser rejects non-coverage-debt metrics", () => {
   );
 });
 
+Deno.test("baseline override parser reads legacy coverage-debt acceptance only when asked", () => {
+  const body =
+    "NEW_PERF_BASELINE: coverage-debt: packages/runner uncovered lines = 123 lines";
+
+  // New PRs must use ACCEPT_COVERAGE_DEBT: the legacy form is ignored by default.
+  assertEquals(parseBaselineOverrides(body).metrics.size, 0);
+
+  // Merged baseline PRs from before the rename still count, so their
+  // acceptance truncates the baseline timeline.
+  const legacy = parseBaselineOverrides(body, true);
+  assertEquals(
+    legacy.metrics.get("coverage-debt: packages/runner uncovered lines"),
+    123,
+  );
+});
+
+Deno.test("legacy override parsing ignores the defunct timing form", () => {
+  // NEW_PERF_BASELINE once accepted timing regressions too; those gate nothing
+  // now, so a legacy timing line is ignored rather than rejected — a merged PR
+  // that carried one must still yield its coverage-debt acceptance.
+  const overrides = parseBaselineOverrides(
+    "NEW_PERF_BASELINE: job: Check = 7s\n" +
+      "NEW_PERF_BASELINE: coverage-debt: packages/runner uncovered lines = 9 lines",
+    true,
+  );
+  assertEquals(overrides.metrics.size, 1);
+  assertEquals(
+    overrides.metrics.get("coverage-debt: packages/runner uncovered lines"),
+    9,
+  );
+});
+
 Deno.test("coverage baseline reset marker parses from PR body", () => {
   const overrides = parseBaselineOverrides(
     `Reset coverage debt for one cycle\n${COVERAGE_BASELINE_RESET_MARKER}\n`,

@@ -144,7 +144,10 @@ export function parseMergedBaselineOverrides(
   warn: (message: string) => void = console.warn,
 ): BaselineOverrides | null {
   try {
-    return parseBaselineOverrides(pr.body ?? "");
+    // Merged baseline PRs predating the marker rename accepted coverage debt
+    // with NEW_PERF_BASELINE; still honor that so their acceptance truncates
+    // the baseline timeline (see parseBaselineOverrides).
+    return parseBaselineOverrides(pr.body ?? "", true);
   } catch (error) {
     warn(
       `  Warning: ignoring invalid baseline override in merged PR #${pr.number}: ${error}`,
