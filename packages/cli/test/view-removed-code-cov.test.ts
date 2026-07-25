@@ -52,24 +52,37 @@ Deno.test("diffdoc cov: Git batch output accepts blobs and rejects malformed rec
   );
 });
 
-Deno.test("diffdoc cov: Git blob reads return empty results after command failures", () => {
-  const root = Deno.makeTempDirSync();
-  try {
-    assertEquals(
-      _dd.readGitBlobs(root, ["aaaa"]).size,
-      0,
-      "git cat-file fails outside a repository",
-    );
-    assertEquals(
-      _dd.readGitBlobs(root, ["aaaa"], () => {
-        throw new Error("spawn failed");
-      }).size,
-      0,
-      "command launch failures return no blobs",
-    );
-  } finally {
-    Deno.removeSync(root, { recursive: true });
-  }
+Deno.test("diffdoc cov: Git blob reads stay local and return empty results after command failures", () => {
+  const failed = _dd.readGitBlobs(
+    "/repo",
+    ["aaaa"],
+    (command, args, options) => {
+      assertEquals(command, "git");
+      assertEquals(args, ["cat-file", "--batch"]);
+      assertEquals(options.cwd, "/repo");
+      assertEquals(options.env?.GIT_NO_LAZY_FETCH, "1");
+      assertEquals(options.input, "aaaa\n");
+      assertEquals(options.maxBuffer, Number.MAX_SAFE_INTEGER);
+      const empty = new Uint8Array();
+      return {
+        pid: 1,
+        output: [null, empty, empty],
+        stdout: empty,
+        stderr: empty,
+        status: 1,
+        signal: null,
+      };
+    },
+  );
+  assertEquals(failed.size, 0, "a nonzero Git result returns no blobs");
+
+  assertEquals(
+    _dd.readGitBlobs("/repo", ["aaaa"], () => {
+      throw new Error("spawn failed");
+    }).size,
+    0,
+    "command launch failures return no blobs",
+  );
 });
 
 Deno.test("diffdoc cov: old-file reconstruction rejects inconsistent hunk metadata", () => {

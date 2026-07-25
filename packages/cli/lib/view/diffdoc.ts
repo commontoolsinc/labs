@@ -117,11 +117,25 @@ function validGitObject(object: string): boolean {
   return /^[0-9a-f]{4,64}$/.test(object) && !/^0+$/.test(object);
 }
 
+interface GitBatchOptions {
+  cwd: string;
+  env: Record<string, string>;
+  input: string;
+  maxBuffer: number;
+}
+
+type GitBatchRunner = (
+  command: string,
+  args: string[],
+  options: GitBatchOptions,
+) => { status: number | null; stdout: Uint8Array | null };
+
 /** Read several locally available Git objects in one batch. */
 function readGitBlobs(
   repoRoot: string,
   objects: readonly string[],
-  run: typeof spawnSync = spawnSync,
+  run: GitBatchRunner = (command, args, options) =>
+    spawnSync(command, args, options),
 ): Map<string, string> {
   const blobs = new Map<string, string>();
   if (objects.length === 0) return blobs;
