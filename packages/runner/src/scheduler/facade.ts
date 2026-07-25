@@ -425,6 +425,7 @@ export class Scheduler {
   private triggerIndex = new SchedulerTriggerIndex();
   private actionChangeGroups = new WeakMap<Action, ChangeGroup>();
   private retries = new WeakMap<Action, number>();
+  private offBudgetRetries = new WeakMap<Action, number>();
 
   // Effect/computation tracking for pull-based scheduling
   private nodes = new NodeRegistry();
@@ -2499,6 +2500,7 @@ export class Scheduler {
       actionChangeGroups: this.actionChangeGroups,
       actionTimingState: this.actionTimingState,
       retries: this.retries,
+      offBudgetRetries: this.offBudgetRetries,
       pending: this.pending,
       actionRunTrace: this.actionRunTrace,
       nodes: this.nodes,
