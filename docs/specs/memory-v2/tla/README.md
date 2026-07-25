@@ -4,8 +4,12 @@
 pending-stack commit protocol (`03-commit-model.md` §3.3–3.6), built to check
 the invariant catalog (`09-invariants.md`) over **all** interleavings within
 its bounds — including the interleavings nobody thought to hand-write a unit
-test for. It reproduces both known bug classes as machine-found
-counterexamples and certifies the repaired shapes.
+test for. It reproduces the CT-1910 bug class as a machine-found
+counterexample and certifies the repaired shapes. (The pre-#4606 scalar wire
+shape — the legacy old-client/old-server dependency recording whose
+under-recording produced the CT-1872 "1c" phantom — is deliberately not
+modeled; only the shipped full-stack shape and the proposed overlap-filtered
+refinement are.)
 
 ## Results
 
@@ -14,17 +18,18 @@ deep config in a few minutes):
 
 | Config | DepMode | BasisMode | Result |
 | --- | --- | --- | --- |
-| `PendingStacks_Scalar.cfg` | `scalar` (pre-#4606) | `confirmed` | **ReadCoherence violated** — the CT-1872 "1c" phantom: a rejected pending layer's write survives inside a dependent commit's accepted observation, because the scalar dependency shape misses the layer and the client cascade never reaches the dependent. |
 | `PendingStacks_Current.cfg` | `fullstack` (shipped #4606) | `maxdep` (shipped) | **ReadCoherence violated** — CT-1910: the pending-read staleness scan starts at the highest dependency's resolution seq, missing a foreign overlapping write that landed between the reader's confirmed basis and that seq. |
 | `PendingStacks_Repaired.cfg` | `fullstack` | `confirmed` (CT-1910 repair) | **All invariants hold** (14.5M distinct states, exhaustive at `MaxTotal = 4`). |
 | `PendingStacks_Filtered.cfg` | `filtered` (proposed CT-1872 refinement) | `confirmed` | **All invariants hold** (same bound). |
 | `PendingStacks_Filtered5.cfg` | `filtered` | `confirmed` | **All invariants hold** at `MaxTotal = 5` with single-path writes (110.7M distinct states, ~5 min) — deep enough for a foreign write to reject a *middle* pending layer beneath a reader, the case where overlap-filtering actually drops a dependency. |
 
-Read the two violations together with the catalog: the scalar counterexample
-is an INV-3(a) failure (dependency under-recording defeats INV-4's cascade),
-the maxdep counterexample is an INV-1 failure through the staleness basis.
-They are orthogonal — fixing one does not fix the other, which is why the
-repaired configs change both dials.
+Read the violation together with the catalog: the maxdep counterexample is an
+INV-1 failure through the staleness basis, orthogonal to dependency
+recording — no choice of DepMode fixes it, which is why the repaired configs
+change the basis dial. Conversely, dependency under-recording is the other
+failure axis (INV-3(a): a recording shape that drops a layer overlapping the
+read path re-creates the CT-1872 phantom); the filtered configs certify that
+the proposed narrowing keeps every overlapping layer and stays sound.
 
 ## Running
 
@@ -83,7 +88,7 @@ or missed contributor directly.
   observations, hiding contributor differences the set form exposes.
 - **Atomic verdict delivery.** The server's verdict and the client's mirrored
   cascade happen in one action. This removes the accepted-versus-dropped race
-  (INV-6, the scalar-downgrade hold rule) from scope. Extending the model
+  (INV-6) from scope. Extending the model
   with an in-flight verdict channel is the natural next step if that area
   churns — until then INV-6 has no model coverage, only the reconnect unit
   tests.

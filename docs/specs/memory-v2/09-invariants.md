@@ -128,8 +128,8 @@ filtering) over-approximates clause (a) — safe direction, costs false dooms
 (the CT-1872 over-coupling). The proposed overlap-filtered refinement must
 keep every layer overlapping the read path *and* the top-of-stack layer; the
 TLA+ config `PendingStacks_Filtered.cfg` certifies that shape in the bounded
-model, and `PendingStacks_Scalar.cfg` shows what breaks when filtering drops
-an overlapping layer.
+model. Dropping a layer that overlaps the read path instead re-creates the
+CT-1872 phantom — an INV-1 violation.
 
 Layer: client dependency recording (`packages/runner/src/storage/v2.ts`
 pending-stack bookkeeping); server resolution (`resolvePendingReads`).

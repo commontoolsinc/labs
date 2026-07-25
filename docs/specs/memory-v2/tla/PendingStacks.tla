@@ -33,8 +33,6 @@
 (*                                                                         *)
 (*   DepMode - how a commit that reads path p through the pending stack    *)
 (*     records its dependency set (INV-3):                                 *)
-(*       "scalar"    pre-#4606 wire shape: only the newest pending layer   *)
-(*                   that wrote p (nothing if no layer wrote p).           *)
 (*       "fullstack" shipped #4606 shape: every pending layer of the       *)
 (*                   document below the reader.                            *)
 (*       "filtered"  proposed CT-1872 refinement: layers whose footprint   *)
@@ -52,10 +50,10 @@ CONSTANTS
   Sessions,   \* logical sessions, e.g. {"s1", "s2"}
   Paths,      \* leaf paths of the single modeled document, e.g. {"p1", "p2"}
   MaxTotal,   \* bound on the total number of commits built, all sessions
-  DepMode,    \* "scalar" | "fullstack" | "filtered"
+  DepMode,    \* "fullstack" | "filtered"
   BasisMode   \* "maxdep" | "confirmed"
 
-ASSUME DepMode \in {"scalar", "fullstack", "filtered"}
+ASSUME DepMode \in {"fullstack", "filtered"}
 ASSUME BasisMode \in {"maxdep", "confirmed"}
 ASSUME MaxTotal \in Nat \ {0}
 
@@ -93,13 +91,9 @@ ObsConfirmed(s, p) == {i \in 1..csn[s] : p \in log[i].writes}
 ReadRecord(s, p) ==
   LET stack == StackLseqs(s)
       wl == LayersWriting(s, p)
-      isPending ==
-        CASE DepMode = "scalar" -> wl # {}
-          [] DepMode = "fullstack" -> stack # {}
-          [] DepMode = "filtered" -> stack # {}
+      isPending == stack # {}
       deps ==
-        CASE DepMode = "scalar" -> IF wl # {} THEN {Max(wl)} ELSE {}
-          [] DepMode = "fullstack" -> stack
+        CASE DepMode = "fullstack" -> stack
           [] DepMode = "filtered" ->
                wl \cup (IF stack # {} THEN {Max(stack)} ELSE {})
   IN [path |-> p,
