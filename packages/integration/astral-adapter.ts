@@ -459,6 +459,12 @@ function contentWaitForPierceSelector(
       const visit = (
         root: Document | Element | ShadowRoot,
       ): Element | undefined => {
+        if (root instanceof Element && root.shadowRoot) {
+          const match = root.shadowRoot.querySelector(selector);
+          if (match) return match;
+          const nestedMatch = visit(root.shadowRoot);
+          if (nestedMatch) return nestedMatch;
+        }
         for (const element of root.querySelectorAll("*")) {
           const shadowRoot = element.shadowRoot;
           if (!shadowRoot) continue;
@@ -761,6 +767,10 @@ function contentWaitForPierceSelector(
     };
 
     const discover = (root: Document | Element | ShadowRoot) => {
+      if (root instanceof Element && root.shadowRoot) {
+        observe(root.shadowRoot);
+        discover(root.shadowRoot);
+      }
       for (const element of root.querySelectorAll("*")) {
         const shadowRoot = element.shadowRoot;
         if (!shadowRoot) continue;

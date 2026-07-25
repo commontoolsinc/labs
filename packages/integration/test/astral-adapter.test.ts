@@ -104,6 +104,50 @@ Deno.test("pierce waits reject when their page closes", async () => {
   }
 });
 
+Deno.test("ElementHandle pierce waits observe their own shadow root", async () => {
+  const browser = await launch({ headless: true });
+  const astralPage = await browser.newPage();
+  const page = new Page(astralPage, { timeout: 10_000 });
+
+  try {
+    await page.evaluate(() => {
+      const host = document.createElement("section");
+      host.id = "scoped-shadow-host";
+      host.attachShadow({ mode: "open" });
+
+      const lightTarget = document.createElement("button");
+      lightTarget.id = "scoped-light-target";
+      lightTarget.className = "scoped-target";
+      host.append(lightTarget);
+      document.body.append(host);
+    });
+
+    const host = await page.waitForSelector("#scoped-shadow-host");
+    await armSelectorStateInstallation(page);
+    const target = host.waitForSelector(".scoped-target", {
+      strategy: "pierce",
+    });
+    await waitForSelectorStateInstallation(page);
+
+    await page.evaluate(() => {
+      const shadowTarget = document.createElement("button");
+      shadowTarget.id = "scoped-shadow-target";
+      shadowTarget.className = "scoped-target";
+      document
+        .getElementById("scoped-shadow-host")!
+        .shadowRoot!
+        .append(shadowTarget);
+    });
+
+    assertEquals(
+      await (await target).getAttribute("id"),
+      "scoped-shadow-target",
+    );
+  } finally {
+    await closeTestBrowser(page, browser);
+  }
+});
+
 Deno.test("method observers use writable locked descriptors", async () => {
   const browser = await launch({ headless: true });
   const astralPage = await browser.newPage();
