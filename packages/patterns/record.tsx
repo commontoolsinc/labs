@@ -40,8 +40,6 @@ import Note, { type NoteOutput } from "./notes/note.tsx";
 import { inferTypeFromModules } from "./record/template-registry.ts";
 import { TypePickerModule, type TypePickerOutput } from "./type-picker.tsx";
 import { ExtractorModule } from "./record/extraction/extractor-module.tsx";
-import { getResultSchema } from "./record/extraction/schema-utils.ts";
-import type { JSONSchema } from "./record/extraction/schema-utils-pure.ts";
 import type { SubPieceEntry, TrashedSubPieceEntry } from "./record/types.ts";
 
 // ===== Types =====
@@ -83,17 +81,13 @@ const seedRecord = lift<{
   // survives the lift boundary; a plain `unknown` is read back as undefined and
   // the module is lost.
   notesPiece: Cell<NoteOutput>;
-  notesSchema: JSONSchema | undefined;
   typePickerPiece: Cell<TypePickerOutput>;
-  typePickerSchema: JSONSchema | undefined;
   isInitialized: Writable<boolean>;
 }>(({
   currentPieces,
   subPieces,
   notesPiece,
-  notesSchema,
   typePickerPiece,
-  typePickerSchema,
   isInitialized,
 }) => {
   if (!isInitialized.get()) {
@@ -103,13 +97,11 @@ const seedRecord = lift<{
           type: "notes",
           pinned: true,
           piece: notesPiece,
-          schema: notesSchema,
         },
         {
           type: "type-picker",
           pinned: false,
           piece: typePickerPiece,
-          schema: typePickerSchema,
         },
       ]);
     }
@@ -229,14 +221,11 @@ const addSubPiece = handler<
     } as any)
     : createSubPiece(type, initialValues);
 
-  // Capture schema at creation time for dynamic discovery
-  const schema = getResultSchema(piece);
   sc.set([...current, {
     type,
     pinned: false,
     collapsed: false,
     piece,
-    schema,
     label: nextLabel,
   }]);
   sat.set("");
@@ -491,7 +480,6 @@ const handleGetSummary = handler<
         collapsed: entry.collapsed || false,
         note: entry.note,
         data: moduleData,
-        schema: entry.schema,
       };
     }),
   };
@@ -573,15 +561,11 @@ const handleAddModule = handler<
     piece = createSubPiece(type, initialValues);
   }
 
-  // Capture schema at creation time
-  const schema = getResultSchema(piece);
-
   sc.set([...current, {
     type,
     pinned: false,
     collapsed: false,
     piece,
-    schema,
     label: entryLabel,
   }]);
 
@@ -818,19 +802,15 @@ const Record = pattern<RecordInput, RecordOutput>(
     // `allEntriesWithIndex`) is what demands the seed.
     const isInitialized = new Writable(false);
     const seedNotesPiece = Note({ linkPattern: recordPatternJson });
-    const seedNotesSchema = getResultSchema(seedNotesPiece);
     const seedTypePickerPiece = TypePickerModule({
       entries: subPieces,
       trashedEntries: trashedSubPieces,
     });
-    const seedTypePickerSchema = getResultSchema(seedTypePickerPiece);
     const recordSeeded = seedRecord({
       currentPieces: subPieces,
       subPieces,
       notesPiece: seedNotesPiece,
-      notesSchema: seedNotesSchema,
       typePickerPiece: seedTypePickerPiece,
-      typePickerSchema: seedTypePickerSchema,
       isInitialized,
     });
 

@@ -25,8 +25,7 @@ import {
 } from "./references.ts";
 import { basename } from "@std/path";
 import { cpLen } from "./ansi.ts";
-import { describeSynthetic } from "./vocab.ts";
-import type { Semantics } from "./semantics.ts";
+import type { Semantics } from "./languages/language.ts";
 
 /** A selectable cross-reference line that jumps the main view when invoked. */
 export interface CardTarget {
@@ -173,20 +172,17 @@ function metaLine(node: StructureNode): Line {
 }
 
 /**
- * An origin line, but only for nodes whose name (or builder) matches the
- * transformer's own vocabulary — those are certainly generated. Everything else
- * gets no line: with no source map back to the original, authored-vs-generated
- * cannot be confirmed, so we make no claim.
+ * An origin line, present only for nodes a language marked as machine-generated
+ * (its {@link StructureNode.generatedOrigin}). Everything else gets no line:
+ * with no source map back to the original, authored-vs-generated cannot be
+ * confirmed, so no claim is made.
  */
 function originLine(node: StructureNode): Line | null {
-  const probe = node.name ??
-    (node.meta?.kind === "contract" ? node.meta.builder : undefined);
-  const generated = probe ? describeSynthetic(probe) : null;
-  if (!generated) return null;
+  if (!node.generatedOrigin) return null;
   return row(
     ["origin  ", "comment"],
     ["transformer-generated", "cfHelper"],
-    [` · ${generated}`, "comment"],
+    [` · ${node.generatedOrigin}`, "comment"],
   );
 }
 

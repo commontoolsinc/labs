@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import ts from "typescript";
 import { parseDocument, SAMPLE, TS_PARSER_REGRESSION } from "./view-helpers.ts";
-import { highlightDocument } from "../lib/view/parse.ts";
+import { highlightDocument } from "../lib/view/languages/typescript/parse.ts";
 import type { Document, TokenClass } from "../lib/view/model.ts";
 
 // A blob exercising statement variety: a function with control flow and a

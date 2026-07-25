@@ -589,7 +589,6 @@ Consider:
 Respond with the most appropriate action.`;
       }),
       schema: SUGGESTION_SCHEMA,
-      model: "anthropic:claude-sonnet-4-5",
     });
 
     // Return the cells directly without wrapping in computed;

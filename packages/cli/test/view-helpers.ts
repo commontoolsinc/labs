@@ -2,7 +2,7 @@
  * Shared fixtures and helpers for the `cf view` test suites. Not a test file
  * itself (the test task globs `*.test.ts`), just an import.
  */
-import { parseDocument } from "../lib/view/parse.ts";
+import { parseDocument } from "../lib/view/languages/typescript/parse.ts";
 import type { ViewState } from "../lib/view/render.ts";
 import type { Rgb } from "../lib/view/ansi.ts";
 

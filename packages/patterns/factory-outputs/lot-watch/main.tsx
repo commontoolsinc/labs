@@ -592,7 +592,6 @@ export default pattern<LotWatchInput, LotWatchOutput>(
           },
         },
       },
-      model: "anthropic:claude-sonnet-4-5",
     });
 
     // ---- Actions ----

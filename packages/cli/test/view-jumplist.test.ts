@@ -9,7 +9,7 @@ import { Session } from "../lib/view/session.ts";
 import { parseDiff } from "../lib/view/diff.ts";
 import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { diffSource } from "../lib/view/diffedit.ts";
-import { parseDocument } from "../lib/view/parse.ts";
+import { parseDocument } from "../lib/view/languages/typescript/parse.ts";
 
 function press(s: Session, ...names: string[]): void {
   for (const name of names) {

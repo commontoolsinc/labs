@@ -15,7 +15,8 @@ import { decodeKeys } from "./keys.ts";
 import { cursorScreenPos, renderFrame, type ViewState } from "./render.ts";
 import { Session, type SessionOptions } from "./session.ts";
 import { ui } from "./theme.ts";
-import { createSemantics, type Semantics } from "./semantics.ts";
+import type { Semantics } from "./languages/language.ts";
+import { languageForFile } from "./languages/language.ts";
 import type { EditableSource } from "./editsource.ts";
 import { realFileGateway } from "./filegateway.ts";
 import { ViewError } from "./errors.ts";
@@ -106,13 +107,15 @@ export async function runPager(
   }
 
   // A best-effort semantic service for inferred types / cross-file definitions.
-  // Construction is cheap (the TypeScript program is built lazily on first use)
-  // and every query degrades to nothing, so this never blocks startup or fails
-  // the pager when the text is not a resolvable module graph. The caller picks
-  // the right service for the input (transformed blob vs diff); fall back to
-  // the blob service.
+  // Construction is cheap (the program is built lazily on first use) and every
+  // query degrades to nothing, so this never blocks startup or fails the pager
+  // when the text is not a resolvable module graph. The caller picks the right
+  // service for the input (transformed blob vs diff); fall back to the catch-all
+  // language's whole-document service.
   const semantics = semanticsIn ??
-    createSemantics(doc.text, { cwd: Deno.cwd() }) ?? undefined;
+    languageForFile(undefined).createSemantics?.(doc.text, {
+      cwd: Deno.cwd(),
+    });
 
   // The terminal fills the area outside the character grid (the sub-cell padding
   // below the last row) with its default background. Set that to the status

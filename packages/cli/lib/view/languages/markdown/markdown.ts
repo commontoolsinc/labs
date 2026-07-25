@@ -16,10 +16,11 @@ import type {
   Span,
   StructureNode,
   TokenClass,
-} from "./model.ts";
-import { flattenStructure } from "./model.ts";
-import type { Highlighter } from "./parse.ts";
-import { cpLen } from "./ansi.ts";
+} from "../../model.ts";
+import { flattenStructure } from "../../model.ts";
+import type { Highlighter } from "../language.ts";
+import { cpLen } from "../../ansi.ts";
+import { computeLineStarts } from "../../lines.ts";
 
 /** Whether `fileName` names a Markdown file. */
 export function isMarkdownPath(fileName: string | undefined): boolean {
@@ -225,10 +226,65 @@ function headingTree(
   return build(0, 1, 0).nodes;
 }
 
-function computeLineStarts(text: string): number[] {
-  const starts = [0];
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === "\n") starts.push(i + 1);
+/**
+ * Heading nodes for a Markdown hunk's navigation tree. Each heading whose own
+ * heading line is shown in the hunk becomes a navigable section, anchored at
+ * that line (past the diff marker) and running to the last new-side line before
+ * the next shown heading. The general structure remap is not used here: it
+ * would fold a shown heading into an ancestor whose own heading line is NOT in
+ * the diff, so navigation would land on a heading the diff never displays.
+ */
+export function markdownHeadingNodes(
+  headings: readonly StructureNode[],
+  lineToDiff: Map<number, number>,
+  hunkEnd: number,
+  diffLineStarts: number[],
+  rawLines: string[],
+): StructureNode[] {
+  const shown: { node: StructureNode; diffLine: number }[] = [];
+  for (const node of headings) {
+    const diffLine = lineToDiff.get(node.startLine);
+    if (diffLine !== undefined) shown.push({ node, diffLine });
   }
-  return starts;
+  if (shown.length === 0) return [];
+  shown.sort((a, b) => a.diffLine - b.diffLine);
+  // The diff lines carrying new-side content (heading or body); a section ends
+  // at the last of these before the next shown heading, so it never spills onto
+  // a trailing removed block or a "\ No newline at end of file" marker (which
+  // the general remap, clamping to visible new-side lines, also excludes).
+  const newSide = [...lineToDiff.values()].sort((a, b) => a - b);
+  // Depth follows the nesting among the SHOWN headings, walked in document
+  // order: the first heading under the hunk is depth 2 and no step jumps more
+  // than one level — the pre-order invariant the wasd tree navigation relies
+  // on. (A global minimum over the shown set would put a deeper-first window's
+  // first heading below depth 2 and strand the sibling/child steps.)
+  const stack: { level: number; depth: number }[] = [];
+  return shown.map(({ node, diffLine }, i) => {
+    while (stack.length > 0 && stack[stack.length - 1].level >= node.depth) {
+      stack.pop();
+    }
+    const depth = stack.length === 0 ? 2 : stack[stack.length - 1].depth + 1;
+    stack.push({ level: node.depth, depth });
+
+    const boundary = i + 1 < shown.length ? shown[i + 1].diffLine : hunkEnd + 1;
+    let end = diffLine;
+    for (const d of newSide) if (d >= diffLine && d < boundary) end = d;
+
+    const endText = rawLines[end] ?? "";
+    const startText = rawLines[diffLine] ?? "";
+    return {
+      kind: "section",
+      label: node.label,
+      name: node.name,
+      startLine: diffLine,
+      endLine: end,
+      // Past the one-column diff marker.
+      startCol: Math.min(1, cpLen(startText)),
+      endCol: cpLen(endText),
+      startOffset: diffLineStarts[diffLine] + Math.min(1, startText.length),
+      endOffset: diffLineStarts[end] + endText.length,
+      depth,
+      children: [],
+    };
+  });
 }

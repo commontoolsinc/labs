@@ -8,7 +8,7 @@ import type {
   StructureNode,
   TokenClass,
 } from "../lib/view/model.ts";
-import type { DefTarget, Semantics } from "../lib/view/semantics.ts";
+import type { DefTarget, Semantics } from "../lib/view/languages/language.ts";
 
 function infoText(doc: Document, node: StructureNode, semantics?: Semantics) {
   return buildPeekCard(doc, node, semantics).info.map((l) => l.text).join("\n");

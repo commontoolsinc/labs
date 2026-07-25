@@ -815,7 +815,6 @@ ${threadSummary}
 Write only the email body, no subject line or greeting line (the greeting will be auto-added):`;
     }) as any,
     system: draftSystemPrompt,
-    model: "anthropic:claude-sonnet-4-5",
   });
 
   // Auto-save LLM draft to drafts Writable when generation completes

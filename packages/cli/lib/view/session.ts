@@ -61,7 +61,7 @@ import {
   findCommitHeaders,
   findCommitMessages,
 } from "./commitmsg.ts";
-import type { Semantics } from "./semantics.ts";
+import type { Highlighter, Semantics } from "./languages/language.ts";
 import { EditBuffer } from "./editbuffer.ts";
 import type {
   EditableSource,
@@ -70,7 +70,6 @@ import type {
   RevertScope,
   SaveOptions,
 } from "./editsource.ts";
-import type { Highlighter } from "./parse.ts";
 import type { DirEntry, FileGateway } from "./filegateway.ts";
 import {
   buildWrapPlan,
