@@ -235,7 +235,8 @@ export class Page extends EventTarget {
     }
   }
 
-  // Passthru of `@astral/astral`'s `Page#keyboard`
+  // Returns Astral's keyboard with `type` patched to apply the configured
+  // default delay when a call omits one.
   get keyboard(): Keyboard {
     this.checkIsOk();
     const keyboard = this.page!.keyboard;
