@@ -5,6 +5,7 @@
   },
   "exports": {
     ".": "./index.ts",
+    "./astral-adapter": "./astral-adapter.ts",
     "./shell-utils": "./shell-utils.ts",
     "./pattern-coverage": "./pattern-coverage.ts",
     "./temp-identity": "./temp-identity.ts",
