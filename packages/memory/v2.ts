@@ -209,7 +209,7 @@ export type CommitPrecondition =
     valueHash: string | null;
   };
 
-export interface ClientCommit {
+export type ClientCommit = {
   localSeq: number;
   reads: {
     confirmed: ConfirmedRead[];
@@ -227,7 +227,7 @@ export interface ClientCommit {
     baseBranch: BranchName;
     baseSeq: number;
   };
-}
+};
 
 export interface SessionOpenArgs {
   sessionId?: SessionId;
@@ -252,7 +252,7 @@ export interface SessionOpenResult {
   sessionOpen: SessionOpenAuthMetadata;
 }
 
-export interface MemoryProtocolFlags {
+export type MemoryProtocolFlags = {
   modernCellRep: boolean;
   persistentSchedulerState: boolean;
   commitPreconditions: boolean;
@@ -283,7 +283,7 @@ export interface MemoryProtocolFlags {
    * version always advertises it.
    */
   pendingReadStacks: boolean;
-}
+};
 
 /**
  * Wire-format flags object.
@@ -304,28 +304,28 @@ export interface HelloMessage {
   flags: WireMemoryProtocolFlags;
 }
 
-export interface HelloOkMessage {
+export type HelloOkMessage = {
   type: "hello.ok";
   protocol: typeof MEMORY_PROTOCOL;
   flags: WireMemoryProtocolFlags;
   sessionOpen?: SessionOpenAuthMetadata;
-}
+};
 
-export interface SessionOpenChallenge {
+export type SessionOpenChallenge = {
   value: string;
   expiresAt: number;
-}
+};
 
-export interface SessionOpenAuthMetadata {
+export type SessionOpenAuthMetadata = {
   challenge: SessionOpenChallenge;
   audience: string;
-}
+};
 
-export interface SessionDescriptor {
+export type SessionDescriptor = {
   sessionId?: SessionId;
   seenSeq?: number;
   sessionToken?: SessionToken;
-}
+};
 
 export interface SessionOpenRequest {
   type: "session.open";
@@ -391,7 +391,7 @@ export interface SessionSyncRemove {
   scope?: CellScope;
 }
 
-export interface SessionSync {
+export type SessionSync = {
   type: "sync";
   fromSeq: number;
   toSeq: number;
@@ -407,7 +407,7 @@ export interface SessionSync {
   // scheduler.snapshot.list result; `observation` is intentionally
   // `unknown` — the runner owns validation.
   observations?: SchedulerActionSnapshotResult[];
-}
+};
 
 export interface WatchSetResult {
   serverSeq: number;
@@ -634,28 +634,28 @@ export interface SchedulerSnapshotListRequest {
   query: SchedulerActionSnapshotQuery;
 }
 
-export interface ResponseMessage<Result> {
+export type ResponseMessage<Result> = {
   type: "response";
   requestId: string;
   ok?: Result;
   error?: V2Error;
-}
+};
 
-export interface SessionEffectMessage {
+export type SessionEffectMessage = {
   type: "session/effect";
   space: string;
   sessionId: SessionId;
   effect: SessionSync;
-}
+};
 
-export interface SessionRevokedMessage {
+export type SessionRevokedMessage = {
   type: "session/revoked";
   space: string;
   sessionId: SessionId;
   reason: "taken-over" | "unauthorized";
-}
+};
 
-export interface V2Error {
+export type V2Error = {
   name: string;
   message: string;
   precondition?: string;
@@ -670,7 +670,7 @@ export interface V2Error {
    * client stops reopening the session and surfaces the error instead of looping.
    */
   retriable?: boolean;
-}
+};
 
 export type V2Result<Value> = { ok: Value } | { error: V2Error };
 

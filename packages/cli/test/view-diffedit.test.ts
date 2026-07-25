@@ -7,7 +7,11 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import { parseDiff } from "../lib/view/diff.ts";
-import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
+import {
+  buildDiffDocument,
+  type DiffWorkspace,
+  type WorkspaceCache,
+} from "../lib/view/diffdoc.ts";
 import { createDiffHighlighter, diffSource } from "../lib/view/diffedit.ts";
 import { type GitRunner, realGit } from "../lib/view/commitmsg.ts";
 import { Session } from "../lib/view/session.ts";
@@ -256,6 +260,70 @@ Deno.test("diffedit: the incremental highlighter recolours only edited lines", (
     }
   } finally {
     done();
+  }
+});
+
+Deno.test("diffedit: newly removed lines use the complete old file", () => {
+  const newText = `/*
+first
+second
+third
+fourth
+sixth
+*/
+export const shown = 2;
+`;
+  const diff = `diff --git a/comment.ts b/comment.ts
+--- a/comment.ts
++++ b/comment.ts
+@@ -3,7 +3,6 @@
+ second
+ third
+ fourth
+-const hidden = 1;
+ sixth
+ */
+ export const shown = 2;
+`;
+  const root = Deno.makeTempDirSync();
+  try {
+    const path = join(root, "comment.ts");
+    Deno.writeTextFileSync(path, newText);
+    const ws: DiffWorkspace = {
+      resolve: () => path,
+      read: () => newText,
+    };
+    const model = parseDiff(diff)!;
+    const cache: WorkspaceCache = new Map();
+    const { doc, edit } = buildDiffDocument(diff, model, ws, cache);
+    const source = diffSource(ws, edit, cache);
+    const highlighter = source.createHighlighter!(diff, doc.lines);
+    const edited = diff.split("\n");
+    const context = edited.indexOf(" third");
+    edited.splice(context, 1, "-third", "+third changed");
+    const lines = highlighter.update(edited.join("\n"));
+    const removed = edited.indexOf("-third");
+    assertEquals(
+      lines[removed].spans.find((span) => span.text === "third")?.cls,
+      "comment",
+      "the block comment opener outside the hunk controls the live removed line",
+    );
+    const reparsed = source.parse(edited.join("\n"));
+    assertEquals(
+      reparsed.lines[removed].spans.find((span) => span.text === "third")?.cls,
+      "comment",
+      "the deferred parse keeps the complete old file",
+    );
+    const originalRemoval = edited.indexOf("-const hidden = 1;");
+    assertEquals(
+      reparsed.lines[originalRemoval].spans.find((span) =>
+        span.text.includes("hidden")
+      )?.cls,
+      "comment",
+      "the deferred parse keeps original removed lines in context",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
   }
 });
 

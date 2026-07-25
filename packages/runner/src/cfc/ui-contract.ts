@@ -1,5 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
-import type { CellScope, JSONSchema } from "../builder/types.ts";
+import type { CellScope, FabricValue, JSONSchema } from "../builder/types.ts";
 import { type NormalizedFullLink, parseLink } from "../link-utils.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { findAndInlineDataUriLinks } from "../data-uri.ts";
@@ -65,8 +65,8 @@ type SerializedTrustedEvent = {
     trusted?: boolean;
     ui?: {
       pattern?: string;
-      eventIntegrity?: unknown;
-      uiContractDataset?: unknown;
+      eventIntegrity?: FabricValue;
+      uiContractDataset?: FabricValue;
     };
   };
 };

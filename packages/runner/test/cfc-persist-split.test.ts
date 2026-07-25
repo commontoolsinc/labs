@@ -1,5 +1,6 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { FabricValue } from "@commonfabric/data-model/interface";
 import { Identity } from "@commonfabric/identity";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -53,7 +54,7 @@ describe("CFC observation classes (C2 persist split)", () => {
   const seedDoc = async (
     rt: Runtime,
     cause: string,
-    value: unknown,
+    value: FabricValue,
     entries: LabelMapEntry[],
   ): Promise<string> => {
     const seed = rt.edit();

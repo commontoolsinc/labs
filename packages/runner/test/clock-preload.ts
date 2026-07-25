@@ -265,11 +265,6 @@ const REAL_CLOCK_FILES = [
   // whose connect/mount/sync machinery does not complete under the fake clock:
   // the resume deadlocks rather than settling.
   "list-resume-container-defer",
-  // Asserts on the retry-backoff *windowing* of transient multi-space commit
-  // rejections — which rejection fails fast versus is retried within a window.
-  // Auto-advance collapses those windows instantly, erasing the distinction the
-  // tests check.
-  "mergeable-append-multispace-conflict",
   // Drives a nested-subagent generateObject: a delegate tool runs a child
   // pattern whose result feeds back to the parent through the post-commit
   // outbox across several cycles. The tool-calling path carries its own

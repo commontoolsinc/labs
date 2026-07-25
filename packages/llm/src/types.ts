@@ -82,7 +82,7 @@ export interface LLMToolResult {
 }
 
 export type LLMRequestMetadata = Record<string, string | undefined | object>;
-export interface LLMRequest {
+export type LLMRequest = {
   cache?: boolean;
   messages: readonly BuiltInLLMMessage[];
   model: ModelName;
@@ -94,7 +94,7 @@ export interface LLMRequest {
   metadata?: LLMRequestMetadata;
   tools?: Record<string, LLMTool>;
   nativeModelToolIds?: readonly LLMNativeModelToolId[];
-}
+};
 
 export interface LLMGenerateObjectRequest {
   schema: Record<string, unknown>;

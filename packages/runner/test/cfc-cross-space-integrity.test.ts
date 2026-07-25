@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { FabricValue } from "@commonfabric/data-model/interface";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -86,7 +87,7 @@ const seedLabeledDoc = async (
   runtime: Runtime,
   space: MemorySpace,
   id: string,
-  value: unknown,
+  value: FabricValue,
   entries: LabelMapEntry[],
 ): Promise<string> => {
   const seed = runtime.edit();

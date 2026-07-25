@@ -1,5 +1,6 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { FabricValue } from "@commonfabric/data-model/interface";
 import { Identity } from "@commonfabric/identity";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -54,7 +55,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
   const seedDoc = async (
     rt: Runtime,
     cause: string,
-    value: unknown,
+    value: FabricValue,
     entries: LabelMapEntry[],
   ): Promise<string> => {
     const seed = rt.edit();

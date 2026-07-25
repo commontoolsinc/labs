@@ -39,6 +39,18 @@ function stubWs(root: string): DiffWorkspace {
   };
 }
 
+function runGit(root: string, args: string[]): string {
+  const output = new Deno.Command("git", {
+    args,
+    cwd: root,
+    stdout: "piped",
+    stderr: "piped",
+  }).outputSync();
+  const stderr = new TextDecoder().decode(output.stderr).trim();
+  assert(output.success, stderr || `git ${args[0]} failed`);
+  return new TextDecoder().decode(output.stdout);
+}
+
 // --- fixtures ---------------------------------------------------------------
 
 const FILE_TEXT = `export function double(n: number): number {
@@ -59,6 +71,41 @@ index 0000000..1111111 100644
 -export const answer = 42;
 +export const answer = double(21);
 +const extra = answer + 1;
+`;
+
+const OLD_COMMENT_FILE = `/*
+first
+second
+third
+fourth
+const hidden = 1;
+sixth
+*/
+export const shown = 2;
+`;
+
+const NEW_COMMENT_FILE = `/*
+first
+second
+third
+fourth
+sixth
+*/
+export const shown = 2;
+`;
+
+const PARTIAL_COMMENT_DIFF = `diff --git a/comment.ts b/comment.ts
+index 0000000..1111111 100644
+--- a/comment.ts
++++ b/comment.ts
+@@ -3,7 +3,6 @@
+ second
+ third
+ fourth
+-const hidden = 1;
+ sixth
+ */
+ export const shown = 2;
 `;
 
 /** A workspace rooted in a temp dir holding `m.ts` with FILE_TEXT. */
@@ -113,6 +160,7 @@ Deno.test("diff: parses files, hunks and per-line old/new numbering", () => {
   const f = model.files[0];
   assertEquals(f.oldPath, "m.ts");
   assertEquals(f.newPath, "m.ts");
+  assertEquals(f.oldObject, "0000000");
   assertEquals(f.hunks.length, 1);
   const h = f.hunks[0];
   assertEquals(
@@ -198,8 +246,8 @@ Deno.test("diff doc: verbatim text, tints, markers and syntax colour", () => {
     // Markers classified.
     assertEquals(doc.lines[9].spans[0].cls, "diffAdd");
     assertEquals(doc.lines[8].spans[0].cls, "diffDel");
-    // Syntax colour under the diff: the `export` keyword on an added line is a
-    // storage keyword (file-span reuse), and on the removed line too (fragment).
+    // Syntax colour under the diff: both complete file parses classify the
+    // `export` keyword as a storage keyword.
     const cls = (line: number, text: string) =>
       doc.lines[line].spans.find((s) => s.text === text)?.cls;
     assertEquals(cls(9, "export"), "storageKeyword", "added line is code");
@@ -210,6 +258,157 @@ Deno.test("diff doc: verbatim text, tints, markers and syntax colour", () => {
   } finally {
     done();
   }
+});
+
+Deno.test("diff doc: removed lines use the reconstructed complete old file", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "comment.ts"), NEW_COMMENT_FILE);
+    const model = parseDiff(PARTIAL_COMMENT_DIFF)!;
+    const { doc } = buildDiffDocument(
+      PARTIAL_COMMENT_DIFF,
+      model,
+      stubWs(root),
+    );
+    const removed = PARTIAL_COMMENT_DIFF.split("\n").indexOf(
+      "-const hidden = 1;",
+    );
+    assertEquals(
+      doc.lines[removed].spans.find((span) => span.text.includes("hidden"))
+        ?.cls,
+      "comment",
+      "the block comment opener outside the hunk controls the removed line",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diff doc: CRLF transport matches complete LF files", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(join(root, "comment.ts"), NEW_COMMENT_FILE);
+    const diff = PARTIAL_COMMENT_DIFF.replaceAll("\n", "\r\n");
+    const { doc } = buildDiffDocument(diff, parseDiff(diff)!, stubWs(root));
+    assertEquals(
+      doc.lines.map((line) => line.spans.map((span) => span.text).join(""))
+        .join("\n"),
+      diff,
+      "highlighting preserves the CRLF transport",
+    );
+    const removed = diff.split("\n").findIndex((line) =>
+      line.startsWith("-const hidden = 1;")
+    );
+    assertEquals(
+      doc.lines[removed].spans.find((span) => span.text.includes("hidden"))
+        ?.cls,
+      "comment",
+      "the LF old file remains available to the CRLF diff",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diff doc: old-file cache separates reconstruction sources", () => {
+  const visibleNewSide = `sharedOne;
+sharedTwo;
+sharedThree;
+sharedFour;
+sharedFive;
+sharedSix;
+`;
+  const diff = `--- common.ts
++++ first.ts
+@@ -3,7 +3,6 @@
+ sharedOne;
+ sharedTwo;
+ sharedThree;
+-export const removed = 1;
+ sharedFour;
+ sharedFive;
+ sharedSix;
+--- common.ts
++++ second.ts
+@@ -3,7 +3,6 @@
+ sharedOne;
+ sharedTwo;
+ sharedThree;
+-export const removed = 1;
+ sharedFour;
+ sharedFive;
+ sharedSix;
+`;
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(
+      join(root, "first.ts"),
+      `/*
+prefix
+${visibleNewSide}`,
+    );
+    Deno.writeTextFileSync(
+      join(root, "second.ts"),
+      `const first = 1;
+const second = 2;
+${visibleNewSide}`,
+    );
+    const { doc } = buildDiffDocument(
+      diff,
+      parseDiff(diff)!,
+      stubWs(root),
+      new Map(),
+    );
+    const removed = diff.split("\n").flatMap((line, index) =>
+      line === "-export const removed = 1;" ? [index] : []
+    );
+    assertEquals(removed.length, 2);
+    const classAt = (line: number) =>
+      doc.lines[line].spans.find((span) => span.text.includes("export"))?.cls;
+    assertEquals(classAt(removed[0]), "comment");
+    assertEquals(classAt(removed[1]), "storageKeyword");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diff doc: old-file cache separates repeated file versions", () => {
+  const diff = [
+    "diff --git a/m.ts b/m.ts",
+    "--- a/m.ts",
+    "+++ b/m.ts",
+    "@@ -2,1 +2,1 @@",
+    "-value",
+    "+new1",
+    "diff --git a/m.ts b/m.ts",
+    "--- a/m.ts",
+    "+++ b/m.ts",
+    "@@ -2,1 +2,1 @@",
+    "-value",
+    "+new2",
+    "",
+  ].join("\n");
+  const ws: DiffWorkspace = {
+    resolve: () => "/m.ts",
+    read: () => "/*\nnew1\n*/\n",
+  };
+  const { doc } = buildDiffDocument(
+    diff,
+    parseDiff(diff)!,
+    ws,
+    new Map(),
+  );
+  const removed = diff.split("\n").flatMap((line, index) =>
+    line === "-value" ? [index] : []
+  );
+  const classAt = (line: number) =>
+    doc.lines[line].spans.find((span) => span.text === "value")?.cls;
+  assertEquals(classAt(removed[0]), "comment");
+  assertEquals(
+    classAt(removed[1]),
+    "identifier",
+    "the nonmatching version uses its own fragment highlighting",
+  );
 });
 
 Deno.test("diff doc: structure is file → hunk → the workspace file's nodes", () => {
@@ -747,6 +946,70 @@ Deno.test("diff workspace: realWorkspace resolves via the repo root and blocks e
     Deno.removeSync(root, { recursive: true });
     Deno.removeSync(outside, { recursive: true });
   }
+});
+
+Deno.test("diff workspace: removed lines use the complete old Git blob", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    runGit(root, ["init", "-q"]);
+    const source = join(root, "source.ts");
+    Deno.writeTextFileSync(source, OLD_COMMENT_FILE);
+    const oldObject = runGit(root, ["hash-object", "-w", "source.ts"]).trim();
+    const otherText = "export const other = 3;\n";
+    Deno.writeTextFileSync(source, otherText);
+    const otherObject = runGit(root, ["hash-object", "-w", "source.ts"]).trim();
+    Deno.removeSync(source);
+
+    const diff = PARTIAL_COMMENT_DIFF.replace("0000000", oldObject);
+    const ws = realWorkspace(root);
+    const blobs = ws.readBlobs?.([oldObject, otherObject]);
+    assertEquals(blobs?.get(oldObject), OLD_COMMENT_FILE);
+    assertEquals(blobs?.get(otherObject), otherText);
+    assertEquals(ws.readBlob?.(oldObject), OLD_COMMENT_FILE);
+    assertEquals(ws.readBlob?.("not-an-object"), null);
+    assertEquals(ws.readBlob?.("0000000"), null);
+    const { doc } = buildDiffDocument(diff, parseDiff(diff)!, ws);
+    const removed = diff.split("\n").indexOf("-const hidden = 1;");
+    assertEquals(
+      doc.lines[removed].spans.find((span) => span.text.includes("hidden"))
+        ?.cls,
+      "comment",
+      "the old blob highlights a file that is absent from the workspace",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diff doc: old-file spans preserve CRLF diff transport", () => {
+  const diff = [
+    "diff --git a/comment.ts b/comment.ts\r",
+    "index 1234..5678 100644\r",
+    "--- a/comment.ts\r",
+    "+++ /dev/null\r",
+    "@@ -1 +0,0 @@\r",
+    "-/* open\r",
+    "\\ No newline at end of file\r",
+    "",
+  ].join("\n");
+  const ws: DiffWorkspace = {
+    resolve: () => null,
+    read: () => null,
+    readBlob: (object) => object === "1234" ? "/* open" : null,
+  };
+  const { doc } = buildDiffDocument(diff, parseDiff(diff)!, ws);
+  assertEquals(
+    doc.lines.map((line) => line.spans.map((span) => span.text).join(""))
+      .join("\n"),
+    diff,
+    "complete-file spans retain the transport carriage return",
+  );
+  const removed = diff.split("\n").indexOf("-/* open\r");
+  assertEquals(
+    doc.lines[removed].spans.find((span) => span.text === "/* open")?.cls,
+    "comment",
+  );
+  assertEquals(doc.lines[removed].spans.at(-1)?.text, "\r");
 });
 
 Deno.test("diff workspace: an in-repo symlink pointing outside is rejected", () => {

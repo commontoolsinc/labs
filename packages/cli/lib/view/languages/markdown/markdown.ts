@@ -87,7 +87,7 @@ function oneSpan(text: string, cls: TokenClass): Line {
 function renderLine(t: string): Line {
   if (t.length === 0) return { text: "", spans: [] };
   if (/^#{1,6}(\s|$)/.test(t)) return oneSpan(t, "sectionHeader");
-  if (/^\s*>/.test(t)) return oneSpan(t, "comment");
+  if (/^\s*>/.test(t)) return oneSpan(t, "markdownQuote");
   if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(t)) return oneSpan(t, "punctuation");
 
   const cps = [...t];

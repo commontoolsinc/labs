@@ -137,9 +137,11 @@ describe("RuntimeConnection disposal", () => {
       done = true;
     });
 
-    // Dispose stays pending until the worker confirms its flush (which arrives
-    // well within the default request timeout).
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // Dispose stays pending until the worker confirms its flush. Draining the
+    // task queue (all microtasks, then one macrotask) runs every continuation a
+    // completed dispose would take; the held Dispose reply never arrives, so a
+    // correct dispose is still pending and the transport is untouched.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(done).toBe(false);
     expect(transport.disposeCalls).toBe(0);
 
@@ -390,33 +392,45 @@ describe("RuntimeConnection pending-request diagnostics", () => {
     const transport = new FakeTransport([RequestType.Idle]);
     const connection = await initializedConnection(transport);
 
-    const first = connection.request<RequestType.Idle>({
-      type: RequestType.Idle,
-    });
-    const firstSettled = first.then(() => undefined, (error) => error);
-    await new Promise((resolve) => setTimeout(resolve, 3));
-    const second = connection.request<RequestType.Idle>({
-      type: RequestType.Idle,
-    });
-    const secondSettled = second.then(() => undefined, (error) => error);
+    // Give the two in-flight requests a deterministic age gap without sleeping:
+    // freeze performance.now() and step it forward between the sends, so the
+    // first request is measurably older. This is what exercises the
+    // descending-age sort — with equal ages a stable sort preserves insertion
+    // order whichever way the comparator runs, leaving the direction untested.
+    const realNow = performance.now;
+    let fakeNow = realNow.call(performance);
+    Reflect.set(performance, "now", () => fakeNow);
+    try {
+      const first = connection.request<RequestType.Idle>({
+        type: RequestType.Idle,
+      });
+      const firstSettled = first.then(() => undefined, (error) => error);
+      fakeNow += 5;
+      const second = connection.request<RequestType.Idle>({
+        type: RequestType.Idle,
+      });
+      const secondSettled = second.then(() => undefined, (error) => error);
 
-    const pending = connection.getPendingRequestDiagnostics();
-    expect(pending.length).toBe(2);
-    for (const entry of pending) {
-      expect(entry.type).toBe(RequestType.Idle);
-      expect(typeof entry.msgId).toBe("number");
-      expect(entry.ageMs).toBeGreaterThanOrEqual(0);
+      const pending = connection.getPendingRequestDiagnostics();
+      expect(pending.length).toBe(2);
+      for (const entry of pending) {
+        expect(entry.type).toBe(RequestType.Idle);
+        expect(typeof entry.msgId).toBe("number");
+        expect(entry.ageMs).toBeGreaterThanOrEqual(0);
+      }
+      // Sorted oldest (largest age) first — the request a stalled caller has
+      // been waiting on longest names the wedged layer.
+      expect(pending[0].ageMs).toBeGreaterThan(pending[1].ageMs);
+      expect(pending[0].msgId).toBeLessThan(pending[1].msgId);
+
+      await connection.dispose();
+      await firstSettled;
+      await secondSettled;
+      // Disposal settled both as cancellation; nothing is pending anymore.
+      expect(connection.getPendingRequestDiagnostics()).toEqual([]);
+    } finally {
+      Reflect.set(performance, "now", realNow);
     }
-    // Sorted oldest (largest age) first — the request a stalled caller has
-    // been waiting on longest names the wedged layer.
-    expect(pending[0].ageMs).toBeGreaterThanOrEqual(pending[1].ageMs);
-    expect(pending[0].msgId).toBeLessThan(pending[1].msgId);
-
-    await connection.dispose();
-    await firstSettled;
-    await secondSettled;
-    // Disposal settled both as cancellation; nothing is pending anymore.
-    expect(connection.getPendingRequestDiagnostics()).toEqual([]);
   });
 });
 

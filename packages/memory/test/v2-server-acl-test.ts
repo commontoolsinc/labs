@@ -8,6 +8,7 @@ import {
   type GraphQueryResult,
   type HelloOkMessage,
   MEMORY_PROTOCOL,
+  type Operation,
   type ResponseMessage,
   type ServerMessage,
   type SessionDescriptor,
@@ -119,7 +120,9 @@ const transactOperation = async (
     commit: {
       localSeq,
       reads: { confirmed: [], pending: [] },
-      operations: [operation],
+      // Deliberately malformed: this suite feeds the server operations it
+      // must reject, so the payload is not an `Operation`.
+      operations: [operation as unknown as Operation],
     },
   }));
   return assertResponse<{ seq: number }>(shiftMessage(messages));

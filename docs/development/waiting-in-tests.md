@@ -366,17 +366,73 @@ logical time to zero and drops pending timers: one frozen clock wraps a whole
 `describe`, so a suite whose cases each read absolute coarsened time (the `#now`
 grid tests) calls it from `beforeEach` to start each case from a known instant.
 
-Three files stay on the real clock, listed with their reasons at the top of the
+Two files stay on the real clock, listed with their reasons at the top of the
 preload. A resume runtime drives a real loopback memory-client transport whose
 connect/mount/sync does not complete under the fake clock, so the resume
-deadlocks. A multi-space mergeable-commit test asserts on the retry-backoff
-_windowing_ of transient rejections — which rejection fails fast versus is
-retried within a window — a distinction auto-advance collapses. And a
-nested-subagent generateObject aborts its delegate tool because the tool-calling
-path's own timeout auto-advances against the subagent's outbox progress rather
-than the wall clock, so the delegate reports "tool call timed out" before it
-completes. These are the honest exceptions: the clock they need is the real one,
-and their own sleeps are the honest way to wait.
+deadlocks. And a nested-subagent generateObject aborts its delegate tool because
+the tool-calling path's own timeout auto-advances against the subagent's outbox
+progress rather than the wall clock, so the delegate reports "tool call timed
+out" before it completes. These are the honest exceptions: the clock they need
+is the real one, and their own sleeps are the honest way to wait.
+
+One caveat governs whether a runner test can leave the exemption list, and it is
+worth stating because it is easy to trip over. The `test/` versus `src/`
+classification reads the caller's stack frame through `new Error().stack`, and
+SES's `errorTaming` blanks that stack once a runtime locks down. From the first
+`Runtime` a test builds, the harness can no longer see the `test/` frame that
+scheduled a timer, so a positive-delay `setTimeout` written in test code is
+classified as a production timer and auto-advances instead of freezing. A test
+that schedules its own wall-clock deadline — a `setTimeout(reject, ms)` guarding
+a wait — therefore has that deadline fire early under auto-advance rather than
+acting as a backstop. The fix is the same one the rest of this note prescribes:
+resolve the wait on the event itself with no deadline, and let a signal that
+never arrives quiesce the loop so Deno fails the pending wait. That is what let
+the multi-space mergeable-commit test move onto the fake clock — its retry
+backoff is a `src/` timer that auto-advances, and the fast-fail-versus-windowed
+distinction it checks is decided by the rejection's error type rather than by
+elapsed time, so collapsing the backoff timing preserves the outcome each case
+asserts.
+
+## The runtime-client suite stays on the real clock
+
+`packages/runtime-client` keeps its unit tests on the real clock, and the
+reasons are worth recording because the package looks, at a glance, like a
+candidate for the runner preload above.
+
+Most of its tests need no wait at all, or only a macrotask drain — a
+`setTimeout(fn, 0)` that lets the scheduler's own `queueTask` dispatch land, an
+awaited round-trip, or a sink fire once. Those drains cross one macrotask
+boundary, carry no real-time floor, and stay as they are. The two positive-delay
+sleeps that were not drains have been made event-driven instead. The test that
+proves `dispose()` stays pending until the worker confirms its flush now drains
+the task queue rather than sleeping ten milliseconds: nothing resolves the held
+Dispose reply, so once every queued continuation has run a correct dispose is
+still pending. The pending-request age-ordering test steps a frozen
+`performance.now()` forward between its two sends rather than sleeping, so the
+first request is measurably older and the descending-age sort is exercised
+deterministically — with equal ages a stable sort preserves insertion order
+whichever way the comparator runs, leaving the direction untested.
+
+Two tests genuinely measure real time and cannot move to a fake clock: the
+main-thread loop-lag probe (`loop/mainLag`, armed in `client/connection.ts`) and
+its worker twin (`runner.loop/workerLag`, armed at the `backends/web-worker`
+entry). Each arms a 100-millisecond `setInterval` and records how far past
+schedule a tick fires; each test blocks the thread with a busy-wait past one
+sample so the due tick can only fire late, then reads the recorded lag. A fake
+clock fires timers exactly on schedule, never late, and cannot advance while a
+synchronous busy-wait holds the thread, so it cannot reproduce loop lag at all.
+These stay on real wall-clock time, and their busy-wait plus short trailing
+yield is the honest way to observe a late fire.
+
+The package also cannot adopt the runner preload wholesale. Those two loop-lag
+intervals are armed unconditionally — in the connection constructor and at the
+worker entry's import — and only unref'd, not gated behind an off-by-default flag
+the way runner's one repeating timer is. Unref keeps them from tripping Deno's
+op-leak sanitizer under the real clock, but auto-advance ignores unref: a
+`setInterval` scheduled from `src/` re-arms forever, so every connection a test
+builds would drive the clock to the runaway guard. Adopting the harness would
+mean excluding the very files that own timers, and no test in the suite observes
+a controllable time window a fake clock would help with.
 
 ## Proving a negative
 

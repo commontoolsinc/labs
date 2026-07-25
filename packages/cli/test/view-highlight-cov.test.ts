@@ -1,5 +1,9 @@
 import { assertEquals } from "@std/assert";
-import { renderLineColored, renderLinePlain } from "../lib/view/highlight.ts";
+import {
+  renderLineColored,
+  renderLinePlain,
+  spanStyle,
+} from "../lib/view/highlight.ts";
 import type { Line } from "../lib/view/model.ts";
 import { stripAnsi } from "../lib/view/ansi.ts";
 import { parseDocument, SAMPLE } from "./view-helpers.ts";
@@ -37,6 +41,15 @@ Deno.test("renderLinePlain ignores spans and background tint entirely", () => {
 
 Deno.test("renderLinePlain handles an empty line", () => {
   assertEquals(renderLinePlain({ text: "", spans: [] }), "");
+});
+
+Deno.test("spanStyle renders comments in bright white", () => {
+  for (const cls of ["comment", "docComment"] as const) {
+    assertEquals(
+      spanStyle({ col: 0, text: "comment", cls }).fg,
+      [255, 255, 255],
+    );
+  }
 });
 
 Deno.test("renderLinePlain matches every parsed line of the sample blob", () => {
