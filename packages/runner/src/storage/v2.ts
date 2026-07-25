@@ -2515,6 +2515,21 @@ class SpaceReplica implements ISpaceReplica {
   /** Microtask debounce so a burst of same-turn membership changes (closure
    * growth, speculative writes, retractions) issues a single watch.set. */
   #docSetReconcileScheduled = false;
+  /**
+   * RPC serialization for the membership reconcile (the 2026-07-24 composed-
+   * browser finding): at most ONE watch.set is ever in flight. Without this,
+   * a membership change landing while a reconcile awaited its round-trip
+   * started a SECOND concurrent reconcile; two watch.sets with different
+   * member snapshots interleave at the server (replace semantics, last write
+   * wins), so an OLDER snapshot could land last and retract the docs only the
+   * newer one carried — manufacturing remove/evict/re-pull churn on the hot
+   * path. A change arriving mid-flight sets the dirty latch instead; the
+   * loop in {@link runSpaceDocSetReconcile} re-reconciles with the then-
+   * current membership after the in-flight call resolves, so a burst of
+   * changes coalesces into one trailing watch.set rather than a stampede.
+   */
+  #docSetReconcileInFlight = false;
+  #docSetReconcileDirty = false;
   #sessionHandle?: Promise<ReplicaSessionHandle>;
   /** The client of the last RESOLVED session handle — for synchronous
    *  capability reads (`sqliteServerCommitRowLabelEval`). */
@@ -3617,12 +3632,38 @@ class SpaceReplica implements ISpaceReplica {
    * single watch.set carrying the whole current membership.
    */
   private scheduleSpaceDocSetReconcile(): void {
-    if (!this.#docSetWatchActive || this.#docSetReconcileScheduled) return;
+    if (!this.#docSetWatchActive) return;
+    // A reconcile is mid-round-trip: latch the request instead of starting a
+    // concurrent one (see #docSetReconcileInFlight). The in-flight loop
+    // re-runs with fresh membership once the current watch.set resolves.
+    if (this.#docSetReconcileInFlight) {
+      this.#docSetReconcileDirty = true;
+      return;
+    }
+    if (this.#docSetReconcileScheduled) return;
     this.#docSetReconcileScheduled = true;
     queueMicrotask(() => {
       this.#docSetReconcileScheduled = false;
-      void this.reconcileSpaceDocSetWatch();
+      void this.runSpaceDocSetReconcile();
     });
+  }
+
+  /** Serialized reconcile driver: one watch.set in flight at a time, with a
+   * trailing re-run while membership kept changing under it. */
+  private async runSpaceDocSetReconcile(): Promise<void> {
+    if (this.#docSetReconcileInFlight) {
+      this.#docSetReconcileDirty = true;
+      return;
+    }
+    this.#docSetReconcileInFlight = true;
+    try {
+      do {
+        this.#docSetReconcileDirty = false;
+        await this.reconcileSpaceDocSetWatch();
+      } while (this.#docSetReconcileDirty && !this.#closed);
+    } finally {
+      this.#docSetReconcileInFlight = false;
+    }
   }
 
   /**
@@ -4988,6 +5029,31 @@ class SpaceReplica implements ISpaceReplica {
       for (const remove of removes) {
         const id = remove.id as URI;
         const key = docKey(id, remove.scope, lane);
+        // Make-before-break gap guard (the 2026-07-24 composed-browser
+        // finding): a remove for a doc we STILL HOLD that was never part of
+        // the last registered membership is registration lag, not surface
+        // shrink — a demand pull delivered the doc after the reconcile's
+        // member snapshot was taken, and the replacing watch.set dropped the
+        // pull's graph watch, so the server diffed the doc out (FW1's member
+        // suppression can't see it: it wasn't a member yet). Evicting here is
+        // what turned one race into a storm: the evicted doc read undefined
+        // mid-derivation (pattern crash), re-pulled, changed membership, and
+        // orphaned the NEXT in-flight pull. Keep the doc and reconcile so it
+        // becomes a member. Registered members pass through: the real server
+        // never removes a current member (FW1), so a member remove reaching
+        // this path is a genuine scripted/legacy retraction and evicts as
+        // before (FA4).
+        if (
+          lane === "space" && this.#docSetWatchActive &&
+          this.#docSetWatchId !== undefined &&
+          !this.#docSetRegisteredKeys.has(key)
+        ) {
+          const held = this.#docs.get(key);
+          if (held !== undefined && this.recordHoldsDocState(held)) {
+            this.scheduleSpaceDocSetReconcile();
+            continue;
+          }
+        }
         // Same-step eviction when the space-lane doc-set surface is engaged and
         // the doc carries no pending local writes (evictHeldSpaceDocsSync's own
         // guard): drop the record entirely rather than resetting it to absent,

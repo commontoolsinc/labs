@@ -142,8 +142,49 @@ class DocSetWatchTransport extends ScriptedSessionTransport {
         return;
       }
       case "session.watch.set": {
-        const watches = wire.watches ?? [];
-        this.watchSets.push(watches);
+        if (this.holdWatchSets) {
+          this.heldWatchSets.push(message);
+          return;
+        }
+        this.processWatchSet(message);
+        return;
+      }
+      case "transact": {
+        if (this.holdTransacts) {
+          this.heldTransacts.push(message);
+          return;
+        }
+        this.#respondTransactOk(message);
+        return;
+      }
+      default:
+        throw new Error(`Unhandled scripted message: ${message.type}`);
+    }
+  }
+
+  /** When set, watch.set requests are parked UNPROCESSED — the test releases
+   * them with `releaseOneHeldWatchSet` / `releaseHeldWatchSets`. Processing
+   * happens at RELEASE time (diffed against the then-current graph surface),
+   * modeling the real server processing a replace after later traffic — a
+   * demand pull's watch.add — already landed: the make-before-break race
+   * window of the 2026-07-24 composed-browser finding. */
+  holdWatchSets = false;
+  readonly heldWatchSets: ScriptedTransportMessage[] = [];
+
+  releaseOneHeldWatchSet(): void {
+    const held = this.heldWatchSets.shift();
+    if (held !== undefined) this.processWatchSet(held);
+  }
+
+  releaseHeldWatchSets(): void {
+    while (this.heldWatchSets.length > 0) this.releaseOneHeldWatchSet();
+  }
+
+  protected processWatchSet(message: ScriptedTransportMessage): void {
+    const wire = message as unknown as WireWatchMessage;
+    const watches = wire.watches ?? [];
+    this.watchSets.push(watches);
+    {
         // Replace semantics, conforming to the real (FW1-fixed) server: the
         // next graph surface is the closure of the set's graph watches; docs
         // watches contribute exact member seeds, never closure expansion.
@@ -190,18 +231,6 @@ class DocSetWatchTransport extends ScriptedSessionTransport {
             sync: fullSync(this.#seq, [...graphUpserts, ...memberSeeds], removes),
           },
         });
-        return;
-      }
-      case "transact": {
-        if (this.holdTransacts) {
-          this.heldTransacts.push(message);
-          return;
-        }
-        this.#respondTransactOk(message);
-        return;
-      }
-      default:
-        throw new Error(`Unhandled scripted message: ${message.type}`);
     }
   }
 
@@ -660,6 +689,144 @@ Deno.test("flag-off: the client never registers a docs watch (byte-identical to 
       false,
       "flag-off never sends a docs watch",
     );
+  } finally {
+    await storageManager.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The 2026-07-24 composed-browser findings (first real-browser F5 engagement
+// after FW6 unlocked negotiation): two client-side reconcile defects the
+// clause-level tests above structurally missed because every flow here had
+// settled between membership changes. Note the client session serializes
+// watch MUTATIONS behind a mutex (runWatchMutation), so the race vehicle is
+// PUSH-delivered closure growth (session/effect frames are not mutex-gated),
+// and the reconcile-stampede symptom is queued stale-snapshot watch.sets
+// draining one after another, not concurrent wire requests.
+// ---------------------------------------------------------------------------
+
+Deno.test("flag-on: push-delivered closure growth is NOT evicted by a stale-snapshot replace (make-before-break gap)", async () => {
+  setServerPrimaryExecutionConfig(true);
+  setServerPrimaryExecutionDocSetWatchConfig(true);
+  const transport = new DocSetWatchTransport();
+  transport.store.set(ROOT, { seq: 1, value: { child: CHILD } });
+  transport.store.set(CHILD, { seq: 1, value: { n: 1 } });
+  transport.closures.set(ROOT, [CHILD]);
+  const { storageManager, provider } = setUp(transport);
+  try {
+    // Boot: closure held, demoted to a registered docs watch.
+    await provider.sync(ROOT, { path: [], schema: false });
+    await waitFor(() => transport.lastDocsWatch() !== undefined);
+    await flush();
+
+    // Open the race window: the next replace's round-trip stays in flight.
+    transport.holdWatchSets = true;
+
+    // A membership change whose reconcile snapshot CANNOT include LINKED
+    // (nothing has delivered it yet): an overlay write target.
+    const tx = storageManager.edit();
+    const write = tx.write(
+      { space, id: INTERMEDIATE, type: DOCUMENT_MIME, path: ["value", "n"] },
+      7,
+    );
+    assert(write.ok, "overlay write applies");
+    const commit = tx.commit();
+    await waitFor(() => transport.heldWatchSets.length >= 1);
+
+    // Server-push closure growth lands while that replace is in flight (a
+    // residual graph watch's refresh delivering a new doc): LINKED is now
+    // HELD client-side but not in the in-flight snapshot, and the server's
+    // graph surface tracks it.
+    transport.store.set(LINKED, { seq: 50, value: { n: 42 } });
+    transport.graphTracked.add(LINKED);
+    transport.emitSync(fullSync(51, [upsert(LINKED, 50, { n: 42 })]));
+    await waitFor(() =>
+      (provider.get(LINKED)?.value as { n?: number })?.n === 42
+    );
+
+    // The stale-snapshot replace lands: its diff drops LINKED (graph-tracked,
+    // not a member of THAT snapshot) — the exact frame the real FW1-fixed
+    // server emits. Releasing only this one keeps any queued reconcile from
+    // masking an eviction with a member reseed.
+    transport.releaseOneHeldWatchSet();
+    await flush();
+    assertEquals(
+      (provider.get(LINKED)?.value as { n?: number })?.n,
+      42,
+      "a held doc the registered membership merely lags is NOT evicted",
+    );
+
+    // The healing reconcile registers it as a member.
+    transport.holdWatchSets = false;
+    transport.releaseHeldWatchSets();
+    await waitFor(() =>
+      transport.lastDocsWatch()?.docs?.some((d) => d.id === LINKED) === true
+    );
+    await commit;
+  } finally {
+    await storageManager.close();
+  }
+});
+
+Deno.test("flag-on: a burst of membership changes coalesces into one trailing reconcile (no stale-snapshot stampede)", async () => {
+  setServerPrimaryExecutionConfig(true);
+  setServerPrimaryExecutionDocSetWatchConfig(true);
+  const SECOND = "of:doc-set-second" as URI;
+  const THIRD = "of:doc-set-third" as URI;
+  const transport = new DocSetWatchTransport();
+  transport.store.set(ROOT, { seq: 1, value: { child: CHILD } });
+  transport.store.set(CHILD, { seq: 1, value: { n: 1 } });
+  transport.closures.set(ROOT, [CHILD]);
+  const { storageManager, provider } = setUp(transport);
+  try {
+    await provider.sync(ROOT, { path: [], schema: false });
+    await waitFor(() => transport.lastDocsWatch() !== undefined);
+    await flush();
+    const setsAfterBoot = transport.watchSets.length;
+
+    // First membership change: its reconcile round-trip is parked in flight.
+    transport.holdWatchSets = true;
+    const tx = storageManager.edit();
+    const write = tx.write(
+      { space, id: INTERMEDIATE, type: DOCUMENT_MIME, path: ["value", "n"] },
+      7,
+    );
+    assert(write.ok, "overlay write applies");
+    const commit = tx.commit();
+    await waitFor(() => transport.heldWatchSets.length >= 1);
+
+    // Two more membership changes while the replace is in flight. Without
+    // serialization each schedules its OWN reconcile whose stale snapshot
+    // drains through the watch-mutation mutex as an extra watch.set; with it
+    // they latch into ONE trailing reconcile carrying the accumulated set.
+    for (const [doc, value] of [[SECOND, 8], [THIRD, 9]] as const) {
+      const burst = storageManager.edit();
+      const burstWrite = burst.write(
+        { space, id: doc, type: DOCUMENT_MIME, path: ["value", "n"] },
+        value,
+      );
+      assert(burstWrite.ok, "burst write applies");
+      await burst.commit();
+      await flush();
+    }
+
+    transport.holdWatchSets = false;
+    transport.releaseHeldWatchSets();
+    await waitFor(() =>
+      transport.lastDocsWatch()?.docs?.some((d) => d.id === THIRD) === true
+    );
+    await flush();
+    // Boot set + the parked stale set + exactly ONE trailing coalesced set.
+    assertEquals(
+      transport.watchSets.length - setsAfterBoot,
+      2,
+      "burst changes coalesce into a single trailing watch.set",
+    );
+    const members = new Set(transport.lastDocsWatch()?.docs?.map((d) => d.id));
+    for (const doc of [ROOT, CHILD, INTERMEDIATE, SECOND, THIRD]) {
+      assertEquals(members.has(doc), true, `${doc} is a member`);
+    }
+    await commit;
   } finally {
     await storageManager.close();
   }
