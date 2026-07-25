@@ -101,10 +101,19 @@ jobs:
           if [[ "$BUILD_RESULT" == "success" ]]; then
             if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" && "$TEST_RESULT" == "success" ]]; then
               allowed=true
-            elif [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$member" == "true" ]]; then
-              if [[ "$TEST_RESULT" == "success" || ("$PUSH_BRANCH" == "true" && "$RUN_ATTEMPT" -gt 1) ]]; then
-                allowed=true
-              fi
+            # PR-actor publishing is disabled (commented out, not removed):
+            # the GCP workload-identity provider's attribute condition
+            # rejects pull_request-context OIDC tokens, so this path could
+            # only ever fail the run at the Google auth step — every PR by
+            # an allow-listed actor went red on "Publish image" once CI
+            # started calling this workflow for all PRs (#4963). Publishing
+            # is main-only until the provider condition deliberately admits
+            # PR tokens; then this block (and the member/env plumbing
+            # above) can be restored as-is.
+            # elif [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$member" == "true" ]]; then
+            #   if [[ "$TEST_RESULT" == "success" || ("$PUSH_BRANCH" == "true" && "$RUN_ATTEMPT" -gt 1) ]]; then
+            #     allowed=true
+            #   fi
             fi
           fi
 
