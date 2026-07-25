@@ -1,4 +1,5 @@
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import type { CfcConfClause } from "./clause.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
@@ -51,12 +52,12 @@ const arraySubsetOf = (
 
 const mergeArraySet = (
   ...sources: Array<readonly unknown[]>
-): unknown[] => {
-  const result: unknown[] = [];
+): CfcAtom[] => {
+  const result: CfcAtom[] = [];
   for (const source of sources) {
     for (const value of source) {
       if (!result.some((candidate) => deepEqual(candidate, value))) {
-        result.push(value);
+        result.push(value as CfcAtom);
       }
     }
   }

@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { type CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -100,7 +101,7 @@ const clauseSetsEqual = (
 // A verified, live grant FACT pool entry as the runner-side resolver expands
 // it: the grant's scalar fields plus ONE audience entry per fact (§4.3.4
 // multi-binding enumerates the disjunction of all matches).
-const aliceShareFact = (audience: unknown = userBob) => ({
+const aliceShareFact = (audience: CfcAtom = userBob) => ({
   kind: "ShareGrant",
   space: ALICE,
   owner: ALICE,
@@ -1322,7 +1323,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
       const result = evaluateExchangeRules(
         { confidentiality: [userAlice] },
         snapshot([shareRule()]),
-        { grantResolver: () => "junk" as unknown as readonly unknown[] },
+        { grantResolver: () => "junk" as unknown as readonly CfcAtom[] },
       );
       expect(result.firings).toEqual([]);
     });
