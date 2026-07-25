@@ -2068,9 +2068,20 @@ Deno.test("memory v2 stacked commits: dropped dependency locally rejects the in-
     // T2's optimistic write is reverted along with T1's.
     expectVisible(harness, { A: undefined, B: undefined, D: undefined });
 
-    // Late verdict: consumed off the books, state stays put.
+    // Late verdict: consumed off the books, state stays put. Releasing the
+    // gate lets the model judge t2 — whose read of dropped t1 now fails
+    // validation, so the late verdict is a REJECT and its swallow is the
+    // "cascade-late-reject" count moving.
+    const lateRejectBaseline = getLoggerCountsBreakdown()["storage.v2"]
+      ?.["cascade-late-reject"]?.debug ?? 0;
     g2.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    await harness.transport.drainVerdicts();
+    await waitForCondition(
+      () =>
+        (getLoggerCountsBreakdown()["storage.v2"]?.["cascade-late-reject"]
+          ?.debug ?? 0) > lateRejectBaseline,
+      "the late server verdict to be swallowed",
+    );
     expectVisible(harness, { A: undefined, B: undefined, D: undefined });
     assertEquals(harness.model.applied.has(t2.localSeq), false);
   } finally {
