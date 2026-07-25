@@ -16,6 +16,7 @@ import {
 } from "@commonfabric/api/cfc";
 import {
   type CfcConfClause,
+  type CfcOrClause,
   clauseAlternatives,
   isOrClause,
   normalizeClause,
@@ -210,7 +211,7 @@ const extendThroughPattern = (
   pool: readonly unknown[],
 ): AtomPatternBindings[] => {
   const next: AtomPatternBindings[] = [];
-  // TODO(danfuzz): drop the cast once clause alternatives are typed as
+  // TODO(danfuzz): drop the cast once the integrity guard pool is typed as
   // `CfcAtom`.
   const atoms = pool as readonly CfcAtom[];
   for (const environment of environments) {
@@ -597,8 +598,7 @@ const matchRule = (
     if (homeClauses !== undefined && !homeClauses.has(clauseIndex)) continue;
     const alternatives = clauseAlternatives(confidentiality[clauseIndex]);
     for (const alternative of alternatives) {
-      // TODO(danfuzz): drop the cast once clause alternatives are typed.
-      const target = matchAtomPattern(rule.appliesTo, alternative as CfcAtom);
+      const target = matchAtomPattern(rule.appliesTo, alternative);
       if (target === null) continue;
 
       let environments: AtomPatternBindings[] = [target];
@@ -751,9 +751,9 @@ const applyRuleMatch = (
   if (added.length === 0) return { confidentiality };
 
   const next = [...confidentiality];
-  next[match.clauseIndex] = normalizeClause({
-    anyOf: [...alternatives, ...added],
-  });
+  next[match.clauseIndex] = normalizeClause(
+    { anyOf: [...alternatives, ...added] } as CfcOrClause,
+  );
   return {
     confidentiality: next,
     firing: { clauseIndex: match.clauseIndex, kind: "add", added },
@@ -778,7 +778,9 @@ export const evaluateExchangeRules = (
   fuel: number = DEFAULT_EXCHANGE_FUEL,
 ): ExchangeEvalResult => {
   const confidentialityInput = label.confidentiality ?? [];
-  const selected = collectSelectedModulePolicyRefs(confidentialityInput);
+  const selected = collectSelectedModulePolicyRefs(
+    confidentialityInput as readonly CfcConfClause[],
+  );
   if (selected.failures.length > 0) {
     return {
       label,
@@ -864,9 +866,10 @@ export const evaluateExchangeRules = (
     ...(ctx.integrity ?? []),
   ];
 
-  let confidentiality: readonly CfcConfClause[] = label.confidentiality.map(
-    normalizeClause,
-  );
+  let confidentiality: readonly CfcConfClause[] =
+    (label.confidentiality as readonly CfcConfClause[]).map(
+      normalizeClause,
+    );
   const firings: RuleFiring[] = [];
   let remainingFuel = fuel;
   let changed = true;

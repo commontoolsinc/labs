@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import { type CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
@@ -85,8 +86,16 @@ const clauseSetsEqual = (
   b: readonly unknown[],
 ): boolean =>
   a.length === b.length &&
-  a.every((clause) => b.some((other) => clausesEqual(clause, other))) &&
-  b.every((clause) => a.some((other) => clausesEqual(clause, other)));
+  a.every((clause) =>
+    b.some((other) =>
+      clausesEqual(clause as CfcConfClause, other as CfcConfClause)
+    )
+  ) &&
+  b.every((clause) =>
+    a.some((other) =>
+      clausesEqual(clause as CfcConfClause, other as CfcConfClause)
+    )
+  );
 
 // A verified, live grant FACT pool entry as the runner-side resolver expands
 // it: the grant's scalar fields plus ONE audience entry per fact (§4.3.4

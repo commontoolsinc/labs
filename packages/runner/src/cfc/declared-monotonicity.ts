@@ -142,12 +142,17 @@ export const collectDeclaredMonotonicityViolations = (input: {
     for (const stored of storedAt) {
       for (const storedClause of stored.label.confidentiality ?? []) {
         const witnessed = proposedClauses.some((proposedClause) =>
-          clauseSubsumes(proposedClause, storedClause)
+          clauseSubsumes(
+            proposedClause as CfcConfClause,
+            storedClause as CfcConfClause,
+          )
         );
         if (witnessed) {
           continue;
         }
-        const storedDigest = cfcCanonicalClauseDigest(storedClause);
+        const storedDigest = cfcCanonicalClauseDigest(
+          storedClause as CfcConfClause,
+        );
         if (
           exemption !== undefined &&
           samePath(exemption.path, storedPath) &&
@@ -165,7 +170,9 @@ export const collectDeclaredMonotonicityViolations = (input: {
         violations.push(
           `declared-monotonicity confidentiality violation ${at} ` +
             `(canUpdateStoreLabel, §8.12.1): stored clause ` +
-            `${JSON.stringify(normalizeClause(storedClause))} dropped or ` +
+            `${
+              JSON.stringify(normalizeClause(storedClause as CfcConfClause))
+            } dropped or ` +
             `weakened ` +
             `(clauses may be added and alternatives removed, never the reverse)`,
         );

@@ -16,6 +16,7 @@ import {
   validateRowLabelSpec,
 } from "@commonfabric/memory/sqlite/row-label";
 import { tableDeclaresRowLabel } from "@commonfabric/memory/v2";
+import type { CfcConfClause } from "../../cfc/clause.ts";
 import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
 import { clauseAlternatives } from "../../cfc/clause.ts";
 
@@ -129,7 +130,7 @@ function readerAdmitsLabel(
   reader: string,
 ): boolean {
   return confidentiality.every((clause) =>
-    clauseAlternatives(clause).some((alt) => alt === reader)
+    clauseAlternatives(clause as CfcConfClause).some((alt) => alt === reader)
   );
 }
 

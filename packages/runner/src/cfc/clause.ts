@@ -1,4 +1,4 @@
-import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { CFC_ATOM_TYPE, type CfcAtom } from "@commonfabric/api/cfc";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
@@ -22,10 +22,14 @@ import { uniqueCfcAtoms } from "./observation.ts";
  * `anyOf` (with an array value) is recognized as a clause; any other shape
  * stays an opaque atom (unsatisfiable against ceilings — restrictive).
  */
-export type CfcOrClause = { readonly anyOf: readonly unknown[] };
+export type CfcOrClause = { readonly anyOf: readonly CfcAtom[] };
 
 /** A confidentiality clause: a bare atom, or an OR of atoms. */
-export type CfcConfClause = unknown;
+export type CfcConfClause = CfcAtom | CfcOrClause;
+
+// TODO(danfuzz): The label and ceiling types that carry clause lists still
+// declare them as `unknown[]`, so callers cast on the way in. Drop those casts
+// once those types name clauses.
 
 export const isOrClause = (value: unknown): value is CfcOrClause =>
   isRecord(value) &&
@@ -35,9 +39,9 @@ export const isOrClause = (value: unknown): value is CfcOrClause =>
 /** The alternatives of a clause; a bare atom is its own single alternative. */
 export const clauseAlternatives = (
   clause: CfcConfClause,
-): readonly unknown[] => isOrClause(clause) ? clause.anyOf : [clause];
+): readonly CfcAtom[] => isOrClause(clause) ? clause.anyOf : [clause];
 
-const compareByCanonicalHash = (left: unknown, right: unknown): number => {
+const compareByCanonicalHash = (left: CfcAtom, right: CfcAtom): number => {
   const leftHash = hashStringOf(left);
   const rightHash = hashStringOf(right);
   return leftHash < rightHash ? -1 : leftHash > rightHash ? 1 : 0;

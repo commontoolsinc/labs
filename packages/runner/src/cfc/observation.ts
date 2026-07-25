@@ -15,6 +15,7 @@ import {
 import { atomEntails, conceptGuard, matchAtomPattern } from "./atom-pattern.ts";
 import type { TrustResolver } from "./trust.ts";
 import {
+  type CfcConfClause,
   clauseAlternatives,
   clausesEqual,
   clauseSubsumes,
@@ -47,7 +48,7 @@ export const CFC_LABEL_READ_FAILED_ATOM = "cfc:label-read-failed";
 // equality now commitment-aware, a marker-naming ceiling would otherwise
 // subsume that spelling. Recognize it here so BOTH forms stay ungrantable.
 const clauseBearsReadFailedMarker = (clause: unknown): boolean =>
-  clauseAlternatives(clause).some((alternative) =>
+  clauseAlternatives(clause as CfcConfClause).some((alternative) =>
     deepEqual(alternative, CFC_LABEL_READ_FAILED_ATOM) ||
     commitmentAwareEquals(alternative, CFC_LABEL_READ_FAILED_ATOM)
   );
@@ -229,7 +230,8 @@ const integrityAtomSatisfies = (
         trust.actingPrincipal,
       );
   }
-  // TODO(danfuzz): drop the cast once clause alternatives are typed.
+  // TODO(danfuzz): drop the cast once integrity atom lists are typed as
+  // `CfcAtom`.
   return matchAtomPattern(required, actual as CfcAtom) !== null ||
     atomEntails(actual, required);
 };
@@ -362,7 +364,9 @@ export const atomsOutsideCeiling = (
   }
   return confidentiality.filter((clause) =>
     clauseBearsReadFailedMarker(clause) ||
-    !ceiling.some((allowed) => clauseSubsumes(allowed, clause))
+    !ceiling.some((allowed) =>
+      clauseSubsumes(allowed as CfcConfClause, clause as CfcConfClause)
+    )
   ) as ImmutableJSONValue[];
 };
 
@@ -426,15 +430,17 @@ export const meetCfcObservationCeilings = (
   if (b === undefined) return a;
   const met: unknown[] = [];
   for (const clauseA of a) {
-    const alternativesA = clauseAlternatives(clauseA);
+    const alternativesA = clauseAlternatives(clauseA as CfcConfClause);
     if (alternativesA.length === 0) continue;
     for (const clauseB of b) {
-      const alternativesB = clauseAlternatives(clauseB);
+      const alternativesB = clauseAlternatives(clauseB as CfcConfClause);
       if (alternativesB.length === 0) continue;
       const union = normalizeClause({
         anyOf: [...alternativesA, ...alternativesB],
       });
-      if (!met.some((existing) => clausesEqual(existing, union))) {
+      if (
+        !met.some((existing) => clausesEqual(existing as CfcConfClause, union))
+      ) {
         met.push(union);
       }
     }

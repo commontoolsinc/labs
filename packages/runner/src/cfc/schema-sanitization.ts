@@ -1,4 +1,5 @@
 import type { ImmutableJSONValue, JSONSchema } from "@commonfabric/api";
+import type { CfcConfClause } from "./clause.ts";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import {
   cloneIfNecessary,
@@ -150,7 +151,8 @@ export const dischargeMaterialRiskAtoms = (
   // which this set cannot have.
   const normalized = atoms.map(normalizeMaterialRiskStringForms);
   const alternativeCount = normalized.reduce(
-    (total: number, clause) => total + clauseAlternatives(clause).length,
+    (total: number, clause) =>
+      total + clauseAlternatives(clause as CfcConfClause).length,
     0,
   );
   const result = evaluateExchangeRules(

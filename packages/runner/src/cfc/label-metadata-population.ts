@@ -1,4 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
+import type { CfcConfClause } from "./clause.ts";
 import { canonicalizeLogicalPath } from "./canonical.ts";
 import { clauseAlternatives } from "./clause.ts";
 import { classifyAtomField } from "./label-field-classification.ts";
@@ -226,7 +227,7 @@ export const deriveLabelMetadataTemplateEntries = (
     const fields = new Set<string>();
     let anyProtected = false;
     for (const clause of confidentiality) {
-      for (const alternative of clauseAlternatives(clause)) {
+      for (const alternative of clauseAlternatives(clause as CfcConfClause)) {
         if (scanAlternative(alternative, fields)) {
           anyProtected = true;
         }

@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import { type CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
 import {
   CFC_LABEL_READ_FAILED_ATOM,
@@ -24,7 +25,11 @@ const clauseSetsEqual = (
   right: readonly unknown[],
 ): boolean =>
   left.length === right.length &&
-  left.every((clause) => right.some((other) => clausesEqual(clause, other)));
+  left.every((clause) =>
+    right.some((other) =>
+      clausesEqual(clause as CfcConfClause, other as CfcConfClause)
+    )
+  );
 
 describe("CFC ceiling meet (pairwise alternative-set union)", () => {
   describe("edge cases", () => {
