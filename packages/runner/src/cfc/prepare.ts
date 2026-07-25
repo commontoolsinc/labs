@@ -50,6 +50,7 @@ import {
   canonicalizeLogicalPath,
 } from "./canonical.ts";
 import {
+  type CfcConfClause,
   clauseAlternatives,
   FORBIDDEN_OR_CLAUSE_ALTERNATIVE_TYPES,
   isOrClause,
@@ -3961,13 +3962,18 @@ const derivePersistedLabel = (
     // clauses coalesce. `normalizeClause` is identity on flat atoms, so flat
     // labels are unchanged. Integrity carries no OR-clauses.
     confidentiality: mergeLabelValues(
-      resolvePolicyOfConfidentiality(
+      (resolvePolicyOfConfidentiality(
         tx,
         schemaLabel.confidentiality,
         owningSpace,
-      )?.map(normalizeClause),
-      copiedInputLabel?.confidentiality?.map(normalizeClause),
-      projectedInputLabel?.confidentiality?.map(normalizeClause),
+      ) as readonly CfcConfClause[] | undefined)?.map(normalizeClause),
+      (copiedInputLabel?.confidentiality as
+        | readonly CfcConfClause[]
+        | undefined)
+        ?.map(normalizeClause),
+      (projectedInputLabel?.confidentiality as
+        | readonly CfcConfClause[]
+        | undefined)?.map(normalizeClause),
     ),
     integrity: mergeLabelValues(
       resolveCurrentPrincipalLabelValues(
@@ -6085,7 +6091,9 @@ export const prepareBoundaryCommit = (
       // list and one spurious envelope rewrite (the SC-11 churn class).
       // normalizeClause each clause first; non-clause atoms pass through.
       const foldedUnique = (atoms: readonly unknown[]): unknown[] =>
-        uniqueCfcAtoms(atoms.map((atom) => normalizeClause(atom)));
+        uniqueCfcAtoms(
+          atoms.map((atom) => normalizeClause(atom as CfcConfClause)),
+        );
       const frozenConfidentialityFor = (
         path: readonly string[],
       ): unknown[] => {

@@ -1,4 +1,5 @@
 import { encodePointer } from "../../../memory/v2/path.ts";
+import type { CfcConfClause } from "./clause.ts";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { uniqueCfcAtoms } from "./observation.ts";
 import { normalizeClause } from "./clause.ts";
@@ -190,7 +191,7 @@ export const mergeLabel = (
     // and `normalizeClause` is identity on non-clause atoms, so it is applied
     // only to confidentiality to keep intent explicit.
     const normalized = key === "confidentiality"
-      ? values.map(normalizeClause)
+      ? (values as readonly CfcConfClause[]).map(normalizeClause)
       : values;
     // Dedup structurally via `uniqueCfcAtoms()` rather than by reference
     // (`new Set()`). Atoms can be fabric-converted clones (each call to

@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import { type CfcConfClause, type CfcOrClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
 import {
   CFC_ATOM_TYPE,
@@ -62,7 +63,9 @@ const legacyStrip = (atoms: readonly unknown[]): unknown[] =>
         const kept = (clause as { anyOf: unknown[] }).anyOf.filter(
           (alternative) => !isMaterialRisk(alternative),
         );
-        return kept.length === 0 ? undefined : normalizeClause({ anyOf: kept });
+        return kept.length === 0
+          ? undefined
+          : normalizeClause({ anyOf: kept } as CfcOrClause);
       })
       .filter((clause) => clause !== undefined),
   );
@@ -76,8 +79,16 @@ const dischargeViaProfile = (atoms: readonly unknown[]): unknown[] =>
 
 const clauseSetsEqual = (a: readonly unknown[], b: readonly unknown[]) =>
   a.length === b.length &&
-  a.every((clause) => b.some((other) => clausesEqual(clause, other))) &&
-  b.every((clause) => a.some((other) => clausesEqual(clause, other)));
+  a.every((clause) =>
+    b.some((other) =>
+      clausesEqual(clause as CfcConfClause, other as CfcConfClause)
+    )
+  ) &&
+  b.every((clause) =>
+    a.some((other) =>
+      clausesEqual(clause as CfcConfClause, other as CfcConfClause)
+    )
+  );
 
 describe("CFC standard prompt-caveat profile (B6)", () => {
   describe("material-risk discharge reproduces the retired strip (goldens)", () => {
@@ -205,7 +216,7 @@ describe("CFC standard prompt-caveat profile (B6)", () => {
         },
       );
       const clause = result.label.confidentiality![0];
-      const alternatives = clauseAlternatives(clause);
+      const alternatives = clauseAlternatives(clause as CfcConfClause);
       // Lower tier remains; higher tier added as an alternative.
       expect(alternatives).toContainEqual(
         caveat(CFC_CONCEPT_KIND.PromptInjectionRiskUnscreened, source),
