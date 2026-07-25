@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "exports": {
     ".": "./src/mod.ts",
+    "./clock-preload": "./src/clock-preload.ts",
     "./compile-byte-cache": "./src/compile-byte-cache.ts",
     "./fixture-runner": "./src/fixture-runner.ts",
     "./isolated-deno": "./src/isolated-deno.ts"
