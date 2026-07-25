@@ -1,11 +1,8 @@
 import { waitForCondition } from "@commonfabric/integration";
 import type { Page } from "@commonfabric/integration";
 
-export function pierce(page: Page, selector: string, timeout?: number) {
-  return page.waitForSelector(selector, {
-    strategy: "pierce",
-    ...(timeout != null ? { timeout } : {}),
-  });
+export function pierce(page: Page, selector: string) {
+  return page.waitForSelector(selector, { strategy: "pierce" });
 }
 
 export async function clickPierce(

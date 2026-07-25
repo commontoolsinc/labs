@@ -22,8 +22,8 @@ Common Fabric product.
 7. End-User Programs: home-schemas, patterns
 
 Support and test packages (utils, test-support, deno-web-test, integration,
-generated-patterns, content-hash, leb128, felt, static, vendor-astral,
-fs-sync-example) sit outside the layer stack.
+generated-patterns, content-hash, leb128, felt, static, fs-sync-example) sit
+outside the layer stack.
 
 ## Documentation Lifecycle
 

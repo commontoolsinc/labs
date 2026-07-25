@@ -34,7 +34,6 @@
     "./packages/toolshed",
     "./packages/ui",
     "./packages/utils",
-    "./packages/vendor-astral",
     "./packages/leb128",
     "./packages/fuse",
     "./packages/fs-sync-example",
@@ -93,7 +92,6 @@
       ".claude/",
       ".beads/",
       "./packages/static/assets",
-      "./packages/vendor-astral",
       "./tmp/",
       "./packages/patterns/record/"
     ],
@@ -134,7 +132,6 @@
       "packages/ui/src/v2/components/cf-toggle/cf-toggle.ts",
       "packages/ui/src/v2/components/cf-checkbox/cf-checkbox.ts",
       "packages/ui/src/v2/components/cf-select/cf-select.ts",
-      "packages/vendor-astral",
       "docs/history/"
     ]
   },
@@ -145,7 +142,7 @@
     "core-js/proposals/explicit-resource-management": "https://esm.sh/core-js@3.46.0/proposals/explicit-resource-management",
     "core-js/proposals/async-explicit-resource-management": "https://esm.sh/core-js@3.46.0/proposals/async-explicit-resource-management",
     "@commonfabric/ports": "./ports.json",
-    "@astral/astral": "./packages/vendor-astral/mod.ts",
+    "@astral/astral": "jsr:@astral/astral@0.5.6",
     // Held at the release candidate: 1.2.1 changes how a required argument
     // followed by a variadic one is parsed, and `cf piece call` stops seeing its
     // first argument. Pinned exact so the within-range refresh cannot pull it.

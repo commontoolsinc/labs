@@ -10,6 +10,7 @@
  */
 
 import { launch } from "@astral/astral";
+import { closeAstralBrowser } from "@commonfabric/integration/astral-adapter";
 
 async function main() {
   console.log("=== Starting headless Chrome benchmark ===\n");
@@ -45,7 +46,6 @@ async function main() {
     console.log("Waiting for benchmark to complete...\n");
     await page.waitForFunction(
       () => (window as any).benchmarkComplete === true,
-      { timeout: 600000 }, // 10 minutes timeout
     );
 
     // Get results
@@ -57,7 +57,7 @@ async function main() {
     console.error("Error running benchmark:", err);
     throw err;
   } finally {
-    await browser.close();
+    await closeAstralBrowser(browser);
   }
 }
 

@@ -1,5 +1,5 @@
 import { join } from "@std/path";
-import type { Page_screencastFrame } from "../../vendor-astral/bindings/celestial.ts";
+import type { ScreencastFrame } from "../astral-adapter.ts";
 import type { DemoParticipantManifest, RecordedFrame } from "./manifest.ts";
 
 export interface ScreencastPage {
@@ -13,7 +13,7 @@ export interface ScreencastPage {
   stopScreencast(): Promise<void>;
   acknowledgeScreencastFrame(sessionId: number): Promise<void>;
   onScreencastFrame(
-    listener: (frame: Page_screencastFrame) => void,
+    listener: (frame: ScreencastFrame) => void,
   ): () => void;
 }
 
@@ -118,7 +118,7 @@ export class FrameRecorder {
     };
   }
 
-  #acceptFrame(frame: Page_screencastFrame): void {
+  #acceptFrame(frame: ScreencastFrame): void {
     if (this.#state === "stopped") return;
     const acknowledgement = this.#page
       .acknowledgeScreencastFrame(frame.sessionId)

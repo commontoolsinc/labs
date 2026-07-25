@@ -12,7 +12,7 @@ import {
   PresentationSession,
   type RecordedFrame,
 } from "../presentation/mod.ts";
-import type { Page_screencastFrame } from "../../vendor-astral/bindings/celestial.ts";
+import type { ScreencastFrame } from "../astral-adapter.ts";
 import { Page } from "../page.ts";
 
 Deno.test("parsePresentationConfig stays disabled without an output directory", () => {
@@ -287,7 +287,7 @@ function frame(
 }
 
 class FakeScreencastPage {
-  listener?: (frame: Page_screencastFrame) => void;
+  listener?: (frame: ScreencastFrame) => void;
   acknowledged: number[] = [];
   acknowledge: (sessionId: number) => Promise<void> = () => Promise.resolve();
 
@@ -305,18 +305,18 @@ class FakeScreencastPage {
   }
 
   onScreencastFrame(
-    listener: (frame: Page_screencastFrame) => void,
+    listener: (frame: ScreencastFrame) => void,
   ): () => void {
     this.listener = listener;
     return () => this.listener = undefined;
   }
 
-  emit(frame: Page_screencastFrame): void {
+  emit(frame: ScreencastFrame): void {
     this.listener?.(frame);
   }
 }
 
-function screencastFrame(sessionId: number): Page_screencastFrame {
+function screencastFrame(sessionId: number): ScreencastFrame {
   return {
     sessionId,
     data: btoa("jpeg"),

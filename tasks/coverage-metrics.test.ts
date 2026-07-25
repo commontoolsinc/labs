@@ -100,10 +100,6 @@ Deno.test("source inventory helpers group tracked files by package", () => {
     shouldTrackSourceFile("packages/runner/test/cell.test.ts"),
     false,
   );
-  assertEquals(
-    shouldTrackSourceFile("packages/vendor-astral/src/page.ts"),
-    false,
-  );
   assertEquals(shouldTrackSourceFile("scripts/start-local-dev.sh"), false);
   assertEquals(shouldTrackSourceFile("scripts/build.ts"), false);
   assertEquals(

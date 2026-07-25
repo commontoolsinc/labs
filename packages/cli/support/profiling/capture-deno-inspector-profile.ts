@@ -1,8 +1,8 @@
-import { Celestial } from "../../../../packages/vendor-astral/bindings/celestial.ts";
 import {
   captureDenoInspectorProfile,
   guardCaptureStopSignal,
 } from "./capture-deno-inspector-profile-lib.ts";
+import { InspectorProtocolClient } from "./inspector-protocol-client.ts";
 
 if (import.meta.main) {
   // captureDenoInspectorProfile removes its own stop-signal handlers as it
@@ -13,7 +13,7 @@ if (import.meta.main) {
   guardCaptureStopSignal(Deno.addSignalListener);
   const exitCode = await captureDenoInspectorProfile(Deno.args, {
     addSignalListener: Deno.addSignalListener,
-    createCelestial: (ws) => new Celestial(ws),
+    createCelestial: (ws) => new InspectorProtocolClient(ws),
     createWebSocket: (url) => new WebSocket(url),
     removeSignalListener: Deno.removeSignalListener,
   });
