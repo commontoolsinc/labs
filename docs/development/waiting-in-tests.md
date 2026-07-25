@@ -378,6 +378,47 @@ than the wall clock, so the delegate reports "tool call timed out" before it
 completes. These are the honest exceptions: the clock they need is the real one,
 and their own sleeps are the honest way to wait.
 
+## The runtime-client suite stays on the real clock
+
+`packages/runtime-client` keeps its unit tests on the real clock, and the
+reasons are worth recording because the package looks, at a glance, like a
+candidate for the runner preload above.
+
+Most of its tests need no wait at all, or only a macrotask drain — a
+`setTimeout(fn, 0)` that lets the scheduler's own `queueTask` dispatch land, an
+awaited round-trip, or a sink fire once. Those drains cross one macrotask
+boundary, carry no real-time floor, and stay as they are. The two positive-delay
+sleeps that were not drains have been made event-driven instead. The test that
+proves `dispose()` stays pending until the worker confirms its flush now drains
+the task queue rather than sleeping ten milliseconds: nothing resolves the held
+Dispose reply, so once every queued continuation has run a correct dispose is
+still pending. The pending-request age-ordering test steps a frozen
+`performance.now()` forward between its two sends rather than sleeping, so the
+first request is measurably older and the descending-age sort is exercised
+deterministically — with equal ages a stable sort preserves insertion order
+whichever way the comparator runs, leaving the direction untested.
+
+Two tests genuinely measure real time and cannot move to a fake clock: the
+main-thread loop-lag probe (`loop/mainLag`, armed in `client/connection.ts`) and
+its worker twin (`runner.loop/workerLag`, armed at the `backends/web-worker`
+entry). Each arms a 100-millisecond `setInterval` and records how far past
+schedule a tick fires; each test blocks the thread with a busy-wait past one
+sample so the due tick can only fire late, then reads the recorded lag. A fake
+clock fires timers exactly on schedule, never late, and cannot advance while a
+synchronous busy-wait holds the thread, so it cannot reproduce loop lag at all.
+These stay on real wall-clock time, and their busy-wait plus short trailing
+yield is the honest way to observe a late fire.
+
+The package also cannot adopt the runner preload wholesale. Those two loop-lag
+intervals are armed unconditionally — in the connection constructor and at the
+worker entry's import — and only unref'd, not gated behind an off-by-default flag
+the way runner's one repeating timer is. Unref keeps them from tripping Deno's
+op-leak sanitizer under the real clock, but auto-advance ignores unref: a
+`setInterval` scheduled from `src/` re-arms forever, so every connection a test
+builds would drive the clock to the runaway guard. Adopting the harness would
+mean excluding the very files that own timers, and no test in the suite observes
+a controllable time window a fake clock would help with.
+
 ## Proving a negative
 
 A test that asserts something never happens has no event of its own to wait for.
