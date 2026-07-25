@@ -9,7 +9,14 @@ import {
 import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 
 const DEFAULT_CFC_BROWSER_TIMEOUT = 30_000;
-const CLICK_TARGET_ATTR = "data-cfc-click-target";
+/**
+ * Attribute a mark predicate stamps on the element it resolved, so the test can
+ * then address exactly that element. What identifies a mark is the attribute's
+ * value — a fresh unique token per click — so the predicates here and in
+ * `note-button-helpers.ts` all stamp this one attribute name, and no helper
+ * resolves or clears a mark another one made.
+ */
+export const CLICK_TARGET_ATTR = "data-cfc-click-target";
 
 // Predicates evaluated in the page by `waitForCondition`. Each is self-contained
 // — it closes over nothing in this module — so it can be serialized and run in
@@ -675,10 +682,11 @@ export async function clickNthCfButton(
 
 /**
  * Resolve the element tagged with `token` and click it, then clear the tag.
- * Shared by the click helpers above: each one marks its target through its own
- * predicate, and the resolve/click/untag tail is the same for all of them.
+ * Shared by `clickCfButton`, `clickNthCfButton`, and the text-matching click
+ * helpers in `note-button-helpers.ts`: each one marks its target through its
+ * own predicate, and the resolve/click/untag tail is the same for all of them.
  */
-async function clickMarked(
+export async function clickMarked(
   page: Page,
   token: string,
 ): Promise<void> {
