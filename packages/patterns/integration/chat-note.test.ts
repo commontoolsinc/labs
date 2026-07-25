@@ -1,4 +1,4 @@
-import { env } from "@commonfabric/integration";
+import { env, waitForCondition } from "@commonfabric/integration";
 import { sleep } from "@commonfabric/utils/sleep";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
@@ -158,6 +158,12 @@ describe("Chat Note pattern test", () => {
     ignore,
     fn: async () => {
       const page = shell.page();
+      const editorContent = await page.waitForSelector(".cm-content", {
+        strategy: "pierce",
+      });
+      const initialContent = await editorContent.evaluate(
+        (el: HTMLElement) => el.textContent ?? "",
+      );
 
       // Click the Generate button
       const generateButton = await page.waitForSelector(
@@ -167,58 +173,34 @@ describe("Chat Note pattern test", () => {
       assert(generateButton, "Should find Generate button");
       await generateButton.click();
 
-      // Wait for the UI to update - should show loading state or Cancel button
-      await sleep(1000);
-
-      // Check that the editor now contains the AI header
-      const editorContent = await page.waitForSelector(".cm-content", {
-        strategy: "pierce",
-      });
-      const content = await editorContent?.evaluate(
-        (el: HTMLElement) => el.textContent,
+      await waitForCondition(
+        page,
+        (probe, beforeGeneration) => {
+          return probe.collect(".cm-content").some((element) => {
+            const text = element.textContent ?? "";
+            if (!text.startsWith(beforeGeneration)) return false;
+            const aiHeader = text.lastIndexOf("## AI");
+            if (aiHeader < beforeGeneration.length) return false;
+            const response = text
+              .slice(aiHeader + "## AI".length)
+              .replaceAll("---", "")
+              .trim();
+            return response.length > 0;
+          });
+        },
+        { args: [initialContent] },
       );
 
+      const generatedContent = await editorContent.evaluate(
+        (el: HTMLElement) => el.textContent ?? "",
+      );
       assert(
-        content?.includes("## AI"),
+        generatedContent.includes("## AI"),
         "Editor should contain AI header after clicking Generate",
       );
-
-      const generationInProgress = await page.evaluate(() => {
-        const containsCancelButton = (
-          root: Document | ShadowRoot,
-        ): boolean => {
-          for (const element of root.querySelectorAll("*")) {
-            if (
-              element.tagName.toLowerCase() === "cf-button" &&
-              element.textContent?.trim() === "Cancel"
-            ) {
-              return true;
-            }
-            if (
-              element.shadowRoot &&
-              containsCancelButton(element.shadowRoot)
-            ) {
-              return true;
-            }
-          }
-          return false;
-        };
-        return containsCancelButton(document);
-      });
-      if (generationInProgress) {
-        await sleep(10000);
-      }
-
-      // After generation, check that we have a response
-      await sleep(2000);
-      const finalContent = await editorContent?.evaluate(
-        (el: HTMLElement) => el.textContent,
-      );
-
-      // The content should now have some AI response
       assert(
-        finalContent && finalContent.length > content!.length,
-        "Editor should have more content after generation",
+        generatedContent.length > initialContent.length,
+        "Editor should contain an AI response after generation",
       );
     },
   });
