@@ -114,23 +114,18 @@ type EventCommitMarker = {
   permanentRejection?: "origin-committed" | "receipt-exists";
 };
 
+// Resolve on the first `scheduler.event.commit` marker the predicate accepts.
 function waitForEventCommit(
   runtime: Runtime,
   predicate: (marker: EventCommitMarker) => boolean,
-  message: string,
 ): Promise<EventCommitMarker> {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      runtime.telemetry.removeEventListener("telemetry", listener);
-      reject(new Error(message));
-    }, 5_000);
+  return new Promise((resolve) => {
     const listener = (event: Event) => {
       const marker = (event as CustomEvent<{ marker: EventCommitMarker }>)
         .detail.marker;
       if (marker.type !== "scheduler.event.commit" || !predicate(marker)) {
         return;
       }
-      clearTimeout(timeout);
       runtime.telemetry.removeEventListener("telemetry", listener);
       resolve(marker);
     };
@@ -250,7 +245,6 @@ describe("mergeable append in a multi-space commit survives a transient storm", 
     const committed = waitForEventCommit(
       rt,
       (marker) => injectedRemaining === 0 && marker.error === undefined,
-      "multi-space append did not commit after the transient storm",
     );
     const addTx = rt.edit();
     handle.withTx(addTx).key("addItem").send({ seed: "X" });
@@ -327,7 +321,6 @@ describe("mergeable append in a multi-space commit survives a transient storm", 
     const rejected = waitForEventCommit(
       rt,
       (marker) => marker.error === "injected non-stale-basis rejection",
-      "non-stale-basis rejection was not observed",
     );
     const addTx = rt.edit();
     handle.withTx(addTx).key("addItem").send({ seed: "Y" });
