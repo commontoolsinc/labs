@@ -28,6 +28,7 @@ export type TokenClass =
   | "regex"
   | "comment"
   | "docComment"
+  | "markdownQuote"
   | "sectionHeader" // `// transformed: <name>` divider lines
   | "typeName" // identifier used in a type position
   | "typeKeyword" // string/number/boolean/any/unknown… in a type position

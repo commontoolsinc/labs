@@ -260,7 +260,7 @@ Deno.test("json: a .json file in a diff is coloured and navigated as JSON", () =
         s.text === '"count"' && s.cls === "propertyName"
       ),
     );
-    // The removed line (old side) fragment-parses as JSON too.
+    // The removed line uses the old side's JSON language too.
     const removed = doc.lines.find((l) => l.text.startsWith('-  "name"'))!;
     assert(
       removed.spans.some((s) =>
