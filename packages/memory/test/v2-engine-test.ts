@@ -2661,6 +2661,63 @@ Deno.test("memory v2 engine: array pending reads scan at the highest layer and r
       "pending dependency not resolved",
     );
 
+    // Malformed dependency sets are protocol violations, not conflicts: an
+    // empty array names no layer at all…
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:1",
+          invocation: invocationFor(7),
+          authorization,
+          commit: {
+            localSeq: 7,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:source",
+                path: toDocumentPath([]),
+                localSeq: [],
+              }],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:malformed-empty",
+              value: toEntityDocument({ ok: false }),
+            }],
+          },
+        }),
+      ProtocolError,
+      "names no localSeq",
+    );
+
+    // …and a non-integer element is not a localSeq.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:1",
+          invocation: invocationFor(8),
+          authorization,
+          commit: {
+            localSeq: 8,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:source",
+                path: toDocumentPath([]),
+                localSeq: [1.5],
+              }],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:malformed-float",
+              value: toEntityDocument({ ok: false }),
+            }],
+          },
+        }),
+      ProtocolError,
+      "non-integer localSeq",
+    );
+
     // Control: based at the LOWER layer alone (scalar 2), the foreign seq-3
     // write is inside the scan interval — the max-basis rule, not the
     // scenario, is what admitted the commit above.
