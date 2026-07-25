@@ -97,11 +97,21 @@ export function classifyOrigin(
     throw new PieceOriginError("origin is empty");
   }
 
-  if (source.startsWith("cf:")) {
-    const ref = parseFabricRef(source);
-    if (ref === undefined) {
-      throw new PieceOriginError(`${source} is not a fabric URL`);
-    }
+  // The fabric parser decides whether this is a fabric URL: it returns undefined
+  // for anything that is not one, and throws for a fabric URL it cannot read. A
+  // malformed one reports as an unusable origin like any other unusable string,
+  // rather than as a parser error from a layer below.
+  let ref;
+  try {
+    ref = parseFabricRef(source);
+  } catch (cause) {
+    throw new PieceOriginError(
+      `${source} is not a usable fabric URL: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    );
+  }
+  if (ref !== undefined) {
     return {
       url: source,
       kind: pinnedPatternIdentity(ref) === undefined

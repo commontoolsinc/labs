@@ -277,6 +277,62 @@ describe("CFRender piece context menu", () => {
     expect(event.defaultPrevented).toBe(false);
   });
 
+  it("opens the built-in menu when no host takes the click", () => {
+    // The menu mounts on document.body, outside the piece — see cf-piece-menu.
+    const mounted: unknown[] = [];
+    const original = Object.getOwnPropertyDescriptor(globalThis, "document");
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      writable: true,
+      value: {
+        createElement: () => ({
+          open: () => {},
+          close: () => {},
+          style: { setProperty: () => {}, removeProperty: () => {} },
+        }),
+        body: {
+          appendChild: (element: unknown) => {
+            mounted.push(element);
+            (element as { isConnected?: boolean }).isConnected = true;
+            return element;
+          },
+        },
+      },
+    });
+    const originalComputed = Object.getOwnPropertyDescriptor(
+      globalThis,
+      "getComputedStyle",
+    );
+    Object.defineProperty(globalThis, "getComputedStyle", {
+      configurable: true,
+      writable: true,
+      value: () => ({ getPropertyValue: () => "" }),
+    });
+
+    try {
+      const element = new CFRender();
+      element.cell = createMockCellHandle({ name: "piece" }, {
+        id: "of:fid1:piece" as never,
+        space: "did:key:zSpace" as never,
+      }) as CellHandle;
+      const event = contextMenuEvent();
+
+      // No listener at all: the announcement goes uncancelled and cf-render
+      // opens the menu itself.
+      (element as unknown as { _onContextMenu(e: MouseEvent): void })
+        ._onContextMenu(event);
+
+      expect(mounted.length).toBe(1);
+      expect(event.defaultPrevented).toBe(true);
+    } finally {
+      if (original) Object.defineProperty(globalThis, "document", original);
+      else Reflect.deleteProperty(globalThis, "document");
+      if (originalComputed) {
+        Object.defineProperty(globalThis, "getComputedStyle", originalComputed);
+      } else Reflect.deleteProperty(globalThis, "getComputedStyle");
+    }
+  });
+
   it("reports the resolved root when a chip or tile resolved a link", () => {
     const element = new CFRender();
     element.variant = "tile";

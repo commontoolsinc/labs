@@ -9,7 +9,7 @@ import {
 } from "./origin-view.ts";
 
 /** Which panel is showing, if any. */
-type Panel = "source" | "origin";
+export type Panel = "source" | "origin";
 
 /** One entry in the menu, and the panel it opens. */
 interface MenuEntry {
@@ -312,7 +312,25 @@ export class CFPieceMenu extends BaseElement {
     else this.close();
   };
 
-  async #openPanel(panel: Panel) {
+  /** Show the source file at `index`, as choosing its tab does. */
+  selectFile(index: number): void {
+    this.selectedFile = index;
+  }
+
+  /**
+   * A right-click on the backdrop dismisses the menu rather than opening a
+   * second one behind it.
+   */
+  private _onBackdropContextMenu = (e: Event) => {
+    e.preventDefault();
+    this.close();
+  };
+
+  /**
+   * Show one of the panels, as choosing its entry does, reading the piece's
+   * source state the first time a panel is opened for that piece.
+   */
+  async showPanel(panel: Panel) {
     this.panel = panel;
     this.selectedFile = 0;
     this.readError = undefined;
@@ -357,10 +375,7 @@ export class CFPieceMenu extends BaseElement {
       <div
         class="backdrop"
         @click="${() => this.close()}"
-        @contextmenu="${(e: Event) => {
-          e.preventDefault();
-          this.close();
-        }}"
+        @contextmenu="${this._onBackdropContextMenu}"
       >
       </div>
       <div class="menu" role="menu" style="left: ${left}px; top: ${top}px">
@@ -371,7 +386,7 @@ export class CFPieceMenu extends BaseElement {
               class="menu-item"
               role="menuitem"
               test-id="${entry.testId}"
-              @click="${() => this.#openPanel(entry.panel)}"
+              @click="${() => this.showPanel(entry.panel)}"
             >
               ${entry.label}
             </button>
@@ -428,9 +443,7 @@ export class CFPieceMenu extends BaseElement {
           html`
             <button
               class="file-tab ${index === this.selectedFile ? "active" : ""}"
-              @click="${() => {
-                this.selectedFile = index;
-              }}"
+              @click="${() => this.selectFile(index)}"
             >
               ${file.name}
             </button>

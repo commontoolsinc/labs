@@ -11,8 +11,10 @@ import {
 import {
   classifyOrigin,
   PieceOriginError,
+  readPieceOrigin,
   readPieceSourceState,
 } from "../src/ops/piece-origin.ts";
+import type { Cell } from "@commonfabric/runner";
 
 const signer = await Identity.fromPassphrase("piece origin");
 
@@ -106,6 +108,154 @@ describe("classifyOrigin", () => {
     expect(() => classifyOrigin(runtime, SPACE, "file:///tmp/p.tsx")).toThrow(
       PieceOriginError,
     );
+  });
+
+  it("reports a malformed fabric URL as an unusable origin", () => {
+    // The parser's own error is a layer below; callers see one kind of failure.
+    expect(() => classifyOrigin(runtime, SPACE, "cf:of:fid1:short")).toThrow(
+      PieceOriginError,
+    );
+    expect(() => classifyOrigin(runtime, SPACE, "cf:module/x")).toThrow(
+      PieceOriginError,
+    );
+  });
+});
+
+/**
+ * A piece stands in for its recorded metadata here: these cases are about what
+ * the reader makes of metadata combinations, and a real piece cannot be given a
+ * displaced-pattern record or a repository locator without the operations that
+ * write them.
+ */
+function pieceWith(
+  { meta = {}, name, files = [], entry }: {
+    meta?: Record<string, unknown>;
+    name?: string;
+    files?: { name: string; contents: string }[];
+    entry?: string;
+  },
+): { piece: Cell<unknown>; runtime: Runtime } {
+  const piece = {
+    space: SPACE,
+    sync: () => Promise.resolve(),
+    getMetaRaw: (field: string) => meta[field],
+    getAsNormalizedFullLink: () => ({ id: `of:fid1:${HASH}` }),
+    asSchema: () => ({
+      get: () => (name === undefined ? {} : { $NAME: name }),
+    }),
+  } as unknown as Cell<unknown>;
+  const runtime = {
+    hostForSpace: () => new URL("https://toolshed.test"),
+    patternManager: {
+      getPatternSourceProgramByIdentity: () =>
+        Promise.resolve(
+          entry === undefined ? undefined : { main: entry, files },
+        ),
+    },
+  } as unknown as Runtime;
+  return { piece, runtime };
+}
+
+describe("readPieceOrigin", () => {
+  it("reads a piece with no recorded source as detached", () => {
+    const { piece, runtime } = pieceWith({});
+    expect(readPieceOrigin(runtime, piece)).toBeUndefined();
+  });
+
+  it("reads an unclassifiable recorded source as detached", () => {
+    // The string names no place the source could be resolved from, so it is no
+    // more an origin than an absent one.
+    const { piece, runtime } = pieceWith({
+      meta: { patternSource: "not a url" },
+    });
+    expect(readPieceOrigin(runtime, piece)).toBeUndefined();
+  });
+});
+
+describe("readPieceSourceState collects every recorded fact", () => {
+  it("reports the setup, displaced, and repository metadata a piece carries", async () => {
+    const { piece, runtime } = pieceWith({
+      name: "Recipe",
+      entry: "/main.tsx",
+      files: [
+        { name: "/helper.tsx", contents: "helper" },
+        { name: "/main.tsx", contents: "main" },
+        { name: "/aaa.tsx", contents: "aaa" },
+      ],
+      meta: {
+        patternSource: "https://example.test/recipe.tsx",
+        patternIdentity: { identity: "abc", symbol: "default" },
+        patternSetupIdentity: { identity: "older", symbol: "default" },
+        displacedPattern: {
+          identity: "displaced",
+          symbol: "default",
+          displacedAt: 1_700_000_000_000,
+        },
+        patternRepository: "https://github.com/example/recipes",
+      },
+    });
+
+    const state = await readPieceSourceState(runtime, piece);
+    expect(state.name).toBe("Recipe");
+    expect(state.pattern).toEqual({ identity: "abc", symbol: "default" });
+    expect(state.setupPattern).toEqual({
+      identity: "older",
+      symbol: "default",
+    });
+    expect(state.displacedPattern).toEqual({
+      identity: "displaced",
+      symbol: "default",
+      displacedAt: 1_700_000_000_000,
+    });
+    expect(state.repository).toBe("https://github.com/example/recipes");
+    expect(state.origin).toEqual({
+      url: "https://example.test/recipe.tsx",
+      kind: "web",
+    });
+    // Entry file first, then the rest by name.
+    expect(state.files.map((file) => file.name)).toEqual([
+      "/main.tsx",
+      "/aaa.tsx",
+      "/helper.tsx",
+    ]);
+  });
+
+  it("drops a displaced-pattern record with no timestamp", async () => {
+    const { piece, runtime } = pieceWith({
+      meta: {
+        patternIdentity: { identity: "abc", symbol: "default" },
+        displacedPattern: { identity: "displaced", symbol: "default" },
+      },
+    });
+    const state = await readPieceSourceState(runtime, piece);
+    expect(state.displacedPattern).toEqual({
+      identity: "displaced",
+      symbol: "default",
+    });
+  });
+
+  it("ignores metadata that is not a pattern reference", async () => {
+    const { piece, runtime } = pieceWith({
+      meta: {
+        patternIdentity: { identity: "abc", symbol: "default" },
+        patternSetupIdentity: { nonsense: true },
+        displacedPattern: "not a record",
+        patternRepository: 42,
+      },
+    });
+    const state = await readPieceSourceState(runtime, piece);
+    expect(state.setupPattern).toBeUndefined();
+    expect(state.displacedPattern).toBeUndefined();
+    expect(state.repository).toBeUndefined();
+  });
+
+  it("reports no files when the source closure is unreadable", async () => {
+    const { piece, runtime } = pieceWith({
+      meta: { patternIdentity: { identity: "abc", symbol: "default" } },
+    });
+    const state = await readPieceSourceState(runtime, piece);
+    expect(state.entry).toBeUndefined();
+    expect(state.files).toEqual([]);
   });
 });
 

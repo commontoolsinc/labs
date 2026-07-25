@@ -1294,21 +1294,15 @@ export class RuntimeProcessor {
     await pieceManager.synced();
   }
 
-  /** The result cell of `pieceId` in `space`, synced. */
-  async #pieceCell(space: DID, pieceId: string): Promise<Cell<unknown>> {
-    const { pieceManager } = this.getSpaceCtx(space);
-    const cell = this.runtime.getCellFromEntityId(
-      pieceManager.getSpace(),
-      entityIdFrom(pageIdForRouting(pieceId)),
-    );
-    await cell.sync();
-    return cell;
-  }
-
   async handlePieceGetSource(
     request: PieceGetSourceRequest,
   ): Promise<PieceSourceResponse> {
-    const cell = await this.#pieceCell(request.space, request.pieceId);
+    const { pieceManager } = this.getSpaceCtx(request.space);
+    // The reader syncs the piece itself, as its first step.
+    const cell = this.runtime.getCellFromEntityId(
+      pieceManager.getSpace(),
+      entityIdFrom(pageIdForRouting(request.pieceId)),
+    );
     const state = await readPieceSourceState(this.runtime, cell);
     return { source: { ...state, space: state.space as DID } };
   }
