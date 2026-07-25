@@ -1,4 +1,4 @@
-import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
+import { CFC_ATOM_TYPE, type CfcAtom, cfcAtom } from "@commonfabric/api/cfc";
 import type { CfcConfClause } from "./clause.ts";
 import { isRecord } from "@commonfabric/utils/types";
 import {
@@ -44,7 +44,7 @@ export const RENDER_SINK_NAME = "render";
  * name plus its class. `sinkClass:"display"` scopes the standard render
  * exchange rules (and any deployment rule guarded on the display class).
  */
-const renderDisplayBoundary = (): readonly unknown[] => [
+const renderDisplayBoundary = (): readonly CfcAtom[] => [
   cfcAtom.boundaryContext("sink", RENDER_SINK_NAME),
   cfcAtom.boundaryContext("sinkClass", RENDER_DISPLAY_SINK_CLASS),
 ];
@@ -178,13 +178,13 @@ export type RenderLabelInput = {
  */
 export type RenderConfidentialityResolver = (
   label: RenderLabelInput,
-) => readonly unknown[];
+) => readonly CfcConfClause[];
 
 /** `HasRole(principal, space, reader)` facts for a principal's reader spaces. */
 const mintReaderRoleFacts = (
   actingPrincipal: string | undefined,
   spaces: readonly string[],
-): readonly unknown[] => {
+): readonly CfcAtom[] => {
   if (actingPrincipal === undefined) return [];
   return spaces.map((space) =>
     cfcAtom.hasRole(actingPrincipal, space, "reader")
@@ -200,7 +200,9 @@ export const createRenderConfidentialityResolver = (
   const staticMemberSpaces = config.memberSpaces ?? [];
   const provider = config.membershipProvider;
   return (label) => {
-    if (label.confidentiality.length === 0) return label.confidentiality;
+    if (label.confidentiality.length === 0) {
+      return label.confidentiality as readonly CfcConfClause[];
+    }
     // §4.9.3: role facts come ONLY from verified membership, never from the
     // cell's residency. The static fast-path members (own space + session
     // space — implicit reads, no ACL lookup) plus any `Space(id)` atom in THIS
@@ -230,8 +232,8 @@ export const createRenderConfidentialityResolver = (
         grantResolver: config.grantResolver,
       },
     );
-    return result.exhausted
+    return (result.exhausted
       ? label.confidentiality
-      : result.label.confidentiality ?? [];
+      : result.label.confidentiality ?? []) as readonly CfcConfClause[];
   };
 };

@@ -64,8 +64,8 @@ export interface CfcObservationResult<T = unknown> {
 
 export const uniqueCfcAtoms = (
   atoms: Iterable<unknown>,
-): ImmutableJSONValue[] => {
-  const unique: ImmutableJSONValue[] = [];
+): CfcAtom[] => {
+  const unique: CfcAtom[] = [];
   for (const atom of atoms) {
     if (!unique.some((existing) => deepEqual(existing, atom))) {
       unique.push(atom as ImmutableJSONValue);

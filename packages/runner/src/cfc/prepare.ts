@@ -1,6 +1,7 @@
 import {
   CFC_ATOM_TYPE,
   CFC_COMPILED_BY_ATOM_PREFIX,
+  type CfcAtom,
   cfcAtom,
 } from "@commonfabric/api/cfc";
 import {
@@ -391,7 +392,7 @@ const resolveCurrentPrincipalPlaceholders = (
 const resolveCurrentPrincipalLabelValues = (
   values: readonly unknown[] | undefined,
   actingPrincipal: string | undefined,
-): readonly unknown[] | undefined => {
+): readonly CfcAtom[] | undefined => {
   if (!values) {
     return undefined;
   }
@@ -403,7 +404,7 @@ const resolveCurrentPrincipalLabelValues = (
       ? [resolveCurrentPrincipalPlaceholders(value, actingPrincipal)]
       : [];
   });
-  return resolved.length > 0 ? resolved : undefined;
+  return resolved.length > 0 ? (resolved as readonly CfcAtom[]) : undefined;
 };
 
 const isCurrentPrincipalClaimAtom = (value: unknown): value is {
@@ -3996,8 +3997,10 @@ const resolvePolicyOfConfidentiality = (
   tx: IExtendedStorageTransaction,
   values: readonly unknown[] | undefined,
   owningSpace: MemorySpace | undefined,
-): readonly unknown[] | undefined =>
-  values?.map((value) => resolvePolicyOfValue(tx, value, owningSpace));
+): readonly CfcConfClause[] | undefined =>
+  values?.map((value) =>
+    resolvePolicyOfValue(tx, value, owningSpace) as CfcConfClause
+  );
 
 const resolvePolicyOfValue = (
   tx: IExtendedStorageTransaction,

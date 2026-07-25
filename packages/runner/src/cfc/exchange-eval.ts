@@ -1,5 +1,4 @@
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import type { CfcAtom } from "@commonfabric/api/cfc";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 import {
   type AtomPatternBindings,
@@ -12,6 +11,7 @@ import {
 import { isRecord } from "@commonfabric/utils/types";
 import {
   CFC_ATOM_TYPE,
+  type CfcAtom,
   type CfcModulePolicyRefAtom,
 } from "@commonfabric/api/cfc";
 import {
@@ -142,7 +142,7 @@ export type CfcGrantResolverQuery = {
  */
 export type CfcGrantResolver = (
   query: CfcGrantResolverQuery,
-) => readonly unknown[];
+) => readonly CfcAtom[];
 
 /** Cold-capable exact-digest lookup supplied by the runner-owned storage seam. */
 export type CfcModulePolicyResolver = (

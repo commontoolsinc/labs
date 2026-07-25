@@ -281,7 +281,7 @@ export const deriveLabelMetadataTemplateEntries = (
 export const resolveLabelMetadataTemplateConfidentiality = (
   entries: readonly LabelMapEntry[],
   path: readonly string[],
-): readonly unknown[] | undefined => {
+): readonly CfcConfClause[] | undefined => {
   let best: { pathLength: number; atoms: unknown[] } | undefined;
   for (const entry of entries) {
     if (
