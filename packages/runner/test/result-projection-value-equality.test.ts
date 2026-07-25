@@ -126,4 +126,51 @@ describe("result projection", () => {
       await storage.close();
     }
   });
+
+  it("compares the projection in the representation it stores", async () => {
+    const storage = EmulatedStorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage,
+    });
+    // A result value that only becomes a `FabricValue` once converted: raw, it
+    // is unhashable, so comparing the projection before converting it throws
+    // (`hashOf: unsupported object type`) instead of deciding anything. The two
+    // setups differ, so the second one reaches the comparison.
+    const patternTagged = (tag: number) =>
+      ({
+        argumentSchema: { type: "object", properties: {} } as const,
+        resultSchema: undefined,
+        result: { tag, when: { toJSON: () => "2020-01-01" } },
+        nodes: [],
+      }) as unknown as Pattern;
+
+    try {
+      const tx = runtime.edit();
+      runtime.run(
+        tx,
+        patternTagged(1),
+        {},
+        runtime.getCell(space, "native-result", undefined, tx),
+      );
+      await tx.commit();
+
+      const tx2 = runtime.edit();
+      runtime.run(
+        tx2,
+        patternTagged(2),
+        {},
+        runtime.getCell(space, "native-result", undefined, tx2),
+      );
+      await tx2.commit();
+
+      const raw = runtime.getCell(space, "native-result", undefined)
+        .getRaw() as { tag: number; when: unknown };
+      expect(raw.tag).toBe(2);
+      expect(raw.when).toBe("2020-01-01");
+    } finally {
+      await runtime.dispose();
+      await storage.close();
+    }
+  });
 });
