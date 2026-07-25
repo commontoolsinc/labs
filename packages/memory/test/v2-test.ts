@@ -142,6 +142,7 @@ describe("memory v2 flags", () => {
       syncSchemaTable: false,
       // Build-inherent capability, not configuration: always advertised.
       sqliteCommitRowLabelEval: true,
+      pendingReadStacks: true,
       syncSchemaTableV2: false,
     });
 
@@ -156,6 +157,7 @@ describe("memory v2 flags", () => {
       commitPreconditions: true,
       syncSchemaTable: false,
       sqliteCommitRowLabelEval: true,
+      pendingReadStacks: true,
       syncSchemaTableV2: true,
     });
 
@@ -174,6 +176,7 @@ describe("memory v2 flags", () => {
         syncSchemaTable: true,
         syncSchemaTableV2: true,
         sqliteCommitRowLabelEval: true,
+        pendingReadStacks: true,
       },
       {
         modernCellRep: true,
@@ -185,6 +188,7 @@ describe("memory v2 flags", () => {
         // compatible — the capability only gates the runner's write-gate
         // relaxation, never the connection.
         sqliteCommitRowLabelEval: false,
+        pendingReadStacks: false,
       },
     ));
   });
@@ -199,6 +203,7 @@ describe("parseMemoryProtocolFlags", () => {
       syncSchemaTable: false,
       syncSchemaTableV2: false,
       sqliteCommitRowLabelEval: false,
+      pendingReadStacks: false,
     });
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: false }), {
       modernCellRep: false,
@@ -207,6 +212,7 @@ describe("parseMemoryProtocolFlags", () => {
       syncSchemaTable: false,
       syncSchemaTableV2: false,
       sqliteCommitRowLabelEval: false,
+      pendingReadStacks: false,
     });
   });
 
@@ -222,6 +228,7 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTable: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
+        pendingReadStacks: false,
       },
     );
   });
@@ -238,6 +245,7 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTable: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
+        pendingReadStacks: false,
       },
     );
   });
@@ -254,6 +262,7 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTable: true,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
+        pendingReadStacks: false,
       },
     );
   });
@@ -270,6 +279,7 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTable: false,
         syncSchemaTableV2: true,
         sqliteCommitRowLabelEval: false,
+        pendingReadStacks: false,
       },
     );
   });
@@ -286,12 +296,34 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTable: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: true,
+        pendingReadStacks: false,
+      },
+    );
+  });
+
+  it("accepts the pendingReadStacks capability key", () => {
+    assertEquals(
+      parseMemoryProtocolFlags({
+        pendingReadStacks: true,
+      }),
+      {
+        modernCellRep: false,
+        persistentSchedulerState: false,
+        commitPreconditions: false,
+        syncSchemaTable: false,
+        syncSchemaTableV2: false,
+        sqliteCommitRowLabelEval: false,
+        pendingReadStacks: true,
       },
     );
   });
 
   it("rejects values that are not a recognizable flags shape", () => {
     assertEquals(parseMemoryProtocolFlags(null), null);
+    assertEquals(
+      parseMemoryProtocolFlags({ pendingReadStacks: "true" }),
+      null,
+    );
     assertEquals(parseMemoryProtocolFlags(undefined), null);
     assertEquals(parseMemoryProtocolFlags("modernCellRep"), null);
     assertEquals(parseMemoryProtocolFlags([true]), null);

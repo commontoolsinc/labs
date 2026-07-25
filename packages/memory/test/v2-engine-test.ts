@@ -2522,20 +2522,19 @@ Deno.test("memory v2 engine resolves pending reads and rejects stale pending rea
   }
 });
 
-// CT-1872 1c: a resolutionOnly pending read asserts only that its dependency
-// localSeq resolved to a durable commit (a lower layer of the reader's pending
-// stack exists). It is exempt from the staleness check — that stays with the
-// top-of-stack pending read — so a later overlapping foreign write must NOT
-// reject it, while an unresolved dependency still must.
+// CT-1872 1c: an array localSeq names every pending layer the read sat on.
+// Non-highest elements impose resolution ONLY (the dependency must have an
+// accepted commit row) — staleness is based at the HIGHEST element, so a
+// foreign write that lands before the highest element's resolution must NOT
+// reject the read, while an unresolved element still must.
 //
-// NOTE: this pins main's de-facto lower-layer semantics made explicit on the
-// wire, not an endorsement of the scan interval. The staleness scan for a
-// pending read starts at the NAMED layer's resolution seq (with or without
-// resolutionOnly), so foreign writes in (reader's confirmed basis,
-// top-layer resolution] go unscanned — a pre-existing gap tracked as the
-// "pending-read basis over-advance" follow-up on CT-1872, whose fix
-// (own-session exclusion + true-basis validation) supersedes this exemption.
-Deno.test("memory v2 engine: resolutionOnly pending reads skip staleness but still require resolution", async () => {
+// NOTE: this pins main's de-facto basis semantics made explicit on the wire,
+// not an endorsement of the scan interval. The staleness scan starts at the
+// highest layer's resolution seq, so foreign writes in (reader's confirmed
+// basis, that resolution] go unscanned — a pre-existing gap tracked as
+// CT-1910 (pending-read basis over-advance), whose fix (own-session
+// exclusion + true-basis validation) supersedes the max-basis rule.
+Deno.test("memory v2 engine: array pending reads scan at the highest layer and require every layer to resolve", async () => {
   const { engine, path } = await createEngine();
 
   try {
@@ -2589,21 +2588,39 @@ Deno.test("memory v2 engine: resolutionOnly pending reads skip staleness but sti
       },
     });
 
-    // resolutionOnly + resolved dependency ⇒ ACCEPTED despite the later
-    // overlapping write: only existence of the seq-2 commit row is asserted.
-    const accepted = applyCommit(engine, {
+    // A newer same-session blind layer (localSeq 3, zero reads) lands AFTER
+    // the foreign write: the doc's stack top below the reader.
+    const top = applyCommit(engine, {
       sessionId: "session:1",
       invocation: invocationFor(3),
       authorization,
       commit: {
         localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:source",
+          patches: [{ op: "add", path: "/value/blind", value: true }],
+        }],
+      },
+    });
+    assertEquals(top.seq, 4);
+
+    // Array [2, 3]: staleness is based at the HIGHEST layer (3 → seq 4), so
+    // the foreign seq-3 write is outside the scan; element 2 imposes
+    // resolution only ⇒ ACCEPTED.
+    const accepted = applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: invocationFor(4),
+      authorization,
+      commit: {
+        localSeq: 4,
         reads: {
           confirmed: [],
           pending: [{
             id: "entity:source",
             path: toDocumentPath([]),
-            localSeq: 2,
-            resolutionOnly: true,
+            localSeq: [2, 3],
           }],
         },
         operations: [{
@@ -2613,25 +2630,24 @@ Deno.test("memory v2 engine: resolutionOnly pending reads skip staleness but sti
         }],
       },
     });
-    assertEquals(accepted.seq, 4);
+    assertEquals(accepted.seq, 5);
 
-    // resolutionOnly does NOT waive resolution itself: a dependency that was
-    // never committed still rejects.
+    // The array does NOT waive resolution for any element: one uncommitted
+    // member rejects the whole read.
     assertThrows(
       () =>
         applyCommit(engine, {
           sessionId: "session:1",
-          invocation: invocationFor(4),
+          invocation: invocationFor(5),
           authorization,
           commit: {
-            localSeq: 4,
+            localSeq: 5,
             reads: {
               confirmed: [],
               pending: [{
                 id: "entity:source",
                 path: toDocumentPath([]),
-                localSeq: 99,
-                resolutionOnly: true,
+                localSeq: [2, 99],
               }],
             },
             operations: [{
@@ -2645,16 +2661,17 @@ Deno.test("memory v2 engine: resolutionOnly pending reads skip staleness but sti
       "pending dependency not resolved",
     );
 
-    // Control: the SAME shape without the flag is stale — the flag, not the
+    // Control: based at the LOWER layer alone (scalar 2), the foreign seq-3
+    // write is inside the scan interval — the max-basis rule, not the
     // scenario, is what admitted the commit above.
     assertThrows(
       () =>
         applyCommit(engine, {
           sessionId: "session:1",
-          invocation: invocationFor(5),
+          invocation: invocationFor(6),
           authorization,
           commit: {
-            localSeq: 5,
+            localSeq: 6,
             reads: {
               confirmed: [],
               pending: [{
@@ -2689,11 +2706,12 @@ Deno.test("memory v2 engine: resolutionOnly pending reads skip staleness but sti
 //
 // T2's observation is not STALE — ["A","B"] never existed at any seq; "A"
 // lived only in the client's optimistic layer for a commit the server
-// refused. An under-declared T2 (pre-#4606 client: top-of-stack read only)
-// passes both resolution (T1.5 has a commit row) and the staleness scan
-// (nothing touched items after seq(T1.5)) and is durably ACCEPTED with a
-// phantom premise. The full-stack shape (#4606) names T1 as a
-// resolutionOnly dependency, and the missing commit row rejects it.
+// refused. An under-declared T2 (scalar top-of-stack read: what a client
+// emits toward a server without the `pendingReadStacks` flag) passes both
+// resolution (T1.5 has a commit row) and the staleness scan (nothing touched
+// items after seq(T1.5)) and is durably ACCEPTED with a phantom premise.
+// The full-stack array shape (#4606) also names T1, and the missing commit
+// row rejects it.
 Deno.test("memory v2 engine: full-stack dependency recording rejects a fabricated composite an under-declared commit smuggles through", async () => {
   const { engine, path } = await createEngine();
 
@@ -2813,8 +2831,8 @@ Deno.test("memory v2 engine: full-stack dependency recording rejects a fabricate
       ["B"],
     );
 
-    // Full-stack shape (#4606): the same observation also names T1, whose
-    // commit row does not exist — rejected on the resolution edge.
+    // Full-stack array shape (#4606): the same observation also names T1,
+    // whose commit row does not exist — rejected on the resolution edge.
     assertThrows(
       () =>
         applyCommit(engine, {
@@ -2828,12 +2846,7 @@ Deno.test("memory v2 engine: full-stack dependency recording rejects a fabricate
               pending: [{
                 id: "entity:D",
                 path: toDocumentPath(["value", "items"]),
-                localSeq: 11,
-              }, {
-                id: "entity:D",
-                path: toDocumentPath([]),
-                localSeq: 10,
-                resolutionOnly: true,
+                localSeq: [10, 11],
               }],
             },
             operations: [{

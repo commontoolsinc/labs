@@ -14,6 +14,7 @@ import type { FabricValue } from "@commonfabric/api";
 import type { MIME, URI } from "@commonfabric/memory/interface";
 import {
   type EntityDocument,
+  getMemoryProtocolFlags,
   type PatchOp,
   resetPersistentSchedulerStateConfig,
   type SessionSync,
@@ -157,6 +158,11 @@ type ResultRecord = {
   message?: string;
 };
 
+// The staleness-bearing top of a pending read's dependency set: the highest
+// listed layer (scalar reads are their own top).
+const localSeqTop = (read: { localSeq: number | number[] }): number =>
+  Array.isArray(read.localSeq) ? Math.max(...read.localSeq) : read.localSeq;
+
 class ScriptedServerModel {
   connectionCount = 0;
   transactLocalSeqs: number[] = [];
@@ -259,30 +265,43 @@ class ScriptedServerModel {
     commit: ClientCommit,
   ): RejectionError | null {
     for (const read of commit.reads.pending) {
-      const dependency = this.applied.get(read.localSeq);
-      if (!dependency) {
+      // Mirrors resolvePendingReads in packages/memory/v2/engine.ts: every
+      // element of an array localSeq must have resolved to an accepted
+      // commit, and staleness is scanned once, based at the HIGHEST element
+      // (the doc's top-of-stack below the reader). Scanning lower layers
+      // would false-conflict with the session's own later stacked writes —
+      // the exact hazard the max-basis rule exists to avoid.
+      const layers = Array.isArray(read.localSeq)
+        ? read.localSeq
+        : [read.localSeq];
+      let basis: AppliedRecord | undefined;
+      let unresolved: number | undefined;
+      for (const layer of layers) {
+        const dependency = this.applied.get(layer);
+        if (!dependency) {
+          unresolved = layer;
+          break;
+        }
+        if (
+          basis === undefined || dependency.applied.seq > basis.applied.seq
+        ) {
+          basis = dependency;
+        }
+      }
+      if (unresolved !== undefined || basis === undefined) {
         return {
           name: "ConflictError",
-          message: `pending dependency localSeq=${read.localSeq}`,
+          message: `pending dependency localSeq=${unresolved}`,
         };
       }
-      // A resolutionOnly read asserts only that the dependency resolved to a
-      // durable commit (a lower layer of the reader's pending stack exists);
-      // staleness stays with the top-of-stack read. Scanning it for overlap
-      // would false-conflict with the session's own later stacked writes —
-      // the exact hazard the flag exists to avoid (mirrors
-      // resolvePendingReads in packages/memory/v2/engine.ts).
-      if (read.resolutionOnly === true) {
-        continue;
-      }
       for (const accepted of this.applied.values()) {
-        if (accepted.applied.seq <= dependency.applied.seq) {
+        if (accepted.applied.seq <= basis.applied.seq) {
           continue;
         }
         if (accepted.touched.some((write) => readOverlapsWrite(read, write))) {
           return {
             name: "ConflictError",
-            message: `stale pending read localSeq=${read.localSeq}`,
+            message: `stale pending read localSeq=${localSeqTop(read)}`,
           };
         }
       }
@@ -531,9 +550,14 @@ type PushSyncOptions = {
 
 type Harness = ReturnType<typeof createHarness>;
 
-const createHarness = () => {
+const createHarness = (
+  options: {
+    transport?: (model: ScriptedServerModel) => ScriptedModelTransport;
+  } = {},
+) => {
   const model = new ScriptedServerModel();
-  const transport = new ScriptedModelTransport(model);
+  const transport = options.transport?.(model) ??
+    new ScriptedModelTransport(model);
   const sessionFactory = new SingleSessionFactory(transport);
   const storageManager = TestStorageManager.create({
     as: signer,
@@ -932,11 +956,9 @@ const topPendingSurface = (
     10_000,
   );
   return new Map(
-    reads.pending
-      // Existence-only reads on lower pending layers are dependency records,
-      // not the staleness-bearing surface this helper reports.
-      .filter((read) => read.resolutionOnly !== true)
-      .map((read) => [read.id as URI, read.localSeq]),
+    // Lower layers in an array localSeq are dependency records; the
+    // staleness-bearing surface this helper reports is the top element.
+    reads.pending.map((read) => [read.id as URI, localSeqTop(read)]),
   );
 };
 
@@ -1893,21 +1915,18 @@ Deno.test("memory v2 stacked commits: pending-read compaction keeps localSeq bou
     );
 
     assertEquals(reads.confirmed, []);
-    // The top-of-stack read carries staleness (and the read path); every
-    // lower pending layer the read's view sat on is recorded as one
-    // existence-only (resolutionOnly) dependency at the document root so a
+    // One read per path, carrying the FULL dependency array (ascending; the
+    // last element is the doc's top-of-stack, the staleness basis) so a
     // dropped lower layer still dooms the commit (CT-1872 1c). Two source
-    // reads over the same stack still emit a single dependency per layer.
+    // reads over the same stack compact to a single entry.
     assertEquals(
       reads.pending.map((read) => ({
         id: read.id,
         localSeq: read.localSeq,
         path: [...read.path],
-        resolutionOnly: read.resolutionOnly ?? false,
       })),
       [
-        { id: DOCS.A, localSeq: 1, path: [], resolutionOnly: true },
-        { id: DOCS.A, localSeq: 2, path: ["value"], resolutionOnly: false },
+        { id: DOCS.A, localSeq: [1, 2], path: ["value"] },
       ],
     );
     await assertResultOk(c1.promise);
@@ -1925,8 +1944,8 @@ Deno.test("memory v2 stacked commits: reading through the session's own two-deep
     const c2 = beginSet(harness, DOCS.A, valueFor("c2"));
     harness.model.setOutcome(c2.localSeq, { kind: "accept" });
     // c3's read view sits on the session's OWN stack [c1 set A, c2 set A].
-    // The lower layer (c1) must be an existence-only dependency: a
-    // staleness-bearing read naming c1 would false-conflict with our own c2.
+    // The lower layer (c1) must impose resolution only: a staleness basis at
+    // c1 would false-conflict with our own c2 (max-basis rule, spec §3.5).
     const c3 = beginSet(
       harness,
       DOCS.A,
@@ -1937,25 +1956,61 @@ Deno.test("memory v2 stacked commits: reading through the session's own two-deep
 
     await assertResultOk(c1.promise);
     await assertResultOk(c2.promise);
-    // ACCEPTED — this is the regression guard for the resolutionOnly design.
+    // ACCEPTED — this is the regression guard for the max-basis rule.
     await assertResultOk(c3.promise);
     expectVisible(harness, { A: valueFor("c3") });
 
-    // The wire commit really carried the two-layer read set (the scenario
-    // that would have false-conflicted without resolutionOnly).
+    // The wire commit really carried the two-layer dependency array (the
+    // scenario that would have false-conflicted under a lower basis).
     const sent = harness.model.applied.get(c3.localSeq);
     assertExists(sent);
     assertEquals(
-      sent.commit.reads.pending
-        .map((read) => ({
-          localSeq: read.localSeq,
-          resolutionOnly: read.resolutionOnly ?? false,
-        }))
-        .sort((left, right) => left.localSeq - right.localSeq),
-      [
-        { localSeq: c1.localSeq, resolutionOnly: true },
-        { localSeq: c2.localSeq, resolutionOnly: false },
-      ],
+      sent.commit.reads.pending.map((read) => read.localSeq),
+      [[c1.localSeq, c2.localSeq]],
+    );
+  } finally {
+    await harness.close();
+  }
+});
+
+// An "older server": advertises every current capability EXCEPT the array
+// dependency sets.
+class PreStackTransport extends ScriptedModelTransport {
+  protected override helloFlags() {
+    return { ...getMemoryProtocolFlags(), pendingReadStacks: false };
+  }
+}
+
+Deno.test("memory v2 stacked commits: a server without pendingReadStacks receives scalar top-of-stack reads", async () => {
+  const harness = await createHarness({
+    transport: (model) => new PreStackTransport(model),
+  });
+  try {
+    const c1 = beginSet(harness, DOCS.A, valueFor("c1"));
+    harness.model.setOutcome(c1.localSeq, { kind: "accept" });
+    const c2 = beginSet(harness, DOCS.A, valueFor("c2"));
+    harness.model.setOutcome(c2.localSeq, { kind: "accept" });
+    const c3 = beginSet(
+      harness,
+      DOCS.A,
+      valueFor("c3"),
+      sourceFromReads([{ id: DOCS.A }]),
+    );
+    harness.model.setOutcome(c3.localSeq, { kind: "accept" });
+
+    await assertResultOk(c1.promise);
+    await assertResultOk(c2.promise);
+    await assertResultOk(c3.promise);
+
+    // The wire commit was scalarized to the top-of-stack element — the
+    // pre-stack shape an old server can resolve. The lower-layer dependency
+    // (c1) is NOT on the wire (the 1c check is knowingly absent against
+    // such servers); the client-side cascade still recorded it locally.
+    const sent = harness.model.applied.get(c3.localSeq);
+    assertExists(sent);
+    assertEquals(
+      sent.commit.reads.pending.map((read) => read.localSeq),
+      [c2.localSeq],
     );
   } finally {
     await harness.close();

@@ -5444,41 +5444,54 @@ const resolvePendingReads = (
   const resolutions = new Map<number, { localSeq: number; seq: number }>();
 
   for (const read of commit.reads.pending) {
-    let resolution = resolutions.get(read.localSeq);
-    if (!resolution) {
-      const row = engine.statements.selectPendingResolution.get({
-        session_id: sessionKey,
-        local_seq: read.localSeq,
-      }) as { seq: number } | undefined;
-      if (!row) {
-        throw new ConflictError(
-          `pending dependency not resolved: ${read.localSeq}`,
-        );
-      }
-      resolution = {
-        localSeq: read.localSeq,
-        seq: row.seq,
-      };
-      resolutions.set(read.localSeq, resolution);
+    // An array localSeq names EVERY pending layer the read's view sat on:
+    // each element must have resolved to an accepted commit, and staleness
+    // is checked exactly once, based at the HIGHEST element — the document's
+    // top-of-stack layer below the reader, which the array MUST include
+    // (03-commit-model.md §3.5). A scalar is the single-layer form.
+    const layers = Array.isArray(read.localSeq)
+      ? read.localSeq
+      : [read.localSeq];
+    if (layers.length === 0) {
+      throw new ProtocolError(
+        `pending read on ${read.id} names no localSeq`,
+      );
     }
-
-    // A resolutionOnly read asserts only that the dependency localSeq resolved
-    // to a durable commit (a lower layer of the reader's pending stack
-    // exists); the staleness check belongs to the top-of-stack pending read.
-    if (read.resolutionOnly === true) continue;
+    let basis: { localSeq: number; seq: number } | undefined;
+    for (const localSeq of layers) {
+      let resolution = resolutions.get(localSeq);
+      if (!resolution) {
+        const row = engine.statements.selectPendingResolution.get({
+          session_id: sessionKey,
+          local_seq: localSeq,
+        }) as { seq: number } | undefined;
+        if (!row) {
+          throw new ConflictError(
+            `pending dependency not resolved: ${localSeq}`,
+          );
+        }
+        resolution = { localSeq, seq: row.seq };
+        resolutions.set(localSeq, resolution);
+      }
+      if (basis === undefined || localSeq > basis.localSeq) {
+        basis = resolution;
+      }
+    }
 
     const conflictSeq = findConflictSeq(
       engine,
       branch,
       read.id,
       resolveScopeKey(read.scope, { principal, sessionId }),
-      resolution.seq,
+      basis!.seq,
       read.path,
       read.nonRecursive ?? false,
     );
     if (conflictSeq !== null) {
       throw new ConflictError(
-        `stale pending read: ${read.id} via localSeq ${read.localSeq} conflicted with seq ${conflictSeq}`,
+        `stale pending read: ${read.id} via localSeq ${
+          basis!.localSeq
+        } conflicted with seq ${conflictSeq}`,
       );
     }
   }
@@ -5573,33 +5586,39 @@ const schedulerObservationReadDropReason = (
 
   const resolutions = new Map<number, { localSeq: number; seq: number }>();
   for (const read of reads.pending) {
-    let resolution = resolutions.get(read.localSeq);
-    if (!resolution) {
-      const row = engine.statements.selectPendingResolution.get({
-        session_id: sessionKey,
-        local_seq: read.localSeq,
-      }) as { seq: number } | undefined;
-      if (!row) {
-        return "pending-read-missing";
-      }
-      resolution = {
-        localSeq: read.localSeq,
-        seq: row.seq,
-      };
-      resolutions.set(read.localSeq, resolution);
+    // Same contract as resolvePendingReads: every listed layer must have
+    // resolved; staleness is checked once, based at the highest layer.
+    const layers = Array.isArray(read.localSeq)
+      ? read.localSeq
+      : [read.localSeq];
+    if (layers.length === 0) {
+      return "pending-read-missing";
     }
-
-    // Same exemption as resolvePendingReads: a resolutionOnly read only
-    // requires the dependency to have resolved (checked above); staleness is
-    // the top-of-stack read's job.
-    if (read.resolutionOnly === true) continue;
+    let basis: { localSeq: number; seq: number } | undefined;
+    for (const localSeq of layers) {
+      let resolution = resolutions.get(localSeq);
+      if (!resolution) {
+        const row = engine.statements.selectPendingResolution.get({
+          session_id: sessionKey,
+          local_seq: localSeq,
+        }) as { seq: number } | undefined;
+        if (!row) {
+          return "pending-read-missing";
+        }
+        resolution = { localSeq, seq: row.seq };
+        resolutions.set(localSeq, resolution);
+      }
+      if (basis === undefined || localSeq > basis.localSeq) {
+        basis = resolution;
+      }
+    }
 
     const conflictSeq = findConflictSeq(
       engine,
       branch,
       read.id,
       resolveScopeKey(read.scope, { principal, sessionId }),
-      resolution.seq,
+      basis!.seq,
       read.path,
       read.nonRecursive ?? false,
     );

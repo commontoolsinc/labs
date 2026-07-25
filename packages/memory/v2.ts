@@ -166,19 +166,19 @@ export interface PendingRead {
   id: EntityId;
   scope?: CellScope;
   path: ReadPath;
-  localSeq: number;
+  /**
+   * The reader's pending-stack dependency set for this document. An array
+   * lists EVERY pending layer the read's materialized view sat on; each
+   * element must have resolved to an accepted commit for this commit to be
+   * applicable, and the staleness (conflict) check runs exactly once, based
+   * at the resolution of the HIGHEST element — the document's top-of-stack
+   * layer below the reader, which the array MUST include. A scalar is the
+   * degenerate single-layer form (also what pre-`pendingReadStacks` peers
+   * emit: top-of-stack only, carrying no lower-layer dependencies).
+   */
+  localSeq: number | number[];
   /** See {@link ConfirmedRead.nonRecursive}. */
   nonRecursive?: boolean;
-  /**
-   * When true, this read asserts ONLY that `localSeq` resolved to a durable
-   * commit — i.e. a lower layer of the reader's pending stack exists — and is
-   * exempt from the staleness (conflict) check entirely. Emitted for the
-   * non-top layers of a stacked pending read: the top-of-stack pending read
-   * carries the full path and remains staleness-bearing, so path staleness is
-   * still checked exactly once per read. Absent/false ⇒ full pending read
-   * (the historical behavior: resolution AND staleness).
-   */
-  resolutionOnly?: boolean;
 }
 
 export interface SchedulerObservationCommit {
@@ -271,6 +271,17 @@ export interface MemoryProtocolFlags {
    * (not configuration), so a server of this version always advertises it.
    */
   sqliteCommitRowLabelEval: boolean;
+  /**
+   * Server capability (CT-1872 1c): pending reads may carry an ARRAY
+   * `localSeq` naming every pending layer the read sat on (resolution
+   * required for each element; staleness based at the highest — see
+   * `PendingRead.localSeq`). A client that sees this absent (an older
+   * server) falls back to scalar top-of-stack emission, keeping wire compat
+   * at the cost of the lower-layer dependency check on that server (the
+   * client-side drop cascade still applies locally). Inherent to the build,
+   * so a server of this version always advertises it.
+   */
+  pendingReadStacks: boolean;
 }
 
 /**
@@ -283,6 +294,7 @@ export type WireMemoryProtocolFlags = {
   syncSchemaTable?: boolean;
   syncSchemaTableV2?: boolean;
   sqliteCommitRowLabelEval?: boolean;
+  pendingReadStacks?: boolean;
 };
 
 export interface HelloMessage {
@@ -750,6 +762,10 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // advertises the fact. Peers that see it absent (an older server) keep their
   // write gate failing closed.
   sqliteCommitRowLabelEval: true,
+  // Likewise build-inherent: this build's engine resolves array-localSeq
+  // pending reads (resolvePendingReads), so it always advertises it. Clients
+  // that see it absent scalarize to top-of-stack before sending.
+  pendingReadStacks: true,
   syncSchemaTableV2: getSyncSchemaTableConfig(),
 });
 
@@ -823,6 +839,14 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const pendingReadStacks = value.pendingReadStacks;
+  if (
+    pendingReadStacks !== undefined &&
+    typeof pendingReadStacks !== "boolean"
+  ) {
+    return null;
+  }
+
   return {
     modernCellRep: modernCellRep === true,
     persistentSchedulerState: persistentSchedulerState === true,
@@ -832,6 +856,9 @@ export const parseMemoryProtocolFlags = (
     // Absent (an older peer) parses to false: the capability must be
     // POSITIVELY advertised for the runner to relax its write gate.
     sqliteCommitRowLabelEval: sqliteCommitRowLabelEval === true,
+    // Absent (an older server) parses to false: clients scalarize pending
+    // reads to top-of-stack unless the array capability is advertised.
+    pendingReadStacks: pendingReadStacks === true,
   };
 };
 
@@ -847,6 +874,7 @@ export const wireMemoryProtocolFlags = (
   syncSchemaTable: flags.syncSchemaTable,
   syncSchemaTableV2: flags.syncSchemaTableV2,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
+  pendingReadStacks: flags.pendingReadStacks,
 });
 
 /**

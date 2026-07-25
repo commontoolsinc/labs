@@ -313,18 +313,18 @@ type PendingCommitRead = {
   id: URI;
   scope?: CellScope;
   path: DocumentPath;
-  localSeq: number;
-  nonRecursive?: boolean;
   /**
-   * Client mirror of the wire flag: this read asserts only that `localSeq`
-   * resolved to a durable commit (a lower layer of the reader's pending
-   * stack), and is exempt from the staleness check. The top-of-stack pending
-   * read carries staleness for the doc; these existence-only reads are what
-   * make the server's pending-dependency check (and the client cascade)
-   * cover EVERY layer the read's materialized view sat on, not just the
-   * nearest one (CT-1872 1c).
+   * Every pending layer the read's materialized view sat on, as an array —
+   * each must resolve to an accepted commit (server pending-dependency
+   * check; client cascade), and staleness is based at the HIGHEST element,
+   * the doc's top-of-stack layer below the reader, which the array always
+   * includes (CT-1872 1c; 03-commit-model.md §3.5). Scalarized to the
+   * top-of-stack element at send time when the server does not advertise
+   * `pendingReadStacks` — the pre-stack wire shape, which keeps compat at
+   * the cost of the lower-layer dependency check on that server.
    */
-  resolutionOnly?: boolean;
+  localSeq: number | number[];
+  nonRecursive?: boolean;
 };
 
 const pendingVersion = (
@@ -609,6 +609,11 @@ const comparePath = (left: readonly string[], right: readonly string[]) => {
   return 0;
 };
 
+// Canonical grouping/sort key for a pending read's dependency set: arrays
+// are ascending, so the join is order-stable per identical stack.
+const localSeqKey = (localSeq: number | number[]): string =>
+  Array.isArray(localSeq) ? localSeq.join(",") : String(localSeq);
+
 const compactCommitReads = <
   Read extends ConfirmedCommitRead | PendingCommitRead,
 >(
@@ -630,11 +635,12 @@ const compactCommitReads = <
       return left.seq - right.seq;
     }
 
-    if (
-      "localSeq" in left && "localSeq" in right &&
-      left.localSeq !== right.localSeq
-    ) {
-      return left.localSeq - right.localSeq;
+    if ("localSeq" in left && "localSeq" in right) {
+      const leftKey = localSeqKey(left.localSeq);
+      const rightKey = localSeqKey(right.localSeq);
+      if (leftKey !== rightKey) {
+        return leftKey < rightKey ? -1 : 1;
+      }
     }
 
     if (left.nonRecursive !== right.nonRecursive) {
@@ -653,9 +659,9 @@ const compactCommitReads = <
       ? `confirmed:${
         normalizeCellScope(candidate.scope)
       }:${candidate.id}:${candidate.seq}`
-      : `pending:${
-        normalizeCellScope(candidate.scope)
-      }:${candidate.id}:${candidate.localSeq}`;
+      : `pending:${normalizeCellScope(candidate.scope)}:${candidate.id}:${
+        localSeqKey(candidate.localSeq)
+      }`;
     let group = grouped.get(dependencyKey);
     if (!group) {
       group = {
@@ -711,11 +717,12 @@ const compactCommitReads = <
       return left.seq - right.seq;
     }
 
-    if (
-      "localSeq" in left && "localSeq" in right &&
-      left.localSeq !== right.localSeq
-    ) {
-      return left.localSeq - right.localSeq;
+    if ("localSeq" in left && "localSeq" in right) {
+      const leftKey = localSeqKey(left.localSeq);
+      const rightKey = localSeqKey(right.localSeq);
+      if (leftKey !== rightKey) {
+        return leftKey < rightKey ? -1 : 1;
+      }
     }
 
     if (left.nonRecursive !== right.nonRecursive) {
@@ -729,6 +736,64 @@ const compactCommitReads = <
 const toCommitReadPath = (
   path: readonly (string | number)[],
 ): DocumentPath => toDocumentPath(path.map(String));
+
+// Wire-compat downgrade for servers that do not advertise the
+// `pendingReadStacks` hello flag: collapse every array dependency set —
+// including those inside batched scheduler observations — to its
+// top-of-stack element (the highest localSeq, i.e. the staleness basis).
+// The lower-layer dependency check is lost against such servers by design
+// (CT-1872 1c stays open there); the client-side drop cascade still covers
+// those edges locally.
+const scalarizeLocalSeq = (localSeq: number | number[]): number =>
+  Array.isArray(localSeq) ? Math.max(...localSeq) : localSeq;
+
+const scalarizePendingReadStacks = (commit: ClientCommit): ClientCommit => {
+  const hasStack = (reads: { localSeq: number | number[] }[]): boolean =>
+    reads.some((read) => Array.isArray(read.localSeq));
+  const scalarizeReads = <Read extends { localSeq: number | number[] }>(
+    reads: Read[],
+  ): Read[] =>
+    reads.map((read) =>
+      Array.isArray(read.localSeq)
+        ? { ...read, localSeq: scalarizeLocalSeq(read.localSeq) }
+        : read
+    );
+  const needsCommit = hasStack(commit.reads.pending);
+  const needsBatch =
+    commit.schedulerObservationBatch?.some((entry) =>
+      hasStack(entry.reads.pending)
+    ) === true;
+  if (!needsCommit && !needsBatch) {
+    return commit;
+  }
+  return {
+    ...commit,
+    ...(needsCommit
+      ? {
+        reads: {
+          confirmed: commit.reads.confirmed,
+          pending: scalarizeReads(commit.reads.pending),
+        },
+      }
+      : {}),
+    ...(needsBatch
+      ? {
+        schedulerObservationBatch: commit.schedulerObservationBatch!.map(
+          (entry) =>
+            hasStack(entry.reads.pending)
+              ? {
+                ...entry,
+                reads: {
+                  confirmed: entry.reads.confirmed,
+                  pending: scalarizeReads(entry.reads.pending),
+                },
+              }
+              : entry,
+        ),
+      }
+      : {}),
+  };
+};
 
 export class StorageManager implements IStorageManager {
   readonly id: string;
@@ -2733,7 +2798,13 @@ class SpaceReplica implements ISpaceReplica {
     }
     const dependencies = new Set<number>();
     for (const read of commit.reads.pending) {
-      dependencies.add(read.localSeq);
+      if (Array.isArray(read.localSeq)) {
+        for (const layer of read.localSeq) {
+          dependencies.add(layer);
+        }
+      } else {
+        dependencies.add(read.localSeq);
+      }
     }
     const entry: InFlightCommit = {
       localSeq,
@@ -2918,7 +2989,13 @@ class SpaceReplica implements ISpaceReplica {
             throw error;
           }
         }
-        const { session } = await this.sessionHandle();
+        const { client, session } = await this.sessionHandle();
+        // Wire-compat: only a server advertising `pendingReadStacks` can
+        // resolve array dependency sets — otherwise collapse each to its
+        // top-of-stack element before sending.
+        const wireCommit = client.serverFlags?.pendingReadStacks === true
+          ? commit
+          : scalarizePendingReadStacks(commit);
         if (inFlight?.localRejectionValue !== undefined) {
           // A pending dependency was dropped while we awaited the scheduler
           // batch flush or the session handshake — do not send a commit whose
@@ -2939,7 +3016,7 @@ class SpaceReplica implements ISpaceReplica {
         if (inFlight === undefined) {
           // No pending reads → no dependency that can be dropped from under
           // this commit; keep the direct await.
-          const applied = await session.transact(commit);
+          const applied = await session.transact(wireCommit);
           this.confirmPending(localSeq, operations, applied);
           telemetry?.submit({
             type: "storage.push.complete",
@@ -2951,7 +3028,7 @@ class SpaceReplica implements ISpaceReplica {
         // Race the server verdict against a locally-fabricated rejection (a
         // dependency dropped mid-flight, or a replica reset). A server
         // rejection wins the race by REJECTING it, landing in the catch below.
-        const verdict = session.transact(commit);
+        const verdict = session.transact(wireCommit);
         const outcome = await Promise.race([
           verdict.then((applied) => ({ applied })),
           inFlight.localRejection.promise.then((rejection) => ({ rejection })),
@@ -3080,10 +3157,6 @@ class SpaceReplica implements ISpaceReplica {
   ) {
     const confirmed: ConfirmedCommitRead[] = [];
     const pending: PendingCommitRead[] = [];
-    // Dedup for the existence-only reads on lower pending layers: a commit
-    // can read the same doc many times, and a pending stack can hold several
-    // entries per localSeq.
-    const seenExistenceDeps = new Set<string>();
     if (!source) {
       return { confirmed, pending };
     }
@@ -3114,32 +3187,29 @@ class SpaceReplica implements ISpaceReplica {
       confirmedSeq?: number,
     ) => {
       const record = this.#docs.get(docKey(id, scope));
-      const lower = record?.pending
-        .filter((version) => version.localSeq < localSeq) ?? [];
-      const pendingLocalSeq = lower.at(-1)?.localSeq;
+      // The read's materialized view sat on EVERY lower pending layer, not
+      // just the nearest one: name them ALL (ascending; the last element is
+      // the doc's top-of-stack below this commit) so a dropped deeper layer
+      // still dooms this commit (server: pending-dependency resolution;
+      // client: cascade). Staleness is based at the highest element only —
+      // a staleness basis on a lower layer would false-conflict with the
+      // session's own later stacked writes (CT-1872 1c).
+      const layers = [
+        ...new Set(
+          record?.pending
+            .filter((version) => version.localSeq < localSeq)
+            .map((version) => version.localSeq) ?? [],
+        ),
+      ].sort((left, right) => left - right);
       const shape = nonRecursive ? { nonRecursive: true } : {};
-      if (pendingLocalSeq !== undefined) {
-        pending.push({ id, scope, path, localSeq: pendingLocalSeq, ...shape });
-        // The read's materialized view sat on EVERY lower pending layer, not
-        // just the nearest one. Emit an existence-only dependency per other
-        // unique layer so a dropped deeper layer still dooms this commit
-        // (server: pending-dependency resolution; client: cascade). These
-        // must not carry the read path: staleness stays with the top read —
-        // a full-path read on a lower layer would false-conflict with the
-        // session's own later stacked writes (CT-1872 1c).
-        for (const version of lower) {
-          if (version.localSeq === pendingLocalSeq) continue;
-          const depKey = `${docKey(id, scope)}\0${version.localSeq}`;
-          if (seenExistenceDeps.has(depKey)) continue;
-          seenExistenceDeps.add(depKey);
-          pending.push({
-            id,
-            scope,
-            path: toDocumentPath([]),
-            localSeq: version.localSeq,
-            resolutionOnly: true,
-          });
-        }
+      if (layers.length > 0) {
+        pending.push({
+          id,
+          scope,
+          path,
+          localSeq: layers.length === 1 ? layers[0] : layers,
+          ...shape,
+        });
       } else {
         confirmed.push({
           id,

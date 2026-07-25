@@ -152,12 +152,15 @@ interface ConfirmedRead {
 interface PendingRead {
   id: EntityId;
   path: ReadPath;
-  localSeq: number;
-  // Existence-only dependency record: asserts that `localSeq` resolved to an
-  // accepted commit, without carrying a staleness precondition of its own.
-  // Emitted for the layers UNDER the staleness-bearing top-of-stack read when
-  // a read observes a value through a stack of pending commits (§3.5).
-  resolutionOnly?: boolean;
+  // The dependency set: every pending layer the read's materialized view
+  // sat on. Each element must have resolved to an ACCEPTED commit for this
+  // commit to be applicable; the staleness check (§3.6.1) runs once, based
+  // at the resolution of the HIGHEST element — the document's top-of-stack
+  // layer below the reader, which the array MUST include (§3.5). A scalar
+  // is the single-layer form, and the only form a client may send to a
+  // server that has not advertised the `pendingReadStacks` capability in
+  // the hello exchange.
+  localSeq: number | number[];
 }
 ```
 
@@ -187,22 +190,30 @@ commits.
 The cascade cannot rely on each pending layer reading the layer beneath it:
 zero-read operations (mergeable collection writes) legally interleave into a
 stack without any read edge. A commit that reads through a pending stack
-therefore records its FULL dependency set directly — the top-of-stack layer as
-the ordinary (staleness-bearing) pending read, and every lower layer at or
-under the read path as a `resolutionOnly` existence read. The client mirrors
-the server cascade at drop time: when a pending commit's optimistic writes are
-dropped, every queued or in-flight commit whose recorded dependency set names
-the dropped `localSeq` is locally rejected without waiting for the server's
-per-commit verdict.
+therefore records its FULL dependency set directly: the read's `localSeq`
+array names every pending layer of the document below the reader, in
+ascending order. Each element imposes a resolution requirement; the highest
+element — the document's top-of-stack layer — is the staleness basis. The
+client mirrors the server cascade at drop time: when a pending commit's
+optimistic writes are dropped, every queued or in-flight commit whose
+recorded dependency set names the dropped `localSeq` is locally rejected
+without waiting for the server's per-commit verdict.
 
-The recorded dependency set MUST include the document's top-of-stack pending
-layer below the reader, and the staleness-bearing read MUST name that top
-layer: the staleness basis is always the stack top. Any narrowing of the
-dependency set (for example, pruning layers whose write footprint provably
-cannot influence the read path) may drop only NON-top layers. Basing the
-staleness scan at a lower layer is unsound, not merely conservative: the
-session's own newer stacked commits then land inside the scan interval, where
-the path-blind set/delete check false-conflicts with the reader's own stack.
+The dependency array MUST include the document's top-of-stack pending layer
+below the reader: the staleness basis is always the stack top (implicitly,
+the array's highest element). Any narrowing of the dependency set (for
+example, pruning layers whose write footprint provably cannot influence the
+read path) may drop only NON-top layers. Basing the staleness scan at a
+lower layer is unsound, not merely conservative: the session's own newer
+stacked commits then land inside the scan interval, where the path-blind
+set/delete check false-conflicts with the reader's own stack.
+
+The array form is a negotiated capability (`pendingReadStacks` in the hello
+flags). Toward a server that does not advertise it, the client MUST send
+scalar reads, collapsing each array to its top-of-stack element — the
+pre-capability wire shape. The lower-layer dependency check is knowingly
+absent on such servers; the client-side drop cascade still covers those
+edges locally.
 
 ## 3.6 Server Validation
 
@@ -276,16 +287,15 @@ basis layer's seq, so the scan interval past the basis contains no own-session
 commits. (The current implementation rejects rather than holds, which
 preserves this ordering trivially.)
 
-A `resolutionOnly` pending read participates in this resolution requirement
-exactly like an ordinary pending read — an unresolved or rejected dependency
-rejects the commit — but carries no staleness precondition of its own: the
-overlap validation of §3.6.1/§3.6.2 applies only to the staleness-bearing
-reads. The staleness scan for a pending read starts at the NAMED layer's
-resolution seq; writes landing between the reader's confirmed basis and that
-seq are not scanned through pending reads today (tracked as the pending-read
-basis over-advance follow-up on CT-1872 — the planned repair validates the
-full interval from the reader's confirmed basis, excluding only the reader's
-own resolved session stack).
+Every element of an array `localSeq` participates in this resolution
+requirement — one unresolved or rejected element rejects the commit — but
+only the highest element carries the staleness precondition: the overlap
+validation of §3.6.1/§3.6.2 runs once per read, based at the highest
+element's resolution seq. Writes landing between the reader's confirmed
+basis and that seq are not scanned through pending reads today (tracked as
+CT-1910, the pending-read basis over-advance — the planned repair validates
+the full interval from the reader's confirmed basis, excluding only the
+reader's own resolved session stack, and supersedes the max-basis rule).
 
 ### 3.6.4 Conflict Response
 
