@@ -6,7 +6,7 @@ import {
   type DiffWorkspace,
   realWorkspace,
 } from "../lib/view/diffdoc.ts";
-import { createDiffSemantics } from "../lib/view/semantics.ts";
+import { createDiffSemantics } from "../lib/view/languages/typescript/semantics.ts";
 import { buildPeekCard } from "../lib/view/card.ts";
 import { renderLineColored } from "../lib/view/highlight.ts";
 import { renderFrame, type ViewState } from "../lib/view/render.ts";
@@ -781,7 +781,7 @@ Deno.test("diff semantics: root files outside the config root are dropped", () =
     assert(maps.rootFiles.length > 0, "the stub resolved the file");
     assertEquals(
       createDiffSemantics(DIFF, maps, { cwd: configRoot }),
-      null,
+      undefined,
       "out-of-root roots leave no service",
     );
   } finally {

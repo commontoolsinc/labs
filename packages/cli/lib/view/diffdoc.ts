@@ -23,8 +23,9 @@ import type {
 } from "./model.ts";
 import { flattenStructure } from "./model.ts";
 import type { DiffHunk, DiffModel } from "./diff.ts";
-import { computeLineStarts, lineIndexOf, parseDocument } from "./parse.ts";
-import { isMarkdownPath } from "./markdown.ts";
+import { computeLineStarts, lineIndexOf } from "./lines.ts";
+import type { Language } from "./languages/language.ts";
+import { languageForFile } from "./languages/language.ts";
 import { cpLen } from "./ansi.ts";
 import { dirname, isAbsolute, join, relative } from "@std/path";
 
@@ -170,7 +171,7 @@ interface FileMapping {
  * Per-session cache of each workspace file's content and parse, keyed by
  * absolute path. The diff is edited, not the workspace, so these are stable: a
  * cache lets the deferred re-parse on every keystroke pause reuse the (costly)
- * TypeScript parses instead of re-reading and re-parsing every named file. It is
+ * parsed documents instead of re-reading and re-parsing every named file. It is
  * also consistent with the save map, which captures the same construction-time
  * content.
  */
@@ -184,13 +185,16 @@ interface LoadedFile {
 
 function loadFile(
   absPath: string,
+  language: Language,
   ws: DiffWorkspace,
   cache?: WorkspaceCache,
 ): LoadedFile {
   const hit = cache?.get(absPath);
   if (hit) return hit;
   const fileText = ws.read(absPath);
-  const fileDoc = fileText !== null ? parseDocument(fileText, absPath) : null;
+  const fileDoc = fileText !== null
+    ? language.parseDocument(fileText, absPath)
+    : null;
   const fileLineStarts = fileText !== null ? computeLineStarts(fileText) : [];
   const entry: LoadedFile = { fileText, fileDoc, fileLineStarts };
   cache?.set(absPath, entry);
@@ -220,8 +224,14 @@ export function buildDiffDocument(
   }
 
   for (const file of model.files) {
+    // The language is chosen once per file, from its path, and every operation
+    // on the file — parsing the workspace copy, colouring fragments, projecting
+    // structure — dispatches through it. A rename can change the extension, so
+    // the old and new sides resolve separately.
+    const newLanguage = languageForFile(file.newPath ?? file.oldPath);
+    const oldLanguage = languageForFile(file.oldPath ?? file.newPath);
     const absPath = file.newPath ? ws.resolve(file.newPath) : null;
-    const loaded = absPath ? loadFile(absPath, ws, cache) : null;
+    const loaded = absPath ? loadFile(absPath, newLanguage, ws, cache) : null;
     const fileText = loaded?.fileText ?? null;
     const fileDoc = loaded?.fileDoc ?? null;
     const fileLineStarts = loaded?.fileLineStarts ?? [];
@@ -263,9 +273,10 @@ export function buildDiffDocument(
         mapping,
         definitions,
         hunks,
+        newLanguage,
+        oldLanguage,
         newFileName: file.newPath ?? file.oldPath,
         oldFileName: file.oldPath ?? file.newPath,
-        markdown: isMarkdownPath(file.newPath ?? file.oldPath),
       }));
     }
 
@@ -347,11 +358,14 @@ interface HunkCtx {
   mapping: FileMapping | undefined;
   definitions: Map<string, Definition[]>;
   hunks: DiffHunkInfo[];
-  /** Paths whose extensions select the new- and old-side fragment parsers. */
+  /** The languages of the new and old sides (they differ across a rename that
+   * changes the extension); each colours its side's fragments and, for the new
+   * side, projects the hunk's structure. */
+  newLanguage: Language;
+  oldLanguage: Language;
+  /** Paths whose extensions the parsers use to pick a script variant. */
   newFileName: string | undefined;
   oldFileName: string | undefined;
-  /** The new-side workspace file is Markdown, so headings form its structure. */
-  markdown: boolean;
 }
 
 function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
@@ -464,64 +478,52 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
     newFragment,
     lines,
     rawLines,
+    ctx.newLanguage,
     ctx.newFileName,
   );
-  applyFragmentSpans(oldFragment, lines, rawLines, ctx.oldFileName);
+  applyFragmentSpans(
+    oldFragment,
+    lines,
+    rawLines,
+    ctx.oldLanguage,
+    ctx.oldFileName,
+  );
 
   // --- structure ---------------------------------------------------------
   // Verified hunks remap the workspace file's own nodes (precise ranges, live
   // semantics). Unverified hunks — drifted workspace, missing file — still get
   // navigable structure from the fragment parse of their new side: the nodes
   // come from the diff text itself, so navigation always works; only the
-  // semantic extras (types, definitions) stay silent there.
+  // semantic extras (types, definitions) stay silent there. Either way the
+  // new-side language projects its own structure into the hunk's coordinates.
   const children: StructureNode[] = [];
-  if (ctx.markdown && ctx.fileDoc && newToDiff.size > 0) {
-    children.push(
-      ...markdownHeadingNodes(
-        ctx.fileDoc.flatStructure,
-        newToDiff,
-        hunk.endLine,
-        diffLineStarts,
-        rawLines,
-      ),
-    );
-  } else if (ctx.fileDoc && newToDiff.size > 0) {
-    for (const root of ctx.fileDoc.structure) {
-      children.push(...remapNode(root, 2, null, {
-        newToDiff,
-        diffLineStarts,
-        rawLines,
-        sourceLineStarts: ctx.fileLineStarts,
-        definitions: ctx.definitions,
-      }));
-    }
+  let source:
+    | { doc: Document; lineToDiff: Map<number, number>; lineStarts: number[] }
+    | null = null;
+  if (ctx.fileDoc && newToDiff.size > 0) {
+    source = {
+      doc: ctx.fileDoc,
+      lineToDiff: newToDiff,
+      lineStarts: ctx.fileLineStarts,
+    };
   } else if (newParsed && newFragment.length > 0) {
     // Fragment line i is the i-th ctx/add line of the hunk, in order.
-    const fragToDiff = new Map(newFragment.map((f, i) => [i, f.diffLine]));
-    if (ctx.markdown) {
-      children.push(
-        ...markdownHeadingNodes(
-          newParsed.flatStructure,
-          fragToDiff,
-          hunk.endLine,
-          diffLineStarts,
-          rawLines,
-        ),
-      );
-    } else {
-      const fragLineStarts = computeLineStarts(
-        newFragment.map((f) => f.code).join("\n"),
-      );
-      for (const root of newParsed.structure) {
-        children.push(...remapNode(root, 2, null, {
-          newToDiff: fragToDiff,
-          diffLineStarts,
-          rawLines,
-          sourceLineStarts: fragLineStarts,
-          definitions: ctx.definitions,
-        }));
-      }
-    }
+    source = {
+      doc: newParsed,
+      lineToDiff: new Map(newFragment.map((f, i) => [i, f.diffLine])),
+      lineStarts: computeLineStarts(newFragment.map((f) => f.code).join("\n")),
+    };
+  }
+  if (source) {
+    children.push(...ctx.newLanguage.hunkStructure({
+      doc: source.doc,
+      lineToDiff: source.lineToDiff,
+      sourceLineStarts: source.lineStarts,
+      hunkEnd: hunk.endLine,
+      diffLineStarts,
+      rawLines,
+      definitions: ctx.definitions,
+    }));
   }
 
   // Tell the user when the workspace could not vouch for this hunk (and the
@@ -578,69 +580,6 @@ function shiftSpans(marker: Span, spans: readonly Span[]): Span[] {
 }
 
 /**
- * Heading nodes for a Markdown hunk's navigation tree. Each heading whose own
- * heading line is shown in the hunk becomes a navigable section, anchored at
- * that line (past the diff marker) and running to the last new-side line before
- * the next shown heading. The general TS structure remap is not used here: it
- * would fold a shown heading into an ancestor whose own heading line is NOT in
- * the diff, so navigation would land on a heading the diff never displays.
- */
-function markdownHeadingNodes(
-  headings: readonly StructureNode[],
-  lineToDiff: Map<number, number>,
-  hunkEnd: number,
-  diffLineStarts: number[],
-  rawLines: string[],
-): StructureNode[] {
-  const shown: { node: StructureNode; diffLine: number }[] = [];
-  for (const node of headings) {
-    const diffLine = lineToDiff.get(node.startLine);
-    if (diffLine !== undefined) shown.push({ node, diffLine });
-  }
-  if (shown.length === 0) return [];
-  shown.sort((a, b) => a.diffLine - b.diffLine);
-  // The diff lines carrying new-side content (heading or body); a section ends
-  // at the last of these before the next shown heading, so it never spills onto
-  // a trailing removed block or a "\ No newline at end of file" marker (which
-  // the TS remap, clamping to visible new-side lines, also excludes).
-  const newSide = [...lineToDiff.values()].sort((a, b) => a - b);
-  // Depth follows the nesting among the SHOWN headings, walked in document
-  // order: the first heading under the hunk is depth 2 and no step jumps more
-  // than one level — the pre-order invariant the wasd tree navigation relies
-  // on. (A global minimum over the shown set would put a deeper-first window's
-  // first heading below depth 2 and strand the sibling/child steps.)
-  const stack: { level: number; depth: number }[] = [];
-  return shown.map(({ node, diffLine }, i) => {
-    while (stack.length > 0 && stack[stack.length - 1].level >= node.depth) {
-      stack.pop();
-    }
-    const depth = stack.length === 0 ? 2 : stack[stack.length - 1].depth + 1;
-    stack.push({ level: node.depth, depth });
-
-    const boundary = i + 1 < shown.length ? shown[i + 1].diffLine : hunkEnd + 1;
-    let end = diffLine;
-    for (const d of newSide) if (d >= diffLine && d < boundary) end = d;
-
-    const endText = rawLines[end] ?? "";
-    const startText = rawLines[diffLine] ?? "";
-    return {
-      kind: "section",
-      label: node.label,
-      name: node.name,
-      startLine: diffLine,
-      endLine: end,
-      // Past the one-column diff marker.
-      startCol: Math.min(1, cpLen(startText)),
-      endCol: cpLen(endText),
-      startOffset: diffLineStarts[diffLine] + Math.min(1, startText.length),
-      endOffset: diffLineStarts[end] + endText.length,
-      depth,
-      children: [],
-    };
-  });
-}
-
-/**
  * Syntax-highlight diff lines the workspace cannot vouch for by parsing their
  * joined content as one fragment — good token-level classification for the old
  * side and for drifted/new files, without any file on disk. Returns the parsed
@@ -650,10 +589,11 @@ function applyFragmentSpans(
   fragment: { diffLine: number; code: string }[],
   lines: MutableLine[],
   rawLines: string[],
+  language: Language,
   fileName: string | undefined,
 ): Document | null {
   if (fragment.length === 0) return null;
-  const parsed = parseDocument(
+  const parsed = language.parseDocument(
     fragment.map((f) => f.code).join("\n"),
     fileName,
   );
@@ -663,176 +603,6 @@ function applyFragmentSpans(
     lines[diffLine].spans = shiftSpans(markerSpan(rawLines[diffLine]), spans);
   }
   return parsed;
-}
-
-// --- structure remapping ---------------------------------------------------
-
-interface RemapCtx {
-  /** Source line (file or fragment) → diff line, for visible lines. */
-  newToDiff: Map<number, number>;
-  diffLineStarts: number[];
-  rawLines: string[];
-  /** Line starts of the source text the nodes were parsed from. */
-  sourceLineStarts: number[];
-  definitions: Map<string, Definition[]>;
-}
-
-/**
- * Remap a workspace-file structure node into diff coordinates, clamped to the
- * file lines this hunk actually shows. Children recurse. A node whose clamped
- * range coincides with its parent's is folded away — but its CHILDREN are
- * hoisted into the parent, so a hunk interior to deeply nested code still
- * exposes the innermost distinct nodes (and Tab never lands on two
- * identical-looking ones). Returns [] when no line of the node is visible.
- */
-/** An object/array literal or one of its entries — a generic node the diff
- * structure keeps (rather than dissolving) so it can be navigated entry by
- * entry. */
-function isLiteralShape(node: StructureNode): boolean {
-  return node.astKinds?.some((k) =>
-    k === "ObjectLiteralExpression" || k === "ArrayLiteralExpression" ||
-    k === "PropertyAssignment" || k === "ShorthandPropertyAssignment"
-  ) ?? false;
-}
-
-function remapNode(
-  node: StructureNode,
-  depth: number,
-  parentRange: { start: number; end: number } | null,
-  ctx: RemapCtx,
-): StructureNode[] {
-  // A diff's structure stays focused on declarations and the like; the generic
-  // expression and comment nodes that fill the full-AST tree are skipped, but
-  // their meaningful descendants are hoisted into this node's place. Object and
-  // array literals and their entries are kept, though — an object literal in a
-  // diff (an options bag, a returned record) is worth navigating entry by entry.
-  if (
-    (node.kind === "node" || node.kind === "comment") && !isLiteralShape(node)
-  ) {
-    const hoisted: StructureNode[] = [];
-    for (const child of node.children) {
-      hoisted.push(...remapNode(child, depth, parentRange, ctx));
-    }
-    return hoisted;
-  }
-
-  let firstVisible = -1;
-  let lastVisible = -1;
-  for (let n = node.startLine; n <= node.endLine; n++) {
-    if (ctx.newToDiff.has(n)) {
-      if (firstVisible < 0) firstVisible = n;
-      lastVisible = n;
-    }
-  }
-  if (firstVisible < 0) return [];
-
-  const startDiffLine = ctx.newToDiff.get(firstVisible)!;
-  const endDiffLine = ctx.newToDiff.get(lastVisible)!;
-  // Columns: the marker occupies column 0, so code column c becomes c+1. A
-  // clamped boundary (the node's true start/end line is not visible) covers
-  // the whole shown line instead.
-  const startCol = firstVisible === node.startLine ? node.startCol + 1 : 1;
-  const endCol = lastVisible === node.endLine
-    ? node.endCol + 1
-    : cpLen(ctx.rawLines[endDiffLine]);
-  const startOffset = ctx.diffLineStarts[startDiffLine] +
-    cpToUtf16(ctx.rawLines[startDiffLine], startCol);
-  const endOffset = ctx.diffLineStarts[endDiffLine] +
-    cpToUtf16(ctx.rawLines[endDiffLine], endCol);
-
-  // Coincidence fold: a node filling its parent's visible range IS the parent
-  // as far as the diff shows. Hoist its mapped children in its place (same
-  // depth, same parent range) and register its name against the surviving
-  // range so `t` lookups still resolve.
-  if (
-    parentRange && parentRange.start === startOffset &&
-    parentRange.end === endOffset
-  ) {
-    registerDefinition(
-      node,
-      startDiffLine,
-      endDiffLine,
-      startOffset,
-      endOffset,
-      ctx,
-    );
-    const hoisted: StructureNode[] = [];
-    for (const child of node.children) {
-      hoisted.push(...remapNode(child, depth, parentRange, ctx));
-    }
-    return hoisted;
-  }
-
-  const nameOffset = remapNameOffset(node, ctx);
-  const children: StructureNode[] = [];
-  for (const child of node.children) {
-    children.push(...remapNode(
-      child,
-      depth + 1,
-      { start: startOffset, end: endOffset },
-      ctx,
-    ));
-  }
-
-  const mapped: StructureNode = {
-    kind: node.kind,
-    label: node.label,
-    name: node.name,
-    nameOffset,
-    startLine: startDiffLine,
-    endLine: endDiffLine,
-    startCol,
-    endCol,
-    startOffset,
-    endOffset,
-    depth,
-    children,
-    meta: node.meta,
-    astKinds: node.astKinds,
-  };
-  registerDefinition(
-    node,
-    startDiffLine,
-    endDiffLine,
-    startOffset,
-    endOffset,
-    ctx,
-  );
-  return [mapped];
-}
-
-function registerDefinition(
-  node: StructureNode,
-  startLine: number,
-  endLine: number,
-  startOffset: number,
-  endOffset: number,
-  ctx: RemapCtx,
-): void {
-  if (!node.name) return;
-  const list = ctx.definitions.get(node.name) ?? [];
-  list.push({
-    name: node.name,
-    kind: node.kind,
-    startLine,
-    endLine,
-    startOffset,
-    endOffset,
-  });
-  ctx.definitions.set(node.name, list);
-}
-
-/** The node's declared-name offset in diff coordinates, when visible. */
-function remapNameOffset(
-  node: StructureNode,
-  ctx: RemapCtx,
-): number | undefined {
-  if (node.nameOffset === undefined) return undefined;
-  const n = lineIndexOf(ctx.sourceLineStarts, node.nameOffset);
-  const diffLine = ctx.newToDiff.get(n);
-  if (diffLine === undefined) return undefined;
-  const col = node.nameOffset - ctx.sourceLineStarts[n]; // UTF-16 in the line
-  return ctx.diffLineStarts[diffLine] + 1 + col; // +1: the marker is 1 unit
 }
 
 // --- offset maps for semantics ----------------------------------------------
@@ -877,18 +647,6 @@ function buildMaps(
 }
 
 // --- small helpers -----------------------------------------------------------
-
-/** UTF-16 index of code-point column `col` within `text`. */
-function cpToUtf16(text: string, col: number): number {
-  let cp = 0;
-  let i = 0;
-  for (const ch of text) {
-    if (cp >= col) break;
-    cp++;
-    i += ch.length;
-  }
-  return i;
-}
 
 function lineEndOffset(
   lineStarts: number[],

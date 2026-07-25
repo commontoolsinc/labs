@@ -28,15 +28,17 @@ import type {
   StructureNode,
   TokenClass,
   TypeMember,
-} from "./model.ts";
-import { flattenStructure } from "./model.ts";
-import { cpLen } from "./ansi.ts";
+} from "../../model.ts";
+import { flattenStructure } from "../../model.ts";
+import { cpLen } from "../../ansi.ts";
+import { computeLineStarts, lineIndexOf } from "../../lines.ts";
+import type { Highlighter } from "../language.ts";
 import {
-  highlightMarkdownLines,
-  isMarkdownPath,
-  markdownDocument,
-} from "./markdown.ts";
-import { isBuilderName, isCallName, isSyntheticName } from "./vocab.ts";
+  describeSynthetic,
+  isBuilderName,
+  isCallName,
+  isSyntheticName,
+} from "./vocab.ts";
 
 const SK = ts.SyntaxKind;
 const DEFAULT_FILE_NAME = "transformed.tsx";
@@ -147,7 +149,6 @@ export function parseDocument(
   fileName = DEFAULT_FILE_NAME,
 ): Document {
   try {
-    if (isMarkdownPath(fileName)) return markdownDocument(text);
     return parseTypeScriptDocument(text, fileName);
   } catch {
     return plainDocument(text);
@@ -205,7 +206,6 @@ export function highlightDocument(
   fileName = DEFAULT_FILE_NAME,
 ): Line[] {
   try {
-    if (isMarkdownPath(fileName)) return highlightMarkdownLines(text);
     const sf = parseSourceFile(text, fileName);
     const lineStarts = computeLineStarts(text);
     return highlightFromSourceFile(
@@ -267,15 +267,6 @@ function highlightFromSourceFile(
   const bracketDepths = computeBracketDepths(tokens);
   const spans = buildGlobalSpans(text, tokens, bracketDepths, schemaSet);
   return spansToLines(text, lineStarts, spans);
-}
-
-/** Live syntax highlighting that re-highlights only the region an edit touches,
- * so the cost is independent of document size. */
-export interface Highlighter {
-  /** The current highlighted lines. */
-  readonly lines: readonly Line[];
-  /** Apply the new full text and return the updated lines. */
-  update(text: string): readonly Line[];
 }
 
 /**
@@ -1110,6 +1101,7 @@ function buildNode(node: ts.Node, depth: number, ctx: BuildCtx): StructureNode {
     children: [],
     meta: desc.meta,
     astKinds: layers.map(syntaxKindName),
+    generatedOrigin: generatedOriginOf(desc),
   };
   if (desc.name) registerDefinition(ctx, desc, sn);
   // Descend only into the child source nodes the classification chose. A
@@ -1127,6 +1119,16 @@ function buildNode(node: ts.Node, depth: number, ctx: BuildCtx): StructureNode {
 
 function sameRange(a: ts.Node, b: ts.Node, sf: ts.SourceFile): boolean {
   return a.getStart(sf) === b.getStart(sf) && a.getEnd() === b.getEnd();
+}
+
+/** The origin description for a node whose name (or builder) matches the
+ * transformer's own vocabulary — those are certainly generated. Undefined for
+ * anything else: with no source map back, authored-vs-generated is unknowable,
+ * so no claim is made. The info card renders whatever this returns. */
+function generatedOriginOf(desc: Desc): string | undefined {
+  const probe = desc.name ??
+    (desc.meta?.kind === "contract" ? desc.meta.builder : undefined);
+  return probe ? describeSynthetic(probe) ?? undefined : undefined;
 }
 
 /**
@@ -2323,27 +2325,6 @@ function attachSections(
 }
 
 // --- Lines -------------------------------------------------------------------
-
-/** Char offset where each line begins. Shared with the diff-document builder. */
-export function computeLineStarts(text: string): number[] {
-  const starts = [0];
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === "\n") starts.push(i + 1);
-  }
-  return starts;
-}
-
-/** Index of the line containing `offset` (binary search over line starts). */
-export function lineIndexOf(lineStarts: number[], offset: number): number {
-  let lo = 0;
-  let hi = lineStarts.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    if (lineStarts[mid] <= offset) lo = mid;
-    else hi = mid - 1;
-  }
-  return lo;
-}
 
 function spansToLines(
   text: string,

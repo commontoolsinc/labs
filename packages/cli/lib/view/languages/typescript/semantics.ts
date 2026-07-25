@@ -21,48 +21,14 @@
 import ts from "typescript";
 import { dirname, fromFileUrl, isAbsolute, join, relative } from "@std/path";
 import { parse as parseJsonc } from "@std/jsonc";
-import type { Line } from "./model.ts";
-import { parseDocument } from "./parse.ts";
-import type { DiffMaps } from "./diffdoc.ts";
-
-/** A resolved definition site for a referenced symbol. */
-export interface DefTarget {
-  readonly name: string;
-  /** Offset within the same blob, when the definition is in-blob. */
-  readonly blobOffset?: number;
-  /** Real file path, when the definition is in a file outside the blob. */
-  readonly filePath?: string;
-  /** Character offset within `filePath`. */
-  readonly fileOffset?: number;
-  /** 0-based line of the definition (blob line in-blob, file line otherwise). */
-  readonly line: number;
-  /** A trimmed one-line preview of the definition site. */
-  readonly preview: string;
-}
-
-export interface Semantics {
-  /** The inferred type at a source offset, or `null` when not knowable. */
-  typeAt(offset: number): string | null;
-  /**
-   * Where the symbol at a source offset is defined. In-blob definitions carry a
-   * `blobOffset` (another section of the same text); definitions in real files
-   * carry a `filePath`. Empty when nothing resolves.
-   */
-  definitionOf(offset: number): DefTarget[];
-  /** Read and colour an external file (within the workspace) so the pager can
-   * show a definition that lives outside the blob. Null when unreadable. */
-  fileLines(filePath: string): readonly Line[] | null;
-  /** Build the TypeScript program now (off the interactive path), so the first
-   * real query does not pay the one-time cost. Safe to call repeatedly. */
-  prewarm(): void;
-}
-
-interface Options {
-  /** Working directory to discover the deno import map from. */
-  cwd: string;
-  /** Name for the implicit single section when the text has no headers. */
-  fileName?: string;
-}
+import type { Line } from "../../model.ts";
+import type { DiffMaps } from "../../diffdoc.ts";
+import type {
+  DefTarget,
+  Semantics,
+  SemanticsOptions as Options,
+} from "../language.ts";
+import { languageForFile } from "../language.ts";
 
 interface SectionFile {
   /** Virtual file name (the section header path, or `fileName`). */
@@ -75,18 +41,18 @@ interface SectionFile {
 
 /**
  * Build a semantic service over `text`. Returns a service whose queries are
- * always safe to call; returns `null` only when even the lightweight setup is
- * impossible. The TypeScript program is not built until the first query.
+ * always safe to call; returns `undefined` only when even the lightweight setup
+ * is impossible. The TypeScript program is not built until the first query.
  */
 export function createSemantics(
   text: string,
   options: Options,
-): Semantics | null {
+): Semantics | undefined {
   let sections: SectionFile[];
   try {
     sections = splitSections(text, options.fileName ?? "transformed.tsx");
   } catch {
-    return null;
+    return undefined;
   }
 
   const { importMap, root } = safe(() => discoverConfig(options.cwd)) ??
@@ -174,7 +140,7 @@ export function createSemantics(
       try {
         const content = readReal(filePath);
         if (content === undefined) return null;
-        return parseDocument(content, filePath).lines;
+        return languageForFile(filePath).parseDocument(content, filePath).lines;
       } catch {
         return null;
       }
@@ -193,12 +159,12 @@ export function createDiffSemantics(
   diffText: string,
   maps: DiffMaps,
   options: Options,
-): Semantics | null {
+): Semantics | undefined {
   const { importMap, root } = safe(() => discoverConfig(options.cwd)) ??
     { importMap: {}, root: options.cwd };
   const libDir = safe(() => defaultLibDir());
   const rootFiles = maps.rootFiles.filter((p) => within(p, root));
-  if (rootFiles.length === 0) return null;
+  if (rootFiles.length === 0) return undefined;
 
   let service: ts.LanguageService | undefined;
   const { build, prewarm } = lazyProgram(() => {
@@ -265,7 +231,7 @@ export function createDiffSemantics(
       try {
         const content = readReal(filePath);
         if (content === undefined) return null;
-        return parseDocument(content, filePath).lines;
+        return languageForFile(filePath).parseDocument(content, filePath).lines;
       } catch {
         return null;
       }

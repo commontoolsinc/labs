@@ -9,7 +9,7 @@ import { join } from "@std/path";
 import { parseDocument, promptText, SAMPLE } from "./view-helpers.ts";
 import { Session } from "../lib/view/session.ts";
 import type { Key } from "../lib/view/keys.ts";
-import type { Semantics } from "../lib/view/semantics.ts";
+import type { Semantics } from "../lib/view/languages/language.ts";
 import type { EditableSource } from "../lib/view/editsource.ts";
 import type { DirEntry, FileGateway } from "../lib/view/filegateway.ts";
 import { parseDiff } from "../lib/view/diff.ts";

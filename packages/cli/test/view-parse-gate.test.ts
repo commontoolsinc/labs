@@ -1,6 +1,6 @@
 /**
  * Behavioural tests for the parse paths the coverage gate flagged in
- * `lib/view/parse.ts`. The dead and duplicate branches at those lines were
+ * `lib/view/languages/typescript/parse.ts`. The dead and duplicate branches at those lines were
  * removed or folded away at the source; these tests exercise the reachable
  * behaviour that remains, through the public API:
  *
@@ -19,7 +19,7 @@ import {
   createHighlighter,
   highlightDocument,
   parseDocument,
-} from "../lib/view/parse.ts";
+} from "../lib/view/languages/typescript/parse.ts";
 import type { Document, StructureNode, TokenClass } from "../lib/view/model.ts";
 
 /** Every token class the literal text `token` is assigned across `doc`. */
