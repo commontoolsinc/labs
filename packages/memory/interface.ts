@@ -264,9 +264,37 @@ export interface InvocationView<
 
 export type Task<Return, Command = never> = Iterable<Command, Return>;
 
+/**
+ * What a provider sends back for an invocation: either the invocation's return
+ * value (`task/return`) or an effect it produced along the way
+ * (`task/effect`).
+ *
+ * `Result` is unconstrained, though what flows through it is narrower: a
+ * receipt reports an `Ok`/`Fail` outcome, possibly awaited (see
+ * `AwaitResult`). It is not a `FabricValue` -- a receipt is in-process
+ * transport rather than stored data, and a `Fail` carries an `Error`, which is
+ * a `FabricNativeObject`.
+ *
+ * The narrower constraint cannot be stated here. `ProviderCommand` reaches this
+ * parameter through inference:
+ *
+ * ```ts
+ * ProtocolMethod<Protocol> extends {
+ *   ProviderCommand: Receipt<infer Command, infer Result, infer Effect>;
+ * } ? Receipt<Command, Result, Effect> : never
+ * ```
+ *
+ * A constraint in an `infer ... extends ...` position is enforced by silent
+ * non-match rather than by a diagnostic: a method whose result does not conform
+ * drops to the `never` arm and vanishes from the protocol type, surfacing far
+ * away as member access on `never`. Unconstrained, a wrong result type is
+ * reported at the use site instead. Constraining becomes safe once the
+ * inference in `InferProtoMethods` is total -- that is, once a non-conforming
+ * method is reported rather than dropped.
+ */
 export type Receipt<
   Command extends NonNullable<unknown>,
-  Result extends FabricValue,
+  Result,
   Effect,
 > =
   | {
