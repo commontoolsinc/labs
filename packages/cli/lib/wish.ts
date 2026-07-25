@@ -8,6 +8,7 @@ import {
   type Runtime,
 } from "@commonfabric/runner";
 import { loadManager, type SpaceConfig } from "./piece.ts";
+import { throwOnSpaceAuthorizationError } from "./utils.ts";
 
 /**
  * The blessed, headless read path for wish targets (CT-1834).
@@ -111,10 +112,7 @@ export async function resolveWish(
   // Surface a permanent authorization denial on the wish's own space with the
   // real error. Scoped to `space`: a denied cross-space profile load stays a
   // silent absent read, which is the wish's expected "no profile yet" outcome.
-  const authError = runtime.storageManager.authorizationError?.(space);
-  if (authError) {
-    throw authError;
-  }
+  throwOnSpaceAuthorizationError(runtime.storageManager, space);
   await result.pull();
   await runtime.idle();
 

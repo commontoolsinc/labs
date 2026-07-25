@@ -13,6 +13,7 @@ import {
   type Capability,
   isACLUser,
 } from "@commonfabric/memory/acl";
+import { throwOnSpaceAuthorizationError } from "./utils.ts";
 
 export interface SpaceConfig {
   apiUrl: URL;
@@ -59,19 +60,6 @@ export async function createRuntime(
   return runtime;
 }
 
-// Surface a permanent authorization denial (an ACL shortfall, an audience or
-// protocol mismatch) on this space with the server's real error. Called AFTER an
-// ACL read/write has pulled the space, since that pull is what opens the space's
-// provider and records the denial; a denied read otherwise collapses to a silent
-// "no ACL" and a denied write already rejects on its own, but this makes a
-// read-only `get` fail loudly with the real cause too.
-function throwIfSpaceDenied(runtime: Runtime, space: Session["space"]): void {
-  const authError = runtime.storageManager.authorizationError?.(space);
-  if (authError) {
-    throw authError;
-  }
-}
-
 // Add or update an ACL entry for a DID
 export async function setAclEntry(
   config: SpaceConfig,
@@ -83,7 +71,10 @@ export async function setAclEntry(
   await using runtime = await createRuntime(config, session);
   const aclManager = new ACLManager(runtime, session.space);
   await aclManager.set(userDid, capability);
-  throwIfSpaceDenied(runtime, session.space);
+  // Checked AFTER the ACL access, which is what pulls the space and records any
+  // denial. A denied write already rejects above; this also fails a read that
+  // otherwise collapses to a silent "no ACL".
+  throwOnSpaceAuthorizationError(runtime.storageManager, session.space);
 }
 
 // Remove an ACL entry for a DID
@@ -96,7 +87,7 @@ export async function removeAclEntry(
   await using runtime = await createRuntime(config, session);
   const aclManager = new ACLManager(runtime, session.space);
   await aclManager.remove(userDid);
-  throwIfSpaceDenied(runtime, session.space);
+  throwOnSpaceAuthorizationError(runtime.storageManager, session.space);
 }
 
 // Get the current ACL for a space
@@ -107,7 +98,7 @@ export async function getAcl(
   await using runtime = await createRuntime(config, session);
   const aclManager = new ACLManager(runtime, session.space);
   const acl = await aclManager.get();
-  throwIfSpaceDenied(runtime, session.space);
+  throwOnSpaceAuthorizationError(runtime.storageManager, session.space);
   return acl;
 }
 

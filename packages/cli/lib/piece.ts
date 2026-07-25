@@ -48,6 +48,7 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { isPlainObject, isRecord } from "@commonfabric/utils/types";
 import { pinProgramFabricImports, renderPinRewrite } from "./fabric-deps.ts";
 import { isHandlerCell } from "../../fuse/callables.ts";
+import { throwOnSpaceAuthorizationError } from "./utils.ts";
 import {
   callableCommandSpec,
   type CallableExecutionDeps,
@@ -363,12 +364,7 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
       "loadManager.synced",
       () => pieceManager.synced(),
     );
-    const authError = runtime.storageManager.authorizationError?.(
-      session.space,
-    );
-    if (authError) {
-      throw authError;
-    }
+    throwOnSpaceAuthorizationError(runtime.storageManager, session.space);
     return pieceManager;
   });
 }
