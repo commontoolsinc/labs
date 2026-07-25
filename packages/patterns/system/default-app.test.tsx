@@ -11,7 +11,7 @@
  *
  * Run: deno task cf test packages/patterns/system/default-app.test.tsx --root packages/patterns --verbose
  */
-import { action, computed, pattern } from "commonfabric";
+import { action, assert, pattern } from "commonfabric";
 import DefaultApp from "./default-app.tsx";
 import Note from "../notes/note.tsx";
 
@@ -43,19 +43,19 @@ export default pattern(() => {
     addPieceOf(subject, otherNote)
   );
 
-  const assert_starts_empty = computed(() => piecesLengthOf(subject) === 0);
+  const assert_starts_empty = assert(() => piecesLengthOf(subject) === 0);
 
-  const assert_first_registration_lands = computed(() =>
+  const assert_first_registration_lands = assert(() =>
     piecesLengthOf(subject) === 1
   );
 
   // The same piece cell again must resolve to the same membership entry.
-  const assert_duplicate_registration_is_noop = computed(() =>
+  const assert_duplicate_registration_is_noop = assert(() =>
     piecesLengthOf(subject) === 1
   );
 
   // Dedup is by identity, not a cap: a distinct piece still lands.
-  const assert_distinct_piece_lands = computed(() =>
+  const assert_distinct_piece_lands = assert(() =>
     piecesLengthOf(subject) === 2
   );
 

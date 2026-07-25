@@ -1,4 +1,4 @@
-import { computed, handler, pattern, Stream } from "commonfabric";
+import { assert, handler, pattern, Stream } from "commonfabric";
 import Gallery from "./main.tsx";
 
 const trigger = handler<void, { stream: Stream<void> }>((_, { stream }) => {
@@ -62,32 +62,30 @@ export default pattern(() => {
       "https://source.example.com/private/source?token=debug&draft=internal",
   });
 
-  const assert_count = computed(() => instance.totalExamples === 16);
-  const assert_forward_prepared = computed(() => instance.completedCount === 0);
-  const assert_forward_committed = computed(() =>
+  const assert_count = assert(() => instance.totalExamples === 16);
+  const assert_forward_prepared = assert(() => instance.completedCount === 0);
+  const assert_forward_committed = assert(() =>
     instance.completedCount === 1 &&
     instance.lastCompleted === "forward-hotel-note"
   );
-  const assert_research_captured = computed(() =>
+  const assert_research_captured = assert(() =>
     instance.completedCount === 1 &&
     instance.lastCompleted === "forward-hotel-note"
   );
-  const assert_research_prepared = computed(() =>
-    instance.completedCount === 1
-  );
-  const assert_research_sent = computed(() =>
+  const assert_research_prepared = assert(() => instance.completedCount === 1);
+  const assert_research_sent = assert(() =>
     instance.completedCount === 2 &&
     instance.lastCompleted === "authorize-research-send"
   );
-  const assert_safe_link_prepared = computed(() =>
+  const assert_safe_link_prepared = assert(() =>
     instance.completedCount === 2 &&
     instance.lastCompleted === "authorize-research-send"
   );
-  const assert_safe_link_released = computed(() =>
+  const assert_safe_link_released = assert(() =>
     instance.completedCount === 3 &&
     instance.lastCompleted === "release-safe-link"
   );
-  const assert_remaining_actions_do_not_regress_completed_flow = computed(() =>
+  const assert_remaining_actions_do_not_regress_completed_flow = assert(() =>
     instance.completedCount >= 3 &&
     instance.lastCompleted !== ""
   );

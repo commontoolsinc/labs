@@ -12,7 +12,7 @@
  *
  * Run: deno task cf test packages/patterns/google/extractors/email-pattern-launcher.test.tsx --root packages/patterns/google --verbose
  */
-import { computed, pattern } from "commonfabric";
+import { assert, pattern } from "commonfabric";
 
 // =============================================================================
 // HELPER FUNCTIONS (duplicated for testing - same as in main pattern)
@@ -78,7 +78,7 @@ export default pattern(() => {
   // ==========================================================================
 
   // Test: wildcard pattern matches any email at domain
-  const assert_wildcard_matches_domain = computed(() => {
+  const assert_wildcard_matches_domain = assert(() => {
     return matchesEmailPattern(
       "notices@library.berkeleypubliclibrary.org",
       "*@library.berkeleypubliclibrary.org",
@@ -86,7 +86,7 @@ export default pattern(() => {
   });
 
   // Test: wildcard pattern matches different usernames
-  const assert_wildcard_matches_different_user = computed(() => {
+  const assert_wildcard_matches_different_user = assert(() => {
     return matchesEmailPattern(
       "info@library.berkeleypubliclibrary.org",
       "*@library.berkeleypubliclibrary.org",
@@ -94,7 +94,7 @@ export default pattern(() => {
   });
 
   // Test: pattern should not match different domain
-  const assert_no_match_different_domain = computed(() => {
+  const assert_no_match_different_domain = assert(() => {
     return !matchesEmailPattern(
       "notices@library.sfpl.org",
       "*@library.berkeleypubliclibrary.org",
@@ -102,7 +102,7 @@ export default pattern(() => {
   });
 
   // Test: USPS pattern matching
-  const assert_usps_pattern_matches = computed(() => {
+  const assert_usps_pattern_matches = assert(() => {
     return matchesEmailPattern(
       "USPSInformeddelivery@email.informeddelivery.usps.com",
       "*@email.informeddelivery.usps.com",
@@ -110,7 +110,7 @@ export default pattern(() => {
   });
 
   // Test: case insensitive matching
-  const assert_case_insensitive = computed(() => {
+  const assert_case_insensitive = assert(() => {
     return matchesEmailPattern(
       "NOTICES@LIBRARY.BERKELEYPUBLICLIBRARY.ORG",
       "*@library.berkeleypubliclibrary.org",
@@ -118,12 +118,12 @@ export default pattern(() => {
   });
 
   // Test: empty email returns false
-  const assert_empty_email_false = computed(() => {
+  const assert_empty_email_false = assert(() => {
     return !matchesEmailPattern("", "*@domain.com");
   });
 
   // Test: empty pattern returns false
-  const assert_empty_pattern_false = computed(() => {
+  const assert_empty_pattern_false = assert(() => {
     return !matchesEmailPattern("user@domain.com", "");
   });
 
@@ -132,7 +132,7 @@ export default pattern(() => {
   // ==========================================================================
 
   // Test: build query from single entry
-  const assert_single_entry_query = computed(() => {
+  const assert_single_entry_query = assert(() => {
     const entries: RegistryEntry[] = [
       {
         patternUri: "google/test.tsx",
@@ -144,7 +144,7 @@ export default pattern(() => {
   });
 
   // Test: build query from multiple entries
-  const assert_multiple_entries_query = computed(() => {
+  const assert_multiple_entries_query = assert(() => {
     const entries: RegistryEntry[] = [
       {
         patternUri: "google/usps.tsx",
@@ -164,13 +164,13 @@ export default pattern(() => {
   });
 
   // Test: empty entries returns default query
-  const assert_empty_entries_default = computed(() => {
+  const assert_empty_entries_default = assert(() => {
     const query = buildGmailQuery([]);
     return query === "in:INBOX";
   });
 
   // Test: deduplicates domains
-  const assert_deduplicates_domains = computed(() => {
+  const assert_deduplicates_domains = assert(() => {
     const entries: RegistryEntry[] = [
       {
         patternUri: "google/pattern1.tsx",

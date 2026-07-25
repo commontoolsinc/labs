@@ -31,6 +31,7 @@ import {
   action,
   assert,
   assertCapture,
+  assertRenderParts,
   byRef,
   computed,
   handler,
@@ -184,8 +185,11 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     assert: trustedAssert,
 
     // Operand recording for transformer-instrumented `assert` bodies. Plain
-    // data in, plain data out — no builder artifact to trust.
+    // data in, plain data out — no builder artifact to trust. `assertCapture`
+    // stashes each operand's value; `assertRenderParts` renders them only when
+    // the assertion failed.
     assertCapture,
+    assertRenderParts,
 
     // Built-in modules
     str: trustedStr,

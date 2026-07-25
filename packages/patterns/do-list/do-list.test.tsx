@@ -19,7 +19,7 @@
  *
  * Run: deno task cf test packages/patterns/do-list/do-list.test.tsx --verbose
  */
-import { action, computed, equals, pattern, Writable } from "commonfabric";
+import { action, assert, equals, pattern, Writable } from "commonfabric";
 import DoList, { type DoItem } from "./do-list.tsx";
 
 export default pattern(() => {
@@ -120,71 +120,71 @@ export default pattern(() => {
   // Assertions
   // ==========================================================================
 
-  const assert_initial_empty = computed(() => doList.itemCount === 0);
+  const assert_initial_empty = assert(() => doList.itemCount === 0);
 
-  const assert_three = computed(() => doList.itemCount === 3);
-  const assert_titles = computed(() =>
+  const assert_three = assert(() => doList.itemCount === 3);
+  const assert_titles = assert(() =>
     doList.items[0]?.title === "Alpha" &&
     doList.items[1]?.title === "Beta" &&
     doList.items[2]?.title === "Gamma"
   );
 
-  const assert_first_done = computed(() => doList.items[0]?.done === true);
-  const assert_first_renamed = computed(() =>
+  const assert_first_done = assert(() => doList.items[0]?.done === true);
+  const assert_first_renamed = assert(() =>
     doList.items[0]?.title === "Alpha!" && doList.items[0]?.done === true
   );
-  const assert_others_untouched = computed(() =>
+  const assert_others_untouched = assert(() =>
     doList.items[1]?.title === "Beta" && doList.items[1]?.done === false &&
     doList.items[2]?.title === "Gamma" && doList.items[2]?.done === false
   );
 
-  const assert_beta_renamed_done = computed(() =>
+  const assert_beta_renamed_done = assert(() =>
     doList.items[1]?.title === "Beta2" && doList.items[1]?.done === true
   );
 
-  const assert_five = computed(() => doList.itemCount === 5);
-  const assert_all_dups_done = computed(() => {
+  const assert_five = assert(() => doList.itemCount === 5);
+  const assert_all_dups_done = assert(() => {
     const dups = doList.items.filter((i: DoItem) => i.title === "Dup");
     return dups.length === 2 && dups.every((i: DoItem) => i.done === true);
   });
 
   // Held-reference survival (reference-addressed update).
-  const assert_six = computed(() => doList.itemCount === 6);
-  const assert_held_stashed = computed(() => {
+  const assert_six = assert(() => doList.itemCount === 6);
+  const assert_held_stashed = assert(() => {
     const h = held.get();
     return h !== null && equals(doList.items[5], h);
   });
-  const assert_held_renamed = computed(() =>
+  const assert_held_renamed = assert(() =>
     doList.items[5]?.title === "HeldRenamed"
   );
   // KEY: the stale-but-once-valid reference still equals()-matches the item
   // AFTER updateItem patched it.
-  const assert_held_survives_update = computed(() => {
+  const assert_held_survives_update = assert(() => {
     const h = held.get();
     return h !== null && equals(doList.items[5], h);
   });
   // KEY: the held reference still DRIVES mutations after the update.
-  const assert_done_via_held = computed(() => doList.items[5]?.done === true);
-  const assert_removed_via_held = computed(() =>
+  const assert_done_via_held = assert(() => doList.items[5]?.done === true);
+  const assert_removed_via_held = assert(() =>
     doList.itemCount === 5 &&
     doList.items.find((i: DoItem) => i.title === "HeldRenamed") === undefined
   );
 
   // Held-reference survival (title-addressed update).
-  const assert_six_again = computed(() => doList.itemCount === 6);
-  const assert_title_held_stashed = computed(() => {
+  const assert_six_again = assert(() => doList.itemCount === 6);
+  const assert_title_held_stashed = assert(() => {
     const h = heldByTitle.get();
     return h !== null && equals(doList.items[5], h);
   });
-  const assert_title_held_renamed = computed(() =>
+  const assert_title_held_renamed = assert(() =>
     doList.items[5]?.title === "TitleHeldRenamed" &&
     doList.items[5]?.done === true
   );
-  const assert_title_held_survives_update = computed(() => {
+  const assert_title_held_survives_update = assert(() => {
     const h = heldByTitle.get();
     return h !== null && equals(doList.items[5], h);
   });
-  const assert_removed_via_title_held = computed(() =>
+  const assert_removed_via_title_held = assert(() =>
     doList.itemCount === 5 &&
     doList.items.find((i: DoItem) => i.title === "TitleHeldRenamed") ===
       undefined

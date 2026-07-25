@@ -9,7 +9,7 @@
  * fids pasted in bodies, comments, and link URLs; never persisted), and the
  * exported pure helpers.
  */
-import { action, computed, Default, NAME, UI, Writable } from "commonfabric";
+import { action, assert, Default, NAME, UI, Writable } from "commonfabric";
 import { pattern } from "commonfabric";
 import Topics, {
   crossrefChipRow,
@@ -265,16 +265,16 @@ export default pattern(() => {
 
   // --- assertions ---
 
-  const assert_initial = computed(() =>
+  const assert_initial = assert(() =>
     board.topicCount === 0 &&
     (board.topics ?? []).length === 0 &&
     (board.mentionable ?? []).length === 0
   );
 
   // Blank titles are rejected by the addTopic guard.
-  const assert_still_empty = computed(() => board.topicCount === 0);
+  const assert_still_empty = assert(() => board.topicCount === 0);
 
-  const assert_first_topic = computed(() =>
+  const assert_first_topic = assert(() =>
     board.topicCount === 1 &&
     board.topics?.[0]?.title === "First topic" &&
     board.topics?.[0]?.createdBy?.kind === "agent" &&
@@ -286,11 +286,11 @@ export default pattern(() => {
     board.topics?.[0]?.[NAME] === "First topic"
   );
 
-  const assert_blank_comment_rejected = computed(() =>
+  const assert_blank_comment_rejected = assert(() =>
     board.topics?.[0]?.commentCount === 0
   );
 
-  const assert_comment_landed = computed(() =>
+  const assert_comment_landed = assert(() =>
     board.topics?.[0]?.commentCount === 1 &&
     board.topics?.[0]?.comments?.[0]?.author?.kind === "agent" &&
     board.topics?.[0]?.comments?.[0]?.author?.name === "Sol" &&
@@ -301,7 +301,7 @@ export default pattern(() => {
       (board.topics?.[0]?.createdAt ?? 0)
   );
 
-  const assert_body_set = computed(() =>
+  const assert_body_set = assert(() =>
     board.topics?.[0]?.body === "line one\nline two" &&
     board.topics?.[0]?.bodyUpdatedBy?.kind === "agent" &&
     board.topics?.[0]?.bodyUpdatedBy?.name === "Sol" &&
@@ -310,10 +310,10 @@ export default pattern(() => {
 
   // javascript: and blank URLs are rejected; a valid https link with a blank
   // label defaults its label to the URL.
-  const assert_links_guarded = computed(() =>
+  const assert_links_guarded = assert(() =>
     (board.topics?.[0]?.links ?? []).length === 0
   );
-  const assert_link_added = computed(() =>
+  const assert_link_added = assert(() =>
     (board.topics?.[0]?.links ?? []).length === 1 &&
     board.topics?.[0]?.links?.[0]?.kind === "pr" &&
     board.topics?.[0]?.links?.[0]?.label ===
@@ -322,7 +322,7 @@ export default pattern(() => {
     (board.topics?.[0]?.links?.[0]?.addedAt ?? 0) > 0
   );
 
-  const assert_second_topic = computed(() =>
+  const assert_second_topic = assert(() =>
     board.topicCount === 2 &&
     board.topics?.[1]?.title === "Second topic" &&
     board.topics?.[1]?.createdBy?.kind === "agent" &&
@@ -330,28 +330,28 @@ export default pattern(() => {
     board[NAME] === "Topics (2)"
   );
 
-  const assert_third_topic = computed(() =>
+  const assert_third_topic = assert(() =>
     board.topicCount === 3 &&
     board.topics?.[2]?.title === "Composed topic" &&
     board.topics?.[2]?.createdBy?.name === "Sol"
   );
 
-  const assert_blank_draft_rejected = computed(() =>
+  const assert_blank_draft_rejected = assert(() =>
     directTopic.commentCount === 0
   );
 
   // startEditBody copied the current body into the draft and opened the editor.
-  const assert_editing = computed(() =>
+  const assert_editing = assert(() =>
     directTopic.editingBody === true &&
     directTopic.bodyDraft.get() === "line one\nline two"
   );
 
-  const assert_edit_cancelled = computed(() =>
+  const assert_edit_cancelled = assert(() =>
     directTopic.editingBody === false &&
     directTopic.body === "line one\nline two"
   );
 
-  const assert_legacy_fields_load = computed(() =>
+  const assert_legacy_fields_load = assert(() =>
     legacy.createdByName === "Legacy Person" &&
     legacy.createdBy === undefined &&
     legacy.comments?.[0]?.authorName === "Old Agent" &&
@@ -364,36 +364,36 @@ export default pattern(() => {
       ) === "Old Agent"
   );
 
-  const assert_legacy_name_set = computed(() =>
+  const assert_legacy_name_set = assert(() =>
     legacyBoard.myName === "Legacy User"
   );
 
-  const assert_legacy_topic_created = computed(() =>
+  const assert_legacy_topic_created = assert(() =>
     legacyBoard.topicCount === 1 &&
     legacyBoard.topics?.[0]?.title === "Legacy-shaped topic" &&
     legacyBoard.topics?.[0]?.createdBy === undefined &&
     legacyBoard.topics?.[0]?.createdByName === "Legacy User"
   );
 
-  const assert_legacy_comment_landed = computed(() =>
+  const assert_legacy_comment_landed = assert(() =>
     legacyBoard.topics?.[0]?.comments?.[0]?.author === undefined &&
     legacyBoard.topics?.[0]?.comments?.[0]?.authorName === "Legacy User" &&
     legacyBoard.topics?.[0]?.comments?.[0]?.body === "legacy comment"
   );
 
-  const assert_legacy_link_landed = computed(() =>
+  const assert_legacy_link_landed = assert(() =>
     legacyBoard.topics?.[0]?.links?.[0]?.addedBy === undefined &&
     legacyBoard.topics?.[0]?.links?.[0]?.label === "legacy link"
   );
 
-  const assert_legacy_body_landed = computed(() =>
+  const assert_legacy_body_landed = assert(() =>
     legacyBoard.topicCount === 1 &&
     legacyBoard.topics?.[0]?.body === "legacy body" &&
     (legacyBoard.topics?.[0]?.bodyUpdatedBy?.name ?? "") === "" &&
     (legacyBoard.topics?.[0]?.bodyUpdatedAt ?? 0) === 0
   );
 
-  const assert_profile_topic_submitted = computed(() => {
+  const assert_profile_topic_submitted = assert(() => {
     const list = profileTopics.get() ?? [];
     return list.length === 1 &&
       list[0]?.title === "Profile topic" &&
@@ -404,7 +404,7 @@ export default pattern(() => {
       profileTitleDraft.get() === "";
   });
 
-  const assert_profile_comment_submitted = computed(() => {
+  const assert_profile_comment_submitted = assert(() => {
     const list = profileComments.get() ?? [];
     return list.length === 1 &&
       list[0]?.body === "via the profile composer" &&
@@ -416,7 +416,7 @@ export default pattern(() => {
       profileCommentDraft.get() === "";
   });
 
-  const assert_profile_body_saved = computed(() =>
+  const assert_profile_body_saved = assert(() =>
     profileBody.get() === "profile-edited body" &&
     profileBodyUpdatedBy.get()?.kind === "person" &&
     profileBodyUpdatedBy.get()?.name === "Ada" &&
@@ -424,7 +424,7 @@ export default pattern(() => {
     profileEditingBody.get() === false
   );
 
-  const assert_profile_link_submitted = computed(() => {
+  const assert_profile_link_submitted = assert(() => {
     const list = profileLinks.get() ?? [];
     return list.length === 1 &&
       list[0]?.kind === "session" &&
@@ -440,7 +440,7 @@ export default pattern(() => {
   });
 
   // A fresh comment on the FIRST topic makes it the most recently active.
-  const assert_pure_helpers = computed(() =>
+  const assert_pure_helpers = assert(() =>
     snippet("a b  c", 3) === "a b…" &&
     snippet("hi", 10) === "hi" &&
     whenLabel(0) === "" &&
@@ -460,7 +460,7 @@ export default pattern(() => {
   // Runs at the two-topic point: the edge that follows must exist while the
   // harness still evaluates the board's card-list computed, so the chip
   // branches render (and count as covered), not just the data layer.
-  const assert_crossrefs_baseline = computed(() =>
+  const assert_crossrefs_baseline = assert(() =>
     (board.crossrefs ?? []).length === 2 &&
     board.crossrefs?.[0]?.fid?.startsWith("fid1:") === true &&
     (board.crossrefs?.[0]?.fid ?? "").length > 25 &&
@@ -480,7 +480,7 @@ export default pattern(() => {
       agentName: "Sol",
     });
   });
-  const assert_body_edge = computed(() =>
+  const assert_body_edge = assert(() =>
     (board.crossrefs?.[1]?.refsOut ?? []).length === 1 &&
     board.crossrefs?.[1]?.refsOut?.[0]?.title === "First topic" &&
     (board.crossrefs?.[0]?.referencedBy ?? []).length === 1 &&
@@ -492,7 +492,7 @@ export default pattern(() => {
   // own row from the mentionable siblings wired at creation (piece-valued,
   // resolved from `mentionable` = the board's own list), while a piece with no
   // mentionable derives empty sets.
-  const assert_detail_edges = computed(() => {
+  const assert_detail_edges = assert(() => {
     return board.topics?.[1]?.crossrefs?.refsOut?.[0]?.title ===
         "First topic" &&
       (board.topics?.[1]?.crossrefs?.refsOut ?? []).length === 1 &&
@@ -503,7 +503,7 @@ export default pattern(() => {
       (board.topics?.[0]?.crossrefs?.refsOut ?? []).length === 0;
   });
 
-  const assert_lone_edgeless = computed(() => {
+  const assert_lone_edgeless = assert(() => {
     return (lone.crossrefs?.refsOut ?? []).length === 0 &&
       (lone.crossrefs?.referencedBy ?? []).length === 0;
   });
@@ -513,7 +513,7 @@ export default pattern(() => {
   // binds included — and an edgeless row collapses to null so the card
   // renders nothing for it. The real in-card path renders too: this suite
   // exports [UI], so the harness demands the vdom continuously (#4715).
-  const assert_chip_row_markup = computed(() => {
+  const assert_chip_row_markup = assert(() => {
     const list = (board.topics ?? []) as TopicPiece[];
     if (list.length < 2) return false;
     const row = crossrefChipRow("references →", false, [list[0], list[1]]);
@@ -529,7 +529,7 @@ export default pattern(() => {
       agentName: "Sol",
     });
   });
-  const assert_comment_edge = computed(() =>
+  const assert_comment_edge = assert(() =>
     (board.crossrefs?.[2]?.refsOut ?? []).length === 1 &&
     board.crossrefs?.[2]?.refsOut?.[0]?.title === "First topic" &&
     (board.crossrefs?.[0]?.referencedBy ?? []).length === 2
@@ -546,7 +546,7 @@ export default pattern(() => {
       agentName: "Sol",
     });
   });
-  const assert_link_edge = computed(() =>
+  const assert_link_edge = assert(() =>
     (board.crossrefs?.[2]?.refsOut ?? []).length === 2 &&
     board.crossrefs?.[2]?.refsOut?.[1]?.title === "Second topic" &&
     (board.crossrefs?.[1]?.referencedBy ?? []).length === 1 &&
@@ -561,7 +561,7 @@ export default pattern(() => {
       agentName: "Sol",
     });
   });
-  const assert_self_unknown_ignored = computed(() =>
+  const assert_self_unknown_ignored = assert(() =>
     (board.crossrefs?.[0]?.refsOut ?? []).length === 0 &&
     (board.crossrefs?.[0]?.referencedBy ?? []).length === 2
   );
@@ -573,7 +573,7 @@ export default pattern(() => {
       agentName: "Sol",
     });
   });
-  const assert_edge_removed = computed(() =>
+  const assert_edge_removed = assert(() =>
     (board.crossrefs?.[1]?.refsOut ?? []).length === 0 &&
     (board.crossrefs?.[0]?.referencedBy ?? []).length === 1 &&
     board.crossrefs?.[0]?.referencedBy?.[0]?.title === "Composed topic"
@@ -583,7 +583,7 @@ export default pattern(() => {
   // percent-encoded) plus the non-matches (short payloads, non-fid hashes).
   const P1 = "A".repeat(43);
   const P2 = "B".repeat(43);
-  const assert_crossref_helpers = computed(() =>
+  const assert_crossref_helpers = assert(() =>
     extractFidPayloads(
         `a fid1:${P1} b of:fid1:${P2} c fid1%3A${P1}`,
       ).join(",") === `${P1},${P2},${P1}` &&
@@ -600,7 +600,7 @@ export default pattern(() => {
   // path retires): one payload→entry map, one scan per corpus. First-mention
   // order out, ascending referrers in; repeats, self-mentions, and payloads
   // no entry owns all drop.
-  const assert_crossref_join = computed(() => {
+  const assert_crossref_join = assert(() => {
     const P3 = "C".repeat(43);
     const joined = crossrefJoin(
       [

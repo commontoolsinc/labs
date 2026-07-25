@@ -11,7 +11,7 @@
  *
  * Run: deno task cf test packages/patterns/todo-list/todo-list.test.tsx --verbose
  */
-import { action, computed, pattern } from "commonfabric";
+import { action, assert, pattern } from "commonfabric";
 import TodoList from "./todo-list.tsx";
 
 export default pattern(() => {
@@ -79,90 +79,90 @@ export default pattern(() => {
   // ==========================================================================
 
   // Initial state
-  const assert_initial_empty = computed(() => {
+  const assert_initial_empty = assert(() => {
     return todoList.items.filter(() => true).length === 0;
   });
 
-  const assert_initial_count_0 = computed(() => {
+  const assert_initial_count_0 = assert(() => {
     return todoList.itemCount === 0;
   });
 
   // After adding first item
-  const assert_has_one_item = computed(() => {
+  const assert_has_one_item = assert(() => {
     return todoList.items.filter(() => true).length === 1;
   });
 
-  const assert_count_is_1 = computed(() => {
+  const assert_count_is_1 = assert(() => {
     return todoList.itemCount === 1;
   });
 
-  const assert_first_item_title = computed(() => {
+  const assert_first_item_title = assert(() => {
     return todoList.items[0]?.title === "Buy groceries";
   });
 
-  const assert_first_item_not_done = computed(() => {
+  const assert_first_item_not_done = assert(() => {
     return todoList.items[0]?.done === false;
   });
 
   // After adding second item
-  const assert_has_two_items = computed(() => {
+  const assert_has_two_items = assert(() => {
     return todoList.items.filter(() => true).length === 2;
   });
 
-  const assert_count_is_2 = computed(() => {
+  const assert_count_is_2 = assert(() => {
     return todoList.itemCount === 2;
   });
 
-  const assert_second_item_title = computed(() => {
+  const assert_second_item_title = assert(() => {
     return todoList.items[1]?.title === "Walk the dog";
   });
 
   // After adding third item
-  const assert_has_three_items = computed(() => {
+  const assert_has_three_items = assert(() => {
     return todoList.items.filter(() => true).length === 3;
   });
 
-  const assert_count_is_3 = computed(() => {
+  const assert_count_is_3 = assert(() => {
     return todoList.itemCount === 3;
   });
 
   // After trying to add empty string (count should still be 3)
-  const assert_still_three_items = computed(() => {
+  const assert_still_three_items = assert(() => {
     return todoList.items.filter(() => true).length === 3;
   });
 
   // After removing second item
-  const assert_back_to_two_items = computed(() => {
+  const assert_back_to_two_items = assert(() => {
     return todoList.items.filter(() => true).length === 2;
   });
 
-  const assert_walk_dog_removed = computed(() => {
+  const assert_walk_dog_removed = assert(() => {
     return !todoList.items.some((item) => item.title === "Walk the dog");
   });
 
-  const assert_groceries_still_exists = computed(() => {
+  const assert_groceries_still_exists = assert(() => {
     return todoList.items.some((item) => item.title === "Buy groceries");
   });
 
-  const assert_book_still_exists = computed(() => {
+  const assert_book_still_exists = assert(() => {
     return todoList.items.some((item) => item.title === "Read a book");
   });
 
   // After removing first item
-  const assert_down_to_one_item = computed(() => {
+  const assert_down_to_one_item = assert(() => {
     return todoList.items.filter(() => true).length === 1;
   });
 
-  const assert_groceries_removed = computed(() => {
+  const assert_groceries_removed = assert(() => {
     return !todoList.items.some((item) => item.title === "Buy groceries");
   });
 
   // After removing last item
-  const assert_back_to_empty = computed(() => {
+  const assert_back_to_empty = assert(() => {
     return todoList.items.filter(() => true).length === 0;
   });
 
-  const assert_final_count_0 = computed(() => {
+  const assert_final_count_0 = assert(() => {
     return todoList.itemCount === 0;
   });
 

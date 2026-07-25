@@ -26,7 +26,7 @@
  *
  * Run: deno task cf test packages/patterns/system/profile-create.test.tsx --verbose
  */
-import { computed, pattern, UI, Writable } from "commonfabric";
+import { assert, pattern, UI, Writable } from "commonfabric";
 import ProfileCreate, {
   TRUSTED_PROFILE_CREATE_ACTION,
 } from "./profile-create.tsx";
@@ -83,13 +83,13 @@ export default pattern(() => {
   });
 
   // === Assertions: no defaultName → no prefill, surface untouched ===
-  const assert_no_default_has_no_initial_value = computed(() => {
+  const assert_no_default_has_no_initial_value = assert(() => {
     const input = findByTag(withoutDefault[UI], "cf-submit-input");
     if (!input) return false;
     const initialValue = propValue(input.props.initialValue);
     return initialValue === undefined || initialValue === "";
   });
-  const assert_no_default_action_wired = computed(() => {
+  const assert_no_default_action_wired = assert(() => {
     const input = findByTag(withoutDefault[UI], "cf-submit-input");
     if (!input) return false;
     return propValue(input.props["data-ui-action"]) ===
@@ -97,12 +97,12 @@ export default pattern(() => {
   });
 
   // === Assertions: defaultName prefills, everything else unchanged ===
-  const assert_default_seeds_initial_value = computed(() => {
+  const assert_default_seeds_initial_value = assert(() => {
     const input = findByTag(withDefault[UI], "cf-submit-input");
     if (!input) return false;
     return propValue(input.props.initialValue) === "Ada";
   });
-  const assert_default_action_still_wired = computed(() => {
+  const assert_default_action_still_wired = assert(() => {
     const input = findByTag(withDefault[UI], "cf-submit-input");
     if (!input) return false;
     return propValue(input.props["data-ui-action"]) ===
@@ -114,13 +114,13 @@ export default pattern(() => {
   // prefill was supplied: the exported `createProfile` stream exists and the
   // field's onClick is bound. (Firing the stream — the cross-space create —
   // is covered in the runner lane; see the header comment.)
-  const assert_no_default_create_wiring = computed(() => {
+  const assert_no_default_create_wiring = assert(() => {
     const input = findByTag(withoutDefault[UI], "cf-submit-input");
     return input !== undefined &&
       input.props.onClick !== undefined &&
       withoutDefault.createProfile !== undefined;
   });
-  const assert_default_create_wiring = computed(() => {
+  const assert_default_create_wiring = assert(() => {
     const input = findByTag(withDefault[UI], "cf-submit-input");
     return input !== undefined &&
       input.props.onClick !== undefined &&
@@ -129,10 +129,10 @@ export default pattern(() => {
 
   // Neither instance creates a profile at render time — the prefill is not
   // auto-submitted.
-  const assert_no_default_no_autocreate = computed(() =>
+  const assert_no_default_no_autocreate = assert(() =>
     (profilesNoDefault.get()?.length ?? 0) === 0
   );
-  const assert_default_no_autocreate = computed(() =>
+  const assert_default_no_autocreate = assert(() =>
     (profilesWithDefault.get()?.length ?? 0) === 0
   );
 

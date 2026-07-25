@@ -10,7 +10,7 @@
  *
  * Run: deno task cf test packages/patterns/counter/counter.test.tsx --verbose
  */
-import { action, computed, pattern } from "commonfabric";
+import { action, assert, pattern } from "commonfabric";
 import { default as ContactBook, matchesSearch } from "./contact-book.tsx";
 import { type Contact } from "./contact-detail.tsx";
 
@@ -31,19 +31,19 @@ const testContact: Contact = {
 
 export default pattern(() => {
   // Initial state assertions
-  const assert_empty_query_matches_all = computed(() =>
+  const assert_empty_query_matches_all = assert(() =>
     matchesSearch(testContact, "")
   );
 
-  const assert_name_query_matches = computed(() =>
+  const assert_name_query_matches = assert(() =>
     matchesSearch(testContact, "conrad")
   );
 
-  const assert_email_query_matches = computed(() =>
+  const assert_email_query_matches = assert(() =>
     matchesSearch(testContact, "testmail")
   );
 
-  const assert_company_query_matches = computed(() =>
+  const assert_company_query_matches = assert(() =>
     matchesSearch(testContact, "widgets")
   );
 
@@ -53,7 +53,7 @@ export default pattern(() => {
     contactBook.onAddContact.send();
   });
 
-  const assert_one_contact = computed(
+  const assert_one_contact = assert(
     () => len(contactBook.contacts) == 1,
   );
 

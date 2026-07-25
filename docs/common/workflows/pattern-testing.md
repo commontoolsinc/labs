@@ -178,8 +178,9 @@ const assert_game_ready = assert(() => {
 ### Prefer `assert()` over `computed()`
 
 Write new assertions with `assert()`. Most test patterns in the repository
-still use `computed()`, which a step also accepts — but a failing `computed()`
-assertion can only ever report the boolean it produced:
+use `assert()` for their assertions; a step also accepts a `computed()` boolean,
+but a failing `computed()` assertion can only ever report the boolean it
+produced:
 
 ```
 ✗ assertion_1

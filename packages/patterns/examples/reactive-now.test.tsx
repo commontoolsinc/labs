@@ -1,4 +1,4 @@
-import { action, computed, pattern } from "commonfabric";
+import { action, assert, pattern } from "commonfabric";
 import ReactiveNow from "./reactive-now.tsx";
 
 // The time labels derive from the reactive #now clock: they read "…" until #now
@@ -12,20 +12,20 @@ import ReactiveNow from "./reactive-now.tsx";
 export default pattern(() => {
   const demo = ReactiveNow();
 
-  const assert_loaded_at_is_clock_shaped = computed(() =>
+  const assert_loaded_at_is_clock_shaped = assert(() =>
     /^\d{2}:\d{2}:\d{2}$/.test(demo.loadedAt)
   );
-  const assert_now_is_clock_shaped = computed(() =>
+  const assert_now_is_clock_shaped = assert(() =>
     /^\d{2}:\d{2}:\d{2}$/.test(demo.now)
   );
-  const assert_since_load_is_ago_shaped = computed(() =>
+  const assert_since_load_is_ago_shaped = assert(() =>
     /^\d+s ago$/.test(demo.sinceLoad)
   );
 
   const action_tap = action(() => {
     demo.tap.send({});
   });
-  const assert_tap_delivered = computed(() => demo.taps >= 1);
+  const assert_tap_delivered = assert(() => demo.taps >= 1);
 
   // Keystroke path: driving the text box updates the derived char count and echo.
   // Like the tap, the delivery SHAPING is not exercised here (a headless test
@@ -33,8 +33,8 @@ export default pattern(() => {
   const action_type = action(() => {
     demo.type.send({ value: "hello" });
   });
-  const assert_char_count = computed(() => demo.charCount === 5);
-  const assert_echo = computed(() => demo.echo === "HELLO");
+  const assert_char_count = assert(() => demo.charCount === 5);
+  const assert_echo = assert(() => demo.echo === "HELLO");
 
   return {
     tests: [

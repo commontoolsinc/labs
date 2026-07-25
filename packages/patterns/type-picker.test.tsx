@@ -1,4 +1,4 @@
-import { action, computed, pattern, UI, Writable } from "commonfabric";
+import { action, assert, pattern, UI, Writable } from "commonfabric";
 import TypePickerModule from "./type-picker.tsx";
 import type { SubPieceEntry, TrashedSubPieceEntry } from "./record/types.ts";
 import { findElementByText, propsOf } from "./test/vnode-helpers.ts";
@@ -19,14 +19,14 @@ export default pattern(() => {
 
   const picker = TypePickerModule({ entries, trashedEntries, dismissed });
 
-  const assert_starts_undismissed = computed(() => picker.dismissed === false);
+  const assert_starts_undismissed = assert(() => picker.dismissed === false);
 
   // `dismissed` is passed straight through, so the output follows the cell
   // rather than a value snapshotted at instantiation.
   const action_dismiss = action(() => {
     dismissed.set(true);
   });
-  const assert_dismissed_follows_the_cell = computed(() =>
+  const assert_dismissed_follows_the_cell = assert(() =>
     picker.dismissed === true
   );
 
@@ -42,16 +42,16 @@ export default pattern(() => {
   // The Person template creates an email and a phone. Each is recorded on its
   // entry with its standard default label, so a later add of the same type can
   // see it. Without that, the added module would default to the same label.
-  const assert_template_email_label = computed(() =>
+  const assert_template_email_label = assert(() =>
     (entries.get() ?? []).find((e) => e.type === "email")?.label === "Personal"
   );
-  const assert_template_phone_label = computed(() =>
+  const assert_template_phone_label = assert(() =>
     (entries.get() ?? []).find((e) => e.type === "phone")?.label === "Mobile"
   );
 
   // The consequence the recorded label buys: the next email add reads the
   // template's email label and picks the next unused one rather than "Personal".
-  const assert_next_email_label_is_work = computed(() =>
+  const assert_next_email_label_is_work = assert(() =>
     getNextUnusedLabel("email", entries.get() ?? []) === "Work"
   );
 

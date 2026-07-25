@@ -14,7 +14,7 @@
  *
  * Run: deno task cf test packages/patterns/card-piles/main.test.tsx --verbose
  */
-import { action, computed, pattern } from "commonfabric";
+import { action, assert, pattern } from "commonfabric";
 import CardPiles, { defaultPile1, defaultPile2 } from "./main.tsx";
 
 export default pattern(() => {
@@ -50,18 +50,18 @@ export default pattern(() => {
   // =========================================================================
   // Initial state assertions — defaults
   // =========================================================================
-  const assert_defaults_pile1_count = computed(
+  const assert_defaults_pile1_count = assert(
     () => defaults.pile1.length === 3,
   );
-  const assert_defaults_pile2_count = computed(
+  const assert_defaults_pile2_count = assert(
     () => defaults.pile2.length === 3,
   );
-  const assert_defaults_pile1_first_card = computed(
+  const assert_defaults_pile1_first_card = assert(
     () =>
       defaults.pile1[0]?.suit === "hearts" &&
       defaults.pile1[0]?.rank === "A",
   );
-  const assert_defaults_pile2_first_card = computed(
+  const assert_defaults_pile2_first_card = assert(
     () =>
       defaults.pile2[0]?.suit === "clubs" &&
       defaults.pile2[0]?.rank === "Q",
@@ -70,24 +70,24 @@ export default pattern(() => {
   // =========================================================================
   // Initial state assertions — custom inputs
   // =========================================================================
-  const assert_custom_pile1_count = computed(() => piles.pile1.length === 2);
-  const assert_custom_pile2_count = computed(() => piles.pile2.length === 1);
-  const assert_custom_total = computed(
+  const assert_custom_pile1_count = assert(() => piles.pile1.length === 2);
+  const assert_custom_pile2_count = assert(() => piles.pile2.length === 1);
+  const assert_custom_total = assert(
     () => piles.pile1.length + piles.pile2.length === 3,
   );
-  const assert_custom_pile1_has_ace = computed(
+  const assert_custom_pile1_has_ace = assert(
     () => piles.pile1[0]?.suit === "hearts" && piles.pile1[0]?.rank === "A",
   );
-  const assert_custom_pile2_has_queen = computed(
+  const assert_custom_pile2_has_queen = assert(
     () => piles.pile2[0]?.suit === "clubs" && piles.pile2[0]?.rank === "Q",
   );
 
   // =========================================================================
   // Initial state assertions — single card edge case
   // =========================================================================
-  const assert_single_pile1_count = computed(() => single.pile1.length === 1);
-  const assert_single_pile2_empty = computed(() => single.pile2.length === 0);
-  const assert_single_total = computed(
+  const assert_single_pile1_count = assert(() => single.pile1.length === 1);
+  const assert_single_pile2_empty = assert(() => single.pile2.length === 0);
+  const assert_single_total = assert(
     () => single.pile1.length + single.pile2.length === 1,
   );
 
@@ -99,7 +99,7 @@ export default pattern(() => {
   });
 
   // Shuffle preserves total card count
-  const assert_total_preserved_after_shuffle = computed(
+  const assert_total_preserved_after_shuffle = assert(
     () => piles.pile1.length + piles.pile2.length === 3,
   );
 
@@ -108,7 +108,7 @@ export default pattern(() => {
     piles.shuffle.send();
   });
 
-  const assert_total_preserved_after_second_shuffle = computed(
+  const assert_total_preserved_after_second_shuffle = assert(
     () => piles.pile1.length + piles.pile2.length === 3,
   );
 
@@ -117,7 +117,7 @@ export default pattern(() => {
     single.shuffle.send();
   });
 
-  const assert_single_total_after_shuffle = computed(
+  const assert_single_total_after_shuffle = assert(
     () => single.pile1.length + single.pile2.length === 1,
   );
 
@@ -136,13 +136,13 @@ export default pattern(() => {
     ],
   });
 
-  const assert_move_initial_pile1 = computed(
+  const assert_move_initial_pile1 = assert(
     () => movePiles.pile1.length === 2,
   );
-  const assert_move_initial_pile2 = computed(
+  const assert_move_initial_pile2 = assert(
     () => movePiles.pile2.length === 2,
   );
-  const assert_move_initial_total = computed(
+  const assert_move_initial_total = assert(
     () => movePiles.pile1.length + movePiles.pile2.length === 4,
   );
 
@@ -153,23 +153,23 @@ export default pattern(() => {
     });
   });
 
-  const assert_after_move_to_pile1_count1 = computed(
+  const assert_after_move_to_pile1_count1 = assert(
     () => movePiles.pile1.length === 3,
   );
-  const assert_after_move_to_pile1_count2 = computed(
+  const assert_after_move_to_pile1_count2 = assert(
     () => movePiles.pile2.length === 1,
   );
-  const assert_after_move_to_pile1_total = computed(
+  const assert_after_move_to_pile1_total = assert(
     () => movePiles.pile1.length + movePiles.pile2.length === 4,
   );
   // Queen of Clubs should now be at end of pile1
-  const assert_queen_moved_to_pile1 = computed(
+  const assert_queen_moved_to_pile1 = assert(
     () =>
       movePiles.pile1[2]?.suit === "clubs" &&
       movePiles.pile1[2]?.rank === "Q",
   );
   // Original pile1 cards should still be in order
-  const assert_pile1_originals_intact = computed(
+  const assert_pile1_originals_intact = assert(
     () =>
       movePiles.pile1[0]?.suit === "hearts" &&
       movePiles.pile1[0]?.rank === "A" &&
@@ -177,7 +177,7 @@ export default pattern(() => {
       movePiles.pile1[1]?.rank === "K",
   );
   // pile2 should only have diamonds/10 left
-  const assert_pile2_has_only_ten = computed(
+  const assert_pile2_has_only_ten = assert(
     () =>
       movePiles.pile2[0]?.suit === "diamonds" &&
       movePiles.pile2[0]?.rank === "10",
@@ -193,23 +193,23 @@ export default pattern(() => {
     });
   });
 
-  const assert_after_move_to_pile2_count1 = computed(
+  const assert_after_move_to_pile2_count1 = assert(
     () => movePiles.pile1.length === 2,
   );
-  const assert_after_move_to_pile2_count2 = computed(
+  const assert_after_move_to_pile2_count2 = assert(
     () => movePiles.pile2.length === 2,
   );
-  const assert_after_move_to_pile2_total = computed(
+  const assert_after_move_to_pile2_total = assert(
     () => movePiles.pile1.length + movePiles.pile2.length === 4,
   );
   // hearts/A should now be at end of pile2
-  const assert_ace_moved_to_pile2 = computed(
+  const assert_ace_moved_to_pile2 = assert(
     () =>
       movePiles.pile2[1]?.suit === "hearts" &&
       movePiles.pile2[1]?.rank === "A",
   );
   // pile1 should still have spades/K and clubs/Q (ace removed from front)
-  const assert_pile1_after_move_to_pile2 = computed(
+  const assert_pile1_after_move_to_pile2 = assert(
     () =>
       movePiles.pile1[0]?.suit === "spades" &&
       movePiles.pile1[0]?.rank === "K" &&
@@ -232,9 +232,9 @@ export default pattern(() => {
     });
   });
 
-  const assert_pile2_empty = computed(() => movePiles.pile2.length === 0);
-  const assert_pile1_has_all = computed(() => movePiles.pile1.length === 4);
-  const assert_empty_pile_total = computed(
+  const assert_pile2_empty = assert(() => movePiles.pile2.length === 0);
+  const assert_pile1_has_all = assert(() => movePiles.pile1.length === 4);
+  const assert_empty_pile_total = assert(
     () => movePiles.pile1.length + movePiles.pile2.length === 4,
   );
 
@@ -247,8 +247,8 @@ export default pattern(() => {
     });
   });
 
-  const assert_pile2_restored = computed(() => movePiles.pile2.length === 1);
-  const assert_pile1_after_restore = computed(
+  const assert_pile2_restored = assert(() => movePiles.pile2.length === 1);
+  const assert_pile1_after_restore = assert(
     () => movePiles.pile1.length === 3,
   );
 
@@ -259,7 +259,7 @@ export default pattern(() => {
     movePiles.shuffle.send();
   });
 
-  const assert_total_after_shuffle_moves = computed(
+  const assert_total_after_shuffle_moves = assert(
     () => movePiles.pile1.length + movePiles.pile2.length === 4,
   );
 
