@@ -79,6 +79,12 @@ Deno.test("diffdoc cov: Git blob reads stay local and return empty results after
   assertEquals(options.maxBuffer, Number.MAX_SAFE_INTEGER);
 
   assertEquals(
+    _dd.readGitBlobs("\0", ["aaaa"]).size,
+    0,
+    "invalid command working directories return no blobs",
+  );
+
+  assertEquals(
     _dd.readGitBlobs("/repo", ["aaaa"], () => {
       throw new Error("spawn failed");
     }).size,
