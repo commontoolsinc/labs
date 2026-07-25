@@ -1,5 +1,6 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { FabricValue } from "@commonfabric/data-model/interface";
 import { Identity } from "@commonfabric/identity";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
@@ -110,7 +111,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
   const seedDoc = async (
     rt: Runtime,
     cause: string,
-    value: unknown,
+    value: FabricValue,
     entries: LabelMapEntry[],
   ): Promise<string> => {
     const seed = rt.edit();
