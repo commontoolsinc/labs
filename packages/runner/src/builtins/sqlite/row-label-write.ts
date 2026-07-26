@@ -42,7 +42,7 @@ import {
  *  input (sink-request) before the commit. */
 export interface RowLabelWritePolicy {
   table: string;
-  label: { confidentiality: unknown[]; integrity: CfcAtom[] };
+  label: { confidentiality: CfcConfClause[]; integrity: CfcAtom[] };
 }
 
 export interface RowLabelWriteArgs {
@@ -301,7 +301,7 @@ export function checkSqliteRowLabelWrite(
     policies.push({
       table: declaredKey,
       label: {
-        confidentiality: res.confidentiality,
+        confidentiality: res.confidentiality as CfcConfClause[],
         integrity: res.integrity as CfcAtom[],
       },
     });

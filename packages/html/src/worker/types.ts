@@ -118,7 +118,7 @@ export interface RenderPolicy {
    * Confidentiality atoms this subtree may declassify before applying the max bound.
    * This is a temporary low-level capability hook for trusted UI experiments.
    */
-  declassifyConfidentiality: readonly unknown[];
+  declassifyConfidentiality: readonly CfcConfClause[];
 
   /**
    * Integrity required for user-visible text in this subtree.
