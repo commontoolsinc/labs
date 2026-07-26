@@ -49,7 +49,7 @@ Entity values are stored in an **envelope** with well-known top-level keys:
 
 ```typescript
 // Shown at module scope.
-interface SigilLink {
+type SigilLink = {
   "/": {
     "link@1": {
       id?: `of:${string}` | `cid:${string}`;
@@ -57,12 +57,12 @@ interface SigilLink {
       space?: string;
     };
   };
-}
+};
 
-interface InternalManifestEntry {
+type InternalManifestEntry = {
   partialCause: FabricValue;
   link: SigilLink;
-}
+};
 
 interface EntityDocument {
   value?: FabricValue; // The cell's data when present.

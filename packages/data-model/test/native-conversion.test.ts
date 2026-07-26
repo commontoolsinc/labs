@@ -1,7 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { FabricInstance, type FabricValue } from "@/interface.ts";
+import {
+  FabricInstance,
+  type FabricOrConvertibleNativeValue,
+  type FabricValue,
+} from "@/interface.ts";
 import { CODEC } from "@/codec-common/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
@@ -35,7 +39,7 @@ import { DummyReconstructionContext } from "./fabric-instances/fixtures.ts";
  * `fabricFromNativeValue()` and decodes it back to native form via
  * `nativeFromFabricValue()`.
  */
-function roundTrip(value: FabricValue): FabricValue {
+function roundTrip(value: FabricValue): FabricOrConvertibleNativeValue {
   return nativeFromFabricValue(fabricFromNativeValue(value));
 }
 
