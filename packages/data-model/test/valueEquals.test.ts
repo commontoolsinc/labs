@@ -250,7 +250,7 @@ describe("valueEqual()", () => {
     const equalShape = () => ({ a: 1, b: [2, 3] });
     const unequalShape = () => ({ a: 1, b: [2, 4] });
 
-    const states: Record<"DF" | "F" | "U", (v: object) => object> = {
+    const states: Record<"DF" | "F" | "U", (v: FabricValue) => FabricValue> = {
       DF: (v) => deepFreeze(v),
       F: (v) => Object.freeze(v),
       U: (v) => v,
