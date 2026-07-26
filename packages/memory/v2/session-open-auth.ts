@@ -65,6 +65,33 @@ export type SessionOpenMessage = {
   authorization?: unknown;
 };
 
+/**
+ * The `session.open` authorization AFTER validation. Deliberately not the
+ * declared type of `SessionOpenMessage.authorization`: that field is whatever
+ * the peer sent, so it stays `unknown` and only
+ * {@link wireAuthorizationOf} may produce this type.
+ *
+ * The signature crosses the wire as a `FabricBytes` -- the canonical binary
+ * fabric value -- not as the `Uint8Array`-derived `Signature<T>` used
+ * in-process.
+ */
+export type WireSessionOpenAuthorization = {
+  signature: FabricBytes;
+};
+
+/**
+ * Narrow a peer-supplied `authorization` to {@link WireSessionOpenAuthorization},
+ * or `undefined` if it is not one. This is the only sanctioned way to go from
+ * the untrusted field to the named shape.
+ */
+export const wireAuthorizationOf = (
+  authorization: unknown,
+): WireSessionOpenAuthorization | undefined => {
+  if (!isRecord(authorization)) return undefined;
+  const { signature } = authorization;
+  return signature instanceof FabricBytes ? { signature } : undefined;
+};
+
 export type VerifySessionOpenOptions = {
   /** This server's own audience identity. */
   audience: string;
@@ -86,12 +113,8 @@ export const verifySessionOpenAuthorization = async (
   message: SessionOpenMessage,
   options: VerifySessionOpenOptions,
 ): Promise<string> => {
-  const rawSignature = isRecord(message.authorization)
-    ? message.authorization.signature
-    : undefined;
-  const signature = rawSignature instanceof FabricBytes
-    ? rawSignature.slice()
-    : null;
+  const wireAuthorization = wireAuthorizationOf(message.authorization);
+  const signature = wireAuthorization?.signature.slice() ?? null;
   if (!isRecord(message.invocation) || signature === null) {
     throw authorizationError("memory session.open requires authorization");
   }
