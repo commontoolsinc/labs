@@ -599,7 +599,7 @@ export class WorkerReconciler {
       textIntegrity: {
         requiredIntegrity: [
           ...(parentTextIntegrity?.requiredIntegrity ?? []),
-          ...(requiredIntegrity as readonly CfcAtom[]),
+          ...requiredIntegrity,
         ],
         allowLiteralText: (parentTextIntegrity?.allowLiteralText ?? true) &&
           allowLiteralText,
@@ -698,7 +698,7 @@ export class WorkerReconciler {
   private nodePropAsAtomList(
     node: WorkerVNode,
     keys: readonly string[],
-  ): readonly CfcConfClause[] | undefined {
+  ): readonly CfcAtom[] | undefined {
     for (const key of keys) {
       const value = this.nodePropForRenderPolicy(node, key);
       if (typeof value === "function") {
@@ -710,16 +710,14 @@ export class WorkerReconciler {
       if (resolved === undefined) {
         continue;
       }
-      return (Array.isArray(resolved)
-        ? resolved
-        : [resolved]) as readonly CfcConfClause[];
+      return (Array.isArray(resolved) ? resolved : [resolved]) as CfcAtom[];
     }
     return undefined;
   }
 
   private requiredAuthorshipIntegrityFromAuthor(
     node: WorkerVNode,
-  ): readonly CfcConfClause[] | undefined {
+  ): readonly CfcAtom[] | undefined {
     const author = this.nodePropForRenderPolicy(node, "author") ??
       this.nodePropForRenderPolicy(node, "$author");
     if (!isCell(author)) {
