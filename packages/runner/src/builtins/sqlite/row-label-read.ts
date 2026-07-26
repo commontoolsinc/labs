@@ -15,6 +15,7 @@ import {
   ruleInputFields,
   validateRowLabelSpec,
 } from "@commonfabric/memory/sqlite/row-label";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { tableDeclaresRowLabel } from "@commonfabric/memory/v2";
 import type { CfcConfClause } from "../../cfc/clause.ts";
 import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
@@ -29,7 +30,7 @@ interface ResultColumn {
 /** A row's per-row label, shaped as a schema `ifc` for the row-doc write. */
 export interface PerRowIfc {
   confidentiality?: unknown[];
-  integrity?: unknown[];
+  integrity?: CfcAtom[];
 }
 
 export interface RowLabelReadArgs {
@@ -292,7 +293,9 @@ export function computeRowLabelRead(
           if (res.confidentiality.length > 0) {
             ifc.confidentiality = res.confidentiality;
           }
-          if (res.integrity.length > 0) ifc.integrity = res.integrity;
+          if (res.integrity.length > 0) {
+            ifc.integrity = res.integrity as CfcAtom[];
+          }
           labels.push(
             ifc.confidentiality || ifc.integrity ? ifc : undefined,
           );

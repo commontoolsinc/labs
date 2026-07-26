@@ -27,6 +27,7 @@ import {
   UI,
   useCancelGroup,
 } from "@commonfabric/runner";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import type { CellRef } from "@commonfabric/runtime-client";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -595,7 +596,7 @@ export class WorkerReconciler {
       textIntegrity: {
         requiredIntegrity: [
           ...(parentTextIntegrity?.requiredIntegrity ?? []),
-          ...requiredIntegrity,
+          ...(requiredIntegrity as readonly CfcAtom[]),
         ],
         allowLiteralText: (parentTextIntegrity?.allowLiteralText ?? true) &&
           allowLiteralText,
@@ -1066,7 +1067,7 @@ export class WorkerReconciler {
    */
   private resolvedConfidentialityRenderable(
     confidentiality: readonly unknown[],
-    integrity: readonly unknown[],
+    integrity: readonly CfcAtom[],
     policy: RenderPolicy,
   ): boolean {
     const resolved = this.resolveRenderConfidentiality!({
@@ -1378,7 +1379,7 @@ export class WorkerReconciler {
     );
   }
 
-  private integrityLabels(labelView: CfcLabelView): readonly unknown[] {
+  private integrityLabels(labelView: CfcLabelView): readonly CfcAtom[] {
     return ContextualFlowControl.uniqueAtoms(
       labelView.entries.flatMap((entry) =>
         entry.path.length === 0 ? [...(entry.label.integrity ?? [])] : []

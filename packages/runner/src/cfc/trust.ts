@@ -243,7 +243,7 @@ export type TrustResolver = {
    */
   conceptSatisfied(
     concept: string,
-    integrityAtoms: readonly unknown[],
+    integrityAtoms: readonly CfcAtom[],
     actingPrincipal: string | undefined,
   ): boolean;
 };

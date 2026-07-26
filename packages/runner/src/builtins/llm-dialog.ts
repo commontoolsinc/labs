@@ -2,6 +2,7 @@ import {
   FabricPrimitive,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import {
   DEFAULT_MODEL_NAME,
   LLMClient,
@@ -2094,7 +2095,11 @@ function toolInputRequiredIntegrityFailure(
       // membership the commit-boundary gates use. `trust` carries the acting
       // principal's closure so a CONCEPT-valued floor accepts any concrete
       // atom above the concept (D5), consistently with the read/write gates.
-      const satisfied = cfcIntegritySatisfiesFloor(integrity, required, trust);
+      const satisfied = cfcIntegritySatisfiesFloor(
+        integrity as readonly CfcAtom[],
+        required,
+        trust,
+      );
       if (!satisfied) {
         return `field "${path || "(root)"}" requires integrity the ` +
           `model-supplied value does not carry (pass an integrity-bearing ` +

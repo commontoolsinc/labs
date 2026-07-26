@@ -1,4 +1,5 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { expect } from "@std/expect";
 import type { FabricValue } from "@commonfabric/data-model/interface";
 import { Identity } from "@commonfabric/identity";
@@ -40,7 +41,7 @@ type StoredEntry = {
 const SOURCE_A = { space: "did:key:remote-a", id: "of:origin-a", path: [] };
 const SOURCE_B = { space: "did:key:remote-b", id: "of:origin-b", path: [] };
 
-const caveatAtom = (source: unknown = SOURCE_A) => ({
+const caveatAtom = (source: CfcAtom = SOURCE_A) => ({
   type: CFC_ATOM_TYPE.Caveat,
   kind: "prompt-influence",
   source,

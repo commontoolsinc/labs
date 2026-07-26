@@ -1,4 +1,5 @@
 import { encodePointer } from "../../../memory/v2/path.ts";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import type { CfcConfClause } from "./clause.ts";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { uniqueCfcAtoms } from "./observation.ts";
@@ -6,7 +7,7 @@ import { normalizeClause } from "./clause.ts";
 
 export type IFCLabel = {
   confidentiality?: unknown[];
-  integrity?: unknown[];
+  integrity?: CfcAtom[];
 };
 
 /**
@@ -88,7 +89,9 @@ export const cloneCfcLabel = (label: IFCLabel): IFCLabel => {
   for (const key of LABEL_KEYS) {
     const value = label[key];
     if (Array.isArray(value) && value.length > 0) {
-      cloned[key] = [...value];
+      // TODO(danfuzz): drop the cast once `confidentiality` names its
+      // clause type too; this loop spans both label keys.
+      cloned[key] = [...value] as CfcAtom[];
     }
   }
   return cloned;
@@ -151,7 +154,9 @@ export const redactCaveatSourcesForDisplay = (
     for (const key of LABEL_KEYS) {
       const value = entry.label[key];
       if (Array.isArray(value) && value.length > 0) {
-        label[key] = value.map(redactCaveatSourceAtom);
+        // TODO(danfuzz): drop the cast once `confidentiality` names its
+        // clause type too; this loop spans both label keys.
+        label[key] = value.map(redactCaveatSourceAtom) as CfcAtom[];
       }
     }
     return {

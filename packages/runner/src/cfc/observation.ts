@@ -226,7 +226,7 @@ const integrityAtomSatisfies = (
       trust?.trustResolver !== undefined &&
       trust.trustResolver.conceptSatisfied(
         concept.uri,
-        [actual],
+        [actual as CfcAtom],
         trust.actingPrincipal,
       );
   }
@@ -248,8 +248,8 @@ const integrityAtomSatisfies = (
  * (concrete/pattern) floors.
  */
 export const cfcIntegritySatisfiesFloor = (
-  integrity: readonly unknown[],
-  requiredIntegrity: readonly unknown[],
+  integrity: readonly CfcAtom[],
+  requiredIntegrity: readonly CfcAtom[],
   trust?: CfcFloorTrustContext,
 ): boolean =>
   requiredIntegrity.every((required) =>
@@ -308,7 +308,7 @@ export const cfcIntegrityWitnessKey = (
  */
 export const cfcIntegritySatisfiesFloorCoherently = (
   consumedIntegrity: readonly (readonly unknown[])[],
-  requiredIntegrity: readonly unknown[],
+  requiredIntegrity: readonly CfcAtom[],
   trust?: CfcFloorTrustContext,
 ): boolean =>
   requiredIntegrity.every((required) => {
