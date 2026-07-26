@@ -15,6 +15,7 @@ import {
   ruleInputFields,
   validateRowLabelSpec,
 } from "@commonfabric/memory/sqlite/row-label";
+import type { CfcAtomObject } from "@commonfabric/api/cfc";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { tableDeclaresRowLabel } from "@commonfabric/memory/v2";
 import type { CfcConfClause } from "../../cfc/clause.ts";
@@ -46,7 +47,7 @@ export interface RowLabelReadArgs {
    *  they ride every row, so they count against the ceiling too. */
   staticConfidentiality?: readonly unknown[];
   /** Declared output ceiling (placeholders already resolved). */
-  ceiling?: readonly unknown[];
+  ceiling?: readonly CfcConfClause[];
   /** What to do when a row's label exceeds the ceiling (default "fail"). */
   onExceed?: unknown;
   /** CFC Phase 3.b read-time clearance: when set, keep only rows the acting
@@ -405,12 +406,14 @@ export function computeRowLabelRead(
  * closed — a ceiling that can't be pinned must not silently widen.
  */
 export function resolveCeilingPlaceholders(
-  ceiling: readonly unknown[],
+  ceiling: readonly CfcConfClause[],
   ctx: { actingPrincipal?: string; owner?: string },
-): { atoms: unknown[] } | { error: string } {
-  const atoms: unknown[] = [];
+): { atoms: CfcConfClause[] } | { error: string } {
+  const atoms: CfcConfClause[] = [];
   for (const atom of ceiling) {
-    if (isRecord(atom) && atom.__ctCurrentPrincipal === true) {
+    if (
+      isRecord(atom) && (atom as CfcAtomObject).__ctCurrentPrincipal === true
+    ) {
       if (ctx.actingPrincipal === undefined) {
         return {
           error: "sqlite: ceiling references the acting user but no acting " +
@@ -420,7 +423,7 @@ export function resolveCeilingPlaceholders(
       atoms.push(ctx.actingPrincipal);
       continue;
     }
-    if (isRecord(atom) && atom.__ctDbOwner === true) {
+    if (isRecord(atom) && (atom as CfcAtomObject).__ctDbOwner === true) {
       if (ctx.owner === undefined) {
         return {
           error: "sqlite: ceiling references the db owner but the db ref " +

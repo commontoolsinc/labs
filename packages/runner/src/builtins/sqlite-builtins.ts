@@ -20,6 +20,7 @@
 // this read path.
 
 import { type Cell, createCell, encodeSqliteParams } from "../cell.ts";
+import type { CfcConfClause } from "../cfc/clause.ts";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { parseLink } from "../link-utils.ts";
 import {
@@ -286,7 +287,7 @@ function deriveNullOriginIfc(
 type ColumnIfc = {
   confidentiality?: unknown[];
   integrity?: CfcAtom[];
-  maxConfidentiality?: unknown[];
+  maxConfidentiality?: CfcConfClause[];
 };
 
 const unionAtoms = (
@@ -306,9 +307,9 @@ const unionAtoms = (
 // An EMPTY intersection stays `[]`, which the verifier reads as "public only"
 // (the tightest ceiling) — collapsing it to undefined would forge "no ceiling".
 const tightenCeiling = (
-  prior: unknown[] | undefined,
-  next: unknown[] | undefined,
-): unknown[] | undefined => {
+  prior: CfcConfClause[] | undefined,
+  next: CfcConfClause[] | undefined,
+): CfcConfClause[] | undefined => {
   if (prior === undefined) return next;
   if (next === undefined) return prior;
   return prior.filter((atom) => next.some((n) => deepEqual(n, atom)));
@@ -638,7 +639,7 @@ export function sqliteQuery(
       // CFC Phase 3: declared output ceiling + what to do when a row's label
       // exceeds it ("fail" default | "skip"). The typed alternative is
       // MaxConfidentiality<> on the Row schema (rowSchema.ifc).
-      maxConfidentiality?: unknown[];
+      maxConfidentiality?: CfcConfClause[];
       onExceed?: unknown;
       // CFC Phase 3.b: opt into read-time clearance — filter rows to those the
       // acting reader may read (a declared existence release). Requires the
@@ -772,7 +773,7 @@ export function sqliteQuery(
           // row, and decides fail/skip under the ceiling — every unresolvable
           // case refuses the query (fail closed), never under-labels.
           const rowSchemaCeiling = (inputs.rowSchema as {
-            ifc?: { maxConfidentiality?: unknown[] };
+            ifc?: { maxConfidentiality?: CfcConfClause[] };
           } | undefined)?.ifc?.maxConfidentiality;
           if (
             inputs.maxConfidentiality !== undefined &&

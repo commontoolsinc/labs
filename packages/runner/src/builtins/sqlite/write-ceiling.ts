@@ -9,6 +9,7 @@
 // without a ceiling are unaffected (zero behavior change until `ifc` is used).
 
 import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
+import type { CfcConfClause } from "../../cfc/clause.ts";
 import {
   blankWriteSql,
   parseWriteParamColumns,
@@ -16,7 +17,7 @@ import {
 } from "@commonfabric/memory/sqlite/write-targets";
 
 interface ColumnIfc {
-  maxConfidentiality?: readonly unknown[];
+  maxConfidentiality?: readonly CfcConfClause[];
   confidentiality?: readonly unknown[];
 }
 type Tables = Record<
@@ -145,7 +146,7 @@ export function checkSqliteWriteCeiling(
   // case; the declared property keys may differ in case from the SQL).
   const resolveCeiling = (
     col: string,
-  ): { found: boolean; ceiling?: readonly unknown[] } => {
+  ): { found: boolean; ceiling?: readonly CfcConfClause[] } => {
     if (table === undefined) return { found: false };
     const props = tables[table]?.properties;
     if (!props) return { found: false };

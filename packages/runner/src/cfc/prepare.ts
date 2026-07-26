@@ -4767,7 +4767,7 @@ const verifySinkRequestCeilings = (
   const state = tx.getCfcState();
   const ceilings = state.sinkMaxConfidentiality;
   if (ceilings === undefined) return [];
-  const gatedSinks = new Map<string, readonly unknown[]>();
+  const gatedSinks = new Map<string, readonly CfcConfClause[]>();
   for (const input of state.writePolicyInputs) {
     if (input.kind !== "sink-request") continue;
     // Own-property lookup only: a sink named like an Object.prototype member
@@ -6192,7 +6192,7 @@ export const prepareBoundaryCommit = (
               ?.confidentiality ?? [];
           const offending = atomsOutsideCeiling(
             flowConfidentiality,
-            declaredCeiling,
+            declaredCeiling as readonly CfcConfClause[],
           );
           if (offending.length > 0) {
             // SC-18c error contract: a stable reason naming the rule id and

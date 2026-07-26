@@ -6,6 +6,7 @@
  */
 
 import type { Cancel, Cell, JSONSchema } from "@commonfabric/runner";
+import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import type {
   RenderConfidentialityResolver,
@@ -102,7 +103,7 @@ export interface RenderPolicy {
    * Confidentiality atoms allowed to render in this subtree.
    * Undefined means no render-time confidentiality bound is active.
    */
-  maxConfidentiality?: readonly unknown[];
+  maxConfidentiality?: readonly CfcConfClause[];
 
   /**
    * Caveat kinds admitted by the host's default render ceiling (spec
@@ -298,7 +299,7 @@ export function normalizeRenderDeclassificationPolicy(
  * new release judgment.
  */
 export interface RenderConfidentialityCeiling {
-  atoms?: readonly unknown[];
+  atoms?: readonly CfcConfClause[];
   caveatKinds?: readonly string[];
 }
 
@@ -322,7 +323,7 @@ export function normalizeRenderConfidentialityCeiling(
     caveatKinds?: unknown;
   };
   return {
-    atoms: Array.isArray(atoms) ? atoms : [],
+    atoms: Array.isArray(atoms) ? atoms as readonly CfcConfClause[] : [],
     caveatKinds: Array.isArray(caveatKinds)
       ? caveatKinds.filter((kind): kind is string => typeof kind === "string")
       : [],

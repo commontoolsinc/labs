@@ -27,6 +27,7 @@ import {
   UI,
   useCancelGroup,
 } from "@commonfabric/runner";
+import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import type { CellRef } from "@commonfabric/runtime-client";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -596,7 +597,7 @@ export class WorkerReconciler {
       textIntegrity: {
         requiredIntegrity: [
           ...(parentTextIntegrity?.requiredIntegrity ?? []),
-          ...(requiredIntegrity as readonly CfcAtom[]),
+          ...requiredIntegrity,
         ],
         allowLiteralText: (parentTextIntegrity?.allowLiteralText ?? true) &&
           allowLiteralText,
@@ -625,7 +626,7 @@ export class WorkerReconciler {
   private staticPropAsAtomList(
     props: WorkerProps | null | undefined,
     key: string,
-  ): readonly unknown[] | undefined {
+  ): readonly CfcConfClause[] | undefined {
     if (!props || typeof props !== "object" || !(key in props)) {
       return undefined;
     }
@@ -637,9 +638,9 @@ export class WorkerReconciler {
       return undefined;
     }
     if (Array.isArray(value)) {
-      return value;
+      return value as readonly CfcConfClause[];
     }
-    return [value];
+    return [value as CfcConfClause];
   }
 
   private nodePropForRenderPolicy(
@@ -695,7 +696,7 @@ export class WorkerReconciler {
   private nodePropAsAtomList(
     node: WorkerVNode,
     keys: readonly string[],
-  ): readonly unknown[] | undefined {
+  ): readonly CfcAtom[] | undefined {
     for (const key of keys) {
       const value = this.nodePropForRenderPolicy(node, key);
       if (typeof value === "function") {
@@ -707,14 +708,14 @@ export class WorkerReconciler {
       if (resolved === undefined) {
         continue;
       }
-      return Array.isArray(resolved) ? resolved : [resolved];
+      return (Array.isArray(resolved) ? resolved : [resolved]) as CfcAtom[];
     }
     return undefined;
   }
 
   private requiredAuthorshipIntegrityFromAuthor(
     node: WorkerVNode,
-  ): readonly unknown[] | undefined {
+  ): readonly CfcAtom[] | undefined {
     const author = this.nodePropForRenderPolicy(node, "author") ??
       this.nodePropForRenderPolicy(node, "$author");
     if (!isCell(author)) {
@@ -913,7 +914,7 @@ export class WorkerReconciler {
 
   private normalizeAtomBound(
     labels: readonly unknown[] | undefined,
-  ): readonly unknown[] | undefined {
+  ): readonly CfcConfClause[] | undefined {
     if (labels === undefined) {
       return undefined;
     }
@@ -921,9 +922,9 @@ export class WorkerReconciler {
   }
 
   private narrowMaxConfidentiality(
-    parentMax: readonly unknown[] | undefined,
-    localMax: readonly unknown[] | undefined,
-  ): readonly unknown[] | undefined {
+    parentMax: readonly CfcConfClause[] | undefined,
+    localMax: readonly CfcConfClause[] | undefined,
+  ): readonly CfcConfClause[] | undefined {
     if (parentMax === undefined) {
       return localMax;
     }
