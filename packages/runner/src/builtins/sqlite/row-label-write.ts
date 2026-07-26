@@ -27,6 +27,7 @@ import {
   ruleInputFields,
   validateRowLabelSpec,
 } from "@commonfabric/memory/sqlite/row-label";
+import type { CfcConfClause } from "../../cfc/clause.ts";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { tableDeclaresRowLabel } from "@commonfabric/memory/v2";
 import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
@@ -283,7 +284,12 @@ export function checkSqliteRowLabelWrite(
             "ceiling); storing the value would launder its label; fail closed",
         };
       }
-      if (!cfcObservationFitsCeiling(conf, res.confidentiality)) {
+      if (
+        !cfcObservationFitsCeiling(
+          conf as readonly CfcConfClause[],
+          res.confidentiality as readonly CfcConfClause[],
+        )
+      ) {
         return {
           error: `sqlite: a value bound to rule-bearing table ` +
             `"${declaredKey}" carries confidentiality not captured by the ` +

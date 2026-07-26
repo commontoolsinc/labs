@@ -2,6 +2,7 @@ import {
   FabricPrimitive,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
+import type { CfcConfClause } from "../cfc/clause.ts";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import {
   DEFAULT_MODEL_NAME,
@@ -165,7 +166,7 @@ type SerializeForLLMObservationParams = {
   logicalPath?: readonly string[];
   rootLink?: NormalizedFullLink;
   labelView?: CfcLabelView;
-  observationMaxConfidentiality?: readonly unknown[];
+  observationMaxConfidentiality?: readonly CfcConfClause[];
 };
 
 function normalizeInputSchema(schemaLike: unknown): JSONSchema {
@@ -873,7 +874,7 @@ type DialogRequestSnapshot = {
   toolCatalog: ToolCatalog;
   userResultSchema: JSONSchema | undefined;
   queueName?: string;
-  observationMaxConfidentiality?: readonly unknown[];
+  observationMaxConfidentiality?: readonly CfcConfClause[];
   systemObservedConfidentiality: readonly unknown[];
 };
 
@@ -1418,7 +1419,7 @@ function materializeDialogRequestSnapshot(
     runtime,
     "llmDialog",
     inputs.key("observationMaxConfidentiality").withTx(tx).get() as
-      | readonly unknown[]
+      | readonly CfcConfClause[]
       | undefined,
   );
   const toolsCell = inputs.key("tools").withTx(tx) as Cell<
@@ -1514,7 +1515,7 @@ function buildAvailableCellsDocumentationWithObservation(
   space: MemorySpace,
   context: Record<string, unknown> | undefined,
   pinnedCells: Cell<PinnedCell[]>,
-  observationMaxConfidentiality?: readonly unknown[],
+  observationMaxConfidentiality?: readonly CfcConfClause[],
 ): AvailableCellsDocumentation {
   // Collect all cell entries, deduplicating by resolved path.
   // When the same cell appears multiple times (e.g., from context AND pinned),
@@ -1665,7 +1666,7 @@ function buildAvailableCellsDocumentation(
   space: MemorySpace,
   context: Record<string, unknown> | undefined,
   pinnedCells: Cell<PinnedCell[]>,
-  observationMaxConfidentiality?: readonly unknown[],
+  observationMaxConfidentiality?: readonly CfcConfClause[],
 ): string {
   return buildAvailableCellsDocumentationWithObservation(
     runtime,
@@ -2013,8 +2014,8 @@ type ToolCallExecutionResult = {
 function effectiveObservationCeiling(
   runtime: Runtime,
   sink: string,
-  patternBound: readonly unknown[] | undefined,
-): readonly unknown[] | undefined {
+  patternBound: readonly CfcConfClause[] | undefined,
+): readonly CfcConfClause[] | undefined {
   const ceilings = runtime.cfcSinkMaxConfidentiality;
   // Object.hasOwn guard: the sink name is a runner-controlled literal today, but
   // a name colliding with an Object.prototype member must resolve to "no
@@ -2213,7 +2214,7 @@ async function executeToolCalls(
   toolCallParts: BuiltInLLMToolCallPart[],
   pinnedCells?: Cell<PinnedCell[]>,
   observedConfidentiality?: readonly unknown[],
-  observationMaxConfidentiality?: readonly unknown[],
+  observationMaxConfidentiality?: readonly CfcConfClause[],
 ): Promise<ToolCallExecutionResult[]> {
   const results: ToolCallExecutionResult[] = [];
   for (const part of toolCallParts) {
@@ -2487,7 +2488,7 @@ function handleSchema(
 async function handleRead(
   resolved: ResolvedToolCall & { type: "read" },
   space: MemorySpace,
-  observationMaxConfidentiality?: readonly unknown[],
+  observationMaxConfidentiality?: readonly CfcConfClause[],
 ): Promise<
   {
     result: { type: string; value: unknown };
@@ -2650,7 +2651,7 @@ async function handleInvoke(
   runtime: Runtime,
   space: MemorySpace,
   resolved: ResolvedToolCall,
-  observationMaxConfidentiality?: readonly unknown[],
+  observationMaxConfidentiality?: readonly CfcConfClause[],
 ): Promise<{
   result: { type: string; value: any };
   observedConfidentiality: readonly unknown[];
@@ -2852,7 +2853,7 @@ async function invokeToolCall(
   resolved: ResolvedToolCall,
   _catalog?: ToolCatalog,
   pinnedCells?: Cell<PinnedCell[]>,
-  observationMaxConfidentiality?: readonly unknown[],
+  observationMaxConfidentiality?: readonly CfcConfClause[],
 ) {
   // Handle pinned cell tools
   if (resolved.type === "pin") {
@@ -3297,7 +3298,7 @@ async function startRequest(
       runtime,
       "llmDialog",
       inputs.key("observationMaxConfidentiality").get() as
-        | readonly unknown[]
+        | readonly CfcConfClause[]
         | undefined,
     );
   const builtinTools = inputs.key("builtinTools").get() !== false;
@@ -3320,7 +3321,7 @@ async function startRequest(
     messages: Schema<typeof LLMMessageSchema>[],
   ) => {
     const startIndex = (messagesCell.withTx(tx).get() as
-      | readonly unknown[]
+      | readonly CfcConfClause[]
       | undefined)?.length ?? 0;
     messagesCell.withTx(tx).push(...messages);
     if (runtime.cfcEnforcementMode === "disabled") {

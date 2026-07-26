@@ -24,7 +24,7 @@ import {
 
 export type CfcObservedConfidentiality = readonly unknown[];
 export type CfcObservationMaxConfidentiality =
-  | readonly unknown[]
+  | readonly CfcConfClause[]
   | undefined;
 
 // Marker confidentiality atom injected when a cell's label could not be read
@@ -428,7 +428,7 @@ export const meetCfcObservationCeilings = (
 ): CfcObservationMaxConfidentiality => {
   if (a === undefined) return b;
   if (b === undefined) return a;
-  const met: unknown[] = [];
+  const met: CfcConfClause[] = [];
   for (const clauseA of a) {
     const alternativesA = clauseAlternatives(clauseA as CfcConfClause);
     if (alternativesA.length === 0) continue;

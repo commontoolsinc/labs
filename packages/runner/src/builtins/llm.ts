@@ -1,4 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import type { CfcConfClause } from "../cfc/clause.ts";
 import {
   DEFAULT_GENERATE_OBJECT_MODELS,
   DEFAULT_MODEL_NAME,
@@ -340,7 +341,7 @@ async function executeWithToolsLoop(params: {
     | ReturnType<typeof llmToolExecutionHelpers.buildToolCatalog>
     | undefined;
   initialObservedConfidentiality?: readonly unknown[];
-  observationMaxConfidentiality?: readonly unknown[];
+  observationMaxConfidentiality?: readonly CfcConfClause[];
   updatePartial: (text: string) => void;
   runtime: Runtime;
   space: any;
@@ -537,7 +538,7 @@ function buildContextDocumentation(
         runtime,
         sink,
         inputs.key("observationMaxConfidentiality").withTx(tx).get() as
-          | readonly unknown[]
+          | readonly CfcConfClause[]
           | undefined,
       ),
     );
@@ -782,7 +783,7 @@ export function llm(
                     runtime,
                     "llm",
                     inputs.key("observationMaxConfidentiality").get() as
-                      | readonly unknown[]
+                      | readonly CfcConfClause[]
                       | undefined,
                   ),
                 updatePartial,
@@ -1125,7 +1126,7 @@ export function generateText(
                     runtime,
                     "generateText",
                     inputs.key("observationMaxConfidentiality").get() as
-                      | readonly unknown[]
+                      | readonly CfcConfClause[]
                       | undefined,
                   ),
                 updatePartial,
@@ -1272,7 +1273,7 @@ export function generateObject<T extends Record<string, unknown>>(
         runtime,
         "generateObject",
         inputs.key("observationMaxConfidentiality").withTx(tx).get() as
-          | readonly unknown[]
+          | readonly CfcConfClause[]
           | undefined,
       );
     const outputScope = tx.getNarrowestReadScope();
