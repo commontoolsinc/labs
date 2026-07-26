@@ -8,6 +8,7 @@ import {
   dbNeedsColumnProvenance,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
+  encodeMemoryBoundaryUnprovenFabricValue,
   type EntityDocument,
   getPersistentSchedulerStateConfig,
   type GraphQuery,
@@ -3213,7 +3214,9 @@ export class Server {
     if (parsed?.type === "hello") {
       const response = respondToHello(parsed);
       if (response.type !== "hello.ok") {
-        return Promise.resolve(encodeMemoryBoundary(response));
+        return Promise.resolve(
+          encodeMemoryBoundaryUnprovenFabricValue(response),
+        );
       }
       return Promise.resolve(encodeMemoryBoundary({
         type: "response",

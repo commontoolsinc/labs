@@ -3,6 +3,7 @@ import {
   compatibleMemoryProtocolFlags,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
+  encodeMemoryBoundaryUnprovenFabricValue,
   type EntitySnapshot,
   getMemoryProtocolFlags,
   getPersistentSchedulerStateConfig,
@@ -190,7 +191,7 @@ export class Client {
     const requestId = message.requestId as string;
     const pending = Promise.withResolvers<unknown>();
     this.#pending.set(requestId, pending);
-    await this.transport.send(encodeMemoryBoundary(message));
+    await this.transport.send(encodeMemoryBoundaryUnprovenFabricValue(message));
     const result = await pending.promise as ResponseMessage<Result>;
     if (result.error) {
       const error = new Error(result.error.message);
@@ -1477,7 +1478,7 @@ export const connect = Client.connect;
 export const loopback = (server: Server): Transport => {
   let receiver = (_payload: string) => {};
   const connection = server.connect((message) => {
-    receiver(encodeMemoryBoundary(message));
+    receiver(encodeMemoryBoundaryUnprovenFabricValue(message));
   });
   return {
     async send(payload: string) {
