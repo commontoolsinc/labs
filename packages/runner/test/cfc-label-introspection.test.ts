@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { expect } from "@std/expect";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import {
@@ -18,7 +19,7 @@ import type { CfcMetadata } from "../src/cfc/types.ts";
 const SOURCE_A = { space: "did:key:spacea", id: "of:origin-a", path: [] };
 const SOURCE_B = { space: "did:key:spaceb", id: "of:origin-b", path: [] };
 
-const caveatAtom = (source: unknown) => ({
+const caveatAtom = (source: CfcAtom) => ({
   type: CFC_ATOM_TYPE.Caveat,
   kind: "prompt-influence",
   source,
@@ -35,7 +36,7 @@ const metadataWith = (
 // A derived-component entry guarding /value/body with a source-bearing caveat
 // clause: the §4.6.4.2 interim fallback territory (the entry's own effective
 // confidentiality is a sound population label for its source fields).
-const derivedBodyEntry = (atom: unknown = caveatAtom(SOURCE_A)) => ({
+const derivedBodyEntry = (atom: CfcAtom = caveatAtom(SOURCE_A)) => ({
   path: ["body"],
   label: { confidentiality: ["secret", atom] },
   origin: "derived" as const,

@@ -160,16 +160,16 @@ function dbTablesResolved(
  *  admit them too. */
 function staticConfidentialityOf(
   labelSchema: Record<string, unknown> | undefined,
-): unknown[] {
+): CfcConfClause[] {
   const props = (labelSchema as {
     properties?: {
       result?: { items?: { properties?: Record<string, unknown> } };
     };
   })?.properties?.result?.items?.properties;
   if (!props) return [];
-  const out: unknown[] = [];
+  const out: CfcConfClause[] = [];
   for (const p of Object.values(props)) {
-    const conf = (p as { ifc?: { confidentiality?: unknown[] } })?.ifc
+    const conf = (p as { ifc?: { confidentiality?: CfcConfClause[] } })?.ifc
       ?.confidentiality;
     if (Array.isArray(conf)) out.push(...conf);
   }
@@ -285,16 +285,16 @@ function deriveNullOriginIfc(
 }
 
 type ColumnIfc = {
-  confidentiality?: unknown[];
+  confidentiality?: CfcConfClause[];
   integrity?: CfcAtom[];
   maxConfidentiality?: CfcConfClause[];
 };
 
 const unionAtoms = (
-  a: unknown[] | undefined,
-  b: unknown[] | undefined,
-): unknown[] | undefined => {
-  const out: unknown[] = [...(a ?? [])];
+  a: CfcConfClause[] | undefined,
+  b: CfcConfClause[] | undefined,
+): CfcConfClause[] | undefined => {
+  const out: CfcConfClause[] = [...(a ?? [])];
   for (const atom of b ?? []) {
     if (!out.some((existing) => deepEqual(existing, atom))) out.push(atom);
   }

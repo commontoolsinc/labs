@@ -1067,7 +1067,7 @@ export class WorkerReconciler {
    * admit only bare atoms — an OR-clause never matches either, staying closed.
    */
   private resolvedConfidentialityRenderable(
-    confidentiality: readonly unknown[],
+    confidentiality: readonly CfcConfClause[],
     integrity: readonly CfcAtom[],
     policy: RenderPolicy,
   ): boolean {
@@ -1132,7 +1132,9 @@ export class WorkerReconciler {
     return this.canRenderConfidentialityAtom(atom, policy);
   }
 
-  private confidentialityLabels(labelView: CfcLabelView): readonly unknown[] {
+  private confidentialityLabels(
+    labelView: CfcLabelView,
+  ): readonly CfcConfClause[] {
     return ContextualFlowControl.uniqueAtoms(
       labelView.entries.flatMap((entry) => [
         ...(entry.label.confidentiality ?? []),

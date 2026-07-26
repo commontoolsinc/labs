@@ -18,7 +18,7 @@ import {
 
 interface ColumnIfc {
   maxConfidentiality?: readonly CfcConfClause[];
-  confidentiality?: readonly unknown[];
+  confidentiality?: readonly CfcConfClause[];
 }
 type Tables = Record<
   string,
@@ -159,7 +159,7 @@ export function checkSqliteWriteCeiling(
   // Check one labeled value against its (named) target column. Fails closed when
   // the column can't be positively resolved.
   const checkLabeled = (
-    conf: readonly unknown[],
+    conf: readonly CfcConfClause[],
     col: string,
   ): string | undefined => {
     const r = resolveCeiling(col);
@@ -178,7 +178,7 @@ export function checkSqliteWriteCeiling(
       if (cols === undefined) return UNRESOLVED; // unattributable shape
       const col = cols[i];
       if (col === null) continue; // a filter param (WHERE), not stored
-      const v = checkLabeled(conf, col);
+      const v = checkLabeled(conf as readonly CfcConfClause[], col);
       if (v) return v;
     }
     return undefined;

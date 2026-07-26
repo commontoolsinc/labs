@@ -4,6 +4,7 @@
 // cfcLabelViewForCell, exercised end-to-end elsewhere).
 
 import { describe, it } from "@std/testing/bdd";
+import type { CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
 import { checkSqliteWriteCeiling } from "../src/builtins/sqlite/write-ceiling.ts";
 
@@ -19,7 +20,7 @@ const TABLES = {
 };
 
 // Fake label reader: a value's confidentiality is looked up by identity.
-const labels = new Map<unknown, readonly unknown[]>();
+const labels = new Map<unknown, readonly CfcConfClause[]>();
 const reader = (v: unknown) => labels.get(v) ?? [];
 const SECRET = { tag: "secret-value" }; // confidentiality {alice} (exceeds cap)
 const SUPPORTED = { tag: "supported-value" }; // confidentiality {support} (fits)

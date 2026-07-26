@@ -142,7 +142,7 @@ export const cfcConfidentialityForObservationNode = (
 };
 
 export const cfcObservationFitsCeiling = (
-  confidentiality: readonly unknown[],
+  confidentiality: readonly CfcConfClause[],
   observationMaxConfidentiality: CfcObservationMaxConfidentiality,
 ): boolean => {
   // undefined means no ceiling. A declared but empty ceiling means "public
@@ -356,7 +356,7 @@ export const cfcIntegritySatisfiesFloorCoherently = (
  * by construction.
  */
 export const atomsOutsideCeiling = (
-  confidentiality: readonly unknown[],
+  confidentiality: readonly CfcConfClause[],
   ceiling: CfcObservationMaxConfidentiality,
 ): ImmutableJSONValue[] => {
   if (ceiling === undefined) {

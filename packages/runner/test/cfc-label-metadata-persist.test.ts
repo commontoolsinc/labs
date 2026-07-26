@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import type { CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
@@ -89,7 +90,7 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
     cfcLabelView: {
       version: 1;
       entries: Array<
-        { path: string[]; label: { confidentiality?: unknown[] } }
+        { path: string[]; label: { confidentiality?: CfcConfClause[] } }
       >;
     },
   ) => {

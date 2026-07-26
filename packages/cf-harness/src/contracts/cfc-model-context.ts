@@ -1,4 +1,5 @@
 import type { CfcLabelView, IFCLabel } from "@commonfabric/runner/cfc";
+import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import type { HarnessCfcInvocationInputLabelPath } from "./cfc-invocation-context.ts";
 import type { ToolOutputId } from "./tool-result.ts";
 
@@ -81,7 +82,7 @@ const labelValueKey = (value: unknown): string => {
 export const mergeConfidentialityOnlyLabels = (
   labels: readonly (IFCLabel | undefined)[],
 ): IFCLabel | undefined => {
-  const confidentiality: unknown[] = [];
+  const confidentiality: CfcConfClause[] = [];
   const seen = new Set<string>();
   for (const label of labels) {
     const confidentialityOnly = label === undefined

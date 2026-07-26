@@ -6,7 +6,7 @@ import { uniqueCfcAtoms } from "./observation.ts";
 import { normalizeClause } from "./clause.ts";
 
 export type IFCLabel = {
-  confidentiality?: unknown[];
+  confidentiality?: CfcConfClause[];
   integrity?: CfcAtom[];
 };
 
