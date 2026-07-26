@@ -596,6 +596,84 @@ export type SchedulerActionSnapshotQuery = {
  * principal and session components use the same encoding as resolved memory
  * scope keys; clients must never construct one to select another context.
  */
+export type SchedulerActionKind =
+  | "computation"
+  | "effect"
+  | "event-handler";
+
+export type SchedulerObservationTransactionKind =
+  | "dependency-collection"
+  | "action-run"
+  | "event-preflight";
+
+export type SchedulerObservationAddress = {
+  space: string;
+  id: EntityId;
+  scope?: CellScope;
+  path: readonly string[];
+};
+
+export type CompleteActionScopeSummary = {
+  version: 1;
+  complete: true;
+  implementationFingerprint: string;
+  runtimeFingerprint: string;
+  piece: SchedulerObservationAddress;
+  reads: SchedulerObservationAddress[];
+  writes: SchedulerObservationAddress[];
+  materializerWriteEnvelopes: SchedulerObservationAddress[];
+  directOutputs: SchedulerObservationAddress[];
+};
+
+/**
+ * A scheduler action observation as it is stored and carried across the memory
+ * boundary.
+ *
+ * A parallel declaration of the same concept lives in the runner, at
+ * `runner/src/scheduler/persistent-observation.ts`. The two are not the same
+ * type and differ in strictness:
+ *
+ * - addresses here are {@link SchedulerObservationAddress} (`space: string`);
+ *   the runner uses `IMemorySpaceAddress` (`space: MemorySpace`)
+ * - `branch` here is `BranchName`; the runner declares it `string`
+ *
+ * The runner produces observations and this side stores them, so this one is
+ * deliberately the wider of the pair. Nothing checks that they agree: the wire
+ * fields that carry an observation (`CommitData.schedulerObservation` and
+ * `SchedulerActionSnapshotResult.observation`) are declared `unknown`, so a
+ * change to either declaration will not surface at the seam. Keep them in sync
+ * by hand until one of them owns the shape.
+ */
+export type SchedulerActionObservation = {
+  version: 1 | 2;
+  ownerSpace?: string;
+  branch: BranchName;
+  pieceId: string;
+  processGeneration: number;
+  actionId: string;
+  actionKind: SchedulerActionKind;
+  implementationFingerprint: string;
+  runtimeFingerprint: string;
+  completeActionScopeSummary?: CompleteActionScopeSummary;
+  observedAtSeq: number;
+  observedAtLocalSeq?: number;
+  transactionKind: SchedulerObservationTransactionKind;
+  reads: SchedulerObservationAddress[];
+  shallowReads: SchedulerObservationAddress[];
+  actualChangedWrites: SchedulerObservationAddress[];
+  currentKnownWrites: SchedulerObservationAddress[];
+  declaredWrites?: SchedulerObservationAddress[];
+  materializerWriteEnvelopes: SchedulerObservationAddress[];
+  ignoredSchedulingWrites?: SchedulerObservationAddress[];
+  actionOptions?: {
+    debounceMs?: number;
+    noDebounce?: boolean;
+    throttleMs?: number;
+  };
+  status: "success" | "failed";
+  errorFingerprint?: string;
+};
+
 export type SchedulerExecutionContextKey =
   | "space"
   | `user:${string}`

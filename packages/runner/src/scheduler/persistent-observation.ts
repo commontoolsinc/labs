@@ -45,6 +45,22 @@ export type CompleteActionScopeSummaryInput = Omit<
   "implementationFingerprint" | "runtimeFingerprint"
 >;
 
+/**
+ * A scheduler action observation as the runner produces it.
+ *
+ * A parallel declaration of the same concept lives in memory, at
+ * `memory/v2.ts`. The two are not the same type and differ in strictness:
+ *
+ * - addresses here are `IMemorySpaceAddress` (`space: MemorySpace`); memory
+ *   uses `SchedulerObservationAddress` (`space: string`)
+ * - `branch` here is `string`; memory declares it `BranchName`
+ *
+ * This side produces observations and memory stores them, so memory's is
+ * deliberately the wider of the pair. Nothing checks that they agree: the wire
+ * fields that carry an observation are declared `unknown` on the memory side,
+ * so a change to either declaration will not surface at the seam. Keep them in
+ * sync by hand until one of them owns the shape.
+ */
 export type SchedulerActionObservation = {
   version: 1 | 2;
   ownerSpace?: string;
