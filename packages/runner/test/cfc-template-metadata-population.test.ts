@@ -1,4 +1,5 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
+import type { CfcConfClause } from "../src/cfc/clause.ts";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { expect } from "@std/expect";
 import type { FabricValue } from "@commonfabric/data-model/interface";
@@ -59,7 +60,7 @@ const metadataWith = (
 const templateEntry = (
   targetPath: string[],
   tail: string[],
-  confidentiality: unknown[],
+  confidentiality: CfcConfClause[],
 ): LabelMapEntry => ({
   path: [
     "cfc",
@@ -697,7 +698,9 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
 describe("CFC template metadata population (Stage B): evaluator resolution", () => {
   // A derived-component entry guarding /value/body with a source-bearing
   // caveat clause — the interim-rule shape.
-  const derivedBodyEntry = (atom: unknown = caveatAtom()): LabelMapEntry => ({
+  const derivedBodyEntry = (
+    atom: CfcAtom = caveatAtom(),
+  ): LabelMapEntry => ({
     path: ["body"],
     label: { confidentiality: ["secret", atom] },
     origin: "derived",
@@ -882,7 +885,9 @@ describe("CFC template metadata population (Stage B): evaluator resolution", () 
 });
 
 describe("CFC template metadata population (Stage B): derivation unit properties", () => {
-  const derivedEntry = (confidentiality: unknown[]): LabelMapEntry => ({
+  const derivedEntry = (
+    confidentiality: CfcConfClause[],
+  ): LabelMapEntry => ({
     path: ["body"],
     label: { confidentiality },
     origin: "derived",

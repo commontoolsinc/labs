@@ -1,4 +1,5 @@
 import type { CellScope, JSONSchema } from "../builder/types.ts";
+import type { CfcConfClause } from "./clause.ts";
 import type { FabricValue } from "@commonfabric/api";
 import type { CfcModulePolicyRefAtom } from "@commonfabric/api/cfc";
 import type { MemorySpace } from "@commonfabric/memory/interface";
@@ -354,7 +355,7 @@ export type CfcDereferenceTrace = Immutable<{
 export type CfcLabelMetadataObservation = Immutable<{
   target: CfcAddress;
   observes: LabelMetadataObservationClass;
-  confidentiality: unknown[];
+  confidentiality: CfcConfClause[];
 }>;
 
 export type ImplementationIdentity =

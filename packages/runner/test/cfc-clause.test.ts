@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import type { CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import {
@@ -159,7 +160,7 @@ describe("CFC clause kernel", () => {
   });
 
   describe("canonicalizeCfcMetadata clause interiors", () => {
-    const metadataWith = (confidentiality: unknown[]): CfcMetadata => ({
+    const metadataWith = (confidentiality: CfcConfClause[]): CfcMetadata => ({
       version: 1,
       schemaHash: "hash",
       labelMap: {
@@ -205,7 +206,9 @@ describe("CFC clause kernel", () => {
         path: [],
       }) as CfcAddress;
 
-    const linkWriteWith = (confidentiality: unknown[]): WritePolicyInput => ({
+    const linkWriteWith = (
+      confidentiality: CfcConfClause[],
+    ): WritePolicyInput => ({
       kind: "link-write",
       target: address("of:target"),
       source: address("of:source"),

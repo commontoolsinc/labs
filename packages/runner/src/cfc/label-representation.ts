@@ -1,4 +1,5 @@
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import type { CfcConfClause } from "./clause.ts";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { isRecord } from "@commonfabric/utils/types";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
@@ -204,7 +205,7 @@ export const transformCfcLabelForCrossSpacePersist = (
 ): IFCLabel => {
   const confidentiality = label.confidentiality === undefined
     ? undefined
-    : (transformValue(label.confidentiality, undefined, []) as unknown[]);
+    : (transformValue(label.confidentiality, undefined, []) as CfcConfClause[]);
   const integrity = label.integrity === undefined
     ? undefined
     : (transformValue(label.integrity, undefined, []) as CfcAtom[]);
