@@ -197,6 +197,15 @@ export type FabricValueLayer =
  * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
  * and belongs directly in `FabricValue` without wrapping.
  */
+export type FabricNativeObject =
+  | Error
+  | Map<unknown, unknown>
+  | Set<unknown>
+  | Date
+  | RegExp
+  | Uint8Array
+  | { toJSON(): unknown };
+
 /**
  * A value produced by converting fabric data back to native JS form. Unlike
  * `FabricValue`, its containers may hold `FabricNativeObject`s: converting a
@@ -208,12 +217,3 @@ export type FabricNativeValue =
   | FabricNativeObject
   | readonly FabricNativeValue[]
   | { readonly [key: string]: FabricNativeValue };
-
-export type FabricNativeObject =
-  | Error
-  | Map<unknown, unknown>
-  | Set<unknown>
-  | Date
-  | RegExp
-  | Uint8Array
-  | { toJSON(): unknown };
