@@ -94,7 +94,7 @@ export const mergeConfidentialityOnlyLabels = (
         continue;
       }
       seen.add(key);
-      confidentiality.push(cloneJsonValue(value));
+      confidentiality.push(cloneJsonValue(value) as CfcConfClause);
     }
   }
   return confidentiality.length > 0 ? { confidentiality } : undefined;
