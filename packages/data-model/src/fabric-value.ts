@@ -27,6 +27,7 @@ export {
 } from "./value-clone.ts";
 
 export {
+  isFabricObjectOrArray,
   isFabricPlainObject,
   isFabricValue,
   isFabricValueLayer,
