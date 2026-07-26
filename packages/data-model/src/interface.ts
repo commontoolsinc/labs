@@ -205,3 +205,19 @@ export type FabricNativeObject =
   | RegExp
   | Uint8Array
   | { toJSON(): unknown };
+
+/**
+ * A `FabricValue`, a `FabricNativeObject`, or a deep tree thereof -- the values
+ * that convert to and from fabric form. This is the precondition of
+ * `fabricFromNativeValue()` (which fails on anything else), the result of
+ * `nativeFromFabricValue()`, and what `isFabricCompatible()` tests for.
+ *
+ * Distinct from `FabricValue`: containers here may hold `FabricNativeObject`s.
+ * Converting a `FabricError` yields an `Error`, so an array of them is an array
+ * of natives, which has no `FabricValue` name.
+ */
+export type FabricOrConvertibleNativeValue =
+  | FabricValue
+  | FabricNativeObject
+  | readonly FabricOrConvertibleNativeValue[]
+  | { readonly [key: string]: FabricOrConvertibleNativeValue };
