@@ -1,4 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
+import type { FabricValue } from "@commonfabric/api";
 import { LlmPrompt } from "./prompts/prompting.ts";
 import type {
   BuiltInLLMContent,
@@ -27,10 +28,10 @@ export type LLMPrompt = LlmPrompt;
 // Use BuiltIn types directly
 export type LLMContent = BuiltInLLMContent;
 
-export interface LLMTool {
+export type LLMTool = {
   description: string;
   inputSchema: JSONSchema;
-}
+};
 
 export const GOOGLE_SEARCH_NATIVE_MODEL_TOOL = "google_search" as const;
 export const LLM_NATIVE_MODEL_TOOL_IDS = [
@@ -39,13 +40,13 @@ export const LLM_NATIVE_MODEL_TOOL_IDS = [
 
 export type LLMNativeModelToolId = typeof LLM_NATIVE_MODEL_TOOL_IDS[number];
 
-export interface LLMNativeModelToolResult {
+export type LLMNativeModelToolResult = {
   type: "cf-harness.native-model-tool-result";
   toolId: LLMNativeModelToolId;
   provider?: string;
   providerMetadata?: unknown;
   sources?: unknown;
-}
+};
 
 export function isLLMNativeModelToolId(
   input: unknown,
@@ -69,19 +70,24 @@ export function isLLMNativeModelToolResults(
   return Array.isArray(input) && input.every(isLLMNativeModelToolResult);
 }
 
-export interface LLMToolCall {
+export type LLMToolCall = {
   id: string;
   name: string;
   input: Record<string, any>;
-}
+};
 
-export interface LLMToolResult {
+export type LLMToolResult = {
   toolCallId: string;
   result: any;
   error?: string;
-}
+};
 
-export type LLMRequestMetadata = Record<string, string | undefined | object>;
+/**
+ * Request metadata. Values are `FabricValue`s -- an LLM request is snapshotted
+ * through `createFrozenRequestSnapshot()`, which requires one, so an arbitrary
+ * `object` here could not be stored.
+ */
+export type LLMRequestMetadata = Record<string, FabricValue>;
 export type LLMRequest = {
   cache?: boolean;
   messages: readonly BuiltInLLMMessage[];
@@ -96,7 +102,7 @@ export type LLMRequest = {
   nativeModelToolIds?: readonly LLMNativeModelToolId[];
 };
 
-export interface LLMGenerateObjectRequest {
+export type LLMGenerateObjectRequest = {
   schema: Record<string, unknown>;
   messages: readonly BuiltInLLMMessage[];
   model?: ModelName;
@@ -104,12 +110,12 @@ export interface LLMGenerateObjectRequest {
   cache?: boolean;
   maxTokens?: number;
   metadata?: LLMRequestMetadata;
-}
+};
 
-export interface LLMGenerateObjectResponse {
+export type LLMGenerateObjectResponse = {
   object: Record<string, unknown>;
   id?: string;
-}
+};
 
 function isArrayOf<T>(
   callback: (data: unknown) => boolean,
