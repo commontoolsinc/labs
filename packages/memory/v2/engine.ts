@@ -44,10 +44,10 @@ const MAX_SCHEDULER_SNAPSHOT_LIST_LIMIT = 1_000;
 // sessions cannot grow the cross-space read-index fanout without limit.
 const MAX_RETAINED_SCHEDULER_SESSION_CONTEXTS_PER_ACTION = 32;
 
-export interface SchedulerScopeContext {
+export type SchedulerScopeContext = {
   principal: string;
   sessionId: SessionId;
-}
+};
 
 export type SchedulerActionSnapshotCursorWithContext =
   & SchedulerActionSnapshotCursor
@@ -745,14 +745,14 @@ interface PreparedStatements {
   deleteOldSnapshots: PreparedStatement;
 }
 
-export interface Engine {
+export type Engine = {
   url: URL;
   database: Database;
   snapshotInterval: number;
   snapshotRetention: number;
   legacyCommitMetadataRefsRequired: boolean;
   statements: PreparedStatements;
-}
+};
 
 export class ConflictError extends Error {
   /** Entity whose confirmed read went stale (stale-read conflicts only). */
@@ -793,11 +793,11 @@ export class ProtocolError extends Error {
   }
 }
 
-export interface OpenOptions {
+export type OpenOptions = {
   url: URL;
   snapshotInterval?: number;
   snapshotRetention?: number;
-}
+};
 
 export type InvocationRecord = {
   iss: string;
@@ -810,7 +810,7 @@ export type InvocationRecord = {
 
 export type AuthorizationRecord = FabricValue;
 
-export interface ApplyCommitOptions {
+export type ApplyCommitOptions = {
   sessionId: SessionId;
   space?: string;
   principal?: string;
@@ -823,9 +823,9 @@ export interface ApplyCommitOptions {
    *  apply loop executes the SQL inside the commit's transaction against the
    *  alias. (docs/specs/sqlite-builtin/plans/atomic-writes.md) */
   sqliteAttachments?: ReadonlyMap<string, string>;
-}
+};
 
-export interface AppliedRevision {
+export type AppliedRevision = {
   id: EntityId;
   scope?: CellScope;
   scopeKey: string;
@@ -836,30 +836,30 @@ export interface AppliedRevision {
   op: Operation["op"];
   document?: EntityDocument;
   patches?: PatchOp[];
-}
+};
 
-export interface AppliedSchedulerObservationResult {
+export type AppliedSchedulerObservationResult = {
   localSeq: number;
   status: "kept" | "dropped";
   schedulerObservationId?: number;
   /** Effective owner-derived context; emitted metadata, never client input. */
   executionContextKey?: SchedulerExecutionContextKey;
   reason?: CommitReadDropReason;
-}
+};
 
 export type CommitReadDropReason =
   | "stale-confirmed-read"
   | "stale-pending-read"
   | "pending-read-missing";
 
-export interface AppliedCommit {
+export type AppliedCommit = {
   seq: number;
   branch: BranchName;
   revisions: AppliedRevision[];
   schedulerObservationId?: number;
   schedulerObservationResults?: AppliedSchedulerObservationResult[];
   schedulerDirtiedReaders?: SchedulerReaderIndexEntry[];
-}
+};
 
 export type SchedulerActionKind =
   | "computation"
@@ -1027,13 +1027,13 @@ export const schedulerObservationFromValue = (
   return value as unknown as SchedulerActionObservation;
 };
 
-export interface SchedulerObservationSnapshot {
+export type SchedulerObservationSnapshot = {
   observationId: number;
   executionContextKey: SchedulerExecutionContextKey;
   commitSeq: number | null;
   observedAtSeq: number;
   observation: SchedulerActionObservation;
-}
+};
 
 export interface SchedulerObservationSnapshotWithState
   extends SchedulerObservationSnapshot {
@@ -1045,12 +1045,12 @@ export interface SchedulerObservationSnapshotWithState
   writerSessionId?: string;
 }
 
-export interface SchedulerObservationSnapshotPage {
+export type SchedulerObservationSnapshotPage = {
   snapshots: SchedulerObservationSnapshotWithState[];
   nextCursor?: SchedulerActionSnapshotCursorWithContext;
-}
+};
 
-export interface SchedulerReaderIndexEntry {
+export type SchedulerReaderIndexEntry = {
   branch: BranchName;
   ownerSpace?: string;
   pieceId: string;
@@ -1060,9 +1060,9 @@ export interface SchedulerReaderIndexEntry {
   observationId: number;
   readKind: "recursive" | "shallow";
   read: ResolvedSchedulerObservationAddress;
-}
+};
 
-export interface SchedulerActionState {
+export type SchedulerActionState = {
   branch: BranchName;
   ownerSpace?: string;
   pieceId: string;
@@ -1073,18 +1073,18 @@ export interface SchedulerActionState {
   directDirtySeq: number | null;
   staleSeq: number | null;
   unknownReason: string | null;
-}
+};
 
-export interface ReadOptions {
+export type ReadOptions = {
   id: EntityId;
   scope?: CellScope;
   principal?: string;
   sessionId?: SessionId;
   branch?: BranchName;
   seq?: number;
-}
+};
 
-export interface EntityState {
+export type EntityState = {
   id: EntityId;
   scope: CellScope;
   scopeKey: string;
@@ -1093,21 +1093,21 @@ export interface EntityState {
   opIndex: number;
   op: Operation["op"];
   document: EntityDocument | null;
-}
+};
 
-export interface PutBlobOptions {
+export type PutBlobOptions = {
   value: Uint8Array;
   contentType: string;
-}
+};
 
-export interface BranchState {
+export type BranchState = {
   name: BranchName;
   parentBranch: BranchName | null;
   forkSeq: number | null;
   createdSeq: number;
   headSeq: number;
   status: string;
-}
+};
 
 type HeadRow = {
   seq: number;
@@ -2383,7 +2383,7 @@ export const applyCommit = (
   );
 };
 
-export interface UpsertSchedulerObservationOptions {
+export type UpsertSchedulerObservationOptions = {
   branch?: BranchName;
   ownerSpace?: string;
   commitSeq?: number | null;
@@ -2397,14 +2397,14 @@ export interface UpsertSchedulerObservationOptions {
   writerSessionId?: string;
   localSeq?: number;
   observation: SchedulerActionObservation;
-}
+};
 
-export interface UpsertSchedulerObservationResult {
+export type UpsertSchedulerObservationResult = {
   observationId: number;
   commitSeq: number | null;
   executionContextKey: SchedulerExecutionContextKey;
   invalidatedExecutionContextKeys: SchedulerExecutionContextKey[];
-}
+};
 
 export const upsertSchedulerObservation = (
   engine: Engine,

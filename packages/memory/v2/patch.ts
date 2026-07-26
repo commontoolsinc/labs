@@ -488,12 +488,12 @@ const isContainer = (value: FabricValue): value is PatchContainer =>
  * union) a compile error, so `apply` and the path matchers can never silently
  * fall out of step with the union.
  */
-export interface PatchOpDescriptor<Op extends PatchOp = PatchOp> {
+export type PatchOpDescriptor<Op extends PatchOp = PatchOp> = {
   readonly op: Op["op"];
   readonly pointerFields: readonly string[];
   readonly structural: boolean;
   readonly apply: (state: FabricValue, op: Op) => FabricValue;
-}
+};
 
 const descriptor = <Op extends PatchOp>(
   d: PatchOpDescriptor<Op>,

@@ -33,15 +33,15 @@ const DEFAULT_SCOPE: CellScope = "space";
 
 export type QueryDocKey = `${string}/${CellScope}/${string}`;
 
-export interface TrackedGraphState {
+export type TrackedGraphState = {
   branch: string;
   tracker: MapSetStringToPathSelectors;
   entities: Map<QueryDocKey, EntitySnapshot>;
   memo: ReturnType<typeof createSchemaMemo>;
   manager: EngineObjectManager;
-}
+};
 
-export interface QueryTraversalStats {
+export type QueryTraversalStats = {
   managerReads: number;
   coveredSelectorSkips: number;
   schemaTraversals: number;
@@ -51,7 +51,7 @@ export interface QueryTraversalStats {
   dagTraversals: number;
   getDocAtPathCalls: number;
   schemaMemoHits: number;
-}
+};
 
 const createQueryTraversalStats = (): QueryTraversalStats => ({
   managerReads: 0,
@@ -196,15 +196,15 @@ export class EngineObjectManager implements ObjectStorageManager {
   }
 }
 
-export interface QueryGraphReuseContext {
+export type QueryGraphReuseContext = {
   managers?: Map<string, EngineObjectManager>;
-}
+};
 
-export interface TrackGraphOptions {
+export type TrackGraphOptions = {
   readSeq?: number;
   principal?: string;
   sessionId?: string;
-}
+};
 
 export const cloneTrackedGraphState = (
   engine: Engine.Engine,

@@ -125,14 +125,14 @@ const MAX_SQLITE_TABLES = 256;
 const declaredScope = (scope: CellScope | undefined): CellScope =>
   scope ?? "space";
 
-export interface SlowQuery {
+export type SlowQuery = {
   timestamp: number;
   elapsed: number;
   operation: string;
   space: string;
   roots?: number;
   watches?: number;
-}
+};
 
 const slowQueries: SlowQuery[] = [];
 

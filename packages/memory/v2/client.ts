@@ -34,32 +34,32 @@ import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { expandServerMessageSchemas } from "./sync-schema-table.ts";
 import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
 
-export interface Transport {
+export type Transport = {
   send(payload: string): Promise<void>;
   close(): Promise<void>;
   setReceiver(receiver: (payload: string) => void): void;
   setCloseReceiver?(receiver: (error?: Error) => void): void;
-}
+};
 
-export interface ConnectOptions {
+export type ConnectOptions = {
   transport: Transport;
-}
+};
 
-export interface MountOptions {
+export type MountOptions = {
   sessionId?: string;
   seenSeq?: number;
   sessionToken?: string;
-}
+};
 
-export interface SessionOpenAuth {
+export type SessionOpenAuth = {
   invocation: Record<string, unknown>;
   authorization: unknown;
-}
+};
 
-export interface SessionOpenAuthContext {
+export type SessionOpenAuthContext = {
   challenge: SessionOpenChallenge;
   audience: string;
-}
+};
 
 export type SessionOpenAuthFactory = (
   space: string,
@@ -67,10 +67,10 @@ export type SessionOpenAuthFactory = (
   context: SessionOpenAuthContext,
 ) => Promise<SessionOpenAuth | undefined> | SessionOpenAuth | undefined;
 
-export interface WatchMutationResult {
+export type WatchMutationResult = {
   view: WatchView;
   sync: SessionSync;
-}
+};
 
 const RECONNECT_BASE_DELAY_MS = 25;
 const RECONNECT_MAX_DELAY_MS = 30_000;
