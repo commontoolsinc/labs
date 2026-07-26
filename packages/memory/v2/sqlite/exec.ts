@@ -64,10 +64,10 @@ export function detachDatabase(db: Database, alias: string): void {
 
 export type SqliteParams = readonly unknown[] | Record<string, unknown>;
 
-export interface WriteResult {
+export type WriteResult = {
   changes: number;
   lastInsertRowid: number;
-}
+};
 
 // @db/sqlite binds positional values as a rest list and named values as a single
 // record argument. Our values are already SQLite scalars (cf_link params are
@@ -91,11 +91,11 @@ export function runQuery<Row = Record<string, unknown>>(
 
 /** A result column's output name plus its TRUE source `(table, column)` origin
  *  (null for an expression/computed/compound column). */
-export interface QueryColumn {
+export type QueryColumn = {
   output: string;
   table: string | null;
   column: string | null;
-}
+};
 
 /**
  * Like {@link runQuery}, but also returns each result column's TRUE origin

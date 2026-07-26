@@ -9,10 +9,10 @@ import { isPlainObject } from "@commonfabric/utils/types";
 export const REQUEST_SCHEMA_CAS_REF_PREFIX = "schema-cas@1:";
 
 /** Optional request-local accounting for recursive schema-bearing values. */
-export interface LinkSchemaTraversal {
+export type LinkSchemaTraversal = {
   visitNode(depth: number): void;
   visitSchemaPosition(): void;
-}
+};
 
 const isPlainRecord = (value: FabricValue): value is FabricPlainObject =>
   isPlainObject(value);

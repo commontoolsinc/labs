@@ -4,9 +4,9 @@ import type { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 /**
  * Some principal identified via DID identifier.
  */
-export interface Principal<ID extends DID = DID> {
+export type Principal<ID extends DID = DID> = {
   did(): ID;
-}
+};
 
 export interface Verifier<ID extends DID = DID> extends Principal<ID> {
   verify(authorization: {
@@ -41,9 +41,9 @@ export type UCAN<Command extends Invocation> = {
 /**
  * Proof of authorization for a given access.
  */
-export interface Proof<Access extends FabricValue = FabricValue> {
+export type Proof<Access extends FabricValue = FabricValue> = {
   [link: AsString<FabricHash>]: Unit;
-}
+};
 
 /**
  * Represents a verifiable authorization issued by specific {@link Authority}.
@@ -348,7 +348,7 @@ export type InvocationURL<T> = `job:${string}` & {
 /**
  * Describes not yet claimed memory. It describes a lack of fact about memory.
  */
-export interface Unclaimed<T extends string = MIME, Of extends string = URI> {
+export type Unclaimed<T extends string = MIME, Of extends string = URI> = {
   /**
    * Type of the fact, usually formatted as media type. By default we expect
    * this to be  "application/json", but in the future we may support other
@@ -363,50 +363,50 @@ export interface Unclaimed<T extends string = MIME, Of extends string = URI> {
 
   is?: undefined;
   cause?: undefined;
-}
+};
 
 /**
  * Asserts a fact: the value MUST be an inline {@link FabricValue} as opposed to
  * a reference to one.
  */
-export interface Assertion<
+export type Assertion<
   T extends string = MIME,
   Of extends string = URI,
   Is extends FabricValue = FabricValue,
-> {
+> = {
   the: T;
   of: Of;
   is: Is;
   cause: FabricHash;
-}
+};
 
 /**
  * Represents retracted {@link Assertion}. It is effectively a tombstone
  * denoting assertion that no longer hold and is a fact in itself.
  */
-export interface Retraction<
+export type Retraction<
   T extends string = MIME,
   Of extends string = URI,
   Is extends FabricValue = FabricValue,
-> {
+> = {
   the: T;
   of: Of;
   is?: undefined;
   cause: FabricHash;
-}
+};
 
-export interface Invariant<
+export type Invariant<
   T extends string = MIME,
   Of extends string = URI,
   Is extends FabricValue = FabricValue,
-> {
+> = {
   the: T;
   of: Of;
   fact: FabricHash;
 
   is?: undefined;
   cause?: undefined;
-}
+};
 
 /**
  * Facts represent a memory in the replica. They are either current and

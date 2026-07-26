@@ -19,23 +19,23 @@
 // Pure module: no FFI, no engine imports — safe for client-side import.
 
 /** A reference to a declared column, handed to the rule as `f.<col>`. */
-export interface FieldRef {
+export type FieldRef = {
   field: string;
-}
+};
 
-export interface MatchOpts {
+export type MatchOpts = {
   /** Capture group to extract instead of the whole match. */
   group?: number;
   /** Minimum number of matches; fewer fails closed (required anchor). */
   min?: number;
-}
+};
 
 /** Serialized rule, attached to the table schema as `rowLabel`. */
-export interface RowLabelSpec {
+export type RowLabelSpec = {
   version: 1;
   confidentiality?: unknown;
   integrity?: unknown;
-}
+};
 
 /** Field handles passed to the rule: one accessor per declared column. */
 export type RowFieldHandles<C extends Record<string, unknown>> =

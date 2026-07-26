@@ -10,21 +10,21 @@
 import { CF_LINK_SUFFIX, isCfLinkColumn } from "./columns.ts";
 import { buildRowLabelSpec, type RowLabelRule } from "./row-label.ts";
 
-export interface ColumnSchema {
+export type ColumnSchema = {
   type: string;
   /** Verbatim SQLite column type/constraints for DDL, e.g. "integer primary key". */
   sqlType: string;
   /** Marks a `_cf_link` column (stored TEXT, surfaced as a Cell). */
   cfLink?: true;
   [key: string]: unknown;
-}
+};
 
-export interface TableSchema {
+export type TableSchema = {
   type: "object";
   properties: Record<string, ColumnSchema>;
   required: string[];
   [key: string]: unknown;
-}
+};
 
 /** Column spec: a shorthand SQL type string, or an explicit column schema. */
 export type ColumnSpec = string | ColumnSchema;

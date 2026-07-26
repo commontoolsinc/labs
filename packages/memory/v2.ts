@@ -44,18 +44,18 @@ export type ValueSchemaPathSelector =
  * future use and carried as opaque payload (a document is validated merely as
  * "an object" — see {@link isEntityDocument}).
  */
-export interface EntityDocument {
+export type EntityDocument = {
   value?: FabricValue;
   source?: EntityRef;
   [key: string]: FabricValue;
-}
+};
 
-export interface Blob {
+export type Blob = {
   hash: Reference;
   value: Uint8Array;
   contentType: string;
   size: number;
-}
+};
 
 export type PatchOp =
   | { op: "replace"; path: string; value: FabricValue }
@@ -105,25 +105,25 @@ export type PatchOp =
 // over-conflicts a parent shape reader conservatively (an extra retry), never
 // missing one. See docs/specs/memory-v2/08-conflict-granularity.md.
 
-export interface SetOperation {
+export type SetOperation = {
   op: "set";
   id: EntityId;
   scope?: CellScope;
   value: EntityDocument;
-}
+};
 
-export interface PatchOperation {
+export type PatchOperation = {
   op: "patch";
   id: EntityId;
   scope?: CellScope;
   patches: PatchOp[];
-}
+};
 
-export interface DeleteOperation {
+export type DeleteOperation = {
   op: "delete";
   id: EntityId;
   scope?: CellScope;
-}
+};
 
 /**
  * A SQLite write folded into the commit, applied inside the same transaction as
@@ -131,12 +131,12 @@ export interface DeleteOperation {
  * enters the revision/head/snapshot/dirty machinery (see SqliteDbRef below /
  * docs/specs/sqlite-builtin/plans/atomic-writes.md).
  */
-export interface SqliteOperation {
+export type SqliteOperation = {
   op: "sqlite";
   db: SqliteDbRef;
   sql: string;
   params?: SqliteParamsWire;
-}
+};
 
 export type Operation =
   | SetOperation
@@ -144,7 +144,7 @@ export type Operation =
   | DeleteOperation
   | SqliteOperation;
 
-export interface ConfirmedRead {
+export type ConfirmedRead = {
   id: EntityId;
   scope?: CellScope;
   branch?: BranchName;
@@ -160,9 +160,9 @@ export interface ConfirmedRead {
    * recursive read (the historical behavior).
    */
   nonRecursive?: boolean;
-}
+};
 
-export interface PendingRead {
+export type PendingRead = {
   id: EntityId;
   scope?: CellScope;
   path: ReadPath;
@@ -179,16 +179,16 @@ export interface PendingRead {
   localSeq: number | number[];
   /** See {@link ConfirmedRead.nonRecursive}. */
   nonRecursive?: boolean;
-}
+};
 
-export interface SchedulerObservationCommit {
+export type SchedulerObservationCommit = {
   localSeq: number;
   reads: {
     confirmed: ConfirmedRead[];
     pending: PendingRead[];
   };
   schedulerObservation: unknown;
-}
+};
 
 export type CommitPrecondition =
   | {
@@ -229,20 +229,20 @@ export type ClientCommit = {
   };
 };
 
-export interface SessionOpenArgs {
+export type SessionOpenArgs = {
   sessionId?: SessionId;
   seenSeq?: number;
   sessionToken?: SessionToken;
-}
+};
 
-export interface SessionOpenCommand {
+export type SessionOpenCommand = {
   cmd: "session.open";
   id: JobId;
   protocol: typeof MEMORY_PROTOCOL;
   args: SessionOpenArgs;
-}
+};
 
-export interface SessionOpenResult {
+export type SessionOpenResult = {
   sessionId: SessionId;
   sessionToken: SessionToken;
   serverSeq: number;
@@ -250,7 +250,7 @@ export interface SessionOpenResult {
   resumed?: boolean;
   sync?: SessionSync;
   sessionOpen: SessionOpenAuthMetadata;
-}
+};
 
 export type MemoryProtocolFlags = {
   modernCellRep: boolean;
@@ -298,11 +298,11 @@ export type WireMemoryProtocolFlags = {
   pendingReadStacks?: boolean;
 };
 
-export interface HelloMessage {
+export type HelloMessage = {
   type: "hello";
   protocol: typeof MEMORY_PROTOCOL;
   flags: WireMemoryProtocolFlags;
-}
+};
 
 export type HelloOkMessage = {
   type: "hello.ok";
@@ -327,69 +327,69 @@ export type SessionDescriptor = {
   sessionToken?: SessionToken;
 };
 
-export interface SessionOpenRequest {
+export type SessionOpenRequest = {
   type: "session.open";
   requestId: string;
   space: string;
   session: SessionDescriptor;
   invocation?: Record<string, unknown>;
   authorization?: FabricValue;
-}
+};
 
-export interface GraphQueryRoot {
+export type GraphQueryRoot = {
   id: EntityId;
   scope?: CellScope;
   selector: SchemaPathSelector;
-}
+};
 
-export interface GraphQuery {
+export type GraphQuery = {
   roots: GraphQueryRoot[];
   atSeq?: number;
   branch?: BranchName;
   excludeSent?: boolean;
-}
+};
 
-export interface EntitySnapshot {
+export type EntitySnapshot = {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
   seq: number;
   document: EntityDocument | null;
-}
+};
 
-export interface GraphQueryResult {
+export type GraphQueryResult = {
   serverSeq: number;
   entities: EntitySnapshot[];
-}
+};
 
-export interface QueryWatchSpec {
+export type QueryWatchSpec = {
   id: string;
   kind: "query";
   query: GraphQuery;
-}
+};
 
-export interface GraphWatchSpec {
+export type GraphWatchSpec = {
   id: string;
   kind: "graph";
   query: GraphQuery;
-}
+};
 
 export type WatchSpec = QueryWatchSpec | GraphWatchSpec;
 
-export interface SessionSyncUpsert {
+export type SessionSyncUpsert = {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
   seq: number;
   doc?: EntityDocument;
   deleted?: true;
-}
+};
 
-export interface SessionSyncRemove {
+export type SessionSyncRemove = {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
-}
+};
 
 export type SessionSync = {
   type: "sync";
@@ -409,35 +409,35 @@ export type SessionSync = {
   observations?: SchedulerActionSnapshotResult[];
 };
 
-export interface WatchSetResult {
+export type WatchSetResult = {
   serverSeq: number;
   sync: SessionSync;
-}
+};
 
-export interface WatchAddResult {
+export type WatchAddResult = {
   serverSeq: number;
   sync: SessionSync;
-}
+};
 
-export interface SessionAckResult {
+export type SessionAckResult = {
   serverSeq: number;
-}
+};
 
-export interface TransactRequest {
+export type TransactRequest = {
   type: "transact";
   requestId: string;
   space: string;
   sessionId: SessionId;
   commit: ClientCommit;
-}
+};
 
-export interface GraphQueryRequest {
+export type GraphQueryRequest = {
   type: "graph.query";
   requestId: string;
   space: string;
   sessionId: SessionId;
   query: GraphQuery;
-}
+};
 
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
 
@@ -451,7 +451,7 @@ export type SqliteParamsWire = ReadonlyArray<unknown> | Record<string, unknown>;
  *  server folds it (with the request's principal / session id) into the on-disk
  *  filename so a `user`/`session`-scoped db gets a per-user / per-session file;
  *  `space` (or absent) keeps the original unqualified name. */
-export interface SqliteDbRef {
+export type SqliteDbRef = {
   id: string;
   tables?: Record<string, unknown>;
   scope?: CellScope;
@@ -459,9 +459,9 @@ export interface SqliteDbRef {
    *  the per-row label rule's `dbOwner()` term (CFC Phase 3); a FIXED db
    *  property, captured once at handle creation, never the acting reader. */
   owner?: string;
-}
+};
 
-export interface SqliteQueryRequest {
+export type SqliteQueryRequest = {
   type: "sqlite.query";
   requestId: string;
   space: string;
@@ -469,15 +469,15 @@ export interface SqliteQueryRequest {
   db: SqliteDbRef;
   sql: string;
   params?: SqliteParamsWire;
-}
+};
 
 /** A result column's output name plus its TRUE source `(table, column)` origin
  *  (null for an expression/computed/compound column). */
-export interface SqliteResultColumn {
+export type SqliteResultColumn = {
   output: string;
   table: string | null;
   column: string | null;
-}
+};
 
 /** Whether a column's `ifc` annotation is present and non-empty — the single
  *  predicate for "this column participates in CFC labeling". Shared by the
@@ -516,7 +516,7 @@ export function dbNeedsColumnProvenance(
   return false;
 }
 
-export interface SqliteQueryResult {
+export type SqliteQueryResult = {
   rows: unknown[];
   /** Per-result-column origin, present ONLY when the db needs provenance for
    *  CFC labeling — any column declares `ifc` (Phase 2) or any table declares
@@ -524,7 +524,7 @@ export interface SqliteQueryResult {
    *  or joined column maps back to its declared `(table, column)`. Undefined
    *  otherwise, so unlabeled queries pay nothing. */
   columns?: SqliteResultColumn[];
-}
+};
 
 // NOTE: there is no `sqlite.execute` write verb. Writes go through the commit
 // fold (a `sqlite` op inside `transact`, applied atomically with cell ops by the
@@ -536,7 +536,7 @@ export interface SqliteQueryResult {
  * given file (read-only) for the handle id instead of the cell-derived path. The
  * descriptor is server-side state — it is NOT written into the handle cell value.
  */
-export interface SqliteRegisterDiskSourceRequest {
+export type SqliteRegisterDiskSourceRequest = {
   type: "sqlite.register-disk-source";
   requestId: string;
   space: string;
@@ -545,37 +545,37 @@ export interface SqliteRegisterDiskSourceRequest {
   id: string;
   /** Absolute path to the on-disk SQLite file. */
   path: string;
-}
+};
 
-export interface SqliteRegisterDiskSourceResult {
+export type SqliteRegisterDiskSourceResult = {
   registered: true;
-}
+};
 
-export interface WatchSetRequest {
+export type WatchSetRequest = {
   type: "session.watch.set";
   requestId: string;
   space: string;
   sessionId: SessionId;
   watches: WatchSpec[];
-}
+};
 
-export interface WatchAddRequest {
+export type WatchAddRequest = {
   type: "session.watch.add";
   requestId: string;
   space: string;
   sessionId: SessionId;
   watches: WatchSpec[];
-}
+};
 
-export interface SessionAckRequest {
+export type SessionAckRequest = {
   type: "session.ack";
   requestId: string;
   space: string;
   sessionId: SessionId;
   seenSeq: number;
-}
+};
 
-export interface SchedulerActionSnapshotQuery {
+export type SchedulerActionSnapshotQuery = {
   branch?: BranchName;
   ownerSpace?: string;
   pieceId?: string;
@@ -589,7 +589,7 @@ export interface SchedulerActionSnapshotQuery {
   throughCommitSeq?: number;
   limit?: number;
   cursor?: SchedulerActionSnapshotCursor;
-}
+};
 
 /**
  * Server-derived ownership partition for durable scheduler state. The opaque
@@ -601,15 +601,15 @@ export type SchedulerExecutionContextKey =
   | `user:${string}`
   | `session:${string}:${string}`;
 
-export interface SchedulerActionSnapshotCursor {
+export type SchedulerActionSnapshotCursor = {
   ownerSpace?: string;
   pieceId: string;
   processGeneration: number;
   actionId: string;
   executionContextKey: SchedulerExecutionContextKey;
-}
+};
 
-export interface SchedulerActionSnapshotResult {
+export type SchedulerActionSnapshotResult = {
   observationId: number;
   commitSeq: number | null;
   observedAtSeq: number;
@@ -618,21 +618,21 @@ export interface SchedulerActionSnapshotResult {
   directDirtySeq?: number;
   staleSeq?: number;
   unknownReason?: string;
-}
+};
 
-export interface SchedulerSnapshotListResult {
+export type SchedulerSnapshotListResult = {
   serverSeq: number;
   snapshots: SchedulerActionSnapshotResult[];
   nextCursor?: SchedulerActionSnapshotCursor;
-}
+};
 
-export interface SchedulerSnapshotListRequest {
+export type SchedulerSnapshotListRequest = {
   type: "scheduler.snapshot.list";
   requestId: string;
   space: string;
   sessionId: SessionId;
   query: SchedulerActionSnapshotQuery;
-}
+};
 
 export type ResponseMessage<Result> = {
   type: "response";
@@ -674,11 +674,11 @@ export type V2Error = {
 
 export type V2Result<Value> = { ok: Value } | { error: V2Error };
 
-export interface TaskReturn<Result> {
+export type TaskReturn<Result> = {
   the: "task/return";
   of: JobId;
   is: Result;
-}
+};
 
 export type Receipt<Result> = TaskReturn<Result>;
 export type LegacyClientMessage = SessionOpenCommand;
