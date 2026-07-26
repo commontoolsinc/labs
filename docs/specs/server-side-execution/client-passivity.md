@@ -266,31 +266,54 @@ Parent-doc edits owed with P-rows: README §5.B.3 retry citation (CP7);
 R5 register rows for `streamData`/`llmDialog` (CP6/CP31); the
 implementation-plan three-way attribution sentence (CP11).
 
-## 7. Decisions required from the owner
+## 7. Owner decisions — RESOLVED 2026-07-26
 
-1. **D1 — speculation scope** (a) direct writes only vs (b) + view-feeding
-   pure computations. Contested: CP2 prices (b)'s warm set as standing
-   machinery of the exact class §4 counts against the hybrid; CP15/CP22
-   show (a) widens the canonical-first tail. Panel recommendation: defer
-   the binding choice to post-P1 coverage data; if pre-committing, (b)
-   restricted to view-feeding pure computations with the warm-set budget
-   as a hard gate.
-2. **D2 — sqlite**: build the served sqlite-op commit path at the routing
-   layer, or a permanent per-action-unservable ruling (which then
-   requires static detectability) (CP21).
-3. **D3 — session-rank boot seed policy**: push rehydrated durable rows
-   immediately and settle via catch-up (stale-tolerant), or hold boot for
-   lane catch-up (canonical, serial cold-start cost) (CP4).
-4. **D4 — numeric budgets from P1 data** (not now): canonical-arrival
-   p50/p95, speculation-coverage budget, creation first-paint, fail-open
-   latency×incidence (CP3/CP15/CP22).
-5. **D5 — divergence UX (hold vs flicker)** across true divergence,
-   premature drop of correct speculation, and conflict overlay drop
-   (CP7/CP8).
-6. **D6 — stage-A soak cost**: accept the hybrid's +~2.4s revisit
-   amplification during the soak, sequence the soak after the watch.add
-   closure-re-resolution scaler fix, or time-box per space — skipping is
-   not on the menu (CP19).
-7. **D7 — k-concurrent-boot failure policy**: escalate to the OQ5
-   Worker-per-lane-group topology, or ratify an explicit session-lane
-   cold-start budget as accepted non-parity (CP4).
+Recorded from the owner's "build all of D" directive. Where the panel
+recommended, the recommendation is adopted; the genuinely open calls
+below carry their rationale and remain owner-vetoable until the plan row
+that consumes them starts building.
+
+1. **D1 — speculation scope: DEFER-THEN-(b), per the panel
+   recommendation.** The binding choice waits for P1's coverage data.
+   The pre-committed *direction* is (b) restricted to view-feeding pure
+   computations, with the CP2 warm-set budget as a hard gate: if P1/P4
+   counters price the warm set above the §4 hybrid class it replaces,
+   the scope drops to (a) rather than shipping a new standing cost.
+2. **D2 — sqlite: BUILD the served sqlite-op commit path** (routing-layer
+   lane-scope admission + row-label re-derivation), at its P2 position
+   after P2.0, priority set by P1's by-caller counts. Rationale: the
+   permanent-ruling alternative requires static detectability that CP21
+   shows is structurally absent (dynamic sqlite ops ride arbitrary
+   callers' commits) — a ruling without detectability recreates the
+   claim-then-nobody-computes hazard under suppression.
+3. **D3 — session-rank boot seed: PUSH-THEN-CATCH-UP** (rehydrated
+   durable rows pushed immediately, settled stale-tolerantly via
+   catch-up). Rationale: holding boot for lane catch-up serializes the
+   session-lane cold start into first paint — exactly the CP4
+   k-boot-serialization hazard — and the stale window is bounded by the
+   same reconnect-barrier semantics §5.B.1 already defines. P1's boot
+   decomposition measures the stale window; D7 governs if it's ugly.
+4. **D4 — numeric budgets: DEFERRED BY DESIGN to P1 close** (unchanged —
+   any number chosen today would be invented). The D-pass records the
+   *procedure*: budgets are set from P1's published table, owner-ratified
+   in the P6 row, and never relaxed silently.
+5. **D5 — divergence UX: HOLD, never flicker.** All three cases: true
+   divergence (hold the speculative value until canonical arrives,
+   replace with a visible transition only when values differ), premature
+   drop of correct speculation (hold — the canonical value returns
+   identical; a flicker here is pure noise, CP8), conflict overlay drop
+   (hold + the P4 catch-up-gated rerun). Rationale: "speculation never
+   commits" pairs naturally with "the UI never shows the retraction of a
+   value that was right."
+6. **D6 — stage-A soak: SEQUENCE AFTER the watch.add
+   closure-re-resolution scaler fix** (selector-coverage preservation /
+   O(delta) replace — already a named P5 build item, pulled forward as
+   the soak precondition), with a per-space time-box as backstop.
+   Rationale: soaking with the known +2.4s amplification both costs
+   users and pollutes the soak's own storm counters with pull churn —
+   the soak must observe the substrate it will actually ship on.
+7. **D7 — k-concurrent-boot failure: ESCALATE TO OQ5**
+   (Worker-per-lane-group topology) rather than ratifying non-parity.
+   Rationale: the P6 bar is non-negotiable by this plan's own language;
+   a pre-ratified session-lane cold-start budget would hollow it out.
+   Conditional: engages only if the P6 k∈{3,10} gate actually fails.
