@@ -341,7 +341,10 @@ function fabricFromNativeValueInternal(
   }
 
   // Primitives, `null`, and `undefined` don't need recursion or freezing.
-  if (!isRecord(value)) {
+  // Spelled as a `typeof` test rather than `!isRecord()` so the non-object
+  // arms of `FabricValueLayer` narrow: every non-object layer value is
+  // already a `FabricValue`.
+  if (typeof value !== "object" || value === null) {
     if (isOriginalRecord) {
       converted.set(original, value);
     }
@@ -599,7 +602,7 @@ export function nativeFromFabricValue(
   }
 
   if (Array.isArray(value)) {
-    const result: unknown[] = [];
+    const result: (FabricValue | FabricNativeObject)[] = [];
     for (let i = 0; i < value.length; i++) {
       if (!(i in value)) {
         result.length = i + 1;
@@ -611,17 +614,21 @@ export function nativeFromFabricValue(
       }
     }
     if (frozen) Object.freeze(result);
-    return result;
+    // TODO(danfuzz): the declared return type cannot describe a nested native
+    // container -- `FabricNativeObject` has no plain-array or plain-object arm,
+    // so an array holding an unwrapped `Error` has no name here. Widen the
+    // return to a recursive native-value type and drop these two casts.
+    return result as FabricValue;
   }
 
-  const result: Record<string, unknown> = {};
+  const result: Record<string, FabricValue | FabricNativeObject> = {};
   for (const [key, val] of Object.entries(value)) {
     if (!isUnsafeObjectKey(key)) {
       result[key] = nativeFromFabricValue(val, frozen);
     }
   }
   if (frozen) Object.freeze(result);
-  return result;
+  return result as FabricValue;
 }
 
 function deepUnwrapFabricError(fe: FabricError, frozen: boolean): Error {
