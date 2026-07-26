@@ -7,6 +7,7 @@ import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
 
 import {
   type FabricNativeObject,
+  type FabricNativeValue,
   FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
@@ -584,7 +585,7 @@ function isFabricCompatibleInternal(
 export function nativeFromFabricValue(
   value: FabricValue,
   frozen = true,
-): FabricValue | FabricNativeObject {
+): FabricNativeValue {
   if (value instanceof FabricError) {
     return deepUnwrapFabricError(value, frozen);
   }
@@ -602,7 +603,7 @@ export function nativeFromFabricValue(
   }
 
   if (Array.isArray(value)) {
-    const result: (FabricValue | FabricNativeObject)[] = [];
+    const result: FabricNativeValue[] = [];
     for (let i = 0; i < value.length; i++) {
       if (!(i in value)) {
         result.length = i + 1;
@@ -614,21 +615,17 @@ export function nativeFromFabricValue(
       }
     }
     if (frozen) Object.freeze(result);
-    // TODO(danfuzz): the declared return type cannot describe a nested native
-    // container -- `FabricNativeObject` has no plain-array or plain-object arm,
-    // so an array holding an unwrapped `Error` has no name here. Widen the
-    // return to a recursive native-value type and drop these two casts.
-    return result as FabricValue;
+    return result;
   }
 
-  const result: Record<string, FabricValue | FabricNativeObject> = {};
+  const result: Record<string, FabricNativeValue> = {};
   for (const [key, val] of Object.entries(value)) {
     if (!isUnsafeObjectKey(key)) {
       result[key] = nativeFromFabricValue(val, frozen);
     }
   }
   if (frozen) Object.freeze(result);
-  return result as FabricValue;
+  return result;
 }
 
 function deepUnwrapFabricError(fe: FabricError, frozen: boolean): Error {

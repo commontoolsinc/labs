@@ -197,6 +197,18 @@ export type FabricValueLayer =
  * Note: `bigint` is NOT included here -- it is a primitive (like `undefined`)
  * and belongs directly in `FabricValue` without wrapping.
  */
+/**
+ * A value produced by converting fabric data back to native JS form. Unlike
+ * `FabricValue`, its containers may hold `FabricNativeObject`s: converting a
+ * `FabricError` yields an `Error`, so an array of them is an array of natives
+ * with no `FabricValue` name.
+ */
+export type FabricNativeValue =
+  | FabricValue
+  | FabricNativeObject
+  | readonly FabricNativeValue[]
+  | { readonly [key: string]: FabricNativeValue };
+
 export type FabricNativeObject =
   | Error
   | Map<unknown, unknown>
