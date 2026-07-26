@@ -159,8 +159,7 @@ export function isFabricValue(value: unknown): value is FabricValue {
  * Indicates whether a fabric value is a plain object, an array, or a
  * `FabricSpecialObject` -- everything a `typeof value === "object"` test
  * accepts, minus `null`. The name spells out the array case because "object"
- * alone reads as excluding it, and treating arrays as excluded here is a real
- * hazard: the array arm carries the per-index walk in change detection.
+ * alone reads as excluding it.
  *
  * The runtime behavior matches a bare `isRecord()` exactly. The difference is
  * static: `isRecord()` narrows to `Record<string | number | symbol, unknown>`,
