@@ -1,7 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { findJsonUnfaithfulValues } from "@commonfabric/pure-json";
+import { findJsonUnfaithfulValues, isPureJson } from "@commonfabric/pure-json";
 
 describe("findJsonUnfaithfulValues", () => {
   it("accepts JSON-faithful shapes", () => {
@@ -151,5 +151,36 @@ describe("findJsonUnfaithfulValues", () => {
     // as two path steps.
     const found = findJsonUnfaithfulValues({ "a/b~c": NaN });
     expect(found[0]!.pointer).toBe("/a~1b~0c");
+  });
+});
+
+describe("isPureJson", () => {
+  it("accepts what JSON carries faithfully", () => {
+    expect(isPureJson(null)).toBe(true);
+    expect(isPureJson("text")).toBe(true);
+    expect(isPureJson(1)).toBe(true);
+    expect(isPureJson(true)).toBe(true);
+    expect(isPureJson({ a: [1, "two", { b: null }] })).toBe(true);
+  });
+
+  it("rejects what JSON would alter or drop", () => {
+    expect(isPureJson(undefined)).toBe(false);
+    expect(isPureJson(Number.NaN)).toBe(false);
+    expect(isPureJson(-0)).toBe(false);
+    expect(isPureJson(1n)).toBe(false);
+    expect(isPureJson(Symbol.for("s"))).toBe(false);
+    expect(isPureJson(() => 1)).toBe(false);
+    expect(isPureJson(new Date())).toBe(false);
+    expect(isPureJson({ nested: { bad: Number.POSITIVE_INFINITY } })).toBe(
+      false,
+    );
+  });
+
+  it("agrees with `findJsonUnfaithfulValues()`", () => {
+    for (const value of [null, 1, "s", { a: 1 }, [1, 2], new Map(), 1n]) {
+      expect(isPureJson(value)).toBe(
+        findJsonUnfaithfulValues(value).length === 0,
+      );
+    }
   });
 });
