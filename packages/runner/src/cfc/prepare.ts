@@ -2640,7 +2640,7 @@ export const writeDetailValueForTarget = (
     return baseValue;
   }
 
-  if (!(isFabricObjectOrArray(baseValue) || Array.isArray(baseValue))) {
+  if (!isFabricObjectOrArray(baseValue)) {
     // Base isn't a container yet deeper writes exist (rare/incoherent): build a
     // fresh container and overlay onto it (it's freshly mutable -- no COW).
     const result: Record<PropertyKey, unknown> | unknown[] =
