@@ -6,8 +6,7 @@ import {
 import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
 
 import {
-  type FabricNativeObject,
-  type FabricNativeValue,
+  type FabricOrConvertibleNativeValue,
   FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
@@ -284,7 +283,10 @@ const PROCESSING = Symbol("PROCESSING");
  * is already a deep-frozen `FabricValue`, returns it as-is (identity
  * optimization).
  *
- * @param value - The value to convert.
+ * @param value - The value to convert. Declared `unknown` for caller
+ *   convenience, but the call THROWS unless it is in fact a
+ *   `FabricOrConvertibleNativeValue`; `isFabricCompatible()` reports in
+ *   advance whether it is.
  * @param freeze - When `true` (default), deep-freezes the result tree.
  *   When `false`, wrapping and validation still occur but the result is
  *   left mutable.
@@ -474,11 +476,13 @@ function rebuildFabricErrorDeep(
  * checks recursively, so all nested values in arrays and objects must also be
  * fabric-compatible or convertible.
  *
- * This function is a TypeScript type guard for `FabricValue | FabricNativeObject`.
+ * This function is a TypeScript type guard for
+ * `FabricOrConvertibleNativeValue`, which names the recursive shape described
+ * above.
  */
 export function isFabricCompatible(
   value: unknown,
-): value is FabricValue | FabricNativeObject {
+): value is FabricOrConvertibleNativeValue {
   return isFabricCompatibleInternal(value, new Set());
 }
 
@@ -585,7 +589,7 @@ function isFabricCompatibleInternal(
 export function nativeFromFabricValue(
   value: FabricValue,
   frozen = true,
-): FabricNativeValue {
+): FabricOrConvertibleNativeValue {
   if (value instanceof FabricError) {
     return deepUnwrapFabricError(value, frozen);
   }
@@ -603,7 +607,7 @@ export function nativeFromFabricValue(
   }
 
   if (Array.isArray(value)) {
-    const result: FabricNativeValue[] = [];
+    const result: FabricOrConvertibleNativeValue[] = [];
     for (let i = 0; i < value.length; i++) {
       if (!(i in value)) {
         result.length = i + 1;
@@ -618,7 +622,7 @@ export function nativeFromFabricValue(
     return result;
   }
 
-  const result: Record<string, FabricNativeValue> = {};
+  const result: Record<string, FabricOrConvertibleNativeValue> = {};
   for (const [key, val] of Object.entries(value)) {
     if (!isUnsafeObjectKey(key)) {
       result[key] = nativeFromFabricValue(val, frozen);

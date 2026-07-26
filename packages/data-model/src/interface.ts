@@ -207,13 +207,17 @@ export type FabricNativeObject =
   | { toJSON(): unknown };
 
 /**
- * A value produced by converting fabric data back to native JS form. Unlike
- * `FabricValue`, its containers may hold `FabricNativeObject`s: converting a
- * `FabricError` yields an `Error`, so an array of them is an array of natives
- * with no `FabricValue` name.
+ * A `FabricValue`, a `FabricNativeObject`, or a deep tree thereof -- the values
+ * that convert to and from fabric form. This is the precondition of
+ * `fabricFromNativeValue()` (which fails on anything else), the result of
+ * `nativeFromFabricValue()`, and what `isFabricCompatible()` tests for.
+ *
+ * Distinct from `FabricValue`: containers here may hold `FabricNativeObject`s.
+ * Converting a `FabricError` yields an `Error`, so an array of them is an array
+ * of natives, which has no `FabricValue` name.
  */
-export type FabricNativeValue =
+export type FabricOrConvertibleNativeValue =
   | FabricValue
   | FabricNativeObject
-  | readonly FabricNativeValue[]
-  | { readonly [key: string]: FabricNativeValue };
+  | readonly FabricOrConvertibleNativeValue[]
+  | { readonly [key: string]: FabricOrConvertibleNativeValue };
