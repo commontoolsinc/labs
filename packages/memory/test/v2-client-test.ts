@@ -1262,8 +1262,8 @@ class ReconnectableLoopbackTransport implements Transport {
       if (this.connectionCount >= 2) {
         this.#reconnected.resolve();
       }
-      this.#connection = this.server.connect((message: FabricValue) => {
-        this.#receiver(encodeMemoryBoundary(message));
+      this.#connection = this.server.connect((message) => {
+        this.#receiver(encodeMemoryBoundaryUnprovenFabricValue(message));
       });
     }
     return this.#connection;

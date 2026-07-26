@@ -13,7 +13,10 @@ import {
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type {
+  FabricPlainObject,
+  FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchema } from "@commonfabric/api";
 import {
@@ -182,10 +185,9 @@ Deno.test("sync schema table reports each repeated schema once", () => {
 });
 
 Deno.test("sync schema table preserves own __proto__ fields", () => {
-  const value = JSON.parse('{"__proto__":{"safe":true}}') as Record<
-    string,
-    unknown
-  >;
+  const value = JSON.parse(
+    '{"__proto__":{"safe":true}}',
+  ) as FabricPlainObject;
   value.ref = linkRefFrom({
     id: "of:target",
     path: [],
@@ -682,7 +684,7 @@ Deno.test("sync schema table rejects refs without a populated table", () => {
 
 Deno.test("sync schema table validates dangling refs without recursive traversal", () => {
   const danglingRef = "schema-ref@2:sha256:missing";
-  let deeplyNested: unknown = {
+  let deeplyNested: FabricValue = {
     $alias: {
       id: "of:deep-target",
       path: [],
