@@ -247,7 +247,7 @@ describe("generateObject with tools", () => {
       (req) =>
         req.messages.some((m) =>
           typeof m.content === "string" && m.content.includes(testPrompt)
-        ) && req.schema.type === "object",
+        ) && typeof req.schema === "object" && req.schema.type === "object",
       {
         object: {
           title: "Test Title",
