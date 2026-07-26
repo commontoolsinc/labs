@@ -119,7 +119,7 @@ export const CONF_LABEL_NOT_AVAILABLE: InspectConfLabelResult = Object.freeze({
  */
 export type ConfLabelConsumedObservation = {
   path: readonly string[];
-  confidentiality: readonly unknown[];
+  confidentiality: readonly CfcConfClause[];
 };
 
 export type ConfLabelQueryEvaluation = {
@@ -131,7 +131,7 @@ export type ConfLabelQueryEvaluation = {
    * hidden arms are value-independent of protected fields (the response is
    * the shared constant), so nothing protected flowed to the caller.
    */
-  consumedConfidentiality: readonly unknown[];
+  consumedConfidentiality: readonly CfcConfClause[];
   /**
    * The same consumption, one record per consulted concrete metadata path
    * (paths are unique by construction — clause/alternative indices plus

@@ -1774,7 +1774,7 @@ export const deriveFlowJoin = (
     collectLabeledSpaces?: boolean;
   },
 ): {
-  confidentiality: unknown[];
+  confidentiality: CfcConfClause[];
   integrity: CfcAtom[];
   labeledSpaces?: ReadonlySet<MemorySpace>;
 } => {
@@ -2427,7 +2427,7 @@ const projectedSourceLabel = (
   claim: ProjectionClaim,
 ): IFCLabel => {
   const source = canonicalizeLogicalPath([...claim.source, ...claim.field]);
-  const confidentiality: unknown[] = [];
+  const confidentiality: CfcConfClause[] = [];
   const integrity: CfcAtom[] = [];
   // Map insertion order is the schema-walk order (parents before children),
   // so contributions stay ordered ancestor-first along the source lineage.
@@ -3703,7 +3703,7 @@ const verifyInputRequirements = (
       // carries no markers, so the extra arm is byte-inert for it; the
       // containment pre-check keeps the dominant plaintext path a single
       // deepEqual per pair.
-      const fitsLegacy = (confidentiality: readonly unknown[]): boolean =>
+      const fitsLegacy = (confidentiality: readonly CfcConfClause[]): boolean =>
         confidentiality.every((value) =>
           maxConfidentiality.some((allowed) =>
             deepEqual(allowed, value) ||
@@ -4564,7 +4564,7 @@ export const loadSchemaDocument = (
 const collectConsumedLabel = (
   tx: IExtendedStorageTransaction,
 ): {
-  confidentiality: readonly unknown[];
+  confidentiality: readonly CfcConfClause[];
   integrity: readonly CfcAtom[];
   modulePolicySpaces: ReadonlyMap<string, ReadonlySet<MemorySpace>>;
 } => {
@@ -4679,7 +4679,7 @@ const collectConsumedLabel = (
  */
 const evaluateGatedConfidentiality = (
   tx: IExtendedStorageTransaction,
-  confidentiality: readonly unknown[],
+  confidentiality: readonly CfcConfClause[],
   integrity: readonly CfcAtom[],
   boundary: readonly unknown[],
   consumption: CfcGrantConsumptionContext,
@@ -4687,7 +4687,7 @@ const evaluateGatedConfidentiality = (
     | MemorySpace
     | ((reference: unknown) => MemorySpace | undefined),
 ): {
-  confidentiality: readonly unknown[];
+  confidentiality: readonly CfcConfClause[];
   exhausted: boolean;
   firings: number;
   resolutionFailures: readonly {
@@ -5670,7 +5670,7 @@ export const prepareBoundaryCommit = (
     // shape would re-smear the pointer/content split.
     const clearedExistence: Array<{
       path: readonly string[];
-      confidentiality: readonly unknown[];
+      confidentiality: readonly CfcConfClause[];
     }> = [];
     // Only pre-class LEGACY entries (no `observes`) pool: they conflated
     // existence with content/membership, and the one-time migration absorb
@@ -6093,14 +6093,14 @@ export const prepareBoundaryCommit = (
       // permuted forms of one clause would both survive — a doubled clause
       // list and one spurious envelope rewrite (the SC-11 churn class).
       // normalizeClause each clause first; non-clause atoms pass through.
-      const foldedUnique = (atoms: readonly unknown[]): unknown[] =>
+      const foldedUnique = (atoms: readonly CfcConfClause[]): CfcConfClause[] =>
         uniqueCfcAtoms(
           atoms.map((atom) => normalizeClause(atom as CfcConfClause)),
         );
       const frozenConfidentialityFor = (
         path: readonly string[],
-      ): unknown[] => {
-        const atoms: unknown[] = [...flowConfidentiality];
+      ): CfcConfClause[] => {
+        const atoms: CfcConfClause[] = [...flowConfidentiality];
         clearedExistence.forEach((cleared, index) => {
           if (isPrefix(path, cleared.path)) {
             attachedExistence.add(index);
@@ -6373,7 +6373,7 @@ export const prepareBoundaryCommit = (
       // shape entry so the existence history survives the migration.
       const leftoverByPath = new Map<
         string,
-        { path: readonly string[]; atoms: unknown[] }
+        { path: readonly string[]; atoms: CfcConfClause[] }
       >();
       clearedExistence.forEach((cleared, index) => {
         if (attachedExistence.has(index)) {

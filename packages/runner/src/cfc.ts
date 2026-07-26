@@ -1,4 +1,5 @@
 import { type ImmutableJSONValue, JSONSchemaObj } from "@commonfabric/api";
+import type { CfcConfClause } from "./cfc/clause.ts";
 import { isRecord } from "@commonfabric/utils/types";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
@@ -348,7 +349,7 @@ export class ContextualFlowControl {
   // Return a copy of the schema with joined confidentiality atoms.
   public schemaWithLub(
     schema: JSONSchema,
-    confidentiality: readonly unknown[],
+    confidentiality: readonly CfcConfClause[],
   ): JSONSchema {
     const joined = new Set<unknown>(confidentiality);
     if (isRecord(schema) && schema.ifc !== undefined) {
