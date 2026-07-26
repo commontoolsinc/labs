@@ -172,9 +172,7 @@ export class WorkerReconciler {
     );
     this.rootRenderPolicy = ceiling === undefined ? DEFAULT_RENDER_POLICY : {
       declassifyConfidentiality: [],
-      maxConfidentiality: [
-        ...(ceiling.atoms ?? []),
-      ] as readonly CfcConfClause[],
+      maxConfidentiality: [...(ceiling.atoms ?? [])],
       caveatKindAllow: [...(ceiling.caveatKinds ?? [])],
     };
   }

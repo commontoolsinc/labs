@@ -299,7 +299,7 @@ export function normalizeRenderDeclassificationPolicy(
  * new release judgment.
  */
 export interface RenderConfidentialityCeiling {
-  atoms?: readonly unknown[];
+  atoms?: readonly CfcConfClause[];
   caveatKinds?: readonly string[];
 }
 
@@ -323,7 +323,7 @@ export function normalizeRenderConfidentialityCeiling(
     caveatKinds?: unknown;
   };
   return {
-    atoms: Array.isArray(atoms) ? atoms : [],
+    atoms: Array.isArray(atoms) ? atoms as readonly CfcConfClause[] : [],
     caveatKinds: Array.isArray(caveatKinds)
       ? caveatKinds.filter((kind): kind is string => typeof kind === "string")
       : [],
