@@ -30,7 +30,7 @@ interface ResultColumn {
 
 /** A row's per-row label, shaped as a schema `ifc` for the row-doc write. */
 export interface PerRowIfc {
-  confidentiality?: unknown[];
+  confidentiality?: CfcConfClause[];
   integrity?: CfcAtom[];
 }
 
@@ -45,7 +45,7 @@ export interface RowLabelReadArgs {
   owner?: string;
   /** Per-column (Phase 2) confidentiality atoms of the labeled projection —
    *  they ride every row, so they count against the ceiling too. */
-  staticConfidentiality?: readonly unknown[];
+  staticConfidentiality?: readonly CfcConfClause[];
   /** Declared output ceiling (placeholders already resolved). */
   ceiling?: readonly CfcConfClause[];
   /** What to do when a row's label exceeds the ceiling (default "fail"). */
@@ -84,7 +84,7 @@ const isRecord = (x: unknown): x is Record<string, unknown> =>
 // intersection, so no principal is guaranteed to read every contributing row.
 type AggregateCommon =
   | { kind: "unconstrained" }
-  | { kind: "readers"; atoms: unknown[] }
+  | { kind: "readers"; atoms: CfcConfClause[] }
   | { kind: "refuse" };
 
 // Intersect the common alternatives of every CONFIDENTIALITY-BEARING
@@ -116,7 +116,10 @@ function intersectCommonAlternatives(
     if (acc.size === 0) return { kind: "refuse" }; // no shared reader
   }
   if (!anyConfidentiality) return { kind: "unconstrained" };
-  return { kind: "readers", atoms: acc === undefined ? [] : [...acc.values()] };
+  return {
+    kind: "readers",
+    atoms: acc === undefined ? [] : [...acc.values()] as CfcConfClause[],
+  };
 }
 
 // CFC Phase 3.b — whether the acting reader may read a row carrying this
@@ -128,7 +131,7 @@ function intersectCommonAlternatives(
 // (Caveat/Expires/material-risk marker) never admits a plain reader, so the row
 // is withheld — fail closed.
 function readerAdmitsLabel(
-  confidentiality: readonly unknown[],
+  confidentiality: readonly CfcConfClause[],
   reader: string,
 ): boolean {
   return confidentiality.every((clause) =>
@@ -292,7 +295,7 @@ export function computeRowLabelRead(
           }
           const ifc: PerRowIfc = {};
           if (res.confidentiality.length > 0) {
-            ifc.confidentiality = res.confidentiality;
+            ifc.confidentiality = res.confidentiality as CfcConfClause[];
           }
           if (res.integrity.length > 0) {
             ifc.integrity = res.integrity as CfcAtom[];

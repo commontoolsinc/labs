@@ -18,7 +18,7 @@ import {
 
 interface ColumnIfc {
   maxConfidentiality?: readonly CfcConfClause[];
-  confidentiality?: readonly unknown[];
+  confidentiality?: readonly CfcConfClause[];
 }
 type Tables = Record<
   string,
