@@ -206,7 +206,7 @@ export type CfcFloorTrustContext = {
  */
 const integrityAtomSatisfies = (
   required: unknown,
-  actual: unknown,
+  actual: CfcAtom,
   trust?: CfcFloorTrustContext,
 ): boolean => {
   const concept = conceptGuard(required);
@@ -230,9 +230,7 @@ const integrityAtomSatisfies = (
         trust.actingPrincipal,
       );
   }
-  // TODO(danfuzz): drop the cast once integrity atom lists are typed as
-  // `CfcAtom`.
-  return matchAtomPattern(required, actual as CfcAtom) !== null ||
+  return matchAtomPattern(required, actual) !== null ||
     atomEntails(actual, required);
 };
 
@@ -276,7 +274,7 @@ export const cfcIntegritySatisfiesFloor = (
  */
 export const cfcIntegrityWitnessKey = (
   required: unknown,
-  actual: unknown,
+  actual: CfcAtom,
   trust?: CfcFloorTrustContext,
 ): string | null => {
   if (!integrityAtomSatisfies(required, actual, trust)) return null;
@@ -307,7 +305,7 @@ export const cfcIntegrityWitnessKey = (
  * incoherent, exactly as two different concrete screening atoms would be.
  */
 export const cfcIntegritySatisfiesFloorCoherently = (
-  consumedIntegrity: readonly (readonly unknown[])[],
+  consumedIntegrity: readonly (readonly CfcAtom[])[],
   requiredIntegrity: readonly CfcAtom[],
   trust?: CfcFloorTrustContext,
 ): boolean =>
