@@ -1,9 +1,10 @@
 import { unclaimed } from "@commonfabric/memory/fact";
+import { isFabricPlainObject } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/api";
 import {
   FabricSpecialObject,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { isRecord } from "@commonfabric/utils/types";
 import type {
   IMemoryAddress,
   IMemoryChange,
@@ -59,8 +60,8 @@ const pushChangedPath = (
 };
 
 const collectChangedPaths = (
-  before: unknown,
-  after: unknown,
+  before: FabricValue,
+  after: FabricValue,
   currentPath: string[],
   depth: number,
   paths: string[][],
@@ -74,7 +75,7 @@ const collectChangedPaths = (
     return;
   }
 
-  if (isRecord(before) && isRecord(after)) {
+  if (isFabricPlainObject(before) && isFabricPlainObject(after)) {
     if (valueEqual(before, after)) {
       return;
     }

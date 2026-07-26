@@ -1,4 +1,5 @@
 import type { Cell } from "./cell.ts";
+import { isFabricValue } from "@commonfabric/data-model/fabric-value";
 
 /**
  * @param resultCell The cell whose meta pattern will be set
@@ -13,7 +14,9 @@ export function setPatternCell(
   // of the creation of the pattern means that this won't generally be
   // available, so for now, we stil link to a pattern cell.
   const parentPattern = patternCell.getRaw();
-  if (parentPattern !== undefined) {
+  // `getRaw()` is declared against the cell's `unknown` type parameter, so
+  // narrow before handing the value to a `FabricValue` API.
+  if (parentPattern !== undefined && isFabricValue(parentPattern)) {
     resultCell.setMetaRaw("pattern", parentPattern);
   }
 }
