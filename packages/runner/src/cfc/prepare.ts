@@ -9,7 +9,6 @@ import {
   internSchemaAsTaggedHashString,
 } from "@commonfabric/data-model/schema-hash";
 import { emptySchemaObject } from "@commonfabric/data-model/schema-utils";
-import { isFabricPlainObject } from "@commonfabric/data-model/fabric-value";
 import {
   cloneForMutation,
   type CloneForMutationResult,
@@ -2640,7 +2639,7 @@ export const writeDetailValueForTarget = (
     return baseValue;
   }
 
-  if (!(isFabricPlainObject(baseValue) || Array.isArray(baseValue))) {
+  if (!(isRecord(baseValue) || Array.isArray(baseValue))) {
     // Base isn't a container yet deeper writes exist (rare/incoherent): build a
     // fresh container and overlay onto it (it's freshly mutable -- no COW).
     const result: Record<PropertyKey, unknown> | unknown[] =
