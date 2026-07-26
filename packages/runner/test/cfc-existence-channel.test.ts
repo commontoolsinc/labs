@@ -1,4 +1,5 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
+import type { FabricPlainObject } from "@commonfabric/api";
 import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
 import type { FabricValue } from "@commonfabric/data-model/interface";
@@ -100,7 +101,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     rt: Runtime,
     sourceId: string | undefined,
     outCause: string,
-    value: Record<string, unknown>,
+    value: FabricPlainObject,
     writePath: string[] = [],
   ): Promise<string> => {
     const tx = rt.edit();
@@ -996,7 +997,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
       copied: true,
     });
 
-    const overwrite = async (value: Record<string, unknown>) => {
+    const overwrite = async (value: FabricPlainObject) => {
       const tx = rt.edit();
       tx.writeOrThrow(
         { space, scope: "space", id: uri(outId), path: ["value"] },

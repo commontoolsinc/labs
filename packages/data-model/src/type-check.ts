@@ -11,8 +11,9 @@ import { BaseFabricInstance } from "./fabric-instances/BaseFabricInstance.ts";
 import { BaseFabricPrimitive } from "./fabric-primitives/BaseFabricPrimitive.ts";
 
 /**
- * Indicates whether the value is a fabric value, accepting `FabricInstance`
- * values, `undefined`, and arrays with `undefined` elements or sparse holes
+ * Indicates whether the value is a fabric value, accepting
+ * `FabricSpecialObject`s (both `FabricInstance` and `FabricPrimitive`),
+ * `undefined`, and arrays with `undefined` elements or sparse holes
  * -- in addition to the base fabric types (`null`, `boolean`, `number`,
  * `string`, plain objects, dense arrays).
  *
@@ -44,7 +45,7 @@ export function isFabricValueLayer(
         return isArrayWithOnlyIndexProperties(value);
       }
       // Plain objects are accepted; class instances are not (except
-      // `FabricInstance`, handled above).
+      // `FabricSpecialObject`, handled above).
       const proto = Object.getPrototypeOf(value);
       return proto === null || proto === Object.prototype;
     }
@@ -152,6 +153,31 @@ export function isFabricValue(value: unknown): value is FabricValue {
   };
 
   return check(value);
+}
+
+/**
+ * Indicates whether a fabric value is a plain object, an array, or a
+ * `FabricSpecialObject` -- everything a `typeof value === "object"` test
+ * accepts, minus `null`. The name spells out the array case because "object"
+ * alone reads as excluding it.
+ *
+ * The runtime behavior matches a bare `isRecord()` exactly. The difference is
+ * static: `isRecord()` narrows to `Record<string | number | symbol, unknown>`,
+ * which discards the fact that the value is a `FabricValue` -- so a guarded
+ * value can no longer be handed to a `FabricValue` API. This keeps that half.
+ *
+ * Contrast `isFabricPlainObject()`, which is strictly narrower at RUNTIME: it
+ * accepts only plain objects, rejecting arrays and `FabricSpecialObject`s. The
+ * two are not interchangeable.
+ */
+export function isFabricObjectOrArray(
+  value: FabricValue,
+): value is FabricValue & object;
+export function isFabricObjectOrArray(
+  value: Immutable<FabricValue>,
+): value is Immutable<FabricValue> & object;
+export function isFabricObjectOrArray(value: unknown): boolean {
+  return typeof value === "object" && value !== null;
 }
 
 /**
