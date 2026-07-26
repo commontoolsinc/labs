@@ -1,4 +1,5 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
+import type { IFCLabel } from "../src/cfc/mod.ts";
 import type { CfcConfClause } from "../src/cfc/clause.ts";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { expect } from "@std/expect";
@@ -34,7 +35,7 @@ const foreignSpace = foreignSigner.did();
 
 type StoredEntry = {
   path: string[];
-  label: { confidentiality?: unknown[]; integrity?: unknown[] };
+  label: IFCLabel;
   origin?: string;
   observes?: string;
 };

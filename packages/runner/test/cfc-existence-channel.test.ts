@@ -1,4 +1,5 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
+import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
 import type { FabricValue } from "@commonfabric/data-model/interface";
 import { Identity } from "@commonfabric/identity";
@@ -15,7 +16,7 @@ const space = signer.did();
 
 type StoredEntry = {
   path: string[];
-  label: { confidentiality?: string[]; integrity?: unknown[] };
+  label: IFCLabel;
   origin?: string;
   observes?: string;
 };

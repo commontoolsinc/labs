@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
@@ -13,7 +14,7 @@ const space = signer.did();
 
 type StoredEntry = {
   path: string[];
-  label: { confidentiality?: unknown[]; integrity?: unknown[] };
+  label: IFCLabel;
   origin?: string;
 };
 

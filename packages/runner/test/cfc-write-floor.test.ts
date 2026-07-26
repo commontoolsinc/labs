@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
 import type { FabricValue } from "@commonfabric/data-model/interface";
 import { Identity } from "@commonfabric/identity";
@@ -67,7 +68,7 @@ const seedLabeledDoc = async (
   runtime: Runtime,
   id: string,
   value: FabricValue,
-  label: { integrity?: unknown[]; confidentiality?: unknown[] },
+  label: IFCLabel,
   path: string[] = [],
 ): Promise<void> => {
   const seed = runtime.edit();
