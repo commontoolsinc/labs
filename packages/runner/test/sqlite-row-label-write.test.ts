@@ -7,6 +7,7 @@
 // Spec: docs/specs/sqlite-builtin/06-cfc.md ("Write — the runner gate").
 
 import { describe, it } from "@std/testing/bdd";
+import type { CfcConfClause } from "../src/cfc/clause.ts";
 import { assert, assertEquals } from "@std/assert";
 import { checkSqliteRowLabelWrite } from "../src/builtins/sqlite/row-label-write.ts";
 import { table } from "@commonfabric/memory/sqlite/schema";
@@ -48,7 +49,7 @@ const tables = {
   notes: table({ id: "integer primary key", body: "text" }),
 };
 
-const unlabeled = (_v: unknown): readonly unknown[] => [];
+const unlabeled = (_v: unknown): readonly CfcConfClause[] => [];
 
 function expectError(
   res: ReturnType<typeof checkSqliteRowLabelWrite>,

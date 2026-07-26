@@ -416,7 +416,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
   const seedLabeledCell = async (
     runtime: Runtime,
     id: string,
-    label: { confidentiality: unknown[]; integrity?: unknown[] },
+    label: { confidentiality: CfcConfClause[]; integrity?: CfcAtom[] },
   ): Promise<void> => {
     const seed = runtime.edit();
     const target = runtime.getCell(signer.did(), id, undefined, seed);
@@ -623,7 +623,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
           kind: "builtin",
           builtinId: "cfc-grant-writer",
         });
-        const attempt = (audience: unknown[]) => () =>
+        const attempt = (audience: CfcAtom[]) => () =>
           tx.writeCfcGrant({
             kind: "ShareGrant",
             owner: signer.did(),

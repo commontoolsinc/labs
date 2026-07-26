@@ -20,6 +20,8 @@
 // this read path.
 
 import { type Cell, createCell, encodeSqliteParams } from "../cell.ts";
+import type { CfcConfClause } from "../cfc/clause.ts";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { parseLink } from "../link-utils.ts";
 import {
   computeRowLabelRead,
@@ -167,7 +169,7 @@ function staticConfidentialityOf(
   if (!props) return [];
   const out: unknown[] = [];
   for (const p of Object.values(props)) {
-    const conf = (p as { ifc?: { confidentiality?: unknown[] } })?.ifc
+    const conf = (p as { ifc?: { confidentiality?: CfcConfClause[] } })?.ifc
       ?.confidentiality;
     if (Array.isArray(conf)) out.push(...conf);
   }
@@ -283,16 +285,16 @@ function deriveNullOriginIfc(
 }
 
 type ColumnIfc = {
-  confidentiality?: unknown[];
-  integrity?: unknown[];
-  maxConfidentiality?: unknown[];
+  confidentiality?: CfcConfClause[];
+  integrity?: CfcAtom[];
+  maxConfidentiality?: CfcConfClause[];
 };
 
 const unionAtoms = (
-  a: unknown[] | undefined,
-  b: unknown[] | undefined,
-): unknown[] | undefined => {
-  const out: unknown[] = [...(a ?? [])];
+  a: CfcConfClause[] | undefined,
+  b: CfcConfClause[] | undefined,
+): CfcConfClause[] | undefined => {
+  const out: CfcConfClause[] = [...(a ?? [])];
   for (const atom of b ?? []) {
     if (!out.some((existing) => deepEqual(existing, atom))) out.push(atom);
   }
@@ -305,9 +307,9 @@ const unionAtoms = (
 // An EMPTY intersection stays `[]`, which the verifier reads as "public only"
 // (the tightest ceiling) — collapsing it to undefined would forge "no ceiling".
 const tightenCeiling = (
-  prior: unknown[] | undefined,
-  next: unknown[] | undefined,
-): unknown[] | undefined => {
+  prior: CfcConfClause[] | undefined,
+  next: CfcConfClause[] | undefined,
+): CfcConfClause[] | undefined => {
   if (prior === undefined) return next;
   if (next === undefined) return prior;
   return prior.filter((atom) => next.some((n) => deepEqual(n, atom)));
@@ -322,9 +324,9 @@ const tightenCeiling = (
 // Identical to `tightenCeiling` EXCEPT the prior-absent case yields undefined
 // (no prior trust to inherit) rather than adopting `next` wholesale.
 const clampIntegrity = (
-  prior: unknown[] | undefined,
-  next: unknown[] | undefined,
-): unknown[] | undefined => {
+  prior: CfcConfClause[] | undefined,
+  next: CfcConfClause[] | undefined,
+): CfcConfClause[] | undefined => {
   if (prior === undefined) return undefined;
   if (next === undefined) return prior;
   const kept = prior.filter((atom) => next.some((n) => deepEqual(n, atom)));
@@ -637,7 +639,7 @@ export function sqliteQuery(
       // CFC Phase 3: declared output ceiling + what to do when a row's label
       // exceeds it ("fail" default | "skip"). The typed alternative is
       // MaxConfidentiality<> on the Row schema (rowSchema.ifc).
-      maxConfidentiality?: unknown[];
+      maxConfidentiality?: CfcConfClause[];
       onExceed?: unknown;
       // CFC Phase 3.b: opt into read-time clearance — filter rows to those the
       // acting reader may read (a declared existence release). Requires the
@@ -771,7 +773,7 @@ export function sqliteQuery(
           // row, and decides fail/skip under the ceiling — every unresolvable
           // case refuses the query (fail closed), never under-labels.
           const rowSchemaCeiling = (inputs.rowSchema as {
-            ifc?: { maxConfidentiality?: unknown[] };
+            ifc?: { maxConfidentiality?: CfcConfClause[] };
           } | undefined)?.ifc?.maxConfidentiality;
           if (
             inputs.maxConfidentiality !== undefined &&
@@ -802,7 +804,9 @@ export function sqliteQuery(
             columns: res.columns,
             rows,
             owner: db.owner,
-            staticConfidentiality: staticConfidentialityOf(labelSchema),
+            staticConfidentiality: staticConfidentialityOf(
+              labelSchema,
+            ) as readonly CfcConfClause[] | undefined,
             ceiling,
             onExceed: inputs.onExceed,
             // Phase 3.b read-time clearance: the reader is the acting principal

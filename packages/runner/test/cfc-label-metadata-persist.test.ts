@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import type { CfcLabelView } from "../src/cfc/label-view-core.ts";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
@@ -125,7 +126,7 @@ describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
         id: sourceId,
         path: [],
       },
-      cfcLabelView,
+      cfcLabelView: cfcLabelView as CfcLabelView,
     });
     tx.prepareCfc();
     expect((await tx.commit()).ok).toBeDefined();

@@ -22,9 +22,9 @@ import {
   normalizeClause,
 } from "./clause.ts";
 
-export type CfcObservedConfidentiality = readonly unknown[];
+export type CfcObservedConfidentiality = readonly CfcConfClause[];
 export type CfcObservationMaxConfidentiality =
-  | readonly unknown[]
+  | readonly CfcConfClause[]
   | undefined;
 
 // Marker confidentiality atom injected when a cell's label could not be read
@@ -142,7 +142,7 @@ export const cfcConfidentialityForObservationNode = (
 };
 
 export const cfcObservationFitsCeiling = (
-  confidentiality: readonly unknown[],
+  confidentiality: readonly CfcConfClause[],
   observationMaxConfidentiality: CfcObservationMaxConfidentiality,
 ): boolean => {
   // undefined means no ceiling. A declared but empty ceiling means "public
@@ -248,7 +248,7 @@ const integrityAtomSatisfies = (
  * (concrete/pattern) floors.
  */
 export const cfcIntegritySatisfiesFloor = (
-  integrity: readonly unknown[],
+  integrity: readonly CfcAtom[],
   requiredIntegrity: readonly unknown[],
   trust?: CfcFloorTrustContext,
 ): boolean =>
@@ -356,7 +356,7 @@ export const cfcIntegritySatisfiesFloorCoherently = (
  * by construction.
  */
 export const atomsOutsideCeiling = (
-  confidentiality: readonly unknown[],
+  confidentiality: readonly CfcConfClause[],
   ceiling: CfcObservationMaxConfidentiality,
 ): ImmutableJSONValue[] => {
   if (ceiling === undefined) {
@@ -428,7 +428,7 @@ export const meetCfcObservationCeilings = (
 ): CfcObservationMaxConfidentiality => {
   if (a === undefined) return b;
   if (b === undefined) return a;
-  const met: unknown[] = [];
+  const met: CfcConfClause[] = [];
   for (const clauseA of a) {
     const alternativesA = clauseAlternatives(clauseA as CfcConfClause);
     if (alternativesA.length === 0) continue;

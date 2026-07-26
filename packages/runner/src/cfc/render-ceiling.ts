@@ -145,7 +145,7 @@ export type RenderConfidentialityResolverConfig = {
  * per distinct space.
  */
 export const spaceAtomIdsInConfidentiality = (
-  confidentiality: readonly unknown[],
+  confidentiality: readonly CfcConfClause[],
 ): readonly string[] => {
   const ids: string[] = [];
   for (const clause of confidentiality) {
@@ -165,8 +165,8 @@ export const spaceAtomIdsInConfidentiality = (
 
 /** The label of the cell being rendered, as read at the display boundary. */
 export type RenderLabelInput = {
-  readonly confidentiality: readonly unknown[];
-  readonly integrity?: readonly unknown[];
+  readonly confidentiality: readonly CfcConfClause[];
+  readonly integrity?: readonly CfcAtom[];
 };
 
 /**

@@ -6,6 +6,7 @@
  */
 
 import type { Cancel, Cell, JSONSchema } from "@commonfabric/runner";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import type {
   RenderConfidentialityResolver,
   SpaceMembershipProvider,
@@ -101,7 +102,7 @@ export interface RenderPolicy {
    * Confidentiality atoms allowed to render in this subtree.
    * Undefined means no render-time confidentiality bound is active.
    */
-  maxConfidentiality?: readonly unknown[];
+  maxConfidentiality?: readonly CfcAtom[];
 
   /**
    * Caveat kinds admitted by the host's default render ceiling (spec

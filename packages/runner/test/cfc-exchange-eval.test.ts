@@ -736,7 +736,7 @@ describe("CFC exchange-rule evaluation (B4)", () => {
       const evidencePool = [roleAliceX, roleAliceY, roleBobX];
 
       for (let round = 0; round < 200; round++) {
-        const clauses: unknown[] = [];
+        const clauses: CfcConfClause[] = [];
         const clauseCount = 1 + Math.floor(random() * 3);
         for (let i = 0; i < clauseCount; i++) {
           const alternativeCount = 1 + Math.floor(random() * 3);
@@ -746,8 +746,8 @@ describe("CFC exchange-rule evaluation (B4)", () => {
           );
           clauses.push(
             alternatives.length === 1
-              ? alternatives[0]
-              : { anyOf: alternatives },
+              ? alternatives[0] as CfcConfClause
+              : { anyOf: alternatives } as CfcOrClause,
           );
         }
         const rules: ExchangeRule[] = Array.from(
@@ -957,7 +957,7 @@ describe("CFC exchange-rule evaluation (B4)", () => {
       for (const ref of cases) {
         const result = evaluateExchangeRules(
           {
-            confidentiality: [{ anyOf: [spaceX, ref] }],
+            confidentiality: [{ anyOf: [spaceX, ref] } as CfcOrClause],
             integrity: [roleAliceX],
           },
           other,

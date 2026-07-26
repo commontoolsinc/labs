@@ -50,7 +50,7 @@ const isMaterialRisk = (atom: unknown): boolean => {
     typeof (atom as { kind?: unknown }).kind === "string" &&
     materialKinds.has((atom as { kind: string }).kind);
 };
-const legacyStrip = (atoms: readonly unknown[]): unknown[] =>
+const legacyStrip = (atoms: readonly CfcConfClause[]): CfcConfClause[] =>
   uniqueCfcAtoms(
     atoms
       .map((clause) => {
@@ -74,8 +74,9 @@ const legacyStrip = (atoms: readonly unknown[]): unknown[] =>
 // bare-InjectionSafe material-risk discharge). This calls the REAL sanitizer
 // entry point — including its legacy bare-string normalization — so the golden
 // guards the shipped code, not a reimplementation (codex P2 on #4567).
-const dischargeViaProfile = (atoms: readonly unknown[]): unknown[] =>
-  dischargeMaterialRiskAtoms(atoms);
+const dischargeViaProfile = (
+  atoms: readonly CfcConfClause[],
+): CfcConfClause[] => dischargeMaterialRiskAtoms(atoms);
 
 const clauseSetsEqual = (a: readonly unknown[], b: readonly unknown[]) =>
   a.length === b.length &&
@@ -162,8 +163,8 @@ describe("CFC standard prompt-caveat profile (B6)", () => {
 
     for (const [name, input] of scenarios) {
       it(name, () => {
-        const oracle = legacyStrip(input);
-        const ruled = dischargeViaProfile(input);
+        const oracle = legacyStrip(input as CfcConfClause[]);
+        const ruled = dischargeViaProfile(input as CfcConfClause[]);
         expect(clauseSetsEqual(ruled, oracle)).toBe(true);
       });
     }

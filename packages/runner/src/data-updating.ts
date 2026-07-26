@@ -1,4 +1,6 @@
 import { isObject, isRecord } from "@commonfabric/utils/types";
+import type { CfcConfClause } from "./cfc/clause.ts";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { forEachSubschema } from "./schema-walk.ts";
 import {
   fabricFromNativeValue,
@@ -140,8 +142,8 @@ const schemaPathsOverlap = (
 
 const labelHasValues = (
   label: {
-    confidentiality?: readonly unknown[];
-    integrity?: readonly unknown[];
+    confidentiality?: readonly CfcConfClause[];
+    integrity?: readonly CfcAtom[];
   },
 ): boolean =>
   (label.confidentiality?.length ?? 0) > 0 ||

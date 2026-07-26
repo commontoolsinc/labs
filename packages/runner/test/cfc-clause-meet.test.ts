@@ -131,7 +131,7 @@ describe("CFC ceiling meet (pairwise alternative-set union)", () => {
     // atoms, OR-clauses (with an order-differing spelling), the malformed
     // empty clause, and the ungrantable read-failed marker (bare and
     // wrapped).
-    const ceilingClausePool: readonly unknown[] = [
+    const ceilingClausePool: readonly CfcConfClause[] = [
       A,
       B,
       C,
@@ -142,7 +142,7 @@ describe("CFC ceiling meet (pairwise alternative-set union)", () => {
       { anyOf: [] },
       CFC_LABEL_READ_FAILED_ATOM,
     ];
-    const labelClausePool: readonly unknown[] = [
+    const labelClausePool: readonly CfcConfClause[] = [
       A,
       B,
       C,
@@ -155,9 +155,9 @@ describe("CFC ceiling meet (pairwise alternative-set union)", () => {
     ];
 
     const subsetsUpToSize2 = (
-      pool: readonly unknown[],
-    ): readonly (readonly unknown[])[] => {
-      const subsets: (readonly unknown[])[] = [[]];
+      pool: readonly CfcConfClause[],
+    ): readonly (readonly CfcConfClause[])[] => {
+      const subsets: (readonly CfcConfClause[])[] = [[]];
       for (let i = 0; i < pool.length; i++) {
         subsets.push([pool[i]]);
         for (let j = i + 1; j < pool.length; j++) {
@@ -170,7 +170,7 @@ describe("CFC ceiling meet (pairwise alternative-set union)", () => {
     it("holds over every (C1, C2, L) triple in the universe", () => {
       const ceilings: readonly CfcObservationMaxConfidentiality[] = [
         undefined,
-        ...subsetsUpToSize2(ceilingClausePool),
+        ...subsetsUpToSize2(ceilingClausePool as CfcConfClause[]),
       ];
       const labels = subsetsUpToSize2(labelClausePool);
       let checked = 0;

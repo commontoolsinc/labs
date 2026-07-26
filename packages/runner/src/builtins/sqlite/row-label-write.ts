@@ -27,6 +27,8 @@ import {
   ruleInputFields,
   validateRowLabelSpec,
 } from "@commonfabric/memory/sqlite/row-label";
+import type { CfcConfClause } from "../../cfc/clause.ts";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { tableDeclaresRowLabel } from "@commonfabric/memory/v2";
 import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
 import {
@@ -40,7 +42,7 @@ import {
  *  input (sink-request) before the commit. */
 export interface RowLabelWritePolicy {
   table: string;
-  label: { confidentiality: unknown[]; integrity: unknown[] };
+  label: { confidentiality: CfcConfClause[]; integrity: CfcAtom[] };
 }
 
 export interface RowLabelWriteArgs {
@@ -51,7 +53,7 @@ export interface RowLabelWriteArgs {
   /** The db's owner (db ref), resolving the rule's `dbOwner()` term. */
   owner?: string;
   /** The confidentiality atoms carried by a bound value ([] if unlabeled). */
-  confidentialityOf: (value: unknown) => readonly unknown[];
+  confidentialityOf: (value: unknown) => readonly CfcConfClause[];
   /** True iff the connected server advertised commit-time re-derivation
    *  (Phase 3.c) — the gate then admits the non-attributable shapes with
    *  unlabeled inputs instead of failing closed. Default false. */
@@ -282,7 +284,12 @@ export function checkSqliteRowLabelWrite(
             "ceiling); storing the value would launder its label; fail closed",
         };
       }
-      if (!cfcObservationFitsCeiling(conf, res.confidentiality)) {
+      if (
+        !cfcObservationFitsCeiling(
+          conf,
+          res.confidentiality as readonly CfcConfClause[],
+        )
+      ) {
         return {
           error: `sqlite: a value bound to rule-bearing table ` +
             `"${declaredKey}" carries confidentiality not captured by the ` +
@@ -293,7 +300,10 @@ export function checkSqliteRowLabelWrite(
     }
     policies.push({
       table: declaredKey,
-      label: { confidentiality: res.confidentiality, integrity: res.integrity },
+      label: {
+        confidentiality: res.confidentiality as CfcConfClause[],
+        integrity: res.integrity as CfcAtom[],
+      },
     });
   }
   return { policies };

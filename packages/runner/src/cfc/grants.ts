@@ -104,7 +104,7 @@ export type CfcGrantIdentity = {
 export type CfcGrant = CfcGrantIdentity & {
   readonly version: typeof CFC_GRANT_VERSION;
   /** Principal-like atoms (§3.1.8-validated) the release extends to. */
-  readonly audience: readonly unknown[];
+  readonly audience: readonly CfcAtom[];
   readonly grantedAt: number;
   readonly expiresAt?: number;
   /** §6 intent attribution once the intent substrate exists. */
@@ -130,7 +130,7 @@ export type CfcGrantWriteInput = {
   readonly kind: string;
   readonly owner: string;
   readonly resource: unknown;
-  readonly audience: readonly unknown[];
+  readonly audience: readonly CfcAtom[];
   /** Defaults to `owner` — the v1 governing-space posture (module doc). */
   readonly space?: string;
   /** Defaults to the runner clock at write time. */

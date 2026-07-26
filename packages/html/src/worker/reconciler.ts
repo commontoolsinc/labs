@@ -27,6 +27,7 @@ import {
   UI,
   useCancelGroup,
 } from "@commonfabric/runner";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import type { CellRef } from "@commonfabric/runtime-client";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -170,7 +171,7 @@ export class WorkerReconciler {
     );
     this.rootRenderPolicy = ceiling === undefined ? DEFAULT_RENDER_POLICY : {
       declassifyConfidentiality: [],
-      maxConfidentiality: [...(ceiling.atoms ?? [])],
+      maxConfidentiality: [...(ceiling.atoms ?? [])] as readonly CfcAtom[],
       caveatKindAllow: [...(ceiling.caveatKinds ?? [])],
     };
   }
@@ -539,7 +540,7 @@ export class WorkerReconciler {
       policy = {
         maxConfidentiality: this.narrowMaxConfidentiality(
           parentPolicy.maxConfidentiality,
-          localMax,
+          localMax as readonly CfcAtom[] | undefined,
         ),
         // The host's caveat-kind allowance is part of the default ceiling
         // profile; boundaries narrow maxConfidentiality but never widen or
@@ -624,7 +625,7 @@ export class WorkerReconciler {
   private staticPropAsAtomList(
     props: WorkerProps | null | undefined,
     key: string,
-  ): readonly unknown[] | undefined {
+  ): readonly CfcAtom[] | undefined {
     if (!props || typeof props !== "object" || !(key in props)) {
       return undefined;
     }
@@ -636,9 +637,9 @@ export class WorkerReconciler {
       return undefined;
     }
     if (Array.isArray(value)) {
-      return value;
+      return value as readonly CfcAtom[];
     }
-    return [value];
+    return [value as CfcAtom];
   }
 
   private nodePropForRenderPolicy(
@@ -920,9 +921,9 @@ export class WorkerReconciler {
   }
 
   private narrowMaxConfidentiality(
-    parentMax: readonly unknown[] | undefined,
-    localMax: readonly unknown[] | undefined,
-  ): readonly unknown[] | undefined {
+    parentMax: readonly CfcAtom[] | undefined,
+    localMax: readonly CfcAtom[] | undefined,
+  ): readonly CfcAtom[] | undefined {
     if (parentMax === undefined) {
       return localMax;
     }
@@ -1065,8 +1066,8 @@ export class WorkerReconciler {
    * admit only bare atoms — an OR-clause never matches either, staying closed.
    */
   private resolvedConfidentialityRenderable(
-    confidentiality: readonly unknown[],
-    integrity: readonly unknown[],
+    confidentiality: readonly CfcAtom[],
+    integrity: readonly CfcAtom[],
     policy: RenderPolicy,
   ): boolean {
     const resolved = this.resolveRenderConfidentiality!({
@@ -1130,7 +1131,7 @@ export class WorkerReconciler {
     return this.canRenderConfidentialityAtom(atom, policy);
   }
 
-  private confidentialityLabels(labelView: CfcLabelView): readonly unknown[] {
+  private confidentialityLabels(labelView: CfcLabelView): readonly CfcAtom[] {
     return ContextualFlowControl.uniqueAtoms(
       labelView.entries.flatMap((entry) => [
         ...(entry.label.confidentiality ?? []),
@@ -1378,7 +1379,7 @@ export class WorkerReconciler {
     );
   }
 
-  private integrityLabels(labelView: CfcLabelView): readonly unknown[] {
+  private integrityLabels(labelView: CfcLabelView): readonly CfcAtom[] {
     return ContextualFlowControl.uniqueAtoms(
       labelView.entries.flatMap((entry) =>
         entry.path.length === 0 ? [...(entry.label.integrity ?? [])] : []

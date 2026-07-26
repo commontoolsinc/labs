@@ -4,6 +4,7 @@ import {
   isObject,
   isRecord,
 } from "@commonfabric/utils/types";
+import type { CfcConfClause } from "./cfc/clause.ts";
 import {
   cloneIfNecessary,
   FabricInstance,
@@ -1172,7 +1173,7 @@ export class CellImpl<T extends FabricValue>
     // column's `ifc.maxConfidentiality`. The label rides the bound value (a Cell
     // or any carried-label value); fail closed when a labeled value's target
     // column can't be determined. No-op until a column declares `ifc`.
-    const confidentialityOf = (value: unknown): readonly unknown[] => {
+    const confidentialityOf = (value: unknown): readonly CfcConfClause[] => {
       const view = cfcLabelViewForCell(value);
       return view
         ? cfcConfidentialityForObservationNode({ labelView: view })
@@ -1182,7 +1183,9 @@ export class CellImpl<T extends FabricValue>
       sql,
       params,
       tables as Parameters<typeof checkSqliteWriteCeiling>[2],
-      confidentialityOf,
+      confidentialityOf as unknown as Parameters<
+        typeof checkSqliteWriteCeiling
+      >[3],
     );
     if (ceilingViolation) throw new TypeError(ceilingViolation);
 

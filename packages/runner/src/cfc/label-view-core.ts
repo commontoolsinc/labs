@@ -1,12 +1,16 @@
 import { encodePointer } from "../../../memory/v2/path.ts";
 import type { CfcConfClause } from "./clause.ts";
-import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import {
+  CFC_ATOM_TYPE,
+  type CfcAtom,
+  type CfcAtomObject,
+} from "@commonfabric/api/cfc";
 import { uniqueCfcAtoms } from "./observation.ts";
 import { normalizeClause } from "./clause.ts";
 
 export type IFCLabel = {
-  confidentiality?: unknown[];
-  integrity?: unknown[];
+  confidentiality?: CfcConfClause[];
+  integrity?: CfcAtom[];
 };
 
 /**
@@ -102,16 +106,18 @@ export const hasCfcLabelValues = (label: IFCLabel): boolean =>
 // `PromptSlotBound.source` / `Caveat.by` are themselves `CfcAtom`s), so a Caveat
 // can appear at any depth; walk the whole structure and drop `source` from each
 // Caveat found, leaving its `kind`/`by`/`type` and all other atoms intact.
-const redactCaveatSourceAtom = (atom: unknown): unknown => {
+const redactCaveatSourceAtom = (atom: CfcAtom): CfcAtom => {
   if (Array.isArray(atom)) {
     return atom.map(redactCaveatSourceAtom);
   }
   if (atom === null || typeof atom !== "object") {
     return atom;
   }
-  const obj = atom as Record<string, unknown>;
+  // The array arm is handled above, but narrowing cannot drop a
+  // `ReadonlyArray` interface from the union, so name the object arm.
+  const obj = atom as CfcAtomObject;
   const dropSource = obj.type === CFC_ATOM_TYPE.Caveat;
-  const out: Record<string, unknown> = {};
+  const out: Record<string, CfcAtom> = {};
   for (const [key, value] of Object.entries(obj)) {
     if (dropSource && key === "source") {
       continue;

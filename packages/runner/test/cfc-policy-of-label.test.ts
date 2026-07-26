@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
+import type { CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
@@ -382,7 +383,7 @@ describe("PolicyOf label-time binding", () => {
       expect(reference).toBeDefined();
       const reader = "did:key:cold-compiled-reader";
       const evaluated = evaluateExchangeRules(
-        { confidentiality: [reference] },
+        { confidentiality: [reference as CfcConfClause] },
         undefined,
         {
           integrity: [cfcAtom.hasRole(reader, space, "reader")],
@@ -538,7 +539,7 @@ describe("PolicyOf label-time binding", () => {
         );
       expect(reference).toBeDefined();
       const evaluated = evaluateExchangeRules(
-        { confidentiality: [reference] },
+        { confidentiality: [reference as CfcConfClause] },
         undefined,
         {
           integrity: [{ type: "IntegrityEvidence" }],

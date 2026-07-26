@@ -155,7 +155,7 @@ export type ExchangeEvalContext = {
    * integrity (boundary-minted facts, consumed-read integrity). The guard
    * pool is `label.integrity ∪ ctx.integrity`.
    */
-  readonly integrity?: readonly unknown[];
+  readonly integrity?: readonly CfcAtom[];
   /** Boundary-context atoms minted for this evaluation site (B5). */
   readonly boundary?: readonly unknown[];
   /** Trust closure for concept-valued integrity guards (B3). */

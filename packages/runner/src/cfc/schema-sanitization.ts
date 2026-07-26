@@ -139,7 +139,7 @@ const normalizeMaterialRiskStringForms = (clause: unknown): unknown => {
 };
 
 export const dischargeMaterialRiskAtoms = (
-  atoms: readonly unknown[],
+  atoms: readonly CfcConfClause[],
 ): ImmutableJSONValue[] => {
   // Fuel budget scaled to the label (cubic P2 on #4567): the default 64 would
   // exhaust on a label with more than ~64 droppable alternatives, and the
@@ -156,7 +156,7 @@ export const dischargeMaterialRiskAtoms = (
     0,
   );
   const result = evaluateExchangeRules(
-    { confidentiality: normalized },
+    { confidentiality: normalized as CfcConfClause[] },
     MATERIAL_RISK_SNAPSHOT,
     { integrity: [INJECTION_SAFE_ATOM] },
     alternativeCount + DEFAULT_EXCHANGE_FUEL,
@@ -175,7 +175,7 @@ const mergeIfc = (
     observedConfidentiality,
     instructionInert,
   }: {
-    observedConfidentiality: readonly unknown[];
+    observedConfidentiality: readonly CfcConfClause[];
     instructionInert: boolean;
   },
 ): Record<string, unknown> => {
@@ -260,7 +260,7 @@ export const resolveSchemaForValidation = (
 
 const annotateSchema = (
   schema: JSONSchema,
-  observedConfidentiality: readonly unknown[],
+  observedConfidentiality: readonly CfcConfClause[],
   fullSchema: JSONSchema,
   visitedRef?: AnnotationRefVisit,
 ): AnnotationResult => {
@@ -439,7 +439,7 @@ const annotateSchema = (
 
 export const schemaWithInjectionSafeAnnotations = (
   schema: JSONSchema,
-  observedConfidentiality: readonly unknown[] = [],
+  observedConfidentiality: readonly CfcConfClause[] = [],
 ): JSONSchema => {
   const clone = cloneJson(schema);
   return stripRequiredFields(
