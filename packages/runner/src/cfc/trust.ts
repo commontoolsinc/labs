@@ -279,11 +279,9 @@ export const createTrustResolver = (
     const reached = new Set<string>();
     for (const statement of admissible) {
       if (reached.has(statement.implements)) continue;
-      // TODO(danfuzz): drop the cast once integrity atom lists are typed as
-      // `CfcAtom`.
       if (
         integrityAtoms.some((atom) =>
-          matchAtomPattern(statement.concrete, atom as CfcAtom) !== null
+          matchAtomPattern(statement.concrete, atom) !== null
         )
       ) {
         reached.add(statement.implements);

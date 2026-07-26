@@ -89,9 +89,7 @@ export const cloneCfcLabel = (label: IFCLabel): IFCLabel => {
   for (const key of LABEL_KEYS) {
     const value = label[key];
     if (Array.isArray(value) && value.length > 0) {
-      // TODO(danfuzz): drop the cast once `confidentiality` names its
-      // clause type too; this loop spans both label keys.
-      cloned[key] = [...value] as CfcAtom[];
+      cloned[key] = [...value];
     }
   }
   return cloned;
@@ -154,8 +152,8 @@ export const redactCaveatSourcesForDisplay = (
     for (const key of LABEL_KEYS) {
       const value = entry.label[key];
       if (Array.isArray(value) && value.length > 0) {
-        // TODO(danfuzz): drop the cast once `confidentiality` names its
-        // clause type too; this loop spans both label keys.
+        // `value` is the union of both label-key array types, so `.map()`
+        // widens its callback parameter and loses the element type.
         label[key] = value.map(redactCaveatSourceAtom) as CfcAtom[];
       }
     }

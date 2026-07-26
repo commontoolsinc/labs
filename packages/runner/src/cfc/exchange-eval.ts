@@ -157,7 +157,7 @@ export type ExchangeEvalContext = {
    */
   readonly integrity?: readonly CfcAtom[];
   /** Boundary-context atoms minted for this evaluation site (B5). */
-  readonly boundary?: readonly unknown[];
+  readonly boundary?: readonly CfcAtom[];
   /** Trust closure for concept-valued integrity guards (B3). */
   readonly trustResolver?: TrustResolver;
   readonly actingPrincipal?: string;
@@ -208,12 +208,10 @@ export type ExchangeEvalResult = {
 const extendThroughPattern = (
   environments: readonly AtomPatternBindings[],
   pattern: unknown,
-  pool: readonly unknown[],
+  pool: readonly CfcAtom[],
 ): AtomPatternBindings[] => {
   const next: AtomPatternBindings[] = [];
-  // TODO(danfuzz): drop the cast once the integrity guard pool is typed as
-  // `CfcAtom`.
-  const atoms = pool as readonly CfcAtom[];
+  const atoms = pool;
   for (const environment of environments) {
     for (
       const extended of matchAtomPatternAgainstAtoms(

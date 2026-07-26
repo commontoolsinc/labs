@@ -1,5 +1,4 @@
 import { css, html } from "lit";
-import type { CfcAtom } from "@commonfabric/api/cfc";
 import { BaseElement } from "../../core/base-element.ts";
 import type { CfcLabelView } from "@commonfabric/runtime-client";
 
@@ -91,9 +90,7 @@ const filteredLabel = (
     }
     const filtered = values.filter((value) => atomMatchesFilter(value, filter));
     if (filtered.length > 0) {
-      // TODO(danfuzz): drop the cast once `confidentiality` names its clause
-      // type too; this loop spans both label keys.
-      result[key] = filtered as CfcAtom[];
+      result[key] = filtered;
     }
   }
   return LABEL_KEYS.some((key) => Array.isArray(result[key]))
