@@ -340,7 +340,7 @@ async function executeWithToolsLoop(params: {
   toolCatalog?:
     | ReturnType<typeof llmToolExecutionHelpers.buildToolCatalog>
     | undefined;
-  initialObservedConfidentiality?: readonly unknown[];
+  initialObservedConfidentiality?: readonly CfcConfClause[];
   observationMaxConfidentiality?: readonly CfcConfClause[];
   updatePartial: (text: string) => void;
   runtime: Runtime;
@@ -364,7 +364,7 @@ async function executeWithToolsLoop(params: {
 
   const executeRecursive = async (
     currentMessages: readonly BuiltInLLMMessage[],
-    observedConfidentiality: readonly unknown[],
+    observedConfidentiality: readonly CfcConfClause[],
   ): Promise<void> => {
     if (thisRun !== getCurrentRun()) return;
 
@@ -497,7 +497,7 @@ function buildContextDocumentation(
   space: any,
   tx: IExtendedStorageTransaction,
   sink: string,
-): { docs: string; observedConfidentiality: readonly unknown[] } {
+): { docs: string; observedConfidentiality: readonly CfcConfClause[] } {
   const context = inputs.key("context").withTx(tx).get();
   if (!context) {
     return {
@@ -1360,7 +1360,7 @@ export function generateObject<T extends Record<string, unknown>>(
       ? toDeepFrozenSchema(schema)
       : undefined;
     const resultSchemaForObserved = (
-      observedConfidentiality: readonly unknown[],
+      observedConfidentiality: readonly CfcConfClause[],
     ) =>
       schemaSanitizePromptInjection
         ? schemaWithInjectionSafeAnnotations(
@@ -1554,13 +1554,13 @@ export function generateObject<T extends Record<string, unknown>>(
               // Execute with tools - capture presentResult when called
               let finalResult: T | undefined;
               let finalMessages: readonly BuiltInLLMMessage[] = requestMessages;
-              let finalObservedConfidentiality: readonly unknown[] =
+              let finalObservedConfidentiality: readonly CfcConfClause[] =
                 liveInitialObservedConfidentiality;
 
               // Custom execution loop for generateObject with presentResult extraction
               const executeRecursive = async (
                 currentMessages: readonly BuiltInLLMMessage[],
-                observedConfidentiality: readonly unknown[],
+                observedConfidentiality: readonly CfcConfClause[],
               ): Promise<void> => {
                 if (isRunCancelled()) return;
 

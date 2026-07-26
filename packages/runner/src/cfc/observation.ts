@@ -22,7 +22,7 @@ import {
   normalizeClause,
 } from "./clause.ts";
 
-export type CfcObservedConfidentiality = readonly unknown[];
+export type CfcObservedConfidentiality = readonly CfcConfClause[];
 export type CfcObservationMaxConfidentiality =
   | readonly CfcConfClause[]
   | undefined;
@@ -77,7 +77,7 @@ export const uniqueCfcAtoms = (
 export const joinCfcObservedConfidentiality = (
   parts: Iterable<readonly unknown[] | undefined>,
 ): CfcObservedConfidentiality => {
-  const joined: unknown[] = [];
+  const joined: CfcConfClause[] = [];
   for (const part of parts) {
     if (Array.isArray(part)) {
       joined.push(...part);
