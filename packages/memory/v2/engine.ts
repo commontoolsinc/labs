@@ -21,6 +21,7 @@ import {
   decodeMemoryBoundary,
   DEFAULT_BRANCH,
   encodeMemoryBoundary,
+  encodeMemoryBoundaryUnprovenFabricValue,
   type EntityDocument,
   type EntityId,
   isEntityDocument,
@@ -4965,7 +4966,7 @@ const applyCommitTransaction = (
   const authorizationRef = engine.legacyCommitMetadataRefsRequired
     ? LEGACY_EMPTY_AUTHORIZATION_REF
     : null;
-  const original = encodeMemoryBoundary(commit);
+  const original = encodeMemoryBoundaryUnprovenFabricValue(commit);
   const resolution = encodeMemoryBoundary(
     resolvedPendingReads.length > 0 ? { seq, resolvedPendingReads } : { seq },
   );
@@ -4981,7 +4982,9 @@ const applyCommitTransaction = (
       aud: LEGACY_EMPTY_INVOCATION.aud ?? null,
       cmd: LEGACY_EMPTY_INVOCATION.cmd,
       sub: LEGACY_EMPTY_INVOCATION.sub,
-      invocation: encodeMemoryBoundary(LEGACY_EMPTY_INVOCATION),
+      invocation: encodeMemoryBoundaryUnprovenFabricValue(
+        LEGACY_EMPTY_INVOCATION,
+      ),
     });
   }
   engine.statements.insertCommit.run({
@@ -6400,7 +6403,7 @@ const sameStoredOriginal = (
   stored: string,
   incoming: ClientCommit,
 ): boolean => {
-  return stored === encodeMemoryBoundary(incoming);
+  return stored === encodeMemoryBoundaryUnprovenFabricValue(incoming);
 };
 
 const revisionKey = (

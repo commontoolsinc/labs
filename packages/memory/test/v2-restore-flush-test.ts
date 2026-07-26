@@ -2,7 +2,10 @@ import { assert, assertEquals } from "@std/assert";
 import { defer } from "@commonfabric/utils/defer";
 import { Server } from "../v2/server.ts";
 import { connect, type Transport } from "../v2/client.ts";
-import { decodeMemoryBoundary, encodeMemoryBoundary } from "../v2.ts";
+import {
+  decodeMemoryBoundary,
+  encodeMemoryBoundaryUnprovenFabricValue,
+} from "../v2.ts";
 import {
   testSessionOpenAuthFactory,
   testSessionOpenServerOptions,
@@ -116,7 +119,7 @@ class ReconnectableTransport implements Transport {
         const localSeq = typeof requestId === "string"
           ? this.#transactRequestLocalSeqById.get(requestId)
           : undefined;
-        const payload = encodeMemoryBoundary(message);
+        const payload = encodeMemoryBoundaryUnprovenFabricValue(message);
         if (
           this.#delayTransacts &&
           typeof requestId === "string" &&

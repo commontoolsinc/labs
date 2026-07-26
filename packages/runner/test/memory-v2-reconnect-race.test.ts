@@ -4,7 +4,7 @@ import { defer } from "@commonfabric/utils/defer";
 import type { MIME, URI } from "@commonfabric/memory/interface";
 import {
   decodeMemoryBoundary,
-  encodeMemoryBoundary,
+  encodeMemoryBoundaryUnprovenFabricValue,
   type EntityDocument,
 } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
@@ -113,7 +113,7 @@ class SabotagedReconnectTransport implements MemoryV2Client.Transport {
       this.onConnectionCount?.(this.connectionCount);
       this.#connection = this.server.connect((message) => {
         if (!this.#dropResponses) {
-          this.#receiver(encodeMemoryBoundary(message));
+          this.#receiver(encodeMemoryBoundaryUnprovenFabricValue(message));
         }
       });
     }
