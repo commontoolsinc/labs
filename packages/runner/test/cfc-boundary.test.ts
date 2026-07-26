@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Identity } from "@commonfabric/identity";
@@ -2263,7 +2264,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
       const entries = stored.cfc?.labelMap?.entries as Array<{
         path: string[];
-        label: { confidentiality?: unknown[]; integrity?: unknown[] };
+        label: IFCLabel;
       }>;
       expect(entries).toEqual(
         expect.arrayContaining([
@@ -2328,7 +2329,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
       const entries = stored.cfc?.labelMap?.entries as Array<{
         path: string[];
-        label: { confidentiality?: unknown[]; integrity?: unknown[] };
+        label: IFCLabel;
       }>;
       expect(entries).toEqual(
         expect.arrayContaining([
@@ -2474,7 +2475,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
       const entries = stored.cfc?.labelMap?.entries as Array<{
         path: string[];
-        label: { confidentiality?: unknown[]; integrity?: unknown[] };
+        label: IFCLabel;
       }>;
       expect(entries).toEqual(
         expect.arrayContaining([
@@ -3268,7 +3269,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
       const entries = stored.cfc?.labelMap?.entries as Array<{
         path: string[];
-        label: { confidentiality?: unknown[]; integrity?: unknown[] };
+        label: IFCLabel;
       }>;
       expect(entries).toEqual(
         expect.arrayContaining([
