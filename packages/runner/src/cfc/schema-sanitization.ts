@@ -175,7 +175,7 @@ const mergeIfc = (
     observedConfidentiality,
     instructionInert,
   }: {
-    observedConfidentiality: readonly unknown[];
+    observedConfidentiality: readonly CfcConfClause[];
     instructionInert: boolean;
   },
 ): Record<string, unknown> => {
@@ -260,7 +260,7 @@ export const resolveSchemaForValidation = (
 
 const annotateSchema = (
   schema: JSONSchema,
-  observedConfidentiality: readonly unknown[],
+  observedConfidentiality: readonly CfcConfClause[],
   fullSchema: JSONSchema,
   visitedRef?: AnnotationRefVisit,
 ): AnnotationResult => {
@@ -439,7 +439,7 @@ const annotateSchema = (
 
 export const schemaWithInjectionSafeAnnotations = (
   schema: JSONSchema,
-  observedConfidentiality: readonly unknown[] = [],
+  observedConfidentiality: readonly CfcConfClause[] = [],
 ): JSONSchema => {
   const clone = cloneJson(schema);
   return stripRequiredFields(
