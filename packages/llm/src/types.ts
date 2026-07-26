@@ -1,5 +1,6 @@
 import { isRecord } from "@commonfabric/utils/types";
-import type { FabricValue } from "@commonfabric/api";
+import type { JSONValue } from "@commonfabric/api";
+import { findJsonUnfaithfulValues } from "@commonfabric/pure-json";
 import { LlmPrompt } from "./prompts/prompting.ts";
 import type {
   BuiltInLLMContent,
@@ -83,11 +84,16 @@ export type LLMToolResult = {
 };
 
 /**
- * Request metadata. Values are `FabricValue`s -- an LLM request is snapshotted
- * through `createFrozenRequestSnapshot()`, which requires one, so an arbitrary
- * `object` here could not be stored.
+ * Request metadata. This crosses a JSON boundary to a general LLM API, so
+ * values must be values ordinary JSON serialization carries faithfully -- not
+ * merely `FabricValue`s, which admit `bigint`, interned symbols, `NaN` / `-0`,
+ * and fabric primitives that no model API can receive.
+ *
+ * `isLLMRequestMetadata()` is the authority: it checks faithfulness with
+ * `findJsonUnfaithfulValues()`. An `undefined` value means "absent" -- JSON
+ * drops such a key, so it never crosses the boundary and is not checked.
  */
-export type LLMRequestMetadata = Record<string, FabricValue>;
+export type LLMRequestMetadata = Record<string, JSONValue | undefined>;
 export type LLMRequest = {
   cache?: boolean;
   messages: readonly BuiltInLLMMessage[];
@@ -128,11 +134,13 @@ function isArrayOf<T>(
 export function isLLMRequestMetadata(
   input: unknown,
 ): input is LLMRequestMetadata {
-  return isRecord(input) && !Array.isArray(input) &&
-    Object.entries(input).every(([k, v]) =>
-      typeof k === "string" &&
-      (v === undefined || typeof v === "string" || typeof v === "object")
-    );
+  if (!isRecord(input) || Array.isArray(input)) return false;
+  // An `undefined` value means "absent": JSON drops the key, so it is not part
+  // of what crosses the boundary and does not have to be JSON-faithful.
+  const present = Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== undefined),
+  );
+  return findJsonUnfaithfulValues(present).length === 0;
 }
 
 // Validator functions removed - use BuiltInLLM types directly
