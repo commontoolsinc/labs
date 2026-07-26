@@ -1765,7 +1765,7 @@ export function generateObject<T extends Record<string, unknown>>(
         maxTokens: maxTokens ?? 8192,
         schema: llmToolExecutionHelpers.prepareSchemaForLLM(
           toDeepFrozenSchema(schema),
-        ) as Record<string, unknown>,
+        ),
         model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,
         metadata: {
           ...readyMetadata,

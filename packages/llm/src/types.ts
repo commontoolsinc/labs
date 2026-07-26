@@ -108,7 +108,7 @@ export type LLMRequest = {
 };
 
 export type LLMGenerateObjectRequest = {
-  schema: Record<string, unknown>;
+  schema: JSONSchema;
   messages: readonly BuiltInLLMMessage[];
   model?: ModelName;
   system?: string;
