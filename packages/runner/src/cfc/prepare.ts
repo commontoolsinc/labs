@@ -4681,7 +4681,7 @@ const evaluateGatedConfidentiality = (
   tx: IExtendedStorageTransaction,
   confidentiality: readonly CfcConfClause[],
   integrity: readonly CfcAtom[],
-  boundary: readonly unknown[],
+  boundary: readonly CfcAtom[],
   consumption: CfcGrantConsumptionContext,
   destinationSpace?:
     | MemorySpace

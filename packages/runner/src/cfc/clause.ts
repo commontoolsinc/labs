@@ -27,10 +27,6 @@ export type CfcOrClause = { readonly anyOf: readonly CfcAtom[] };
 /** A confidentiality clause: a bare atom, or an OR of atoms. */
 export type CfcConfClause = CfcAtom | CfcOrClause;
 
-// TODO(danfuzz): The label and ceiling types that carry clause lists still
-// declare them as `unknown[]`, so callers cast on the way in. Drop those casts
-// once those types name clauses.
-
 export const isOrClause = (value: unknown): value is CfcOrClause =>
   isRecord(value) &&
   Array.isArray((value as { anyOf?: unknown }).anyOf) &&
