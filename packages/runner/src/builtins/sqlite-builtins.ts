@@ -20,6 +20,7 @@
 // this read path.
 
 import { type Cell, createCell, encodeSqliteParams } from "../cell.ts";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { parseLink } from "../link-utils.ts";
 import {
   computeRowLabelRead,
@@ -284,7 +285,7 @@ function deriveNullOriginIfc(
 
 type ColumnIfc = {
   confidentiality?: unknown[];
-  integrity?: unknown[];
+  integrity?: CfcAtom[];
   maxConfidentiality?: unknown[];
 };
 
@@ -322,9 +323,9 @@ const tightenCeiling = (
 // Identical to `tightenCeiling` EXCEPT the prior-absent case yields undefined
 // (no prior trust to inherit) rather than adopting `next` wholesale.
 const clampIntegrity = (
-  prior: unknown[] | undefined,
-  next: unknown[] | undefined,
-): unknown[] | undefined => {
+  prior: CfcAtom[] | undefined,
+  next: CfcAtom[] | undefined,
+): CfcAtom[] | undefined => {
   if (prior === undefined) return undefined;
   if (next === undefined) return prior;
   const kept = prior.filter((atom) => next.some((n) => deepEqual(n, atom)));

@@ -1775,7 +1775,7 @@ export const deriveFlowJoin = (
   },
 ): {
   confidentiality: unknown[];
-  integrity: unknown[];
+  integrity: CfcAtom[];
   labeledSpaces?: ReadonlySet<MemorySpace>;
 } => {
   const atoms: unknown[] = [];
@@ -1787,7 +1787,7 @@ export const deriveFlowJoin = (
   // uncertified. (In practice most transactions read some unlabeled doc,
   // so the meet is usually empty until inputs are universally certified —
   // staged conformance per SC-9, never over-claiming.)
-  let hereditaryMeet: unknown[] | undefined;
+  let hereditaryMeet: CfcAtom[] | undefined;
   const labeledSpaces = options?.collectLabeledSpaces === true
     ? new Set<MemorySpace>()
     : undefined;
@@ -1898,7 +1898,7 @@ export const deriveFlowJoin = (
     atoms.push(...observation.confidentiality);
   }
   const confidentiality = uniqueCfcAtoms(atoms);
-  const integrity: unknown[] = [...(hereditaryMeet ?? [])];
+  const integrity: CfcAtom[] = [...(hereditaryMeet ?? [])];
   // Derivation provenance (§8.9.3 TransformedBy, staged: identity binding
   // only — no per-input refs/witnesses yet). The flow join is one per-tx
   // label stamped on every written doc, so the identity must hold for the
@@ -2428,7 +2428,7 @@ const projectedSourceLabel = (
 ): IFCLabel => {
   const source = canonicalizeLogicalPath([...claim.source, ...claim.field]);
   const confidentiality: unknown[] = [];
-  const integrity: unknown[] = [];
+  const integrity: CfcAtom[] = [];
   // Map insertion order is the schema-walk order (parents before children),
   // so contributions stay ordered ancestor-first along the source lineage.
   for (const [key, label] of sourceEntryLabels) {
@@ -4565,7 +4565,7 @@ const collectConsumedLabel = (
   tx: IExtendedStorageTransaction,
 ): {
   confidentiality: readonly unknown[];
-  integrity: readonly unknown[];
+  integrity: readonly CfcAtom[];
   modulePolicySpaces: ReadonlyMap<string, ReadonlySet<MemorySpace>>;
 } => {
   const atoms: unknown[] = [];
@@ -4575,7 +4575,7 @@ const collectConsumedLabel = (
   // transaction-global over-approximation as the confidentiality union —
   // rules bind kind/source structurally, so evidence still has to match the
   // clause it discharges.
-  const integrityAtoms: unknown[] = [];
+  const integrityAtoms: CfcAtom[] = [];
   for (
     const read of [
       ...(tx.getReadActivities?.() ?? []),
@@ -4680,7 +4680,7 @@ const collectConsumedLabel = (
 const evaluateGatedConfidentiality = (
   tx: IExtendedStorageTransaction,
   confidentiality: readonly unknown[],
-  integrity: readonly unknown[],
+  integrity: readonly CfcAtom[],
   boundary: readonly unknown[],
   consumption: CfcGrantConsumptionContext,
   destinationSpace?:
@@ -4958,7 +4958,7 @@ const verifyWriteFloor = (
     ) => ImplementationIdentity | undefined;
     linkWriteInputs: readonly LinkWritePolicyInput[];
     candidateSchemas: ReadonlyMap<string, JSONSchema>;
-    flowIntegrity: readonly unknown[];
+    flowIntegrity: readonly CfcAtom[];
   },
 ): string[] => {
   const failures: string[] = [];
@@ -5034,7 +5034,7 @@ const verifyWriteFloor = (
     // One contribution per link written at/under the floor path (each linked
     // value must individually carry the floor), plus one `value` contribution
     // when plain data was written (crediting the flow meet when available).
-    const contributions: (readonly unknown[])[] = [];
+    const contributions: (readonly CfcAtom[])[] = [];
     for (const input of linksHere) {
       const derived = derivePersistedLinkLabel(
         tx,

@@ -27,6 +27,7 @@ import {
   ruleInputFields,
   validateRowLabelSpec,
 } from "@commonfabric/memory/sqlite/row-label";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { tableDeclaresRowLabel } from "@commonfabric/memory/v2";
 import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
 import {
@@ -40,7 +41,7 @@ import {
  *  input (sink-request) before the commit. */
 export interface RowLabelWritePolicy {
   table: string;
-  label: { confidentiality: unknown[]; integrity: unknown[] };
+  label: { confidentiality: unknown[]; integrity: CfcAtom[] };
 }
 
 export interface RowLabelWriteArgs {
@@ -293,7 +294,10 @@ export function checkSqliteRowLabelWrite(
     }
     policies.push({
       table: declaredKey,
-      label: { confidentiality: res.confidentiality, integrity: res.integrity },
+      label: {
+        confidentiality: res.confidentiality,
+        integrity: res.integrity as CfcAtom[],
+      },
     });
   }
   return { policies };

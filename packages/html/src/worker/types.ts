@@ -6,6 +6,7 @@
  */
 
 import type { Cancel, Cell, JSONSchema } from "@commonfabric/runner";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import type {
   RenderConfidentialityResolver,
   SpaceMembershipProvider,
@@ -123,7 +124,7 @@ export interface RenderPolicy {
    * Undefined means descendant text is not integrity-gated.
    */
   textIntegrity?: {
-    requiredIntegrity: readonly unknown[];
+    requiredIntegrity: readonly CfcAtom[];
     allowLiteralText: boolean;
     /**
      * The enclosing text-integrity boundaries this policy applies to, innermost

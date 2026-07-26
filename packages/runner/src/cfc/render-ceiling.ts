@@ -166,7 +166,7 @@ export const spaceAtomIdsInConfidentiality = (
 /** The label of the cell being rendered, as read at the display boundary. */
 export type RenderLabelInput = {
   readonly confidentiality: readonly unknown[];
-  readonly integrity?: readonly unknown[];
+  readonly integrity?: readonly CfcAtom[];
 };
 
 /**

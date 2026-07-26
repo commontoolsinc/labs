@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { cfcAtom } from "@commonfabric/api/cfc";
@@ -220,7 +221,7 @@ describe("CFC concept-level integrity floors (D5)", () => {
       // against a concrete object never meets.
       expect(cfcIntegritySatisfiesFloor(
         [gps("X")],
-        [arrayGuard],
+        [arrayGuard as unknown as CfcAtom],
         trustCtx(signer.did()),
       )).toBe(false);
     });
