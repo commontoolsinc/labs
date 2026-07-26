@@ -17,6 +17,7 @@ import {
   type CellScope,
   type ClientCommit,
   commitPreconditionValueHash,
+  type CompleteActionScopeSummary,
   decodeMemoryBoundary,
   DEFAULT_BRANCH,
   encodeMemoryBoundary,
@@ -26,14 +27,23 @@ import {
   type Operation,
   type PatchOp,
   type Reference,
+  type SchedulerActionObservation,
   type SchedulerActionSnapshotCursor,
   type SchedulerExecutionContextKey,
+  type SchedulerObservationAddress,
   type SessionId,
   type SqliteOperation,
   tableDeclaresRowLabel,
 } from "../v2.ts";
 
-export type { SchedulerExecutionContextKey } from "../v2.ts";
+export type {
+  CompleteActionScopeSummary,
+  SchedulerActionKind,
+  SchedulerActionObservation,
+  SchedulerExecutionContextKey,
+  SchedulerObservationAddress,
+  SchedulerObservationTransactionKind,
+} from "../v2.ts";
 
 const DEFAULT_SCOPE: CellScope = "space";
 const DEFAULT_SCOPE_KEY = "space" as const;
@@ -861,23 +871,6 @@ export type AppliedCommit = {
   schedulerDirtiedReaders?: SchedulerReaderIndexEntry[];
 };
 
-export type SchedulerActionKind =
-  | "computation"
-  | "effect"
-  | "event-handler";
-
-export type SchedulerObservationTransactionKind =
-  | "dependency-collection"
-  | "action-run"
-  | "event-preflight";
-
-export type SchedulerObservationAddress = {
-  space: string;
-  id: EntityId;
-  scope?: CellScope;
-  path: readonly string[];
-};
-
 export interface ResolvedSchedulerObservationAddress
   extends SchedulerObservationAddress {
   scopeKey: string;
@@ -885,48 +878,6 @@ export interface ResolvedSchedulerObservationAddress
 
 type SchedulerWriteAddress = SchedulerObservationAddress & {
   scopeKey?: string;
-};
-
-export type CompleteActionScopeSummary = {
-  version: 1;
-  complete: true;
-  implementationFingerprint: string;
-  runtimeFingerprint: string;
-  piece: SchedulerObservationAddress;
-  reads: SchedulerObservationAddress[];
-  writes: SchedulerObservationAddress[];
-  materializerWriteEnvelopes: SchedulerObservationAddress[];
-  directOutputs: SchedulerObservationAddress[];
-};
-
-export type SchedulerActionObservation = {
-  version: 1 | 2;
-  ownerSpace?: string;
-  branch: BranchName;
-  pieceId: string;
-  processGeneration: number;
-  actionId: string;
-  actionKind: SchedulerActionKind;
-  implementationFingerprint: string;
-  runtimeFingerprint: string;
-  completeActionScopeSummary?: CompleteActionScopeSummary;
-  observedAtSeq: number;
-  observedAtLocalSeq?: number;
-  transactionKind: SchedulerObservationTransactionKind;
-  reads: SchedulerObservationAddress[];
-  shallowReads: SchedulerObservationAddress[];
-  actualChangedWrites: SchedulerObservationAddress[];
-  currentKnownWrites: SchedulerObservationAddress[];
-  declaredWrites?: SchedulerObservationAddress[];
-  materializerWriteEnvelopes: SchedulerObservationAddress[];
-  ignoredSchedulingWrites?: SchedulerObservationAddress[];
-  actionOptions?: {
-    debounceMs?: number;
-    noDebounce?: boolean;
-    throttleMs?: number;
-  };
-  status: "success" | "failed";
-  errorFingerprint?: string;
 };
 
 const isSchedulerRecord = (

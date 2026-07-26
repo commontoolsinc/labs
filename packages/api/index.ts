@@ -1779,7 +1779,15 @@ export type BuiltInLLMTextPart = {
 
 export type BuiltInLLMImagePart = {
   type: "image";
-  image: string | Uint8Array | ArrayBuffer | URL;
+  /**
+   * The image, as a string -- a URL or a data URI. Deliberately not
+   * `Uint8Array` / `ArrayBuffer` / `URL`: an LLM request is snapshotted through
+   * `createFrozenRequestSnapshot()`, which requires a `FabricValue`, and none of
+   * those three can be stored by the data model. The builtin's own input schema
+   * (`llm-schemas.ts`) already declares this field `{ type: "string" }`, so
+   * those arms were unreachable through the validated path as well.
+   */
+  image: string;
 };
 
 export type BuiltInLLMToolCallPart = {
