@@ -1997,12 +1997,16 @@
       "npm:hash-wasm@^4.12.0",
       "npm:lit@^3.3.3",
       "npm:multiformats@^14.0.4",
-      "npm:ses@^2.2.0",
       "npm:turndown@^7.2.4",
       "npm:unicode-case-folding@1.1.1",
       "npm:zod@^4.4.3"
     ],
     "members": {
+      "packages/api": {
+        "dependencies": [
+          "npm:typescript@6.0.3"
+        ]
+      },
       "packages/background-piece-service": {
         "dependencies": [
           "npm:@opentelemetry/api@^1.9.1",

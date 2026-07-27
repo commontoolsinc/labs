@@ -427,9 +427,11 @@ receipt, return — never the graph going quiet. An acceptance test must prove a
 slow derived recomputation cannot delay acknowledgement (implementation plan,
 WS-D).
 
-Waiting is a caller-side choice — whether to wait at all, and for how long. This
-replaces the current fixed 15 s `DEFAULT_TOOL_RESULT_TIMEOUT_MS`, and the wait
-observes settlement rather than polling for it.
+Waiting is a caller-side choice — whether to wait at all, and for how long. The
+tool path already observes settlement rather than polling for it —
+`runtime.settled()` drains scheduler, storage, and in-flight async builtins
+with no interval under it and no deadline over it (#4946); what remains is
+making the wait bound caller-controlled.
 
 ### Choosing an id
 
@@ -555,22 +557,22 @@ without reading pattern source. The pieces exist:
 - **Per verb**, `cf piece call <piece> <verb> --help --json` already emits the
   machine-readable command spec — kind, default verb, input schema — derived
   from the pattern's own types (`packages/cli/lib/callable.ts:260-286`).
-- **Enumeration** exists only through FUSE, which classifies a piece's result
-  entries (`packages/fuse/callables.ts:88`) and projects `.handler` / `.tool`
-  files plus a `.handlers` listing — flagged on the board as neither universal
-  nor complete. The CLI has no listing at all; `cf piece call` requires the
-  name. The topics skill compensates by hand-listing the verbs in prose — a
-  maintained copy of what the durable result schema already knows.
+- **Enumeration**: `cf piece verbs --json` lists every callable — name, kind
+  (handler/tool), which cell it lives on, and its input schema (tools also
+  carry their output schema) — walking result-then-input with the same
+  classification `cf piece call` resolves through, so the listing and the
+  dispatcher cannot disagree. FUSE independently classifies the same entries
+  (`packages/fuse/callables.ts:88`) into `.handler` / `.tool` files plus a
+  `.handlers` listing — flagged on the board as neither universal nor
+  complete.
 
-Two additions close it:
+The listing also carries the deployed pattern's source identity, so a client
+or skill can detect that it targets a newer contract than the live piece
+instead of discovering skew through a silently dropped field.
 
-1. A CLI listing (`cf piece verbs --json`, or a `callables` section in
-   `piece inspect --json`): name, kind, and schemas per verb in one read —
-   the same classification FUSE already performs, exposed generically. The
-   listing also carries the deployed pattern's source identity, so a client or
-   skill can detect that it targets a newer contract than the live piece
-   instead of discovering skew through a silently dropped field.
-2. **Result schemas for handlers.** The command spec carries an output schema
+What remains:
+
+1. **Result schemas for handlers.** The command spec carries an output schema
    only for tools, because handlers return nothing today. Rule 3's declared
    result must reach the piece's **durable schema** — otherwise introspection
    can name a verb and its arguments but never what it returns. This rides
@@ -634,17 +636,14 @@ client-side sugar, not protocol.
 
 ## Defects and unknowns in the current machinery
 
-- **The tool result wait is a poll.** `defaultWaitForResult`
-  (`packages/cli/lib/callable.ts:206-222`) calls `resultCell.pull()` every 25 ms
-  up to a 15 s timeout, then throws — a timeout, a sleep, and a retry loop, the
-  trio `AGENTS.md` says to flag. An observation mechanism is already present:
-  `running.sink(…)` at `:353` is used as a fast path when it fires before
-  commit. Settlement should await the sink.
 - **Tool result cells are unlinked, and their collection status is unknown.**
-  Created with a random UUID whose address is never returned. A search of the
+  Created with a random UUID; the CLI hands the address back to the caller
+  (`resultRef`), but nothing in the fabric links the cell. A search of the
   memory and storage layers turned up no collection of unreferenced cells; that
   search was not exhaustive, and the answer should be confirmed before the
-  retention design is settled.
+  retention design is settled. (A second defect once listed here — the tool
+  result wait was a 25 ms poll under a 15 s deadline — is fixed: the wait is
+  `runtime.settled()`, #4946.)
 
 ## Checking the design against other patterns
 

@@ -37,12 +37,15 @@ can run their own spaces or use hosted versions.
    your shell
 2. Clone this repo
 3. Run `mise trust && mise install` in the repo to install the pinned Deno
-   version (see
-   [DEVELOPMENT.md](./docs/development/DEVELOPMENT.md#installing-deno) for
-   details, including installing Deno without mise)
+   version
 4. Install the Git hooks: `deno task install-hooks` (optional)
 5. Start local dev servers: `./scripts/start-local-dev.sh`
 6. Access the application at <http://localhost:8000>
+
+Installing
+[Deno 2 directly](https://docs.deno.com/runtime/getting_started/installation/)
+also works. `deno task check` accepts the supported range in `tasks/check.sh`
+and warns when the installed version differs from the pin in `mise.toml`.
 
 For Claude Code users, run [`/deps`](.claude/commands/deps.md) to verify
 prerequisites, [`/start-local-dev`](.claude/commands/start-local-dev.md) to
@@ -97,27 +100,16 @@ through `/.agents/skills/`, while Claude compatibility preserves the existing
 `/pattern-dev`, `/pattern-test`, and related skill names through
 `/.claude/skills/`.
 
-### Dependencies & Integrations
-
-**Required**:
-
-- [Deno 2](https://docs.deno.com/runtime/getting_started/installation/) -
-  Runtime for backend and tooling. The version is pinned in `mise.toml`.
-
-**Recommended for installing Deno**:
-
-- [mise](https://mise.jdx.dev/) - Installs the pinned version and keeps you on
-  it (run `mise trust && mise install` in the repo). Installing Deno yourself
-  also works: `deno task check` accepts the range in `tasks/check.sh`, and warns
-  when your version is off the pin.
-
-**Recommended Integrations**:
+### Optional Integrations
 
 - [GitHub CLI](https://github.com/cli/cli) - For PR and issue workflows
 - Browser automation for pattern testing uses the bundled `agent-browser` skill
   (no MCP setup required)
 - Claude Code MCP integrations (run `/deps` in Claude Code for setup):
   - Playwright MCP — optional fallback browser driver for the `/tour` command
+
+When adding or rolling repository dependencies, follow the
+[dependency maintenance guide](./docs/development/DEPENDENCIES.md).
 
 ### Development Practices
 

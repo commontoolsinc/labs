@@ -45,36 +45,18 @@ toolshed/
 
 ## Getting Started
 
-To get started, you'll need to clone the git repository, install a few
-dependencies, and set up your environment variables.
+Follow the repository
+[development quick start](../../README.md#quick-start-development) to clone the
+repository and install the pinned toolchain. Then configure the Toolshed
+environment.
 
-To clone the repository, you can run the following command:
+### Environment Setup
 
-```sh
-git clone git@github.com:commontoolsinc/labs.git
-cd labs/toolshed
-```
-
-### Prerequisites
-
-#### Deno
-
-Toolshed is build using Deno, so you'll need to install Deno if you want to run
-the code locally. Deno has a
-[detailed installation guide](https://deno.land/manual/getting_started/installation).
-
-The fastest path to install on MacOS and Linux is to run the following command:
-
-```shell
-curl -fsSL https://deno.land/install.sh | sh
-```
-
-#### Environment Setup
-
-To setup your environment, you'll need to create a `.env` file in the root of
+To set up your environment, you'll need to create a `.env` file in the root of
 the toolshed application. You can use the `.env.example` file as a reference.
 
 ```shell
+cd packages/toolshed
 cp .env.example .env
 ```
 

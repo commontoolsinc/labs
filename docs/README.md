@@ -67,7 +67,9 @@ done.
 - [`common/`](common/README.md) — pattern-author documentation: concepts,
   components, conventions, workflows
 - [`development/`](development/DEVELOPMENT.md) — runtime-developer
-  documentation: style, testing, debugging, subsystem internals
+  documentation: style, testing, debugging, subsystem internals; use the
+  [dependency maintenance guide](development/DEPENDENCIES.md) when adding,
+  rolling, or diagnosing dependencies
 - [`specs/`](specs/README.md) — technical specifications of current and
   intended behavior
 - [`plans/`](plans/README.md) — pending implementation plans

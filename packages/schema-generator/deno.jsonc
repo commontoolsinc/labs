@@ -12,6 +12,7 @@
     "./numeric-expression": "./src/typescript/numeric-expression.ts"
   },
   "imports": {
+    // Dependency guide: ../../docs/development/DEPENDENCIES.md
     "typescript": "npm:typescript@6.0.3"
   },
   "tasks": {
