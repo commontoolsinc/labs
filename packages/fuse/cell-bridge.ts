@@ -435,7 +435,9 @@ export class CellBridge {
   }
 
   private async _attemptReconnect(): Promise<void> {
-    for (const [spaceName, state] of this.spaces) {
+    const spaces = [...this.spaces];
+    let allSpacesRestored = spaces.length > 0;
+    for (const [spaceName, state] of spaces) {
       try {
         const loadManager = this.reconnectManagerLoader ??
           this.managerLoader ??
@@ -451,15 +453,9 @@ export class CellBridge {
           if (state.piecesHydrated) {
             await state.pieces.getRegisteredPieces();
           }
-          // If a fresh manager can connect and the existing pieces view can sync,
-          // connection is back. manager.synced() alone can succeed from local
-          // state while the backend is still unavailable.
-          this._disconnected = false;
-          this._disconnectCount = 0;
-          console.error(
-            `[FUSE] Backend connection restored — write access resumed.`,
-          );
-          return;
+          // The session probe and existing pieces view verify this space.
+          // manager.synced() alone can succeed from local state while the
+          // backend is still unavailable.
         } finally {
           await manager.runtime.dispose().catch((e) => {
             console.warn(
@@ -475,9 +471,19 @@ export class CellBridge {
             e instanceof Error ? e.message : String(e)
           }`,
         );
+        allSpacesRestored = false;
       }
     }
-    // All probes failed — retry with increasing backoff
+    if (allSpacesRestored) {
+      this._disconnected = false;
+      this._disconnectCount = 0;
+      console.error(
+        `[FUSE] Backend connection restored — write access resumed.`,
+      );
+      return;
+    }
+
+    // At least one probe failed — retry with increasing backoff
     this._disconnectCount++;
     console.error(
       `[FUSE] Reconnect failed, retrying in ${this._reconnectDelayMs()}ms`,
