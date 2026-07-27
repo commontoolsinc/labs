@@ -136,6 +136,14 @@ fixed recipe. The recurring debugging questions and where they resolve:
   who), `timeline <space> <id>` (value after each write),
   `diff <space> <id> --from --to` (what changed between two seqs),
   `value-at … --seq` (state at a point).
+- _"Is this space writing more than it should be / has it settled?"_ →
+  `churn <space>` (commits + revisions per time bucket, and the entities driving
+  the busiest one). `hot` ranks by all-time writes and so cannot separate a
+  burst from the same writes spread over a week — churn is the shape-in-time
+  view: a storm starting, and a settle completing. Use it before and after a
+  `setsrc` on a populated space; `--bucket`/`--since`/`--until` frame the
+  window. It reports rates and never judges them — what counts as "settled" is
+  yours to decide.
 - _"Is this entity the same across spaces / did a replica drift?"_ →
   `converge <id>
   --all` / `converge-scan --all`, trusting the
