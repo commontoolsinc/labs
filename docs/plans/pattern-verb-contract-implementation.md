@@ -232,13 +232,13 @@ The provenance half is a separate CFC-gated track:
 
 Size M, mostly parallel. `packages/cli`, `skills/cf`.
 
-- `cf piece verbs --json` — name, kind, input schema per verb from the
-  existing classification (`packages/fuse/callables.ts:88`), plus the
-  deployed pattern's source identity so a skill can detect it targets a newer
-  contract than the live piece; result schemas appear once WS-C lands; v1
-  lists everything, per the decided semantics (every verb listable; tier
-  filtering arrives with the marker, later). **Independent — can ship
-  first.**
+- ~~`cf piece verbs --json`~~ — **shipped** (F1): name, kind, on
+  (result/input), input schema per verb; tools carry their output schema.
+  Walks result-then-input with the same classification `cf piece call`
+  resolves through — including the forced-stream fallback path. v1 lists
+  everything per the decided semantics; handler result schemas appear once
+  WS-C lands, tier filtering with the marker, later. The 2026-07-24 amendment is absorbed: the listing carries the
+  deployed pattern's source identity (skew detection).
 - Generic identity annotation for data reads and callable results. Start with
   an exploration form such as `--include-ids` that annotates points where the
   backing identity changes; evaluate a narrower path-selected form if broad
