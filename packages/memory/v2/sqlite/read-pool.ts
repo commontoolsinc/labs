@@ -15,6 +15,7 @@
 // other files.
 
 import { Database } from "@db/sqlite";
+import type { FabricPlainObject } from "@commonfabric/api";
 import {
   type QueryColumn,
   runQuery,
@@ -61,7 +62,7 @@ export class ReadConnectionPool {
 
   /** Run a guarded read-only SELECT on the pooled read-only connection for
    *  `path`. Throws if the file can't be opened read-only (missing/unreadable). */
-  query<Row = Record<string, unknown>>(
+  query<Row extends FabricPlainObject = FabricPlainObject>(
     path: string,
     sql: string,
     params?: SqliteParams,
@@ -72,7 +73,7 @@ export class ReadConnectionPool {
   /** Like {@link query} but also returns each result column's TRUE origin
    *  `(table, column)`, for CFC read-labeling. Used only when the db declares
    *  per-column `ifc`. */
-  queryWithOrigins<Row = Record<string, unknown>>(
+  queryWithOrigins<Row extends FabricPlainObject = FabricPlainObject>(
     path: string,
     sql: string,
     params?: SqliteParams,
