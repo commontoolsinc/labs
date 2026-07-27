@@ -507,6 +507,33 @@ peeled three successive liveness layers — each fix exposing the next:
    battery/load artifacts, confirmed green serially and at every
    commit via an isolated bisect worktree).
 
+9. **P0-R3f (d28092a64) — candidate admission unfrozen — and the
+   terminal P0 frontier.** The decisive n=20 exposed the last
+   structural wall: the host serializes candidate admission with
+   setDemand, and the worker's set-demand reply awaited the structural
+   swap — which queues behind the in-flight pump item, so ONE 37.8s
+   first-piece prepare froze admission for the whole demand window
+   while 111 emitted candidates queued (admitted in one burst after
+   the window, declined). Fixed by replying at LANE APPLICATION with
+   the swap detached (authority fencing synchronous; the P0-R1 shape).
+   All twelve executor suites green per-file. The post-fix n=20
+   frontier: **S1 missed its 29.7s window by ~1.5s (30.8s first
+   prepare), S2 missed its 10.9s window by ~2.5s (12.9s prepare)** —
+   candidates now attempt within ~200ms of emission, all authority
+   machinery healthy, and the ONLY remaining gap to claimsIssued>0 on
+   this harness is first-instantiation speed vs page lifetime: the
+   `runtime.start` instantiation-I/O cost (which scales 2-4× with
+   concurrent client load and machine contention). Two admissible
+   closers, choose by intent: (i) the instantiation-I/O workstream
+   (batch/pipeline the per-read round trips during graph build — a
+   runner-core performance arc); (ii) recognize the harness's 5-30s
+   page lifetimes as the pathological cold case the P5 warm-space
+   design (demote-never-retire, push-then-catch-up) exists for, and
+   let P6's measured scenario include a persistent page (real pages
+   live minutes) — in which case the CURRENT stack already engages.
+   Both are legitimate; (ii) matches the plan's own steady-state
+   theory and unblocks P1's measurement program immediately.
+
    Original diagnosis (superseded in one respect — the dominant class
    was growth, not never-held): the demand-pull traversal scaler.
    With the pump landed,
