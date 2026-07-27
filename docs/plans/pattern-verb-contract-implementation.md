@@ -181,12 +181,19 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   ends in the stream link. The binding is a content hash over the caller's key
   plus the whole link, not a delimited join: the caller's half is opaque, so
   concatenation would let a chosen id shift the separator.
-- **cli:** `--invocation <id>` on `piece call` (UUID minted and printed by
+- ~~**cli:** `--invocation <id>` on `piece call` (UUID minted and printed by
   default, including when the wait times out); after commit, sync and read the
   receipt (a cold plain read returns `undefined` — sync first); reclassify
   `precondition: "receipt-exists"` as success-with-readback, exit 0. Output is
   the `Invocation` JSON — `status` and `id` from day one, `result` once WS-C
-  lands.
+  lands.~~ — **done (D2)**: `cf piece call` mints a UUID (or takes
+  `--invocation <id>`), prints `invocation: <id>` to stderr at dispatch —
+  before any network work — and re-prints it with the furthest phase on every
+  failure exit; the receipt reads back through `tx.handlingReceiptLink`
+  (pull = sync + read); `precondition: "receipt-exists"` settles as success
+  with the original outcome (`deduplicated: true`), exit 0; stdout is the
+  settled `Invocation` JSON (`invocation`, `status`, `result` when the
+  receipt carries a value).
 - **cli, pre-dispatch validation:** `piece call` validates the payload against
   the *deployed* verb schema before sending — an undeclared or malformed
   field is an immediate local rejection. This is the half that catches
@@ -196,16 +203,20 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
 - **cli, phase reporting:** every output — success, failure, timeout — carries
   the furthest observed `phase`
   (`initial_sync | dispatched | committed | readback`) beside the invocation
-  id; verbose output adds per-phase timings (initial sync / dispatch /
-  handler / commit / result sync / readback). With a caller-supplied id a
-  retry is safe in every phase, so phase is diagnosis; a derived `retrySafe`
-  convenience flag may ride along.
-- **Acknowledgement is transaction-local.** The call path awaits *this
+  id — **done (D2)** for the annotation (tracked through an `onPhase`
+  callback, printed on failure exits); verbose output adds per-phase timings
+  (initial sync / dispatch / handler / commit / result sync / readback) —
+  still open. With a caller-supplied id a retry is safe in every phase, so
+  phase is diagnosis; a derived `retrySafe` convenience flag may ride along.
+- ~~**Acknowledgement is transaction-local.** The call path awaits *this
   handling's* commit (D1's commit callback) plus receipt sync — never
   `runtime.idle()` / full-sync quiescence, which today holds a committed
   write hostage to downstream recomputation (60–80 s body writes observed
-  live while `crossrefs` re-derived). Acceptance test: a deliberately slow
-  derived recomputation cannot delay `addTopic` acknowledgement.
+  live while `crossrefs` re-derived).~~ — **done (D2)**: the handler send
+  path awaits only the commit callback and the receipt pull; a unit test
+  fails if the path ever awaits `runtime.idle()` or `manager.synced()`. The
+  live acceptance check — a deliberately slow derived recomputation cannot
+  delay `addTopic` acknowledgement — rides with D3's integration scenarios.
 - Integration tests (isolated toolshed, `isolated-test-processes`
   conventions), four timeout/retry scenarios: timeout before dispatch (retry
   re-executes; one topic); timeout after dispatch, before commit

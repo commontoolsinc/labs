@@ -24,6 +24,15 @@ export interface CallableTransactionStatus {
 export interface CallableTransactionLike {
   status?: () => CallableTransactionStatus;
   commit?: () => Promise<unknown>;
+  /** The handling's receipt address (runner: tx.handlingReceiptLink) — on
+   * success this handling's outcome, on a receipt-exists collision the
+   * winner's original (verb contract WS-D). */
+  handlingReceiptLink?: {
+    id: string;
+    space: string;
+    scope?: CellScope;
+    path?: readonly (string | number)[];
+  };
 }
 
 export interface CallableCellLike {
@@ -41,6 +50,7 @@ export interface CallableCellLike {
   send?: (
     value: unknown,
     onCommit?: (tx: CallableTransactionLike) => void,
+    sendOptions?: { eventId?: string },
   ) => void;
 }
 
@@ -73,6 +83,12 @@ export interface CallableRuntimeLike {
     resultCell: CallableCellLike,
   ) => { sink?: (fn: (value: unknown) => void) => (() => void) | void } | void;
   prepareTxForCommit?: (tx: CallableTransactionLike) => void;
+  /** Open a cell at a normalized link — the receipt readback path. */
+  getCellFromLink?: (
+    link: NonNullable<CallableTransactionLike["handlingReceiptLink"]>,
+    schema?: JSONSchema,
+    tx?: CallableTransactionLike,
+  ) => CallableCellLike;
 }
 
 export interface CallableManagerLike {
@@ -97,8 +113,37 @@ export interface CallableResolution {
   space: string;
 }
 
+/** The phases a handler invocation passes through, reported on early exit so
+ * a caller knows whether a retry is pre- or post-dispatch (both are safe with
+ * a caller-supplied id; the phase is diagnosis, not a safety gate). */
+export type InvocationPhase =
+  | "initial_sync"
+  | "dispatched"
+  | "committed"
+  | "readback";
+
 export interface CallableExecutionDeps {
   uuid?: () => string;
+  /** Caller-supplied idempotency key for handler sends: threads through as
+   * the durable event id, so a retry of the same id collides on the
+   * handling's create-only receipt and reads the original outcome back
+   * instead of re-executing (verb contract WS-D). */
+  invocationId?: string;
+  /** Phase observer for early-exit reporting. */
+  onPhase?: (phase: InvocationPhase) => void;
+}
+
+/** The outcome of a handler invocation made with a caller-supplied id. */
+export interface InvocationOutcome {
+  id: string;
+  status: "settled";
+  /** The verb's result read back from the handling's receipt, when the
+   * receipt carried one (a reactive-bearing return, or a plain return under
+   * the plainResultReceipts flag). Absent for value-less verbs. */
+  result?: unknown;
+  /** True when this call collided on the create-only receipt: the handling
+   * did not commit again, and `result` is the ORIGINAL outcome. */
+  deduplicated?: boolean;
 }
 
 /** Durable address of a tool's per-invocation result cell. The scope is part
@@ -112,6 +157,8 @@ export interface CallableResultRef {
 
 export interface ExecutedCallable {
   outputText?: string;
+  /** Present for handler sends carrying a caller-supplied invocation id. */
+  invocation?: InvocationOutcome;
   /** The tool result cell's address, when the runtime exposes it — the handle
    * a caller can revisit later instead of re-running the tool (verb contract
    * Part 2, docs/plans/pattern-verb-contract.md). Handlers gain their
@@ -295,20 +342,36 @@ export async function executeResolvedCallable(
     if (typeof send === "function") {
       const runtimeErrors = runtimeErrorLog(resolved.manager.runtime);
       const errorCountBefore = runtimeErrors.length;
+      const invocationId = deps.invocationId;
+      deps.onPhase?.("dispatched");
       const tx = await new Promise<CallableTransactionLike>(
         (resolve, reject) => {
           try {
-            send.call(resolved.callableCell, input, resolve);
+            send.call(
+              resolved.callableCell,
+              input,
+              resolve,
+              invocationId !== undefined
+                ? { eventId: invocationId }
+                : undefined,
+            );
           } catch (error) {
             reject(error);
           }
         },
       );
-      await resolved.manager.runtime.idle();
-      await resolved.manager.synced();
+      // Acknowledgment is transaction-local (verb contract, Settlement): the
+      // commit callback above fires on THIS handling's final commit. Awaiting
+      // runtime.idle()/manager.synced() here instead would hold an
+      // already-committed write hostage to every derived recomputation it
+      // triggered elsewhere in the graph.
+      deps.onPhase?.("committed");
 
       const txStatus = tx?.status?.();
-      if (txStatus?.status === "error") {
+      const deduplicated = txStatus?.status === "error" &&
+        (txStatus.error as { precondition?: string } | undefined)
+            ?.precondition === "receipt-exists";
+      if (txStatus?.status === "error" && !deduplicated) {
         const latestRuntimeError = runtimeErrors.slice(errorCountBefore).at(-1)
           ?.message;
         throw new Error(
@@ -318,7 +381,37 @@ export async function executeResolvedCallable(
         );
       }
 
-      return {};
+      if (invocationId === undefined) return {};
+
+      // Read the handling's outcome back off its receipt. On a receipt-exists
+      // collision this is the ORIGINAL handling's receipt — same id, same
+      // outcome, no re-execution — so a retry settles as a success.
+      deps.onPhase?.("readback");
+      let result: unknown;
+      const link = tx?.handlingReceiptLink;
+      const getCellFromLink = resolved.manager.runtime.getCellFromLink;
+      if (link && typeof getCellFromLink === "function") {
+        const receipt = getCellFromLink.call(resolved.manager.runtime, link);
+        const value = typeof receipt.pull === "function"
+          ? await receipt.pull()
+          : receipt.get();
+        // A value-less verb's receipt is an empty record — existence-only.
+        if (
+          value !== undefined &&
+          !(isRecord(value) && Object.keys(value).length === 0)
+        ) {
+          result = value;
+        }
+      }
+
+      return {
+        invocation: {
+          id: invocationId,
+          status: "settled",
+          ...(deduplicated ? { deduplicated: true } : {}),
+          ...(result !== undefined ? { result } : {}),
+        },
+      };
     }
 
     await resolved.piece[resolved.cellProp].set(input, [resolved.cellKey]);

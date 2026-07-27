@@ -30,6 +30,7 @@ import {
   SpaceConfig,
   stepPiece,
 } from "../lib/piece.ts";
+import type { InvocationPhase } from "../lib/callable.ts";
 import { renderPiece } from "../lib/piece-render.ts";
 import { parseSqliteSource } from "../lib/sqlite-source.ts";
 import { render, safeStringify } from "../lib/render.ts";
@@ -1112,9 +1113,17 @@ after --. Handlers interpret piped input when no input argument is present.`,
     `Run the "search" tool using schema-derived flags after "--".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option(
+    "--invocation <id:string>",
+    "Idempotency key for a handler call (before the callable name). " +
+      "Retrying with the same id settles on the original outcome instead " +
+      "of executing again. Minted automatically when omitted.",
+  )
   .stopEarly()
   .arguments("<callable:string> [tail...:string]")
   .action(async function (options, callableName, ...tail) {
+    const invocationId = options.invocation ?? crypto.randomUUID();
+    let phase: InvocationPhase = "initial_sync";
     try {
       setQuietMode(!!options.quiet);
       const invocation = pieceCallInvocation(
@@ -1129,6 +1138,19 @@ after --. Handlers interpret piped input when no input argument is present.`,
         pieceConfig,
         callableName,
         invocation.rawArgs,
+        {
+          invocationId,
+          onPhase: (next) => {
+            // The id goes to stderr the moment the event is about to
+            // dispatch, BEFORE any network work: if this process dies past
+            // this line, the caller holds the exact id to retry with, and
+            // the retry deduplicates instead of double-executing.
+            if (next === "dispatched" && phase === "initial_sync") {
+              console.error(`invocation: ${invocationId}`);
+            }
+            phase = next;
+          },
+        },
       );
       if (result.helpText) {
         render(result.helpText);
@@ -1150,6 +1172,26 @@ after --. Handlers interpret piped input when no input argument is present.`,
         }
         return;
       }
+      if (result.invocation) {
+        // The machine surface for a handler invocation: stdout carries the
+        // settled Invocation JSON, prose stays on stderr via hint().
+        render(JSON.stringify(
+          {
+            invocation: result.invocation.id,
+            status: result.invocation.status,
+            ...(result.invocation.deduplicated ? { deduplicated: true } : {}),
+            ...("result" in result.invocation
+              ? { result: result.invocation.result }
+              : {}),
+          },
+          null,
+          2,
+        ));
+        hint(cliText(`NEXT STEPS:
+  → Verify state:  cf piece get --piece ${pieceConfig.piece} <path> ...
+  → Full inspect:  cf piece inspect --piece ${pieceConfig.piece} ...`));
+        return;
+      }
       const confirmation =
         `Called handler "${callableName}" on piece ${pieceConfig.piece}`;
       if (result.parsed.usedJsonInput) {
@@ -1166,6 +1208,10 @@ after --. Handlers interpret piped input when no input argument is present.`,
       }
       const message = error instanceof Error ? error.message : String(error);
       console.error(message);
+      // Where the invocation stopped decides retry semantics: anything at or
+      // past "dispatched" retries SAFELY ONLY with this same id (same-id
+      // retries deduplicate; a fresh id would re-execute).
+      console.error(`invocation: ${invocationId} phase: ${phase}`);
       Deno.exit(1);
     }
   })

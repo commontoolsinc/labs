@@ -679,6 +679,148 @@ describe("executePieceCallable", () => {
       ),
     ).rejects.toThrow(/Handler "recordMessage" failed: Bad message payload/);
   });
+
+  it("threads the invocation id to send and settles with receipt readback, without awaiting graph quiescence", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      receiptValue: { commentId: "c-1" },
+    });
+    const phases: string[] = [];
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-123",
+        onPhase: (phase) => phases.push(phase),
+      },
+    );
+
+    expect(harness.tracker.sendOptions).toEqual([{ eventId: "inv-123" }]);
+    expect(result.invocation).toEqual({
+      id: "inv-123",
+      status: "settled",
+      result: { commentId: "c-1" },
+    });
+    expect(phases).toEqual(["dispatched", "committed", "readback"]);
+    expect(harness.tracker.receiptLinkRequested?.id).toBe("of:receipt-1");
+    // Transaction-local acknowledgment: the settled result must come straight
+    // off this handling's commit — never from draining the whole graph.
+    expect(harness.tracker.idleCalls).toBe(0);
+    expect(harness.tracker.syncedCalls).toBe(0);
+  });
+
+  it("reclassifies a receipt-exists collision as the original settled outcome", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      receiptExists: true,
+      receiptValue: { commentId: "c-original" },
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-dup",
+      },
+    );
+
+    expect(result.invocation).toEqual({
+      id: "inv-dup",
+      status: "settled",
+      deduplicated: true,
+      result: { commentId: "c-original" },
+    });
+  });
+
+  it("settles a value-less verb with no result key (existence-only receipt)", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "refresh",
+      inputSchema: { type: "object", properties: {} },
+      receiptValue: {},
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "refresh",
+      [],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => true,
+        invocationId: "inv-empty",
+      },
+    );
+
+    expect(result.invocation).toEqual({ id: "inv-empty", status: "settled" });
+  });
+
+  it("sends without options and returns no invocation when no id is supplied", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "refresh",
+      inputSchema: { type: "object", properties: {} },
+      receiptValue: { ignored: true },
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "refresh",
+      [],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => true,
+      },
+    );
+
+    expect(harness.tracker.sendOptions).toEqual([undefined]);
+    expect(result.invocation).toBeUndefined();
+    expect(harness.tracker.receiptLinkRequested).toBeUndefined();
+  });
 });
 
 function createPieceCallableHarness(options: {
@@ -693,6 +835,12 @@ function createPieceCallableHarness(options: {
   toolResult?: unknown;
   handlerFailureMessage?: string;
   callableScope?: "space" | "user" | "session";
+  /** Value the handling's receipt cell reads back ({} = value-less verb). */
+  receiptValue?: unknown;
+  /** Simulate the create-only receipt collision: commit fails with
+   * precondition "receipt-exists" while the link addresses the winner's
+   * original receipt. */
+  receiptExists?: boolean;
 }) {
   const tracker = {
     handlerWrites: [] as Array<{
@@ -700,6 +848,10 @@ function createPieceCallableHarness(options: {
       path: (string | number)[] | undefined;
       value: unknown;
     }>,
+    sendOptions: [] as Array<{ eventId?: string } | undefined>,
+    receiptLinkRequested: undefined as { id?: string } | undefined,
+    idleCalls: 0,
+    syncedCalls: 0,
     toolRunPattern: undefined as unknown,
     toolRunInput: undefined as unknown,
     toolResultScope: undefined as string | undefined,
@@ -737,14 +889,19 @@ function createPieceCallableHarness(options: {
           send: (
             value: unknown,
             onCommit?: (
-              tx: { status: () => { status: string; error?: Error } },
+              tx: {
+                status: () => { status: string; error?: Error };
+                handlingReceiptLink?: { id: string; space: string };
+              },
             ) => void,
+            sendOptions?: { eventId?: string },
           ) => {
             tracker.handlerWrites.push({
               cellProp: "result",
               path: [options.cellKey],
               value,
             });
+            tracker.sendOptions.push(sendOptions);
             if (options.handlerFailureMessage) {
               runtimeErrors.push({ message: options.handlerFailureMessage });
             }
@@ -755,7 +912,19 @@ function createPieceCallableHarness(options: {
                     status: "error",
                     error: new Error(options.handlerFailureMessage),
                   }
+                  : options.receiptExists
+                  ? {
+                    status: "error",
+                    error: Object.assign(
+                      new Error("Result receipt already exists"),
+                      { precondition: "receipt-exists" },
+                    ),
+                  }
                   : { status: "done" },
+              handlingReceiptLink: {
+                id: "of:receipt-1",
+                space: "did:key:test-home",
+              },
             });
           },
         }
@@ -814,11 +983,24 @@ function createPieceCallableHarness(options: {
     },
   };
 
+  const receiptCell = {
+    get: () => options.receiptValue,
+    pull: () => Promise.resolve(options.receiptValue),
+    key: (_key: string) => receiptCell,
+  };
+
   const manager = {
     getSpace: () => "home",
-    synced: async () => {},
+    synced: () => {
+      tracker.syncedCalls++;
+      return Promise.resolve();
+    },
     runtime: {
       [CF_RUNTIME_ERROR_LOG]: runtimeErrors,
+      getCellFromLink: (link: { id?: string }) => {
+        tracker.receiptLinkRequested = link;
+        return receiptCell;
+      },
       storageManager: {
         synced: async () => {},
       },
@@ -848,7 +1030,10 @@ function createPieceCallableHarness(options: {
           sink: () => () => {},
         };
       },
-      idle: async () => {},
+      idle: () => {
+        tracker.idleCalls++;
+        return Promise.resolve();
+      },
     },
   };
 
