@@ -1478,7 +1478,7 @@ export const connect = Client.connect;
 export const loopback = (server: Server): Transport => {
   let receiver = (_payload: string) => {};
   const connection = server.connect((message) => {
-    receiver(encodeMemoryBoundaryUnprovenFabricValue(message));
+    receiver(encodeMemoryBoundary(message));
   });
   return {
     async send(payload: string) {

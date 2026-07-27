@@ -816,7 +816,7 @@ export type InvocationRecord = {
   cmd: string;
   sub: string;
   args?: FabricValue;
-  [key: string]: unknown;
+  [key: string]: FabricValue;
 };
 
 export type AuthorizationRecord = FabricValue;
@@ -872,10 +872,9 @@ export type AppliedCommit = {
   schedulerDirtiedReaders?: SchedulerReaderIndexEntry[];
 };
 
-export interface ResolvedSchedulerObservationAddress
-  extends SchedulerObservationAddress {
-  scopeKey: string;
-}
+export type ResolvedSchedulerObservationAddress =
+  & SchedulerObservationAddress
+  & { scopeKey: string };
 
 type SchedulerWriteAddress = SchedulerObservationAddress & {
   scopeKey?: string;
@@ -4982,9 +4981,7 @@ const applyCommitTransaction = (
       aud: LEGACY_EMPTY_INVOCATION.aud ?? null,
       cmd: LEGACY_EMPTY_INVOCATION.cmd,
       sub: LEGACY_EMPTY_INVOCATION.sub,
-      invocation: encodeMemoryBoundaryUnprovenFabricValue(
-        LEGACY_EMPTY_INVOCATION,
-      ),
+      invocation: encodeMemoryBoundary(LEGACY_EMPTY_INVOCATION),
     });
   }
   engine.statements.insertCommit.run({

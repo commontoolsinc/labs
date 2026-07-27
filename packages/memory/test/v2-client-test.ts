@@ -6,7 +6,6 @@ import { Server, SessionRegistry } from "../v2/server.ts";
 import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
-  encodeMemoryBoundaryUnprovenFabricValue,
   type EntitySnapshot,
   getMemoryProtocolFlags,
   MEMORY_PROTOCOL,
@@ -52,7 +51,7 @@ const sessionOpenFor = (id: string) => ({
 
 const handshakeTransport = (
   helloOk: FabricValue,
-  sessionOpen: unknown = undefined,
+  sessionOpen: FabricValue = undefined,
 ): Transport => {
   let receiver = (_payload: string) => {};
   return {
@@ -66,7 +65,7 @@ const handshakeTransport = (
         return Promise.resolve();
       }
       if (message.type === "session.open") {
-        receiver(encodeMemoryBoundaryUnprovenFabricValue({
+        receiver(encodeMemoryBoundary({
           type: "response",
           requestId: message.requestId!,
           ok: {
@@ -1263,7 +1262,7 @@ class ReconnectableLoopbackTransport implements Transport {
         this.#reconnected.resolve();
       }
       this.#connection = this.server.connect((message) => {
-        this.#receiver(encodeMemoryBoundaryUnprovenFabricValue(message));
+        this.#receiver(encodeMemoryBoundary(message));
       });
     }
     return this.#connection;

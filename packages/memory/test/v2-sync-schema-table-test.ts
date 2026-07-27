@@ -21,7 +21,6 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchema } from "@commonfabric/api";
 import {
   encodeMemoryBoundary,
-  encodeMemoryBoundaryUnprovenFabricValue,
   type EntityDocument,
   getMemoryProtocolFlags,
   type HelloOkMessage,
@@ -52,7 +51,7 @@ import { testSessionOpenServerOptions } from "./v2-auth-test-helpers.ts";
 const textEncoder = new TextEncoder();
 
 const encodedBytes = (value: ServerMessage): number =>
-  textEncoder.encode(encodeMemoryBoundaryUnprovenFabricValue(value)).byteLength;
+  textEncoder.encode(encodeMemoryBoundary(value)).byteLength;
 
 const largeSchema = (): JSONSchema => ({
   type: "object",
@@ -150,13 +149,11 @@ Deno.test("sync schema table experiment captures repeated schema savings", () =>
   const message = syncEffect(sync);
   const bytes = encodedBytes(message);
   const schemaMarkerCount =
-    encodeMemoryBoundaryUnprovenFabricValue(message).split("$defs").length -
-    1;
+    encodeMemoryBoundary(message).split("$defs").length - 1;
   const compressed = compressServerMessageSchemas(message);
   const compressedBytes = encodedBytes(compressed);
-  const compressedSchemaMarkerCount =
-    encodeMemoryBoundaryUnprovenFabricValue(compressed)
-      .split("$defs").length - 1;
+  const compressedSchemaMarkerCount = encodeMemoryBoundary(compressed)
+    .split("$defs").length - 1;
   const expanded = expandServerMessageSchemas(compressed);
 
   assertEquals(expanded, message);
