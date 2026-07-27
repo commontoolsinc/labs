@@ -20,14 +20,6 @@ jobs:
   # ---------------------------------------------------------------------------
   # Tier 0 – These jobs all start immediately with no dependencies
   # ---------------------------------------------------------------------------
-  dashboard:
-    name: "Dashboard"
-    if: ${{ github.event_name == 'pull_request' }}
-    uses: ./.github/workflows/dashboard-image.yml
-    permissions:
-      contents: read
-      id-token: write
-
   check:
     name: "Check"
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -987,7 +979,6 @@ jobs:
     name: "Status"
     if: ${{ always() && github.event_name == 'pull_request' }}
     needs:
-      - dashboard
       - check
       - cfcheck
       - test
