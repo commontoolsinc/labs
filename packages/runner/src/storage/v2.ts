@@ -2643,7 +2643,7 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private enqueueSchedulerObservationCommit(
-    schedulerObservation: unknown,
+    schedulerObservation: FabricValue,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
     if (!getPersistentSchedulerStateConfig()) {
@@ -2802,7 +2802,7 @@ class SpaceReplica implements ISpaceReplica {
   private async commitOperations(
     operations: NativeCommitOperation[],
     source?: IStorageTransaction,
-    schedulerObservation?: unknown,
+    schedulerObservation?: FabricValue,
     preconditions: readonly CommitPrecondition[] = [],
     sqliteOps: readonly SqliteOperation[] = [],
   ): Promise<Result<Unit, StorageTransactionRejected>> {

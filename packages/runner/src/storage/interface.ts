@@ -794,8 +794,8 @@ export interface IStorageTransaction {
    * memory transaction. When there are no semantic writes, storage backends may
    * still commit this metadata as an internal no-op observation.
    */
-  setSchedulerObservation?(observation: unknown): void;
-  getSchedulerObservation?(): unknown;
+  setSchedulerObservation?(observation: FabricValue): void;
+  getSchedulerObservation?(): FabricValue;
 
   /**
    * Optional commit-time preconditions attached to this transaction's commit in
@@ -1641,7 +1641,7 @@ export interface IStorageTransactionComplete extends IStorageError {
  * Represents adddress within the memory space which is like pointer inside the
  * fact value in the memory.
  */
-export interface IMemoryAddress {
+export type IMemoryAddress = {
   /**
    * URI to an entity. It corresponds to `of` field in the memory protocol.
    */
@@ -1660,11 +1660,11 @@ export interface IMemoryAddress {
    * address. It is a path within the `is` field of the fact in memory protocol.
    */
   path: readonly MemoryAddressPathComponent[];
-}
+};
 
-export interface IMemorySpaceAddress extends IMemoryAddress {
+export type IMemorySpaceAddress = IMemoryAddress & {
   space: MemorySpace;
-}
+};
 
 export type MemoryAddressPathComponent = string;
 
@@ -1800,7 +1800,7 @@ export type NativeStorageCommitOperation =
 
 export interface NativeStorageCommit {
   operations: readonly NativeStorageCommitOperation[];
-  schedulerObservation?: unknown;
+  schedulerObservation?: FabricValue;
   preconditions?: readonly CommitPrecondition[];
   /**
    * Folded SQLite write ops, applied in the same wire commit as `operations`

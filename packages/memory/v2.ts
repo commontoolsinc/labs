@@ -191,7 +191,10 @@ export type SchedulerObservationCommit = {
     confirmed: ConfirmedRead[];
     pending: PendingRead[];
   };
-  schedulerObservation: unknown;
+  /** The observation, opaque here: this layer stores and forwards it, and
+   *  the runner owns its shape and validation. `FabricValue` says only what
+   *  the wire requires of it. */
+  schedulerObservation: FabricValue;
 };
 
 export type CommitPrecondition =
@@ -221,7 +224,10 @@ export type ClientCommit = {
   };
   operations: Operation[];
   preconditions?: CommitPrecondition[];
-  schedulerObservation?: unknown;
+  /** The observation, opaque here: this layer stores and forwards it, and
+   *  the runner owns its shape and validation. `FabricValue` says only what
+   *  the wire requires of it. */
+  schedulerObservation?: FabricValue;
   schedulerObservationBatch?: SchedulerObservationCommit[];
   codeCID?: Reference;
   branch?: BranchName;

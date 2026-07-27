@@ -882,7 +882,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   #activityClock = 0;
   #writeAttemptLog: IWriteAttempt[] = [];
   #reactivityLogCache?: TransactionReactivityLog;
-  #schedulerObservation?: unknown;
+  #schedulerObservation?: FabricValue;
   #commitPreconditions = new Map<MemorySpace, CommitPrecondition[]>();
   #createOnlyMarks = new Map<
     MemorySpace,
@@ -963,7 +963,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     return this.#reactivityLogCache;
   }
 
-  setSchedulerObservation(observation: unknown): void {
+  setSchedulerObservation(observation: FabricValue): void {
     this.assertWritable("setSchedulerObservation()");
     const ready = this.editable();
     if (ready.error) {
@@ -972,7 +972,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     this.#schedulerObservation = observation;
   }
 
-  getSchedulerObservation(): unknown {
+  getSchedulerObservation(): FabricValue {
     return this.#schedulerObservation;
   }
 
@@ -2142,7 +2142,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   private schedulerObservationForNativeCommit(
     space: MemorySpace,
-  ): unknown | undefined {
+  ): FabricValue {
     if (this.#schedulerObservation === undefined) {
       return undefined;
     }
