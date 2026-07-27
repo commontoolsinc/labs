@@ -358,6 +358,50 @@ peeled three successive liveness layers — each fix exposing the next:
    the A24 demandGeneration candidate fence does NOT drop space-lane
    candidates (the space generation is a constant 0; only scoped lanes
    carry live generations).
+8. **Named residual (P0-R3c, the sole remaining claimsIssued>0
+   blocker): the demand-pull traversal scaler.** With the pump landed,
+   the n=20 rerun put a 27s demand window against a ~40s first pull —
+   the pull cost SCALES with the same client load that defines the
+   window, so the worker structurally loses the race on this harness.
+   The feed counters pin it exactly: `graph.query.demand` = 858 calls,
+   93,932 managerReads, dag 2,576, **coveredSelectorSkips = 0** —
+   ~97% of all read work; the persistent-tracker paths DO skip
+   (watch.add 1,385 skips, watch.refresh 3,905), but the executor
+   replica's cold-watch pull path issues STATELESS `graph.query`
+   (fresh tracker + manager per call, `reuse=undefined` in the wire
+   handler) ~21× per piece. Exact mechanism (v2-host-provider's
+   accepted-commit integration): a watch whose FIRST pull has not
+   completed has no held entities (`#watchEntities` miss), so EVERY
+   wave that dirties its root re-marks it cold ("Registration never
+   completed a pull; a named root is a cold repull") and the wave
+   pipeline — serial by construction — runs ANOTHER full
+   `refreshWatches` traversal for it at that wave's sequence. Under a
+   note-per-1-2s client, that is ~21 serial full traversals per piece
+   before the first one's closure ever lands, each slower than the
+   last because they compete with the client on the same engine; the
+   worker's `cell.pull()` settlement barrier waits behind this
+   pipeline, hence first-pull cost SCALING with client load (the §4
+   baseline's 23× revisit-pull amplification, now located to the
+   line). The genuinely-warm paths are fine: steady waves take exact
+   point reads, and only 15/881 queries were wave-triggered
+   re-traversals (shrink/re-key/root-re-establishment — the narrow,
+   correct cases). Fix design (needs a panel pass — it cuts into
+   F5/CP3 second-wave and FB13 deferral semantics): COALESCE cold
+   refreshes for never-held watches — while a watch's first cold
+   refresh is in flight, later waves that would re-cold it instead
+   BLOCK their notices into the existing FB13 deferred-notice queue
+   (the machinery already used when a cold refresh FAILS: notices
+   defer, never lost, and retry integrates them); when the first
+   refresh completes and holds entities, the deferred notices retry
+   through the cheap point-read path at their own sequences. Net: one
+   traversal per genuinely-cold root + point-read catch-up, instead
+   of one traversal per wave. Secondary (independent) lever: the
+   server's session-attributed `graph.query` could consult the
+   session's per-branch TrackedGraphState for covered queries — but
+   the coalescing fix removes the repeat calls at the source, so
+   measure after it before adding server-side complexity. Contract
+   tests to hold green: executor-provider-parity / provider-demand /
+   FB13 deferral fixtures, and CP3's second-refresh-wave delivery.
 
 **(superseded numbering below)**
    with the deadline at 120s the Workers RAN (43 scheduler runs, 32
