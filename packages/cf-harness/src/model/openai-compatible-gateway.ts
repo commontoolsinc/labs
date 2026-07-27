@@ -34,9 +34,14 @@ import type {
   HarnessModelTurnResult,
 } from "./client.ts";
 
-const normalizeTextContent = (content: OpenAIChatMessageContent): string => {
+const normalizeTextContent = (
+  content: OpenAIChatMessageContent | undefined,
+): string => {
   if (typeof content === "string") return content;
-  if (content === null) return "";
+  // Vertex-backed models omit `content` entirely on tool-call-only turns
+  // (gemini-3.5-flash returns just role/thinking_blocks/tool_calls), so this
+  // has to treat "absent" the same as "null" rather than assume an array.
+  if (content === null || content === undefined) return "";
   return content.flatMap((part) =>
     typeof part === "object" && part !== null && part.type === "text" &&
       typeof part.text === "string"

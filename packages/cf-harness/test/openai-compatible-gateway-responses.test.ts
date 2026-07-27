@@ -222,6 +222,34 @@ Deno.test("non-OpenAI models and native tools stay on Chat Completions", async (
   assertEquals(captured[0].url, `${GATEWAY}/v1/chat/completions`);
 });
 
+Deno.test("a chat turn with no content field is handled", async () => {
+  // gemini-3.5-flash returns `{role, thinking_blocks, tool_calls}` on a
+  // tool-call-only turn — `content` is absent, not null. Treating that as an
+  // array threw `Cannot read properties of undefined (reading 'flatMap')` and
+  // broke every claude-*/gemini-* run that called a tool.
+  const captured: Captured[] = [];
+  const client = clientWith(captured, [{
+    choices: [{
+      index: 0,
+      message: {
+        role: "assistant",
+        thinking_blocks: [{ type: "thinking", thinking: "..." }],
+        tool_calls: [{
+          id: "call-1",
+          type: "function",
+          function: { name: "read_file", arguments: "{}" },
+        }],
+      },
+    }],
+  }]);
+
+  const result = await client.complete(turn({ model: "gemini-3.5-flash" }));
+
+  assertEquals(captured[0].url, `${GATEWAY}/v1/chat/completions`);
+  assertEquals(result.assistant.content, "");
+  assertEquals(result.assistant.toolCalls?.[0].id, "call-1");
+});
+
 Deno.test("the Responses turn stays stateless", async () => {
   const captured: Captured[] = [];
   const client = clientWith(captured, [

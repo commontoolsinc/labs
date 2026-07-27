@@ -66,7 +66,8 @@ export type OpenAIChatMessageContent =
 
 export interface OpenAIChatCompletionMessage {
   role: OpenAIChatMessageRole;
-  content: OpenAIChatMessageContent;
+  /** Absent on tool-call-only turns from some providers, not just null. */
+  content?: OpenAIChatMessageContent;
   tool_calls?: readonly OpenAIChatCompletionToolCall[];
   tool_call_id?: string;
   grounding_metadata?: unknown;
