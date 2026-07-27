@@ -8,7 +8,7 @@
  * composer wrappers, whose silent guards are correct behavior (an empty draft
  * is a non-event in a composer, not a headless mutation).
  */
-import { action, computed } from "commonfabric";
+import { action, assert } from "commonfabric";
 import { pattern } from "commonfabric";
 import Topics from "./main.tsx";
 
@@ -79,22 +79,20 @@ export default pattern(() => {
     });
   });
 
-  const assert_seeded = computed(() =>
+  const assert_seeded = assert(() =>
     board.topicCount === 1 &&
     board.topics?.[0]?.title === "Seed"
   );
 
   // The one seeded topic, untouched: no comments, no links, empty body.
-  const assert_board_unchanged = computed(() =>
+  const assert_board_unchanged = assert(() =>
     board.topicCount === 1 &&
     board.topics?.[0]?.commentCount === 0 &&
     (board.topics?.[0]?.links ?? []).length === 0 &&
     board.topics?.[0]?.body === ""
   );
 
-  const assert_legacy_board_empty = computed(() =>
-    legacyBoard.topicCount === 0
-  );
+  const assert_legacy_board_empty = assert(() => legacyBoard.topicCount === 0);
 
   return {
     // Every rejection below MUST surface as a thrown handler error — nine
