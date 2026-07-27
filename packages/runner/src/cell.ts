@@ -283,22 +283,32 @@ declare module "@commonfabric/api" {
     set(
       value: AnyCellWrapping<T> | T,
       onCommit?: (tx: IExtendedStorageTransaction) => void,
+      sendOptions?: { eventId?: string },
     ): C;
   }
 
   /**
-   * Augment Streamable to add onCommit callback support.
-   * Event is optional only when T is void (matching public API).
+   * Augment Streamable to add onCommit callback and internal send-options
+   * support (`eventId` — caller-supplied durable event id, verb contract
+   * WS-D). Event is optional only when T is void (matching public API).
    */
   interface IStreamable<T> {
     send(
       ...args: T extends void ? [] | [AnyCellWrapping<T> | T] | [
           AnyCellWrapping<T> | T,
           (tx: IExtendedStorageTransaction) => void,
+        ] | [
+          AnyCellWrapping<T> | T,
+          ((tx: IExtendedStorageTransaction) => void) | undefined,
+          { eventId?: string },
         ]
         : [AnyCellWrapping<T> | T] | [
           AnyCellWrapping<T> | T,
           (tx: IExtendedStorageTransaction) => void,
+        ] | [
+          AnyCellWrapping<T> | T,
+          ((tx: IExtendedStorageTransaction) => void) | undefined,
+          { eventId?: string },
         ]
     ): void;
   }
@@ -1270,6 +1280,15 @@ export class CellImpl<T extends FabricValue>
      * after success.
      */
     onCommit?: (tx: IExtendedStorageTransaction) => void,
+    /**
+     * Internal-only stream-send options. `eventId` supplies the durable event
+     * id (spec §7.5) instead of minting one: an ingress caller that owns a
+     * delivery id passes it through so a retry of the same id collides on the
+     * handling's create-only receipt instead of re-executing (verb contract
+     * WS-D, docs/plans/pattern-verb-contract-implementation.md). Ignored on
+     * the plain-cell write path.
+     */
+    sendOptions?: { eventId?: string },
   ): Cell<T> {
     const resolvedToValueLink = resolveLink(
       this.runtime,
@@ -1302,7 +1321,10 @@ export class CellImpl<T extends FabricValue>
         undefined,
         onCommit,
         false,
-        { originTx: this.tx ?? undefined },
+        {
+          eventId: sendOptions?.eventId,
+          originTx: this.tx ?? undefined,
+        },
       );
 
       this.cleanup?.();
@@ -1383,6 +1405,10 @@ export class CellImpl<T extends FabricValue>
          * after success.
          */
         (tx: IExtendedStorageTransaction) => void,
+      ] | [
+        AnyCellWrapping<T>,
+        ((tx: IExtendedStorageTransaction) => void) | undefined,
+        { eventId?: string },
       ]
       : [AnyCellWrapping<T>] | [
         AnyCellWrapping<T>,
@@ -1393,10 +1419,20 @@ export class CellImpl<T extends FabricValue>
          * after success.
          */
         (tx: IExtendedStorageTransaction) => void,
+      ] | [
+        AnyCellWrapping<T>,
+        ((tx: IExtendedStorageTransaction) => void) | undefined,
+        /**
+         * Internal-only stream-send options: `eventId` passes a
+         * caller-supplied durable event id through to the scheduler, so a
+         * same-id retry collides on the handling's create-only receipt
+         * instead of re-executing (verb contract WS-D).
+         */
+        { eventId?: string },
       ]
   ): void {
-    const [event, onCommit] = args;
-    this.set(event as AnyCellWrapping<T>, onCommit);
+    const [event, onCommit, sendOptions] = args;
+    this.set(event as AnyCellWrapping<T>, onCommit, sendOptions);
   }
 
   update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(

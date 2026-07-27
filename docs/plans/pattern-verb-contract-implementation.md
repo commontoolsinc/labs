@@ -166,13 +166,13 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
 Size M (~1 week). Idempotency portion has no dependencies; result readback
 joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
 
-- **runner:** thread a caller-supplied `eventId` from `cell.send()` to
-  `queueEvent` (the parameter exists — `facade.ts:1308`; the send path passes
-  none — `cell.ts:1276`). Expose the receipt cell's link **structurally
-  through the dispatch path**: the commit callback on success, a structured
-  field on the `receipt-exists` rejection on collision. Both branches already
-  know the cell; nobody parses error prose, and the CLI never reconstructs
-  `{ $ctx, $event }` client-side.
+- ~~**runner:** thread a caller-supplied `eventId`; expose the receipt link
+  structurally~~ — **done (D1)**: `cell.send(event, onCommit, { eventId })`
+  internal options thread to `queueEvent`, and `tx.handlingReceiptLink`
+  (mirroring `dispatchedEventId`) carries the receipt address to the sender's
+  commit callback on success AND on `receipt-exists` collision — the loser
+  receives the winner's outcome address; nobody parses error prose or
+  reconstructs `{ $ctx, $event }` client-side.
 - **cli:** `--invocation <id>` on `piece call` (UUID minted and printed by
   default, including when the wait times out); after commit, sync and read the
   receipt (a cold plain read returns `undefined` — sync first); reclassify
