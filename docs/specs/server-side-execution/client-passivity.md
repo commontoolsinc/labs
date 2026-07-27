@@ -289,20 +289,58 @@ peeled three successive liveness layers — each fix exposing the next:
    to fallback. (b) Also found and cleaned: the pre-rebind wedged drains
    leak ORPHANED toolshed processes that keep appending to the shared
    log — always verify serverStart before trusting log/stats agreement.
-6. **Named residual (P0-R2, now the sole claimsIssued>0 blocker):** with
-   demand stable and sponsors rebindable, 68/68 declines on one space
-   are `not-owned` — the executor's START-TIME lease handle resolves via
-   the authority WeakMap to an authority object that is no longer the
-   owned one. Next probe (one run): extend the not-owned decline log
-   with {ownedPresent, authority.firstDemandOrder,
-   owned?.firstDemandOrder} and read pool
-   workerStartAttempts/leaseLosses/leaseReplacements — distinguishing
-   owned-deleted (expiry/release) from owned-replaced (silent
-   re-acquisition). Likely durable fix either way: resolve the claim
-   path's authority by (space,branch) KEY with field-validated handle
-   (generation + host + onBehalfOf) instead of WeakMap object identity —
-   handle-object identity across a Worker's lifetime is exactly the
-   coupling the renewal/reuse paths do not maintain.
+6. **P0-R2 (stale sponsor pin) FIXED — and it exposed P0-R3 (item 7).** The
+   instrumented probe run (renewal decline legs + owned-deletion cause
+   logs + not-owned sub-legs) overturned the not-owned theory: the rerun
+   showed ZERO not-owned declines — instead 54/54 `sponsor-demand-gone`
+   with the Worker fully live (166 scheduler runs, 133 shadow
+   transactions) and, decisively, **54 authority-loss notes producing
+   ZERO pool rebind attempts** (`sponsorRebinds=0`) plus 2 renewal
+   declines `durable-renew-refused` that released the leases as revoked.
+   Root cause, confirmed in code: the lease pins its sponsor as a
+   host-local **(connection, session, token) triple**, and the browser
+   breaks that triple routinely without surrendering anything — sessions
+   OUTLIVE connections (resume), demand rows are CONNECTION-scoped, and
+   an explicit demand clear on page departure removes the pinned row
+   without any drain. Four consumers then failed the same stale pin
+   differently: claim issuance (`sponsor-demand-gone`), claim renewal
+   (revokes the live claim), lease renewal (`authorizeWrite` checks
+   `#connections.has(pinnedConnection)` → durable refusal → the pool
+   tears the whole generation down within TTL/2), and the ACL
+   ineligibility sweep (drains the lease outright). Fix (this commit):
+   one shared `#reanchorExecutionSponsorInPlace` — when the pinned
+   binding goes stale on a live un-drained lease, re-point it at the
+   best live demander of the SAME principal (acquisition candidate
+   order) and let THIS operation proceed; decline only when no target
+   exists. Wired into all four consumers + the pool-facing rebind now
+   delegates to it. Contracts preserved and pinned by tests: the
+   "sponsor disconnect drains before a remaining writer can replace it"
+   auto-drain is untouched (re-anchor refuses under `drainRequested`);
+   re-anchor NEVER crosses principals (new lease-test); the drain-window
+   semantics (explicit demand clear leaves the lease renewable) survive
+   (the staleness check deliberately excludes the demand row). Red-first
+   evidence: claim-issuance/lease-renewal/claim-renewal re-anchor tests
+   all failed pre-fix. Also permanent observability: renewal decline
+   legs (mirror of claim legs), owned-lease release/abandon cause logs,
+   `not-owned[owned-missing|owned-replaced fdo A->B]` sub-legs, and
+   pool-side re-anchor SKIP reasons (the 54-notes-zero-attempts
+   silence, never again).
+7. **Named residual (P0-R3, now the sole claimsIssued>0 blocker):** the
+   post-fix rerun still declined 54/54 — and the new sponsor-population
+   dump shows `rows=NONE` at every single decline: by the time the
+   Worker's candidates reach claim-ready, ZERO demand rows exist for
+   the (space, branch) — nothing to sponsor OR re-anchor against, and
+   52/54 pool loss-notes were skipped `state-draining` (the slot was
+   already in its 60s graceful-settle window). Theory to verify with
+   the timeline probe (demand-row set/clear/sweep + claim-ready +
+   decline, all timestamped): the harness's pages live seconds while
+   time-to-claim-ready under live browser load exceeds the page
+   lifetime, so the demand-alive and claim-ready windows never overlap
+   — a cold-start/activation-latency problem (P1's cold-start
+   distribution, arriving early), not an authority problem. Steady
+   state (long-lived real sessions) should not have this shape; the
+   timeline run decides whether P0's acceptance needs a longer-lived
+   page scenario, activation speedup, or both.
 
 **(superseded numbering below)**
    with the deadline at 120s the Workers RAN (43 scheduler runs, 32

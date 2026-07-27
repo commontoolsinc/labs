@@ -737,15 +737,29 @@ export class SharedExecutionPool {
   noteClaimAuthorityLoss(space: string, branch: BranchName): Promise<void> {
     if (this.#closed) return Promise.resolve();
     const slot = this.#slots.get(laneKey(space, branch));
-    if (
-      slot === undefined || slot.executor === null || slot.state !== "live" ||
-      slot.reanchorQueued || slot.lease === null
-    ) return Promise.resolve();
+    // A recovery path that silently declines to run is undebuggable (the
+    // P0-R2 probe found 54 loss notes producing ZERO rebind attempts with
+    // no trace) — name the skip reason, mirroring the server's decline
+    // legs.
+    const skipped = (reason: string): Promise<void> => {
+      console.debug(
+        "SharedExecutionPool: authority-loss re-anchor skipped:",
+        reason,
+        space,
+        branch,
+      );
+      return Promise.resolve();
+    };
+    if (slot === undefined) return skipped("no-slot");
+    if (slot.executor === null) return skipped("no-executor");
+    if (slot.state !== "live") return skipped(`state-${slot.state}`);
+    if (slot.reanchorQueued) return skipped("queued");
+    if (slot.lease === null) return skipped("no-lease");
     const cooldownMs = Math.max(this.#demandGraceMs, 10_000);
     if (
       slot.lastReanchorAt !== null &&
       this.#now() - slot.lastReanchorAt < cooldownMs
-    ) return Promise.resolve();
+    ) return skipped("cooldown");
     slot.reanchorQueued = true;
     // Cooldown runs from the ATTEMPT, so a storm of loss notes during the
     // async rebind cannot queue a second recovery.

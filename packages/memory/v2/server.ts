@@ -916,11 +916,14 @@ export interface ExecutionLeaseHandle extends ExecutionLease {
 
 type OwnedExecutionLease = {
   handle: ExecutionLeaseHandle;
-  /** The sponsor triple is MUTABLE for exactly one operation: the P0
-   * sponsor re-anchor (`reanchorExecutionLeaseSponsor`) re-points a live
-   * lease at a live demanding session of the SAME principal after the
-   * original sponsor session died (e.g. a page reload). Everything else
-   * treats these as write-once. */
+  /** The sponsor triple is MUTABLE for exactly one mechanism: the P0-R2
+   * sponsor re-anchor (`#reanchorExecutionSponsorInPlace`, reached from
+   * claim issuance/renewal, lease renewal, the ACL ineligibility sweep,
+   * and the pool's `reanchorExecutionLeaseSponsor`) re-points a live
+   * un-drained lease at a live demanding session of the SAME principal
+   * after the pinned binding went stale (explicit demand clear, connection
+   * hop with session resume, page reload). Everything else treats these as
+   * write-once. */
   sponsorConnectionId: string;
   sponsorSessionId: string;
   sponsorSessionToken: SessionToken;
@@ -3453,6 +3456,17 @@ export class Server {
     authority: OwnedExecutionLease,
     revoked: ExecutionLease,
   ): void {
+    // Owned-map deletion is the root event behind every later
+    // "not-owned[owned-missing]" claim/renewal decline (P0-R2) — log it
+    // with the durable state so the decline stream has its cause.
+    console.debug(
+      "Memory: owned execution lease released:",
+      revoked.state,
+      revoked.space,
+      revoked.branch,
+      "generation",
+      revoked.leaseGeneration,
+    );
     const slot = executionLeaseKey(revoked.space, revoked.branch);
     if (this.#ownedExecutionLeases.get(slot) === authority) {
       this.#ownedExecutionLeases.delete(slot);
@@ -3467,6 +3481,15 @@ export class Server {
    * durable row. This is the stale-host handoff path. */
   #abandonOwnedExecutionLease(authority: OwnedExecutionLease): void {
     const lease = authority.handle;
+    // See #releaseOwnedExecutionLease — same P0-R2 cause-of-deletion log,
+    // stale-host handoff flavor.
+    console.debug(
+      "Memory: owned execution lease abandoned:",
+      lease.space,
+      lease.branch,
+      "generation",
+      lease.leaseGeneration,
+    );
     const slot = executionLeaseKey(lease.space, lease.branch);
     if (this.#ownedExecutionLeases.get(slot) === authority) {
       this.#ownedExecutionLeases.delete(slot);
@@ -3480,6 +3503,20 @@ export class Server {
   async renewExecutionLease(
     lease: ExecutionLeaseHandle,
   ): Promise<ExecutionLeaseHandle | null> {
+    // Renewal declines are the lease-lifecycle mirror of the claim-decline
+    // legs (P0-R2 chase): the pool tears the whole Worker generation down on
+    // a null renewal, so WHICH null path fired is load-bearing operationally
+    // — a dead pinned sponsor is re-anchorable in place, a lapsed durable
+    // row is not. The wire result stays reasonless; log the leg here.
+    const declined = (leg: string): null => {
+      console.debug(
+        "Memory: execution lease renewal declined:",
+        leg,
+        lease.space,
+        lease.branch,
+      );
+      return null;
+    };
     const authority = this.#executionLeaseAuthorities.get(lease);
     const owned = this.#ownedExecutionLeases.get(
       executionLeaseKey(lease.space, lease.branch),
@@ -3487,28 +3524,65 @@ export class Server {
     if (
       authority === undefined || authority !== owned ||
       authority.drainRequested
-    ) return null;
+    ) {
+      return declined(
+        authority === undefined
+          ? "authority-missing"
+          : authority !== owned
+          ? (owned === undefined
+            ? "not-owned[owned-missing]"
+            : "not-owned[owned-replaced]")
+          : "drain-requested",
+      );
+    }
     if (!this.memoryProtocolFlags().serverPrimaryExecutionV1) {
       await this.beginExecutionLeaseDrain(lease);
-      return null;
+      return declined("flags-off");
     }
-    const sponsor = this.#sessions.get(lease.space, authority.sponsorSessionId);
-    if (sponsor === null) return null;
     const engine = await this.openEngine(lease.space);
     if (!this.memoryProtocolFlags().serverPrimaryExecutionV1) {
       await this.beginExecutionLeaseDrain(lease);
-      return null;
+      return declined("flags-off");
     }
     if (
       this.#executionLeaseAuthorities.get(lease) !== authority ||
       this.#ownedExecutionLeases.get(
           executionLeaseKey(lease.space, lease.branch),
         ) !== authority ||
-      authority.drainRequested ||
-      this.#sessions.get(lease.space, authority.sponsorSessionId) !== sponsor
+      authority.drainRequested
     ) {
-      return null;
+      return declined("raced");
     }
+    // The pinned binding must hold up to the drain-window standard (live
+    // session, token, connection, WRITE — the demand row is deliberately
+    // NOT required; an explicit demand clear leaves the lease renewable
+    // for graceful drain). A stale pin is not a lease loss (P0-R2): the
+    // pool tears the whole Worker generation down on null, so re-anchor
+    // at a live same-principal demander before giving up.
+    let sponsor = this.#sessions.get(lease.space, authority.sponsorSessionId);
+    if (
+      sponsor === null ||
+      !this.#executionLeaseSponsorCanWrite(engine, authority, sponsor)
+    ) {
+      const staleLeg = sponsor === null
+        ? "sponsor-session-dead"
+        : "sponsor-binding-stale";
+      const reanchored = this.#reanchorExecutionSponsorInPlace(
+        engine,
+        authority,
+      );
+      if (reanchored === null) {
+        console.debug(
+          "Memory: execution sponsor population at decline:",
+          lease.space,
+          lease.branch,
+          this.#describeExecutionSponsorPopulation(engine, authority),
+        );
+        return declined(staleLeg);
+      }
+      sponsor = reanchored.session;
+    }
+    const renewSponsor = sponsor;
     const renewed = Engine.renewExecutionLease(engine, {
       lease: authority.handle,
       nowMs: () => this.#executionNowMs(),
@@ -3517,10 +3591,10 @@ export class Server {
         this.#executionLeaseSponsorCanWrite(
           transactionEngine,
           authority,
-          sponsor,
+          renewSponsor,
         ),
     });
-    if (renewed === null) return null;
+    if (renewed === null) return declined("durable-renew-refused");
     const handle = this.#replaceOwnedExecutionLease(authority, renewed);
     this.#scheduleExecutionLeaseExpiry();
     return handle;
@@ -3705,6 +3779,13 @@ export class Server {
         sponsor !== null &&
         this.#executionLeaseSponsorCanWrite(engine, authority, sponsor)
       ) continue;
+      // P0-R2: a stale pin (connection hop, session resume) is not
+      // ineligibility — re-anchor before draining. A genuinely
+      // WRITE-revoked principal can never be rescued here: every
+      // same-principal candidate shares the revoked capability.
+      if (this.#reanchorExecutionSponsorInPlace(engine, authority) !== null) {
+        continue;
+      }
       authority.drainRequested = true;
       affectedBranches.add(lease.branch);
       const drain = this.beginExecutionLeaseDrain(lease).then(() => undefined);
@@ -3735,6 +3816,15 @@ export class Server {
       this.#executionDemands.delete(key);
       this.#executionDemandRegistrationOrder.delete(key);
       this.#executionDemandSessionTokens.delete(key);
+      // P0-R2 timeline probe: connection-close sweeps are the other demand
+      // remover; without this line a vanished row is unattributable.
+      console.debug(
+        "Memory: execution demand row swept:",
+        `t=${Date.now()}`,
+        demand.space,
+        demand.branch,
+        demand.sessionId,
+      );
       this.#drainExecutionLeasesForDemand(
         demand.connectionId,
         demand.space,
@@ -3788,6 +3878,17 @@ export class Server {
         message.space,
         message.sessionId,
         message.branch,
+      );
+      // P0-R2 timeline probe (kept: demand-row lifecycle is the reference
+      // clock for every claim/renewal decline investigation).
+      console.debug(
+        "Memory: execution demand row",
+        message.pieces.length === 0 ? "cleared:" : "set:",
+        `t=${Date.now()}`,
+        message.space,
+        message.branch,
+        message.sessionId,
+        `pieces=${message.pieces.length}`,
       );
       if (message.pieces.length === 0) {
         this.#executionDemands.delete(key);
@@ -5800,24 +5901,99 @@ export class Server {
    * declined claim, while malformed candidates and duplicate claims remain
    * hard failures. */
   /**
-   * P0 sponsor re-anchor (client-passivity plan): re-point a live owned
-   * lease's sponsor binding at a live demanding session of the SAME
-   * principal, without touching the durable lease record or the Worker.
+   * P0-R2 (client-passivity plan): re-point a live owned lease's sponsor
+   * binding at the best live demanding session of the SAME principal,
+   * without touching the durable lease record or the Worker.
    *
-   * WHY: claim issuance re-validates the sponsor triple bound at
-   * acquisition (session live, token match, demand present, sponsor can
-   * WRITE). Before the P0 demand grace window, navigation churn tore the
-   * pool down constantly and every re-acquisition re-picked a live
-   * sponsor as a side effect; with the churn gone, a page reload kills
-   * the sponsor session while the Worker stays healthy, and every claim
-   * is refused ("execution lease is not active and authorized") — 32/32
-   * on the real workload. A full generation replacement is the wrong
-   * primitive for this (its graceful settle hangs against a live-load
-   * Worker); the sponsor is host state, so rebinding is a host-local
-   * operation. Returns false when no live same-principal WRITE-capable
-   * demander exists (a true principal change) — the pool then falls back
-   * to generation replacement.
+   * WHY: claim issuance/renewal and lease renewal re-validate the sponsor
+   * triple pinned at acquisition (session live, token match, demand row
+   * present, connection live, sponsor can WRITE). The browser breaks that
+   * pin routinely without surrendering anything — an explicit demand clear
+   * when a page departs, a connection hop with session resume, a reload —
+   * measured as 54/54 claim declines (`sponsor-demand-gone`) on the real
+   * workload with a live same-principal demander present throughout. A
+   * stale pin is host state, not lost authority: re-anchor it in place.
+   * Same principal only — the durable lease's onBehalfOf stays valid, so
+   * no re-issue is needed; a different principal is a real rotation and
+   * rides the drain + acquisition path. Candidate order matches
+   * acquisition (`#executionSponsorCandidates`), so the re-anchored pin is
+   * the same sponsor acquisition would have picked. Returns null (authority
+   * untouched) when no target exists; callers then decline exactly as
+   * before. Callers guarantee the authority is owned and un-drained.
    */
+  #reanchorExecutionSponsorInPlace(
+    engine: Engine.Engine,
+    authority: OwnedExecutionLease,
+  ):
+    | { demand: AuthenticatedExecutionDemand; session: SessionState }
+    | null {
+    const lease = authority.handle;
+    for (
+      const candidate of this.#executionSponsorCandidates(
+        lease.space,
+        lease.branch,
+      )
+    ) {
+      if (candidate.demand.principal !== lease.onBehalfOf) continue;
+      if (
+        !this.#executionSponsorCanWrite(
+          engine,
+          candidate.demand,
+          candidate.session,
+        )
+      ) continue;
+      console.debug(
+        "Memory: execution lease sponsor re-anchored:",
+        lease.space,
+        lease.branch,
+        "generation",
+        lease.leaseGeneration,
+        `${authority.sponsorSessionId} -> ${candidate.demand.sessionId}`,
+      );
+      authority.sponsorConnectionId = candidate.demand.connectionId;
+      authority.sponsorSessionId = candidate.demand.sessionId;
+      authority.sponsorSessionToken = candidate.session.sessionToken;
+      return { demand: candidate.demand, session: candidate.session };
+    }
+    return null;
+  }
+
+  /** P0-R2 probe companion: one compact line describing every demand row
+   * for the lease's (space, branch) and why it can or cannot re-anchor the
+   * sponsor — logged at sponsor-stale declines, where "no target" is
+   * otherwise indistinguishable from "wrong principal" and "dead row". */
+  #describeExecutionSponsorPopulation(
+    engine: Engine.Engine,
+    authority: OwnedExecutionLease,
+  ): string {
+    const lease = authority.handle;
+    const rows: string[] = [];
+    for (const demand of this.#executionDemands.values()) {
+      if (demand.space !== lease.space || demand.branch !== lease.branch) {
+        continue;
+      }
+      const session = this.#sessions.get(lease.space, demand.sessionId);
+      const flags = [
+        demand.principal === lease.onBehalfOf ? "same-principal" : "other",
+        session === null ? "session-dead" : "session-live",
+        session !== null && session.ownerConnectionId === demand.connectionId
+          ? "owner-conn"
+          : "conn-moved",
+        this.#connections.has(demand.connectionId) ? "conn-live" : "conn-gone",
+        session !== null &&
+          this.#executionSponsorCanWrite(engine, demand, session)
+          ? "writable"
+          : "unwritable",
+      ];
+      rows.push(`${demand.sessionId}[${flags.join(",")}]`);
+    }
+    return `onBehalfOf=${lease.onBehalfOf} pinned=${authority.sponsorSessionId}` +
+      ` rows=${rows.length === 0 ? "NONE" : rows.join(" ")}`;
+  }
+
+  /** Pool-facing wrapper over the in-place re-anchor: validates the handle
+   * still names the owned, un-drained authority (engine open is an
+   * authority boundary — re-sample after the await), then delegates. */
   async reanchorExecutionLeaseSponsor(
     lease: ExecutionLeaseHandle,
   ): Promise<boolean> {
@@ -5829,28 +6005,11 @@ export class Server {
       authority.drainRequested
     ) return false;
     const engine = await this.openEngine(lease.space);
-    // Engine open is an authority boundary: re-sample after the await.
     if (
       this.#ownedExecutionLeases.get(key) !== authority ||
       authority.drainRequested
     ) return false;
-    for (const demand of this.#executionDemands.values()) {
-      if (demand.space !== lease.space || demand.branch !== lease.branch) {
-        continue;
-      }
-      // Same principal only: the durable lease's onBehalfOf stays valid, so
-      // no re-issue is needed. A different principal is a real rotation and
-      // rides the acquisition path.
-      if (demand.principal !== lease.onBehalfOf) continue;
-      const session = this.#sessions.get(lease.space, demand.sessionId);
-      if (session === null) continue;
-      if (!this.#executionSponsorCanWrite(engine, demand, session)) continue;
-      authority.sponsorConnectionId = demand.connectionId;
-      authority.sponsorSessionId = demand.sessionId;
-      authority.sponsorSessionToken = session.sessionToken;
-      return true;
-    }
-    return false;
+    return this.#reanchorExecutionSponsorInPlace(engine, authority) !== null;
   }
 
   async trySetExecutionClaim(
@@ -5867,6 +6026,7 @@ export class Server {
         // but the wire result is deliberately reasonless — log it here.
         console.debug(
           "Memory: execution claim declined:",
+          `t=${Date.now()}`,
           error.message,
           claimInput.space,
           claimInput.actionId,
@@ -5920,11 +6080,18 @@ export class Server {
       lease.branch !== claimInput.branch
     ) {
       // The leg matters operationally (P0-R1 chase): four distinct causes
-      // share this refusal, and the recovery differs per cause.
+      // share this refusal, and the recovery differs per cause. The
+      // not-owned leg further distinguishes owned-missing (this authority
+      // was released/abandoned/expired and nothing re-acquired) from
+      // owned-replaced (a NEW generation owns the slot while this stale
+      // handle still claims) — the P0-R2 probe fields.
       const leg = authority === undefined
         ? "authority-missing"
         : authority !== owned
-        ? "not-owned"
+        ? (owned === undefined
+          ? "not-owned[owned-missing]"
+          : "not-owned[owned-replaced fdo " +
+            `${authority.firstDemandOrder}->${owned.firstDemandOrder}]`)
         : authority.drainRequested
         ? "drain-requested"
         : "space-mismatch";
@@ -5956,33 +6123,34 @@ export class Server {
       branch: claimInput.branch,
       nowMs: claimNow,
     });
-    const sponsor = this.#sessions.get(
-      claimInput.space,
-      authority.sponsorSessionId,
-    );
-    const demand = this.#executionDemands.get(executionDemandKey(
-      authority.sponsorConnectionId,
-      claimInput.space,
-      authority.sponsorSessionId,
-      claimInput.branch,
-    ));
     if (
       current === null || current.state !== "active" ||
-      !this.#sameExecutionLease(current, lease) || sponsor === null ||
-      sponsor.sessionToken !== authority.sponsorSessionToken ||
-      demand === undefined || demand.principal !== current.onBehalfOf ||
-      !this.#executionSponsorCanWrite(engine, demand, sponsor)
+      !this.#sameExecutionLease(current, lease)
     ) {
       // Leg discrimination (P0-R1): the recovery differs per cause — a
-      // dead/rotated sponsor is rebindable in place, a lapsed durable
+      // stale sponsor pin is re-anchorable in place, a lapsed durable
       // lease is not.
       const leg = current === null
         ? "durable-missing"
         : current.state !== "active"
         ? "durable-inactive"
-        : !this.#sameExecutionLease(current, lease)
-        ? "handle-mismatch"
-        : sponsor === null
+        : "handle-mismatch";
+      throw new ExecutionLeaseAuthorityError(
+        `execution lease is not active and authorized (${leg})`,
+      );
+    }
+    let sponsor = this.#sessions.get(
+      claimInput.space,
+      authority.sponsorSessionId,
+    );
+    let demand = this.#executionDemands.get(executionDemandKey(
+      authority.sponsorConnectionId,
+      claimInput.space,
+      authority.sponsorSessionId,
+      claimInput.branch,
+    ));
+    const sponsorLeg = (): string | null =>
+      sponsor === null
         ? "sponsor-session-dead"
         : sponsor.sessionToken !== authority.sponsorSessionToken
         ? "sponsor-token-rotated"
@@ -5990,10 +6158,35 @@ export class Server {
         ? "sponsor-demand-gone"
         : demand.principal !== current.onBehalfOf
         ? "sponsor-principal-changed"
-        : "sponsor-write-denied";
-      throw new ExecutionLeaseAuthorityError(
-        `execution lease is not active and authorized (${leg})`,
+        : !this.#executionSponsorCanWrite(engine, demand, sponsor)
+        ? "sponsor-write-denied"
+        : null;
+    let leg = sponsorLeg();
+    if (leg !== null) {
+      // P0-R2: a stale pin is not lost authority — re-anchor at a live
+      // same-principal demander and issue THIS claim, instead of declining
+      // and hoping an async pool round-trip converges before the next
+      // churn. Fail closed: the healed binding re-runs the same checks.
+      const reanchored = this.#reanchorExecutionSponsorInPlace(
+        engine,
+        authority,
       );
+      if (reanchored !== null) {
+        sponsor = reanchored.session;
+        demand = reanchored.demand;
+        leg = sponsorLeg();
+      }
+      if (leg !== null) {
+        console.debug(
+          "Memory: execution sponsor population at decline:",
+          claimInput.space,
+          claimInput.branch,
+          this.#describeExecutionSponsorPopulation(engine, authority),
+        );
+        throw new ExecutionLeaseAuthorityError(
+          `execution lease is not active and authorized (${leg})`,
+        );
+      }
     }
     // C3.6 issuance preflight (C3A17): a cross-space-read claim binds the
     // acting principal's foreign READ per read space and the delivery
@@ -6197,6 +6390,13 @@ export class Server {
       branch: claim.branch,
       nowMs: renewalNow,
     });
+    if (
+      current === null || current.state !== "active" ||
+      !this.#sameExecutionLease(current, lease)
+    ) {
+      this.revokeExecutionClaim(live);
+      return null;
+    }
     const sponsor = this.#sessions.get(
       claim.space,
       authority.sponsorSessionId,
@@ -6208,14 +6408,31 @@ export class Server {
       claim.branch,
     ));
     if (
-      current === null || current.state !== "active" ||
-      !this.#sameExecutionLease(current, lease) || sponsor === null ||
+      sponsor === null ||
       sponsor.sessionToken !== authority.sponsorSessionToken ||
       demand === undefined || demand.principal !== current.onBehalfOf ||
       !this.#executionSponsorCanWrite(engine, demand, sponsor)
     ) {
-      this.revokeExecutionClaim(live);
-      return null;
+      // P0-R2: a stale sponsor pin must not cost the executor its live
+      // claim — re-anchor at a live same-principal demander and renew;
+      // revoke only when none exists. The healed binding re-runs the same
+      // checks (fail closed).
+      const reanchored = this.#reanchorExecutionSponsorInPlace(
+        engine,
+        authority,
+      );
+      if (
+        reanchored === null ||
+        reanchored.demand.principal !== current.onBehalfOf ||
+        !this.#executionSponsorCanWrite(
+          engine,
+          reanchored.demand,
+          reanchored.session,
+        )
+      ) {
+        this.revokeExecutionClaim(live);
+        return null;
+      }
     }
     const ttlMs = this.options.executionControl?.claimTtlMs ?? 30_000;
     if (!isPositiveSafeInteger(ttlMs)) {

@@ -158,6 +158,7 @@ export function startServerExecutionPool(runtime: Runtime): void {
         memoryServer.recordExecutionCandidateClaimReady(candidate.claimKey);
         console.debug(
           "Memory: Server execution candidate claim-ready",
+          `t=${Date.now()}`,
           candidate.claimKey,
         );
       },

@@ -443,6 +443,72 @@ Deno.test("sponsor disconnect drains before a remaining writer can replace it", 
   }
 });
 
+// P0-R2 boundary: the sponsor re-anchor (a stale pin re-points at a live
+// demander of the SAME principal) must never become sponsor rotation. A
+// different principal is a real authority change and rides the drain +
+// acquisition path — the "sponsor disconnect drains before a remaining
+// writer can replace it" contract above.
+Deno.test("sponsor re-anchor never crosses principals", async () => {
+  const directory = await Deno.makeTempDir();
+  const server = createLeaseServer(
+    toFileUrl(`${directory}/`),
+    "host:reanchor-principal",
+    { acl: "enforce" },
+  );
+  const ownerClient = await connect(server);
+  const owner = await mount(ownerClient, OWNER);
+  let firstClient: MemoryClient.Client | undefined;
+  let secondClient: MemoryClient.Client | undefined;
+  try {
+    await setAcl(owner, {
+      [OWNER]: "OWNER",
+      [WRITER_A]: "WRITE",
+      [WRITER_B]: "WRITE",
+    });
+    firstClient = await connect(server);
+    const first = await mount(firstClient, WRITER_A);
+    await first.setExecutionDemand("", ["space:first"]);
+    secondClient = await connect(server);
+    const second = await mount(secondClient, WRITER_B);
+    await second.setExecutionDemand("", ["space:second"]);
+
+    const lease = await server.acquireExecutionLease(SPACE, "");
+    assertExists(lease);
+    assertEquals(lease.onBehalfOf, WRITER_A);
+
+    // WRITER_A's page departs (explicit clear; session and connection stay
+    // live). The only remaining demander is WRITER_B — a DIFFERENT
+    // principal, so claim issuance declines instead of re-anchoring.
+    await first.setExecutionDemand("", []);
+    await assertRejects(
+      () =>
+        server.setExecutionClaim(lease, {
+          branch: "",
+          space: SPACE,
+          contextKey: "space",
+          pieceId: "of:piece",
+          actionId: "action:cross-principal",
+          actionKind: "computation",
+          implementationFingerprint: "impl:v1",
+          runtimeFingerprint: "runtime:v1",
+        }),
+      Error,
+      "not active and authorized",
+    );
+
+    // Renewal keeps the graceful drain-window semantics: the pinned sponsor
+    // session/connection are live and WRITE-capable, so the lease renews
+    // WITHOUT its demand row — no re-anchor involved.
+    assertExists(await server.renewExecutionLease(lease));
+  } finally {
+    await firstClient?.close();
+    await secondClient?.close();
+    await ownerClient.close();
+    await server.close();
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
 Deno.test("stale host relinquishes claims after another host acquires the next generation", async () => {
   const directory = await Deno.makeTempDir();
   const store = toFileUrl(`${directory}/`);

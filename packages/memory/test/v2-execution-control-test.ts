@@ -3111,6 +3111,140 @@ Deno.test("reconnect restores demand before a replacement sponsor claim", async 
   }
 });
 
+// P0-R2 (client-passivity plan): the lease pins its sponsor as a host-local
+// (connection, session, token) triple, and the browser breaks that triple
+// routinely WITHOUT surrendering the lease — an explicit demand clear when a
+// page departs, a connection hop with session resume. Measured on the real
+// workload: 54/54 claim declines were `sponsor-demand-gone` with a live
+// same-principal demander present the whole time. A stale pin is not lost
+// authority: issuance/renewal re-anchor the pin in place at the best live
+// demander of the SAME principal, and only decline when none exists.
+Deno.test("claim issuance re-anchors the sponsor at a live same-principal demander", async () => {
+  const server = createControlServer("memory-v2-execution-claim-reanchor");
+  const clientA = await connectControlClient(server);
+  const clientB = await connectControlClient(server);
+  try {
+    const sessionA = await mount(clientA) as ExecutionSession;
+    const sessionB = await mount(clientB) as ExecutionSession;
+    const lease = await demandAndAcquireLease(server, sessionA);
+    await sessionB.setExecutionDemand("", ["space:piece:one"]);
+    // The sponsoring page departs: an explicit clear removes A's demand row
+    // but neither drains the lease nor kills A's session.
+    await sessionA.setExecutionDemand("", []);
+
+    const claim = await server.setExecutionClaim(
+      lease,
+      claimKey(CONTROL_SPACE, ""),
+    );
+    assertEquals(claim.claimGeneration, 1);
+    assertEquals(server.hasLiveExecutionClaim(claim), true);
+
+    // The re-anchored sponsor is B now: with B's demand also cleared and no
+    // remaining demander, the next issuance declines again (fail closed).
+    await sessionB.setExecutionDemand("", []);
+    assertEquals(
+      await server.trySetExecutionClaim(
+        lease,
+        claimKey(CONTROL_SPACE, "", "action:after-departure"),
+      ),
+      null,
+    );
+  } finally {
+    await clientA.close();
+    await clientB.close();
+    await server.close();
+  }
+});
+
+Deno.test("lease renewal re-anchors a stale sponsor binding instead of failing the generation", async () => {
+  const server = createControlServer("memory-v2-execution-renew-reanchor");
+  const transport = new ReconnectableExecutionTransport(server);
+  const clientA = await MemoryClient.connect({
+    transport,
+    protocolFlags: {
+      serverPrimaryExecutionV1: true,
+      serverPrimaryExecutionClaimRoutingV1: true,
+      serverPrimaryExecutionBuiltinPassivityV1: true,
+      serverPrimaryExecutionContextLatticeClaimsV1: true,
+    },
+  } as ExecutionClientOptions);
+  const clientB = await connectControlClient(server);
+  try {
+    const sessionA = await mount(clientA) as ExecutionSession;
+    const sessionB = await mount(clientB) as ExecutionSession;
+    const lease = await demandAndAcquireLease(server, sessionA);
+    await sessionB.setExecutionDemand("", ["space:piece:one"]);
+    // Clear A's row FIRST so the later connection drop has no sponsor demand
+    // row left to sweep — the auto-drain contract ("sponsor disconnect
+    // drains") stays untriggered, which is exactly the browser's
+    // navigate-with-session-resume shape: active durable lease, stale pin.
+    await sessionA.setExecutionDemand("", []);
+    transport.disconnect();
+    await server.flushExecutionLeaseTasks();
+
+    const renewed = await server.renewExecutionLease(lease);
+    assertExists(renewed);
+    assertEquals(renewed.leaseGeneration, lease.leaseGeneration);
+    assertEquals(renewed.state, "active");
+  } finally {
+    await clientA.close();
+    await clientB.close();
+    await server.close();
+  }
+});
+
+Deno.test("a stale sponsor binding with no live same-principal demander still fails renewal", async () => {
+  const server = createControlServer("memory-v2-execution-renew-no-target");
+  const transport = new ReconnectableExecutionTransport(server);
+  const client = await MemoryClient.connect({
+    transport,
+    protocolFlags: {
+      serverPrimaryExecutionV1: true,
+      serverPrimaryExecutionClaimRoutingV1: true,
+      serverPrimaryExecutionBuiltinPassivityV1: true,
+      serverPrimaryExecutionContextLatticeClaimsV1: true,
+    },
+  } as ExecutionClientOptions);
+  try {
+    const session = await mount(client) as ExecutionSession;
+    const lease = await demandAndAcquireLease(server, session);
+    await session.setExecutionDemand("", []);
+    transport.disconnect();
+    await server.flushExecutionLeaseTasks();
+
+    assertEquals(await server.renewExecutionLease(lease), null);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+Deno.test("claim renewal re-anchors the sponsor instead of revoking the live claim", async () => {
+  const server = createControlServer("memory-v2-execution-claim-renew-reanchor");
+  const clientA = await connectControlClient(server);
+  const clientB = await connectControlClient(server);
+  try {
+    const sessionA = await mount(clientA) as ExecutionSession;
+    const sessionB = await mount(clientB) as ExecutionSession;
+    const lease = await demandAndAcquireLease(server, sessionA);
+    const claim = await server.setExecutionClaim(
+      lease,
+      claimKey(CONTROL_SPACE, ""),
+    );
+    await sessionB.setExecutionDemand("", ["space:piece:one"]);
+    await sessionA.setExecutionDemand("", []);
+
+    const renewed = await server.renewExecutionClaim(lease, claim);
+    assertExists(renewed);
+    assertEquals(renewed.claimGeneration, claim.claimGeneration);
+    assertEquals(server.hasLiveExecutionClaim(renewed), true);
+  } finally {
+    await clientA.close();
+    await clientB.close();
+    await server.close();
+  }
+});
+
 Deno.test("control-only claim frames advance one feed sequence without advancing data", async () => {
   const server = createControlServer("memory-v2-execution-feed-order");
   const client = await connectControlClient(server);
