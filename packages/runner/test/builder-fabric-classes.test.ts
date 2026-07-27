@@ -6,7 +6,10 @@ import {
   FabricPrimitive,
   FabricSpecialObject,
 } from "@commonfabric/data-model/fabric-value";
-import { FabricLink } from "@commonfabric/data-model/fabric-instances";
+import {
+  FabricError,
+  FabricLink,
+} from "@commonfabric/data-model/fabric-instances";
 import {
   FabricBytes,
   FabricEpochDays,
@@ -48,6 +51,7 @@ const expectedBindings: Record<string, unknown> = {
   FabricLink,
   FabricBytes,
   FabricRegExp,
+  FabricError,
 };
 
 describe("commonfabric Fabric value classes", () => {
@@ -131,6 +135,42 @@ describe("commonfabric Fabric value classes", () => {
       expect(instance.flavor).toBe("es2025");
       expect(instance.source).toBe("a.c");
       expect(instance.flags).toBe("s");
+    });
+  });
+
+  describe("FabricError", () => {
+    it("constructs an instance carrying its fixed-schema slots", () => {
+      const BoundFabricError = commonfabric.FabricError as typeof FabricError;
+      const instance = new BoundFabricError({
+        type: "TypeError",
+        message: "nope",
+        stack: undefined,
+        cause: undefined,
+      });
+
+      expect(instance).toBeInstanceOf(FabricError);
+      expect(instance.type).toBe("TypeError");
+      expect(instance.name).toBe("TypeError");
+      expect(instance.message).toBe("nope");
+    });
+
+    // Unlike the other exposed classes, this one is mutable until frozen, so
+    // pattern code can reach its extras bag. Pinned because exposing writable
+    // members is a choice rather than a side effect of exposing the class.
+    it("allows extras to be set and read back", () => {
+      const BoundFabricError = commonfabric.FabricError as typeof FabricError;
+      const instance = new BoundFabricError({
+        type: "Error",
+        message: "with extras",
+        stack: undefined,
+        cause: undefined,
+      });
+
+      instance.setExtra("code", 42);
+
+      expect(instance.getExtra("code")).toBe(42);
+      expect(instance.hasExtra("code")).toBe(true);
+      expect(instance.extraSize).toBe(1);
     });
   });
 

@@ -1,3 +1,8 @@
+import type {
+  FabricError as ApiFabricError,
+  FabricErrorConstructor as ApiFabricErrorConstructor,
+} from "@commonfabric/api";
+
 import type { FabricValue } from "@/interface.ts";
 import {
   DEEP_CLONE_CORE,
@@ -85,7 +90,8 @@ export type FabricErrorState = {
  * `[CODEC]`, which is the source of truth for the encoded form.
  * See Section 1.4.1 of the formal spec.
  */
-export class FabricError extends FabricNativeWrapper<Error> {
+export class FabricError extends FabricNativeWrapper<Error>
+  implements ApiFabricError {
   /** Constructor name of the originating native `Error` (e.g. `"TypeError"`). */
   type: string;
   /** The `.name` property (always a concrete string). */
@@ -410,3 +416,8 @@ export class FabricError extends FabricNativeWrapper<Error> {
     return this.#codec;
   }
 }
+
+// Compile-time check that the exported `FabricError` constructor matches the
+// `FabricErrorConstructor` declared in `@commonfabric/api`. This catches drift
+// between the public type contract and this implementation.
+FabricError satisfies ApiFabricErrorConstructor;

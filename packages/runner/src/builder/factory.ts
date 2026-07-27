@@ -86,7 +86,10 @@ import {
   FabricSpecialObject,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { FabricLink } from "@commonfabric/data-model/fabric-instances";
+import {
+  FabricError,
+  FabricLink,
+} from "@commonfabric/data-model/fabric-instances";
 import {
   FabricBytes,
   FabricEpochDays,
@@ -307,6 +310,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     FabricLink,
     FabricBytes,
     FabricRegExp,
+    FabricError,
 
     // Debug stringifiers (helpers exposed for pattern code)
     toCompactDebugString,
