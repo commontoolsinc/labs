@@ -312,12 +312,16 @@ const emitChatCompletionAttempt = async (
 };
 
 const transportErrorAfterRetries = (
+  operation: OpenAIGatewayOperation,
   endpoint: URL,
   attempts: number,
   error: unknown,
 ): Error =>
+  // Names the operation so a Responses failure is not reported as a chat
+  // completion one. `diagnostics.ts` classifies timeouts by matching
+  // "transport request failed", which stays stable across both operations.
   new Error(
-    `chat completion transport request failed after ${attempts} ${
+    `${operation} transport request failed after ${attempts} ${
       attempts === 1 ? "attempt" : "attempts"
     } for ${endpoint.toString()}: ${errorMessage(error)}`,
   );
@@ -498,12 +502,17 @@ export class OpenAICompatibleGatewayClient {
           throw chatCompletionAbortReason(options.signal);
         }
         if (attempt >= maxTransportAttempts) {
-          throw transportErrorAfterRetries(endpoint, attempt, error);
+          throw transportErrorAfterRetries(operation, endpoint, attempt, error);
         }
         await sleep(this.#chatCompletionRetryDelayMs * attempt, options.signal);
       }
     }
-    throw transportErrorAfterRetries(endpoint, maxTransportAttempts, lastError);
+    throw transportErrorAfterRetries(
+      operation,
+      endpoint,
+      maxTransportAttempts,
+      lastError,
+    );
   }
 
   async createChatCompletionJson(

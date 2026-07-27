@@ -266,6 +266,41 @@ Deno.test("chatViewOfRequest projects a Responses request to the chat view", () 
   assertEquals(view.tools, ["read_file"]);
 });
 
+Deno.test("chatViewOfRequest reads user turns in either legal item shape", () => {
+  // `{role, content}` and the fully-qualified `{type:"message", role, content}`
+  // are both legal Responses input items. Keying on `type` projected the
+  // qualified form as an empty string, which would have silently emptied the
+  // ~50 content assertions that run through this helper.
+  for (
+    const item of [
+      { role: "user", content: [{ type: "input_text", text: "Do the task." }] },
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "Do the task." }],
+      },
+    ]
+  ) {
+    const view = chatViewOfRequest({ input: [item] });
+    assertEquals(view.messages[0].role, "user");
+    assertEquals(view.messages[0].content, "Do the task.");
+  }
+});
+
+Deno.test("chatViewOfRequest joins multi-part assistant text", () => {
+  const view = chatViewOfRequest({
+    input: [{
+      type: "message",
+      role: "assistant",
+      content: [
+        { type: "output_text", text: "Part one. " },
+        { type: "output_text", text: "Part two." },
+      ],
+    }],
+  });
+  assertEquals(view.messages[0].content, "Part one. Part two.");
+});
+
 Deno.test("chatViewOfRequest omits the system turn when there are no instructions", () => {
   const view = chatViewOfRequest({
     input: [

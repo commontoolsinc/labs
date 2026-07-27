@@ -233,6 +233,30 @@ Deno.test("a Responses 401 explains which credential was rejected", async () => 
   );
 });
 
+Deno.test("transport failures name the operation that failed", async () => {
+  // A Responses timeout reported as a "chat completion" failure sends anyone
+  // reading the log to the wrong endpoint.
+  const failing = new OpenAICompatibleGatewayModelClient(
+    new OpenAICompatibleGatewayClient({
+      baseUrl: GATEWAY,
+      authMode: "none",
+      chatCompletionTransportRetries: 0,
+      fetchFn: () => Promise.reject(new Error("connection error: timed out")),
+    }),
+  );
+
+  await assertRejects(
+    () => failing.complete(turn({ model: "gpt-5.6-terra" })),
+    Error,
+    "responses transport request failed after 1 attempt",
+  );
+  await assertRejects(
+    () => failing.complete(turn()),
+    Error,
+    "chat.completions transport request failed after 1 attempt",
+  );
+});
+
 Deno.test("other Responses failures pass the body through", async () => {
   const client = clientWith([], () => ({
     body: '{"error":{"message":"bad request"}}',

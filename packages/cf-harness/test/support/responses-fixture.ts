@@ -65,25 +65,18 @@ export const chatViewOfRequest = (
       continue;
     }
     const content = item.content;
-    if (item.type === "message" && Array.isArray(content)) {
-      messages.push({
-        role: String(item.role),
-        content: content.flatMap((part) =>
-          typeof part === "object" && part !== null &&
-            (part as Record<string, unknown>).type === "output_text"
-            ? [(part as Record<string, unknown>).text as string]
-            : []
-        ).join(""),
-      });
-      continue;
-    }
     if (!Array.isArray(content)) continue;
+    // Both `{role, content}` and the fully-qualified `{type:"message", role,
+    // content}` are legal Responses input items, and assistant turns use
+    // output_text where user turns use input_text. Handle every combination
+    // rather than keying on `type`, so a producer change cannot silently
+    // project real content as an empty string.
     const parts: Record<string, unknown>[] = content.flatMap((
       rawPart,
     ): Record<string, unknown>[] => {
       if (typeof rawPart !== "object" || rawPart === null) return [];
       const part = rawPart as Record<string, unknown>;
-      if (part.type === "input_text") {
+      if (part.type === "input_text" || part.type === "output_text") {
         return [{ type: "text", text: part.text as string }];
       }
       if (part.type === "input_image") {
@@ -91,11 +84,15 @@ export const chatViewOfRequest = (
       }
       return [];
     });
-    // Text-only turns read as a plain string, matching the chat contract.
+    // Text-only turns read as a plain string, matching the chat contract;
+    // anything carrying an image keeps the content-part array.
+    const textOnly = parts.every((part) => part.type === "text");
     messages.push({
       role: String(item.role),
-      content: (parts.length === 1 && parts[0].type === "text"
-        ? (parts[0] as { text: string }).text
+      content: (textOnly
+        ? parts.map((part) =>
+          part.text as string
+        ).join("")
         : parts) as unknown as string,
     });
   }
