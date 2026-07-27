@@ -76,8 +76,12 @@ snapshot for that source and shows the combined list in gray with the error.
 Each event connection receives the current tile snapshot before it waits for
 new collections. The browser reconciles that snapshot by tile ID, leaving
 unchanged elements, focus, and scroll positions in place. Routine data updates
-never navigate the page. A changed shell version reloads once so an unattended
-display picks up new CSS or client code after a dashboard deployment.
+never navigate the page. At startup the server hashes the shell renderer and
+wrapper together with fixed rendered HTML for every status. Changes to the
+shell markup, CSS, browser code, embedded assets, or actual refresh interval
+therefore change the version. An unattended display reloads when it reconnects
+to a server with a different version. Routine tile data changes leave the
+version unchanged.
 
 The tab favicon follows the most urgent visible tile. It is red when any tile is
 red, orange when there are no red tiles but at least one orange tile, and green

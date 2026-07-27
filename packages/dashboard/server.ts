@@ -26,7 +26,7 @@ import { makeCtx } from "./ctx.ts";
 import { friendlyError } from "./lib.ts";
 import { faviconPng, faviconStatus } from "./favicon.ts";
 import type { FaviconStatus } from "./favicon.ts";
-import { renderTile, shell, SHELL_VERSION } from "./render.ts";
+import { renderTile, shell, shellVersion } from "./render.ts";
 import type { Ctx, Run, RunSource, Tile, TileView } from "./types.ts";
 
 const ctx = makeCtx();
@@ -69,7 +69,7 @@ interface DashboardUpdate {
   gridHtml: string;
   wideHtml: string;
   ageSeconds: number;
-  shellVersion: number;
+  shellVersion: string;
   faviconStatus: FaviconStatus;
   faviconRedSince: number | null;
   faviconRedAgeMs: number | null;
@@ -398,6 +398,7 @@ const routes = TILES.flatMap((t) => t.routes ?? []);
 // the real cadence for the fastest tile is its interval plus a tick, not the bare
 // interval.
 const REFRESH_MS = Math.min(...TILES.map((t) => t.intervalMs)) + TICK_MS;
+const SHELL_VERSION = shellVersion(REFRESH_MS);
 
 export function page(currentViews: ReadonlyMap<string, TileView> = views): string {
   const update = dashboardUpdate(currentViews);
@@ -406,7 +407,6 @@ export function page(currentViews: ReadonlyMap<string, TileView> = views): strin
     update.wideHtml,
     update.ageSeconds,
     REFRESH_MS,
-    update.shellVersion,
     update.faviconStatus,
     update.faviconRedSince,
     update.faviconRedAgeMs,

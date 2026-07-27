@@ -1,6 +1,7 @@
 {
   "imports": {
     // Dependency guide: ../../docs/development/DEPENDENCIES.md
+    "@noble/hashes": "npm:@noble/hashes@^2.2.0",
     "@resvg/resvg-js": "npm:@resvg/resvg-js@2.6.2"
   },
   "tasks": {
