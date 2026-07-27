@@ -177,7 +177,7 @@ surveillance tool.
 | prod errors | SigNoz trace error rate for one service (errored spans / all spans): last-12h headline, with a per-hour sparkline over the retained trace history (~2 weeks) and the last-12h slice that feeds the headline highlighted. Scoped to `PROD_SERVICE` — the same SigNoz holds staging and one-off perf runs, whose rates are not production's. Gray (not red) when SigNoz is unreachable. Pops out to the SigNoz logs explorer | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `SIGNOZ_UI_URL` for the pop-out |
 | cloud spend | BigQuery billing export, via the REST API | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
 | ci spend | GitHub Actions and Blacksmith billing, projected to month-end in USD. Each configured source gets a line in the shared 45-day chart and an MTD label. The header shows combined MTD spend. A source that cannot be read shows `$???`, while the headline remains a lower bound from the sources that did respond | either or both of `GH_TOKEN` (with org billing read) and `BLACKSMITH_API_TOKEN`; optional `GH_BILLING_ORG`, `BLACKSMITH_ORG`, `CI_MONTHLY_BUDGET` |
-| benchmark | a runtime benchmark's ~45-day trend, from the `benchmarks.yml` deno-bench artifacts on main | `GH_TOKEN`; optional `BENCH_METRIC` |
+| benchmarks | a scale-invariant index of benchmark performance on `benchmarks.yml` main runs, trended over ~45 days (each run vs the last, geometric mean of per-benchmark changes, so every benchmark weighs the same): red when the most recent run failed or produced no valid data (the main signal), orange only on a broad across-the-board rise. Adding or removing a benchmark is a non-event. Drills through to the per-benchmark history | `GH_TOKEN` |
 | performance history → `/bench?view=runtime` | runtime benchmark trends, labs or loom CI duration history, and a detailed CI run Gantt. Historical views support windows from 1 through 45 days, date axes, and duration sorting. CI includes end-to-end workflow time, every job, and slowest-shard group lines | `GH_TOKEN` |
 | model spend | OpenAI + Anthropic + OpenRouter usage APIs. Headline is the projected full-month spend (extrapolated from the recent daily rate, spilling into last month when this month is under two weeks old), summed across providers. OpenAI and Anthropic (which expose per-day cost) are charted as one line each over ~45 days, dimmed except for the current-month slice that feeds the headline, with each line's MTD in the right gutter; OpenRouter (monthly total only, abbreviated "OR") is folded into the totals. The subtitle is the bullet-separated key (`OpenAI • Anthropic • OR $0`); the combined MTD sits in the header (the `aside` slot); the span the chart covers is in its bottom-left corner (the `duration` slot). A provider we can't read shows `$???` and drops the tile to gray, but the rest still chart and total | any of `OPENAI_ADMIN_KEY`, `ANTHROPIC_ADMIN_KEY`, `OPENROUTER_KEY`; optional `MODEL_MONTHLY_BUDGET` |
 | discord online | Discord gateway presence, team vs visitors over time | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` (Server Members + Presence intents) |
@@ -378,7 +378,6 @@ it.
 | `COMMON_TOOLS_URL` | common.tools | override the public-site URL (e.g. the `www` host if the apex redirects). |
 | `DASHBOARD_REPO` | CI tiles, github users | which repo the CI tiles read. Its owner is the organization the **github users** tile reads (default `commontoolsinc/labs`). |
 | `DASHBOARD_CACHE_DIR` | server caches | directory for all persistent dashboard cache files (default: the platform temp directory). |
-| `BENCH_METRIC` | benchmark | substring that pins which benchmark the grid tile shows; unset, it rotates hourly through all of them (see the note below). |
 | `SIGNOZ_UI_URL` | prod errors | browser-facing SigNoz URL for the "logs" pop-out. Defaults to `SIGNOZ_URL` when that is a public `https://` URL; set it when the server reaches SigNoz over an in-cluster URL a browser can't. |
 | `PROD_SERVICE` | prod errors, dau | the `service.name` production reports under in SigNoz, which both trace-reading tiles scope to. Defaults to `toolshed-production`. A name outside `[A-Za-z0-9._-]` is ignored, since it lands inside a query expression. |
 | `DAU_EXCLUDE_DIDS` | dau | comma-separated identity DIDs to leave out of the count — the server's own identity, `MEMORY_SERVICE_DIDS`, background services. Until it is set the count is an upper bound. See [dau](#dau) below. |
@@ -431,34 +430,58 @@ Notes:
   gray and shows `$???` for that source. The values from responding sources
   remain as a lower bound. A GitHub classic-plan setup still falls back to
   minutes when Blacksmith is not configured.
-- **`benchmark`** trends one `deno bench` measurement over ~45 days. The
-  `benchmarks.yml` job on main runs `deno bench --json` over the runner, cache,
-  and deep-equal benchmarks and uploads the report as a `bench-results` artifact
-  (90-day retention; there is no committed history). The tile lists benchmark runs
-  on main, samples one run per shortest-view bucket, downloads that artifact, unzips it
-  in-process, and reads each benchmark's timings. Each completed artifact check is
-  persisted before it is counted as finished, so only new runs and new attempts are
-  fetched after the first fill or a server restart. The grid tile plots **p99**. With
-  `BENCH_METRIC` set it pins to the benchmark whose `<file> > <group>/<name>` key
-  contains that substring; otherwise it **rotates** — showing one benchmark per
-  clock-hour, chosen deterministically from the hour so a fresh dashboard on any
-  machine shows the same one for the same hour. It goes **orange** when that
-  benchmark's 45-day trend rises past 5% and **red** past 20% ("trending up
-  rapidly"); flat or falling is green. A large regression reads as a fold
-  multiplier (`▲44×`) once it passes 4x, rather than a long percentage. The trend
-  is a robust **daily-median Theil–Sen** fit: the sub-daily samples are first
-  collapsed to one median per calendar day, then the trend is the median of the
-  pairwise log-slopes between days, projected across the day span. The daily median
-  absorbs within-day spikes, the median-of-slopes tolerates roughly a third of the
-  days being outliers, and working per calendar day (not per sample or per
-  millisecond) keeps it time-aware without letting two noisy runs a few hours apart
-  blow up the slope — which is what naive per-millisecond weighting does. A
-  benchmark with fewer than 7 distinct days in the window is marked as new and
-  left gray: there is too little data to claim a trend. The window is capped by
-  the 90-day artifact retention, so it shows at most ~45 days and only as far
-  back as the job has run.
-  (The shortest-view buckets are about 16 minutes wide, so the first cache fill
-  can download correspondingly more artifacts.)
+- **`benchmarks`** trends a **scale-invariant index** of benchmark performance on the
+  `benchmarks.yml` runs on main over ~45 days. The job runs `deno bench --json` over
+  the runner, cache, and deep-equal benchmarks and uploads the report as a
+  `bench-results` artifact (90-day retention; there is no committed history). Each
+  run's index is the previous run's index times the **geometric mean of the
+  per-benchmark changes** between the two runs, so every benchmark weighs the same
+  regardless of size and **only a broad, across-the-board move shifts it** — a
+  regression in one benchmark, however slow, barely registers (that is the
+  drill-down's job; a summed total, by contrast, is dominated by the few slowest
+  benchmarks). The headline is the **trend** itself — the fractional change of the
+  index across the recent window — over a second line naming how many benchmarks the
+  latest run measured and, when a recent window is highlighted, how many days that
+  window spans. **Red** — the signal this tile is mainly here to
+  raise — is the **most recent run failing outright, or finishing green on CI with no
+  readable benchmark data** (it ran and made nothing usable, so it is as good as
+  failed); red reads the workflow-run list and the latest run's cached result, so it
+  fires even when the artifacts cannot be read. **Orange** is the index **trending
+  up** (past 5%). The trend reads a recent window only — the runs in the last
+  `BENCH_TREND_MAX_AGE_DAYS` or the newest `BENCH_TREND_MIN_RUNS`, whichever is more,
+  the same "larger of the two" idea as CI duration's median window — while the
+  sparkline still spans the full ~45 days with that window drawn brighter. Green
+  while flat or falling. `deno bench` samples
+  each benchmark to a fixed time budget, so the run's wall clock barely moves with
+  performance; the per-op times do, which is why the tile trends those rather than
+  the run's duration. Because the index comes from the artifacts, the tile grays when
+  no in-window run has readable data and the latest run is neither failed nor empty:
+  **collecting…** while a fetch is still in progress — shown from the moment a
+  collection starts, before the run list is even fetched, so a freshly loaded
+  dashboard is never blank — and **benchmark data unavailable** once a fetch has
+  finished and found none. Chaining the per-run ratios makes **adding or removing a benchmark
+  a non-event**: it is in only one run of the adjacent pair at that step, so it drops
+  out of the geometric mean and the index does not step — no reset needed. A large
+  rise reads as a fold multiplier (`▲44×`) once it passes 4x, rather
+  than a long percentage. The trend is a robust
+  **daily-median Theil–Sen** fit: the sub-daily samples are first collapsed to one
+  median per calendar day, then the trend is the median of the pairwise log-slopes
+  between days, projected across the day span. The daily median absorbs within-day
+  spikes, the median-of-slopes tolerates roughly a third of the days being outliers,
+  and working per calendar day (not per sample or per millisecond) keeps it
+  time-aware without letting two noisy runs a few hours apart blow up the slope —
+  which is what naive per-millisecond weighting does. With fewer than 7 distinct
+  days in the window the trend is marked new: there is too little data to claim one.
+  The window is capped by the 90-day artifact retention, so it shows at most ~45
+  days and only as far back as the job has run.
+  - The tile drills through to the per-benchmark history behind `/bench`, which the
+    tile's collection keeps warm in the background. That collection lists benchmark
+    runs on main, samples one run per shortest-view bucket, downloads that artifact,
+    unzips it in-process, and reads each benchmark's timings. Each completed
+    artifact check is persisted before it is counted as finished, so only new runs
+    and new attempts are fetched after the first fill or a server restart. (The
+    shortest-view buckets are about 16 minutes wide, so the first cache fill can
+    download correspondingly more artifacts.)
   - Its **runtime benchmarks** view at `/bench?view=runtime` shows a sparkline
     for **every** benchmark on a shared calendar-time axis, so a late-starting
     benchmark sits at the right and a stale one visibly ends short of it.
@@ -553,7 +576,7 @@ Notes:
 Everything below is a tunable constant in `config.ts`:
 
 - **Status thresholds:** `TRUST_GOOD`/`TRUST_WARN` (first-try-green %), `DUR_GOOD`/`DUR_WARN` (median CI minutes).
-- **Data windows:** The shared fetch returns at most `CI_RUNS_MAX=200` workflow runs and stops at `CI_RUNS_MAX_AGE_DAYS=60` days. CI trust uses the entire fetched window. CI duration uses whichever is larger: `DUR_MIN_RUNS=20` passing runs or `DUR_MAX_AGE_HOURS=6` hours. Recent runs shows `RECENT_DISPLAY=50` entries.
+- **Data windows:** The shared fetch returns at most `CI_RUNS_MAX=200` workflow runs and stops at `CI_RUNS_MAX_AGE_DAYS=60` days. CI trust uses the entire fetched window. CI duration uses whichever is larger: `DUR_MIN_RUNS=20` passing runs or `DUR_MAX_AGE_HOURS=6` hours. The benchmark trend uses the same larger-of-the-two idea in days: `BENCH_TREND_MIN_RUNS=20` runs or `BENCH_TREND_MAX_AGE_DAYS=14` days. Recent runs shows `RECENT_DISPLAY=50` entries.
 - **ci-trust cell grid:** `TRUST_COLS=40` sets the column count. The grid has up to `CI_RUNS_MAX=200` cells, one for every fetched run. First-try successes are green. In-progress runs are blue. Completed runs that lower the trust percentage are red. Ignored runs are gray.
 
 ## Local development

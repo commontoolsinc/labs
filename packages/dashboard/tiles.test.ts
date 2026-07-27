@@ -108,7 +108,7 @@ Deno.test(
     assertEquals(cells, 200);
     assertEquals(
       view.sub,
-      "first-try green · 199 counted of last 200 runs",
+      "first-try green · 199 of last 200 runs",
     );
     assert(
       !(view.extra ?? "").includes("#e2504a"),

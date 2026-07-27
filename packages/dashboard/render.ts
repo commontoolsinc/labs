@@ -104,7 +104,10 @@ ${faviconLink(status)}
   .lbl .spacer{flex:1}
   .drill{font-size:10px;color:#6f757f;letter-spacing:0;text-transform:none}
   .hmtd{font-size:11px;color:#9aa0ab;letter-spacing:0;text-transform:none;font-variant-numeric:tabular-nums;margin-right:8px}
-  .big{font-size:30px;font-weight:600;margin:0}
+  /* Fixed line-height so the headline's line box is the same height regardless of
+     which font the glyph comes from: the ▲/▼ trend arrows fall back to a taller
+     symbol font, and under line-height:normal that stretched the tile. */
+  .big{font-size:30px;font-weight:600;margin:0;line-height:1.2}
   .big.good{color:#62d18d}.big.warn{color:#f0b968}.big.bad{color:#f0726c}.big.unknown{color:#9aa0ab}
   .sub{font-size:13px;color:#9aa0ab;margin:5px 0 0}
   .running{display:inline-flex;align-items:center;gap:5px;font-size:10px;color:#8a93a5;letter-spacing:.02em;text-transform:none;margin-top:10px}
