@@ -437,8 +437,8 @@ export async function main(argv: string[] = Deno.args) {
   }
 
   // CF_FUSE_DEBUG=1 enables debug logging even when --debug isn't passed.
-  // The background supervisor doesn't forward --debug to the daemon child,
-  // but env vars are inherited, so this is the reliable switch in CI.
+  // --debug is forwarded through every spawn layer (mount -> supervisor ->
+  // daemon child), and env vars are inherited too, so either switch works.
   const debug = args.debug || Deno.env.get("CF_FUSE_DEBUG") === "1";
   const dangerouslyAllowIncompatibleSchema = Boolean(
     args["dangerously-allow-incompatible-schema"],
