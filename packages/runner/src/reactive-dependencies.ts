@@ -1,5 +1,6 @@
-import { isRecord } from "@commonfabric/utils/types";
+import { isPlainContainer, isRecord } from "@commonfabric/utils/types";
 import {
+  FabricSpecialObject,
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
@@ -267,22 +268,24 @@ function commonPrefixLength(
  * trigger re-evaluation. Deep value changes inside existing keys should not.
  *
  * - Links: compared by identity (deepEqual), since a link IS the pointer.
- * - Objects: changed iff the key set changed (not the values).
+ * - Plain objects: changed iff the key set changed (not the values).
  * - Arrays: changed iff the key set changed (not the values).
- * - Primitives: changed iff the value changed.
+ * - Everything else: an opaque leaf, changed iff its value changed.
  *
- * NOTE: FabricSpecialObjects (FabricBytes / other FabricPrimitives) are NOT
- * meaningfully handled here. They hold state in private fields with zero
- * enumerable own-props, so the object branch below compares them by their
- * (empty) key set and calls any two "unchanged" — detecting neither an in-place
- * value change nor a class/type change. They are kept off this path upstream:
- * query-result-proxy materializes a FabricPrimitive as an atomic value (a
- * recursive read), so its change-detection runs through `valueEqual`, not here.
- * And the intended behavior here is genuinely ambiguous: for an opaque, keyless
- * leaf, should a "shallow" read react to a class/type change (its shape) or to
- * any value change (it being atomic)? We don't decide — if a FabricSpecialObject
- * ever reaches here via a nonRecursive read, treat it as an unhandled gap, not
- * defined behavior.
+ * Comparing by key set is only meaningful for a plain object or array, where
+ * the key set IS the shallow structure and deeper changes are picked up by the
+ * recursive path instead. It says nothing useful about any other object: a
+ * `FabricPrimitive` holds its state in private fields and presents no
+ * enumerable own-props at all, so comparing key sets reports every two of them
+ * as unchanged and reactive consumers never re-fire. The same goes for any
+ * other non-plain value whose key set doesn't describe it. Those are leaves,
+ * and a leaf is compared by value.
+ *
+ * That resolves an ambiguity this function used to leave open — whether a
+ * shallow read of an opaque leaf should react to a change of class or to any
+ * change of value. Treating non-plain values as leaves answers "any change of
+ * value", which is also what the recursive path answers, so the same value
+ * gets the same verdict whichever way it is read.
  */
 function shallowEqual(
   before: FabricValue,
@@ -293,7 +296,7 @@ function shallowEqual(
     return valueEqual(before, after);
   }
 
-  if (isRecord(before) && isRecord(after)) {
+  if (isPlainContainer(before) && isPlainContainer(after)) {
     const beforeKeys = Object.keys(before);
     const afterKeys = Object.keys(after);
     if (beforeKeys.length !== afterKeys.length) return false;
@@ -304,8 +307,42 @@ function shallowEqual(
     return beforeKeys.every((k) => Object.hasOwn(after, k));
   }
 
-  // Primitives (null, number, string, boolean, undefined)
+  return leafEqual(before, after);
+}
+
+/**
+ * Compares two opaque leaf values. Defined for every input, including ones
+ * outside `FabricValue` that reach here despite the declared parameter types.
+ *
+ * Values `valueEqual()` cannot compare fall back to identity. Identity errs
+ * toward reporting a change, which costs at worst a redundant re-evaluation;
+ * the opposite error — reporting "unchanged" for something that changed — is
+ * silent, and is the one this function exists to avoid.
+ */
+function leafEqual(before: FabricValue, after: FabricValue): boolean {
+  if (Object.is(before, after)) return true;
+
+  if (!isValueComparable(before) || !isValueComparable(after)) {
+    return false;
+  }
+
   return valueEqual(before, after);
+}
+
+/**
+ * Returns true if `valueEqual()` can compare `value`. Mirrors the
+ * classification `objectSubtypeOf()` performs in the `data-model` `valueEqual`
+ * module, which accepts a plain container or a `FabricSpecialObject` and
+ * rejects every other object; functions are rejected earlier still.
+ */
+function isValueComparable(value: unknown): boolean {
+  // Rejected before any classification happens.
+  if (typeof value === "function") return false;
+
+  // Primitives, which `valueEqual()` settles directly.
+  if (typeof value !== "object" || value === null) return true;
+
+  return isPlainContainer(value) || value instanceof FabricSpecialObject;
 }
 
 function comparePaths(
