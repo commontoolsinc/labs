@@ -286,6 +286,13 @@ function commonPrefixLength(
  * change of value. Treating non-plain values as leaves answers "any change of
  * value", which is also what the recursive path answers, so the same value
  * gets the same verdict whichever way it is read.
+ *
+ * A leaf whose comparison `valueEqual()` cannot perform will throw, and that
+ * is deliberate: the classes it currently cannot compare are ones whose
+ * protocol members are unimplemented stubs. Catching here would turn a loud
+ * "this class isn't finished" into a quiet answer derived from it, which is
+ * both the failure mode this function guards against and a way for an
+ * unfinished class to shape behavior elsewhere. Do not add a `catch`.
  */
 function shallowEqual(
   before: FabricValue,
@@ -307,36 +314,9 @@ function shallowEqual(
     return beforeKeys.every((k) => Object.hasOwn(after, k));
   }
 
-  return leafEqual(before, after);
-}
-
-/**
- * Compares two opaque leaf values. Defined for every input, including ones
- * outside `FabricValue` that reach here despite the declared parameter types.
- *
- * Anything `valueEqual()` turns out not to answer for is compared by identity
- * instead. Identity errs toward reporting a change, which costs at worst a
- * redundant re-evaluation; the opposite error — reporting "unchanged" for
- * something that changed — is silent, and is the one this function exists to
- * avoid.
- */
-function leafEqual(before: FabricValue, after: FabricValue): boolean {
-  if (Object.is(before, after)) return true;
-
-  try {
-    return valueEqual(before, after);
-  } catch {
-    // `valueEqual()` refuses some values outright — a `Date`, a `Map`, a
-    // function — and for some fabric classes its comparison is not written
-    // yet. Neither is predictable from a value's type: whether it is frozen
-    // decides the first, and which classes are finished decides the second.
-    // So this doesn't try to predict them; it just declines to be surprised.
-    //
-    // Reporting a change is the safe answer. It costs a redundant
-    // re-evaluation, where reporting "unchanged" for something that did change
-    // is silent — the failure this whole function exists to prevent.
-    return false;
-  }
+  // Opaque leaf: compared by value. `valueEqual()` leads with `Object.is()`,
+  // so an identical pair short-circuits before any structural work.
+  return valueEqual(before, after);
 }
 
 function comparePaths(

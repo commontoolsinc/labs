@@ -1966,14 +1966,14 @@ describe("determineTriggeredActions", () => {
       expect(result).toEqual([action]);
     });
 
-    // A non-recursive read compares an opaque leaf by value, and not every
-    // fabric class can answer that: `FabricMap` and `FabricSet` are protocol
-    // stubs whose comparison throws. Change detection has to survive one
-    // arriving rather than propagating the failure into the scheduler, so it
-    // reports a change instead -- a redundant re-evaluation, never a silent
-    // miss. `FabricMap` stands in here for any value whose comparison is
-    // unavailable, whatever the reason.
-    it("triggers rather than throwing on a value it cannot compare", () => {
+    // A non-recursive read compares an opaque leaf by value, and a class whose
+    // comparison is an unimplemented stub cannot answer. The failure is
+    // deliberately left to propagate rather than being caught and turned into
+    // "changed": a stub announcing itself loudly is worth more than a quiet
+    // answer derived from an unfinished class, and swallowing it would let
+    // that class shape behavior here. `FabricMap` stands in for any value
+    // whose comparison is unavailable.
+    it("propagates the failure from a value it cannot compare", () => {
       const action = createAction("nonRecursiveUncomparableLeaf");
       const dependencies = new Map<Action, SortedAndCompactPaths>([
         [action, [["value", "a"]]],
@@ -1981,14 +1981,15 @@ describe("determineTriggeredActions", () => {
       const before = { value: { a: new FabricMap(new Map([["k", 1]])) } };
       const after = { value: { a: new FabricMap(new Map([["k", 2]])) } };
 
-      const result = determineTriggeredActions(
-        dependencies,
-        before as unknown as FabricValue,
-        after as unknown as FabricValue,
-        ["value", "a"],
-        { nonRecursive: true },
-      );
-      expect(result).toEqual([action]);
+      expect(() =>
+        determineTriggeredActions(
+          dependencies,
+          before as unknown as FabricValue,
+          after as unknown as FabricValue,
+          ["value", "a"],
+          { nonRecursive: true },
+        )
+      ).toThrow("not yet implemented");
     });
 
     it("triggers on same-path write for non-recursive reads", () => {
