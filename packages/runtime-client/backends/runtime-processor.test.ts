@@ -30,7 +30,7 @@ import {
   getCell,
   mapCellRefsToSigilLinks,
 } from "./utils.ts";
-import { Runtime } from "@commonfabric/runner";
+import { entityIdFrom, Runtime } from "@commonfabric/runner";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import * as V2Storage from "../../runner/src/storage/v2.ts";
 import { parseLink } from "../../runner/src/link-utils.ts";
@@ -280,6 +280,67 @@ describe("renderMembershipProviderFor (§4.9.3 Stage 2)", () => {
       await runtime.dispose();
       await storageManager.close();
     }
+  });
+});
+
+describe("piece source state", () => {
+  it("reads the piece named by the request, in that request's space", async () => {
+    const space = "did:key:z6Mk-runtime-processor-source" as const;
+    const synced: string[] = [];
+    const readFor: unknown[] = [];
+    const cell = {
+      space,
+      sync: () => {
+        synced.push("cell");
+        return Promise.resolve();
+      },
+      // A piece with no metadata at all: the reader's own behaviour on each
+      // field is covered in packages/piece; this asserts the addressing.
+      getMetaRaw: () => undefined,
+      getAsNormalizedFullLink: () => ({ id: "of:fid1:sourced" }),
+      asSchema: () => ({ get: () => ({}) }),
+    };
+    const processor = {
+      getSpaceCtx: (requested: string) => ({
+        pieceManager: { getSpace: () => requested },
+      }),
+      runtime: {
+        // Stands in for readPieceSourceState's reads: the handler's own job is
+        // to address the right cell and hand back what the reader produced.
+        getCellFromEntityId: (
+          requestedSpace: string,
+          entityId: unknown,
+        ) => {
+          readFor.push({ space: requestedSpace, entityId: String(entityId) });
+          return cell;
+        },
+        patternManager: {
+          getPatternSourceProgramByIdentity: () => Promise.resolve(undefined),
+        },
+        hostForSpace: () => new URL("https://toolshed.test"),
+      },
+    };
+
+    const result = await (RuntimeProcessor.prototype as any)
+      .handlePieceGetSource.call(processor, {
+        type: RequestType.PieceGetSource,
+        space,
+        pieceId: fid("sourced-piece"),
+      });
+
+    expect(synced).toEqual(["cell"]);
+    // The handler addresses the cell by the entity id `entityIdFrom` builds
+    // from the routing form of the request's pieceId. That is a FabricHash, and
+    // its string form is the tagged hash — the `of:` scheme is added later, by
+    // the `getCellFromEntityId` this stub stands in for.
+    expect(readFor).toEqual([{
+      space,
+      entityId: String(entityIdFrom(fid("sourced-piece"))),
+    }]);
+    // The reader saw a piece with no metadata at all, which is a detached piece
+    // with no readable source — reported as such rather than as a failure.
+    expect(result.source.origin).toBeUndefined();
+    expect(result.source.files).toEqual([]);
   });
 });
 

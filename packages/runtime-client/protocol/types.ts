@@ -89,6 +89,7 @@ export enum RequestType {
   PageStop = "page:stop",
   PageGetAll = "page:getAll",
   PageSynced = "page:synced",
+  PieceGetSource = "piece:getSource",
 
   // VDOM operations (main -> worker)
   VDomMount = "vdom:mount",
@@ -627,6 +628,49 @@ export interface PageSyncedRequest extends BaseRequest {
   space: DID;
 }
 
+/**
+ * Read one piece's source state: the pattern it runs, the origin it tracks, the
+ * history metadata it carries, and its authored source files. See
+ * `docs/specs/piece-source-lifecycle.md`.
+ */
+export interface PieceGetSourceRequest extends BaseRequest {
+  type: RequestType.PieceGetSource;
+  space: DID;
+  pieceId: string;
+}
+
+/** How a piece's origin URL resolves. */
+export type PieceOriginKind = "web" | "fabric-piece" | "fabric-pattern";
+
+export interface PieceOriginView {
+  url: string;
+  kind: PieceOriginKind;
+  /** The URL as recorded on the piece, when normalization changed it. */
+  recorded?: string;
+}
+
+export interface PiecePatternRefView {
+  identity: string;
+  symbol: string;
+}
+
+export interface PieceSourceView {
+  space: DID;
+  pieceId: string;
+  name?: string;
+  pattern?: PiecePatternRefView;
+  setupPattern?: PiecePatternRefView;
+  displacedPattern?: PiecePatternRefView & { displacedAt?: number };
+  origin?: PieceOriginView;
+  repository?: string;
+  entry?: string;
+  files: PatternSourceFile[];
+}
+
+export interface PieceSourceResponse {
+  source: PieceSourceView;
+}
+
 /** Common shape for one-way main -> worker notifications. */
 export interface BaseClientNotification {
   type: ClientNotificationType;
@@ -777,6 +821,7 @@ export type IPCClientRequest =
   | PageStopRequest
   | PageGetAllRequest
   | PageSyncedRequest
+  | PieceGetSourceRequest
   | RuntimeSyncedRequest
   | ResolveSpaceNameRequest
   | RegisterSpaceHostRequest
@@ -955,6 +1000,7 @@ export type RemoteResponse =
   | TriggerTraceResponse
   | WriteStackTraceResponse
   | PageResponse
+  | PieceSourceResponse
   | SlugResponse
   | SpaceResponse
   | VDomMountResponse
@@ -1145,6 +1191,10 @@ export type Commands = {
   [RequestType.PageGetAll]: {
     request: PageGetAllRequest;
     response: CellResponse;
+  };
+  [RequestType.PieceGetSource]: {
+    request: PieceGetSourceRequest;
+    response: PieceSourceResponse;
   };
   [RequestType.GetSpaceRootPattern]: {
     request: PageGetSpaceDefault;

@@ -35,6 +35,7 @@ import {
   NavigateRequestNotification,
   type PatternSourcesResponse,
   PendingWritesNotification,
+  type PieceSourceView,
   RequestType,
   TelemetryNotification,
   type UploadBlobResponse,
@@ -298,6 +299,22 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     if (!response) return null;
 
     return new PageHandle<T>(this, response.page);
+  }
+
+  /**
+   * Read a piece's source state: the pattern it runs, the origin it tracks, the
+   * history metadata it carries, and its authored source files.
+   */
+  async getPieceSource(
+    pieceId: string,
+    space: DID,
+  ): Promise<PieceSourceView> {
+    const response = await this.#conn.request<RequestType.PieceGetSource>({
+      type: RequestType.PieceGetSource,
+      pieceId,
+      space,
+    });
+    return response.source;
   }
 
   async getPageSlug(pageId: string, space: DID): Promise<string | undefined> {

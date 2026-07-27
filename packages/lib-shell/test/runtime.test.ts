@@ -58,6 +58,14 @@ class MockRuntimeClient {
     return Promise.resolve(this.slugByPageId.get(pageId));
   }
 
+  /** Records the (pieceId, space) argument order source reads arrive in. */
+  pieceSourceCalls: Array<{ pieceId: string; space: DID }> = [];
+
+  getPieceSource(pieceId: string, space: DID): Promise<{ pieceId: string }> {
+    this.pieceSourceCalls.push({ pieceId, space });
+    return Promise.resolve({ pieceId });
+  }
+
   /** Records which space each root-pattern request targeted. */
   spaceRootCalls: DID[] = [];
 
@@ -108,6 +116,26 @@ type NavigationDetail = {
 };
 
 describe("RuntimeInternals", () => {
+  it("reads a piece's source state through the client", async () => {
+    const { RuntimeInternals } = await import("@commonfabric/lib-shell");
+    const client = new MockRuntimeClient();
+    const runtime = new RuntimeInternals(client as any);
+    const space = "did:key:z6Mk-source-space" as DID;
+    try {
+      const source = await runtime.getPieceSource(space, "of:fid1:piece");
+
+      expect(source).toEqual({ pieceId: "of:fid1:piece" });
+      // The shell method takes (space, pieceId); the client takes them the
+      // other way round, so the order is worth pinning.
+      expect(client.pieceSourceCalls).toEqual([{
+        pieceId: "of:fid1:piece",
+        space,
+      }]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
   it("resolves named spaces through the worker client", async () => {
     const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const client = new MockRuntimeClient();

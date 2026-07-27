@@ -394,6 +394,29 @@ describe("RuntimeClient", () => {
       assertExists(page.id());
     });
 
+    it("reads a created piece's source state", async () => {
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+
+      const page = await rt.createPage(TEST_PROGRAM, session.space, {
+        run: true,
+      });
+      const source = await rt.getPieceSource(page.id(), session.space);
+
+      assertEquals(source.space, session.space);
+      assertExists(source.pattern);
+      // A piece created from a program records no origin: nothing supplies new
+      // code for it.
+      assertEquals(source.origin, undefined);
+      // Its authored source is retained in its own space, entry file first.
+      assertExists(source.entry);
+      assertEquals(source.files[0].name, source.entry);
+      assertEquals(
+        source.files.some((file) => file.contents.includes("home")),
+        true,
+      );
+    });
+
     it("retrieves a page with its result schema, including UI", async () => {
       const session = await createTestSession();
       await using rt = await createRuntimeClient(session);
