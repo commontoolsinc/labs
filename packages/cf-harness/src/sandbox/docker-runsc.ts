@@ -8,6 +8,7 @@ import {
   normalize,
 } from "@std/path/posix";
 import { DenoProcessRunner, type ProcessRunner } from "./process-runner.ts";
+import { SandboxPathEscapeError } from "./errors.ts";
 import type {
   DockerNetworkMode,
   DockerRunscAdditionalMount,
@@ -635,7 +636,10 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
       const rootLabel = this.config.additionalMounts.length === 0
         ? "workspace root"
         : "allowed sandbox roots";
-      throw new Error(`path escapes ${rootLabel}: ${path}`);
+      throw new SandboxPathEscapeError(
+        path,
+        `path escapes ${rootLabel}: ${path}`,
+      );
     }
     return normalized;
   }

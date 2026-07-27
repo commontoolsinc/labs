@@ -2358,6 +2358,15 @@ export class CfHarnessPromptLoop {
         ...optionalPolicyEventIndexes(policyEventIndexes),
         errorDetail: toErrorDetail(error),
       });
+      // Reaching this catch means a genuinely fatal tool failure — sandbox
+      // spawn/infra, CFC transport, artifact/run-state persistence, an engine
+      // invariant, or a cancelled run. These are not model-correctable, so the
+      // run stays fatal. RECOVERABLE mistakes (a `cwd` outside the sandbox, a
+      // command timeout) never arrive here: the bash tool converts them into an
+      // ordinary failed BashToolOutput the model reacts to, which flows through
+      // the normal CFC-mediated output path below (see bash.ts). Keeping the
+      // narrowing at the tool boundary is what lets this catch stay run-fatal
+      // without matching error-message strings.
       throw error;
     }
     const modelOutputResult = await this.#modelFacingToolOutput(

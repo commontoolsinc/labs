@@ -79,7 +79,8 @@ one-off IDs.
   These built-ins are gated by the sandbox: allowed inside an action or handler
   (the clock is coarsened to one-second resolution), and they throw a
   `TimeCapabilityError` in a lift/computed or at pattern-body level. For
-  reactive time in a computed, read the `#now` wish.
+  reactive time in a computed, read the interval `#now/N` wish (bare `#now` is
+  a frozen first-load capture, not a clock).
 - Prefer capturing time/random snapshots in the action itself rather than
   inside a `computed()` that may re-run many times.
 
