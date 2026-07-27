@@ -86,6 +86,7 @@ import {
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import {
+  FabricBytes,
   FabricEpochDays,
   FabricEpochNsec,
   FabricHash,
@@ -297,6 +298,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     FabricEpochNsec,
     FabricEpochDays,
     FabricHash,
+    FabricBytes,
 
     // Debug stringifiers (helpers exposed for pattern code)
     toCompactDebugString,

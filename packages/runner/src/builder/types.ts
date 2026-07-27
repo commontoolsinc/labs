@@ -453,6 +453,8 @@ export interface BuilderFunctionsAndConstants {
     typeof import("@commonfabric/data-model/fabric-primitives").FabricEpochDays;
   FabricHash:
     typeof import("@commonfabric/data-model/fabric-primitives").FabricHash;
+  FabricBytes:
+    typeof import("@commonfabric/data-model/fabric-primitives").FabricBytes;
 
   // Debug stringifiers
   toCompactDebugString:
