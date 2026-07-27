@@ -44,6 +44,7 @@ export type {
   TopicLinkKind,
   TopicOutput,
   TopicPiece,
+  TopicReference,
 } from "./topic.tsx";
 
 export interface TopicsInput {
