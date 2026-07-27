@@ -21,6 +21,7 @@ import {
 } from "../gateway/openai-client.ts";
 import {
   normalizeTerminalResponse,
+  providerRunAffinityKey,
   toResponsesInput,
   toResponsesTools,
 } from "./responses-protocol.ts";
@@ -247,7 +248,7 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
       // Reasoning items are only replayable across turns when the provider
       // returns them encrypted, which `store: false` requires.
       include: ["reasoning.encrypted_content"],
-      prompt_cache_key: request.runId,
+      prompt_cache_key: providerRunAffinityKey(request.runId),
     };
     const response = await this.gatewayClient.createResponseJson(
       payload,

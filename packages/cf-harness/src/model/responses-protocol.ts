@@ -6,6 +6,8 @@ import type {
   HarnessTranscriptMessage,
 } from "../contracts/transcript.ts";
 import { materializeImageAttachmentContentPart } from "../image-attachments.ts";
+import { sha256 } from "@commonfabric/content-hash";
+import { encodeHex } from "@std/encoding/hex";
 
 /**
  * Shared OpenAI Responses API wire mapping.
@@ -19,6 +21,26 @@ import { materializeImageAttachmentContentPart } from "../image-attachments.ts";
  * provider's reasoning items; `label` keeps error text in the caller's voice.
  */
 export type ResponsesInputItem = Record<string, unknown>;
+
+const MAX_PROVIDER_AFFINITY_KEY_LENGTH = 64;
+
+/**
+ * Bounds a run id for use as `prompt_cache_key`, which the provider caps at 64
+ * characters and rejects outright above it.
+ *
+ * Subagent run ids are derived as `<parent>.subagent.<n>`, so they grow with
+ * nesting depth and reach the cap on their own. Long ids keep a readable
+ * prefix and a digest suffix so cache affinity stays stable per run.
+ */
+export const providerRunAffinityKey = (runId: string): string => {
+  if (runId.length <= MAX_PROVIDER_AFFINITY_KEY_LENGTH) return runId;
+  const digest = encodeHex(sha256(new TextEncoder().encode(runId))).slice(
+    0,
+    40,
+  );
+  const prefixLength = MAX_PROVIDER_AFFINITY_KEY_LENGTH - digest.length - 1;
+  return `${runId.slice(0, prefixLength)}-${digest}`;
+};
 
 export const continuationOutput = (
   continuation: HarnessProviderContinuation | undefined,

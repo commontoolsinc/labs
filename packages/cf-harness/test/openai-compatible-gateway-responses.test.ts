@@ -222,6 +222,58 @@ Deno.test("non-OpenAI models and native tools stay on Chat Completions", async (
   assertEquals(captured[0].url, `${GATEWAY}/v1/chat/completions`);
 });
 
+Deno.test("the Responses turn stays stateless", async () => {
+  const captured: Captured[] = [];
+  const client = clientWith(captured, [
+    completedResponse([{
+      type: "message",
+      id: "msg_4",
+      role: "assistant",
+      status: "completed",
+      content: [{ type: "output_text", text: "ok", annotations: [] }],
+    }]),
+  ]);
+
+  await client.complete(turn());
+
+  const body = captured[0].body;
+  // The harness transcript is the only source of truth: nothing is persisted
+  // provider-side and no turn is chained to a stored response. That keeps
+  // resume-from-transcript working and keeps CFC-mediated tool output from
+  // being bypassed by provider-retained context.
+  assertEquals(body.store, false);
+  assertEquals(body.previous_response_id, undefined);
+  assertEquals(Array.isArray(body.input), true);
+});
+
+Deno.test("prompt_cache_key is bounded to the provider limit", async () => {
+  // Subagent run ids are `<parent>.subagent.<n>` and grow with nesting depth.
+  // The provider rejects prompt_cache_key above 64 characters outright, which
+  // would fail every model turn in a deeply delegated run.
+  const runId = `loom-run-${"a".repeat(120)}.subagent.1.subagent.2`;
+  const captured: Captured[] = [];
+  const client = clientWith(captured, [
+    completedResponse([{
+      type: "message",
+      id: "msg_5",
+      role: "assistant",
+      status: "completed",
+      content: [{ type: "output_text", text: "ok", annotations: [] }],
+    }]),
+  ]);
+
+  await client.complete(turn({ runId }));
+
+  const key = captured[0].body.prompt_cache_key as string;
+  assertEquals(key.length <= 64, true);
+  // Stable and run-specific: the same id maps to the same key.
+  await client.complete(turn({ runId }));
+  assertEquals(captured[1].body.prompt_cache_key, key);
+  // Short ids are passed through untouched.
+  await client.complete(turn({ runId: "run-short" }));
+  assertEquals(captured[2].body.prompt_cache_key, "run-short");
+});
+
 Deno.test("a turn without a system message sends no instructions", async () => {
   const captured: Captured[] = [];
   const client = clientWith(captured, [

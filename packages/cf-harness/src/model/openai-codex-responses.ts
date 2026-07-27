@@ -1,6 +1,4 @@
 import type { HarnessFetch } from "../contracts/http-fetch.ts";
-import { sha256 } from "@commonfabric/content-hash";
-import { encodeHex } from "@std/encoding/hex";
 import {
   type HarnessCredentialOwnerRef,
   harnessCredentialOwnersEqual,
@@ -8,6 +6,7 @@ import {
 import { defaultHarnessFetch } from "../contracts/http-fetch.ts";
 import {
   normalizeTerminalResponse,
+  providerRunAffinityKey,
   toResponsesInput,
   toResponsesTools,
 } from "./responses-protocol.ts";
@@ -42,18 +41,6 @@ export interface OpenAICodexResponsesClientOptions {
 
 const OPENAI_CODEX_PROVIDER_ID = "openai-codex";
 const OPENAI_CODEX_RESPONSES_LABEL = "Codex Responses";
-
-const MAX_PROVIDER_AFFINITY_KEY_LENGTH = 64;
-
-const providerRunAffinityKey = (runId: string): string => {
-  if (runId.length <= MAX_PROVIDER_AFFINITY_KEY_LENGTH) return runId;
-  const digest = encodeHex(sha256(new TextEncoder().encode(runId))).slice(
-    0,
-    40,
-  );
-  const prefixLength = MAX_PROVIDER_AFFINITY_KEY_LENGTH - digest.length - 1;
-  return `${runId.slice(0, prefixLength)}-${digest}`;
-};
 
 const textBytes = (text: string): number =>
   new TextEncoder().encode(text).byteLength;
