@@ -1,4 +1,5 @@
 {
+  // Dependency guide: ../../docs/development/DEPENDENCIES.md
   "name": "@commonfabric/fuse",
   "exports": { ".": "./mod.ts" },
   "tasks": {

@@ -1,4 +1,5 @@
 {
+  // Dependency guide: ../../docs/development/DEPENDENCIES.md
   "name": "@commonfabric/fs-sync-example",
   "tasks": {
     "test": "echo 'Pattern tests require cf test runner. Use: deno task cf test'"

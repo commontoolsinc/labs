@@ -16,6 +16,7 @@
     "./shared": "./shared/mod.ts"
   },
   "imports": {
+    // Dependency guide: ../../docs/development/DEPENDENCIES.md
     "@lit/context": "npm:@lit/context@^1.1.6",
     "@lit/task": "npm:@lit/task@^1.0.3",
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.1",

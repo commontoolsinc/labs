@@ -102,12 +102,12 @@ initialized images still hold separate allocators and mutexes while sharing
 handles. The invariant is one image, not two agreeing ones.
 
 `@db/sqlite` builds its download URL from its own package version, so the release
-version pinned in `column-origin.ts` is what keeps both on one path, and it has
-to be the version the lockfile resolves `@db/sqlite` to. Plug's cache is keyed by
-the URL, so a pin naming a different version names a different file. Rolling
-`@db/sqlite` means updating the pin in the same change; a test in
-`packages/memory` checks the pin against the lockfile, so a stale pin is reported
-as a test failure rather than a crash.
+version pinned in `column-origin.ts` has to equal the version resolved for
+`@db/sqlite`. Plug's cache is keyed by URL, so different versions name different
+files. The [SQLite dependency guide](../../development/DEPENDENCIES.md#sqlite)
+owns the complete roll procedure. A test in `packages/memory` checks the code
+pin against the lockfile, so a stale pin is reported as a test failure rather
+than a crash.
 
 Provenance is captured **server-side** (where the prepared statement lives); the
 **runner** maps each origin → the column's `ifc` and writes the result rows under

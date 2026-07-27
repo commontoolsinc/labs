@@ -46,6 +46,7 @@
     "./skills/registry": "./src/skills/registry.ts"
   },
   "imports": {
+    // Dependency guide: ../../docs/development/DEPENDENCIES.md
     "@db/sqlite": "jsr:@db/sqlite@0.13.0"
   }
 }
