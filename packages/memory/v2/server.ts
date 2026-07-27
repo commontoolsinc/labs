@@ -5919,8 +5919,17 @@ export class Server {
       authority.drainRequested || lease.space !== claimInput.space ||
       lease.branch !== claimInput.branch
     ) {
+      // The leg matters operationally (P0-R1 chase): four distinct causes
+      // share this refusal, and the recovery differs per cause.
+      const leg = authority === undefined
+        ? "authority-missing"
+        : authority !== owned
+        ? "not-owned"
+        : authority.drainRequested
+        ? "drain-requested"
+        : "space-mismatch";
       throw new ExecutionLeaseAuthorityError(
-        "execution claim requires the current owned lease",
+        `execution claim requires the current owned lease (${leg})`,
       );
     }
     const key = actionClaimMapKey(claimInput);
@@ -5964,8 +5973,26 @@ export class Server {
       demand === undefined || demand.principal !== current.onBehalfOf ||
       !this.#executionSponsorCanWrite(engine, demand, sponsor)
     ) {
+      // Leg discrimination (P0-R1): the recovery differs per cause — a
+      // dead/rotated sponsor is rebindable in place, a lapsed durable
+      // lease is not.
+      const leg = current === null
+        ? "durable-missing"
+        : current.state !== "active"
+        ? "durable-inactive"
+        : !this.#sameExecutionLease(current, lease)
+        ? "handle-mismatch"
+        : sponsor === null
+        ? "sponsor-session-dead"
+        : sponsor.sessionToken !== authority.sponsorSessionToken
+        ? "sponsor-token-rotated"
+        : demand === undefined
+        ? "sponsor-demand-gone"
+        : demand.principal !== current.onBehalfOf
+        ? "sponsor-principal-changed"
+        : "sponsor-write-denied";
       throw new ExecutionLeaseAuthorityError(
-        "execution lease is not active and authorized",
+        `execution lease is not active and authorized (${leg})`,
       );
     }
     // C3.6 issuance preflight (C3A17): a cross-space-read claim binds the

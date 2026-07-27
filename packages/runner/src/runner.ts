@@ -15,6 +15,7 @@ import {
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
 import { rendererVDOMSchema } from "./schemas.ts";
+import { ExecutionDemandShrinkGate } from "./executor/demand-shrink-gate.ts";
 import {
   type CellScope,
   type Frame,
@@ -729,6 +730,10 @@ export class Runner {
   // Client-visible start() calls export only their final piece roots. Internal
   // child run()/startCore() registrations stay inside that demanded closure.
   private executionDemandBySpace = new Map<MemorySpace, Set<string>>();
+  /** P0 demand-blip fix: shrink publications are held briefly so a
+   * same-space navigation (stop A -> start B) never publishes the
+   * transient empty set that breaks claim issuance and pool liveness. */
+  private executionDemandShrinkGate = new ExecutionDemandShrinkGate();
   private executionDemandTails = new Map<MemorySpace, Promise<void>>();
   private crossSpaceChildSpaces = new WeakMap<
     IExtendedStorageTransaction,
@@ -2198,11 +2203,15 @@ export class Runner {
     }
     if (roots.has(link.id)) return Promise.resolve();
     roots.add(link.id);
-    return this.queueExecutionDemand(
+    let queued: Promise<void> = Promise.resolve();
+    this.executionDemandShrinkGate.grow(
       link.space,
-      provider,
       [...roots].sort(),
+      (pieces) => {
+        queued = this.queueExecutionDemand(link.space, provider, pieces);
+      },
     );
+    return queued;
   }
 
   private removeExecutionDemand(link: NormalizedFullLink): void {
@@ -2211,8 +2220,14 @@ export class Runner {
     if (roots.size === 0) this.executionDemandBySpace.delete(link.space);
     const provider = this.runtime.storageManager.open(link.space);
     if (provider.setExecutionDemand === undefined) return;
-    this.runtime.storageManager.trackUntilSettled(
-      this.queueExecutionDemand(link.space, provider, [...roots].sort()),
+    this.executionDemandShrinkGate.shrink(
+      link.space,
+      [...roots].sort(),
+      (pieces) => {
+        this.runtime.storageManager.trackUntilSettled(
+          this.queueExecutionDemand(link.space, provider, pieces),
+        );
+      },
     );
   }
 
@@ -2220,10 +2235,13 @@ export class Runner {
     for (const space of this.executionDemandBySpace.keys()) {
       const provider = this.runtime.storageManager.open(space);
       if (provider.setExecutionDemand === undefined) continue;
-      this.runtime.storageManager.trackUntilSettled(
-        this.queueExecutionDemand(space, provider, []),
-      );
+      this.executionDemandShrinkGate.flushImmediate(space, [], (pieces) => {
+        this.runtime.storageManager.trackUntilSettled(
+          this.queueExecutionDemand(space, provider, pieces),
+        );
+      });
     }
+    this.executionDemandShrinkGate.dispose();
     this.executionDemandBySpace.clear();
   }
 
