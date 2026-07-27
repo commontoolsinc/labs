@@ -341,7 +341,7 @@ describe("resume owned-cell walk cycle-detection key", () => {
       mint("of:spot-a", ["other"]), // same spot id, different path
       mint("of:spot-a", ["a", "b"]), // multi-component path
       mint("of:spot-a", ["ab"]), // would join-collide with ["a","b"] under a delimiter
-      mint("of:spot-a", ["a b"]), // a path component that itself contains the delimiter
+      mint("of:spot-a", ["a\x00b"]), // a path component that itself contains the delimiter
     ];
     const keys = cells.map(cycleKey);
     expect(new Set(keys).size).toBe(cells.length); // injective: no collisions
