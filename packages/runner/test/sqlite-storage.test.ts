@@ -10,7 +10,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { cfLink, table } from "@commonfabric/memory/sqlite/schema";
-import type { SqliteDbRef } from "@commonfabric/memory/v2";
+import type { SqliteDbRef, SqliteParamsWire } from "@commonfabric/memory/v2";
 import { Runtime } from "../src/runtime.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -42,7 +42,7 @@ describe("storage provider sqlite passthrough (emulated server)", () => {
   const seedSqlite = async (
     db: SqliteDbRef,
     sql: string,
-    params?: readonly unknown[],
+    params?: SqliteParamsWire,
   ) => {
     const tx = runtime.edit();
     tx.recordSqliteWrite!(space, { op: "sqlite", db, sql, params });
