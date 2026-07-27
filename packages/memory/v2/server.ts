@@ -916,9 +916,14 @@ export interface ExecutionLeaseHandle extends ExecutionLease {
 
 type OwnedExecutionLease = {
   handle: ExecutionLeaseHandle;
-  readonly sponsorConnectionId: string;
-  readonly sponsorSessionId: string;
-  readonly sponsorSessionToken: SessionToken;
+  /** The sponsor triple is MUTABLE for exactly one operation: the P0
+   * sponsor re-anchor (`reanchorExecutionLeaseSponsor`) re-points a live
+   * lease at a live demanding session of the SAME principal after the
+   * original sponsor session died (e.g. a page reload). Everything else
+   * treats these as write-once. */
+  sponsorConnectionId: string;
+  sponsorSessionId: string;
+  sponsorSessionToken: SessionToken;
   readonly firstDemandOrder: number;
   readonly claimGenerations: Map<string, number>;
   drainRequested: boolean;
@@ -5794,6 +5799,60 @@ export class Server {
    * can change while engine setup awaits; that expected authority race is a
    * declined claim, while malformed candidates and duplicate claims remain
    * hard failures. */
+  /**
+   * P0 sponsor re-anchor (client-passivity plan): re-point a live owned
+   * lease's sponsor binding at a live demanding session of the SAME
+   * principal, without touching the durable lease record or the Worker.
+   *
+   * WHY: claim issuance re-validates the sponsor triple bound at
+   * acquisition (session live, token match, demand present, sponsor can
+   * WRITE). Before the P0 demand grace window, navigation churn tore the
+   * pool down constantly and every re-acquisition re-picked a live
+   * sponsor as a side effect; with the churn gone, a page reload kills
+   * the sponsor session while the Worker stays healthy, and every claim
+   * is refused ("execution lease is not active and authorized") — 32/32
+   * on the real workload. A full generation replacement is the wrong
+   * primitive for this (its graceful settle hangs against a live-load
+   * Worker); the sponsor is host state, so rebinding is a host-local
+   * operation. Returns false when no live same-principal WRITE-capable
+   * demander exists (a true principal change) — the pool then falls back
+   * to generation replacement.
+   */
+  async reanchorExecutionLeaseSponsor(
+    lease: ExecutionLeaseHandle,
+  ): Promise<boolean> {
+    const key = executionLeaseKey(lease.space, lease.branch);
+    const authority = this.#executionLeaseAuthorities.get(lease);
+    if (
+      authority === undefined ||
+      this.#ownedExecutionLeases.get(key) !== authority ||
+      authority.drainRequested
+    ) return false;
+    const engine = await this.openEngine(lease.space);
+    // Engine open is an authority boundary: re-sample after the await.
+    if (
+      this.#ownedExecutionLeases.get(key) !== authority ||
+      authority.drainRequested
+    ) return false;
+    for (const demand of this.#executionDemands.values()) {
+      if (demand.space !== lease.space || demand.branch !== lease.branch) {
+        continue;
+      }
+      // Same principal only: the durable lease's onBehalfOf stays valid, so
+      // no re-issue is needed. A different principal is a real rotation and
+      // rides the acquisition path.
+      if (demand.principal !== lease.onBehalfOf) continue;
+      const session = this.#sessions.get(lease.space, demand.sessionId);
+      if (session === null) continue;
+      if (!this.#executionSponsorCanWrite(engine, demand, session)) continue;
+      authority.sponsorConnectionId = demand.connectionId;
+      authority.sponsorSessionId = demand.sessionId;
+      authority.sponsorSessionToken = session.sessionToken;
+      return true;
+    }
+    return false;
+  }
+
   async trySetExecutionClaim(
     lease: ExecutionLeaseHandle,
     claimInput: ExecutionClaimInput,
@@ -5802,7 +5861,18 @@ export class Server {
     try {
       return await this.#setExecutionClaim(lease, claimInput, options);
     } catch (error) {
-      if (error instanceof ExecutionLeaseAuthorityError) return null;
+      if (error instanceof ExecutionLeaseAuthorityError) {
+        // The decline reason is load-bearing observability (P0-R1 chase:
+        // three distinct authority mechanisms produce the same soft null),
+        // but the wire result is deliberately reasonless — log it here.
+        console.debug(
+          "Memory: execution claim declined:",
+          error.message,
+          claimInput.space,
+          claimInput.actionId,
+        );
+        return null;
+      }
       throw error;
     }
   }

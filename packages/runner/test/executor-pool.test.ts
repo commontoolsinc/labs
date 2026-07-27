@@ -658,6 +658,7 @@ Deno.test("shared execution pool unions ten client references into one worker", 
       demandGraceExpiries: 0,
       demandGraceIdleWorkerMs: 0,
       sponsorReanchors: 0,
+      sponsorRebinds: 0,
       parkedWakeAttempts: 0,
       parkedWakeStarts: 0,
       foreignWakeNotifications: 0,
@@ -719,6 +720,7 @@ Deno.test("shared execution pool unions ten client references into one worker", 
       demandGraceExpiries: 0,
       demandGraceIdleWorkerMs: 0,
       sponsorReanchors: 0,
+      sponsorRebinds: 0,
       parkedWakeAttempts: 0,
       parkedWakeStarts: 0,
       foreignWakeNotifications: 0,
@@ -1914,7 +1916,7 @@ Deno.test("P0 re-anchor: claim-authority loss on a live lane replaces the genera
     assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "live");
 
     clock = 5_000;
-    pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    await pool.noteClaimAuthorityLoss(SPACE, BRANCH);
     await pool.idle();
 
     assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "live");
@@ -1953,22 +1955,23 @@ Deno.test("P0 re-anchor cooldown: repeated authority-loss notes collapse; a fres
     await pool.idle();
 
     clock = 1_000;
-    pool.noteClaimAuthorityLoss(SPACE, BRANCH);
-    pool.noteClaimAuthorityLoss(SPACE, BRANCH);
-    pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    const first = pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    void pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    void pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    await first;
     await pool.idle();
     assertEquals(pool.metrics().sponsorReanchors, 1, "burst collapses to one");
     assertEquals(factory.starts.length, 2);
 
     // Inside the cooldown (max(grace, 10s)): a further note is a no-op.
     clock = 6_000;
-    pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    await pool.noteClaimAuthorityLoss(SPACE, BRANCH);
     await pool.idle();
     assertEquals(pool.metrics().sponsorReanchors, 1, "cooldown holds");
 
     // A fresh window: the persistent failure re-anchors once more.
     clock = 20_000;
-    pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    await pool.noteClaimAuthorityLoss(SPACE, BRANCH);
     await pool.idle();
     assertEquals(pool.metrics().sponsorReanchors, 2);
     assertEquals(factory.starts.length, 3);
@@ -1997,7 +2000,7 @@ Deno.test("P0 re-anchor: no live or in-grace demand means no re-anchor (the drai
     clock = 1_000;
     await control.emit(2, []);
     clock = 20_000; // grace lapsed; drain not yet fired (timer unfired)
-    pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    await pool.noteClaimAuthorityLoss(SPACE, BRANCH);
     await pool.idle();
     assertEquals(pool.metrics().sponsorReanchors, 0, "no sponsor to re-anchor onto");
     assertEquals(factory.starts.length, 1);
@@ -2061,6 +2064,64 @@ Deno.test("P0: grace expiry never aborts an in-flight cold start; departure drai
     assertEquals(pool.metrics().workerStartAborts, 0);
   } finally {
     releaseStart.resolve();
+    await pool.close();
+  }
+});
+
+Deno.test("P0 rebind: same-principal sponsor churn re-points the lease in place — no Worker restart", async () => {
+  class RebindControl extends FakeExecutionControl {
+    rebinds = 0;
+    rebindResult = true;
+    reanchorExecutionLeaseSponsor(
+      _lease: ExecutionLeaseHandle,
+    ): Promise<boolean> {
+      this.rebinds++;
+      return Promise.resolve(this.rebindResult);
+    }
+  }
+  const control = new RebindControl();
+  const timers = new ManualTimers();
+  let clock = 0;
+  const factory = new FakeExecutorFactory();
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    now: () => clock,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    demandGraceMs: 10_000,
+  });
+  pool.start();
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+    assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "live");
+
+    clock = 5_000;
+    await pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    await pool.idle();
+
+    assertEquals(control.rebinds, 1, "host rebind attempted first");
+    assertEquals(factory.starts.length, 1, "no generation replacement");
+    assertEquals(factory.executors[0].stopped, 0, "Worker untouched");
+    const metrics = pool.metrics();
+    assertEquals(metrics.sponsorRebinds, 1);
+    assertEquals(metrics.sponsorReanchors, 0);
+
+    // Cooldown applies to the rebind path too: a storm collapses.
+    clock = 6_000;
+    await pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    assertEquals(control.rebinds, 1, "cooldown holds for rebinds");
+
+    // A rebind refusal after the window falls back to replacement.
+    control.rebindResult = false;
+    clock = 20_000;
+    await pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    await pool.idle();
+    assertEquals(control.rebinds, 2);
+    assertEquals(factory.starts.length, 2, "refusal fell back to replacement");
+    assertEquals(pool.metrics().sponsorReanchors, 1);
+  } finally {
     await pool.close();
   }
 });

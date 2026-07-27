@@ -40,6 +40,13 @@ export interface ExecutionPoolControl {
   renewExecutionLease(
     lease: ExecutionLeaseHandle,
   ): Promise<ExecutionLeaseHandle | null>;
+  /** P0 sponsor re-anchor without a generation replacement: re-point the
+   * lease's sponsor binding at a live demanding session of the same
+   * principal. Optional — a control without it falls back to the full
+   * generation replacement. */
+  reanchorExecutionLeaseSponsor?(
+    lease: ExecutionLeaseHandle,
+  ): Promise<boolean>;
   beginExecutionLeaseDrain(
     lease: ExecutionLeaseHandle,
   ): Promise<ExecutionLeaseHandle | null>;
@@ -263,6 +270,10 @@ export interface ExecutionPoolMetricsSnapshot {
    * sponsor. (Before the grace window, demand churn itself forced this
    * rotation as a side effect of constant teardowns.) */
   readonly sponsorReanchors: number;
+  /** Sponsor bindings re-pointed IN PLACE (no Worker restart) after a
+   * claim-authority loss — the cheap common case (same-principal session
+   * churn, e.g. a page reload). */
+  readonly sponsorRebinds: number;
   /** Coalesced reconciliation passes queued for indexed-relevant
    * executor-null/draining lanes. */
   readonly parkedWakeAttempts: number;
@@ -439,6 +450,7 @@ export class SharedExecutionPool {
     demandGraceExpiries: 0,
     demandGraceIdleWorkerMs: 0,
     sponsorReanchors: 0,
+    sponsorRebinds: 0,
     userLanesOpened: 0,
     userLanesClosed: 0,
     userLaneReanchors: 0,
@@ -722,38 +734,58 @@ export class SharedExecutionPool {
    * Debounced by the queued flag and a cooldown of max(grace, 10s) so a
    * space with NO authorizable sponsor cannot restart-loop.
    */
-  noteClaimAuthorityLoss(space: string, branch: BranchName): void {
-    if (this.#closed) return;
+  noteClaimAuthorityLoss(space: string, branch: BranchName): Promise<void> {
+    if (this.#closed) return Promise.resolve();
     const slot = this.#slots.get(laneKey(space, branch));
     if (
       slot === undefined || slot.executor === null || slot.state !== "live" ||
-      slot.reanchorQueued
-    ) return;
+      slot.reanchorQueued || slot.lease === null
+    ) return Promise.resolve();
     const cooldownMs = Math.max(this.#demandGraceMs, 10_000);
     if (
       slot.lastReanchorAt !== null &&
       this.#now() - slot.lastReanchorAt < cooldownMs
-    ) return;
+    ) return Promise.resolve();
     slot.reanchorQueued = true;
-    void this.#enqueue(slot, async () => {
+    // Cooldown runs from the ATTEMPT, so a storm of loss notes during the
+    // async rebind cannot queue a second recovery.
+    slot.lastReanchorAt = this.#now();
+    const lease = slot.lease;
+    return (async () => {
       try {
-        if (
-          this.#closed || slot.executor === null || slot.state !== "live"
-        ) return;
-        // A lane whose demand is genuinely gone drains through the grace
-        // path instead; re-anchoring needs a live (or in-grace) demander
-        // for the re-acquisition to sponsor against.
-        if (slot.demands.length === 0 && !this.#withinDemandGrace(slot)) {
+        // Cheap common case first: same-principal session churn (a page
+        // reload killed the sponsor session). The host re-points the
+        // lease's sponsor binding in place — no Worker restart, no lease
+        // re-issue. Runs OFF the slot queue: it touches host state only.
+        const rebound =
+          await this.#control.reanchorExecutionLeaseSponsor?.(lease) ?? false;
+        if (rebound) {
+          this.#metrics.sponsorRebinds++;
           return;
         }
-        this.#metrics.sponsorReanchors++;
-        slot.lastReanchorAt = this.#now();
-        await this.#shutdown(slot, false);
-        await this.#reconcile(slot);
+        // True principal change (or a control without the rebind surface):
+        // full generation replacement. Bounded by the settle hard cap, but
+        // heavy — hence last resort.
+        await this.#enqueue(slot, async () => {
+          if (
+            this.#closed || slot.executor === null || slot.state !== "live"
+          ) return;
+          // A lane whose demand is genuinely gone drains through the grace
+          // path instead; re-anchoring needs a live (or in-grace) demander
+          // for the re-acquisition to sponsor against.
+          if (slot.demands.length === 0 && !this.#withinDemandGrace(slot)) {
+            return;
+          }
+          this.#metrics.sponsorReanchors++;
+          await this.#shutdown(slot, false);
+          await this.#reconcile(slot);
+        });
+      } catch (error) {
+        console.warn("sponsor re-anchor failed", error);
       } finally {
         slot.reanchorQueued = false;
       }
-    });
+    })();
   }
 
   /** Whether the lane's empty demand is still inside the grace window. */
