@@ -315,7 +315,7 @@ function shallowEqual(
  * Compares two opaque leaf values. Defined for every input, including ones
  * outside `FabricValue` that reach here despite the declared parameter types.
  *
- * Values `valueEqual()` cannot compare fall back to identity. Identity errs
+ * Anything not known to be comparable falls back to identity. Identity errs
  * toward reporting a change, which costs at worst a redundant re-evaluation;
  * the opposite error — reporting "unchanged" for something that changed — is
  * silent, and is the one this function exists to avoid.
@@ -331,10 +331,17 @@ function leafEqual(before: FabricValue, after: FabricValue): boolean {
 }
 
 /**
- * Returns true if `valueEqual()` can compare `value`. Mirrors the
- * classification `objectSubtypeOf()` performs in the `data-model` `valueEqual`
- * module, which accepts a plain container or a `FabricSpecialObject` and
- * rejects every other object; functions are rejected earlier still.
+ * Returns true if `value` is one of the shapes `objectSubtypeOf()` classifies
+ * in the `data-model` `valueEqual` module: a primitive, a plain container, or
+ * a `FabricSpecialObject`. Functions are excluded, since `valueEqual()` turns
+ * them away before classifying anything.
+ *
+ * This is deliberately narrower than everything `valueEqual()` will answer. A
+ * frozen value routes to a hash comparison that skips the subtype check, so
+ * whether a given type is accepted depends on whether that particular value is
+ * frozen rather than on the type itself — not a stable thing to depend on.
+ * Anything outside the classified shapes is treated as not comparable and
+ * compared by identity instead, which is the conservative direction.
  */
 function isValueComparable(value: unknown): boolean {
   // Rejected before any classification happens.
