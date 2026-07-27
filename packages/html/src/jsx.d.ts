@@ -2154,12 +2154,6 @@ declare namespace CFDOM {
   }
 
   interface ImgHTMLAttributes<T> extends HTMLAttributes<T> {
-    // CF extension: the renderer wires any `on*` prop to a real listener
-    // (render-utils.ts cleans `onLoad` → "load"); typed here — the img
-    // `load` event is the sanctioned completion signal for data-URL
-    // thumbnails (lunch-poll auto-persist) — rather than in DOMAttributes,
-    // whose event block is still the untyped @TODO(events) backlog.
-    "onLoad"?: EventHandler<unknown>;
     alt?: string | undefined;
     crossOrigin?: CrossOrigin;
     decoding?: "async" | "auto" | "sync" | undefined;

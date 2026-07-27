@@ -1,5 +1,6 @@
 import {
   computed,
+  handler,
   lift,
   NAME,
   pattern,
@@ -42,6 +43,24 @@ const myVoteFor = (
 const formatRank = lift<{ rank: number | undefined }, string>(({ rank }) =>
   rank === undefined || rank <= 0 ? "—" : `#${rank}`
 );
+
+// Auto-persist trigger handler: fired by the hidden trigger img's `load`
+// event; forwards the bound generated data URL into the parent-owned,
+// admin-gated `setOptionImage` stream. A module-scope handler (rather than
+// an inline attribute arrow) so its bound form is a storable stream VALUE —
+// that lets the JSX attach it through a spread cast, keeping the pattern
+// compilable on server builds whose jsx.d.ts predates the typed `onLoad`
+// img attribute (pieces store authored source; every runtime type-checks it
+// at load).
+const sendGeneratedArt = handler<unknown, {
+  setOptionImage: Stream<SetOptionImageEvent>;
+  optionId: string;
+  imageDataUrl: string | undefined;
+}>((_event, { setOptionImage, optionId, imageDataUrl }) => {
+  const url = imageDataUrl ?? "";
+  if (!url) return;
+  setOptionImage.send({ optionId, imageUrl: url });
+});
 
 /**
  * PollOptionCard renders one complete ranked restaurant option row.
@@ -220,11 +239,13 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
                 src={art.imageDataUrl}
                 alt=""
                 style={{ display: "none" }}
-                onLoad={() =>
-                  setOptionImage.send({
+                {...({
+                  onLoad: sendGeneratedArt({
+                    setOptionImage,
                     optionId: oid,
-                    imageUrl: art.imageDataUrl ?? "",
-                  })}
+                    imageDataUrl: art.imageDataUrl,
+                  }),
+                } as Record<string, unknown>)}
               />
             )
             : null}

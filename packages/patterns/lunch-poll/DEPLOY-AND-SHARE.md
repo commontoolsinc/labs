@@ -31,7 +31,7 @@ now an ordinary `PerSpace` cell — can all be copied to another piece via the C
 ## The canonical piece
 
 One shared instance everyone iterates on. **This is a deployment pointer, not a
-stable identifier — current as of 2026-06-22.** A piece is tied to one
+stable identifier — current as of 2026-07-26.** A piece is tied to one
 space/server and can be reset, wedged, or lost; if it 404s, `inspect` fails, or
 it stops responding, re-establish it (see "Recovering" below) and update this
 block.
@@ -41,9 +41,36 @@ successor to `toolshed`.
 
 ```
 space:  team-lunch
-piece:  fid1:2ZMvtKFGBMSem8sp6FskXKro5qLbAhbW6dBLUcX8vu0
-url:    https://rapids.saga-castor.ts.net/team-lunch/fid1:2ZMvtKFGBMSem8sp6FskXKro5qLbAhbW6dBLUcX8vu0
+piece:  fid1:WzgHDaxbET9w9aenhhJrOFcXWfWVimHu0rOPREm9t5M
+url:    https://rapids.saga-castor.ts.net/team-lunch/fid1:WzgHDaxbET9w9aenhhJrOFcXWfWVimHu0rOPREm9t5M
 ```
+
+> **Build-compatibility note:** the generated-art auto-persist trigger attaches
+> `onLoad` to a raw `<img>` through a spread cast over a module-scope bound
+> handler (see `sendGeneratedArt` in poll-option-card.tsx) INSTEAD of a typed
+> attribute, on purpose: jsx.d.ts's event block is still the `@TODO(events)`
+> backlog, pieces store authored source, and every runtime type-checks that
+> source at load — a typed `onLoad` attribute would make the piece refuse to
+> load (`Failed to load piece — Could not load pattern <hash>#default`) on any
+> server build predating the typing (verified live against such a rapids build).
+> The renderer wires any `on*` prop whose value is a handler stream, so the cast
+> changes nothing at runtime. If `onLoad` ever lands in jsx.d.ts, wait until
+> every deploy target carries it before switching the pattern to the typed
+> attribute.
+
+### Historical: the first `rapids` piece
+
+The previous rapids piece (`fid1:2ZMvtKFGBMSem8sp6FskXKro5qLbAhbW6dBLUcX8vu0`,
+canonical 2026-06-22 → 2026-07-26) went stale two ways at once: its stored
+pattern source imported `safeDateNow`/`nonPrivateRandom` (removed from the
+framework API), which blocks `setsrc` — the swap loads the current pattern first
+and that compile now fails — and the space's root pattern predated a runtime
+format change, which blocked `piece new` from registering anything. It held no
+data (empty roster/options/votes, default question), so on 2026-07-26 the space
+root was repaired with `cf piece recreate-root` and a fresh piece minted rather
+than attempting surgery. If in-place `setsrc` ever hits the same
+uncompilable-stored-source error against a piece with data you care about,
+Option B (state copy) is the escape — it never loads the old source.
 
 ### Historical: the `toolshed` piece
 
@@ -62,7 +89,7 @@ url:    https://toolshed.saga-castor.ts.net/team-lunch/fid1:zJT0lRy-Hd6p_ZsK_h6C
 ```bash
 export CF_API_URL=https://rapids.saga-castor.ts.net/   # current prod; toolshed.saga-castor.ts.net is the predecessor; http://localhost:8000 for local dev
 export CF_IDENTITY=./your-identity.key
-PIECE=fid1:2ZMvtKFGBMSem8sp6FskXKro5qLbAhbW6dBLUcX8vu0    # rapids; current as of 2026-06-22
+PIECE=fid1:WzgHDaxbET9w9aenhhJrOFcXWfWVimHu0rOPREm9t5M    # rapids; current as of 2026-07-26
 SPACE=team-lunch
 ```
 
