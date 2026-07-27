@@ -92,6 +92,7 @@ import {
   FabricEpochDays,
   FabricEpochNsec,
   FabricHash,
+  FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
 import {
   toCompactDebugString,
@@ -305,6 +306,7 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     FabricHash,
     FabricLink,
     FabricBytes,
+    FabricRegExp,
 
     // Debug stringifiers (helpers exposed for pattern code)
     toCompactDebugString,

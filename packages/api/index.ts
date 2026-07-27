@@ -159,6 +159,36 @@ export interface FabricBytesConstructor {
 export declare const FabricBytes: FabricBytesConstructor;
 
 /**
+ * An immutable regular expression. Extends `FabricPrimitive` -- treated like a
+ * primitive in the fabric type system (always frozen, passes through
+ * conversion unchanged).
+ *
+ * The pattern is held as a flavor / source / flags triple rather than as a
+ * native `RegExp`, so that flavors with no native representation can still be
+ * carried. `value` reconstitutes a native `RegExp` where one exists.
+ */
+export interface FabricRegExp extends FabricPrimitive {
+  readonly source: string;
+  readonly flags: string;
+  readonly flavor: string;
+
+  /**
+   * A fresh native `RegExp` equivalent to this value, returned anew on each
+   * call so the internal instance is never aliased out. Throws for a flavor
+   * with no native `RegExp` representation.
+   */
+  readonly value: RegExp;
+}
+
+export interface FabricRegExpConstructor {
+  new (regex: RegExp): FabricRegExp;
+  new (flavor: string, source: string, flags: string): FabricRegExp;
+  prototype: FabricRegExp;
+}
+
+export declare const FabricRegExp: FabricRegExpConstructor;
+
+/**
  * The full set of values that the fabric storage layer can represent.
  */
 export type FabricValue =

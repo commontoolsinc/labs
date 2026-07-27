@@ -459,6 +459,8 @@ export interface BuilderFunctionsAndConstants {
     typeof import("@commonfabric/data-model/fabric-instances").FabricLink;
   FabricBytes:
     typeof import("@commonfabric/data-model/fabric-primitives").FabricBytes;
+  FabricRegExp:
+    typeof import("@commonfabric/data-model/fabric-primitives").FabricRegExp;
 
   // Debug stringifiers
   toCompactDebugString:
