@@ -186,6 +186,21 @@ export const STYLES = `
   font-size:.8rem;line-height:1.5;font-weight:450;letter-spacing:0;text-transform:none;text-align:left;
   background:var(--ink);color:var(--bg);padding:.55rem .75rem;border-radius:8px;box-shadow:var(--shadowcard)}
 .mm .cflag[data-tip]:not([data-tip=""]):hover::after{left:auto;right:0}
+.mm [data-tip]{-webkit-tap-highlight-color:transparent}
+
+/* Tap-to-reveal. A hover tooltip is unreachable on a touch screen, so a tap
+   pins the same text into one shared sheet at the foot of the viewport. On a
+   pointer device hover already answers the question, so the sheet only appears
+   once something has actually been tapped. */
+.mm .tipsheet{display:none}
+.mm .tipsheet.open{
+  display:flex;align-items:flex-start;gap:.7rem;
+  position:fixed;left:.8rem;right:.8rem;bottom:.8rem;z-index:80;
+  max-width:60ch;margin:0 auto;padding:.85rem .95rem;border-radius:10px;
+  font-size:.85rem;line-height:1.5;text-align:left;
+  background:var(--ink);color:var(--bg);
+  box-shadow:0 8px 30px rgba(0,0,0,.45);cursor:pointer}
+.mm .tipsheet .tipx{flex:none;font-size:1.1rem;line-height:1.2;opacity:.55}
 
 /* claims */
 .mm .claims-intro{margin:0 0 1.4rem;max-width:74ch}

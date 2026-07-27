@@ -79,6 +79,24 @@ const setSort = handler<void, { mode: string; sortMode: Writable<string> }>(
   (_, { mode, sortMode }) => sortMode.set(mode),
 );
 
+/**
+ * Tap-to-reveal for the tooltips. Hover alone leaves every referent unreachable
+ * on a touch screen, and the source document had the same problem — it solved
+ * it by pinning the tooltip to the bottom of the viewport rather than beside
+ * the element it belongs to. Doing the same here means one shared sheet driven
+ * by one cell, instead of a reactive class on all ~216 annotated elements.
+ *
+ * Tapping something with no referent closes the sheet, which is also how you
+ * dismiss it.
+ */
+const showTip = handler<void, { text: string; tip: Writable<string> }>(
+  (_, { text, tip }) => tip.set(text),
+);
+
+const hideTip = handler<void, { tip: Writable<string> }>(
+  (_, { tip }) => tip.set(""),
+);
+
 const STATUS_KEY = [
   { cls: "cstat s-live", term: "live", gloss: "shipping" },
   { cls: "cstat s-partial", term: "partial", gloss: "incomplete" },
@@ -89,12 +107,16 @@ const STATUS_KEY = [
 
 // ------------------------------------------------------------------- fragments
 
-const chipRow = (chips: Chip[], extra: string) => (
+const chipRow = (chips: Chip[], extra: string, tip: Writable<string>) => (
   <div className="chips">
     {chips.map((c) => {
       const vm = chipVM(c, extra);
       return (
-        <span className={vm.cls} data-tip={vm.tip}>
+        <span
+          className={vm.cls}
+          data-tip={vm.tip}
+          onClick={showTip({ text: vm.tip, tip })}
+        >
           {vm.label}
           <span className={vm.codeCls}>{vm.code}</span>
         </span>
@@ -152,6 +174,8 @@ export interface MappaMundiOutput {
 export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
   const activeTab = new Writable.perSession("why");
   const sortMode = new Writable.perSession("maturity");
+  // The referent currently pinned open by tap; "" means the sheet is closed.
+  const tip = new Writable.perSession("");
 
   // Sorting and filtering are CSS; only this class is reactive. See ordering.ts.
   const ledgerCls = computed(() =>
@@ -310,7 +334,7 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                               <span className="bl">its gate</span>
                               <div>{l.gate}</div>
                             </div>
-                            {chipRow(l.chips, "")}
+                            {chipRow(l.chips, "", tip)}
                           </div>
                         ))}
                       </div>
@@ -342,7 +366,7 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                               <span className={"glabel l-" + g.layer}>
                                 {g.label}
                               </span>
-                              {chipRow(g.chips, "l-" + g.layer)}
+                              {chipRow(g.chips, "l-" + g.layer, tip)}
                             </div>
                           ))}
                         </div>
@@ -386,14 +410,22 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                             </div>
                             {dom.rows.map((r) => (
                               <div className={r.cls}>
-                                <span className="cname" data-tip={r.tip}>
+                                <span
+                                  className="cname"
+                                  data-tip={r.tip}
+                                  onClick={showTip({ text: r.tip, tip })}
+                                >
                                   {r.name}
                                 </span>
                                 <span className={r.layerCls}>
                                   {r.layerText}
                                 </span>
                                 <span className={r.statusCls}>{r.status}</span>
-                                <span className={r.flagCls} data-tip={r.flag}>
+                                <span
+                                  className={r.flagCls}
+                                  data-tip={r.flag}
+                                  onClick={showTip({ text: r.flag, tip })}
+                                >
                                   {r.flagMark}
                                 </span>
                               </div>
@@ -423,6 +455,17 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                   </div>
                 </cf-tab-panel>
               </cf-tabs>
+
+              <div
+                className={computed(() =>
+                  tip.get() ? "tipsheet open" : "tipsheet"
+                )}
+                role="status"
+                onClick={hideTip({ tip })}
+              >
+                <span className="tipx">×</span>
+                <span>{tip}</span>
+              </div>
             </div>
           </div>
         </cf-screen>
