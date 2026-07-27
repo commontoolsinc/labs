@@ -26,6 +26,17 @@ function jobIds(workflow: string): string[] {
   ].map((match) => match[1]);
 }
 
+function stepBlock(job: string, stepName: string): string {
+  const header = `      - name: ${stepName}\n`;
+  const start = job.indexOf(header);
+  assert(start >= 0, `${stepName} step not found`);
+
+  const bodyStart = start + header.length;
+  const nextStepOffset = job.slice(bodyStart).search(/^ {6}- name: /m);
+  const end = nextStepOffset < 0 ? job.length : bodyStart + nextStepOffset;
+  return job.slice(start, end);
+}
+
 function neededJobIds(job: string): string[] {
   const marker = "\n    needs:\n";
   const needsStart = job.indexOf(marker);
@@ -77,50 +88,12 @@ Deno.test("Status waits for every pull request validation job", async () => {
   assertStringIncludes(gate, "JOB_RESULTS: ${{ toJSON(needs) }}");
   assertStringIncludes(gate, 'select(.value.result != "success")');
   assertStringIncludes(gate, "permissions: {}");
-});
 
-Deno.test("Status calls reusable dashboard validation", async () => {
-  const deno = await workflow("deno.yml");
-  const dashboard = await workflow("dashboard-image.yml");
-  const caller = jobBlock(deno, "dashboard");
-
-  assertStringIncludes(caller, 'name: "Dashboard"');
-  assertStringIncludes(
-    caller,
-    "if: ${{ github.event_name == 'pull_request' }}",
-  );
-  assertStringIncludes(
-    caller,
-    "uses: ./.github/workflows/dashboard-image.yml",
-  );
-  assertStringIncludes(
-    caller,
-    "permissions:\n      contents: read\n      id-token: write",
-  );
-  assertStringIncludes(
-    dashboard,
-    "\npermissions:\n  contents: read\n\nconcurrency:\n",
-  );
-  assertEquals(
-    neededJobIds(jobBlock(deno, "status")).includes("dashboard"),
-    true,
-  );
-
-  const denoTriggers = workflowTriggers(deno);
-  assertStringIncludes(denoTriggers, "  pull_request:\n");
-  assertEquals(denoTriggers.includes("\n    paths:"), false);
-
-  const dashboardTriggers = workflowTriggers(dashboard);
-  assertStringIncludes(dashboardTriggers, "  workflow_call:\n");
-  assertStringIncludes(
-    dashboardTriggers,
-    "  push:\n    branches: [main]\n    paths:\n",
-  );
-  assertEquals(dashboardTriggers.includes("  pull_request:\n"), false);
-  assertStringIncludes(
-    dashboard,
-    "group: dashboard-${{ github.event.pull_request.number || github.ref }}",
-  );
+  // A path filter would leave the required check pending on a pull request
+  // that touches none of the listed paths.
+  const triggers = workflowTriggers(contents);
+  assertStringIncludes(triggers, "  pull_request:\n");
+  assertEquals(triggers.includes("\n    paths:"), false);
 });
 
 Deno.test("Coverage Comment follows the CI workflow by name", async () => {
@@ -132,87 +105,55 @@ Deno.test("Coverage Comment follows the CI workflow by name", async () => {
   assertStringIncludes(comment, `    workflows: ["${name[1]}"]\n`);
 });
 
-Deno.test("Dashboard Status verifies every reusable workflow job", async () => {
-  const contents = await workflow("dashboard-image.yml");
-  assertStringIncludes(contents, "name: Dashboard\n");
-  assertEquals(jobIds(contents).includes("dashboard_scope"), false);
+Deno.test("Dashboard publishes only from main, never from a pull request", async () => {
+  const deno = await workflow("deno.yml");
+  const dashboard = await workflow("dashboard-image.yml");
 
-  const gate = jobBlock(contents, "status");
-  const expected = jobIds(contents).filter((jobId) => jobId !== "status")
-    .sort();
-  assertEquals(neededJobIds(gate).sort(), expected);
-  for (const jobId of expected) {
-    assertStringIncludes(gate, `needs.${jobId}.result`);
-  }
-  assertStringIncludes(gate, "name: Status");
-  assertStringIncludes(gate, "if: ${{ always() }}");
-  assertStringIncludes(
-    gate,
-    "needs.publish_authorization.outputs.allowed",
-  );
-  assertStringIncludes(gate, 'TEST_RESULT" == "success"');
-  assertStringIncludes(gate, 'BUILD_RESULT" == "success"');
-  assertStringIncludes(gate, 'AUTHORIZATION_RESULT" == "success"');
-  assertStringIncludes(gate, 'PUBLISH_ALLOWED" == "true"');
-  assertStringIncludes(gate, 'PUBLISH_ALLOWED" == "false"');
-  assertStringIncludes(gate, "permissions: {}");
-});
+  assertEquals(deno.includes("dashboard-image.yml"), false);
+  assertEquals(jobIds(deno).includes("dashboard"), false);
 
-Deno.test("called dashboard validation always runs", async () => {
-  const contents = await workflow("dashboard-image.yml");
+  assertStringIncludes(dashboard, "name: Dashboard\n");
+  const triggers = workflowTriggers(dashboard);
+  assertStringIncludes(triggers, "  workflow_dispatch: {}");
+  assertStringIncludes(
+    triggers,
+    "  push:\n    branches: [main]\n    paths:\n",
+  );
+  assertEquals(triggers.includes("  pull_request:"), false);
+  assertEquals(triggers.includes("  workflow_call:"), false);
+  assertStringIncludes(
+    dashboard,
+    "\npermissions:\n  contents: read\n\nconcurrency:\n",
+  );
+  assertStringIncludes(dashboard, "group: dashboard-${{ github.ref }}");
+  assertEquals(jobIds(dashboard).sort(), ["publish", "tests"]);
 
-  for (const jobId of ["tests", "build"]) {
-    const validation = jobBlock(contents, jobId);
-    assertEquals(validation.includes("\n    needs:"), false);
-    assertEquals(validation.includes("\n    if:"), false);
-  }
+  // A manual run can name any ref, so the tests job refuses anything but main
+  // before the publish job it gates gets a credential. The guard has to fail
+  // the run, not just report: a guard that only warns lets a dispatch from any
+  // branch move the `latest` tag.
+  const tests = jobBlock(dashboard, "tests");
+  assertEquals(tests.includes("id-token: write"), false);
+  const guard = stepBlock(tests, "Verify the run is on main");
+  assertStringIncludes(guard, "if: ${{ github.ref != 'refs/heads/main' }}");
+  assertStringIncludes(guard, "\n          exit 1\n");
 
-  const authorization = jobBlock(contents, "publish_authorization");
-  assertStringIncludes(
-    authorization,
-    "needs: [tests, build]",
-  );
-  assertStringIncludes(authorization, "if: ${{ !cancelled() }}");
-  assertStringIncludes(authorization, "ACTOR_ID: ${{ github.actor_id }}");
-  assertStringIncludes(
-    authorization,
-    'if [[ ",${PUBLISHER_ACTOR_IDS}," == *",${ACTOR_ID},"* ]]; then',
-  );
-  assertStringIncludes(
-    authorization,
-    'if [[ "$BUILD_RESULT" == "success" ]]; then',
-  );
-  assertStringIncludes(
-    authorization,
-    'elif [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$member" == "true" ]]; then',
-  );
-  assertStringIncludes(
-    authorization,
-    'if [[ "$TEST_RESULT" == "success" || ("$PUSH_BRANCH" == "true" && "$RUN_ATTEMPT" -gt 1) ]]; then',
-  );
-
-  const publish = jobBlock(contents, "publish");
-  assertStringIncludes(
-    publish,
-    "needs: [tests, build, publish_authorization]",
-  );
-  assertStringIncludes(
-    publish,
-    "!cancelled() && needs.publish_authorization.outputs.allowed == 'true'",
-  );
+  const publish = jobBlock(dashboard, "publish");
+  assertStringIncludes(publish, "needs: [tests]");
+  assertEquals(publish.includes("\n    if:"), false);
   assertStringIncludes(
     publish,
     "permissions:\n      contents: read\n      id-token: write",
   );
 
-  for (
-    const jobId of [
-      "tests",
-      "build",
-      "publish_authorization",
-      "status",
-    ]
-  ) {
-    assertEquals(jobBlock(contents, jobId).includes("id-token: write"), false);
-  }
+  // Both tags go up in the one push: the immutable commit tag the infra
+  // overlay pins, and the `latest` the deployment follows.
+  const build = stepBlock(publish, "Build and push dashboard image");
+  assertStringIncludes(build, "\n          push: true\n");
+  assertStringIncludes(
+    build,
+    "\n          tags: |\n" +
+      "            ${{ env.IMAGE }}:${{ github.sha }}\n" +
+      "            ${{ env.IMAGE }}:latest\n",
+  );
 });

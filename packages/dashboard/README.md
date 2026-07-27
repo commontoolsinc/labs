@@ -671,29 +671,38 @@ its embedded tsnet).
 
 **Build, push, deploy**
 
-On pull requests, the CI workflow calls
-`.github/workflows/dashboard-image.yml` as a reusable workflow. Every pull
-request runs the dashboard tests and an amd64 image build without cloud
-credentials. The internal `Status` job verifies the dashboard workflow, and the
-CI workflow's required `Status` job waits for that result. Main-branch pushes
-start the Dashboard workflow directly only when the dashboard image,
-dashboard package, Gantt drill-down, Deno dependency metadata, or the workflow
-itself changes.
+`.github/workflows/dashboard-image.yml` publishes the image, and it publishes
+only from `main`. A push to `main` starts it when the dashboard image, the
+dashboard package, the Gantt drill-down, the Deno dependency metadata, or the
+workflow itself changes. You can also start it by hand from the repository's
+Actions tab, which is how to publish a `main` commit whose files fall outside
+that path list. A manual run can name any branch or tag, so the workflow's
+first step fails a run that is not on `main`: publishing moves the `latest` tag
+the stage deployment follows. That step runs before anything from the named ref
+is checked out.
 
-For organization-member pull requests, a passing dashboard test and image build
-publish the source commit as `dev-dashboard:<full-sha>`. A controlled rerun may
-override a failed dashboard test by temporarily setting the repository Actions
-variable `PUSH_BRANCH=true`; the image build must still pass, the rerun must have
-`github.run_attempt > 1`, and GCP independently verifies the actor's numeric org
-membership ID. Reset `PUSH_BRANCH=false` immediately after testing. Main-branch
-pushes publish both the immutable SHA tag and `latest`. Once a SHA tag exists,
-reruns reuse its digest instead of rebuilding or moving the tag.
+The workflow runs the dashboard tests, then builds the amd64 image and pushes
+it under both the immutable `dev-dashboard:<full-sha>` tag and `latest`. Once a
+SHA tag exists, a rerun of that commit reuses its digest: it moves `latest` onto
+the image already there rather than rebuilding it or repushing the immutable
+tag.
+
+The same tests also run in CI, on pull requests and on main alike, because the
+dashboard is a workspace package and CI's `Test` job runs each package's test
+task. The publish workflow runs them again rather than leaning on that. The two
+workflows are independent — neither waits for the other, and this one cannot
+read CI's verdict — so its own test job is the only thing standing between a
+dashboard that fails its tests and the `latest` tag. Leave it in place even
+though it looks redundant.
+
+No image is built or published for a pull request.
 
 The publish job authenticates with GitHub OIDC and GCP Workload Identity
 Federation. It emits the immutable `sha256:` image reference in the workflow
 summary; no service-account JSON key is used.
 
-Manual build fallback:
+The manual trigger publishes whatever `main` currently points at. To publish
+some other commit, build and push it by hand:
 
 ```bash
 SHA=$(git rev-parse HEAD)
@@ -702,8 +711,9 @@ docker build --platform=linux/amd64 -f Dockerfile.dashboard -t "$IMG:$SHA" .
 docker push "$IMG:$SHA"
 ```
 
-Copy the published digest from the workflow summary into the infra stage
-overlay's `images[].digest`, commit that immutable pin, then run
+Copy the published digest — from the workflow summary, or from `docker push`'s
+output for a hand build — into the infra stage overlay's `images[].digest`,
+commit that immutable pin, then run
 `make apply-dev-dashboard-stage` from `infra/k8s`. The node then appears in the
 Tailscale console as `tag:dashboard`; open
 `https://dashboard.<tailnet>.ts.net/`. (The sidecar image is already pinned by
