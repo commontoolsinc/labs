@@ -393,38 +393,55 @@ if (env.CFTS_AI_LLM_OPENAI_API_KEY) {
     },
   });
 
+  // GPT-5.6 is codename-tiered rather than mini/nano: sol (flagship), terra
+  // (balanced), luna (fast). All three reason by default, which is why
+  // function tools must go through the Responses API rather than Chat
+  // Completions. Context is 1,050,000 total (922,000 in + 128,000 out).
   addModel({
     provider: openAIProvider,
-    name: "openai:gpt-5-mini",
-    aliases: ["openai:gpt-5-mini-latest", "gpt-5-mini"],
+    name: "openai:gpt-5.6-sol",
+    aliases: ["openai:gpt-5.6-sol-latest", "gpt-5.6-sol", "gpt-5.6"],
     capabilities: {
-      contextWindow: 400_000,
+      contextWindow: 1_050_000,
       maxOutputTokens: 128_000,
       images: true,
       prefill: false,
       systemPrompt: true,
       stopSequences: true,
       streaming: true,
-      reasoning: false,
+      reasoning: true,
     },
   });
 
   addModel({
     provider: openAIProvider,
-    name: "openai:gpt-5-mini-thinking",
-    aliases: ["openai:gpt-5-mini-thinking-latest", "gpt-5-mini-thinking"],
+    name: "openai:gpt-5.6-terra",
+    aliases: ["openai:gpt-5.6-terra-latest", "gpt-5.6-terra"],
     capabilities: {
-      contextWindow: 400_000,
+      contextWindow: 1_050_000,
       maxOutputTokens: 128_000,
       images: true,
       prefill: false,
-      systemPrompt: false,
-      stopSequences: false,
+      systemPrompt: true,
+      stopSequences: true,
       streaming: true,
       reasoning: true,
     },
-    providerOptions: {
-      reasoningEffort: "high",
+  });
+
+  addModel({
+    provider: openAIProvider,
+    name: "openai:gpt-5.6-luna",
+    aliases: ["openai:gpt-5.6-luna-latest", "gpt-5.6-luna"],
+    capabilities: {
+      contextWindow: 1_050_000,
+      maxOutputTokens: 128_000,
+      images: true,
+      prefill: false,
+      systemPrompt: true,
+      stopSequences: true,
+      streaming: true,
+      reasoning: true,
     },
   });
 }

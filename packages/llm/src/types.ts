@@ -15,8 +15,8 @@ export const DEFAULT_MODEL_NAME: ModelName = "default";
 
 // NOTE(ja): This should be an array of models, the first model will be tried, if it
 // fails, the second model will be tried, etc.
-export const DEFAULT_IFRAME_MODELS: ModelName = "openai:gpt-5-mini";
-export const DEFAULT_GENERATE_OBJECT_MODELS: ModelName = "openai:gpt-5-mini";
+export const DEFAULT_IFRAME_MODELS: ModelName = "openai:gpt-5.6-luna";
+export const DEFAULT_GENERATE_OBJECT_MODELS: ModelName = "openai:gpt-5.6-luna";
 
 export type LLMResponse = BuiltInLLMMessage & {
   // The trace span ID

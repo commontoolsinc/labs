@@ -1,4 +1,9 @@
 import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import {
+  chatViewOfRequest,
+  responsesBodyFromChatFixture,
+} from "./support/responses-fixture.ts";
+
 import { decodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
 import {
@@ -2839,7 +2844,10 @@ Deno.test({
                     }],
                   };
                 return Promise.resolve(
-                  new Response(JSON.stringify(payload), { status: 200 }),
+                  new Response(
+                    JSON.stringify(responsesBodyFromChatFixture(payload)),
+                    { status: 200 },
+                  ),
                 );
               },
             });
@@ -2855,7 +2863,7 @@ Deno.test({
       const secondRequest = JSON.parse(String(fetchCalls[1]?.body)) as {
         messages: Array<{ role: string; content: string }>;
       };
-      const toolMessage = secondRequest.messages.at(-1);
+      const toolMessage = chatViewOfRequest(secondRequest).messages.at(-1);
       assertEquals(toolMessage?.role, "tool");
       const toolOutput = JSON.parse(toolMessage!.content) as {
         status: string;

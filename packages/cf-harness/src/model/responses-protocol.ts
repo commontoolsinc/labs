@@ -1,0 +1,283 @@
+import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
+import type {
+  HarnessAssistantTranscriptMessage,
+  HarnessProviderContinuation,
+  HarnessToolCall,
+  HarnessTranscriptMessage,
+} from "../contracts/transcript.ts";
+import { materializeImageAttachmentContentPart } from "../image-attachments.ts";
+
+/**
+ * Shared OpenAI Responses API wire mapping.
+ *
+ * Both the Codex client (owner-authenticated, pinned chatgpt.com endpoint) and
+ * the OpenAI-compatible gateway client speak this protocol, so the transcript
+ * conversion and terminal-response normalization live here. Provider-specific
+ * pieces stay with each client: transport, auth, and streaming vs single-shot.
+ *
+ * `providerId` scopes continuation state so one provider never replays another
+ * provider's reasoning items; `label` keeps error text in the caller's voice.
+ */
+export type ResponsesInputItem = Record<string, unknown>;
+
+export const continuationOutput = (
+  continuation: HarnessProviderContinuation | undefined,
+  model: string,
+  providerId: string,
+): ResponsesInputItem[] => {
+  if (continuation?.providerId !== providerId) return [];
+  const state = continuation.state;
+  if (typeof state !== "object" || state === null || Array.isArray(state)) {
+    return [];
+  }
+  const record = state as Record<string, unknown>;
+  if (record.version !== 1 || typeof record.sourceModel !== "string") return [];
+  if (record.sourceModel !== model) {
+    throw new Error(
+      `${providerId} continuation model ${record.sourceModel} does not match requested model ${model}`,
+    );
+  }
+  const output = record.output;
+  if (!Array.isArray(output)) return [];
+  return output.flatMap((item) =>
+    typeof item === "object" && item !== null &&
+      (item as Record<string, unknown>).type === "reasoning" &&
+      typeof (item as Record<string, unknown>).id === "string" &&
+      typeof (item as Record<string, unknown>).encrypted_content === "string"
+      ? [structuredClone(item as ResponsesInputItem)]
+      : []
+  );
+};
+
+export const continuationFunctionCallItemId = (
+  continuation: HarnessProviderContinuation | undefined,
+  callId: string,
+  model: string,
+  providerId: string,
+): string | undefined => {
+  if (
+    continuation?.providerId !== providerId ||
+    typeof continuation.state !== "object" || continuation.state === null ||
+    Array.isArray(continuation.state)
+  ) return undefined;
+  const record = continuation.state as Record<string, unknown>;
+  if (record.version !== 1 || record.sourceModel !== model) return undefined;
+  const ids = record.functionCallItemIds;
+  if (typeof ids !== "object" || ids === null || Array.isArray(ids)) {
+    return undefined;
+  }
+  const itemId = (ids as Record<string, unknown>)[callId];
+  return typeof itemId === "string" ? itemId : undefined;
+};
+
+export const materializeUserContent = async (
+  message: Extract<HarnessTranscriptMessage, { role: "user" }>,
+  label: string,
+): Promise<ResponsesInputItem[]> => {
+  const content: ResponsesInputItem[] = message.content.length > 0
+    ? [{ type: "input_text", text: message.content }]
+    : [];
+  for (const attachment of message.imageAttachments ?? []) {
+    const part = await materializeImageAttachmentContentPart(attachment);
+    const partRecord = part as Record<string, unknown>;
+    const imageUrl =
+      typeof partRecord.image_url === "object" && partRecord.image_url !== null
+        ? (partRecord.image_url as Record<string, unknown>).url
+        : undefined;
+    if (typeof imageUrl !== "string") {
+      throw new Error(
+        `failed to materialize image attachment for ${label}`,
+      );
+    }
+    content.push({ type: "input_image", detail: "auto", image_url: imageUrl });
+  }
+  return content;
+};
+
+export const toResponsesInput = async (
+  transcript: readonly HarnessTranscriptMessage[],
+  model: string,
+  providerId: string,
+  label: string,
+  // Used only when the transcript carries no system message. Callers that omit
+  // it send no `instructions` at all, so a run without a system prompt is not
+  // silently given one.
+  defaultInstructions?: string,
+): Promise<
+  { instructions: string | undefined; input: ResponsesInputItem[] }
+> => {
+  const systemText = transcript.filter((message) => message.role === "system")
+    .map((message) => message.content).join("\n\n");
+  const instructions = systemText.length > 0 ? systemText : defaultInstructions;
+  const input: ResponsesInputItem[] = [];
+  for (const [index, message] of transcript.entries()) {
+    switch (message.role) {
+      case "system":
+        break;
+      case "user": {
+        const content = await materializeUserContent(message, label);
+        if (content.length > 0) input.push({ role: "user", content });
+        break;
+      }
+      case "assistant":
+        input.push(
+          ...continuationOutput(
+            message.providerContinuation,
+            model,
+            providerId,
+          ),
+        );
+        if (message.content.length > 0) {
+          input.push({
+            type: "message",
+            id: `msg_cf_${index}`,
+            role: "assistant",
+            status: "completed",
+            content: [{
+              type: "output_text",
+              text: message.content,
+              annotations: [],
+            }],
+          });
+        }
+        for (const call of message.toolCalls ?? []) {
+          const itemId = continuationFunctionCallItemId(
+            message.providerContinuation,
+            call.id,
+            model,
+            providerId,
+          );
+          input.push({
+            type: "function_call",
+            ...(itemId !== undefined ? { id: itemId } : {}),
+            call_id: call.id,
+            name: call.function.name,
+            arguments: call.function.arguments,
+          });
+        }
+        break;
+      case "tool":
+        input.push({
+          type: "function_call_output",
+          call_id: message.toolCallId,
+          output: message.content,
+        });
+        break;
+    }
+  }
+  return { instructions, input };
+};
+
+export const toResponsesTools = (
+  tools: readonly HarnessToolDescriptor[],
+): ResponsesInputItem[] =>
+  tools.map((tool) => ({
+    type: "function",
+    name: tool.toolId,
+    description: tool.description,
+    parameters: typeof tool.inputSchema === "boolean"
+      ? tool.inputSchema
+      : { ...tool.inputSchema },
+    strict: null,
+  }));
+
+export const normalizeTerminalResponse = (
+  response: Record<string, unknown>,
+  sourceModel: string,
+  providerId: string,
+  label: string,
+): HarnessAssistantTranscriptMessage => {
+  const status = response.status;
+  if (
+    status === "incomplete" || status === "failed" || status === "cancelled"
+  ) {
+    throw new Error(`${label} ended with status ${String(status)}`);
+  }
+  if (status !== "completed") {
+    throw new Error(`${label} terminal event has an unknown status`);
+  }
+  const output = response.output;
+  if (!Array.isArray(output)) {
+    throw new Error(`${label} terminal event did not include output`);
+  }
+  const text: string[] = [];
+  const toolCalls: HarnessToolCall[] = [];
+  const toolCallById = new Map<string, HarnessToolCall>();
+  const continuation: ResponsesInputItem[] = [];
+  const functionCallItemIds: Record<string, string> = {};
+  for (const rawItem of output) {
+    if (
+      typeof rawItem !== "object" || rawItem === null || Array.isArray(rawItem)
+    ) continue;
+    const item = rawItem as Record<string, unknown>;
+    if (item.type === "message" && Array.isArray(item.content)) {
+      for (const rawContent of item.content) {
+        if (typeof rawContent !== "object" || rawContent === null) continue;
+        const content = rawContent as Record<string, unknown>;
+        if (
+          content.type === "output_text" && typeof content.text === "string"
+        ) {
+          text.push(content.text);
+        } else if (
+          content.type === "refusal" && typeof content.refusal === "string"
+        ) {
+          text.push(content.refusal);
+        }
+      }
+    } else if (item.type === "function_call") {
+      if (
+        typeof item.call_id !== "string" || typeof item.name !== "string" ||
+        typeof item.arguments !== "string"
+      ) {
+        throw new Error(`${label} included an incomplete tool call`);
+      }
+      const call: HarnessToolCall = {
+        id: item.call_id,
+        type: "function",
+        function: { name: item.name, arguments: item.arguments },
+      };
+      if (typeof item.id === "string") {
+        functionCallItemIds[call.id] = item.id;
+      }
+      const previous = toolCallById.get(call.id);
+      if (previous !== undefined) {
+        if (JSON.stringify(previous) !== JSON.stringify(call)) {
+          throw new Error(
+            `${label} included conflicting duplicate tool-call ids`,
+          );
+        }
+        continue;
+      }
+      toolCallById.set(call.id, call);
+      toolCalls.push(call);
+    } else if (
+      item.type === "reasoning" && typeof item.id === "string" &&
+      typeof item.encrypted_content === "string"
+    ) {
+      continuation.push(structuredClone(item));
+    }
+  }
+  return {
+    role: "assistant",
+    content: text.join(""),
+    ...(toolCalls.length > 0 ? { toolCalls } : {}),
+    ...(continuation.length > 0 || Object.keys(functionCallItemIds).length > 0
+      ? {
+        providerContinuation: {
+          providerId,
+          state: {
+            version: 1,
+            sourceModel,
+            ...(typeof response.id === "string"
+              ? { responseId: response.id }
+              : {}),
+            output: continuation,
+            ...(Object.keys(functionCallItemIds).length > 0
+              ? { functionCallItemIds }
+              : {}),
+          },
+        },
+      }
+      : {}),
+  };
+};
