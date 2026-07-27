@@ -1,0 +1,279 @@
+// A clone exists so a rehearsal can be run, judged, and REPEATED from an
+// identical baseline. These tests pin the three properties that makes true:
+// the source is never touched, a reset really discards the attempt, and verify
+// can tell a clean migration from data loss.
+
+import { assert, assertEquals, assertRejects } from "@std/assert";
+import { Database } from "@db/sqlite";
+
+import {
+  clonePaths,
+  createClone,
+  readManifest,
+  resetClone,
+  verifyClone,
+} from "../clone.ts";
+
+const SPACE = "did:key:z6MkExampleSpace";
+const SESSION = "session:did:key:zSpaceAAAA:11111111-2222-3333";
+const MODULE_IDENTITY = "pf1v3J_M5Nep7cq-Uh8EYG0ZQaE217FfDfcjbwGdjVI";
+const NOW = () => new Date("2026-07-27T12:00:00.000Z");
+
+const link = (id: string) => ({ "/": { "link@1": { id, path: [] } } });
+
+/** A source store shaped like a real one: a piece with one named and one
+ *  generated internal cell, plus its input. */
+function seedSource(path: string): void {
+  const db = new Database(path, { create: true });
+  db.exec(`
+CREATE TABLE "commit" (
+  seq INTEGER NOT NULL PRIMARY KEY, branch TEXT NOT NULL DEFAULT '',
+  session_id TEXT NOT NULL, local_seq INTEGER NOT NULL,
+  invocation_ref TEXT, authorization_ref TEXT,
+  original JSON NOT NULL, resolution JSON NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE revision (
+  branch TEXT NOT NULL DEFAULT '', id TEXT NOT NULL,
+  scope_key TEXT NOT NULL DEFAULT 'space', seq INTEGER NOT NULL,
+  op_index INTEGER NOT NULL, op TEXT NOT NULL, data JSON, commit_seq INTEGER NOT NULL,
+  PRIMARY KEY (branch, id, scope_key, seq, op_index)
+);`);
+  writeDocs(db, [
+    ["of:piece", {
+      value: { $NAME: "Board" },
+      argument: link("of:input"),
+      internal: [
+        { partialCause: "entries", link: link("of:named") },
+        { partialCause: { $generated: 0 }, link: link("of:generated") },
+      ],
+      patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
+      schema: { type: "object", properties: {}, $defs: {} },
+    }],
+    ["of:input", { value: { title: "a topic" } }],
+    ["of:named", { value: "named-v1", result: link("of:piece") }],
+    ["of:generated", { value: "generated-v1", result: link("of:piece") }],
+  ]);
+  db.close();
+}
+
+/** Append documents to an existing store, continuing its seq sequence. */
+function writeDocs(db: Database, docs: [string, unknown][]): void {
+  const next = db.prepare(`SELECT coalesce(max(seq), 0) s FROM "commit"`)
+    .get<{ s: number }>()!.s;
+  const commit = db.prepare(
+    `INSERT INTO "commit" (seq, session_id, local_seq, original, resolution)
+     VALUES (?, ?, ?, '{}', '{}')`,
+  );
+  const rev = db.prepare(
+    `INSERT INTO revision (id, scope_key, seq, op_index, op, data, commit_seq)
+     VALUES (?, 'space', ?, 0, 'set', ?, ?)`,
+  );
+  docs.forEach(([id, doc], i) => {
+    const seq = next + i + 1;
+    commit.run(seq, SESSION, seq);
+    rev.run(id, seq, JSON.stringify(doc), seq);
+  });
+}
+
+/** Apply writes to a store on disk (what a rehearsal's migration would do). */
+function mutate(path: string, docs: [string, unknown][]): void {
+  const db = new Database(path);
+  writeDocs(db, docs);
+  db.close();
+}
+
+async function withDirs(
+  run: (t: { root: string; source: string; clone: string }) => Promise<void>,
+): Promise<void> {
+  const root = await Deno.makeTempDir({ prefix: "clone-test-" });
+  try {
+    const sourceDir = `${root}/source`;
+    await Deno.mkdir(sourceDir);
+    const source = `${sourceDir}/${SPACE}.sqlite`;
+    seedSource(source);
+    await run({ root, source, clone: `${root}/clone` });
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+}
+
+Deno.test("a clone is servable, recorded, and leaves the source untouched", async () => {
+  await withDirs(async ({ source, clone }) => {
+    const before = await Deno.readFile(source);
+    const manifest = await createClone({
+      source,
+      space: SPACE,
+      targetDir: clone,
+      now: NOW,
+    });
+
+    const paths = clonePaths(clone, SPACE);
+    // The working copy sits where the memory server resolves a space store, so
+    // pointing MEMORY_DIR at the clone dir serves it under the same DID.
+    assert(paths.workingPath.endsWith(`engine-v3/${SPACE}.sqlite`));
+    assertEquals((await Deno.stat(paths.workingPath)).isFile, true);
+    assertEquals((await Deno.stat(paths.pristinePath)).isFile, true);
+    assertEquals((await Deno.stat(`${clone}/.cf-clone`)).isFile, true);
+
+    assertEquals(manifest.space, SPACE);
+    assertEquals(manifest.createdAt, "2026-07-27T12:00:00.000Z");
+    assertEquals(manifest.counts.commits, 4);
+    assertEquals(manifest.counts.entities, 4);
+    // One generated cell excluded; the piece, input and named cell remain.
+    assertEquals(manifest.fingerprint.excludedGenerated, 1);
+    assertEquals(manifest.fingerprint.entities, 3);
+
+    assertEquals(await Deno.readFile(source), before, "source is untouched");
+    assertEquals(await readManifest(clone), manifest, "manifest round-trips");
+  });
+});
+
+Deno.test("a clean migration keeps the fingerprint even as commits climb", async () => {
+  // The whole reason generated cells are excluded. A pattern update rotates
+  // them and adds commits; content is unchanged, so verify must still pass.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const paths = clonePaths(clone, SPACE);
+
+    mutate(paths.workingPath, [
+      ["of:generated", { value: "generated-v2", result: link("of:piece") }],
+      ["of:generated", { value: "generated-v3", result: link("of:piece") }],
+    ]);
+
+    const v = await verifyClone(clone);
+    assert(v.ok, "a generated-cell rewrite is not a content change");
+    assert(v.fingerprint.match);
+    assert(
+      v.counts.working.commits > v.counts.manifest.commits,
+      "counts grew, as a migration should",
+    );
+  });
+});
+
+Deno.test("verify catches a real content change", async () => {
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const paths = clonePaths(clone, SPACE);
+
+    mutate(paths.workingPath, [["of:input", {
+      value: { title: "CLOBBERED" },
+    }]]);
+
+    const v = await verifyClone(clone);
+    assert(!v.ok, "authored content moved");
+    assert(!v.fingerprint.match);
+    assert(v.baselineIntact, "the baseline itself is still fine");
+  });
+});
+
+Deno.test("reset discards the attempt, including WAL companions", async () => {
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const paths = clonePaths(clone, SPACE);
+
+    // Open in WAL like the engine does, so real companions exist to clean up.
+    const db = new Database(paths.workingPath);
+    db.exec("PRAGMA journal_mode = WAL");
+    db.close();
+    mutate(paths.workingPath, [["of:input", {
+      value: { title: "CLOBBERED" },
+    }]]);
+    assert(!(await verifyClone(clone)).ok, "the attempt landed");
+
+    await resetClone(clone);
+
+    for (const suffix of ["-wal", "-shm"]) {
+      await assertRejects(
+        () => Deno.stat(`${paths.workingPath}${suffix}`),
+        Deno.errors.NotFound,
+        undefined,
+        `${suffix} must not survive a reset`,
+      );
+    }
+    const v = await verifyClone(clone);
+    assert(v.ok, "back to baseline");
+    assertEquals(v.counts.working.commits, v.counts.manifest.commits);
+  });
+});
+
+Deno.test("verify reports a corrupted baseline rather than trusting it", async () => {
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const paths = clonePaths(clone, SPACE);
+    // A baseline that rotted is not a baseline; resetting to it would silently
+    // rehearse against the wrong data.
+    mutate(paths.pristinePath, [["of:input", { value: { title: "rot" } }]]);
+
+    const v = await verifyClone(clone);
+    assert(!v.baselineIntact);
+    assert(!v.ok);
+  });
+});
+
+Deno.test("refuses to write into the live store directory", async () => {
+  await withDirs(async ({ root, source, clone }) => {
+    const live = `${root}/live-memory`;
+    await Deno.mkdir(live);
+    await assertRejects(
+      () =>
+        createClone({
+          source,
+          space: SPACE,
+          targetDir: `${live}/nested`,
+          forbiddenDirs: [live],
+          now: NOW,
+        }),
+      Error,
+      "overlaps the live store directory",
+    );
+    assertEquals(await exists(clone), false);
+  });
+});
+
+Deno.test("refuses to clone into the snapshot's own directory", async () => {
+  await withDirs(async ({ source }) => {
+    await assertRejects(
+      () =>
+        createClone({
+          source,
+          space: SPACE,
+          targetDir: source.replace(/\/[^/]*$/, ""),
+          now: NOW,
+        }),
+      Error,
+      "snapshot's own directory",
+    );
+  });
+});
+
+Deno.test("refuses a non-empty target rather than merging into it", async () => {
+  await withDirs(async ({ source, clone }) => {
+    await Deno.mkdir(clone, { recursive: true });
+    await Deno.writeTextFile(`${clone}/something.txt`, "prior contents");
+    await assertRejects(
+      () => createClone({ source, space: SPACE, targetDir: clone, now: NOW }),
+      Error,
+      "is not empty",
+    );
+  });
+});
+
+Deno.test("a directory without a manifest is not a clone", async () => {
+  await withDirs(async ({ root }) => {
+    await assertRejects(
+      () => verifyClone(root),
+      Error,
+      "is not a clone directory",
+    );
+  });
+});
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await Deno.stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}

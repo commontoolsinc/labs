@@ -1,0 +1,246 @@
+// The fingerprint's contract is one sentence: a legitimate pattern update must
+// not move it, and a content change must. Everything here pins one half of that.
+//
+// The load-bearing case is `generated cells are excluded`: compiler-generated
+// internal cells rotate their identities on every pattern update by design
+// (labs#4916), so a fingerprint that counted them would change on every clean
+// migration and answer no question at all. Verified against the real Estuary
+// Topics store, where all 20 write-storm cells are `$generated` and none is
+// authored content.
+
+import { assert, assertEquals } from "@std/assert";
+import { Database } from "@db/sqlite";
+
+import { openSpace, type SpaceDb } from "../db.ts";
+import {
+  contentFingerprint,
+  diffFingerprints,
+  generatedInternalCellIds,
+} from "../fingerprint.ts";
+
+const SCHEMA = `
+CREATE TABLE "commit" (
+  seq INTEGER NOT NULL PRIMARY KEY, branch TEXT NOT NULL DEFAULT '',
+  session_id TEXT NOT NULL, local_seq INTEGER NOT NULL,
+  invocation_ref TEXT, authorization_ref TEXT,
+  original JSON NOT NULL, resolution JSON NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE revision (
+  branch TEXT NOT NULL DEFAULT '', id TEXT NOT NULL,
+  scope_key TEXT NOT NULL DEFAULT 'space', seq INTEGER NOT NULL,
+  op_index INTEGER NOT NULL, op TEXT NOT NULL, data JSON, commit_seq INTEGER NOT NULL,
+  PRIMARY KEY (branch, id, scope_key, seq, op_index)
+);
+`;
+
+const MODULE_IDENTITY = "pf1v3J_M5Nep7cq-Uh8EYG0ZQaE217FfDfcjbwGdjVI";
+const SESSION = "session:did:key:zSpaceAAAA:11111111-2222-3333";
+
+const link = (id: string) => ({ "/": { "link@1": { id, path: [] } } });
+
+interface Doc {
+  id: string;
+  doc: Record<string, unknown>;
+  scope?: string;
+}
+
+/**
+ * A space holding one piece whose manifest names `of:named` as authored
+ * (`partialCause: "entries"`) and `of:generated` as compiler-generated
+ * (`partialCause: { $generated: 0 }`) — the exact shape observed in a real
+ * store — plus whatever extra docs a case needs.
+ */
+function seed(path: string, extra: Doc[] = []): void {
+  const db = new Database(path, { create: true });
+  db.exec(SCHEMA);
+  const commit = db.prepare(
+    `INSERT INTO "commit" (seq, session_id, local_seq, original, resolution)
+     VALUES (?, ?, ?, '{}', '{}')`,
+  );
+  const rev = db.prepare(
+    `INSERT INTO revision (id, scope_key, seq, op_index, op, data, commit_seq)
+     VALUES (?, ?, ?, 0, 'set', ?, ?)`,
+  );
+  let seq = 0;
+  const write = (id: string, doc: unknown, scope = "space") => {
+    const s = ++seq;
+    commit.run(s, SESSION, s);
+    rev.run(id, scope, s, JSON.stringify(doc), s);
+  };
+
+  write("of:piece", {
+    value: { $NAME: "Board" },
+    argument: link("of:input"),
+    internal: [
+      { partialCause: "entries", link: link("of:named") },
+      { partialCause: { $generated: 0 }, link: link("of:generated") },
+    ],
+    patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
+    schema: { type: "object", properties: {}, $defs: {} },
+  });
+  write("of:input", { value: { title: "untitled" } });
+  write("of:named", { value: "named-v1", result: link("of:piece") });
+  write("of:generated", { value: "generated-v1", result: link("of:piece") });
+
+  for (const e of extra) write(e.id, e.doc, e.scope ?? "space");
+  db.close();
+}
+
+function withSpace(extra: Doc[], run: (s: SpaceDb) => void): void {
+  const dir = Deno.makeTempDirSync({ prefix: "fingerprint-test-" });
+  try {
+    const path = `${dir}/space.sqlite`;
+    seed(path, extra);
+    const space = openSpace(path);
+    try {
+      run(space);
+    } finally {
+      space.close();
+    }
+  } finally {
+    Deno.removeSync(dir, { recursive: true });
+  }
+}
+
+/** The fingerprint of the base space, plus one extra/overriding document. */
+function hashWith(extra: Doc[]): string {
+  let hash = "";
+  withSpace(extra, (s) => {
+    hash = contentFingerprint(s).hash;
+  });
+  return hash;
+}
+
+Deno.test("the manifest classifies generated vs authored internal cells", () => {
+  withSpace([], (space) => {
+    const { generated, named } = generatedInternalCellIds(space);
+    assert(generated.has("of:generated"));
+    assert(named.has("of:named"));
+    assert(!generated.has("of:named"));
+  });
+});
+
+Deno.test("a generated cell's value does not move the fingerprint", () => {
+  // THE contract. A pattern update rewrites generated cells by design; if that
+  // moved the fingerprint, every clean migration would look like data loss.
+  const base = hashWith([]);
+  const generatedChanged = hashWith([
+    {
+      id: "of:generated",
+      doc: { value: "generated-v2", result: link("of:piece") },
+    },
+  ]);
+  assertEquals(generatedChanged, base);
+});
+
+Deno.test("an authored cell's value does move the fingerprint", () => {
+  // The other half: excluding generated cells must not blind the check to real
+  // content. A named internal cell is intentional durable state.
+  const base = hashWith([]);
+  const namedChanged = hashWith([
+    { id: "of:named", doc: { value: "named-v2", result: link("of:piece") } },
+  ]);
+  assert(namedChanged !== base, "a named cell change must be visible");
+
+  const inputChanged = hashWith([
+    { id: "of:input", doc: { value: { title: "renamed" } } },
+  ]);
+  assert(inputChanged !== base, "an input cell change must be visible");
+});
+
+Deno.test("includeGenerated makes generated churn visible on purpose", () => {
+  withSpace([], (a) => {
+    const strict = contentFingerprint(a);
+    const loose = contentFingerprint(a, { includeGenerated: true });
+    assert(loose.hash !== strict.hash);
+    assertEquals(strict.excludedGenerated, 1);
+    assertEquals(loose.excludedGenerated, 0);
+    assertEquals(loose.entities, strict.entities + 1);
+  });
+});
+
+Deno.test("per-user and per-session state is covered, not silently skipped", () => {
+  // listEntityModels defaults to scope "space"; on the real Estuary store that
+  // omits 579 entities. A fingerprint that ignored them would call a migration
+  // clean while PerUser state was destroyed.
+  const base = hashWith([
+    {
+      id: "of:peruser",
+      doc: { value: "u1" },
+      scope: "user:did%3Akey%3AzAlice",
+    },
+  ]);
+  const changed = hashWith([
+    {
+      id: "of:peruser",
+      doc: { value: "u2" },
+      scope: "user:did%3Akey%3AzAlice",
+    },
+  ]);
+  assert(changed !== base, "a per-user value change must move the fingerprint");
+});
+
+Deno.test("the same id in two scopes is fingerprinted separately", () => {
+  withSpace([
+    { id: "of:shared", doc: { value: "space-value" } },
+    {
+      id: "of:shared",
+      doc: { value: "alice-value" },
+      scope: "user:did%3Akey%3AzAlice",
+    },
+  ], (space) => {
+    const fp = contentFingerprint(space);
+    const rows = fp.perEntity.filter((e) => e.id === "of:shared");
+    assertEquals(rows.length, 2);
+    assert(rows[0].hash !== rows[1].hash, "distinct scopes, distinct content");
+  });
+});
+
+Deno.test("the fingerprint is deterministic and order-independent", () => {
+  withSpace([{ id: "of:z", doc: { value: 1 } }, {
+    id: "of:a",
+    doc: { value: 2 },
+  }], (s) => {
+    assertEquals(contentFingerprint(s).hash, contentFingerprint(s).hash);
+    const fp = contentFingerprint(s);
+    const ids = fp.perEntity.map((e) => `${e.id} ${e.scope}`);
+    assertEquals([...ids].sort(), ids, "per-entity rows are sorted");
+  });
+});
+
+Deno.test("diff names what moved, not merely that something did", () => {
+  // The point of per-entity hashes: a rehearsal needs "these two cells changed",
+  // not "the number differs".
+  let before = null as ReturnType<typeof contentFingerprint> | null;
+  let after = null as ReturnType<typeof contentFingerprint> | null;
+  withSpace([], (s) => before = contentFingerprint(s));
+  withSpace([
+    { id: "of:named", doc: { value: "named-v2", result: link("of:piece") } },
+    { id: "of:newcomer", doc: { value: "hello" } },
+  ], (s) => after = contentFingerprint(s));
+
+  const d = diffFingerprints(before!, after!);
+  assert(!d.equal);
+  assertEquals(d.changed, ["of:named"]);
+  assertEquals(d.added, ["of:newcomer"]);
+  assertEquals(d.removed, []);
+
+  assert(
+    diffFingerprints(before!, before!).equal,
+    "a diff with itself is equal",
+  );
+});
+
+Deno.test("an entity with no value is recorded, not dropped", () => {
+  withSpace(
+    [{ id: "of:novalue", doc: { result: link("of:piece") } }],
+    (space) => {
+      const fp = contentFingerprint(space);
+      const row = fp.perEntity.find((e) => e.id === "of:novalue");
+      assert(row !== undefined, "present in the report");
+      assertEquals(row.hash, null);
+      assertEquals(fp.unhashable, []);
+    },
+  );
+});
