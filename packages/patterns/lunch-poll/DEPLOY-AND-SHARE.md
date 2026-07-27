@@ -18,10 +18,11 @@ A poll's durable state belongs to **one deployed piece instance in one space**,
 addressed by `(space, causal-cell-id)` — not to "the pattern" in the abstract.
 So "share the state" = "everyone points at the same piece"; "copy the state" =
 "move that piece's values into a new piece." It all lives in **`PerSpace` input
-cells**, shared by everyone in the space: `question`, `options`, `votes`,
-`users`, `adminName`, and **`visits`** (the "Recently eaten" log + embedded vote
-snapshots that feed "Lunch stats"). Plus **`myName`**, which is **`PerUser`**
-(keyed by your DID).
+cells**, shared by everyone in the space: `question`, `options` (each option
+embeds its persisted generated-art thumbnail as a ~10 kB `imageUrl` data URL
+once the host's client has generated it), `votes`, `users`, `adminName`, and
+**`visits`** (the "Recently eaten" log + embedded vote snapshots that feed
+"Lunch stats"). Plus **`myName`**, which is **`PerUser`** (keyed by your DID).
 
 All of these survive an in-place `setsrc` (Option A) and — because `visits` is
 now an ordinary `PerSpace` cell — can all be copied to another piece via the CLI
@@ -278,13 +279,17 @@ load — you just don't get your profile name and avatar pre-filled.
 
 ## Performance notes
 
-The poll no longer does any per-option AI work. The generated cuisine-image
-(#4325) and web-search homepage-enrichment (#4326) features were removed on
-2026-06-23, and with them the per-option image generation, web search, and
-`generateText` homepage-verification call — plus the 30s mutex that serialized
-them. That work, not graph/runtime cost, was what made cold loads of a
-many-option poll take **minutes**. What remains is graph/runtime cost, which
-instantiation measured at ~linear, ~12ms/option.
+Per-option AI image generation is back, but host-gated and self-limiting. The
+generated cuisine-image feature (removed in #4325 on 2026-06-23, restored in
+#4920) fetches one 128px thumbnail per option from `/api/ai/img` — only on the
+**host's** client, and only for options with no stored image. The result
+auto-persists onto the option as a data URL, after which no client generates:
+every viewer (host included) renders the stored value. So non-host cold loads do
+no AI work at all, and the host pays one generation per not-yet-imaged option,
+once ever. The web-search homepage-enrichment (#4326) and its `generateText`
+call remain removed — that unbounded per-option work, not graph/runtime cost,
+was what made pre-#4325 cold loads of a many-option poll take **minutes**. The
+remaining graph/runtime cost measured ~linear at ~12ms/option.
 
 For the deeper aggregate + write-conflict findings that still apply to a poll
 with many options and voters, see willkelly's perf investigation in

@@ -90,8 +90,9 @@ export interface Option {
   addedByName: string;
   /**
    * Persisted generated-art data URL (`""` until the host's client generates
-   * and syncs it). Every viewer renders this stored value; generation only
-   * runs on the host's client for options where it is still empty.
+   * and auto-persists it). Every viewer renders this stored value; generation
+   * only runs on the host's client for options where it is still empty, and
+   * the card auto-persists the result the moment it lands (no host action).
    */
   imageUrl?: string;
 }
@@ -130,9 +131,11 @@ export interface CastVoteEvent {
 }
 
 /**
- * Art persistence event: the host keeps a generated thumbnail by storing its
- * data URL onto the option. Sent by the option card's host-only keep action,
- * which reads the GeneratedArt sub-pattern's `imageDataUrl` output directly
+ * Art persistence event: store a generated thumbnail's data URL onto its
+ * option. Sent automatically by the option card's hidden trigger img the
+ * moment the host's browser decodes the freshly generated thumbnail (see
+ * poll-option-card.tsx) — no manual keep action exists anymore. The handler
+ * reads the GeneratedArt sub-pattern's `imageDataUrl` output via the card
  * (fetch-derived child outputs materialize for parents since CT-1836).
  */
 export interface SetOptionImageEvent {
@@ -528,11 +531,14 @@ const addOption = handler<AddOptionEvent, {
   optionDraft.set("");
 });
 
-// Host persists the generated cuisine thumbnail (a data URL read from the
-// GeneratedArt sub-pattern by the card's keep action) onto its option.
-// Idempotent on the stored value, keyed-collection addressed, and admin-gated
-// like every other mutation — only the host's client generates, but the gate
-// holds regardless.
+// Persists the generated cuisine thumbnail (a data URL read from the
+// GeneratedArt sub-pattern) onto its option. Sent automatically by the
+// card's hidden trigger img on the host's client; also the external surface
+// for CLI and linked-piece callers. Idempotent on the stored value,
+// keyed-collection addressed, and admin-gated like every other mutation —
+// only the host's client generates, but the gate holds regardless (it also
+// covers a host deposed while generation was in flight, and absorbs
+// replayed load events from reloads or a second host tab).
 const setOptionImage = handler<SetOptionImageEvent, {
   options: OptionsCell;
   myName: NameCell;
