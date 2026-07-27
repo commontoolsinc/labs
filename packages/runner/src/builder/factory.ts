@@ -83,8 +83,10 @@ import { isTrustedPattern, setPatternProgram } from "./pattern-metadata.ts";
 import {
   FabricInstance,
   FabricPrimitive,
+  FabricSpecialObject,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import { FabricLink } from "@commonfabric/data-model/fabric-instances";
 import {
   FabricBytes,
   FabricEpochDays,
@@ -292,12 +294,16 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
 
     // Fabric value classes -- runtime values backing the type declarations
     // in api/index.ts. Enables `new FabricEpochNsec(...)` and `instanceof`
-    // checks in patterns.
+    // checks in patterns. `FabricSpecialObject` is abstract; it is bound for
+    // `instanceof` only. Listed in declaration order, so this list and the
+    // declarations in api/index.ts can be compared directly.
+    FabricSpecialObject,
     FabricInstance,
     FabricPrimitive,
     FabricEpochNsec,
     FabricEpochDays,
     FabricHash,
+    FabricLink,
     FabricBytes,
 
     // Debug stringifiers (helpers exposed for pattern code)
