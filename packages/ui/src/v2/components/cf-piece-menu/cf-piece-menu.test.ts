@@ -212,6 +212,25 @@ describe("the source panel", () => {
     expect(shows(menu)).not.toContain("gone");
   });
 
+  it("drops a failed read that a later opening replaced", async () => {
+    let failRead!: (error: Error) => void;
+    const menu = openMenu(
+      pieceCell(() =>
+        new Promise<PieceSourceView>((_resolve, reject) => {
+          failRead = reject;
+        })
+      ),
+    );
+    const pending = menu.showPanel("source");
+
+    menu.open({ cell: pieceCell(), x: 0, y: 0 });
+    failRead(new Error("failed after reopening"));
+    await pending;
+
+    // The failure belongs to the piece the menu no longer shows.
+    expect(shows(menu)).not.toContain("failed after reopening");
+  });
+
   it("drops a read that a later opening replaced", async () => {
     let resolveRead!: (source: PieceSourceView) => void;
     const menu = openMenu(

@@ -17,6 +17,19 @@ import {
 // handling, cell assignment, variant configuration, and disconnectedCallback
 // state reset. For full integration tests, use a browser-based test harness.
 
+/** Record what a call logged as an error, leaving the console untouched. */
+function captureConsoleError(fn: () => void): unknown[][] {
+  const calls: unknown[][] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => calls.push(args);
+  try {
+    fn();
+  } finally {
+    console.error = original;
+  }
+  return calls;
+}
+
 describe("CFRender", () => {
   it("should be defined", () => {
     expect(CFRender).toBeDefined();
@@ -113,18 +126,6 @@ describe("CFRender render-error handling", () => {
     } as unknown as CellHandle;
   }
 
-  function captureConsoleError(fn: () => void): unknown[][] {
-    const calls: unknown[][] = [];
-    const original = console.error;
-    console.error = (...args: unknown[]) => calls.push(args);
-    try {
-      fn();
-    } finally {
-      console.error = original;
-    }
-    return calls;
-  }
-
   it("logs render errors while the runtime is alive", () => {
     const element = new CFRender();
     element.cell = cellWithSignal(false);
@@ -146,7 +147,109 @@ describe("CFRender render-error handling", () => {
   });
 });
 
+describe("CFRender tile navigation", () => {
+  /** Collect the navigation events the shell (or an embedder) listens for. */
+  function captureNavigation(name: string, run: () => void): unknown[] {
+    const seen: unknown[] = [];
+    const listener = (e: Event) => seen.push((e as CustomEvent).detail);
+    globalThis.addEventListener(name, listener);
+    try {
+      run();
+    } finally {
+      globalThis.removeEventListener(name, listener);
+    }
+    return seen;
+  }
+
+  function tileClick(modifiers: Partial<MouseEvent> = {}): MouseEvent {
+    return {
+      stopPropagation: () => {},
+      ...modifiers,
+    } as unknown as MouseEvent;
+  }
+
+  function navigatingElement(): CFRender {
+    const element = new CFRender();
+    element.cell = createMockCellHandle({ name: "piece" }, {
+      id: "of:fid1:tile-piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    return element;
+  }
+
+  it("navigates to the piece a clicked tile renders", () => {
+    const element = navigatingElement();
+    const seen = captureNavigation("cf-navigate", () => {
+      (element as unknown as { _navigateToPiece(e: MouseEvent): void })
+        ._navigateToPiece(tileClick());
+    });
+
+    expect(seen).toEqual([{
+      spaceDid: "did:key:zSpace",
+      pieceId: "of:fid1:tile-piece",
+    }]);
+  });
+
+  it("offers the same target to a host on a modifier-click", () => {
+    const element = navigatingElement();
+    // The new-tab hook is cancellable so a host can own the new tab; cancelling
+    // it here keeps the shell's `globalThis.open` fallback out of the test.
+    const seen = captureNavigation("cf-open-external", () => {
+      globalThis.addEventListener(
+        "cf-open-external",
+        (e: Event) => e.preventDefault(),
+        { once: true },
+      );
+      (element as unknown as { _navigateToPiece(e: MouseEvent): void })
+        ._navigateToPiece(tileClick({ metaKey: true }));
+    });
+
+    expect(seen).toEqual([{
+      spaceDid: "did:key:zSpace",
+      pieceId: "of:fid1:tile-piece",
+    }]);
+  });
+
+  it("reports a navigation it could not address, rather than throwing", () => {
+    const element = new CFRender();
+    element.cell = {
+      space: () => {
+        throw new Error("no space");
+      },
+      id: () => "of:fid1:tile-piece",
+    } as unknown as CellHandle;
+
+    const calls = captureConsoleError(() => {
+      (element as unknown as { _navigateToPiece(e: MouseEvent): void })
+        ._navigateToPiece(tileClick());
+    });
+    expect(calls.length).toBe(1);
+  });
+});
+
 describe("CFRender disconnectedCallback", () => {
+  it("listens for right-clicks while connected, and stops when disconnected", () => {
+    const element = new CFRender();
+    const listened: string[] = [];
+    const removed: string[] = [];
+    (element as unknown as { addEventListener(t: string): void })
+      .addEventListener = (type: string) => listened.push(type);
+    (element as unknown as { removeEventListener(t: string): void })
+      .removeEventListener = (type: string) => removed.push(type);
+    // Connecting makes Lit build a render root and schedule its first update,
+    // both of which want a DOM. This test is about the listener the callback
+    // wires, not about rendering.
+    (element as unknown as { createRenderRoot(): unknown }).createRenderRoot =
+      () => ({ adoptedStyleSheets: [] });
+    (element as unknown as { performUpdate(): void }).performUpdate = () => {};
+
+    element.connectedCallback();
+    element.disconnectedCallback();
+
+    expect(listened).toContain("contextmenu");
+    expect(removed).toContain("contextmenu");
+  });
+
   it("should reset state on disconnect", () => {
     const element = new CFRender();
     const cell = createMockCellHandle({ name: "test" });
