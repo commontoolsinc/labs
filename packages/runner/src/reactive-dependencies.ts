@@ -315,6 +315,8 @@ function shallowEqual(
 
   // Opaque leaf: compared by value. `valueEqual()` leads with `Object.is()`,
   // so an identical pair short-circuits before any structural work.
+  // TODO(danfuzz): `FabricInstance` cases will currently end up here, and we
+  // should be treating them more like the plain container cases above.
   return valueEqual(before, after);
 }
 
