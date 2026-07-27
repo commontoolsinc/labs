@@ -9,10 +9,11 @@
  * Identity follows the scrabble idiom:
  * - `users` is a per-space directory of joined participants.
  * - Each viewer's `myName` is per-user; it is set once on join and treated as
- *   immutable thereafter. The join name/avatar come from the viewer's shared
- *   profile (`wish({ query: "#profile" })` — its built-in UI covers profile
- *   create/pick); programmatic callers can still pass an explicit name in the
- *   `joinAs` event.
+ *   immutable thereafter. A profile-backed join stores the viewer's live
+ *   `wish({ query: "#profile" })` cell in the object-wrapped
+ *   `participantProfiles` directory, while keeping a name/avatar snapshot in
+ *   the legacy name-keyed poll state. A guest may instead type a string; guest
+ *   entries deliberately have no canonical profile link.
  * - The first joiner's name is captured into `adminName` (per-space). They can
  *   add/remove options and reset votes. `isAdmin` is derived, not stored.
  * - Open host takeover: any joined participant can `claimHost`, transferring
@@ -32,9 +33,10 @@
  * denormalized, so the snapshot survives the option being removed. The
  * "📊 Lunch stats" card derives per-place visit + green/yellow/red tallies from
  * those embedded snapshots via a plain `computed` (the `tallyOptions` idiom).
- * Live voting stays on the in-cell `votes` array. Each entry — and each embedded
- * vote — carries a frozen name snapshot plus a live `Cell<User>` profile link
- * (the shared-profile-roster live-link idiom).
+ * Live voting stays on the in-cell `votes` array. Each history entry — and each
+ * embedded vote — carries a frozen name plus a same-space `Cell<User>` roster
+ * link. Canonical cross-space profile identity lives separately in
+ * `participantProfiles` so legacy stored Lunch Poll arguments remain valid.
  *
  * History was briefly backed by the SQLite builtin (#4144/#4145, to dogfood it),
  * but that brought a deployed-piece "invalid database handle" failure plus a
@@ -81,8 +83,53 @@ export interface User {
   /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
   avatar?: string;
   color: string;
-  joinedAt: number;
 }
+
+/**
+ * The minimal profile shape a roster needs: the stable identity cell for
+ * `<cf-profile-badge>` binding and `equals()` dedup. Deliberately just
+ * `{ name?, avatar? }`, matching the shared-profile-rosters spec's
+ * `ParticipantProfileCell` — a richer wish schema (bio / externalLinks /
+ * verifiedIdentities Cell[]) makes the cross-space `#profile` result fail to
+ * resolve, so the badge falls back to "Unknown profile". The display NAME is
+ * never read off this cell; it comes from the `#profileName` string wish and
+ * is snapshotted at join.
+ */
+export interface LunchProfile {
+  readonly name?: string;
+  readonly avatar?: string;
+}
+
+/** Stable identity for a profile-backed participant. */
+export type LunchProfileCell = Cell<LunchProfile>;
+
+export interface ParticipantProfileLink {
+  /** Immutable Lunch Poll name used by the current name-keyed vote schema. */
+  readonly name: string;
+  /** Live canonical profile cell; compare it by identity with `equals()`. */
+  readonly profile: LunchProfileCell;
+}
+
+/**
+ * Live profile links use an object-wrapped directory. Nested cross-space cells
+ * inside Lunch Poll's legacy bare `users` array do not preserve strong handler
+ * schemas, so the compatibility-safe profile index remains separate.
+ */
+export interface ParticipantProfileDirectory {
+  readonly participants: ParticipantProfileLink[] | Default<[]>;
+}
+
+export const DEFAULT_PARTICIPANT_PROFILES = {
+  participants: [] as ParticipantProfileLink[],
+} satisfies ParticipantProfileDirectory;
+
+export type ParticipantProfileDirectoryValue =
+  | ParticipantProfileDirectory
+  | Default<typeof DEFAULT_PARTICIPANT_PROFILES>;
+
+export type ParticipantProfileDirectoryCell = Writable<
+  ParticipantProfileDirectoryValue
+>;
 
 export interface Option {
   id: string;
@@ -146,8 +193,8 @@ export type ResetVotesEvent = Record<PropertyKey, never>;
  * A snapshot of one person's vote at the moment a visit was logged, embedded in
  * the visit's `votes` list. `optionTitle` is denormalized (options can be
  * removed later; the title is the meaningful record). `voter` is a frozen name
- * snapshot; `voterLink` is a live `Cell<User>` link to that voter's profile
- * (null if the voter is no longer in the directory).
+ * snapshot; `voterLink` is a live `Cell<User>` link to that voter's Lunch Poll
+ * roster entry (null if the voter is no longer in the directory).
  */
 export interface VoteSnapshot {
   voter: string;
@@ -160,8 +207,9 @@ export interface VoteSnapshot {
  * A place the group actually ate, logged by the host — one entry in the
  * `PerSpace<HistoryEntry[]>` visit log. `loggedByName` is a frozen name snapshot
  * (what the "Recently eaten" card renders); `loggedBy` is a live `Cell<User>`
- * link to the logging host's profile (null if absent). `votes` embeds the vote
- * snapshot taken at log time, so per-place stats survive an option's removal.
+ * link to the logging host's Lunch Poll roster entry (null if absent). `votes`
+ * embeds the vote snapshot taken at log time, so per-place stats survive an
+ * option's removal.
  */
 export interface HistoryEntry {
   id: string;
@@ -261,11 +309,20 @@ const unusedId = (
   return id;
 };
 
+// Guard against live options AND every optionId still referenced by a vote:
+// without the vote sweep, a remove→re-add of the same (name, title) would mint
+// the removed option's id again and adopt any stray votes that merged in after
+// the removal cascade's read.
 const newOptionId = (
   options: readonly Option[],
+  votes: readonly Vote[],
   addedByName: string,
   title: string,
-): string => unusedId("o", [addedByName, title], options.map((o) => o.id));
+): string =>
+  unusedId("o", [addedByName, title], [
+    ...options.map((o) => o.id),
+    ...votes.map((v) => v.optionId),
+  ]);
 
 // The deterministic key a vote is addressed by: a voter's vote for one option.
 // castVote, clearMyVote, and the removeOption cascade all derive the same key,
@@ -504,10 +561,11 @@ const visitLabel = (wentAt: number): string => {
 
 const addOption = handler<AddOptionEvent, {
   options: OptionsCell;
+  votes: VotesCell;
   myName: NameCell;
   adminName: NameCell;
   optionDraft: NameCell;
-}>(({ title }, { options, myName, adminName, optionDraft }) => {
+}>(({ title }, { options, votes, myName, adminName, optionDraft }) => {
   const me = trimmedName(myName.get());
   const admin = trimmedName(adminName.get());
   if (!me || me !== admin) return;
@@ -515,8 +573,9 @@ const addOption = handler<AddOptionEvent, {
   if (!trimmed) return;
   // Address the option by its id so later edits and removal reach it without a
   // positional index. addUnique merges concurrent adds (distinct ids) and is
-  // idempotent on the id.
-  const id = newOptionId(options.get(), me, trimmed);
+  // idempotent on the id. The votes read joins the id-freshness guard into
+  // this transaction's conflict set — a concurrent cast retries the add.
+  const id = newOptionId(options.get(), votes.get(), me, trimmed);
   const option = options.elementById(id);
   option.set({
     id,
@@ -684,9 +743,9 @@ const logVisit = handler<LogVisitEvent, {
       : parseVisitDate(visitDate.get(), fallbackNow);
     if (!when) return;
 
-    // Resolve a name → that user's live Cell<User> in the directory, for the
-    // `*Link` live-profile links (the shared-profile-roster idiom). users.key(i)
-    // is a stable cell that round-trips through the array as a link.
+    // Resolve a name → that user's same-space Cell<User> roster entry.
+    // Canonical cross-space identity is held by `participantProfiles`; these
+    // historical links remain unchanged for stored-value compatibility.
     const us = users.get();
     const cellForName = (name: string): Cell<User> | null => {
       const idx = us.findIndex((u) => u.name === name);
@@ -847,6 +906,8 @@ export interface CozyPollInput {
   options?: PerSpace<Option[] | Default<[]>>;
   votes?: PerSpace<Vote[] | Default<[]>>;
   users?: PerSpace<User[] | Default<[]>>;
+  /** Canonical live profile links for profile-backed users; guests are absent. */
+  participantProfiles?: PerSpace<ParticipantProfileDirectoryValue>;
   adminName?: PerSpace<string | Default<"">>;
   myName?: PerUser<string | Default<"">>;
   // Durable "we went here" log; each entry embeds its own vote snapshot. Capped
@@ -865,6 +926,7 @@ export interface CozyPollOutput {
   // only `todaysVotes` — see the current-day filter note in the file header.
   votes: readonly Vote[];
   users: readonly User[];
+  participantProfiles: readonly ParticipantProfileLink[];
   adminName: string;
   myName: string;
   userCount: number;
@@ -909,6 +971,7 @@ export interface CozyPollOutput {
 const EMPTY_OPTIONS: Option[] = [];
 const EMPTY_VOTES: Vote[] = [];
 const EMPTY_USERS: User[] = [];
+const EMPTY_PARTICIPANT_PROFILE_LINKS: ParticipantProfileLink[] = [];
 
 export default pattern<CozyPollInput, CozyPollOutput>(
   (
@@ -917,6 +980,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       options,
       votes,
       users,
+      participantProfiles,
       adminName,
       myName,
       visits,
@@ -952,13 +1016,46 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     >(null);
     const resetConfirmPending = Writable.perSession.of<boolean>(false);
     const clearHistoryConfirmPending = Writable.perSession.of<boolean>(false);
+    // Resolve the viewer's shared profile at the TOP LEVEL, per the
+    // shared-profile-rosters spec (docs/specs/shared-profile-rosters.md): the
+    // `#profile` cell is the stable identity (badge + `equals()` dedup), and
+    // `#profileName` / `#profileAvatar` are the display strings. Simple schema
+    // on purpose — a rich schema fails to resolve the cross-space result. The
+    // injected `profile` input (tests) overrides the wish cell. These pass
+    // DOWN into the identity card; the card no longer wishes for itself, so
+    // resolution happens in this piece's top-level context where it works.
+    const profileWish = wish<LunchProfile>({ query: "#profile" });
+    const profileNameWish = wish<string>({ query: "#profileName" });
+    const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
+    // Bind the badge/identity to the wish result DIRECTLY (the demo idiom). Do
+    // NOT reintroduce a `profile ?? …` injection override: an unset optional
+    // cell input is a truthy proxy at pattern-build time, so `??` returns that
+    // broken proxy instead of the real result and every badge falls back to
+    // "Unknown profile". Profile-backed rendering is verified at the browser
+    // tier (the scrabble/battleship precedent), not via a pattern-body cell
+    // injection.
+    const viewerProfileCell = profileWish.result;
+    const viewerProfileName = computed(() =>
+      trimmedName(profileNameWish.result ?? "")
+    );
+    const viewerProfileAvatar = computed(() =>
+      (profileAvatarWish.result ?? "").trim()
+    );
+    // This pattern renders identity only from the STORED directory entries, so
+    // a later profile switch cannot orphan the joined identity.
     const participantIdentity = ParticipantIdentityCard({
       users,
       myName,
       adminName,
+      participantProfiles,
+      profile: viewerProfileCell,
+      profileName: viewerProfileName,
+      profileAvatar: viewerProfileAvatar,
+      profileSetupUI: profileWish[UI],
     });
     const boundAddOption = addOption({
       options,
+      votes,
       myName,
       adminName,
       optionDraft,
@@ -1041,6 +1138,31 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const me = participantIdentity.me;
     const isJoined = participantIdentity.isJoined;
     const isAdmin = participantIdentity.isAdmin;
+    // Normalize the Default<>-wrapped directory once: downstream maps need
+    // one concrete element type, not the raw schema union.
+    const participantLinks = computed((): readonly ParticipantProfileLink[] =>
+      participantProfiles.participants ?? EMPTY_PARTICIPANT_PROFILE_LINKS
+    );
+    // The viewer's stored canonical profile link(s) — the STORED entry (not
+    // the live `#profile` wish) is the rendered identity source, so switching
+    // the active profile after joining keeps the joined badge. An array of
+    // 0-or-1 entries: the header chip renders it with a plain static map,
+    // which keeps the `$profile` binding free of conditionals.
+    const viewerLinks = computed((): readonly ParticipantProfileLink[] => {
+      const viewerName = participantIdentity.me;
+      if (!viewerName) return EMPTY_PARTICIPANT_PROFILE_LINKS;
+      return participantLinks.filter((entry) => entry.name === viewerName);
+    });
+    const viewerHasStoredProfile = computed(() => viewerLinks.length > 0);
+    // Guests (typed-name joins) have no directory entry; the participants
+    // strip renders them as plain name chips next to the profile badges.
+    const guestUsers = computed(() => {
+      const linked = new Set(participantLinks.map((entry) => entry.name));
+      return users.filter((u) => !linked.has(u.name));
+    });
+    // Hoisted booleans for the JSX ternaries below (the file's reset-confirm
+    // idiom): conditions in JSX stay bare computed refs.
+    const hasParticipants = computed(() => users.length > 0);
     // Hoist a boolean cell for the reset-confirm JSX ternary so TS doesn't
     // narrow `resetConfirmPending` itself and lose the `.set` method in
     // the false branch.
@@ -1120,12 +1242,69 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       </div>
                     );
                   })}
+                  {hasParticipants
+                    ? (
+                      <div
+                        data-participants-strip
+                        style={{
+                          marginTop: "8px",
+                          display: "flex",
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                          gap: "6px",
+                        }}
+                      >
+                        {
+                          /* Every profile-backed participant renders from
+                            their STORED live cell (the canonical-roster
+                            idiom, multi-user-patterns.md#presenting-identity);
+                            guests keep plain name chips. Static maps on
+                            purpose — `$profile` bindings cannot live inside
+                            the tally computed below. These badges navigate;
+                            only the viewer's own chip is noNavigate. */
+                        }
+                        {participantLinks.map((entry) => (
+                          <cf-profile-badge
+                            variant="chip"
+                            size="sm"
+                            $profile={entry.profile}
+                            data-participant-badge={entry.name}
+                          />
+                        ))}
+                        {guestUsers.map((u) => (
+                          <span
+                            data-participant-guest={u.name}
+                            title={u.name}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              padding: "2px 8px",
+                              borderRadius: "9999px",
+                              background: "#f3f4f6",
+                              border: "1px solid #e5e7eb",
+                              fontSize: "11px",
+                              fontWeight: 600,
+                              color: "#374151",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {u.name}
+                          </span>
+                        ))}
+                      </div>
+                    )
+                    : null}
                 </div>
-                {computed(() => {
-                  const viewer = me;
-                  if (viewer === "") return null;
-                  const amAdmin = isAdmin;
-                  return (
+                {
+                  /* Static JSX only in this cluster: the viewer badge carries
+                    a `$profile` binding, and a `$`-binding inside an authored
+                    `computed(() => …)` VNode is materialized by the lift and
+                    blanks the whole render (pattern-critique-guide §5). JSX
+                    ternaries compile to static-branch `ifElse`, the safe
+                    conditional shape at a `$`-binding position. */
+                }
+                {isJoined
+                  ? (
                     <div
                       style={{
                         display: "flex",
@@ -1133,7 +1312,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                         alignItems: "center",
                       }}
                     >
-                      {amAdmin
+                      {isAdmin
                         ? (
                           <span
                             style={{
@@ -1154,30 +1333,48 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           </span>
                         )
                         : null}
-                      <span
-                        title={viewer}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "6px",
-                          padding: "4px 10px",
-                          borderRadius: "9999px",
-                          background: "#f3f4f6",
-                          border: "1px solid #e5e7eb",
-                          fontSize: "12px",
-                          fontWeight: 600,
-                          color: "#374151",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        <span style={{ fontSize: "10px", color: "#10b981" }}>
-                          ●
+                      {
+                        /* The viewer's chip binds the STORED directory entry
+                          (never the live `#profile` wish), so a profile
+                          switch after joining keeps the joined identity.
+                          `viewerLinks` is pre-filtered to 0-or-1 entries, so
+                          this map stays conditional-free at the binding. */
+                      }
+                      {viewerLinks.map((entry) => (
+                        <cf-profile-badge
+                          variant="chip"
+                          size="sm"
+                          $profile={entry.profile}
+                          noNavigate
+                          data-viewer-badge
+                        />
+                      ))}
+                      {viewerHasStoredProfile ? null : (
+                        <span
+                          title={me}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            padding: "4px 10px",
+                            borderRadius: "9999px",
+                            background: "#f3f4f6",
+                            border: "1px solid #e5e7eb",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            color: "#374151",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          <span style={{ fontSize: "10px", color: "#10b981" }}>
+                            ●
+                          </span>
+                          {me}
                         </span>
-                        {viewer}
-                      </span>
+                      )}
                     </div>
-                  );
-                })}
+                  )
+                  : null}
               </div>
             </div>
 
@@ -1189,6 +1386,31 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   margin: "0 auto",
                 }}
               >
+                {
+                  /* Always-on live self-badge, at the TOP LEVEL co-located with
+                    the `#profile` wish — the profile-roster-live-demo idiom. A
+                    `<cf-profile-badge>` rendered here keeps the viewer's profile
+                    pattern running in this runtime, which is what materializes
+                    the cross-space profile so EVERY badge (this one, the header
+                    viewer chip, and the participants strip's stored-cell badges)
+                    resolves instead of falling back to "Unknown profile", and it
+                    reliably primes the `#profileName` string the join label and
+                    roster snapshot read. A badge rendered inside the identity
+                    sub-pattern does NOT achieve this — it must be top-level.
+                    Static JSX position: the `$profile` binding must not sit
+                    inside an authored `computed(() => …)` VNode. */
+                }
+                <div
+                  data-viewer-self-badge
+                  style={{ marginBottom: "12px" }}
+                >
+                  <cf-profile-badge
+                    variant="chip"
+                    size="sm"
+                    $profile={viewerProfileCell}
+                    noNavigate
+                  />
+                </div>
                 {participantIdentity[UI]}
 
                 {/* Top choice — only when there are votes */}
@@ -1790,6 +2012,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       options: computed(() => options ?? EMPTY_OPTIONS),
       votes: computed(() => votes ?? EMPTY_VOTES),
       users: computed(() => users ?? EMPTY_USERS),
+      participantProfiles: participantLinks,
       adminName: computed(() => trimmedName(adminName)),
       myName: participantIdentity.me,
       userCount,

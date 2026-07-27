@@ -1,16 +1,22 @@
 import {
   computed,
   Default,
+  equals,
   handler,
   NAME,
   pattern,
   type Stream,
   UI,
   type VNode,
-  wish,
   Writable,
 } from "commonfabric";
-import type { ClaimHostEvent, JoinEvent, User } from "./main.tsx";
+import type {
+  ClaimHostEvent,
+  JoinEvent,
+  LunchProfileCell,
+  ParticipantProfileDirectoryCell,
+  User,
+} from "./main.tsx";
 
 /** Parent-owned roster cell shared by all viewers. */
 export type ParticipantIdentityUsersCell = Writable<User[] | Default<[]>>;
@@ -35,6 +41,12 @@ const joinAs = handler<JoinEvent, {
   myName: ParticipantIdentityNameCell;
   adminName: ParticipantIdentityNameCell;
   joinName: ParticipantIdentityNameCell;
+  participantProfiles: ParticipantProfileDirectoryCell;
+  profile: LunchProfileCell | undefined;
+  // The display strings arrive pre-resolved (from `#profileName` /
+  // `#profileAvatar`, or the injected profile object) — field reads off the
+  // live `#profile` result are NOT a reliable display source; the dedicated
+  // string wishes are (the battleship-lobby idiom, multi-user-patterns.md).
   profileName: string;
   profileAvatar: string;
 }>(
@@ -45,6 +57,8 @@ const joinAs = handler<JoinEvent, {
       myName,
       adminName,
       joinName,
+      participantProfiles,
+      profile,
       profileName,
       profileAvatar,
     },
@@ -60,14 +74,20 @@ const joinAs = handler<JoinEvent, {
       name: trimmed,
       avatar: override ? "" : (profileAvatar ?? "").trim(),
       color: colorForIndex(existing.length),
-      // Ordering comes from the shared roster itself; avoid ambient time so
-      // this action also works in pre-#4740 secure Loom runtimes.
-      joinedAt: 0,
     };
     // A duplicate name must reject the second join rather than silently make
     // two sessions the same participant. Keep the admission read and write the
     // resulting roster as one conflict-safe read-modify-write transaction.
     users.set([...existing, user]);
+    if (!override && profile) {
+      const currentLinks = participantProfiles.get().participants ?? [];
+      if (!currentLinks.some((entry) => equals(entry.profile, profile))) {
+        participantProfiles.key("participants").set([
+          ...currentLinks,
+          { name: trimmed, profile },
+        ]);
+      }
+    }
     myName.set(trimmed);
     if (trimmedName(adminName.get()) === "") {
       adminName.set(trimmed);
@@ -95,12 +115,14 @@ const claimHost = handler<ClaimHostEvent, {
  * and `isAdmin`) are intended for downstream sub-patterns such as per-option
  * cards.
  *
- * Joining is profile-first: when `#profileName` resolves, the surface offers a
- * one-click "Join as <name>" (carrying the profile name and avatar) with a
- * "Use a different name" escape hatch. The manual name input is the FALLBACK,
- * shown by default only when no profile resolves. This keeps the shared profile
- * — not a hand-typed name — the primary identity, so avatars aren't dropped and
- * viewers aren't asked to retype who they already are.
+ * Joining is profile-first. The parent resolves the viewer's `#profile` at
+ * top level (per docs/specs/shared-profile-rosters.md) and passes the cell,
+ * display name, and the wish's create/pick surface in. When a profile
+ * resolves, the card offers a one-click "Join as <name>" and retains the live
+ * cell in the shared profile directory. When it doesn't, the card renders the
+ * passed create/pick surface — the typed-name guest path never appears
+ * automatically; "Continue as guest" is an explicit choice, and guest entries
+ * store only the entered string.
  */
 
 /**
@@ -119,6 +141,34 @@ export interface ParticipantIdentityCardInput {
 
   /** Shared admin name cell. */
   adminName: ParticipantIdentityNameCell;
+
+  /** Object-wrapped directory of live canonical profile links. */
+  participantProfiles: ParticipantProfileDirectoryCell;
+
+  /**
+   * The viewer's resolved `#profile` cell, from the parent's top-level wish
+   * (or an injected cell in tests). Used only as the badge/`equals()` identity
+   * — never read for its name; the display name arrives as `profileName`.
+   * Undefined until it resolves (or when the viewer has no profile).
+   */
+  profile?: LunchProfileCell;
+
+  /**
+   * The viewer's resolved display name, from the parent's top-level
+   * `#profileName` wish (or injected in tests). "" until it resolves; the join
+   * card gates on this being non-empty and snapshots it into the roster.
+   */
+  profileName: string;
+
+  /** The viewer's resolved avatar, from the parent's `#profileAvatar` wish. */
+  profileAvatar: string;
+
+  /**
+   * The `#profile` wish's built-in create/pick surface (`profileWish[UI]`),
+   * rendered by the parent's top-level wish and passed down so the card shows
+   * it in the no-profile state. Omitted in tests without a wish environment.
+   */
+  profileSetupUI?: VNode;
 }
 
 /**
@@ -144,6 +194,9 @@ export interface ParticipantIdentityCardOutput {
   /** Whether the current viewer currently owns admin actions. */
   isAdmin: boolean;
 
+  /** Current canonical profile display name, or empty for a guest/no profile. */
+  profileName: string;
+
   /** Bound stream that joins the current viewer and claims admin if first. */
   joinAs: Stream<JoinEvent>;
 
@@ -155,35 +208,57 @@ export default pattern<
   ParticipantIdentityCardInput,
   ParticipantIdentityCardOutput
 >(
-  ({ users, myName, adminName }) => {
+  (
+    {
+      users,
+      myName,
+      adminName,
+      participantProfiles,
+      profile,
+      profileName,
+      profileAvatar,
+      profileSetupUI,
+    },
+  ) => {
     const joinName = Writable.perSession.of<string>("");
-    const profileNameWish = wish<string>({ query: "#profileName" });
-    const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
-
-    const profileName = computed(() => profileNameWish.result ?? "");
-    const profileAvatar = computed(() => profileAvatarWish.result ?? "");
+    // The parent resolves the viewer's profile at top level (per
+    // docs/specs/shared-profile-rosters.md) and passes the results in:
+    // `profile` is the identity cell (badge + `equals()` dedup), `profileName`
+    // / `profileAvatar` are the display strings. The card never reads the name
+    // off the cell — the cross-space `#profileName` value is the source, and
+    // it is snapshotted into the roster on join.
+    const canonicalProfileName = computed(() => trimmedName(profileName));
+    const canonicalProfileAvatar = computed(() => (profileAvatar ?? "").trim());
     const boundJoin = joinAs({
       users,
       myName,
       adminName,
       joinName,
-      profileName,
-      profileAvatar,
+      participantProfiles,
+      profile,
+      profileName: canonicalProfileName,
+      profileAvatar: canonicalProfileAvatar,
     });
     const boundClaimHost = claimHost({ myName, adminName });
 
-    // The join name/avatar default to the viewer's shared profile; the manual
-    // input is only a fallback for when no profile resolves (or the viewer
-    // deliberately wants a one-off name). `useCustomName` reveals that input
-    // even when a profile IS present.
+    // Joining is profile-first, and the typed-name path is never automatic:
+    // with no resolved profile the card renders the wish's create/pick UI,
+    // and "Continue as guest" is an explicit secondary action. `useCustomName`
+    // also lets a profile-holder deliberately join under a one-off name.
     const useCustomName = Writable.perSession.of<boolean>(false);
-    const profileDisplayName = computed(() =>
-      trimmedName(profileNameWish.result ?? "")
+    // Gate on the resolved profile NAME. `#profileName` is a cross-space
+    // computed value: the profile's `initialNameApplied` lift lives in its own
+    // inSpace child space and only materializes once a `$profile` badge starts
+    // the profile pattern in this runtime (the raw `#profile` result is a
+    // pending proxy, not a usable truthiness signal). The badge in the setup
+    // branch below is what does that priming, so the empty-name window is a
+    // brief transient, not a deadlock — see its comment.
+    const hasProfile = computed(() => canonicalProfileName !== "");
+    const showProfileJoin = computed(() => hasProfile && !useCustomName.get());
+    const showProfileSetup = computed(() =>
+      !hasProfile && !useCustomName.get()
     );
-    const hasProfile = computed(() => profileDisplayName !== "");
-    const showManualEntry = computed(() =>
-      profileDisplayName === "" || useCustomName.get()
-    );
+    const showManualEntry = computed(() => useCustomName.get());
 
     const me = computed(() => trimmedName(myName.get()));
     const isJoined = computed(() => trimmedName(myName.get()) !== "");
@@ -236,6 +311,75 @@ export default pattern<
               >
                 {joinHint}
               </div>
+              {showProfileJoin
+                ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "8px",
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                    }}
+                  >
+                    <div
+                      data-profile-identity="canonical"
+                      style={{ display: "inline-flex", alignItems: "center" }}
+                    >
+                      <cf-profile-badge
+                        $profile={profile}
+                        size="sm"
+                        noNavigate
+                      />
+                    </div>
+                    <cf-button
+                      id="lp-join-button"
+                      variant="primary"
+                      aria-label="Join the poll with your profile name"
+                      onClick={() => boundJoin.send({})}
+                    >
+                      Join as {canonicalProfileName}
+                    </cf-button>
+                    <cf-button
+                      variant="ghost"
+                      size="sm"
+                      aria-label="Use a different name"
+                      onClick={() => useCustomName.set(true)}
+                    >
+                      Use a different name
+                    </cf-button>
+                  </div>
+                )
+                : null}
+              {showProfileSetup
+                ? (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "8px",
+                    }}
+                  >
+                    {
+                      /* Built-in profile create/pick surface, resolved by the
+                        parent's top-level `#profile` wish and passed in. The
+                        typed-name path never appears automatically — guests
+                        opt in below. */
+                    }
+                    <div data-profile-setup>{profileSetupUI}</div>
+                    <div>
+                      <cf-button
+                        id="lp-guest-button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label="Continue as guest with a typed name"
+                        onClick={() => useCustomName.set(true)}
+                      >
+                        Continue as guest
+                      </cf-button>
+                    </div>
+                  </div>
+                )
+                : null}
               {showManualEntry
                 ? (
                   <div
@@ -261,50 +405,20 @@ export default pattern<
                     >
                       Join
                     </cf-button>
-                    {hasProfile
-                      ? (
-                        <cf-button
-                          variant="ghost"
-                          size="sm"
-                          aria-label="Use my profile name instead"
-                          onClick={() => {
-                            useCustomName.set(false);
-                            joinName.set("");
-                          }}
-                        >
-                          Cancel
-                        </cf-button>
-                      )
-                      : null}
-                  </div>
-                )
-                : (
-                  <div
-                    style={{
-                      display: "flex",
-                      gap: "8px",
-                      alignItems: "center",
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <cf-button
-                      id="lp-join-button"
-                      variant="primary"
-                      aria-label="Join the poll with your profile name"
-                      onClick={() => boundJoin.send({})}
-                    >
-                      Join as {profileDisplayName}
-                    </cf-button>
                     <cf-button
                       variant="ghost"
                       size="sm"
-                      aria-label="Use a different name"
-                      onClick={() => useCustomName.set(true)}
+                      aria-label="Back to profile join"
+                      onClick={() => {
+                        useCustomName.set(false);
+                        joinName.set("");
+                      }}
                     >
-                      Use a different name
+                      Back
                     </cf-button>
                   </div>
-                )}
+                )
+                : null}
             </div>
           )}
 
@@ -342,6 +456,7 @@ export default pattern<
       me,
       isJoined,
       isAdmin,
+      profileName: canonicalProfileName,
       joinAs: boundJoin,
       claimHost: boundClaimHost,
     };
