@@ -125,7 +125,7 @@ export type SetOperation = {
  * same-address ensures require identical normalized path policies, and policy
  * paths must not overlap.
  */
-export interface EnsureOperation {
+export type EnsureOperation = {
   op: "ensure";
   id: EntityId;
   scope?: CellScope;
@@ -137,7 +137,7 @@ export interface EnsureOperation {
    * existing entity after the canonical core compares equal.
    */
   addUnique?: DocumentPath[];
-}
+};
 
 export type PatchOperation = {
   op: "patch";
