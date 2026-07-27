@@ -30,7 +30,7 @@ import {
   getCell,
   mapCellRefsToSigilLinks,
 } from "./utils.ts";
-import { Runtime } from "@commonfabric/runner";
+import { entityIdFrom, Runtime } from "@commonfabric/runner";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import * as V2Storage from "../../runner/src/storage/v2.ts";
 import { parseLink } from "../../runner/src/link-utils.ts";
@@ -329,9 +329,13 @@ describe("piece source state", () => {
       });
 
     expect(synced).toEqual(["cell"]);
+    // The handler addresses the cell by the entity id `entityIdFrom` builds
+    // from the routing form of the request's pieceId. That is a FabricHash, and
+    // its string form is the tagged hash — the `of:` scheme is added later, by
+    // the `getCellFromEntityId` this stub stands in for.
     expect(readFor).toEqual([{
       space,
-      entityId: fid("sourced-piece"),
+      entityId: String(entityIdFrom(fid("sourced-piece"))),
     }]);
     // The reader saw a piece with no metadata at all, which is a detached piece
     // with no readable source — reported as such rather than as a failure.

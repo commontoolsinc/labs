@@ -84,6 +84,23 @@ describe("classifyOrigin", () => {
       .toEqual({ url: "https://example.test/p.tsx", kind: "web" });
   });
 
+  it("keeps the recorded form of an absolute URL the parser rewrote", () => {
+    // Canonicalizing adds the path a bare origin omits, and drops a default
+    // port. What the piece stores stays visible beside what it resolves to.
+    expect(classifyOrigin(runtime, SPACE, "https://example.test"))
+      .toEqual({
+        url: "https://example.test/",
+        kind: "web",
+        recorded: "https://example.test",
+      });
+    expect(classifyOrigin(runtime, SPACE, "https://example.test:443/p.tsx"))
+      .toEqual({
+        url: "https://example.test/p.tsx",
+        kind: "web",
+        recorded: "https://example.test:443/p.tsx",
+      });
+  });
+
   it("reads an unpinned entity reference as a mutable piece origin", () => {
     expect(classifyOrigin(runtime, SPACE, `cf:/${SPACE}/of:fid1:${HASH}`))
       .toEqual({ url: `cf:/${SPACE}/of:fid1:${HASH}`, kind: "fabric-piece" });

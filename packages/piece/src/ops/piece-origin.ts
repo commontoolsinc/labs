@@ -122,11 +122,7 @@ export function classifyOrigin(
 
   if (source.startsWith("/")) {
     const host = runtime.hostForSpace(space);
-    return {
-      url: new URL(source, host).href,
-      kind: "web",
-      recorded: source,
-    };
+    return webOrigin(new URL(source, host), source);
   }
 
   let url: URL;
@@ -138,7 +134,22 @@ export function classifyOrigin(
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     throw new PieceOriginError(`${source} is not a web URL`);
   }
-  return { url: url.href, kind: "web" };
+  return webOrigin(url, source);
+}
+
+/**
+ * A web origin at its canonical URL, keeping the recorded string whenever
+ * canonicalizing changed it — a relative path resolved against a host, but also
+ * an absolute URL the URL parser rewrote, such as one with no path or a default
+ * port. The panel shows the recorded form beside the canonical one, so what a
+ * piece stores stays visible.
+ */
+function webOrigin(url: URL, recorded: string): PieceOrigin {
+  return {
+    url: url.href,
+    kind: "web",
+    ...(url.href === recorded ? {} : { recorded }),
+  };
 }
 
 /**
