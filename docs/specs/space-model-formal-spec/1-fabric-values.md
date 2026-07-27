@@ -766,7 +766,7 @@ FabricSpecialObject (abstract root)
 a single `instanceof FabricSpecialObject` check wherever code needs to recognize
 any fabric-system value without caring which branch it belongs to.
 
-It is **nominal**, not structural: the `@fabric/special-object` member is a
+It is **nominal**, not structural: the `@commonfabric/FabricSpecialObject` member is a
 brand that exists only in the type system (`declare` emits no runtime member,
 and nothing reads the key). This matters for what `FabricValue` means as a
 static claim. TypeScript is structurally typed, so were the class empty, every
@@ -793,7 +793,7 @@ would otherwise not satisfy the other.
  * belongs to.
  */
 export abstract class FabricSpecialObject {
-  declare readonly "@fabric/special-object": true;
+  declare readonly "@commonfabric/FabricSpecialObject": true;
 }
 ```
 

@@ -28,13 +28,13 @@ import type { Cfc, CurrentPrincipal, WriteAuthorizedBy } from "./cfc.ts";
  * Common base class for `FabricInstance` and `FabricPrimitive`. Enables a
  * single `instanceof` check for any fabric-system value type.
  *
- * The `@fabric/special-object` member is a nominal brand with no runtime
- * existence — see the canonical declaration in
+ * The `@commonfabric/FabricSpecialObject` member is a nominal brand with no
+ * runtime existence — see the canonical declaration in
  * `data-model/src/interface.ts` for why it is a well-known string key and not
  * a `unique symbol`. The two declarations must agree exactly.
  */
 export interface FabricSpecialObject {
-  readonly "@fabric/special-object": true;
+  readonly "@commonfabric/FabricSpecialObject": true;
 }
 
 export interface FabricSpecialObjectConstructor {

@@ -22,12 +22,12 @@
  * fabric-system value without caring which branch of the hierarchy it
  * belongs to.
  *
- * The `@fabric/special-object` member is a nominal brand, and exists only in
- * the type system: `declare` emits no runtime member, and nothing ever reads
- * the key. Without it the class is structurally empty, so *every* object
- * satisfies `FabricSpecialObject` — which in turn makes every object satisfy
- * `FabricValue`, since that union includes this type. The brand is what makes
- * `FabricValue` mean anything as a static claim.
+ * The `@commonfabric/FabricSpecialObject` member is a nominal brand, and
+ * exists only in the type system: `declare` emits no runtime member, and
+ * nothing ever reads the key. Without it the class is structurally empty, so
+ * *every* object satisfies `FabricSpecialObject` — which in turn makes every
+ * object satisfy `FabricValue`, since that union includes this type. The brand
+ * is what makes `FabricValue` mean anything as a static claim.
  *
  * It is a well-known string key rather than a `unique symbol` because that
  * would require importing a symbol *value*, and this file is deliberately free
@@ -36,7 +36,7 @@
  * will not satisfy the other.
  */
 export abstract class FabricSpecialObject {
-  declare readonly "@fabric/special-object": true;
+  declare readonly "@commonfabric/FabricSpecialObject": true;
 }
 
 //
