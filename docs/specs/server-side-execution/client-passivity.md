@@ -325,22 +325,39 @@ peeled three successive liveness layers — each fix exposing the next:
    `not-owned[owned-missing|owned-replaced fdo A->B]` sub-legs, and
    pool-side re-anchor SKIP reasons (the 54-notes-zero-attempts
    silence, never again).
-7. **Named residual (P0-R3, now the sole claimsIssued>0 blocker):** the
-   post-fix rerun still declined 54/54 — and the new sponsor-population
-   dump shows `rows=NONE` at every single decline: by the time the
-   Worker's candidates reach claim-ready, ZERO demand rows exist for
-   the (space, branch) — nothing to sponsor OR re-anchor against, and
-   52/54 pool loss-notes were skipped `state-draining` (the slot was
-   already in its 60s graceful-settle window). Theory to verify with
-   the timeline probe (demand-row set/clear/sweep + claim-ready +
-   decline, all timestamped): the harness's pages live seconds while
-   time-to-claim-ready under live browser load exceeds the page
-   lifetime, so the demand-alive and claim-ready windows never overlap
-   — a cold-start/activation-latency problem (P1's cold-start
-   distribution, arriving early), not an authority problem. Steady
-   state (long-lived real sessions) should not have this shape; the
-   timeline run decides whether P0's acceptance needs a longer-lived
-   page scenario, activation speedup, or both.
+7. **P0-R3: demand-alive and claim-ready windows never overlapped —
+   three stacked latency mechanisms, peeled with timestamped timeline
+   probes.** The post-R2 rerun still declined 54/54 with `rows=NONE` at
+   every decline: zero demand rows existed by the time candidates
+   reached the host. The timeline probe (demand-row set/clear/sweep +
+   claim-ready + decline, all t=) plus pool phase timing decomposed it:
+   Worker spawn is a non-problem (300-700ms); the entire gap was the
+   `demand-update` batch — 20.7s/28.3s at n=5, **45s/83s at n=20**
+   (scales with client load), with the claim-ready burst landing
+   exactly at batch completion, after the page (4-12s demand lifetime)
+   had departed. Mechanisms, in the order found: (a) the worker's
+   `replaceDemand` was ONE monolithic queue item — sequential
+   activate+settle-barrier per piece — so candidates, claim activation
+   (`run-claimed-action` rides the same queue), and later snapshots all
+   waited for the whole batch → split into a structural swap plus
+   per-piece work items, with the set-demand reply resolving at the
+   structural swap (activation observable via settle()'s fixpoint, not
+   the reply). (b) Worker-side emission probes then showed candidates
+   DO emit per-piece (first burst 21.5s → 7.8s) but the host attempts
+   them only in one burst at set-demand completion: the host holds its
+   candidate-admission lane across the whole setDemand await, and a
+   later snapshot's structural swap still queued behind the whole pull
+   backlog (grow-by-one snapshots every ~1-2s vs 8-20s per heavy
+   pull → the backlog only grows). (c) → the **activation pump**: one
+   piece per queue item consumed NEWEST-FIRST from a pending set, so
+   control operations wait at most the single in-flight pull, and the
+   most recently demanded piece (the one a live client is looking at)
+   activates next. Fixing the six timing-coupled tests that assumed
+   activation completes within microtasks of start()/pool.idle() —
+   they now await candidate/settle barriers. Dead-end theory recorded:
+   the A24 demandGeneration candidate fence does NOT drop space-lane
+   candidates (the space generation is a constant 0; only scoped lanes
+   carry live generations).
 
 **(superseded numbering below)**
    with the deadline at 120s the Workers RAN (43 scheduler runs, 32

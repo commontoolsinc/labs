@@ -475,6 +475,11 @@ async function exercisePoolDemandRestart(
     };
 
     let candidateActionId: string | undefined;
+    // P0-R3: initial activation is detached from the set-demand reply and
+    // runs as per-piece queue items, so candidate emission is awaited as an
+    // EVENT — never assumed to have happened within a fixed number of
+    // microtasks of pool.idle().
+    const candidateSeen = Promise.withResolvers<void>();
     const factory = new DenoSpaceExecutorFactory({
       server,
       apiUrl: new URL("https://toolshed.example/"),
@@ -486,6 +491,7 @@ async function exercisePoolDemandRestart(
       onCandidateClaim(candidate) {
         candidateActionId = candidate.claimKey.actionId;
         acceptedEvents.push(`candidate:${candidate.claimKey.actionId}`);
+        candidateSeen.resolve();
       },
       onCandidateDiagnostic(diagnostic) {
         acceptedEvents.push(`diagnostic:${diagnostic.diagnosticCode}`);
@@ -704,6 +710,11 @@ async function exercisePoolDemandRestart(
     // the discovered computation directly to an exact server claim.
     clientCommits.length = 0;
     const initialSourceSeq = await runSource(6, false);
+    await awaitBarrier(
+      candidateSeen.promise,
+      "initial candidate emission",
+      acceptedEvents,
+    );
     assertExists(candidateActionId);
     const initialClaimEvent = await waitForControl(
       (event): event is Extract<

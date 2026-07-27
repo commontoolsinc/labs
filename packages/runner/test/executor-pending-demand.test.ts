@@ -276,7 +276,11 @@ Deno.test("executor retries pending demand only for its exact creation commit", 
     });
 
     // The redirect reaches one absent target. It gets one initial activation
-    // attempt; the absent direct root requires no writer lookup yet.
+    // attempt; the absent direct root requires no writer lookup yet. P0-R3:
+    // activation runs as detached per-piece queue items, so the attempt is
+    // observed through the settle barrier, never assumed complete when
+    // start() returns.
+    await executor.settle();
     assertEquals(server.writerLookupCount, 1);
     assertEquals(discoveries, []);
 

@@ -945,72 +945,145 @@ const pullDemand = async (
   }
 };
 
-const replaceDemand = async (
+/**
+ * Apply a demand snapshot. Self-enqueuing (P0-R3, client-passivity plan):
+ * the structural swap (retire removed roots, register added ones) runs as
+ * ONE serialized work item, and then each piece's activate+initial-pull is
+ * its OWN work item, DETACHED from the returned promise. The measured
+ * failure this granularity fixes: the monolithic batch held both the
+ * worker queue and the pool's per-slot reconcile lane for the WHOLE
+ * initial activation (45-83s under live client load on the real
+ * workload), so candidate claim-ready only reached the host at batch END
+ * — after the demanding page had already departed — and
+ * `run-claimed-action` (same queue) could not have activated a claim
+ * mid-batch anyway. Per-piece items let candidates emit, claims install,
+ * and later demand snapshots interleave between pieces; the returned
+ * promise resolves at the STRUCTURAL swap (demand applied, stops done,
+ * pulls queued), so the pool's reconcile lane is released immediately.
+ * Activation completion remains observable through `settle()` (its
+ * fixpoint loop drains the queued pulls) — never through the set-demand
+ * reply. A stale per-piece item (its piece was since removed or replaced)
+ * re-reads `demanded` at run time and skips or pulls the CURRENT
+ * registration — `instantiatedDemand` dedupes re-activation — and a pull
+ * failure is fatal through postFatal exactly like the old batch.
+ *
+ * Callers must NOT wrap this in enqueue() — it enqueues internally, and an
+ * outer item would deadlock awaiting its own queue.
+ */
+const replaceDemand = (
   pieces: readonly string[],
   resetClaims = false,
 ): Promise<void> => {
-  if (runtime === null || space === null) {
-    throw new Error("executor Worker is not initialized");
-  }
   const next = [...new Set(pieces)].sort();
   const nextSet = new Set(next);
-  const growsOnly = !resetClaims &&
-    [...demanded.keys()].every((pieceId) => nextSet.has(pieceId));
-  if (resetClaims) {
-    for (const [pieceId, cell] of demanded) {
-      demandSinks.get(pieceId)?.();
-      runtime.runner.stop(cell);
+  return enqueue(async (): Promise<void> => {
+    if (runtime === null || space === null) {
+      throw new Error("executor Worker is not initialized");
     }
-    demanded.clear();
-    instantiatedDemand.clear();
-    pendingDemand.clear();
-    demandSinks.clear();
-    candidateActions.clear();
-    userCandidateTemplates.clear();
-    laneHydration.clear();
-    actionsBySchedulerIdentity.clear();
-    pendingCausalActorMatches.clear();
-    causalActorMatchesByAction = new WeakMap<object, boolean>();
-    permanentBuiltinFailureByAction = new WeakMap<
-      object,
-      { claim: ExecutionClaim; diagnosticCode: string }
-    >();
-    claimsByAction = new WeakMap<object, Map<string, ExecutionClaim>>();
-    laneRunPins = new WeakMap<object, string>();
-    laneRunsByAction = new WeakMap<object, string>();
-    foreignReadTargetsByAction = new WeakMap<
-      object,
-      Map<string, IMemorySpaceAddress>
-    >();
-    pendingLaneRerunsByAction = new WeakMap<object, Set<string>>();
-  }
-  for (const [pieceId, cell] of demanded) {
-    if (nextSet.has(pieceId)) continue;
-    demandSinks.get(pieceId)?.();
-    demandSinks.delete(pieceId);
-    runtime.runner.stop(cell);
-    demanded.delete(pieceId);
-    instantiatedDemand.delete(pieceId);
-    pendingDemand.delete(pieceId);
-  }
-  const added = new Set<string>();
-  for (const pieceId of next) {
-    if (demanded.has(pieceId)) continue;
-    const cell = runtime.getCellFromEntityId<unknown>(
-      space,
-      entityIdFrom(normalizePieceId(pieceId)),
-    );
-    demanded.set(pieceId, cell);
-    added.add(pieceId);
-  }
-  // Existing roots retain a standing sink and receive their own selective
-  // invalidation wakes. Re-pulling them for an unrelated demand addition
-  // installs redundant temporary pull effects and serially re-traverses every
-  // active graph. A shrink/reset still rebuilds and pulls every survivor.
-  await pullDemand(
-    undefined,
-    growsOnly ? added : new Set(demanded.keys()),
-  );
+    const growsOnly = !resetClaims &&
+      [...demanded.keys()].every((pieceId) => nextSet.has(pieceId));
+    if (resetClaims) {
+      for (const [pieceId, cell] of demanded) {
+        demandSinks.get(pieceId)?.();
+        runtime.runner.stop(cell);
+      }
+      demanded.clear();
+      instantiatedDemand.clear();
+      pendingDemand.clear();
+      demandSinks.clear();
+      candidateActions.clear();
+      userCandidateTemplates.clear();
+      laneHydration.clear();
+      actionsBySchedulerIdentity.clear();
+      pendingCausalActorMatches.clear();
+      causalActorMatchesByAction = new WeakMap<object, boolean>();
+      permanentBuiltinFailureByAction = new WeakMap<
+        object,
+        { claim: ExecutionClaim; diagnosticCode: string }
+      >();
+      claimsByAction = new WeakMap<object, Map<string, ExecutionClaim>>();
+      laneRunPins = new WeakMap<object, string>();
+      laneRunsByAction = new WeakMap<object, string>();
+      foreignReadTargetsByAction = new WeakMap<
+        object,
+        Map<string, IMemorySpaceAddress>
+      >();
+      pendingLaneRerunsByAction = new WeakMap<object, Set<string>>();
+    }
+    for (const [pieceId, cell] of demanded) {
+      if (nextSet.has(pieceId)) continue;
+      demandSinks.get(pieceId)?.();
+      demandSinks.delete(pieceId);
+      runtime.runner.stop(cell);
+      demanded.delete(pieceId);
+      instantiatedDemand.delete(pieceId);
+      pendingDemand.delete(pieceId);
+    }
+    const added = new Set<string>();
+    for (const pieceId of next) {
+      if (demanded.has(pieceId)) continue;
+      const cell = runtime.getCellFromEntityId<unknown>(
+        space,
+        entityIdFrom(normalizePieceId(pieceId)),
+      );
+      demanded.set(pieceId, cell);
+      added.add(pieceId);
+    }
+    // Existing roots retain a standing sink and receive their own selective
+    // invalidation wakes. Re-pulling them for an unrelated demand addition
+    // installs redundant temporary pull effects and serially re-traverses
+    // every active graph. A shrink/reset still rebuilds and pulls every
+    // survivor.
+    const pullSet = growsOnly ? added : new Set(demanded.keys());
+    for (const pieceId of pullSet) {
+      if (!pendingPulls.includes(pieceId)) pendingPulls.push(pieceId);
+    }
+    ensurePullPump();
+  });
+};
+
+/**
+ * P0-R3 activation pump: initial piece activation runs ONE piece per
+ * serialized work item, consuming `pendingPulls` newest-first. Two
+ * measured failures this shape fixes: (a) pre-queued per-piece items
+ * still made a later demand snapshot's structural swap wait behind the
+ * WHOLE backlog (grow-by-one snapshots arrive every ~1-2s on the real
+ * workload while a heavy first piece pulls for 8-20s, so the backlog
+ * only grows); (b) the host holds its candidate-admission lane across
+ * the set-demand request, so every candidate emitted mid-batch was
+ * admitted only in a burst after the request completed — by which time
+ * the demanding page had departed (rows=NONE at 100% of claim attempts).
+ * With the pump, control operations (set-demand structural swap, claim
+ * activation, wake) wait at most the ONE in-flight pull, and candidates
+ * admit between pulls. Newest-first because the most recently demanded
+ * piece is what a live client is looking at NOW — its candidates must
+ * emit while its demand row still exists; under sustained growth the
+ * oldest (heaviest, shell-like) piece finishes when growth pauses.
+ */
+const pendingPulls: string[] = [];
+let pullPumpQueued = false;
+const ensurePullPump = (): void => {
+  if (pullPumpQueued || pendingPulls.length === 0) return;
+  pullPumpQueued = true;
+  void enqueue(async () => {
+    const pieceId = pendingPulls.pop();
+    if (pieceId === undefined) {
+      pullPumpQueued = false;
+      return;
+    }
+    try {
+      const cell = demanded.get(pieceId);
+      if (cell !== undefined && (await activateDemand(pieceId, cell))) {
+        await cell.pull();
+      }
+    } finally {
+      pullPumpQueued = false;
+      ensurePullPump();
+    }
+  }).catch((error) => {
+    pullPumpQueued = false;
+    postFatal(error);
+  });
 };
 
 const initialize = async (request: WorkerRequest): Promise<void> => {
@@ -1463,11 +1536,10 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
   // Lanes live at startup arrive with initialize so the first candidates
   // already carry their lane's generation (A24).
   applyLaneDemands(validateWireLanes(request.lanes));
-  // Serialize initial activation with commit-feed retries. A piece-creation
-  // commit can arrive while its first sync is in flight; the retry must run
-  // after this attempt rather than instantiate the same root concurrently.
-  // The ENQUEUE stays (everything later — set-demand, selective pulls,
-  // settle — serializes behind it), but the "ready" reply must NOT await it
+  // Initial activation serializes with commit-feed retries through
+  // replaceDemand's own per-piece queue items (P0-R3) — a piece-creation
+  // commit retry runs after that piece's attempt rather than instantiating
+  // the same root concurrently. The "ready" reply must NOT await activation
   // (P0-R1, client-passivity plan): under live client load the initial
   // activation legitimately outlasts any startup deadline while the runtime
   // is already executing (claim-ready candidates were flowing on the real
@@ -1475,7 +1547,7 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
   // demonstrably working generation live, so no claim could ever be
   // issued). Readiness = runtime constructed + lanes applied; activation
   // failures still kill the Worker visibly through the fatal channel.
-  void enqueue(() => replaceDemand(request.pieces!)).catch(postFatal);
+  void replaceDemand(request.pieces!).catch(postFatal);
 };
 
 type StartedClaimedAction = {
@@ -1665,7 +1737,9 @@ const handle = async (request: WorkerRequest): Promise<void> => {
       demandGeneration = Number(request.demandGeneration);
       if (request.resetClaims === true) cancelClaimedAttempts();
       applyLaneDemands(validateWireLanes(request.lanes));
-      await enqueue(() => replaceDemand(request.pieces!, request.resetClaims));
+      // replaceDemand enqueues internally (P0-R3) — wrapping it here would
+      // deadlock its per-piece items behind this outer item.
+      await replaceDemand(request.pieces!, request.resetClaims);
       break;
     case "wake":
       await enqueue(pullDemand);
