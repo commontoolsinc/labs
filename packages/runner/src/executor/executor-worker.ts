@@ -1466,7 +1466,16 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
   // Serialize initial activation with commit-feed retries. A piece-creation
   // commit can arrive while its first sync is in flight; the retry must run
   // after this attempt rather than instantiate the same root concurrently.
-  await enqueue(() => replaceDemand(request.pieces!));
+  // The ENQUEUE stays (everything later — set-demand, selective pulls,
+  // settle — serializes behind it), but the "ready" reply must NOT await it
+  // (P0-R1, client-passivity plan): under live client load the initial
+  // activation legitimately outlasts any startup deadline while the runtime
+  // is already executing (claim-ready candidates were flowing on the real
+  // workload as every start "timed out" — the pool never marked a
+  // demonstrably working generation live, so no claim could ever be
+  // issued). Readiness = runtime constructed + lanes applied; activation
+  // failures still kill the Worker visibly through the fatal channel.
+  void enqueue(() => replaceDemand(request.pieces!)).catch(postFatal);
 };
 
 type StartedClaimedAction = {
