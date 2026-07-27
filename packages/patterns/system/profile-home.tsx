@@ -163,7 +163,12 @@ export type ProfileHomeOutput = {
   // (CT-1648). Owner-protected like name/avatar; the canonical shared-profile
   // bio (distinct from Home's legacy `learned.summary`). Readable from the
   // profile result and via `wish({ query: "#profileBio" })`.
-  bio: OwnerProtectedProfileWrite<string, typeof setBio>;
+  // Default outside the wrapper, like externalLinks below: bio arrived
+  // 2026-06-17, so stored profiles predating it have no such property — a
+  // required field here fails consumer argument validation on those docs
+  // (masked until now only because `addExternalLink` sorts earlier in the
+  // required check).
+  bio: Default<OwnerProtectedProfileWrite<string, typeof setBio>, "">;
   // Public web profiles the owner has chosen to associate with this profile.
   // The owner-protected list is distinct from `elements`, whose entries are
   // Common Fabric piece references.
@@ -187,6 +192,12 @@ export type ProfileHomeOutput = {
     []
   >;
   elements: OwnerProtectedProfileWrite<ProfileElement[], typeof mutateElements>;
+  // The mutation streams are REQUIRED here on purpose: this type describes
+  // what a RUNNING current profile provides, and a live profile always binds
+  // every stream. Consumers that read stored profiles of any vintage must not
+  // reuse this type — they take `BackwardsCompatibleProfile` (below), which
+  // makes the post-genesis streams optional, because streams are affordances
+  // and never exist on a stored doc that predates them.
   setName: Stream<SetProfileNameEvent>;
   setAvatar: Stream<SetProfileAvatarEvent>;
   setBio: Stream<SetProfileBioEvent>;
@@ -205,13 +216,44 @@ export type ProfileHomeOutput = {
   // presentation and the edit form. UI state — not owner-protected.
   toggleEditing: Stream<void>;
   // Current view mode: false = read-only presentation, true = edit form.
-  isEditing: boolean;
+  // Data field, so backwards compatibility rides Default<> (like bio and
+  // externalLinks): stored profiles predating CT-1748 (2026-06-16) have no
+  // such property, and validation fills the default instead of failing.
+  isEditing: Default<boolean, false>;
   initialNameApplied: string;
 };
 
 export type ProfileHomeInput = {
   initialName?: string;
 };
+
+type PartialBy<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
+
+// The consumer-side view of a profile: every field a stored profile doc of ANY
+// supported vintage satisfies. Streams added after profile genesis (2026-05-31,
+// #3762) are optional here — a stored doc written before a stream existed has
+// no such property, and a consumer schema that requires it bricks at argument
+// validation (fleet incident 2026-07-22: `profiles: 0: missing required
+// property addExternalLink` for June-era profiles). Genesis streams stay
+// required: every doc has them.
+//
+// Standard idiom (seefeld, #4901 review): the producer type keeps its honest,
+// required shape; consumers of stored docs take this weakened view and handle
+// absence (`profile.addPiece?.send(...)`). ADD EVERY FUTURE STREAM TO THIS
+// LIST in the same change that adds it to ProfileHomeOutput — a new stream
+// missing here re-bricks old docs at every consumer seam.
+// Introduction dates: setBio/addPiece 2026-06-17, toggleEditing 2026-06-16,
+// external links #4731 and verified identities #4745 both 2026-07-15.
+export type BackwardsCompatibleProfile = PartialBy<
+  ProfileHomeOutput,
+  | "setBio"
+  | "addExternalLink"
+  | "removeExternalLink"
+  | "publishVerifiedIdentities"
+  | "revokeVerifiedIdentities"
+  | "addPiece"
+  | "toggleEditing"
+>;
 
 const trimInitialName = (initialName?: string): string =>
   (initialName ?? "").trim();

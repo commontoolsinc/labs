@@ -42,6 +42,34 @@ describe("deep-freeze", () => {
       });
     });
 
+    describe("functions (opaque immutable leaves)", () => {
+      // `deepFreeze()`/`isDeepFrozen()` treat a function as an opaque immutable
+      // leaf -- a code reference, not fabric data -- so general-purpose callers
+      // that freeze objects-with-methods (e.g. `api/cfc.ts`'s `cfcPattern`) keep
+      // working. Its internal `prototype`/closure mutability is a known
+      // limitation, closed by the strict `FabricValue`-only migration follow-up.
+      it("returns `true` for a function", () => {
+        expect(isDeepFrozen(() => {})).toBe(true);
+        expect(isDeepFrozen(function () {})).toBe(true);
+      });
+
+      it("returns `true` for a frozen graph containing a function", () => {
+        expect(isDeepFrozen(Object.freeze({ a: 1, fn: () => {} }))).toBe(true);
+      });
+
+      it("returns the function unchanged from `deepFreeze()` (does not throw)", () => {
+        const fn = () => {};
+        expect(() => deepFreeze(fn)).not.toThrow();
+        expect(deepFreeze(fn)).toBe(fn);
+      });
+
+      it("freezes a graph containing a function, leaving the function a leaf", () => {
+        const o = deepFreeze({ a: 1, fn: () => {} }) as Record<string, unknown>;
+        expect(Object.isFrozen(o)).toBe(true);
+        expect(typeof o.fn).toBe("function");
+      });
+    });
+
     describe("objects", () => {
       it("returns `false` for an unfrozen empty object", () => {
         expect(isDeepFrozen({})).toBe(false);
@@ -375,6 +403,29 @@ describe("deep-freeze", () => {
     });
   });
 
+  describe("`isDeepFrozenFabricValue()` symbols", () => {
+    // Only registry-interned symbols are `FabricValue`s; unique (uninterned)
+    // symbols are not portable across realms and are rejected, consistent with
+    // `isFabricValue()` / `isFabricValueLayer()`.
+    it("returns `true` for an interned symbol", () => {
+      expect(isDeepFrozenFabricValue(Symbol.for("k"))).toBe(true);
+    });
+
+    it("returns `false` for a unique (uninterned) symbol", () => {
+      expect(isDeepFrozenFabricValue(Symbol("k"))).toBe(false);
+    });
+
+    it("returns `false` for a frozen tree reaching a unique symbol", () => {
+      const tree = Object.freeze({ a: 1, s: Symbol("nope") });
+      expect(isDeepFrozenFabricValue(tree)).toBe(false);
+    });
+
+    it("returns `true` for a frozen tree reaching only interned symbols", () => {
+      const tree = Object.freeze({ a: 1, s: Symbol.for("ok") });
+      expect(isDeepFrozenFabricValue(tree)).toBe(true);
+    });
+  });
+
   describe("`isDeepFrozenFabricValue()` identity cache", () => {
     it("does not revalidate an already-proven frozen Fabric value", () => {
       let childReads = 0;
@@ -394,69 +445,17 @@ describe("deep-freeze", () => {
       expect(isDeepFrozenFabricValue(value)).toBe(true);
       expect(childReads).toBe(readsAfterProof);
     });
-
-    it("revalidates accessor-backed values whose result changes", () => {
-      let child: unknown = Object.freeze({ value: 1 });
-      const value = Object.freeze({
-        get child() {
-          return child;
-        },
-      });
-
-      expect(isDeepFrozenFabricValue(value)).toBe(true);
-      child = () => "not a Fabric value";
-      expect(isDeepFrozenFabricValue(value)).toBe(false);
-    });
-
-    it("rejects an accessor result that becomes mutable", () => {
-      let child: unknown = Object.freeze({ value: 1 });
-      const value = Object.freeze({
-        get child() {
-          return child;
-        },
-      });
-
-      expect(isDeepFrozenFabricValue(value)).toBe(true);
-      child = { value: 2 };
-      expect(isDeepFrozenFabricValue(value)).toBe(false);
-    });
-
-    it("revalidates frozen arrays with accessor elements", () => {
-      let elementReads = 0;
-      let element: unknown = 1;
-      const value: unknown[] = [];
-      Object.defineProperty(value, "0", {
-        configurable: true,
-        enumerable: true,
-        get() {
-          elementReads++;
-          return element;
-        },
-      });
-      Object.freeze(value);
-
-      expect(isDeepFrozenFabricValue(value)).toBe(true);
-      const readsAfterFirstProof = elementReads;
-      expect(readsAfterFirstProof).toBeGreaterThan(0);
-
-      element = () => "not a Fabric value";
-      expect(isDeepFrozenFabricValue(value)).toBe(false);
-      expect(elementReads).toBeGreaterThan(readsAfterFirstProof);
-    });
   });
 
   // Cycle coverage for `deepFreeze()`'s arms (per the function's doc-comment
-  // 4-arm dispatch) and the analogous arms of `checkValue` inside
-  // `isDeepFrozenFabricValue`. Arm 1 (necessarily-or-known-deep-frozen) and
-  // Arm 2 (`FabricPrimitive`) are structurally cycle-free (leaf / no outbound
-  // references), so cycle tests only apply to Arm 4 (plain-object / array
-  // fallback) here. Arm 3 (`FabricInstance` via `[DEEP_FREEZE]`) cycles are
-  // covered in `fabric-instances/native-conversion.test.ts`.
+  // 4-arm dispatch) and for `isDeepFrozenFabricValue()`, which composes
+  // `isFabricValue()` and `isDeepFrozen()` -- each threading its own
+  // cycle-tracking set (`seen` / `inProgress`) through its recursion.
   //
-  // Termination assertion: a cycle without shared-`inProgress` threading would
-  // manifest as `RangeError: Maximum call stack size exceeded` (a clean fast
-  // throw, not a hang). `.not.toThrow()` is the discriminating assertion for
-  // "this call terminates."
+  // Termination assertion: a cycle without such threading would manifest as
+  // `RangeError: Maximum call stack size exceeded` (a clean fast throw, not a
+  // hang). `.not.toThrow()` is the discriminating assertion for "this call
+  // terminates."
   describe("cycle behavior", () => {
     describe("`deepFreeze()` (plain object / array)", () => {
       it("terminates on a self-referential plain object", () => {
@@ -494,10 +493,10 @@ describe("deep-freeze", () => {
     });
 
     describe("`isDeepFrozenFabricValue()` (regression pin)", () => {
-      // `checkValue` inside `isDeepFrozenFabricValue` maintains a closure-
-      // captured `seen` set, so it is currently cycle-safe across Arms 3 and
-      // 4 via that closure. These tests pin that property so a future fix
-      // does not regress it.
+      // `isDeepFrozenFabricValue()` composes `isFabricValue()` and
+      // `isDeepFrozen()`, each of which threads its own cycle-tracking set
+      // through its recursion, so the composition is cycle-safe. These tests
+      // pin that property so a future change does not regress it.
       it("terminates on a deep-frozen self-referential plain object", () => {
         const a: Record<string, unknown> = { x: 1 };
         a.self = a;

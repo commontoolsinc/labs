@@ -37,6 +37,7 @@ describe("ExperimentalOptions", () => {
         experimental: {
           modernCellRep: false,
           commitPreconditions: false,
+          computedCellIds: false,
         },
       });
       expect(runtime.experimental).toEqual({
@@ -65,7 +66,7 @@ describe("ExperimentalOptions", () => {
         modernCellRep: true,
         persistentSchedulerState: false,
         commitPreconditions: true,
-        computedCellIds: false,
+        computedCellIds: true,
         eagerSourceAnnotation: false,
       });
       await runtime.dispose();
@@ -83,7 +84,7 @@ describe("ExperimentalOptions", () => {
         modernCellRep: false,
         persistentSchedulerState: false,
         commitPreconditions: true,
-        computedCellIds: false,
+        computedCellIds: true,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
         eagerSourceAnnotation: false,

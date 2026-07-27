@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { Identity } from "@commonfabric/identity";
@@ -25,6 +26,7 @@ import {
   canonicalizePreparedDigestInput,
   canonicalizeWritePolicyInput,
   logicalPathToPointer,
+  preparedDigestFor,
 } from "../src/cfc/mod.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
@@ -207,6 +209,62 @@ describe("CFC canonicalization helpers", () => {
         item.kind === "custom" ? item.name : ""
       ),
     ).toEqual(["a", "b"]);
+  });
+
+  it("binds delegation space while canonicalizing delegation order", () => {
+    const spaceA = signer.did();
+    const spaceB = "did:key:z6MkPreparedDigestOtherSpace" as MemorySpace;
+    const base = {
+      consumedReads: [],
+      attemptedWrites: [],
+      writes: [],
+      writeAttemptLog: [],
+      dereferenceTraces: [],
+      triggerReads: [],
+      writePolicyInputs: [],
+    };
+
+    expect(preparedDigestFor({
+      ...base,
+      moduleDelegations: [{
+        space: spaceA,
+        moduleIdentity: "successor",
+        delegatedModuleIdentities: ["predecessor"],
+      }],
+    })).not.toBe(preparedDigestFor({
+      ...base,
+      moduleDelegations: [{
+        space: spaceB,
+        moduleIdentity: "successor",
+        delegatedModuleIdentities: ["predecessor"],
+      }],
+    }));
+
+    const ordered = preparedDigestFor({
+      ...base,
+      moduleDelegations: [{
+        space: spaceB,
+        moduleIdentity: "z-successor",
+        delegatedModuleIdentities: ["z-predecessor", "a-predecessor"],
+      }, {
+        space: spaceA,
+        moduleIdentity: "a-successor",
+        delegatedModuleIdentities: ["predecessor"],
+      }],
+    });
+    const reversed = preparedDigestFor({
+      ...base,
+      moduleDelegations: [{
+        space: spaceA,
+        moduleIdentity: "a-successor",
+        delegatedModuleIdentities: ["predecessor"],
+      }, {
+        space: spaceB,
+        moduleIdentity: "z-successor",
+        delegatedModuleIdentities: ["a-predecessor", "z-predecessor"],
+      }],
+    });
+    expect(reversed).toBe(ordered);
   });
 
   it("canonicalizes link-write policy input paths", () => {
@@ -759,6 +817,74 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         tx,
       );
       cell.set({ argument: { savedTitle: "not default" } });
+
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "missing trusted-event policy input",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("rejects a uiContract field whose Fabric write differs from its Fabric default (CT-1770)", async () => {
+    // The schema default and the written value are distinct `FabricBytes`
+    // (interned from the `Uint8Array`s) that differ only in byte content, so
+    // the write does NOT install the default -- the write-policy gate's
+    // content comparison must reject it exactly like the "not default" string
+    // case above.
+    const { runtime, storageManager } = createRuntime();
+    try {
+      // A schema whose `savedBytes` default is a `Uint8Array` cannot be authored
+      // as a plain literal (schema interning deep-freezes it and a raw
+      // `Uint8Array` cannot be frozen). Instead, round-trip the schema through a
+      // cell read as a query result, which interns the native `Uint8Array`
+      // default into a `FabricBytes` -- the realistic way a Fabric value reaches
+      // `schema.default` (see query-result-proxy-fabric-primitive.test.ts).
+      const schemaSource = {
+        type: "object",
+        properties: {
+          argument: {
+            type: "object",
+            properties: {
+              savedBytes: {
+                default: new Uint8Array([1, 2, 3]),
+                ifc: {
+                  uiContract: {
+                    helper: "UiAction",
+                    action: "TrustedSave",
+                    trustedPattern: "TrustedSaveSurface",
+                  },
+                },
+              },
+            },
+            required: ["savedBytes"],
+          },
+        },
+      };
+
+      const schemaTx = runtime.edit();
+      const schemaCell = runtime.getCell(
+        signer.did(),
+        "cfc-ui-contract-fabric-schema-source",
+        undefined,
+        schemaTx,
+      );
+      schemaCell.set(schemaSource);
+      const schema = schemaCell.getAsQueryResult() as JSONSchema;
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-explicit");
+      const cell = runtime.getCell(
+        signer.did(),
+        "cfc-ui-contract-fabric-non-default-setup",
+        schema,
+        tx,
+      );
+      // Write bytes that DIFFER from the default's bytes.
+      cell.set({ argument: { savedBytes: new Uint8Array([4, 5, 6]) } });
 
       tx.prepareCfc();
       const result = await tx.commit();
@@ -2138,7 +2264,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
       const entries = stored.cfc?.labelMap?.entries as Array<{
         path: string[];
-        label: { confidentiality?: unknown[]; integrity?: unknown[] };
+        label: IFCLabel;
       }>;
       expect(entries).toEqual(
         expect.arrayContaining([
@@ -2203,7 +2329,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
       const entries = stored.cfc?.labelMap?.entries as Array<{
         path: string[];
-        label: { confidentiality?: unknown[]; integrity?: unknown[] };
+        label: IFCLabel;
       }>;
       expect(entries).toEqual(
         expect.arrayContaining([
@@ -2349,7 +2475,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
       const entries = stored.cfc?.labelMap?.entries as Array<{
         path: string[];
-        label: { confidentiality?: unknown[]; integrity?: unknown[] };
+        label: IFCLabel;
       }>;
       expect(entries).toEqual(
         expect.arrayContaining([
@@ -3143,7 +3269,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       }) as { cfc?: { labelMap?: { entries?: unknown[] } } };
       const entries = stored.cfc?.labelMap?.entries as Array<{
         path: string[];
-        label: { confidentiality?: unknown[]; integrity?: unknown[] };
+        label: IFCLabel;
       }>;
       expect(entries).toEqual(
         expect.arrayContaining([

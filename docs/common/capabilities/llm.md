@@ -42,7 +42,6 @@ interface ProductIdea {
 const ideaRequest = generateObject<ProductIdea>({
   prompt: userInput,
   system: "Generate a product idea.",
-  model: "anthropic:claude-sonnet-4-5",
 });
 const idea = resultOf(ideaRequest);
 
@@ -160,6 +159,30 @@ As with fetch, `resultOf(request) ?? previousValue` is not a
 fallback-while-loading mechanism: an unavailable marker remains present at
 runtime. Keep the request for explicit status UI, or retain a last successful
 snapshot with `latestComplete(request)`.
+
+### Selecting a Model
+
+`model` is optional on `generateText`, `generateObject`, and `llmDialog`. Omit
+it and the runtime fills in a default. Prefer omitting it over naming a specific
+model version, which stops working on any deployment that no longer offers that
+exact version.
+
+The default an omitted `model` resolves to depends on the call. `generateText`
+and `llmDialog` use the `"default"` alias, which is the deployment's current
+default model. `generateObject` uses a separate default chosen for structured
+output. To pin any call to the deployment's default model explicitly — for
+instance to keep a `generateObject` call on the same model as the rest of a
+pattern — pass `model: "default"`.
+
+Hardcode a specific model only when the call needs that model's particular
+capability — for example a cheaper, faster model for a high-volume map, or a
+model chosen for a vision task.
+
+**TODO:** A call should be able to request a model by capability rather than by
+name — asking for a capability such as "vision", "high-effort", or "low-cost"
+and letting the deployment resolve the best available model that has it. That
+would remove the remaining reason to name a specific model, so a capability need
+would no longer force a version pin that goes stale.
 
 ### Valid Model Names
 

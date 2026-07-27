@@ -185,7 +185,6 @@ describe("home-space profile creation", () => {
     await waitForRuntimeIdle(page);
     await page.waitForSelector('[data-ui-region="profile-edit"]', {
       strategy: "pierce",
-      timeout: 30_000,
     });
   });
 
@@ -235,10 +234,6 @@ async function clickProfileLink(page: any, name: string) {
         if (!(chip?.textContent ?? "").includes(targetName)) continue;
         const clickTarget = chip?.shadowRoot?.querySelector("button") ?? chip ??
           element;
-        (clickTarget as HTMLElement).scrollIntoView({
-          block: "center",
-          inline: "center",
-        });
         clickTarget.setAttribute("data-profile-link-click", targetToken);
         return true;
       }
@@ -249,7 +244,7 @@ async function clickProfileLink(page: any, name: string) {
   if (!marked) throw new Error(`No profile link for "${name}" found`);
   const target = await page.waitForSelector(
     `[data-profile-link-click="${token}"]`,
-    { strategy: "pierce", timeout: 30_000 },
+    { strategy: "pierce" },
   );
   await target.click();
 }

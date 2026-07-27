@@ -6,7 +6,7 @@ import {
   linkProbeSubPath,
 } from "@commonfabric/data-model/cell-rep";
 import { type CellLinkRefPayload } from "./sigil-types.ts";
-import { createDataCellURI } from "./data-uri.ts";
+import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
 import {
   type CellLink,
   type NormalizedFullLink,
@@ -80,7 +80,7 @@ const schemaScopeForLink = (
 
 const undefinedDataLink = (link: NormalizedFullLink): NormalizedFullLink => ({
   ...link,
-  id: createDataCellURI(undefined, link),
+  id: dataUriFromValueWithResolvedLinks(undefined, link),
   path: [],
 });
 
@@ -124,8 +124,13 @@ const canFollowLinkHop = (
  * @param tx - The storage transaction to read from.
  * @param link - The link to read.
  * @param lastNode - The last node in the path.
- * @param options - Preserve `overwrite` when needed, or suppress cross-space
- * target prefetch for a side-effect-free topology verification pass.
+ * @param options - `preserveOverwrite` keeps the `overwrite` field if needed;
+ *   `prefetch` can suppress cross-space target prefetch for a side-effect-free
+ *   topology verification pass.
+ *   `onScopeBlocked` is invoked when a narrower-scope follow is blocked by a
+ *   schema scope cap (the chain then terminates at an undefined-data link);
+ *   it is the only way to distinguish that cut from a chain that genuinely
+ *   ends at a stored undefined-data link.
  * @returns The resolved link.
  */
 export function resolveLink(
@@ -133,7 +138,11 @@ export function resolveLink(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   lastNode: LastNode = "value",
-  options: { preserveOverwrite?: boolean; prefetch?: boolean } = {},
+  options: {
+    preserveOverwrite?: boolean;
+    prefetch?: boolean;
+    onScopeBlocked?: () => void;
+  } = {},
 ): ResolvedFullLink {
   const seen = new Set<string>();
 
@@ -159,7 +168,7 @@ export function resolveLink(
     seen.add(key);
 
     // Optimized fast-path: a single sigil probe at the full remaining path.
-    // If not a sigil link, use that error's path to check legacy or parent once.
+    // If not a sigil link, use that error's path to check the parent once.
     let nextHop: LinkHop | undefined;
 
     // Sigil probe at full path. Probe reads are shape observations of link
@@ -202,18 +211,10 @@ export function resolveLink(
         // instead)
         lastValid.pop();
 
-        if (lastValid.length === link.path.length) {
-          // full path candidate, only check legacy-at full path
-          const legacy = checkLegacyAt(tx, link, lastValid);
-          if (legacy) {
-            nextHop = {
-              link: legacy,
-              source: { ...link, path: [...lastValid] },
-              kind: hopKindForLink(legacy),
-            };
-          }
-        } else {
-          // Check sigil at this parent, then legacy
+        // A full-path candidate needs no further check: the sigil probe above
+        // already covered it, and `$alias` records in data are not links.
+        if (lastValid.length < link.path.length) {
+          // Check sigil at this parent
           const parentSigil = tx.read(
             toMemorySpaceAddress({
               ...link,
@@ -236,15 +237,6 @@ export function resolveLink(
               source: { ...link, path: [...lastValid] },
               kind: hopKindForLink(nextLink),
             };
-          } else {
-            const legacy = checkLegacyAt(tx, link, lastValid);
-            if (legacy) {
-              nextHop = {
-                link: legacy,
-                source: { ...link, path: [...lastValid] },
-                kind: hopKindForLink(legacy),
-              };
-            }
           }
         }
 
@@ -286,6 +278,7 @@ export function resolveLink(
             target: cfcAddressFromLink(nextHop.link),
           },
         ]);
+        options.onScopeBlocked?.();
         link = undefinedDataLink(link);
         break;
       }
@@ -360,27 +353,6 @@ export function resolveLink(
   return result as unknown as ResolvedFullLink;
 }
 
-function checkLegacyAt(
-  tx: IExtendedStorageTransaction,
-  link: NormalizedFullLink,
-  atPath: readonly string[],
-): NormalizedFullLink | undefined {
-  const aliasPath = tx.read(
-    toMemorySpaceAddress({
-      ...link,
-      path: [...atPath, "$alias", "path"],
-    }),
-    { meta: linkResolutionProbe },
-  );
-  if (Array.isArray(aliasPath.ok?.value)) {
-    return parseLink(
-      tx.readValueOrThrow({ ...link, path: atPath }) as CellLink,
-      { ...link, path: atPath },
-    );
-  }
-  return undefined;
-}
-
 /**
  * Read a value that might be a link.
  *
@@ -405,11 +377,9 @@ export function readMaybeLink(
   const maybeSigilPayload = linkPayloadAtProbe(readSubPath(linkProbeSubPath()));
   if (
     // Sigil link: { "/": { "link@1": { id: <id>, ... } } }
-    (maybeSigilPayload !== undefined &&
-      (!onlyWriteRedirects ||
-        (maybeSigilPayload as CellLinkRefPayload).overwrite === "redirect")) ||
-    // Legacy alias: { $alias: { path: [] } }
-    Array.isArray(readSubPath(["$alias", "path"]))
+    maybeSigilPayload !== undefined &&
+    (!onlyWriteRedirects ||
+      (maybeSigilPayload as CellLinkRefPayload).overwrite === "redirect")
   ) {
     return parseLink(readSubPath([]) as CellLink, link);
   } else {

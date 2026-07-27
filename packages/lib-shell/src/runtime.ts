@@ -32,7 +32,6 @@ export type ExperimentalRuntimeFlags = {
   persistentSchedulerState?: boolean;
   eagerSourceAnnotation?: boolean;
   systemPatternAutoUpdate?: boolean;
-  systemPatternAutoUpdateHome?: boolean;
 };
 
 export type RuntimeCfcEnforcementMode = NonNullable<
@@ -100,12 +99,6 @@ export type RuntimeInternalsCallbacks = {
   navigate?: (target: RuntimeNavigationTarget) => void;
   onConsole?: (event: RuntimeClientEvents["console"][0]) => void;
   onError?: (event: RuntimeClientEvents["error"][0]) => void;
-  /**
-   * A space's toolshed build differs from this client build, so its
-   * system-pattern auto-update check was skipped. The shell surfaces a
-   * non-blocking "reload to update" banner.
-   */
-  onVersionSkew?: (event: RuntimeClientEvents["versionskew"][0]) => void;
 };
 
 /**
@@ -147,9 +140,8 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   cfcRenderCeiling?: boolean;
   trustSnapshot?: RuntimeTrustSnapshot | null;
   /**
-   * This client build's git sha (the shell's `COMMIT_SHA`). Forwarded to the
-   * worker runtime for the system-pattern auto-update version-skew gate.
-   * Absent ⇒ never auto-update.
+   * This shell build's identifier (normally `COMMIT_SHA`). Deployed builds use
+   * it to select the immutable `/builds/<clientVersion>/` worker asset graph.
    */
   clientVersion?: string;
   /**
@@ -158,6 +150,19 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    * Off by default.
    */
   forwardWorkerConsole?: boolean;
+  /**
+   * When true, the worker runtime instruments pattern compiles for statement
+   * coverage; the integration harness pulls the accumulated hits at teardown.
+   * Test/CI only, off by default. See docs/development/COVERAGE.md.
+   */
+  patternCoverage?: boolean;
+  /**
+   * When true, the worker's remote storage overlaps watch-refresh round trips
+   * up to a bounded window instead of strict single-flight
+   * (`experimentalConcurrentWatchRefresh`). Dogfood flag, default off; fixed at
+   * StorageManager.open time so it takes effect on the next runtime (reload).
+   */
+  concurrentWatchRefresh?: boolean;
   /**
    * Override the runtime worker URL. By default, deployed builds use the
    * immutable `/builds/<clientVersion>/` asset namespace while local builds
@@ -244,8 +249,9 @@ export function createRuntimeClientOptions({
   // expected — that is the point of the dogfood stage.
   cfcRenderCeiling = false,
   trustSnapshot,
-  clientVersion,
   forwardWorkerConsole,
+  patternCoverage,
+  concurrentWatchRefresh,
 }: {
   session: Session;
   apiUrl: URL;
@@ -255,8 +261,9 @@ export function createRuntimeClientOptions({
   cfcFlowLabels?: RuntimeCfcFlowLabelsMode;
   cfcRenderCeiling?: boolean;
   trustSnapshot?: RuntimeTrustSnapshot | null;
-  clientVersion?: string;
   forwardWorkerConsole?: boolean;
+  patternCoverage?: boolean;
+  concurrentWatchRefresh?: boolean;
 }) {
   const resolvedTrustSnapshot = trustSnapshot === undefined
     ? {
@@ -284,8 +291,9 @@ export function createRuntimeClientOptions({
       }
       : {}),
     trustSnapshot: resolvedTrustSnapshot,
-    clientVersion,
     forwardWorkerConsole,
+    patternCoverage,
+    concurrentWatchRefresh,
   };
 }
 
@@ -325,7 +333,6 @@ export class RuntimeInternals extends EventTarget {
     this.#client.on("console", this.#onConsole);
     this.#client.on("navigaterequest", this.#onNavigateRequest);
     this.#client.on("error", this.#onError);
-    this.#client.on("versionskew", this.#onVersionSkew);
     this.#client.on("telemetry", this.#onTelemetry);
   }
 
@@ -617,10 +624,6 @@ export class RuntimeInternals extends EventTarget {
     console.error("[RuntimeClient Error]", event);
   };
 
-  #onVersionSkew = (event: RuntimeClientEvents["versionskew"][0]) => {
-    this.#callbacks.onVersionSkew?.(event);
-  };
-
   #onTelemetry = (marker: RuntimeTelemetryMarkerResult) => {
     this.#telemetryMarkers.push(marker);
     this.dispatchEvent(new CustomEvent("telemetryupdate"));
@@ -656,12 +659,13 @@ export class RuntimeInternals extends EventTarget {
     trustSnapshot,
     clientVersion,
     forwardWorkerConsole,
+    patternCoverage,
+    concurrentWatchRefresh,
     getBuildHash = fetchBuildHash,
     workerUrl,
     navigate,
     onConsole,
     onError,
-    onVersionSkew,
     telemetry,
   }: RuntimeInternalsCreateOptions): Promise<RuntimeInternals> {
     // One runtime per identity: the worker session is always the
@@ -681,8 +685,9 @@ export class RuntimeInternals extends EventTarget {
     // Production deploys retain each complete module graph under its commit
     // SHA. Keeping the entry and all of its relative split chunks in that same
     // immutable namespace prevents a later root deployment from deleting a
-    // chunk that a long-lived page still needs. Local/legacy builds have no
-    // clientVersion, so retain the root URL and its manifest cache-buster.
+    // chunk that a long-lived page still needs. An explicit worker URL (local
+    // development) or an absent clientVersion retains the mutable root URL and
+    // its manifest cache-buster.
     const immutableBuildId = workerUrl === undefined && clientVersion
       ? clientVersion
       : undefined;
@@ -712,8 +717,9 @@ export class RuntimeInternals extends EventTarget {
         cfcFlowLabels,
         cfcRenderCeiling,
         trustSnapshot,
-        clientVersion,
         forwardWorkerConsole,
+        patternCoverage,
+        concurrentWatchRefresh,
       }),
     );
 
@@ -722,7 +728,7 @@ export class RuntimeInternals extends EventTarget {
     // explicitly.
     return new RuntimeInternals(
       client,
-      { navigate, onConsole, onError, onVersionSkew },
+      { navigate, onConsole, onError },
       telemetry,
     );
   }

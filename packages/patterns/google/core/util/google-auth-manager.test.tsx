@@ -11,7 +11,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/util/google-auth-manager.test.tsx --verbose
  */
-import { computed, pattern } from "commonfabric";
+import { assert, pattern } from "commonfabric";
 import {
   GoogleAuthManager,
   type GoogleAuthManagerOutput,
@@ -52,54 +52,52 @@ export default pattern<Record<string, never>, TestOutput>(() => {
   // ==========================================================================
 
   // When no auth pieces exist, state should be loading
-  const assert_default_not_ready = computed(() =>
-    authDefault.isReady === false
-  );
+  const assert_default_not_ready = assert(() => authDefault.isReady === false);
 
-  const assert_default_state_initial = computed(() => {
+  const assert_default_state_initial = assert(() => {
     const state = authDefault.currentState;
     // Initial state is "loading" (wish in progress or no matches)
     return state === "loading";
   });
 
-  const assert_default_availability_loading = computed(() =>
+  const assert_default_availability_loading = assert(() =>
     authDefault.availability.state === "loading" &&
     authDefault.availability.auth === null
   );
 
-  const assert_authInfo_exists = computed(
+  const assert_authInfo_exists = assert(
     () => authDefault.authInfo != null,
   );
 
-  const assert_authInfo_state_matches = computed(
+  const assert_authInfo_state_matches = assert(
     () => authDefault.authInfo.state === authDefault.currentState,
   );
 
-  const assert_authInfo_email_empty = computed(
+  const assert_authInfo_email_empty = assert(
     () => authDefault.authInfo.email === "",
   );
 
   // With scopes - should still be not ready (no auth found)
-  const assert_withScopes_not_ready = computed(
+  const assert_withScopes_not_ready = assert(
     () => authWithScopes.isReady === false,
   );
 
   // Debug mode instance should behave the same
-  const assert_debug_not_ready = computed(() => authDebug.isReady === false);
+  const assert_debug_not_ready = assert(() => authDebug.isReady === false);
 
   // Work account type instance should behave the same
-  const assert_work_not_ready = computed(() => authWork.isReady === false);
+  const assert_work_not_ready = assert(() => authWork.isReady === false);
 
   // UI components should exist (even if empty/null when no auth)
-  const assert_fullUI_exists = computed(() => authDefault.fullUI !== undefined);
-  const assert_statusUI_exists = computed(
+  const assert_fullUI_exists = assert(() => authDefault.fullUI !== undefined);
+  const assert_statusUI_exists = assert(
     () => authDefault.statusUI !== undefined,
   );
-  const assert_pickerUI_exists = computed(
+  const assert_pickerUI_exists = assert(
     () => authDefault.pickerUI !== undefined,
   );
 
-  const assert_fullUI_names_google_permissions = computed(() =>
+  const assert_fullUI_names_google_permissions = assert(() =>
     hasText(authWithScopes.fullUI, "Connect Your Google Account") &&
     hasText(
       authWithScopes.fullUI,

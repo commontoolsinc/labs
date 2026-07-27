@@ -11,7 +11,7 @@ import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { ID, type JSONSchema } from "../src/builder/types.ts";
 import { diffAndUpdate } from "../src/data-updating.ts";
 import { Runtime } from "../src/runtime.ts";
-import { createDataCellURI } from "../src/data-uri.ts";
+import { dataUriFromValueWithResolvedLinks } from "../src/data-uri.ts";
 import { areLinksSame } from "../src/link-utils.ts";
 import { toCell } from "../src/back-to-cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -824,13 +824,13 @@ describe("Schema - Link Resolution", () => {
    */
   describe("validateAndTransform with redirect links", () => {
     it("creates schema-declared stream cells for missing stream targets", () => {
-      const processCell = runtime.getCell(
+      const resultCell = runtime.getCell<any>(
         space,
-        "missing-stream-target-process",
+        "missing-stream-target-result-cell",
         undefined,
         tx,
       );
-      processCell.setRawUntyped({ internal: {} });
+      resultCell.setRawUntyped({ internal: {} });
 
       const streamSchema = {
         type: "object",
@@ -842,17 +842,14 @@ describe("Schema - Link Resolution", () => {
         ifc: { confidentiality: [{ kind: "secret" }] },
       } as const satisfies JSONSchema;
 
+      // Redirects in data are sigil links (`$alias` records are plain data
+      // there): point at a stream target that doesn't exist yet.
       const inputs = runtime.getImmutableCell(
         space,
         {
           $ctx: {
-            add: {
-              $alias: {
-                cell: processCell.entityId,
-                path: ["internal", "dialog", "add"],
-                schema: streamSchema,
-              },
-            },
+            add: resultCell.key("internal").key("dialog").key("add")
+              .getAsWriteRedirectLink(),
           },
         },
         undefined,
@@ -878,6 +875,13 @@ describe("Schema - Link Resolution", () => {
       expect(result).toBeDefined();
       expect(result.$ctx).toBeDefined();
       expect(isCell(result.$ctx.add)).toBe(true);
+
+      // The stream cell must be created at the redirect target inside
+      // resultCell, not at the input cell's own location.
+      const streamLink = result.$ctx.add.getAsNormalizedFullLink();
+      expect(streamLink.id).toBe(resultCell.getAsNormalizedFullLink().id);
+      expect(streamLink.path).toEqual(["internal", "dialog", "add"]);
+
       expect(() => result.$ctx.add.send({ value: 1 })).not.toThrow();
     });
 
@@ -1727,7 +1731,7 @@ describe("Schema - Link Resolution", () => {
       } as FabricValue);
 
       // data cell's system points to cellB's argument.system
-      const dataCellURI = createDataCellURI({
+      const dataCellURI = dataUriFromValueWithResolvedLinks({
         "system": cellB.key("argument").key("system").getAsWriteRedirectLink({
           includeSchema: true,
         }),

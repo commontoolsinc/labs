@@ -1,3 +1,4 @@
+import type { FabricValue } from "@commonfabric/api";
 import { expect } from "@std/expect";
 import type {
   SchedulerActionSnapshotCursor,
@@ -898,7 +899,7 @@ Deno.test("a locally stopped piece restarts fresh while retaining persistence id
     runtime.edit = ((...args: Parameters<typeof originalEdit>) => {
       const actionTx = originalEdit(...args);
       const originalSet = actionTx.setSchedulerObservation?.bind(actionTx);
-      actionTx.setSchedulerObservation = (value: unknown) => {
+      actionTx.setSchedulerObservation = (value: FabricValue) => {
         if (isSchedulerActionObservation(value)) observations.push(value);
         originalSet?.(value);
       };

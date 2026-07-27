@@ -1,6 +1,7 @@
 import {
   type Cell,
   cellEntityIdString,
+  Console as RuntimeConsole,
   EntityId,
   entityIdFrom,
   getEntityId,
@@ -36,7 +37,10 @@ import {
   nameSchema,
   pieceListSchema,
 } from "@commonfabric/runner/schemas";
-import { getResultCellWithSourceSchema } from "../../runner/src/piece-helpers.ts";
+import {
+  getResultCellWithSourceSchema,
+  isLegacyPieceRegistryRoot,
+} from "../../runner/src/piece-helpers.ts";
 ensureNotRenderThread();
 
 const PRIVILEGED_PIECE_LIST_SCHEMA = internSchema({
@@ -97,6 +101,8 @@ export class PieceManager {
 
   private spaceCell: Cell<SpaceCellContents>;
 
+  private diagnosticConsole: RuntimeConsole;
+
   /**
    * Promise resolved when the piece manager is ready.
    */
@@ -106,6 +112,7 @@ export class PieceManager {
     private session: Session,
     public runtime: Runtime,
   ) {
+    this.diagnosticConsole = new RuntimeConsole(runtime.harness);
     this.space = this.session.space;
 
     // Use the space DID as the cause - it's derived from the space name
@@ -117,8 +124,9 @@ export class PieceManager {
 
     const syncSpaceCellContents = Promise.resolve(this.spaceCell.sync());
 
-    // Note: allPieces and recentPieces are now managed by the default pattern,
-    // not directly on the space cell. The space cell only contains a link to defaultPattern.
+    // Note: pieceRegistry and recentPieces are managed by the default pattern,
+    // not directly on the space cell. The space cell only contains a link to
+    // defaultPattern.
     // Default pattern creation is handled by PiecesController.ensureDefaultPattern()
     // which is called by CLI/shell entry points. PieceManager doesn't auto-create it.
     this.ready = syncSpaceCellContents.then(() => {});
@@ -207,16 +215,17 @@ export class PieceManager {
 
   /**
    * Get the cell containing the list of all pieces in this space.
-   * Reads from the default pattern's allPieces export.
+   * Reads the default pattern's pieceRegistry export. An eligible legacy
+   * system root is read through its retired registry export.
    */
-  async getPieces(): Promise<Cell<Cell<unknown>[]>> {
+  async getPieceRegistry(): Promise<Cell<Cell<unknown>[]>> {
     const defaultPattern = await this.getDefaultPattern(true);
     if (!defaultPattern) {
       // Return empty array cell if no default pattern. Loud on purpose: any
       // subscription made against this placeholder never fires again, so a
       // cold-cache miss here silently freezes piece listings (e.g. FUSE).
       console.warn(
-        `getPieces: no default pattern found for space ${this.space}; ` +
+        `getPieceRegistry: no default pattern found for space ${this.space}; ` +
           "returning detached empty piece list",
       );
       return this.runtime.getCell(this.space, "empty-pieces", pieceListSchema);
@@ -225,12 +234,21 @@ export class PieceManager {
     const cell = defaultPattern.asSchema({
       type: "object",
       properties: {
+        pieceRegistry: pieceListSchema,
         allPieces: pieceListSchema,
       },
     });
-    const piecesCell = cell.key("allPieces") as Cell<Cell<unknown>[]>;
-    await this.syncPieces(piecesCell);
-    return piecesCell;
+    const pieceRegistry = cell.key("pieceRegistry") as Cell<Cell<unknown>[]>;
+    await this.syncPieces(pieceRegistry);
+    if (!isLegacyPieceRegistryRoot(defaultPattern)) {
+      return pieceRegistry;
+    }
+
+    const legacyPieceRegistry = cell.key("allPieces") as Cell<
+      Cell<unknown>[]
+    >;
+    await this.syncPieces(legacyPieceRegistry);
+    return legacyPieceRegistry;
   }
 
   async add(newPieces: Cell<unknown>[]): Promise<void> {
@@ -365,15 +383,15 @@ export class PieceManager {
   }
 
   /**
-   * Find all pieces that the given piece reads data from via aliases or links.
+   * Find all pieces that the given piece reads data from via sigil links.
    * This identifies dependencies that the piece has on other pieces.
    * @param piece The piece to check
    * @returns Array of pieces that are read from
    */
   async getReadingFrom(piece: Cell<unknown>): Promise<Cell<unknown>[]> {
     // Get all pieces that might be referenced
-    const piecesCell = await this.getPieces();
-    const allPieces = piecesCell.get();
+    const piecesCell = await this.getPieceRegistry();
+    const registeredPieces = piecesCell.get();
     const result: Cell<unknown>[] = [];
     const seenEntityIds = new Set<string>(); // Track entities we've already processed
     const maxDepth = 10; // Prevent infinite recursion
@@ -393,7 +411,7 @@ export class PieceManager {
       try {
         argumentValue = argumentCell.getRaw();
       } catch (err) {
-        console.debug("Error getting argument value:", err);
+        this.diagnosticConsole.debug("Error getting argument value:", err);
         return result;
       }
 
@@ -408,7 +426,7 @@ export class PieceManager {
         seenEntityIds.add(entityIdStr);
 
         // Find matching piece by entity ID
-        const matchingPiece = allPieces.find((c) => {
+        const matchingPiece = registeredPieces.find((c) => {
           const cId = getEntityId(c);
           return isEntityRef(cId) && entityRefToString(cId) === entityIdStr;
         });
@@ -453,6 +471,7 @@ export class PieceManager {
 
             const resultCell = followCellToResult(
               this.runtime.getCellFromLink(link),
+              this.diagnosticConsole,
               new Set(),
               0,
             );
@@ -468,7 +487,7 @@ export class PieceManager {
                   depth + 1,
                 );
               } catch (err) {
-                console.debug(
+                this.diagnosticConsole.debug(
                   `Error processing array item at index ${i}:`,
                   err,
                 );
@@ -488,7 +507,7 @@ export class PieceManager {
                   depth + 1,
                 );
               } catch (err) {
-                console.debug(
+                this.diagnosticConsole.debug(
                   `Error processing object property '${key}':`,
                   err,
                 );
@@ -496,7 +515,7 @@ export class PieceManager {
             }
           }
         } catch (err) {
-          console.debug("Error in processValue:", err);
+          this.diagnosticConsole.debug("Error in processValue:", err);
         }
       };
 
@@ -510,7 +529,10 @@ export class PieceManager {
         );
       }
     } catch (error) {
-      console.debug("Error finding references in piece arguments:", error);
+      this.diagnosticConsole.debug(
+        "Error finding references in piece arguments:",
+        error,
+      );
       // Don't throw the error - return an empty result instead
     }
 
@@ -518,15 +540,15 @@ export class PieceManager {
   }
 
   /**
-   * Find all pieces that read data from the given piece via aliases or links.
+   * Find all pieces that read data from the given piece via sigil links.
    * This identifies which pieces depend on this piece.
    * @param piece The piece to check
    * @returns Array of pieces that read from this piece
    */
   async getReadByPieces(piece: Cell<unknown>): Promise<Cell<unknown>[]> {
     // Get all pieces to check
-    const piecesCell = await this.getPieces();
-    const allPieces = piecesCell.get();
+    const piecesCell = await this.getPieceRegistry();
+    const registeredPieces = piecesCell.get();
     const result: Cell<unknown>[] = [];
     const seenEntityIds = new Set<string>(); // Track entities we've already processed
     const maxDepth = 10; // Prevent infinite recursion
@@ -587,12 +609,13 @@ export class PieceManager {
             // Check if cell link's source chain leads to our target
             const resultCell = followCellToResult(
               this.runtime.getCellFromLink(link),
+              this.diagnosticConsole,
               new Set(),
               0,
             );
             if (resultCell?.sourceURI === piece.sourceURI) return true;
           } catch (err) {
-            console.debug(
+            this.diagnosticConsole.debug(
               "Error handling cell link in checkRefersToTarget:",
               err,
             );
@@ -615,7 +638,10 @@ export class PieceManager {
                 return true;
               }
             } catch (err) {
-              console.debug(`Error checking array item at index ${i}:`, err);
+              this.diagnosticConsole.debug(
+                `Error checking array item at index ${i}:`,
+                err,
+              );
             }
           }
         } else if (isRecord(value)) {
@@ -636,19 +662,22 @@ export class PieceManager {
                 return true;
               }
             } catch (err) {
-              console.debug(`Error checking object property '${key}':`, err);
+              this.diagnosticConsole.debug(
+                `Error checking object property '${key}':`,
+                err,
+              );
             }
           }
         }
       } catch (err) {
-        console.debug("Error in checkRefersToTarget:", err);
+        this.diagnosticConsole.debug("Error in checkRefersToTarget:", err);
       }
 
       return false;
     };
 
     // Check each piece to see if it references this piece
-    for (const otherPiece of allPieces) {
+    for (const otherPiece of registeredPieces) {
       if (otherPiece.resolveAsCell().equals(resolvedPiece)) continue; // Skip self
 
       if (checkRefersToTarget(otherPiece, otherPiece, new Set(), 0)) {
@@ -724,7 +753,7 @@ export class PieceManager {
 
   // note: removing a piece doesn't clean up the piece's cells
   async remove(piece: Cell<unknown>) {
-    const piecesCell = await this.getPieces();
+    const piecesCell = await this.getPieceRegistry();
     await this.syncPieces(piecesCell);
 
     // Check if this is the default pattern and clear the link
@@ -862,14 +891,17 @@ export class PieceManager {
   }
 
   /** Start scheduling and running a prepared piece. */
-  async startPiece<T = unknown>(pieceOrId: string | Cell<T>): Promise<void> {
+  async startPiece<T = unknown>(
+    pieceOrId: string | Cell<T>,
+    options: { schedulePatternUpdate?: boolean } = {},
+  ): Promise<void> {
     const piece = typeof pieceOrId === "string"
       ? await timePiecePhase("startPiece.get", () => this.get<T>(pieceOrId))
       : pieceOrId;
     if (!piece) throw new Error("Piece not found");
     await timePiecePhase(
       "startPiece.runtime.start",
-      () => this.runtime.start(piece),
+      () => this.runtime.start(piece, options),
     );
     await timePiecePhase(
       "startPiece.result.pull",
@@ -928,7 +960,7 @@ export class PieceManager {
   // Returns the piece from our active piece list if it is present,
   // or undefined if it is not
   async getActivePiece(pieceCell: Cell<unknown>) {
-    const piecesCell = await this.getPieces();
+    const piecesCell = await this.getPieceRegistry();
     const resolved = pieceCell.resolveAsCell();
     return piecesCell.get().find((piece) =>
       piece.resolveAsCell().equals(resolved)
@@ -986,7 +1018,10 @@ export class PieceManager {
       let targetInputCell = targetCell.withTx(tx);
       if (targetIsPiece) {
         // For pieces, target fields are in the result cell's argument
-        const resultCell = followCellToResult(targetInputCell);
+        const resultCell = followCellToResult(
+          targetInputCell,
+          this.diagnosticConsole,
+        );
         if (!resultCell) {
           throw new Error("Target piece has no result cell");
         }
@@ -1056,7 +1091,7 @@ async function getCellByIdOrPiece(
       );
 
       // Check if this cell is actually a piece by looking at the pieces list
-      const piecesCell = await manager.getPieces();
+      const piecesCell = await manager.getPieceRegistry();
       const pieces = piecesCell.get();
       const isActuallyPiece = pieces.some((piece: Cell<unknown>) => {
         const id = pieceId(piece);
@@ -1075,6 +1110,7 @@ async function getCellByIdOrPiece(
 const MAX_DEPTH = 10;
 function followCellToResult(
   cell: Cell<unknown>,
+  diagnosticConsole: RuntimeConsole,
   visited = new Set<string>(),
   depth = 0,
 ): Cell<unknown> | undefined {
@@ -1095,16 +1131,21 @@ function followCellToResult(
       const resultLink = getMetaLink(cell, "result");
       if (resultLink !== undefined) {
         const resultCell = cell.runtime.getCellFromLink(resultLink);
-        return followCellToResult(resultCell, visited, depth + 1);
+        return followCellToResult(
+          resultCell,
+          diagnosticConsole,
+          visited,
+          depth + 1,
+        );
       }
     } catch (err) {
       // Ignore errors getting doc value
-      console.debug("Error getting doc value:", err);
+      diagnosticConsole.debug("Error getting doc value:", err);
     }
 
     return cell; // Return the current document's ID if no further references
   } catch (err) {
-    console.debug("Error in followCellToResult:", err);
+    diagnosticConsole.debug("Error in followCellToResult:", err);
     return undefined;
   }
 }

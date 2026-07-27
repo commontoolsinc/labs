@@ -31,6 +31,7 @@ import {
   action,
   assert,
   assertCapture,
+  assertRenderParts,
   byRef,
   computed,
   handler,
@@ -94,6 +95,7 @@ import { isTrustedPattern, setPatternProgram } from "./pattern-metadata.ts";
 import {
   FabricInstance,
   FabricPrimitive,
+  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import {
   FabricEpochDays,
@@ -195,8 +197,11 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     assert: trustedAssert,
 
     // Operand recording for transformer-instrumented `assert` bodies. Plain
-    // data in, plain data out — no builder artifact to trust.
+    // data in, plain data out — no builder artifact to trust. `assertCapture`
+    // stashes each operand's value; `assertRenderParts` renders them only when
+    // the assertion failed.
     assertCapture,
+    assertRenderParts,
 
     // Pure unavailable-data observation helpers
     isPending,
@@ -320,6 +325,9 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     // Debug stringifiers (helpers exposed for pattern code)
     toCompactDebugString,
     toIndentedDebugString,
+
+    // Value comparison helper exposed for pattern code
+    valueEqual,
   } as BuilderFunctionsAndConstants & {
     __cfHelpers?: BuilderFunctionsAndConstants;
   };

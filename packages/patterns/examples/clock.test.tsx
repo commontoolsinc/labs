@@ -1,4 +1,4 @@
-import { computed, pattern } from "commonfabric";
+import { assert, pattern } from "commonfabric";
 import Clock from "./clock.tsx";
 
 // The clock's labels derive from the reactive #now clock. They read the
@@ -8,10 +8,10 @@ import Clock from "./clock.tsx";
 export default pattern(() => {
   const clock = Clock();
 
-  const assert_time_is_clock_shaped = computed(() =>
+  const assert_time_is_clock_shaped = assert(() =>
     /^\d{2}:\d{2}:\d{2}$/.test(clock.time)
   );
-  const assert_date_is_non_empty = computed(() => clock.date.length > 0);
+  const assert_date_is_non_empty = assert(() => clock.date.length > 0);
 
   return {
     tests: [

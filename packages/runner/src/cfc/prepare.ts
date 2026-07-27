@@ -1,6 +1,7 @@
 import {
   CFC_ATOM_TYPE,
   CFC_COMPILED_BY_ATOM_PREFIX,
+  type CfcAtom,
   cfcAtom,
 } from "@commonfabric/api/cfc";
 import {
@@ -8,16 +9,21 @@ import {
   internSchemaAsTaggedHashString,
 } from "@commonfabric/data-model/schema-hash";
 import { emptySchemaObject } from "@commonfabric/data-model/schema-utils";
+import { isFabricObjectOrArray } from "@commonfabric/data-model/fabric-value";
 import {
   cloneForMutation,
   type CloneForMutationResult,
+  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { normalizeIdentitySource } from "./writer-claim-correspondence.ts";
 import type { FabricValue } from "@commonfabric/api";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema } from "../builder/types.ts";
+import { forEachSubschema } from "../schema-walk.ts";
+import { arrayMatchesPositionally } from "../schema-match.ts";
 import { normalizeCellScope } from "../scope.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import type {
@@ -46,6 +52,7 @@ import {
   canonicalizeLogicalPath,
 } from "./canonical.ts";
 import {
+  type CfcConfClause,
   clauseAlternatives,
   FORBIDDEN_OR_CLAUSE_ALTERNATIVE_TYPES,
   isOrClause,
@@ -86,6 +93,10 @@ import {
   type ReadObservationShape,
 } from "./observation-classes.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
+import {
+  CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
+  CfcSchemaMigrationError,
+} from "./migration-reason.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
@@ -382,7 +393,7 @@ const resolveCurrentPrincipalPlaceholders = (
 const resolveCurrentPrincipalLabelValues = (
   values: readonly unknown[] | undefined,
   actingPrincipal: string | undefined,
-): readonly unknown[] | undefined => {
+): readonly CfcAtom[] | undefined => {
   if (!values) {
     return undefined;
   }
@@ -394,7 +405,7 @@ const resolveCurrentPrincipalLabelValues = (
       ? [resolveCurrentPrincipalPlaceholders(value, actingPrincipal)]
       : [];
   });
-  return resolved.length > 0 ? resolved : undefined;
+  return resolved.length > 0 ? (resolved as readonly CfcAtom[]) : undefined;
 };
 
 const isCurrentPrincipalClaimAtom = (value: unknown): value is {
@@ -506,6 +517,7 @@ const writeAuthorizedByReason = (
   tx: IExtendedStorageTransaction,
   schema: JSONSchema,
   path: readonly string[],
+  targetSpace: MemorySpace,
   targetIdentity?: ImplementationIdentity,
 ): string | undefined => {
   if (!isRecord(schema) || !isRecord(schema.ifc)) {
@@ -555,15 +567,23 @@ const writeAuthorizedByReason = (
   // must match the live identity's. The legacy bundleId-only arm (stored
   // pre-#4009 claims) retired with the legacy read path (identity E5,
   // data-wipe decision): a claim without a moduleIdentity is rejected.
-  const identityArmMatches =
-    typeof bindingIdentity.moduleIdentity === "string" &&
-    typeof identity.moduleIdentity === "string" &&
-    identity.moduleIdentity.length > 0 &&
-    identity.moduleIdentity === bindingIdentity.moduleIdentity;
+  //
+  // The binding is `moduleIdentity` + `bindingPath`. The claim's file SPELLING
+  // deliberately does not participate: it is resolver-dependent (the same
+  // module spells differently across piece-deploy and HTTP compiles —
+  // labs#4772), while moduleIdentity already pins the module content-
+  // addressed, subsuming anything the spelling could soundly assert.
+  const claimedModuleIdentity = bindingIdentity.moduleIdentity;
+  const writerModuleIdentity = identity.moduleIdentity;
+  const identityArmMatches = typeof claimedModuleIdentity === "string" &&
+    typeof writerModuleIdentity === "string" &&
+    writerModuleIdentity.length > 0 &&
+    (writerModuleIdentity === claimedModuleIdentity ||
+      tx.getCfcState().moduleDelegations.get(targetSpace)?.get(
+          writerModuleIdentity,
+        )?.includes(claimedModuleIdentity) === true);
   if (
     !identityArmMatches ||
-    normalizeIdentitySource(identity.sourceFile) !==
-      normalizeIdentitySource(bindingIdentity.file) ||
     !arraysEqual(identity.bindingPath, bindingIdentity.path)
   ) {
     return `writeAuthorizedBy failed at /${path.join("/")}`;
@@ -604,15 +624,6 @@ const arraysEqual = (
 ): boolean =>
   left.length === right.length &&
   left.every((value, index) => value === right[index]);
-
-const normalizeIdentitySource = (
-  source: string | undefined,
-): string | undefined => {
-  if (typeof source !== "string" || source.length === 0) {
-    return undefined;
-  }
-  return source.startsWith("/") ? source : `/${source}`;
-};
 
 type StructuralProvenanceInput = Extract<
   WritePolicyInput,
@@ -1025,7 +1036,9 @@ const schemasEqualIgnoringWriterStamp = (
     stripWriterIdentityStamp(right),
   );
 
-const storedSchemaCoversCandidateEnvelope = (
+// Exported for unit testing of the merge-skip decision. Not part of the
+// public CFC surface.
+export const storedSchemaCoversCandidateEnvelope = (
   stored: JSONSchema | undefined,
   candidate: JSONSchema | undefined,
 ): boolean => {
@@ -1047,12 +1060,77 @@ const storedSchemaCoversCandidateEnvelope = (
       return false;
     }
     const storedProperties = stored.properties;
-    return Object.entries(candidate.properties).every(([key, child]) =>
-      storedSchemaCoversCandidateEnvelope(
-        storedProperties[key] as JSONSchema | undefined,
-        child as JSONSchema,
+    if (
+      !Object.entries(candidate.properties).every(([key, child]) =>
+        storedSchemaCoversCandidateEnvelope(
+          storedProperties[key] as JSONSchema | undefined,
+          child as JSONSchema,
+        )
       )
-    );
+    ) {
+      return false;
+    }
+    // Rest claims (PR #4969 review): a candidate additionalProperties is a
+    // claim about every key absent from the CANDIDATE's properties — which
+    // includes keys the stored side NAMES. Stored rest does not govern
+    // stored-named keys, so each stored-only named property must itself
+    // cover the candidate rest claim, and the rest claims must cover too.
+    // No candidate rest claim means the properties coverage above suffices;
+    // boolean forms must match exactly.
+    const candidateRest = candidate.additionalProperties;
+    if (candidateRest === undefined) {
+      return true;
+    }
+    if (typeof candidateRest === "boolean") {
+      return stored.additionalProperties === candidateRest;
+    }
+    for (const [key, storedChild] of Object.entries(storedProperties)) {
+      if (Object.hasOwn(candidate.properties, key)) continue;
+      if (
+        !storedSchemaCoversCandidateEnvelope(
+          storedChild as JSONSchema,
+          candidateRest,
+        )
+      ) {
+        return false;
+      }
+    }
+    return typeof stored.additionalProperties === "object" &&
+      stored.additionalProperties !== null &&
+      storedSchemaCoversCandidateEnvelope(
+        stored.additionalProperties,
+        candidateRest,
+      );
+  }
+
+  // Tuple slots: when either side declares prefixItems, coverage requires
+  // slot-wise coverage — otherwise the items branch below would judge
+  // envelopes "covered" while their tuple slots differ, and the candidate's
+  // slot info would be dropped instead of merged (fail-open). Arities must
+  // be EQUAL (PR #4969 review): with differing arities, one side's rest
+  // `items` claims positions the other covers with slots, and the shared
+  // items branch below cannot compare those — fail closed and merge.
+  if (
+    candidate.prefixItems !== undefined || stored.prefixItems !== undefined
+  ) {
+    if (
+      !Array.isArray(candidate.prefixItems) ||
+      !Array.isArray(stored.prefixItems) ||
+      candidate.prefixItems.length !== stored.prefixItems.length
+    ) {
+      return false;
+    }
+    const storedSlots = stored.prefixItems;
+    if (
+      !candidate.prefixItems.every((slot, index) =>
+        storedSchemaCoversCandidateEnvelope(storedSlots[index], slot)
+      )
+    ) {
+      return false;
+    }
+    // Slots covered; the rest `items` (if any) is judged by the shared
+    // branch below. A slots-only candidate reaches the conservative
+    // `return false` (merge) the same way.
   }
 
   if (
@@ -1081,7 +1159,8 @@ const rebindWriteAuthorizedByClaims = (
   }
   // Only the function NAMED by a binding may stamp that binding's provenance
   // moduleIdentity. The writer's own binding (sourceFile + bindingPath) must
-  // match the claim's binding (file + path); otherwise a foreign writer that
+  // match the claim's binding (file + path) exactly; otherwise a foreign
+  // writer that
   // merely *initializes* the protected field — e.g. profile-create's
   // `submitProfileCreation` seeding a freshly `inSpace`'d ProfileHome whose
   // `elements` bind to profile-home's `mutateElements` — would stamp ITS module
@@ -1147,6 +1226,16 @@ const rebindWriteAuthorizedByClaimsInner = (
     // match rationale in rebindWriteAuthorizedByClaims). When we can identify
     // both bindings, require they match; a mismatch means a foreign writer is
     // initializing the field, so we leave the claim unstamped.
+    // Minting the FIRST stamp requires exact (slash-normalized) file
+    // equality, not the tolerant spelling correspondence: a claim being
+    // stamped here rides a schema emitted by the SAME compile as the live
+    // writer, so their spellings agree whenever the writer genuinely is the
+    // named binding. Cross-spelling healing of stored claims deliberately
+    // does NOT happen here — the current compile's claim gets stamped
+    // exactly, and reconcileWriterClaimStamp adopts that stamp onto the
+    // stored spelling (schema-merge.ts). Keeping the mint exact means the
+    // tolerance never widens who can create authority, only how an
+    // already-minted stamp meets an aged spelling.
     const writerOwnsBinding = ids.writerFile !== undefined &&
       ids.writerPath !== undefined && bindingFile !== undefined &&
       bindingPath !== undefined &&
@@ -1686,8 +1775,8 @@ export const deriveFlowJoin = (
     collectLabeledSpaces?: boolean;
   },
 ): {
-  confidentiality: unknown[];
-  integrity: unknown[];
+  confidentiality: CfcConfClause[];
+  integrity: CfcAtom[];
   labeledSpaces?: ReadonlySet<MemorySpace>;
 } => {
   const atoms: unknown[] = [];
@@ -1699,7 +1788,7 @@ export const deriveFlowJoin = (
   // uncertified. (In practice most transactions read some unlabeled doc,
   // so the meet is usually empty until inputs are universally certified —
   // staged conformance per SC-9, never over-claiming.)
-  let hereditaryMeet: unknown[] | undefined;
+  let hereditaryMeet: CfcAtom[] | undefined;
   const labeledSpaces = options?.collectLabeledSpaces === true
     ? new Set<MemorySpace>()
     : undefined;
@@ -1810,7 +1899,7 @@ export const deriveFlowJoin = (
     atoms.push(...observation.confidentiality);
   }
   const confidentiality = uniqueCfcAtoms(atoms);
-  const integrity: unknown[] = [...(hereditaryMeet ?? [])];
+  const integrity: CfcAtom[] = [...(hereditaryMeet ?? [])];
   // Derivation provenance (§8.9.3 TransformedBy, staged: identity binding
   // only — no per-input refs/witnesses yet). The flow join is one per-tx
   // label stamped on every written doc, so the identity must hold for the
@@ -2019,28 +2108,11 @@ const walkIfcSchema = (
       });
     }
 
-    if (resolved.properties) {
-      for (const [key, child] of Object.entries(resolved.properties)) {
-        walkIfcSchema(child, [...path, key], entries, childRoot, nextActive);
-      }
-    }
-    const compound = [
-      ...(resolved.anyOf ?? []),
-      ...(resolved.oneOf ?? []),
-      ...(resolved.allOf ?? []),
-    ];
-    for (const child of compound) {
-      walkIfcSchema(child, path, entries, childRoot, nextActive);
-    }
-    if (typeof resolved.items === "object" && resolved.items !== null) {
-      walkIfcSchema(
-        resolved.items,
-        [...path, "*"],
-        entries,
-        childRoot,
-        nextActive,
-      );
-    }
+    // Keyword descent via the shared walk, so the vocabulary cannot silently
+    // drift from schema-walk's (a missed keyword here fails open:
+    // under-tainting). The visitor owns the path rule per keyword — that
+    // part is this walker's semantics, not the walk's.
+    //
     // Record-only `additionalProperties` descends as the same `*` segment
     // arrays get from `items` (template-population §4) — RESTRICTED to
     // record-only objects (no NAMED property). The restriction is
@@ -2055,20 +2127,71 @@ const walkIfcSchema = (
     // all of them; schema helpers routinely emit that wrapper shape, and
     // skipping it would silently drop the declared map label (codex/cubic
     // review on this PR).
-    if (
-      (resolved.properties === undefined ||
-        Object.keys(resolved.properties).length === 0) &&
-      typeof resolved.additionalProperties === "object" &&
-      resolved.additionalProperties !== null
-    ) {
-      walkIfcSchema(
-        resolved.additionalProperties,
-        [...path, "*"],
-        entries,
-        childRoot,
-        nextActive,
-      );
-    }
+    const recordOnly = resolved.properties === undefined ||
+      Object.keys(resolved.properties).length === 0;
+    // `items` keeps its `*` entry even beside `prefixItems` (PR #4969
+    // review). The `*` matches ANY index — including the tuple slots — so
+    // the mixed tuple-plus-rest shape over-taints the slots with the rest
+    // labels; but the alternative (minting nothing, as additionalProperties
+    // does beside named properties) silently DROPS the tail elements'
+    // declared labels — fail-open, strictly worse than over-taint.
+    // Expressing "every index past the slots" precisely needs a path
+    // grammar beyond `*`; until then the wildcard stays. The record-side
+    // no-mint rule is unchanged: there the `*` entry would misassign
+    // through schemaAtPath's properties-first resolution, a trade that
+    // predates tuple support.
+    forEachSubschema(resolved, (child, keyword, key, index) => {
+      switch (keyword) {
+        case "properties":
+          walkIfcSchema(child, [...path, key!], entries, childRoot, nextActive);
+          break;
+        case "anyOf":
+        case "oneOf":
+        case "allOf":
+          walkIfcSchema(child, path, entries, childRoot, nextActive);
+          break;
+        case "items":
+          walkIfcSchema(child, [...path, "*"], entries, childRoot, nextActive);
+          break;
+        case "prefixItems":
+          // Tuple slots mint at their concrete index — unlike `items`' `*`
+          // entry, a slot label applies to exactly that position.
+          walkIfcSchema(
+            child,
+            [...path, String(index!)],
+            entries,
+            childRoot,
+            nextActive,
+          );
+          break;
+        case "additionalProperties":
+          if (recordOnly) {
+            walkIfcSchema(
+              child,
+              [...path, "*"],
+              entries,
+              childRoot,
+              nextActive,
+            );
+          }
+          break;
+        case "not":
+          // Negation describes what the value must NOT be. Minting
+          // label/policy entries from it would enforce an author's negated
+          // branch as if it labeled real data — deliberately skipped (unlike
+          // joinSchema, where unioning `not` atoms into the LUB is a safe
+          // over-taint).
+          break;
+        default:
+          // A keyword schema-walk knows but this walker has no path rule
+          // for: descend at the parent's own path — labels join at the
+          // position (over-taint, fail-safe) rather than being silently
+          // dropped (under-taint, fail-open). Give new keywords an explicit
+          // case above.
+          walkIfcSchema(child, path, entries, childRoot, nextActive);
+          break;
+      }
+    });
     return entries;
   }
 };
@@ -2305,8 +2428,8 @@ const projectedSourceLabel = (
   claim: ProjectionClaim,
 ): IFCLabel => {
   const source = canonicalizeLogicalPath([...claim.source, ...claim.field]);
-  const confidentiality: unknown[] = [];
-  const integrity: unknown[] = [];
+  const confidentiality: CfcConfClause[] = [];
+  const integrity: CfcAtom[] = [];
   // Map insertion order is the schema-walk order (parents before children),
   // so contributions stay ordered ancestor-first along the source lineage.
   for (const [key, label] of sourceEntryLabels) {
@@ -2517,7 +2640,7 @@ export const writeDetailValueForTarget = (
     return baseValue;
   }
 
-  if (!(isRecord(baseValue) || Array.isArray(baseValue))) {
+  if (!isFabricObjectOrArray(baseValue)) {
     // Base isn't a container yet deeper writes exist (rare/incoherent): build a
     // fresh container and overlay onto it (it's freshly mutable -- no COW).
     const result: Record<PropertyKey, unknown> | unknown[] =
@@ -2589,12 +2712,15 @@ const writeInstallsInitialSchemaDefault = (
     return false;
   }
   const pathTarget = { ...target, path };
-  // TODO(danfuzz): `deepEqual` mishandles `FabricValue` (see
-  // `utils/deep-equal.ts`); `schema.default` can hold a `FabricValue`, so this
-  // CFC write-policy check can compare wrong. Migrate to a `Fabric`-aware
-  // equality once available.
+  // The cast is required: `default` is statically `ImmutableJSONValue`, whose
+  // deeply-`readonly`, `ArrayLike`-based JSON shape is not assignable to
+  // `FabricValue` -- though the runtime value is one (a native
+  // `Uint8Array`/`Date` default interns to a `FabricPrimitive`).
   return previousWriteValueForTarget(tx, pathTarget) === undefined &&
-    deepEqual(writeValueForTarget(tx, pathTarget), schema.default);
+    valueEqual(
+      writeValueForTarget(tx, pathTarget),
+      schema.default as FabricValue,
+    );
 };
 
 const linkedWriteValueForPolicy = (
@@ -2807,14 +2933,21 @@ const policySchemaMatchesValue = (
       policySchemaMatchesValue(childSchema, value[key], schemaRoot)
     );
   }
-  if (
-    Array.isArray(value) && typeof schema.items === "object" &&
-    schema.items !== null
-  ) {
-    const itemSchema = schema.items;
-    return value.every((item) =>
-      policySchemaMatchesValue(itemSchema, item, schemaRoot)
-    );
+  if (Array.isArray(value)) {
+    // Shared position rule (schema-match.ts): tuple slots condition their
+    // exact position, `items` conditions the positions past them. Before
+    // prefixItems was handled here, a tuple-shaped condition fell through
+    // to `return true` and vacuously matched any array.
+    if (
+      !arrayMatchesPositionally(
+        schema,
+        value,
+        (childSchema, childValue) =>
+          policySchemaMatchesValue(childSchema, childValue, schemaRoot),
+      )
+    ) {
+      return false;
+    }
   }
   return true;
 };
@@ -3446,6 +3579,7 @@ const verifyInputRequirements = (
       tx,
       entry.schema,
       entry.path,
+      target.space,
       identityForPath(entry.path),
     );
     const setupProjection = setupProjectionSourceMatchesValue(
@@ -3570,7 +3704,7 @@ const verifyInputRequirements = (
       // carries no markers, so the extra arm is byte-inert for it; the
       // containment pre-check keeps the dominant plaintext path a single
       // deepEqual per pair.
-      const fitsLegacy = (confidentiality: readonly unknown[]): boolean =>
+      const fitsLegacy = (confidentiality: readonly CfcConfClause[]): boolean =>
         confidentiality.every((value) =>
           maxConfidentiality.some((allowed) =>
             deepEqual(allowed, value) ||
@@ -3830,13 +3964,18 @@ const derivePersistedLabel = (
     // clauses coalesce. `normalizeClause` is identity on flat atoms, so flat
     // labels are unchanged. Integrity carries no OR-clauses.
     confidentiality: mergeLabelValues(
-      resolvePolicyOfConfidentiality(
+      (resolvePolicyOfConfidentiality(
         tx,
         schemaLabel.confidentiality,
         owningSpace,
-      )?.map(normalizeClause),
-      copiedInputLabel?.confidentiality?.map(normalizeClause),
-      projectedInputLabel?.confidentiality?.map(normalizeClause),
+      ) as readonly CfcConfClause[] | undefined)?.map(normalizeClause),
+      (copiedInputLabel?.confidentiality as
+        | readonly CfcConfClause[]
+        | undefined)
+        ?.map(normalizeClause),
+      (projectedInputLabel?.confidentiality as
+        | readonly CfcConfClause[]
+        | undefined)?.map(normalizeClause),
     ),
     integrity: mergeLabelValues(
       resolveCurrentPrincipalLabelValues(
@@ -3859,8 +3998,10 @@ const resolvePolicyOfConfidentiality = (
   tx: IExtendedStorageTransaction,
   values: readonly unknown[] | undefined,
   owningSpace: MemorySpace | undefined,
-): readonly unknown[] | undefined =>
-  values?.map((value) => resolvePolicyOfValue(tx, value, owningSpace));
+): readonly CfcConfClause[] | undefined =>
+  values?.map((value) =>
+    resolvePolicyOfValue(tx, value, owningSpace) as CfcConfClause
+  );
 
 const resolvePolicyOfValue = (
   tx: IExtendedStorageTransaction,
@@ -4424,8 +4565,8 @@ export const loadSchemaDocument = (
 const collectConsumedLabel = (
   tx: IExtendedStorageTransaction,
 ): {
-  confidentiality: readonly unknown[];
-  integrity: readonly unknown[];
+  confidentiality: readonly CfcConfClause[];
+  integrity: readonly CfcAtom[];
   modulePolicySpaces: ReadonlyMap<string, ReadonlySet<MemorySpace>>;
 } => {
   const atoms: unknown[] = [];
@@ -4435,7 +4576,7 @@ const collectConsumedLabel = (
   // transaction-global over-approximation as the confidentiality union —
   // rules bind kind/source structurally, so evidence still has to match the
   // clause it discharges.
-  const integrityAtoms: unknown[] = [];
+  const integrityAtoms: CfcAtom[] = [];
   for (
     const read of [
       ...(tx.getReadActivities?.() ?? []),
@@ -4539,15 +4680,15 @@ const collectConsumedLabel = (
  */
 const evaluateGatedConfidentiality = (
   tx: IExtendedStorageTransaction,
-  confidentiality: readonly unknown[],
-  integrity: readonly unknown[],
-  boundary: readonly unknown[],
+  confidentiality: readonly CfcConfClause[],
+  integrity: readonly CfcAtom[],
+  boundary: readonly CfcAtom[],
   consumption: CfcGrantConsumptionContext,
   destinationSpace?:
     | MemorySpace
     | ((reference: unknown) => MemorySpace | undefined),
 ): {
-  confidentiality: readonly unknown[];
+  confidentiality: readonly CfcConfClause[];
   exhausted: boolean;
   firings: number;
   resolutionFailures: readonly {
@@ -4627,7 +4768,7 @@ const verifySinkRequestCeilings = (
   const state = tx.getCfcState();
   const ceilings = state.sinkMaxConfidentiality;
   if (ceilings === undefined) return [];
-  const gatedSinks = new Map<string, readonly unknown[]>();
+  const gatedSinks = new Map<string, readonly CfcConfClause[]>();
   for (const input of state.writePolicyInputs) {
     if (input.kind !== "sink-request") continue;
     // Own-property lookup only: a sink named like an Object.prototype member
@@ -4818,7 +4959,7 @@ const verifyWriteFloor = (
     ) => ImplementationIdentity | undefined;
     linkWriteInputs: readonly LinkWritePolicyInput[];
     candidateSchemas: ReadonlyMap<string, JSONSchema>;
-    flowIntegrity: readonly unknown[];
+    flowIntegrity: readonly CfcAtom[];
   },
 ): string[] => {
   const failures: string[] = [];
@@ -4894,7 +5035,7 @@ const verifyWriteFloor = (
     // One contribution per link written at/under the floor path (each linked
     // value must individually carry the floor), plus one `value` contribution
     // when plain data was written (crediting the flow meet when available).
-    const contributions: (readonly unknown[])[] = [];
+    const contributions: (readonly CfcAtom[])[] = [];
     for (const input of linksHere) {
       const derived = derivePersistedLinkLabel(
         tx,
@@ -5249,8 +5390,16 @@ export const prepareBoundaryCommit = (
           ? storedSchema
           : mergeCfcSchemaEnvelopes(storedSchema, schema);
       } catch (error) {
+        // Tag the additive-required migration incompatibility with a stable
+        // token so the default-root runnability backstop can key on THIS class
+        // (recoverable by rolling forward) and leave every other CFC rejection
+        // fail-closed. Only the recorded reason is tagged; the human-readable
+        // message is preserved verbatim after the token. A plain schema-load or
+        // other merge failure records its bare message as before.
         reasons.push(
-          error instanceof Error
+          error instanceof CfcSchemaMigrationError
+            ? `${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: ${error.message}`
+            : error instanceof Error
             ? error.message
             : `schema merge failed for ${id}`,
         );
@@ -5522,7 +5671,7 @@ export const prepareBoundaryCommit = (
     // shape would re-smear the pointer/content split.
     const clearedExistence: Array<{
       path: readonly string[];
-      confidentiality: readonly unknown[];
+      confidentiality: readonly CfcConfClause[];
     }> = [];
     // Only pre-class LEGACY entries (no `observes`) pool: they conflated
     // existence with content/membership, and the one-time migration absorb
@@ -5945,12 +6094,14 @@ export const prepareBoundaryCommit = (
       // permuted forms of one clause would both survive — a doubled clause
       // list and one spurious envelope rewrite (the SC-11 churn class).
       // normalizeClause each clause first; non-clause atoms pass through.
-      const foldedUnique = (atoms: readonly unknown[]): unknown[] =>
-        uniqueCfcAtoms(atoms.map((atom) => normalizeClause(atom)));
+      const foldedUnique = (atoms: readonly CfcConfClause[]): CfcConfClause[] =>
+        uniqueCfcAtoms(
+          atoms.map((atom) => normalizeClause(atom as CfcConfClause)),
+        );
       const frozenConfidentialityFor = (
         path: readonly string[],
-      ): unknown[] => {
-        const atoms: unknown[] = [...flowConfidentiality];
+      ): CfcConfClause[] => {
+        const atoms: CfcConfClause[] = [...flowConfidentiality];
         clearedExistence.forEach((cleared, index) => {
           if (isPrefix(path, cleared.path)) {
             attachedExistence.add(index);
@@ -6042,7 +6193,7 @@ export const prepareBoundaryCommit = (
               ?.confidentiality ?? [];
           const offending = atomsOutsideCeiling(
             flowConfidentiality,
-            declaredCeiling,
+            declaredCeiling as readonly CfcConfClause[],
           );
           if (offending.length > 0) {
             // SC-18c error contract: a stable reason naming the rule id and
@@ -6223,7 +6374,7 @@ export const prepareBoundaryCommit = (
       // shape entry so the existence history survives the migration.
       const leftoverByPath = new Map<
         string,
-        { path: readonly string[]; atoms: unknown[] }
+        { path: readonly string[]; atoms: CfcConfClause[] }
       >();
       clearedExistence.forEach((cleared, index) => {
         if (attachedExistence.has(index)) {

@@ -1339,8 +1339,8 @@ Summary table; the full per-mechanism walkthrough with file references is in
 
     *Efficiency-only and accepted.* Final results are identical and single-runtime
     / static-graph workloads are neutral-to-faster (note-create @128 −22%,
-    unchanged-recompute −42%, targeted-dirty-rehydrate −50%). Accepted via
-    `NEW_PERF_BASELINE`.
+    unchanged-recompute −42%, targeted-dirty-rehydrate −50%). Accepted as a
+    deliberate efficiency-only tradeoff.
 
     *Corrected mechanism — single-runtime control (2026-06-28; SUPERSEDES the
     "per-node hash/freeze + idle sync" wording below).* The decisive control: the

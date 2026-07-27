@@ -91,7 +91,6 @@ When done, call presentResult with your structured findings.`,
       searchWeb: patternTool(searchWeb),
       readWebpage: patternTool(readWebpage),
     },
-    model: "anthropic:claude-sonnet-4-5",
     context: computed(() => context ?? {}),
   });
   const { addMessage, pending } = dialog;

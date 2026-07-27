@@ -381,6 +381,46 @@ Deno.test(
 );
 
 Deno.test(
+  "Expression site policy: optionality preserves receiver-method call-root ownership",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(`
+      declare function pattern<T>(fn: (state: any) => T): T;
+
+      const view = pattern((state: any) => ({
+        receiverOptional: state.name?.toUpperCase(),
+        invocationOptional: state.name.toUpperCase?.(),
+        bothOptional: state.name?.toUpperCase?.(),
+      }));
+    `);
+
+    const calls = findAllNodes(
+      sourceFile,
+      (node): node is ts.CallExpression =>
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "toUpperCase",
+    );
+    const analyze = createDataFlowAnalyzer(checker);
+
+    assertEquals(calls.length, 3);
+    for (const call of calls) {
+      assertEquals(
+        classifyExpressionSiteHandling(
+          call,
+          "object-property",
+          context,
+          analyze,
+        ),
+        {
+          kind: "shared",
+          lowerable: true,
+        },
+      );
+    }
+  },
+);
+
+Deno.test(
   "Expression site policy: aliased reactive array callbacks keep receiver-method ownership",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(`

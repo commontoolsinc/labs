@@ -69,6 +69,65 @@ Deno.test("importsPollingWaitFor detects an aliased import", () => {
   );
 });
 
+// A type-only import binds the type of `waitFor` and is erased before the test
+// runs, so it cannot poll. The value forms below it still have to be caught.
+
+Deno.test("importsPollingWaitFor ignores a type-only import statement", () => {
+  assertEquals(
+    importsPollingWaitFor(
+      'import type { waitFor } from "@commonfabric/integration";',
+    ),
+    false,
+  );
+});
+
+Deno.test("importsPollingWaitFor ignores a type-only import by relative path", () => {
+  assertEquals(
+    importsPollingWaitFor(
+      'import type { waitFor } from "../../integration/utils.ts";',
+    ),
+    false,
+  );
+});
+
+Deno.test("importsPollingWaitFor ignores an inline type member", () => {
+  assertEquals(
+    importsPollingWaitFor(
+      'import { type waitFor } from "@commonfabric/integration";',
+    ),
+    false,
+  );
+});
+
+Deno.test("importsPollingWaitFor ignores an aliased inline type member", () => {
+  // The erased member binds the local name `waitFor`, so dropping only the
+  // `type` keyword would leave the name behind and flag this.
+  assertEquals(
+    importsPollingWaitFor(
+      'import { type Poll as waitFor } from "@commonfabric/integration";',
+    ),
+    false,
+  );
+});
+
+Deno.test("importsPollingWaitFor detects a value waitFor beside a type member", () => {
+  assert(
+    importsPollingWaitFor(
+      'import { type Page, waitFor } from "@commonfabric/integration";',
+    ),
+  );
+});
+
+Deno.test("importsPollingWaitFor detects a value waitFor after a type member on its own line", () => {
+  const source = [
+    "import {",
+    "  type Page,",
+    "  waitFor,",
+    '} from "@commonfabric/integration";',
+  ].join("\n");
+  assert(importsPollingWaitFor(source));
+});
+
 Deno.test("importsPollingWaitFor ignores waitFor-prefixed helpers", () => {
   assertEquals(
     importsPollingWaitFor(

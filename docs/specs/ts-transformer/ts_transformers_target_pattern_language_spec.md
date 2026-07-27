@@ -75,7 +75,7 @@ Each construct family is classified as one of:
 | Cell-style `.get()` reads on explicitly cell-like values inside JSX expressions, authored helper control flow, or explicit computation callbacks | Supported | Eager cell reads remain valid when authored in JSX interpolation, helper control flow such as `ifElse` / `when` / `unless`, and explicit computation callbacks such as `computed`, `action`, `lift`, and `handler` |
 | Foreign callback / imperative container roots in JSX | Unsupported | Shapes like `[0, 1].forEach(() => list.map(...))` are not part of the intended reactive language core and should move into supported value expressions, wrappers, or helpers |
 | Residual callback-container pass-through behavior for invalid programs | Compatibility-only | Some invalid callback-container shapes may still survive as plain JS in current emitted output, but that is residual implementation behavior rather than supported language policy |
-| Optional-call on reactive receivers | Unsupported | Optional-call forms are outside the intended language because they are difficult to lower without semantic ambiguity |
+| Optional receiver navigation and optional invocation on otherwise-supported call roots | Supported | Optionality does not define a separate call family: `value?.method()`, `value.method?.()`, and combined chains lower wherever the corresponding non-optional call is supported, with receiver binding, evaluation order, nullish short-circuiting, and skipped argument evaluation preserved |
 | Direct non-JSX receiver-method calls on reactive values in top-level pattern-body expression sites | Supported | Value-like receiver-method roots at top-level object-property, call-argument, variable-initializer, array-element, or return-expression sites lower to derived local value expressions |
 | Direct receiver-method roots inside supported collection callbacks | Supported | Callback-local value-like receiver-method roots lower to callback-local lift-applied computations instead of remaining raw or requiring manual wrapper calls |
 | Direct top-level `.get()` reads in pattern-owned reactive context | Unsupported | Even on true cell-like values, eager `.get()` reads should move into JSX or an explicit computation callback such as `computed`, `action`, `lift`, or `handler` rather than living directly in the top-level declarative pattern body |
@@ -125,6 +125,7 @@ The top-level pattern body should stay declarative.
 // Shown for illustration only.
 pattern(({ items, show }) => ({
   upper: items[0].name.toUpperCase(),
+  maybeUpper: items[0]?.name?.toUpperCase?.(),
   title: show ? "Visible" : "Hidden",
   visibleCount: ifElse(show, items.length, 0),
   [UI]: <div>{items.map((item) => item.name)}</div>,
@@ -160,6 +161,7 @@ JSX is the main local reactive expression context.
 // Shown as JSX element children.
 <div>
   {user.name.toUpperCase()}
+  {user.name?.toUpperCase?.()}
   {selectedScopes[key]}
   {ifElse(show, count.get(), 0)}
   {items.filter((item) => item.visible).join(", ")}
@@ -190,6 +192,7 @@ imperative/value-computation boundaries.
 // Shown inside a pattern body.
 computed(() => input[key])
 computed(() => count.get())
+computed(() => input.name?.trim?.())
 action(() => state.name.trim())
 ```
 
@@ -235,6 +238,7 @@ expression context.
 // Shown inside a pattern body.
 items.map((item) => item.name)
 items.map((item) => item.toUpperCase())
+items.map((item) => item?.toUpperCase?.())
 items.map((item) => identity(item.toUpperCase()))
 items.map((item) => ifElse(item.active, item.name, "hidden"))
 items.map((item) => <span>{item.name.toUpperCase()}</span>)
@@ -331,25 +335,24 @@ pattern(({ selectedScopes, key }) =>
 or move the imperative container entirely outside the pattern-facing expression
 site into a named helper or handler.
 
-### Optional-Call -> Explicit Nullish Control Flow
+### Optional Calls Follow The Underlying Call Policy
 
-**Avoid**
-
-```ts
-// Shown for illustration only.
-pattern(({ maybeFn, value }) => ({
-  result: maybeFn?.(value),
-}));
-```
-
-**Prefer**
+Optionality does not make an otherwise unsupported call legal, and it does not
+make an otherwise supported call ambiguous.
 
 ```ts
 // Shown for illustration only.
-pattern(({ maybeFn, value }) => ({
-  result: computed(() => maybeFn == null ? undefined : maybeFn(value)),
+pattern(({ maybeName }) => ({
+  result: maybeName?.trim?.(),
 }));
 ```
+
+The compiler lowers the whole call expression and preserves JavaScript's
+receiver binding and short-circuit behavior. A function-valued pattern input is
+still outside the reactive data model whether invoked as `fn()` or `fn?.()`:
+the problem in that case is the unstorable function value, not optional-call
+syntax. Put behavior in a module-scope helper, `lift`, or `handler` instead of
+placing a function in reactive data.
 
 ## 5. Construct Notes
 
@@ -487,19 +490,33 @@ The intended split is:
      - `ifElse(show, state.name.trim(), "fallback")`
      - `items.map((item) => item.toUpperCase())`
      - `items.map((item) => identity(item.toUpperCase()))`
-3. **optional-call / ambiguous receiver-call forms**
-   - still outside the target language
+3. **optional receiver and invocation forms of supported calls**
+   - part of the same target-language call family
    - examples:
-     - `input?.foo()`
-     - `items.map((item) => item?.toUpperCase())`
+     - `{ upper: input.name?.trim?.() }`
+     - JSX expression sites like `{input.name?.trim?.()}`
+     - `computed(() => input.name?.trim?.())`
+     - `items.map((item) => item?.toUpperCase?.())`
+   - lowering preserves:
+     - single evaluation of the receiver and callee
+     - the original `this` binding
+     - nullish short-circuiting
+     - non-evaluation of arguments when invocation short-circuits
+4. **calls that are already outside the language**
+   - remain unsupported with or without `?.`
+   - examples:
+     - a statement-position receiver call in the top-level declarative pattern
+       body
+     - invocation of a function value supplied through reactive pattern data
 
 So the language should not be read as “receiver methods are unsupported.” The
 real rule is that **receiver methods are supported in explicit local expression
 contexts, inside supported collection callbacks, and at lowerable top-level
-non-JSX pattern sites, but optional-call receiver forms remain unsupported**.
-Optional property / element access follows the ordinary lowerable
-expression-site rules; only optional-call forms remain outside the target
-language.
+non-JSX pattern sites, and optionality does not change that classification**.
+Optional property / element access and optional invocation follow the ordinary
+lowerable expression-site and call-root rules. Standalone functions and
+execution callbacks such as `action`, `lift`, and `handler` retain ordinary
+JavaScript behavior as before.
 
 ## 5.7 `.key(...)` And `.get()` Are Cell-Semantics-Split
 
@@ -563,8 +580,9 @@ questions:
    would be a later language revision rather than an unresolved v1 semantic
 3. preserve typed-input/schema continuity tests around explicit cell-like
    inputs without promoting direct top-level `.get()` reads into the language
-4. keep optional-call on reactive receivers unsupported in v1 unless a future
-   language revision defines an explicit evaluation model
+4. preserve the optional-call evaluation model with golden coverage for
+   receiver optionality, invocation optionality, combined chains, receiver
+   binding, and lazy argument evaluation
 
 ## 7. Use This Spec
 

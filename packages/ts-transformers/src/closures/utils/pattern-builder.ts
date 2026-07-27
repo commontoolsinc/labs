@@ -1,5 +1,6 @@
 import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
+import { preserveSourceMapRange } from "../../ast/mod.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
   createBindingElementsFromNames,
@@ -166,17 +167,23 @@ export class PatternBuilder {
       ? undefined
       : (returnType || originalCallback.type);
 
-    if (ts.isArrowFunction(originalCallback)) {
-      return this.factory.createArrowFunction(
+    // Carry the authored callback's source-map position onto the rebuilt
+    // closure so the hoisting stage can recover where it was written (every
+    // strategy — computed-origin, array-method, inline-handler — routes its
+    // callback through here). Source-map-range ONLY, not full preserveLineage:
+    // these callbacks are re-emitted as arrow heads and their types feed schema
+    // derivation, so textRange/original would perturb emit. See
+    // preserveSourceMapRange / CT-1868.
+    const built = ts.isArrowFunction(originalCallback)
+      ? this.factory.createArrowFunction(
         originalCallback.modifiers,
         originalCallback.typeParameters,
         [destructuredParam],
         typeNode,
         originalCallback.equalsGreaterThanToken,
         body,
-      );
-    } else {
-      return this.factory.createFunctionExpression(
+      )
+      : this.factory.createFunctionExpression(
         originalCallback.modifiers,
         originalCallback.asteriskToken,
         originalCallback.name,
@@ -185,7 +192,7 @@ export class PatternBuilder {
         typeNode,
         body as ts.Block,
       );
-    }
+    return preserveSourceMapRange(built, originalCallback);
   }
 
   /**
@@ -313,13 +320,16 @@ export class PatternBuilder {
       ? undefined
       : (returnType || originalCallback.type);
 
-    return this.factory.createArrowFunction(
-      originalCallback.modifiers,
-      originalCallback.typeParameters,
-      [eventParameter, paramsParameter, ...additionalParameters],
-      typeNode,
-      originalCallback.equalsGreaterThanToken,
-      body,
+    return preserveSourceMapRange(
+      this.factory.createArrowFunction(
+        originalCallback.modifiers,
+        originalCallback.typeParameters,
+        [eventParameter, paramsParameter, ...additionalParameters],
+        typeNode,
+        originalCallback.equalsGreaterThanToken,
+        body,
+      ),
+      originalCallback,
     );
   }
 }

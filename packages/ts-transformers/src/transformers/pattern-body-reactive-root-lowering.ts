@@ -841,10 +841,6 @@ function rewriteTrackedOpaquePatternBody(
         if (
           KNOWN_PATH_TERMINAL_METHODS.has(visited.name.text) && parentCall
         ) {
-          if (unsupportedCallRoot === "optional-call") {
-            return visited;
-          }
-
           if (info.path.length <= 1) {
             return visited;
           }
@@ -866,7 +862,6 @@ function rewriteTrackedOpaquePatternBody(
 
         if (parentCall) {
           if (
-            unsupportedCallRoot === "optional-call" ||
             unsupportedCallRoot === "unsupported-receiver-method"
           ) {
             return visited;
@@ -1205,12 +1200,12 @@ function hasLocalOpaqueOriginBinding(
  * Source shapes handled:
  *   const x = wish(...).result
  *     => const { result: x } = wish(...)
- *   const x = wish(...).result.allPieces
- *     => const { result: { allPieces: x } } = wish(...)
+ *   const x = wish(...).result.pieceRegistry
+ *     => const { result: { pieceRegistry: x } } = wish(...)
  *   const { x } = wish(...).result
  *     => const { result: { x } } = wish(...)
- *   const { x } = wish(...).result.allPieces
- *     => const { result: { allPieces: { x } } } = wish(...)
+ *   const { x } = wish(...).result.pieceRegistry
+ *     => const { result: { pieceRegistry: { x } } } = wish(...)
  *
  * Non-null assertions inside the chain are dropped (they have no runtime
  * effect). Casts and parens at the root of the chain are preserved.

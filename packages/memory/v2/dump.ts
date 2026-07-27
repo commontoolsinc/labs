@@ -27,12 +27,12 @@ import type { MemorySpace } from "../interface.ts";
 
 const SQLITE_SUFFIX = ".sqlite";
 
-export interface SpaceStoreInfo {
+export type SpaceStoreInfo = {
   /** Canonical space DID (decoded from the on-disk filename). */
   space: string;
   sizeBytes: number;
   mtimeMs: number;
-}
+};
 
 /**
  * List the space stores for a memory `store` (the value passed to

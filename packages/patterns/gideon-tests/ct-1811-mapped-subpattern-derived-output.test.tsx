@@ -25,6 +25,7 @@
  * that never reads the mapped output would not trigger it.
  */
 import {
+  assert,
   computed,
   NAME,
   pattern,
@@ -117,7 +118,7 @@ export default pattern(() => {
   // Reading the rendered tree forces the map to materialize; each Child then
   // renders its derived-internal `doubled` output (2, 4, 6). Without the fix,
   // binding throws before any of this and the harness fails the run.
-  const rendered = computed(() => {
+  const rendered = assert(() => {
     const values = leafValues(ui);
     return values.includes("2") && values.includes("4") &&
       values.includes("6");

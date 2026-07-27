@@ -45,7 +45,7 @@
 //
 // Do NOT remove the other two, UNRELATED "legacy" axes when you do this; they
 // retire on their own (different) timelines:
-//   • decode.ts  — at-rest codec routing (`fvj1:` envelope vs plain-JSON sigil
+//   • decode.ts  — at-rest codec routing (codec envelope vs plain-JSON sigil
 //                  links). A serialization concern, orthogonal to process cells.
 //   • db.ts / reconstruct.ts — DBs lacking branch/snapshot/scope_key tables
 //                  (`hasTable`, the scope_key shim). A schema-migration concern.

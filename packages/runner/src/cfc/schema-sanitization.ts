@@ -1,4 +1,5 @@
 import type { ImmutableJSONValue, JSONSchema } from "@commonfabric/api";
+import type { CfcConfClause } from "./clause.ts";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import {
   cloneIfNecessary,
@@ -118,7 +119,9 @@ export const isPromptInjectionMaterialRiskAtom = (atom: unknown): boolean => {
 // strings are left untouched (no rule matches them, exactly as before). This
 // keeps discharge a single rule-driven mechanism rather than reintroducing a
 // hardcoded strip (codex P2 on #4567).
-const normalizeMaterialRiskStringForms = (clause: unknown): unknown => {
+const normalizeMaterialRiskStringForms = (
+  clause: CfcConfClause,
+): CfcConfClause => {
   if (typeof clause === "string") {
     return PROMPT_INJECTION_RISK_KINDS.has(clause)
       ? { type: CFC_ATOM_TYPE.Caveat, kind: clause }
@@ -138,7 +141,7 @@ const normalizeMaterialRiskStringForms = (clause: unknown): unknown => {
 };
 
 export const dischargeMaterialRiskAtoms = (
-  atoms: readonly unknown[],
+  atoms: readonly CfcConfClause[],
 ): ImmutableJSONValue[] => {
   // Fuel budget scaled to the label (cubic P2 on #4567): the default 64 would
   // exhaust on a label with more than ~64 droppable alternatives, and the
@@ -150,7 +153,8 @@ export const dischargeMaterialRiskAtoms = (
   // which this set cannot have.
   const normalized = atoms.map(normalizeMaterialRiskStringForms);
   const alternativeCount = normalized.reduce(
-    (total: number, clause) => total + clauseAlternatives(clause).length,
+    (total: number, clause) =>
+      total + clauseAlternatives(clause as CfcConfClause).length,
     0,
   );
   const result = evaluateExchangeRules(
@@ -173,7 +177,7 @@ const mergeIfc = (
     observedConfidentiality,
     instructionInert,
   }: {
-    observedConfidentiality: readonly unknown[];
+    observedConfidentiality: readonly CfcConfClause[];
     instructionInert: boolean;
   },
 ): Record<string, unknown> => {
@@ -258,7 +262,7 @@ export const resolveSchemaForValidation = (
 
 const annotateSchema = (
   schema: JSONSchema,
-  observedConfidentiality: readonly unknown[],
+  observedConfidentiality: readonly CfcConfClause[],
   fullSchema: JSONSchema,
   visitedRef?: AnnotationRefVisit,
 ): AnnotationResult => {
@@ -437,7 +441,7 @@ const annotateSchema = (
 
 export const schemaWithInjectionSafeAnnotations = (
   schema: JSONSchema,
-  observedConfidentiality: readonly unknown[] = [],
+  observedConfidentiality: readonly CfcConfClause[] = [],
 ): JSONSchema => {
   const clone = cloneJson(schema);
   return stripRequiredFields(

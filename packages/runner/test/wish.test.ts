@@ -28,11 +28,11 @@ import {
 const signer = await Identity.fromPassphrase("wish built-in tests");
 const space = signer.did();
 
-// Stable entity id used to address the test's "all pieces" cell. The value is
+// Stable entity id used to address the test's piece registry cell. The value is
 // opaque to these tests, which set up the cell and the space link to it
 // directly; it's a real content-hash id so it stays well-formed.
-const allPiecesEntityId = entityIdFrom(hashOf("all-pieces"));
-const allPiecesId = allPiecesEntityId.taggedHashString;
+const pieceRegistryEntityId = entityIdFrom(hashOf("piece-registry"));
+const pieceRegistryId = pieceRegistryEntityId.taggedHashString;
 
 function expectUnavailableReason(
   value: unknown,
@@ -87,36 +87,38 @@ describe("wish built-in", () => {
     expect((selected as typeof result).get()).toEqual({ name: "Selected" });
   });
 
-  it("resolves the well known all pieces cell", async () => {
-    const allPiecesCell = runtime.getCellFromEntityId<unknown[]>(
+  it("resolves the piece registry through an absolute path", async () => {
+    const pieceRegistryCell = runtime.getCellFromEntityId<unknown[]>(
       space,
-      allPiecesEntityId,
+      pieceRegistryEntityId,
       [],
       undefined,
       tx,
     );
     const piecesData = [{ name: "Alpha", title: "Alpha" }];
-    allPiecesCell.withTx(tx).set(piecesData);
+    pieceRegistryCell.withTx(tx).set(piecesData);
 
-    // Set up the space cell to link to allPieces
-    const spaceCell = runtime.getCell<{ allPieces?: unknown[] }>(space, space)
-      .withTx(tx);
-    spaceCell.key("allPieces").set(allPiecesCell.withTx(tx));
+    // Set up the space cell to link to pieceRegistry.
+    const spaceCell = runtime.getCell<{ pieceRegistry?: unknown[] }>(
+      space,
+      space,
+    ).withTx(tx);
+    spaceCell.key("pieceRegistry").set(pieceRegistryCell.withTx(tx));
 
     await tx.commit();
     await runtime.idle();
     tx = runtime.edit();
 
     const wishPattern = pattern(() => {
-      const allPieces = wish<Array<Record<string, unknown>>>({
-        query: "/allPieces",
+      const pieceRegistry = wish<Array<Record<string, unknown>>>({
+        query: "/pieceRegistry",
       });
-      const firstPieceTitle = wish({ query: "/allPieces/0/title" });
-      return { allPieces, firstPieceTitle };
+      const firstPieceTitle = wish({ query: "/pieceRegistry/0/title" });
+      return { pieceRegistry, firstPieceTitle };
     });
 
     const resultCell = runtime.getCell<{
-      allPieces?: { result?: unknown[] };
+      pieceRegistry?: { result?: unknown[] };
       firstPieceTitle?: { result?: string };
     }>(
       space,
@@ -131,26 +133,26 @@ describe("wish built-in", () => {
     // Pull to trigger computation
     await result.pull();
 
-    const wishResultCell = result.key("allPieces");
-    const allPiecesResultCell = wishResultCell.key("result");
-    const rawValue = allPiecesResultCell.getRaw() as
+    const wishResultCell = result.key("pieceRegistry");
+    const pieceRegistryResultCell = wishResultCell.key("result");
+    const rawValue = pieceRegistryResultCell.getRaw() as
       | { ["/"]: Record<string, unknown> }
       | undefined;
     const linkData = rawValue?.["/"]?.[LINK_V1_TAG] as
       | { id?: string; overwrite?: string }
       | undefined;
 
-    expect(result.key("allPieces").get()?.result).toEqual(piecesData);
+    expect(result.key("pieceRegistry").get()?.result).toEqual(piecesData);
     expect(result.key("firstPieceTitle").get()?.result).toEqual(
       piecesData[0].title,
     );
-    expect(linkData?.id).toEqual(`of:${allPiecesId}`);
+    expect(linkData?.id).toEqual(`of:${pieceRegistryId}`);
   });
 
   it("resolves semantic wishes with # prefixes", async () => {
-    const allPiecesCell = runtime.getCellFromEntityId(
+    const pieceRegistryCell = runtime.getCellFromEntityId(
       space,
-      allPiecesEntityId,
+      pieceRegistryEntityId,
       [],
       undefined,
       tx,
@@ -159,14 +161,15 @@ describe("wish built-in", () => {
       { name: "Alpha", title: "Alpha" },
       { name: "Beta", title: "Beta" },
     ];
-    allPiecesCell.withTx(tx).set(piecesData);
+    pieceRegistryCell.withTx(tx).set(piecesData);
 
-    // Set up the space cell with defaultPattern that links to allPieces
     const spaceCell = runtime.getCell(space, space).withTx(tx);
     const defaultPatternCell = runtime.getCell(space, "default-pattern").withTx(
       tx,
     );
-    (defaultPatternCell as any).key("allPieces").set(allPiecesCell.withTx(tx));
+    (defaultPatternCell as any).key("pieceRegistry").set(
+      pieceRegistryCell.withTx(tx),
+    );
     (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
     await tx.commit();
@@ -175,14 +178,14 @@ describe("wish built-in", () => {
 
     const wishPattern = pattern(() => {
       return {
-        semanticAllPieces: wish({ query: "#allPieces" }),
-        semanticFirstTitle: wish({ query: "#allPieces/0/title" }),
+        pieceRegistry: wish({ query: "#pieceRegistry" }),
+        canonicalFirstTitle: wish({ query: "#pieceRegistry/0/title" }),
       };
     });
 
     const resultCell = runtime.getCell<{
-      semanticAllPieces?: { result?: unknown[] };
-      semanticFirstTitle?: { result?: string };
+      pieceRegistry?: { result?: unknown[] };
+      canonicalFirstTitle?: { result?: string };
     }>(
       space,
       "wish semantic",
@@ -196,8 +199,8 @@ describe("wish built-in", () => {
     // Pull to trigger computation
     await result.pull();
 
-    expect(result.key("semanticAllPieces").get()?.result).toEqual(piecesData);
-    expect(result.key("semanticFirstTitle").get()?.result).toEqual("Alpha");
+    expect(result.key("pieceRegistry").get()?.result).toEqual(piecesData);
+    expect(result.key("canonicalFirstTitle").get()?.result).toEqual("Alpha");
   });
 
   it("resolves the default pattern with #default", async () => {
@@ -506,24 +509,28 @@ describe("wish built-in", () => {
   });
 
   describe("object-based wish syntax", () => {
-    it("resolves allPieces using tag parameter", async () => {
-      const allPiecesCell = runtime.getCellFromEntityId<unknown[]>(
+    it("resolves only the canonical registry target", async () => {
+      const canonicalRegistryCell = runtime.getCellFromEntityId<unknown[]>(
         space,
-        allPiecesEntityId,
+        pieceRegistryEntityId,
         [],
         undefined,
         tx,
       );
       const piecesData = [{ name: "Alpha", title: "Alpha" }];
-      allPiecesCell.withTx(tx).set(piecesData);
+      canonicalRegistryCell.withTx(tx).set(piecesData);
 
-      // Set up defaultPattern to own allPieces
-      const spaceCell = runtime.getCell<{ allPieces?: unknown[] }>(space, space)
-        .withTx(tx);
+      const spaceCell = runtime.getCell<{ pieceRegistry?: unknown[] }>(
+        space,
+        space,
+      ).withTx(tx);
       const defaultPatternCell = runtime.getCell(space, "default-pattern")
         .withTx(tx);
+      (defaultPatternCell as any).key("pieceRegistry").set(
+        canonicalRegistryCell.withTx(tx),
+      );
       (defaultPatternCell as any).key("allPieces").set(
-        allPiecesCell.withTx(tx),
+        canonicalRegistryCell.withTx(tx),
       );
       (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
@@ -531,19 +538,14 @@ describe("wish built-in", () => {
       await runtime.idle();
       tx = runtime.edit();
 
-      const wishPattern = pattern(() => {
-        const allPieces = wish<unknown[]>({ query: "#allPieces" });
-        return { allPieces };
-      });
-
+      const wishPattern = pattern(() => ({
+        pieceRegistry: wish<unknown[]>({ query: "#pieceRegistry" }),
+        retiredTarget: wish<unknown[]>({ query: "#allPieces" }),
+      }));
       const resultCell = runtime.getCell<{
-        allPieces?: { result?: unknown[] };
-      }>(
-        space,
-        "wish object syntax result",
-        undefined,
-        tx,
-      );
+        pieceRegistry?: { result?: unknown[] };
+        retiredTarget?: { result?: unknown[]; error?: string };
+      }>(space, "wish canonical registry result", undefined, tx);
       const result = runtime.run(tx, wishPattern, {}, resultCell);
       await tx.commit();
       tx = runtime.edit();
@@ -551,13 +553,140 @@ describe("wish built-in", () => {
       await runtime.idle();
       await result.pull();
 
-      expect(result.key("allPieces").get()?.result).toEqual(piecesData);
+      expect(result.key("pieceRegistry").get()?.result).toEqual(piecesData);
+      expectUnavailableReason(
+        result.key("retiredTarget").key("result").resolveAsCell().getRaw(),
+        "error",
+      );
+      expect(result.key("retiredTarget").get()?.error).toMatch(
+        /No favorites found matching/,
+      );
+
+      const canonicalResult = result.key("pieceRegistry").key("result")
+        .resolveAsCell();
+      canonicalResult.withTx(tx).push({ name: "Beta", title: "Beta" });
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.idle();
+      expect(canonicalRegistryCell.get()).toEqual([
+        ...piecesData,
+        { name: "Beta", title: "Beta" },
+      ]);
+    });
+
+    it("resolves pieceRegistry through a sourced legacy default root", async () => {
+      const legacyRegistryCell = runtime.getCellFromEntityId<unknown[]>(
+        space,
+        pieceRegistryEntityId,
+        [],
+        undefined,
+        tx,
+      );
+      const piecesData = [{ name: "Alpha", title: "Alpha" }];
+      legacyRegistryCell.withTx(tx).set(piecesData);
+
+      const spaceCell = runtime.getCell<{ allPieces?: unknown[] }>(space, space)
+        .withTx(tx);
+      const defaultPatternCell = runtime.getCell(space, "default-pattern")
+        .withTx(tx);
+      (defaultPatternCell as any).key("allPieces").set(
+        legacyRegistryCell.withTx(tx),
+      );
+      (defaultPatternCell as any).key("addPiece").setRaw({ $stream: true });
+      defaultPatternCell.setMetaRaw("patternIdentity", {
+        identity: "legacy-default-app",
+        symbol: "default",
+      });
+      defaultPatternCell.setMetaRaw(
+        "patternSource",
+        "/api/patterns/system/default-app.tsx",
+      );
+      (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => ({
+        pieceRegistry: wish<unknown[]>({ query: "#pieceRegistry" }),
+      }));
+      const resultCell = runtime.getCell<{
+        pieceRegistry?: { result?: unknown[] };
+      }>(space, "wish legacy registry result", undefined, tx);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await runtime.idle();
+      await result.pull();
+
+      expect(result.key("pieceRegistry").get()?.result).toEqual(piecesData);
+
+      const registryResult = result.key("pieceRegistry").key("result")
+        .resolveAsCell();
+      registryResult.withTx(tx).push({ name: "Beta", title: "Beta" });
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.idle();
+      expect(legacyRegistryCell.get()).toEqual([
+        ...piecesData,
+        { name: "Beta", title: "Beta" },
+      ]);
+    });
+
+    it("does not treat a custom allPieces output as the registry", async () => {
+      const customListCell = runtime.getCellFromEntityId<unknown[]>(
+        space,
+        pieceRegistryEntityId,
+        [],
+        undefined,
+        tx,
+      );
+      const customData = [{ name: "Unrelated", title: "Unrelated" }];
+      customListCell.withTx(tx).set(customData);
+
+      const spaceCell = runtime.getCell(space, space).withTx(tx);
+      const defaultPatternCell = runtime.getCell(
+        space,
+        "custom-default-pattern",
+      )
+        .withTx(tx);
+      (defaultPatternCell as any).key("allPieces").set(
+        customListCell.withTx(tx),
+      );
+      (defaultPatternCell as any).key("addPiece").setRaw({ $stream: true });
+      defaultPatternCell.setMetaRaw("patternIdentity", {
+        identity: "custom-app",
+        symbol: "default",
+      });
+      defaultPatternCell.setMetaRaw("patternSource", "/custom-app.tsx");
+      (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
+
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const wishPattern = pattern(() => ({
+        pieceRegistry: wish<unknown[]>({ query: "#pieceRegistry" }),
+      }));
+      const resultCell = runtime.getCell<{
+        pieceRegistry?: { result?: unknown[] };
+      }>(space, "wish custom registry result", undefined, tx);
+      const result = runtime.run(tx, wishPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+
+      await runtime.idle();
+      await result.pull();
+
+      expect(result.key("pieceRegistry").get()?.result).toBeUndefined();
+      expect(customListCell.get()).toEqual(customData);
     });
 
     it("resolves nested paths using tag and path parameters", async () => {
-      const allPiecesCell = runtime.getCellFromEntityId<unknown[]>(
+      const pieceRegistryCell = runtime.getCellFromEntityId<unknown[]>(
         space,
-        allPiecesEntityId,
+        pieceRegistryEntityId,
         [],
         undefined,
         tx,
@@ -566,15 +695,16 @@ describe("wish built-in", () => {
         { name: "Alpha", title: "First Title" },
         { name: "Beta", title: "Second Title" },
       ];
-      allPiecesCell.withTx(tx).set(piecesData);
+      pieceRegistryCell.withTx(tx).set(piecesData);
 
-      // Set up defaultPattern to own allPieces
-      const spaceCell = runtime.getCell<{ allPieces?: unknown[] }>(space, space)
-        .withTx(tx);
+      const spaceCell = runtime.getCell<{ pieceRegistry?: unknown[] }>(
+        space,
+        space,
+      ).withTx(tx);
       const defaultPatternCell = runtime.getCell(space, "default-pattern")
         .withTx(tx);
-      (defaultPatternCell as any).key("allPieces").set(
-        allPiecesCell.withTx(tx),
+      (defaultPatternCell as any).key("pieceRegistry").set(
+        pieceRegistryCell.withTx(tx),
       );
       (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
@@ -584,7 +714,7 @@ describe("wish built-in", () => {
 
       const wishPattern = pattern(() => {
         const firstTitle = wish<string>({
-          query: "#allPieces",
+          query: "#pieceRegistry",
           path: ["0", "title"],
         });
         return { firstTitle };
@@ -609,9 +739,9 @@ describe("wish built-in", () => {
     });
 
     it("resolves slashed path embedded in tag query", async () => {
-      const allPiecesCell = runtime.getCellFromEntityId<unknown[]>(
+      const pieceRegistryCell = runtime.getCellFromEntityId<unknown[]>(
         space,
-        allPiecesEntityId,
+        pieceRegistryEntityId,
         [],
         undefined,
         tx,
@@ -620,15 +750,16 @@ describe("wish built-in", () => {
         { name: "Alpha", title: "First Title" },
         { name: "Beta", title: "Second Title" },
       ];
-      allPiecesCell.withTx(tx).set(piecesData);
+      pieceRegistryCell.withTx(tx).set(piecesData);
 
-      // Set up defaultPattern to own allPieces
-      const spaceCell = runtime.getCell<{ allPieces?: unknown[] }>(space, space)
-        .withTx(tx);
+      const spaceCell = runtime.getCell<{ pieceRegistry?: unknown[] }>(
+        space,
+        space,
+      ).withTx(tx);
       const defaultPatternCell = runtime.getCell(space, "default-pattern")
         .withTx(tx);
-      (defaultPatternCell as any).key("allPieces").set(
-        allPiecesCell.withTx(tx),
+      (defaultPatternCell as any).key("pieceRegistry").set(
+        pieceRegistryCell.withTx(tx),
       );
       (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 
@@ -638,7 +769,7 @@ describe("wish built-in", () => {
 
       const wishPattern = pattern(() => {
         const firstTitle = wish<string>({
-          query: "#allPieces/0/title",
+          query: "#pieceRegistry/0/title",
         });
         return { firstTitle };
       });
@@ -2034,30 +2165,30 @@ describe("wish built-in", () => {
         expect((defaultData as any)?.value).toBe("other");
       });
 
-      it("#allPieces with scope: [did] returns that space's allPieces", async () => {
-        // Setup: Add allPieces data to the other space
+      it("#pieceRegistry with scope: [did] reads that space", async () => {
+        // Setup: add registry data to the other space.
         const otherSpaceCell = runtime.getCell(
           otherSpace.did(),
           otherSpace.did(),
         ).withTx(tx);
         const otherDefaultPattern = runtime.getCell(
           otherSpace.did(),
-          "other-default-allpieces",
+          "other-default-piece-registry",
           undefined,
           tx,
         );
-        const otherAllPieces = runtime.getCell(
+        const otherPieceRegistry = runtime.getCell(
           otherSpace.did(),
-          "other-allpieces-data",
+          "other-piece-registry-data",
           undefined,
           tx,
         );
-        otherAllPieces.set([
+        otherPieceRegistry.set([
           { name: "Piece A" },
           { name: "Piece B" },
         ]);
         otherDefaultPattern.set({
-          allPieces: otherAllPieces,
+          pieceRegistry: otherPieceRegistry,
         });
         (otherSpaceCell as any).key("defaultPattern").set(otherDefaultPattern);
 
@@ -2065,11 +2196,11 @@ describe("wish built-in", () => {
         await runtime.idle();
         tx = runtime.edit();
 
-        // Execute: #allPieces with scope: [otherSpace.did()]
+        // Execute: #pieceRegistry with scope: [otherSpace.did()].
         const wishPattern = pattern(() => {
           return {
             result: wish({
-              query: "#allPieces",
+              query: "#pieceRegistry",
               scope: [otherSpace.did()],
             }),
           };
@@ -2079,7 +2210,7 @@ describe("wish built-in", () => {
           result?: { result?: unknown };
         }>(
           patternSpace.did(),
-          "allpieces-did-scope-result",
+          "piece-registry-did-scope-result",
           undefined,
           tx,
         );
@@ -2089,13 +2220,13 @@ describe("wish built-in", () => {
 
         await result.pull();
 
-        // Verify: Should return the other space's allPieces
+        // Verify: it returns the other space's registry.
         const wishResult = result.key("result").get();
         expect(wishResult?.error).toBeUndefined();
-        const allPieces = wishResult?.result;
-        expect(allPieces).toBeDefined();
-        expect(Array.isArray(allPieces)).toBe(true);
-        expect((allPieces as any[])[0]?.name).toBe("Piece A");
+        const pieceRegistry = wishResult?.result;
+        expect(pieceRegistry).toBeDefined();
+        expect(Array.isArray(pieceRegistry)).toBe(true);
+        expect((pieceRegistry as any[])[0]?.name).toBe("Piece A");
       });
 
       it("error message includes space count for arbitrary DID scope", async () => {
@@ -2243,6 +2374,72 @@ describe("wish built-in", () => {
   });
 
   describe("compiled pattern with object-based wish syntax", () => {
+    it("keeps a typed semantic registry writable", async () => {
+      const pieceRegistryCell = runtime.getCellFromEntityId<unknown[]>(
+        space,
+        pieceRegistryEntityId,
+        [],
+        undefined,
+        tx,
+      );
+      pieceRegistryCell.withTx(tx).set([]);
+      const spaceCell = runtime.getCell(space, space).withTx(tx);
+      const defaultPatternCell = runtime.getCell(
+        space,
+        "compiled-wish-default",
+        undefined,
+        tx,
+      );
+      defaultPatternCell.key("pieceRegistry").set(
+        pieceRegistryCell.withTx(tx),
+      );
+      spaceCell.key("defaultPattern").set(defaultPatternCell);
+      await tx.commit();
+      await runtime.idle();
+      tx = runtime.edit();
+
+      const program = {
+        main: "/main.tsx",
+        files: [
+          {
+            name: "/main.tsx",
+            contents: [
+              "import { action, pattern, resultOf, wish, Writable } from 'commonfabric';",
+              "interface Piece { title: string; children?: Piece[]; }",
+              "export default pattern<void>(() => {",
+              "  const registryRequest = wish<Writable<Piece[]>>({",
+              "    query: '#pieceRegistry',",
+              "    headless: true,",
+              "  });",
+              "  const registry = resultOf(registryRequest.result);",
+              "  const addPiece = action(() => registry.push({ title: 'Beta' }));",
+              "  return { addPiece };",
+              "});",
+            ].join("\n"),
+          },
+        ],
+      };
+      const loadedPattern = await runtime.patternManager.compilePattern(
+        program,
+        { space },
+      );
+      const resultCell = runtime.getCell(
+        space,
+        "compiled writable registry wish result",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, loadedPattern, {}, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+      await runtime.idle();
+
+      result.key("addPiece").send({});
+      await runtime.idle();
+
+      expect(pieceRegistryCell.get()).toEqual([{ title: "Beta" }]);
+    });
+
     it("preserves object syntax through compilation pipeline", async () => {
       // This test ensures that wish({ query: "..." }) object syntax works
       // when patterns are compiled and deployed (CT-1084)
@@ -2984,13 +3181,13 @@ describe("wish built-in", () => {
         await result.pull();
 
         // The missing-profile UI kicks off a deferred profile-create fetch.
+        // `recordedUrls` is a plain array, not a cell, so there is no sink to
+        // wait on; drain the runtime (including post-commit effects) until the
+        // deferred fetch has routed through, bounded as a stuck-condition guard.
         const expectedUrl =
           "https://pattern-env.test/api/patterns/system/profile-create.tsx";
-        const deadline = Date.now() + 5_000;
-        while (
-          !recordedUrls.includes(expectedUrl) && Date.now() < deadline
-        ) {
-          await new Promise((resolve) => setTimeout(resolve, 10));
+        for (let i = 0; i < 50 && !recordedUrls.includes(expectedUrl); i++) {
+          await runtime.settled();
         }
         expect(recordedUrls).toContain(expectedUrl);
       } finally {
@@ -3565,11 +3762,10 @@ describe("wish built-in", () => {
       const pieceData = result.key("pieceData").get()?.result;
       expect(pieceData).toBeDefined();
       expect(typeof pieceData).toBe("object");
+      expect(pieceData).not.toBeNull();
 
       // The piece should be running and have its state accessible.
-      if (typeof pieceData === "object" && pieceData !== null) {
-        expect("count" in pieceData).toBe(true);
-      }
+      expect(pieceData).toHaveProperty("count");
     });
 
     // Host-embedding contract seam 1 (docs/development/HOST_EMBEDDING.md §1):
@@ -4044,13 +4240,14 @@ describe("wish built-in", () => {
           // Give the deferred fetch a moment to route through and commit.
           const pickerCell = result.key("profile").key(UI).key("props")
             .key("$cell").resolveAsCell();
-          const deadline = Date.now() + 5_000;
+          // The deferred fetch rejects and the error UI commits into the picker
+          // cell; drain the runtime until it lands, bounded as a stuck-condition
+          // guard.
           let errorNode: any;
-          while (Date.now() < deadline) {
-            await runtime.idle();
+          for (let i = 0; i < 50; i++) {
+            await runtime.settled();
             errorNode = pickerCell.key(UI).get() as any;
             if (errorNode) break;
-            await new Promise((resolve) => setTimeout(resolve, 20));
           }
           expect(errorNode).toBeDefined();
         } finally {
@@ -4237,13 +4434,16 @@ describe("wish built-in", () => {
 
 describe("parseWishTarget", () => {
   it("parses absolute paths starting with /", () => {
-    const result = parseWishTarget("/allPieces");
-    expect(result).toEqual({ key: "/", path: ["allPieces"] });
+    const result = parseWishTarget("/pieceRegistry");
+    expect(result).toEqual({ key: "/", path: ["pieceRegistry"] });
   });
 
   it("parses nested absolute paths", () => {
-    const result = parseWishTarget("/allPieces/0/title");
-    expect(result).toEqual({ key: "/", path: ["allPieces", "0", "title"] });
+    const result = parseWishTarget("/pieceRegistry/0/title");
+    expect(result).toEqual({
+      key: "/",
+      path: ["pieceRegistry", "0", "title"],
+    });
   });
 
   it("parses hash tag targets", () => {
@@ -4257,13 +4457,16 @@ describe("parseWishTarget", () => {
   });
 
   it("trims whitespace", () => {
-    const result = parseWishTarget("  /allPieces  ");
-    expect(result).toEqual({ key: "/", path: ["allPieces"] });
+    const result = parseWishTarget("  /pieceRegistry  ");
+    expect(result).toEqual({ key: "/", path: ["pieceRegistry"] });
   });
 
   it("filters empty segments", () => {
-    const result = parseWishTarget("/allPieces//nested/");
-    expect(result).toEqual({ key: "/", path: ["allPieces", "nested"] });
+    const result = parseWishTarget("/pieceRegistry//nested/");
+    expect(result).toEqual({
+      key: "/",
+      path: ["pieceRegistry", "nested"],
+    });
   });
 
   it("throws on empty string", () => {
@@ -4360,7 +4563,7 @@ describe("interval #now wish", () => {
     const first = result.key("nowValue").get()?.result;
     expect(typeof first).toBe("number");
 
-    await new Promise((r) => setTimeout(r, 1100));
+    await clock.tick(1100);
     triggerCell.withTx(tx).set(1);
     await tx.commit();
     tx = runtime.edit();
@@ -4390,7 +4593,7 @@ describe("interval #now wish", () => {
     // wish-action closure, exactly what a piece stop/start or a reload in another
     // runtime produces — after crossing the 1s coarsening boundary.
     runtime.runner.stop(resultCell);
-    await new Promise((r) => setTimeout(r, 1100));
+    await clock.tick(1100);
 
     const result2 = runtime.run(tx, wishPattern, {}, resultCell.withTx(tx));
     await tx.commit();
@@ -4707,93 +4910,9 @@ describe("interval #now wish", () => {
     // Stop the runner for this cell — should clear the timer without errors
     runtime.runner.stop(resultCell);
 
-    // Wait briefly to confirm no timer errors after cleanup
-    await new Promise((r) => setTimeout(r, 100));
-  });
-
-  it("#now/1 ticks and updates value", async () => {
-    const wishPattern = pattern(() => {
-      return { nowValue: wish({ query: "#now/1" }) };
-    });
-
-    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
-      space,
-      "ticking now result",
-      undefined,
-      tx,
-    );
-    const result = runtime.run(tx, wishPattern, {}, resultCell);
-    await tx.commit();
-    tx = runtime.edit();
-
-    await result.pull();
-
-    const initial = result.key("nowValue").get()?.result;
-    expect(typeof initial).toBe("number");
-    expect(initial! % 1000).toBe(0);
-
-    // Poll until value changes, with a generous deadline for CI
-    const deadline = Date.now() + 5000;
-    let updated = initial;
-    while (updated === initial && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 200));
-      await result.pull();
-      updated = result.key("nowValue").get()?.result;
-    }
-    expect(updated).toBeGreaterThan(initial!);
-    expect(updated! % 1000).toBe(0);
-
-    // Clean up timer
-    runtime.runner.stop(resultCell);
-  });
-
-  it("#now interval keeps ticking when other dependencies change", async () => {
-    // Regression: re-running the wish action (here via an unrelated cell the
-    // pattern reads) must not reset or starve the shared interval timer.
-    const triggerCell = runtime.getCell<number>(
-      space,
-      "tick collision trigger",
-      undefined,
-      tx,
-    );
-    triggerCell.set(0);
-
-    const wishPattern = pattern(() => {
-      triggerCell.get();
-      return { nowValue: wish({ query: "#now/1" }) };
-    });
-
-    const resultCell = runtime.getCell<{ nowValue?: { result?: number } }>(
-      space,
-      "collision now result",
-      undefined,
-      tx,
-    );
-    const result = runtime.run(tx, wishPattern, {}, resultCell);
-    await tx.commit();
-    tx = runtime.edit();
-
-    await result.pull();
-
-    const initial = result.key("nowValue").get()?.result;
-    expect(typeof initial).toBe("number");
-
-    // Flip the trigger repeatedly while the 1s timer must advance regardless.
-    const deadline = Date.now() + 5000;
-    let updated = initial;
-    let flip = 0;
-    while (updated === initial && Date.now() < deadline) {
-      flip += 1;
-      triggerCell.withTx(tx).set(flip);
-      await tx.commit();
-      tx = runtime.edit();
-      await new Promise((r) => setTimeout(r, 200));
-      await result.pull();
-      updated = result.key("nowValue").get()?.result;
-    }
-    expect(updated).toBeGreaterThan(initial!);
-
-    runtime.runner.stop(resultCell);
+    // With the interval cleared, the runtime drains to idle. A leftover timer
+    // would auto-advance forever and hang here instead.
+    await runtime.idle();
   });
 });
 

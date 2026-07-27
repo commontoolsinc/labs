@@ -1,7 +1,7 @@
 // Decode safety: modern `FabricLink` instances are recognized as links (not
 // dropped as opaque objects), and non-JSON-safe Fabric leaves (BigInt, Fabric
 // instances) survive `annotate` → `JSON.stringify` without throwing or becoming
-// `{}`. Both are the at-rest shapes a real `fvj1` DB can produce.
+// `{}`. Both are the at-rest shapes a real DB can produce.
 
 import { assert, assertEquals } from "@std/assert";
 import { FabricLink } from "@commonfabric/data-model/fabric-instances";
@@ -31,7 +31,7 @@ Deno.test("decode: modern FabricLink is recognized as a link", () => {
   assertEquals(links[0].id, "of:target");
 });
 
-Deno.test("decode: a modern fvj1-encoded link round-trips to a recognized link", () => {
+Deno.test("decode: a modern encoded link round-trips to a recognized link", () => {
   // Encode WITH modern cell rep on (as a modern server would), decode with the
   // inspector's default config — the value-at-rest must still read as a link.
   setModernCellRepConfig(true);

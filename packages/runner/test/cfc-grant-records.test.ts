@@ -1,8 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
+import type { IFCLabel } from "../src/cfc/mod.ts";
+import { type CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
+import { CFC_ATOM_TYPE, type CfcAtom, cfcAtom } from "@commonfabric/api/cfc";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { evaluateExchangeRules } from "../src/cfc/exchange-eval.ts";
@@ -85,13 +87,21 @@ const clauseSetsEqual = (
   b: readonly unknown[],
 ): boolean =>
   a.length === b.length &&
-  a.every((clause) => b.some((other) => clausesEqual(clause, other))) &&
-  b.every((clause) => a.some((other) => clausesEqual(clause, other)));
+  a.every((clause) =>
+    b.some((other) =>
+      clausesEqual(clause as CfcConfClause, other as CfcConfClause)
+    )
+  ) &&
+  b.every((clause) =>
+    a.some((other) =>
+      clausesEqual(clause as CfcConfClause, other as CfcConfClause)
+    )
+  );
 
 // A verified, live grant FACT pool entry as the runner-side resolver expands
 // it: the grant's scalar fields plus ONE audience entry per fact (§4.3.4
 // multi-binding enumerates the disjunction of all matches).
-const aliceShareFact = (audience: unknown = userBob) => ({
+const aliceShareFact = (audience: CfcAtom = userBob) => ({
   kind: "ShareGrant",
   space: ALICE,
   owner: ALICE,
@@ -407,7 +417,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
   const seedLabeledCell = async (
     runtime: Runtime,
     id: string,
-    label: { confidentiality: unknown[]; integrity?: unknown[] },
+    label: IFCLabel,
   ): Promise<void> => {
     const seed = runtime.edit();
     const target = runtime.getCell(signer.did(), id, undefined, seed);
@@ -1313,7 +1323,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
       const result = evaluateExchangeRules(
         { confidentiality: [userAlice] },
         snapshot([shareRule()]),
-        { grantResolver: () => "junk" as unknown as readonly unknown[] },
+        { grantResolver: () => "junk" as unknown as readonly CfcAtom[] },
       );
       expect(result.firings).toEqual([]);
     });

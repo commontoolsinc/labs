@@ -9,7 +9,10 @@ import {
   CODEC_TYPE_TAGS,
   EmptyReconstructionContext,
 } from "@commonfabric/data-model/codec-common";
-import type { FabricValue } from "@commonfabric/data-model/interface";
+import type {
+  FabricPlainObject,
+  FabricValue,
+} from "@commonfabric/data-model/interface";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
@@ -30,8 +33,13 @@ import {
 
 const PROGRAM_REQUEST_TIMEOUT = 1000 * 10; // 10 seconds for program resolution
 
-export interface ProgramResult {
-  files: Array<{ name: string; contents: string }>;
+export interface ProgramFile extends FabricPlainObject {
+  name: string;
+  contents: string;
+}
+
+export interface ProgramResult extends FabricPlainObject {
+  files: ProgramFile[];
   main: string;
 }
 
@@ -637,7 +645,12 @@ async function startFetch(
             inputHash,
             state: {
               type: "success",
-              data: { files: program.files, main: program.main },
+              data: {
+                files: program.files.map(
+                  ({ name, contents }): ProgramFile => ({ name, contents }),
+                ),
+                main: program.main,
+              },
             },
           },
         });

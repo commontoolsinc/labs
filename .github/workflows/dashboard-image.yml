@@ -1,19 +1,8 @@
-name: Dashboard Image
+name: Dashboard
 
 on:
+  workflow_call:
   push:
-    branches: [main]
-    paths:
-      - "Dockerfile.dashboard"
-      - "packages/dashboard/**"
-      - "scripts/ci-gantt.ts"
-      - "deno.jsonc"
-      - "deno.lock"
-      - ".dockerignore"
-      - ".github/actions/deno-setup/**"
-      - ".github/actions/deno-install/**"
-      - ".github/workflows/dashboard-image.yml"
-  pull_request:
     branches: [main]
     paths:
       - "Dockerfile.dashboard"
@@ -30,7 +19,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: dashboard-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -38,9 +27,9 @@ env:
   SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
-  dashboard_tests:
-    name: Dashboard tests
-    runs-on: ubuntu-latest
+  tests:
+    name: Tests
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
       - name: Checkout source commit
@@ -59,9 +48,9 @@ jobs:
         working-directory: packages/dashboard
         run: deno task test
 
-  dashboard_build:
-    name: Dashboard image build
-    runs-on: ubuntu-latest
+  build:
+    name: Image build
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
       - name: Checkout source commit
@@ -70,38 +59,36 @@ jobs:
           persist-credentials: false
           ref: ${{ env.SOURCE_SHA }}
 
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Build dashboard image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           file: Dockerfile.dashboard
           platforms: linux/amd64
           push: false
           tags: ${{ env.IMAGE }}:${{ env.SOURCE_SHA }}
-          cache-from: type=gha,scope=dashboard-${{ env.SOURCE_SHA }}
-          cache-to: type=gha,mode=max,scope=dashboard-${{ env.SOURCE_SHA }}
 
   publish_authorization:
-    name: Authorize dashboard image publish
-    needs: [dashboard_tests, dashboard_build]
+    name: Authorize publish
+    needs: [tests, build]
     if: ${{ !cancelled() }}
     outputs:
       allowed: ${{ steps.decision.outputs.allowed }}
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
       - name: Evaluate publish policy
         id: decision
         env:
           ACTOR_ID: ${{ github.actor_id }}
-          BUILD_RESULT: ${{ needs.dashboard_build.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
           PUSH_BRANCH: ${{ vars.PUSH_BRANCH }}
           PUBLISHER_ACTOR_IDS: ${{ vars.DASHBOARD_PUBLISHER_ACTOR_IDS }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
-          TEST_RESULT: ${{ needs.dashboard_tests.result }}
+          TEST_RESULT: ${{ needs.tests.result }}
         shell: bash
         run: |
           allowed=false
@@ -114,20 +101,29 @@ jobs:
           if [[ "$BUILD_RESULT" == "success" ]]; then
             if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" && "$TEST_RESULT" == "success" ]]; then
               allowed=true
-            elif [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$member" == "true" ]]; then
-              if [[ "$TEST_RESULT" == "success" || ("$PUSH_BRANCH" == "true" && "$RUN_ATTEMPT" -gt 1) ]]; then
-                allowed=true
-              fi
+            # PR-actor publishing is disabled (commented out, not removed):
+            # the GCP workload-identity provider's attribute condition
+            # rejects pull_request-context OIDC tokens, so this path could
+            # only ever fail the run at the Google auth step — every PR by
+            # an allow-listed actor went red on "Publish image" once CI
+            # started calling this workflow for all PRs (#4963). Publishing
+            # is main-only until the provider condition deliberately admits
+            # PR tokens; then this block (and the member/env plumbing
+            # above) can be restored as-is.
+            # elif [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$member" == "true" ]]; then
+            #   if [[ "$TEST_RESULT" == "success" || ("$PUSH_BRANCH" == "true" && "$RUN_ATTEMPT" -gt 1) ]]; then
+            #     allowed=true
+            #   fi
             fi
           fi
 
           echo "allowed=$allowed" >> "$GITHUB_OUTPUT"
 
   publish:
-    name: Publish dashboard image
-    needs: [dashboard_tests, dashboard_build, publish_authorization]
-    if: ${{ needs.publish_authorization.outputs.allowed == 'true' }}
-    runs-on: ubuntu-latest
+    name: Publish image
+    needs: [tests, build, publish_authorization]
+    if: ${{ !cancelled() && needs.publish_authorization.outputs.allowed == 'true' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     permissions:
       contents: read
@@ -156,8 +152,8 @@ jobs:
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
 
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+      - name: Setup Blacksmith Builder
+        uses: useblacksmith/setup-docker-builder@v1
 
       - name: Resolve existing immutable image
         id: existing
@@ -205,14 +201,13 @@ jobs:
       - name: Build and push dashboard image
         id: build
         if: ${{ steps.existing.outputs.exists != 'true' }}
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           file: Dockerfile.dashboard
           platforms: linux/amd64
           push: true
           tags: ${{ steps.image.outputs.tags }}
-          cache-from: type=gha,scope=dashboard-${{ env.SOURCE_SHA }}
 
       - name: Promote existing image to latest
         if: >-
@@ -246,3 +241,48 @@ jobs:
             echo "- Tag: \`${IMAGE}:${SOURCE_SHA}\`"
             echo "- Digest: \`${IMAGE}@${DIGEST}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  status:
+    name: Status
+    needs:
+      - tests
+      - build
+      - publish_authorization
+      - publish
+    if: ${{ always() }}
+    permissions: {}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: 🔎 Verify dashboard jobs
+        env:
+          AUTHORIZATION_RESULT: ${{ needs.publish_authorization.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          PUBLISH_ALLOWED: ${{ needs.publish_authorization.outputs.allowed }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+          TEST_RESULT: ${{ needs.tests.result }}
+        shell: bash
+        run: |
+          failures=()
+
+          [[ "$TEST_RESULT" == "success" ]] ||
+            failures+=("tests: ${TEST_RESULT}")
+          [[ "$BUILD_RESULT" == "success" ]] ||
+            failures+=("build: ${BUILD_RESULT}")
+          [[ "$AUTHORIZATION_RESULT" == "success" ]] ||
+            failures+=("publish_authorization: ${AUTHORIZATION_RESULT}")
+
+          if [[ "$PUBLISH_ALLOWED" == "true" ]]; then
+            [[ "$PUBLISH_RESULT" == "success" ]] ||
+              failures+=("publish: ${PUBLISH_RESULT}")
+          elif [[ "$PUBLISH_ALLOWED" == "false" ]]; then
+            [[ "$PUBLISH_RESULT" == "skipped" ]] ||
+              failures+=("publish: ${PUBLISH_RESULT}")
+          else
+            failures+=("publish_authorization output: ${PUBLISH_ALLOWED:-missing}")
+          fi
+
+          if (( ${#failures[@]} > 0 )); then
+            printf 'Unsuccessful dashboard jobs:\n'
+            printf '%s\n' "${failures[@]}"
+            exit 1
+          fi

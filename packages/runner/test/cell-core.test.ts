@@ -1279,7 +1279,7 @@ describe("Cell raw methods: frozen-or-not", () => {
 // returned from a previous shape of the storage layer. PR #2971 in
 // March 2026 wired `valueFromJson` into the storage-boundary read path
 // (`memory/space.ts`): `valueFromJson` unconditionally decodes the `is`
-// column to an object (stripping the `fvj1:` prefix) before reaching
+// column to an object (stripping the codec prefix) before reaching
 // either defensive parse. From that point on, neither guard could fire
 // through the standard public API, and the defensive parses became
 // orphaned — which is what motivated their deletion.
@@ -1315,7 +1315,7 @@ describe(`Cell result-meta round-trip`, () => {
       // Set up a result/target pair via the standard meta-link API.
       const resultCell = runtime.getCell<{ foo: number }>(
         space,
-        "fvj1 source-cell round-trip: source",
+        "encoded source-cell round-trip: source",
         undefined,
         tx,
       );
@@ -1323,7 +1323,7 @@ describe(`Cell result-meta round-trip`, () => {
 
       const targetCell = runtime.getCell<{ bar: string }>(
         space,
-        "fvj1 source-cell round-trip: target",
+        "encoded source-cell round-trip: target",
         undefined,
         tx,
       );
@@ -1354,7 +1354,7 @@ describe(`Cell result-meta round-trip`, () => {
       // Set up a result/target pair and commit.
       const resultCell = runtime.getCell<{ foo: number }>(
         space,
-        "fvj1 source-cell raw read: source",
+        "encoded source-cell raw read: source",
         undefined,
         tx,
       );
@@ -1362,7 +1362,7 @@ describe(`Cell result-meta round-trip`, () => {
 
       const targetCell = runtime.getCell<{ bar: string }>(
         space,
-        "fvj1 source-cell raw read: target",
+        "encoded source-cell raw read: target",
         undefined,
         tx,
       );

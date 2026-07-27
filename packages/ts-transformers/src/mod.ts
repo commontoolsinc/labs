@@ -10,7 +10,6 @@ export type {
 } from "./core/mod.ts";
 export {
   CrossStageState,
-  injectCfDataHelper,
   injectCfHelpers,
   isLegacyInjectedEnvelope,
   PATTERN_COVERAGE_GLOBAL,

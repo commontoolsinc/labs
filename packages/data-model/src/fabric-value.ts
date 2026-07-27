@@ -5,6 +5,7 @@ export {
   type FabricArray,
   FabricInstance,
   type FabricNativeObject,
+  type FabricOrConvertibleNativeValue,
   type FabricPlainObject,
   FabricPrimitive,
   FabricSpecialObject,
@@ -25,7 +26,12 @@ export {
   shallowMutableClone,
 } from "./value-clone.ts";
 
-export { isFabricPlainObject, isFabricValueLayer } from "./type-check.ts";
+export {
+  isFabricObjectOrArray,
+  isFabricPlainObject,
+  isFabricValue,
+  isFabricValueLayer,
+} from "./type-check.ts";
 
 export {
   fabricFromNativeValue,

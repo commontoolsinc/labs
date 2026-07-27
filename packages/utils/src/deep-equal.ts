@@ -17,8 +17,8 @@ import { isRecord } from "./types.ts";
  * own-props, so two same-class `FabricPrimitive` values (state in private
  * `#fields`, zero own-props) compare equal regardless of value, and
  * `FabricInstance` values compare by internal slots rather than logical
- * contents. Use a `data-model`-aware equality (`valueEqual`, once it is itself
- * made `Fabric`-aware) for any `FabricValue` comparison.
+ * contents. Use the `data-model`-aware `valueEqual()` for any `FabricValue`
+ * comparison.
  */
 export function deepEqual(a: any, b: any): boolean {
   if (Object.is(a, b)) return true;

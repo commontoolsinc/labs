@@ -4791,8 +4791,6 @@ declare namespace Intl {
         supportedLocalesOf(locales: string | string[], options?: CollatorOptions): string[];
     }
 
-    var Collator: CollatorConstructor;
-
     interface NumberFormatOptionsStyleRegistry {
         decimal: never;
         percent: never;
@@ -4853,8 +4851,6 @@ declare namespace Intl {
         readonly prototype: NumberFormat;
     }
 
-    var NumberFormat: NumberFormatConstructor;
-
     interface DateTimeFormatOptions {
         localeMatcher?: "best fit" | "lookup" | undefined;
         weekday?: "long" | "short" | "narrow" | undefined;
@@ -4900,7 +4896,6 @@ declare namespace Intl {
         readonly prototype: DateTimeFormat;
     }
 
-    var DateTimeFormat: DateTimeFormatConstructor;
 }
 
 interface String {
@@ -7048,7 +7043,6 @@ declare namespace Intl {
      * @param locale A list of String values for which to get the canonical locale names
      * @returns An array containing the canonical and validated locale names.
      */
-    function getCanonicalLocales(locale?: string | readonly string[]): string[];
 }
 
 
@@ -7469,8 +7463,6 @@ declare namespace Intl {
         supportedLocalesOf(locales: string | readonly string[], options?: { localeMatcher?: "lookup" | "best fit"; }): string[];
     }
 
-    const PluralRules: PluralRulesConstructor;
-
     interface NumberFormatPartTypeRegistry {
         literal: never;
         nan: never;
@@ -7790,50 +7782,6 @@ declare namespace Intl {
      *
      * [Compatibility](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/RelativeTimeFormat#Browser_compatibility).
      */
-    const RelativeTimeFormat: {
-        /**
-         * Creates [Intl.RelativeTimeFormat](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/RelativeTimeFormat) objects
-         *
-         * @param locales - A string with a [BCP 47 language tag](http://tools.ietf.org/html/rfc5646), or an array of such strings.
-         *  For the general form and interpretation of the locales argument,
-         *  see the [`Intl` page](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl#Locale_identification_and_negotiation).
-         *
-         * @param options - An [object](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/RelativeTimeFormat/RelativeTimeFormat#Parameters)
-         *  with some or all of options of `RelativeTimeFormatOptions`.
-         *
-         * @returns [Intl.RelativeTimeFormat](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/RelativeTimeFormat) object.
-         *
-         * [MDN](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/RelativeTimeFormat/RelativeTimeFormat).
-         */
-        new (
-            locales?: LocalesArgument,
-            options?: RelativeTimeFormatOptions,
-        ): RelativeTimeFormat;
-
-        /**
-         * Returns an array containing those of the provided locales
-         * that are supported in date and time formatting
-         * without having to fall back to the runtime's default locale.
-         *
-         * @param locales - A string with a [BCP 47 language tag](http://tools.ietf.org/html/rfc5646), or an array of such strings.
-         *  For the general form and interpretation of the locales argument,
-         *  see the [`Intl` page](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl#Locale_identification_and_negotiation).
-         *
-         * @param options - An [object](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/RelativeTimeFormat/RelativeTimeFormat#Parameters)
-         *  with some or all of options of the formatting.
-         *
-         * @returns An array containing those of the provided locales
-         *  that are supported in date and time formatting
-         *  without having to fall back to the runtime's default locale.
-         *
-         * [MDN](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/RelativeTimeFormat/supportedLocalesOf).
-         */
-        supportedLocalesOf(
-            locales?: LocalesArgument,
-            options?: RelativeTimeFormatOptions,
-        ): UnicodeBCP47LocaleIdentifier[];
-    };
-
     interface NumberFormatOptionsStyleRegistry {
         unit: never;
     }
@@ -7942,10 +7890,6 @@ declare namespace Intl {
      *
      * [MDN](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale).
      */
-    const Locale: {
-        new (tag: UnicodeBCP47LocaleIdentifier | Locale, options?: LocaleOptions): Locale;
-    };
-
     type DisplayNamesFallback =
         | "code"
         | "none";
@@ -8010,36 +7954,6 @@ declare namespace Intl {
      *
      * [Compatibility](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/DisplayNames#browser_compatibility).
      */
-    const DisplayNames: {
-        prototype: DisplayNames;
-
-        /**
-         * @param locales A string with a BCP 47 language tag, or an array of such strings.
-         *   For the general form and interpretation of the `locales` argument, see the [Intl](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl#locale_identification_and_negotiation)
-         *   page.
-         *
-         * @param options An object for setting up a display name.
-         *
-         * [MDN](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/DisplayNames/DisplayNames).
-         */
-        new (locales: LocalesArgument, options: DisplayNamesOptions): DisplayNames;
-
-        /**
-         * Returns an array containing those of the provided locales that are supported in display names without having to fall back to the runtime's default locale.
-         *
-         * @param locales A string with a BCP 47 language tag, or an array of such strings.
-         *   For the general form and interpretation of the `locales` argument, see the [Intl](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl#locale_identification_and_negotiation)
-         *   page.
-         *
-         * @param options An object with a locale matcher.
-         *
-         * @returns An array of strings representing a subset of the given locale tags that are supported in display names without having to fall back to the runtime's default locale.
-         *
-         * [MDN](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/DisplayNames/supportedLocalesOf).
-         */
-        supportedLocalesOf(locales?: LocalesArgument, options?: { localeMatcher?: RelativeTimeFormatLocaleMatcher; }): UnicodeBCP47LocaleIdentifier[];
-    };
-
     interface CollatorConstructor {
         new (locales?: LocalesArgument, options?: CollatorOptions): Collator;
         (locales?: LocalesArgument, options?: CollatorOptions): Collator;
@@ -9217,44 +9131,6 @@ declare namespace Intl {
         resolvedOptions(): ResolvedListFormatOptions;
     }
 
-    const ListFormat: {
-        prototype: ListFormat;
-
-        /**
-         * Creates [Intl.ListFormat](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/ListFormat) objects that
-         * enable language-sensitive list formatting.
-         *
-         * @param locales - A string with a [BCP 47 language tag](http://tools.ietf.org/html/rfc5646), or an array of such strings.
-         *  For the general form and interpretation of the `locales` argument,
-         *  see the [`Intl` page](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl#Locale_identification_and_negotiation).
-         *
-         * @param options - An [object](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/ListFormat/ListFormat#parameters)
-         *  with some or all options of `ListFormatOptions`.
-         *
-         * @returns [Intl.ListFormatOptions](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/ListFormat) object.
-         *
-         * [MDN](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/ListFormat).
-         */
-        new (locales?: LocalesArgument, options?: ListFormatOptions): ListFormat;
-
-        /**
-         * Returns an array containing those of the provided locales that are
-         * supported in list formatting without having to fall back to the runtime's default locale.
-         *
-         * @param locales - A string with a [BCP 47 language tag](http://tools.ietf.org/html/rfc5646), or an array of such strings.
-         *  For the general form and interpretation of the `locales` argument,
-         *  see the [`Intl` page](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl#Locale_identification_and_negotiation).
-         *
-         * @param options - An [object](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/ListFormat/supportedLocalesOf#parameters).
-         *  with some or all possible options.
-         *
-         * @returns An array of strings representing a subset of the given locale tags that are supported in list
-         *  formatting without having to fall back to the runtime's default locale.
-         *
-         * [MDN](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/ListFormat/supportedLocalesOf).
-         */
-        supportedLocalesOf(locales: LocalesArgument, options?: Pick<ListFormatOptions, "localeMatcher">): UnicodeBCP47LocaleIdentifier[];
-    };
 }
 
 
@@ -9479,40 +9355,6 @@ declare namespace Intl {
         isWordLike?: boolean;
     }
 
-    const Segmenter: {
-        prototype: Segmenter;
-
-        /**
-         * Creates a new `Intl.Segmenter` object.
-         *
-         * @param locales - A string with a [BCP 47 language tag](http://tools.ietf.org/html/rfc5646), or an array of such strings.
-         *  For the general form and interpretation of the `locales` argument,
-         *  see the [`Intl` page](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl#Locale_identification_and_negotiation).
-         *
-         * @param options - An [object](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/Segmenter/Segmenter#parameters)
-         *  with some or all options of `SegmenterOptions`.
-         *
-         * @returns [Intl.Segmenter](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/Segments) object.
-         *
-         * [MDN](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/Segmenter).
-         */
-        new (locales?: LocalesArgument, options?: SegmenterOptions): Segmenter;
-
-        /**
-         * Returns an array containing those of the provided locales that are supported without having to fall back to the runtime's default locale.
-         *
-         * @param locales - A string with a [BCP 47 language tag](http://tools.ietf.org/html/rfc5646), or an array of such strings.
-         *  For the general form and interpretation of the `locales` argument,
-         *  see the [`Intl` page](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl#Locale_identification_and_negotiation).
-         *
-         * @param options An [object](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/Segmenter/supportedLocalesOf#parameters).
-         *  with some or all possible options.
-         *
-         * [MDN](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/Segmenter/supportedLocalesOf)
-         */
-        supportedLocalesOf(locales: LocalesArgument, options?: Pick<SegmenterOptions, "localeMatcher">): UnicodeBCP47LocaleIdentifier[];
-    };
-
     /**
      * Returns a sorted array of the supported collation, calendar, currency, numbering system, timezones, and units by the implementation.
      * [MDN](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Intl/supportedValuesOf)
@@ -9520,7 +9362,6 @@ declare namespace Intl {
      * @param key A string indicating the category of values to return.
      * @returns A sorted array of the supported values.
      */
-    function supportedValuesOf(key: "calendar" | "collation" | "currency" | "numberingSystem" | "timeZone" | "unit"): string[];
 }
 
 interface ObjectConstructor {

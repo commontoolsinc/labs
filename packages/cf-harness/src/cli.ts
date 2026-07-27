@@ -16,6 +16,7 @@ import { type CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
   DEFAULT_GATEWAY_BASE_URL,
   type HarnessGatewayAuthMode,
+  type HarnessModelProviderId,
   parseCfcEnforcementMode,
   parseHarnessGatewayAuthMode,
 } from "./config.ts";
@@ -40,6 +41,9 @@ import {
   type PromptSlotRole,
 } from "./contracts/prompt-slot.ts";
 import {
+  HARNESS_CREDENTIAL_OWNER_REF_TYPE,
+  type HarnessCredentialOwnerRef,
+  harnessCredentialOwnersEqual,
   type HarnessRunManifest,
   parseLoomRunManifestJson,
 } from "./contracts/run-manifest.ts";
@@ -87,6 +91,23 @@ import {
 } from "./structured-result.ts";
 import { BUILTIN_TOOLS } from "./tools/registry.ts";
 import { normalizeCdpOrigin } from "./tools/browser-host-command-policy.ts";
+import {
+  defaultHarnessCredentialStorePath,
+  FileHarnessCredentialStore,
+  type HarnessCredentialStore,
+} from "./auth/credential-store.ts";
+import {
+  completeOpenAICodexDeviceAuthorization,
+  loginOpenAICodexWithBrowser,
+  OpenAICodexAuthService,
+  OpenAICodexCredentialResolver,
+  startOpenAICodexDeviceAuthorization,
+} from "./auth/openai-codex.ts";
+import {
+  type OpenAICodexCredentialResolverLike,
+  OpenAICodexResponsesClient,
+} from "./model/openai-codex-responses.ts";
+import type { HarnessModelClient } from "./model/client.ts";
 
 const DEFAULT_MODEL = "gpt-5.5";
 const DEFAULT_MAX_MODEL_TURNS = 8;
@@ -107,6 +128,7 @@ const CLI_STRING_FLAGS = [
   "system-prompt",
   "resume-run",
   "model",
+  "model-provider",
   "skills-root",
   "skill",
   "skill-script-execution-target",
@@ -171,6 +193,9 @@ export interface CfHarnessCliConfig {
   skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
   skillCatalogEnabled: boolean;
   model?: string;
+  modelProvider?: HarnessModelProviderId;
+  gatewayConfigurationExplicit: boolean;
+  harnessHome: string;
   gatewayBaseUrl: string;
   gatewayAuthMode: HarnessGatewayAuthMode;
   artifactRoot: string;
@@ -215,6 +240,8 @@ export interface CfHarnessCliCapabilities {
   builtinToolIds: readonly BuiltinToolId[];
   subagentProfiles: readonly HarnessSubagentProfile[];
   nativeModelToolIds: readonly string[];
+  modelProviders: readonly HarnessModelProviderId[];
+  authProviders: readonly string[];
   features: {
     images: true;
     structuredResults: true;
@@ -224,6 +251,8 @@ export interface CfHarnessCliCapabilities {
     fabricMount: true;
     hostMounts: true;
     resumeRun: true;
+    subscriptionAuth: true;
+    modelDiscovery: true;
   };
 }
 
@@ -248,6 +277,18 @@ export interface RunCfHarnessCliDependencies {
   createPromptLoop?: (
     options: CreateHarnessPromptLoopOptions,
   ) => Pick<CfHarnessPromptLoop, "runPrompt" | "runTranscript">;
+  credentialStore?: HarnessCredentialStore;
+  openAICodexCredentialResolver?: OpenAICodexCredentialResolverLike & {
+    ownerKey?: string;
+    credentialOwner?: HarnessCredentialOwnerRef;
+  };
+  createModelClient?: (options: {
+    provider: HarnessModelProviderId;
+    credentialOwnerKey: string;
+    credentialOwner: HarnessCredentialOwnerRef;
+    loom: boolean;
+  }) => HarnessModelClient | Promise<HarnessModelClient>;
+  openUrl?: (url: string) => void | Promise<void>;
   registerSignalHandler?: (
     signals: readonly CfHarnessCliSignal[],
     handler: CfHarnessCliSignalHandler,
@@ -323,6 +364,11 @@ export const installCfHarnessSignalHandlers = (
 const usage = `Usage: deno run -A src/main.ts [options] [prompt text]
 
 Options:
+  auth login openai-codex [--device]
+                                Connect a ChatGPT/Codex subscription
+  auth status openai-codex      Show local connection status without secrets
+  auth logout openai-codex      Remove only cf-harness local credentials
+  models openai-codex           List models advertised for this subscription
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
@@ -343,6 +389,7 @@ Options:
                                 Execute skill scripts in sandbox or host (default: sandbox)
   --no-skill-catalog            Disable automatic skill catalog disclosure
   --model <name>                Model name (default: ${DEFAULT_MODEL})
+  --model-provider <provider>   openai-compatible-gateway | openai-codex
   --gateway-base-url <url>      OpenAI-compatible gateway URL
   --gateway-auth-mode <mode>    bearer | none (default: bearer)
   --artifact-root <path>        Host-side artifact directory
@@ -375,6 +422,8 @@ Environment:
   CF_HARNESS_GATEWAY_BASE_URL   Default value for --gateway-base-url
   CF_HARNESS_GATEWAY_AUTH_MODE  Default value for --gateway-auth-mode
   CF_HARNESS_MODEL              Default value for --model (ignored on --resume-run)
+  CF_HARNESS_MODEL_PROVIDER     Default value for --model-provider
+  CF_HARNESS_HOME               Local cf-harness credential/config directory
   CF_HARNESS_DOCKER_NETWORK_MODE none | bridge | host (default: bridge)
   CF_HARNESS_SANDBOX_IMAGE      Default value for --sandbox-image
   CF_HARNESS_SANDBOX_DOCKER_RUNTIME Default value for --sandbox-docker-runtime
@@ -451,6 +500,8 @@ export const createCfHarnessCliCapabilities = (): CfHarnessCliCapabilities => ({
       getHarnessSubagentProfileConfig(profile).nativeModelToolIds ?? []
     ),
   ),
+  modelProviders: ["openai-compatible-gateway", "openai-codex"],
+  authProviders: ["openai-codex"],
   features: {
     images: true,
     structuredResults: true,
@@ -460,6 +511,8 @@ export const createCfHarnessCliCapabilities = (): CfHarnessCliCapabilities => ({
     fabricMount: true,
     hostMounts: true,
     resumeRun: true,
+    subscriptionAuth: true,
+    modelDiscovery: true,
   },
 });
 
@@ -477,6 +530,13 @@ const parseCliOutputMode = (
   input !== undefined &&
     (CLI_OUTPUT_MODES as readonly string[]).includes(input)
     ? input as CfHarnessCliOutputMode
+    : undefined;
+
+const parseModelProvider = (
+  input: string | undefined,
+): HarnessModelProviderId | undefined =>
+  input === "openai-compatible-gateway" || input === "openai-codex"
+    ? input
     : undefined;
 
 const parseBuiltinToolId = (
@@ -1188,6 +1248,9 @@ export const parseCfHarnessCliArgs = async (
         "CF_HARNESS_GATEWAY_AUTH_MODE",
       ),
       CF_HARNESS_MODEL: Deno.env.get("CF_HARNESS_MODEL"),
+      CF_HARNESS_MODEL_PROVIDER: Deno.env.get("CF_HARNESS_MODEL_PROVIDER"),
+      CF_HARNESS_HOME: Deno.env.get("CF_HARNESS_HOME"),
+      HOME: Deno.env.get("HOME"),
       CF_HARNESS_CFC_ENFORCEMENT_MODE: Deno.env.get(
         "CF_HARNESS_CFC_ENFORCEMENT_MODE",
       ),
@@ -1215,6 +1278,28 @@ export const parseCfHarnessCliArgs = async (
     throw new Error("gateway auth mode must be one of bearer, none");
   }
   const gatewayAuthMode = parsedGatewayAuthMode ?? "bearer";
+  const rawModelProvider = typeof args["model-provider"] === "string"
+    ? args["model-provider"]
+    : nonEmptyEnvValue(env.CF_HARNESS_MODEL_PROVIDER);
+  const modelProvider = parseModelProvider(rawModelProvider);
+  if (rawModelProvider !== undefined && modelProvider === undefined) {
+    throw new Error(
+      "model provider must be one of openai-compatible-gateway, openai-codex",
+    );
+  }
+  const gatewayConfigurationExplicit = args["gateway-base-url"] !== undefined ||
+    args["gateway-auth-mode"] !== undefined ||
+    nonEmptyEnvValue(env.CF_HARNESS_GATEWAY_BASE_URL) !== undefined ||
+    nonEmptyEnvValue(env.CF_HARNESS_GATEWAY_AUTH_MODE) !== undefined;
+  if (modelProvider === "openai-codex" && gatewayConfigurationExplicit) {
+    throw new Error(
+      "gateway URL/auth options cannot be used with --model-provider openai-codex",
+    );
+  }
+  const harnessHome = resolve(
+    nonEmptyEnvValue(env.CF_HARNESS_HOME) ??
+      join(nonEmptyEnvValue(env.HOME) ?? cwd, ".cf-harness"),
+  );
   const readTextFile = deps.readTextFile ?? Deno.readTextFile;
   const structuredResult = await parseStructuredResultConfig(args, {
     cwd,
@@ -1326,6 +1411,9 @@ export const parseCfHarnessCliArgs = async (
       : resumeRun === undefined
       ? { model: nonEmptyEnvValue(env.CF_HARNESS_MODEL) ?? DEFAULT_MODEL }
       : {}),
+    ...(modelProvider !== undefined ? { modelProvider } : {}),
+    gatewayConfigurationExplicit,
+    harnessHome,
     gatewayBaseUrl,
     gatewayAuthMode,
     artifactRoot,
@@ -1363,6 +1451,119 @@ const readRunManifest = async (
   path === undefined
     ? undefined
     : parseLoomRunManifestJson(await readTextFile(path));
+
+const localCredentialOwner = (
+  ownerKey = "local",
+): HarnessCredentialOwnerRef => ({
+  type: HARNESS_CREDENTIAL_OWNER_REF_TYPE,
+  version: 1,
+  ownerKey,
+});
+
+const createSelectedModelClient = async (options: {
+  provider: HarnessModelProviderId;
+  credentialOwner: HarnessCredentialOwnerRef;
+  loom: boolean;
+  harnessHome: string;
+  deps: RunCfHarnessCliDependencies;
+}): Promise<HarnessModelClient | undefined> => {
+  if (options.provider === "openai-compatible-gateway") return undefined;
+  const credentialOwnerKey = options.credentialOwner.ownerKey;
+  if (options.deps.createModelClient !== undefined) {
+    const client = await options.deps.createModelClient({
+      provider: options.provider,
+      credentialOwnerKey,
+      credentialOwner: options.credentialOwner,
+      loom: options.loom,
+    });
+    if (client.providerId !== options.provider) {
+      throw new Error(
+        `created model client provider ${client.providerId} does not match selected provider ${options.provider}`,
+      );
+    }
+    if (
+      options.loom &&
+      (client.credentialOwner === undefined ||
+        !harnessCredentialOwnersEqual(
+          client.credentialOwner,
+          options.credentialOwner,
+        ))
+    ) {
+      throw new Error(
+        "Loom model client credential owner does not match the run manifest",
+      );
+    }
+    return client;
+  }
+  let resolver = options.deps.openAICodexCredentialResolver;
+  if (options.loom) {
+    if (resolver === undefined) {
+      throw new Error(
+        "Loom openai-codex runs require an injected owner-bound credential resolver",
+      );
+    }
+    const resolverOwnerMatches = resolver.credentialOwner !== undefined
+      ? harnessCredentialOwnersEqual(
+        resolver.credentialOwner,
+        options.credentialOwner,
+      )
+      : options.credentialOwner.tenantKey === undefined &&
+        resolver.ownerKey === credentialOwnerKey;
+    if (!resolverOwnerMatches) {
+      throw new Error(
+        "Loom credential resolver owner does not match the run manifest",
+      );
+    }
+  } else if (resolver === undefined) {
+    const store = options.deps.credentialStore ??
+      new FileHarnessCredentialStore({
+        path: defaultHarnessCredentialStorePath(options.harnessHome),
+      });
+    resolver = new OpenAICodexCredentialResolver({
+      store,
+      ownerKey: credentialOwnerKey,
+      credentialOwner: options.credentialOwner,
+    });
+  }
+  return new OpenAICodexResponsesClient({
+    credentialResolver: resolver!,
+    credentialOwner: options.credentialOwner,
+  });
+};
+
+const runCfHarnessModelsCommand = async (
+  argv: readonly string[],
+  deps: RunCfHarnessCliDependencies,
+  io: CfHarnessCliIO,
+): Promise<number | undefined> => {
+  const normalized = argv[0] === "--" ? argv.slice(1) : argv;
+  if (normalized[0] !== "models") return undefined;
+  if (normalized.length !== 2 || normalized[1] !== "openai-codex") {
+    throw new Error("usage: models openai-codex");
+  }
+  const env = deps.env ?? {
+    CF_HARNESS_HOME: Deno.env.get("CF_HARNESS_HOME"),
+    HOME: Deno.env.get("HOME"),
+  };
+  const cwd = resolve(deps.cwd ?? Deno.cwd());
+  const harnessHome = resolve(
+    nonEmptyEnvValue(env.CF_HARNESS_HOME) ??
+      join(nonEmptyEnvValue(env.HOME) ?? cwd, ".cf-harness"),
+  );
+  const client = await createSelectedModelClient({
+    provider: "openai-codex",
+    credentialOwner: localCredentialOwner(),
+    loom: false,
+    harnessHome,
+    deps,
+  });
+  const models = await client?.listModels?.();
+  if (models === undefined) {
+    throw new Error("openai-codex model discovery is unavailable");
+  }
+  io.stdout(`${JSON.stringify(models, null, 2)}\n`);
+  return 0;
+};
 
 const createAdditionalMountConfigs = (
   config: Pick<CfHarnessCliConfig, "fabricMount" | "hostMounts">,
@@ -1852,6 +2053,94 @@ const parseCfHarnessCliControlArgs = (
   });
 };
 
+const defaultOpenUrl = async (url: string): Promise<void> => {
+  const command = Deno.build.os === "darwin"
+    ? { command: "open", args: [url] }
+    : Deno.build.os === "windows"
+    ? { command: "cmd", args: ["/c", "start", "", url] }
+    : { command: "xdg-open", args: [url] };
+  try {
+    const status = await new Deno.Command(command.command, {
+      args: command.args,
+      stdin: "null",
+      stdout: "null",
+      stderr: "null",
+    }).output();
+    if (!status.success) return;
+  } catch {
+    // Printing the URL is the reliable fallback.
+  }
+};
+
+const runCfHarnessAuthCommand = async (
+  argv: readonly string[],
+  deps: RunCfHarnessCliDependencies,
+  io: CfHarnessCliIO,
+): Promise<number | undefined> => {
+  const normalized = argv[0] === "--" ? argv.slice(1) : argv;
+  if (normalized[0] !== "auth") return undefined;
+  const action = normalized[1];
+  const provider = normalized[2];
+  if (
+    (action !== "login" && action !== "status" && action !== "logout") ||
+    provider !== "openai-codex"
+  ) {
+    throw new Error(
+      "usage: auth login|status|logout openai-codex [--device]",
+    );
+  }
+  const env = deps.env ?? {
+    CF_HARNESS_HOME: Deno.env.get("CF_HARNESS_HOME"),
+    HOME: Deno.env.get("HOME"),
+  };
+  const cwd = resolve(deps.cwd ?? Deno.cwd());
+  const harnessHome = resolve(
+    nonEmptyEnvValue(env.CF_HARNESS_HOME) ??
+      join(nonEmptyEnvValue(env.HOME) ?? cwd, ".cf-harness"),
+  );
+  const store = deps.credentialStore ?? new FileHarnessCredentialStore({
+    path: defaultHarnessCredentialStorePath(harnessHome),
+  });
+  const auth = new OpenAICodexAuthService(store, "local");
+  if (action === "status") {
+    const status = await auth.status();
+    io.stdout(
+      status.signedIn
+        ? `openai-codex: connected (${
+          status.expired ? "refresh required" : "ready"
+        })\n`
+        : "openai-codex: not connected\n",
+    );
+    return status.signedIn ? 0 : 1;
+  }
+  if (action === "logout") {
+    await auth.logout();
+    io.stdout("openai-codex: disconnected\n");
+    return 0;
+  }
+  if (normalized.slice(3).some((argument) => argument !== "--device")) {
+    throw new Error("auth login openai-codex accepts only --device");
+  }
+  if (normalized.includes("--device")) {
+    const device = await startOpenAICodexDeviceAuthorization();
+    io.stdout(
+      `Open ${device.verificationUrl} and enter code ${device.userCode}\n`,
+    );
+    const credential = await completeOpenAICodexDeviceAuthorization({ device });
+    await auth.save(credential);
+  } else {
+    await loginOpenAICodexWithBrowser({
+      authService: auth,
+      onAuthorizationUrl: async (url) => {
+        io.stdout(`Open this URL to connect openai-codex:\n${url}\n`);
+        await (deps.openUrl ?? defaultOpenUrl)(url);
+      },
+    });
+  }
+  io.stdout("openai-codex: connected\n");
+  return 0;
+};
+
 export const runCfHarnessCli = async (
   argv: readonly string[],
   deps: RunCfHarnessCliDependencies = {},
@@ -1867,6 +2156,10 @@ export const runCfHarnessCli = async (
     );
   };
   try {
+    const authResult = await runCfHarnessAuthCommand(argv, deps, io);
+    if (authResult !== undefined) return authResult;
+    const modelsResult = await runCfHarnessModelsCommand(argv, deps, io);
+    if (modelsResult !== undefined) return modelsResult;
     const controlArgs = parseCfHarnessCliControlArgs(argv);
     if (controlArgs.help) {
       io.stdout(formatCfHarnessCliUsage());
@@ -1888,11 +2181,6 @@ export const runCfHarnessCli = async (
         new CfHarnessPromptLoop(options));
     const writeTextFile = deps.writeTextFile ?? Deno.writeTextFile;
     const readTextFile = deps.readTextFile ?? Deno.readTextFile;
-    if (parsed.gatewayAuthMode === "bearer" && parsed.apiKey === undefined) {
-      throw new Error(
-        "no API key configured; set CF_HARNESS_API_KEY or OPENAI_API_KEY",
-      );
-    }
     const startedAt = Date.now();
     let result: HarnessPromptLoopResult;
     const runManifest = await readRunManifest(
@@ -1949,6 +2237,64 @@ export const runCfHarnessCli = async (
     if (parsed.resumeRun !== undefined) {
       const readRunArtifacts = deps.readRunArtifacts ?? readHarnessRunArtifacts;
       const artifacts = await readRunArtifacts(parsed.resumeRun);
+      if (artifacts.runState.lineage?.role === "subagent") {
+        throw new Error(
+          `Cannot resume subagent run ${artifacts.runState.runId} as a top-level run; resume root run ${artifacts.runState.lineage.rootRunId} instead.`,
+        );
+      }
+      const recordedProvider = artifacts.runState.modelProvider ??
+        "openai-compatible-gateway";
+      const requestedProvider = parsed.modelProvider ??
+        runManifest?.modelProvider;
+      if (
+        requestedProvider !== undefined &&
+        requestedProvider !== recordedProvider
+      ) {
+        throw new Error(
+          `resume provider mismatch: run uses ${recordedProvider}, requested ${requestedProvider}`,
+        );
+      }
+      const modelProvider = recordedProvider;
+      if (
+        modelProvider === "openai-codex" && parsed.gatewayConfigurationExplicit
+      ) {
+        throw new Error(
+          "gateway URL/auth options cannot be used with openai-codex",
+        );
+      }
+      if (
+        modelProvider === "openai-compatible-gateway" &&
+        parsed.gatewayAuthMode === "bearer" && parsed.apiKey === undefined
+      ) {
+        throw new Error(
+          "no API key configured; set CF_HARNESS_API_KEY or OPENAI_API_KEY",
+        );
+      }
+      const recordedRunManifest = artifacts.runState.runManifest;
+      const credentialOwner = recordedRunManifest?.credentialOwner ??
+        localCredentialOwner(artifacts.runState.credentialOwnerKey ?? "local");
+      if (
+        runManifest?.credentialOwner !== undefined &&
+        !harnessCredentialOwnersEqual(
+          runManifest.credentialOwner,
+          credentialOwner,
+        )
+      ) {
+        throw new Error(
+          "resume credential owner mismatch: requested owner does not match the recorded run",
+        );
+      }
+      const credentialOwnerKey = credentialOwner.ownerKey;
+      const effectiveRunManifest = recordedRunManifest ?? runManifest;
+      const loom = effectiveRunManifest?.source === "loom";
+      if (
+        modelProvider === "openai-codex" && loom &&
+        recordedRunManifest?.credentialOwner === undefined
+      ) {
+        throw new Error(
+          "Loom openai-codex runs require an authenticated credential owner reference",
+        );
+      }
       const engine = new CfHarnessEngine({
         runState: artifacts.runState,
         artifactRoot: parsed.artifactRoot,
@@ -1966,8 +2312,14 @@ export const runCfHarnessCli = async (
           ? { cfcInvocationContextDir: parsed.cfcInvocationContextDir }
           : {}),
         model: parsed.model ?? artifacts.runState.model,
-        gatewayBaseUrl: parsed.gatewayBaseUrl,
-        gatewayAuthMode: parsed.gatewayAuthMode,
+        modelProvider,
+        credentialOwnerKey,
+        ...(modelProvider === "openai-compatible-gateway"
+          ? {
+            gatewayBaseUrl: parsed.gatewayBaseUrl,
+            gatewayAuthMode: parsed.gatewayAuthMode,
+          }
+          : {}),
         ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
         ...(parsed.skillsRoot !== undefined
           ? { skillsRoot: parsed.skillsRoot }
@@ -1980,11 +2332,20 @@ export const runCfHarnessCli = async (
           ? { browserAccess: parsed.browserAccess }
           : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
-        ...(runManifest !== undefined ? { runManifest } : {}),
+        ...(effectiveRunManifest !== undefined
+          ? { runManifest: effectiveRunManifest }
+          : {}),
         ...(parsed.runManifestPath !== undefined
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
         ...(additionalMounts.length > 0 ? { additionalMounts } : {}),
+      });
+      const modelClient = await createSelectedModelClient({
+        provider: modelProvider,
+        credentialOwner,
+        loom,
+        harnessHome: parsed.harnessHome,
+        deps,
       });
       activateEngine(engine);
       const loop = createPromptLoop({
@@ -1992,8 +2353,14 @@ export const runCfHarnessCli = async (
         workspaceHostPath: parsed.workspace,
         artifactRoot: parsed.artifactRoot,
         model: parsed.model ?? artifacts.runState.model,
-        gatewayBaseUrl: parsed.gatewayBaseUrl,
-        gatewayAuthMode: parsed.gatewayAuthMode,
+        modelProvider,
+        credentialOwnerKey,
+        ...(modelProvider === "openai-compatible-gateway"
+          ? {
+            gatewayBaseUrl: parsed.gatewayBaseUrl,
+            gatewayAuthMode: parsed.gatewayAuthMode,
+          }
+          : {}),
         ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
         ...(parsed.skillsRoot !== undefined
           ? { skillsRoot: parsed.skillsRoot }
@@ -2006,12 +2373,16 @@ export const runCfHarnessCli = async (
           ? { browserAccess: parsed.browserAccess }
           : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
-        ...(runManifest !== undefined ? { runManifest } : {}),
+        ...(effectiveRunManifest !== undefined
+          ? { runManifest: effectiveRunManifest }
+          : {}),
         ...(parsed.runManifestPath !== undefined
           ? { runManifestPath: parsed.runManifestPath }
           : {}),
-        apiKey: parsed.apiKey,
-        apiKeySource: parsed.apiKeySource,
+        ...(modelProvider === "openai-compatible-gateway"
+          ? { apiKey: parsed.apiKey, apiKeySource: parsed.apiKeySource }
+          : {}),
+        ...(modelClient !== undefined ? { modelClient } : {}),
         maxModelTurns: parsed.maxModelTurns,
         allowedSubagentProfiles: parsed.allowedSubagentProfiles,
         ...(parsed.allowedToolIds !== undefined
@@ -2032,6 +2403,42 @@ export const runCfHarnessCli = async (
         onTranscriptEvent,
       });
     } else {
+      const modelProvider = parsed.modelProvider ??
+        runManifest?.modelProvider ??
+        "openai-compatible-gateway";
+      if (
+        modelProvider === "openai-codex" && parsed.gatewayConfigurationExplicit
+      ) {
+        throw new Error(
+          "gateway URL/auth options cannot be used with openai-codex",
+        );
+      }
+      if (
+        modelProvider === "openai-compatible-gateway" &&
+        parsed.gatewayAuthMode === "bearer" && parsed.apiKey === undefined
+      ) {
+        throw new Error(
+          "no API key configured; set CF_HARNESS_API_KEY or OPENAI_API_KEY",
+        );
+      }
+      const credentialOwner = runManifest?.credentialOwner ??
+        localCredentialOwner();
+      const credentialOwnerKey = credentialOwner.ownerKey;
+      if (
+        modelProvider === "openai-codex" && runManifest?.source === "loom" &&
+        runManifest.credentialOwner === undefined
+      ) {
+        throw new Error(
+          "Loom openai-codex runs require an authenticated credential owner reference",
+        );
+      }
+      const modelClient = await createSelectedModelClient({
+        provider: modelProvider,
+        credentialOwner,
+        loom: runManifest?.source === "loom",
+        harnessHome: parsed.harnessHome,
+        deps,
+      });
       const engine = new CfHarnessEngine({
         workspaceHostPath: parsed.workspace,
         artifactRoot: parsed.artifactRoot,
@@ -2048,8 +2455,14 @@ export const runCfHarnessCli = async (
           ? { cfcInvocationContextDir: parsed.cfcInvocationContextDir }
           : {}),
         model: parsed.model,
-        gatewayBaseUrl: parsed.gatewayBaseUrl,
-        gatewayAuthMode: parsed.gatewayAuthMode,
+        modelProvider,
+        credentialOwnerKey,
+        ...(modelProvider === "openai-compatible-gateway"
+          ? {
+            gatewayBaseUrl: parsed.gatewayBaseUrl,
+            gatewayAuthMode: parsed.gatewayAuthMode,
+          }
+          : {}),
         ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
         ...(parsed.skillsRoot !== undefined
           ? { skillsRoot: parsed.skillsRoot }
@@ -2074,8 +2487,14 @@ export const runCfHarnessCli = async (
         workspaceHostPath: parsed.workspace,
         artifactRoot: parsed.artifactRoot,
         model: parsed.model,
-        gatewayBaseUrl: parsed.gatewayBaseUrl,
-        gatewayAuthMode: parsed.gatewayAuthMode,
+        modelProvider,
+        credentialOwnerKey,
+        ...(modelProvider === "openai-compatible-gateway"
+          ? {
+            gatewayBaseUrl: parsed.gatewayBaseUrl,
+            gatewayAuthMode: parsed.gatewayAuthMode,
+          }
+          : {}),
         ...(parsed.cwd !== undefined ? { cwd: parsed.cwd } : {}),
         ...(parsed.skillsRoot !== undefined
           ? { skillsRoot: parsed.skillsRoot }
@@ -2084,8 +2503,10 @@ export const runCfHarnessCli = async (
           ? { allowedSkillScripts: parsed.allowedSkillScripts }
           : {}),
         skillScriptExecutionTarget: parsed.skillScriptExecutionTarget,
-        apiKey: parsed.apiKey,
-        apiKeySource: parsed.apiKeySource,
+        ...(modelProvider === "openai-compatible-gateway"
+          ? { apiKey: parsed.apiKey, apiKeySource: parsed.apiKeySource }
+          : {}),
+        ...(modelClient !== undefined ? { modelClient } : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(runManifest !== undefined ? { runManifest } : {}),
         ...(parsed.runManifestPath !== undefined

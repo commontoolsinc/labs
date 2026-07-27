@@ -8,7 +8,8 @@
     "./wrapper-names": "./src/typescript/wrapper-names.ts",
     "./type-traversal": "./src/typescript/type-traversal.ts",
     "./property-optionality": "./src/typescript/property-optionality.ts",
-    "./property-name": "./src/typescript/property-name.ts"
+    "./property-name": "./src/typescript/property-name.ts",
+    "./numeric-expression": "./src/typescript/numeric-expression.ts"
   },
   "imports": {
     "typescript": "npm:typescript@6.0.3"

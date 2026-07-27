@@ -89,6 +89,9 @@ describe("Runtime.getSpaceCell", () => {
       const loadedDefaultPattern = spaceCell2.key("defaultPattern");
       const loadedValue = loadedDefaultPattern.get();
       expect(loadedValue).toBeDefined();
+      expect(
+        loadedDefaultPattern.asSchema<{ name?: string }>().key("name").get(),
+      ).toBe("TestDefaultPattern");
     });
 
     it("should return different space cells for different spaces", async () => {

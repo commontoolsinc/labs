@@ -1,5 +1,5 @@
 /**
- * Second-round coverage tests for lib/view/semantics.ts. These drive the
+ * Second-round coverage tests for lib/view/languages/typescript/semantics.ts. These drive the
  * remaining failure-isolation branches that the first two suites do not reach:
  * the setup-time guards (`splitSections` throwing, a non-discoverable config),
  * the lazily-built program latching after a failed build, and the per-query
@@ -15,7 +15,10 @@
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import { parseDocument } from "./view-helpers.ts";
-import { createDiffSemantics, createSemantics } from "../lib/view/semantics.ts";
+import {
+  createDiffSemantics,
+  createSemantics,
+} from "../lib/view/languages/typescript/semantics.ts";
 import type { DiffMaps } from "../lib/view/diffdoc.ts";
 import type { Document } from "../lib/view/model.ts";
 
@@ -68,12 +71,12 @@ function cwdThatThrows(): string {
 
 // --- createSemantics: setup-time guards -------------------------------------
 
-Deno.test("semantics: a text that throws while splitting yields a null service", () => {
+Deno.test("semantics: a text that throws while splitting yields no service", () => {
   // `splitSections` reads `text.length` first; that throw is caught and the
   // factory returns null — the documented "returns null only when even the
   // lightweight setup is impossible" path.
   const sem = createSemantics(textThatThrows(), { cwd: CWD });
-  assertEquals(sem, null, "an unsplittable text gives no service at all");
+  assertEquals(sem, undefined, "an unsplittable text gives no service at all");
 });
 
 Deno.test("semantics: an un-discoverable config falls back to an empty import map", () => {

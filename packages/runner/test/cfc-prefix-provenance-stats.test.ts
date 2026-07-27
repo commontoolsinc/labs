@@ -1,5 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
+import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
+import type { FabricValue } from "@commonfabric/data-model/interface";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -57,8 +59,8 @@ const makeRuntime = (options: {
 const seedLabeledDoc = async (
   runtime: Runtime,
   id: string,
-  value: unknown,
-  label: { integrity?: unknown[]; confidentiality?: unknown[] },
+  value: FabricValue,
+  label: IFCLabel,
 ): Promise<void> => {
   const seed = runtime.edit();
   const cell = runtime.getCell(signer.did(), id, undefined, seed);
@@ -82,7 +84,7 @@ const seedLabeledDoc = async (
 const seedPlainDoc = async (
   runtime: Runtime,
   id: string,
-  value: unknown,
+  value: FabricValue,
 ): Promise<void> => {
   const seed = runtime.edit();
   const cell = runtime.getCell(signer.did(), id, undefined, seed);

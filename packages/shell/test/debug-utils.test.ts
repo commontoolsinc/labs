@@ -21,7 +21,7 @@ describe("debug utils", () => {
       $TYPE: "notes/note",
       $UI: { children: [1, 2, 3] },
       internal: {
-        allPieces: [],
+        pieceRegistry: [],
         visiblePieces: [],
         mentionable: [],
       },

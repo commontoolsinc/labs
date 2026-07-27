@@ -11,6 +11,7 @@ import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { FabricSpecialObject, type FabricValue } from "@/interface.ts";
 
 describe("value-debug", () => {
   describe("toCompactDebugString", () => {
@@ -258,6 +259,18 @@ describe("value-debug", () => {
 
     describe("with values that prevent rendering", () => {
       const FALLBACK = "<unrenderable debug string>";
+
+      it("falls back to the class name when codec lookup throws", () => {
+        // A `FabricSpecialObject` with no `[CODEC]` makes `codecOf()` throw.
+        // The formatter is most likely to be reached for a value that is
+        // already malformed, so it renders what it can rather than adding a
+        // second failure on top of the first.
+        class RogueSpecial extends FabricSpecialObject {}
+
+        expect(toCompactDebugString(new RogueSpecial() as FabricValue)).toBe(
+          "/RogueSpecial(...)",
+        );
+      });
 
       it("honors a normal `toJSON()` and renders its return value", () => {
         // Sanity check that `toJSON()` is consulted in the usual way; this is

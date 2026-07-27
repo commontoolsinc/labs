@@ -759,4 +759,207 @@ describe("CFC trusted agent: tool-input requiredIntegrity (Epic D2)", () => {
       await storageManager.close();
     }
   });
+
+  it("passes elements past the slots of a floorless tuple", async () => {
+    // The element past the tuple arity has no covering schema (no `items`),
+    // so no floor position exists for it and the call executes.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    const tx = runtime.edit();
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { pattern, handler, Writable } = commonfabric;
+    try {
+      const routeInputSchema = {
+        type: "object",
+        properties: {
+          route: {
+            type: "array",
+            prefixItems: [{ type: "string" }],
+          },
+        },
+        required: ["route"],
+        additionalProperties: false,
+      } as const satisfies JSONSchema;
+      const sendRoute = handler<{ route: string[] }, { sent: any }>(
+        routeInputSchema,
+        {
+          type: "object",
+          properties: {
+            sent: {
+              type: "array",
+              items: { type: "string" },
+              asCell: ["cell"],
+            },
+          },
+          required: ["sent"],
+        },
+        ({ route }, { sent }) => {
+          for (const r of route) sent.push(r);
+        },
+      );
+      const resultSchema = {
+        type: "object",
+        properties: {
+          sent: { type: "array", items: { type: "string" } },
+          tools: true,
+        },
+        required: ["sent", "tools"],
+      } as const satisfies JSONSchema;
+      const testPattern = pattern(
+        () => {
+          const sent = Writable.of<string[]>([]);
+          return {
+            sent,
+            tools: {
+              sendRoute: {
+                description: "Send along a route.",
+                inputSchema: routeInputSchema,
+                handler: sendRoute({ sent }),
+              },
+            },
+          };
+        },
+        false,
+        resultSchema,
+      );
+      const resultCell = runtime.getCell(
+        space,
+        "agent-tuple-floorless",
+        resultSchema,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, {}, resultCell);
+      runtime.prepareTxForCommit(tx);
+      await tx.commit();
+      await runtime.idle();
+
+      const catalog = llmToolExecutionHelpers.buildToolCatalog(
+        result.key("tools") as any,
+        false,
+      );
+      await llmToolExecutionHelpers.executeToolCalls(runtime, space, catalog, [{
+        type: "tool-call",
+        toolCallId: "call-tuple-open",
+        toolName: "sendRoute",
+        input: { route: ["a", "b"] },
+      }] as any);
+      await runtime.idle();
+
+      const sent = (await result.key("sent").pull()) as string[] | undefined;
+      expect(sent).toEqual(["a", "b"]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("descends into tuple (prefixItems) slot floors", async () => {
+    // CT-1895: the gate never descended prefixItems, so a floor declared on
+    // a tuple slot was never enforced — a model-supplied literal in that
+    // slot executed the tool.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    const tx = runtime.edit();
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { pattern, handler, Writable } = commonfabric;
+    try {
+      const routeInputSchema = {
+        type: "object",
+        properties: {
+          route: {
+            type: "array",
+            prefixItems: [
+              {
+                type: "string",
+                ifc: { requiredIntegrity: [KERNEL_ATOM] },
+              },
+              { type: "string" },
+            ],
+          },
+        },
+        required: ["route"],
+        additionalProperties: false,
+      } as const satisfies JSONSchema;
+      const sendRoute = handler<{ route: string[] }, { sent: any }>(
+        routeInputSchema,
+        {
+          type: "object",
+          properties: {
+            sent: {
+              type: "array",
+              items: { type: "string" },
+              asCell: ["cell"],
+            },
+          },
+          required: ["sent"],
+        },
+        ({ route }, { sent }) => {
+          for (const r of route) sent.push(r);
+        },
+      );
+      const resultSchema = {
+        type: "object",
+        properties: {
+          sent: { type: "array", items: { type: "string" } },
+          tools: true,
+        },
+        required: ["sent", "tools"],
+      } as const satisfies JSONSchema;
+      const testPattern = pattern(
+        () => {
+          const sent = Writable.of<string[]>([]);
+          return {
+            sent,
+            tools: {
+              sendRoute: {
+                description: "Send along a route.",
+                inputSchema: routeInputSchema,
+                handler: sendRoute({ sent }),
+              },
+            },
+          };
+        },
+        false,
+        resultSchema,
+      );
+      const resultCell = runtime.getCell(
+        space,
+        "agent-tuple-slot-floor",
+        resultSchema,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, {}, resultCell);
+      runtime.prepareTxForCommit(tx);
+      await tx.commit();
+      await runtime.idle();
+
+      const catalog = llmToolExecutionHelpers.buildToolCatalog(
+        result.key("tools") as any,
+        false,
+      );
+      await llmToolExecutionHelpers.executeToolCalls(runtime, space, catalog, [{
+        type: "tool-call",
+        toolCallId: "call-tuple",
+        toolName: "sendRoute",
+        // The third element sits past the tuple slots with no `items`
+        // schema — no floor position exists for it (covered continue).
+        input: { route: ["evil@x.org", "harmless note", "extra"] },
+      }] as any);
+      await runtime.idle();
+
+      const sent = (await result.key("sent").pull()) as string[] | undefined;
+      expect((sent ?? []).includes("evil@x.org")).toBe(false);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 });

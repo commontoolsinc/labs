@@ -10,9 +10,12 @@ import {
 import type { JSONSchemaObj, SchemaPathSelector } from "@commonfabric/api";
 import type { MemorySpace, Result, Unit } from "@commonfabric/memory/interface";
 import {
+  FabricInstance,
+  FabricPrimitive,
   FabricSpecialObject,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 // TODO(@ubik2): Ideally this would import from "@commonfabric/utils/types",
@@ -40,7 +43,7 @@ import type {
   JSONSchemaTypes,
   SchemaScope,
 } from "./builder/types.ts";
-import { createDataCellURI } from "./data-uri.ts";
+import { dataUriFromValueWithResolvedLinks } from "./data-uri.ts";
 import { addressKey, NormalizedFullLink, parseLink } from "./link-utils.ts";
 import { canFollowScopedLink } from "./scope.ts";
 import type {
@@ -1514,6 +1517,19 @@ export abstract class BaseObjectTraverser {
         this.dagMemo.set(memoKey, arrayResult);
       }
       return arrayResult;
+    } else if (doc.value instanceof FabricPrimitive) {
+      // An opaque leaf: return it intact ahead of the record branch below.
+      // Placed after the array arm so array reads skip the `instanceof`.
+      return doc.value;
+    } else if (
+      doc.value instanceof FabricInstance && !isSigilLink(doc.value)
+    ) {
+      // TODO(danfuzz): a `FabricInstance` should be descended by its codec
+      // contents, which does not exist yet. This path carries live instance
+      // traffic today (the fetch builtins store a `FabricError` result value
+      // that is read back through here), so unlike the schema-`default`
+      // paths it cannot fail loudly yet: the instance leafs through whole.
+      return doc.value;
     } else if (isRecord(doc.value)) {
       // First, see if we need special handling
       if (isSigilLink(doc.value)) {
@@ -2673,17 +2689,43 @@ function _combineSchemaUncached(
         ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
       };
     } else if (linkSchema.type === "array" && parentSchema.type === "array") {
-      // TODO(@ubik2): We should handle prefixItems
+      const {
+        prefixItems: parentPrefixItems,
+        ...parentSchemaWithoutPrefixItems
+      } = parentSchema;
+      const {
+        prefixItems: linkPrefixItems,
+        ...linkSchemaWithoutPrefixItems
+      } = linkSchema;
       const mergedDefs = { ...linkSchema.$defs, ...parentSchema.$defs };
       const mergedSchemaItems = parentSchema.items === undefined
         ? linkSchema.items
         : linkSchema.items === undefined
         ? parentSchema.items
         : combineSchema(parentSchema.items, linkSchema.items);
+      const prefixItemCount = Math.max(
+        parentPrefixItems?.length ?? 0,
+        linkPrefixItems?.length ?? 0,
+      );
+      const mergedPrefixItems = Array.from(
+        { length: prefixItemCount },
+        (_, index): JSONSchema => {
+          const parentItem = parentPrefixItems?.[index] ?? parentSchema.items;
+          const linkItem = linkPrefixItems?.[index] ?? linkSchema.items;
+          return parentItem === undefined
+            ? linkItem ?? true
+            : linkItem === undefined
+            ? parentItem
+            : combineSchema(parentItem, linkItem);
+        },
+      );
       return {
-        ...linkSchema,
-        ...parentSchema,
+        ...linkSchemaWithoutPrefixItems,
+        ...parentSchemaWithoutPrefixItems,
         type: "array",
+        ...(mergedPrefixItems.length > 0 && {
+          prefixItems: mergedPrefixItems,
+        }),
         ...(mergedSchemaItems !== undefined && { items: mergedSchemaItems }),
         ...(Object.keys(mergedDefs).length && { $defs: mergedDefs }),
       };
@@ -3413,7 +3455,12 @@ export class SchemaObjectTraverser<V extends FabricValue>
       );
       return { ok: this.objectCreator.createObject(newLink, doc.value) };
     }
-    if (doc.value === undefined) {
+    if (isDataUnavailable(doc.value)) {
+      // Availability markers are control-flow leaves, not user containers.
+      // They must survive projection through any declared result schema so
+      // consumers can propagate or inspect the exact unavailable reason.
+      return { ok: doc.value };
+    } else if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
       const defaultValue = this.applyDefault(doc, resolved);
@@ -3444,6 +3491,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
           this.isValidType(schemaObj, "boolean")
         ? { ok: this.traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
+    } else if (isSigilLink(doc.value)) {
+      this.tx.read(doc.address, READ_FOR_SCHEDULING);
+      // When traversing a pointer, use the unresolved schema, so we have
+      // the same values in the schema tracker.
+      return this.traversePointerWithSchema(doc, schema, link);
     } else if (Array.isArray(doc.value)) {
       const valid = this.isValidType(schemaObj, "array");
       if (valid === TypeValidity.False) {
@@ -3474,65 +3526,62 @@ export class SchemaObjectTraverser<V extends FabricValue>
       });
       newValue.length = entries.length;
       return { ok: this.objectCreator.createObject(newLink, newValue) };
-      // TODO(danfuzz): a `FabricInstance` is walked by `Object.entries` over
-      // internal slots rather than descended by its codec contents; the same
-      // gap applies to the schema-`default` fallback path
-      // (`traverseDAG`/`applyDefault`), since a schema `default` can carry a
-      // `FabricValue`. A correct fix descends a `FabricInstance` by codec
-      // contents, not own-props.
-    } else if (doc.value instanceof FabricSpecialObject) {
-      // A `FabricSpecialObject` (e.g. `FabricBytes`) is an opaque host value
-      // the fabric type system treats like a primitive — always frozen,
-      // passing through conversion unchanged — so it materializes as a LEAF:
-      // its `typeof` is "object", so this arm must precede the record branch
-      // below, which would otherwise decompose it via `Object.entries` over
-      // its own props (empty for e.g. `FabricBytes`, whose surface lives on
-      // the prototype). Type-validate as "object" — the shape the
-      // schema-generator emits for these types today — but do not consult
-      // the schema's structural details: leaves are not property-walked
-      // (CT-1836).
+      // TODO(danfuzz): `FabricInstance` values (containers) are not yet
+      // handled by schema traversal: a correct fix descends one by its codec
+      // contents, not own-props. Separately, a `FabricPrimitive` stored as
+      // an array element under `items: true` still decomposes via
+      // `traverseArrayWithSchema`'s `createDataCellURI` path (pre-existing;
+      // not addressed here).
+    } else if (doc.value instanceof FabricPrimitive) {
+      // An opaque leaf whose `typeof` is "object": this arm must precede the
+      // record branch below, which would otherwise decompose it.
+      // Type-validate as "object" — the shape the schema-generator emits for
+      // these types today — but do not consult the schema's structural
+      // details: leaves are not property-walked.
       return this.isValidType(schemaObj, "object") !== TypeValidity.False
         ? { ok: this.traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
+    } else if (doc.value instanceof FabricInstance) {
+      // TODO(danfuzz): a `FabricInstance` (which can have model-visible
+      // outgoing references) is not yet handled by schema traversal; correct
+      // traversal descends it by its codec contents. Fail loudly until that
+      // exists.
+      throw new Error(
+        `Cannot yet handle \`${doc.value.constructor.name}\` (a ` +
+          "`FabricInstance`) in schema traversal.",
+      );
     } else if (isRecord(doc.value)) {
-      if (isSigilLink(doc.value)) {
-        this.tx.read(doc.address, READ_FOR_SCHEDULING);
-        // When traversing a pointer, use the unresolved schema, so we have
-        // the same values in the schema tracker.
-        return this.traversePointerWithSchema(doc, schema, link);
-      } else {
-        const valid = this.isValidType(schemaObj, "object");
-        if (valid === TypeValidity.False) {
-          return fail(TRAVERSE_FAILURES.invalidType);
-        }
-        const newValue: Record<string, Immutable<FabricValue>> = {};
-        // Our link is based on the last link in the chain and not the first.
-        const newLink = link ?? getNormalizedLink(doc.address, schemaObj);
-        using t = this.tracker.include(doc.value, schemaObj, newValue, doc);
-        if (t === null) {
-          // newValue will be converted to a createObject result by the
-          // function that added it to the tracker, so don't do that here
-          return { ok: this.tracker.getExisting(doc.value, schemaObj) };
-        }
-        if (valid === TypeValidity.Unknown) {
-          return { ok: this.objectCreator.createObject(newLink, undefined) };
-        }
-        const entries = this.traverseObjectWithSchema(doc, schemaObj, newLink);
-        if (entries === undefined || entries === null) {
-          return fail(TRAVERSE_FAILURES.invalidObject);
-        }
-        for (const [k, v] of Object.entries(entries)) {
-          newValue[k] = v;
-        }
-        // TODO(@ubik2): We should be able to remove this cast when we make
-        // our return types more correct (we can hold cells/functions).
-        return {
-          ok: this.objectCreator.createObject(
-            newLink,
-            newValue as FabricValue,
-          ),
-        };
+      const valid = this.isValidType(schemaObj, "object");
+      if (valid === TypeValidity.False) {
+        return fail(TRAVERSE_FAILURES.invalidType);
       }
+      const newValue: Record<string, Immutable<FabricValue>> = {};
+      // Our link is based on the last link in the chain and not the first.
+      const newLink = link ?? getNormalizedLink(doc.address, schemaObj);
+      using t = this.tracker.include(doc.value, schemaObj, newValue, doc);
+      if (t === null) {
+        // newValue will be converted to a createObject result by the
+        // function that added it to the tracker, so don't do that here
+        return { ok: this.tracker.getExisting(doc.value, schemaObj) };
+      }
+      if (valid === TypeValidity.Unknown) {
+        return { ok: this.objectCreator.createObject(newLink, undefined) };
+      }
+      const entries = this.traverseObjectWithSchema(doc, schemaObj, newLink);
+      if (entries === undefined || entries === null) {
+        return fail(TRAVERSE_FAILURES.invalidObject);
+      }
+      for (const [k, v] of Object.entries(entries)) {
+        newValue[k] = v;
+      }
+      // TODO(@ubik2): We should be able to remove this cast when we make
+      // our return types more correct (we can hold cells/functions).
+      return {
+        ok: this.objectCreator.createObject(
+          newLink,
+          newValue as FabricValue,
+        ),
+      };
     }
     return fail(TRAVERSE_FAILURES.unexpectedDocValue);
   }
@@ -3612,6 +3661,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     reads: PlainSchemaReads,
   ): TraverseResult<Immutable<FabricValue>> | undefined {
     if (isSigilLink(doc.value)) return undefined;
+    if (isDataUnavailable(doc.value)) return { ok: doc.value };
 
     if (plan.kind === "primitive") {
       return getPlainJsonType(doc.value) === plan.type
@@ -3653,7 +3703,18 @@ export class SchemaObjectTraverser<V extends FabricValue>
         : fail(TRAVERSE_FAILURES.invalidArray);
     }
 
-    if (doc.value instanceof FabricSpecialObject) return { ok: doc.value };
+    if (doc.value instanceof FabricSpecialObject) {
+      // A `FabricPrimitive` is an opaque leaf; see the value-type dispatch's
+      // arm (the plan compiles from the same schema family, so the same
+      // posture applies here).
+      if (doc.value instanceof FabricPrimitive) return { ok: doc.value };
+      // TODO(danfuzz): a `FabricInstance` is not yet handled here either —
+      // see the dispatch's `FabricInstance` arm. Fail loudly until it is.
+      throw new Error(
+        `Cannot yet handle \`${doc.value.constructor.name}\` (a ` +
+          "`FabricInstance`) in plain-schema traversal.",
+      );
+    }
     if (!isRecord(doc.value)) return fail(TRAVERSE_FAILURES.invalidType);
 
     const newValue: Record<string, Immutable<FabricValue>> = {};
@@ -4043,7 +4104,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
           ...curDoc,
           address: {
             ...curDoc.address,
-            id: createDataCellURI(curDoc.value, elementLink),
+            id: dataUriFromValueWithResolvedLinks(curDoc.value, elementLink),
             path: ["value"],
           },
         };

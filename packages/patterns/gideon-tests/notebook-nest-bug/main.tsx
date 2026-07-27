@@ -18,10 +18,10 @@ export default pattern<
   Record<PropertyKey, never>,
   { [NAME]: string; [UI]: VNode; requestCreate: Stream<void> }
 >(() => {
-  const defaultWish = wish<{ allPieces: Writable<MinimalPiece[]> }>({
-    query: "#default",
+  const pieceRegistryWish = wish<Writable<MinimalPiece[]>>({
+    query: "#pieceRegistry",
   });
-  const { allPieces } = resultOf(defaultWish.result);
+  const pieceRegistry = resultOf(pieceRegistryWish.result);
 
   // "idle" | "creating" | "done"
   const status = new Writable<string>("idle");
@@ -92,7 +92,7 @@ export default pattern<
     });
     const nbB = Notebook({ title: "Notebook B", notes: [noteB1, nbBChild] });
 
-    allPieces.push(
+    pieceRegistry.push(
       noteA1,
       noteAC1,
       noteAG1,

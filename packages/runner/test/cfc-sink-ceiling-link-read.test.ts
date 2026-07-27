@@ -300,7 +300,6 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
     await runtime.idle();
     // The fetch (if any) fires from a post-commit effect and writes its result
     // via separate transactions — give those a chance to run, then settle.
-    await new Promise((resolve) => setTimeout(resolve, 100));
     await result.pull();
     await runtime.idle();
 

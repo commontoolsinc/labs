@@ -411,11 +411,12 @@ describe("scheduler", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    const deadline = performance.now() + 1_000;
-    while (c.get() !== 1 && performance.now() < deadline) {
-      await runtime.scheduler.idle();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
+    // The intermediate delays its own commit by 25ms (a modeled slow
+    // computation). Drive the scheduler so it arms the delay, fire it, then let
+    // the downstream effect re-run against the committed value.
+    await runtime.scheduler.idle();
+    await clock.tick(25);
+    await runtime.scheduler.idle();
 
     expect(c.get()).toBe(1);
   });

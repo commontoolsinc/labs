@@ -5,8 +5,15 @@
  * the renderer. `pager.ts` drives it against a real TTY, but it is fully
  * exercisable from tests by feeding keys and inspecting `view()`.
  */
-import type { Document, Line, StructureNode, TokenClass } from "./model.ts";
+import type {
+  Document,
+  Line,
+  Span,
+  StructureNode,
+  TokenClass,
+} from "./model.ts";
 import type { Key } from "./keys.ts";
+import { cpLen } from "./ansi.ts";
 import {
   type DialogButton,
   type DialogState,
@@ -49,16 +56,20 @@ import {
   identityFold,
 } from "./fold.ts";
 import { parseDiff } from "./diff.ts";
-import { findCommitMessages } from "./commitmsg.ts";
-import type { Semantics } from "./semantics.ts";
+import {
+  commitSubjects,
+  findCommitHeaders,
+  findCommitMessages,
+} from "./commitmsg.ts";
+import type { Highlighter, Semantics } from "./languages/language.ts";
 import { EditBuffer } from "./editbuffer.ts";
 import type {
   EditableSource,
   ExpandResult,
   HunkRoom,
   RevertScope,
+  SaveOptions,
 } from "./editsource.ts";
-import type { Highlighter } from "./parse.ts";
 import type { DirEntry, FileGateway } from "./filegateway.ts";
 import {
   buildWrapPlan,
@@ -79,7 +90,8 @@ type Mode =
   | "savePrompt"
   | "amendPrompt"
   | "revertPrompt"
-  | "filePicker";
+  | "filePicker"
+  | "jumpList";
 
 /**
  * Overlay content. A peek carries both an info card and the verbatim source and
@@ -132,6 +144,20 @@ interface FoldAnchor {
   readonly sourceCol: number;
   /** Display column within a collapsed summary that remains collapsed. */
   readonly syntheticDisplayCol?: number;
+}
+
+/** One row of the jump list (the `i` dialog): a file the diff touches or a
+ * commit whose message it carries, with where selecting it moves the view. */
+interface JumpEntry {
+  /** Document line the jump lands the viewport on (a file header or a `commit`
+   * header line). */
+  readonly line: number;
+  /** The styled row shown in the list. */
+  readonly display: Line;
+  /** Lower-cased text the filter matches against. */
+  readonly filterText: string;
+  /** Short name for the "Jumped to …" confirmation. */
+  readonly name: string;
 }
 
 export class Session {
@@ -230,9 +256,6 @@ export class Session {
   private dialogFocus = 0;
   /** What the active save prompt does on confirm. */
   private savePromptThen: "quit" | null = null;
-  /** Set once the user confirms amending the commit message, so the save that
-   * follows goes ahead instead of prompting again. */
-  private amendConfirmed = false;
   /** Filenames a save would write, computed when the quit prompt opens and
    * listed above it. */
   private editedFiles: string[] = [];
@@ -243,6 +266,14 @@ export class Session {
   private pickerFilter = "";
   private pickerEntries: DirEntry[] = [];
   private pickerSel = 0;
+
+  // --- jump list (i) ---
+  /** Every file and commit in the diff, in document order; the filter narrows
+   * this into the shown {@link jumpEntries}. */
+  private jumpAll: JumpEntry[] = [];
+  private jumpEntries: JumpEntry[] = [];
+  private jumpFilter = "";
+  private jumpSel = 0;
 
   constructor(
     doc: Document,
@@ -574,6 +605,8 @@ export class Session {
     const o = this.overlay;
     const ov: OverlayState | null = this.mode === "filePicker"
       ? this.pickerOverlay()
+      : this.mode === "jumpList"
+      ? this.jumpOverlay()
       : o
       ? {
         title: o.title,
@@ -610,6 +643,8 @@ export class Session {
         ? `definition: ${this.input}`
         : this.mode === "filePicker"
         ? `find file: ${this.files?.join(this.pickerDir, this.pickerFilter)}`
+        : this.mode === "jumpList"
+        ? `jump to: ${this.jumpFilter}`
         : null,
       dialog: this.promptDialog(),
       overlay: ov,
@@ -705,10 +740,11 @@ export class Session {
     const subject = full.length > 46 ? `${full.slice(0, 45)}…` : full;
     return {
       title: "Amend Commit",
-      body: [`Amend commit ${sha}?`, `“${subject}”`],
+      body: [`Amend commit ${sha}, or save files only?`, `“${subject}”`],
       buttons: [
-        { label: "Yes", hotkey: "y", kind: "default" },
-        { label: "No", hotkey: "n", kind: "cancel" },
+        { label: "Amend commit", hotkey: "a", kind: "default" },
+        { label: "Save files only", hotkey: "s" },
+        { label: "Cancel", hotkey: "c", kind: "cancel" },
       ],
     };
   }
@@ -737,7 +773,7 @@ export class Session {
     return { title: "Revert", body: ["Revert which changes?"], buttons };
   }
 
-  handleKey(key: Key): void {
+  handleKey(key: Key, beforeButtonAction?: () => void): void {
     // A reveal is animated by the driver over the frames after the key that
     // caused it, so the next key ends it whatever it was. A message that takes
     // itself away goes now rather than waiting out its moment, before this key
@@ -749,11 +785,15 @@ export class Session {
       this.mode === "savePrompt" || this.mode === "amendPrompt" ||
       this.mode === "revertPrompt"
     ) {
-      this.handleDialogKey(key);
+      this.handleDialogKey(key, beforeButtonAction);
       return;
     }
     if (this.mode === "filePicker") {
       this.handleFilePicker(key);
+      return;
+    }
+    if (this.mode === "jumpList") {
+      this.handleJumpList(key);
       return;
     }
     if (this.mode === "search" || this.mode === "deflookup") {
@@ -1519,6 +1559,9 @@ export class Session {
       case "f":
         this.toggleCurrentFile();
         return;
+      case "i":
+        this.openJumpList();
+        return;
       case "F":
         this.collapseAllFiles();
         return;
@@ -2274,9 +2317,13 @@ export class Session {
   }
 
   private notEditableMessage(): string {
-    return this.canResurrectRemovedLine()
-      ? "This removed line isn't editable; press R to resurrect it."
-      : NOT_EDITABLE_MSG;
+    if (this.canResurrectRemovedLine()) {
+      return "This removed line isn't editable; press R to resurrect it.";
+    }
+    const b = this.buffer;
+    const policy = this.source?.policy;
+    return (b ? policy?.notEditableMessage?.(b.lines, b.row) : null) ??
+      NOT_EDITABLE_MSG;
   }
 
   private afterMove(): void {
@@ -2461,7 +2508,7 @@ export class Session {
     else this.message = `C-x ${key.name}: unbound`;
   }
 
-  private requestSave(): boolean {
+  private requestSave(target?: "amend" | "workspace"): boolean {
     if (!this.source || !this.buffer) {
       this.message = "Nothing to save.";
       return false;
@@ -2472,53 +2519,61 @@ export class Session {
     }
     const baseline = this.buffer.baseline();
     const current = this.buffer.text();
-    // A changed commit message rewrites git history, so confirm before saving.
+    if (!this.buffer.dirty()) {
+      this.message = "Saved 0 files";
+      return true;
+    }
+    // Saving changed commit output rewrites git history, so confirm first.
     const amend = this.source.pendingAmend?.(baseline, current) ?? null;
-    if (amend && !this.amendConfirmed) {
-      if (amend.subject.trim() === "") {
-        this.message = "Refusing to amend: the commit message would be empty.";
-        return false;
-      }
+    if (amend && target === undefined) {
       this.mode = "amendPrompt";
       this.focusDefaultButton();
       this.message = "";
       return false;
     }
+    if (amend && target === "amend" && amend.subject.trim() === "") {
+      this.message = "Refusing to amend: the commit message would be empty.";
+      return false;
+    }
+    const options: SaveOptions | undefined = target === "workspace"
+      ? { amendCommit: false }
+      : undefined;
     try {
-      // Amend the commit before writing files: if the amend fails (an empty
-      // message, a rejecting hook, HEAD moved) nothing is written to disk, so a
-      // failed save never leaves the files half-written.
-      const amended = amend
-        ? this.source.amendCommit!(baseline, current)
-        : null;
-      const saved = this.source.save(current);
-      this.message = amended
-        ? (/^No(thing)?\b/.test(saved) ? amended : `${saved}; ${amended}`)
-        : saved;
-      this.buffer.commitSaved();
+      this.message = this.source.save(current, baseline, options);
+      const savedBaseline = this.source.baselineAfterSave?.(
+        baseline,
+        current,
+        options,
+      ) ?? current;
+      this.buffer.setBaseline(savedBaseline);
+      if (target === "workspace" && this.buffer.dirty()) {
+        this.message += "; commit message remains unsaved";
+      }
       return true;
     } catch (e) {
       this.message = `Save failed: ${e instanceof Error ? e.message : e}`;
       return false;
-    } finally {
-      this.amendConfirmed = false;
     }
   }
 
   private applyAmendButton(button: DialogButton): void {
-    if (button.hotkey === "y") {
-      this.amendConfirmed = true;
-      const ok = this.requestSave();
+    if (button.hotkey === "a" || button.hotkey === "s") {
+      const ok = this.requestSave(
+        button.hotkey === "a" ? "amend" : "workspace",
+      );
       this.mode = "normal";
       this.editedFiles = [];
-      if (ok && this.savePromptThen === "quit") this.quit = true;
+      if (
+        ok && this.savePromptThen === "quit" && !this.buffer?.dirty()
+      ) {
+        this.quit = true;
+      }
       this.savePromptThen = null;
     } else if (button.kind === "cancel") {
       this.mode = "normal";
-      this.amendConfirmed = false;
       this.savePromptThen = null;
       this.editedFiles = [];
-      this.message = "Save cancelled — the commit was not amended.";
+      this.message = "Save cancelled.";
     }
   }
 
@@ -2570,7 +2625,10 @@ export class Session {
    * move the focus ring between buttons, wrapping around; Space and Enter
    * activate the focused button; Esc activates the cancel button; a button's
    * shortcut letter activates it directly. Any other key leaves the prompt up. */
-  private handleDialogKey(key: Key): void {
+  private handleDialogKey(
+    key: Key,
+    beforeButtonAction?: () => void,
+  ): void {
     // Reached only from the prompt modes, each of which builds a dialog with at
     // least two buttons, so the dialog is present and its row is non-empty.
     const dialog = this.promptDialog()!;
@@ -2602,14 +2660,18 @@ export class Session {
       index = buttons.findIndex((b) => b.hotkey.toLowerCase() === k);
     }
     if (index < 0 || index >= n) return; // an unbound key leaves the prompt up
-    this.activateButton(dialog, index);
+    this.activateButton(dialog, index, beforeButtonAction);
   }
 
-  /** Run a prompt button's action, first capturing the frame that shows it
-   * pushed so the driver can play the press before the result appears. The
-   * pressed button is drawn focused as well, so a shortcut-key press shows it
-   * highlighted rather than leaving the highlight on whatever Tab last chose. */
-  private activateButton(dialog: DialogState, index: number): void {
+  /** Capture a prompt button's pushed frame, let the driver paint it, then run
+   * the button's action. The pressed button is drawn focused as well, so a
+   * shortcut-key press shows it highlighted rather than leaving the highlight
+   * on whatever Tab last chose. */
+  private activateButton(
+    dialog: DialogState,
+    index: number,
+    beforeButtonAction?: () => void,
+  ): void {
     this.dialogFocus = index;
     this.pendingPush = {
       doc: this.displayDoc(),
@@ -2618,6 +2680,7 @@ export class Session {
         dialog: { ...dialog, focus: index, pushed: index },
       },
     };
+    beforeButtonAction?.();
     const button = dialog.buttons[index];
     if (this.mode === "savePrompt") this.applySaveButton(button);
     else if (this.mode === "amendPrompt") this.applyAmendButton(button);
@@ -3055,11 +3118,18 @@ export class Session {
   }
 
   private ensurePickerVisible(): void {
+    this.scrollListToSelection(this.pickerSel);
+  }
+
+  /** Scroll the overlay list so row `sel` sits inside the box. Shared by the
+   * file picker and the jump list, which both project a selectable list into an
+   * {@link OverlayState} scrolled by `overlayScroll`. */
+  private scrollListToSelection(sel: number): void {
     const innerH = overlayBox(this.width, this.height).innerH;
-    if (this.pickerSel < this.overlayScroll) {
-      this.overlayScroll = this.pickerSel;
-    } else if (this.pickerSel >= this.overlayScroll + innerH) {
-      this.overlayScroll = this.pickerSel - innerH + 1;
+    if (sel < this.overlayScroll) {
+      this.overlayScroll = sel;
+    } else if (sel >= this.overlayScroll + innerH) {
+      this.overlayScroll = sel - innerH + 1;
     }
   }
 
@@ -3200,6 +3270,163 @@ export class Session {
     };
   }
 
+  // --- jump list (i) ---------------------------------------------------------
+
+  /** Open the list of the diff's files and commit messages, so Enter jumps the
+   * view to the one chosen. Only a diff has this list; a plain source view says
+   * so and stays put. */
+  private openJumpList(): void {
+    const entries = this.buildJumpEntries();
+    if (entries.length === 0) {
+      this.message = "The jump list is only available in a diff view.";
+      return;
+    }
+    this.jumpAll = entries;
+    this.jumpFilter = "";
+    this.overlayScroll = 0;
+    this.mode = "jumpList";
+    this.refreshJump();
+    // Open focused on the file the viewport is already reading, so the list
+    // starts where the eye is.
+    this.jumpSel = this.jumpEntryAtViewport();
+    this.scrollListToSelection(this.jumpSel);
+  }
+
+  /** Every file the diff touches and every commit whose message it carries, in
+   * document order. Empty for a non-diff view. */
+  private buildJumpEntries(): JumpEntry[] {
+    if (!this.source?.isDiff) return [];
+    const texts = this.currentDoc.lines.map((l) => l.text);
+    const subjects = commitSubjects(texts);
+    const entries: JumpEntry[] = [];
+    for (const header of findCommitHeaders(texts)) {
+      const subject = subjects.get(header.sha) ?? "";
+      const short = header.sha.slice(0, 9);
+      entries.push({
+        line: header.line,
+        display: commitJumpLine(short, subject),
+        filterText: `commit ${header.sha} ${subject}`.toLowerCase(),
+        name: `commit ${short}`,
+      });
+    }
+    for (const file of this.foldFiles()) {
+      entries.push({
+        line: file.headerLine,
+        display: file.summary,
+        filterText: file.path.toLowerCase(),
+        name: file.path,
+      });
+    }
+    entries.sort((a, b) => a.line - b.line);
+    return entries;
+  }
+
+  /** Re-derive the shown rows from the filter, keeping the selection in range. */
+  private refreshJump(): void {
+    const f = this.jumpFilter.toLowerCase();
+    this.jumpEntries = f.length === 0
+      ? this.jumpAll
+      : this.jumpAll.filter((e) => e.filterText.includes(f));
+    this.jumpSel = clamp(
+      this.jumpSel,
+      0,
+      Math.max(0, this.jumpEntries.length - 1),
+    );
+    this.scrollListToSelection(this.jumpSel);
+  }
+
+  /** The index of the entry the viewport currently sits on: the last one whose
+   * jump line is at or above the top document line. */
+  private jumpEntryAtViewport(): number {
+    const line = this.toDoc(this.top);
+    let idx = 0;
+    for (let i = 0; i < this.jumpEntries.length; i++) {
+      if (this.jumpEntries[i].line <= line) idx = i;
+      else break;
+    }
+    return idx;
+  }
+
+  private handleJumpList(key: Key): void {
+    this.message = "";
+    const last = Math.max(0, this.jumpEntries.length - 1);
+    switch (key.name) {
+      case "escape":
+        this.mode = "normal";
+        this.overlayScroll = 0;
+        this.message = "Cancelled";
+        return;
+      case "down":
+      case "ctrl-n":
+        this.jumpSel = clamp(this.jumpSel + 1, 0, last);
+        return this.scrollListToSelection(this.jumpSel);
+      case "up":
+      case "ctrl-p":
+        this.jumpSel = clamp(this.jumpSel - 1, 0, last);
+        return this.scrollListToSelection(this.jumpSel);
+      case "pagedown":
+        this.jumpSel = clamp(this.jumpSel + 10, 0, last);
+        return this.scrollListToSelection(this.jumpSel);
+      case "pageup":
+        this.jumpSel = clamp(this.jumpSel - 10, 0, last);
+        return this.scrollListToSelection(this.jumpSel);
+      case "backspace":
+        if (this.jumpFilter.length > 0) {
+          this.jumpFilter = this.jumpFilter.slice(0, -1);
+          this.jumpSel = 0;
+          this.refreshJump();
+        }
+        return;
+      case "tab":
+      case "enter":
+        this.activateJump();
+        return;
+    }
+    if (key.char && key.char >= " " && !key.ctrl) {
+      this.jumpFilter += key.char;
+      this.jumpSel = 0;
+      this.refreshJump();
+    }
+  }
+
+  /** Jump to the highlighted entry and close the list. A filter that matches
+   * nothing leaves the list open so it can be edited. */
+  private activateJump(): void {
+    const entry = this.jumpEntries[this.jumpSel];
+    if (!entry) return;
+    this.mode = "normal";
+    this.overlayScroll = 0;
+    this.jumpToLine(entry.line);
+    this.message = `Jumped to ${entry.name}`;
+  }
+
+  /** Land document line `docLine` at the top of the viewport, dropping any node
+   * selection so tree navigation resumes from where the jump landed. */
+  private jumpToLine(docLine: number): void {
+    this.selectedIndex = null;
+    this.top = clamp(
+      this.toDisplay(docLine),
+      0,
+      maxTop(this.displayCount(), this.height),
+    );
+    this.left = 0;
+  }
+
+  private jumpOverlay(): OverlayState {
+    const lines: Line[] = this.jumpEntries.map((e) => e.display);
+    if (lines.length === 0) {
+      const text = "(no matches)";
+      lines.push({ text, spans: [{ col: 0, text, cls: "comment" }] });
+    }
+    return {
+      title: "Jump to file or commit",
+      lines,
+      scroll: this.overlayScroll,
+      footer: "↑/↓ select · enter jump · esc cancel",
+      selectedLine: this.jumpEntries.length > 0 ? this.jumpSel : undefined,
+    };
+  }
+
   private navigateTree(
     step: (flat: readonly StructureNode[], idx: number) => number,
   ): void {
@@ -3291,6 +3518,21 @@ function isArrowName(name: string): boolean {
     name === "right";
 }
 
+/** The styled jump-list row for a commit: a bullet, the short hash, and the
+ * subject when one is known. */
+function commitJumpLine(shortSha: string, subject: string): Line {
+  const spans: Span[] = [];
+  let text = "";
+  const add = (s: string, cls: TokenClass) => {
+    spans.push({ col: cpLen(text), text: s, cls });
+    text += s;
+  };
+  add("● ", "diffMeta");
+  add(`commit ${shortSha}`, "sectionHeader");
+  if (subject) add(`  ${subject}`, "plain");
+  return { text, spans };
+}
+
 export function helpOverlay(): {
   title: string;
   info: Line[];
@@ -3317,6 +3559,7 @@ export function helpOverlay(): {
     ["  f", "hide / show the file under the cursor (collapse to a summary)"],
     ["  F / E", "hide all files / show all files"],
     ["  T", "hide test and test-support files"],
+    ["  i", "list the diff's files and commits, jump to one"],
     ["", ""],
     ["Structure tree", ""],
     ["  W / S", "previous / next sibling (W → parent, S → out, at ends)"],

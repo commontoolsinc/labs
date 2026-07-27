@@ -19,22 +19,43 @@ export function normalizeLcovInstancePaths(lcov: string): string {
   ).join("\n");
 }
 
-async function collectCoverageProfileFiles(dir: string): Promise<string[]> {
+/**
+ * Collect every `.json` coverage profile file under `dir`, descending into
+ * subdirectories. A missing directory, including one removed mid-walk, yields
+ * an empty result rather than an error.
+ *
+ * A full local coverage run can leave several hundred thousand profile files
+ * under one directory. The walk appends each path to a single shared array, so
+ * no step ever passes a several-hundred-thousand-element array to a variadic
+ * call such as `push(...items)`; doing so overflows the call stack, because
+ * each element becomes a separate argument and V8 caps how many arguments one
+ * call takes.
+ *
+ * `readDir` defaults to `Deno.readDir`; it is a parameter so a test can present
+ * a very large directory without creating that many real files.
+ */
+export async function collectCoverageProfileFiles(
+  dir: string,
+  readDir: (dir: string) => AsyncIterable<Deno.DirEntry> = Deno.readDir,
+): Promise<string[]> {
   const files: string[] = [];
-  try {
-    for await (const entry of Deno.readDir(dir)) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory) {
-        files.push(...await collectCoverageProfileFiles(fullPath));
-      } else if (entry.name.endsWith(".json")) {
-        files.push(fullPath);
+  async function walk(current: string): Promise<void> {
+    try {
+      for await (const entry of readDir(current)) {
+        const fullPath = path.join(current, entry.name);
+        if (entry.isDirectory) {
+          await walk(fullPath);
+        } else if (entry.name.endsWith(".json")) {
+          files.push(fullPath);
+        }
       }
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) return;
+      throw error;
     }
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return [];
-    throw error;
   }
 
+  await walk(dir);
   return files;
 }
 

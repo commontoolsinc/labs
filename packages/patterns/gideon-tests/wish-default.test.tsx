@@ -1,13 +1,14 @@
 /**
- * Test: wish("#default") in pattern test harness
+ * Test: writable #pieceRegistry wishes in the pattern test harness
  *
- * Verifies that the test runner sets up a defaultPattern with allPieces
- * so that patterns using wish({ query: "#default" }) can read/write allPieces.
+ * Verifies that the test runner sets up a defaultPattern with pieceRegistry
+ * so semantic wishes can read and write it.
  *
  * Run: deno task cf test packages/patterns/gideon-tests/wish-default.test.tsx --verbose
  */
 import {
   action,
+  assert,
   computed,
   NAME,
   pattern,
@@ -21,40 +22,40 @@ interface MinimalPiece {
 }
 
 export default pattern(() => {
-  // This is the core thing being tested: wish("#default") should resolve
-  // and provide allPieces as a writable array
-  const defaultWish = wish<{ allPieces: Writable<MinimalPiece[]> }>({
-    query: "#default",
+  // This is the core thing being tested: #pieceRegistry should resolve as a
+  // writable array.
+  const pieceRegistryWish = wish<Writable<MinimalPiece[]>>({
+    query: "#pieceRegistry",
   });
-  const { allPieces } = resultOf(defaultWish.result);
+  const pieceRegistry = resultOf(pieceRegistryWish.result);
 
   // Track state for assertions
-  const initialLength = computed(() => allPieces?.get?.()?.length ?? -1);
+  const initialLength = computed(() => pieceRegistry?.get?.()?.length ?? -1);
 
-  // Push a piece to allPieces
+  // Register a piece.
   const action_push_piece = action(() => {
-    allPieces.push({ [NAME]: "Test Piece 1" } as any);
+    pieceRegistry.push({ [NAME]: "Test Piece 1" } as any);
   });
 
   const action_push_another = action(() => {
-    allPieces.push({ [NAME]: "Test Piece 2" } as any);
+    pieceRegistry.push({ [NAME]: "Test Piece 2" } as any);
   });
 
   // Assertions
-  const assert_allPieces_exists = computed(() => !!allPieces);
-  const assert_initial_empty = computed(() => initialLength === 0);
-  const assert_after_push_one = computed(
-    () => allPieces?.get?.()?.length === 1,
+  const assert_piece_registry_exists = assert(() => !!pieceRegistry);
+  const assert_initial_empty = assert(() => initialLength === 0);
+  const assert_after_push_one = assert(
+    () => pieceRegistry?.get?.()?.length === 1,
   );
-  const assert_after_push_two = computed(
-    () => allPieces?.get?.()?.length === 2,
+  const assert_after_push_two = assert(
+    () => pieceRegistry?.get?.()?.length === 2,
   );
 
   return {
     tests: [
-      // allPieces should be defined (wish resolved successfully)
-      { assertion: assert_allPieces_exists },
-      // allPieces should start empty
+      // pieceRegistry should be defined (wish resolved successfully)
+      { assertion: assert_piece_registry_exists },
+      // pieceRegistry should start empty
       { assertion: assert_initial_empty },
       // Push a piece
       { action: action_push_piece },

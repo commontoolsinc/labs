@@ -91,16 +91,18 @@ export const counterNestedComputedTotalsScenario: PatternIntegrationScenario<
     },
     {
       events: [
-        { stream: "groups.0.append", payload: { value: Number.NaN } }, // fails
+        // Sanitized by the pattern's own `sanitizeNumber` (non-finite -> 0):
+        // the event carries `NaN` faithfully, and the handler catches it.
+        { stream: "groups.0.append", payload: { value: Number.NaN } },
         { stream: "groups.0.append", payload: { value: 0 } },
         { stream: "appendToGroup", payload: { index: 9, value: 100 } },
       ],
       expect: [
-        { path: "groups.0.items", value: [4, 1, 6, 0] },
+        { path: "groups.0.items", value: [4, 1, 6, 0, 0] },
         { path: "groups.0.subtotal", value: 11 },
         { path: "groupTotals", value: [11, 12, 6] },
         { path: "grandTotal", value: 29 },
-        { path: "totalItems", value: 9 },
+        { path: "totalItems", value: 10 },
       ],
     },
   ],

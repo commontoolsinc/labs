@@ -91,6 +91,12 @@ export interface NotebookOutput extends NotebookPiece {
   cancelNewNestedNotebook: Stream<void>;
   startEditTitle: Stream<void>;
   stopEditTitle: Stream<void>;
+  goToAllNotes: Stream<void>;
+  createNoteFromPrompt: Stream<void>;
+  createAnotherNoteFromPrompt: Stream<void>;
+  createNestedNotebookFromPrompt: Stream<void>;
+  createAnotherNestedNotebookFromPrompt: Stream<void>;
+  createNotebookFromSelectionPrompt: Stream<void>;
   // Test-accessible state
   selectedNoteIndices: number[];
   selectedCount: number;
@@ -286,10 +292,10 @@ const deleteSelectedNotes = handler<
   {
     notes: Writable<NotePiece[]>;
     selectedNoteIndices: Writable<number[]>;
-    allPieces: Writable<NotePiece[] | Default<[]>>;
+    pieceRegistry: Writable<NotePiece[] | Default<[]>>;
     notebooks: Writable<NotebookPiece[]>;
   }
->((_, { notes, selectedNoteIndices, allPieces, notebooks }) => {
+>((_, { notes, selectedNoteIndices, pieceRegistry, notebooks }) => {
   const selected = selectedNoteIndices.get();
   const notesList = notes.get();
   const itemsToDelete = selected.map((idx) => notesList[idx]).filter(Boolean);
@@ -304,9 +310,9 @@ const deleteSelectedNotes = handler<
     ),
   );
 
-  // Remove from allPieces (permanent delete)
-  allPieces.set(
-    (allPieces.get() ?? []).filter(
+  // Remove from the registry (permanent delete)
+  pieceRegistry.set(
+    (pieceRegistry.get() ?? []).filter(
       (piece) => !itemsToDelete.some((item) => equals(piece, item)),
     ),
   );
@@ -436,7 +442,7 @@ const createNotebookFromPrompt = handler<
     pendingNotebookAction: Writable<"add" | "move" | "">;
     selectedNoteIndices: Writable<number[]>;
     notes: Writable<NotePiece[]>;
-    allPieces: Writable<MinimalPiece[]>;
+    pieceRegistry: Writable<MinimalPiece[]>;
     notebooks: Writable<NotebookPiece[]>;
   }
 >((_, state) => {
@@ -446,7 +452,7 @@ const createNotebookFromPrompt = handler<
     pendingNotebookAction,
     selectedNoteIndices,
     notes,
-    allPieces,
+    pieceRegistry,
     notebooks,
   } = state;
 
@@ -463,7 +469,7 @@ const createNotebookFromPrompt = handler<
     notes: selectedItems,
     isHidden: true,
   });
-  allPieces.push(newNotebook);
+  pieceRegistry.push(newNotebook);
 
   if (actionType === "move") {
     // Remove from all existing notebooks
@@ -542,14 +548,15 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       scope: ["."],
       headless: true,
     });
-    // Notebooks discovered via wish scope (replaces allPieces emoji filtering)
+    // Notebooks discovered through wish scope.
     const notebooks = notebookWish.candidates;
 
-    // Still need allPieces for write operations (push new notes/notebooks)
-    const defaultWish = wish<{ allPieces: Writable<NotePiece[]> }>(
-      { query: "#default", headless: true },
-    );
-    const { allPieces } = resultOf(defaultWish.result);
+    // The registry is writable for creating notes and notebooks.
+    const pieceRegistryWish = wish<Writable<NotePiece[]>>({
+      query: "#pieceRegistry",
+      headless: true,
+    });
+    const pieceRegistry = resultOf(pieceRegistryWish.result);
 
     // Use computed() for proper reactive tracking of notes.length
     const noteCount = computed(() => notes.get().length);
@@ -624,7 +631,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
 
     // TODO(seefeld,mathpirate): We need some better way to find the "All Notes" notebook.
     const goToAllNotesAction = action(() => {
-      const pieces = allPieces.get() ?? [];
+      const pieces = pieceRegistry.get() ?? [];
       const existing = pieces.find((piece: any) => {
         const name = piece?.[NAME];
         return typeof name === "string" && name.startsWith("All Notes");
@@ -657,7 +664,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       }
     });
 
-    // ===== Actions (close over notes, allPieces, self) =====
+    // ===== Actions (close over notes, pieceRegistry, self) =====
     // These work because all inputs use Default<> (not optional ?), so self
     // always satisfies the output schema's required properties at runtime.
 
@@ -676,7 +683,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
           isHidden: true,
           parentNotebook: self,
         });
-        allPieces.push(newNote);
+        pieceRegistry.push(newNote);
         notes.push(newNote);
         if (navigate) {
           navigateTo(newNote);
@@ -701,7 +708,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
             parentNotebook: self,
           }));
         }
-        allPieces.push(...created);
+        pieceRegistry.push(...created);
         notes.push(...created);
         return created;
       },
@@ -737,7 +744,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
           notes: notesToAdd,
         });
 
-        allPieces.push(newNotebook);
+        pieceRegistry.push(newNotebook);
         return newNotebook;
       },
     );
@@ -751,7 +758,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
         isHidden: true,
         parentNotebook: self,
       });
-      allPieces.push(newNote);
+      pieceRegistry.push(newNote);
       notes.push(newNote);
 
       // Close modal and navigate (unless "Create Another" was previously used)
@@ -772,7 +779,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
         isHidden: true,
         parentNotebook: self,
       });
-      allPieces.push(newNote);
+      pieceRegistry.push(newNote);
       notes.push(newNote);
 
       // Keep modal open for "Create Another"
@@ -789,7 +796,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
         isHidden: true,
         parentNotebook: self,
       });
-      allPieces.push(nb);
+      pieceRegistry.push(nb);
       notes.push(nb);
 
       const shouldNavigate = !usedCreateAnotherNotebook.get();
@@ -809,7 +816,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
         isHidden: true,
         parentNotebook: undefined,
       });
-      allPieces.push(nb);
+      pieceRegistry.push(nb);
       notes.push(nb);
 
       usedCreateAnotherNotebook.set(true);
@@ -829,7 +836,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
             isHidden: true,
             parentNotebook: self, // Set parent for back navigation
           });
-          allPieces.push(newNote);
+          pieceRegistry.push(newNote);
           notes.push(newNote);
         }
       }
@@ -953,9 +960,9 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       backlinks.get().length > 0 ? "flex" : "none"
     );
 
-    // All Notes button display - search allPieces by name (matches default-app approach)
+    // All Notes button display - search the registry by name.
     const allNotesButtonDisplay = computed(() => {
-      const pieces = allPieces.get() ?? [];
+      const pieces = pieceRegistry.get() ?? [];
       const exists = pieces.some((piece: any) => {
         const name = piece?.[NAME];
         return typeof name === "string" && name.startsWith("All Notes");
@@ -1336,7 +1343,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                     onClick={deleteSelectedNotes({
                       notes,
                       selectedNoteIndices,
-                      allPieces,
+                      pieceRegistry,
                       notebooks,
                     })}
                     style={{ color: "var(--cf-theme-color-error, #dc3545)" }}
@@ -1381,7 +1388,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                   pendingNotebookAction,
                   selectedNoteIndices,
                   notes,
-                  allPieces,
+                  pieceRegistry,
                   notebooks,
                 })}
               >
@@ -1518,7 +1525,7 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       deleteSelected: deleteSelectedNotes({
         notes,
         selectedNoteIndices,
-        allPieces,
+        pieceRegistry,
         notebooks,
       }),
       duplicateSelected: doDuplicateSelectedNotes,
@@ -1529,6 +1536,20 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
       cancelNewNestedNotebook: cancelNewNestedNotebookPromptAction,
       startEditTitle: startEditingTitleAction,
       stopEditTitle: stopEditingTitleAction,
+      goToAllNotes: goToAllNotesAction,
+      createNoteFromPrompt: createNoteAction,
+      createAnotherNoteFromPrompt: createAnotherNoteAction,
+      createNestedNotebookFromPrompt: createNestedNotebookAction,
+      createAnotherNestedNotebookFromPrompt: createAnotherNestedNotebookAction,
+      createNotebookFromSelectionPrompt: createNotebookFromPrompt({
+        newNotebookName,
+        showNewNotebookPrompt,
+        pendingNotebookAction,
+        selectedNoteIndices,
+        notes,
+        pieceRegistry,
+        notebooks,
+      }),
       // Test-accessible state
       selectedNoteIndices,
       selectedCount,

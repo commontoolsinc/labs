@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { expect } from "@std/expect";
 import {
   CFC_ATOM_TYPE,
@@ -84,13 +85,15 @@ describe("CFC commitment-form matching (inv-12 Stage 1)", () => {
         reader,
       );
       expect(matchAtomPattern(plain, {
+        // Spreading a discriminated union leaves `?: never` fields behind,
+        // which no `CfcAtom` admits; the runtime value is a policy-ref atom.
         ...plain,
         subject: commitCfcFieldValue(reader),
-      })).not.toBeNull();
+      } as unknown as CfcAtom)).not.toBeNull();
       expect(matchAtomPattern(plain, {
         ...plain,
         subject: commitCfcFieldValue(stranger),
-      })).toBeNull();
+      } as unknown as CfcAtom)).toBeNull();
     });
 
     it("digest-matches a CONCRETE pattern value against a committed field", () => {

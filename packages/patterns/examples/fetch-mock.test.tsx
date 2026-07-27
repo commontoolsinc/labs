@@ -8,6 +8,7 @@
 // LLM calls (generateText/generateObject) mock separately via @commonfabric/llm;
 // this seam is for generic `fetchJson` HTTP.
 import {
+  assert,
   computed,
   fetchJson,
   hasError,
@@ -34,10 +35,10 @@ export default pattern(() => {
   // Values gated on the `fetchJson` result — observable only once the mocked
   // request is driven to completion. Inline-boolean assertions so the reads are
   // reliable (an intermediate observer computed would infer `unknown`).
-  const result_answer_is_42 = computed(() => result.answer === 42);
-  const result_label_is_mocked = computed(() => result.label === "mocked");
-  const not_pending = computed(() => !isPending(fetched));
-  const no_error = computed(() => !hasError(fetched));
+  const result_answer_is_42 = assert(() => result.answer === 42);
+  const result_label_is_mocked = assert(() => result.label === "mocked");
+  const not_pending = assert(() => !isPending(fetched));
+  const no_error = assert(() => !hasError(fetched));
 
   return {
     tests: [

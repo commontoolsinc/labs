@@ -15,6 +15,7 @@ import {
   BROWSER_HOST_COMMAND_DENIED_PREFIX,
 } from "./tools/browser-host-command-policy.ts";
 import type { DelegateTaskToolOutput } from "./contracts/subagent.ts";
+import type { HarnessModelProviderId } from "./config.ts";
 import type { ReadSkillResourceToolOutput } from "./tools/read-skill-resource.ts";
 import { isWebFetchToolErrorOutput } from "./tools/web-fetch.ts";
 import {
@@ -45,6 +46,10 @@ export interface HarnessCapabilitySnapshot {
   type: "cf-harness.capability-snapshot";
   at: string;
   commands: Record<HarnessCapabilityCommand, HarnessCapabilityProbe>;
+  model?: {
+    providerId: HarnessModelProviderId;
+    authSource: "api-key" | "none" | "owner-bound-oauth";
+  };
   cfc: HarnessCfcCapabilitySnapshot;
 }
 
@@ -488,6 +493,8 @@ export interface CollectHarnessCapabilitySnapshotOptions {
   cfcEnforcementMode?: CfcEnforcementMode;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
+  modelProvider?: HarnessModelProviderId;
+  gatewayAuthMode?: "bearer" | "none";
 }
 
 export const collectHarnessCapabilitySnapshot = async (
@@ -509,6 +516,16 @@ export const collectHarnessCapabilitySnapshot = async (
     );
   }
   const snapshot = parseCapabilityProbeOutput(result.stdout, at, cfc);
+  if (options.modelProvider !== undefined) {
+    snapshot.model = {
+      providerId: options.modelProvider,
+      authSource: options.modelProvider === "openai-codex"
+        ? "owner-bound-oauth"
+        : options.gatewayAuthMode === "none"
+        ? "none"
+        : "api-key",
+    };
+  }
   const fabricMount = snapshot.cfc.mounts.fabric;
   if (fabricMount.status === "configured") {
     const fabricStatus = await sandbox.runShell({

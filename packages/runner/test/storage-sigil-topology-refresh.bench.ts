@@ -28,7 +28,7 @@ const rootSchema = {
         params: {
           type: "object",
           properties: {
-            allPieces: {
+            pieceRegistry: {
               type: "array",
               items: { type: "object", additionalProperties: true },
             },
@@ -53,8 +53,8 @@ const rootSchema = {
   },
 } as const;
 
-const allPiecesSchema =
-  rootSchema.properties.argument.properties.params.properties.allPieces;
+const pieceRegistrySchema =
+  rootSchema.properties.argument.properties.params.properties.pieceRegistry;
 const backlinksSchema = rootSchema.properties.argument.properties.backlinks;
 const elementSchema = rootSchema.properties.argument.properties.element;
 const internalZeroSchema = rootSchema.properties.internal.properties["__#0"];
@@ -90,7 +90,7 @@ const buildDoc = (index: number, version: number) => {
       argument: {
         element: sigilLink(linkIds[1]!),
         params: {
-          allPieces: linkIds.map((id) => sigilLink(id)),
+          pieceRegistry: linkIds.map((id) => sigilLink(id)),
         },
         backlinks: linkIds.slice(0, 2).map((id) => sigilLink(id)),
       },
@@ -135,8 +135,8 @@ const setup = async () => {
       schema: elementSchema,
     });
     await (provider as any).sync(uri, {
-      path: ["argument", "params", "allPieces"],
-      schema: allPiecesSchema,
+      path: ["argument", "params", "pieceRegistry"],
+      schema: pieceRegistrySchema,
     });
     await (provider as any).sync(uri, {
       path: ["argument", "backlinks"],

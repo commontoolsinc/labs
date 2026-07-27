@@ -4,7 +4,6 @@
 
 import {
   type Cancel,
-  isLegacyAlias,
   isSigilLink,
   type JSONSchema,
   linkRefFrom,
@@ -441,8 +440,10 @@ export class CellHandle<T = unknown> {
   }
 
   /**
-   * Recursively hydrate any object, converting any links (SigilLink,
-   * LegacyAlias) into CellHandle instances.
+   * Recursively hydrate any object, converting any sigil links into
+   * CellHandle instances. Legacy `$alias` records are plain data — they are
+   * only meaningful as bindings inside Pattern objects, which the client
+   * never interprets.
    */
   static deserialize<T>(
     base: CellHandle<T>,
@@ -643,19 +644,6 @@ function parseAsCellRef(
         cfcLabelView: (linkData as { cfcLabelView?: CfcLabelView })
           .cfcLabelView,
       }),
-    };
-  } else if (isLegacyAlias(value)) {
-    const alias = value.$alias;
-    const aliasPath = alias.path.map((p) => String(p));
-
-    // Named-cell/partialCause aliases carry no absolute id of their own;
-    // resolve to the base cell's document.
-    return {
-      id: from.id,
-      space: from.space,
-      scope: from.scope,
-      path: aliasPath,
-      ...(alias.schema !== undefined && { schema: alias.schema }),
     };
   }
 }

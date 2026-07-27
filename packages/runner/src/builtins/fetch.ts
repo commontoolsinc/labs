@@ -1,4 +1,9 @@
-import type { FetchBinaryResult, JSONSchema } from "@commonfabric/api";
+import type {
+  FetchBinaryResult,
+  JSONSchema,
+  JSONSchemaObj,
+} from "@commonfabric/api";
+import { isRecord } from "@commonfabric/utils/types";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
@@ -11,6 +16,7 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { validateSchemaValue } from "../cfc/schema-sanitization.ts";
+import { mapSubschemas } from "../schema-walk.ts";
 import {
   isProtectedToolshedFirstPartyRoute,
   isToolshedApiOrigin,
@@ -170,6 +176,44 @@ async function processBinaryResponse(
   const mediaType = contentType?.split(";")[0].trim().toLowerCase() ||
     "application/octet-stream";
   return { bytes, mediaType };
+}
+
+const asTypeArray = (type: unknown): string[] =>
+  typeof type === "string" ? [type] : Array.isArray(type) ? type : [];
+
+/**
+ * Returns a copy of `schema` with `additionalProperties: true` on every
+ * object-shaped subschema that doesn't declare it. CFC sanitization treats
+ * such schemas as closed, while ordinary value validation follows standard
+ * JSON Schema semantics, where unknown object properties are allowed unless
+ * the schema names `additionalProperties`.
+ *
+ * Exported for unit testing only — not part of the fetch builtin surface.
+ */
+export function schemaWithOpenObjects(schema: JSONSchema): JSONSchema {
+  if (!isRecord(schema)) return schema;
+  // Default-tier walk plus `$defs`. The never-emitted keywords (`contains`,
+  // `if`/`then`/`else`, ...) are deliberately NOT rewritten — opening objects
+  // under them would make those paths look supported; if one becomes emitted,
+  // it moves to the used tier in schema-walk and this walk picks it up.
+  const mapped = mapSubschemas(
+    schema as JSONSchemaObj,
+    (child) =>
+      // Draft-07 array-form `items`; the 2020-12 tuple form is `prefixItems`,
+      // which mapSubschemas already walks element-wise.
+      Array.isArray(child)
+        ? child.map(schemaWithOpenObjects) as unknown as JSONSchema
+        : schemaWithOpenObjects(child),
+    { includeDefs: true },
+  );
+
+  const declaresObjectShape = asTypeArray(mapped.type).includes("object") ||
+    mapped.properties !== undefined ||
+    mapped.required !== undefined;
+  if (declaresObjectShape && mapped.additionalProperties === undefined) {
+    return { ...mapped, additionalProperties: true } as JSONSchema;
+  }
+  return mapped;
 }
 
 const fetchBinaryKind: FetchKind = {

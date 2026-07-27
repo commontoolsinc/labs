@@ -1,4 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
+import type { CfcAtom } from "@commonfabric/api/cfc";
+import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
@@ -13,7 +15,7 @@ const space = signer.did();
 
 type StoredEntry = {
   path: string[];
-  label: { confidentiality?: unknown[]; integrity?: unknown[] };
+  label: IFCLabel;
   origin?: string;
 };
 
@@ -41,7 +43,7 @@ describe("CFC flow labels: integrity propagation (phase C)", () => {
   const seedDoc = async (
     runtime: Runtime,
     cause: string,
-    integrity: unknown[],
+    integrity: CfcAtom[],
   ): Promise<string> => {
     const seed = runtime.edit();
     const cell = runtime.getCell(space, cause, undefined, seed);

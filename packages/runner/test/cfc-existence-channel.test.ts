@@ -1,5 +1,8 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
+import type { FabricPlainObject } from "@commonfabric/api";
+import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
+import type { FabricValue } from "@commonfabric/data-model/interface";
 import { Identity } from "@commonfabric/identity";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -14,7 +17,7 @@ const space = signer.did();
 
 type StoredEntry = {
   path: string[];
-  label: { confidentiality?: string[]; integrity?: unknown[] };
+  label: IFCLabel;
   origin?: string;
   observes?: string;
 };
@@ -54,7 +57,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
   const seedDoc = async (
     rt: Runtime,
     cause: string,
-    value: unknown,
+    value: FabricValue,
     entries: LabelMapEntry[],
   ): Promise<string> => {
     const seed = rt.edit();
@@ -98,7 +101,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     rt: Runtime,
     sourceId: string | undefined,
     outCause: string,
-    value: Record<string, unknown>,
+    value: FabricPlainObject,
     writePath: string[] = [],
   ): Promise<string> => {
     const tx = rt.edit();
@@ -994,7 +997,7 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
       copied: true,
     });
 
-    const overwrite = async (value: Record<string, unknown>) => {
+    const overwrite = async (value: FabricPlainObject) => {
       const tx = rt.edit();
       tx.writeOrThrow(
         { space, scope: "space", id: uri(outId), path: ["value"] },

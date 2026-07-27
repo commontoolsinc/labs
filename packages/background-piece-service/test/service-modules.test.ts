@@ -464,7 +464,9 @@ describe("BackgroundPieceService", () => {
       runtime: runtime as never,
       workerTimeoutMs: 123,
       createSpaceManager: (options) => ({
-        start: () => started.push(options.did),
+        start: () => {
+          started.push(options.did);
+        },
         stop: () => {
           stopped.push(options.did);
           return Promise.resolve();

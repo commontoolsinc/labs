@@ -8,12 +8,13 @@ import {
   type FabricCodec,
   type ReconstructionContext,
 } from "@/codec-common/interface.ts";
-import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
+import { deepFreeze } from "@/deep-freeze.ts";
 import type { FabricValue } from "@/interface.ts";
 import { fabricFromNativeValue } from "@/native-conversion.ts";
 import { cloneIfNecessary } from "@/value-clone.ts";
 import {
   BaseFabricInstance,
+  DEEP_CLONE_CORE,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
@@ -215,9 +216,7 @@ export class DataUnavailable extends BaseFabricInstance
   }
 
   /** @inheritDoc */
-  override deepClone(frozen: boolean): DataUnavailable {
-    if (frozen && isDeepFrozen(this)) return this;
-
+  protected override [DEEP_CLONE_CORE](frozen: boolean): DataUnavailable {
     if (this.#state.reason !== "error") {
       if (frozen) {
         switch (this.#state.reason) {
@@ -234,8 +233,12 @@ export class DataUnavailable extends BaseFabricInstance
     }
 
     const error = cloneIfNecessary(this.#state.error, { frozen });
-    const result = new DataUnavailable({ reason: "error", error });
-    return frozen ? deepFreeze(result) : result;
+    return new DataUnavailable({ reason: "error", error });
+  }
+
+  /** @inheritDoc */
+  override deepClone(frozen: boolean): DataUnavailable {
+    return super.deepClone(frozen) as DataUnavailable;
   }
 
   static #codec = Object.freeze(

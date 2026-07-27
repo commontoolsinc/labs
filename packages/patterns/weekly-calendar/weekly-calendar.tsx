@@ -26,6 +26,7 @@ import {
   resultOf,
   Stream,
   UI,
+  type VNode,
   wish,
   Writable,
 } from "commonfabric";
@@ -34,7 +35,7 @@ import Event, { COLORS, generateId } from "./event.tsx";
 
 // ============ TYPES ============
 
-type EventPiece = {
+export type EventPiece = {
   [NAME]?: string;
   title?: string;
   date?: string;
@@ -66,6 +67,7 @@ interface Input {
 }
 
 export interface Output {
+  [UI]: VNode;
   title: string;
   events: EventPiece[];
   mentionable: EventPiece[];
@@ -228,7 +230,7 @@ const showNewEventModal = handler<
 >((_, { showNewEventPrompt }) => showNewEventPrompt.set(true));
 
 // Handler to create event and close modal (stays on calendar)
-const createEventHandler = handler<
+export const createEventHandler = handler<
   void,
   {
     newEventTitle: Writable<string>;
@@ -238,7 +240,7 @@ const createEventHandler = handler<
     newEventColor: Writable<string>;
     showNewEventPrompt: Writable<boolean>;
     events: Writable<EventPiece[]>;
-    allPieces: Writable<EventPiece[]>;
+    pieceRegistry: Writable<EventPiece[]>;
   }
 >((
   _,
@@ -250,7 +252,7 @@ const createEventHandler = handler<
     newEventColor,
     showNewEventPrompt,
     events,
-    allPieces,
+    pieceRegistry,
   },
 ) => {
   const title = newEventTitle.get() || "New Event";
@@ -264,7 +266,7 @@ const createEventHandler = handler<
     isHidden: false,
     eventId: generateId(),
   });
-  allPieces.push(newEvent);
+  pieceRegistry.push(newEvent);
   events.push(newEvent);
 
   // Reset modal state and stay on calendar
@@ -273,7 +275,7 @@ const createEventHandler = handler<
 });
 
 // Handler to create event and stay in modal
-const createEventAndContinue = handler<
+export const createEventAndContinue = handler<
   void,
   {
     newEventTitle: Writable<string>;
@@ -282,7 +284,7 @@ const createEventAndContinue = handler<
     newEventEndTime: Writable<string>;
     newEventColor: Writable<string>;
     events: Writable<EventPiece[]>;
-    allPieces: Writable<EventPiece[]>;
+    pieceRegistry: Writable<EventPiece[]>;
     usedCreateAnother: Writable<boolean>;
   }
 >((
@@ -294,7 +296,7 @@ const createEventAndContinue = handler<
     newEventEndTime,
     newEventColor,
     events,
-    allPieces,
+    pieceRegistry,
     usedCreateAnother,
   },
 ) => {
@@ -309,7 +311,7 @@ const createEventAndContinue = handler<
     isHidden: false,
     eventId: generateId(),
   });
-  allPieces.push(newEvent);
+  pieceRegistry.push(newEvent);
   events.push(newEvent);
   usedCreateAnother.set(true);
   newEventTitle.set("");
@@ -336,10 +338,10 @@ const handleBacklinkClick = handler<
 >((_, { piece }) => navigateTo(piece));
 
 // LLM-callable handler: Create a single event
-const handleCreateEvent = handler<
+export const handleCreateEvent = handler<
   { title: string; date: string; startTime: string; endTime: string },
-  { events: Writable<EventPiece[]>; allPieces: Writable<EventPiece[]> }
->(({ title, date, startTime, endTime }, { events, allPieces }) => {
+  { events: Writable<EventPiece[]>; pieceRegistry: Writable<EventPiece[]> }
+>(({ title, date, startTime, endTime }, { events, pieceRegistry }) => {
   const newEvent = Event({
     title,
     date,
@@ -350,7 +352,7 @@ const handleCreateEvent = handler<
     isHidden: false,
     eventId: generateId(),
   });
-  allPieces.push(newEvent);
+  pieceRegistry.push(newEvent);
   events.push(newEvent);
   return newEvent;
 });
@@ -368,10 +370,10 @@ const handleSetTitle = handler<
 
 const WeeklyCalendar = pattern<Input, Output>(
   ({ title, events, isCalendar, isHidden }) => {
-    const defaultWish = wish<{ allPieces: EventPiece[] }>({
-      query: "#default",
+    const pieceRegistryWish = wish<EventPiece[]>({
+      query: "#pieceRegistry",
     });
-    const { allPieces } = resultOf(defaultWish.result);
+    const pieceRegistry = resultOf(pieceRegistryWish.result);
 
     // Reactive #now for date defaults; dependent computations remain
     // unavailable until it resolves because the ambient clock is not readable
@@ -727,7 +729,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                     newEventEndTime,
                     newEventColor,
                     events,
-                    allPieces,
+                    pieceRegistry,
                     usedCreateAnother,
                   })}
                 >
@@ -744,7 +746,7 @@ const WeeklyCalendar = pattern<Input, Output>(
                     newEventColor,
                     showNewEventPrompt,
                     events,
-                    allPieces,
+                    pieceRegistry,
                   })}
                 >
                   Create
@@ -1316,7 +1318,7 @@ const WeeklyCalendar = pattern<Input, Output>(
       isHidden,
       backlinks,
       // LLM-callable streams
-      createEvent: handleCreateEvent({ events, allPieces }),
+      createEvent: handleCreateEvent({ events, pieceRegistry }),
       setTitle: handleSetTitle({ title }),
     };
   },

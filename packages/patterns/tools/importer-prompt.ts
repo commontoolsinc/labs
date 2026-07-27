@@ -1238,8 +1238,8 @@ import type { AirtableAuth as AirtableAuthType } from "../airtable-auth.tsx";
 // ============================================================================
 
 export interface AirtableClientConfig {
+  /** How many times to refresh an expired token and retry before giving up. */
   retries?: number;
-  delay?: number;
   debugMode?: boolean;
   /** External refresh callback for cross-piece token refresh */
   onRefresh?: () => Promise<void>;
@@ -1286,19 +1286,6 @@ export interface ListRecordsOptions {
 // HELPERS
 // ============================================================================
 
-// The SES pattern sandbox endows no timers, so a real delay happens only in
-// host contexts that expose setTimeout; in-sandbox this resolves immediately
-// rather than throwing ReferenceError (retries stay ~1s apart anyway via the
-// gated fetch's grid-aligned settlement).
-const sleep = (ms: number): Promise<void> => {
-  if (ms <= 0) return Promise.resolve();
-  const timer = (globalThis as { setTimeout?: typeof setTimeout }).setTimeout;
-  if (typeof timer !== "function") return Promise.resolve();
-  return new Promise((resolve) => {
-    timer(resolve, ms);
-  });
-};
-
 function debugLog(debugMode: boolean, ...args: unknown[]) {
   if (debugMode) console.log("[AirtableClient]", ...args);
 }
@@ -1325,7 +1312,6 @@ export function AirtableClient(
   config: AirtableClientConfig = {},
 ): AirtableClient {
   const retries = config.retries ?? 2;
-  const delay = config.delay ?? 1000;
   const debugMode = config.debugMode ?? false;
   const onRefresh = config.onRefresh;
 
@@ -1335,73 +1321,62 @@ export function AirtableClient(
   }
 
   /**
-   * Make an authenticated API request with retry and token refresh.
-   * Call this only from handler code: the sandbox fetch is handler-only
-   * (it throws in a lift/computed or the pattern body) and its settlement
-   * is coarsened to one-second resolution.
+   * Make an authenticated API request. A 401 refreshes the token and retries,
+   * up to \`retries\` times; every other failure — including a 429 rate limit —
+   * is thrown. A compartment has no timers to back off with, so the reactive
+   * layer re-drives the work rather than the client sleeping between attempts.
+   *
+   * Call this only from handler code: the sandbox fetch is handler-only (it
+   * throws in a lift/computed or the pattern body) and its settlement is
+   * coarsened to one-second resolution.
    */
   async function request<T>(
     url: string,
     options: RequestInit = {},
   ): Promise<T> {
-    let lastError: Error | null = null;
-
     for (let attempt = 0; attempt <= retries; attempt++) {
       const token = getToken();
       if (!token) {
         throw new Error("No access token available");
       }
 
-      try {
-        const response = await fetch(url, {
-          ...options,
-          headers: {
-            Authorization: \`Bearer \${token}\`,
-            "Content-Type": "application/json",
-            ...options.headers,
-          },
-        });
+      const response = await fetch(url, {
+        ...options,
+        headers: {
+          Authorization: \`Bearer \${token}\`,
+          "Content-Type": "application/json",
+          ...options.headers,
+        },
+      });
 
-        if (response.status === 401) {
-          debugLog(debugMode, "Got 401, attempting token refresh...");
-          await refreshToken();
-          continue;
-        }
-
-        if (response.status === 429) {
-          const retryAfter = response.headers.get("Retry-After");
-          const parsed = retryAfter ? parseInt(retryAfter, 10) : NaN;
-          const waitMs = !isNaN(parsed) ? parsed * 1000 : delay * (attempt + 1);
-          debugLog(
-            debugMode,
-            \`Rate limited, waiting \${waitMs}ms...\`,
-          );
-          await sleep(waitMs);
-          continue;
-        }
-
-        if (!response.ok) {
-          const errorBody = await response.text();
-          throw new Error(
-            \`Airtable API error \${response.status}: \${errorBody}\`,
-          );
-        }
-
-        return (await response.json()) as T;
-      } catch (error) {
-        lastError = error instanceof Error ? error : new Error(String(error));
-        if (attempt < retries) {
-          debugLog(
-            debugMode,
-            \`Request failed (attempt \${attempt + 1}/\${retries + 1}):\`,
-            lastError.message,
-          );
-          await sleep(delay);
-        }
+      if (response.status === 401 && attempt < retries) {
+        debugLog(debugMode, "Got 401, attempting token refresh...");
+        await refreshToken();
+        continue;
       }
+
+      if (response.status === 429) {
+        const retryAfter = response.headers.get("Retry-After");
+        throw new Error(
+          retryAfter
+            ? \`Airtable rate limited; retry after \${retryAfter}s\`
+            : "Airtable rate limited",
+        );
+      }
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(
+          \`Airtable API error \${response.status}: \${errorBody}\`,
+        );
+      }
+
+      return (await response.json()) as T;
     }
 
-    throw lastError || new Error("Request failed after retries");
+    // The loop returns or throws on every attempt; a final 401 falls through to
+    // the error above rather than retrying.
+    throw new Error("Airtable request did not complete");
   }
 
   /**

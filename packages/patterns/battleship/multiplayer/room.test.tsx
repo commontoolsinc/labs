@@ -11,7 +11,7 @@
  *
  * Run: deno task cf test packages/patterns/battleship/multiplayer/room.test.tsx --root packages/patterns/battleship --verbose
  */
-import { action, computed, pattern, Writable } from "commonfabric";
+import { action, assert, computed, pattern, Writable } from "commonfabric";
 import BattleshipRoom from "./room.tsx";
 import {
   createInitialShots,
@@ -121,15 +121,15 @@ export default pattern(() => {
   // Assertions - Initial State
   // ==========================================================================
 
-  const assert_initial_turn_is_player1 = computed(
+  const assert_initial_turn_is_player1 = assert(
     () => gameStateCell.get().currentTurn === 1,
   );
 
-  const assert_initial_phase_playing = computed(
+  const assert_initial_phase_playing = assert(
     () => gameStateCell.get().phase === "playing",
   );
 
-  const assert_initial_no_shots = computed(() => {
+  const assert_initial_no_shots = assert(() => {
     const shots = shotsCell.get();
     // All cells should be "empty"
     return shots[1].every((row) => row.every((cell) => cell === "empty")) &&
@@ -140,17 +140,17 @@ export default pattern(() => {
   // Assertions - After Miss
   // ==========================================================================
 
-  const assert_miss_recorded = computed(() => {
+  const assert_miss_recorded = assert(() => {
     const shots = shotsCell.get();
     // Player 1 fired at player 2's board, so shots[2][5][5] should be "miss"
     return shots[2][5][5] === "miss";
   });
 
-  const assert_turn_switched_to_player2 = computed(
+  const assert_turn_switched_to_player2 = assert(
     () => gameStateCell.get().currentTurn === 2,
   );
 
-  const assert_message_contains_miss = computed(() =>
+  const assert_message_contains_miss = assert(() =>
     gameStateCell.get().lastMessage.includes("Miss")
   );
 
@@ -159,12 +159,12 @@ export default pattern(() => {
   // ==========================================================================
 
   // After firing at same spot, nothing should change (still player 2's turn)
-  const assert_still_player2_turn = computed(
+  const assert_still_player2_turn = assert(
     () => gameStateCell.get().currentTurn === 2,
   );
 
   // After firing when not your turn, nothing should change
-  const assert_no_new_shot_recorded = computed(() => {
+  const assert_no_new_shot_recorded = assert(() => {
     const shots = shotsCell.get();
     // row 1, col 1 should still be empty (shot was ignored)
     return shots[2][1][1] === "empty";

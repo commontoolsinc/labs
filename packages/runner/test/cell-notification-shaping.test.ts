@@ -119,7 +119,7 @@ describe("wake shaper (cell path)", () => {
     s.hold("pattern-a", "cell-1", commit(), () => seen.push("1"));
     s.dispose();
     expect(s.hasPending()).toBe(false);
-    await new Promise((r) => setTimeout(r, 5));
+    await clock.settle();
     expect(seen).toEqual([]); // the deferred delivery is cancelled by dispose
   });
 });

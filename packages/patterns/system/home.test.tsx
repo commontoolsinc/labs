@@ -1,4 +1,4 @@
-import { action, computed, NAME, pattern, Writable } from "commonfabric";
+import { action, assert, NAME, pattern, Writable } from "commonfabric";
 import Home from "./home.tsx";
 
 export default pattern(() => {
@@ -7,7 +7,7 @@ export default pattern(() => {
   // A stable piece cell to favorite and unfavorite by identity.
   const piece = new Writable<{ [NAME]?: string }>({ [NAME]: "Fav Piece" });
 
-  const assert_initial_profile_missing = computed(() =>
+  const assert_initial_profile_missing = assert(() =>
     ((home.profiles as unknown[])?.length ?? 0) === 0
   );
 

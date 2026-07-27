@@ -6,7 +6,7 @@
  *
  * Run: deno task cf test packages/patterns/google/core/experimental/gmail-label-manager.test.tsx --root packages/patterns --verbose
  */
-import { action, computed, pattern, UI } from "commonfabric";
+import { action, assert, pattern, UI } from "commonfabric";
 import {
   findElementByExactText,
   findElementByText,
@@ -47,7 +47,7 @@ export default pattern(() => {
     }
   });
 
-  const assert_waiting_message_is_rendered = computed(() =>
+  const assert_waiting_message_is_rendered = assert(() =>
     hasText(manager[UI], "Waiting for Google connection") &&
     hasText(
       manager[UI],
@@ -55,11 +55,11 @@ export default pattern(() => {
     )
   );
 
-  const assert_refresh_control_is_hidden = computed(() =>
+  const assert_refresh_control_is_hidden = assert(() =>
     !hasText(manager[UI], "Refresh Labels")
   );
 
-  const assert_apply_button_disabled_without_auth = computed(() => {
+  const assert_apply_button_disabled_without_auth = assert(() => {
     const button = findElementByText(
       manager[UI],
       "button",
@@ -68,12 +68,12 @@ export default pattern(() => {
     return readValue(propsOf(button)?.disabled) === true;
   });
 
-  const assert_confirmation_uses_label_ids_when_names_unloaded = computed(() =>
+  const assert_confirmation_uses_label_ids_when_names_unloaded = assert(() =>
     hasText(manager[UI], "Confirm Label Changes") &&
     hasText(manager[UI], "Label_1")
   );
 
-  const assert_auth_error_result_is_reported = computed(() =>
+  const assert_auth_error_result_is_reported = assert(() =>
     manager.result?.success === false &&
     manager.result.messageCount === 1 &&
     manager.result.error === "Connect Google before applying label changes."

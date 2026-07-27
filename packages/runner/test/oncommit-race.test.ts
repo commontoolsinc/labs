@@ -47,13 +47,13 @@ describe("onCommit callback final outcome", () => {
     await tx.commit();
     tx = runtime.edit();
 
-    const allPiecesCell = runtime.getCell<string[]>(
+    const pieceRegistryCell = runtime.getCell<string[]>(
       space,
-      "all-pieces-list",
+      "piece-registry-list",
       undefined,
       tx,
     );
-    allPiecesCell.set([]);
+    pieceRegistryCell.set([]);
     await tx.commit();
     tx = runtime.edit();
 
@@ -84,7 +84,7 @@ describe("onCommit callback final outcome", () => {
     // onCommit fires exactly once with the failed final status.
     expect(statuses).toEqual(["error"]);
     expect(handlerCallCount).toBe(1);
-    expect(allPiecesCell.get()).toEqual([]);
+    expect(pieceRegistryCell.get()).toEqual([]);
   });
 
   it("fires onCommit once after a conflict is retried and lands", async () => {
@@ -147,13 +147,10 @@ describe("onCommit callback final outcome", () => {
         },
       );
 
-      // The first commit fails on the server asynchronously; wait for the
-      // backoff retry to re-run the handler before asserting.
-      const deadline = performance.now() + 2_000;
-      while (attempts < 2 && performance.now() < deadline) {
-        await runtime.idle();
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
+      // The first commit fails on the server asynchronously; the scheduler's
+      // backoff retry re-runs the handler. Advancing the clock fires the
+      // backoff timer so the retry lands before we assert.
+      await clock.tick(2_000);
       await runtime.idle();
       await runtime.storageManager.synced();
     } finally {

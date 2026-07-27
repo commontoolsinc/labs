@@ -74,6 +74,9 @@
  * | pieceCreatedCallback       | delta (browserWorker only)                       |
  * | telemetry                  | delta (productionServer, browserWorker)          |
  * | moduleByteCache            | delta (patternTest, remoteClient, unitTest)      |
+ * | patternCoverage            | delta (patternTest, remoteClient, browserWorker) |
+ * |                            | — test/CI statement-coverage collection, unset   |
+ * |                            | elsewhere                                        |
  * | trustSnapshotProvider      | delta (remoteClient, browserWorker)              |
  * | spaceHostMap               | delta (browserWorker only — federation routing   |
  * |                            | is decided by the shell host)                    |
@@ -89,6 +92,7 @@ import type {
   TrustSnapshot,
 } from "./cfc/mod.ts";
 import type { CommitBackpressurePolicy } from "./scheduler/backpressure.ts";
+import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import type { IStorageManager } from "./storage/interface.ts";
 import type { RuntimeTelemetry } from "./telemetry.ts";
 import type {
@@ -100,7 +104,6 @@ import type {
   PieceCreatedCallback,
   RuntimeFetch,
   RuntimeOptions,
-  VersionSkewHandler,
 } from "./runtime.ts";
 
 // ---------------------------------------------------------------------------
@@ -118,8 +121,6 @@ import type {
 export const RUNTIME_OPTION_KEYS = [
   "apiUrl",
   "spaceHostMap",
-  "clientVersion",
-  "onVersionSkew",
   "storageManager",
   "consoleHandler",
   "errorHandlers",
@@ -144,6 +145,7 @@ export const RUNTIME_OPTION_KEYS = [
   "hideInternalStackFrames",
   "commitBackpressure",
   "moduleByteCache",
+  "patternCoverage",
   "fetch",
 ] as const satisfies readonly (keyof RuntimeOptions)[];
 
@@ -185,7 +187,6 @@ export const EXPERIMENTAL_ENV_VARS = {
   // override while the flag exists; no environment exposure is needed.
   commitPreconditions: null,
   systemPatternAutoUpdate: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
-  systemPatternAutoUpdateHome: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME",
   computedCellIds: "EXPERIMENTAL_COMPUTED_CELL_IDS",
 } as const satisfies Record<keyof ExperimentalOptions, string | null>;
 
@@ -285,6 +286,8 @@ export interface RemoteClientPresetParams extends CoreParams {
   moduleByteCache?: ModuleByteCache;
   /** Trust provenance for CFC-relevant writes (pieces controller). */
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
+  /** Statement-coverage collector for the pattern integration harness. */
+  patternCoverage?: PatternCoverageCollector;
 }
 
 export interface PatternTestPresetParams extends CoreParams {
@@ -295,13 +298,13 @@ export interface PatternTestPresetParams extends CoreParams {
   moduleByteCache?: ModuleByteCache;
   /** Per-test laxer mode; defaults to the shared core pin. */
   cfcEnforcementMode?: CfcEnforcementMode;
+  /** Statement-coverage collector for `cf test` and the pattern harnesses. */
+  patternCoverage?: PatternCoverageCollector;
 }
 
 export interface BrowserWorkerPresetParams extends CoreParams {
   /** Space DID → host base URL map (federation); decided by the shell host. */
   spaceHostMap?: Record<string, string>;
-  /** This client build's git sha, for the system-pattern update version gate. */
-  clientVersion?: string;
   /** Host-controlled rollout dials, from `InitializationData`. */
   cfcEnforcementMode?: CfcEnforcementMode;
   cfcFlowLabels?: CfcFlowLabelsMode;
@@ -311,8 +314,8 @@ export interface BrowserWorkerPresetParams extends CoreParams {
   errorHandlers?: ErrorHandler[];
   navigateCallback?: NavigateCallback;
   pieceCreatedCallback?: PieceCreatedCallback;
-  /** System-pattern update version-skew signal → shell IPC. */
-  onVersionSkew?: VersionSkewHandler;
+  /** Statement-coverage collector, set only on the coverage-collecting shell build. */
+  patternCoverage?: PatternCoverageCollector;
 }
 
 export interface UnitTestPresetParams extends Omit<CoreParams, "experimental"> {
@@ -369,6 +372,9 @@ export const runtimePresets = {
       ...(params.trustSnapshotProvider !== undefined
         ? { trustSnapshotProvider: params.trustSnapshotProvider }
         : {}),
+      ...(params.patternCoverage !== undefined
+        ? { patternCoverage: params.patternCoverage }
+        : {}),
     };
   },
 
@@ -395,10 +401,13 @@ export const runtimePresets = {
       ...(params.moduleByteCache !== undefined
         ? { moduleByteCache: params.moduleByteCache }
         : {}),
+      ...(params.patternCoverage !== undefined
+        ? { patternCoverage: params.patternCoverage }
+        : {}),
     };
   },
 
-  /** Local CLI development runtime (`cf check` / `cf dev`): emulated storage, real fetch. */
+  /** Local CLI check runtime: emulated storage, real fetch. */
   localDev(params: CoreParams): RuntimeOptions {
     return coreOptions(params);
   },
@@ -415,9 +424,6 @@ export const runtimePresets = {
       patternEnvironment: { apiUrl: params.apiUrl },
       ...(params.spaceHostMap !== undefined
         ? { spaceHostMap: params.spaceHostMap }
-        : {}),
-      ...(params.clientVersion !== undefined
-        ? { clientVersion: params.clientVersion }
         : {}),
       ...(params.cfcEnforcementMode !== undefined
         ? { cfcEnforcementMode: params.cfcEnforcementMode }
@@ -443,8 +449,8 @@ export const runtimePresets = {
       ...(params.pieceCreatedCallback !== undefined
         ? { pieceCreatedCallback: params.pieceCreatedCallback }
         : {}),
-      ...(params.onVersionSkew !== undefined
-        ? { onVersionSkew: params.onVersionSkew }
+      ...(params.patternCoverage !== undefined
+        ? { patternCoverage: params.patternCoverage }
         : {}),
     };
   },

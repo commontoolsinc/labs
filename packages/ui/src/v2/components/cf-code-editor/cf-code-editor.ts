@@ -826,9 +826,6 @@ export class CFCodeEditor extends BaseElement {
       return;
     }
 
-    // External updates override local edits, so drop any pending debounced write.
-    this._cellController.cancel();
-
     // Apply external update to editor, preserving cursor position.
     // Clamp cursor to new document length in case content is shorter.
     const currentSelection = this._editorView.state.selection.main;
@@ -1738,11 +1735,16 @@ export class CFCodeEditor extends BaseElement {
       annotations: CFCodeEditor._cellSyncAnnotation.of(true),
     });
 
-    // Update Cell value IMMEDIATELY (bypass debounce) so Cell sync doesn't revert
+    // Record the rewrite as a local edit through the CellController so it merges
+    // with any pending debounced edit and the controller's pending-edit view
+    // stays consistent with the document. Then flush: this is a remote change,
+    // not user input, so it must persist without waiting on the input-timing
+    // strategy — the blur strategy would otherwise hold it until the next
+    // focus/blur cycle, and a rewrite that arrives while the editor is
+    // unfocused would never be written.
     const newDocValue = this._editorView.state.doc.toString();
-    if (isCellHandle(this.value)) {
-      this.value.set(newDocValue);
-    }
+    this.setValue(newDocValue);
+    this._cellController.flush();
   }
 
   /**

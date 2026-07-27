@@ -8,7 +8,7 @@ import {
   textContent,
   UI,
   Writable,
-} from "../commonfabric-stub.test.ts";
+} from "../commonfabric-shim.test.ts";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -83,15 +83,6 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
     assert(
       textContent(uiOf(fetchJsonExample)).includes("123"),
       "fetch-json example renders the typed repo star count",
-    );
-
-    const { default: TestAwaitInHandler } = await import(
-      "../../../gideon-tests/test-await-in-handler.tsx"
-    );
-    const testAwaitInHandler = instantiatePattern(TestAwaitInHandler, {});
-    assert(
-      textContent(uiOf(testAwaitInHandler)).includes("Fetched successfully"),
-      "await-in-handler pattern renders the reactive fetchJson result",
     );
 
     const { default: GmailImporter } = await import(

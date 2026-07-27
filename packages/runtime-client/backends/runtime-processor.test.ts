@@ -8,13 +8,11 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
   browserWorkerParamsFromInitializationData,
-  postVersionSkew,
   renderConfidentialityResolverFor,
   renderMembershipProviderFor,
   RuntimeProcessor,
   sanitizeForPostMessage,
   shouldReconcileHomeRoot,
-  versionSkewNotification,
 } from "./runtime-processor.ts";
 import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
 import { cfcAtom } from "@commonfabric/api/cfc";
@@ -23,7 +21,6 @@ import {
   type CellRef,
   type CfcLabelView,
   ClientNotificationType,
-  NotificationType,
   RequestType,
 } from "../protocol/mod.ts";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
@@ -1097,16 +1094,13 @@ describe("RuntimeProcessor blob upload IPC", () => {
 });
 
 describe("RuntimeProcessor home pattern IPC", () => {
-  it("reconciles the home root only when both update flags are enabled", () => {
+  it("reconciles the home root when the update flag is enabled", () => {
     expect(shouldReconcileHomeRoot({ experimental: {} })).toBe(false);
     expect(shouldReconcileHomeRoot({
-      experimental: { systemPatternAutoUpdate: true },
+      experimental: { systemPatternAutoUpdate: false },
     })).toBe(false);
     expect(shouldReconcileHomeRoot({
-      experimental: {
-        systemPatternAutoUpdate: true,
-        systemPatternAutoUpdateHome: true,
-      },
+      experimental: { systemPatternAutoUpdate: true },
     })).toBe(true);
   });
 
@@ -1197,10 +1191,7 @@ describe("RuntimeProcessor home pattern IPC", () => {
     let startedDirectly = false;
     const runtime = {
       userIdentityDID: "did:key:test-home",
-      experimental: {
-        systemPatternAutoUpdate: true,
-        systemPatternAutoUpdateHome: true,
-      },
+      experimental: { systemPatternAutoUpdate: true },
       getHomeSpaceCell: () => ({
         sync: () => Promise.resolve(),
         key: () => ({
@@ -1243,39 +1234,6 @@ describe("RuntimeProcessor home pattern IPC", () => {
 });
 
 describe("system-pattern update wiring", () => {
-  it("versionSkewNotification builds the worker→shell payload", () => {
-    expect(
-      versionSkewNotification({
-        space: "did:key:z6Mk",
-        clientVersion: "c",
-        toolshedVersion: "t",
-      }),
-    ).toEqual({
-      type: NotificationType.VersionSkew,
-      space: "did:key:z6Mk",
-      clientVersion: "c",
-      toolshedVersion: "t",
-    });
-  });
-
-  it("postVersionSkew posts the notification to the shell", () => {
-    const posted: unknown[] = [];
-    const orig = self.postMessage;
-    (self as { postMessage: unknown }).postMessage = (m: unknown) =>
-      posted.push(m);
-    try {
-      postVersionSkew({ space: "did:key:z6Mk", toolshedVersion: "t" });
-    } finally {
-      (self as { postMessage: unknown }).postMessage = orig;
-    }
-    expect(posted).toEqual([{
-      type: NotificationType.VersionSkew,
-      space: "did:key:z6Mk",
-      clientVersion: undefined,
-      toolshedVersion: "t",
-    }]);
-  });
-
   it("handleGetSpaceRootPattern returns the root ensured by the controller", async () => {
     const ref: CellRef = {
       id: "of:root-result" as CellRef["id"],
@@ -2378,6 +2336,55 @@ describe("RuntimeProcessor VDom event label-view ingress", () => {
   });
 });
 
+describe("RuntimeProcessor pattern coverage IPC", () => {
+  const report = {
+    spans: [{
+      fileName: "/main.tsx",
+      id: 1,
+      kind: "runtime" as const,
+      startLine: 1,
+      endLine: 1,
+      startColumn: 1,
+      endColumn: 2,
+    }],
+    hits: [{ fileName: "/main.tsx", id: 1, count: 3 }],
+  };
+
+  it("returns the worker collector's report", () => {
+    const processor = {
+      runtime: { patternCoverage: { toData: () => report } },
+    } as unknown as RuntimeProcessor;
+    expect(
+      RuntimeProcessor.prototype.getPatternCoverage.call(processor, {
+        type: RequestType.GetPatternCoverage,
+      }),
+    ).toEqual({ data: report });
+  });
+
+  it("reports null when the worker was built without a collector", () => {
+    const processor = { runtime: {} } as unknown as RuntimeProcessor;
+    expect(
+      RuntimeProcessor.prototype.getPatternCoverage.call(processor, {
+        type: RequestType.GetPatternCoverage,
+      }),
+    ).toEqual({ data: null });
+  });
+
+  it("routes a GetPatternCoverage request through the dispatcher", async () => {
+    const processor = {
+      runtime: { patternCoverage: { toData: () => report } },
+      // handleRequest dispatches to this.getPatternCoverage; the stub carries
+      // the real method so the routing case executes it.
+      getPatternCoverage: RuntimeProcessor.prototype.getPatternCoverage,
+    } as unknown as RuntimeProcessor;
+    expect(
+      await RuntimeProcessor.prototype.handleRequest.call(processor, {
+        type: RequestType.GetPatternCoverage,
+      }),
+    ).toEqual({ data: report });
+  });
+});
+
 describe("browserWorkerParamsFromInitializationData", () => {
   it("threads CFC initialization settings through the preset into runtime options", () => {
     const telemetry = { marker() {} } as unknown as Parameters<
@@ -2415,45 +2422,6 @@ describe("browserWorkerParamsFromInitializationData", () => {
     });
     // The preset pins patterns to the host's own API base.
     expect(options.patternEnvironment?.apiUrl.href).toBe("http://worker.test/");
-  });
-
-  it("threads clientVersion through to the runtime options", () => {
-    const telemetry = { marker() {} } as unknown as Parameters<
-      typeof browserWorkerParamsFromInitializationData
-    >[2];
-    const storageManager = {
-      as: { did: () => "did:key:worker" },
-    } as unknown as Parameters<
-      typeof browserWorkerParamsFromInitializationData
-    >[1];
-
-    const withVersion = runtimePresets.browserWorker(
-      browserWorkerParamsFromInitializationData(
-        {
-          apiUrl: "http://worker.test/",
-          identity: {} as never,
-          spaceDid: "did:key:space",
-          clientVersion: "build-sha-xyz",
-        },
-        storageManager,
-        telemetry,
-      ),
-    );
-    expect(withVersion.clientVersion).toBe("build-sha-xyz");
-
-    // Absent → omitted (rides the constructor default of undefined).
-    const withoutVersion = runtimePresets.browserWorker(
-      browserWorkerParamsFromInitializationData(
-        {
-          apiUrl: "http://worker.test/",
-          identity: {} as never,
-          spaceDid: "did:key:space",
-        },
-        storageManager,
-        telemetry,
-      ),
-    );
-    expect(withoutVersion.clientVersion).toBe(undefined);
   });
 
   it("falls back to the shared CFC pin when the host sends no dial", () => {
@@ -2496,6 +2464,39 @@ describe("browserWorkerParamsFromInitializationData", () => {
     expect(options.spaceHostMap).toEqual({
       "did:key:federated": "http://other-host.test/",
     });
+  });
+
+  it("builds a fresh collector only when the host asks for coverage", () => {
+    const storageManager = {
+      as: { did: () => "did:key:worker" },
+    } as unknown as Parameters<
+      typeof browserWorkerParamsFromInitializationData
+    >[1];
+    const telemetry = { marker() {} } as unknown as Parameters<
+      typeof browserWorkerParamsFromInitializationData
+    >[2];
+    const params = (patternCoverage: boolean | undefined) =>
+      browserWorkerParamsFromInitializationData(
+        {
+          apiUrl: "http://worker.test/",
+          identity: {} as never,
+          spaceDid: "did:key:space",
+          ...(patternCoverage === undefined ? {} : { patternCoverage }),
+        },
+        storageManager,
+        telemetry,
+      );
+
+    // On → a real collector the GetPatternCoverage handler can read back.
+    const on = runtimePresets.browserWorker(params(true));
+    expect(on.patternCoverage).toBeDefined();
+    expect(typeof on.patternCoverage?.toData).toBe("function");
+
+    // Off / absent → omitted, so the worker runs uninstrumented.
+    expect(runtimePresets.browserWorker(params(false)).patternCoverage)
+      .toBeUndefined();
+    expect(runtimePresets.browserWorker(params(undefined)).patternCoverage)
+      .toBeUndefined();
   });
 });
 

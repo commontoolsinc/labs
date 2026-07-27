@@ -16,7 +16,11 @@ import type {
   SchedulerTestStorageManager,
 } from "./scheduler-test-utils.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
-import { useCancelGroup, useDeferredCancelOwnership } from "../src/cancel.ts";
+import {
+  cancel as cancelCancellable,
+  useCancelGroup,
+  useDeferredCancelOwnership,
+} from "../src/cancel.ts";
 import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
 
 const secondSigner = await Identity.fromPassphrase(
@@ -140,7 +144,6 @@ async function waitForSchedulerCondition(
   const deadline = performance.now() + 1_000;
   while (!condition() && performance.now() < deadline) {
     await runtime.idle();
-    await new Promise((resolve) => setTimeout(resolve, 0));
   }
   if (!condition()) {
     throw new Error(message);
@@ -167,18 +170,11 @@ async function waitForSignal(
 async function expectIdlePending(
   idlePromise: Promise<void>,
 ): Promise<void> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const result = await Promise.race([
-      idlePromise.then(() => "resolved" as const),
-      new Promise<"pending">((resolve) => {
-        timeoutId = setTimeout(() => resolve("pending"), 100);
-      }),
-    ]);
-    expect(result).toBe("pending");
-  } finally {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-  }
+  const result = await Promise.race([
+    idlePromise.then(() => "resolved" as const),
+    clock.settle().then(() => "pending" as const),
+  ]);
+  expect(result).toBe("pending");
 }
 
 describe("scheduler event lineage", () => {
@@ -535,7 +531,7 @@ describe("scheduler event lineage", () => {
       );
       gate.fail();
       await runtime.idle();
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await clock.tick(50);
       await runtime.idle();
 
       expect(payloads.get()).toEqual([]);
@@ -1112,6 +1108,15 @@ describe("scheduler event lineage", () => {
 });
 
 describe("cancel group lifecycle", () => {
+  it("invokes an optional cancellable cleanup", () => {
+    let calls = 0;
+
+    cancelCancellable({ cancel: () => calls++ });
+    cancelCancellable({});
+
+    expect(calls).toBe(1);
+  });
+
   it("hands an installed cleanup through an already-cancelled owner once", () => {
     let calls = 0;
     const installedCancel = () => calls++;

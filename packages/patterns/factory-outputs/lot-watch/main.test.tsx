@@ -22,7 +22,7 @@
  *
  * NOTE: Uses .filter(() => true).length for array lengths per reactivity tracking note.
  */
-import { action, computed, pattern, Writable } from "commonfabric";
+import { action, assert, pattern, Writable } from "commonfabric";
 import LotWatch from "./main.tsx";
 import type { KnownVehicle, PlateGroup, Sighting } from "./main.tsx";
 import { classifyPlate, plateKey } from "./main.tsx";
@@ -103,10 +103,10 @@ export default pattern(() => {
   });
 
   // Initial state: no sightings
-  const assert_s1_empty = computed(() => len(s1.sightings) === 0);
+  const assert_s1_empty = assert(() => len(s1.sightings) === 0);
 
   // After first capture: plate normalized to uppercase alphanumerics
-  const assert_s1_normalized_plate = computed(() => {
+  const assert_s1_normalized_plate = assert(() => {
     const all = s1.sightings;
     if (len(all) !== 1) return false;
     const s = all[0];
@@ -119,8 +119,8 @@ export default pattern(() => {
   });
 
   // After second capture
-  const assert_s1_two_sightings = computed(() => len(s1.sightings) === 2);
-  const assert_s1_second_plate = computed(() => {
+  const assert_s1_two_sightings = assert(() => len(s1.sightings) === 2);
+  const assert_s1_second_plate = assert(() => {
     const all = s1.sightings;
     const second = all.find((s: Sighting) => s.spotNumber === "5");
     return second?.plateNumber === "XYZ999" && second?.plateState === "NY";
@@ -214,7 +214,7 @@ export default pattern(() => {
   // classifyPlate is a pure exported function — test it directly using the
   // pre-seeded data. This avoids needing to read back from the live computed
   // sightingRows (which requires admin mode to surface classification labels).
-  const assert_s2_ours_classification = computed(() =>
+  const assert_s2_ours_classification = assert(() =>
     classifyPlate(
       "OUR001",
       "CA",
@@ -223,7 +223,7 @@ export default pattern(() => {
     ) === "ours"
   );
 
-  const assert_s2_offender_classification = computed(() =>
+  const assert_s2_offender_classification = assert(() =>
     classifyPlate(
       "OFF001",
       "CA",
@@ -232,7 +232,7 @@ export default pattern(() => {
     ) === "offender"
   );
 
-  const assert_s2_guest_classification = computed(() =>
+  const assert_s2_guest_classification = assert(() =>
     classifyPlate(
       "GST001",
       "CA",
@@ -241,7 +241,7 @@ export default pattern(() => {
     ) === "guest"
   );
 
-  const assert_s2_unknown_classification = computed(() =>
+  const assert_s2_unknown_classification = assert(() =>
     classifyPlate(
       "UNK999",
       "CA",
@@ -251,9 +251,9 @@ export default pattern(() => {
   );
 
   // Verify plates appear in sightings with correct normalized plate numbers
-  const assert_s2_four_sightings = computed(() => len(s2.sightings) === 4);
+  const assert_s2_four_sightings = assert(() => len(s2.sightings) === 4);
 
-  const assert_s2_ours_in_sightings = computed(() =>
+  const assert_s2_ours_in_sightings = assert(() =>
     s2.sightings.some((s: Sighting) =>
       s.plateNumber === "OUR001" && s.spotNumber === "1"
     )
@@ -279,13 +279,13 @@ export default pattern(() => {
   });
 
   // The sighting was captured (capture is NOT admin-gated)
-  const assert_s3_sighting_captured = computed(() =>
+  const assert_s3_sighting_captured = assert(() =>
     s3.sightings.some((s: Sighting) => s.plateNumber === "BAD001")
   );
 
   // Before adding to known registry, plate classifies as unknown (pure function)
   const emptyKnown: KnownVehicle[] = [];
-  const assert_s3_initial_classification = computed(() =>
+  const assert_s3_initial_classification = assert(() =>
     classifyPlate("BAD001", "CA", [], emptyKnown) === "unknown"
   );
 
@@ -302,7 +302,7 @@ export default pattern(() => {
       label: "daily parker",
     },
   ];
-  const assert_s3_retro_classified = computed(() =>
+  const assert_s3_retro_classified = assert(() =>
     classifyPlate("BAD001", "CA", [], knownWithOffender) === "offender"
   );
 
@@ -316,7 +316,7 @@ export default pattern(() => {
     });
   });
 
-  const assert_s3_mark_no_admin_noop = computed(() =>
+  const assert_s3_mark_no_admin_noop = assert(() =>
     len(s3.knownVehicles) === 0
   );
 
@@ -376,20 +376,20 @@ export default pattern(() => {
   ];
 
   // Same-plate group has count=2, isRepeat=true
-  const assert_s4_repeat_plate_group_count = computed(() => {
+  const assert_s4_repeat_plate_group_count = assert(() => {
     const groups = groupSightingsByPlate(sightingsForGrouping);
     const g = groups.find((pg: PlateGroup) => pg.plate === "RPT001");
     return g?.count === 2 && g?.isRepeat === true;
   });
 
   // Only one group (blank plate skipped)
-  const assert_s4_only_one_group = computed(() => {
+  const assert_s4_only_one_group = assert(() => {
     const groups = groupSightingsByPlate(sightingsForGrouping);
     return len(groups) === 1;
   });
 
   // Blank-plate sightings are excluded from grouping
-  const assert_s4_blank_plate_not_grouped = computed(() => {
+  const assert_s4_blank_plate_not_grouped = assert(() => {
     const groups = groupSightingsByPlate(sightingsForGrouping);
     return groups.every((pg: PlateGroup) => pg.plate !== "");
   });
@@ -495,14 +495,14 @@ export default pattern(() => {
   ];
 
   // Repeat plates: only AAA111 (3x) and BBB222 (2x), not CCC333 (1x)
-  const assert_s5_repeat_groups = computed(() => {
+  const assert_s5_repeat_groups = assert(() => {
     const groups = groupSightingsByPlate(sightingsForReport);
     const repeats = groups.filter((g: PlateGroup) => g.isRepeat);
     return len(repeats) === 2;
   });
 
   // Leaderboard ordering: sorted by count descending → AAA111 first, BBB222 second
-  const assert_s5_leaderboard_order = computed(() => {
+  const assert_s5_leaderboard_order = assert(() => {
     const groups = groupSightingsByPlate(sightingsForReport);
     const sorted = groups
       .filter((g: PlateGroup) => g.isRepeat)
@@ -517,7 +517,7 @@ export default pattern(() => {
   });
 
   // Spot occupancy: spot 1 has 3 sightings, spot 5 has 2, spot 12 has 1
-  const assert_s5_spot_occupancy = computed(() => {
+  const assert_s5_spot_occupancy = assert(() => {
     const spot1 = sightingsForReport.filter((s) => s.spotNumber === "1");
     const spot5 = sightingsForReport.filter((s) => s.spotNumber === "5");
     const spot12 = sightingsForReport.filter((s) => s.spotNumber === "12");
@@ -558,7 +558,7 @@ export default pattern(() => {
     });
   });
 
-  const assert_s6_mark_no_admin_noop = computed(() =>
+  const assert_s6_mark_no_admin_noop = assert(() =>
     len(s6.knownVehicles) === 0
   );
 
@@ -568,9 +568,7 @@ export default pattern(() => {
     s6.deleteSighting.send({ id });
   });
 
-  const assert_s6_delete_no_admin_noop = computed(() =>
-    len(s6.sightings) === 1
-  );
+  const assert_s6_delete_no_admin_noop = assert(() => len(s6.sightings) === 1);
 
   // Now establish admin: enableAdminManager makes the current user a manager
   const action_s6_enable_admin_manager = action(() => {
@@ -589,7 +587,7 @@ export default pattern(() => {
 
   // After Alice is toggled admin, markVehicle called by non-matching reporter
   // (blank reporter) should still be a no-op for knownVehicles.
-  const assert_s6_still_no_known_vehicles = computed(() =>
+  const assert_s6_still_no_known_vehicles = assert(() =>
     len(s6.knownVehicles) === 0
   );
 
@@ -609,7 +607,7 @@ export default pattern(() => {
     },
   ];
 
-  const assert_s7_ours_beats_offender = computed(() =>
+  const assert_s7_ours_beats_offender = assert(() =>
     classifyPlate("BOTH01", "CA", conflictOurs, conflictKnown) === "ours"
   );
 
@@ -634,12 +632,12 @@ export default pattern(() => {
     },
   ];
 
-  const assert_s7_offender_beats_guest = computed(() =>
+  const assert_s7_offender_beats_guest = assert(() =>
     classifyPlate("PRIO01", "CA", [], priorityKnown) === "offender"
   );
 
   // Empty plate number → always unknown
-  const assert_s7_empty_plate_unknown = computed(() =>
+  const assert_s7_empty_plate_unknown = assert(() =>
     classifyPlate("", "CA", conflictOurs, conflictKnown) === "unknown"
   );
 
@@ -691,7 +689,7 @@ export default pattern(() => {
   const action_s8_save_guest_no_admin = action(() => {
     s8.saveGuest.send();
   });
-  const assert_s8_save_guest_no_admin_noop = computed(() =>
+  const assert_s8_save_guest_no_admin_noop = assert(() =>
     len(s8.knownVehicles) === 0
   );
 
@@ -706,7 +704,7 @@ export default pattern(() => {
   const action_s8_assign_no_admin = action(() => {
     s8.assignToPerson.send();
   });
-  const assert_s8_assign_no_admin_noop = computed(() => {
+  const assert_s8_assign_no_admin_noop = assert(() => {
     const alice = s8.people.find((p) => p.name === "Alice");
     return alice !== undefined && (alice.vehicles ?? []).length === 0;
   });
@@ -729,7 +727,7 @@ export default pattern(() => {
       org: "Local Butcher Shop",
     });
   });
-  const assert_s8_mark_succeeds = computed(() => {
+  const assert_s8_mark_succeeds = assert(() => {
     const kvs = [...s8.knownVehicles];
     return kvs.some((kv) =>
       kv.plateNumber === "X1" && kv.category === "offender"
@@ -744,7 +742,7 @@ export default pattern(() => {
   const action_s8_save_guest_admin = action(() => {
     s8.saveGuest.send();
   });
-  const assert_s8_save_guest_succeeds = computed(() => {
+  const assert_s8_save_guest_succeeds = assert(() => {
     const kvs = [...s8.knownVehicles];
     return kvs.some((kv) => kv.plateNumber === "Y1" && kv.category === "guest");
   });
@@ -759,7 +757,7 @@ export default pattern(() => {
   const action_s8_assign_admin = action(() => {
     s8.assignToPerson.send();
   });
-  const assert_s8_assign_succeeds = computed(() => {
+  const assert_s8_assign_succeeds = assert(() => {
     const alice = s8.people.find((p) => p.name === "Alice");
     if (!alice) return false;
     return (alice.vehicles ?? []).some((v) =>

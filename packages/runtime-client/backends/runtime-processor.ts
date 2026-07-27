@@ -25,6 +25,7 @@ import {
   isCellResult,
   markRendererInputTx,
   markUiInputBlindWriteTx,
+  PatternCoverageCollector,
   Runtime,
   runtimePresets,
   RuntimeTelemetry,
@@ -33,7 +34,6 @@ import {
   setPatternEnvironment,
   type SigilLink,
   unmarkUiInputBlindWriteTx,
-  type VersionSkewInfo,
 } from "@commonfabric/runner";
 import { linkRefPayload } from "@commonfabric/runner/shared";
 import {
@@ -47,7 +47,10 @@ import {
   stripSigilCfcLabelViews,
 } from "@commonfabric/runner/cfc";
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
-import { StorageManager } from "../../runner/src/storage/cache.ts";
+import {
+  defaultSettings,
+  StorageManager,
+} from "../../runner/src/storage/cache.ts";
 import {
   getMetaLink,
   KeepAsCell,
@@ -77,6 +80,7 @@ import {
   GetGraphSnapshotRequest,
   type GetHomeSpaceCellRequest,
   type GetLoggerCountsRequest,
+  type GetPatternCoverageRequest,
   type GetPatternSourcesRequest,
   type GetSettleStatsHistoryRequest,
   type GetSettleStatsRequest,
@@ -100,6 +104,7 @@ import {
   type PageStartRequest,
   type PageStopRequest,
   type PageSyncedRequest,
+  type PatternCoverageResponse,
   type PatternSourcesResponse,
   type RecreateSpaceRootPatternRequest,
   type RegisterSpaceHostRequest,
@@ -125,7 +130,6 @@ import {
   type VDomMountRequest,
   type VDomMountResponse,
   type VDomUnmountRequest,
-  type VersionSkewNotification,
   type WriteStackTraceResponse,
 } from "../protocol/mod.ts";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
@@ -191,29 +195,11 @@ function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
   return new URL(url, spaceBaseUrl).href;
 }
 
-/** The worker→shell versionSkew IPC payload for a build-mismatch skip. */
-export function versionSkewNotification(
-  info: VersionSkewInfo,
-): VersionSkewNotification {
-  return {
-    type: NotificationType.VersionSkew,
-    space: info.space,
-    clientVersion: info.clientVersion,
-    toolshedVersion: info.toolshedVersion,
-  };
-}
-
-/** Post the versionSkew notification to the shell. Exported for testing. */
-export function postVersionSkew(info: VersionSkewInfo): void {
-  self.postMessage(versionSkewNotification(info));
-}
-
 /** Whether the home root must take the reconcile-before-start path. */
 export function shouldReconcileHomeRoot(
   runtime: Pick<Runtime, "experimental">,
 ): boolean {
-  return runtime.experimental?.systemPatternAutoUpdate === true &&
-    runtime.experimental?.systemPatternAutoUpdateHome === true;
+  return runtime.experimental?.systemPatternAutoUpdate === true;
 }
 
 /**
@@ -229,9 +215,6 @@ export function browserWorkerParamsFromInitializationData(
 ): BrowserWorkerPresetParams {
   return {
     apiUrl: new URL(data.apiUrl),
-    ...(data.clientVersion !== undefined
-      ? { clientVersion: data.clientVersion }
-      : {}),
     storageManager,
     // The host decides the flags (shell build-time defines); absent ⇒ runtime
     // defaults.
@@ -248,6 +231,11 @@ export function browserWorkerParamsFromInitializationData(
       : {}),
     ...(data.trustSnapshot
       ? { trustSnapshotProvider: () => data.trustSnapshot }
+      : {}),
+    // The worker owns its collector so the GetPatternCoverage handler can read
+    // it back through `runtime.patternCoverage`; the harness pulls it at teardown.
+    ...(data.patternCoverage
+      ? { patternCoverage: new PatternCoverageCollector() }
       : {}),
   };
 }
@@ -531,6 +519,14 @@ export class RuntimeProcessor {
       spaceIdentity: spaceIdentity,
       memoryHost: apiUrlObj,
       spaceHostMap: data.spaceHostMap,
+      // Host dogfood toggle (commonfabric.concurrentWatchRefresh): overlap
+      // watch-refresh round trips up to a bounded window. Off unless the host
+      // set it; the default is strict single-flight.
+      settings: {
+        ...defaultSettings,
+        experimentalConcurrentWatchRefresh:
+          data.concurrentWatchRefresh === true,
+      },
     });
 
     // Mirror the durability barrier to the page: `pending` is true while any
@@ -601,7 +597,6 @@ export class RuntimeProcessor {
       },
 
       errorHandlers: [postContextualRuntimeError],
-      onVersionSkew: postVersionSkew,
     }));
 
     if (!await runtime.healthCheck()) {
@@ -1283,7 +1278,7 @@ export class RuntimeProcessor {
 
   async handlePageGetAll(request: PageGetAllRequest): Promise<CellResponse> {
     const { pieceManager } = this.getSpaceCtx(request.space);
-    const piecesCell = await pieceManager.getPieces();
+    const piecesCell = await pieceManager.getPieceRegistry();
     return {
       cell: createCellRef(piecesCell),
     };
@@ -1479,6 +1474,10 @@ export class RuntimeProcessor {
     return { result };
   }
 
+  getPatternCoverage(_: GetPatternCoverageRequest): PatternCoverageResponse {
+    return { data: this.runtime.patternCoverage?.toData() ?? null };
+  }
+
   getSettleStats(
     _request: GetSettleStatsRequest,
   ): SettleStatsResponse {
@@ -1611,6 +1610,8 @@ export class RuntimeProcessor {
         return this.getGraphSnapshot(request);
       case RequestType.GetLoggerCounts:
         return this.getLoggerCounts(request);
+      case RequestType.GetPatternCoverage:
+        return this.getPatternCoverage(request);
       case RequestType.SetLoggerLevel:
         return this.setLoggerLevel(request);
       case RequestType.SetLoggerEnabled:

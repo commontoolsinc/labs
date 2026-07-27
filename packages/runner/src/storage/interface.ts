@@ -207,6 +207,17 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   synced(): Promise<void>;
 
   /**
+   * A throwable `AuthorizationError` when `space` is under a permanent
+   * authorization denial (an ACL shortfall, an audience or protocol mismatch),
+   * or undefined when it is authorized or was never opened. Scoped to one space
+   * on purpose: `synced()` stays silent so a denied cross-space link stays a
+   * silent absent read, and a caller that must reach a specific space reads this
+   * after `synced()` to surface the real failure. Optional: emulated/test
+   * managers may omit it.
+   */
+  authorizationError?(space: MemorySpace): Error | undefined;
+
+  /**
    * Register an in-flight commit so the durability barrier
    * (`hasPendingCommits` / `pendingCommitsSettled`) covers it. Called by the
    * transaction layer at `commit()` entry, synchronously with the commit
@@ -347,6 +358,20 @@ export interface IRemoteStorageProviderSettings {
    * abort.
    */
   connectionTimeout: number;
+
+  /**
+   * EXPERIMENTAL (default off): allow more than one watch-refresh round trip
+   * to be in flight per space at once, up to a bounded window
+   * (`CONCURRENT_WATCH_REFRESH_WINDOW`). By default watch acquisition is strict
+   * single-flight, so traversal-driven pulls discovered a tick apart — even
+   * with no data dependency between them — serialize into one-RTT-each frames
+   * instead of fanning out. With this on, refreshes overlap up to the window
+   * and the memory client issues the watch-mutation family (set + add) in an
+   * ordered issue phase so wire order is preserved. Same-tick microtask
+   * coalescing is unchanged. Off preserves the exact current behavior. See
+   * docs/development/EXPERIMENTAL_OPTIONS.md.
+   */
+  experimentalConcurrentWatchRefresh?: boolean;
 }
 
 export interface LocalStorageOptions {
@@ -799,8 +824,8 @@ export interface IStorageTransaction {
    * memory transaction. When there are no semantic writes, storage backends may
    * still commit this metadata as an internal no-op observation.
    */
-  setSchedulerObservation?(observation: unknown): void;
-  getSchedulerObservation?(): unknown;
+  setSchedulerObservation?(observation: FabricValue): void;
+  getSchedulerObservation?(): FabricValue;
 
   /**
    * Optional commit-time preconditions attached to this transaction's commit in
@@ -837,6 +862,16 @@ export interface IStorageTransaction {
     address: IMemorySpaceAddress,
     delta: MergeableOpDelta,
   ): void;
+
+  /**
+   * Abandon the mergeable fast path for the array at `address`. A caller that
+   * rewrites the whole array in a way a recorded mergeable op cannot represent —
+   * an in-place reshape such as sort/reverse/splice after a push — calls this so
+   * the commit emits the whole-array diff (the correct local value) instead of a
+   * tail-relative op whose recorded tail no longer identifies the appended
+   * elements. A path with no recorded op is left untouched.
+   */
+  poisonMergeableOp?(address: IMemorySpaceAddress): void;
 
   /**
    * The document addresses for which this transaction recorded a mergeable op.
@@ -1061,6 +1096,13 @@ export interface IExtendedStorageTransaction
    * resolving the link to a memory address.
    */
   recordMergeableOp?(link: NormalizedFullLink, delta: MergeableOpDelta): void;
+
+  /**
+   * Abandon the mergeable fast path for the array addressed by `link`, forwarded
+   * to the underlying transaction after resolving the link. See
+   * {@link IStorageTransaction.poisonMergeableOp}.
+   */
+  poisonMergeableOp?(link: NormalizedFullLink): void;
 
   getCfcState(): Readonly<CfcTxState>;
   setCfcEnforcementMode(mode: CfcEnforcementMode): void;
@@ -1629,7 +1671,7 @@ export interface IStorageTransactionComplete extends IStorageError {
  * Represents adddress within the memory space which is like pointer inside the
  * fact value in the memory.
  */
-export interface IMemoryAddress {
+export type IMemoryAddress = {
   /**
    * URI to an entity. It corresponds to `of` field in the memory protocol.
    */
@@ -1648,11 +1690,11 @@ export interface IMemoryAddress {
    * address. It is a path within the `is` field of the fact in memory protocol.
    */
   path: readonly MemoryAddressPathComponent[];
-}
+};
 
-export interface IMemorySpaceAddress extends IMemoryAddress {
+export type IMemorySpaceAddress = IMemoryAddress & {
   space: MemorySpace;
-}
+};
 
 export type MemoryAddressPathComponent = string;
 
@@ -1788,7 +1830,7 @@ export type NativeStorageCommitOperation =
 
 export interface NativeStorageCommit {
   operations: readonly NativeStorageCommitOperation[];
-  schedulerObservation?: unknown;
+  schedulerObservation?: FabricValue;
   preconditions?: readonly CommitPrecondition[];
   /**
    * Folded SQLite write ops, applied in the same wire commit as `operations`

@@ -340,59 +340,22 @@ is the **intersection** of:
 2. Any schema embedded in the reference itself (what the reference declares B to
    contain).
 
-This intersection is computed by `combineSchema`:
+`combineSchema` computes a best-effort pseudo-intersection. False schemas and
+disjoint types produce a false schema, while an unconstrained schema yields to
+the other input. Integer is treated as a subtype of number. For combinations
+that do not receive more specific handling, the parent schema takes precedence
+while retaining relevant flags from the link schema.
 
-```
-combineSchema(parentSchema, linkSchema):
-  if parentSchema is false:
-    return parentSchema
+Object schemas combine shared properties recursively, retain properties allowed
+by only one side, and preserve every property required by either input. Array
+schemas combine their `items` schemas recursively. Their positional
+`prefixItems` extend to the longer input prefix: each position combines the two
+positional schemas, falling back to that input's `items` schema after its prefix
+ends. The result omits `prefixItems` when the merged prefix is empty.
 
-  if linkSchema is false:
-    return linkSchema
-
-  if parentSchema is true/{}:
-    return linkSchema  (parent accepts anything, use link's constraint)
-
-  if linkSchema is true/{}:
-    return parentSchema  (link accepts anything, use parent's constraint)
-
-  compare parentSchema.type and linkSchema.type:
-    let unknown or an absent type use legacy parent precedence
-    treat integer as a subtype of number; their intersection is integer
-    if their possible types cannot overlap, return false
-
-  if both are type:"object":
-    // A property required by either input remains required.
-    required = union(parentSchema.required, linkSchema.required)
-
-    // Intersect properties: for shared property keys, recurse combineSchema.
-    // For properties only in one schema, combine with the other's
-    // additionalProperties.
-    mergedProperties = {}
-    for each key in union(parentSchema.properties, linkSchema.properties):
-      mergedProperties[key] = combineSchema(
-        parentSchema.properties[key] ?? parentSchema.additionalProperties,
-        linkSchema.properties[key] ?? linkSchema.additionalProperties
-      )
-    return { type: "object", properties: mergedProperties, ... }
-
-  if both are type:"array":
-    items = parent.items is absent ? link.items
-      : link.items is absent ? parent.items
-      : combineSchema(parent.items, link.items)
-    return {
-      ...linkSchema,
-      ...parentSchema,  // parent metadata wins
-      type: "array",
-      items
-    }
-
-  // Fallback: prefer parent schema with link's metadata flags
-  return parentSchema
-```
-
-This mirrors the `combineSchema` and `narrowSchema` functions from
-`traverse.ts`.
+The operation is intentionally not a complete JSON Schema intersection and does
+not resolve `$ref` values. See `combineSchema` and `narrowSchema` in
+`packages/runner/src/traverse.ts` for the implementation.
 
 ### 5.3.5 Schema Tracker
 

@@ -8,6 +8,7 @@ import {
   compactChangeSet,
   diffAndUpdate,
   normalizeAndDiff,
+  schemaIfcOverlapsPath,
 } from "../src/data-updating.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
@@ -454,6 +455,42 @@ describe("data-updating", () => {
       expect(changes.length).toBe(0);
     });
 
+    it("stores $alias-shaped records verbatim as plain data", () => {
+      const testCell = runtime.getCell<any>(
+        space,
+        "normalizeAndDiff $alias plain data",
+        undefined,
+        tx,
+      );
+
+      const aliasRecord = { $alias: { path: ["target"] } };
+      diffAndUpdate(runtime, tx, testCell.getAsNormalizedFullLink(), {
+        alias: aliasRecord,
+        target: 1,
+      });
+
+      // Stored verbatim: the record is plain data, not converted to a link.
+      expect(testCell.getRaw()).toEqual({ alias: aliasRecord, target: 1 });
+      expect(isSigilLink(testCell.key("alias").getRaw())).toBe(false);
+
+      // Writing at the location holding the record writes there; the record
+      // is not followed as a write redirect.
+      const changes = normalizeAndDiff(
+        runtime,
+        tx,
+        testCell.key("alias").getAsNormalizedFullLink(),
+        100,
+      );
+      expect(changes.length).toBe(1);
+      expect(
+        areNormalizedLinksSame(
+          changes[0].location,
+          testCell.key("alias").getAsNormalizedFullLink(),
+        ),
+      ).toBe(true);
+      expect(changes[0].value).toBe(100);
+    });
+
     it("should follow aliases", () => {
       const testCell = runtime.getCell<{
         value: number;
@@ -464,9 +501,10 @@ describe("data-updating", () => {
         undefined,
         tx,
       );
+      // Redirects in data are sigil links; `$alias` in data is plain data.
       testCell.setRaw({
         value: 42,
-        alias: { $alias: { path: ["value"] } },
+        alias: testCell.key("value").getAsWriteRedirectLink(),
       });
       const current = testCell.key("alias").getAsNormalizedFullLink();
       const changes = normalizeAndDiff(runtime, tx, current, 100);
@@ -496,7 +534,7 @@ describe("data-updating", () => {
       testCell.setRaw({
         value: 42,
         value2: 200,
-        alias: { $alias: { path: ["value"] } },
+        alias: testCell.key("value").getAsWriteRedirectLink(),
       });
       const current = testCell.key("alias").getAsNormalizedFullLink();
       const changes = normalizeAndDiff(runtime, tx, current, 100);
@@ -513,9 +551,8 @@ describe("data-updating", () => {
 
       applyChangeSet(tx, changes);
 
-      const changes2 = normalizeAndDiff(runtime, tx, current, {
-        $alias: { path: ["value2"] },
-      });
+      const redirectToValue2 = testCell.key("value2").getAsWriteRedirectLink();
+      const changes2 = normalizeAndDiff(runtime, tx, current, redirectToValue2);
 
       applyChangeSet(tx, changes2);
 
@@ -526,7 +563,7 @@ describe("data-updating", () => {
           testCell.key("alias").getAsNormalizedFullLink(),
         ),
       ).toBe(true);
-      expect(changes2[0].value).toEqual({ $alias: { path: ["value2"] } });
+      expect(changes2[0].value).toEqual(redirectToValue2);
 
       const changes3 = normalizeAndDiff(runtime, tx, current, 300);
 
@@ -2118,5 +2155,61 @@ describe("scope-isolation write guard", () => {
       dest.key("item").getAsNormalizedFullLink(),
     );
     expect(isSigilLink(stored)).toBe(true);
+  });
+});
+
+// CT-1895: the overlap predicate deciding whether a schema-policy write
+// input might cover a written path missed ifc labels in tuple slots, so
+// schema-policy inputs for tuple positions were skipped (fail-open).
+describe("schemaIfcOverlapsPath", () => {
+  const tupleSchema = {
+    type: "object",
+    properties: {
+      pair: {
+        type: "array",
+        prefixItems: [
+          { type: "string", ifc: { confidentiality: ["x"] } },
+          { type: "number" },
+        ],
+      },
+    },
+  } as const satisfies JSONSchema;
+
+  it("overlaps a write into a labeled tuple slot", () => {
+    expect(schemaIfcOverlapsPath(tupleSchema, [], ["pair", "0"])).toBe(true);
+  });
+
+  it("does not overlap the unlabeled slot", () => {
+    expect(schemaIfcOverlapsPath(tupleSchema, [], ["pair", "1"])).toBe(false);
+  });
+
+  it("still overlaps items-covered elements via the wildcard", () => {
+    const restSchema = {
+      type: "object",
+      properties: {
+        list: {
+          type: "array",
+          items: { type: "string", ifc: { confidentiality: ["x"] } },
+        },
+      },
+    } as const satisfies JSONSchema;
+    expect(schemaIfcOverlapsPath(restSchema, [], ["list", "3"])).toBe(true);
+  });
+
+  it("sees labels inside combinator branches (shared-walk descent)", () => {
+    // Gained by the forEachSubschema rework: ifc under an anyOf branch was
+    // previously invisible to the predicate (fail-open).
+    const branchSchema = {
+      type: "object",
+      properties: {
+        field: {
+          anyOf: [
+            { type: "string", ifc: { confidentiality: ["x"] } },
+            { type: "number" },
+          ],
+        },
+      },
+    } as const satisfies JSONSchema;
+    expect(schemaIfcOverlapsPath(branchSchema, [], ["field"])).toBe(true);
   });
 });

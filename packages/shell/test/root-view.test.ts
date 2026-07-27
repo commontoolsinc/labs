@@ -101,38 +101,6 @@ describe("XRootView", () => {
     }
   });
 
-  it("raises the reload banner on a versionSkew, and renders it", async () => {
-    const restore = installBrowserGlobals();
-    const warnings: unknown[][] = [];
-    const origWarn = console.warn;
-    console.warn = (...a: unknown[]) => warnings.push(a);
-    try {
-      const { XRootView } = await import("../src/views/RootView.ts");
-      const view = new XRootView();
-      const bannerSlot = () =>
-        (view.render() as { values: unknown[] }).values[0];
-
-      // No banner by default (the conditional renders null).
-      expect(bannerSlot()).toBe(null);
-
-      // The worker's versionSkew handler warns and flips the banner state on.
-      view._handleVersionSkew({ space: "did:key:x" });
-      expect(warnings.length).toBe(1);
-      expect(
-        (view as unknown as { _versionSkew: boolean })._versionSkew,
-      ).toBe(true);
-
-      // Now the banner template is constructed and rendered in the slot.
-      const banner = bannerSlot();
-      expect(banner).not.toBe(null);
-      expect(templateStrings(banner)).toContain("version-skew-banner");
-      expect(templateStrings(banner)).toContain("Reload");
-    } finally {
-      console.warn = origWarn;
-      restore();
-    }
-  });
-
   it("replaces the current worker after a compiler chunk load failure", async () => {
     const restore = installBrowserGlobals();
     const originalError = console.error;
@@ -180,9 +148,11 @@ describe("XRootView", () => {
     const { RuntimeInternals } = await import("@commonfabric/lib-shell");
     const originalCreate = RuntimeInternals.create;
     let capturedOnError: ((event: ErrorNotification) => void) | undefined;
+    let capturedWorkerUrl: URL | undefined;
     const fakeRuntime = {};
     RuntimeInternals.create = ((options) => {
       capturedOnError = options.onError;
+      capturedWorkerUrl = options.workerUrl;
       return Promise.resolve({
         runtime: () => fakeRuntime,
         dispose: () => Promise.resolve(),
@@ -208,6 +178,7 @@ describe("XRootView", () => {
       task.run([view.app]);
       await task.taskComplete;
       expect(capturedOnError).toBeDefined();
+      expect(capturedWorkerUrl?.pathname).toBe("/scripts/worker-runtime.js");
 
       const event: ErrorNotification = {
         type: NotificationType.ErrorReport,

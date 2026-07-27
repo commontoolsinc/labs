@@ -87,6 +87,8 @@ One line per archived document; each document's header carries the fuller
 
 ### Audits and reports
 
+- [cf-json-argument-audit-2026-07.md](packages/cli/cf-json-argument-audit-2026-07.md)
+  — command-by-command audit of `cf --json` behavior, July 2026.
 - [cts-docs-audit-2026-07.md](cts-docs-audit-2026-07.md) —
   ts-transformers/schema-generator documentation audit, July 2026.
 - [cfc-spec-audit.md](cfc-spec-audit.md) — the CFC spec versus the
@@ -99,6 +101,9 @@ One line per archived document; each document's header carries the fuller
   — the v1 scheduler's mechanisms and their v2 dispositions, June 2026.
 - [PREEXISTING_BUGS.md](packages/patterns/PREEXISTING_BUGS.md) — pattern
   runtime bug survey, December 2025.
+- [piece-timeout-hangs-investigation.md](packages/cli/piece-timeout-hangs-investigation.md)
+  — why the CLI tool-result poll was replaced event-driven and why the
+  piece-start and sync bounds could not be removed at the CLI layer, July 2026.
 
 ### Executed plans and work orders
 
@@ -108,6 +113,8 @@ One line per archived document; each document's header carries the fuller
   lowering and durable atomic last-complete snapshots.
 - [async-api-availability-migration.md](plans/async-api-availability-migration.md)
   — pending render continuity and the remaining asynchronous API migrations.
+- [cf-harness implementation plan](packages/cf-harness/docs/IMPLEMENTATION_PLAN.md)
+  — April 2026 package bootstrap plan and implementation checkpoint.
 - [2026-03-17-ct-exec-fuse-callables.md](plans/2026-03-17-ct-exec-fuse-callables.md)
   and [its test plan](plans/2026-03-17-ct-exec-fuse-callables-test-plan.md) —
   `cf exec` and mounted callable files.
@@ -200,6 +207,13 @@ One line per archived document; each document's header carries the fuller
 
 ### Investigations, journals, and working notes
 
+- [cf-harness Loom migration notes](packages/cf-harness/docs/LOOM_MIGRATION_NOTES.md)
+  — April 2026 pre-integration assessment of Loom's Codex batch and interactive paths.
+- [bug3-suggestion-alias-verification-2026-07.md](packages/patterns/bug3-suggestion-alias-verification-2026-07.md)
+  — verification that the December 2025 survey's Bug 3 (Counter values
+  rendering as raw `$alias` objects when instantiated via `fetchAndRunPattern`)
+  does not reproduce; the dynamically-compiled render path resolves reactive and
+  computed values correctly, July 2026.
 - [reverse-invalidation-deadlock.md](packages/fuse/reverse-invalidation-deadlock.md)
   — root cause of the FUSE daemon hang that flaked the CLI FUSE integration
   suite: synchronous reverse invalidation deadlocking the request thread,
@@ -226,6 +240,9 @@ One line per archived document; each document's header carries the fuller
 - [2026-07-ci-duration-profile.md](development/performance/2026-07-ci-duration-profile.md)
   — July 2026 Deno Workflow profile, including compile-cache validation,
   duplicate work, workspace shard balance, and follow-up experiments.
+- [2026-07-binary-artifact-transfer.md](development/performance/2026-07-binary-artifact-transfer.md)
+  — binary artifact file and byte transfer snapshot before the per-binary
+  workflow split, July 2026.
 - [scoped-cells-field-notes.md](development/scoped-cells-field-notes.md) —
   field journal from the first scoped-cell patterns.
 - [2026-07-02-convergence-evidence-appendix.md](plans/2026-07-02-convergence-evidence-appendix.md)

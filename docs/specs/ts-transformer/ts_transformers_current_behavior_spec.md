@@ -477,18 +477,14 @@ Diagnostics emitted in all modes:
   - message instructs the author to move the use into a nested
     `computed(() => ...)` or module-scope `lift()`
 - **Error** `pattern-context:optional-chaining`
-  - optional calls in restricted reactive context **outside JSX and outside
-    explicit compute callbacks** — top-level (`input?.foo()`), statement
-    position, and collection callbacks (`items.map((item) =>
-    item?.toUpperCase())`) all error (`test/validation.test.ts:546,567,1509`)
-  - inside JSX expressions (`{maybeFn?.(1)}`, `{text?.trim()}`) and inside
-    `computed(...)` bodies the same shapes are accepted and lowered intact —
-    an unratified delta from the target-language matrix's unconditional
-    "Unsupported" (see the design-deltas 2026-07-10 record; note the
-    lowering drops function-typed captures from the lift input schema, so an
-    accepted reactive optional-call is dead code at runtime)
   - optional property / element access that appears outside a supported
     lowerable expression site
+  - optional calls do not receive this diagnostic merely because they are
+    optional: their underlying call root is classified by the same policy as a
+    non-optional call
+  - at supported expression sites, receiver optionality (`value?.method()`),
+    invocation optionality (`value.method?.()`), and combined chains lower as
+    whole calls with JavaScript short-circuit and receiver semantics intact
 - **Error** `pattern-context:computation`
   - binary/unary/conditional computations using opaque dependencies outside
     wrappers
@@ -795,6 +791,9 @@ order:
 3. array-method strategy
 4. lift-applied strategy
 
+Strategy rebuilds — and the callbacks `PatternBuilder` assembles for them —
+carry the replaced nodes' source-map ranges (§11.5).
+
 There is no longer a separate patternTool closure strategy (CT-1655, #3862):
 `patternTool` now requires an explicit `pattern(...)` first argument (see
 §6.5 `pattern-context:patterntool-requires-pattern`), so the captures live on
@@ -929,8 +928,10 @@ Primary behaviors:
   access in pattern contexts
 - preserves terminal path methods (`get`, `set`, `update`, etc.) and rewrites
   only the receiver path portion when needed
-- treats dynamic key access, spread, and optional-call forms as non-lowerable in
-  pattern context with diagnostics
+- treats dynamic key access and spread as non-lowerable in unsupported pattern
+  contexts with diagnostics
+- classifies optional calls by their underlying call kind and expression site;
+  optionality itself neither admits nor rejects a call
 - treats wildcard traversals (`Object.keys/values/entries`, `JSON.stringify`) as
   broad/full-shape access for capability analysis, but allows whole-call
   lowering when they appear in supported expression-root positions
@@ -978,7 +979,8 @@ site ownership** rather than a special-case callback return-expression rule.
 ## 10. Schema Injection
 
 `SchemaInjectionTransformer` runs only when helper import is present. It injects
-`toSchema<...>()` calls (later materialized to JSON schema literals).
+`toSchema<...>()` calls (later materialized to JSON schema literals). Every
+builder call it rebuilds carries the replaced call's source-map range (§11.5).
 
 ### 10.1 General typing rules
 
@@ -1113,6 +1115,10 @@ adjustments:
 - capability analysis resolves member access through `.get()` when the member
   access itself is observed (`notes.get().length` records `["length"]` rather
   than a blanket root read) and suppresses the redundant blanket `.get()` read
+- optional `.get()` chains retain an explicit readonly read of the receiver
+  Cell even when a projected result member is observed; this preserves the
+  nested Cell in synthesized closure schemas without widening the enclosing
+  root to wildcard
 - array-like roots whose observed paths only touch non-item properties
   (`length`, `get`, `set`, `key`, `update`) keep array shape but shrink their
   item type to `unknown`
@@ -1294,6 +1300,39 @@ Note: the design comments frame this stage as Phase 2 of a
 "derive→lift→selfcontained" arc. Phase 3 (`selfcontained(...)` wrapping of the
 hoisted consts) is **not** implemented on `main` — see the design-deltas doc.
 
+### 11.5 Authored-position lineage at the hoisting boundary
+
+Every builder call this stage visits — hoisted inner calls, in-place authored
+builder consts, the `export default` pattern call — and every builder callback
+arrives carrying a recoverable **authored** source position (CT-1868). The
+carrier is the emit-node **source-map range**: the callbacks
+`PatternBuilder.buildCallback`/`buildHandlerCallback` assemble, the closure
+strategies' rebuilt applied calls, the expression-rewrite wrapper arrows and
+applied calls, and every SchemaInjection builder-call rebuild wrap their
+output in `preserveSourceMapRange(built, replaced)` (`src/ast/utils.ts`).
+Full `preserveLineage` (textRange + sourceMapRange + original) is applied only
+where the emit-invariance gate proved those channels inert — the lift-applied
+strategy's outer applied call and the array-method `mapWithPattern` rebuild.
+
+sourceMapRange is the one channel observable only by sourcemaps: a real
+`textRange` on a synthetic node changes printer layout (arrow-head
+parenthesization via `canEmitSimpleArrowHead`; JSX/ternary line-break reflow),
+and a real `original` feeds the §2.2 marker family, `typeRegistry` fallbacks,
+and schema derivation — all of which change emitted output. The rebuilds set
+no originals, so the `schemaInjected` flag's deliberate lack of a
+`getOriginalNode` fallback (§2.2) is unaffected. sourceMapRange also survives
+`factory.update*` rebuilds (`setOriginalNode` merges emit-node data,
+including `sourceMapRange` — verified on TS 5.9.2 and 6.0.3).
+
+Recovery precedence is: own text range → explicit source-map range →
+original-chain terminal. `test/lineage-regression.test.ts` pins it end to end:
+it drives the full pipeline over a five-origin fixture and asserts every
+builder call AND callback recovers to its distinctive authored snippet
+(content is the ground truth, not merely `pos >= 0`). This is the read path
+for transform-time source annotation (A′, CT-1870), and the same fallback
+family §16.2's coverage spans use. Rationale, per-site table, and the probe
+rig: `packages/ts-transformers/APRIME-LINEAGE-HANDOFF.md`.
+
 ## 12. Schema Generation
 
 `SchemaGeneratorTransformer` replaces `toSchema<T>(options?)` calls with JSON
@@ -1307,7 +1346,21 @@ Recognized call forms:
 Behavior:
 
 1. resolve type from `typeRegistry` (preferred) or checker fallback
-2. evaluate literal options object
+2. evaluate literal options object — string, boolean and `null` literals,
+   object and array literals, and numbers in any of their spellings (bare
+   literal, sign-prefixed, or the `NaN` / `Infinity` globals, the latter only
+   where the name is not shadowed). Parentheses and the type-only assertion
+   forms (`as`, `satisfies`, `<T>x`) are transparent at any depth, including
+   nested inside a sign (`-(1 as number)`). A property whose value is none of
+   these is dropped from the options object.
+
+   The code carries a `checker.getConstantValue()` fallback intended to recover
+   a named constant or enum member. It runs, but the call returns `undefined`
+   for these nodes here (verified for both an `Identifier` and a
+   `PropertyAccessExpression`), so `{ maxProperties: K }` and
+   `{ maxProperties: E.One }` are both dropped where `{ maxProperties: 1 }`
+   survives. Why the checker recovers no constant value at this stage is not
+   established here; treat only literal values as supported.
 3. extract `widenLiterals` generation option
 4. generate schema via `createSchemaTransformerV2`
 5. merge non-generation options into resulting schema object
@@ -1336,7 +1389,9 @@ Special path:
   `AnyOf<...>` becomes an IFC `anyOf` atom, and `PolicyOf<typeof policy>`
   becomes a policy-reference marker that `SchemaGeneratorTransformer`
   resolves to module identity, symbol, and digest. `WriteAuthorizedBy`
-  rehydrates as `ifc.writeAuthorizedBy.__ctWriterIdentityOf = { file, path }`,
+  rehydrates as `ifc.writeAuthorizedBy.__ctWriterIdentityOf = { file, path }`
+  (plus a mint-time `moduleIdentity` stamp when the compiler was given
+  `moduleIdentities` — see §17.3 file normalization),
   and router-seeded `cfcUiContract` hints emit as `ifc.uiContract`. See §6.8;
   pinned by `test/cfc-authoring.test.ts`,
   `packages/schema-generator/test/schema/cfc-authoring.test.ts`, and
@@ -1759,7 +1814,7 @@ values it can classify as `builder | data | function | import`, and rejects raw
 mutable literals and arbitrary call results at module scope
 (`classifyExpressionText`,
 `packages/runner/src/sandbox/compiled-bundle-verifier.ts`; policy narrative in
-`docs/specs/module-loading-verifier-and-engine-design.md` §"Security
+`docs/specs/module-loading.md` §"Security
 classification"). `__cf_data(...)` is the canonical "verified module-safe
 data" wrapper of that grammar: the verifier pattern-matches the wrapper
 boundary without interpreting the payload, and at module load the runtime
@@ -1983,31 +2038,35 @@ admits the module-safe subset (plain objects, arrays, `Map`→`FrozenMap`,
 (`SES_SANDBOXING_SPEC.md` §4.2.3; `packages/runner/src/sandbox/plain-data.ts`).
 The same classification serves both the AMD factory body and the per-module
 ESM record body (`classifyModuleItems` doc comment;
-`docs/specs/module-loading-verifier-and-engine-design.md`); on the ESM path,
+`docs/specs/module-loading.md`); on the ESM path,
 write-once exports neutralize side effects smuggled into an accepted wrapper
 argument (`__cf_data((exports.x = evil, 1))`), and pipeline-compiled bodies are
 required precisely because bare `ts.transpileModule` cannot produce the
 `__cf_data` wrapping (`packages/runner/src/sandbox/module-record-compiler.ts`).
 
-### 15.6 Dormant alternate wiring (`__cfDataHelper`), historical
+### 15.6 Alternate wiring (`__cfDataHelper`), removed — historical
 
-The transformer and `CFHelpers` retain a second, data-helper-only emission
-path: when `__cfHelpers` is absent, `wrapWithCfData` falls back to a named
-`__cfDataHelper` import binding (`CFHelpers.getDataHelperExpr`) or a bare
-`__cfDataHelper` identifier plus a prepended
-`import { __cf_data as __cfDataHelper } from "commonfabric"`
-(`createCfDataHelperImport`, `CF_DATA_HELPER_IDENTIFIER`), and
-`shouldWrapTopLevelExpression` narrows to primitive-snapshot calls only. All
-of that is unreachable in the current pipeline: the `HelpersOnlyTransformer`
-filter guarantees `sourceHasHelpers()` at every wrap site. It is a remnant of
-the opt-in era (#3168), when modules without a `/// <cts-enable />` directive
-received only the data-helper import via `injectCfDataHelper`
-(`src/core/cf-helpers.ts`) from the runner's pretransform; that call site was
-removed when transforms became default-on (#3254,
-`packages/runner/src/harness/pretransform.ts`). `injectCfDataHelper` is still
-exported (`src/mod.ts`, `src/core/mod.ts`) but has **no callers** in the repo;
-`test/transform.test.ts` asserts `__cfDataHelper` does not appear in
-opted-out output.
+Until the 2026-07 docs audit the transformer and `CFHelpers` retained a
+second, data-helper-only emission path from the opt-in era (#3168), when
+modules without a `/// <cts-enable />` directive received only a
+`__cf_data as __cfDataHelper` import from the runner's pretransform (via a
+string-pass `injectCfDataHelper` helper): with `__cfHelpers` absent,
+`wrapWithCfData` fell back to that import binding or a bare `__cfDataHelper`
+identifier plus a prepended import, and `shouldWrapTopLevelExpression`
+narrowed to primitive-snapshot calls only. The wiring became unreachable when
+transforms went default-on (#3254 removed the pretransform call site; the
+`HelpersOnlyTransformer` filter guarantees `sourceHasHelpers()` at every wrap
+site) and its output had drifted out of contract — `__cfDataHelper(...)` is
+not in `TRUSTED_DATA_HELPERS`, so the sandbox verifier would not classify the
+fallback's wraps. The audit removed the whole path: `injectCfDataHelper`, the
+fallback emission arms, `createCfDataHelperImport`, and the
+`getDataHelperExpr` / `sourceHasDataHelper` recognizer surface.
+`wrapWithCfData` now has the single §15.2 emission form, and `getHelperExpr`
+throws if the filter invariant is ever violated (pinned in
+`test/module-scope-cf-data-coverage.test.ts`). `test/transform.test.ts` once
+asserted `__cfDataHelper` absent from opted-out output; #4463's
+structural-assertion rewrite already dropped that literal check, and after
+this removal no code in the package references the identifier at all.
 
 
 ## 16. Pattern Runtime Coverage Instrumentation
@@ -2496,16 +2555,36 @@ the annotated value itself and, when the value carries a function-valued
 `.implementation` (builder factories do), on that implementation function too
 (`createBindingIdentityHelper` / `createDefineBindingMetadataCall`).
 
-**File normalization.** `normalizeWriterIdentityFile` (backslashes → slashes,
-then strip the first path segment when the path has more than one) is
-deliberately duplicated, character-for-character, in
-`src/transformers/schema-generator.ts`, which emits the matching claim into
-schemas as `ifc: { writeAuthorizedBy: { __ctWriterIdentityOf: { file, path
-} } }` (`attachWriteAuthorizedByMarker` / `extractWriteAuthorizedByIdentity`).
-The stripped leading segment corresponds to the engine's per-load `/${id}`
-module-path prefix (see the prefix/identity-source-normalization discussion
-in `docs/specs/module-loading-verifier-and-engine-design.md`), keeping both
-sides load-independent and equal.
+**File normalization and mint-time stamps.**
+`normalizeWriterIdentityFile` (`src/utils/writer-identity-file.ts`) normalizes
+backslashes → slashes and then applies the caller-supplied
+`canonicalWriterIdentityFile` option (`TransformerOptions`), the compile-name →
+authored-name unmapping. `src/transformers/schema-generator.ts` uses it while
+emitting `ifc: { writeAuthorizedBy: { __ctWriterIdentityOf: { file, path } } }`.
+General nested/interface/alias claims are constructed by the schema-generator's
+`CommonFabricFormatter`; the transformer passes it the same writer-source
+resolver used by the direct-root special case. When
+`TransformerOptions.moduleIdentities` contains the binding's defining compile
+source, the payload also carries that source's `moduleIdentity`. The engine's
+map covers its authored sources and is computed from pristine source before
+the TS compile, so engine-minted claims are *born stamped* and the capturable
+unstamped state is never minted (labs#4772 residual —
+`writerIdentityForSourceFile` / `extractWriteAuthorizedByIdentity`). Supplying
+an identity map that lacks the binding's defining source fails compilation;
+only callers that omit the map entirely retain unstamped compatibility output.
+
+The runner's engine passes its `storedFilenameFor`
+(stripping the per-load `/${id}` module-path prefix and unmapping fabric-mount
+paths — see the prefix/identity-source-normalization discussion in
+`docs/specs/module-loading.md`), keeping claim and
+provenance spellings load-independent and equal. Without the option the name
+is recorded verbatim: direct compiles (HTTP resolver, piece manifests) already
+present authored paths. Historical behavior — blindly stripping the first
+segment of any absolute multi-segment name as a presumed engine prefix —
+mis-spelled modules from direct compiles whose first segment was a real path
+segment, shearing claims from provenance across compile stacks (labs#4772 /
+CT-1886); stores hold claims minted under those spellings (see the
+spelling-compat note in the normalizer's doc comment).
 
 **Runtime consumption.** After a verified evaluation,
 `Engine.recordModuleProvenance` reads the annotation off each exported or
@@ -2515,12 +2594,37 @@ sides load-independent and equal.
 CFC's implementation identity surfaces it as `sourceFile`/`bindingPath`
 (`packages/runner/src/cfc/implementation-identity.ts`), and at commit the
 `writeAuthorizedBy` check requires the writing identity's
-moduleIdentity + normalized source file + binding path to equal the claim's
-(`packages/runner/src/cfc/prepare.ts`; both sides pass through
-`normalizeIdentitySource`, which only guarantees a leading slash). The
+moduleIdentity to equal the claim's directly or name an authenticated
+`piece setsrc` predecessor, plus an equal binding path — the file SPELLING is
+deliberately not load-bearing at verification (it is resolver-dependent;
+labs#4772). Stamp MINTING (`rebindWriteAuthorizedByClaims`) still requires
+exact slash-normalized file equality, and stored-claim reconciliation
+tolerates spellings one leading segment apart
+(`packages/runner/src/cfc/writer-claim-correspondence.ts`); when both sides
+of a reconcile carry stamps for the same binding, the STORED stamp always
+wins — a republished module's born-stamped claim never rotates the stored
+one at merge time (its field writes are authorized at verification by
+authenticated `piece setsrc` module delegation, or fail closed loudly
+without one), and the envelope's sibling writes keep committing. The
 non-exported case reaches provenance through the `__cfReg` registration sink
 — the gap guarded by
 `packages/runner/test/cfc-nonexported-binding-identity.test.ts`.
+
+> **TODO (review after 2026-09-15): retire the pre-`moduleIdentity` aged-data
+> exceptions.** The writeAuthorizedBy path carries several compatibility
+> allowances purely so integrity works over data written before claims were
+> `moduleIdentity`-anchored: the one-leading-segment spelling tolerance in
+> reconciliation (`writerClaimFilesCorrespond`), stamp adoption onto stored
+> *unstamped* claims, the legacy `bundleId` stamp arm, and the unstamped
+> minting path for callers that omit the identity map. Claims born stamped
+> (labs#4871) mean every write now anchors on `moduleIdentity`, so aged
+> claims **self-heal on their next write** — once no pre-anchoring data
+> remains, these exceptions can be deleted and verification tightened to
+> require an exact `moduleIdentity` match. Revisit around mid-September 2026:
+> confirm the aged-data population has drained (or force a rewrite sweep),
+> then remove the tolerance in `writer-claim-correspondence.ts`, the
+> unstamped-adoption branch in `reconcileWriterClaimStamp`, the `bundleId`
+> arm, and this note. (Berni's ask on the labs#4871 review.)
 
 No fixture in `test/fixtures/**` exercises `__cfBindVerifiedBinding` as of
 this writing; the annotation paths are covered by `test/cfc-authoring.test.ts`
@@ -2628,7 +2732,7 @@ until the verifier agrees (also stated in
   `registerFunctionStatement`). The design doc states the rule directly:
   "canonical function-hardening (`__cfHardenFn(fn)`) and binding-identity
   statements recognized by byte-equality to `sandbox-contract.ts` sources"
-  (`docs/specs/module-loading-verifier-and-engine-design.md`). A same-named
+  (`docs/specs/module-loading.md`). A same-named
   helper with a different body is just an ordinary function — and the module
   then fails on its call sites: pinned by the adversarial case "fake
   (non-canonical) __cfHardenFn laundering a callback"
@@ -2734,21 +2838,14 @@ pipeline. Current built-in behavior:
    intentionally omitted).
 2. Action and JSX inline handler callback extraction currently unwraps arrow
    functions only.
-3. Optional-call forms on opaque pattern roots report
-   `pattern-context:optional-chaining` at top level, statement position, and
-   inside collection callbacks — but are accepted and lowered inside JSX
-   expressions and `computed(...)` bodies (see §6.5; unratified language
-   delta). Optional property/element access is supported only in explicit
-   lowerable expression sites; statement-position optional access still
-   errors.
-4. Non-static destructuring defaults, rest destructuring, and unsupported
+3. Non-static destructuring defaults, rest destructuring, and unsupported
    computed destructuring keys in pattern callbacks remain non-lowerable and
    produce pattern-context diagnostics.
-5. Interprocedural capability propagation applies only when a resolved callee
+4. Interprocedural capability propagation applies only when a resolved callee
    declaration is analyzable in-proc (arrow/function
    expression/declaration/method); external/unresolved calls remain
    conservative.
-6. The CFC authoring contract under `docs/specs/ts-transformer/cfc_*.md` is
+5. The CFC authoring contract under `docs/specs/ts-transformer/cfc_*.md` is
    implemented for the canonical alias set: the schema-generator's
    common-fabric formatter lowers `Cfc` payloads, the wrapper aliases, the
    projection helpers, and the `WriteAuthorizedBy` writer-identity marker into
@@ -2760,6 +2857,17 @@ pipeline. Current built-in behavior:
    schema generation resolves the resulting exact manifest marker. The
    `WriteAuthorizedBy` validation remains a separate transformer rather than a
    schema-generator responsibility.
+6. Invoking a function value that flows through reactive pattern data (for
+   example a function-typed input property called as `input.fn(...)` or
+   `input.fn?.(...)`) produces no diagnostic at any expression site. Function
+   values are not schema-representable, so synthesized lift input schemas
+   silently drop function-typed captures; the lowered closure then reads an
+   absent property at runtime, making the call dead code (`undefined` under
+   optional invocation, a runtime `TypeError` when a plain invocation is
+   reached). The target language classifies such callable roots as
+   unsupported — the problem is the unstorable function value, not the call
+   syntax — but that classification is not yet surfaced as an authoring-time
+   diagnostic. The open follow-up is recorded in the design-deltas addendum.
 
 ## 20. Test Coverage Snapshot
 
@@ -2828,7 +2936,7 @@ re-listing it. The enforced sources of truth:
 | Module-scope `__cf_data` wrap/exclusion name sets + verifier error strings (§15) | `TRUSTED_BUILDERS` / `TRUSTED_DATA_HELPERS` (`packages/utils/src/sandbox-contract.ts`); `CF_DATA_CONSTRUCTOR_NAMES` (`src/transformers/module-scope-cf-data.ts`); `TOP_LEVEL_CALL_RESULT_ERROR` (`packages/runner/src/sandbox/policy.ts`) | one module feeds both transformer and runner verifier — cross-package contract; runtime freezer semantics live in `packages/runner/src/sandbox/plain-data.ts` |
 | Coverage instrumentation + span schema (§16) | `PatternCoverageTransformer` (`src/transformers/pattern-coverage.ts`); `PatternCoverageSpan` / `PatternCoverageOptions` / `PATTERN_COVERAGE_GLOBAL` (`src/core/transformers.ts`) | line remapping pins the one-line helper prelude: `HELPERS_STMT` (`src/core/cf-helpers.ts`) ↔ `patternCoverageOptionsForCompile` (`packages/runner/src/harness/engine.ts`) — change them together |
 | Hardening/binding helper names, metadata field, canonical helper bodies (§17) | `FUNCTION_HARDENING_HELPER_NAME` / `BINDING_IDENTITY_HELPER_NAME` / `VERIFIED_BINDING_METADATA_FIELD` and `createFunctionHardeningHelperSource` / `createBindingIdentityHelperSource` (`packages/utils/src/sandbox-contract.ts`) | the runner verifier recognizes helper declarations by trivia-stripped byte equality to these sources (`CANONICAL_HARDENING_HELPER` in `packages/runner/src/sandbox/compiled-bundle-verifier.ts`); the transformer's AST-built twins (`createFunctionHardeningHelper` / `createBindingIdentityHelper` in `src/transformers/module-scope-function-hardening.ts`) must compile to exactly that text — drift fails every module load |
-| Trusted-binding type names + binding positions (§17.3) | seed map in `discoverWriteAuthorizedByBindingPositions` (`src/transformers/module-scope-function-hardening.ts`) | keep in sync with `WriteAuthorizedByValidationTransformer` (§6.8) and the schema generator's `__ctWriterIdentityOf` claim emission; `normalizeWriterIdentityFile` is intentionally duplicated in `schema-generator.ts` and must stay identical |
+| Trusted-binding type names + binding positions (§17.3) | seed map in `discoverWriteAuthorizedByBindingPositions` (`src/transformers/module-scope-function-hardening.ts`) | keep in sync with `WriteAuthorizedByValidationTransformer` (§6.8) and the schema generator's `__ctWriterIdentityOf` claim emission; both spell files via the shared `normalizeWriterIdentityFile` (`src/utils/writer-identity-file.ts`) so claim and provenance spellings cannot drift |
 
 A drift-resistant habit: when a section enumerates a set, cite the constant /
 function that defines it so a reader can confirm the live set, and keep prose

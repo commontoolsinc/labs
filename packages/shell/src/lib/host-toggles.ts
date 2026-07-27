@@ -15,6 +15,10 @@ import {
   isCfcRenderCeilingEnabled,
   setupCfcRenderCeilingToggle,
 } from "./render-ceiling.ts";
+import {
+  isConcurrentWatchRefreshEnabled,
+  setupConcurrentWatchRefreshToggle,
+} from "./concurrent-watch-refresh.ts";
 
 /**
  * Install every `commonfabric.*` host-toggle console command. Run once at
@@ -24,6 +28,21 @@ import {
 export function setupHostToggles(): void {
   setupWorkerConsoleToggle();
   setupCfcRenderCeilingToggle();
+  setupConcurrentWatchRefreshToggle();
+}
+
+/**
+ * Read the pattern-coverage host flag. Unlike the other toggles this carries no
+ * `commonfabric.*` console command: it is set by the integration harness via
+ * localStorage before login (gated by CF_PATTERN_COVERAGE_DIR on the test
+ * process), never by a dogfooding user. See docs/development/COVERAGE.md.
+ */
+export function isPatternCoverageEnabled(): boolean {
+  try {
+    return globalThis.localStorage?.getItem("patternCoverage") === "true";
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -34,9 +53,13 @@ export function setupHostToggles(): void {
 export function runtimeHostFlags(): {
   forwardWorkerConsole: boolean;
   cfcRenderCeiling: boolean;
+  patternCoverage: boolean;
+  concurrentWatchRefresh: boolean;
 } {
   return {
     forwardWorkerConsole: isWorkerConsoleForwardingEnabled(),
     cfcRenderCeiling: isCfcRenderCeilingEnabled(),
+    patternCoverage: isPatternCoverageEnabled(),
+    concurrentWatchRefresh: isConcurrentWatchRefreshEnabled(),
   };
 }

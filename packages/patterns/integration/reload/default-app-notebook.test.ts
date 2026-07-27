@@ -3,7 +3,6 @@ import {
   env,
   Page,
   type ProbeApi,
-  waitFor,
   waitForCondition,
 } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
@@ -16,6 +15,11 @@ import {
   waitForRuntimeIdle,
   waitForRuntimeSynced,
 } from "../cfc-browser-helpers.ts";
+import {
+  clickButtonWithExactText,
+  clickButtonWithText,
+  clickButtonWithTitle,
+} from "../note-button-helpers.ts";
 import { resolveSpaceDid } from "@commonfabric/lib-shell";
 
 const { FRONTEND_URL } = env;
@@ -23,7 +27,6 @@ const { FRONTEND_URL } = env;
 // slightly while still exercising persisted scheduler-state reuse.
 const NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT = 150;
 const NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT = 90;
-const NOTEBOOK_RELOAD_TIMEOUT_MS = 180_000;
 
 const EXPECT_PERSISTENT_SCHEDULER_STATE = (() => {
   const raw = Deno.env.get("CF_EXPECT_PERSISTENT_SCHEDULER_STATE");
@@ -92,11 +95,6 @@ describe("default-app notebook reload integration test", () => {
       await clickButtonWithTitle(page, "New Note"),
       "Expected New Note click to succeed",
     );
-    await waitFor(async () => {
-      await awaitViewSettled(page);
-      return !!(await findButtonWithText(page, "Create Another"));
-    });
-    await waitFor(async () => await resetEventInvocationTrace(page));
 
     const noteCreates = 7;
     for (let i = 0; i < noteCreates - 1; i++) {
@@ -112,10 +110,9 @@ describe("default-app notebook reload integration test", () => {
 
     await waitForCondition(page, notebookSourceStateMatches, {
       args: [noteCreates],
-      timeout: NOTEBOOK_RELOAD_TIMEOUT_MS,
     });
 
-    await waitForRuntimeSynced(page, { timeout: NOTEBOOK_RELOAD_TIMEOUT_MS });
+    await waitForRuntimeSynced(page);
 
     const startedAt = performance.now();
     await page.reload({ waitUntil: "load" });
@@ -124,9 +121,8 @@ describe("default-app notebook reload integration test", () => {
 
     await waitForCondition(page, notebookReloadRendered, {
       args: [noteCreates],
-      timeout: NOTEBOOK_RELOAD_TIMEOUT_MS,
     });
-    await waitForRuntimeIdle(page, { timeout: NOTEBOOK_RELOAD_TIMEOUT_MS });
+    await waitForRuntimeIdle(page);
 
     const reloadRenderState = await collectNotebookRenderState(page);
     assertEquals(reloadRenderState.noteCount, noteCreates);
@@ -245,45 +241,6 @@ async function collectBrowserLoadMetrics(page: Page): Promise<{
       ),
       postRenderStableMs: round(postRenderStableMs)!,
     };
-  });
-}
-
-async function resetEventInvocationTrace(page: Page): Promise<boolean> {
-  return await page.evaluate(async () => {
-    const api = globalThis.commonfabric as {
-      rt?: {
-        setTelemetryEnabled?: (enabled: boolean) => Promise<void>;
-        on?: (event: string, handler: (marker: unknown) => void) => void;
-        off?: (event: string, handler: (marker: unknown) => void) => void;
-        idle?: () => Promise<void>;
-      };
-      __eventInvocationTrace?: unknown[];
-      __eventInvocationTraceHandler?: (marker: unknown) => void;
-    } | undefined;
-    const rt = api?.rt;
-    if (!api || !rt?.setTelemetryEnabled || !rt.on || !rt.off) return false;
-
-    if (api.__eventInvocationTraceHandler) {
-      rt.off("telemetry", api.__eventInvocationTraceHandler);
-    }
-
-    api.__eventInvocationTrace = [];
-    api.__eventInvocationTraceHandler = (marker: unknown) => {
-      const type = marker && typeof marker === "object"
-        ? (marker as { type?: unknown }).type
-        : undefined;
-      if (
-        type === "scheduler.invocation" ||
-        type === "scheduler.event.commit" ||
-        type === "scheduler.event.preflight"
-      ) {
-        api.__eventInvocationTrace?.push(marker);
-      }
-    };
-    rt.on("telemetry", api.__eventInvocationTraceHandler);
-    await rt.setTelemetryEnabled(true);
-    await rt.idle?.();
-    return true;
   });
 }
 
@@ -415,177 +372,6 @@ const notebookReloadRendered = async (
   }).length;
   return renderedNoteChips === expectedCount;
 };
-
-// Marker attribute a click predicate stamps on the button it resolved, so the
-// test can then resolve that exact element and dispatch a single trusted click
-// on it. Mirrors the CLICK_TARGET_ATTR flow of clickCfButton in
-// cfc-browser-helpers.ts.
-const NOTE_BUTTON_CLICK_TARGET_ATTR = "data-cfc-note-button-target";
-
-// Serialized into the page by waitForCondition: find the first rendered
-// button/link whose text or title matches, scroll it into view, and stamp its
-// inner click target with `token`. "Rendered" means laid out and not
-// display:none/visibility:hidden — the same elements the innerText scan the
-// poll used could see — and is viewport-independent, so a match below the fold
-// is scrolled in rather than skipped. Returns false until a match exists, so
-// the wait re-checks on the next DOM mutation instead of the caller retrying a
-// bare find-and-click loop.
-const markNoteButton = async (
-  probe: ProbeApi,
-  selector: string,
-  match: "includes" | "exact" | "title",
-  needle: string,
-  token: string,
-  attr: string,
-): Promise<boolean> => {
-  const target = probe.collect(selector).find((element) => {
-    if (!probe.isRendered(element)) return false;
-    if (match === "title") return element.getAttribute("title") === needle;
-    const text = (element.textContent ?? "").trim();
-    return match === "exact" ? text === needle : text.includes(needle);
-  }) as HTMLElement | undefined;
-  if (!target) return false;
-  target.scrollIntoView({ block: "center", inline: "center" });
-  await new Promise((resolve) =>
-    requestAnimationFrame(() => requestAnimationFrame(resolve))
-  );
-  const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
-    | HTMLElement
-    | null) ?? target;
-  if (!clickTarget.isConnected || !probe.isRendered(clickTarget)) return false;
-  clickTarget.setAttribute(attr, token);
-  return true;
-};
-
-// Remove every element carrying `attr=token`, descending through shadow roots.
-async function clearNoteButtonMark(
-  page: Page,
-  token: string,
-): Promise<void> {
-  await page.evaluate((targetToken, targetAttr) => {
-    function collect(root: Document | ShadowRoot, result: Element[]): void {
-      for (const element of root.querySelectorAll("*")) {
-        if (element.getAttribute(targetAttr) === targetToken) {
-          result.push(element);
-        }
-        if (element.shadowRoot) collect(element.shadowRoot, result);
-      }
-    }
-    const matches: Element[] = [];
-    collect(document, matches);
-    for (const element of matches) element.removeAttribute(targetAttr);
-  }, { args: [token, NOTE_BUTTON_CLICK_TARGET_ATTR] }).catch(() => {});
-}
-
-// Wait for a matching button to be present and interactive, then dispatch a
-// single trusted click on it. Throws if no matching button becomes clickable.
-async function settleAndClickNoteButton(
-  page: Page,
-  selector: string,
-  match: "includes" | "exact" | "title",
-  needle: string,
-): Promise<void> {
-  const markTarget = async (token: string) => {
-    await waitForCondition(page, markNoteButton, {
-      args: [selector, match, needle, token, NOTE_BUTTON_CLICK_TARGET_ATTR],
-    });
-  };
-
-  let token = `cfc-note-button-${crypto.randomUUID()}`;
-  try {
-    await markTarget(token);
-  } catch (cause) {
-    throw new Error(
-      `Unable to find a ${
-        match === "title" ? "button titled" : "button matching"
-      } "${needle}" to click`,
-      { cause },
-    );
-  }
-
-  let lastCause: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const clickTarget = await page.waitForSelector(
-        `[${NOTE_BUTTON_CLICK_TARGET_ATTR}="${token}"]`,
-        { strategy: "pierce" },
-      );
-      await clickTarget.click();
-      return;
-    } catch (cause) {
-      lastCause = cause;
-      const retryable = cause instanceof Error &&
-        cause.message.includes("stable box model");
-      if (!retryable || attempt === 2) break;
-    } finally {
-      await clearNoteButtonMark(page, token);
-    }
-
-    // A root-pattern hot swap can replace the marked button after discovery
-    // but before Astral resolves its box. Re-mark the current rendered node and
-    // retry the coordinate click; only the successful attempt dispatches.
-    token = `cfc-note-button-${crypto.randomUUID()}`;
-    await markTarget(token);
-  }
-
-  throw new Error(`Unable to click the stable "${needle}" button`, {
-    cause: lastCause,
-  });
-}
-
-// The click helpers resolve `true` once the single click has landed (they throw
-// otherwise), so the call sites that assert the click succeeded keep reading.
-async function clickButtonWithText(
-  page: Page,
-  searchText: string,
-): Promise<boolean> {
-  await settleAndClickNoteButton(
-    page,
-    "cf-button, button, a",
-    "includes",
-    searchText,
-  );
-  return true;
-}
-
-async function clickButtonWithExactText(
-  page: Page,
-  searchText: string,
-): Promise<boolean> {
-  await settleAndClickNoteButton(
-    page,
-    "cf-button, button, a",
-    "exact",
-    searchText,
-  );
-  return true;
-}
-
-async function clickButtonWithTitle(
-  page: Page,
-  title: string,
-): Promise<boolean> {
-  await settleAndClickNoteButton(page, "cf-button, button", "title", title);
-  return true;
-}
-
-async function findButtonWithText(
-  page: Page,
-  searchText: string,
-): Promise<any | null> {
-  try {
-    const buttons = await page.$$("cf-button, button, a", {
-      strategy: "pierce",
-    });
-    for (const button of buttons) {
-      const text = await button.innerText();
-      if (text?.trim().includes(searchText)) return button;
-    }
-    return null;
-  } catch (_) {
-    return null;
-  }
-}
 
 async function collectNotebookRenderState(page: Page): Promise<{
   isNotebook: boolean;

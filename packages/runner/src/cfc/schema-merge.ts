@@ -1,8 +1,14 @@
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import type { CfcAtom } from "@commonfabric/api/cfc";
+import type { CfcConfClause } from "./clause.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
+import { forEachSubschema } from "../schema-walk.ts";
+import { ContextualFlowControl } from "../cfc.ts";
 import { normalizeClause } from "./clause.ts";
+import { CfcSchemaMigrationError } from "./migration-reason.ts";
+import { writerClaimFilesCorrespond } from "./writer-claim-correspondence.ts";
 
 const IFC_KEYS = [
   "confidentiality",
@@ -46,12 +52,12 @@ const arraySubsetOf = (
 
 const mergeArraySet = (
   ...sources: Array<readonly unknown[]>
-): unknown[] => {
-  const result: unknown[] = [];
+): CfcAtom[] => {
+  const result: CfcAtom[] = [];
   for (const source of sources) {
     for (const value of source) {
       if (!result.some((candidate) => deepEqual(candidate, value))) {
-        result.push(value);
+        result.push(value as CfcAtom);
       }
     }
   }
@@ -77,21 +83,35 @@ const WRITER_CLAIM_STAMP_KEYS = ["bundleId", "moduleIdentity"] as const;
 const writerClaimIsStamped = (identity: Record<string, unknown>): boolean =>
   WRITER_CLAIM_STAMP_KEYS.some((key) => identity[key] !== undefined);
 
-const writerClaimWithoutStamp = (
+const writerClaimWithoutStampAndFile = (
   identity: Record<string, unknown>,
 ): Record<string, unknown> => {
   const rest = { ...identity };
   for (const key of WRITER_CLAIM_STAMP_KEYS) delete rest[key];
+  // The file spelling is compared separately, tolerantly
+  // (writerClaimFilesCorrespond) — never byte-wise.
+  delete rest.file;
   return rest;
 };
 
 /**
- * Reconcile two `writeAuthorizedBy` writer-identity claims that differ only
- * by the presence of the provenance stamp (`moduleIdentity`, or a legacy
- * `bundleId` on pre-migration claims — one side recorded under a verified
- * identity, the other without one). Returns the stamped claim, or `undefined`
- * when the claims genuinely conflict (different bindings, or two different
- * stamps).
+ * Reconcile two `writeAuthorizedBy` writer-identity claims that mean the same
+ * binding. The binding a claim MEANS is `path` (+ `moduleIdentity` once
+ * stamped); the `file` spelling is resolver-dependent (the same module spells
+ * differently across piece-deploy and HTTP compiles — labs#4772), so two
+ * claims reconcile when their paths match, their file spellings CORRESPOND
+ * (equal or one-leading-segment apart), and everything outside file + stamp
+ * is equal. Returns the stamped side when exactly one carries the provenance
+ * stamp (`moduleIdentity`, or a legacy `bundleId` on pre-migration claims),
+ * and the existing side otherwise — both-unstamped, both same stamp, and
+ * both stamped DIFFERENTLY (a version boundary: born-stamped claims make a
+ * republished module re-present this binding under its new moduleIdentity
+ * on every envelope write; the stored stamp is kept, never rotated, and the
+ * successor's field writes are authorized at verification time by
+ * authenticated `piece setsrc` module delegation — or fail closed loudly
+ * without one — while the envelope's sibling writes keep committing).
+ * `undefined` only when the claims name different bindings
+ * (non-corresponding files or paths).
  */
 const reconcileWriterClaimStamp = (
   existing: unknown,
@@ -102,26 +122,50 @@ const reconcileWriterClaimStamp = (
   }
   const existingIdentity = existing.__ctWriterIdentityOf;
   const candidateIdentity = candidate.__ctWriterIdentityOf;
-  const existingStamped = writerClaimIsStamped(existingIdentity);
-  const candidateStamped = writerClaimIsStamped(candidateIdentity);
-  // Exactly one side stamped — otherwise deepEqual already decided (equal
-  // stamps) or this is a genuine conflict (two different stamps).
-  if (existingStamped === candidateStamped) {
+  if (
+    !writerClaimFilesCorrespond(
+      typeof existingIdentity.file === "string"
+        ? existingIdentity.file
+        : undefined,
+      typeof candidateIdentity.file === "string"
+        ? candidateIdentity.file
+        : undefined,
+    )
+  ) {
     return undefined;
   }
   if (
     !deepEqual(
       {
         ...existing,
-        __ctWriterIdentityOf: writerClaimWithoutStamp(existingIdentity),
+        __ctWriterIdentityOf: writerClaimWithoutStampAndFile(existingIdentity),
       },
       {
         ...candidate,
-        __ctWriterIdentityOf: writerClaimWithoutStamp(candidateIdentity),
+        __ctWriterIdentityOf: writerClaimWithoutStampAndFile(candidateIdentity),
       },
     )
   ) {
     return undefined;
+  }
+  const existingStamped = writerClaimIsStamped(existingIdentity);
+  const candidateStamped = writerClaimIsStamped(candidateIdentity);
+  if (existingStamped && candidateStamped) {
+    // Both stamped, same binding: the stored claim wins either way. With
+    // equal stamps this is plain stability (spelling included). With
+    // DIFFERENT stamps it is a version boundary — claims are minted born
+    // stamped, so a republished module re-presents this binding under its
+    // new moduleIdentity on every envelope write. Keeping the stored stamp
+    // (instead of conflict-aborting the transaction) preserves the
+    // fail-closed posture at the right granularity: the new version's
+    // writes to THIS field are rejected loudly at verification until the
+    // setsrc-history delegation design authorizes the rotation, while the
+    // envelope's sibling fields keep committing. Rotation never happens
+    // here in either direction.
+    return existing;
+  }
+  if (!existingStamped && !candidateStamped) {
+    return existing;
   }
   return existingStamped ? existing : candidate;
 };
@@ -159,10 +203,10 @@ const mergeSetLikeIfcArray = (
       // identity on flat atoms and integrity carries no OR-clauses, so the
       // other keys are untouched.
       const existingArray = key === "confidentiality"
-        ? (existing as readonly unknown[]).map(normalizeClause)
+        ? (existing as readonly CfcConfClause[]).map(normalizeClause)
         : existing as readonly unknown[];
       const candidateArray = key === "confidentiality"
-        ? (candidate as readonly unknown[]).map(normalizeClause)
+        ? (candidate as readonly CfcConfClause[]).map(normalizeClause)
         : candidate as readonly unknown[];
       if (!arraySubsetOf(existingArray, candidateArray)) {
         throw new Error(`${key} cannot be weakened at ${path || "/"}`);
@@ -183,8 +227,9 @@ const mergeSetLikeIfcArray = (
           // authoring identity's provenance stamp and one recorded without an
           // identity (unstamped). The BINDING (file + path) is what the claim
           // means; the stamp is provenance added per input — keep the stamped
-          // claim. Two DIFFERENT stamps (or different bindings) still
-          // conflict.
+          // claim. For two different stamps of the same binding, keep the
+          // stored stamp (a version boundary, never a rotation here). Different
+          // bindings still conflict.
           if (key === "writeAuthorizedBy") {
             const reconciled = reconcileWriterClaimStamp(existing, candidate);
             if (reconciled !== undefined) {
@@ -257,26 +302,15 @@ const mergeIfc = (
   return merged as JSONSchemaObj["ifc"];
 };
 
+// `$defs` bodies were part of this walk before the shared-walker move, so keep
+// descending them (`includeDefs`). This walk does not resolve `$ref`, so a
+// definition referenced but not inlined is only seen through `$defs`.
 const branchContainsIfc = (schema: JSONSchema): boolean => {
-  if (!isRecord(schema)) {
-    return false;
-  }
-  const object = schema as JSONSchemaObj;
-  if (object.ifc !== undefined) {
-    return true;
-  }
-  return [
-    ...(object.anyOf ?? []),
-    ...(object.oneOf ?? []),
-    ...(object.allOf ?? []),
-    ...(object.prefixItems ?? []),
-    ...(object.items ? [object.items] : []),
-    ...(object.properties ? Object.values(object.properties) : []),
-    ...(object.$defs ? Object.values(object.$defs) : []),
-    ...(isRecord(object.additionalProperties)
-      ? [object.additionalProperties as JSONSchema]
-      : []),
-  ].some(branchContainsIfc);
+  if (!isRecord(schema)) return false;
+  if ((schema as JSONSchemaObj).ifc !== undefined) return true;
+  return forEachSubschema(schema, (child) => branchContainsIfc(child), {
+    includeDefs: true,
+  });
 };
 
 const assertNoDivergentIfcBranches = (
@@ -303,13 +337,38 @@ const assertNoDivergentIfcBranches = (
     }
   }
 
-  for (const [key, value] of Object.entries(object.properties ?? {})) {
-    assertNoDivergentIfcBranches(value, `${path}/${key}`);
-  }
-  if (object.items !== undefined) {
-    assertNoDivergentIfcBranches(object.items, `${path}/*`);
-  }
+  // Recurse over the shared keyword vocabulary so a divergent-ifc shape
+  // cannot hide under a keyword this guard forgot (prefixItems and
+  // additionalProperties previously escaped it). Combinator members are
+  // technically redundant here — a member containing ifc anywhere already
+  // threw via branchContainsIfc above — but descending them is harmless.
+  forEachSubschema(object, (child, keyword, key, index) => {
+    const childPath = keyword === "properties"
+      ? `${path}/${key}`
+      : keyword === "items" || keyword === "additionalProperties"
+      ? `${path}/*`
+      : keyword === "prefixItems"
+      ? `${path}/${index}`
+      : path;
+    assertNoDivergentIfcBranches(child, childPath);
+  });
 };
+
+// A stream slot is a runtime-materialized capability marker, not stored
+// document data — see the additive-required exemption in `mergeRequired`.
+//
+// Only the field's IMMEDIATE OUTER slot decides what it is, so read the first
+// `asCell` entry (mirroring the canonical stream test in link-utils.ts and
+// schema.ts, which both key on `getAsCellValues(schema).at(0)`). A bare
+// `.includes("stream")` was wrong twice: it exempted `["cell", "stream"]` — a
+// CELL of a stream, whose outer slot is a cell and which therefore holds
+// preservable data — and it missed the scoped-descriptor dialect
+// (`[{ kind: "stream", scope: … }]`), which is a string only under the legacy
+// form. `getAsCellKind` normalizes both dialects.
+const isStreamSlot = (schema: JSONSchema | undefined): boolean =>
+  ContextualFlowControl.getAsCellKind(
+    ContextualFlowControl.getAsCellValues(schema).at(0),
+  ) === "stream";
 
 const mergeRequired = (
   existing: readonly string[] | undefined,
@@ -325,8 +384,26 @@ const mergeRequired = (
       continue;
     }
     const property = mergedProperties[name];
+    // A newly-required field must carry a default so an old document that
+    // predates the field can still be read (the default synthesizes the
+    // missing value). This guard is about PRESERVABLE DOCUMENT DATA, so it
+    // does not apply to a stream slot: `asCell: ["stream"]` is a
+    // runtime-materialized capability marker, not stored data. Pattern setup
+    // re-materializes every stream marker on each run, so an old doc that
+    // lacks one has no value to preserve and there is no meaningful default a
+    // `Stream<…>` field could declare. Without this exemption, materializing a
+    // handler-rich pattern (e.g. home.tsx) over a doc that predates its
+    // handlers fails additive-required — the estuary cold-start-setup-repair
+    // cascade, where each defaulted DATA field just unmasked the next
+    // required-no-default handler.
+    if (isStreamSlot(property)) {
+      continue;
+    }
     if (!isRecord(property) || property.default === undefined) {
-      throw new Error(
+      // Typed so the CFC prepare catch can tag this as the recoverable
+      // schema-migration class (see migration-reason.ts) without sniffing the
+      // message. The message text stays human-readable and unchanged.
+      throw new CfcSchemaMigrationError(
         `required field ${name} needs a default to preserve old documents`,
       );
     }
@@ -382,17 +459,46 @@ const mergeSchemaNode = (
     );
   }
 
-  const mergedProperties: Record<string, JSONSchema> = {
-    ...(left.properties ?? {}),
-  };
-  for (const [key, value] of Object.entries(right.properties ?? {})) {
-    mergedProperties[key] = key in mergedProperties
-      ? mergeSchemaNode(
-        mergedProperties[key],
-        value,
-        `${path}/${key}`,
-      )
-      : value;
+  // A side's claim about a named key is its properties[key] where declared,
+  // else its object-valued additionalProperties (the rest claim covering
+  // every undeclared key) — the record twin of the prefixItems/items rule
+  // below. So a key only one side names still merges with the other side's
+  // rest claim rather than winning wholesale.
+  const leftAdditional = typeof left.additionalProperties === "object" &&
+      left.additionalProperties !== null
+    ? left.additionalProperties
+    : undefined;
+  const rightAdditional = typeof right.additionalProperties === "object" &&
+      right.additionalProperties !== null
+    ? right.additionalProperties
+    : undefined;
+  const mergedProperties: Record<string, JSONSchema> = {};
+  for (
+    const key of new Set([
+      ...Object.keys(left.properties ?? {}),
+      ...Object.keys(right.properties ?? {}),
+    ])
+  ) {
+    const leftClaim = left.properties?.[key] ?? leftAdditional;
+    const rightClaim = right.properties?.[key] ?? rightAdditional;
+    mergedProperties[key] = leftClaim !== undefined &&
+        rightClaim !== undefined
+      ? mergeSchemaNode(leftClaim, rightClaim, `${path}/${key}`)
+      : (rightClaim ?? leftClaim)!;
+  }
+
+  // Object-valued rest claims merge like items; boolean forms keep the
+  // spread's right-wins behavior (closed-object union semantics are
+  // CT-1898's question, not this merge's).
+  let mergedAdditionalProperties = left.additionalProperties;
+  if (leftAdditional !== undefined && rightAdditional !== undefined) {
+    mergedAdditionalProperties = mergeSchemaNode(
+      leftAdditional,
+      rightAdditional,
+      `${path}/*`,
+    );
+  } else if (right.additionalProperties !== undefined) {
+    mergedAdditionalProperties = right.additionalProperties;
   }
 
   let mergedItems = left.items;
@@ -400,6 +506,40 @@ const mergeSchemaNode = (
     mergedItems = mergeSchemaNode(left.items, right.items, `${path}/*`);
   } else if (right.items !== undefined) {
     mergedItems = right.items;
+  }
+
+  // Tuple slots merge slot-wise like properties — the `{...left, ...right}`
+  // spread below would otherwise let one side's prefixItems win wholesale,
+  // dropping the other side's slot ifc/defaults. A side's claim about slot
+  // index i is its prefixItems[i] where declared, else its rest `items`
+  // (2020-12: `items` speaks for every index past that side's slots). So a
+  // shorter side's `items` claim merges into the longer side's extra slots,
+  // and a side introducing prefixItems beside an items-only side merges
+  // each slot with that `items` claim rather than winning wholesale.
+  let mergedPrefixItems: JSONSchema[] | undefined;
+  if (left.prefixItems !== undefined || right.prefixItems !== undefined) {
+    const slotClaim = (
+      side: typeof left,
+      index: number,
+    ): JSONSchema | undefined =>
+      side.prefixItems !== undefined && index < side.prefixItems.length
+        ? side.prefixItems[index]
+        : side.items;
+    const length = Math.max(
+      left.prefixItems?.length ?? 0,
+      right.prefixItems?.length ?? 0,
+    );
+    const slots: JSONSchema[] = [];
+    for (let index = 0; index < length; index++) {
+      const leftSlot = slotClaim(left, index);
+      const rightSlot = slotClaim(right, index);
+      slots.push(
+        leftSlot !== undefined && rightSlot !== undefined
+          ? mergeSchemaNode(leftSlot, rightSlot, `${path}/${index}`)
+          : (rightSlot ?? leftSlot)!,
+      );
+    }
+    mergedPrefixItems = slots;
   }
 
   // `$defs` is not merged: `{...left, ...right}` lets a `right` envelope that
@@ -416,6 +556,12 @@ const mergeSchemaNode = (
       ? { properties: mergedProperties }
       : {}),
     ...(mergedItems !== undefined ? { items: mergedItems } : {}),
+    ...(mergedPrefixItems !== undefined
+      ? { prefixItems: mergedPrefixItems }
+      : {}),
+    ...(mergedAdditionalProperties !== undefined
+      ? { additionalProperties: mergedAdditionalProperties }
+      : {}),
     ifc: mergeIfc(left.ifc, right.ifc, path),
     required: mergeRequired(left.required, right.required, mergedProperties),
     default: mergeDefaults(left.default, right.default),

@@ -1,4 +1,5 @@
-import type { ElementHandle, InteractionObserver } from "@astral/astral";
+import type { ElementHandle } from "@astral/astral";
+import type { InteractionObserver } from "../astral-adapter.ts";
 import type { Page } from "../page.ts";
 import { type ProbeApi, waitForCondition } from "../utils.ts";
 import type { PresentationConfig } from "./config.ts";
@@ -81,11 +82,9 @@ export class PresentationInteractions {
   async typeIntoCfInput(
     selector: string,
     value: string,
-    timeout: number,
   ): Promise<void> {
     const host = await this.#page.waitForSelector(selector, {
       strategy: "pierce",
-      timeout,
     });
     await host.evaluate((element: Element) => {
       const input = element instanceof HTMLInputElement
@@ -94,7 +93,6 @@ export class PresentationInteractions {
       input?.scrollIntoView({ block: "center", inline: "center" });
     });
     await waitForCondition(this.#page, cfInputIsFillable, {
-      timeout,
       args: [selector],
     });
     await this.#moveCursorToElement(host);

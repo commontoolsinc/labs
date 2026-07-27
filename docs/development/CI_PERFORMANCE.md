@@ -13,10 +13,35 @@ same rough band. As a default, stop when:
 - The slowest required test job is around 2 minutes.
 - The expected critical-path win is under about 30 seconds.
 - The proposed split adds comparable maintenance cost: more matrix entries,
-  ports, artifacts, sharding rules, or performance baselines.
+  ports, artifacts, or sharding rules.
 
 At that point, keep the timing instrumentation and wait for a concrete trigger
 instead of continuing to split jobs proactively.
+
+## Required Pull Request Checks
+
+Configure merge protection to require `Status`. The GitHub web interface shows
+that check as `CI / Status`, joining the workflow's name to the job's name, but
+merge protection stores and matches the job's name on its own.
+
+`Status` runs after every pull request validation job in `deno.yml`. It runs
+after failed and skipped dependencies. It fails unless every dependency
+succeeded. Add each new pull request validation job to its `needs` list. Its
+dependencies include the reusable Dashboard workflow.
+
+The Dashboard workflow's internal `Status` job waits for the dashboard tests,
+image build, publish authorization, and any authorized publish. The reusable
+workflow reports that result to the CI workflow's `Status`. GitHub names a
+check from a called workflow by joining the calling job's name to the called
+job's name, so that one is called `Dashboard / Status` and does not collide
+with the check to require. Do not require it separately in merge protection.
+
+Keep pull request path filters out of workflows that provide required checks.
+GitHub leaves a required check pending when a path filter prevents its workflow
+from starting.
+
+Require checks from other GitHub Apps separately. A GitHub Actions job cannot
+depend on a check produced by another app.
 
 ## Revisit Triggers
 
@@ -28,25 +53,17 @@ normal runs:
   at least 30 seconds slower in absolute terms.
 - Required non-deploy checks take more than 8 minutes from first start to last
   completion.
-- The same job repeatedly appears as `OVER` or `CLOSE` in Performance Check,
-  rather than as a one-run fluctuation.
 - New tests clearly cluster in one shard or suite and make it consistently
   heavier.
 
-Performance Check prints a non-blocking `CI Wall-Time Revisit Signals` section
-for the first three triggers. Treat it as a prompt to inspect the data, not as a
-failure by itself.
-
 ## How To Respond
 
-1. Start from the latest completed `main` run and its Performance Check log.
+1. Start from the latest completed `main` run and its Coverage Check log.
 2. Prefer timing artifacts and repeated runs over a single outlier.
 3. First look for a low-maintenance rebalance, such as moving a heavy test file
    between existing shards.
 4. Split a job only when the boundary is already clear and the split preserves
    local developer workflows.
-5. If Performance Check asks for a `NEW_PERF_BASELINE`, make sure the metric is
-   understood and note whether it is related to the CI change.
 
 Good CI optimization PRs should reduce critical-path wall time without making
 the workflow harder to reason about.
@@ -84,6 +101,16 @@ artifacts are not reachable this way; measure those locally.
 Jobs and steps for a run:
 `GET /repos/commontoolsinc/labs/actions/runs/<run-id>/jobs?per_page=100` — each
 job and step carries `started_at` and `completed_at`.
+
+The team ops dashboard's `/bench?view=ci` page provides repeated-run analysis
+for labs and loom. It reports overall workflow duration and individual job
+duration. Matrix jobs are grouped using the trailing-parenthesis base names from
+`scripts/ci-gantt.ts`, with the slowest shard tracked across runs to expose
+persistent imbalance.
+
+For a requested history window, the collector retains every successful main
+push build when there are at most 90. Larger sets are reduced to about 90 time
+buckets, keeping the newest build in each bucket.
 
 ## Step Phase Markers
 
@@ -194,8 +221,8 @@ printed by `tasks/test.ts`. The round-robin split carries no per-package
 weighting, so first check whether one shard simply drew several slow packages.
 Changing the shard count in the workflow matrix reshuffles the assignment. A
 shard-count change must also update the `coverage-profile-workspace-*` entries
-in `EXPECTED_COVERAGE_ARTIFACT_NAMES` in `tasks/perf-check.ts`, which the
-Performance Check gate uses to require every shard's coverage artifact.
+in `EXPECTED_COVERAGE_ARTIFACT_NAMES` in `tasks/coverage-check.ts`, which the
+Coverage Check gate uses to require every shard's coverage artifact.
 
 A package too heavy for any single shard can be split internally: the cli
 package runs as three units via `CLI_TEST_SHARD` (see
@@ -221,85 +248,3 @@ Known serial CLI tests:
 
 The CLI package keeps those tests in a serial group and runs the rest of its
 test modules with `--parallel`.
-
-## Coverage Debt Baselines
-
-Performance Check also tracks coverage debt as uncovered source lines. See
-[COVERAGE.md](COVERAGE.md) for how that coverage is collected and which CI job
-measures which code. Coverage debt uses a latest-main ratchet for source groups
-changed by the PR: any increase in a changed group fails unless the PR
-explicitly accepts it. Debt metrics for unchanged groups are still reported, but
-they do not block the PR.
-
-Use the narrow per-metric form when a PR intentionally increases one coverage
-debt metric:
-
-```text
-NEW_PERF_BASELINE: coverage-debt: packages/runner uncovered lines = 123 lines
-```
-
-Use the broad reset marker only to bootstrap coverage data for the first time,
-or when the upstream coverage baseline is known to be bogus and should be
-re-seeded for one cycle:
-
-```text
-NEW_COVERAGE_BASELINE
-```
-
-When that PR merges, the main run's coverage metrics become the new ratchet
-baseline for later PRs. Performance Check still requires the full expected
-coverage artifact set during that reset cycle. Jobs with no reportable covered
-files upload an empty LCOV report so missing artifacts mean the report upload
-itself failed.
-
-## Compile Cache State and Cold Runs
-
-The pattern test jobs restore a compile byte cache keyed on a fingerprint hash
-over the compiler packages. A PR that changes that fingerprint runs cold: every
-pattern compiles from scratch, pattern tests run roughly 1.7–2× slower, and the
-timing gate would trip against warm baselines. The other direction is just as
-bad: a cold main run covers compile branches that only execute on a cold cache,
-which lowers the coverage-debt baseline, so later warm PRs fail the coverage
-ratchet with phantom uncovered lines.
-
-The pattern-integration process owns one shared cache in
-`packages/patterns/integration/pieces-controller.ts`. Its controller helper and
-the capability-gate controller both inject that cache into every runtime they
-create. A custom runtime in this suite must do the same. Setting
-`CF_COMPILE_CACHE_FILE` only tells the test-support cache where to persist its
-bytes; a runtime uses those bytes only when it receives the cache through its
-`moduleByteCache` option.
-
-To compare like with like, each pattern job uploads a small `cache-state-*`
-artifact recording its cache restore result. Performance Check aggregates those
-into `compileCacheStates` in `perf-metrics.json`. A job family is cold when any
-of its shards had a full cache miss, detected as the cache file being absent
-after the restore step (the combined `actions/cache` action does not expose the
-matched key). A partial hit through a restore key counts as warm: both key
-forms start with the fingerprint hash, so any restore means the compiled bytes
-are current.
-
-The comparison rules follow from the tagging:
-
-- When the current run is cold for a family, that family's cache-sensitive
-  timing metrics get the non-blocking `COLD` status instead of being gated.
-  The remedy is to re-run the pattern jobs: the cold attempt already saved the
-  new cache, so the re-run is warm and gates normally.
-- When the current run is warm, known-cold baseline samples are excluded from
-  the timing comparison.
-- The coverage-debt ratchet uses the latest non-cold main sample, so a cold
-  main run cannot lower the baseline that warm PRs are held to.
-
-A run without a recorded cache state — an artifact carrying no stamp, a
-backfill-derived run, or a run whose cache-state artifact failed to upload — is
-retro-classified from the compile fingerprint (`tasks/perf-cache-state.ts`
-mirrors the `cc-*` key globs, drift-guarded by a test that parses the workflow):
-if the fingerprint paths changed against the run's predecessor, every family is
-treated as cold; if unchanged, warm. The same fingerprint inference backstops
-the current run when its cache-state artifact is missing. Fingerprint inference
-cannot see non-fingerprint cold causes (cache eviction, cache-service outages):
-a run cold for those reasons and lacking a recorded state stays unknown, so its
-samples are kept and gate normally.
-
-Cold compile duration itself is not gated, so a regression that shows up only on
-a cold cache passes unnoticed; a dedicated cold-compile bench would cover it.

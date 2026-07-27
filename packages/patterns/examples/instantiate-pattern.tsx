@@ -60,7 +60,7 @@ export const Counter = pattern<PatternState>((state) => {
 
 interface FactoryInput {
   // Provided by the shell; not used directly here
-  allPieces: unknown[] | Default<[]>;
+  pieceRegistry: unknown[] | Default<[]>;
 }
 
 // No additional outputs beyond name and UI

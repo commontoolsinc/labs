@@ -767,6 +767,21 @@ FabricSpecialObject (abstract root)
 a single `instanceof FabricSpecialObject` check wherever code needs to recognize
 any fabric-system value without caring which branch it belongs to.
 
+It is **nominal**, not structural: the `@commonfabric/FabricSpecialObject` member is a
+brand that exists only in the type system (`declare` emits no runtime member,
+and nothing reads the key). This matters for what `FabricValue` means as a
+static claim. TypeScript is structurally typed, so were the class empty, every
+object would satisfy `FabricSpecialObject` — and therefore satisfy
+`FabricValue`, since the union includes this type. Annotating a value
+`FabricValue` would then assert nothing at all. The brand is what makes the
+annotation carry information.
+
+The brand is a well-known string key rather than a `unique symbol` because
+`interface.ts` is deliberately free of runtime imports, and a `unique symbol`
+would have to be imported as a *value*. `packages/api/index.ts` declares the
+identical member; the two must agree exactly, since a value branded by one
+would otherwise not satisfy the other.
+
 ```typescript
 // file: packages/data-model/interface.ts
 
@@ -778,7 +793,9 @@ any fabric-system value without caring which branch it belongs to.
  * fabric-system value without caring which branch of the hierarchy it
  * belongs to.
  */
-export abstract class FabricSpecialObject {}
+export abstract class FabricSpecialObject {
+  declare readonly "@commonfabric/FabricSpecialObject": true;
+}
 ```
 
 **`FabricPrimitive`** is the abstract base class for non-`FabricInstance` types
@@ -1103,7 +1120,7 @@ codec's `encode()` returns the payload directly, and `decode()` reconstructs a
 malformed). The JSON wire form is the `/Link@1`-tagged envelope
 `{ "/Link@1": <payload> }`; see Section 3 of `3-json-encoding.md` for the wire
 encoding, and the migration table in Section 4 for how legacy link forms
-(the IPLD sigil `{ "/": { "link@1": … } }` and `$alias`) map onto it.
+(the IPLD sigil `{ "/": { "link@1": … } }`) map onto it.
 
 ```typescript
 // Shown for illustration only.
@@ -2932,7 +2949,7 @@ boundary-only serialization and the three-layer architecture:
 
 ### 7.2 Unifying JSON Encoding
 
-Four legacy conventions in the current codebase must be migrated to the unified
+Three legacy conventions in the current codebase must be migrated to the unified
 `/<Type>@<Version>` format:
 
 | Legacy Convention | Where Used | Example | New Form |
@@ -2940,17 +2957,11 @@ Four legacy conventions in the current codebase must be migrated to the unified
 | IPLD sigil | Links (`sigil-types.ts`) | `{ "/": { "link@1": { id, path, space } } }` | `{ "/Link@1": { id, path, space } }` |
 | `@` prefix | Errors (`fabric-value.ts`) | `{ "@Error": { name, message, ... } }` | `{ "/Error@1": { name, message, ... } }` |
 | `$` prefix (stream) | Streams (`builder/types.ts`) | `{ "$stream": true }` | `{ "/Stream@1": null }` |
-| `$` prefix (alias) | Internal refs (`json-utils.ts`, `cell-handle.ts`) | `{ "$alias": { path, cell?, schema? } }` | `{ "/Link@1": { id, path, space, overwrite? } }` |
 
 > **Note on `$stream`:** In the current codebase, `$stream` is a stateless
 > marker — it signals that a cell path is a stream endpoint rather than carrying
 > reconstructible state. Under the new encoding it becomes `{ "/Stream@1": null }`
 > (a stateless tagged type per Section 5 of `3-json-encoding.md`), preserving its marker semantics.
->
-> **Note on `$alias`:** An alias is an internal cross-cell reference with an
-> optional schema filter. During migration it maps to `/Link@1` with the
-> appropriate `overwrite` property (e.g., `overwrite: "redirect"` for aliases
-> that redirect writes to the target cell).
 
 ### 7.3 Replacing CID-Based Hashing
 

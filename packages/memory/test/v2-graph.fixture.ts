@@ -1,3 +1,4 @@
+import type { JSONSchema } from "@commonfabric/api";
 import type { URI } from "../interface.ts";
 
 type GraphLink = {
@@ -24,7 +25,7 @@ export type GraphFixture = {
   hiddenRootId: URI;
   initialReachableIds: URI[];
   expandedReachableIds: URI[];
-  schema: Record<string, unknown>;
+  schema: JSONSchema;
   expandedRootValue: GraphDoc;
 };
 
@@ -64,7 +65,7 @@ const nodeSchema = {
   },
   required: ["name", "metadata"],
   additionalProperties: false,
-};
+} as const satisfies JSONSchema;
 
 export const createGraphFixture = (space: string): GraphFixture => {
   const docs = new Map<URI, GraphDoc>();

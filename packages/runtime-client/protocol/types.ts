@@ -3,6 +3,7 @@ import type {
   JSONSchema,
   JSONValue,
   NormalizedFullLink,
+  PatternCoverageData,
   SchedulerDiagnosisResult,
   SchedulerGraphSnapshot,
   SettleStats,
@@ -57,6 +58,7 @@ export enum RequestType {
   FlushCompileCacheWrites = "runtime:flushCompileCacheWrites",
   GetGraphSnapshot = "runtime:getGraphSnapshot",
   GetLoggerCounts = "runtime:getLoggerCounts",
+  GetPatternCoverage = "runtime:getPatternCoverage",
   SetLoggerLevel = "runtime:setLoggerLevel",
   SetLoggerEnabled = "runtime:setLoggerEnabled",
   SetTelemetryEnabled = "runtime:setTelemetryEnabled",
@@ -109,7 +111,6 @@ export enum NotificationType {
   Telemetry = "callback:telemetry",
   VDomBatch = "vdom:batch",
   PendingWritesChanged = "callback:pending-writes",
-  VersionSkew = "callback:versionskew",
 }
 
 export interface IPCClientMessage {
@@ -156,20 +157,14 @@ export interface InitializationData {
   spaceIdentity?: KeyPairRaw;
   // Default timeout in milliseconds.
   timeoutMs?: number;
-  // This client build's git sha (the shell's COMMIT_SHA). Threaded to the
-  // worker runtime as `clientVersion` for the system-pattern auto-update
-  // version-skew gate (compared to a space's toolshed /api/meta gitSha).
-  // Absent (dev / unknown) ⇒ never auto-update.
-  clientVersion?: string;
   // Experimental space-model feature flags.
   experimental?: {
     modernCellRep?: boolean;
     persistentSchedulerState?: boolean;
     eagerSourceAnnotation?: boolean;
-    // Roll a space's system root pattern forward in place when its toolshed
-    // serves a newer identity. Default off; home held behind the second flag.
+    // Roll a space's system root pattern (home included) forward in place
+    // when its toolshed serves a newer identity. Default off.
     systemPatternAutoUpdate?: boolean;
-    systemPatternAutoUpdateHome?: boolean;
   };
   // Commit-boundary CFC mode for the worker runtime.
   cfcEnforcementMode?:
@@ -210,6 +205,18 @@ export interface InitializationData {
   // integration-test console capture. Off by default: each forwarded call
   // costs one postMessage, so it is enabled only for diagnostic runs.
   forwardWorkerConsole?: boolean;
+  // When true, the worker runtime instruments every pattern compile for
+  // statement coverage and accumulates hits, which the integration harness
+  // pulls at teardown via GetPatternCoverage. Test/CI only (the coverage shell
+  // build sets it); off by default. See docs/development/COVERAGE.md.
+  patternCoverage?: boolean;
+  // When true, the worker's remote storage overlaps watch-refresh round trips
+  // up to a bounded window instead of the default strict single-flight
+  // (`experimentalConcurrentWatchRefresh`, docs/development/EXPERIMENTAL_OPTIONS.md).
+  // Fixed at StorageManager.open time, so like the render ceiling it takes
+  // effect on the next runtime (reload), not live. Off by default; the shell
+  // dogfood toggle `commonfabric.concurrentWatchRefresh()` sets it.
+  concurrentWatchRefresh?: boolean;
 }
 
 export interface InitializeRequest extends BaseRequest {
@@ -350,6 +357,10 @@ export interface GetGraphSnapshotRequest extends BaseRequest {
 
 export interface GetLoggerCountsRequest extends BaseRequest {
   type: RequestType.GetLoggerCounts;
+}
+
+export interface GetPatternCoverageRequest extends BaseRequest {
+  type: RequestType.GetPatternCoverage;
 }
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -739,6 +750,7 @@ export type IPCClientRequest =
   | EnsureHomePatternRunningRequest
   | GetGraphSnapshotRequest
   | GetLoggerCountsRequest
+  | GetPatternCoverageRequest
   | SetLoggerLevelRequest
   | SetLoggerEnabledRequest
   | SetTelemetryEnabledRequest
@@ -824,6 +836,17 @@ export interface LoggerCountsResponse {
   flags: LoggerFlagsData;
 }
 
+export interface PatternCoverageResponse {
+  /**
+   * The worker collector's spans and hit counts, or `null` when this worker was
+   * built without a collector. Null and empty are kept apart on purpose: a
+   * worker that never had coverage on and one that had it on but ran nothing
+   * instrumented are different failures, and reporting both as an empty report
+   * makes the first invisible.
+   */
+  data: PatternCoverageData | null;
+}
+
 export interface CellUpdateNotification {
   type: NotificationType.CellUpdate;
   cell: CellRef;
@@ -860,20 +883,6 @@ export interface ErrorNotification {
 export interface TelemetryNotification {
   type: NotificationType.Telemetry;
   marker: RuntimeTelemetryMarkerResult;
-}
-
-/**
- * Worker→shell signal that a space's toolshed build differs from this client
- * build, so the system-pattern auto-update check was skipped for that space
- * (the light `?identity` is only comparable within a build). The shell surfaces
- * a non-blocking "newer version available — reload" affordance. Versions are
- * git shas; either may be absent when a side's build sha is unknown.
- */
-export interface VersionSkewNotification {
-  type: NotificationType.VersionSkew;
-  space: string;
-  clientVersion?: string;
-  toolshedVersion?: string;
 }
 
 /**
@@ -939,6 +948,7 @@ export type RemoteResponse =
   | CfcLabelViewResponse
   | GraphSnapshotResponse
   | LoggerCountsResponse
+  | PatternCoverageResponse
   | SettleStatsResponse
   | SettleStatsHistoryResponse
   | ActionRunTraceResponse
@@ -958,8 +968,7 @@ export type IPCRemoteNotification =
   | NavigateRequestNotification
   | ErrorNotification
   | VDomBatchNotification
-  | PendingWritesNotification
-  | VersionSkewNotification;
+  | PendingWritesNotification;
 
 export type Commands = {
   // Runtime requests
@@ -998,6 +1007,10 @@ export type Commands = {
   [RequestType.GetLoggerCounts]: {
     request: GetLoggerCountsRequest;
     response: LoggerCountsResponse;
+  };
+  [RequestType.GetPatternCoverage]: {
+    request: GetPatternCoverageRequest;
+    response: PatternCoverageResponse;
   };
   [RequestType.SetLoggerLevel]: {
     request: SetLoggerLevelRequest;

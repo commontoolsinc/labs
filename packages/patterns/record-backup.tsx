@@ -5,7 +5,7 @@
  * Designed for data survival after server wipes.
  *
  * Features:
- * - Discovers all Records using wish({ query: "#default" })
+ * - Discovers all Records using wish({ query: "#pieceRegistry" })
  * - Extracts module data using registry's fieldMapping
  * - Preserves wiki-links in notes as-is
  * - Includes trashed modules in export
@@ -21,7 +21,9 @@ import {
   navigateTo,
   pattern,
   resultOf,
+  type Stream,
   UI,
+  type VNode,
   wish,
   Writable,
 } from "commonfabric";
@@ -78,6 +80,8 @@ interface Input {
 }
 
 export interface Output {
+  [NAME]: string;
+  [UI]: VNode;
   exportedJson: string;
   importJson: string;
   recordCount: number;
@@ -86,7 +90,7 @@ export interface Output {
 
 // ===== Type for Record piece =====
 
-interface RecordPiece {
+export interface RecordPiece {
   "#record"?: boolean;
   title?: string;
   subPieces?: SubPieceEntry[];
@@ -172,10 +176,13 @@ function extractModuleData(
  */
 const buildExportData = lift(
   (
-    { allPieces, now }: { allPieces: RecordPiece[]; now: number | undefined },
+    { pieceRegistry, now }: {
+      pieceRegistry: RecordPiece[];
+      now: number | undefined;
+    },
   ): ExportData => {
     // Filter to only Record patterns
-    const records = (allPieces || []).filter(
+    const records = (pieceRegistry || []).filter(
       (piece) => piece?.["#record"] === true,
     );
 
@@ -416,10 +423,10 @@ const importRecords = handler<
   Record<string, never>,
   {
     importJson: Writable<string>;
-    allPieces: Writable<RecordPiece[]>;
+    addPiece: Stream<{ piece: Writable<RecordPiece> }>;
     importResult: Writable<ImportResult | null>;
   }
->((_, { importJson, allPieces, importResult }) => {
+>((_, { importJson, addPiece, importResult }) => {
   const jsonText = importJson.get();
   const parseResult = parseImportJson(jsonText);
 
@@ -537,14 +544,13 @@ const importRecords = handler<
 
       // Create the Record with all its modules
       // deno-lint-ignore no-explicit-any
-      const record = (Record as any)({
+      const record: Writable<RecordPiece> = (Record as any)({
         title: recordData.title,
         subPieces: subPieces,
         trashedSubPieces: trashedSubPieces,
       });
 
-      // Push to allPieces to persist
-      allPieces.push(record as RecordPiece);
+      addPiece.send({ piece: record });
       createdRecords.push(record);
       result.imported++;
     } catch (e) {
@@ -616,12 +622,18 @@ const handleFileUpload = handler<
 
 // ===== The Pattern =====
 
-export default pattern<Input, Output>(({ importJson }) => {
+export default pattern<Input, Output>((input) => {
+  const { importJson } = input;
   // Get all pieces in the space
-  const defaultWish = wish<{ allPieces: RecordPiece[] }>({
-    query: "#default",
+  const pieceRegistryWish = wish<RecordPiece[]>({
+    query: "#pieceRegistry",
   });
-  const { allPieces } = resultOf(defaultWish.result);
+  const pieceRegistry = resultOf(pieceRegistryWish.result);
+  const addPieceWish = wish<Stream<{ piece: Writable<RecordPiece> }>>({
+    query: "#default",
+    path: ["addPiece"],
+  });
+  const addPiece = resultOf(addPieceWish.result);
 
   // Current time, sourced from the reactive #now cell (coarsened to 1s).
   const nowCell = wish<number>({ query: "#now" });
@@ -629,7 +641,7 @@ export default pattern<Input, Output>(({ importJson }) => {
 
   // Build export data
   const exportData = buildExportData({
-    allPieces,
+    pieceRegistry,
     now: nowCellValue,
   });
   const exportedJson = formatExportJson({ exportData });
@@ -746,7 +758,7 @@ export default pattern<Input, Output>(({ importJson }) => {
                 <cf-button
                   onClick={importRecords({
                     importJson,
-                    allPieces,
+                    addPiece,
                     importResult,
                   })}
                   variant="primary"

@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import type { FabricValue } from "@commonfabric/data-model/interface";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { URI } from "@commonfabric/memory/interface";
@@ -53,7 +54,7 @@ describe("CFC privileged system write (S18)", () => {
         id,
         type: "application/json",
         path: ["cfc"],
-      }, forgedMetadata as unknown as Record<string, unknown>);
+      }, forgedMetadata as unknown as FabricValue);
 
       const result = await tx.commit();
       expect(result.error).toBeDefined();
@@ -87,7 +88,7 @@ describe("CFC privileged system write (S18)", () => {
         id,
         type: "application/json",
         path: ["cfc"],
-      }, forgedMetadata as unknown as Record<string, unknown>);
+      }, forgedMetadata as unknown as FabricValue);
 
       const result = await tx.commit();
       expect(result.ok).toBeDefined();
@@ -194,7 +195,7 @@ describe("CFC privileged system write (S18)", () => {
         id,
         type: "application/json",
         path: ["cfc"],
-      }, forgedMetadata as unknown as Record<string, unknown>);
+      }, forgedMetadata as unknown as FabricValue);
       // The forgery is recorded even though enforcement is disabled.
       expect(tx.getCfcState().unprivilegedSystemWrites.length).toBe(1);
 
@@ -235,7 +236,7 @@ describe("CFC privileged system write (S18)", () => {
         id,
         type: "application/json",
         path: ["cfc"],
-      }, forgedMetadata as unknown as Record<string, unknown>);
+      }, forgedMetadata as unknown as FabricValue);
 
       const result = await tx.commit();
       expect(result.ok).toBeDefined();
@@ -313,7 +314,7 @@ describe("CFC privileged system write (S18)", () => {
       const base = current && typeof current === "object" ? current : {};
       tx.writeOrThrow(
         docAddress,
-        { ...base, cfc: forgedMetadata } as unknown as Record<string, unknown>,
+        { ...base, cfc: forgedMetadata } as unknown as FabricValue,
       );
       expect(tx.getCfcState().unprivilegedSystemWrites.length).toBe(0);
 

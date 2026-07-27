@@ -4,6 +4,8 @@ import {
   StaticCacheHTTP,
 } from "@commonfabric/static";
 import { RuntimeTelemetry } from "@commonfabric/runner";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
+import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
 import type { NonIdempotentReport } from "./telemetry.ts";
 import type {
   AnyCell,
@@ -34,6 +36,7 @@ import {
   setEagerSourceAnnotation,
 } from "./builder/module.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
+import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import type {
   ChangeGroup,
   CommitError,
@@ -63,7 +66,6 @@ import {
   resolveCommitBackpressure,
 } from "./scheduler/backpressure.ts";
 import { Engine } from "./harness/index.ts";
-import { fetchToolshedGitSha } from "./harness/version-gate.ts";
 import {
   CellLink,
   isCellLink,
@@ -108,6 +110,7 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { commitPreconditionValueHash } from "@commonfabric/memory/v2";
 import { snapshotQueryResult } from "./query-result-proxy.ts";
 import { PatternManager } from "./pattern-manager.ts";
+import { PatternUpdater } from "./pattern-updater.ts";
 import type { CompiledModuleArtifact } from "./harness/types.ts";
 import { ModuleRegistry } from "./module.ts";
 import { Runner } from "./runner.ts";
@@ -123,6 +126,7 @@ import {
 import { popFrame, pushFrame } from "./builder/pattern.ts";
 import type { Frame } from "./builder/types.ts";
 import type { ConsoleMessage } from "./interface.ts";
+import type { ConsoleMethod } from "./harness/console.ts";
 import type {
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
@@ -214,9 +218,15 @@ function missingDocLoadKey(link: NormalizedFullLink): string {
 
 export type { IExtendedStorageTransaction, IStorageProvider, MemorySpace };
 
+export interface ConsoleHandlerOutput {
+  method: ConsoleMethod;
+  args: any[];
+  target?: Console;
+}
+
 export type ConsoleHandler = (
   message: ConsoleMessage,
-) => any[];
+) => any[] | ConsoleHandlerOutput;
 
 export type ErrorWithContext = Error & {
   action: Action;
@@ -229,21 +239,6 @@ export type ErrorWithContext = Error & {
 export type ErrorHandler = (error: ErrorWithContext) => void;
 export type NavigateCallback = (target: Cell<any>) => void | Promise<void>;
 export type PieceCreatedCallback = (piece: Cell<any>) => void;
-
-/**
- * TTL backstop for the system-pattern update caches (toolshed git sha and
- * ?identity). Bounds how long a stale value survives a toolshed redeploy
- * mid-session; the primary invalidation is clearPatternUpdateCaches().
- */
-const PATTERN_UPDATE_CACHE_TTL_MS = 5 * 60_000;
-
-/** A build-version mismatch detected while checking a space for updates. */
-export interface VersionSkewInfo {
-  space: string;
-  clientVersion?: string;
-  toolshedVersion?: string;
-}
-export type VersionSkewHandler = (info: VersionSkewInfo) => void;
 
 /**
  * Feature flags for the space-model data-layer changes. Each flag gates an
@@ -269,7 +264,8 @@ export interface ExperimentalOptions {
   /**
    * Mint computed-scheme entity ids (`computed:fid1:<hash>`) for derived
    * internal cells classified as replayable by the builder. Gates minting
-   * only; readers accept both forms unconditionally. See
+   * only; readers accept both forms unconditionally. Defaults to on; pass
+   * `false` as a temporary rollback override. See
    * `docs/specs/computed-cell-identity.md`.
    */
   computedCellIds?: boolean | undefined;
@@ -283,19 +279,13 @@ export interface ExperimentalOptions {
    */
   eagerSourceAnnotation?: boolean | undefined;
   /**
-   * Roll a space's system root pattern (default-app / home) forward in place
-   * when its toolshed serves a newer content identity. Default off; enabled per
-   * deployment once CI golden-replay coverage exists. The home root has an
-   * additional gate ({@link systemPatternAutoUpdateHome}) pending the
-   * stable-addressing audit. See docs/specs/pattern-imports/pattern-updates.md.
+   * Roll toolshed-backed patterns forward in place when their source serves a
+   * newer content identity. Persisted default roots reconcile before start;
+   * other patterns check in the background after instantiation. Default off;
+   * enabled per deployment once CI golden-replay coverage exists. See
+   * docs/specs/pattern-imports/pattern-updates.md.
    */
   systemPatternAutoUpdate?: boolean | undefined;
-  /**
-   * Also auto-update the HOME space root (favorites/journal/spaces). Requires
-   * {@link systemPatternAutoUpdate}. Held separately until home.tsx addresses
-   * its durable state by stable key/cause (spec § open question 4).
-   */
-  systemPatternAutoUpdateHome?: boolean | undefined;
 }
 
 /**
@@ -352,24 +342,9 @@ export interface RuntimeOptions {
    * one. Fixed for the runtime's lifetime.
    */
   spaceHostMap?: Record<string, string>;
-  /**
-   * This client build's git sha (the shell's `COMMIT_SHA`). Compared against a
-   * space's toolshed `/api/meta` `gitSha` to gate the system-pattern
-   * auto-update path — the light `?identity` is only trustworthy when client
-   * and toolshed are the same build. Absent (dev / unknown) ⇒ never
-   * auto-update. See `harness/version-gate.ts`.
-   */
-  clientVersion?: string;
   storageManager: IStorageManager;
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
-  /**
-   * Invoked when a system-pattern update check is skipped because the space's
-   * toolshed build differs from this client build. The worker backend forwards
-   * it to the shell as a `versionSkew` IPC notification (banner). Inert when
-   * omitted.
-   */
-  onVersionSkew?: VersionSkewHandler;
   patternEnvironment?: PatternEnvironment;
   navigateCallback?: NavigateCallback;
   pieceCreatedCallback?: PieceCreatedCallback;
@@ -488,6 +463,19 @@ export interface RuntimeOptions {
    */
   moduleByteCache?: ModuleByteCache;
   /**
+   * Statement-coverage collector for authored patterns. When set, every compile
+   * this runtime performs is instrumented — the transformer injects a hit call
+   * in front of each authored statement — and the collector receives the hits.
+   * The compiled-byte caches (the process byte cache and the per-space durable
+   * cell cache) key the instrumented variant separately from the ordinary one,
+   * so an instrumented and an uninstrumented compile of the same source never
+   * collide, and a runtime with coverage on never serves or stores uninstrumented
+   * bytes. A per-compile `patternCoverage` option still overrides this default.
+   * Test-and-CI only; production runtimes leave it unset. See
+   * packages/runner/src/pattern-coverage.ts and docs/development/COVERAGE.md.
+   */
+  patternCoverage?: PatternCoverageCollector;
+  /**
    * Override for the outbound `fetch` used by network builtins (`fetchJson` et al).
    * Defaults to the host `globalThis.fetch`. Scoped to this runtime instance, so
    * a test harness can inject a deterministic mock without mutating process
@@ -597,6 +585,12 @@ export interface SpaceCellContents {
   defaultPattern: Cell<unknown>;
 }
 
+type RuntimeSetupOptions = {
+  patternRepository?: string;
+  reapplyStoredSetup?: boolean;
+  prepareForResume?: boolean;
+};
+
 function isMemorySpaceDID(value: string): boolean {
   return /^did:[^:]+:.+/.test(value);
 }
@@ -625,6 +619,7 @@ export class Runtime {
   readonly id: string;
   readonly scheduler: Scheduler;
   readonly patternManager: PatternManager;
+  readonly patternUpdater: PatternUpdater;
   readonly moduleRegistry: ModuleRegistry;
   readonly harness: Engine;
   readonly runner: Runner;
@@ -648,6 +643,8 @@ export class Runtime {
   readonly storageManager: IStorageManager;
   /** Optional process-level compiled-module-byte cache; see RuntimeOptions. */
   readonly moduleByteCache?: ModuleByteCache;
+  /** Optional pattern statement-coverage collector; see RuntimeOptions. */
+  readonly patternCoverage?: PatternCoverageCollector;
   readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
   readonly telemetry: RuntimeTelemetry;
   /** Resolved experimental flags (all properties present with built-in defaults). */
@@ -656,9 +653,6 @@ export class Runtime {
   readonly commitBackpressure: CommitBackpressurePolicy;
   readonly apiUrl: URL;
   readonly spaceHostMap?: Record<string, string>;
-  /** This client build's git sha; see RuntimeOptions.clientVersion. */
-  readonly clientVersion?: string;
-  readonly #onVersionSkew?: VersionSkewHandler;
   /**
    * Outbound `fetch` used by network builtins (e.g. `fetchJson`). Defaults to
    * the host `globalThis.fetch`; a test harness can inject a mock via
@@ -676,6 +670,71 @@ export class Runtime {
   private cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
   readonly #policyManifests = new Map<string, PolicyArtifactManifestV1>();
   readonly #policyManifestSpaces = new Map<string, Set<MemorySpace>>();
+  // Attesting space -> successor module identity -> direct predecessor
+  // identities whose writer authority it inherits. Entries come only from
+  // verified source closures or integrity-valid compiled closures in that same
+  // space. Transactions receive a transitive, immutable snapshot at creation
+  // so an in-flight authorization decision cannot change when another module
+  // loads, and authorization in one space can never borrow another space's
+  // delegation metadata.
+  readonly #moduleDelegations = new Map<
+    MemorySpace,
+    Map<string, Set<string>>
+  >();
+
+  registerModuleDelegations(
+    space: MemorySpace,
+    delegations: ReadonlyMap<string, ReadonlySet<string>>,
+  ): void {
+    if (typeof space !== "string" || space.length === 0) return;
+    const spaceDelegations = this.#moduleDelegations.get(space) ?? new Map();
+    for (const [identity, predecessors] of delegations) {
+      if (typeof identity !== "string" || identity.length === 0) continue;
+      const merged = spaceDelegations.get(identity) ?? new Set<string>();
+      for (const predecessor of predecessors) {
+        if (
+          typeof predecessor === "string" && predecessor.length > 0 &&
+          predecessor !== identity
+        ) {
+          merged.add(predecessor);
+        }
+      }
+      if (merged.size > 0) spaceDelegations.set(identity, merged);
+    }
+    if (spaceDelegations.size > 0) {
+      this.#moduleDelegations.set(space, spaceDelegations);
+    }
+  }
+
+  private moduleDelegationSnapshot(): Map<
+    MemorySpace,
+    ReadonlyMap<string, readonly string[]>
+  > {
+    const snapshot = new Map<
+      MemorySpace,
+      ReadonlyMap<string, readonly string[]>
+    >();
+    for (const [space, spaceDelegations] of this.#moduleDelegations) {
+      const spaceSnapshot = new Map<string, readonly string[]>();
+      for (const identity of spaceDelegations.keys()) {
+        const inherited = new Set<string>();
+        const pending = [...(spaceDelegations.get(identity) ?? [])];
+        while (pending.length > 0) {
+          const predecessor = pending.pop()!;
+          if (predecessor === identity || inherited.has(predecessor)) continue;
+          inherited.add(predecessor);
+          pending.push(...(spaceDelegations.get(predecessor) ?? []));
+        }
+        if (inherited.size > 0) {
+          spaceSnapshot.set(identity, [...inherited].sort());
+        }
+      }
+      if (spaceSnapshot.size > 0) {
+        snapshot.set(space, spaceSnapshot);
+      }
+    }
+    return snapshot;
+  }
 
   registerCfcPolicyManifests(
     space: MemorySpace | undefined,
@@ -905,8 +964,8 @@ export class Runtime {
 
     // Unlike ambient flags, computedCellIds is consumed from this Runtime's
     // builder frame. Normalize its local default after override logging so an
-    // omitted option does not appear as an explicit `false` override.
-    this.experimental.computedCellIds ??= false;
+    // omitted option does not appear as an explicit `true` override.
+    this.experimental.computedCellIds ??= true;
 
     // Propagate experimental flags to their ambient control points, then read
     // back the effective state so `experimental.*` reflects what is actually in
@@ -936,8 +995,6 @@ export class Runtime {
     );
 
     this.id = options.storageManager.id;
-    this.clientVersion = options.clientVersion;
-    this.#onVersionSkew = options.onVersionSkew;
     this.apiUrl = new URL(options.apiUrl);
     // Validate eagerly, mirroring the storage layer's resolver: a
     // malformed host should fail at configuration time naming the
@@ -984,6 +1041,7 @@ export class Runtime {
       setTelemetry?: (telemetry: RuntimeTelemetry) => void;
     }).setTelemetry?.(this.telemetry);
     this.moduleByteCache = options.moduleByteCache;
+    this.patternCoverage = options.patternCoverage;
     // Validated + digested + frozen before the trust-snapshot provider
     // default below, whose `revision` covers the config digest (a trust
     // config change must invalidate prepared digests like any other
@@ -1001,6 +1059,7 @@ export class Runtime {
     this.userIdentityDID = options.storageManager.as.did() as DID;
     this.moduleRegistry = new ModuleRegistry(this);
     this.patternManager = new PatternManager(this);
+    this.patternUpdater = new PatternUpdater(this);
     this.runner = new Runner(this);
     this.cfc = new ContextualFlowControl();
     this.cfcEnforcementMode = options.cfcEnforcementMode ??
@@ -1208,6 +1267,10 @@ export class Runtime {
     // Stop all running docs
     this.runner.stopAll();
 
+    // Background source checks are deliberately outside the scheduler. Abort
+    // and settle them before the storage sessions they may write through close.
+    await this.patternUpdater.dispose();
+
     // Scheduler background work can still be using storage, for example the
     // lifecycle-guarded boot-time persistent-state listing. Let that finish
     // before tearing down storage sessions.
@@ -1333,6 +1396,7 @@ export class Runtime {
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcPolicySnapshot(this.cfcPolicySnapshot);
     wrapped.setCfcTrustConfig(this.cfcTrustConfig);
+    wrapped.setCfcModuleDelegations(this.moduleDelegationSnapshot());
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     return wrapped;
   }
@@ -2026,6 +2090,29 @@ export class Runtime {
     );
   }
 
+  /**
+   * Makes a read-only cell whose content is `data`, carried entirely in the
+   * cell's own `data:` URI id; there is no document in a space to fetch.
+   *
+   * **Contract note:** `data` is an arbitrary value, deliberately NOT
+   * limited to `FabricValue`. Callers pass, among other things, `Cell`
+   * objects (wish candidate lists), userland event payloads (whatever
+   * patterns and the DOM hand over, `Date`s and `Error`s included), and
+   * pattern-authored schema defaults. The body converts via
+   * `fabricFromNativeValue()`, which is the designed intake for exactly
+   * this: `Cell`s become sigil links (their `toJSON()`), native instances
+   * become their fabric counterparts, and input that is already a
+   * deep-frozen `FabricValue` passes through by identity.
+   *
+   * @param space The space the cell claims as its own (it is not stored
+   *   there; links within relate to it).
+   * @param data The value to carry. Must be acyclic.
+   * @param schema Optional schema for the resulting cell.
+   * @param tx Optional transaction for the resulting cell.
+   * @param cfcLabelView Optional CFC label view for the resulting cell.
+   * @returns A read-only cell whose value is (the fabric conversion of)
+   *   `data`.
+   */
   getImmutableCell<T>(
     space: MemorySpace,
     data: T,
@@ -2047,9 +2134,11 @@ export class Runtime {
     tx?: IExtendedStorageTransaction,
     cfcLabelView?: CfcLabelView,
   ): Cell<any> {
-    const asDataURI = `data:application/json,${
-      encodeURIComponent(JSON.stringify({ value: data }))
-    }` as const as `${string}:${string}`;
+    // Not `dataUriFromValueWithResolvedLinks()`: its link-rewriting walk is unwanted here
+    // (this data is immutable as given). `fabricFromNativeValue()` converts
+    // what callers actually pass -- notably `Cell`s, which become sigil
+    // links via their `toJSON()` -- into an encodable `FabricValue`.
+    const asDataURI = dataUriFromValue(fabricFromNativeValue(data));
     return createCell(
       this,
       {
@@ -2119,26 +2208,32 @@ export class Runtime {
   }
 
   // Convenience methods that delegate to the runner
+  syncStoredSetupArgument(
+    resultCell: Cell<unknown>,
+  ): Promise<(candidate: Cell<unknown>) => boolean> {
+    return this.runner.syncStoredSetupArgument(resultCell);
+  }
+
   setup<T, R>(
     tx: IExtendedStorageTransaction | undefined,
     patternFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
-    options?: { patternRepository?: string },
+    options?: RuntimeSetupOptions,
   ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     pattern: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-    options?: { patternRepository?: string },
+    options?: RuntimeSetupOptions,
   ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-    options?: { patternRepository?: string },
+    options?: RuntimeSetupOptions,
   ): Promise<Cell<R>> {
     return this.runner.setup<T, R>(
       tx,
@@ -2153,20 +2248,29 @@ export class Runtime {
     patternFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
+    options?: { schedulePatternUpdate?: boolean },
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     pattern: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    options?: { schedulePatternUpdate?: boolean },
   ): Cell<R>;
   run<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
+    options: { schedulePatternUpdate?: boolean } = {},
   ): Cell<R> {
-    return this.runner.run<T, R>(tx, patternOrModule, argument, resultCell);
+    return this.runner.run<T, R>(
+      tx,
+      patternOrModule,
+      argument,
+      resultCell,
+      options,
+    );
   }
 
   runSynced(
@@ -2185,8 +2289,11 @@ export class Runtime {
     return this.runner.runSynced(resultCell, pattern, inputs, options);
   }
 
-  start<T = any>(resultCell: Cell<T>): Promise<boolean> {
-    return this.runner.start(resultCell);
+  start<T = any>(
+    resultCell: Cell<T>,
+    options: { schedulePatternUpdate?: boolean } = {},
+  ): Promise<boolean> {
+    return this.runner.start(resultCell, options);
   }
 
   /**
@@ -2208,107 +2315,6 @@ export class Runtime {
    */
   hostForSpace(space: MemorySpace): URL {
     return new URL(this.mappedHostFor(space) ?? this.apiUrl);
-  }
-
-  /**
-   * Report a build-version mismatch found while checking a space for a
-   * system-pattern update. Forwarded (by the worker backend) to the shell as a
-   * `versionSkew` notification. Inert when no handler is configured.
-   */
-  reportVersionSkew(info: VersionSkewInfo): void {
-    this.#onVersionSkew?.(info);
-  }
-
-  // --- System-pattern update caches ---------------------------------------
-  // A toolshed's build sha and each pattern's content identity are fixed for
-  // its process lifetime, so both are cached. Keyed by host / (host,url), with
-  // single-flight in-flight sharing. A failed (undefined) lookup is evicted so
-  // it retries. Cleared explicitly by clearPatternUpdateCaches() and, as a
-  // backstop against a toolshed redeploy mid-session (we have no
-  // storage-socket-reset event to hang invalidation on yet), after a TTL.
-  #toolshedGitShaCache = new Map<
-    string,
-    { at: number; value: Promise<string | undefined> }
-  >();
-  #patternIdentityCache = new Map<
-    string,
-    { at: number; value: Promise<string | undefined> }
-  >();
-
-  /** A space's toolshed build git sha (cached). See version-gate.ts. */
-  toolshedGitSha(host: string | URL): Promise<string | undefined> {
-    const key = host.toString();
-    return this.#cachedLookup(
-      this.#toolshedGitShaCache,
-      key,
-      () => fetchToolshedGitSha(this.fetch, host),
-    );
-  }
-
-  /**
-   * A pattern file's content identity from its toolshed (cached), via
-   * `GET {host}{url}?identity`. Undefined on any failure. Equals the
-   * patternIdentity the worker would compile for the same source at the same
-   * build (see the toolshed parity test).
-   */
-  cachedPatternIdentity(
-    host: string | URL,
-    url: string,
-  ): Promise<string | undefined> {
-    const key = `${host.toString()} ${url}`;
-    return this.#cachedLookup(
-      this.#patternIdentityCache,
-      key,
-      () => this.#fetchPatternIdentity(host, url),
-    );
-  }
-
-  /** Drop the update caches (e.g. on a storage-socket reset). */
-  clearPatternUpdateCaches(): void {
-    this.#toolshedGitShaCache.clear();
-    this.#patternIdentityCache.clear();
-  }
-
-  async #fetchPatternIdentity(
-    host: string | URL,
-    url: string,
-  ): Promise<string | undefined> {
-    try {
-      const u = new URL(url, host.toString());
-      u.searchParams.set("identity", "");
-      const res = await this.fetch(u);
-      if (!res.ok) return undefined;
-      const body = (await res.text()).trim();
-      return body.length > 0 ? body : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  #cachedLookup(
-    cache: Map<string, { at: number; value: Promise<string | undefined> }>,
-    key: string,
-    lookup: () => Promise<string | undefined>,
-  ): Promise<string | undefined> {
-    const now = Date.now();
-    const entry = cache.get(key);
-    if (entry && now - entry.at < PATTERN_UPDATE_CACHE_TTL_MS) {
-      return entry.value;
-    }
-    const value = lookup();
-    const fresh = { at: now, value };
-    cache.set(key, fresh);
-    // Evict a failed lookup (or one that resolved to "unknown") so it retries —
-    // but only if it is still THIS entry (a later lookup may have replaced it).
-    const evictIfStale = () => {
-      if (cache.get(key) === fresh) cache.delete(key);
-    };
-    value
-      .then((v) => {
-        if (v === undefined) evictIfStale();
-      })
-      .catch(evictIfStale);
-    return value;
   }
 
   /**

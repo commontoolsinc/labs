@@ -22,8 +22,8 @@ Common Fabric product.
 7. End-User Programs: home-schemas, patterns
 
 Support and test packages (utils, test-support, deno-web-test, integration,
-generated-patterns, content-hash, leb128, felt, static, vendor-astral,
-fs-sync-example) sit outside the layer stack.
+generated-patterns, content-hash, leb128, felt, static, fs-sync-example) sit
+outside the layer stack.
 
 ## Documentation Lifecycle
 
@@ -86,6 +86,8 @@ already does). `docs/development/skill-audit.md` covers what keeps those facts
 honest, including the `deno task check-skill-facts` tripwire that fails CI when
 a path or import a skill cites stops resolving.
 
+For reading or changing Topics on Estuary, use `skills/topics/SKILL.md`.
+
 #### Useful Pattern documentation
 
 **Start here:**
@@ -112,7 +114,7 @@ a path or import a skill cites stops resolving.
 - `docs/common/capabilities/llm.md` - Using generateText and generateObject for
   LLM integration
 - `docs/common/conventions/adding-pieces.md` - How to add pieces (use addPiece
-  handler, not allPieces.push)
+  handler, not pieceRegistry.push)
 
 **Reference:**
 

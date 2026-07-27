@@ -1,14 +1,14 @@
 import {
-  buildsMatch,
   type Cell,
   entityIdFrom,
   type EnvReader,
   experimentalOptionsFromEnv,
   getPatternIdentityRef,
-  getPatternSource,
   type JSONSchema,
   type MemorySpace,
   type ModuleByteCache,
+  type PatternCoverageCollector,
+  type PatternUpdateOutcome,
   Runtime,
   runtimePresets,
   RuntimeProgram,
@@ -19,6 +19,7 @@ import {
 import type { CellScope } from "@commonfabric/api";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import { type NameSchema, nameSchema } from "@commonfabric/runner/schemas";
+import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
 import { PieceManager } from "../index.ts";
 import { PieceController } from "./piece-controller.ts";
 import { compileProgram } from "./utils.ts";
@@ -35,17 +36,18 @@ const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
 export const HOME_PATTERN_URL = "/api/patterns/system/home.tsx";
 export const DEFAULT_APP_PATTERN_URL = "/api/patterns/system/default-app.tsx";
 
+// Default roots have a stronger update policy than ordinary pieces: an
+// existing root is reconciled before start, while a new root is compiled from
+// the current source immediately before creation. Keep the runner's watcher,
+// but do not schedule its duplicate fire-and-forget source check.
+const DEFAULT_ROOT_RUN_OPTIONS = { schedulePatternUpdate: false } as const;
+
 /**
- * The system space-root pattern URL a space of this type is created with — the
- * home DID gets home.tsx, every other space the default app. Used to back-fill
- * `patternSource` for spaces created before provenance stamping.
- *
- * Known v1 limitation: an existing *custom-app* space (whose root was seeded
- * from home's `defaultAppUrl`) that carries no stored `patternSource` derives to
- * default-app.tsx here. The auto-update check must therefore only act when a
- * stored `patternSource` is present (or the running identity matches a known
- * system identity) — otherwise it would roll a custom app to the default. See
- * docs/specs/pattern-imports/pattern-updates.md risk list.
+ * The official system space-root pattern URL for a space type — the home DID
+ * gets home.tsx, every other space gets the default app. This derivation only
+ * selects the identity to check; it never proves that a sourceless root tracks
+ * that URL. Exact equality with the official content identity supplies
+ * that proof below.
  */
 export function deriveSystemPatternUrl(
   space: MemorySpace,
@@ -65,13 +67,43 @@ const pieceUpdateLogger = getLogger("piece.update", {
   level: "warn",
 });
 
-/** The result of a system-pattern update check. */
-export type UpdateOutcome =
-  | "updated"
-  | "current"
-  | "skipped-skew"
-  | "skipped-unknown-build"
-  | "skipped-disabled";
+/** Backward-compatible name for the result of a pattern update check. */
+export type UpdateOutcome = PatternUpdateOutcome;
+
+/**
+ * A cold-start setup repair failed specifically because the CFC SCHEMA
+ * MIGRATION rejected the commit — the pinned pattern loads but cannot migrate
+ * the reused doc onto a now-required field that carries no default (the estuary
+ * `favorites` case). This is the ONLY repair-failure class the runnability
+ * backstop ({@link PiecesController.healDefaultRootByRollForward}) acts on;
+ * every other failure stays fail-closed.
+ *
+ * The bare `CFC enforcement rejected commit` prefix is NOT a safe trigger: the
+ * runner emits it for prepared-digest races, unprepared transactions, and
+ * policy/provenance rejections too (`extended-storage-transaction.ts`), none of
+ * which are repaired by repointing the root's pattern identity. So we require
+ * the machine-stable migration token the CFC prepare tags onto this class
+ * (`migration-reason.ts`). Matching a token in the message — not the error
+ * class — is what survives the plain-`Error` re-wrap the runner applies at its
+ * setup-commit boundary (`runner.ts`), keeping producer and consumer in
+ * lockstep across that boundary and across packages.
+ *
+ * Crucially we match the token only in its FRAMED reason position — `: <token>:
+ * ` — the exact shape the prepare catch emits (`${token}: ${message}` recorded
+ * as a reason, surfaced by the commit as `…not prepared: ${reason}`). A bare
+ * `includes(token)` would also match the token appearing incidentally inside an
+ * UNRELATED, user-influenced error — e.g. an ordinary incompatible-type merge
+ * failure at a property path literally named `/cfc-schema-migration-incompatible`
+ * — and wrongly authorize a root replacement for a non-additive incompatibility.
+ * The `: … : ` framing cannot be produced by a path or value that merely
+ * contains the token string.
+ */
+const FRAMED_MIGRATION_REASON =
+  `: ${CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON}: `;
+const isCfcMigrationRejection = (error: unknown): boolean =>
+  error instanceof Error &&
+  error.message.startsWith("CFC enforcement rejected commit") &&
+  error.message.includes(FRAMED_MIGRATION_REASON);
 
 // This module can load outside Deno (browser-safe storage import above), so
 // env reads are guarded like PIECE_TRACE_TIMINGS: absent env ⇒ defaults.
@@ -158,9 +190,9 @@ export class PiecesController<T = unknown> {
     return new PieceController(this.#manager, cell);
   }
 
-  async getAllPieces() {
+  async getRegisteredPieces() {
     this.disposeCheck();
-    const piecesCell = await this.#manager.getPieces();
+    const piecesCell = await this.#manager.getPieceRegistry();
     const pieces = await this.#manager.syncPieces(piecesCell);
     return pieces.map((piece) =>
       new PieceController(this.#manager, piece.asSchema(undefined))
@@ -204,15 +236,23 @@ export class PiecesController<T = unknown> {
     }
   }
 
-  static async initialize({ apiUrl, identity, spaceName, moduleByteCache }: {
-    apiUrl: URL;
-    identity: Identity;
-    spaceName: string;
-    // Optional compiled-module-byte cache to share across controllers. Supplied
-    // only by test code (see the integration suite's compile-byte-cache helper);
-    // unset in production, so no cache is installed.
-    moduleByteCache?: ModuleByteCache;
-  }): Promise<PiecesController> {
+  static async initialize(
+    { apiUrl, identity, spaceName, moduleByteCache, patternCoverage }: {
+      apiUrl: URL;
+      identity: Identity;
+      spaceName: string;
+      // Optional compiled-module-byte cache to share across controllers. Supplied
+      // only by test code (see the integration suite's compile-byte-cache helper);
+      // unset in production, so no cache is installed.
+      moduleByteCache?: ModuleByteCache;
+      // Collect statement coverage for the patterns this controller compiles.
+      // Test/CI only. Beyond the coverage itself, this decides which cached
+      // variant the pieces it creates are stored under, so a browser collecting
+      // coverage against the same space warm-loads them instead of recompiling
+      // every pattern for itself.
+      patternCoverage?: PatternCoverageCollector;
+    },
+  ): Promise<PiecesController> {
     const session = await createSession({ identity, spaceName });
     // Shared first-party posture for client runtimes against a deployed API
     // (CT-1814); the CFC pin this site previously restated lives in the
@@ -226,6 +266,7 @@ export class PiecesController<T = unknown> {
       }),
       experimental: experimentalOptionsFromEnv(readEnv),
       moduleByteCache,
+      patternCoverage,
       trustSnapshotProvider: () => ({
         id: `principal:${session.as.did()}`,
         actingPrincipal: session.as.did(),
@@ -321,14 +362,14 @@ export class PiecesController<T = unknown> {
       if (isHomeSpace) {
         patternConfig = {
           name: "Home",
-          urlPath: "/api/patterns/system/home.tsx",
+          urlPath: HOME_PATTERN_URL,
           cause: `home-pattern-${Date.now()}`,
         };
       } else {
         const customUrl = await this.getDefaultAppUrlFromHome();
         patternConfig = {
           name: "DefaultPieceList",
-          urlPath: customUrl || "/api/patterns/system/default-app.tsx",
+          urlPath: customUrl || DEFAULT_APP_PATTERN_URL,
           cause: `space-root-${Date.now()}`,
         };
       }
@@ -361,7 +402,28 @@ export class PiecesController<T = unknown> {
       );
 
       // Run pattern setup within same transaction
-      this.#manager.runtime.run(tx, pattern, {}, pieceCell);
+      this.#manager.runtime.run(
+        tx,
+        pattern,
+        {},
+        pieceCell,
+        DEFAULT_ROOT_RUN_OPTIONS,
+      );
+
+      // Stamp the provenance the piece tracks for updates, mirroring
+      // ensureDefaultPattern (CT-1890). Without this, every recreated root
+      // is born unprovenanced and checkAndUpdateDefaultPattern can only admit
+      // it while its ref exactly equals the current official identity — the
+      // repair path would otherwise mint roots with no durable update source.
+      // A custom program has no URL the
+      // auto-updater could re-fetch (stamping the "custom" placeholder
+      // would poison URL resolution — it would resolve relative to the
+      // host); its locator, when supplied, is recorded via
+      // setPatternRepository below, so a custom root without a repository
+      // intentionally stays unstamped.
+      if (options?.customProgram === undefined) {
+        setPatternSource(pieceCell, tx, patternConfig.urlPath);
+      }
 
       if (options?.repository !== undefined) {
         setPatternRepository(pieceCell, tx, options.repository);
@@ -386,7 +448,7 @@ export class PiecesController<T = unknown> {
     }
 
     // Start the piece
-    await this.#manager.startPiece(finalPattern);
+    await this.#manager.startPiece(finalPattern, DEFAULT_ROOT_RUN_OPTIONS);
     await this.#manager.runtime.idle();
     await this.#manager.synced();
 
@@ -498,7 +560,13 @@ export class PiecesController<T = unknown> {
           );
 
           // Run pattern setup within same transaction
-          this.#manager.runtime.run(tx, pattern, {}, pieceCell);
+          this.#manager.runtime.run(
+            tx,
+            pattern,
+            {},
+            pieceCell,
+            DEFAULT_ROOT_RUN_OPTIONS,
+          );
 
           // Stamp the provenance the piece tracks for updates (the source it
           // was born from) — the same transaction, one extra meta write.
@@ -547,10 +615,111 @@ export class PiecesController<T = unknown> {
       rootToStart = await this.#manager.getDefaultPattern(false) ?? root;
     }
 
-    await timePiecesPhase(
-      "ensureDefaultPattern.startPiece",
-      () => this.#manager.startPiece(rootToStart),
-    );
+    try {
+      await timePiecesPhase(
+        "ensureDefaultPattern.startPiece",
+        () => this.#manager.startPiece(rootToStart, DEFAULT_ROOT_RUN_OPTIONS),
+      );
+    } catch (startError) {
+      // Cold-start setup repair. checkAndUpdateDefaultPattern moves
+      // patternIdentity WITHOUT running the setup phase ("Never calls run()"),
+      // and Runner.start() of a not-running piece instantiates the stored
+      // identity directly — also without setup. A root whose identity moved
+      // while it was not running (the bricked-space heal: no watcher existed
+      // to swap it in place) therefore boots over a doc that never
+      // materialized the pattern's internal cells — handler
+      // `{ "$stream": true }` markers included — and dies at instantiation
+      // ("Handler used as lift", the 2026-07-22 estuary failure). This also
+      // covers docs ALREADY left in that state by an earlier session: their
+      // identity compares current, so no further swap will ever fire.
+      //
+      // run() (setup + start) is the sanctioned repair: with an unchanged
+      // pattern pointer the setup phase is idempotent — it only materializes
+      // missing internal cells and writes no argument (none supplied). Fail
+      // closed: if the repair cannot proceed or fails, surface the ORIGINAL
+      // start error; nothing is torn down or overwritten.
+      const runtime = this.#manager.runtime;
+      const ref = getPatternIdentityRef(rootToStart);
+      if (ref === undefined) throw startError;
+      let pattern;
+      try {
+        pattern = await runtime.patternManager.loadPatternByIdentity(
+          ref.identity,
+          ref.symbol,
+          this.#manager.getSpace(),
+        );
+      } catch {
+        throw startError;
+      }
+      if (pattern === undefined) throw startError;
+      pieceUpdateLogger.warn(
+        "cold-start-setup-repair",
+        () => [
+          "startEnsuredDefaultPattern: start failed; re-running setup for",
+          `${ref.identity}#${ref.symbol}`,
+          startError,
+        ],
+      );
+      const repairPattern = pattern;
+      // Detach any transaction view the resolved root carries: getDefault-
+      // Pattern hands back a cell bound to a read-only tx, and runSynced
+      // would otherwise adopt it for the setup writes.
+      const writableRoot = rootToStart.withTx();
+      // runSynced does not plumb schedulePatternUpdate, so the repair may let
+      // the lazy updater schedule one redundant check post-start. Benign: the
+      // awaited checkAndUpdateDefaultPattern above already reconciled, so the
+      // check observes a current identity and no-ops.
+      //
+      // expectedPatternIdentity is the repair precondition, not a formality:
+      // it atomically rejects a repair superseded by a concurrent source
+      // update (the identity is re-asserted inside every setup retry), and it
+      // makes runSynced THROW on a setup-commit failure instead of logging
+      // and continuing — without it this catch never sees commit-level
+      // failures and a dead root would be reported as a successful start.
+      try {
+        await timePiecesPhase(
+          "ensureDefaultPattern.coldStartSetupRepair",
+          () =>
+            runtime.runSynced(writableRoot, repairPattern, undefined, {
+              expectedPatternIdentity: ref,
+            }),
+        );
+      } catch (repairError) {
+        // Escalate to the RUNNABILITY backstop on EXACTLY one signal: the
+        // pinned pattern LOADS but its setup-commit was REJECTED BY THE CFC
+        // MIGRATION — the estuary case, where an old root's required field
+        // predates its `Default<>` or a handler stream predates its exemption.
+        // "Loadable" is not "runnable"; re-running the same identity can only
+        // fail identically, so roll the root forward to the space's CURRENT
+        // official pattern (which migrates the reused doc cleanly). This fires
+        // only on a failed migration, so a root that already runs — current
+        // official, or a custom root that migrates cleanly — never reaches it,
+        // and custom-root protection is preserved for free.
+        //
+        // Any OTHER repair failure (transient storage/commit error, backend
+        // unavailable, …) is NOT evidence the pinned pattern is wrong. It stays
+        // FAIL-CLOSED: surface the ORIGINAL start error, change nothing, let
+        // the next boot retry. This gate is what keeps a transient blip from
+        // swapping a healthy root's identity out from under it.
+        if (!isCfcMigrationRejection(repairError)) {
+          throw startError;
+        }
+        pieceUpdateLogger.warn(
+          "cold-start-setup-repair-failed",
+          () => [
+            "startEnsuredDefaultPattern: setup repair rejected by CFC " +
+            "migration; rolling forward",
+            `${ref.identity}#${ref.symbol}`,
+            repairError,
+          ],
+        );
+        rootToStart = await this.healDefaultRootByRollForward(
+          rootToStart,
+          ref,
+          repairError,
+        );
+      }
+    }
     await timePiecesPhase(
       "ensureDefaultPattern.runtime.idle",
       () => this.#manager.runtime.idle(),
@@ -564,12 +733,217 @@ export class PiecesController<T = unknown> {
   }
 
   /**
+   * Runnability backstop for {@link startEnsuredDefaultPattern}'s cold-start
+   * repair. Reached only when the pinned pattern's OWN setup repair was
+   * REJECTED BY THE CFC MIGRATION (gated by {@link isCfcMigrationRejection}) —
+   * a root that loads but cannot run (the estuary `favorites`/handler-stream
+   * case). Rolls the root forward to the space's CURRENT official pattern and
+   * materializes THAT over the reused doc.
+   *
+   * Outcome is one of exactly two, each legible — no operator left
+   * reverse-engineering scattered `$stream`/`needs a default` messages:
+   *
+   *   1. Healed: identity now points at the official pattern, its setup
+   *      committed, the reused doc materialized against it.
+   *   2. A single CLEAR error naming WHY — the pinned pattern's migration
+   *      failure and where the roll-forward stopped (compile, identity, swap,
+   *      or the official pattern's own materialize).
+   *
+   * On atomicity: the identity swap and the materialize are two commits, not
+   * one (runSynced owns its own setup transaction and asserts the identity is
+   * already pinned, so the swap must precede it). If the swap commits but the
+   * materialize then fails, the root is left pinned to the official identity
+   * but un-setup — the SAME "already moved" state the same-identity repair
+   * heals on the next boot (see the cold-start "already moved" test), never a
+   * worse state than the pinned-and-unmigratable root we started from. The
+   * error still surfaces, so the failed boot is not silent.
+   *
+   * Returns the healed root cell so the caller starts/returns the swapped-in
+   * pattern rather than the stale pinned view.
+   */
+  private async healDefaultRootByRollForward(
+    rootToStart: Cell<NameSchema>,
+    pinnedRef: { identity: string; symbol: string },
+    migrationError: unknown,
+  ): Promise<Cell<NameSchema>> {
+    const runtime = this.#manager.runtime;
+    const space = this.#manager.getSpace();
+    // Reuse the canonical official-URL derivation (home.tsx for the home DID,
+    // default-app.tsx otherwise) — never hard-code home here.
+    const officialUrlPath = deriveSystemPatternUrl(space, runtime);
+    const msg = (error: unknown) =>
+      error instanceof Error ? error.message : String(error);
+    const clearError = (reason: string, cause: unknown) =>
+      new Error(
+        `default-root heal failed for ${space}: pinned pattern ` +
+          `${pinnedRef.identity}#${pinnedRef.symbol} failed CFC migration ` +
+          `(${msg(migrationError)}) and roll-forward to official ` +
+          `${officialUrlPath} ${reason}`,
+        { cause },
+      );
+
+    // Fetch + compile the official source, mirroring pattern-updater's #check.
+    // Force ETag revalidation (`cache: "no-cache"`): the roll-forward exists to
+    // ESCAPE a stale pinned pattern, so compiling a stale HTTP-cached source
+    // would defeat the heal — it could "roll forward" to the same aged bytes.
+    // A 304 still reuses unchanged bytes; we just never trust the cache blind.
+    const revalidatingFetch: typeof globalThis.fetch = (input, init) =>
+      runtime.fetch(input, { ...init, cache: "no-cache" });
+    // Resolve against the host that actually SERVES this space, not the global
+    // apiUrl. A mapped space is served by its own host (`mappedHostFor`); the
+    // system pattern must be fetched and compiled from there, or a mapped space
+    // could roll forward onto the WRONG host's system pattern. `hostForSpace`
+    // is the same `mappedHostFor(space) ?? apiUrl` resolution PatternUpdater
+    // uses for its own roll-forward.
+    const officialUrl = new URL(officialUrlPath, runtime.hostForSpace(space));
+    let officialPattern;
+    let officialRef;
+    try {
+      const resolved = await runtime.harness.resolve(
+        new HttpProgramResolver(officialUrl.href, revalidatingFetch),
+      );
+      officialPattern = await runtime.patternManager.compilePattern(
+        // Default-root routes select the official `default` export.
+        { ...resolved, mainExport: "default" },
+        { space },
+      );
+      officialRef = runtime.patternManager.getArtifactEntryRef(officialPattern);
+    } catch (compileError) {
+      // Chain the ACTUAL compile failure as `cause` (not the migration error):
+      // the migration reason is already named in the message, and the compile
+      // stack is the new information here.
+      throw clearError(
+        `could not be compiled (${msg(compileError)})`,
+        compileError,
+      );
+    }
+    if (officialRef === undefined) {
+      throw clearError("did not yield an entry identity", migrationError);
+    }
+    // Already current: the pinned pattern IS the official entry (same identity
+    // AND symbol) but failed for some other reason. Re-materializing the exact
+    // same entry would fail identically, so do not loop — surface the clear
+    // error now. Compare BOTH identity and symbol: a root pinned to the current
+    // artifact under an obsolete/other symbol (e.g. a persisted export that is
+    // no longer `default`) is NOT already-official — rolling it forward to the
+    // official `default` entry is exactly the recovery, so it must not
+    // short-circuit here. This mirrors PatternUpdater's identity+symbol gate.
+    if (
+      officialRef.identity === pinnedRef.identity &&
+      officialRef.symbol === pinnedRef.symbol
+    ) {
+      throw clearError(
+        `is already the pinned entry ${officialRef.identity}#` +
+          `${officialRef.symbol}, so the migration cannot be repaired by ` +
+          `rolling forward`,
+        migrationError,
+      );
+    }
+
+    // Atomic swap: record the displaced pinned ref for recovery, move
+    // patternIdentity to the official entry, stamp official provenance. One
+    // tx — it commits together or aborts, leaving the root untouched.
+    //
+    // Precondition guard (fail-closed): re-read the root's identity INSIDE the
+    // transaction and proceed only if it still equals the pinned ref we
+    // diagnosed. `editWithRetry` reruns this callback against fresh state on
+    // conflict, so without the guard a concurrent heal (another boot, the
+    // pattern updater) that already repointed the root would be blindly
+    // clobbered by our stale `officialRef`. Returning `false` aborts the write
+    // without committing — precedent: pattern-updater's `stillMatches`/
+    // `canWrite`. `result.ok === false` (no error) then means "superseded".
+    const swapResult = await runtime.editWithRetry((tx) => {
+      const rootTx = rootToStart.withTx(tx);
+      const currentRef = getPatternIdentityRef(rootTx);
+      if (
+        currentRef?.identity !== pinnedRef.identity ||
+        currentRef?.symbol !== pinnedRef.symbol
+      ) {
+        return false;
+      }
+      rootTx.setMetaRaw("displacedPattern", {
+        identity: pinnedRef.identity,
+        symbol: pinnedRef.symbol,
+        displacedAt: Date.now(),
+      });
+      rootTx.setMetaRaw("patternIdentity", officialRef);
+      setPatternSource(rootToStart, tx, officialUrlPath);
+      return true;
+    });
+    if (swapResult.error) {
+      // Chain the actual commit failure as `cause` (the migration reason is
+      // already in the message).
+      throw clearError(
+        `identity swap could not commit (${msg(swapResult.error)})`,
+        swapResult.error,
+      );
+    }
+    if (!swapResult.ok) {
+      // The root was repointed by a concurrent heal between the failed repair
+      // and this swap. We must NOT overwrite the newer identity (the whole
+      // point of the precondition) — but we also must NOT return it as a
+      // success: this is the cold-start path, so the caller does not start or
+      // materialize what we hand back, and the concurrent heal may still be
+      // mid-flight (the repoint commits BEFORE its own materialize). Claiming
+      // success here would surface an unstarted, un-setup root. Fail closed
+      // with a clear, accurate error; nothing was overwritten, and the next
+      // boot observes the settled root and starts/repairs it through the
+      // ordinary path.
+      pieceUpdateLogger.warn(
+        "default-root-roll-forward-superseded",
+        () => [
+          "startEnsuredDefaultPattern: root identity changed before roll-forward;",
+          `leaving concurrent heal in place for ${space}`,
+        ],
+      );
+      throw clearError(
+        "was superseded by a concurrent heal (the root identity changed " +
+          "before the swap); left in place for the next boot to start",
+        migrationError,
+      );
+    }
+
+    // Re-resolve so the materialize observes the committed patternIdentity
+    // (the caller's cell is a pre-swap transaction view), then materialize the
+    // OFFICIAL pattern. expectedPatternIdentity asserts the just-committed
+    // identity and makes runSynced THROW on a setup-commit failure rather than
+    // log-and-continue — so an official pattern that ALSO cannot migrate the
+    // doc surfaces here as the clear error below, not a silently-dead root.
+    const swappedRoot = await this.#manager.getDefaultPattern(false) ??
+      rootToStart;
+    try {
+      await timePiecesPhase(
+        "ensureDefaultPattern.rollForwardMaterialize",
+        () =>
+          runtime.runSynced(swappedRoot.withTx(), officialPattern, undefined, {
+            expectedPatternIdentity: officialRef,
+          }),
+      );
+    } catch (materializeError) {
+      throw clearError(
+        `also failed CFC migration (${msg(materializeError)})`,
+        materializeError,
+      );
+    }
+
+    pieceUpdateLogger.warn(
+      "default-root-rolled-forward",
+      () => [
+        "startEnsuredDefaultPattern: healed by roll-forward to official",
+        `${pinnedRef.identity}#${pinnedRef.symbol} ->`,
+        `${officialRef.identity}#${officialRef.symbol}`,
+      ],
+    );
+    return swappedRoot;
+  }
+
+  /**
    * Roll the space's system root pattern forward in place if its toolshed
    * serves a newer content identity. Best-effort: every failure logs and
    * returns without throwing. During {@link ensureDefaultPattern}, this runs
-   * before the persisted root is started, so an unloadable obsolete identity
-   * can be replaced before bootstrap. If the root is already running, its
-   * watcher applies the same metadata swap in place.
+   * before the persisted root is started, so an eligible tracked root's
+   * unloadable obsolete identity can be replaced before bootstrap. If the root
+   * is already running, its watcher applies the same metadata swap in place.
    *
    * Never calls run()/stop()/recreateDefaultPattern.
    */
@@ -578,107 +952,22 @@ export class PiecesController<T = unknown> {
   ): Promise<UpdateOutcome> {
     const runtime = this.#manager.runtime;
     const space = this.#manager.getSpace();
-
-    // 1. Flag gate. Home is held behind a second flag until its durable state
-    //    is verified stable-key-addressed (spec § open question 4).
     if (!runtime.experimental?.systemPatternAutoUpdate) {
       return "skipped-disabled";
     }
-    const isHomeSpace = space === runtime.userIdentityDID;
-    if (isHomeSpace && !runtime.experimental?.systemPatternAutoUpdateHome) {
-      return "skipped-disabled";
-    }
-
     try {
-      // 2. The root piece's result cell, resolved without starting it. Ensure
-      // passes the cell it already found; explicit checks resolve it here.
-      const root = resolvedRoot ??
-        await this.#manager.getDefaultPattern(false);
+      const root = resolvedRoot ?? await this.#manager.getDefaultPattern(false);
       if (!root) return "current";
-
-      // 3. Provenance + per-space host (NOT the global apiUrl — a foreign-homed
-      //    space must resolve against its own toolshed). A non-home root
-      //    created before provenance stamping has no patternSource; we must NOT
-      //    derive default-app.tsx for it — a custom-app space (seeded from
-      //    home's defaultAppUrl) would be silently rolled to the default app.
-      //    Deriving is only safe for the home root (definitionally home.tsx).
-      //    Legacy non-home roots stay pinned until re-created stamps them; a
-      //    known-system-identity match could relax this later (spec M2.3).
-      const storedSource = getPatternSource(root);
-      if (storedSource === undefined && !isHomeSpace) {
-        return "current";
-      }
-      const url = storedSource ?? deriveSystemPatternUrl(space, runtime);
-      const host = runtime.mappedHostFor(space) ?? runtime.apiUrl.href;
-
-      // The version gate (step 4) validates `host`'s build, and the light
-      // ?identity is only trustworthy from that same build — so only act on a
-      // source served BY `host`. A cross-origin patternSource (a published /
-      // custom-app source on another host) would be gated against the wrong
-      // build; defer it to the cross-host published-pattern flow (Phase 4).
-      const target = new URL(url, host);
-      if (target.origin !== new URL(host).origin) {
-        return "current";
-      }
-
-      // 4. Version gate: the light ?identity is only comparable within a build.
-      const toolshedVersion = await runtime.toolshedGitSha(host);
-      if (!buildsMatch(runtime.clientVersion, toolshedVersion)) {
-        // An unknown sha on either side (dev/source servers carry none)
-        // proves nothing — skip silently. The skew signal raises the shell's
-        // "reload to update" banner, which must only claim what is proven:
-        // both builds known and different. Signalling on unknown would show
-        // the banner on every space open in local dev, where no reload helps.
-        if (
-          runtime.clientVersion === undefined || toolshedVersion === undefined
-        ) {
-          return "skipped-unknown-build";
-        }
-        runtime.reportVersionSkew({
-          space,
-          clientVersion: runtime.clientVersion,
-          toolshedVersion,
-        });
-        return "skipped-skew";
-      }
-
-      // 5. Current identity from the toolshed (cached).
-      const currentId = await runtime.cachedPatternIdentity(host, url);
-      if (currentId === undefined) return "current"; // unresolved → skip
-
-      // 6. Compare to the running identity.
-      const running = getPatternIdentityRef(root)?.identity;
-      if (currentId === running) return "current";
-
-      // 7. Apply: compile the new source, then swap patternIdentity in place.
-      const program = await runtime.harness.resolve(
-        new HttpProgramResolver(target.href),
+      return await runtime.patternUpdater.checkDefaultPattern(
+        root,
+        deriveSystemPatternUrl(space, runtime),
       );
-      const pattern = await runtime.patternManager.compilePattern(program, {
-        space,
-      });
-      const entryRef = runtime.patternManager.getArtifactEntryRef(pattern) ??
-        { identity: currentId, symbol: "default" };
-      const { error } = await runtime.editWithRetry((tx) => {
-        root.withTx(tx).setMetaRaw("patternIdentity", {
-          identity: entryRef.identity,
-          symbol: entryRef.symbol,
-        });
-        setPatternSource(root, tx, url); // back-fill provenance
-      });
-      if (error) {
-        pieceUpdateLogger.warn(
-          "swap-failed",
-          () => ["checkAndUpdateDefaultPattern: swap failed", space, error],
-        );
-        return "current";
-      }
-      return "updated";
     } catch (error) {
-      pieceUpdateLogger.warn(
-        "check-failed",
-        () => ["checkAndUpdateDefaultPattern: check failed", space, error],
-      );
+      pieceUpdateLogger.warn("root-resolution-failed", () => [
+        "checkAndUpdateDefaultPattern: root resolution failed",
+        space,
+        error,
+      ]);
       return "current";
     }
   }

@@ -115,7 +115,7 @@ const IMPLS: ReadonlyArray<{
 ];
 
 for (const { name: implName, biToMtc, biFromMtc } of IMPLS) {
-  const isBaselineImpl = implName === IMPLS[0].name;
+  const isBaselineImpl = implName === IMPLS[0]!.name;
 
   const encodeBatch = (values: bigint[]): Uint8Array[] => {
     return values.map((v) => biToMtc(v));
@@ -153,7 +153,7 @@ for (const { name: implName, biToMtc, biFromMtc } of IMPLS) {
       baseline: isBaselineImpl,
       fn() {
         for (let i = 0; i < BATCH; i++) {
-          biToMtc(positives[i]);
+          biToMtc(positives[i]!);
         }
       },
     });
@@ -163,7 +163,7 @@ for (const { name: implName, biToMtc, biFromMtc } of IMPLS) {
       group: encodeGroup,
       fn() {
         for (let i = 0; i < BATCH; i++) {
-          biToMtc(negatives[i]);
+          biToMtc(negatives[i]!);
         }
       },
     });
@@ -174,7 +174,7 @@ for (const { name: implName, biToMtc, biFromMtc } of IMPLS) {
       baseline: isBaselineImpl,
       fn() {
         for (let i = 0; i < BATCH; i++) {
-          biFromMtc(positiveBytes[i]);
+          biFromMtc(positiveBytes[i]!);
         }
       },
     });
@@ -184,7 +184,7 @@ for (const { name: implName, biToMtc, biFromMtc } of IMPLS) {
       group: decodeGroup,
       fn() {
         for (let i = 0; i < BATCH; i++) {
-          biFromMtc(negativeBytes[i]);
+          biFromMtc(negativeBytes[i]!);
         }
       },
     });

@@ -318,7 +318,7 @@ describe("FabricAwareResolver", () => {
       ],
       [
         `cf:/kitchen/pattern:${entryIdentity}`,
-        "space names require name→DID resolution (open question 2); use a DID",
+        "space names are currently unsupported; resolve the name to a DID first",
       ],
     ];
 

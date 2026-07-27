@@ -368,7 +368,6 @@ export default pattern<Input, Output>(
             },
           },
         },
-        model: "anthropic:claude-sonnet-4-5",
       });
       const extraction = resultOf(extractionRequest);
       const extractedAisles = computed(() => {

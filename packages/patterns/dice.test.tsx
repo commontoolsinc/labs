@@ -1,4 +1,4 @@
-import { action, computed, pattern } from "commonfabric";
+import { action, assert, pattern } from "commonfabric";
 import Dice from "./dice.tsx";
 
 // The roll handler draws from Math.random(), which the capability gate allows in
@@ -12,14 +12,14 @@ export default pattern(() => {
   const action_roll_default = action(() => {
     dice.roll.send({});
   });
-  const assert_default_roll_is_a_d6 = computed(() =>
+  const assert_default_roll_is_a_d6 = assert(() =>
     Number.isInteger(dice.value) && dice.value >= 1 && dice.value <= 6
   );
 
   const action_roll_d20 = action(() => {
     dice.roll.send({ sides: 20 });
   });
-  const assert_d20_roll_is_in_range = computed(() =>
+  const assert_d20_roll_is_in_range = assert(() =>
     Number.isInteger(dice.value) && dice.value >= 1 && dice.value <= 20
   );
 
@@ -27,11 +27,11 @@ export default pattern(() => {
   const action_roll_invalid_sides = action(() => {
     dice.roll.send({ sides: -3 });
   });
-  const assert_invalid_sides_falls_back_to_a_d6 = computed(() =>
+  const assert_invalid_sides_falls_back_to_a_d6 = assert(() =>
     Number.isInteger(dice.value) && dice.value >= 1 && dice.value <= 6
   );
 
-  const assert_nested_output_is_readable = computed(() =>
+  const assert_nested_output_is_readable = assert(() =>
     dice.something.nested === "a secret surprise!"
   );
 

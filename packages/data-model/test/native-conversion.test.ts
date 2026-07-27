@@ -1,7 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { FabricInstance, type FabricValue } from "@/interface.ts";
+import {
+  FabricInstance,
+  type FabricOrConvertibleNativeValue,
+  type FabricValue,
+} from "@/interface.ts";
 import { CODEC } from "@/codec-common/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
@@ -22,6 +26,7 @@ import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
 import {
   BaseFabricInstance,
+  DEEP_CLONE_CORE,
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
   SHALLOW_UNFROZEN_CLONE,
@@ -34,7 +39,7 @@ import { DummyReconstructionContext } from "./fabric-instances/fixtures.ts";
  * `fabricFromNativeValue()` and decodes it back to native form via
  * `nativeFromFabricValue()`.
  */
-function roundTrip(value: FabricValue): FabricValue {
+function roundTrip(value: FabricValue): FabricOrConvertibleNativeValue {
   return nativeFromFabricValue(fabricFromNativeValue(value));
 }
 
@@ -154,6 +159,29 @@ describe("native-conversion", () => {
       expect(Object.isFrozen(result.error)).toBe(true);
       expect(result.code).toBe(500);
       expect(Object.isFrozen(result)).toBe(true);
+    });
+
+    it("restores an overridden `name` when unwrapping a `FabricError`", () => {
+      const err = new TypeError("renamed");
+      err.name = "CustomName";
+      const se = FabricError.fromNativeError(err);
+      const result = nativeFromFabricValue(
+        se as unknown as FabricValue,
+      ) as Error;
+
+      expect(result).toBeInstanceOf(TypeError);
+      expect(result.name).toBe("CustomName");
+      expect(result.message).toBe("renamed");
+    });
+
+    it("leaves the class's own `name` in place when not overridden", () => {
+      const se = FabricError.fromNativeError(new TypeError("plain"));
+      const result = nativeFromFabricValue(
+        se as unknown as FabricValue,
+      ) as Error;
+
+      expect(result).toBeInstanceOf(TypeError);
+      expect(result.name).toBe("TypeError");
     });
 
     it("deeply unwraps `FabricError` in arrays (frozen)", () => {
@@ -358,7 +386,7 @@ describe("native-conversion", () => {
         ): boolean {
           return Object.isFrozen(this);
         }
-        deepClone(_frozen: boolean): CustomFabInst {
+        protected [DEEP_CLONE_CORE](_frozen: boolean): CustomFabInst {
           return new CustomFabInst();
         }
         protected [SHALLOW_UNFROZEN_CLONE](): CustomFabInst {
@@ -716,6 +744,35 @@ describe("native-conversion", () => {
             "`toJSON()` on object returned something other than a fabric value",
           );
       });
+
+      it("throws if a function's `toJSON()` returns a non-fabric value", () => {
+        const fn = Object.assign(() => 1, { toJSON: () => new Map() });
+        expect(() => shallowFabricFromNativeValue(fn)).toThrow(
+          "`toJSON()` on function returned something other than a fabric value",
+        );
+      });
+
+      it("converts a function via a `toJSON()` returning a fabric value", () => {
+        const fn = Object.assign(() => 1, { toJSON: () => ({ x: 1 }) });
+        expect(shallowFabricFromNativeValue(fn)).toEqual({ x: 1 });
+      });
+    });
+
+    // "Death before confusion": a native type with a dedicated fabric
+    // representation carries no room for extra state, so silently dropping it
+    // would lose data on a round trip.
+    describe("rejects extra enumerable properties", () => {
+      it("throws for a `Date` carrying an extra property", () => {
+        const date = new Date(0) as Date & { extra?: number };
+        date.extra = 1;
+        expect(() => shallowFabricFromNativeValue(date)).toThrow(
+          "Cannot store Date with extra enumerable properties",
+        );
+      });
+
+      it("still converts a `Date` with no extra properties", () => {
+        expect(() => shallowFabricFromNativeValue(new Date(0))).not.toThrow();
+      });
     });
 
     describe("throws for non-convertible values", () => {
@@ -1024,7 +1081,7 @@ describe("native-conversion", () => {
       it("recursively processes nested arrays", () => {
         const date = new Date("2024-01-15T12:00:00.000Z");
         const result = fabricFromNativeValue([[date]]) as unknown[][];
-        expect(result[0][0]).toBeInstanceOf(FabricEpochNsec);
+        expect(result[0]![0]).toBeInstanceOf(FabricEpochNsec);
       });
     });
 
@@ -1397,7 +1454,7 @@ describe("native-conversion", () => {
         sparse[0] = 1;
         sparse[2] = 3;
         const result = fabricFromNativeValue([[sparse]]) as unknown[][][];
-        const inner = result[0][0];
+        const inner = result[0]![0]!;
         expect(inner[0]).toBe(1);
         expect(1 in inner).toBe(false); // hole preserved
         expect(inner[2]).toBe(3);
@@ -1545,6 +1602,16 @@ describe("native-conversion", () => {
         const out = fabricFromNativeValue(Symbol.for("identity-check"));
         expect(Object.is(out, Symbol.for("identity-check"))).toBe(true);
       });
+
+      it("throws on a top-level unique symbol (freeze default)", () => {
+        // A unique symbol is not a `FabricValue`; conversion rejects it
+        // regardless of the `freeze` flag -- the deep-frozen fast-path
+        // (`isDeepFrozenFabricValue`) must not admit it and short-circuit the
+        // validation that `freeze=false` performs (see below).
+        expect(() => fabricFromNativeValue(Symbol("bad"))).toThrow(
+          "Cannot store unique (uninterned) symbol",
+        );
+      });
     });
 
     describe("`freeze` parameter", () => {
@@ -1646,7 +1713,7 @@ describe("native-conversion", () => {
           Record<string, unknown>
         >;
         expect(Object.getPrototypeOf(result.nested)).toBe(null);
-        expect(result.nested.val).toBe(42);
+        expect(result.nested!.val).toBe(42);
       });
     });
   });
@@ -1799,6 +1866,33 @@ describe("native-conversion", () => {
     it("rejects objects with `toJSON()` returning non-fabric values", () => {
       const obj = { toJSON: () => Symbol("bad") };
       expect(isFabricCompatible(obj)).toBe(false);
+    });
+
+    it("accepts a function with `toJSON()` returning a fabric value", () => {
+      const fn = Object.assign(() => 1, { toJSON: () => ({ x: 1 }) });
+      expect(isFabricCompatible(fn)).toBe(true);
+    });
+
+    it("rejects a function with `toJSON()` returning a non-fabric value", () => {
+      const fn = Object.assign(() => 1, { toJSON: () => Symbol("bad") });
+      expect(isFabricCompatible(fn)).toBe(false);
+    });
+
+    it("rejects a plain function", () => {
+      expect(isFabricCompatible(() => 1)).toBe(false);
+    });
+
+    // -- Arrays carrying named properties --
+    it("rejects an array with extra named properties", () => {
+      const arr = [1, 2, 3] as number[] & { extra?: string };
+      arr.extra = "nope";
+      expect(isFabricCompatible(arr)).toBe(false);
+    });
+
+    it("rejects an array with named properties nested inside an object", () => {
+      const arr = [1] as number[] & { extra?: string };
+      arr.extra = "nope";
+      expect(isFabricCompatible({ list: arr })).toBe(false);
     });
   });
 });

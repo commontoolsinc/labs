@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import type { CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
@@ -49,7 +50,7 @@ const seedConfidentialCell = async (
   runtime: Runtime,
   id: string,
   schema = CONFIDENTIAL_SCHEMA,
-  atoms: readonly unknown[] = ["medical"],
+  atoms: readonly CfcConfClause[] = ["medical"],
 ): Promise<void> => {
   const seed = runtime.edit();
   const target = runtime.getCell(signer.did(), id, undefined, seed);

@@ -5,7 +5,6 @@
  * TTY) or prints the colourised text and exits, mirroring how `less`/`bat`
  * behave when their output is redirected.
  */
-import { parseDocument } from "./parse.ts";
 import { renderLineColored } from "./highlight.ts";
 import { runPager } from "./pager.ts";
 import type { Document } from "./model.ts";
@@ -16,18 +15,19 @@ import {
   realWorkspace,
   type WorkspaceCache,
 } from "./diffdoc.ts";
+import type { Semantics } from "./languages/language.ts";
 import {
-  createDiffSemantics,
-  createSemantics,
-  type Semantics,
-} from "./semantics.ts";
+  diffSemanticsFor,
+  distinctLanguages,
+  languageForFile,
+} from "./languages/language.ts";
 import {
   type EditableSource,
   fileSource,
   readonlySource,
 } from "./editsource.ts";
 import { diffSource } from "./diffedit.ts";
-import { realGit } from "./commitmsg.ts";
+import { findCommitHeaders, realGit } from "./commitmsg.ts";
 
 export { ViewError };
 
@@ -101,33 +101,79 @@ export function buildView(
   semantics: () => Semantics | undefined;
   editSource: EditableSource;
 } {
-  const tryDiff = forceDiff ?? looksLikeDiff(text);
-  const model = tryDiff ? parseDiff(text) : null;
-  if (model && (forceDiff || mostlyDiff(model, text))) {
+  const commitOutput = looksLikeCommitOutput(text);
+  const tryDiff = forceDiff ?? (looksLikeDiff(text) || commitOutput);
+  const parsedDiff = tryDiff ? parseDiff(text) : null;
+  const model: DiffModel | null = parsedDiff ??
+    (tryDiff && commitOutput
+      ? {
+        files: [],
+        lines: text.split("\n").map(() => ({ kind: "other" as const })),
+      }
+      : null);
+  if (model && (forceDiff || commitOutput || mostlyDiff(model, text))) {
     const ws = realWorkspace(safeCwd());
     // One workspace cache shared by the initial build and every deferred
     // re-parse, so the named files are read and parsed once per session.
     const cache: WorkspaceCache = new Map();
     const { doc, maps, edit } = buildDiffDocument(text, model, ws, cache);
+    // The diff's semantic layer comes from the languages the diff touches.
+    const languages = distinctLanguages(
+      model.files.map((f) => f.newPath ?? f.oldPath),
+    );
     return {
       doc,
       semantics: () =>
-        createDiffSemantics(text, maps, { cwd: safeCwd() }) ?? undefined,
-      // A diff edits the new side of the files it touches, in place; a
-      // `git show`'s HEAD commit message is editable and amended on save.
+        diffSemanticsFor(languages, text, maps, { cwd: safeCwd() }),
+      // A diff edits the new side of the files it touches, in place. Saving
+      // edited `git show` output amends HEAD with those file and message edits.
       editSource: diffSource(ws, edit, cache, realGit(safeCwd())),
     };
   }
-  const doc = parseDocument(text, file ?? "transformed.ts");
+  const language = languageForFile(file);
+  const doc = language.parseDocument(text, file ?? "transformed.tsx");
   return {
     doc,
     semantics: () =>
-      createSemantics(text, { cwd: safeCwd(), fileName: file }) ?? undefined,
+      language.createSemantics?.(text, { cwd: safeCwd(), fileName: file }),
     // A real file is editable; a pipe (transformed output, etc.) is not.
     editSource: file ? fileSource(file) : readonlySource(
       "This view is of a pipe — there is no underlying file to edit.",
     ),
   };
+}
+
+/** A standard `git show` or `git log` header. Unlike a diff heuristic, this also
+ * recognizes commits with no message or textual file hunks. */
+function looksLikeCommitOutput(text: string): boolean {
+  const lines = text.split("\n").map((line) =>
+    line.endsWith("\r") ? line.slice(0, -1) : line
+  );
+  const first = lines.findIndex((line) => line.trim().length > 0);
+  if (first < 0) return false;
+  const commits = findCommitHeaders(lines);
+  const commit = commits.find((candidate) => candidate.line === first);
+  if (!commit) return false;
+  if (lines[first].startsWith(`From ${commit.sha} `)) {
+    const separator = lines.indexOf("", first + 1);
+    if (separator < 0) return false;
+    const headers = lines.slice(first + 1, separator);
+    return headers.some((line) => /^From: .+<[^<>]*>$/.test(line)) &&
+      headers.some((line) => /^Date: .+/.test(line)) &&
+      headers.some((line) => /^Subject: .+/.test(line));
+  }
+  if (!lines[first].startsWith(`commit ${commit.sha}`)) {
+    return lines.slice(first + 1).some((line) =>
+      line.startsWith("diff --git ")
+    );
+  }
+  const separator = lines.indexOf("", first + 1);
+  if (separator < 0) return false;
+  const headers = lines.slice(first + 1, separator);
+  return headers.some((line) =>
+    /^Author:\s+.*<[^<>]*>$/.test(line) ||
+    /^author .*<[^<>]*> -?\d+ [+-]\d{4}$/.test(line)
+  );
 }
 
 /** At least a quarter of the non-empty lines parse as diff content. Headers in

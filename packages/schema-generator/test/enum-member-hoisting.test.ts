@@ -1,13 +1,8 @@
-// Pins TS enum handling (mapping spec §4) and the KNOWN BUG in spec §16.2:
-// single enum-member types hoist into $defs under the BARE member name with
-// no disambiguation, so two enums sharing a member name — or an enum member
-// sharing a name with any other named type — collide on the $defs key.
-// First definition wins; later occurrences emit a $ref to the WRONG schema
-// (silently wrong values, or even a wrong shape), order-dependently.
-//
-// The collision expectations below pin today's corrupted output ON PURPOSE
-// so a fix (e.g. qualifying member defs as `<Enum>.<Member>` or inlining
-// member literals) flips them consciously.
+// Pins TS enum-member handling (mapping spec §4/§16.2). Enum members are scalar
+// literal types, not reusable named definitions: keeping them inline prevents
+// their short member names from colliding with members of another enum or with
+// an unrelated named type in $defs. Whole enum declarations remain hoisted and
+// are covered separately by enum-schema-rows.test.ts.
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { SchemaGenerator } from "../src/schema-generator.ts";
@@ -19,8 +14,8 @@ async function generate(code: string, typeName: string) {
   return generator.generateSchema(type, checker, typeNode);
 }
 
-describe("TS enum member hoisting collisions", () => {
-  it("hoists a single enum-member type under the bare member name", async () => {
+describe("TS enum member schemas", () => {
+  it("keeps a single enum-member type inline", async () => {
     const schema = await generate(
       `enum Mode { On = "on", Off = "off" }
        interface S { m: Mode.On; }`,
@@ -28,50 +23,49 @@ describe("TS enum member hoisting collisions", () => {
     );
     expect(schema).toEqual({
       type: "object",
-      properties: { m: { $ref: "#/$defs/On" } },
+      properties: { m: { type: "string", enum: ["on"] } },
       required: ["m"],
-      $defs: { On: { type: "string", enum: ["on"] } },
     });
   });
 
-  it("KNOWN BUG §16.2: members of two enums sharing a name collide, first wins", async () => {
+  it("keeps same-named members of different enums distinct", async () => {
     const schema = await generate(
       `enum AlphaMode { On = "alpha-on", Off = "alpha-off" }
        enum BetaMode { On = "beta-on", Off = "beta-off" }
        interface State { a: AlphaMode.On; b: BetaMode.On; }`,
       "State",
     );
-    // BUG pinned: property `b` (BetaMode.On, value "beta-on") $refs the
-    // AlphaMode.On definition and would validate "alpha-on" instead.
     expect(schema).toEqual({
       type: "object",
       properties: {
-        a: { $ref: "#/$defs/On" },
-        b: { $ref: "#/$defs/On" },
+        a: { type: "string", enum: ["alpha-on"] },
+        b: { type: "string", enum: ["beta-on"] },
       },
       required: ["a", "b"],
-      $defs: { On: { type: "string", enum: ["alpha-on"] } },
     });
   });
 
-  it("KNOWN BUG §16.2: an enum member colliding with an interface name steals its $ref", async () => {
+  it("does not collide with a same-named interface", async () => {
     const schema = await generate(
       `enum E { Config = "e-config" }
        interface Config { url: string; }
        interface App { mode: E.Config; settings: Config; }`,
       "App",
     );
-    // BUG pinned: `settings` (an object type) $refs the enum-member string
-    // schema because the member was formatted first. Reversing property
-    // order reverses the winner (order-dependent corruption).
     expect(schema).toEqual({
       type: "object",
       properties: {
-        mode: { $ref: "#/$defs/Config" },
+        mode: { type: "string", enum: ["e-config"] },
         settings: { $ref: "#/$defs/Config" },
       },
       required: ["mode", "settings"],
-      $defs: { Config: { type: "string", enum: ["e-config"] } },
+      $defs: {
+        Config: {
+          type: "object",
+          properties: { url: { type: "string" } },
+          required: ["url"],
+        },
+      },
     });
   });
 });

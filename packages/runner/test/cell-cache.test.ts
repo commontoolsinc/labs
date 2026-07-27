@@ -11,6 +11,7 @@ import {
   resolveModuleImports,
 } from "../src/harness/module-identity.ts";
 import type { CacheableModule, RuntimeProgram } from "../src/harness/types.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 
 import {
   buildSourceDocs,
@@ -32,6 +33,8 @@ import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
 import { buildCfcPolicyArtifactManifest } from "../src/cfc/policy.ts";
+import { PatternCoverageCollector } from "../src/pattern-coverage.ts";
+import { pattern } from "../src/builder/pattern.ts";
 
 // These tests drive the sync parse internals directly (below the async flow
 // boundaries that normally load the deferred compiler stack), so load it here.
@@ -508,6 +511,75 @@ describe("cell-cache: source-set store (per space, link-following)", () => {
     ]);
   });
 
+  it("rejects a source closure linked to another space's attestation", async () => {
+    const attackerSpace = "did:key:z6MkSourceClosureAttacker";
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const utilIdentity = identityOf(PROGRAM, "/util.ts");
+    const predecessorIdentity = "victim-source-predecessor";
+    const delegations = new Map([
+      [utilIdentity, new Set([predecessorIdentity])],
+    ]);
+
+    const attackerTx = runtime.edit();
+    writeSourceDocs(
+      runtime,
+      attackerSpace,
+      modules,
+      entryIdentity,
+      attackerTx,
+      delegations,
+    );
+    runtime.prepareTxForCommit(attackerTx);
+    expect((await attackerTx.commit()).error).toBeUndefined();
+
+    const victimTx = runtime.edit();
+    writeSourceDocs(runtime, spaceA, modules, entryIdentity, victimTx);
+    runtime.prepareTxForCommit(victimTx);
+    expect((await victimTx.commit()).error).toBeUndefined();
+
+    const entryModule = modules.find((module) =>
+      module.identity === entryIdentity
+    )!;
+    const rewireTx = runtime.edit();
+    runtime.getCell(
+      spaceA,
+      sourceDocKey(entryIdentity),
+      undefined,
+      rewireTx,
+    ).set({
+      kind: "source",
+      identity: entryIdentity,
+      code: entryModule.source,
+      filename: entryModule.filename,
+      imports: entryModule.imports.map((imp) => ({
+        specifier: imp.specifier,
+        link: runtime.getCell(
+          imp.targetIdentity === utilIdentity ? attackerSpace : spaceA,
+          sourceDocKey(imp.targetIdentity),
+          undefined,
+          rewireTx,
+        ).getAsLink(),
+      })),
+    });
+    runtime.prepareTxForCommit(rewireTx);
+    expect((await rewireTx.commit()).error).toBeUndefined();
+
+    const loadTx = runtime.edit();
+    const loaded = await loadVerifiedSourceClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      loadTx,
+    );
+    loadTx.abort?.("mixed-space source closure rejected");
+    expect(loaded).toBeUndefined();
+
+    const snapshotTx = runtime.edit();
+    expect(snapshotTx.getCfcState().moduleDelegations.get(spaceA))
+      .toBeUndefined();
+    snapshotTx.abort?.("mixed-space source snapshot inspected");
+  });
+
   it("skips source imports that do not point to source documents", async () => {
     const entryIdentity = "source-entry-with-broken-imports";
     const missingIdentity = "source-missing-child";
@@ -701,6 +773,113 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     expect(new Set([...loaded.values()].map((d) => d.filename))).toEqual(
       new Set(["/main.tsx", "/util.ts", "/types.ts"]),
     );
+  });
+
+  it("round-trips JSON coverage spans and rejects unsupported stored spans", async () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const spans = [{
+      fileName: "/main.tsx",
+      id: 1,
+      kind: "runtime" as const,
+      startLine: 3,
+      endLine: 3,
+      startColumn: 1,
+      endColumn: 20,
+    }];
+    modules[0] = { ...modules[0]!, patternCoverageSpans: spans };
+    const wtx = runtime.edit();
+    writeCompiledDocs(runtime, spaceA, modules, entryIdentity, opts(), wtx);
+    wtx.prepareCfc();
+    await wtx.commit();
+
+    const inspectTx = runtime.edit();
+    const storedDoc = runtime.getCell(
+      spaceA,
+      compiledDocKey(RTVER, entryIdentity),
+      compiledDocWriteSchema(),
+      inspectTx,
+    ).get() as Record<string, unknown>;
+    expect(typeof storedDoc.patternCoverageSpansJson).toBe("string");
+    expect(storedDoc.patternCoverageSpans).toBeUndefined();
+    inspectTx.abort?.();
+
+    const coldLoad = async () => {
+      const rtx = runtime.edit();
+      const loaded = await loadCompiledClosure(
+        runtime,
+        spaceA,
+        entryIdentity,
+        opts(),
+        rtx,
+      );
+      rtx.abort?.();
+      return loaded;
+    };
+
+    // Valid spans survive the round trip.
+    expect((await coldLoad()).get(entryIdentity)?.patternCoverageSpans)
+      .toEqual(spans);
+
+    // Overwrite the stored doc's spans with malformed values, bypassing the
+    // write path's integrity via the compile-cache implementation identity.
+    const replaceSpans = async (
+      value: {
+        patternCoverageSpansJson?: unknown;
+        patternCoverageSpans?: unknown;
+      },
+    ) => {
+      const tx = runtime.edit();
+      const previousIdentity = tx.getCfcState().implementationIdentity;
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "compile-cache",
+      });
+      try {
+        const cell = runtime.getCell(
+          spaceA,
+          compiledDocKey(RTVER, entryIdentity),
+          compiledDocWriteSchema(),
+          tx,
+        );
+        const next = { ...(cell.get() as Record<string, unknown>) };
+        delete next.patternCoverageSpansJson;
+        delete next.patternCoverageSpans;
+        cell.set({ ...next, ...value });
+      } finally {
+        tx.setCfcImplementationIdentity(previousIdentity);
+      }
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+    };
+
+    // A span whose id is the wrong type is dropped rather than reported against
+    // malformed coordinates.
+    await replaceSpans({
+      patternCoverageSpansJson: JSON.stringify([{
+        ...spans[0],
+        id: "not-a-number",
+      }]),
+    });
+    expect((await coldLoad()).get(entryIdentity)?.patternCoverageSpans)
+      .toBeUndefined();
+
+    // Malformed JSON is dropped too.
+    await replaceSpans({ patternCoverageSpansJson: "not-json" });
+    expect((await coldLoad()).get(entryIdentity)?.patternCoverageSpans)
+      .toBeUndefined();
+
+    // Valid JSON still has to describe an array of span records.
+    await replaceSpans({ patternCoverageSpansJson: JSON.stringify({}) });
+    expect((await coldLoad()).get(entryIdentity)?.patternCoverageSpans)
+      .toBeUndefined();
+    await replaceSpans({ patternCoverageSpansJson: JSON.stringify([null]) });
+    expect((await coldLoad()).get(entryIdentity)?.patternCoverageSpans)
+      .toBeUndefined();
+
+    // The durable format accepts only the scalar JSON field.
+    await replaceSpans({ patternCoverageSpans: spans });
+    expect((await coldLoad()).get(entryIdentity)?.patternCoverageSpans)
+      .toBeUndefined();
   });
 
   it("persists and cold-loads verified policy manifests without module evaluation", async () => {
@@ -906,6 +1085,90 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
       { specifier: "./child.ts", identity: childIdentity },
       { specifier: "./again.ts", identity: childIdentity },
     ]);
+  });
+
+  it("rejects a compiled closure linked to another space's attestation", async () => {
+    const attackerSpace = "did:key:z6MkCompiledClosureAttacker";
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const utilIdentity = identityOf(PROGRAM, "/util.ts");
+    const predecessorIdentity = "victim-compiled-predecessor";
+    const delegations = new Map([
+      [utilIdentity, new Set([predecessorIdentity])],
+    ]);
+
+    const attackerTx = runtime.edit();
+    writeCompiledDocs(
+      runtime,
+      attackerSpace,
+      modules,
+      entryIdentity,
+      { ...opts(), moduleDelegations: delegations },
+      attackerTx,
+    );
+    attackerTx.prepareCfc();
+    expect((await attackerTx.commit()).error).toBeUndefined();
+
+    const victimTx = runtime.edit();
+    writeCompiledDocs(
+      runtime,
+      spaceA,
+      modules,
+      entryIdentity,
+      opts(),
+      victimTx,
+    );
+    victimTx.prepareCfc();
+    expect((await victimTx.commit()).error).toBeUndefined();
+
+    const entryModule = modules.find((module) =>
+      module.identity === entryIdentity
+    )!;
+    const rewireTx = runtime.edit();
+    const previousIdentity = rewireTx.getCfcState().implementationIdentity;
+    rewireTx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: "compile-cache",
+    });
+    try {
+      const entryCell = runtime.getCell<Record<string, unknown>>(
+        spaceA,
+        compiledDocKey(RTVER, entryIdentity),
+        compiledDocWriteSchema(),
+        rewireTx,
+      );
+      entryCell.set({
+        ...entryCell.get(),
+        imports: entryModule.imports.map((imp) => ({
+          specifier: imp.specifier,
+          link: runtime.getCell(
+            imp.targetIdentity === utilIdentity ? attackerSpace : spaceA,
+            compiledDocKey(RTVER, imp.targetIdentity),
+            undefined,
+            rewireTx,
+          ).getAsLink(),
+        })),
+      });
+    } finally {
+      rewireTx.setCfcImplementationIdentity(previousIdentity);
+    }
+    rewireTx.prepareCfc();
+    expect((await rewireTx.commit()).error).toBeUndefined();
+
+    const loadTx = runtime.edit();
+    const loaded = await loadCompiledClosure(
+      runtime,
+      spaceA,
+      entryIdentity,
+      opts(),
+      loadTx,
+    );
+    loadTx.abort?.("mixed-space compiled closure rejected");
+    expect(loaded.size).toBe(0);
+
+    const snapshotTx = runtime.edit();
+    expect(snapshotTx.getCfcState().moduleDelegations.get(spaceA))
+      .toBeUndefined();
+    snapshotTx.abort?.("mixed-space compiled snapshot inspected");
   });
 
   it("skips compiled import links without integrity", async () => {
@@ -1150,20 +1413,92 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     }
   });
 
-  it("replicates fabric dependencies even though source closures exclude them", async () => {
+  it("skips same-space and keyless pattern replication", async () => {
+    const keyed = pattern(() => ({}));
+    const keyless = pattern(() => ({}));
+    const ref = { identity: "same-space-entry", symbol: "default" };
+    runtime.patternManager.associatePatternIdentity(keyed, ref);
+    expect(runtime.patternManager.getArtifactEntryRef(keyed)).toEqual(ref);
+    expect(runtime.patternManager.getArtifactEntryRef(keyless)).toBeUndefined();
+
+    const manager = runtime.patternManager as unknown as {
+      replicateClosures(
+        entryIdentity: string,
+        fromSpace: string,
+        toSpace: string,
+      ): Promise<void>;
+    };
+    const originalReplicateClosures = manager.replicateClosures;
+    let replicationCalls = 0;
+    manager.replicateClosures = () => {
+      replicationCalls++;
+      return Promise.resolve();
+    };
+    try {
+      runtime.patternManager.replicatePatternToSpace(keyed, spaceA, spaceA);
+      runtime.patternManager.replicatePatternToSpace(
+        keyless,
+        "did:key:z6MkCellCacheKeylessReplicationTarget",
+        spaceA,
+      );
+
+      await runtime.patternManager.flushCompileCacheWrites();
+      expect(replicationCalls).toBe(0);
+    } finally {
+      manager.replicateClosures = originalReplicateClosures;
+    }
+  });
+
+  it("replicates fabric dependencies without importing authority", async () => {
     const spaceB = "did:key:z6MkCellCacheFabricReplicationTarget";
     const { modules, importerIdentity, depIdentity } = fabricLinkedModules();
+    const coverageSpans = [{
+      fileName: "/main.tsx",
+      id: 1,
+      kind: "runtime" as const,
+      startLine: 1,
+      endLine: 1,
+      startColumn: 1,
+      endColumn: 20,
+    }];
+    const policyManifest = buildCfcPolicyArtifactManifest({
+      formatVersion: 1,
+      moduleIdentity: importerIdentity,
+      symbol: "rules",
+      template: {
+        templateVersion: 1,
+        exchangeRules: [],
+        dependencies: { authorityOnly: [], dataBearing: [] },
+        integrityRequirements: {},
+      },
+    });
+    modules[0] = {
+      ...modules[0]!,
+      patternCoverageSpans: coverageSpans,
+      policyManifests: [policyManifest],
+    };
     const replicationOpts = {
       runtimeVersion,
     };
+    const predecessorIdentity = "replicated-predecessor";
+    const moduleDelegations = new Map([
+      [importerIdentity, new Set([predecessorIdentity])],
+    ]);
     const wtx = runtime.edit();
-    writeSourceDocs(runtime, spaceA, modules, importerIdentity, wtx);
+    writeSourceDocs(
+      runtime,
+      spaceA,
+      modules,
+      importerIdentity,
+      wtx,
+      moduleDelegations,
+    );
     writeCompiledDocs(
       runtime,
       spaceA,
       modules,
       importerIdentity,
-      replicationOpts,
+      { ...replicationOpts, moduleDelegations },
       wtx,
     );
     wtx.prepareCfc();
@@ -1204,7 +1539,555 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     expect(depSource?.has(depIdentity)).toBe(true);
     expect(compiled.has(importerIdentity)).toBe(true);
     expect(compiled.has(depIdentity)).toBe(true);
+    expect(compiled.get(importerIdentity)?.patternCoverageSpans).toEqual(
+      coverageSpans,
+    );
+    expect(compiled.get(importerIdentity)?.policyManifests).toEqual([
+      policyManifest,
+    ]);
+    expect(importerSource?.get(importerIdentity)?.delegatedModuleIdentities)
+      .toBeUndefined();
+    expect(compiled.get(importerIdentity)?.delegatedModuleIdentities)
+      .toBeUndefined();
+
+    const snapshotTx = runtime.edit();
+    expect(
+      snapshotTx.getCfcState().moduleDelegations.get(spaceA)?.get(
+        importerIdentity,
+      ),
+    ).toEqual([predecessorIdentity]);
+    expect(snapshotTx.getCfcState().moduleDelegations.get(spaceB))
+      .toBeUndefined();
+    snapshotTx.abort?.("cross-space replication snapshot inspected");
+
+    const protectedSchema = {
+      type: "object",
+      properties: {
+        value: {
+          type: "string",
+          ifc: {
+            writeAuthorizedBy: {
+              __ctWriterIdentityOf: {
+                moduleIdentity: predecessorIdentity,
+                file: "/main.tsx",
+                path: ["setValue"],
+              },
+            },
+          },
+        },
+      },
+      required: ["value"],
+    } as unknown as JSONSchema;
+    const protectedCell = runtime.getCell<{ value: string }>(
+      spaceB,
+      "cell-cache-cross-space-replication-authority",
+      protectedSchema,
+    );
+    const seed = await runtime.editWithRetry((tx) => {
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        moduleIdentity: predecessorIdentity,
+        sourceFile: "/main.tsx",
+        bindingPath: ["setValue"],
+      });
+      protectedCell.withTx(tx).set({ value: "seed" });
+    });
+    expect(seed.error).toBeUndefined();
+
+    const denied = await runtime.editWithRetry((tx) => {
+      tx.setCfcImplementationIdentity({
+        kind: "verified",
+        moduleIdentity: importerIdentity,
+        sourceFile: "/main.tsx",
+        bindingPath: ["setValue"],
+      });
+      protectedCell.withTx(tx).set({ value: "replicated" });
+    }, 0);
+    expect(denied.error?.message).toContain("writeAuthorizedBy failed");
+    expect(protectedCell.get()).toEqual({ value: "seed" });
+
+    const damageTx = runtime.edit();
+    const previousIdentity = damageTx.getCfcState().implementationIdentity;
+    damageTx.setCfcImplementationIdentity({
+      kind: "builtin",
+      builtinId: "compile-cache",
+    });
+    try {
+      runtime.getCell(
+        spaceB,
+        sourceDocKey(importerIdentity),
+        undefined,
+        damageTx,
+      ).set({ damaged: true });
+      runtime.getCell(
+        spaceB,
+        compiledDocKey(runtimeVersion, importerIdentity),
+        undefined,
+        damageTx,
+      ).set({ damaged: true });
+    } finally {
+      damageTx.setCfcImplementationIdentity(previousIdentity);
+    }
+    damageTx.prepareCfc();
+    expect((await damageTx.commit()).error).toBeUndefined();
+
+    await manager.replicateClosures(importerIdentity, spaceA, spaceB);
+    const repairedTx = runtime.edit();
+    const repairedSource = await loadVerifiedSourceClosure(
+      runtime,
+      spaceB,
+      importerIdentity,
+      repairedTx,
+    );
+    const repairedCompiled = await loadCompiledClosure(
+      runtime,
+      spaceB,
+      importerIdentity,
+      replicationOpts,
+      repairedTx,
+    );
+    repairedTx.abort?.();
+    expect(repairedSource?.has(importerIdentity)).toBe(true);
+    expect(repairedCompiled.has(importerIdentity)).toBe(true);
   });
+
+  it("rejects replication from an incomplete origin closure", async () => {
+    const targetSpace = "did:key:z6MkCellCacheIncompleteReplicationTarget";
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const manager = runtime.patternManager as unknown as {
+      replicateClosures(
+        entryIdentity: string,
+        fromSpace: string,
+        toSpace: string,
+        visited?: Set<string>,
+      ): Promise<void>;
+    };
+
+    const visitKey = `${spaceA}\0${targetSpace}\0${entryIdentity}`;
+    await expect(
+      manager.replicateClosures(
+        entryIdentity,
+        spaceA,
+        targetSpace,
+        new Set([visitKey]),
+      ),
+    ).resolves.toBeUndefined();
+
+    await expect(
+      manager.replicateClosures(entryIdentity, spaceA, targetSpace),
+    ).rejects.toThrow("source closure unavailable in origin space");
+
+    const sourceOnlyWrite = runtime.edit();
+    writeSourceDocs(
+      runtime,
+      spaceA,
+      modules,
+      entryIdentity,
+      sourceOnlyWrite,
+    );
+    sourceOnlyWrite.prepareCfc();
+    expect((await sourceOnlyWrite.commit()).error).toBeUndefined();
+
+    await expect(
+      manager.replicateClosures(entryIdentity, spaceA, targetSpace),
+    ).rejects.toThrow(`compiled doc missing for ${entryIdentity}`);
+  });
+
+  it("rejects coverage replication when compiled spans are absent", async () => {
+    const coverageStorageManager = StorageManager.emulate({ as: signer });
+    const coverageRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: coverageStorageManager,
+      cfcEnforcementMode: "enforce-explicit",
+      trustSnapshotProvider: () => ({
+        id: "cell-cache-coverage-replication-test",
+        actingPrincipal: signer.did(),
+      }),
+      patternCoverage: new PatternCoverageCollector(),
+    });
+    const targetSpace = "did:key:z6MkCellCacheCoverageReplicationTarget";
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const coverageRuntimeVersion = `${runtimeVersion}/pattern-coverage`;
+
+    try {
+      const writeTx = coverageRuntime.edit();
+      writeSourceDocs(
+        coverageRuntime,
+        spaceA,
+        modules,
+        entryIdentity,
+        writeTx,
+      );
+      writeCompiledDocs(
+        coverageRuntime,
+        spaceA,
+        modules,
+        entryIdentity,
+        { runtimeVersion: coverageRuntimeVersion },
+        writeTx,
+      );
+      writeTx.prepareCfc();
+      expect((await writeTx.commit()).error).toBeUndefined();
+
+      const manager = coverageRuntime.patternManager as unknown as {
+        replicateClosures(
+          entryIdentity: string,
+          fromSpace: string,
+          toSpace: string,
+        ): Promise<void>;
+      };
+      await expect(
+        manager.replicateClosures(entryIdentity, spaceA, targetSpace),
+      ).rejects.toThrow("coverage spans unavailable in origin space");
+    } finally {
+      await coverageRuntime.dispose();
+      await coverageStorageManager.close();
+    }
+  });
+
+  it("does not reuse a closure missing required delegation metadata", async () => {
+    const targetSpace = "did:key:z6MkCellCacheDelegationPersistenceTarget";
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const requiredDelegations = new Map([
+      [entryIdentity, new Set(["required-predecessor"])],
+    ]);
+    const manager = runtime.patternManager as unknown as {
+      hasStoredCompileCacheClosure(
+        space: string,
+        modules: readonly CacheableModule[],
+        entryIdentity: string,
+        opts: { runtimeVersion: string },
+        moduleDelegations: ReadonlyMap<string, ReadonlySet<string>>,
+      ): Promise<boolean>;
+    };
+
+    const initialWrite = runtime.edit();
+    writeSourceDocs(
+      runtime,
+      targetSpace,
+      modules,
+      entryIdentity,
+      initialWrite,
+    );
+    writeCompiledDocs(
+      runtime,
+      targetSpace,
+      modules,
+      entryIdentity,
+      opts(),
+      initialWrite,
+    );
+    initialWrite.prepareCfc();
+    expect((await initialWrite.commit()).error).toBeUndefined();
+
+    const missingModule: CacheableModule = {
+      identity: "missing-source-module",
+      filename: "/missing.ts",
+      source: "export {};",
+      js: "export {};",
+      imports: [],
+    };
+    expect(
+      await manager.hasStoredCompileCacheClosure(
+        targetSpace,
+        [...modules, missingModule],
+        entryIdentity,
+        opts(),
+        new Map(),
+      ),
+    ).toBe(false);
+
+    const coverageRuntimeVersion = `${RTVER}/pattern-coverage`;
+    const uninstrumentedCoverageWrite = runtime.edit();
+    writeCompiledDocs(
+      runtime,
+      targetSpace,
+      modules,
+      entryIdentity,
+      { runtimeVersion: coverageRuntimeVersion },
+      uninstrumentedCoverageWrite,
+    );
+    uninstrumentedCoverageWrite.prepareCfc();
+    expect((await uninstrumentedCoverageWrite.commit()).error).toBeUndefined();
+    expect(
+      await manager.hasStoredCompileCacheClosure(
+        targetSpace,
+        modules,
+        entryIdentity,
+        { runtimeVersion: coverageRuntimeVersion },
+        new Map(),
+      ),
+    ).toBe(false);
+
+    // The source set does not yet carry the requested authority.
+    expect(
+      await manager.hasStoredCompileCacheClosure(
+        targetSpace,
+        modules,
+        entryIdentity,
+        opts(),
+        requiredDelegations,
+      ),
+    ).toBe(false);
+
+    const sourceOnlyRepair = runtime.edit();
+    writeSourceDocs(
+      runtime,
+      targetSpace,
+      modules,
+      entryIdentity,
+      sourceOnlyRepair,
+      requiredDelegations,
+    );
+    sourceOnlyRepair.prepareCfc();
+    expect((await sourceOnlyRepair.commit()).error).toBeUndefined();
+
+    // A source-only repair is insufficient: a later warm load could trust the
+    // still-stale compiled set without ever consulting source metadata.
+    expect(
+      await manager.hasStoredCompileCacheClosure(
+        targetSpace,
+        modules,
+        entryIdentity,
+        opts(),
+        requiredDelegations,
+      ),
+    ).toBe(false);
+
+    const compiledRepair = runtime.edit();
+    writeCompiledDocs(
+      runtime,
+      targetSpace,
+      modules,
+      entryIdentity,
+      { ...opts(), moduleDelegations: requiredDelegations },
+      compiledRepair,
+    );
+    compiledRepair.prepareCfc();
+    expect((await compiledRepair.commit()).error).toBeUndefined();
+
+    expect(
+      await manager.hasStoredCompileCacheClosure(
+        targetSpace,
+        modules,
+        entryIdentity,
+        opts(),
+        requiredDelegations,
+      ),
+    ).toBe(true);
+  });
+
+  it("distinguishes persisted closures that share an entry module", async () => {
+    const targetSpace = "did:key:z6MkCellCacheSharedEntryTarget";
+    const main = {
+      name: "/main.ts",
+      contents: "export const main = 1;",
+    };
+    const first = toModules({
+      main: main.name,
+      files: [
+        main,
+        { name: "/first.ts", contents: "export const first = 1;" },
+      ],
+    });
+    const second = toModules({
+      main: main.name,
+      files: [
+        main,
+        { name: "/second.ts", contents: "export const second = 2;" },
+      ],
+    });
+    expect(second.entryIdentity).toBe(first.entryIdentity);
+
+    const manager = runtime.patternManager as unknown as {
+      persistCompileCacheTracked(
+        space: string,
+        modules: CacheableModule[],
+        entryIdentity: string,
+        opts: { runtimeVersion: string },
+      ): Promise<void>;
+    };
+    await manager.persistCompileCacheTracked(
+      targetSpace,
+      first.modules,
+      first.entryIdentity,
+      { runtimeVersion },
+    );
+    await manager.persistCompileCacheTracked(
+      targetSpace,
+      second.modules,
+      second.entryIdentity,
+      { runtimeVersion },
+    );
+
+    const firstExtraIdentity =
+      first.modules.find((module) => module.filename === "/first.ts")!.identity;
+    const secondExtraIdentity =
+      second.modules.find((module) => module.filename === "/second.ts")!
+        .identity;
+    const readTx = runtime.edit();
+    const loaded = await loadCompiledClosure(
+      runtime,
+      targetSpace,
+      second.entryIdentity,
+      { runtimeVersion },
+      readTx,
+    );
+    readTx.abort?.();
+
+    expect(loaded.has(secondExtraIdentity)).toBe(true);
+    expect(loaded.has(firstExtraIdentity)).toBe(false);
+
+    await manager.persistCompileCacheTracked(
+      targetSpace,
+      first.modules,
+      first.entryIdentity,
+      { runtimeVersion },
+    );
+    const replayTx = runtime.edit();
+    const replayed = await loadCompiledClosure(
+      runtime,
+      targetSpace,
+      first.entryIdentity,
+      { runtimeVersion },
+      replayTx,
+    );
+    replayTx.abort?.();
+    expect(replayed.has(firstExtraIdentity)).toBe(true);
+    expect(replayed.has(secondExtraIdentity)).toBe(false);
+  });
+
+  it("tracks a queued replacement write before its predecessor completes", async () => {
+    const targetSpace = "did:key:z6MkCellCacheQueuedWriteTarget";
+    const main = {
+      name: "/main.ts",
+      contents: "export const main = 1;",
+    };
+    const first = toModules({
+      main: main.name,
+      files: [
+        main,
+        { name: "/first.ts", contents: "export const first = 1;" },
+      ],
+    });
+    const second = toModules({
+      main: main.name,
+      files: [
+        main,
+        { name: "/second.ts", contents: "export const second = 2;" },
+      ],
+    });
+    const manager = runtime.patternManager as unknown as {
+      persistCompileCacheTracked(
+        space: string,
+        modules: CacheableModule[],
+        entryIdentity: string,
+        opts: { runtimeVersion: string },
+      ): Promise<void>;
+      writeBackCompileCache(
+        space: string,
+        modules: CacheableModule[],
+        entryIdentity: string,
+        opts: { runtimeVersion: string },
+      ): Promise<void>;
+      pendingCacheWriteBacks: Set<Promise<unknown>>;
+    };
+    const originalWriteBack = manager.writeBackCompileCache;
+    const firstStarted = Promise.withResolvers<void>();
+    const releaseFirst = Promise.withResolvers<void>();
+    const secondStarted = Promise.withResolvers<void>();
+    const releaseSecond = Promise.withResolvers<void>();
+    let writeCount = 0;
+    let firstWrite: Promise<void> | undefined;
+    let secondWrite: Promise<void> | undefined;
+    manager.writeBackCompileCache = async () => {
+      writeCount++;
+      if (writeCount === 1) {
+        firstStarted.resolve();
+        await releaseFirst.promise;
+      } else {
+        secondStarted.resolve();
+        await releaseSecond.promise;
+      }
+    };
+
+    try {
+      firstWrite = manager.persistCompileCacheTracked(
+        targetSpace,
+        first.modules,
+        first.entryIdentity,
+        { runtimeVersion },
+      );
+      await firstStarted.promise;
+      secondWrite = manager.persistCompileCacheTracked(
+        targetSpace,
+        second.modules,
+        second.entryIdentity,
+        { runtimeVersion },
+      );
+
+      expect(manager.pendingCacheWriteBacks.size).toBe(2);
+      releaseFirst.resolve();
+      await secondStarted.promise;
+      releaseSecond.resolve();
+      await Promise.all([firstWrite, secondWrite]);
+      expect(writeCount).toBe(2);
+    } finally {
+      releaseFirst.resolve();
+      releaseSecond.resolve();
+      await Promise.allSettled(
+        [firstWrite, secondWrite].filter(
+          (write): write is Promise<void> => write !== undefined,
+        ),
+      );
+      manager.writeBackCompileCache = originalWriteBack;
+    }
+  });
+
+  it("retains persistence entries for the runner session", async () => {
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const manager = runtime.patternManager as unknown as {
+      persistCompileCacheTracked(
+        space: string,
+        modules: CacheableModule[],
+        entryIdentity: string,
+        opts: { runtimeVersion: string },
+      ): Promise<void>;
+      writeBackCompileCache(
+        space: string,
+        modules: CacheableModule[],
+        entryIdentity: string,
+        opts: { runtimeVersion: string },
+      ): Promise<void>;
+      persistedCompileCacheClosures: Map<string, string>;
+    };
+    const originalWriteBack = manager.writeBackCompileCache;
+    manager.writeBackCompileCache = () => Promise.resolve();
+    try {
+      for (let index = 0; index <= 1000; index++) {
+        await manager.persistCompileCacheTracked(
+          `did:key:z6MkPersistenceSlot${index}`,
+          modules,
+          entryIdentity,
+          { runtimeVersion },
+        );
+      }
+    } finally {
+      manager.writeBackCompileCache = originalWriteBack;
+    }
+
+    expect(manager.persistedCompileCacheClosures.size).toBe(1001);
+    expect(
+      manager.persistedCompileCacheClosures.has(
+        JSON.stringify([
+          "did:key:z6MkPersistenceSlot0",
+          runtimeVersion,
+          entryIdentity,
+        ]),
+      ),
+    ).toBe(true);
+  });
+
   // Regression: before bd98e01a4, compiled docs were stamped with a per-user
   // `cf-compiled-by:<did>` atom. A second user's cold-compile writeback of the
   // SAME content into the same space was rejected by the CFC label merge

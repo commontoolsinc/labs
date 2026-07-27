@@ -9,10 +9,11 @@
  * Identity follows the scrabble idiom:
  * - `users` is a per-space directory of joined participants.
  * - Each viewer's `myName` is per-user; it is set once on join and treated as
- *   immutable thereafter. The join name/avatar come from the viewer's shared
- *   profile (`wish({ query: "#profile" })` — its built-in UI covers profile
- *   create/pick); programmatic callers can still pass an explicit name in the
- *   `joinAs` event.
+ *   immutable thereafter. A profile-backed join stores the viewer's live
+ *   `wish({ query: "#profile" })` cell in the object-wrapped
+ *   `participantProfiles` directory, while keeping a name/avatar snapshot in
+ *   the legacy name-keyed poll state. A guest may instead type a string; guest
+ *   entries deliberately have no canonical profile link.
  * - The first joiner's name is captured into `adminName` (per-space). They can
  *   add/remove options and reset votes. `isAdmin` is derived, not stored.
  * - Open host takeover: any joined participant can `claimHost`, transferring
@@ -32,9 +33,10 @@
  * denormalized, so the snapshot survives the option being removed. The
  * "📊 Lunch stats" card derives per-place visit + green/yellow/red tallies from
  * those embedded snapshots via a plain `computed` (the `tallyOptions` idiom).
- * Live voting stays on the in-cell `votes` array. Each entry — and each embedded
- * vote — carries a frozen name snapshot plus a live `Cell<User>` profile link
- * (the shared-profile-roster live-link idiom).
+ * Live voting stays on the in-cell `votes` array. Each history entry — and each
+ * embedded vote — carries a frozen name plus a same-space `Cell<User>` roster
+ * link. Canonical cross-space profile identity lives separately in
+ * `participantProfiles` so legacy stored Lunch Poll arguments remain valid.
  *
  * History was briefly backed by the SQLite builtin (#4144/#4145, to dogfood it),
  * but that brought a deployed-piece "invalid database handle" failure plus a
@@ -45,13 +47,16 @@
  * and the UI (tallies, swatches, per-option highlights, header count, logVisit
  * snapshots) only shows votes cast on the current day. Older votes stay stored
  * but hidden — the (voter, option) vote key means a re-cast overwrites the same
- * entity, so they don't accumulate. "Today" is the one-shot `#now` wish
- * (`loadedAt`, resolved in every viewing runtime; null — shown as an empty
- * vote view — until it resolves), overridden by a per-session cell the vote
- * handlers refresh so a tab
- * left open across midnight snaps forward on the next interaction. The day
- * boundary is the runtime's local timezone (the viewer's, in the browser); two
- * viewers in different timezones can see different vote sets around midnight.
+ * entity, so they don't accumulate. "Today" is the interval `#now/300` wish
+ * (`nowTick`): the runtime's shared per-space clock, coarsened to five
+ * minutes, written immediately on subscribe (and refreshed on reload), then
+ * advanced on aligned boundaries — so an open tab rolls to the new day at
+ * midnight on its own. It reads null until the wish resolves (shown as an
+ * empty vote view and a placeholder date) and stays null on pre-#4740
+ * runtimes, where the vote and visit handlers no-op rather than read an
+ * ambient clock the runtime may not provide. The day boundary is the
+ * runtime's local timezone (the viewer's, in the browser); two viewers in
+ * different timezones can see different vote sets around midnight.
  */
 
 import {
@@ -72,19 +77,71 @@ import {
 } from "commonfabric";
 import PollOptionCard from "./poll-option-card.tsx";
 import ParticipantIdentityCard from "./participant-identity-card.tsx";
+import { safeImageUrl } from "./generated-art.tsx";
 
 export interface User {
   name: string;
   /** Avatar URL or glyph, snapshotted from the joiner's shared profile. */
   avatar?: string;
   color: string;
-  joinedAt: number;
 }
+
+/**
+ * The minimal profile shape a roster needs: the stable identity cell for
+ * `<cf-profile-badge>` binding and `equals()` dedup. Deliberately just
+ * `{ name?, avatar? }`, matching the shared-profile-rosters spec's
+ * `ParticipantProfileCell` — a richer wish schema (bio / externalLinks /
+ * verifiedIdentities Cell[]) makes the cross-space `#profile` result fail to
+ * resolve, so the badge falls back to "Unknown profile". The display NAME is
+ * never read off this cell; it comes from the `#profileName` string wish and
+ * is snapshotted at join.
+ */
+export interface LunchProfile {
+  readonly name?: string;
+  readonly avatar?: string;
+}
+
+/** Stable identity for a profile-backed participant. */
+export type LunchProfileCell = Cell<LunchProfile>;
+
+export interface ParticipantProfileLink {
+  /** Immutable Lunch Poll name used by the current name-keyed vote schema. */
+  readonly name: string;
+  /** Live canonical profile cell; compare it by identity with `equals()`. */
+  readonly profile: LunchProfileCell;
+}
+
+/**
+ * Live profile links use an object-wrapped directory. Nested cross-space cells
+ * inside Lunch Poll's legacy bare `users` array do not preserve strong handler
+ * schemas, so the compatibility-safe profile index remains separate.
+ */
+export interface ParticipantProfileDirectory {
+  readonly participants: ParticipantProfileLink[] | Default<[]>;
+}
+
+export const DEFAULT_PARTICIPANT_PROFILES = {
+  participants: [] as ParticipantProfileLink[],
+} satisfies ParticipantProfileDirectory;
+
+export type ParticipantProfileDirectoryValue =
+  | ParticipantProfileDirectory
+  | Default<typeof DEFAULT_PARTICIPANT_PROFILES>;
+
+export type ParticipantProfileDirectoryCell = Writable<
+  ParticipantProfileDirectoryValue
+>;
 
 export interface Option {
   id: string;
   title: string;
   addedByName: string;
+  /**
+   * Persisted generated-art data URL (`""` until the host's client generates
+   * and syncs it). Every viewer renders this stored value; generation only
+   * runs on the host's client for options where it is still empty.
+   */
+  imageUrl?: string;
 }
 
 export type VoteColor = "green" | "yellow" | "red";
@@ -120,14 +177,25 @@ export interface CastVoteEvent {
   voteType: VoteColor;
 }
 
+/**
+ * Art persistence event: the host keeps a generated thumbnail by storing its
+ * data URL onto the option. Sent by the option card's host-only keep action,
+ * which reads the GeneratedArt sub-pattern's `imageDataUrl` output directly
+ * (fetch-derived child outputs materialize for parents since CT-1836).
+ */
+export interface SetOptionImageEvent {
+  optionId: string;
+  imageUrl: string;
+}
+
 export type ResetVotesEvent = Record<PropertyKey, never>;
 
 /**
  * A snapshot of one person's vote at the moment a visit was logged, embedded in
  * the visit's `votes` list. `optionTitle` is denormalized (options can be
  * removed later; the title is the meaningful record). `voter` is a frozen name
- * snapshot; `voterLink` is a live `Cell<User>` link to that voter's profile
- * (null if the voter is no longer in the directory).
+ * snapshot; `voterLink` is a live `Cell<User>` link to that voter's Lunch Poll
+ * roster entry (null if the voter is no longer in the directory).
  */
 export interface VoteSnapshot {
   voter: string;
@@ -140,8 +208,9 @@ export interface VoteSnapshot {
  * A place the group actually ate, logged by the host — one entry in the
  * `PerSpace<HistoryEntry[]>` visit log. `loggedByName` is a frozen name snapshot
  * (what the "Recently eaten" card renders); `loggedBy` is a live `Cell<User>`
- * link to the logging host's profile (null if absent). `votes` embeds the vote
- * snapshot taken at log time, so per-place stats survive an option's removal.
+ * link to the logging host's Lunch Poll roster entry (null if absent). `votes`
+ * embeds the vote snapshot taken at log time, so per-place stats survive an
+ * option's removal.
  */
 export interface HistoryEntry {
   id: string;
@@ -188,9 +257,6 @@ type VotesCell = Writable<Vote[] | Default<[]>>;
 type UsersCell = Writable<User[] | Default<[]>>;
 type NameCell = Writable<string | Default<"">>;
 type HistoryCell = Writable<HistoryEntry[] | Default<[]>>;
-// The session's "today" (ms epoch) — see the current-day filter note in the
-// file header.
-type TodayCell = Writable<number>;
 
 const POLL_THEME = {
   fontFamily:
@@ -229,10 +295,35 @@ const VOTE_SWATCH: Record<VoteColor, string> = {
 
 const trimmedName = (n: string | undefined) => (n ?? "").trim();
 
-const newOptionId = () =>
-  `o_${Date.now().toString(36)}_${
-    Math.floor(Math.random() * 1e6).toString(36)
-  }`;
+// Produce a stable unused id from action inputs and the current collection.
+// This deliberately avoids Date.now()/Math.random(): pre-#4740 Loom runtimes
+// reject those ambient capabilities in secure handlers.
+const unusedId = (
+  prefix: string,
+  parts: readonly string[],
+  existingIds: readonly string[],
+): string => {
+  const base = `${prefix}_${JSON.stringify(parts)}`;
+  let id = base;
+  let suffix = 2;
+  while (existingIds.includes(id)) id = `${base}_${suffix++}`;
+  return id;
+};
+
+// Guard against live options AND every optionId still referenced by a vote:
+// without the vote sweep, a remove→re-add of the same (name, title) would mint
+// the removed option's id again and adopt any stray votes that merged in after
+// the removal cascade's read.
+const newOptionId = (
+  options: readonly Option[],
+  votes: readonly Vote[],
+  addedByName: string,
+  title: string,
+): string =>
+  unusedId("o", [addedByName, title], [
+    ...options.map((o) => o.id),
+    ...votes.map((v) => v.optionId),
+  ]);
 
 // The deterministic key a vote is addressed by: a voter's vote for one option.
 // castVote, clearMyVote, and the removeOption cascade all derive the same key,
@@ -250,13 +341,135 @@ const clearVoteEntity = (votes: VotesCell, key: string): void => {
   vote.set(undefined);
 };
 
-const getInitials = (name: string): string => {
+const COMBINING_MARK = /^\p{Mark}$/u;
+const EMOJI_MODIFIER = /^\p{Emoji_Modifier}$/u;
+const REGIONAL_INDICATOR = /^\p{Regional_Indicator}$/u;
+const ZERO_WIDTH_JOINER = "\u200D";
+
+// Groups combining marks, emoji modifiers, joined emoji, and regional-indicator
+// pairs into the characters displayed in participant labels.
+const displayCharactersOf = (value: string): string[] => {
+  const codePoints = Array.from(value);
+  const characters: string[] = [];
+  for (let index = 0; index < codePoints.length; index += 1) {
+    let character = codePoints[index] ?? "";
+    const next = codePoints[index + 1] ?? "";
+    if (
+      REGIONAL_INDICATOR.test(character) && REGIONAL_INDICATOR.test(next)
+    ) {
+      character += next;
+      index += 1;
+    }
+    while (index + 1 < codePoints.length) {
+      const continuation = codePoints[index + 1] ?? "";
+      if (
+        COMBINING_MARK.test(continuation) ||
+        EMOJI_MODIFIER.test(continuation)
+      ) {
+        character += continuation;
+        index += 1;
+        continue;
+      }
+      if (
+        continuation === ZERO_WIDTH_JOINER && index + 2 < codePoints.length
+      ) {
+        character += continuation + (codePoints[index + 2] ?? "");
+        index += 2;
+        continue;
+      }
+      break;
+    }
+    characters.push(character);
+  }
+  return characters;
+};
+
+const getDefaultInitials = (name: string): string => {
   const trimmed = name.trim();
   if (!trimmed) return "?";
-  return trimmed.split(/\s+/).map((w) => w[0]).join("").toUpperCase().slice(
-    0,
-    2,
+  const initials = trimmed.split(/\s+/).map((word) =>
+    displayCharactersOf(word)[0] ?? ""
+  ).join("").toUpperCase();
+  return displayCharactersOf(initials).slice(0, 2).join("");
+};
+
+const compactName = (name: string): string =>
+  name.trim().split(/\s+/).join("").toUpperCase();
+
+const getInitials = (
+  name: string,
+  participantNames: readonly string[],
+): string => {
+  const compact = compactName(name);
+  const characters = displayCharactersOf(compact);
+  if (characters.length === 0) return "?";
+  const peers = participantNames
+    .map(compactName)
+    .filter((candidate) =>
+      candidate !== compact &&
+      displayCharactersOf(candidate)[0] === characters[0]
+    );
+  if (peers.length === 0) return getDefaultInitials(name);
+
+  const distinguishingIndex = characters.findIndex((_, index) =>
+    index > 0 &&
+    peers.every((peer) =>
+      !peer.startsWith(characters.slice(0, index + 1).join(""))
+    )
   );
+  const secondInitial = distinguishingIndex >= 1
+    ? characters[distinguishingIndex]
+    : characters[1];
+  return `${characters[0]}${secondInitial ?? ""}`;
+};
+
+const getInitialsByName = (
+  participantNames: readonly string[],
+): Map<string, string> => {
+  const provisionalByName = new Map<string, string>();
+  const countByInitials = new Map<string, number>();
+  for (const name of participantNames) {
+    const initials = getInitials(name, participantNames);
+    provisionalByName.set(name, initials);
+    countByInitials.set(initials, (countByInitials.get(initials) ?? 0) + 1);
+  }
+
+  const expandedByName = new Map<string, string>();
+  const countByExpanded = new Map<string, number>();
+  for (const name of participantNames) {
+    const initials = provisionalByName.get(name) ?? getDefaultInitials(name);
+    const expanded = (countByInitials.get(initials) ?? 0) > 1
+      ? compactName(name)
+      : initials;
+    expandedByName.set(name, expanded);
+    countByExpanded.set(expanded, (countByExpanded.get(expanded) ?? 0) + 1);
+  }
+
+  const result = new Map<string, string>();
+  const usedLabels = new Set<string>();
+  for (const name of participantNames) {
+    const expanded = expandedByName.get(name) ?? getDefaultInitials(name);
+    if ((countByExpanded.get(expanded) ?? 0) <= 1) {
+      result.set(name, expanded);
+      usedLabels.add(expanded);
+    }
+  }
+
+  const nextSuffixByExpanded = new Map<string, number>();
+  for (const name of participantNames) {
+    const expanded = expandedByName.get(name) ?? getDefaultInitials(name);
+    if ((countByExpanded.get(expanded) ?? 0) <= 1) continue;
+    let suffix = nextSuffixByExpanded.get(expanded) ?? 1;
+    let label = `${expanded}${suffix}`;
+    while (usedLabels.has(label)) {
+      suffix += 1;
+      label = `${expanded}${suffix}`;
+    }
+    nextSuffixByExpanded.set(expanded, suffix + 1);
+    result.set(name, label);
+    usedLabels.add(label);
+  }
+  return result;
 };
 
 const DAY_NAMES = [
@@ -295,7 +508,7 @@ export const dayKeyOf = (ms: number): string => {
   }`;
 };
 
-// Header label for the session's "today" ("Thursday, Jul 10"). Formatted from
+// Header label for the current day ("Thursday, Jul 10"). Formatted from
 // the name tables, not toLocaleDateString: SES localeTaming ("safe") aliases
 // toLocale* methods to their non-locale forms, so option-driven locale
 // formatting is unreliable under lockdown.
@@ -306,19 +519,29 @@ const dayLabelOf = (ms: number): string => {
   } ${d.getDate()}`;
 };
 
-const newHistoryId = () =>
-  `h_${Date.now().toString(36)}_${
-    Math.floor(Math.random() * 1e6).toString(36)
-  }`;
+const newHistoryId = (
+  visits: readonly HistoryEntry[],
+  loggedByName: string,
+  title: string,
+  wentAt: number,
+): string =>
+  unusedId(
+    "h",
+    [loggedByName, title, String(wentAt)],
+    visits.map((visit) => visit.id),
+  );
 
 // Parse a "YYYY-MM-DD" draft (from the host's date input) into a timestamp,
-// anchored to local midnight. Blank or unparseable → now. Only ever called
-// from a handler, so reading the clock here is fine.
-const parseVisitDate = (draft: string | undefined): number => {
+// anchored to local midnight. Blank or unparseable → the caller's current
+// `#now/300` tick, i.e. today.
+const parseVisitDate = (
+  draft: string | undefined,
+  fallbackNow: number,
+): number => {
   const s = (draft ?? "").trim();
-  if (!s) return Date.now();
+  if (!s) return fallbackNow;
   const t = new Date(`${s}T00:00:00`).getTime();
-  return Number.isNaN(t) ? Date.now() : t;
+  return Number.isNaN(t) ? fallbackNow : t;
 };
 
 // Cap the stored visit log at the most-recent MAX_HISTORY entries (by date). A
@@ -339,10 +562,11 @@ const visitLabel = (wentAt: number): string => {
 
 const addOption = handler<AddOptionEvent, {
   options: OptionsCell;
+  votes: VotesCell;
   myName: NameCell;
   adminName: NameCell;
   optionDraft: NameCell;
-}>(({ title }, { options, myName, adminName, optionDraft }) => {
+}>(({ title }, { options, votes, myName, adminName, optionDraft }) => {
   const me = trimmedName(myName.get());
   const admin = trimmedName(adminName.get());
   if (!me || me !== admin) return;
@@ -350,16 +574,39 @@ const addOption = handler<AddOptionEvent, {
   if (!trimmed) return;
   // Address the option by its id so later edits and removal reach it without a
   // positional index. addUnique merges concurrent adds (distinct ids) and is
-  // idempotent on the id.
-  const id = newOptionId();
+  // idempotent on the id. The votes read joins the id-freshness guard into
+  // this transaction's conflict set — a concurrent cast retries the add.
+  const id = newOptionId(options.get(), votes.get(), me, trimmed);
   const option = options.elementById(id);
   option.set({
     id,
     title: trimmed,
     addedByName: me,
+    imageUrl: "",
   });
   options.addUnique(option);
   optionDraft.set("");
+});
+
+// Host persists the generated cuisine thumbnail (a data URL read from the
+// GeneratedArt sub-pattern by the card's keep action) onto its option.
+// Idempotent on the stored value, keyed-collection addressed, and admin-gated
+// like every other mutation — only the host's client generates, but the gate
+// holds regardless.
+const setOptionImage = handler<SetOptionImageEvent, {
+  options: OptionsCell;
+  myName: NameCell;
+  adminName: NameCell;
+}>(({ optionId, imageUrl }, { options, myName, adminName }) => {
+  const me = trimmedName(myName.get());
+  const admin = trimmedName(adminName.get());
+  if (!me || me !== admin) return;
+  const option = options.elementById(optionId);
+  const current = option.get();
+  if (!current) return;
+  const safe = safeImageUrl(imageUrl);
+  if (!safe || trimmedName(current.imageUrl) === safe) return;
+  option.key("imageUrl").set(safe);
 });
 
 const removeOption = handler<RemoveOptionEvent, {
@@ -390,14 +637,17 @@ const removeOption = handler<RemoveOptionEvent, {
 const castVote = handler<CastVoteEvent, {
   votes: VotesCell;
   myName: NameCell;
-  today: TodayCell;
-}>(({ optionId, voteType }, { votes, myName, today }) => {
+  nowTick: number | null;
+}>(({ optionId, voteType }, { votes, myName, nowTick }) => {
   const me = trimmedName(myName.get());
   if (!me) return;
-  // Reading the clock is fine here (handler, not computed). Refresh the
-  // session's "today" so the current-day filter tracks the interaction.
-  const now = Date.now();
-  today.set(now);
+  // Stamp with the shared `#now/300` tick — fresh to five minutes, all a
+  // day-granularity stamp needs, and it keeps the deployed source compatible
+  // with Loom runtimes from before handler-scoped Date.now(). Null until the
+  // wish resolves (and always on pre-#4740 runtimes, which also show no
+  // votes): voting no-ops rather than reading an ambient clock.
+  const now = nowTick;
+  if (!now) return;
   // My vote for this option has a deterministic address, so this reads and
   // edits just that one vote — never the whole list. Clicking the current
   // color toggles the vote off; any other color sets it.
@@ -444,12 +694,9 @@ export interface ClearVoteEvent {
 const clearMyVote = handler<ClearVoteEvent, {
   votes: VotesCell;
   myName: NameCell;
-  today: TodayCell;
-}>(({ optionId }, { votes, myName, today }) => {
+}>(({ optionId }, { votes, myName }) => {
   const me = trimmedName(myName.get());
   if (!me) return;
-  // Vote-affecting interaction → refresh the session's current-day filter.
-  today.set(Date.now());
   const key = voteKey(me, optionId);
   votes.removeByValue(votes.elementById(key));
   clearVoteEntity(votes, key);
@@ -467,8 +714,7 @@ const logVisit = handler<LogVisitEvent, {
   myName: NameCell;
   adminName: NameCell;
   visitDate: NameCell;
-  today: TodayCell;
-  loadedAt: number | null;
+  nowTick: number | null;
 }>(
   (
     { optionId, title, wentAt },
@@ -480,8 +726,7 @@ const logVisit = handler<LogVisitEvent, {
       myName,
       adminName,
       visitDate,
-      today,
-      loadedAt,
+      nowTick,
     },
   ) => {
     const me = trimmedName(myName.get());
@@ -493,13 +738,15 @@ const logVisit = handler<LogVisitEvent, {
       place = opt ? trimmedName(opt.title) : "";
     }
     if (!place) return;
+    const fallbackNow = nowTick || 0;
     const when = typeof wentAt === "number"
       ? wentAt
-      : parseVisitDate(visitDate.get());
+      : parseVisitDate(visitDate.get(), fallbackNow);
+    if (!when) return;
 
-    // Resolve a name → that user's live Cell<User> in the directory, for the
-    // `*Link` live-profile links (the shared-profile-roster idiom). users.key(i)
-    // is a stable cell that round-trips through the array as a link.
+    // Resolve a name → that user's same-space Cell<User> roster entry.
+    // Canonical cross-space identity is held by `participantProfiles`; these
+    // historical links remain unchanged for stored-value compatibility.
     const us = users.get();
     const cellForName = (name: string): Cell<User> | null => {
       const idx = us.findIndex((u) => u.name === name);
@@ -510,13 +757,11 @@ const logVisit = handler<LogVisitEvent, {
     // option title (options can be removed later; the title is the record).
     // Only today's votes are "current opinion": stale votes are hidden from
     // the UI, so they stay out of the snapshot too. Same day source as the
-    // UI's `todaysVotes` (`today` override, else the `#now` load snapshot) —
-    // the snapshot must capture what the host is looking at, not the wall
-    // clock's day, or a tab crossing midnight logs an empty new-day snapshot
-    // of a board still showing yesterday's votes. While `#now` is still
-    // resolving (no override, null `loadedAt`) the board shows no votes, so
-    // the snapshot stays empty for that window too.
-    const nowRef = today.get() || loadedAt;
+    // UI's `todaysVotes` (the shared `#now/300` tick), so the snapshot
+    // captures exactly what the host is looking at, by construction. While
+    // the wish is still unresolved (null `nowTick`) the board shows no votes,
+    // so the snapshot stays empty for that window too.
+    const nowRef = nowTick;
     const nowDay = nowRef ? dayKeyOf(nowRef) : null;
     const titleById = new Map(options.get().map((o) => [o.id, o.title]));
     const voteSnapshot: VoteSnapshot[] = [];
@@ -537,23 +782,26 @@ const logVisit = handler<LogVisitEvent, {
       });
     }
 
+    // The id and cap both depend on the current list, so this is deliberately
+    // one read-modify-write. A mergeable push would keep the explicit read in
+    // the conflict set anyway and would mix an append with a whole-list trim.
+    const currentVisits = visits.get();
     const entry: HistoryEntry = {
-      id: newHistoryId(),
+      id: newHistoryId(currentVisits, me, place, when),
       title: place,
       loggedByName: me,
       loggedBy: cellForName(me),
       wentAt: when,
       votes: voteSnapshot,
     };
-    // Append (push round-trips the live links); cap to the MAX_HISTORY most
-    // recent only on overflow.
-    visits.push(entry);
-    const all = visits.get();
-    if (all.length > MAX_HISTORY) {
-      visits.set(
-        [...all].sort((a, b) => b.wentAt - a.wentAt).slice(0, MAX_HISTORY),
-      );
-    }
+    const nextVisits = [...currentVisits, entry];
+    visits.set(
+      nextVisits.length > MAX_HISTORY
+        ? [...nextVisits]
+          .sort((a, b) => b.wentAt - a.wentAt)
+          .slice(0, MAX_HISTORY)
+        : nextVisits,
+    );
 
     // Reset the date draft so the next log defaults back to today.
     visitDate.set("");
@@ -588,7 +836,12 @@ interface OptionTally {
   green: number;
   yellow: number;
   red: number;
-  voters: Array<{ name: string; voteType: VoteColor; color: string }>;
+  voters: Array<{
+    name: string;
+    voteType: VoteColor;
+    color: string;
+    initials: string;
+  }>;
 }
 
 const tallyOptions = (
@@ -597,6 +850,8 @@ const tallyOptions = (
   users: readonly User[],
 ): OptionTally[] => {
   const colorByName = new Map(users.map((u) => [u.name, u.color]));
+  const participantNames = users.map((u) => u.name);
+  const initialsByName = getInitialsByName(participantNames);
   const tallies = options.map((option): OptionTally => {
     const optionVotes = votes.filter((v) => v.optionId === option.id);
     return {
@@ -608,6 +863,8 @@ const tallyOptions = (
         name: v.voterName,
         voteType: v.voteType,
         color: colorByName.get(v.voterName) ?? "#888",
+        initials: initialsByName.get(v.voterName) ??
+          getInitials(v.voterName, participantNames),
       })),
     };
   });
@@ -650,6 +907,8 @@ export interface CozyPollInput {
   options?: PerSpace<Option[] | Default<[]>>;
   votes?: PerSpace<Vote[] | Default<[]>>;
   users?: PerSpace<User[] | Default<[]>>;
+  /** Canonical live profile links for profile-backed users; guests are absent. */
+  participantProfiles?: PerSpace<ParticipantProfileDirectoryValue>;
   adminName?: PerSpace<string | Default<"">>;
   myName?: PerUser<string | Default<"">>;
   // Durable "we went here" log; each entry embeds its own vote snapshot. Capped
@@ -668,13 +927,14 @@ export interface CozyPollOutput {
   // only `todaysVotes` — see the current-day filter note in the file header.
   votes: readonly Vote[];
   users: readonly User[];
+  participantProfiles: readonly ParticipantProfileLink[];
   adminName: string;
   myName: string;
   userCount: number;
   optionCount: number;
   voteCount: number;
-  // The session's current local day ("YYYY-MM-DD") that votes are filtered
-  // to; unavailable until the `#now` wish resolves.
+  // The current local day ("YYYY-MM-DD") that votes are filtered to;
+  // unavailable until the `#now/300` wish resolves.
   todayDate: string;
   // Votes cast on the current day — the only votes the UI shows and tallies.
   todaysVotes: readonly Vote[];
@@ -701,6 +961,7 @@ export interface CozyPollOutput {
   castVote: Stream<CastVoteEvent>;
   clearMyVote: Stream<ClearVoteEvent>;
   resetVotes: Stream<ResetVotesEvent>;
+  setOptionImage: Stream<SetOptionImageEvent>;
   logVisit: Stream<LogVisitEvent>;
   removeHistoryEntry: Stream<RemoveHistoryEntryEvent>;
   clearHistory: Stream<ClearHistoryEvent>;
@@ -711,6 +972,7 @@ export interface CozyPollOutput {
 const EMPTY_OPTIONS: Option[] = [];
 const EMPTY_VOTES: Vote[] = [];
 const EMPTY_USERS: User[] = [];
+const EMPTY_PARTICIPANT_PROFILE_LINKS: ParticipantProfileLink[] = [];
 
 export default pattern<CozyPollInput, CozyPollOutput>(
   (
@@ -719,6 +981,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       options,
       votes,
       users,
+      participantProfiles,
       adminName,
       myName,
       visits,
@@ -731,37 +994,66 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // Host's backdate field for "we went here" — a "YYYY-MM-DD" draft, blank
     // means today. Per-session like the other form drafts.
     const visitDate = Writable.perSession.of<string>("");
-    // "Now" at load — the one-shot `#now` wish, resolved in EVERY viewing
-    // runtime (pattern bodies run per session; the calendar idiom). This, not
-    // the cell below, is what makes "today" defined for a session that hasn't
-    // interacted yet: a scoped cell's `.of()` initial is seeded only into the
-    // piece-creating session's partition, and every other session reads
-    // undefined from it (see docs/development/debugging/gotchas/
-    // scoped-cell-pitfalls.md #5). The body cannot read the ambient clock, so
-    // `loadedAt` remains unavailable until the wish resolves, which withholds
-    // downstream day-filter values during that load window.
-    const loadedAtWish = wish<number>({ query: "#now" });
-    const loadedAtWishValue = resultOf(loadedAtWish.result);
-    const loadedAt = computed(() => loadedAtWishValue);
-    // Handler-refreshed override (ms epoch) so a tab left open across
-    // midnight snaps forward on the next vote interaction. 0 = "this session
-    // hasn't interacted"; every read falls back to `loadedAt`. The initial is
-    // a stable literal on purpose — a computed initial would embed a
-    // different schema default per runtime and churn the built graph.
-    const today = Writable.perSession.of<number>(0);
+    // The clock the poll runs on — the interval `#now/300` wish: the
+    // runtime's shared per-space tick, coarsened to five minutes, written
+    // immediately on subscribe (and refreshed on reload), then advanced on
+    // aligned boundaries by a runner-owned timer (builtins/wish.ts). Five
+    // minutes is plenty for day-granularity stamps and keeps tick writes
+    // negligible. Deliberately NOT the bare one-shot `#now`: that wish
+    // durably captures the piece's FIRST-EVER load time and never advances
+    // again, which would freeze the current-day filter (and every new
+    // `castAt`) at the poll's birth day. The body cannot read the ambient
+    // clock, so `nowTick` remains unavailable until the wish resolves.
+    const nowTickWish = wish<number>({ query: "#now/300" });
+    const nowTick = resultOf(nowTickWish.result);
     // Two-step confirmation for destructive actions. Stores the optionId
-    // pending remove-confirm (null = nothing pending). Same idiom as
+    // pending remove-confirm (null or undefined = nothing pending). Same idiom as
     // parking-coordinator's `removePersonConfirmTarget`.
-    const removeConfirmTarget = Writable.perSession.of<string | null>(null);
+    const removeConfirmTarget = Writable.perSession.of<
+      string | null | undefined
+    >(null);
     const resetConfirmPending = Writable.perSession.of<boolean>(false);
     const clearHistoryConfirmPending = Writable.perSession.of<boolean>(false);
+    // Resolve the viewer's shared profile at the TOP LEVEL, per the
+    // shared-profile-rosters spec (docs/specs/shared-profile-rosters.md): the
+    // `#profile` cell is the stable identity (badge + `equals()` dedup), and
+    // `#profileName` / `#profileAvatar` are the display strings. Simple schema
+    // on purpose — a rich schema fails to resolve the cross-space result. The
+    // injected `profile` input (tests) overrides the wish cell. These pass
+    // DOWN into the identity card; the card no longer wishes for itself, so
+    // resolution happens in this piece's top-level context where it works.
+    const profileWish = wish<LunchProfile>({ query: "#profile" });
+    const profileNameWish = wish<string>({ query: "#profileName" });
+    const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
+    // Bind the badge/identity to the wish result DIRECTLY (the demo idiom). Do
+    // NOT reintroduce a `profile ?? …` injection override: an unset optional
+    // cell input is a truthy proxy at pattern-build time, so `??` returns that
+    // broken proxy instead of the real result and every badge falls back to
+    // "Unknown profile". Profile-backed rendering is verified at the browser
+    // tier (the scrabble/battleship precedent), not via a pattern-body cell
+    // injection.
+    const viewerProfileCell = resultOf(profileWish.result);
+    const viewerProfileName = hasError(profileNameWish.result)
+      ? ""
+      : resultOf(profileNameWish.result);
+    const viewerProfileAvatar = hasError(profileAvatarWish.result)
+      ? ""
+      : resultOf(profileAvatarWish.result);
+    // This pattern renders identity only from the STORED directory entries, so
+    // a later profile switch cannot orphan the joined identity.
     const participantIdentity = ParticipantIdentityCard({
       users,
       myName,
       adminName,
+      participantProfiles,
+      profile: viewerProfileCell,
+      profileName: viewerProfileName,
+      profileAvatar: viewerProfileAvatar,
+      profileSetupUI: profileWish[UI],
     });
     const boundAddOption = addOption({
       options,
+      votes,
       myName,
       adminName,
       optionDraft,
@@ -772,8 +1064,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       myName,
       adminName,
     });
-    const boundCastVote = castVote({ votes, myName, today });
-    const boundClearMyVote = clearMyVote({ votes, myName, today });
+    const boundCastVote = castVote({ votes, myName, nowTick });
+    const boundSetOptionImage = setOptionImage({ options, myName, adminName });
+    const boundClearMyVote = clearMyVote({ votes, myName });
     const boundResetVotes = resetVotes({ votes, myName, adminName });
     const boundLogVisit = logVisit({
       visits,
@@ -783,8 +1076,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       myName,
       adminName,
       visitDate,
-      today,
-      loadedAt,
+      nowTick,
     });
     const boundRemoveHistoryEntry = removeHistoryEntry({
       visits,
@@ -799,21 +1091,14 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const userCount = users.length;
     const optionCount = options.length;
     const voteCount = votes.length;
-    // Current-day filter: the UI only shows votes cast on this session's
-    // "today" (local calendar day). Derived at top level so every remote
-    // voter's vote entity resolves (same reason `ranked` is computed here,
-    // not per-option — see the swatch comment below).
-    // `|| loadedAt` (not ??) covers both the unwritten cross-session read
-    // (undefined) and the seeded 0. The combined value remains unavailable
-    // while `#now` is still resolving, withholding the day key and vote set.
-    const todayKey = computed(() => {
-      const ref = today.get() || loadedAt;
-      return ref ? dayKeyOf(ref) : "";
-    });
+    // Current-day filter: the UI only shows votes cast on the current day
+    // (local calendar), per the shared tick. Derived at top level so every
+    // remote voter's vote entity resolves (same reason `ranked` is computed
+    // here, not per-option — see the swatch comment below). Both derived
+    // values remain unavailable while `#now/300` is resolving.
+    const todayKey = computed(() => dayKeyOf(nowTick));
     const todaysVotes = computed(() => {
-      const ref = today.get() || loadedAt;
-      if (!ref) return EMPTY_VOTES;
-      const key = dayKeyOf(ref);
+      const key = dayKeyOf(nowTick);
       return votes.filter((v) =>
         typeof v.castAt === "number" && dayKeyOf(v.castAt) === key
       );
@@ -849,6 +1134,31 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const me = participantIdentity.me;
     const isJoined = participantIdentity.isJoined;
     const isAdmin = participantIdentity.isAdmin;
+    // Normalize the Default<>-wrapped directory once: downstream maps need
+    // one concrete element type, not the raw schema union.
+    const participantLinks = computed((): readonly ParticipantProfileLink[] =>
+      participantProfiles.participants ?? EMPTY_PARTICIPANT_PROFILE_LINKS
+    );
+    // The viewer's stored canonical profile link(s) — the STORED entry (not
+    // the live `#profile` wish) is the rendered identity source, so switching
+    // the active profile after joining keeps the joined badge. An array of
+    // 0-or-1 entries: the header chip renders it with a plain static map,
+    // which keeps the `$profile` binding free of conditionals.
+    const viewerLinks = computed((): readonly ParticipantProfileLink[] => {
+      const viewerName = participantIdentity.me;
+      if (!viewerName) return EMPTY_PARTICIPANT_PROFILE_LINKS;
+      return participantLinks.filter((entry) => entry.name === viewerName);
+    });
+    const viewerHasStoredProfile = computed(() => viewerLinks.length > 0);
+    // Guests (typed-name joins) have no directory entry; the participants
+    // strip renders them as plain name chips next to the profile badges.
+    const guestUsers = computed(() => {
+      const linked = new Set(participantLinks.map((entry) => entry.name));
+      return users.filter((u) => !linked.has(u.name));
+    });
+    // Hoisted booleans for the JSX ternaries below (the file's reset-confirm
+    // idiom): conditions in JSX stay bare computed refs.
+    const hasParticipants = computed(() => users.length > 0);
     // Hoist a boolean cell for the reset-confirm JSX ternary so TS doesn't
     // narrow `resetConfirmPending` itself and lose the `.set` method in
     // the false branch.
@@ -901,8 +1211,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     const u = userCount ?? 0;
                     const o = optionCount ?? 0;
                     const v = todayVoteCount ?? 0;
-                    const todayRef = today.get() || loadedAt;
-                    const todayLabel = todayRef ? dayLabelOf(todayRef) : "…";
+                    const todayLabel = dayLabelOf(nowTick);
                     const admin = trimmedName(adminName);
                     const viewer = me;
                     const amAdmin = isAdmin;
@@ -929,12 +1238,69 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       </div>
                     );
                   })}
+                  {hasParticipants
+                    ? (
+                      <div
+                        data-participants-strip
+                        style={{
+                          marginTop: "8px",
+                          display: "flex",
+                          alignItems: "center",
+                          flexWrap: "wrap",
+                          gap: "6px",
+                        }}
+                      >
+                        {
+                          /* Every profile-backed participant renders from
+                            their STORED live cell (the canonical-roster
+                            idiom, multi-user-patterns.md#presenting-identity);
+                            guests keep plain name chips. Static maps on
+                            purpose — `$profile` bindings cannot live inside
+                            the tally computed below. These badges navigate;
+                            only the viewer's own chip is noNavigate. */
+                        }
+                        {participantLinks.map((entry) => (
+                          <cf-profile-badge
+                            variant="chip"
+                            size="sm"
+                            $profile={entry.profile}
+                            data-participant-badge={entry.name}
+                          />
+                        ))}
+                        {guestUsers.map((u) => (
+                          <span
+                            data-participant-guest={u.name}
+                            title={u.name}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              padding: "2px 8px",
+                              borderRadius: "9999px",
+                              background: "#f3f4f6",
+                              border: "1px solid #e5e7eb",
+                              fontSize: "11px",
+                              fontWeight: 600,
+                              color: "#374151",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {u.name}
+                          </span>
+                        ))}
+                      </div>
+                    )
+                    : null}
                 </div>
-                {computed(() => {
-                  const viewer = me;
-                  if (viewer === "") return null;
-                  const amAdmin = isAdmin;
-                  return (
+                {
+                  /* Static JSX only in this cluster: the viewer badge carries
+                    a `$profile` binding, and a `$`-binding inside an authored
+                    `computed(() => …)` VNode is materialized by the lift and
+                    blanks the whole render (pattern-critique-guide §5). JSX
+                    ternaries compile to static-branch `ifElse`, the safe
+                    conditional shape at a `$`-binding position. */
+                }
+                {isJoined
+                  ? (
                     <div
                       style={{
                         display: "flex",
@@ -942,7 +1308,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                         alignItems: "center",
                       }}
                     >
-                      {amAdmin
+                      {isAdmin
                         ? (
                           <span
                             style={{
@@ -963,30 +1329,48 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                           </span>
                         )
                         : null}
-                      <span
-                        title={viewer}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "6px",
-                          padding: "4px 10px",
-                          borderRadius: "9999px",
-                          background: "#f3f4f6",
-                          border: "1px solid #e5e7eb",
-                          fontSize: "12px",
-                          fontWeight: 600,
-                          color: "#374151",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        <span style={{ fontSize: "10px", color: "#10b981" }}>
-                          ●
+                      {
+                        /* The viewer's chip binds the STORED directory entry
+                          (never the live `#profile` wish), so a profile
+                          switch after joining keeps the joined identity.
+                          `viewerLinks` is pre-filtered to 0-or-1 entries, so
+                          this map stays conditional-free at the binding. */
+                      }
+                      {viewerLinks.map((entry) => (
+                        <cf-profile-badge
+                          variant="chip"
+                          size="sm"
+                          $profile={entry.profile}
+                          noNavigate
+                          data-viewer-badge
+                        />
+                      ))}
+                      {viewerHasStoredProfile ? null : (
+                        <span
+                          title={me}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            padding: "4px 10px",
+                            borderRadius: "9999px",
+                            background: "#f3f4f6",
+                            border: "1px solid #e5e7eb",
+                            fontSize: "12px",
+                            fontWeight: 600,
+                            color: "#374151",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          <span style={{ fontSize: "10px", color: "#10b981" }}>
+                            ●
+                          </span>
+                          {me}
                         </span>
-                        {viewer}
-                      </span>
+                      )}
                     </div>
-                  );
-                })}
+                  )
+                  : null}
               </div>
             </div>
 
@@ -998,6 +1382,31 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   margin: "0 auto",
                 }}
               >
+                {
+                  /* Always-on live self-badge, at the TOP LEVEL co-located with
+                    the `#profile` wish — the profile-roster-live-demo idiom. A
+                    `<cf-profile-badge>` rendered here keeps the viewer's profile
+                    pattern running in this runtime, which is what materializes
+                    the cross-space profile so EVERY badge (this one, the header
+                    viewer chip, and the participants strip's stored-cell badges)
+                    resolves instead of falling back to "Unknown profile", and it
+                    reliably primes the `#profileName` string the join label and
+                    roster snapshot read. A badge rendered inside the identity
+                    sub-pattern does NOT achieve this — it must be top-level.
+                    Static JSX position: the `$profile` binding must not sit
+                    inside an authored `computed(() => …)` VNode. */
+                }
+                <div
+                  data-viewer-self-badge
+                  style={{ marginBottom: "12px" }}
+                >
+                  <cf-profile-badge
+                    variant="chip"
+                    size="sm"
+                    $profile={viewerProfileCell}
+                    noNavigate
+                  />
+                </div>
                 {participantIdentity[UI]}
 
                 {/* Top choice — only when there are votes */}
@@ -1150,6 +1559,8 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                 {tally.voters.map((voter) => (
                                   <span
                                     title={voter.name}
+                                    role="img"
+                                    aria-label={`${voter.name}: ${voter.voteType} vote`}
                                     data-vote-swatch-name={voter.name}
                                     style={{
                                       display: "inline-flex",
@@ -1169,7 +1580,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                                         : "none",
                                     }}
                                   >
-                                    {getInitials(voter.name)}
+                                    {voter.initials}
                                   </span>
                                 ))}
                               </div>
@@ -1227,12 +1638,15 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     id: option.id,
                     title: option.title,
                     addedByName: option.addedByName,
+                    ...(option.imageUrl === undefined
+                      ? {}
+                      : { imageUrl: option.imageUrl }),
                   };
                   const rank = computed(() => {
                     const idx = ranked.findIndex(
                       (t) => t.option.id === oid,
                     );
-                    return idx >= 0 ? idx + 1 : 0;
+                    return idx >= 0 ? idx + 1 : undefined;
                   });
                   return (
                     <PollOptionCard
@@ -1246,6 +1660,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       castVote={boundCastVote}
                       removeOption={boundRemoveOption}
                       logVisit={boundLogVisit}
+                      setOptionImage={boundSetOptionImage}
                     />
                   );
                 })}
@@ -1593,6 +2008,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       options: computed(() => options ?? EMPTY_OPTIONS),
       votes: computed(() => votes ?? EMPTY_VOTES),
       users: computed(() => users ?? EMPTY_USERS),
+      participantProfiles: participantLinks,
       adminName: computed(() => trimmedName(adminName)),
       myName: participantIdentity.me,
       userCount,
@@ -1615,6 +2031,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       castVote: boundCastVote,
       clearMyVote: boundClearMyVote,
       resetVotes: boundResetVotes,
+      setOptionImage: boundSetOptionImage,
       logVisit: boundLogVisit,
       removeHistoryEntry: boundRemoveHistoryEntry,
       clearHistory: boundClearHistory,

@@ -18,7 +18,7 @@
  */
 import {
   action,
-  computed,
+  assert,
   equals,
   handler,
   pattern,
@@ -164,75 +164,69 @@ Fresh vegetables and fruits
   // ==========================================================================
 
   // Initial state - use totalCount which is computed from items.get().length
-  const assert_initial_empty = computed(() => list.totalCount === 0);
-  const assert_initial_total_zero = computed(() => list.totalCount === 0);
-  const assert_initial_done_zero = computed(() => list.doneCount === 0);
-  const assert_initial_remaining_zero = computed(() =>
-    list.remainingCount === 0
-  );
+  const assert_initial_empty = assert(() => list.totalCount === 0);
+  const assert_initial_total_zero = assert(() => list.totalCount === 0);
+  const assert_initial_done_zero = assert(() => list.doneCount === 0);
+  const assert_initial_remaining_zero = assert(() => list.remainingCount === 0);
 
   // After adding one item
-  const assert_one_item = computed(() => list.totalCount === 1);
-  const assert_total_one = computed(() => list.totalCount === 1);
-  const assert_remaining_one = computed(() => list.remainingCount === 1);
-  const assert_first_item_milk = computed(() =>
-    list.items[0]?.title === "Milk"
-  );
+  const assert_one_item = assert(() => list.totalCount === 1);
+  const assert_total_one = assert(() => list.totalCount === 1);
+  const assert_remaining_one = assert(() => list.remainingCount === 1);
+  const assert_first_item_milk = assert(() => list.items[0]?.title === "Milk");
 
   // After adding three items
-  const assert_three_items = computed(() => list.totalCount === 3);
-  const assert_total_three = computed(() => list.totalCount === 3);
-  const assert_remaining_three = computed(() => list.remainingCount === 3);
-  const assert_done_still_zero = computed(() => list.doneCount === 0);
+  const assert_three_items = assert(() => list.totalCount === 3);
+  const assert_total_three = assert(() => list.totalCount === 3);
+  const assert_remaining_three = assert(() => list.remainingCount === 3);
+  const assert_done_still_zero = assert(() => list.doneCount === 0);
 
   // After marking first done
-  const assert_done_one = computed(() => list.doneCount === 1);
-  const assert_remaining_two = computed(() => list.remainingCount === 2);
-  const assert_first_is_done = computed(() => list.items[0]?.done === true);
+  const assert_done_one = assert(() => list.doneCount === 1);
+  const assert_remaining_two = assert(() => list.remainingCount === 2);
+  const assert_first_is_done = assert(() => list.items[0]?.done === true);
 
   // After removing first item
-  const assert_two_items = computed(() => list.totalCount === 2);
-  const assert_total_two = computed(() => list.totalCount === 2);
-  const assert_done_zero_after_remove = computed(() => list.doneCount === 0);
-  const assert_first_now_bread = computed(() =>
-    list.items[0]?.title === "Bread"
-  );
+  const assert_two_items = assert(() => list.totalCount === 2);
+  const assert_total_two = assert(() => list.totalCount === 2);
+  const assert_done_zero_after_remove = assert(() => list.doneCount === 0);
+  const assert_first_now_bread = assert(() => list.items[0]?.title === "Bread");
 
   // Store layout
-  const assert_no_layout_initially = computed(() =>
+  const assert_no_layout_initially = assert(() =>
     String(list.storeLayout).trim().length === 0
   );
-  const assert_has_layout = computed(() =>
+  const assert_has_layout = assert(() =>
     String(list.storeLayout).trim().length > 0
   );
-  const assert_layout_cleared = computed(() =>
+  const assert_layout_cleared = assert(() =>
     String(list.storeLayout).trim().length === 0
   );
 
   // === Held-reference survival assertions (CT-1715) ===
-  const assert_held_stashed = computed(() => {
+  const assert_held_stashed = assert(() => {
     const h = heldItem.get();
     return h.title === "Bread" && equals(itemsCell.get()[0], h);
   });
-  const assert_override_set = computed(() =>
+  const assert_override_set = assert(() =>
     itemsCell.get()[0]?.aisleOverride === "Aisle 2"
   );
-  const assert_correction_closed = computed(() =>
+  const assert_correction_closed = assert(() =>
     correctionIndexCell.get() === -1
   );
   // KEY: the stale-but-once-valid reference still equals()-matches the item
   // AFTER selectAisle updated it.
-  const assert_held_survives_correction = computed(() => {
+  const assert_held_survives_correction = assert(() => {
     const h = heldItem.get();
     return equals(itemsCell.get()[0], h);
   });
   // The held reference also READS the update (it would show the stale,
   // orphaned entity if selectAisle had re-minted identity).
-  const assert_held_reads_correction = computed(() =>
+  const assert_held_reads_correction = assert(() =>
     heldItem.get().aisleOverride === "Aisle 2"
   );
   // KEY: the held reference still DRIVES an equals()-located removal.
-  const assert_removed_via_held = computed(() =>
+  const assert_removed_via_held = assert(() =>
     list.totalCount === 1 && list.items[0]?.title === "Eggs"
   );
 

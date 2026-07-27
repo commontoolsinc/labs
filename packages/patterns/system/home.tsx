@@ -1,5 +1,6 @@
 import {
   computed,
+  Default,
   equals,
   handler,
   NAME,
@@ -18,7 +19,7 @@ import {
   type TrustedProfileMru,
 } from "./profile-create.tsx";
 import ProfilePicker from "./profile-picker.tsx";
-import type { ProfileHomeOutput } from "./profile-home.tsx";
+import type { BackwardsCompatibleProfile } from "./profile-home.tsx";
 
 // Types from favorites-manager.tsx
 type Favorite = {
@@ -50,13 +51,33 @@ type SpaceEntry = {
 export type HomeOutput = {
   [NAME]: string;
   [UI]: unknown;
-  favorites: Writable<Favorite[]>;
-  journal: Writable<JournalEntry[]>;
-  spaces: Writable<SpaceEntry[]>;
-  defaultAppUrl: Writable<string>;
-  profiles: TrustedProfileList;
-  defaultProfile: TrustedDefaultProfile;
-  mru: TrustedProfileMru;
+  // Post-genesis data fields carry a `Default<>` so the runtime can materialize
+  // this pattern over a home root doc that predates the field. Without it, CFC
+  // schema-merge refuses the setup commit ("required field <name> needs a
+  // default to preserve old documents"), which — via the cold-start setup
+  // repair — leaves an unloadable home bricked. Continues #4901's seefeldb-
+  // approved "post-genesis DATA fields ride Default<>" line (bio/isEditing did);
+  // favorites-manager already uses the same idiom for its own favorites list.
+  favorites: Writable<Favorite[] | Default<[]>>;
+  journal: Writable<JournalEntry[] | Default<[]>>;
+  spaces: Writable<SpaceEntry[] | Default<[]>>;
+  defaultAppUrl: Writable<string | Default<"">>;
+  // The profile list/mru are CFC-wrapped (WriteAuthorizedBy), so their default
+  // goes OUTSIDE the wrapper — `Default<Cfc<…>, []>`, exactly as profile-home
+  // spells externalLinks/verifiedIdentities. An absent list on an old home root
+  // (created before #3830 added profiles) defaults to empty — a valid
+  // pre-first-profile state with no elements, hence no WriteAuthorizedBy claims
+  // to verify. The contract still governs every real element once one is
+  // appended via the trusted create surface, so this adds no authorization
+  // surface; it only lets an old doc merge. defaultProfile needs no default:
+  // the `?` marker is what drops it from the generated schema's `required`
+  // list, so the additive-required guard never applies. (Requiredness is
+  // decided by the `?` marker, NOT by the value type — a bare
+  // `defaultProfile: T | undefined` would still be required-with-no-default and
+  // would trip the guard; the marker is doing the work here.)
+  profiles: Default<TrustedProfileList, []>;
+  defaultProfile?: TrustedDefaultProfile;
+  mru: Default<TrustedProfileMru, []>;
   createProfile: Stream<CreateProfileEvent>;
   addFavorite: Stream<{
     piece: Writable<{ [NAME]?: string }>;
@@ -177,10 +198,14 @@ export default pattern<Record<string, never>, HomeOutput>((_) => {
   // space. `profiles` is the durable list (appended on create). `defaultProfile`
   // is the one `#profile` resolves to in headless mode and orders first in the
   // picker; `mru` is the recency-ordered list driving the rest of the ordering.
-  const profiles = new Writable<ProfileHomeOutput[]>([]).for("profiles");
-  const defaultProfile = new Writable<ProfileHomeOutput | undefined>(undefined)
+  const profiles = new Writable<BackwardsCompatibleProfile[]>([]).for(
+    "profiles",
+  );
+  const defaultProfile = new Writable<BackwardsCompatibleProfile | undefined>(
+    undefined,
+  )
     .for("defaultProfile");
-  const mru = new Writable<ProfileHomeOutput[]>([]).for("mru");
+  const mru = new Writable<BackwardsCompatibleProfile[]>([]).for("mru");
   // Untrusted-write regression surface: this stream is exported so tests can
   // verify that sending it from outside the trusted create surface does NOT
   // create a profile. The actual create UI lives in the profile picker below.

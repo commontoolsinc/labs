@@ -9,6 +9,7 @@ import {
   detectCallKind,
   getLiftAppliedInputAndCallback,
   getTypeFromTypeNodeWithFallback,
+  preserveLineage,
   qualifyCommonFabricTypeRefs,
   setParentPointers,
   typeToTypeNodeWithRegistry,
@@ -738,10 +739,13 @@ export function transformLiftAppliedCall(
       : (resultTypeNode ? [inputTypeNode, resultTypeNode] : [inputTypeNode]),
     [newCallback, ...(schedulerOptions ? [schedulerOptions] : [])],
   );
-  const rebuiltCall = factory.createCallExpression(
-    innerLiftCall,
-    undefined,
-    [mergedInput],
+  const rebuiltCall = preserveLineage(
+    factory.createCallExpression(
+      innerLiftCall,
+      undefined,
+      [mergedInput],
+    ),
+    inputCall,
   );
 
   // Register the type of the call expression itself

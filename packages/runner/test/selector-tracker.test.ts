@@ -33,8 +33,7 @@ describe("SelectorTracker", () => {
 
   afterEach(async () => {
     await storageManager?.close();
-    // _processCurrentBatch leaves sleep behind that makes deno error
-    await new Promise((wake) => setTimeout(wake, 1));
+    await runtime.idle();
   });
 
   const vnodeSchema = {

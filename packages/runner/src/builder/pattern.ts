@@ -1,5 +1,12 @@
 import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import {
+  ARRAY_SUBSCHEMA_KEYS,
+  RECORD_SUBSCHEMA_KEYS,
+  SINGLE_SUBSCHEMA_KEYS,
+  UNUSED_RECORD_SUBSCHEMA_KEYS,
+  UNUSED_SINGLE_SUBSCHEMA_KEYS,
+} from "../schema-walk.ts";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
@@ -38,7 +45,7 @@ import {
   type CellAliasResolver,
   moduleToJSON,
   patternToJSON,
-  toJSONWithLegacyAliases,
+  toJSONWithAliasBindings,
 } from "./json-utils.ts";
 import { traverseValue } from "./traverse-utils.ts";
 import {
@@ -50,7 +57,7 @@ import {
   KeepAsCell,
   sanitizeSchemaForLinks,
 } from "../link-utils.ts";
-import { type LegacyAlias } from "../sigil-types.ts";
+import { type AliasBinding } from "../sigil-types.ts";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,
@@ -400,25 +407,30 @@ function factoryFromPattern<T, R>(
 
   const cellReferenceForCell = (
     cell: ICell<unknown> | OpaqueCell<any> | Reactive<any>,
-  ): LegacyAlias["$alias"] | undefined => {
+  ): AliasBinding["$alias"] | undefined => {
     const { cell: top, path, external, scope, schema } = cell.export();
     // If we have an external id, don't bother with all this
     if (external) return undefined;
 
     const commonAliasProps = {
       path,
-      ...(scope !== undefined && { scope }),
       ...(schema !== undefined && { schema }),
     };
     // See if we're one of the special cells (result or argument)
     const cellName = cellNameForCell(cell);
     if (cellName !== undefined) {
+      // No scope on named-cell aliases: the argument/result cell's own link
+      // provides it at unwrap time.
       return { cell: cellName, ...commonAliasProps };
     }
     // Otherwise, we should be an internal call, and should have partialCause
     const partialCause = assignedInternalPartialCauses.get(top);
     if (partialCause !== undefined) {
-      return { partialCause, ...commonAliasProps };
+      return {
+        partialCause,
+        ...(scope !== undefined && { scope }),
+        ...commonAliasProps,
+      };
     }
   };
 
@@ -513,7 +525,7 @@ function factoryFromPattern<T, R>(
     }
   };
   // Creates a query (i.e. aliases) into the cells for the result
-  const result = toJSONWithLegacyAliases(
+  const result = toJSONWithAliasBindings(
     outputs ?? {},
     resolveCellAlias,
     true,
@@ -536,17 +548,17 @@ function factoryFromPattern<T, R>(
     applyArgumentIfcToResult(argumentSchema, resultSchemaArg) ?? {};
 
   const serializedNodes = Array.from(allNodes).map((node) => {
-    const module = toJSONWithLegacyAliases(
+    const module = toJSONWithAliasBindings(
       node.module,
       resolveCellAlias,
       false,
     ) as unknown as Module;
-    const inputs = toJSONWithLegacyAliases(
+    const inputs = toJSONWithAliasBindings(
       node.inputs,
       resolveCellAlias,
       false,
     )!;
-    const outputs = toJSONWithLegacyAliases(
+    const outputs = toJSONWithAliasBindings(
       node.outputs,
       resolveCellAlias,
       false,
@@ -689,29 +701,41 @@ function schemaMayGrantWritableHandles(schema: unknown): boolean {
 }
 
 /**
+ * The subschema-bearing keywords the aligned walk positions against a value:
+ * `properties`/`additionalProperties` for record values, `items`/`prefixItems`
+ * for array values.
+ */
+const MODELED_SCHEMA_KEYWORDS: ReadonlySet<string> = new Set([
+  "properties",
+  "additionalProperties",
+  "items",
+  "prefixItems",
+]);
+
+/**
  * Schema keywords that can route a subschema to a value position through a
  * mechanism the aligned walk does not model. Their presence at a position
  * makes the walk fall back to treating the whole value subtree as writably
- * bound (when a grant may exist below). The walk models only `properties`,
- * `additionalProperties`, and `items`; `$defs`/`definitions` are harmless
- * without a `$ref` (which is listed).
+ * bound (when a grant may exist below).
+ *
+ * Derived from schema-walk's canonical keyword vocabulary (both tiers) so a
+ * keyword added there cannot silently bypass this fail-safe: an omission here
+ * fails OPEN — a grant routed through the missing keyword would be walked
+ * past, and tagging its cell computed silently drops user writes. The ref
+ * keywords are added by hand (they are resolution, not subschema edges, in
+ * schema-walk); `$defs`/`definitions` stay out — dormant without a `$ref`,
+ * which is listed.
  */
 const UNMODELED_SCHEMA_KEYWORDS: readonly string[] = [
   "$ref",
   "$dynamicRef",
-  "allOf",
-  "anyOf",
-  "oneOf",
-  "not",
-  "if",
-  "then",
-  "else",
-  "dependentSchemas",
-  "prefixItems",
-  "contains",
-  "patternProperties",
-  "propertyNames",
-  "contentSchema",
+  ...[
+    ...SINGLE_SUBSCHEMA_KEYS,
+    ...ARRAY_SUBSCHEMA_KEYS,
+    ...RECORD_SUBSCHEMA_KEYS,
+    ...UNUSED_SINGLE_SUBSCHEMA_KEYS,
+    ...UNUSED_RECORD_SUBSCHEMA_KEYS,
+  ].filter((keyword) => !MODELED_SCHEMA_KEYWORDS.has(keyword)),
 ];
 
 /**
@@ -855,12 +879,30 @@ function assignComputedCellKinds(
     else seen.set(target, new Set([schema]));
     if (Array.isArray(target)) {
       const items = schema.items;
-      if (items === undefined) {
+      if ("prefixItems" in schema && !Array.isArray(schema.prefixItems)) {
+        // Malformed prefixItems (not a schema array): a grant could hide in a
+        // shape the slot alignment below would walk past — fail safe.
+        collectAll();
+        return;
+      }
+      const prefixItems = Array.isArray(schema.prefixItems)
+        ? schema.prefixItems
+        : undefined;
+      if (items === undefined && prefixItems === undefined) {
         collectAll(); // Array value under an object-shaped schema: misaligned.
         return;
       }
-      for (const element of target) {
-        collectWritablyBoundRoots(element, items, out, seen);
+      for (let index = 0; index < target.length; index++) {
+        const slotSchema =
+          prefixItems !== undefined && index < prefixItems.length
+            ? prefixItems[index]
+            : items;
+        // An element past the tuple slots with no `items` schema has no
+        // covering subschema — like an undeclared property, no `asCell`
+        // position exists for it, so the handler receives at most a plain,
+        // unwritable value.
+        if (slotSchema === undefined) continue;
+        collectWritablyBoundRoots(target[index], slotSchema, out, seen);
       }
       return;
     }

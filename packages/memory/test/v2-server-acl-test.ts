@@ -4,10 +4,12 @@ import { Database } from "@db/sqlite";
 import { Server } from "../v2/server.ts";
 import {
   encodeMemoryBoundary,
+  encodeMemoryBoundaryUnprovenFabricValue,
   getMemoryProtocolFlags,
   type GraphQueryResult,
   type HelloOkMessage,
   MEMORY_PROTOCOL,
+  type Operation,
   type ResponseMessage,
   type ServerMessage,
   type SessionDescriptor,
@@ -111,7 +113,7 @@ const transactOperation = async (
   operation: Record<string, unknown>,
   localSeq: number,
 ): Promise<ResponseMessage<{ seq: number }>> => {
-  await connection.receive(encodeMemoryBoundary({
+  await connection.receive(encodeMemoryBoundaryUnprovenFabricValue({
     type: "transact",
     requestId: nextRequestId("tx"),
     space,
@@ -119,7 +121,9 @@ const transactOperation = async (
     commit: {
       localSeq,
       reads: { confirmed: [], pending: [] },
-      operations: [operation],
+      // Deliberately malformed: this suite feeds the server operations it
+      // must reject, so the payload is not an `Operation`.
+      operations: [operation as unknown as Operation],
     },
   }));
   return assertResponse<{ seq: number }>(shiftMessage(messages));

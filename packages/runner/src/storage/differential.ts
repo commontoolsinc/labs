@@ -1,9 +1,11 @@
 import { unclaimed } from "@commonfabric/memory/fact";
+import type { FabricPlainObject } from "@commonfabric/api";
+import { isFabricObjectOrArray } from "@commonfabric/data-model/fabric-value";
+import type { FabricValue } from "@commonfabric/api";
 import {
   FabricSpecialObject,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { isRecord } from "@commonfabric/utils/types";
 import type {
   IMemoryAddress,
   IMemoryChange,
@@ -59,8 +61,8 @@ const pushChangedPath = (
 };
 
 const collectChangedPaths = (
-  before: unknown,
-  after: unknown,
+  before: FabricValue,
+  after: FabricValue,
   currentPath: string[],
   depth: number,
   paths: string[][],
@@ -74,7 +76,7 @@ const collectChangedPaths = (
     return;
   }
 
-  if (isRecord(before) && isRecord(after)) {
+  if (isFabricObjectOrArray(before) && isFabricObjectOrArray(after)) {
     if (valueEqual(before, after)) {
       return;
     }
@@ -142,8 +144,12 @@ const collectChangedPaths = (
       return;
     }
 
-    const beforeKeys = Object.keys(before);
-    const afterKeys = Object.keys(after);
+    // Both are plain objects here: `FabricSpecialObject`s and arrays returned
+    // above. Narrowing does not carry those exclusions forward, so name it.
+    const beforeObject = before as FabricPlainObject;
+    const afterObject = after as FabricPlainObject;
+    const beforeKeys = Object.keys(beforeObject);
+    const afterKeys = Object.keys(afterObject);
 
     if (beforeKeys.length === afterKeys.length) {
       let sameKeys = true;
@@ -158,8 +164,8 @@ const collectChangedPaths = (
         for (const key of beforeKeys) {
           currentPath[depth] = key;
           collectChangedPaths(
-            before[key],
-            after[key],
+            beforeObject[key],
+            afterObject[key],
             currentPath,
             depth + 1,
             paths,
@@ -177,8 +183,8 @@ const collectChangedPaths = (
       currentPath[depth] = key;
       if (afterHas) {
         collectChangedPaths(
-          before[key],
-          after[key],
+          beforeObject[key],
+          afterObject[key],
           currentPath,
           depth + 1,
           paths,

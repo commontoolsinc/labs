@@ -7,9 +7,7 @@ import { parse as parseJsonc } from "@std/jsonc";
 import { decode, encode } from "@commonfabric/utils/encoding";
 import { parseShard, type Shard } from "./shard-utils.ts";
 
-export const ALL_DISABLED = [
-  "vendor-astral", // no tests yet
-];
+export const ALL_DISABLED: string[] = [];
 
 export function getPackageName(memberPath: string): string {
   const relativePath = memberPath.replace(/^\.\//, "");

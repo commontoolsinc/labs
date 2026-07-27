@@ -3,8 +3,8 @@
 /**
  * Post the coverage-debt suggestion comment produced by the coverage gate.
  *
- * The gate (tasks/perf-check.ts) runs on the `pull_request` event, where fork
- * PRs only get a read-only token and cannot comment. It writes the intended
+ * The gate (tasks/coverage-check.ts) runs on the `pull_request` event, where
+ * fork PRs only get a read-only token and cannot comment. It writes the intended
  * comment to coverage-comment.json and uploads it as an artifact. The
  * `coverage-comment` workflow_run workflow runs this script from the base-repo
  * context with a write token to actually post it.
@@ -31,7 +31,7 @@ import {
   githubPost,
   REPO,
   TOKEN,
-} from "./perf-lib.ts";
+} from "./ci-check-lib.ts";
 
 /**
  * Read the pending comment payload and post or update the PR's coverage

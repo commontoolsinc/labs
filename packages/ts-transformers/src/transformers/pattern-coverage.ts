@@ -26,14 +26,21 @@ export class PatternCoverageTransformer extends Transformer {
         PATTERN_COVERAGE_GLOBAL,
       );
 
+    // `createCallChain`, not `createCallExpression`: the call has to be part of
+    // the optional chain. A plain call wrapping a chained callee prints as
+    // `(globalThis.__cfPatternCoverage?.hit)(...)`, whose parentheses end the
+    // chain — the short-circuit yields `undefined` and the call then throws. As a
+    // chain it prints `globalThis.__cfPatternCoverage?.hit(...)` and a body with
+    // no collector installed skips the probe instead of throwing.
     const makeHitStatement = (spanId: number): ts.Statement => {
       return context.factory.createExpressionStatement(
-        context.factory.createCallExpression(
+        context.factory.createCallChain(
           context.factory.createPropertyAccessChain(
             coverageGlobal(),
             context.factory.createToken(ts.SyntaxKind.QuestionDotToken),
             "hit",
           ),
+          undefined,
           undefined,
           [
             context.factory.createStringLiteral(fileName),

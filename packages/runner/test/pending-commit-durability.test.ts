@@ -109,7 +109,7 @@ function rejectServerTransacts(
   };
 }
 
-const tick = (ms = 15) => new Promise((resolve) => setTimeout(resolve, ms));
+const tick = (_ms = 0) => clock.settle();
 
 describe("pending-commit durability barrier", () => {
   let storageManager: SchedulerTestStorageManager;

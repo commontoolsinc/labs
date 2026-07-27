@@ -1003,8 +1003,8 @@ describe("Cell Static Methods", () => {
       });
     });
 
-    // TODO(danfuzz): the `Cell.of(new Date(...))` cases (top-level and nested)
-    // are intentionally absent: unlike `set()`, the `Cell.of` initial-value path
+    // The `Cell.of(new Date(...))` cases (top-level and nested) are absent.
+    // Unlike `set()`, the `Cell.of` initial-value path
     // doesn't normalize native values (see the TODO in `createWithDefault` in
     // `cell.ts`), so the raw `Date` reaches encode and throws under the strict
     // codec. `get()` *appears* to convert (read-side projection), but the

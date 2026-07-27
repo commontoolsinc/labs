@@ -17,12 +17,11 @@
  * - SELF-dependent functionality: parentNotebook set correctly on created notes
  *
  * The test harness sets up defaultPattern so wish("#default") resolves,
- * enabling tests for handlers that push to allPieces.
+ * enabling tests for handlers that write to pieceRegistry.
  *
  * Run: deno task cf test packages/patterns/notes/notebook.test.tsx --verbose
  */
-import { action, computed, pattern } from "commonfabric";
-import { NAME } from "commonfabric";
+import { action, assert, NAME, pattern } from "commonfabric";
 import Notebook from "./notebook.tsx";
 import Note from "./note.tsx";
 
@@ -69,6 +68,24 @@ export default pattern(() => {
         title: "Note B",
         content: "Content B",
 
+        isHidden: true,
+      }),
+    ],
+    isHidden: false,
+  });
+
+  const modalNotebook = Notebook({
+    title: "Modal Actions",
+    notes: [],
+    isHidden: false,
+  });
+
+  const promptNotebook = Notebook({
+    title: "Prompt Actions",
+    notes: [
+      Note({
+        title: "Prompt Note",
+        content: "Prompt content",
         isHidden: true,
       }),
     ],
@@ -168,23 +185,47 @@ export default pattern(() => {
     });
   });
 
+  const action_go_to_all_notes = action(() => {
+    modalNotebook.goToAllNotes.send();
+  });
+
+  const action_create_another_note = action(() => {
+    modalNotebook.showNewNoteModal.send();
+    modalNotebook.createAnotherNoteFromPrompt.send();
+  });
+
+  const action_create_note_from_modal = action(() => {
+    modalNotebook.createNoteFromPrompt.send();
+  });
+
+  const action_create_another_nested_notebook = action(() => {
+    modalNotebook.showNewNotebookModal.send();
+    modalNotebook.createAnotherNestedNotebookFromPrompt.send();
+  });
+
+  const action_create_nested_notebook_from_modal = action(() => {
+    modalNotebook.createNestedNotebookFromPrompt.send();
+  });
+
+  const action_create_notebook_from_prompt = action(() => {
+    promptNotebook.createNotebookFromSelectionPrompt.send();
+  });
+
   // ==========================================================================
   // Assertions - Initial State
   // ==========================================================================
 
-  const assert_initial_title = computed(() =>
-    notebook.title === "Test Notebook"
-  );
-  const assert_initial_note_count = computed(() => notebook.noteCount === 2);
-  const assert_is_notebook_flag = computed(() => notebook.isNotebook === true);
-  const assert_initial_not_hidden = computed(() => notebook.isHidden === false);
-  const assert_notes_array_length = computed(() => notebook.notes.length === 2);
+  const assert_initial_title = assert(() => notebook.title === "Test Notebook");
+  const assert_initial_note_count = assert(() => notebook.noteCount === 2);
+  const assert_is_notebook_flag = assert(() => notebook.isNotebook === true);
+  const assert_initial_not_hidden = assert(() => notebook.isHidden === false);
+  const assert_notes_array_length = assert(() => notebook.notes.length === 2);
 
   // Empty notebook assertions
-  const assert_empty_notebook_count = computed(() =>
+  const assert_empty_notebook_count = assert(() =>
     emptyNotebook.noteCount === 0
   );
-  const assert_empty_notebook_notes = computed(() =>
+  const assert_empty_notebook_notes = assert(() =>
     emptyNotebook.notes.length === 0
   );
 
@@ -192,29 +233,27 @@ export default pattern(() => {
   // Assertions - After Rename
   // ==========================================================================
 
-  const assert_title_renamed = computed(() =>
+  const assert_title_renamed = assert(() =>
     notebook.title === "Renamed Notebook"
   );
-  const assert_title_final = computed(() => notebook.title === "Final Name");
+  const assert_title_final = assert(() => notebook.title === "Final Name");
 
   // ==========================================================================
   // Assertions - After Creating Notes via Stream
   // ==========================================================================
 
   // After createNote, should have 3 notes
-  const assert_note_count_after_create = computed(() =>
-    notebook.noteCount === 3
-  );
+  const assert_note_count_after_create = assert(() => notebook.noteCount === 3);
 
   // The third note (index 2) was created via stream - verify it has parentNotebook
-  const assert_created_note_has_parent = computed(() => {
+  const assert_created_note_has_parent = assert(() => {
     const notesList = notebook.notes;
     if (notesList.length < 3) return false;
     const createdNote = notesList[2] as any; // Cast to any to access parentNotebook
     return !!createdNote?.parentNotebook;
   });
 
-  const assert_created_note_parent_title = computed(() => {
+  const assert_created_note_parent_title = assert(() => {
     const notesList = notebook.notes;
     if (notesList.length < 3) return false;
     const createdNote = notesList[2] as any; // Cast to any to access parentNotebook
@@ -222,25 +261,25 @@ export default pattern(() => {
   });
 
   // After createNotes with 2 notes, should have 5 total
-  const assert_note_count_after_bulk = computed(() => notebook.noteCount === 5);
+  const assert_note_count_after_bulk = assert(() => notebook.noteCount === 5);
 
   // ==========================================================================
   // Assertions - Selection System
   // ==========================================================================
 
-  const assert_selection_initial = computed(() =>
+  const assert_selection_initial = assert(() =>
     selectionNotebook.selectedNoteIndices.length === 0 &&
     selectionNotebook.hasSelection === false &&
     selectionNotebook.selectedCount === 0
   );
 
-  const assert_all_selected = computed(() =>
+  const assert_all_selected = assert(() =>
     selectionNotebook.selectedNoteIndices.length === 2 &&
     selectionNotebook.hasSelection === true &&
     selectionNotebook.selectedCount === 2
   );
 
-  const assert_none_selected = computed(() =>
+  const assert_none_selected = assert(() =>
     selectionNotebook.selectedNoteIndices.length === 0 &&
     selectionNotebook.hasSelection === false &&
     selectionNotebook.selectedCount === 0
@@ -250,25 +289,25 @@ export default pattern(() => {
   // Assertions - Modal State Management
   // ==========================================================================
 
-  const assert_initial_modal_state = computed(() =>
+  const assert_initial_modal_state = assert(() =>
     notebook.showNewNotePrompt === false &&
     notebook.showNewNotebookPrompt === false &&
     notebook.showNewNestedNotebookPrompt === false
   );
 
-  const assert_new_note_modal_shown = computed(() =>
+  const assert_new_note_modal_shown = assert(() =>
     notebook.showNewNotePrompt === true
   );
 
-  const assert_new_note_modal_hidden = computed(() =>
+  const assert_new_note_modal_hidden = assert(() =>
     notebook.showNewNotePrompt === false
   );
 
-  const assert_new_notebook_modal_shown = computed(() =>
+  const assert_new_notebook_modal_shown = assert(() =>
     notebook.showNewNestedNotebookPrompt === true
   );
 
-  const assert_new_notebook_modal_hidden = computed(() =>
+  const assert_new_notebook_modal_hidden = assert(() =>
     notebook.showNewNestedNotebookPrompt === false
   );
 
@@ -276,13 +315,13 @@ export default pattern(() => {
   // Assertions - Title Editing
   // ==========================================================================
 
-  const assert_not_editing_title = computed(() =>
+  const assert_not_editing_title = assert(() =>
     notebook.isEditingTitle === false
   );
 
-  const assert_editing_title = computed(() => notebook.isEditingTitle === true);
+  const assert_editing_title = assert(() => notebook.isEditingTitle === true);
 
-  const assert_stopped_editing_title = computed(() =>
+  const assert_stopped_editing_title = assert(() =>
     notebook.isEditingTitle === false
   );
 
@@ -290,7 +329,7 @@ export default pattern(() => {
   // Assertions - Delete Selected
   // ==========================================================================
 
-  const assert_notes_deleted = computed(() =>
+  const assert_notes_deleted = assert(() =>
     selectionNotebook.noteCount === 0 &&
     selectionNotebook.notes.length === 0 &&
     selectionNotebook.selectedNoteIndices.length === 0
@@ -328,19 +367,19 @@ export default pattern(() => {
     dupNotebook.duplicateSelected.send();
   });
 
-  const assert_dup_initial_count = computed(() => dupNotebook.noteCount === 2);
+  const assert_dup_initial_count = assert(() => dupNotebook.noteCount === 2);
 
-  const assert_dup_all_selected = computed(() =>
+  const assert_dup_all_selected = assert(() =>
     dupNotebook.selectedNoteIndices.length === 2
   );
 
-  const assert_duplicated = computed(() =>
+  const assert_duplicated = assert(() =>
     dupNotebook.noteCount === 4 &&
     dupNotebook.selectedNoteIndices.length === 0
   );
 
   // Verify duplicated notes have parent set
-  const assert_dup_notes_have_parent = computed(() => {
+  const assert_dup_notes_have_parent = assert(() => {
     const notesList = dupNotebook.notes;
     if (notesList.length < 4) return false;
     // Notes at index 2 and 3 are the duplicates
@@ -353,7 +392,7 @@ export default pattern(() => {
   // Assertions - NAME Computed Format
   // ==========================================================================
 
-  const assert_name_format = computed(() => {
+  const assert_name_format = assert(() => {
     const name = notebook[NAME];
     return typeof name === "string" &&
       name.includes("📓") &&
@@ -365,10 +404,33 @@ export default pattern(() => {
   // Assertions - Create Nested Notebook
   // ==========================================================================
 
-  // createNotebook pushes to allPieces, not to this notebook's notes array.
+  // createNotebook writes to pieceRegistry, not this notebook's notes array.
   // So the notebook's own noteCount should remain unchanged at 3.
-  const assert_notebook_count_unchanged = computed(() =>
+  const assert_notebook_count_unchanged = assert(() =>
     notebook.noteCount === 3
+  );
+
+  const assert_go_to_all_notes_leaves_notebook_intact = assert(() =>
+    modalNotebook.title === "Modal Actions"
+  );
+  const assert_create_another_note_keeps_modal_open = assert(() =>
+    modalNotebook.noteCount === 1 && modalNotebook.showNewNotePrompt === true
+  );
+  const assert_create_note_closes_modal = assert(() =>
+    modalNotebook.noteCount === 2 && modalNotebook.showNewNotePrompt === false
+  );
+  const assert_create_another_notebook_keeps_modal_open = assert(() =>
+    modalNotebook.noteCount === 3 &&
+    modalNotebook.showNewNestedNotebookPrompt === true
+  );
+  const assert_create_notebook_closes_modal = assert(() =>
+    modalNotebook.noteCount === 4 &&
+    modalNotebook.showNewNestedNotebookPrompt === false
+  );
+  const assert_prompt_creates_notebook = assert(() =>
+    promptNotebook.noteCount === 2 &&
+    promptNotebook.showNewNotebookPrompt === false &&
+    promptNotebook.selectedCount === 0
   );
 
   // ==========================================================================
@@ -442,16 +504,32 @@ export default pattern(() => {
       { action: action_delete_selected },
       { assertion: assert_notes_deleted },
 
-      // === Create nested notebook (pushes to allPieces, not notes) ===
+      // === Create nested notebook (writes to pieceRegistry, not notes) ===
       { action: action_create_notebook_via_stream },
       { assertion: assert_notebook_count_unchanged },
       // === Bulk create notes ===
       { action: action_create_multiple_notes },
       { assertion: assert_note_count_after_bulk },
+
+      // === Registry-backed UI actions ===
+      { action: action_go_to_all_notes },
+      { assertion: assert_go_to_all_notes_leaves_notebook_intact },
+      { action: action_create_another_note },
+      { assertion: assert_create_another_note_keeps_modal_open },
+      { action: action_create_note_from_modal },
+      { assertion: assert_create_note_closes_modal },
+      { action: action_create_another_nested_notebook },
+      { assertion: assert_create_another_notebook_keeps_modal_open },
+      { action: action_create_nested_notebook_from_modal },
+      { assertion: assert_create_notebook_closes_modal },
+      { action: action_create_notebook_from_prompt },
+      { assertion: assert_prompt_creates_notebook },
     ],
     notebook,
     emptyNotebook,
     selectionNotebook,
     dupNotebook,
+    modalNotebook,
+    promptNotebook,
   };
 });

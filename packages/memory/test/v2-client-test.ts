@@ -51,7 +51,7 @@ const sessionOpenFor = (id: string) => ({
 
 const handshakeTransport = (
   helloOk: FabricValue,
-  sessionOpen: unknown = undefined,
+  sessionOpen: FabricValue = undefined,
 ): Transport => {
   let receiver = (_payload: string) => {};
   return {
@@ -124,6 +124,57 @@ Deno.test("memory v2 client rejects malformed async hello session.open metadata"
     Error,
     "challenge",
   );
+});
+
+Deno.test("memory v2 client does not send a request after close begins", async () => {
+  let receiver = (_payload: string) => {};
+  let lateRequestId: string | undefined;
+  let lateRequestCount = 0;
+  const transport: Transport = {
+    send(payload: string): Promise<void> {
+      const message = decodeMemoryBoundary(payload) as {
+        type?: string;
+        requestId?: string;
+      };
+      if (message.type === "hello") {
+        receiver(encodeMemoryBoundary(HELLO_OK));
+      } else {
+        lateRequestCount++;
+        lateRequestId = message.requestId;
+      }
+      return Promise.resolve();
+    },
+    close(): Promise<void> {
+      // Keep the pre-fix failure finite: if a request escaped the client's
+      // pending-request rejection sweep, synthesize its terminal response.
+      if (lateRequestId !== undefined) {
+        receiver(encodeMemoryBoundary({
+          type: "response",
+          requestId: lateRequestId,
+          error: { name: "ConnectionError", message: "transport closed" },
+        }));
+      }
+      return Promise.resolve();
+    },
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver() {},
+  };
+  const client = await connect({ transport });
+
+  const request = client.request({
+    type: "test.request",
+    requestId: "request-after-close",
+  }).then(
+    () => "resolved" as const,
+    () => "rejected" as const,
+  );
+  const close = client.close();
+
+  assertEquals(await request, "rejected");
+  await close;
+  assertEquals(lateRequestCount, 0);
 });
 
 Deno.test("memory v2 client rejects malformed hello session.open metadata", async () => {
@@ -1210,7 +1261,7 @@ class ReconnectableLoopbackTransport implements Transport {
       if (this.connectionCount >= 2) {
         this.#reconnected.resolve();
       }
-      this.#connection = this.server.connect((message: FabricValue) => {
+      this.#connection = this.server.connect((message) => {
         this.#receiver(encodeMemoryBoundary(message));
       });
     }

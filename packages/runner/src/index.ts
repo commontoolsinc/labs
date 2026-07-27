@@ -1,14 +1,13 @@
 export { Runtime } from "./runtime.ts";
 export type {
   ConsoleHandler,
+  ConsoleHandlerOutput,
   ErrorHandler,
   ErrorWithContext as RuntimeErrorWithContext,
   ExperimentalOptions, // Space-model feature flags; see ExperimentalOptions in runtime.ts
   RuntimeFetch,
   RuntimeOptions,
   SpaceCellContents,
-  VersionSkewHandler,
-  VersionSkewInfo,
 } from "./runtime.ts";
 export {
   type BrowserWorkerPresetParams,
@@ -59,7 +58,12 @@ export {
   summarizeTransaction,
   type TransactionSummary,
 } from "./storage/transaction-summary.ts";
-export { convertCellsToLinks, isCell, isStream } from "./cell.ts";
+export {
+  convertCellsToLinks,
+  isCell,
+  isReadableCell,
+  isStream,
+} from "./cell.ts";
 export {
   getCellOrThrow,
   isCellResult,
@@ -68,19 +72,20 @@ export {
 export { effect } from "./reactivity.ts";
 export { type AddCancel, type Cancel, noOp, useCancelGroup } from "./cancel.ts";
 export {
-  buildsMatch,
   computeEntryIdentity,
   Console,
   type ConsoleEvent,
   ConsoleMethod,
   Engine,
-  fetchToolshedGitSha,
   resolveEntryIdentity,
   type RuntimeProgram,
   type TypeScriptHarnessProcessOptions,
 } from "./harness/index.ts";
 export {
+  PATTERN_COVERAGE_INTEGRATION_TEST_NAME,
+  PATTERN_COVERAGE_TEST_NAME,
   PatternCoverageCollector,
+  type PatternCoverageData,
   type PatternCoverageFileReport,
   type PatternCoverageKind,
   patternCoverageOutputPath,
@@ -113,10 +118,15 @@ export {
 } from "./link-utils.ts";
 export * from "./pattern-manager.ts";
 export {
+  type PatternUpdateOutcome,
+  PatternUpdater,
+} from "./pattern-updater.ts";
+export {
   asPatternIdentityRef,
   extractDefaultValues,
   getPatternIdentityRef,
   getPatternRepository,
+  getPatternSetupIdentityRef,
   getPatternSource,
   mergeSchemaDefaults,
   patternIdentityKey,
@@ -231,6 +241,7 @@ export { ACLManager } from "./acl-manager.ts";
 export {
   cellEntityIdString,
   type CellPath,
+  cellWithScopedLinkRequiredsRelaxed,
   compileAndSavePattern,
   parseCellPath,
   resolveCellPath,

@@ -4,14 +4,14 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 import {
   createJsonSchema,
   moduleToJSON,
-  toJSONWithLegacyAliases,
+  toJSONWithAliasBindings,
 } from "../src/builder/json-utils.ts";
 import {
-  type FabricValue,
   type JSONSchema,
   type JSONSchemaObj,
   type UnavailableInputPolicy,
@@ -487,7 +487,9 @@ describe("json-utils", () => {
         },
       );
 
-      const create = (value: FabricValue) =>
+      // `createJsonSchema()` accepts cells as well as fabric data -- which is
+      // exactly what these cases exercise -- so this cannot be `FabricValue`.
+      const create = (value: unknown) =>
         createJsonSchema(value, false, runtime);
 
       // Preflight expectations.
@@ -676,7 +678,7 @@ describe("json-utils", () => {
     });
   });
 
-  describe("toJSONWithLegacyAliases", () => {
+  describe("toJSONWithAliasBindings", () => {
     it("should serialize shared object references correctly", () => {
       // Regression test: shared style objects used across siblings in .map()
       // should all serialize with full data, not {} for the 3rd+ occurrence.
@@ -698,7 +700,7 @@ describe("json-utils", () => {
         ],
       };
 
-      const result = toJSONWithLegacyAliases(tree as any) as any;
+      const result = toJSONWithAliasBindings(tree as any) as any;
 
       // All 5 children should have the full style object
       for (let i = 0; i < 5; i++) {
@@ -714,7 +716,7 @@ describe("json-utils", () => {
       const circular: any = { name: "root", child: {} };
       circular.child.parent = circular; // true circular reference
 
-      const result = toJSONWithLegacyAliases(circular as any) as any;
+      const result = toJSONWithAliasBindings(circular as any) as any;
 
       // The root should serialize, but the circular back-reference should be {}
       expect(result.name).toEqual("root");
@@ -731,7 +733,7 @@ describe("json-utils", () => {
         ],
       };
 
-      const result = toJSONWithLegacyAliases(tree as any) as any;
+      const result = toJSONWithAliasBindings(tree as any) as any;
 
       expect(result.items[0].meta).toEqual({ author: "test", version: 1 });
       expect(result.items[1].meta).toEqual({ author: "test", version: 1 });
@@ -748,12 +750,13 @@ describe("json-utils", () => {
         path: [],
       });
 
-      const result = toJSONWithLegacyAliases(
+      const result = toJSONWithAliasBindings(
         cellWithFalseSchema as any,
         (cell) => {
           const { schema, scope } = cell.export();
           return {
             "$alias": {
+              partialCause: "placeholder", // we have no way to represent an alias binding to this fake cell
               path: ["path", "to", "cell"],
               ...(schema !== undefined && { schema }),
               ...(scope !== undefined && { scope }),
@@ -764,6 +767,7 @@ describe("json-utils", () => {
 
       expect(result).toEqual({
         "$alias": {
+          partialCause: "placeholder",
           path: [
             "path",
             "to",
@@ -773,6 +777,18 @@ describe("json-utils", () => {
           scope: "space",
         },
       });
+    });
+
+    it("passes a nested FabricPrimitive through as an atomic value", () => {
+      // A `FabricBytes` (a `FabricPrimitive`) keeps its state in private fields
+      // and exposes zero enumerable own-props, so the `for...in` copy branch
+      // flattens it to `{}`, silently dropping its bytes. It is atomic and must
+      // pass through unchanged.
+      const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+
+      const result = toJSONWithAliasBindings({ payload: bytes } as any) as any;
+
+      expect(result.payload).toBe(bytes);
     });
   });
 });

@@ -8,6 +8,7 @@ import {
   LLMToolCall,
   LLMToolResult,
 } from "./types.ts";
+import { assertJsonTransportSafe } from "./schema-transport.ts";
 
 type PartialCallback = (text: string) => void;
 
@@ -452,6 +453,14 @@ export class LLMClient {
       endpoint?: string | URL;
     },
   ): Promise<LLMGenerateObjectResponse> {
+    // The request crosses to the provider as ordinary JSON. Refuse a schema
+    // holding a value that would not survive that intact, before anything is
+    // sent -- this is the last point where the schema is still the faithful
+    // in-memory object rather than its JSON rendering. Checked ahead of the
+    // mock and test-environment paths too: such a request is malformed for its
+    // purpose regardless of where it would have gone.
+    assertJsonTransportSafe(request.schema, "The generateObject schema");
+
     // Check for mock mode
     if (mockCatalog.isEnabled()) {
       const mockResponse = mockCatalog.findObjectResponse(request);
@@ -523,6 +532,16 @@ export class LLMClient {
     if (!request.stream && callback) {
       throw new Error(
         "Requested an LLM request with callback, but not configured as a stream.",
+      );
+    }
+
+    // Each tool's input schema rides the same JSON-serialized request to the
+    // provider, so it faces the same transport hazard as a `generateObject`
+    // schema. Refuse one that would not survive intact, naming the tool.
+    for (const [name, tool] of Object.entries(request.tools ?? {})) {
+      assertJsonTransportSafe(
+        tool.inputSchema,
+        `The input schema for tool "${name}"`,
       );
     }
 

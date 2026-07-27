@@ -1,5 +1,6 @@
 // discord online: a one-shot Discord gateway snapshot of currently-online guild
-// members, split into the "Team Member" role and everyone else ("Visitors").
+// members, split into the "Team" and "Team Member" roles and everyone else
+// ("Visitors").
 // Each poll opens a fresh gateway connection, identifies, waits for the initial
 // GUILD_CREATE, tallies presences against members, then tears the socket and
 // heartbeat down. Successive polls accumulate a rolling history (persisted to
@@ -10,6 +11,7 @@
 // closes with 4014.
 import type { Status, Tile, TileView } from "../types.ts";
 import { escapeHtml, multiSparkline, thin } from "../lib.ts";
+import { dashboardCacheFile } from "../history-files.ts";
 
 const GATEWAY = "wss://gateway.discord.gg/?v=10&encoding=json";
 const SNAPSHOT_TIMEOUT_MS = 12_000;
@@ -17,9 +19,10 @@ const SNAPSHOT_TIMEOUT_MS = 12_000;
 // Intents: GUILDS (1) | GUILD_MEMBERS (2) | GUILD_PRESENCES (256).
 const INTENTS = 259;
 
-// Online members carrying this role are counted as team; everyone else online is
-// a visitor. Matched against the Discord role name exactly.
-const TEAM_ROLE_NAME = "Team Member";
+// Online members carrying either exact role name are counted as team. "Team
+// Member" is the former name of the "Team" role.
+const TEAM_ROLE_NAME = "Team";
+const TEAM_ROLE_NAMES = new Set([TEAM_ROLE_NAME, "Team Member"]);
 const VISITOR_COLOR = "#7c828c";
 // The chart lines fade from this (a shade darker than the good-status tile
 // background) on the far left up to their own color, matching the ci-duration
@@ -27,15 +30,14 @@ const VISITOR_COLOR = "#7c828c";
 const LINE_FADE = "#0e1915";
 
 // A rolling series of timestamped samples, charted as two lines. Samples are
-// retained for up to HISTORY_MAX_AGE_DAYS (~2 months) and persisted to disk
-// (DISCORD_HISTORY_FILE, else a file in the temp dir), reloaded on start so a
-// relaunch keeps the chart.
+// retained for up to HISTORY_MAX_AGE_DAYS (~2 months) and persisted to disk in
+// the dashboard cache directory, reloaded on start so a relaunch keeps the
+// chart.
 const HISTORY_MAX_AGE_DAYS = 60; // ~2 months
 // Cap the plotted points so a long window still renders as a small SVG; the full
 // history feeds the timestamps and span, this only thins the polyline.
 const PLOT_POINTS = 500;
-const HISTORY_FILE = Deno.env.get("DISCORD_HISTORY_FILE") ??
-  `${Deno.env.get("TMPDIR") ?? "/tmp"}/fabric-wall-discord-history.json`;
+const HISTORY_FILE = dashboardCacheFile("fabric-wall-discord-history.json");
 type Point = { t: number; team: number; visitors: number };
 const history: Point[] = [];
 
@@ -112,25 +114,28 @@ function roleColor(color: number): string {
   return "#" + (color & 0xffffff).toString(16).padStart(6, "0");
 }
 
-// Count online users carrying the "Team Member" role as team; everyone else
-// online is a visitor. Also returns the team role's own color. Exported for
-// unit testing.
-export function buildSnapshot(g: GuildCreate): Snapshot {
+// Count online users carrying either team role name as team; everyone else
+// online is a visitor. A guild without either role has no valid snapshot. Also
+// returns the current role's color. Exported for unit testing.
+export function buildSnapshot(g: GuildCreate): Snapshot | null {
   const byId = new Map<string, Member>();
   for (const m of g.members) byId.set(m.user.id, m);
-  const teamRole = g.roles.find((r) => r.name === TEAM_ROLE_NAME);
+  const teamRoles = g.roles.filter((r) => TEAM_ROLE_NAMES.has(r.name));
+  if (teamRoles.length === 0) return null;
+  const teamRoleIds = new Set(teamRoles.map((r) => r.id));
+  const colorRole = teamRoles.find((r) => r.name === TEAM_ROLE_NAME) ?? teamRoles[0];
 
   const online = g.presences.filter((p) => p.status !== "offline");
   let team = 0;
   for (const p of online) {
     const member = byId.get(p.user.id);
-    if (teamRole && member && member.roles.includes(teamRole.id)) team++;
+    if (member && member.roles.some((roleId) => teamRoleIds.has(roleId))) team++;
   }
   return {
     online: online.length,
     team,
     visitors: online.length - team,
-    teamColor: teamRole ? roleColor(teamRole.color) : VISITOR_COLOR,
+    teamColor: roleColor(colorRole.color),
   };
 }
 
@@ -242,7 +247,8 @@ export const discordOnline: Tile = {
         label,
         status: "unknown",
         value: "—",
-        sub: "enable the presences + members intents on the bot",
+        sub:
+          "enable the presences + members intents; add a Team or Team Member role",
       };
     }
 

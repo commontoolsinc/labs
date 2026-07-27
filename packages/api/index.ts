@@ -27,9 +27,15 @@ import type { Cfc, CurrentPrincipal, WriteAuthorizedBy } from "./cfc.ts";
 /**
  * Common base class for `FabricInstance` and `FabricPrimitive`. Enables a
  * single `instanceof` check for any fabric-system value type.
+ *
+ * The `@commonfabric/FabricSpecialObject` member is a nominal brand with no
+ * runtime existence — see the canonical declaration in
+ * `data-model/src/interface.ts` for why it is a well-known string key and not
+ * a `unique symbol`. The two declarations must agree exactly.
  */
-// deno-lint-ignore no-empty-interface
-export interface FabricSpecialObject {}
+export interface FabricSpecialObject {
+  readonly "@commonfabric/FabricSpecialObject": true;
+}
 
 export interface FabricSpecialObjectConstructor {
   prototype: FabricSpecialObject;
@@ -262,6 +268,7 @@ export type FabricValue =
   | number
   | string
   | bigint
+  | symbol
   | FabricSpecialObject
   | FabricArray
   | FabricPlainObject
@@ -457,6 +464,8 @@ export type MetaLinkField =
  * The `argument` field links a result cell to its argument cell
  * The `internal` field contains a manifest with links to derived internal cells.
  * The `schema` field stores the schema for a result cell
+ * The `patternSetupIdentity` field records the pattern identity whose complete
+ * setup state was installed on a result cell.
  * The `result` field lets a result cell link to its parent result cell,
  * and also lets the argument and derived internal cells link back to the result cell.
  *
@@ -469,9 +478,13 @@ export type MetaLinkField =
 export type MetaField =
   | MetaLinkField
   | "patternIdentity" // content-addressed {identity, symbol} pattern reference
+  | "patternSetupIdentity" // setup-completion {identity, symbol} marker
   | "patternSource" // provenance: the source a piece tracks for updates (a
   // toolshed pattern path, or later a `cf:` fabric ref)
   | "patternRepository" // optional caller-supplied repository locator
+  | "displacedPattern" // {identity, symbol, displacedAt}: the prior pattern
+  // reference recorded when system-pattern auto-update replaces an unloadable
+  // sourceless root — the recovery pointer for a displaced custom program
   | "internal"
   | "schema"
   | "slug";
@@ -1784,6 +1797,7 @@ export type JSONSchemaObj = {
           readonly bundleId?: string;
           readonly file?: string;
           readonly path?: readonly string[];
+          readonly moduleIdentity?: string;
         };
       };
     readonly exactCopyOf?: readonly string[];
@@ -1895,7 +1909,15 @@ export type BuiltInLLMTextPart = {
 
 export type BuiltInLLMImagePart = {
   type: "image";
-  image: string | Uint8Array | ArrayBuffer | URL;
+  /**
+   * The image, as a string -- a URL or a data URI. Deliberately not
+   * `Uint8Array` / `ArrayBuffer` / `URL`: an LLM request is snapshotted through
+   * `createFrozenRequestSnapshot()`, which requires a `FabricValue`, and none of
+   * those three can be stored by the data model. The builtin's own input schema
+   * (`llm-schemas.ts`) already declares this field `{ type: "string" }`, so
+   * those arms were unreachable through the validated path as well.
+   */
+  image: string;
 };
 
 export type BuiltInLLMToolCallPart = {
@@ -2392,12 +2414,24 @@ export type ActionFunction = {
 export type ComputedFunction = <T>(fn: () => T) => Reactive<T>;
 
 /**
- * One operand recorded while an `assert` body ran: the operand's authored
- * source text, and its value rendered with `toCompactDebugString`.
+ * One operand of a failed `assert` body: the operand's authored source text,
+ * and its value rendered with `toCompactDebugString`. Only a failing assertion
+ * carries these; a passing one records nothing to render.
  */
 export type AssertPart = {
   src: string;
   rendered: string;
+};
+
+/**
+ * One operand captured while an `assert` body runs, holding the resolved value
+ * itself rather than a rendering of it. The value is rendered into an
+ * `AssertPart` only if the assertion fails, so a passing assertion never pays
+ * for rendering an operand it will not report.
+ */
+export type AssertRawPart = {
+  src: string;
+  value: unknown;
 };
 
 /**
@@ -2432,15 +2466,29 @@ export type AssertFunction = (fn: () => boolean) => Reactive<AssertRecord>;
 
 /**
  * Records one operand of an `assert` body and returns it unchanged, so that
- * wrapping an operand does not change evaluation order or semantics. The
- * assert-diagnostics transformer emits the calls; authored code does not call
- * it directly.
+ * wrapping an operand does not change evaluation order or semantics. It stores
+ * the resolved value; rendering is deferred to `assertRenderParts`, which runs
+ * only when the assertion fails. The assert-diagnostics transformer emits the
+ * calls; authored code does not call it directly.
  */
 export type AssertCaptureFunction = <T>(
-  parts: AssertPart[],
+  parts: AssertRawPart[],
   src: string,
   value: T,
 ) => T;
+
+/**
+ * Renders the operands captured while an `assert` body ran into the record's
+ * `parts`, but only when the assertion failed: for a passing assertion
+ * (`ok === true`) it returns an empty list without rendering anything, so the
+ * common case pays nothing for diagnostics it will not show. The
+ * assert-diagnostics transformer emits the call around the record's `parts`;
+ * authored code does not call it directly.
+ */
+export type AssertRenderPartsFunction = (
+  ok: boolean,
+  parts: AssertRawPart[],
+) => AssertPart[];
 
 export type StrFunction = (
   strings: TemplateStringsArray,
@@ -3193,6 +3241,14 @@ export type EqualsFunction = (
 ) => boolean;
 
 /**
+ * Deep structural equality for two values, intended for `FabricValue`-shaped
+ * data. Compares primitives with `Object.is` (so `NaN` equals `NaN` and `-0`
+ * is distinct from `0`). Unlike `equals`, it compares values directly and does
+ * not resolve cells or links.
+ */
+export type ValueEqualFunction = (a: unknown, b: unknown) => boolean;
+
+/**
  * Multi-user pattern test descriptor (`cf test`). Export it as the test
  * file's default export to run each participant pattern in its own isolated
  * runtime (own identity) against one shared space. The optional `setup`
@@ -3262,6 +3318,7 @@ export declare const createNodeFactory: CreateNodeFactoryFunction;
 /** @deprecated Use Cell.of(defaultValue?) instead */
 export declare const cell: CellTypeConstructor<AsCell>["of"];
 export declare const equals: EqualsFunction;
+export declare const valueEqual: ValueEqualFunction;
 export declare const byRef: ByRefFunction;
 export function getPatternEnvironment(): PatternEnvironment {
   const location = globalThis.location;

@@ -3,6 +3,7 @@ import { assertEquals, assertThrows } from "@std/assert";
 import {
   cliMain,
   runCli,
+  stillDeclared,
   stripWithheldGlobals,
 } from "./strip-withheld-globals.ts";
 
@@ -147,6 +148,14 @@ Deno.test("throws when a declaration never closes", () => {
   );
 });
 
+Deno.test("throws when a declaration closes more braces than it opens", () => {
+  assertThrows(
+    () => stripWithheldGlobals("declare var Withheld: };\n", names),
+    Error,
+    "Unbalanced declaration",
+  );
+});
+
 // The checked-in type libraries are kept stripped, so the CLI run over them is
 // the up-to-date path: --check reports clean and returns 0, and a plain run
 // finds nothing to remove and rewrites nothing.
@@ -187,7 +196,8 @@ Deno.test("runCli --check fails when a library still declares a withheld global"
 Deno.test("runCli fails when a withheld global is declared in an unstrippable form", async () => {
   const status = await runCli(["--check"], {
     files: ["injected.d.ts"],
-    readFile: () => Promise.resolve("declare namespace Float32Array {\n}\n"),
+    readFile: () =>
+      Promise.resolve("declare const Float32Array: Float32ArrayConstructor;\n"),
   });
   assertEquals(status, 1);
 });
@@ -206,4 +216,261 @@ Deno.test("runCli without --check writes the stripped text back", async () => {
   assertEquals(status, 0);
   assertEquals(writes.length, 1);
   assertEquals(writes[0][1], "");
+});
+
+Deno.test("strips a namespace's value members and keeps its types", () => {
+  const { text, removed } = stripWithheldGlobals(
+    [
+      "declare namespace Withheld {",
+      "    var Collator: CollatorConstructor;",
+      "    function getCanonicalLocales(locale?: string): string[];",
+      "    interface CollatorOptions {",
+      "        usage?: string;",
+      "    }",
+      '    type Fallback = "code" | "none";',
+      "}",
+      "",
+    ].join("\n"),
+    names,
+  );
+
+  assertEquals(removed, ["Withheld"]);
+  assertEquals(
+    text,
+    [
+      "declare namespace Withheld {",
+      "    interface CollatorOptions {",
+      "        usage?: string;",
+      "    }",
+      '    type Fallback = "code" | "none";',
+      "}",
+      "",
+    ].join("\n"),
+  );
+});
+
+Deno.test("strips a braced namespace value member, keeping the interface", () => {
+  const { text, removed } = stripWithheldGlobals(
+    [
+      "declare namespace Withheld {",
+      "    const RelativeTimeFormat: {",
+      "        new (): RelativeTimeFormat;",
+      "    };",
+      "    interface RelativeTimeFormat {",
+      "        format(): string;",
+      "    }",
+      "}",
+      "",
+    ].join("\n"),
+    names,
+  );
+
+  assertEquals(removed, ["Withheld"]);
+  assertEquals(
+    text,
+    [
+      "declare namespace Withheld {",
+      "    interface RelativeTimeFormat {",
+      "        format(): string;",
+      "    }",
+      "}",
+      "",
+    ].join("\n"),
+  );
+});
+
+Deno.test("ignores braces inside a namespace member's JSDoc", () => {
+  const { text, removed } = stripWithheldGlobals(
+    [
+      "declare namespace Withheld {",
+      "    /** Returns {@link Foo}; @throws {TypeError} on bad input. */",
+      "    function supportedValuesOf(key: string): string[];",
+      "    interface Kept {",
+      "        value: string;",
+      "    }",
+      "}",
+      "",
+    ].join("\n"),
+    names,
+  );
+
+  assertEquals(removed, ["Withheld"]);
+  assertEquals(
+    text,
+    [
+      "declare namespace Withheld {",
+      "    /** Returns {@link Foo}; @throws {TypeError} on bad input. */",
+      "    interface Kept {",
+      "        value: string;",
+      "    }",
+      "}",
+      "",
+    ].join("\n"),
+  );
+});
+
+Deno.test("leaves a non-withheld namespace's members alone", () => {
+  const source = [
+    "declare namespace Kept {",
+    "    var Value: ValueConstructor;",
+    "}",
+    "",
+  ].join("\n");
+  const { text, removed } = stripWithheldGlobals(source, names);
+
+  assertEquals(removed, []);
+  assertEquals(text, source);
+});
+
+Deno.test("re-stripping an emptied namespace removes nothing", () => {
+  const source = [
+    "declare namespace Withheld {",
+    "    var Collator: CollatorConstructor;",
+    "}",
+    "",
+  ].join("\n");
+  const once = stripWithheldGlobals(source, names).text;
+  const twice = stripWithheldGlobals(once, names);
+
+  assertEquals(twice.removed, []);
+  assertEquals(twice.text, once);
+});
+
+Deno.test("reports a namespace split across blocks once", () => {
+  const { removed } = stripWithheldGlobals(
+    [
+      "declare namespace Withheld {",
+      "    var Collator: C;",
+      "}",
+      "declare namespace Withheld {",
+      "    var NumberFormat: N;",
+      "}",
+      "",
+    ].join("\n"),
+    names,
+  );
+
+  assertEquals(removed, ["Withheld"]);
+});
+
+Deno.test("throws when a namespace member's braces never close", () => {
+  assertThrows(
+    () =>
+      stripWithheldGlobals(
+        [
+          "declare namespace Withheld {",
+          "    const RelativeTimeFormat: {",
+          "        new (): RelativeTimeFormat;",
+          "",
+        ].join("\n"),
+        names,
+      ),
+    Error,
+    "Unbalanced namespace member",
+  );
+});
+
+Deno.test("strips a namespace member whose signature wraps across lines", () => {
+  const { text, removed } = stripWithheldGlobals(
+    [
+      "declare namespace Withheld {",
+      "    function foo(",
+      "        a: number,",
+      "    ): void;",
+      "    interface Kept {",
+      "    }",
+      "}",
+      "",
+    ].join("\n"),
+    names,
+  );
+
+  assertEquals(removed, ["Withheld"]);
+  assertEquals(
+    text,
+    [
+      "declare namespace Withheld {",
+      "    interface Kept {",
+      "    }",
+      "}",
+      "",
+    ].join("\n"),
+  );
+});
+
+Deno.test("throws when a wrapped namespace member never terminates", () => {
+  assertThrows(
+    () =>
+      stripWithheldGlobals(
+        [
+          "declare namespace Withheld {",
+          "    function foo(",
+          "        a: number,",
+          "",
+        ].join("\n"),
+        names,
+      ),
+    Error,
+    "Unbalanced namespace member",
+  );
+});
+
+Deno.test("drops a namespace value member's trailing blank line", () => {
+  const { text, removed } = stripWithheldGlobals(
+    [
+      "declare namespace Withheld {",
+      "    var Collator: C;",
+      "",
+      "    interface Kept {",
+      "    }",
+      "}",
+      "",
+    ].join("\n"),
+    names,
+  );
+
+  assertEquals(removed, ["Withheld"]);
+  assertEquals(
+    text,
+    [
+      "declare namespace Withheld {",
+      "    interface Kept {",
+      "    }",
+      "}",
+      "",
+    ].join("\n"),
+  );
+});
+
+// `stillDeclared` is the post-strip safety net. `runCli` only ever hands it
+// already-stripped text, where a withheld namespace has no value members left,
+// so its namespace branch is exercised directly here.
+Deno.test("stillDeclared flags a withheld namespace that still declares a value", () => {
+  const text = [
+    "declare namespace Withheld {",
+    "    var Collator: C;",
+    "    interface Kept {",
+    "    }",
+    "}",
+    "",
+  ].join("\n");
+
+  assertEquals(stillDeclared(text, names), ["Withheld"]);
+});
+
+Deno.test("stillDeclared ignores an emptied or types-only withheld namespace", () => {
+  assertEquals(stillDeclared("declare namespace Withheld {\n}\n", names), []);
+  assertEquals(
+    stillDeclared(
+      [
+        "declare namespace Withheld {",
+        "    interface Kept {",
+        "    }",
+        "}",
+        "",
+      ].join("\n"),
+      names,
+    ),
+    [],
+  );
 });

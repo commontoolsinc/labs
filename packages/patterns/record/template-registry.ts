@@ -2,6 +2,7 @@
 // Defines common record types and their associated modules
 
 import { createSubPiece } from "./registry.ts";
+import { getNextUnusedLabel } from "./standard-labels.ts";
 import type { SubPieceEntry } from "./types.ts";
 
 // ===== Template Types =====
@@ -178,6 +179,12 @@ export function createTemplateModules(
 
   for (const moduleType of template.modules) {
     try {
+      // Smart-default label for label-bearing types (email/phone/address), so a
+      // later add of the same type sees this entry's label and picks the next
+      // unused one instead of duplicating it. Recorded on the entry and passed
+      // to the module so its visible label matches.
+      const label = getNextUnusedLabel(moduleType, entries);
+
       // Special case: use factory for notes if provided
       // Notes needs linkPattern which requires Record's pattern JSON
       let piece: unknown;
@@ -185,12 +192,13 @@ export function createTemplateModules(
         if (!notesPiece) continue;
         piece = notesPiece;
       } else {
-        piece = createSubPiece(moduleType);
+        piece = createSubPiece(moduleType, label ? { label } : undefined);
       }
       entries.push({
         type: moduleType,
         pinned: template.defaultPinned.includes(moduleType),
         piece,
+        label,
       });
     } catch (error) {
       console.warn(

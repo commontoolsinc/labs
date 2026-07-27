@@ -107,7 +107,7 @@ async function runCliTask(
 }
 
 // Executes the `cf` command via CLI
-// `const { stdout, stderr, code } = cf("dev --no-run ./pattern.tsx")`
+// `const { stdout, stderr, code } = cf("check --no-run ./pattern.tsx")`
 // Pass `stdin` to feed the command's standard input.
 export async function cf(
   command: string,

@@ -47,7 +47,8 @@ const addExpenseHandler = handler<
   { description: string; amount: number; category?: string; date?: string },
   { expenses: Writable<Expense[]> }
 >(({ description, amount, category, date }, { expenses }) => {
-  if (!description?.trim() || typeof amount !== "number" || amount <= 0) {
+  // `NaN` passes `amount <= 0` (`NaN <= 0` is false), so gate finiteness too.
+  if (!description?.trim() || !Number.isFinite(amount) || amount <= 0) {
     return;
   }
   expenses.push({

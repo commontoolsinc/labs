@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { setPropDefault } from "../src/render-utils.ts";
+import { setPropDefault, stringifyText } from "../src/render-utils.ts";
 
 describe("setPropDefault", () => {
   it("does not re-assign an unchanged NaN property", () => {
@@ -26,5 +26,30 @@ describe("setPropDefault", () => {
     const target = { value: 0 };
     setPropDefault(target, "value", -0);
     expect(Object.is(target.value, -0)).toBe(true);
+  });
+});
+
+describe("stringifyText", () => {
+  function captureWarn(): { calls: unknown[][]; restore(): void } {
+    const calls: unknown[][] = [];
+    const original = console.warn;
+    console.warn = (...args: unknown[]) => calls.push(args);
+    return { calls, restore: () => (console.warn = original) };
+  }
+
+  it("JSON-renders a $alias-shaped record with a warning, not empty text", () => {
+    // `$alias` records are Pattern-binding vocabulary; in data they are inert
+    // plain values. The old unresolved-alias special case rendered them as
+    // empty text; now they warn and JSON-render like any unexpected object.
+    const aliasRecord = { $alias: { path: ["x"] } };
+    const spy = captureWarn();
+    let text: string;
+    try {
+      text = stringifyText(aliasRecord);
+    } finally {
+      spy.restore();
+    }
+    expect(text).toBe(JSON.stringify(aliasRecord));
+    expect(spy.calls.length).toBe(1);
   });
 });

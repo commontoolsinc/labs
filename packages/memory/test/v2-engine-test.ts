@@ -8,6 +8,7 @@ import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   type EntityRef,
   entityRefFromString,
+  LINK_V1_TAG,
 } from "@commonfabric/data-model/cell-rep";
 import { toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
@@ -85,6 +86,456 @@ const toEntityDocument = (
   }
   return document as EntityDocument;
 };
+
+Deno.test("memory v2 engine reserves sync schema reference strings", async () => {
+  const { engine, path } = await createEngine();
+  const id = "entity:reserved-sync-schema-ref";
+  const reservedRef = "schema-ref@2:sha256:user-controlled";
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:reserved-sync-schema-ref",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id,
+          value: toEntityDocument({
+            harmless: reservedRef,
+            ref: {
+              "/": {
+                [LINK_V1_TAG]: {
+                  id: "of:target",
+                  path: [],
+                  schema: "opaque-schema-name",
+                },
+              },
+            },
+            $alias: {
+              id: "of:legacy-target",
+              path: [],
+              schema: "opaque-legacy-schema-name",
+            },
+          }),
+        }],
+      },
+    });
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:reserved-sync-schema-ref",
+          commit: {
+            localSeq: 2,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "set",
+              id: "entity:reserved-sync-schema-ref-set",
+              value: toEntityDocument({
+                $alias: {
+                  id: "of:target",
+                  path: [],
+                  schema: reservedRef,
+                },
+              }),
+            }],
+          },
+        }),
+      ProtocolError,
+      "reserved wire schema reference",
+    );
+
+    applyCommit(engine, {
+      sessionId: "session:reserved-sync-schema-ref",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id,
+          patches: [{
+            op: "add",
+            path: "/value/harmlessPatch",
+            value: reservedRef,
+          }],
+        }],
+      },
+    });
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:reserved-sync-schema-ref",
+          commit: {
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "patch",
+              id,
+              patches: [{
+                op: "replace",
+                path: `/value/ref/~1/${LINK_V1_TAG}/schema`,
+                value: reservedRef,
+              }],
+            }],
+          },
+        }),
+      ProtocolError,
+      "reserved wire schema reference",
+    );
+
+    for (
+      const path of [
+        `/value/ref/~1/${LINK_V1_TAG}/schema`,
+        "/value/$alias/schema",
+      ]
+    ) {
+      assertThrows(
+        () =>
+          applyCommit(engine, {
+            sessionId: "session:reserved-sync-schema-ref",
+            commit: {
+              localSeq: 3,
+              reads: { confirmed: [], pending: [] },
+              operations: [{
+                op: "patch",
+                id,
+                patches: [{
+                  op: "move",
+                  from: "/value/harmless",
+                  path,
+                }],
+              }],
+            },
+          }),
+        ProtocolError,
+        "reserved wire schema reference",
+      );
+    }
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:reserved-sync-schema-ref",
+          commit: {
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "set",
+              id: "entity:reserved-sync-schema-ref-hidden-by-set",
+              value: toEntityDocument({
+                $alias: {
+                  id: "of:target",
+                  path: [],
+                  schema: reservedRef,
+                },
+              }),
+            }, {
+              op: "set",
+              id: "entity:reserved-sync-schema-ref-hidden-by-set",
+              value: toEntityDocument({ safe: true }),
+            }],
+          },
+        }),
+      ProtocolError,
+      "reserved wire schema reference",
+    );
+    assertEquals(
+      read(engine, { id: "entity:reserved-sync-schema-ref-hidden-by-set" }),
+      null,
+    );
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:reserved-sync-schema-ref",
+          commit: {
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "patch",
+              id,
+              patches: [{
+                op: "replace",
+                path: `/value/ref/~1/${LINK_V1_TAG}/schema`,
+                value: reservedRef,
+              }],
+            }, {
+              op: "delete",
+              id,
+            }],
+          },
+        }),
+      ProtocolError,
+      "reserved wire schema reference",
+    );
+
+    // A reserved reference that exists only in a mid-commit state — placed by
+    // one patch and cleaned by the next in the same commit — is still stored
+    // history (readable at its seq) and must be rejected.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:reserved-sync-schema-ref",
+          commit: {
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "patch",
+              id,
+              patches: [{
+                op: "replace",
+                path: `/value/ref/~1/${LINK_V1_TAG}/schema`,
+                value: reservedRef,
+              }],
+            }, {
+              op: "patch",
+              id,
+              patches: [{
+                op: "replace",
+                path: `/value/ref/~1/${LINK_V1_TAG}/schema`,
+                value: "opaque-schema-name",
+              }],
+            }],
+          },
+        }),
+      ProtocolError,
+      "reserved wire schema reference",
+    );
+
+    assertEquals(
+      read(engine, { id }),
+      toEntityDocument({
+        harmless: reservedRef,
+        harmlessPatch: reservedRef,
+        ref: {
+          "/": {
+            [LINK_V1_TAG]: {
+              id: "of:target",
+              path: [],
+              schema: "opaque-schema-name",
+            },
+          },
+        },
+        $alias: {
+          id: "of:legacy-target",
+          path: [],
+          schema: "opaque-legacy-schema-name",
+        },
+      }),
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine replays stateful entities across set and delete revisions", async () => {
+  const { engine, path } = await createEngine();
+  const reservedRef = "schema-ref@2:sha256:harmless-position";
+  const id = "entity:stateful-replay";
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:stateful-replay",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id,
+          value: toEntityDocument({ base: true }),
+        }],
+      },
+    });
+
+    // One commit whose replay walks every stateful branch without throwing:
+    // a candidate patch placing a reserved string in a harmless position,
+    // a wholesale set, a follow-up patch, and a tombstoning delete.
+    applyCommit(engine, {
+      sessionId: "session:stateful-replay",
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id,
+          patches: [{
+            op: "add",
+            path: "/value/harmless",
+            value: reservedRef,
+          }],
+        }, {
+          op: "set",
+          id,
+          value: toEntityDocument({ replaced: true }),
+        }, {
+          op: "patch",
+          id,
+          patches: [{
+            op: "add",
+            path: "/value/afterSet",
+            value: "clean",
+          }],
+        }, {
+          op: "delete",
+          id,
+        }],
+      },
+    });
+
+    assertEquals(read(engine, { id }), null);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine validates clean moves against snapshot-backed pre-state", async () => {
+  const { engine, path } = await createEngineWithOptions({
+    snapshotInterval: 1,
+  });
+  const reservedRef = "schema-ref@2:sha256:snapshot-resident";
+  const id = "entity:snapshot-move";
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:snapshot-move",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id,
+          value: toEntityDocument({
+            harmless: reservedRef,
+            ref: {
+              "/": {
+                [LINK_V1_TAG]: {
+                  id: "of:target",
+                  path: [],
+                  schema: "opaque-schema-name",
+                },
+              },
+            },
+          }),
+        }],
+      },
+    });
+    // Force a snapshot so the clean-move probe reads the snapshot row rather
+    // than the base set revision.
+    applyCommit(engine, {
+      sessionId: "session:snapshot-move",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id,
+          patches: [{ op: "add", path: "/value/padding", value: "clean" }],
+        }],
+      },
+    });
+
+    // The move commit's own serialization is clean; only the snapshot-backed
+    // pre-state carries the reserved string, and relocating it into a schema
+    // position must still be rejected.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:snapshot-move",
+          invocation: invocationFor(3),
+          authorization,
+          commit: {
+            localSeq: 3,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "patch",
+              id,
+              patches: [{
+                op: "move",
+                from: "/value/harmless",
+                path: `/value/ref/~1/${LINK_V1_TAG}/schema`,
+              }],
+            }],
+          },
+        }),
+      ProtocolError,
+      "reserved wire schema reference",
+    );
+
+    // A clean move between harmless positions over the same snapshot-backed
+    // pre-state is allowed.
+    applyCommit(engine, {
+      sessionId: "session:snapshot-move",
+      invocation: invocationFor(3),
+      authorization,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id,
+          patches: [{
+            op: "move",
+            from: "/value/harmless",
+            path: "/value/relocated",
+          }],
+        }],
+      },
+    });
+    const document = read(engine, { id });
+    assertEquals(
+      (document?.value as Record<string, unknown>).relocated,
+      reservedRef,
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine reserves request CAS schema reference strings", async () => {
+  const { engine, path } = await createEngine();
+  const reservedRef = "schema-cas@1:sha256:user-controlled";
+  try {
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:reserved-request-schema-ref",
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "set",
+              id: "entity:reserved-request-schema-ref",
+              value: toEntityDocument({
+                $alias: {
+                  id: "of:target",
+                  path: [],
+                  schema: reservedRef,
+                },
+              }),
+            }],
+          },
+        }),
+      ProtocolError,
+      "reserved wire schema reference",
+    );
+    assertEquals(
+      read(engine, { id: "entity:reserved-request-schema-ref" }),
+      null,
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
 
 Deno.test("memory v2 engine stores independent scoped instances for the same id", async () => {
   const { engine, path } = await createEngine();
@@ -2064,6 +2515,406 @@ Deno.test("memory v2 engine resolves pending reads and rejects stale pending rea
         }),
       Error,
       "pending dependency",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+// CT-1872 1c: an array localSeq names every pending layer the read sat on.
+// Non-highest elements impose resolution ONLY (the dependency must have an
+// accepted commit row) — staleness is based at the HIGHEST element, so a
+// foreign write that lands before the highest element's resolution must NOT
+// reject the read, while an unresolved element still must.
+//
+// NOTE: this pins main's de-facto basis semantics made explicit on the wire,
+// not an endorsement of the scan interval. The staleness scan starts at the
+// highest layer's resolution seq, so foreign writes in (reader's confirmed
+// basis, that resolution] go unscanned — a pre-existing gap tracked as
+// CT-1910 (pending-read basis over-advance), whose fix (own-session
+// exclusion + true-basis validation) supersedes the max-basis rule.
+Deno.test("memory v2 engine: array pending reads scan at the highest layer and require every layer to resolve", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:source",
+          value: toEntityDocument({ foo: 0 }),
+        }],
+      },
+    });
+
+    // The dependency: localSeq 2 commits durably (seq 2).
+    const dependency = applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: invocationFor(2),
+      authorization,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:source",
+          patches: [{ op: "replace", path: "/value/foo", value: 1 }],
+        }],
+      },
+    });
+    assertEquals(dependency.seq, 2);
+
+    // A LATER overlapping foreign write to the same doc (a whole-doc set is
+    // path-blind, so it overlaps ANY read of entity:source): a normal pending
+    // read via localSeq 2 is now stale.
+    applyCommit(engine, {
+      sessionId: "session:other",
+      invocation: invocationFor(1, { actor: "other" }),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:source",
+          value: toEntityDocument({ foo: 2 }),
+        }],
+      },
+    });
+
+    // A newer same-session blind layer (localSeq 3, zero reads) lands AFTER
+    // the foreign write: the doc's stack top below the reader.
+    const top = applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: invocationFor(3),
+      authorization,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:source",
+          patches: [{ op: "add", path: "/value/blind", value: true }],
+        }],
+      },
+    });
+    assertEquals(top.seq, 4);
+
+    // Array [2, 3]: staleness is based at the HIGHEST layer (3 → seq 4), so
+    // the foreign seq-3 write is outside the scan; element 2 imposes
+    // resolution only ⇒ ACCEPTED.
+    const accepted = applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: invocationFor(4),
+      authorization,
+      commit: {
+        localSeq: 4,
+        reads: {
+          confirmed: [],
+          pending: [{
+            id: "entity:source",
+            path: toDocumentPath([]),
+            localSeq: [2, 3],
+          }],
+        },
+        operations: [{
+          op: "set",
+          id: "entity:target",
+          value: toEntityDocument({ derived: true }),
+        }],
+      },
+    });
+    assertEquals(accepted.seq, 5);
+
+    // The array does NOT waive resolution for any element: one uncommitted
+    // member rejects the whole read.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:1",
+          invocation: invocationFor(5),
+          authorization,
+          commit: {
+            localSeq: 5,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:source",
+                path: toDocumentPath([]),
+                localSeq: [2, 99],
+              }],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:unresolved",
+              value: toEntityDocument({ ok: false }),
+            }],
+          },
+        }),
+      ConflictError,
+      "pending dependency not resolved",
+    );
+
+    // Malformed dependency sets are protocol violations, not conflicts: an
+    // empty array names no layer at all…
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:1",
+          invocation: invocationFor(7),
+          authorization,
+          commit: {
+            localSeq: 7,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:source",
+                path: toDocumentPath([]),
+                localSeq: [],
+              }],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:malformed-empty",
+              value: toEntityDocument({ ok: false }),
+            }],
+          },
+        }),
+      ProtocolError,
+      "names no localSeq",
+    );
+
+    // …and a non-integer element is not a localSeq.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:1",
+          invocation: invocationFor(8),
+          authorization,
+          commit: {
+            localSeq: 8,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:source",
+                path: toDocumentPath([]),
+                localSeq: [1.5],
+              }],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:malformed-float",
+              value: toEntityDocument({ ok: false }),
+            }],
+          },
+        }),
+      ProtocolError,
+      "non-integer localSeq",
+    );
+
+    // Control: based at the LOWER layer alone (scalar 2), the foreign seq-3
+    // write is inside the scan interval — the max-basis rule, not the
+    // scenario, is what admitted the commit above.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:1",
+          invocation: invocationFor(6),
+          authorization,
+          commit: {
+            localSeq: 6,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:source",
+                path: toDocumentPath([]),
+                localSeq: 2,
+              }],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:control",
+              value: toEntityDocument({ ok: false }),
+            }],
+          },
+        }),
+      ConflictError,
+      "stale pending read",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+// CT-1872 1c, end to end at the engine: a fabricated composite must die on
+// the resolution edge, because no staleness scan can catch it.
+//
+//   base:  D = { items: [] }                                  (seq 1)
+//   T1  (localSeq 10): items = ["A"]  — REJECTED (stale read on title)
+//   T1.5 (localSeq 11): blind append "B", zero reads — APPLIED → items ["B"]
+//   T2  (localSeq 12): observed items ["A","B"] through the client stack
+//
+// T2's observation is not STALE — ["A","B"] never existed at any seq; "A"
+// lived only in the client's optimistic layer for a commit the server
+// refused. An under-declared T2 (scalar top-of-stack read: what a client
+// emits toward a server without the `pendingReadStacks` flag) passes both
+// resolution (T1.5 has a commit row) and the staleness scan (nothing touched
+// items after seq(T1.5)) and is durably ACCEPTED with a phantom premise.
+// The full-stack array shape (#4606) also names T1, and the missing commit
+// row rejects it.
+Deno.test("memory v2 engine: full-stack dependency recording rejects a fabricated composite an under-declared commit smuggles through", async () => {
+  const { engine, path } = await createEngine();
+
+  try {
+    applyCommit(engine, {
+      sessionId: "session:seed",
+      invocation: invocationFor(1, { actor: "seed" }),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:D",
+          value: toEntityDocument({ items: [], title: "t0" }),
+        }],
+      },
+    });
+
+    // Foreign write (seq 2) bumps title so T1's confirmed read goes stale.
+    applyCommit(engine, {
+      sessionId: "session:other",
+      invocation: invocationFor(1, { actor: "other" }),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:D",
+          patches: [{
+            op: "replace",
+            path: "/value/title",
+            value: "t-foreign",
+          }],
+        }],
+      },
+    });
+
+    // T1: REJECTED — its items=["A"] write is discarded everywhere.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:1",
+          invocation: invocationFor(10),
+          authorization,
+          commit: {
+            localSeq: 10,
+            reads: {
+              confirmed: [{
+                id: "entity:D",
+                path: toDocumentPath(["value", "title"]),
+                seq: 1,
+              }],
+              pending: [],
+            },
+            operations: [{
+              op: "patch",
+              id: "entity:D",
+              patches: [{
+                op: "replace",
+                path: "/value/items",
+                value: ["A"],
+              }],
+            }],
+          },
+        }),
+      ConflictError,
+      "stale confirmed read",
+    );
+
+    // T1.5: blind append, zero reads — applies onto the T1-less base.
+    applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: invocationFor(11),
+      authorization,
+      commit: {
+        localSeq: 11,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:D",
+          patches: [{ op: "add", path: "/value/items/-", value: "B" }],
+        }],
+      },
+    });
+
+    // Under-declared shape (pre-#4606 client): top-of-stack read only.
+    // ACCEPTED — resolution and staleness both legitimately pass, and the
+    // phantom ["A","B"] premise lands durably. This pins WHY the full-stack
+    // shape below is load-bearing (and stays reachable via version skew).
+    const smuggled = applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: invocationFor(12),
+      authorization,
+      commit: {
+        localSeq: 12,
+        reads: {
+          confirmed: [],
+          pending: [{
+            id: "entity:D",
+            path: toDocumentPath(["value", "items"]),
+            localSeq: 11,
+          }],
+        },
+        operations: [{
+          op: "set",
+          id: "entity:phantom",
+          value: toEntityDocument({ observedItems: ["A", "B"] }),
+        }],
+      },
+    });
+    assertEquals(smuggled.seq, 4);
+    const durable = read(engine, { id: "entity:D" });
+    assertEquals(
+      (durable as { value?: { items?: unknown } } | null)?.value?.items,
+      ["B"],
+    );
+
+    // Full-stack array shape (#4606): the same observation also names T1,
+    // whose commit row does not exist — rejected on the resolution edge.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:1",
+          invocation: invocationFor(13),
+          authorization,
+          commit: {
+            localSeq: 13,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:D",
+                path: toDocumentPath(["value", "items"]),
+                localSeq: [10, 11],
+              }],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:caught",
+              value: toEntityDocument({ observedItems: ["A", "B"] }),
+            }],
+          },
+        }),
+      ConflictError,
+      "pending dependency not resolved: 10",
     );
   } finally {
     close(engine);

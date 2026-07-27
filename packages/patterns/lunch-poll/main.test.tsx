@@ -11,9 +11,40 @@
  * are covered by multi-user.test.tsx.
  */
 
-import { action, computed, pattern, resultOf, UI, wish } from "commonfabric";
-import { findNode, propsOf, readValue } from "../test/vnode-helpers.ts";
-import CozyPoll, { dayKeyOf, type Option, type Vote } from "./main.tsx";
+import {
+  action,
+  assert,
+  computed,
+  pattern,
+  resultOf,
+  UI,
+  wish,
+} from "commonfabric";
+import {
+  findNode,
+  hasExactText,
+  propsOf,
+  readValue,
+} from "../test/vnode-helpers.ts";
+import CozyPoll, {
+  dayKeyOf,
+  type Option,
+  type User,
+  type Vote,
+} from "./main.tsx";
+
+// This file's single identity IS the host, so adding options triggers the
+// host-gated art generation. Mock the image endpoint so the flows stay
+// deterministic and never reach a live dev server's real generator (the
+// stored-art wiring itself is asserted in art-sync.test.tsx).
+export const fetchMocks = [
+  {
+    urlIncludes: "/api/ai/img",
+    contentType: "image/png",
+    base64Body:
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  },
+];
 
 const findNodeByProp = (
   root: unknown,
@@ -31,15 +62,106 @@ const SEEDED_OPTION: Option = {
   addedByName: "Stan",
 };
 
+const COLLIDING_INITIAL_OPTION: Option = {
+  id: "opt-colliding-initials",
+  title: "Initials Café",
+  addedByName: "Daffodil",
+};
+
+const COLLIDING_INITIAL_USERS: User[] = [
+  {
+    name: "Daffodil",
+    avatar: "",
+    color: "#2f6f4e",
+  },
+  {
+    name: "Dragonfly",
+    avatar: "",
+    color: "#c2573a",
+  },
+  {
+    name: "Dan",
+    avatar: "",
+    color: "#3b4a6b",
+  },
+  {
+    name: "Dana",
+    avatar: "",
+    color: "#a33b35",
+  },
+  {
+    name: "dan",
+    avatar: "",
+    color: "#b27722",
+  },
+  {
+    name: "A",
+    avatar: "",
+    color: "#7c3aed",
+  },
+  {
+    name: "a",
+    avatar: "",
+    color: "#2f6f4e",
+  },
+  {
+    name: "A1",
+    avatar: "",
+    color: "#c2573a",
+  },
+  {
+    name: "Bob Smith",
+    avatar: "",
+    color: "#3b4a6b",
+  },
+  {
+    name: "Bob  Smith",
+    avatar: "",
+    color: "#a33b35",
+  },
+  {
+    name: "👩🏽‍💻Alice",
+    avatar: "",
+    color: "#7c3aed",
+  },
+  {
+    name: "👩🏽‍💻Bob",
+    avatar: "",
+    color: "#2f6f4e",
+  },
+  {
+    name: "🇺🇸Alice",
+    avatar: "",
+    color: "#c2573a",
+  },
+  {
+    name: "🇺🇸Bob",
+    avatar: "",
+    color: "#3b4a6b",
+  },
+  {
+    name: "e\u0301Alice",
+    avatar: "",
+    color: "#a33b35",
+  },
+  {
+    name: "e\u0301Bob",
+    avatar: "",
+    color: "#b27722",
+  },
+];
+
 export default pattern(() => {
   const poll = CozyPoll({});
 
-  // Reference times derive from the one-shot `#now` wish (the pattern body
-  // cannot read the ambient clock — mirrors how the pattern under test gets
-  // its own "today"): "yesterday" for the seeded stale vote, and the day key
-  // the pattern is expected to filter to. Both remain unavailable until
-  // `#now` resolves, then the harness re-evaluates their dependents.
-  const nowCell = wish<number>({ query: "#now" });
+  // Reference times derive from the interval `#now/300` wish — the same
+  // shared ticking clock the pattern under test runs on (the pattern body
+  // cannot read the ambient clock; the bare one-shot `#now` would freeze at
+  // first capture, which is exactly what the poll must not do): "yesterday"
+  // for the seeded stale vote, and the day key the pattern is expected to
+  // filter to. Both remain unavailable until the wish resolves, then the
+  // harness re-evaluates their dependents.
+  const nowCell = wish<number>({ query: "#now/300" });
   const nowCellValue = resultOf(nowCell.result);
   const staleCastAt = computed(() => nowCellValue - 86_400_000);
   const todayKey = computed(() => dayKeyOf(nowCellValue));
@@ -60,6 +182,122 @@ export default pattern(() => {
     options: [SEEDED_OPTION],
     votes: [STALE_VOTE],
   });
+
+  // Participant names with shared prefixes use distinct current-day vote labels.
+  // Each label preserves complete displayed characters.
+  const collidingCastAt = computed(() => nowCellValue);
+  const initialsPoll = CozyPoll({
+    options: [COLLIDING_INITIAL_OPTION],
+    users: COLLIDING_INITIAL_USERS,
+    votes: [
+      {
+        voterName: "Daffodil",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "green",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "Dragonfly",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "yellow",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "Dan",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "red",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "Dana",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "green",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "dan",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "yellow",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "A",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "red",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "a",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "green",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "A1",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "yellow",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "Bob Smith",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "red",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "Bob  Smith",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "green",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "👩🏽‍💻Alice",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "yellow",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "👩🏽‍💻Bob",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "red",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "🇺🇸Alice",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "green",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "🇺🇸Bob",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "yellow",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "e\u0301Alice",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "red",
+        castAt: collidingCastAt,
+      },
+      {
+        voterName: "e\u0301Bob",
+        optionId: COLLIDING_INITIAL_OPTION.id,
+        voteType: "green",
+        castAt: collidingCastAt,
+      },
+    ],
+  });
+
+  // Profile-first join + the header strip/viewer-chip rendering from stored
+  // profile cells are verified at the browser/integration tier (the
+  // scrabble/battleship precedent), not here: a pattern-body `#profile` wish
+  // has no resolving environment in a unit test, and an unset optional cell
+  // input reads as a truthy proxy — so there is no honest way to inject a
+  // resolvable viewer profile cell at this tier. The join LOGIC (name
+  // snapshot, equals()-keyed dedup, directory write) is covered by
+  // participant-identity-card.test.tsx, which injects those values into the
+  // card directly.
 
   // === Actions ===
 
@@ -167,7 +405,7 @@ export default pattern(() => {
   // Alex is in users, no admin name was claimed by anyone else, and the
   // "Should not appear" option is absent (implied by chipotle assertions
   // later — options.length === 1 after only Chipotle is added).
-  const assert_joined_as_alex = computed(() =>
+  const assert_joined_as_alex = assert(() =>
     poll.users.length === 1 &&
     poll.users[0]?.name === "Alex" &&
     poll.myName === "Alex" &&
@@ -176,20 +414,20 @@ export default pattern(() => {
     poll.isAdmin === true
   );
 
-  const assert_immutable_after_join = computed(() =>
+  const assert_immutable_after_join = assert(() =>
     poll.users.length === 1 &&
     poll.myName === "Alex"
   );
 
-  const assert_chipotle_added = computed(() =>
+  const assert_chipotle_added = assert(() =>
     poll.options.length === 1 &&
     poll.options[0]?.title === "Chipotle" &&
     poll.options[0]?.addedByName === "Alex"
   );
 
-  const assert_two_options = computed(() => poll.options.length === 2);
+  const assert_two_options = assert(() => poll.options.length === 2);
 
-  const assert_green_vote_recorded = computed(() => {
+  const assert_green_vote_recorded = assert(() => {
     const v = poll.votes[0];
     return poll.votes.length === 1 &&
       v?.voteType === "green" &&
@@ -206,33 +444,33 @@ export default pattern(() => {
   // to a proxy-vs-proxy `===` (always false), so the filter dropped every vote
   // and the swatches silently stopped rendering: after Alex's green vote, his
   // swatch must appear in the rendered UI tree.
-  const assert_alex_swatch_renders = computed(() =>
+  const assert_alex_swatch_renders = assert(() =>
     findNodeByProp(poll[UI], "data-vote-swatch-name", "Alex") !== undefined
   );
 
-  const assert_changed_to_yellow = computed(() => {
+  const assert_changed_to_yellow = assert(() => {
     const v = poll.votes[0];
     return poll.votes.length === 1 &&
       v?.voteType === "yellow";
   });
 
-  const assert_changed_to_red = computed(() => {
+  const assert_changed_to_red = assert(() => {
     const v = poll.votes[0];
     return poll.votes.length === 1 &&
       v?.voteType === "red";
   });
 
-  const assert_revote_green_cleared = computed(() => poll.votes.length === 0);
+  const assert_revote_green_cleared = assert(() => poll.votes.length === 0);
 
-  const assert_votes_reset = computed(() => poll.votes.length === 0);
+  const assert_votes_reset = assert(() => poll.votes.length === 0);
 
-  const assert_option_removed_with_its_votes = computed(() =>
+  const assert_option_removed_with_its_votes = assert(() =>
     poll.options.length === 1 &&
     poll.options[0]?.title === "Thai Kitchen" &&
     poll.votes.length === 0
   );
 
-  const assert_still_alex_host = computed(() =>
+  const assert_still_alex_host = assert(() =>
     poll.adminName === "Alex" && poll.isAdmin === true
   );
 
@@ -244,7 +482,7 @@ export default pattern(() => {
   // to the host (the frozen `loggedByName` snapshot). If the pre-join attempt
   // ("Sneaky") had not been gated, an entry would exist before this — so this
   // implicitly verifies the host gate too.
-  const assert_thai_logged = computed(() => {
+  const assert_thai_logged = assert(() => {
     const rows = poll.recentVisits ?? [];
     return rows.length === 1 &&
       rows[0]?.title === "Thai Kitchen" &&
@@ -253,7 +491,7 @@ export default pattern(() => {
       poll.mostRecentTitle === "Thai Kitchen";
   });
 
-  const assert_recent_visit_row_renders = computed(() =>
+  const assert_recent_visit_row_renders = assert(() =>
     findNodeByProp(
       poll[UI],
       "data-recent-visit-title",
@@ -263,12 +501,12 @@ export default pattern(() => {
 
   // The live green vote on Thai was snapshotted into the entry's `votes` when
   // Thai was logged → exactly one embedded snapshot.
-  const assert_vote_snapshot = computed(() => poll.voteHistoryCount === 1);
+  const assert_vote_snapshot = assert(() => poll.voteHistoryCount === 1);
 
   // Second entry is the backdated Chipotle log; newest-first sort puts it after
   // today's Thai, so it's rows[1]. `wentAt` is a plain ms-epoch number now, so
   // the backdated value compares directly (no TEXT encoding to round-trip).
-  const assert_two_history = computed(() => {
+  const assert_two_history = assert(() => {
     const rows = poll.recentVisits ?? [];
     return rows.length === 2 &&
       rows[1]?.title === "Chipotle" &&
@@ -281,7 +519,7 @@ export default pattern(() => {
   // the row content directly (which entry survived), not just the count — and
   // that the entry's live `loggedBy` link survives the array round-trip (push
   // on log + the set-subset filter on delete).
-  const assert_one_history_after_remove = computed(() => {
+  const assert_one_history_after_remove = assert(() => {
     const rows = poll.recentVisits ?? [];
     return poll.historyCount === 1 &&
       rows.length === 1 &&
@@ -291,28 +529,127 @@ export default pattern(() => {
   });
 
   // Clearing visits also drops the embedded vote snapshots.
-  const assert_history_cleared = computed(() =>
+  const assert_history_cleared = assert(() =>
     poll.historyCount === 0 &&
     poll.voteHistoryCount === 0
   );
 
   // === Current-day vote filter ===
 
-  // The header renders the session's date, and `todayDate` exposes the local
+  // The header renders the current date, and `todayDate` exposes the local
   // day key the votes are filtered to. The assertion remains unavailable until
-  // this pattern's `#now` wish resolves.
-  const assert_today_header_renders = computed(() =>
+  // this pattern's `#now/300` wish resolves.
+  const assert_today_header_renders = assert(() =>
     todayKey !== "" &&
     findNodeByProp(poll[UI], "data-poll-today", true) !== undefined &&
     poll.todayDate === todayKey
   );
 
+  const assert_colliding_initials_are_disambiguated = assert(() => {
+    const ui = initialsPoll[UI];
+    const daffodil = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "Daffodil",
+    );
+    const dragonfly = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "Dragonfly",
+    );
+    const dan = findNodeByProp(ui, "data-vote-swatch-name", "Dan");
+    const dana = findNodeByProp(ui, "data-vote-swatch-name", "Dana");
+    const lowerDan = findNodeByProp(ui, "data-vote-swatch-name", "dan");
+    const upperA = findNodeByProp(ui, "data-vote-swatch-name", "A");
+    const lowerA = findNodeByProp(ui, "data-vote-swatch-name", "a");
+    const aOne = findNodeByProp(ui, "data-vote-swatch-name", "A1");
+    const bobSmith = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "Bob Smith",
+    );
+    const bobDoubleSpace = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "Bob  Smith",
+    );
+    const emojiAlice = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "👩🏽‍💻Alice",
+    );
+    const emojiBob = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "👩🏽‍💻Bob",
+    );
+    const flagAlice = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "🇺🇸Alice",
+    );
+    const flagBob = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "🇺🇸Bob",
+    );
+    const accentAlice = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "e\u0301Alice",
+    );
+    const accentBob = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "e\u0301Bob",
+    );
+    return todayKey !== "" &&
+      initialsPoll.todayDate === todayKey &&
+      hasExactText(daffodil, "DF") &&
+      hasExactText(dragonfly, "DR") &&
+      hasExactText(dan, "DAN1") &&
+      hasExactText(dana, "DANA") &&
+      hasExactText(lowerDan, "DAN2") &&
+      hasExactText(upperA, "A2") &&
+      hasExactText(lowerA, "A3") &&
+      hasExactText(aOne, "A1") &&
+      hasExactText(bobSmith, "BOBSMITH1") &&
+      hasExactText(bobDoubleSpace, "BOBSMITH2") &&
+      hasExactText(emojiAlice, "👩🏽‍💻A") &&
+      hasExactText(emojiBob, "👩🏽‍💻B") &&
+      hasExactText(flagAlice, "🇺🇸A") &&
+      hasExactText(flagBob, "🇺🇸B") &&
+      hasExactText(accentAlice, "E\u0301A") &&
+      hasExactText(accentBob, "E\u0301B");
+  });
+
+  const assert_vote_swatches_have_accessible_names = assert(() => {
+    const ui = initialsPoll[UI];
+    const daffodil = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "Daffodil",
+    );
+    const emojiBob = findNodeByProp(
+      ui,
+      "data-vote-swatch-name",
+      "👩🏽‍💻Bob",
+    );
+    return readValue(propsOf(daffodil)?.role) === "img" &&
+      readValue(propsOf(daffodil)?.["aria-label"]) ===
+        "Daffodil: green vote" &&
+      readValue(propsOf(emojiBob)?.role) === "img" &&
+      readValue(propsOf(emojiBob)?.["aria-label"]) ===
+        "👩🏽‍💻Bob: red vote";
+  });
+
   // The seeded stale vote is stored but hidden: absent from `todaysVotes`,
   // the count, and the rendered swatches. Guarded on both `#now` reads —
   // this pattern's (`todayKey`, which also resolves the seeded `castAt`) and
-  // the poll's own (via `todayDate`) — so it runs only once the day filter is
-  // live and the vote really is dated yesterday.
-  const assert_stale_vote_hidden = computed(() =>
+  // the poll's own (via `todayDate`) — so it passes only once the day filter
+  // is live and the vote really is dated yesterday, not merely during the
+  // load window's empty vote view.
+  const assert_stale_vote_hidden = assert(() =>
     todayKey !== "" &&
     stalePoll.todayDate === todayKey &&
     stalePoll.votes.length === 1 &&
@@ -320,6 +657,17 @@ export default pattern(() => {
     stalePoll.todayVoteCount === 0 &&
     findNodeByProp(stalePoll[UI], "data-vote-swatch-name", "Stan") ===
       undefined
+  );
+
+  // Options saved before generated art was introduced have no `imageUrl`
+  // property. They must still satisfy the card's map/pattern contract and
+  // render normally rather than passing a present-but-undefined value.
+  const assert_legacy_option_without_image_renders = assert(() =>
+    findNodeByProp(
+      stalePoll[UI],
+      "data-option-title",
+      SEEDED_OPTION.title,
+    ) !== undefined
   );
 
   const action_stale_join_as_stan = action(() => {
@@ -334,7 +682,7 @@ export default pattern(() => {
   // A same-color click on a stale vote RE-CASTS it for today (fresh castAt)
   // instead of toggling off a vote the voter cannot see; the vote becomes
   // visible again (list, count, and swatch).
-  const assert_stale_recast_visible = computed(() => {
+  const assert_stale_recast_visible = assert(() => {
     const v = stalePoll.todaysVotes[0];
     return todayKey !== "" &&
       stalePoll.todaysVotes.length === 1 &&
@@ -348,7 +696,7 @@ export default pattern(() => {
   });
 
   // A second same-color click is the normal today-toggle-off.
-  const assert_stale_recast_cleared = computed(() =>
+  const assert_stale_recast_cleared = assert(() =>
     stalePoll.todaysVotes.length === 0 &&
     stalePoll.todayVoteCount === 0
   );
@@ -448,7 +796,11 @@ export default pattern(() => {
       // === Current-day vote filter ===
       // Header date + exposed day key.
       { assertion: assert_today_header_renders },
+      // Same-first-letter participant names get stable, distinct swatches.
+      { assertion: assert_colliding_initials_are_disambiguated },
+      { assertion: assert_vote_swatches_have_accessible_names },
       // Seeded stale (yesterday) vote: stored but hidden everywhere.
+      { assertion: assert_legacy_option_without_image_renders },
       { assertion: assert_stale_vote_hidden },
       // Same-color click on the stale vote re-casts it for today…
       { action: action_stale_join_as_stan },

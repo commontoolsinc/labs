@@ -20,14 +20,14 @@ import {
   linkRefFrom,
 } from "@commonfabric/data-model/cell-rep";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   deepFrozenCloneAndInternSchema,
   internSchema,
   isInternedSchema,
 } from "@commonfabric/data-model/schema-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
-import type { SqliteParamsWire } from "@commonfabric/memory/v2";
+import type { ReadonlyCell } from "@commonfabric/api";
+import type { SqliteDbRef, SqliteParamsWire } from "@commonfabric/memory/v2";
 import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 import { encodeCellToSigilString } from "./builtins/sqlite/cf-link-codec.ts";
 import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
@@ -109,7 +109,10 @@ import {
   type URI,
 } from "./sigil-types.ts";
 import type { Runtime } from "./runtime.ts";
-import { createDataCellURI, findAndInlineDataURILinks } from "./data-uri.ts";
+import {
+  dataUriFromValueWithResolvedLinks,
+  findAndInlineDataUriLinks,
+} from "./data-uri.ts";
 import {
   areLinksSame,
   createSigilLinkFromParsedLink,
@@ -487,31 +490,47 @@ const cellMethods = new Set<
   "query",
 ]);
 
-/** Parse the explicit column list from `INSERT INTO t (a, b, c) VALUES ...`,
- *  used to map positional `_cf_link` params. Returns undefined when there is no
- *  explicit column list (columnless `INSERT … VALUES (…)`, `UPDATE`, opaque
- *  SQL). The capture must be immediately followed by `VALUES`, so a columnless
- *  insert's VALUES tuple is NOT mistaken for a column list. */
 // The schema for one element of an array schema, suitable for a standalone
 // element cell. The array's items schema is often a `$ref` into the array
 // schema's `$defs`; carry those `$defs` onto the element schema so the reference
 // (and any nested references) still resolve once the element is addressed on its
 // own, detached from the array.
-function elementSchemaFor(
+// The schema covering one element of `arraySchema`. The covering schema is
+// index-determined for tuples — prefixItems[index] when the index is within
+// the slots, `items` past them — so callers that know the element's index
+// should pass it. Without an index (elementById is id-keyed; the element's
+// position is unknown), the element is treated as rest-region: tuple slots
+// are positional and cannot be id-addressed, so `items` covers it, and a
+// pure tuple (no `items`) yields `undefined` — no principled per-element
+// schema exists there (CT-1895 borderline site).
+// Exported for unit testing only.
+export function elementSchemaFor(
   arraySchema: JSONSchema | undefined,
+  index?: number,
 ): JSONSchema | undefined {
   if (!isRecord(arraySchema)) return undefined;
-  const items = arraySchema.items;
-  if (!isRecord(items) || Array.isArray(items)) {
-    return items as JSONSchema | undefined;
+  const prefixItems = Array.isArray(arraySchema.prefixItems)
+    ? arraySchema.prefixItems as JSONSchema[]
+    : undefined;
+  const covering = prefixItems !== undefined && index !== undefined &&
+      index < prefixItems.length
+    ? prefixItems[index]
+    : arraySchema.items;
+  if (!isRecord(covering) || Array.isArray(covering)) {
+    return covering as JSONSchema | undefined;
   }
   const defs = arraySchema.$defs;
-  if (defs && !("$defs" in items)) {
-    return { ...items, $defs: defs } as JSONSchema;
+  if (defs && !("$defs" in covering)) {
+    return { ...covering, $defs: defs } as JSONSchema;
   }
-  return items as JSONSchema;
+  return covering as JSONSchema;
 }
 
+/** Parse the explicit column list from `INSERT INTO t (a, b, c) VALUES ...`,
+ *  used to map positional `_cf_link` params. Returns undefined when there is no
+ *  explicit column list (columnless `INSERT … VALUES (…)`, `UPDATE`, opaque
+ *  SQL). The capture must be immediately followed by `VALUES`, so a columnless
+ *  insert's VALUES tuple is NOT mistaken for a column list. */
 function parseSqliteInsertColumns(sql: string): string[] | undefined {
   const m = sql.match(
     /\binsert\b[\s\S]*?\binto\b\s+[^()]+?\(([^)]*)\)\s*values\b/i,
@@ -694,6 +713,10 @@ export class CellImpl<T extends FabricValue>
 
     this._kind = kind ?? "cell";
     this._cfcLabelView = cloneCfcLabelView(_cfcLabelView);
+  }
+
+  isReadableCell(): boolean {
+    return this._kind === "cell" || this._kind === "readonly";
   }
 
   [cfcLabelViewSymbol](): CfcLabelView | undefined {
@@ -1158,8 +1181,10 @@ export class CellImpl<T extends FabricValue>
       ? cloneIfNecessary(
         materialized.tables as Parameters<typeof cloneIfNecessary>[0],
         { frozen: false },
-      ) as Record<string, unknown>
-      : handle.tables as Record<string, unknown> | undefined;
+      ) as SqliteDbRef["tables"]
+      // `handle` is a raw, unvalidated read (see above), so this states the
+      // wire shape rather than proving it.
+      : handle.tables as SqliteDbRef["tables"];
     // CFC write-ceiling (Phase 2): a value bound to a labeled column must fit the
     // column's `ifc.maxConfidentiality`. The label rides the bound value (a Cell
     // or any carried-label value); fail closed when a labeled value's target
@@ -1320,14 +1345,32 @@ export class CellImpl<T extends FabricValue>
         resolvedToValueLink.schema ?? this.schema,
       );
 
+      const writeLink = resolveLink(
+        this.runtime,
+        this.tx,
+        this.link,
+        "writeRedirect",
+      );
+
       // TODO(@ubik2) investigate whether i need to check confidential as i walk down my own obj
       diffAndUpdate(
         this.runtime,
         this.tx,
-        resolveLink(this.runtime, this.tx, this.link, "writeRedirect"),
+        writeLink,
         transformedValue,
         this._frame?.cause,
       );
+
+      // A whole-value set over the path it writes reshapes what a mergeable op
+      // intent recorded there (an earlier push / addUnique / increment /
+      // removeByValue in this transaction) refers to. Poison that intent —
+      // keyed on `writeLink`, the exact path diffAndUpdate wrote — so the commit
+      // emits this set's whole-array diff rather than a stale tail op. Keying on
+      // the written path is what keeps this correct across aliases and child
+      // writes: a set that lands on a different slot than the op's target (a
+      // non-redirect alias) or on a child path (an element edit) finds no intent
+      // there, so poisonMergeableOp is a no-op and the append stays mergeable.
+      this.tx.poisonMergeableOp?.(writeLink);
 
       // Register commit callback if provided.
       if (onCommit) {
@@ -1541,7 +1584,7 @@ export class CellImpl<T extends FabricValue>
     });
     const cause = this._frame?.cause;
 
-    let array = currentValue as unknown[];
+    let array = currentValue as FabricValue[];
     if (array !== undefined && !Array.isArray(array)) {
       throw new Error(
         "Cell.addUnique() requires transaction and array value\n" +
@@ -1566,14 +1609,14 @@ export class CellImpl<T extends FabricValue>
     // server re-dedups against durable state, catching elements the local
     // replica had not loaded.
     const anchored = recursivelyAddIDIfNeeded(
-      value as unknown[],
+      value as FabricValue[],
       this._frame,
-    ) as unknown[];
+    );
     const existing = array;
     // A cell candidate matches an existing element by its (deterministic) link,
     // so re-adding the same keyed entity is a local no-op; a plain value matches
-    // by stored-value equality, mirroring the server's keyless dedup.
-    const alreadyPresent = (candidate: unknown) =>
+    // by content, mirroring the server's keyless dedup.
+    const alreadyPresent = (candidate: FabricValue) =>
       existing.some((element) =>
         isCell(candidate)
           ? areLinksSame(
@@ -1584,7 +1627,7 @@ export class CellImpl<T extends FabricValue>
             this.tx!,
             this.runtime,
           )
-          : deepEqual(element, candidate)
+          : valueEqual(element, candidate)
       );
     const toAdd = anchored.filter((candidate) => !alreadyPresent(candidate));
     if (toAdd.length === 0) {
@@ -1610,10 +1653,10 @@ export class CellImpl<T extends FabricValue>
           "help: use in handlers only, ensure cell is typed as number",
       );
     }
-    if (by === 0) {
+    if (!Number.isFinite(by) || by === 0) {
       throw new Error(
-        "Cell.increment() requires a non-zero amount\n" +
-          "help: a zero increment is a no-op; drop the call",
+        "Cell.increment() requires a finite non-zero amount\n" +
+          "help: a zero or non-finite increment is not a meaningful change",
       );
     }
     if (!this.synced) this.sync();
@@ -1668,7 +1711,7 @@ export class CellImpl<T extends FabricValue>
     const currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
-    const array = currentValue as unknown[];
+    const array = currentValue as FabricValue[];
     if (array === undefined) {
       return;
     }
@@ -1682,7 +1725,7 @@ export class CellImpl<T extends FabricValue>
     // matches by stored-value equality. The removed elements are the array's
     // stored representations (links stay as their sigil), so recording each one
     // as the op's value lets the server match the durable element exactly.
-    const matches = (element: unknown) =>
+    const matches = (element: FabricValue) =>
       isCell(ref)
         ? areLinksSame(
           element,
@@ -1692,7 +1735,7 @@ export class CellImpl<T extends FabricValue>
           this.tx!,
           this.runtime,
         )
-        : deepEqual(element, ref);
+        : valueEqual(element, ref as FabricValue);
     const removed = array.filter(matches);
     if (removed.length === 0) {
       return;
@@ -1730,6 +1773,11 @@ export class CellImpl<T extends FabricValue>
       },
     );
     const arraySchema = resolveSchema(resolvedLink.schema ?? this.schema);
+    // The element's index is unknown here (id-keyed addressing, and this
+    // method deliberately never reads the array), so a tuple schema's slot
+    // cannot be selected: elementSchemaFor falls back to the rest `items`
+    // schema for prefixItems arrays. A caller that knows the element sits
+    // in a tuple slot can pass the slot schema explicitly via `schema`.
     const elementSchema = schema ?? elementSchemaFor(arraySchema);
     return this.runtime.getCellFromEntityId(
       resolvedLink.space,
@@ -2158,7 +2206,7 @@ export class CellImpl<T extends FabricValue>
     // retry on conflict.
     if (!this.synced) this.sync();
 
-    const inlined = findAndInlineDataURILinks(value);
+    const inlined = findAndInlineDataUriLinks(value);
 
     // When asked to write only on change, read the current raw value and bail
     // out if it already equals what we'd write. `readValueOrThrow` mirrors the
@@ -2167,11 +2215,7 @@ export class CellImpl<T extends FabricValue>
     // is marked `ignoreReadForScheduling` (it must not register a
     // self-dependency that would re-trigger the writer) and
     // `internalVerifierRead` (it must not taint the transaction's CFC labels
-    // with this cell's own value). Comparison uses `valueEqual`, the
-    // `Fabric`-aware content equality the storage no-op gates rely on:
-    // `deepEqual` walks enumerable own-props and so conflates distinct
-    // same-class `FabricSpecialObject`s (e.g. `FabricBytes`/`FabricHash`),
-    // which would drop a real change.
+    // with this cell's own value).
     if (onlyIfDifferent) {
       const current = this.tx.readValueOrThrow(this.link, {
         meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
@@ -2803,7 +2847,7 @@ function maybeConvertArrayPathToDataURILink(
     return link;
   }
 
-  let rootValue: unknown;
+  let rootValue: FabricValue;
   try {
     rootValue = tx.readValueOrThrow({ ...link, path: [] }, {
       meta: ignoreReadForScheduling,
@@ -2812,11 +2856,11 @@ function maybeConvertArrayPathToDataURILink(
     return link;
   }
 
-  let current: unknown = rootValue;
+  let current: FabricValue = rootValue;
   const prefix: string[] = [];
   let candidate:
     | {
-      value: unknown;
+      value: FabricValue;
       path: string[];
       remainingPath: string[];
     }
@@ -2828,13 +2872,13 @@ function maybeConvertArrayPathToDataURILink(
     }
 
     const segment = link.path[i];
-    let next: unknown;
+    let next: FabricValue;
 
     if (Array.isArray(current)) {
       if (!isArrayIndexPropertyName(segment)) {
         break;
       }
-      next = (current as unknown as Record<string, unknown>)[segment];
+      next = (current as unknown as Record<string, FabricValue>)[segment];
       if (isRecord(next) && !isCellLink(next)) {
         candidate = {
           value: next,
@@ -2843,7 +2887,7 @@ function maybeConvertArrayPathToDataURILink(
         };
       }
     } else {
-      next = (current as Record<string, unknown>)[segment];
+      next = (current as Record<string, FabricValue>)[segment];
     }
 
     prefix.push(segment);
@@ -2861,7 +2905,7 @@ function maybeConvertArrayPathToDataURILink(
 
   return {
     ...link,
-    id: createDataCellURI(candidate.value, baseLink),
+    id: dataUriFromValueWithResolvedLinks(candidate.value, baseLink),
     path: candidate.remainingPath,
   };
 }
@@ -3204,6 +3248,13 @@ export function convertCellsToLinks(
  */
 export function isCell(value: any): value is Cell<any> {
   return value instanceof CellImpl;
+}
+
+/** Check whether a cell capability permits reading its stored value. */
+export function isReadableCell(
+  value: any,
+): value is Cell<any> | ReadonlyCell<any> {
+  return value instanceof CellImpl && value.isReadableCell();
 }
 
 /**

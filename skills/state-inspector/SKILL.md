@@ -79,7 +79,7 @@ stores state, not things a model infers from the data:
   (many tabs/devices) is benign; two distinct _principals_ is real cross-user
   contention. The tool draws this line for you — trust the `multiUser` flag, not
   the raw session count.
-- **Two at-rest value formats coexist, both handled:** modern `fvj1:`-prefixed
+- **Two at-rest value formats coexist, both handled:** modern `data-model`
   codec-json (ids `of:fid1:…`) and legacy plain-JSON sigils (ids `of:baedrei…`).
   You don't route between them; just know an id's shape tells you the era.
 - **Reconstruction is engine-faithful, and proven so.** State-at-`(branch, seq)`

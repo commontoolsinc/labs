@@ -8,7 +8,6 @@ import {
   clearMockResponses,
   enableMockMode,
 } from "@commonfabric/llm/client";
-import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -18,6 +17,7 @@ import { parseLink } from "../src/link-utils.ts";
 import type { Cell } from "../src/cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { waitForLlmSettled } from "./support/llm-result.ts";
 import { LLM_DERIVED_RESULT_STAMP_SCHEMA } from "../src/builtins/llm-schemas.ts";
 
 // Epic D1b (docs/history/plans/cfc-future-work-implementation.md): the `llm`,
@@ -79,33 +79,6 @@ function childDocIntegrity(
   } finally {
     rtx.commit();
   }
-}
-
-function waitForPendingToBecomeFalse(result: Cell<any>) {
-  const liveResult = result.withTx();
-  const timeoutMs = 5000;
-  return new Promise<void>((resolve, reject) => {
-    const start = Date.now();
-    const tick = async () => {
-      await liveResult.sync();
-      const pending = liveResult.key("pending").get() as unknown;
-      const directResult = liveResult.key("result").resolveAsCell().getRaw();
-      if (
-        pending === false ||
-        (pending === undefined && directResult !== undefined &&
-          !isDataUnavailable(directResult))
-      ) {
-        resolve();
-        return;
-      }
-      if (Date.now() - start > timeoutMs) {
-        reject(new Error("Timeout waiting for pending to become false"));
-        return;
-      }
-      setTimeout(tick, 10);
-    };
-    tick().catch(reject);
-  });
 }
 
 describe("CFC LlmDerived stamping — result-field stamp mechanism", () => {
@@ -230,8 +203,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     // Both model-output fields carry the stamp.
     expect(resultIntegrity(result)).toContainEqual(LLM_DERIVED_ATOM);
@@ -266,8 +238,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     expect(resultIntegrity(result)).toContainEqual(LLM_DERIVED_ATOM);
   });
@@ -298,8 +269,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     expect(result.key("result").get()).toBe("text reply");
     expect(resultIntegrity(result)).toContainEqual(LLM_DERIVED_ATOM);
@@ -320,7 +290,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
       (req) =>
         req.messages.some((m) =>
           typeof m.content === "string" && m.content.includes(testPrompt)
-        ) && req.schema.type === "object",
+        ) && typeof req.schema === "object" && req.schema.type === "object",
       {
         object: { title: "Model Title", summary: "Model summary" },
         id: "d1b-go-direct-1",
@@ -342,8 +312,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     expect(result.key("result").get()).toEqual({
       title: "Model Title",
@@ -401,8 +370,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     expect(result.key("result").get()).toEqual({ verdict: "model-produced" });
     expect(resultIntegrity(result)).toContainEqual(LLM_DERIVED_ATOM);
@@ -441,7 +409,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
       (req) =>
         req.messages.some((m) =>
           typeof m.content === "string" && m.content.includes(testPrompt)
-        ) && req.schema.type === "object",
+        ) && typeof req.schema === "object" && req.schema.type === "object",
       {
         object: { items: [{ name: "alpha" }, { name: "beta" }] },
         id: "d1b-go-child-doc-1",
@@ -464,8 +432,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     expect(result.key("result").get()).toEqual({
       items: [{ name: "alpha" }, { name: "beta" }],
@@ -544,7 +511,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
       (req) =>
         req.messages.some((m) =>
           typeof m.content === "string" && m.content.includes(testPrompt)
-        ) && req.schema.type === "object",
+        ) && typeof req.schema === "object" && req.schema.type === "object",
       {
         object: {
           tagged: [{ a: "x" }, { b: 2 }],
@@ -570,8 +537,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     expect(result.key("result").get()).toEqual({
       tagged: [{ a: "x" }, { b: 2 }],
@@ -642,9 +608,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
       );
       disabledTx.commit();
 
-      await expect(waitForPendingToBecomeFalse(result)).resolves
-        .toBeUndefined();
-      await disabledRuntime.idle();
+      await waitForLlmSettled(disabledRuntime, result);
 
       expect(resultIntegrity(result)).not.toContainEqual(LLM_DERIVED_ATOM);
     } finally {
@@ -676,7 +640,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
       (req) =>
         req.messages.some((m) =>
           typeof m.content === "string" && m.content.includes(testPrompt)
-        ) && req.schema.type === "object",
+        ) && typeof req.schema === "object" && req.schema.type === "object",
       { object: { verdict: "unstamped" }, id: "d1b-go-disabled-1" },
     );
 
@@ -701,9 +665,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
       );
       disabledTx.commit();
 
-      await expect(waitForPendingToBecomeFalse(result)).resolves
-        .toBeUndefined();
-      await disabledRuntime.idle();
+      await waitForLlmSettled(disabledRuntime, result);
 
       expect(result.key("result").get()).toEqual({ verdict: "unstamped" });
       expect(resultIntegrity(result)).not.toContainEqual(LLM_DERIVED_ATOM);

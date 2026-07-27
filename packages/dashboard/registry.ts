@@ -15,7 +15,7 @@ import { modelSpend } from "./tiles/model-spend.ts";
 import { discordOnline } from "./tiles/discord-online.ts";
 import { benchmark } from "./tiles/benchmark.ts";
 import { dau } from "./tiles/dau.ts";
-import { yourMetric } from "./tiles/your-metric.ts";
+import { githubMembers } from "./tiles/github-members.ts";
 import { recentRuns } from "./tiles/recent-runs.ts";
 
 export const TILES: Tile[] = [
@@ -34,10 +34,10 @@ export const TILES: Tile[] = [
   prodUptime,
   prodErrors,
   dau,
-  // Row 4: the remaining spend tiles + product/placeholder
+  // Row 4: the remaining spend and community tiles
   modelSpend,
   gcpSpend,
   discordOnline,
-  yourMetric,
+  githubMembers,
   recentRuns, // wide — renders full-width below the grid
 ];

@@ -86,7 +86,7 @@ interface TaskAnalysis {
 }
 
 // Note type from wish
-type NotePiece = {
+export type NotePiece = {
   [NAME]?: string;
   content?: string;
   title?: string;
@@ -182,8 +182,8 @@ const fetchLabels = handler<
 /**
  * Execute an edit-note suggestion
  */
-const executeEditNote = handler<
-  unknown,
+export const executeEditNote = handler<
+  Record<string, never>,
   {
     removeLabels: Stream<{ messageId: string; labels: string[] }>;
     emailId: string;
@@ -192,7 +192,7 @@ const executeEditNote = handler<
     taskCurrentLabelId: Writable<string>;
     hiddenTasks: Writable<string[]>;
     processingTasks: Writable<string[]>;
-    allPieces: Writable<NotePiece[]>;
+    pieceRegistry: Writable<NotePiece[]>;
   }
 >(
   (
@@ -205,7 +205,7 @@ const executeEditNote = handler<
       taskCurrentLabelId,
       hiddenTasks,
       processingTasks,
-      allPieces,
+      pieceRegistry,
     },
   ) => {
     const labelId = taskCurrentLabelId.get();
@@ -220,7 +220,7 @@ const executeEditNote = handler<
 
     try {
       // Find the target note
-      const pieces = allPieces.get() || [];
+      const pieces = pieceRegistry.get() || [];
       const targetNoteIndex = pieces.findIndex((piece: NotePiece) => {
         const name = piece?.[NAME] || "";
         // Notes are named "📝 Title", extract title for matching
@@ -233,7 +233,7 @@ const executeEditNote = handler<
 
       if (targetNoteIndex >= 0) {
         // Get the note cell and update content
-        const noteCell = allPieces.key(targetNoteIndex);
+        const noteCell = pieceRegistry.key(targetNoteIndex);
         const contentCell = noteCell.key("content");
         const currentContent = contentCell.get() || "";
 
@@ -271,8 +271,8 @@ const executeEditNote = handler<
 /**
  * Execute a create-note suggestion
  */
-const executeCreateNote = handler<
-  unknown,
+export const executeCreateNote = handler<
+  Record<string, never>,
   {
     removeLabels: Stream<{ messageId: string; labels: string[] }>;
     emailId: string;
@@ -281,7 +281,7 @@ const executeCreateNote = handler<
     taskCurrentLabelId: Writable<string>;
     hiddenTasks: Writable<string[]>;
     processingTasks: Writable<string[]>;
-    allPieces: Writable<NotePiece[] | Default<[]>>;
+    pieceRegistry: Writable<NotePiece[] | Default<[]>>;
   }
 >(
   (
@@ -294,7 +294,7 @@ const executeCreateNote = handler<
       taskCurrentLabelId,
       hiddenTasks,
       processingTasks,
-      allPieces,
+      pieceRegistry,
     },
   ) => {
     const labelId = taskCurrentLabelId.get();
@@ -315,8 +315,8 @@ const executeCreateNote = handler<
         isHidden: false,
       });
 
-      // Add to allPieces
-      allPieces.push(newNote);
+      // Register the new note.
+      pieceRegistry.push(newNote);
 
       if (DEBUG_TASKS) {
         console.log("[EmailTaskEngine] Created new note:", title);
@@ -467,8 +467,10 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   const sortNewestFirst = new Writable(true).for("sortNewestFirst");
 
   // Get all pieces for note discovery
-  const defaultWish = wish<{ allPieces: NotePiece[] }>({ query: "#default" });
-  const { allPieces } = resultOf(defaultWish.result);
+  const pieceRegistryWish = wish<NotePiece[]>({
+    query: "#pieceRegistry",
+  });
+  const pieceRegistry = resultOf(pieceRegistryWish.result);
 
   // Reactive clock for relative-date display; ticks every 60s so labels refresh.
   const nowCell = wish<number>({ query: "#now/60" });
@@ -536,7 +538,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
 
   // Get available notes for the LLM context
   const availableNotes = computed(() => {
-    const pieces = allPieces || [];
+    const pieces = pieceRegistry || [];
     return pieces
       .filter((piece: NotePiece) => {
         const name = piece?.[NAME];
@@ -592,7 +594,6 @@ Consider:
 Respond with the most appropriate action.`;
       }),
       schema: SUGGESTION_SCHEMA,
-      model: "anthropic:claude-sonnet-4-5",
     });
     const analysisResult = resultOf(analysisRequest);
     const result = computed(() => {
@@ -879,7 +880,7 @@ Respond with the most appropriate action.`;
                           taskCurrentLabelId,
                           hiddenTasks,
                           processingTasks,
-                          allPieces,
+                          pieceRegistry,
                         });
                       } else if (result?.actionType === "create-note") {
                         return executeCreateNote({
@@ -890,7 +891,7 @@ Respond with the most appropriate action.`;
                           taskCurrentLabelId,
                           hiddenTasks,
                           processingTasks,
-                          allPieces,
+                          pieceRegistry,
                         });
                       }
                       return null;

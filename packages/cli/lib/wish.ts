@@ -8,7 +8,7 @@ import {
   type Runtime,
 } from "@commonfabric/runner";
 import { loadManager, type SpaceConfig } from "./piece.ts";
-import { awaitSyncWithTimeout } from "./utils.ts";
+import { throwOnSpaceAuthorizationError } from "./utils.ts";
 
 /**
  * The blessed, headless read path for wish targets (CT-1834).
@@ -52,8 +52,6 @@ export interface WishSpec {
   schema?: JSONSchema;
   scope?: (DID | "~" | "." | "profile")[];
 }
-
-const WISH_SYNC_TIMEOUT_MS = 30_000;
 
 /**
  * Resolve a wish target headlessly against an already-constructed runtime.
@@ -110,10 +108,11 @@ export async function resolveWish(
   // when they materialize; pulling the result and syncing storage drains that.
   await result.pull();
   await runtime.idle();
-  await awaitSyncWithTimeout(
-    runtime.storageManager.synced(),
-    WISH_SYNC_TIMEOUT_MS,
-  );
+  await runtime.storageManager.synced();
+  // Surface a permanent authorization denial on the wish's own space with the
+  // real error. Scoped to `space`: a denied cross-space profile load stays a
+  // silent absent read, which is the wish's expected "no profile yet" outcome.
+  throwOnSpaceAuthorizationError(runtime.storageManager, space);
   await result.pull();
   await runtime.idle();
 

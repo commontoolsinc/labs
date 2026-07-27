@@ -70,7 +70,7 @@ const truncatedHash = (value: unknown): string =>
   hashStringOf(value).slice(0, 16);
 
 /**
- * Compact long ids (`data:application/json,...` URIs embed entire documents)
+ * Compact long ids (`data:` cell URIs embed entire documents)
  * to a recognizable prefix plus a structural hash, so oracle entries stay
  * cheap without losing discriminating power.
  */

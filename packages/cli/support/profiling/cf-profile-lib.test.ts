@@ -1,8 +1,11 @@
 import { assert, assertEquals, assertMatch, assertThrows } from "@std/assert";
 import {
+  createProfileOutputRelay,
+  DEBUGGER_WAITING_MESSAGE,
   escapeRegex,
   findInspectorWebSocketUrl,
   inspectWaitFlag,
+  type KillableProcess,
   mirrorOutput,
   parseProfileArgs,
   pickInspectPort,
@@ -202,6 +205,58 @@ Deno.test("stopCaptureOnce records a sent signal when kill fails", () => {
   });
 
   assertEquals(state.sent, true);
+});
+
+Deno.test("createProfileOutputRelay resolves the inspector URL exactly once", () => {
+  const urls: string[] = [];
+  const { onCliOutput } = createProfileOutputRelay({
+    captureRef: {},
+    captureStopState: { sent: false },
+    captureStopSignal: "SIGTERM",
+    onInspectorUrl: (url) => urls.push(url),
+  });
+
+  onCliOutput("startup noise\n");
+  onCliOutput("Debugger listening on ws://127.0.0.1:9229/abc\n");
+  // A later inspector line does not resolve a second time.
+  onCliOutput("Debugger listening on ws://127.0.0.1:9229/def\n");
+
+  assertEquals(urls, ["ws://127.0.0.1:9229/abc"]);
+});
+
+Deno.test("createProfileOutputRelay stops the capture on the debugger-waiting message", () => {
+  const signals: Deno.Signal[] = [];
+  const captureStopState = { sent: false };
+  const captureRef: { current?: KillableProcess } = {
+    current: { kill: (signal) => signals.push(signal) },
+  };
+  const { onCliOutput } = createProfileOutputRelay({
+    captureRef,
+    captureStopState,
+    captureStopSignal: "SIGTERM",
+    onInspectorUrl: () => {},
+  });
+
+  onCliOutput(`${DEBUGGER_WAITING_MESSAGE}\n`);
+
+  assertEquals(signals, ["SIGTERM"]);
+  assertEquals(captureStopState.sent, true);
+});
+
+Deno.test("createProfileOutputRelay's stopCapture is inert before a capture starts", () => {
+  const captureStopState = { sent: false };
+  const { onCliOutput, stopCapture } = createProfileOutputRelay({
+    captureRef: {}, // the capture process has not spawned yet
+    captureStopState,
+    captureStopSignal: "SIGTERM",
+    onInspectorUrl: () => {},
+  });
+
+  // The debugger message can arrive before the capture exists; nothing to signal.
+  onCliOutput(`${DEBUGGER_WAITING_MESSAGE}\n`);
+  stopCapture();
+
+  assertEquals(captureStopState.sent, false);
 });
 
 Deno.test("waitForCliStatusOrStopOnCaptureFailure stops the CLI after capture failure", async () => {

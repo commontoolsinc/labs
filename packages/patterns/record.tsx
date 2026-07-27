@@ -12,6 +12,7 @@
  */
 
 import {
+  type Cell,
   computed,
   type Default,
   handler,
@@ -24,6 +25,7 @@ import {
   type Stream,
   toCompactDebugString,
   UI,
+  type VNode,
   Writable,
 } from "commonfabric";
 import {
@@ -31,53 +33,14 @@ import {
   getAddableTypes,
   getDefinition,
 } from "./record/registry.ts";
+import { getNextUnusedLabel } from "./record/standard-labels.ts";
 // Import Note directly - we create it inline with proper linkPattern
 // (avoids global state for passing Record's pattern JSON)
-import Note from "./notes/note.tsx";
+import Note, { type NoteOutput } from "./notes/note.tsx";
 import { inferTypeFromModules } from "./record/template-registry.ts";
-import { TypePickerModule } from "./type-picker.tsx";
+import { TypePickerModule, type TypePickerOutput } from "./type-picker.tsx";
 import { ExtractorModule } from "./record/extraction/extractor-module.tsx";
-import { getResultSchema } from "./record/extraction/schema-utils.ts";
 import type { SubPieceEntry, TrashedSubPieceEntry } from "./record/types.ts";
-
-// ===== Standard Labels for Smart Defaults =====
-// When adding a second module of same type, pick next unused standard label
-const STANDARD_LABELS: Record<string, string[]> = {
-  email: ["Personal", "Work", "School", "Other"],
-  phone: ["Mobile", "Home", "Work", "Other"],
-  address: ["Home", "Work", "Billing", "Shipping", "Other"],
-};
-
-// Helper to get next unused standard label for a module type
-function getNextUnusedLabel(
-  type: string,
-  existingPieces: readonly SubPieceEntry[],
-): string | undefined {
-  const standards = STANDARD_LABELS[type];
-  if (!standards || standards.length === 0) return undefined;
-
-  // Collect labels already used by modules of this type
-  const usedLabels = new Set<string>();
-  for (const entry of existingPieces) {
-    if (entry.type === type) {
-      try {
-        // Access the label field from the piece pattern output
-        // Property access is reactive - framework handles Cell unwrapping
-        // deno-lint-ignore no-explicit-any
-        const piece = entry.piece as any;
-        const labelValue = piece?.label;
-        if (typeof labelValue === "string" && labelValue) {
-          usedLabels.add(labelValue);
-        }
-      } catch {
-        // Ignore errors from pieces without label field
-      }
-    }
-  }
-
-  // Return first unused standard label (or undefined if all used)
-  return standards.find((label) => !usedLabels.has(label));
-}
 
 // ===== Types =====
 
@@ -88,6 +51,7 @@ interface RecordInput {
 }
 
 export interface RecordOutput {
+  [UI]?: VNode;
   title?: string | Default<"">;
   subPieces?: SubPieceEntry[] | Default<[]>;
   trashedSubPieces?: TrashedSubPieceEntry[] | Default<[]>;
@@ -99,91 +63,69 @@ export interface RecordOutput {
     initialData?: Record<string, unknown>;
     result?: Writable<unknown>;
   }>;
+  /** Writes a structured summary of every module into the result cell. */
+  getSummary?: Stream<{ result?: Writable<unknown> }>;
+  /** Sets a directly-settable field on the module at the given index. */
+  updateModule?: Stream<{
+    index: number;
+    field: string;
+    value: unknown;
+    result?: Writable<unknown>;
+  }>;
+  /** Moves the module at the given index to the trash. */
+  removeModule?: Stream<{ index: number; result?: Writable<unknown> }>;
+  /** Sets this record's title. */
+  setTitle?: Stream<{ newTitle: string; result?: Writable<unknown> }>;
+  /** Writes the list of addable module types into the result cell. */
+  listModuleTypes?: Stream<{ result?: Writable<unknown> }>;
 }
 
-// ===== Auto-Initialize Notes + TypePicker (Two-Lift Pattern) =====
-// Based on chatbot-list-view.tsx pattern:
-// - Outer lift creates the pieces and calls inner lift
-// - Inner lift receives pieces as input and stores them
-// This works because the inner lift provides proper cause context
-//
-// TypePicker is a "controller module" - it receives parent Cells as input
-// so it can modify the parent's subPieces list when a template is selected.
-
-// Inner lift: stores the initial pieces (receives pieces as input)
-const storeInitialPieces = lift<{
-  notesPiece: any;
-  notesSchema: any;
-  typePickerPiece: any;
-  typePickerSchema: any;
+// ===== Auto-initialize Notes + TypePicker =====
+// Seed an empty Record with a pinned Notes module and a TypePicker module. The
+// two pieces and their schemas are built in the pattern body, which supplies
+// their durable identity, and passed in; this lift writes them into `subPieces`
+// when the Record is empty. It runs when something reads its result, which the
+// body does in `allEntriesWithIndex`, so the seed happens the first time the
+// module list is rendered. `isInitialized` latches on the first run whether or
+// not it seeded, so the seed happens at most once and a Record that is later
+// emptied is not re-seeded.
+const seedRecord = lift<{
+  currentPieces: SubPieceEntry[]; // Unwrapped value, used only for the guard
   subPieces: Writable<SubPieceEntry[]>;
+  // The pieces the seeder stores on the entries. Typed as cells so the handle
+  // survives the lift boundary; a plain `unknown` is read back as undefined and
+  // the module is lost.
+  notesPiece: Cell<NoteOutput>;
+  typePickerPiece: Cell<TypePickerOutput>;
   isInitialized: Writable<boolean>;
-}>(({
-  notesPiece,
-  notesSchema,
-  typePickerPiece,
-  typePickerSchema,
-  subPieces,
-  isInitialized,
-}) => {
-  if (!isInitialized.get()) {
-    subPieces.set([
-      { type: "notes", pinned: true, piece: notesPiece, schema: notesSchema },
-      {
-        type: "type-picker",
-        pinned: false,
-        piece: typePickerPiece,
-        schema: typePickerSchema,
-      },
-    ]);
-    isInitialized.set(true);
-    return notesPiece; // Return notes piece as primary reference
-  }
-});
-
-// Outer lift: checks if empty, creates pieces, calls inner lift
-// TypePicker uses ContainerCoordinationContext protocol for parent access
-// Note: We receive recordPatternJson as input to avoid capturing Record before it's defined
-const initializeRecord = lift<{
-  currentPieces: SubPieceEntry[]; // Unwrapped value, not Cell
-  subPieces: Writable<SubPieceEntry[]>;
-  trashedSubPieces: Writable<TrashedSubPieceEntry[]>;
-  isInitialized: Writable<boolean>;
-  recordPatternJson: string; // Computed that returns Record JSON string
 }>(({
   currentPieces,
   subPieces,
-  trashedSubPieces,
+  notesPiece,
+  typePickerPiece,
   isInitialized,
-  recordPatternJson,
 }) => {
-  if ((currentPieces || []).length === 0) {
-    // Create Note as default module (rendered via cf-render variant="tile" → its [TILE_UI])
-    // Pass recordPatternJson so [[wiki-links]] create Record pieces instead of Note pieces
-    const notesPiece = Note({ linkPattern: recordPatternJson });
-
-    // Capture schema for dynamic discovery
-    const notesSchema = getResultSchema(notesPiece);
-
-    // TypePicker receives Cells as top-level props (CTS handles serialization correctly)
-    // NOTE: Cells must be top-level, not nested in a context object!
-    const typePickerPiece = TypePickerModule({
-      entries: subPieces,
-      trashedEntries: trashedSubPieces,
-    });
-
-    // Capture schema for dynamic discovery
-    const typePickerSchema = getResultSchema(typePickerPiece);
-
-    return storeInitialPieces({
-      notesPiece,
-      notesSchema,
-      typePickerPiece,
-      typePickerSchema,
-      subPieces,
-      isInitialized,
-    });
+  if (!isInitialized.get()) {
+    if ((currentPieces || []).length === 0) {
+      subPieces.set([
+        {
+          type: "notes",
+          pinned: true,
+          piece: notesPiece,
+        },
+        {
+          type: "type-picker",
+          pinned: false,
+          piece: typePickerPiece,
+        },
+      ]);
+    }
+    isInitialized.set(true);
   }
+
+  // A stable, readable result so the pattern body can put this lift in the
+  // Record UI's demand graph.
+  return true;
 });
 
 // Helper to check if a module has settings UI
@@ -294,14 +236,12 @@ const addSubPiece = handler<
     } as any)
     : createSubPiece(type, initialValues);
 
-  // Capture schema at creation time for dynamic discovery
-  const schema = getResultSchema(piece);
   sc.set([...current, {
     type,
     pinned: false,
     collapsed: false,
     piece,
-    schema,
+    label: nextLabel,
   }]);
   sat.set("");
 });
@@ -497,13 +437,23 @@ const toggleTrashExpanded = handler<unknown, { expanded: Writable<boolean> }>(
 // IMPORTANT: Handlers must use result.set() to return data to the LLM.
 // The 'result' Cell is injected by llm-dialog.ts invoke() - return statements are ignored!
 
+// SubPieceEntry as an LLM handler that touches the piece must type it. The
+// shared SubPieceEntry declares `piece: unknown`, and a field typed `unknown`
+// reads back across the handler boundary as undefined, so a handler that needs
+// to read the piece's fields or write them types the piece as a live Cell
+// instead. The handler still receives the same `subPieces` cell; the call site
+// casts to bridge the two views.
+type SubPieceEntryHandle =
+  & Omit<SubPieceEntry, "piece">
+  & { piece: Cell<Record<string, unknown>> };
+
 // Get a structured summary of all modules in this record
 // Returns module types, their data, and schemas for LLM context
 const handleGetSummary = handler<
   { result?: Writable<unknown> },
   {
     title: Writable<string>;
-    subPieces: Writable<SubPieceEntry[]>;
+    subPieces: Writable<SubPieceEntryHandle[]>;
   }
 >(({ result }, { title, subPieces }) => {
   const modules = subPieces.get() || [];
@@ -512,38 +462,20 @@ const handleGetSummary = handler<
     moduleCount: modules.length,
     modules: modules.map((entry, index) => {
       const def = getDefinition(entry.type);
-      // Extract data from piece - access common fields reactively
-      // deno-lint-ignore no-explicit-any
-      const piece = entry.piece as any;
+      // Read the piece's current field values. The piece is a live Cell here,
+      // so `get()` resolves the whole module value; a plain read off the
+      // `unknown`-typed handle would come back undefined. Every own field is
+      // reported except callable outputs (streams); a module whose value cannot
+      // be resolved contributes empty data rather than failing the whole
+      // summary.
       const moduleData: Record<string, unknown> = {};
-
-      // Try to extract common fields based on module type
       try {
-        // Most modules have a primary value field
-        if (piece?.label !== undefined) moduleData.label = piece.label;
-        if (piece?.value !== undefined) moduleData.value = piece.value;
-        if (piece?.content !== undefined) moduleData.content = piece.content;
-        if (piece?.address !== undefined) moduleData.address = piece.address;
-        if (piece?.email !== undefined) moduleData.email = piece.email;
-        if (piece?.phone !== undefined) moduleData.phone = piece.phone;
-        if (piece?.rating !== undefined) moduleData.rating = piece.rating;
-        if (piece?.tags !== undefined) moduleData.tags = piece.tags;
-        if (piece?.status !== undefined) moduleData.status = piece.status;
-        if (piece?.nickname !== undefined) moduleData.nickname = piece.nickname;
-        if (piece?.icon !== undefined) moduleData.icon = piece.icon;
-        if (piece?.birthDate !== undefined) {
-          moduleData.birthDate = piece.birthDate;
-        }
-        if (piece?.birthYear !== undefined) {
-          moduleData.birthYear = piece.birthYear;
-        }
-        if (piece?.url !== undefined) moduleData.url = piece.url;
-        if (piece?.notes !== undefined) moduleData.notes = piece.notes;
-        if (piece?.occurrences !== undefined) {
-          moduleData.occurrences = piece.occurrences;
+        const pieceValue = entry.piece?.get() ?? {};
+        for (const [key, fieldValue] of Object.entries(pieceValue)) {
+          if (typeof fieldValue !== "function") moduleData[key] = fieldValue;
         }
       } catch {
-        // Ignore errors from pieces without expected fields
+        // A module whose value cannot be resolved contributes no data.
       }
 
       return {
@@ -555,7 +487,6 @@ const handleGetSummary = handler<
         collapsed: entry.collapsed || false,
         note: entry.note,
         data: moduleData,
-        schema: entry.schema,
       };
     }),
   };
@@ -603,12 +534,17 @@ const handleAddModule = handler<
 
   const current = sc.get() || [];
 
-  // Get smart default label for modules that support it
+  // Get smart default label for modules that support it. initialData may carry
+  // an explicit label that overrides the smart default; record the effective
+  // label on the entry so the next add can see it.
   const nextLabel = getNextUnusedLabel(type, current);
   const initialValues = {
     ...(nextLabel ? { label: nextLabel } : {}),
     ...initialData,
   };
+  const entryLabel = typeof initialValues.label === "string"
+    ? initialValues.label
+    : undefined;
 
   // Create the module - special cases handled
   let piece: unknown;
@@ -632,15 +568,12 @@ const handleAddModule = handler<
     piece = createSubPiece(type, initialValues);
   }
 
-  // Capture schema at creation time
-  const schema = getResultSchema(piece);
-
   sc.set([...current, {
     type,
     pinned: false,
     collapsed: false,
     piece,
-    schema,
+    label: entryLabel,
   }]);
 
   if (result) {
@@ -659,7 +592,7 @@ const handleAddModule = handler<
 // value: new value
 const handleUpdateModule = handler<
   { index: number; field: string; value: unknown; result?: Writable<unknown> },
-  { subPieces: Writable<SubPieceEntry[]> }
+  { subPieces: Writable<SubPieceEntryHandle[]> }
 >(({ index, field, value, result }, { subPieces: sc }) => {
   const current = sc.get() || [];
 
@@ -676,42 +609,40 @@ const handleUpdateModule = handler<
   }
 
   const entry = current[index];
-  // deno-lint-ignore no-explicit-any
-  const piece = entry.piece as any;
+  const piece = entry.piece;
 
   if (!piece) {
     if (result) result.set({ success: false, error: "Module piece not found" });
     return;
   }
 
+  // Only the piece's own, non-callable fields may be written. A path write
+  // through `piece.key(field)` would otherwise create whatever field it is
+  // handed; `Object.hasOwn` keeps a caller to the module's real fields (an `in`
+  // test would also admit inherited names like `constructor`), and the callable
+  // check keeps it off the module's streams.
+  const pieceValue = piece.get();
+  if (
+    !pieceValue || !Object.hasOwn(pieceValue, field) ||
+    typeof pieceValue[field] === "function"
+  ) {
+    if (result) {
+      result.set({
+        success: false,
+        error:
+          `Field ${field} is not a settable field on module type ${entry.type}`,
+      });
+    }
+    return;
+  }
+
   try {
-    // Try to access the field as a Cell and set it
-    const fieldCell = piece[field];
-    if (fieldCell && typeof fieldCell.set === "function") {
-      fieldCell.set(value);
-      if (result) {
-        result.set({
-          success: true,
-          message: `Updated ${field} to ${toCompactDebugString(value)}`,
-        });
-      }
-    } else if (fieldCell && typeof fieldCell.key === "function") {
-      // It might be a nested cell - try setting via parent
-      if (result) {
-        result.set({
-          success: false,
-          error:
-            `Field ${field} exists but is not directly settable. Try a more specific path.`,
-        });
-      }
-    } else {
-      if (result) {
-        result.set({
-          success: false,
-          error:
-            `Field ${field} not found or not a Cell on module type ${entry.type}`,
-        });
-      }
+    piece.key(field).set(value);
+    if (result) {
+      result.set({
+        success: true,
+        message: `Updated ${field} to ${toCompactDebugString(value)}`,
+      });
     }
   } catch (err) {
     if (result) {
@@ -816,6 +747,7 @@ const createSibling = handler<
     pinned: false,
     collapsed: false,
     piece,
+    label: nextLabel,
   });
   sc.set(updated);
 });
@@ -867,14 +799,24 @@ const Record = pattern<RecordInput, RecordOutput>(
     const recordPatternJson = computed(() => JSON.stringify(Record));
 
     // ===== Auto-initialize Notes + TypePicker =====
-    // Capture return value to force lift execution (fixes wiki-link creation)
+    // Build the two default modules in the pattern body, which supplies their
+    // durable identity. The Note carries recordPatternJson so its [[wiki-links]]
+    // resolve to Record pieces rather than Note pieces; the TypePicker gets the
+    // parent list cells so it can rewrite them when the user picks a template.
+    // `seedRecord` writes these into an empty Record, and reading its result (in
+    // `allEntriesWithIndex`) is what demands the seed.
     const isInitialized = new Writable(false);
-    const _initialized = initializeRecord({
+    const seedNotesPiece = Note({ linkPattern: recordPatternJson });
+    const seedTypePickerPiece = TypePickerModule({
+      entries: subPieces,
+      trashedEntries: trashedSubPieces,
+    });
+    const recordSeeded = seedRecord({
       currentPieces: subPieces,
       subPieces,
-      trashedSubPieces,
+      notesPiece: seedNotesPiece,
+      typePickerPiece: seedTypePickerPiece,
       isInitialized,
-      recordPatternJson,
     });
 
     // ===== Computed Values =====
@@ -900,6 +842,10 @@ const Record = pattern<RecordInput, RecordOutput>(
     // IMPORTANT: displayInfo uses getDisplayInfo (plain helper) - this works because
     //   computed() transforms .map() callbacks to properly unwrap reactive values
     const allEntriesWithIndex = computed(() => {
+      // Reading `recordSeeded` puts `seedRecord` in this UI's demand graph, so a
+      // fresh Record fills in its Notes + TypePicker modules the first time it
+      // is rendered; there is nothing to list until the seeder has run.
+      if (!recordSeeded) return [];
       const expandedIdx = expandedIndex.get();
       return subPieces.map((entry, index) => {
         // Get display info using plain helper function
@@ -2253,9 +2199,15 @@ const Record = pattern<RecordInput, RecordOutput>(
       "#record": true,
       // LLM-callable streams for Omnibot integration
       // Omnibot can invoke these via: invoke({ "@link": "/of:record-id/getSummary" }, {})
-      getSummary: handleGetSummary({ title, subPieces }),
+      // getSummary and updateModule read the piece handles the list holds, so
+      // they take the `SubPieceEntryHandle` view of `subPieces`, which types
+      // the piece as a live Cell. The cell is the same either way; the cast
+      // only bridges the two static views.
+      // deno-lint-ignore no-explicit-any
+      getSummary: handleGetSummary({ title, subPieces: subPieces as any }),
       addModule: handleAddModule({ subPieces, trashedSubPieces, title }),
-      updateModule: handleUpdateModule({ subPieces }),
+      // deno-lint-ignore no-explicit-any
+      updateModule: handleUpdateModule({ subPieces: subPieces as any }),
       removeModule: handleRemoveModule({ subPieces, trashedSubPieces }),
       setTitle: handleSetTitle({ title }),
       listModuleTypes: handleListModuleTypes({}),

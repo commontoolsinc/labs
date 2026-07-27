@@ -27,6 +27,8 @@ import {
   UI,
   useCancelGroup,
 } from "@commonfabric/runner";
+import type { CfcConfClause } from "@commonfabric/runner/cfc";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import type { CellRef } from "@commonfabric/runtime-client";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -679,7 +681,7 @@ export class WorkerReconciler {
   private staticPropAsAtomList(
     props: WorkerProps | null | undefined,
     key: string,
-  ): readonly unknown[] | undefined {
+  ): readonly CfcConfClause[] | undefined {
     if (!props || typeof props !== "object" || !(key in props)) {
       return undefined;
     }
@@ -691,9 +693,9 @@ export class WorkerReconciler {
       return undefined;
     }
     if (Array.isArray(value)) {
-      return value;
+      return value as readonly CfcConfClause[];
     }
-    return [value];
+    return [value as CfcConfClause];
   }
 
   private nodePropForRenderPolicy(
@@ -749,7 +751,7 @@ export class WorkerReconciler {
   private nodePropAsAtomList(
     node: WorkerVNode,
     keys: readonly string[],
-  ): readonly unknown[] | undefined {
+  ): readonly CfcAtom[] | undefined {
     for (const key of keys) {
       const value = this.nodePropForRenderPolicy(node, key);
       if (typeof value === "function") {
@@ -761,14 +763,14 @@ export class WorkerReconciler {
       if (resolved === undefined) {
         continue;
       }
-      return Array.isArray(resolved) ? resolved : [resolved];
+      return (Array.isArray(resolved) ? resolved : [resolved]) as CfcAtom[];
     }
     return undefined;
   }
 
   private requiredAuthorshipIntegrityFromAuthor(
     node: WorkerVNode,
-  ): readonly unknown[] | undefined {
+  ): readonly CfcAtom[] | undefined {
     const author = this.nodePropForRenderPolicy(node, "author") ??
       this.nodePropForRenderPolicy(node, "$author");
     if (!isCell(author)) {
@@ -967,7 +969,7 @@ export class WorkerReconciler {
 
   private normalizeAtomBound(
     labels: readonly unknown[] | undefined,
-  ): readonly unknown[] | undefined {
+  ): readonly CfcConfClause[] | undefined {
     if (labels === undefined) {
       return undefined;
     }
@@ -975,9 +977,9 @@ export class WorkerReconciler {
   }
 
   private narrowMaxConfidentiality(
-    parentMax: readonly unknown[] | undefined,
-    localMax: readonly unknown[] | undefined,
-  ): readonly unknown[] | undefined {
+    parentMax: readonly CfcConfClause[] | undefined,
+    localMax: readonly CfcConfClause[] | undefined,
+  ): readonly CfcConfClause[] | undefined {
     if (parentMax === undefined) {
       return localMax;
     }
@@ -1120,8 +1122,8 @@ export class WorkerReconciler {
    * admit only bare atoms — an OR-clause never matches either, staying closed.
    */
   private resolvedConfidentialityRenderable(
-    confidentiality: readonly unknown[],
-    integrity: readonly unknown[],
+    confidentiality: readonly CfcConfClause[],
+    integrity: readonly CfcAtom[],
     policy: RenderPolicy,
   ): boolean {
     const resolved = this.resolveRenderConfidentiality!({
@@ -1185,7 +1187,9 @@ export class WorkerReconciler {
     return this.canRenderConfidentialityAtom(atom, policy);
   }
 
-  private confidentialityLabels(labelView: CfcLabelView): readonly unknown[] {
+  private confidentialityLabels(
+    labelView: CfcLabelView,
+  ): readonly CfcConfClause[] {
     return ContextualFlowControl.uniqueAtoms(
       labelView.entries.flatMap((entry) => [
         ...(entry.label.confidentiality ?? []),
@@ -1433,7 +1437,7 @@ export class WorkerReconciler {
     );
   }
 
-  private integrityLabels(labelView: CfcLabelView): readonly unknown[] {
+  private integrityLabels(labelView: CfcLabelView): readonly CfcAtom[] {
     return ContextualFlowControl.uniqueAtoms(
       labelView.entries.flatMap((entry) =>
         entry.path.length === 0 ? [...(entry.label.integrity ?? [])] : []
@@ -3927,13 +3931,9 @@ export class WorkerReconciler {
     } else if (value === null || value === undefined || value === false) {
       return "";
     } else if (typeof value === "object") {
-      // Handle unresolved alias objects
-      if (value && "$alias" in value) {
-        return "";
-      } else {
-        console.warn("unexpected object when value was expected", value);
-        return JSON.stringify(value);
-      }
+      // Objects are not expected here - warn and render their JSON as a fallback
+      console.warn("unexpected object when value was expected", value);
+      return JSON.stringify(value);
     }
     return String(value);
   }

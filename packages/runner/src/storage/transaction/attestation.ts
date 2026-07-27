@@ -1,8 +1,8 @@
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import {
   type FabricPlainObject,
   type FabricValue,
+  valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import type {
@@ -23,7 +23,12 @@ import { unclaimed } from "@commonfabric/memory/fact";
 import { getLogger } from "@commonfabric/utils/logger";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { toTransactionDocumentValue } from "../v2-document.ts";
-import { decodeDataURIPayloadText } from "../../data-uri.ts";
+import {
+  extractDataUriPayloadText,
+  isDataUri,
+  isDataUriMediaType,
+  valueFromDataUriPayloadText,
+} from "@commonfabric/data-model/data-uri-codec";
 
 const logger = getLogger("attestation", {
   enabled: false,
@@ -129,8 +134,7 @@ export const attest = (
  * of the fact in the given replica otherwise function fails with
  * `IStorageTransactionInconsistent` error.
  *
- * Optimized to check reference equality before falling back to JSON.stringify
- * comparison, avoiding expensive hashing when the replica state is unchanged.
+ * Values are compared with `valueEqual()`.
  */
 export const claim = (
   { address, value: expected }: IAttestation,
@@ -148,15 +152,7 @@ export const claim = (
     )
     : read(source, address)?.ok?.value;
 
-  // Fast path: reference equality check avoids expensive comparison
-  // when the replica state hasn't changed since the original read
-  // TODO(danfuzz): This compares a stored document value (the read/attested
-  // value) with `deepEqual`, which mishandles `FabricValue`: two same-class
-  // `FabricPrimitive` values (state in private `#fields`, zero own-props)
-  // compare equal regardless of value, so a changed Fabric value can be
-  // mis-detected as unchanged. Use a Fabric-aware equality for stored-value
-  // comparison.
-  if (expected === actual || deepEqual(expected, actual)) {
+  if (valueEqual(expected, actual)) {
     return { ok: state };
   } else {
     return {
@@ -199,7 +195,8 @@ export const resolve = (
   while (++at < path.length) {
     const key = path[at];
     if (isRecord(value)) {
-      value = (value as FabricPlainObject)[key];
+      const record = value as FabricPlainObject;
+      value = Object.hasOwn(record, key) ? record[key] : undefined;
     } else {
       // If the value is undefined, the path doesn't exist, but we can still
       // write onto it. Return error with last valid path component.
@@ -247,54 +244,44 @@ export const load = (
   >;
 
   try {
-    // Parse data URI using URL constructor
-    const url = new URL(address.id);
-
-    if (url.protocol !== "data:") {
+    if (!isDataUri(address.id)) {
       result = {
-        error: InvalidDataURIError(
-          "Invalid data URI: protocol must be 'data:'",
+        error: UnsupportedMediaTypeError(
+          `Unsupported media type in data URI: ${address.id.slice(0, 64)}`,
         ),
       };
-    } else {
-      const [mediaTypeAndParams, data] = url.pathname.split(",");
+      dataURICache.put(cacheKey, result);
+      return result;
+    }
 
-      if (data === undefined) {
+    const { mediaType, text } = extractDataUriPayloadText(address.id);
+
+    if (isDataUriMediaType(mediaType)) {
+      let value: FabricValue;
+      try {
+        // The payload encodes the cell VALUE; the document that the
+        // address grammar resolves against (`["value", ...]`-rooted and
+        // facet paths) is synthesized here, at the one reader that
+        // thinks in documents. Synthesis also guarantees payload
+        // content can never alias a document facet (`cfc`, `source`).
+        value = Object.freeze({
+          value: valueFromDataUriPayloadText(text),
+        });
+        result = { ok: { address: { ...address, path: [] }, value } };
+      } catch (error) {
+        const reason = error as Error;
         result = {
           error: InvalidDataURIError(
-            "Invalid data URI format: missing comma separator",
+            `Failed to decode data URI payload: ${reason.message}`,
           ),
         };
-      } else {
-        // Parse media type and parameters
-        const params = mediaTypeAndParams.split(";");
-        const mediaType = params[0] || "text/plain";
-        const isBase64 = params.includes("base64");
-
-        // Decode data
-        const content = isBase64 ? atob(data) : decodeURIComponent(data);
-
-        if (mediaType === "application/json") {
-          let value: FabricValue;
-          try {
-            value = decodeDataURIPayloadText(content);
-            result = { ok: { address: { ...address, path: [] }, value } };
-          } catch (error) {
-            const reason = error as Error;
-            result = {
-              error: InvalidDataURIError(
-                `Failed to decode data URI payload: ${reason.message}`,
-              ),
-            };
-          }
-        } else {
-          result = {
-            error: UnsupportedMediaTypeError(
-              `Unsupported media type ${mediaType}`,
-            ),
-          };
-        }
       }
+    } else {
+      result = {
+        error: UnsupportedMediaTypeError(
+          `Unsupported media type ${mediaType}`,
+        ),
+      };
     }
   } catch (error) {
     const reason = error as Error;

@@ -596,11 +596,72 @@ Deno.test("pager: a prompt button's result waits for the press animation to fini
     "the result waited for the press timer, so it never drew",
   );
 
+  const partial = await run([
+    ...openRevert,
+    { bytes: new Uint8Array([0xce]) }, // first byte of a split UTF-8 key
+    { eof: true },
+  ]);
+  assert(
+    !partial.some((w) => w.includes("Cancelled")),
+    "an incomplete next key kept the pressed frame on screen",
+  );
+
   const fired = await run([...openRevert, { fireTimers: true }, { eof: true }]);
   assert(
     fired.some((w) => w.includes("Cancelled")),
     "the press timer drew the result",
   );
+});
+
+Deno.test("pager: paints a pressed button before its synchronous action starts", async () => {
+  const { doc, source: base, dir } = editableDoc();
+  try {
+    const { deps, writes } = makeFake({
+      steps: [
+        { bytes: enc("e") },
+        { bytes: enc("X") },
+        { bytes: enc("\x18") }, // Ctrl-X
+        { bytes: enc("\x13") }, // Ctrl-S: open the amend prompt
+        { bytes: enc("a") }, // Amend commit
+        { eof: true },
+      ],
+    });
+    let promptFramesWhenSaveStarted = -1;
+    let pressedFrameWasDistinct = false;
+    const source = {
+      ...base,
+      pendingAmend: () => ({
+        sha: "0123456789abcdef0123456789abcdef01234567",
+        subject: "A commit subject",
+      }),
+      save: (
+        text: string,
+        baseline?: string,
+        options?: Parameters<typeof base.save>[2],
+      ) => {
+        const promptFrames = writes.filter((write) =>
+          write.includes("Amend commit 012345678")
+        );
+        promptFramesWhenSaveStarted = promptFrames.length;
+        pressedFrameWasDistinct = promptFrames[0] !== promptFrames[1];
+        return base.save(text, baseline, options);
+      },
+    };
+
+    await runPager(doc, OPTS, undefined, source, deps);
+
+    assertEquals(
+      promptFramesWhenSaveStarted,
+      2,
+      "the ordinary prompt frame and its pressed frame were written before save",
+    );
+    assert(
+      pressedFrameWasDistinct,
+      "the second frame visibly pressed the button",
+    );
+  } finally {
+    Deno.removeSync(dir, { recursive: true });
+  }
 });
 
 Deno.test("pager: a committing button plays its press before the pager quits", async () => {

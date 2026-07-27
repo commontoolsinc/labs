@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
+  isNativeError,
   NATIVE_TAGS,
   tagFromNativeClass,
   tagFromNativeValue,
@@ -32,8 +33,9 @@ describe("native-type-tags", () => {
         }
       }
       const exotic = new MyFancyError("exotic");
-      // Constructor is MyFancyError, not in the switch -- falls back to
-      // Error.isError().
+      // Recognized by class: `tagFromNativeClass()` walks the prototype chain,
+      // so an `Error` subclass is tagged without reaching the value-level
+      // fallbacks below.
       expect(tagFromNativeValue(exotic)).toBe(NATIVE_TAGS.Error);
     });
 
@@ -70,6 +72,32 @@ describe("native-type-tags", () => {
       expect(tagFromNativeValue(forged)).toBe(NATIVE_TAGS.Object);
     });
 
+    it("returns `Error` tag for an `Error` whose prototype was severed", () => {
+      const severed = new Error("severed");
+      Object.setPrototypeOf(severed, null);
+
+      // No reachable constructor, so the class-level lookup yields nothing and
+      // the `Error.isError()` fallback is what recognizes it.
+      expect((severed as { constructor?: unknown }).constructor).toBe(
+        undefined,
+      );
+      expect(tagFromNativeValue(severed)).toBe(NATIVE_TAGS.Error);
+    });
+
+    it("returns `Array` tag for an `Array` subclass", () => {
+      class MyArray extends Array {}
+
+      expect(tagFromNativeClass(MyArray)).toBe(null);
+      expect(tagFromNativeValue(new MyArray())).toBe(NATIVE_TAGS.Array);
+    });
+
+    it("returns `Array` tag for an array whose prototype was severed", () => {
+      const severed = [1, 2];
+      Object.setPrototypeOf(severed, null);
+
+      expect(tagFromNativeValue(severed)).toBe(NATIVE_TAGS.Array);
+    });
+
     it("returns `Map` tag for `Map` instances", () => {
       expect(tagFromNativeValue(new Map())).toBe(NATIVE_TAGS.Map);
     });
@@ -103,6 +131,28 @@ describe("native-type-tags", () => {
     it("returns `Object` tag for null-prototype objects (no constructor)", () => {
       const obj = Object.create(null);
       expect(tagFromNativeValue(obj)).toBe(NATIVE_TAGS.Object);
+    });
+
+    it("classifies values when `Error.isError` is unavailable", () => {
+      const descriptor = Object.getOwnPropertyDescriptor(Error, "isError");
+      Object.defineProperty(Error, "isError", {
+        value: undefined,
+        writable: true,
+        configurable: true,
+      });
+
+      try {
+        expect(isNativeError(new Error("test"))).toBe(true);
+        expect(tagFromNativeValue(Object.create(null))).toBe(
+          NATIVE_TAGS.Object,
+        );
+      } finally {
+        if (descriptor) {
+          Object.defineProperty(Error, "isError", descriptor);
+        } else {
+          delete (Error as { isError?: unknown }).isError;
+        }
+      }
     });
 
     it("returns `HasToJSON` tag for plain objects with `toJSON()`", () => {

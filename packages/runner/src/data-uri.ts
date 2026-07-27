@@ -1,29 +1,33 @@
 /**
- * The `data:` URI codec. The runner uses `application/json` `data:` URIs as
- * self-contained content-addressed cell ids: the URI _is_ its content, so
- * reading such a cell means decoding its own id. This module holds the whole
- * matched set -- the minting side ({@link createDataCellURI}) and the reading
- * side ({@link getJSONFromDataURI} and {@link decodeDataURIPayloadText}) --
- * because the encoding chosen by the one dictates what is decodable by the
- * other, and colocating them is what keeps a change to either from drifting
- * away from its partner. {@link findAndInlineDataURILinks}, which dissolves
- * `data:` URI links back into the values they carry, lives here for the same
- * reason: it is a direct consumer of the decode half.
+ * Cell-side integration of the `data:` cell URI codec. The dividing line
+ * between this module and `data-model`'s `data-uri-codec.ts` is the need
+ * for the cell/link machinery: everything that can be expressed against
+ * `data-model` alone lives in the codec (in that package); this module
+ * holds the two operations that cannot -- {@link dataUriFromValueWithResolvedLinks},
+ * which rewrites relative links against a base before encoding, and
+ * {@link findAndInlineDataUriLinks}, which dissolves `data:` URI links
+ * back into the values they carry.
  *
- * The dependency on the link machinery is one-way: this module imports from
- * `link-utils.ts`, and `link-utils.ts` imports nothing back. The
+ * The payload encodes the cell's VALUE, and the codec's decode entry
+ * points return that value. The document view that the address grammar
+ * requires (`["value", ...]`-rooted and facet paths) is synthesized by the
+ * one reader that thinks in documents -- `storage/transaction/
+ * attestation.ts`'s `load()` -- which also guarantees that payload content
+ * can never alias a document facet (`cfc`, `source`).
+ *
+ * The dependency on the link machinery is one-way: this module imports
+ * from `link-utils.ts`, and `link-utils.ts` imports nothing back. The
  * relationship with `cell.ts` is mutual -- this module needs `isCell` (and
- * the `Cell` type) while `cell.ts` consumes the codec -- the same two-way
- * shape `cell.ts` and `link-utils.ts` had while the codec lived there,
+ * the `Cell` type) while `cell.ts` consumes it -- the same two-way shape
+ * `cell.ts` and `link-utils.ts` had while these functions lived there,
  * relocated rather than newly introduced.
  */
 
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
-  seemsLikeJsonEncodedFabricValue,
-  valueFromJson,
-} from "@commonfabric/data-model/codec-json";
-import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
+  FabricInstance,
+  FabricPrimitive,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
 import { type Cell, isCell } from "./cell.ts";
 import { isPrimitiveCellLink, type NormalizedLink } from "./link-types.ts";
@@ -35,65 +39,50 @@ import {
 } from "./link-utils.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import type { URI } from "./sigil-types.ts";
-
-/**
- * `ReconstructionContext` for decoding `data:` URI payloads. Links at this
- * boundary are sigil (plain) data rather than cell references, so no cell
- * reconstruction is ever needed; this context exists so that an unexpected
- * cell reference produces a message that names the boundary.
- */
-const dataUriReconstructionContext = new EmptyReconstructionContext(
-  true,
-  "no cell reconstruction at the `data:` URI boundary",
-);
+import {
+  dataUriFromValue,
+  valueFromDataUri,
+} from "@commonfabric/data-model/data-uri-codec";
 
 /**
  * Makes a `data:` URI that names a cell whose content is carried in the id
  * itself. Reading such a cell means decoding its own id; there is no document
  * in a space to fetch.
  *
- * The encoded payload is a storage document of the conventional shape
- * `{"value": <data>}`, with readers unwrapping `value` before walking a link's
- * path.
+ * The encoded payload is the cell's value itself; the document view that
+ * the address grammar needs is synthesized on read (see the module doc).
  *
  * This is the encode half of the matched set this module exists to hold;
- * {@link getJSONFromDataURI} is what reads back what this writes. The decode
- * half accepts both the bare-JSON form written here and the standard
- * `data-model` `FabricValue` encoding (tagged `fvj1:`); see the `TODO` in the
- * body below about moving this side onto the latter.
+ * {@link valueFromDataUri} is what reads back what this writes. Both
+ * sides speak only the standard `data-model` `FabricValue` encoding, which
+ * carries that codec's prefix tag.
  *
  * Each primitive cell link within `data` is rewritten to a full sigil link,
  * with relative links resolved against `base`. That rewriting is what makes
  * the result self-contained: the ids it embeds don't depend on where it was
  * minted, so the URI denotes the same value wherever it later gets read.
  *
- * **Note:** This does not use the standard `data-model` value encoding, and
- * callers are exposed to two consequences. A `FabricSpecialObject` within
- * `data` is not represented correctly, and plain-object keys are not
- * canonicalized -- so two runtimes holding the same value can mint two
- * different ids for it, which is to say that the content addressing here is
- * not reliably addressing content. See the `TODO`s in the body.
+ * The standard encoding canonicalizes plain-object key order (UTF-8 byte
+ * order, per `3-json-encoding.md` section 10), so two runtimes holding the
+ * same value mint the same id regardless of key insertion history -- the
+ * property that makes this content addressing actually address content.
  *
  * @param data The value to encode. Must be acyclic.
  * @param base Optional base link; relative links within `data` are resolved
  *   against it.
- * @returns A `data:application/json` URI naming a cell whose content is `data`.
+ * @returns A `data:` URI naming a cell whose content is `data`.
  * @throws If `data` contains a reference cycle.
  */
-export function createDataCellURI(
-  data: any,
+export function dataUriFromValueWithResolvedLinks(
+  data: FabricValue,
   base?: Cell | NormalizedLink,
 ): URI {
   const baseLink = isCell(base) ? base.getAsNormalizedFullLink() : base;
 
-  // TODO(danfuzz): This `isRecord`-gated walk guards only `isPrimitiveCellLink`;
-  // a `FabricPrimitive`/`FabricInstance` that is not a link falls through to the
-  // `Object.entries` descent (primitive decomposed, instance walked by internal
-  // slots).
   function traverseAndAddBaseIdToRelativeLinks(
-    value: any,
-    seen: Set<any>,
-  ): any {
+    value: FabricValue,
+    seen: Set<object>,
+  ): FabricValue {
     if (!isRecord(value)) return value;
     if (seen.has(value)) {
       throw new Error(`Cycle detected when creating data URI`);
@@ -106,6 +95,18 @@ export function createDataCellURI(
           includeSchema: true,
           keepAsCell: KeepAsCell.All,
         });
+      } else if (value instanceof FabricPrimitive) {
+        // A `FabricPrimitive` is a leaf; the value encoding represents it
+        // via its codec.
+        return value;
+      } else if (value instanceof FabricInstance) {
+        // TODO(danfuzz): A `FabricInstance` is not a leaf: its state can
+        // carry cell links, which need the same relative-to-absolute
+        // rewriting as everything else. That requires codec-mediated
+        // traversal into instance state; until that exists, the instance
+        // passes through unrewritten (encoded correctly in form, but any
+        // relative link within it stays relative).
+        return value;
       } else if (Array.isArray(value)) {
         return value.map((item) =>
           traverseAndAddBaseIdToRelativeLinks(item, seen)
@@ -114,125 +115,20 @@ export function createDataCellURI(
         return Object.fromEntries(
           Object.entries(value).map((
             [key, value],
-          ) => [key, traverseAndAddBaseIdToRelativeLinks(value, seen)]),
+          ) => [
+            key,
+            traverseAndAddBaseIdToRelativeLinks(value as FabricValue, seen),
+          ]),
         );
       }
     } finally {
       seen.delete(value);
     }
   }
-  // TODO(danfuzz): This `JSON.stringify()` should be changed to use the
-  // standard `data-model` value encoding, both so that `FabricSpecialObject`s
-  // can be properly represented and so that plain objects get properly
-  // canonicalized. Once this is done, the changes to `schema-hash.ts` made in
-  // PR #4360 should be able to be reverted, as those changes amount to a
-  // workaround for the plain object canonicalization issue.
-  const json = JSON.stringify({
-    value: traverseAndAddBaseIdToRelativeLinks(data, new Set()),
-  });
-  // Use encodeURIComponent for UTF-8 safe encoding (matches runtime.ts pattern)
-  return `data:application/json,${encodeURIComponent(json)}` as URI;
-}
 
-/**
- * Decodes the extracted payload text of an `application/json` `data:` URI.
- * This is the single point of truth for how such payloads read, shared by
- * every reader of them; per-reader payload extraction and error policy stay
- * with the readers (see {@link getJSONFromDataURI} and
- * `storage/transaction/attestation.ts`'s `load()`). Two forms are accepted:
- *
- * - Text bearing the `fvj1:` tag is decoded as the standard `data-model`
- *   `FabricValue` JSON-embedded encoding. Results from this branch are
- *   deep-frozen and may contain `FabricInstance`s.
- * - Any other text is parsed as bare JSON. A `data:` URI _is_ its own
- *   content and such URIs are embedded in persisted documents, so ids with
- *   bare-JSON payloads survive indefinitely; this branch has to stay for as
- *   long as any of them remain, that is, probably forever.
- *
- * @param text The payload text, after any percent- or Base64-decoding.
- * @returns The decoded value.
- * @throws If `text` is neither valid JSON nor a valid encoded `FabricValue`.
- *   Notably, an empty `text` is not valid and is rejected like any other
- *   invalid input.
- */
-export function decodeDataURIPayloadText(text: string): FabricValue {
-  return seemsLikeJsonEncodedFabricValue(text)
-    ? valueFromJson(text, dataUriReconstructionContext)
-    : JSON.parse(text);
-}
-
-/**
- * Extracts and decodes the payload of a `data:` URI, which is required to
- * have the media type `application/json`. The payload is everything past the
- * first comma, and how it is spelled is dictated by the parameters in the
- * header before that comma:
- *
- * - `;base64` selects Base64. Without it, the payload is percent-encoded.
- * - `;charset=` is honored only as `utf-8` (or `utf8`), and any other value is
- *   rejected. It is UTF-8 either way; the parameter only gets to agree.
- *
- * This reads a strict superset of what gets written by
- * {@link createDataCellURI}, which only ever emits the percent-encoded form
- * with no header parameters (`data:application/json,...`). The Base64 and
- * `charset` spellings are for `data:` URIs originating anywhere else.
- *
- * The extracted payload text is decoded via {@link decodeDataURIPayloadText},
- * which accepts both the standard `fvj1:`-tagged `FabricValue` encoding and
- * bare JSON; see its doc comment for the details of the two forms. (The
- * media type is admittedly a bit of a fib for the tagged form, since the tag
- * prefix makes the payload not actually be JSON.)
- *
- * @param uri The `data:` URI to read.
- * @returns The decoded payload.
- * @throws If `uri` is not an `application/json` `data:` URI, if it declares a
- *   charset other than UTF-8, or if its payload is neither valid JSON nor a
- *   valid encoded `FabricValue` (which includes the empty payload).
- */
-export function getJSONFromDataURI(uri: URI | string): any {
-  if (!uri.startsWith("data:application/json")) {
-    throw new Error(`Invalid URI: ${uri}`);
-  }
-
-  // Extract the data part after the comma
-  const commaIndex = uri.indexOf(",");
-  if (commaIndex === -1) {
-    throw new Error(`Invalid data URI format: ${uri}`);
-  }
-
-  const header = uri.substring(0, commaIndex);
-  const data = uri.substring(commaIndex + 1);
-
-  // Parse the header to check for charset
-  const headerParts = header.split(";").map((part) => part.trim());
-  for (const part of headerParts) {
-    if (part.startsWith("charset=")) {
-      const charset = part.substring(8).toLowerCase();
-      if (charset !== "utf-8" && charset !== "utf8") {
-        throw new Error(
-          `Unsupported charset: ${charset}. Only UTF-8 is supported.`,
-        );
-      }
-    }
-  }
-
-  // Check if data is base64 encoded
-  const isBase64 = headerParts.some((part) => part === "base64");
-
-  let decodedData: string;
-  if (isBase64) {
-    // Use TextDecoder to properly decode UTF-8 bytes from base64
-    const binaryString = atob(data);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-    const decoder = new TextDecoder();
-    decodedData = decoder.decode(bytes);
-  } else {
-    decodedData = decodeURIComponent(data);
-  }
-
-  return decodeDataURIPayloadText(decodedData);
+  return dataUriFromValue(
+    traverseAndAddBaseIdToRelativeLinks(data, new Set()),
+  );
 }
 
 /**
@@ -251,18 +147,13 @@ export function getJSONFromDataURI(uri: URI | string): any {
  * @param value - The value to find and inline data: URI links in.
  * @returns The value with any data: URI links inlined.
  */
-export function findAndInlineDataURILinks(value: any): any {
+export function findAndInlineDataUriLinks(value: any): any {
   if (isCellLink(value)) {
     const dataLink = parseLink(value)!;
 
     if (dataLink.id?.startsWith("data:")) {
-      let dataValue: any = getJSONFromDataURI(dataLink.id);
+      let dataValue: any = valueFromDataUri(dataLink.id);
       const path = [...dataLink.path];
-
-      // This is a storage item, so we have to look into the "value" field for
-      // the actual data.
-      if (!isRecord(dataValue)) return undefined;
-      dataValue = dataValue["value"];
 
       // If there is a link on the way to `path`, follow it, appending remaining
       // path to the target link.
@@ -293,7 +184,7 @@ export function findAndInlineDataURILinks(value: any): any {
             includeSchema: true,
             keepAsCell: KeepAsCell.All,
           });
-          return findAndInlineDataURILinks(newSigilLink);
+          return findAndInlineDataUriLinks(newSigilLink);
         }
         if (path.length > 0) {
           dataValue = dataValue[path.shift()!];
@@ -311,7 +202,7 @@ export function findAndInlineDataURILinks(value: any): any {
     for (let index = 0; index < value.length; index++) {
       if (!(index in value)) continue;
       const current = value[index];
-      const inlined = findAndInlineDataURILinks(current);
+      const inlined = findAndInlineDataUriLinks(current);
       if (next) {
         next[index] = inlined;
       } else if (!Object.is(inlined, current)) {
@@ -325,7 +216,7 @@ export function findAndInlineDataURILinks(value: any): any {
   } else if (isRecord(value)) {
     let next: Record<string, unknown> | undefined;
     for (const [key, entry] of Object.entries(value)) {
-      const inlined = findAndInlineDataURILinks(entry);
+      const inlined = findAndInlineDataUriLinks(entry);
       if (next) {
         next[key] = inlined;
       } else if (!Object.is(inlined, entry)) {

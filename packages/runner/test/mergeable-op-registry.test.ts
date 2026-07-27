@@ -87,3 +87,37 @@ describe("mergeable op createsKey stamping", () => {
     ).toEqual([{ op: "increment", path: "/value/n", by: 3 }]);
   });
 });
+
+// The tail op builder (append / add-unique) bails to a no-op in two guarded
+// cases, leaving the commit to carry the plain diff. A handler reaches these
+// only through sequences the poison fallback now short-circuits before build, so
+// they are covered directly here.
+describe("mergeable tail-op build guards", () => {
+  // The op path holds no array at commit — the value is absent, or was
+  // overwritten with a non-array — so there is nothing to slice a tail from.
+  it("a tail op with no working array emits no op and no suppression", () => {
+    for (const op of ["append", "add-unique"] as const) {
+      expect(
+        buildMergeableIntent(
+          { op, path: ["value"], count: 1 },
+          {
+            workingArray: undefined,
+            hadInitialArray: false,
+            hadInitialValue: false,
+          },
+        ),
+      ).toEqual({ ops: [], suppress: [] });
+    }
+  });
+
+  // The recorded tail slice is empty: an empty working array against an existing
+  // base makes `array.slice(length - count)` empty, so the op carries nothing.
+  it("a tail op whose recorded tail is empty emits no op and no suppression", () => {
+    expect(
+      buildMergeableIntent(
+        { op: "append", path: ["value"], count: 2 },
+        { workingArray: [], hadInitialArray: true, hadInitialValue: true },
+      ),
+    ).toEqual({ ops: [], suppress: [] });
+  });
+});

@@ -14,6 +14,7 @@ import {
   Stream,
   UI,
   type VNode,
+  wish,
   Writable,
 } from "commonfabric";
 
@@ -21,11 +22,44 @@ import {
 
 export type TopicLinkKind = "pr" | "topic" | "session" | "web";
 
+/** A display snapshot attached atomically to content. Fabric remains the
+ * authority for which principal/key performed the write. `kind: "agent"`
+ * disambiguates an agent acting with its human user's key. */
+export interface TopicAuthor {
+  kind: "person" | "agent";
+  name: string;
+  avatar?: string;
+}
+
+export interface AgentAuthoredEvent {
+  /** Explicit content-level signature for an agent using its human user's
+   * identity key. Optional only so callers of the previous deployed schema
+   * remain valid; new callers must provide a non-blank name. */
+  agentName?: string;
+}
+
+export interface AddCommentEvent extends AgentAuthoredEvent {
+  body: string;
+}
+
+export interface AddLinkEvent extends AgentAuthoredEvent {
+  kind: TopicLinkKind;
+  url: string;
+  label: string;
+}
+
+export interface SetBodyEvent extends AgentAuthoredEvent {
+  body: string;
+}
+
 export interface TopicComment {
   /** Snapshot taken at write time (profile enrichment comes later; never gate
    * authorship on a profile wish — CT-1879). Comments carry no minted id:
    * array elements have stable entity identity; future editing addresses
    * elements by reference (`equals()`), not by a synthetic key. */
+  author?: TopicAuthor;
+  /** @deprecated Compatibility shadow for consumers of the previous result
+   * schema. New callers must use `author`; the pattern mirrors this field. */
   authorName: string | Default<"">;
   body: string | Default<"">;
   sentAt: number | Default<0>;
@@ -35,6 +69,8 @@ export interface TopicLink {
   kind: TopicLinkKind | Default<"web">;
   url: string | Default<"">;
   label: string | Default<"">;
+  addedBy?: TopicAuthor;
+  addedAt?: number;
 }
 
 export interface TopicInput {
@@ -45,17 +81,22 @@ export interface TopicInput {
   comments?: Writable<TopicComment[] | Default<[]>>;
   links?: Writable<TopicLink[] | Default<[]>>;
   createdAt?: number | Default<0>;
+  createdBy?: TopicAuthor;
+  /** @deprecated Compatibility shadow for the previous result contract. */
   createdByName?: string | Default<"">;
-  /** The viewer's display name. Per-user: each authenticated identity gets its
-   * own value on the same shared piece. The tracker passes its cell down so one
-   * name covers the whole board. */
+  /** @deprecated Retained only for callers of the previous unsigned mutation
+   * streams. New callers use Profile authorship or an atomic `agentName`. */
   myName?: PerUser<Writable<string | Default<"">>>;
+  bodyUpdatedBy?: Writable<
+    TopicAuthor | Default<{ kind: "person"; name: "" }>
+  >;
+  bodyUpdatedAt?: Writable<number | Default<0>>;
   /** The board's own topics list — the sibling set for this topic's derived
    * crossrefs and the mention universe for authoring. A reference to the
    * tracker's array, wired at creation like `myName` (and backfillable as a
    * one-time link-bind on pieces created before it existed). Absent, the
    * detail page simply derives no connections. */
-  mentionable?: Writable<TopicPiece[] | Default<[]>>;
+  mentionable?: Writable<TopicReference[] | Default<[]>>;
 }
 
 /**
@@ -70,24 +111,44 @@ export interface TopicInput {
  * controls are intentionally excluded: a TopicPiece can be followed from a
  * shared list even when the viewer has no matching session-local cells.
  */
-export interface TopicPiece {
+export interface TopicReference {
   [NAME]: string;
   title: string;
   body: string;
   comments: TopicComment[];
   links: TopicLink[];
   createdAt: number;
+  createdBy?: TopicAuthor;
+  /** @deprecated Compatibility shadow for consumers of the previous result
+   * schema. New callers must use `createdBy`; the pattern mirrors this field. */
   createdByName: string;
+  bodyUpdatedBy?: TopicAuthor;
+  bodyUpdatedAt?: number;
   commentCount: number;
-  /** Max of createdAt and the newest comment — the tracker sorts by this. */
+  /** Max of creation, comments, body saves, and link additions. */
   lastActivityAt: number;
+  addComment: Stream<AddCommentEvent>;
+  addLink: Stream<AddLinkEvent>;
+  setBody: Stream<SetBodyEvent>;
+}
+
+/**
+ * The board-facing Topic projection. Crossref targets deliberately use the
+ * non-recursive TopicReference contract: a Topic needs enough sibling data to
+ * render and navigate chips, not each sibling's entire crossref graph.
+ */
+export interface TopicPiece extends TopicReference {
   /** This topic's own place in the board's prose graph, derived read-side
-   * from `mentionable` (indices into it, so chips can bind its direct
-   * elements). Both sets stay empty until `mentionable` is wired. */
-  crossrefs: { refsOut: number[]; referencedBy: number[] };
-  addComment: Stream<{ body: string }>;
-  addLink: Stream<{ kind: TopicLinkKind; url: string; label: string }>;
-  setBody: Stream<{ body: string }>;
+   * from `mentionable` (the sibling pieces it links, resolved from the
+   * board's own list). Both sets stay empty until `mentionable` is wired.
+   * Optional (2026-07-21 deploy): pieces healed before their `mentionable`
+   * link exists carry a session-scoped crossrefs indirection that resolves
+   * undefined outside the minting session; the list projection must accept
+   * that rather than fail argument validation. */
+  crossrefs?:
+    | { refsOut: TopicReference[]; referencedBy: TopicReference[] }
+    | Default<{ refsOut: []; referencedBy: [] }>
+    | undefined;
 }
 
 /** The complete result available when a Topic is instantiated directly. */
@@ -166,6 +227,39 @@ export const whenLabel = (ts: number): string => {
 export const snippet = (text: string, max: number): string => {
   const t = (text ?? "").trim().replace(/\s+/g, " ");
   return t.length > max ? `${t.slice(0, max)}…` : t;
+};
+
+/** Build the content-level signature required by headless mutation streams.
+ * The authenticated human principal is deliberately not copied here: Fabric
+ * already owns that authority and history. */
+export const topicAuthorFromAgent = (
+  agentName: string,
+): TopicAuthor | undefined => {
+  const name = (agentName ?? "").trim();
+  return name ? { kind: "agent", name } : undefined;
+};
+
+/** Snapshot the canonical Profile fields used by browser mutations. */
+export const topicAuthorFromPerson = (
+  profileName: string,
+  profileAvatar = "",
+): TopicAuthor | undefined => {
+  const name = (profileName ?? "").trim();
+  if (!name) return undefined;
+  const avatar = (profileAvatar ?? "").trim();
+  return avatar ? { kind: "person", name, avatar } : { kind: "person", name };
+};
+
+/** Structured author first, legacy string second. Agent snapshots are labelled
+ * explicitly because they share the authenticated principal's identity key. */
+export const topicAuthorLabel = (
+  author: TopicAuthor | undefined,
+  legacyName: string | undefined = "",
+): string => {
+  const name = (author?.name ?? "").trim() ||
+    (legacyName ?? "").trim() ||
+    "someone";
+  return author?.kind === "agent" ? `${name} (agent)` : name;
 };
 
 /** Only http(s) URLs may become live anchors — a user-supplied `javascript:`
@@ -252,37 +346,38 @@ export const crossrefJoin = (
 /** Row navigation, bound per topic card and per crossref chip. Module-scope
  * handler (not an inline closure) so embedders and tests can bind and drive
  * it directly. */
-export const openTopic = handler<void, { topic: TopicPiece }>(
+export const openTopic = handler<void, { topic: TopicReference }>(
   (_, { topic }) => {
     navigateTo(topic);
   },
 );
 
 /** One row of crossref chips ("references →" / "← referenced by"): each chip
- * names a sibling topic and navigates to it. Chips bind against direct
- * elements of a topics list — a handler bound to a piece nested inside a
- * derived wrapper object silently keeps the consuming UI computed from ever
- * running. Module-scope and pure so the single-runtime suite can also drive
- * the exact markup directly (pinning the no-edges → null branch) alongside
- * the real card path it renders via continuous UI demand. */
+ * names a sibling topic and navigates to it. Takes the sibling pieces
+ * directly and binds navigation to each — #4714's path-scoped wildcard fix
+ * makes binding a piece reached through a derived crossref row safe (before
+ * it, such a bind silently kept the consuming UI computed from ever running,
+ * which forced the earlier index-plumbed shape). Module-scope and pure so the
+ * single-runtime suite can also drive the exact markup directly (pinning the
+ * no-edges → null branch) alongside the real card path it renders via
+ * continuous UI demand. */
 export const crossrefChipRow = (
   caption: string,
   accent: boolean,
-  list: TopicPiece[],
-  indices: number[],
+  pieces: TopicReference[],
 ) =>
-  indices.length === 0
+  pieces.length === 0
     ? null
     : (
       <cf-hstack gap="1" align="center" style="flex-wrap: wrap;">
         <cf-text variant="caption" tone="muted">{caption}</cf-text>
-        {indices.map((j) => (
+        {pieces.map((p) => (
           <cf-chip
-            label={snippet(list[j]?.title || "(untitled topic)", 40)}
+            label={snippet(p?.title || "(untitled topic)", 40)}
             size="xs"
             color={accent ? "accent" : "neutral"}
             interactive
-            oncf-click={openTopic({ topic: list[j] })}
+            oncf-click={openTopic({ topic: p })}
           />
         ))}
       </cf-hstack>
@@ -295,6 +390,94 @@ const LINK_KIND_ITEMS = [
   { label: "Agent session", value: "session" },
 ];
 
+/** Browser comment submit with Profile fields already resolved by the pattern.
+ * Keeping the mutation in a module-scope handler lets tests bind deterministic
+ * Profile snapshots while production still sources them only from wishes. */
+export const submitProfileComment = handler<void, {
+  comments: Writable<TopicComment[] | Default<[]>>;
+  commentDraft: Writable<string>;
+  profileName: string;
+  profileAvatar: string;
+}>((_, { comments, commentDraft, profileName, profileAvatar }) => {
+  const text = commentDraft.get();
+  const author = topicAuthorFromPerson(profileName, profileAvatar);
+  if (!text.trim() || !author) return;
+  comments.push({
+    author,
+    authorName: topicAuthorLabel(author),
+    body: text.trim(),
+    sentAt: Date.now(),
+  });
+  commentDraft.set("");
+});
+
+/** Browser body save under the current Profile snapshot. */
+export const saveProfileBody = handler<void, {
+  body: Writable<string | Default<"">>;
+  bodyDraft: Writable<string>;
+  editingBody: Writable<boolean>;
+  bodyUpdatedBy: Writable<
+    TopicAuthor | Default<{ kind: "person"; name: "" }>
+  >;
+  bodyUpdatedAt: Writable<number | Default<0>>;
+  profileName: string;
+  profileAvatar: string;
+}>((
+  _,
+  {
+    body,
+    bodyDraft,
+    editingBody,
+    bodyUpdatedBy,
+    bodyUpdatedAt,
+    profileName,
+    profileAvatar,
+  },
+) => {
+  const author = topicAuthorFromPerson(profileName, profileAvatar);
+  if (!author) return;
+  // One whole-value set per explicit save keeps the conflict window small; a
+  // live-bound textarea on a shared string would conflict per keystroke.
+  body.set(bodyDraft.get());
+  bodyUpdatedBy.set(author);
+  bodyUpdatedAt.set(Date.now());
+  editingBody.set(false);
+});
+
+/** Browser link submit under the current Profile snapshot. */
+export const submitProfileLink = handler<void, {
+  links: Writable<TopicLink[] | Default<[]>>;
+  linkUrlDraft: Writable<string>;
+  linkLabelDraft: Writable<string>;
+  linkKindDraft: Writable<TopicLinkKind>;
+  profileName: string;
+  profileAvatar: string;
+}>((
+  _,
+  {
+    links,
+    linkUrlDraft,
+    linkLabelDraft,
+    linkKindDraft,
+    profileName,
+    profileAvatar,
+  },
+) => {
+  const url = linkUrlDraft.get();
+  const author = topicAuthorFromPerson(profileName, profileAvatar);
+  if (!url.trim() || !isSafeLinkUrl(url) || !author) return;
+  links.push({
+    kind: linkKindDraft.get(),
+    url: url.trim(),
+    label: linkLabelDraft.get().trim() || url.trim(),
+    addedBy: author,
+    addedAt: Date.now(),
+  });
+  linkUrlDraft.set("");
+  linkLabelDraft.set("");
+  linkKindDraft.set("web");
+});
+
 // ===== The pattern =====
 
 export default pattern<TopicInput, TopicOutput>(
@@ -305,8 +488,11 @@ export default pattern<TopicInput, TopicOutput>(
       comments,
       links,
       createdAt,
+      createdBy,
       createdByName,
       myName,
+      bodyUpdatedBy,
+      bodyUpdatedAt,
       mentionable,
       [SELF]: self,
     },
@@ -319,48 +505,84 @@ export default pattern<TopicInput, TopicOutput>(
     const linkLabelDraft = new Writable.perSession("");
     const linkKindDraft = new Writable.perSession<TopicLinkKind>("web");
 
+    // Browser mutations snapshot the current viewer's canonical Profile.
+    // Agent-facing streams below deliberately remain wish-free and accept the
+    // agent's content-level signature in the same event as the mutation.
+    const profileWish = wish<{ name?: string; avatar?: string }>({
+      query: "#profile",
+    });
+    const profileNameWish = wish<string>({ query: "#profileName" });
+    const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
+    const profileName = computed(() => profileNameWish.result ?? "");
+    const profileAvatar = computed(() => profileAvatarWish.result ?? "");
+    const hasProfile = computed(() =>
+      profileName.trim().length > 0 && profileWish.result !== undefined
+    );
+    // A legacy Topic has only `createdByName`. Project that snapshot into the
+    // structured result instead of returning a dangling link to an absent
+    // optional input path; sibling Topic schemas can then validate the piece.
+    const createdByView = computed(() => {
+      const name = (createdBy?.name ?? "").trim();
+      if (name) return createdBy;
+      const legacyName = (createdByName ?? "").trim();
+      return legacyName
+        ? { kind: "person" as const, name: legacyName }
+        : undefined;
+    });
+
     // --- Streams (external API; also usable headlessly via CLI) ---
 
-    const addComment = action(({ body: text }: { body: string }) => {
+    const addComment = action(({ body: text, agentName }: AddCommentEvent) => {
       const trimmed = (text ?? "").trim();
-      if (!trimmed) return;
+      const author = topicAuthorFromAgent(agentName ?? "");
+      if (!trimmed || (agentName !== undefined && !author)) return;
+      const legacyName = author
+        ? topicAuthorLabel(author)
+        : (myName.get() ?? "").trim() || "someone";
       // Mergeable append: concurrent comments from different users all land.
       comments.push({
-        // `?? ""`: a never-written PerUser cell can read as undefined (e.g. a
-        // headless caller that never set a name) — same guard as myNameView.
-        authorName: (myName.get() ?? "").trim() || "someone",
+        author,
+        authorName: legacyName,
         body: trimmed,
         sentAt: Date.now(),
       });
     });
 
     const addLink = action(
-      ({ kind, url, label }: {
-        kind: TopicLinkKind;
-        url: string;
-        label: string;
-      }) => {
+      ({ kind, url, label, agentName }: AddLinkEvent) => {
         const trimmedUrl = (url ?? "").trim();
-        if (!trimmedUrl || !isSafeLinkUrl(trimmedUrl)) return;
+        const author = topicAuthorFromAgent(agentName ?? "");
+        if (
+          !trimmedUrl || !isSafeLinkUrl(trimmedUrl) ||
+          (agentName !== undefined && !author)
+        ) return;
         links.push({
           kind: kind ?? "web",
           url: trimmedUrl,
           label: (label ?? "").trim() || trimmedUrl,
+          addedBy: author,
+          addedAt: Date.now(),
         });
       },
     );
 
-    const setBody = action(({ body: text }: { body: string }) => {
+    const setBody = action(({ body: text, agentName }: SetBodyEvent) => {
+      const author = topicAuthorFromAgent(agentName ?? "");
+      if (agentName !== undefined && !author) return;
       body.set(text ?? "");
+      if (author) {
+        bodyUpdatedBy.set(author);
+        bodyUpdatedAt.set(Date.now());
+      }
     });
 
     // --- UI-side actions (close over session drafts) ---
 
-    const submitComment = action(() => {
-      const text = commentDraft.get();
-      if (!text.trim()) return;
-      addComment.send({ body: text });
-      commentDraft.set("");
+    const submitComment = submitProfileComment({
+      comments,
+      commentDraft,
+      profileName,
+      profileAvatar,
     });
 
     const startEditBody = action(() => {
@@ -368,28 +590,27 @@ export default pattern<TopicInput, TopicOutput>(
       editingBody.set(true);
     });
 
-    const saveBody = action(() => {
-      // One whole-value set per explicit save keeps the conflict window small;
-      // a live-bound textarea on a shared string would conflict per keystroke.
-      body.set(bodyDraft.get());
-      editingBody.set(false);
+    const saveBody = saveProfileBody({
+      body,
+      bodyDraft,
+      editingBody,
+      bodyUpdatedBy,
+      bodyUpdatedAt,
+      profileName,
+      profileAvatar,
     });
 
     const cancelEditBody = action(() => {
       editingBody.set(false);
     });
 
-    const submitLink = action(() => {
-      const url = linkUrlDraft.get();
-      if (!url.trim()) return;
-      addLink.send({
-        kind: linkKindDraft.get(),
-        url,
-        label: linkLabelDraft.get(),
-      });
-      linkUrlDraft.set("");
-      linkLabelDraft.set("");
-      linkKindDraft.set("web");
+    const submitLink = submitProfileLink({
+      links,
+      linkUrlDraft,
+      linkLabelDraft,
+      linkKindDraft,
+      profileName,
+      profileAvatar,
     });
 
     // --- Derived values ---
@@ -397,9 +618,16 @@ export default pattern<TopicInput, TopicOutput>(
     const commentCount = computed(() => asArray(comments.get()).length);
 
     const lastActivityAt = computed(() => {
-      const newest = asArray(comments.get())
+      const newestComment = asArray(comments.get())
         .reduce((max, c) => Math.max(max, c?.sentAt ?? 0), 0);
-      return Math.max(createdAt ?? 0, newest);
+      const newestLink = asArray(links.get())
+        .reduce((max, link) => Math.max(max, link?.addedAt ?? 0), 0);
+      return Math.max(
+        createdAt ?? 0,
+        newestComment,
+        newestLink,
+        bodyUpdatedAt.get() ?? 0,
+      );
     });
 
     const commentsView = computed(() =>
@@ -431,8 +659,8 @@ export default pattern<TopicInput, TopicOutput>(
       // erased self's comparable marking and this computed never ran.
       const me = sibs.findIndex((t) => t && equals(t, self));
       return me < 0 ? { refsOut: [], referencedBy: [] } : {
-        refsOut: joined.refsOut[me],
-        referencedBy: joined.referencedBy[me],
+        refsOut: joined.refsOut[me].map((j) => sibs[j]),
+        referencedBy: joined.referencedBy[me].map((j) => sibs[j]),
       };
     });
 
@@ -453,10 +681,24 @@ export default pattern<TopicInput, TopicOutput>(
                 placeholder="Topic title…"
                 style="font-size: 1.25rem; font-weight: 600;"
               />
-              <cf-text variant="caption" tone="muted">
-                started by {createdByName || "someone"}
-                {createdAt ? ` · ${whenLabel(createdAt)}` : ""}
-              </cf-text>
+              <cf-hstack justify="between" align="center">
+                <cf-text variant="caption" tone="muted">
+                  started by {topicAuthorLabel(createdByView, createdByName)}
+                  {createdAt ? ` · ${whenLabel(createdAt)}` : ""}
+                </cf-text>
+                <cf-hstack gap="2" align="center">
+                  <cf-text variant="caption" tone="muted">Acting as</cf-text>
+                  {hasProfile
+                    ? (
+                      <cf-profile-badge
+                        $profile={profileWish.result}
+                        size="sm"
+                        noNavigate
+                      />
+                    )
+                    : <div>{profileWish[UI]}</div>}
+                </cf-hstack>
+              </cf-hstack>
             </cf-vstack>
 
             <cf-vstack gap="3" padding="4">
@@ -465,13 +707,15 @@ export default pattern<TopicInput, TopicOutput>(
                 <cf-vstack gap="2">
                   <cf-hstack justify="between" align="center">
                     <cf-heading level={5}>Body</cf-heading>
-                    {editingBody
-                      ? null
-                      : (
-                        <cf-button variant="secondary" onClick={startEditBody}>
-                          Edit
-                        </cf-button>
-                      )}
+                    {editingBody ? null : (
+                      <cf-button
+                        variant="secondary"
+                        disabled={computed(() => !hasProfile)}
+                        onClick={startEditBody}
+                      >
+                        Edit
+                      </cf-button>
+                    )}
                   </cf-hstack>
 
                   {editingBody
@@ -488,7 +732,11 @@ export default pattern<TopicInput, TopicOutput>(
                           style="min-height: 12rem;"
                         />
                         <cf-hstack gap="2">
-                          <cf-button variant="primary" onClick={saveBody}>
+                          <cf-button
+                            variant="primary"
+                            disabled={computed(() => !hasProfile)}
+                            onClick={saveBody}
+                          >
                             Save
                           </cf-button>
                           <cf-button variant="ghost" onClick={cancelEditBody}>
@@ -506,6 +754,15 @@ export default pattern<TopicInput, TopicOutput>(
                         below holds the deliberation.
                       </cf-text>
                     )}
+                  {bodyUpdatedAt.get()
+                    ? (
+                      <cf-text variant="caption" tone="muted">
+                        Last updated by {topicAuthorLabel(bodyUpdatedBy.get())}
+                        {" · "}
+                        {whenLabel(bodyUpdatedAt.get() ?? 0)}
+                      </cf-text>
+                    )
+                    : null}
                 </cf-vstack>
               </cf-card>
 
@@ -538,6 +795,13 @@ export default pattern<TopicInput, TopicOutput>(
                                     {link.label || link.url}
                                   </cf-text>
                                 )}
+                              {link.addedBy
+                                ? (
+                                  <cf-text variant="caption" tone="muted">
+                                    by {topicAuthorLabel(link.addedBy)}
+                                  </cf-text>
+                                )
+                                : null}
                             </cf-hstack>
                           ))
                         )}
@@ -564,7 +828,11 @@ export default pattern<TopicInput, TopicOutput>(
                         placeholder="optional"
                       />
                     </cf-field>
-                    <cf-button variant="secondary" onClick={submitLink}>
+                    <cf-button
+                      variant="secondary"
+                      disabled={computed(() => !hasProfile)}
+                      onClick={submitLink}
+                    >
                       Add
                     </cf-button>
                   </cf-hstack>
@@ -573,7 +841,6 @@ export default pattern<TopicInput, TopicOutput>(
 
               {/* ── Connections (derived crossrefs; nothing persisted) ── */}
               {computed(() => {
-                const sibs = asArray(mentionable.get());
                 const { refsOut, referencedBy } = crossrefs;
                 return refsOut.length === 0 && referencedBy.length === 0
                   ? null
@@ -581,13 +848,8 @@ export default pattern<TopicInput, TopicOutput>(
                     <cf-card>
                       <cf-vstack gap="2">
                         <cf-heading level={5}>Connections</cf-heading>
-                        {crossrefChipRow("references →", false, sibs, refsOut)}
-                        {crossrefChipRow(
-                          "← referenced by",
-                          true,
-                          sibs,
-                          referencedBy,
-                        )}
+                        {crossrefChipRow("references →", false, refsOut)}
+                        {crossrefChipRow("← referenced by", true, referencedBy)}
                       </cf-vstack>
                     </cf-card>
                   );
@@ -613,8 +875,19 @@ export default pattern<TopicInput, TopicOutput>(
                               style="border-left: 2px solid var(--cf-theme-color-border); padding-left: 0.75rem;"
                             >
                               <cf-hstack gap="2" align="center">
+                                <cf-avatar
+                                  src={comment.author?.avatar || ""}
+                                  name={topicAuthorLabel(
+                                    comment.author,
+                                    comment.authorName,
+                                  )}
+                                  size="xs"
+                                />
                                 <cf-text style="font-weight: 600;">
-                                  {comment.authorName || "someone"}
+                                  {topicAuthorLabel(
+                                    comment.author,
+                                    comment.authorName,
+                                  )}
                                 </cf-text>
                                 <cf-text variant="caption" tone="muted">
                                   {whenLabel(comment.sentAt)}
@@ -635,9 +908,6 @@ export default pattern<TopicInput, TopicOutput>(
                     )}
 
                   <cf-hstack gap="2" align="end">
-                    <cf-field label="Commenting as" style="width: 160px;">
-                      <cf-input $value={myName} placeholder="Your name" />
-                    </cf-field>
                     <cf-field label="Comment" style="flex: 1;">
                       <cf-textarea
                         $value={commentDraft}
@@ -645,7 +915,11 @@ export default pattern<TopicInput, TopicOutput>(
                         placeholder="Add to the thread…"
                       />
                     </cf-field>
-                    <cf-button variant="primary" onClick={submitComment}>
+                    <cf-button
+                      variant="primary"
+                      disabled={computed(() => !hasProfile)}
+                      onClick={submitComment}
+                    >
                       Send
                     </cf-button>
                   </cf-hstack>
@@ -660,7 +934,10 @@ export default pattern<TopicInput, TopicOutput>(
       comments,
       links,
       createdAt,
+      createdBy: createdByView,
       createdByName,
+      bodyUpdatedBy,
+      bodyUpdatedAt,
       commentCount,
       lastActivityAt,
       crossrefs,

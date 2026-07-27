@@ -53,6 +53,20 @@ export const NATIVE_TAGS = Object.freeze(
 export type NativeTag = typeof NATIVE_TAGS[keyof typeof NATIVE_TAGS];
 
 /**
+ * Checks whether a value is a native `Error`.
+ *
+ * `Error.isError()` recognizes errors from other realms when the engine
+ * provides it. Engines without it fall back to `instanceof`, which recognizes
+ * errors that share the current realm's prototype hierarchy.
+ */
+export function isNativeError(value: unknown): value is Error {
+  const isError = (Error as { isError?: (value: unknown) => boolean }).isError;
+  return typeof isError === "function"
+    ? isError(value)
+    : value instanceof Error;
+}
+
+/**
  * Maps a constructor to its native-instance tag. Returns the tag string if
  * the constructor is a recognized type (JS builtins or system-defined
  * special primitives), or `null` otherwise.
@@ -130,10 +144,12 @@ export function tagFromNativeClass(
  * value is a recognized convertible native instance, or `null` otherwise.
  * Non-object types (`null`, `undefined`, primitives) return `Primitive`.
  *
- * Dispatches via the value's constructor (O(1) switch in `tagFromNativeClass`).
- * Falls back to a pre-SES captured `Error.isError()` for foreign-branded
- * errors; cross-realm arrays use `Array.isArray()`, and null-prototype objects
- * use a prototype check.
+ * Dispatches via the value's constructor (O(1) switch in `tagFromNativeClass`,
+ * which matches `Error` subclasses via `prototype instanceof Error`). Falls
+ * back to native error detection, including a pre-SES captured
+ * `Error.isError()` for foreign-branded errors, and `Array.isArray()` for
+ * values whose constructor is unreachable -- a severed prototype or another
+ * realm. Null-prototype objects use a prototype check.
  *
  * For tags that have pass-through handling (`Object`, `Array`) or no dedicated
  * handler (`null`), a per-instance `hasToJSON()` check upgrades the tag to
@@ -170,6 +186,12 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     if (isCanonicalDataUnavailable(value)) {
       return NATIVE_TAGS.FabricInstance;
     }
+
+    // `Error`s with no reachable constructor -- e.g. one whose prototype has
+    // been severed, or one from another realm. An ordinary subclass (including
+    // `DOMException`) never gets here: `tagFromNativeClass()` matches it via
+    // `prototype instanceof Error`.
+    if (isNativeError(value)) return NATIVE_TAGS.Error;
 
     // Other Fabric protocol values are already valid and must be recognized
     // before consulting realm-specific native helpers.

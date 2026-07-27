@@ -88,7 +88,7 @@ export interface NoteOutput extends NotePiece {
 
 // ===== Module-scope handlers (reused with different bindings) =====
 
-// Used in cf-code-editor - binds mentionable and allPieces
+// Used in cf-code-editor - binds mentionable and pieceRegistry
 const handleNewBacklink = handler<
   {
     detail: {
@@ -98,11 +98,11 @@ const handleNewBacklink = handler<
   },
   {
     mentionable: Writable<MentionablePiece[]>;
-    allPieces: Writable<MinimalPiece[]>;
+    pieceRegistry: Writable<MinimalPiece[]>;
   }
->(({ detail }, { mentionable, allPieces }) => {
-  // Push to allPieces so it appears in default-app
-  allPieces.push(detail.piece);
+>(({ detail }, { mentionable, pieceRegistry }) => {
+  // Register the piece so it appears in default-app.
+  pieceRegistry.push(detail.piece);
 
   if (detail.navigate) {
     return navigateTo(detail.piece);
@@ -191,11 +191,12 @@ const Note = pattern<NoteInput, NoteOutput>(
       ? undefined
       : resultOf(allNotesWish.result);
 
-    // Still need allPieces for write operations (push new notes, push backlinks)
-    const defaultWish = wish<{ allPieces: Writable<MinimalPiece[]> }>(
-      { query: "#default", headless: true },
-    );
-    const { allPieces } = resultOf(defaultWish.result);
+    // The registry is writable for creating notes and backlinks.
+    const pieceRegistryWish = wish<Writable<MinimalPiece[]>>({
+      query: "#pieceRegistry",
+      headless: true,
+    });
+    const pieceRegistry = resultOf(pieceRegistryWish.result);
     const mentionableWish = wish<MentionablePiece[] | Default<[]>>(
       { query: "#mentionable", headless: true },
     );
@@ -268,7 +269,7 @@ const Note = pattern<NoteInput, NoteOutput>(
       );
     });
 
-    // Create new note action - closes over allPieces and parentNotebook
+    // Create new note action - closes over the registry and parentNotebook
     const createNewNote = action(() => {
       const notebook = parentNotebook.get();
 
@@ -285,7 +286,7 @@ const Note = pattern<NoteInput, NoteOutput>(
           isHidden: !!notebook,
           parentNotebook: notebook,
         });
-        allPieces.push(note as any);
+        pieceRegistry.push(note as any);
         return navigateTo(note);
       }
     });
@@ -409,7 +410,7 @@ const Note = pattern<NoteInput, NoteOutput>(
         onbacklink-click={handlePieceLinkClick}
         onbacklink-create={handleNewBacklink({
           mentionable,
-          allPieces,
+          pieceRegistry,
         })}
         language="text/markdown"
         mode="prose"

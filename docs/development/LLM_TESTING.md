@@ -54,9 +54,11 @@ addMockResponse(
   { role: "assistant", content: "Hi!", id: "mock-1" },
 );
 
-// For generateObject (no tools path)
+// For generateObject (no tools path). `req.schema` is a `JSONSchema`, which
+// includes the boolean schemas `true` and `false`, so narrow before reading a
+// keyword off it.
 addMockObjectResponse(
-  (req) => req.schema.type === "object",
+  (req) => typeof req.schema === "object" && req.schema.type === "object",
   { object: { name: "Alice" }, id: "mock-2" },
 );
 ```

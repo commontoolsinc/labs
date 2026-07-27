@@ -1,4 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import type { CfcConfClause } from "../cfc/clause.ts";
 import {
   DEFAULT_GENERATE_OBJECT_MODELS,
   DEFAULT_MODEL_NAME,
@@ -17,7 +18,8 @@ import {
   BuiltInLLMParams,
 } from "@commonfabric/api";
 import type { Schema } from "@commonfabric/api/schema";
-import type { JSONSchema } from "../builder/types.ts";
+import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
+import { mapSubschemas } from "../schema-walk.ts";
 import { cfcAtom } from "@commonfabric/api/cfc";
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import {
@@ -216,11 +218,15 @@ function mergeLlmDerivedIntoNode(
 }
 
 /**
- * Deep-merge the `LlmDerived` stamp into a generateObject result schema's
- * `ifc.addIntegrity` at EVERY node — the root AND every nested property / item /
- * `$defs` / compound-branch node — so it rides the (possibly custom /
- * injection-safe) resultSchema write to wherever the model bytes land, whether
- * inline at `["result"]` or in a SPLIT CHILD DOCUMENT.
+ * Deep-merge the `LlmDerived` stamp into every object subschema in a
+ * generateObject result schema. Storage-addressable nodes (properties,
+ * additional properties, items / prefix items, compound branches, and `$defs`
+ * targets) need the stamp so it rides the possibly custom / injection-safe
+ * resultSchema to wherever the model bytes land, whether inline at `["result"]`
+ * or in a SPLIT CHILD DOCUMENT. The shared walker's complete vocabulary is
+ * stamped too: this runs once per model result, so defensive completeness for
+ * caller-supplied schemas has no noticeable cost and preserves provenance if
+ * more keywords become storage-addressable later.
  *
  * A root-only merge is not enough: when a nested value redirects/splits into its
  * own document (an `asCell` field, an ID-anchored array item), the child write
@@ -238,31 +244,15 @@ function mergeLlmDerivedIntoNode(
  * An absent resultSchema defaults to a plain object schema.
  */
 function withLlmDerivedStamp(schema: JSONSchema | undefined): JSONSchema {
-  const stampNode = (node: Record<string, unknown>): JSONSchema => {
-    const stamped = mergeLlmDerivedIntoNode(node);
-
-    const descend = (value: unknown): unknown => {
-      if (Array.isArray(value)) return value.map(descend);
-      if (isRecord(value)) return stampNode(value);
-      return value;
-    };
-
-    for (const key of ["properties", "$defs", "patternProperties"]) {
-      const container = stamped[key];
-      if (isRecord(container)) {
-        stamped[key] = Object.fromEntries(
-          Object.entries(container).map(([k, v]) => [k, descend(v)]),
-        );
-      }
-    }
-    for (const key of ["items", "additionalProperties", "prefixItems"]) {
-      if (key in stamped) stamped[key] = descend(stamped[key]);
-    }
-    for (const key of ["anyOf", "oneOf", "allOf"]) {
-      if (Array.isArray(stamped[key])) stamped[key] = descend(stamped[key]);
-    }
-    return stamped as JSONSchema;
-  };
+  // Stamp this node, then every structural subschema, including `$defs` and the
+  // keywords our generators do not currently emit. `$ref` is a string, not a
+  // subschema, so a `$defs` self-reference stays a leaf.
+  const stampNode = (node: Record<string, unknown>): JSONSchema =>
+    mapSubschemas(
+      mergeLlmDerivedIntoNode(node) as JSONSchemaObj,
+      (child) => (isRecord(child) ? stampNode(child) : child),
+      { includeDefs: true, includeUnused: true },
+    );
 
   const base: Record<string, unknown> = isRecord(schema)
     ? schema
@@ -441,8 +431,8 @@ async function executeWithToolsLoop(params: {
   toolCatalog?:
     | ReturnType<typeof llmToolExecutionHelpers.buildToolCatalog>
     | undefined;
-  initialObservedConfidentiality?: readonly unknown[];
-  observationMaxConfidentiality?: readonly unknown[];
+  initialObservedConfidentiality?: readonly CfcConfClause[];
+  observationMaxConfidentiality?: readonly CfcConfClause[];
   updatePartial: (text: string) => void;
   runtime: Runtime;
   space: any;
@@ -465,7 +455,7 @@ async function executeWithToolsLoop(params: {
 
   const executeRecursive = async (
     currentMessages: readonly BuiltInLLMMessage[],
-    observedConfidentiality: readonly unknown[],
+    observedConfidentiality: readonly CfcConfClause[],
   ): Promise<void> => {
     if (thisRun !== getCurrentRun()) return;
 
@@ -609,7 +599,7 @@ function buildContextDocumentation(
   space: any,
   tx: IExtendedStorageTransaction,
   sink: string,
-): { docs: string; observedConfidentiality: readonly unknown[] } {
+): { docs: string; observedConfidentiality: readonly CfcConfClause[] } {
   const context = inputs.key("context").withTx(tx).get();
   if (!context) {
     return {
@@ -650,7 +640,7 @@ function buildContextDocumentation(
         runtime,
         sink,
         inputs.key("observationMaxConfidentiality").withTx(tx).get() as
-          | readonly unknown[]
+          | readonly CfcConfClause[]
           | undefined,
       ),
     );
@@ -899,7 +889,7 @@ export function llm(
                     runtime,
                     "llm",
                     inputs.key("observationMaxConfidentiality").get() as
-                      | readonly unknown[]
+                      | readonly CfcConfClause[]
                       | undefined,
                   ),
                 updatePartial,
@@ -1296,7 +1286,7 @@ export function generateText(
                     runtime,
                     "generateText",
                     inputs.key("observationMaxConfidentiality").get() as
-                      | readonly unknown[]
+                      | readonly CfcConfClause[]
                       | undefined,
                   ),
                 updatePartial,
@@ -1484,7 +1474,7 @@ export function generateObject<T extends Record<string, unknown>>(
         runtime,
         "generateObject",
         inputs.key("observationMaxConfidentiality").withTx(tx).get() as
-          | readonly unknown[]
+          | readonly CfcConfClause[]
           | undefined,
       );
     const outputScope = tx.getNarrowestReadScope();
@@ -1582,7 +1572,7 @@ export function generateObject<T extends Record<string, unknown>>(
       }
     };
     const resultSchemaForObserved = (
-      observedConfidentiality: readonly unknown[],
+      observedConfidentiality: readonly CfcConfClause[],
     ) =>
       schemaSanitizePromptInjection
         ? schemaWithInjectionSafeAnnotations(
@@ -1790,13 +1780,13 @@ export function generateObject<T extends Record<string, unknown>>(
               // Execute with tools - capture presentResult when called
               let finalResult: T | undefined;
               let finalMessages: readonly BuiltInLLMMessage[] = requestMessages;
-              let finalObservedConfidentiality: readonly unknown[] =
+              let finalObservedConfidentiality: readonly CfcConfClause[] =
                 liveInitialObservedConfidentiality;
 
               // Custom execution loop for generateObject with presentResult extraction
               const executeRecursive = async (
                 currentMessages: readonly BuiltInLLMMessage[],
-                observedConfidentiality: readonly unknown[],
+                observedConfidentiality: readonly CfcConfClause[],
               ): Promise<void> => {
                 if (isRunCancelled()) return;
 
@@ -2012,7 +2002,7 @@ export function generateObject<T extends Record<string, unknown>>(
         maxTokens: maxTokens ?? 8192,
         schema: llmToolExecutionHelpers.prepareSchemaForLLM(
           toDeepFrozenSchema(schema),
-        ) as Record<string, unknown>,
+        ),
         model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,
         metadata: {
           ...readyMetadata,

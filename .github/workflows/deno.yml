@@ -1,4 +1,4 @@
-name: Deno Workflow
+name: CI
 
 on:
   push:
@@ -12,11 +12,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# Define the list of binaries we're building
-# This makes it easy to add more binaries in the future
-env:
-  BINARIES: "toolshed bg-piece-service cf"
-
 # Every step name must begin with a phase-marker emoji (setup / work / shutdown).
 # scripts/ci-gantt.ts reads that emoji to split each job bar by phase. See the
 # "Step phase markers" table in docs/development/CI_PERFORMANCE.md for the
@@ -25,9 +20,17 @@ jobs:
   # ---------------------------------------------------------------------------
   # Tier 0 – These jobs all start immediately with no dependencies
   # ---------------------------------------------------------------------------
+  dashboard:
+    name: "Dashboard"
+    if: ${{ github.event_name == 'pull_request' }}
+    uses: ./.github/workflows/dashboard-image.yml
+    permissions:
+      contents: read
+      id-token: write
+
   check:
     name: "Check"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
       - name: 📥 Checkout repository
@@ -80,7 +83,7 @@ jobs:
 
   cfcheck:
     name: "CFC Pattern Check (${{ matrix.shard }}/${{ matrix.total }})"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -104,7 +107,7 @@ jobs:
 
   test:
     name: "Test (${{ matrix.shard }}/${{ matrix.total }})"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -129,8 +132,15 @@ jobs:
 
       # For deno-web-test browser tests
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
-      - name: 🛡️ Disable AppArmor for browser tests
-        run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+      - name: 🛡️ Disable AppArmor restriction for browser tests
+        shell: bash
+        run: |
+          sysctl_path=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [[ -e "$sysctl_path" ]]; then
+            printf '0\n' | sudo tee "$sysctl_path" >/dev/null
+          else
+            echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
+          fi
 
       - name: 🧪 Run parallel workspace tests
         run: deno task test
@@ -154,7 +164,7 @@ jobs:
 
   runner-test:
     name: "Runner Tests (${{ matrix.shard }}/${{ matrix.total }})"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -171,9 +181,6 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
-      - name: 📥 Download Deno dependency binaries
-        run: deno task initialize-db
-
       - name: 🧪 Run runner tests
         working-directory: packages/runner
         env:
@@ -187,9 +194,13 @@ jobs:
           printf 'Runner test shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
           printf '  %s\n' $TEST_FILES
           # --no-check: the Check job type-checks packages/runner
-          # (tasks/check.sh).
+          # (tasks/check.sh). --preload runs the fake clock before every test
+          # module, the same as the package test task; without it the global
+          # `clock` the converted tests use is undefined. See
+          # test/clock-preload.ts.
           ENV=test deno test \
             --no-check \
+            --preload=test/clock-preload.ts \
             --allow-ffi \
             --allow-env \
             --allow-read \
@@ -210,9 +221,9 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
-  build-binaries:
-    name: "Build Binaries"
-    runs-on: ubuntu-latest
+  build-toolshed:
+    name: "Build Binary (toolshed)"
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
       - name: 📥 Checkout repository
@@ -224,24 +235,69 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
-      - name: 🏗️ Build application binaries
-        run: deno task build-binaries
+      - name: 🏗️ Build toolshed binary
+        run: deno task build-binaries toolshed
         env:
           COMMIT_SHA: ${{ github.sha }}
 
-      # Upload binaries as artifacts for the integration tests
-      - name: 📤 Upload binaries for integration tests
+      - name: 📤 Upload toolshed binary
         uses: actions/upload-artifact@v7
         with:
-          name: common-binaries
-          path: |
-            ./dist/toolshed
-            ./dist/bg-piece-service
-            ./dist/cf
+          name: binary-toolshed
+          path: ./dist/toolshed
+          if-no-files-found: error
+
+  build-bg-piece-service:
+    name: "Build Binary (bg-piece-service)"
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v7
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      - name: 🏗️ Build bg-piece-service binary
+        run: deno task build-binaries bg-piece-service
+
+      - name: 📤 Upload bg-piece-service binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: binary-bg-piece-service
+          path: ./dist/bg-piece-service
+          if-no-files-found: error
+
+  build-cf:
+    name: "Build Binary (cf)"
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v7
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      - name: 🏗️ Build cf binary
+        run: deno task build-binaries cf
+
+      - name: 📤 Upload cf binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: binary-cf
+          path: ./dist/cf
+          if-no-files-found: error
 
   generated-patterns-integration-test:
     name: "Generated Patterns Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -267,16 +323,13 @@ jobs:
           restore-keys: |
             cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
 
-      - name: 🧾 Record compile cache state for the Performance Check
+      - name: 🧾 Record compile cache state for the Coverage Check
         uses: ./.github/actions/record-compile-cache-state
         with:
           family: generated-patterns
           shard: ${{ matrix.shard }}
           cache-file: ${{ github.workspace }}/.compile-cache/generated-patterns-${{ matrix.shard }}.json
           exact-hit: ${{ steps.compile-cache.outputs.cache-hit }}
-
-      - name: 📥 Download Deno dependency binaries
-        run: deno task initialize-db
 
       - name: 🧪 Run generated patterns integration tests
         working-directory: packages/generated-patterns
@@ -324,9 +377,9 @@ jobs:
 
   package-integration-test:
     name: "Package Integration Tests (${{ matrix.suite_name }})"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
-    needs: ["build-binaries"]
+    needs: ["build-toolshed"]
     strategy:
       fail-fast: false
       matrix:
@@ -356,10 +409,10 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
-      - name: 📥 Download built binaries
+      - name: 📥 Download toolshed binary
         uses: actions/download-artifact@v8
         with:
-          name: common-binaries
+          name: binary-toolshed
           path: common-binaries
 
       - name: 🔌 Start Toolshed server for testing
@@ -367,14 +420,26 @@ jobs:
           TOOLSHED_PORT: 8000
         run: |
           chmod +x ./common-binaries/toolshed
+          # --background spawns the server, waits until it has bound its port,
+          # then returns, so the test steps never race a not-yet-listening
+          # server. The server logs to --log-file, which the launcher prints on
+          # success and dumps if the server exits before binding.
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
-          ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
+          ./common-binaries/toolshed --port="$TOOLSHED_PORT" \
+            --background --log-file="$RUNNER_TEMP/toolshed.log"
 
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
-      - name: 🛡️ Disable AppArmor for browser tests
-        run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+      - name: 🛡️ Disable AppArmor restriction for browser tests
+        shell: bash
+        run: |
+          sysctl_path=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [[ -e "$sysctl_path" ]]; then
+            printf '0\n' | sudo tee "$sysctl_path" >/dev/null
+          else
+            echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
+          fi
 
       - name: 🧪 Run ${{ matrix.step_name }}
         working-directory: ${{ matrix.package_dir }}
@@ -416,9 +481,9 @@ jobs:
 
   cli-integration-test:
     name: "CLI Integration Tests (${{ matrix.suite_name }})"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: ${{ matrix.timeout_minutes }}
-    needs: ["build-binaries"]
+    needs: ["build-toolshed", "build-cf"]
     strategy:
       fail-fast: false
       matrix:
@@ -457,10 +522,16 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
-      - name: 📥 Download built binaries
+      - name: 📥 Download toolshed binary
         uses: actions/download-artifact@v8
         with:
-          name: common-binaries
+          name: binary-toolshed
+          path: common-binaries
+
+      - name: 📥 Download cf binary
+        uses: actions/download-artifact@v8
+        with:
+          name: binary-cf
           path: common-binaries
 
       - name: 🔌 Start Toolshed server for testing
@@ -473,12 +544,11 @@ jobs:
           # Set tools to path
           # Integration script needs `cf`
           echo "${{ github.workspace }}/common-binaries" >> $GITHUB_PATH
-          CFTS_AI_GATEWAY_URL="" MEMORY_URL="$TOOLSHED_URL" API_URL="$TOOLSHED_URL" ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
-
-      - name: ⏳ Wait for Toolshed to be ready
-        uses: ./.github/actions/wait-for-toolshed
-        with:
-          url: http://localhost:${{ matrix.toolshed_port }}
+          # --background waits until the server has bound its port before it
+          # returns, so the test steps never race a not-yet-listening server.
+          CFTS_AI_GATEWAY_URL="" MEMORY_URL="$TOOLSHED_URL" API_URL="$TOOLSHED_URL" \
+            ./common-binaries/toolshed --port="$TOOLSHED_PORT" \
+            --background --log-file="$RUNNER_TEMP/toolshed.log"
 
       - name: 📦 Install CLI integration dependencies
         uses: ./.github/actions/apt-install
@@ -569,9 +639,9 @@ jobs:
 
   pattern-integration-test:
     name: "Pattern Integration Tests (${{ matrix.shard }}/${{ matrix.total }})"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
-    needs: ["build-binaries"]
+    needs: ["build-toolshed"]
     strategy:
       fail-fast: false
       matrix:
@@ -615,7 +685,7 @@ jobs:
           restore-keys: |
             cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
 
-      - name: 🧾 Record compile cache state for the Performance Check
+      - name: 🧾 Record compile cache state for the Coverage Check
         uses: ./.github/actions/record-compile-cache-state
         with:
           family: pattern-integration
@@ -623,33 +693,40 @@ jobs:
           cache-file: ${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json
           exact-hit: ${{ steps.compile-cache.outputs.cache-hit }}
 
-      - name: 📥 Download built binaries
+      - name: 📥 Download toolshed binary
         uses: actions/download-artifact@v8
         with:
-          name: common-binaries
+          name: binary-toolshed
           path: common-binaries
 
       - name: 🔌 Start Toolshed server for testing
         run: |
           chmod +x ./common-binaries/toolshed
+          # --background waits until the server has bound its port before it
+          # returns, so the test steps never race a not-yet-listening server.
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
-          ./common-binaries/toolshed &
-
-      - name: ⏳ Wait for Toolshed to be ready
-        uses: ./.github/actions/wait-for-toolshed
-        with:
-          url: http://localhost:8000
+          ./common-binaries/toolshed \
+            --background --log-file="$RUNNER_TEMP/toolshed.log"
 
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
-      - name: 🛡️ Disable AppArmor for browser tests
-        run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+      - name: 🛡️ Disable AppArmor restriction for browser tests
+        shell: bash
+        run: |
+          sysctl_path=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [[ -e "$sysctl_path" ]]; then
+            printf '0\n' | sudo tee "$sysctl_path" >/dev/null
+          else
+            echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
+          fi
 
-      # These tests run with `deno test`, so they collect V8 runtime coverage
-      # (DENO_COVERAGE_DIR) but not authored-pattern coverage. Pattern coverage
-      # is only collected by `cf test` via CF_PATTERN_COVERAGE_DIR, set on the
-      # pattern-unit-test job. See docs/development/COVERAGE.md.
+      # Both kinds of coverage: V8 runtime coverage via DENO_COVERAGE_DIR, and
+      # authored-pattern coverage via CF_PATTERN_COVERAGE_DIR, which the shell
+      # integration harness reads to turn on the browser worker's collector and
+      # to place the LCOV it pulls back at teardown. Absolute, because the
+      # harness resolves it against a working directory that differs between the
+      # two integration jobs. See docs/development/COVERAGE.md.
       - name: 🧩 Run end-to-end patterns integration tests
         working-directory: packages/patterns
         run: |
@@ -663,6 +740,7 @@ jobs:
           API_URL=http://localhost:8000/ \
           PATTERN_INTEGRATION_SHARD="${{ matrix.shard }}/${{ matrix.total }}" \
           CF_COMPILE_CACHE_FILE="${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json" \
+          CF_PATTERN_COVERAGE_DIR="${{ github.workspace }}/coverage/lcov/pattern-runtime/pattern-integration-${{ matrix.shard }}" \
           DENO_COVERAGE_DIR=../../coverage/raw/pattern-integration-${{ matrix.shard }} \
           deno test --no-check --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
             --junit-path=../../test-results/patterns-${{ matrix.shard }}.xml \
@@ -672,12 +750,15 @@ jobs:
         if: always()
         run: deno run --allow-read --allow-write --allow-run tasks/write-coverage-lcov.ts coverage/raw/pattern-integration-${{ matrix.shard }} coverage/lcov/pattern-integration-${{ matrix.shard }}.lcov
 
+      # The whole directory: the V8 report plus the authored-pattern LCOV the
+      # harness wrote under pattern-runtime/. coverage-check joins every .lcov in
+      # the artifact, so both streams reach the gate.
       - name: 📤 Upload coverage report
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: coverage-profile-pattern-integration-${{ matrix.shard }}
-          path: coverage/lcov/pattern-integration-${{ matrix.shard }}.lcov
+          path: coverage/lcov/
           retention-days: 90
           if-no-files-found: error
 
@@ -692,7 +773,7 @@ jobs:
 
   pattern-reload-integration-test:
     name: "Pattern Reload Integration Tests"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
       - name: 📥 Checkout repository
@@ -706,19 +787,24 @@ jobs:
 
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
-      - name: 🛡️ Disable AppArmor for browser tests
-        run: echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+      - name: 🛡️ Disable AppArmor restriction for browser tests
+        shell: bash
+        run: |
+          sysctl_path=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [[ -e "$sysctl_path" ]]; then
+            printf '0\n' | sudo tee "$sysctl_path" >/dev/null
+          else
+            echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
+          fi
 
-      # These tests run with `deno test`, so they collect V8 runtime coverage
-      # (DENO_COVERAGE_DIR) but not authored-pattern coverage. Pattern coverage
-      # is only collected by `cf test` via CF_PATTERN_COVERAGE_DIR, set on the
-      # pattern-unit-test job. See docs/development/COVERAGE.md.
+      # Both kinds of coverage — see the note on pattern-integration-test above.
       - name: 🧩 Run pattern reload integration tests
         run: |
           mkdir -p test-results
           HEADLESS=1 \
           EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE=true \
           CF_EXPECT_PERSISTENT_SCHEDULER_STATE=1 \
+          CF_PATTERN_COVERAGE_DIR="${{ github.workspace }}/coverage/lcov/pattern-runtime/pattern-reload" \
           DENO_COVERAGE_DIR=coverage/raw/pattern-reload \
           deno task integration --junit-dir=test-results patterns-reload
 
@@ -726,12 +812,13 @@ jobs:
         if: always()
         run: deno run --allow-read --allow-write --allow-run tasks/write-coverage-lcov.ts coverage/raw/pattern-reload coverage/lcov/pattern-reload.lcov
 
+      # The whole directory — see the note on pattern-integration-test above.
       - name: 📤 Upload coverage report
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: coverage-profile-pattern-reload
-          path: coverage/lcov/pattern-reload.lcov
+          path: coverage/lcov/
           retention-days: 90
           if-no-files-found: error
 
@@ -746,9 +833,9 @@ jobs:
 
   pattern-unit-test:
     name: "Pattern Unit Tests (${{ matrix.chunk }}/${{ matrix.total }})"
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
-    needs: ["build-binaries"]
+    needs: ["build-cf"]
     strategy:
       matrix:
         chunk: [1, 2, 3, 4, 5]
@@ -763,9 +850,6 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
-      - name: 📥 Download Deno dependency binaries
-        run: deno task initialize-db
-
       - name: ♻️ Restore/save pattern unit compile byte cache
         id: compile-cache
         uses: actions/cache@v4
@@ -775,7 +859,7 @@ jobs:
           restore-keys: |
             cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.chunk }}-
 
-      - name: 🧾 Record compile cache state for the Performance Check
+      - name: 🧾 Record compile cache state for the Coverage Check
         uses: ./.github/actions/record-compile-cache-state
         with:
           family: pattern-unit
@@ -783,10 +867,10 @@ jobs:
           cache-file: ${{ github.workspace }}/.compile-cache/pattern-unit-coverage-${{ matrix.chunk }}.json
           exact-hit: ${{ steps.compile-cache.outputs.cache-hit }}
 
-      - name: 📥 Download built binaries
+      - name: 📥 Download cf binary
         uses: actions/download-artifact@v8
         with:
-          name: common-binaries
+          name: binary-cf
           path: common-binaries
 
       - name: 🧪 Run pattern unit tests
@@ -825,15 +909,17 @@ jobs:
   # Tier 2 – Post-test gates and deployments
   # ---------------------------------------------------------------------------
 
-  perf-check:
-    name: "Performance Check"
+  coverage-check:
+    name: "Coverage Check"
     if: (github.event_name == 'pull_request') || (github.ref_name == 'main')
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     needs:
       - check
       - test
-      - build-binaries
+      - build-toolshed
+      - build-bg-piece-service
+      - build-cf
       - package-integration-test
       - cli-integration-test
       - pattern-integration-test
@@ -858,12 +944,22 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
-      - name: 📊 Run performance check
+      - name: 📥 Download coverage reports
+        uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-profile-*
+          path: coverage-artifacts
+          merge-multiple: false
+          skip-decompress: false
+          digest-mismatch: error
+
+      - name: 📊 Run coverage check
         env:
+          COVERAGE_ARTIFACTS_DIR: coverage-artifacts
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: deno run --allow-net --allow-env --allow-read --allow-run --allow-write tasks/perf-check.ts
+        run: deno run --allow-net --allow-env --allow-read --allow-run --allow-write tasks/coverage-check.ts
 
       - name: 📤 Upload coverage regression comment
         if: always()
@@ -874,7 +970,11 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-      - name: 📤 Upload performance metrics
+      # The per-run coverage baseline (this run's coverage-debt metrics and
+      # compile cache states). Named perf-metrics for historical continuity —
+      # the coverage ratchet reads recent main runs' artifacts by this name, so
+      # keeping it avoids a baseline migration.
+      - name: 📤 Upload coverage baseline
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -883,24 +983,55 @@ jobs:
           retention-days: 90
           if-no-files-found: ignore
 
-      - name: 📤 Upload performance metrics backfill
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: perf-metrics-backfill
-          path: perf-metrics-backfill.json
-          retention-days: 90
-          if-no-files-found: ignore
+  status:
+    name: "Status"
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    needs:
+      - dashboard
+      - check
+      - cfcheck
+      - test
+      - runner-test
+      - build-toolshed
+      - build-bg-piece-service
+      - build-cf
+      - generated-patterns-integration-test
+      - package-integration-test
+      - cli-integration-test
+      - pattern-integration-test
+      - pattern-reload-integration-test
+      - pattern-unit-test
+      - coverage-check
+    permissions: {}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: 🔎 Verify pull request jobs
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          failures=$(jq -r '
+            to_entries[]
+            | select(.value.result != "success")
+            | "\(.key): \(.value.result)"
+          ' <<< "$JOB_RESULTS")
+
+          if [[ -n "$failures" ]]; then
+            printf 'Unsuccessful pull request jobs:\n%s\n' "$failures"
+            exit 1
+          fi
 
   attest-binaries:
     name: "Attest and Upload Binaries"
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
     needs:
       [
         "test",
         "check",
+        "build-toolshed",
+        "build-bg-piece-service",
+        "build-cf",
         "runner-test",
         "pattern-integration-test",
         "pattern-reload-integration-test",
@@ -919,10 +1050,22 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v7
 
-      - name: 📥 Download built binaries
+      - name: 📥 Download toolshed binary
         uses: actions/download-artifact@v8
         with:
-          name: common-binaries
+          name: binary-toolshed
+          path: common-binaries
+
+      - name: 📥 Download bg-piece-service binary
+        uses: actions/download-artifact@v8
+        with:
+          name: binary-bg-piece-service
+          path: common-binaries
+
+      - name: 📥 Download cf binary
+        uses: actions/download-artifact@v8
+        with:
+          name: binary-cf
           path: common-binaries
 
       - name: 🦕 Setup Deno
@@ -1126,7 +1269,7 @@ jobs:
     name: "Deploy to Toolshed (Staging)"
     if: github.ref == 'refs/heads/main'
     needs: ["attest-binaries"]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: toolshed
     steps:
       - name: 📥 Checkout repository
@@ -1150,7 +1293,7 @@ jobs:
     name: "Deploy to Rapids (Staging)"
     if: github.ref == 'refs/heads/main'
     needs: ["attest-binaries"]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: toolshed
     steps:
       - name: 📥 Checkout repository
@@ -1183,7 +1326,7 @@ jobs:
         "package-integration-test",
         "cli-integration-test",
       ]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: ci
     steps:
       - name: 📥 Checkout repository

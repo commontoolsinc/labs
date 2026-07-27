@@ -12,7 +12,7 @@
  *
  * Run: deno task cf test packages/patterns/test/non-idempotent/shuffle.test.tsx --verbose
  */
-import { computed, pattern, Writable } from "commonfabric";
+import { assert, computed, pattern, Writable } from "commonfabric";
 
 export default pattern(() => {
   const items = new Writable(["alpha", "bravo", "charlie", "delta", "echo"]);
@@ -38,7 +38,7 @@ export default pattern(() => {
     lastDraw.set(stamp);
   });
 
-  const hasItems = computed(() => shuffled.get().length > 0);
+  const hasItems = assert(() => shuffled.get().length > 0);
 
   return {
     tests: [{ assertion: hasItems }],

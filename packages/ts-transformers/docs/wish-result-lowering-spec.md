@@ -40,9 +40,9 @@ When the destructure root is a fresh opaque-origin call
 - `allowIfSet: true` makes multi-binding destructures
   (`const { a, b } = wish(...)`) order-deterministic: the first leaf in source
   order wins, the rest are no-ops.
-- Honest to user intent — the user wrote `const { allPieces } = wish(...)`, so
-  the cell takes its identity from `allPieces`, the name they actually chose.
-  The synthesized `__cf_destructure_N` is invisible scaffolding.
+- Honest to user intent — the user wrote `const { pieceRegistry } = wish(...)`,
+  so the cell takes its identity from `pieceRegistry`, the name they actually
+  chose. The synthesized `__cf_destructure_N` is invisible scaffolding.
 - Avoids a regression we hit when attaching `.for(...)` to the root:
   `isOpaqueSourceExpression` didn't recognize `<opaque>.for(...)` as a source,
   so downstream walker tracking broke.

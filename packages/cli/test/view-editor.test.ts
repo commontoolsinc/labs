@@ -7,7 +7,7 @@
  */
 import { assert, assertEquals } from "@std/assert";
 import { parseDocument, promptText } from "./view-helpers.ts";
-import { highlightDocument } from "../lib/view/parse.ts";
+import { highlightDocument } from "../lib/view/languages/typescript/parse.ts";
 import { Session } from "../lib/view/session.ts";
 import type { Key } from "../lib/view/keys.ts";
 import {
@@ -192,6 +192,26 @@ Deno.test("editor: F3 saves the edited text to disk", async () => {
     press(s, "f3");
     assertEquals(await Deno.readTextFile(path), "Xhello\nworld\n");
     assert(s.view().message.startsWith("Saved"));
+  } finally {
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("editor: F3 on an unchanged file reports zero and does not write", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".ts" });
+  try {
+    await Deno.writeTextFile(path, "hello\n");
+    const oldTime = new Date("2000-01-01T00:00:00.000Z");
+    await Deno.utime(path, oldTime, oldTime);
+    const mtime = (await Deno.stat(path)).mtime?.getTime();
+    const s = editSession("hello\n", fileSource(path));
+    press(s, "f3");
+    assertEquals(s.view().message, "Saved 0 files");
+    assertEquals(
+      (await Deno.stat(path)).mtime?.getTime(),
+      mtime,
+      "the unchanged file was not opened for writing",
+    );
   } finally {
     await Deno.remove(path);
   }

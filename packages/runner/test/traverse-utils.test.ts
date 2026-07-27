@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { traverseValue } from "../src/builder/traverse-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -115,5 +116,51 @@ describe("traverseValue with query result proxies", () => {
     expect(result[2]).toBe(mixedArray[2]); // Query result proxy preserved
     expect(result[3]).toEqual({ nested: { values: [10, 20] } });
     expect(result[4]).toEqual([100, 200, 300]);
+  });
+});
+
+describe("traverseValue with FabricPrimitive values", () => {
+  it("passes a nested FabricPrimitive through as an atomic leaf", () => {
+    // A `FabricBytes` (a `FabricPrimitive`) keeps its state in private fields
+    // and exposes zero enumerable own-props. Descending into it via
+    // `Object.entries`/`Object.fromEntries` decomposes it to `{}`, silently
+    // corrupting the value. It must be left intact as an atomic leaf.
+    const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+    const structure = { name: "test", payload: bytes };
+
+    const result = traverseValue(structure, () => undefined);
+
+    // Same instance passes through: it is not rebuilt, so its private state
+    // survives.
+    expect(result.payload).toBe(bytes);
+    // Siblings are still traversed normally.
+    expect(result.name).toBe("test");
+  });
+
+  it("still applies `fn` to a nested FabricPrimitive", () => {
+    // The guard belongs in the descent condition, not as a pre-`fn` early
+    // return: a primitive is still a value `fn` should get to see (and
+    // optionally replace), exactly like a string or number leaf. Only the
+    // rebuild-descent must be skipped.
+    const bytes = new FabricBytes(new Uint8Array([4, 5, 6]));
+    const seen: unknown[] = [];
+
+    traverseValue({ payload: bytes }, (v) => {
+      seen.push(v);
+      return undefined;
+    });
+
+    expect(seen).toContain(bytes);
+  });
+
+  it("lets `fn` replace a nested FabricPrimitive", () => {
+    const bytes = new FabricBytes(new Uint8Array([7, 8, 9]));
+
+    const result = traverseValue(
+      { payload: bytes },
+      (v) => (v instanceof FabricBytes ? "replaced" : undefined),
+    );
+
+    expect(result.payload).toBe("replaced");
   });
 });

@@ -24,10 +24,11 @@ toylike even when it's functionally correct.
    problem and validates the fix. Connect micro-optimizations to user-visible
    outcomes.
 
-4. **Protect what you've gained.** Every improvement should be defended by an
-   existing benchmark. CI already runs the benchmark suite every four hours
-   and gates PRs on CI timing regressions — lean on that rather than building
-   new infrastructure.
+4. **Protect what you've gained.** Every improvement should be defended by a
+   benchmark. CI runs the benchmark suite every four hours and charts the trend
+   on the team ops dashboard (see [BENCHMARKS.md](BENCHMARKS.md)). Benchmarks
+   and CI wall time are not gated, so the dashboard is where you catch drift —
+   watch it rather than assuming a check will fail on a regression.
 
 5. **Balance direct wins with leverage.** We're a tiny team, so we can't
    afford to spend a month on infrastructure before delivering improvements.
@@ -59,8 +60,6 @@ step, and we'll ratchet targets down as we improve.
 - CI benchmarks every four hours on main (dedicated runner group), JSON
   artifacts with 90-day retention, charted on the team ops dashboard's /bench
   page (see [BENCHMARKS.md](BENCHMARKS.md))
-- Per-PR performance gate comparing CI timings against recent main runs
-  (median + 3σ or +50%)
 - Recent wins: compilation cache (~100-500ms saved), schema freeze caching,
   LLM queue batching, scheduler debouncing, scheduler writer-index cleanup
   (`writersByEntity` is Set-backed), refer() caching (~2x)
@@ -167,7 +166,7 @@ debating when the timing is right.
 | INFRA-2 | Local benchmark comparison | High | S | `deno task bench` wrapper that saves `bench-baseline.json` and diffs against it. See results in seconds instead of waiting for CI. Every optimization project gets faster. |
 | INFRA-3 | Selective benchmark filtering | Medium | S | Verify and document `deno bench --filter` for subsystem-specific runs. Faster inner loop when working on a specific area. |
 | INFRA-4 | Single "pattern load" benchmark | High | M | One representative pattern that compiles, loads, receives data, and renders. The top-level number that tells you whether an optimization actually moved the user-visible needle. Without this you're optimizing components without knowing if they're the bottleneck. (Partly done in [#3133](https://github.com/commontoolsinc/labs/pull/3133)) |
-| INFRA-5 | PR benchmark bot | High | M | CI job on PRs touching critical packages, runs the benchmarks, compares against main, posts a before/after comment. The per-PR gate from [#3125](https://github.com/commontoolsinc/labs/pull/3125) compares CI job, step, and test timings but never runs benchmarks, so benchmark regressions surface only in the dashboard trends, after merge. The benchmark suite, the four-hourly bench-results artifacts, and the generic baseline math in `tasks/perf-lib.ts` are reusable; the deno-bench ingestion was removed with the scheduled detector, so a bot would need to rebuild it. |
+| INFRA-5 | PR benchmark bot | High | M | CI job on PRs touching critical packages, runs the benchmarks, compares against main, posts a before/after comment. Nothing gates benchmarks or CI timings on a PR today, so benchmark regressions surface only in the dashboard trends, after merge. The benchmark suite and the four-hourly bench-results artifacts are reusable; the deno-bench ingestion and the per-PR CI-timing gate have both been removed, so a bot would build its comparison from scratch. |
 | INFRA-6 | Benchmark trend visualization | Medium | M | Script that pulls 90 days of benchmark JSON artifacts and produces charts or CSVs. Spots gradual drift that per-PR checks miss. (done: the team ops dashboard charts benchmark trends on its /bench page) |
 | INFRA-7 | Automated budget enforcement | High | L | Hard budgets on critical metrics, CI fails if exceeded. Performance becomes a contract. Requires careful calibration for CI-vs-local variance and a warmup period as warnings-only. Risk of false positives creating CI noise. |
 | INFRA-8 | End-to-end performance test suite | High | L | Multiple representative user journeys (simple load, 100-cell pattern, LLM pattern, large list) measured wall-clock on every PR. Guarantees user-visible performance is protected, not just micro-benchmarks. Each scenario needs a pattern, test data, and harness. Maintenance scales with scenario count. (Note that the pattern unit tests integration test is the closest we have to that. It also run the backend in-memory, so it happens to measure both client and server in one go.) |
