@@ -4,10 +4,16 @@ import {
   Default,
   entityRefToString,
   handler,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   NAME,
+  observeAvailability,
   pattern,
   type PerSession,
   type PerUser,
+  resultOf,
   Stream,
   UI,
   type VNode,
@@ -155,10 +161,42 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
   });
   const profileNameWish = wish<string>({ query: "#profileName" });
   const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
-  const profileName = computed(() => profileNameWish.result ?? "");
-  const profileAvatar = computed(() => profileAvatarWish.result ?? "");
+  const observedProfileSetupUI = observeAvailability(profileWish[UI]);
+  const profileSetupUI = computed(() => {
+    if (
+      hasError(observedProfileSetupUI) ||
+      isPending(observedProfileSetupUI) ||
+      isSyncing(observedProfileSetupUI) ||
+      hasSchemaMismatch(observedProfileSetupUI)
+    ) return <></>;
+    return observedProfileSetupUI;
+  });
+  const profile = computed(() => {
+    const state = profileWish.result;
+    if (
+      hasError(state) || isPending(state) || isSyncing(state) ||
+      hasSchemaMismatch(state)
+    ) return undefined;
+    return resultOf(state);
+  });
+  const profileName = computed(() => {
+    const state = profileNameWish.result;
+    if (
+      hasError(state) || isPending(state) || isSyncing(state) ||
+      hasSchemaMismatch(state)
+    ) return "";
+    return resultOf(state);
+  });
+  const profileAvatar = computed(() => {
+    const state = profileAvatarWish.result;
+    if (
+      hasError(state) || isPending(state) || isSyncing(state) ||
+      hasSchemaMismatch(state)
+    ) return "";
+    return resultOf(state);
+  });
   const hasProfile = computed(() =>
-    profileName.trim().length > 0 && profileWish.result !== undefined
+    profileName.trim().length > 0 && profile !== undefined
   );
 
   const addTopic = action(({ title, agentName }: AddTopicEvent) => {
@@ -244,7 +282,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
   );
 
   return {
-    [NAME]: computed(() => `Topics (${asArray(topics.get()).length})`),
+    [NAME]: computed(() => `Topics (${topicCount})`),
     [UI]: (
       <cf-theme theme={TOPICS_THEME}>
         <cf-screen>
@@ -261,12 +299,12 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
                 {hasProfile
                   ? (
                     <cf-profile-badge
-                      $profile={profileWish.result}
+                      $profile={profile}
                       size="sm"
                       noNavigate
                     />
                   )
-                  : <div>{profileWish[UI]}</div>}
+                  : <div>{profileSetupUI}</div>}
               </cf-hstack>
             </cf-hstack>
           </cf-vstack>

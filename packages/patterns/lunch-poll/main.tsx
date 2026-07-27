@@ -64,7 +64,12 @@ import {
   computed,
   Default,
   handler,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   NAME,
+  observeAvailability,
   pattern,
   type PerSpace,
   type PerUser,
@@ -1025,20 +1030,47 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const profileWish = wish<LunchProfile>({ query: "#profile" });
     const profileNameWish = wish<string>({ query: "#profileName" });
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
-    // Bind the badge/identity to the wish result DIRECTLY (the demo idiom). Do
-    // NOT reintroduce a `profile ?? …` injection override: an unset optional
-    // cell input is a truthy proxy at pattern-build time, so `??` returns that
-    // broken proxy instead of the real result and every badge falls back to
-    // "Unknown profile". Profile-backed rendering is verified at the browser
-    // tier (the scrabble/battleship precedent), not via a pattern-body cell
-    // injection.
-    const viewerProfileCell = resultOf(profileWish.result);
-    const viewerProfileName = hasError(profileNameWish.result)
-      ? ""
-      : resultOf(profileNameWish.result);
-    const viewerProfileAvatar = hasError(profileAvatarWish.result)
-      ? ""
-      : resultOf(profileAvatarWish.result);
+    const observedProfileSetupUI = observeAvailability(profileWish[UI]);
+    const viewerProfileSetupUI = computed(() => {
+      if (
+        hasError(observedProfileSetupUI) ||
+        isPending(observedProfileSetupUI) ||
+        isSyncing(observedProfileSetupUI) ||
+        hasSchemaMismatch(observedProfileSetupUI)
+      ) return <></>;
+      return observedProfileSetupUI;
+    });
+    // Bind the badge/identity to the typed wish results after resolving
+    // availability inside computed boundaries. Do NOT reintroduce a
+    // `profile ?? …` injection override: an unset optional cell input is a
+    // truthy proxy at pattern-build time, so `??` returns that broken proxy
+    // instead of the real result and every badge falls back to "Unknown
+    // profile". Profile-backed rendering is verified at the browser tier (the
+    // scrabble/battleship precedent), not via a pattern-body cell injection.
+    const viewerProfileCell = computed(() => {
+      const state = profileWish.result;
+      if (
+        hasError(state) || isPending(state) || isSyncing(state) ||
+        hasSchemaMismatch(state)
+      ) return undefined;
+      return resultOf(state);
+    });
+    const viewerProfileName = computed(() => {
+      const state = profileNameWish.result;
+      if (
+        hasError(state) || isPending(state) || isSyncing(state) ||
+        hasSchemaMismatch(state)
+      ) return "";
+      return resultOf(state);
+    });
+    const viewerProfileAvatar = computed(() => {
+      const state = profileAvatarWish.result;
+      if (
+        hasError(state) || isPending(state) || isSyncing(state) ||
+        hasSchemaMismatch(state)
+      ) return "";
+      return resultOf(state);
+    });
     // This pattern renders identity only from the STORED directory entries, so
     // a later profile switch cannot orphan the joined identity.
     const participantIdentity = ParticipantIdentityCard({
@@ -1049,7 +1081,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       profile: viewerProfileCell,
       profileName: viewerProfileName,
       profileAvatar: viewerProfileAvatar,
-      profileSetupUI: profileWish[UI],
+      profileSetupUI: viewerProfileSetupUI,
     });
     const boundAddOption = addOption({
       options,
