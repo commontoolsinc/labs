@@ -973,7 +973,7 @@ function getRuntimeIntervalNowTimers(
 }
 
 function intervalNowTimerKey(space: MemorySpace, intervalMs: number): string {
-  return `${space} ${intervalMs}`;
+  return `${space}\x00${intervalMs}`;
 }
 
 // Write the current coarsened timestamp into the shared cell unless it is

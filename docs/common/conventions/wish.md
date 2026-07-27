@@ -237,7 +237,7 @@ The `scope` parameter can redirect or fan the others out across other spaces.
 | `#suggestions`      | Suggestion history of the current space                 |
 | `#summaryIndex`     | Summary index of the current space                      |
 | `#knowledgeGraph`   | Knowledge graph of the current space                    |
-| `#now`              | Current timestamp (one-shot, 1s resolution)             |
+| `#now`              | Piece's first-ever load time, durable — never advances  |
 | `#now/N`            | Reactive timestamp, every N seconds (N must be 1-86400) |
 | `#favorites`        | User's favorites list (home space)                      |
 | `#favorites/<term>` | First favorite matching `<term>` (legacy search)        |
@@ -258,7 +258,9 @@ routed to the suggestion picker.
 
 ```tsx
 // Shown inside a pattern body.
-// One-shot: captures the time once at first load, never updates.
+// One-shot: durably captures the piece's FIRST-EVER load time — a reload, or
+// any other runtime opening the same piece, reads the original capture. It
+// never updates; use it for created-at stamps, never as a clock.
 const createdAt = wish<number>({ query: "#now" });
 
 // Reactive: updates every 60 seconds, re-triggering downstream computed()s.
@@ -269,6 +271,17 @@ const timeAgo = computed(() => {
   return `${Math.floor(ms / 60000)} minutes ago`;
 });
 ```
+
+For a one-off timestamp of the **triggering event** — not the piece's first
+load, and not a reactive tick — call `Date.now()` / `new Date()` directly
+**inside a handler or action**. There the sandbox exposes the event's own
+instant, frozen for the whole handler cascade and coarsened to one-second
+resolution; it is not a live wall-clock read (shaped/delayed delivery can make
+it lag real time). The three sit on a spectrum: `#now` is the piece's first-load
+instant, the handler clock is the current event's instant (a single frozen
+reading), and `#now/N` is a reading that keeps refreshing. Reach for `#now` only
+for a created-at stamp; use the handler clock to stamp an event, or `#now/N` for
+a value that must track the current time.
 
 ### Periodic work: polling a data source on a `#now/N` tick
 
