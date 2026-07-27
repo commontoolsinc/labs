@@ -688,6 +688,82 @@ Deno.test("CellBridge prepares a stable paginated entity identifier snapshot", a
   assertEquals(tree.getChildren(state.entitiesIno), []);
 });
 
+Deno.test("CellBridge rejects inconsistent entity identifier pages", async (t) => {
+  type EntityIdPage = {
+    serverSeq: number;
+    ids: string[];
+    nextAfter?: string;
+  };
+
+  const cases: Array<{
+    name: string;
+    pages: Array<EntityIdPage | undefined>;
+    message: string;
+  }> = [
+    {
+      name: "missing page",
+      pages: [undefined],
+      message: "does not support paginated entity identifier listing",
+    },
+    {
+      name: "changed server sequence",
+      pages: [
+        {
+          serverSeq: 1,
+          ids: ["of:fid1:first"],
+          nextAfter: "of:fid1:first",
+        },
+        { serverSeq: 2, ids: ["of:fid1:second"] },
+      ],
+      message: "snapshot changed from server sequence 1 to 2",
+    },
+    {
+      name: "unsorted identifiers",
+      pages: [
+        {
+          serverSeq: 1,
+          ids: ["of:fid1:second"],
+          nextAfter: "of:fid1:second",
+        },
+        {
+          serverSeq: 1,
+          ids: ["of:fid1:first"],
+        },
+      ],
+      message: "entity identifier pages are not strictly sorted",
+    },
+    {
+      name: "non-advancing cursor",
+      pages: [{
+        serverSeq: 1,
+        ids: ["of:fid1:first"],
+        nextAfter: "of:fid1:different",
+      }],
+      message: "entity identifier page did not advance",
+    },
+  ];
+
+  for (const testCase of cases) {
+    await t.step(testCase.name, async () => {
+      const tree = new FsTree();
+      const bridge = new CellBridge(tree, "/tmp/cf-exec");
+      const state = buildTestSpace(bridge, "home", []);
+      let request = 0;
+      state.manager = {
+        listEntityIdPage: () => Promise.resolve(testCase.pages[request++]),
+      } as unknown as SpaceState["manager"];
+
+      await assertRejects(
+        () => openDirectorySnapshot(bridge, state.entitiesIno),
+        Error,
+        testCase.message,
+      );
+      assertEquals(request, testCase.pages.length);
+      assertEquals(tree.getChildren(state.entitiesIno), []);
+    });
+  }
+});
+
 Deno.test("CellBridge coalesces concurrent entity directory snapshots", async () => {
   const ids = ["of:fid1:first", "of:fid1:second"];
   const page = defer<{ serverSeq: number; ids: string[] }>();
@@ -759,6 +835,56 @@ Deno.test("CellBridge exact entity lookup is targeted and projection cache is bo
     tree.getChildren(state.entitiesIno).map(([name]) => name),
     [ids[0], ids[2]].map((id) => encodeFuseComponent(id)),
   );
+});
+
+Deno.test("CellBridge resolves known pieces without point identifier lookup", async () => {
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "home", []);
+  const entityId = "of:fid1:known-piece";
+  const encodedId = encodeFuseComponent(entityId);
+  const existenceRequests: string[] = [];
+  state.manager = {
+    entityIdExists: (id: string) => {
+      existenceRequests.push(id);
+      return Promise.resolve(undefined);
+    },
+  } as unknown as SpaceState["manager"];
+  const piece = { id: entityId };
+  state.pieceControllers.set(
+    "Known Piece",
+    piece as unknown as SpaceState["pieceControllers"] extends
+      Map<string, infer Piece> ? Piece : never,
+  );
+
+  const firstIno = await bridge.prepareLookupForReply(
+    state.entitiesIno,
+    encodedId,
+  );
+  assertNotEquals(firstIno, undefined);
+  assertEquals(tree.lookup(state.entitiesIno, encodedId), firstIno);
+  assertStrictEquals(state.entityControllers.get(entityId), piece);
+  bridge.releaseEntityProjectionLookup(firstIno!);
+
+  const existingIno = await bridge.prepareLookupForReply(
+    state.entitiesIno,
+    encodedId,
+  );
+  assertEquals(existingIno, firstIno);
+  bridge.releaseEntityProjectionLookup(existingIno!);
+
+  assertEquals(
+    await bridge.prepareLookup(
+      state.entitiesIno,
+      encodeFuseComponent("of:fid1:unknown-piece"),
+    ),
+    false,
+  );
+  assertEquals(existenceRequests, [
+    entityId,
+    entityId,
+    "of:fid1:unknown-piece",
+  ]);
 });
 
 Deno.test("CellBridge keeps a newly resolved projection while older hydration is pending", async () => {
@@ -969,6 +1095,61 @@ Deno.test("CellBridge defers projection eviction until lookup and open reference
   assertEquals(tree.getNode(firstIno), undefined);
   assertNotEquals(tree.getNode(latestIno), undefined);
   bridge.releaseEntityProjectionLookup(latestIno);
+});
+
+Deno.test("CellBridge balances repeated lookup and open references", async () => {
+  const entityId = "of:fid1:repeated-references";
+  let exists = true;
+  const tree = new FsTree();
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    loadManager: () =>
+      Promise.resolve(
+        {
+          getSpace: () => "did:key:zRepeatedReferencesSpace",
+          entityIdExists: (id: string) =>
+            Promise.resolve(exists && id === entityId),
+        } as unknown as SpaceState["manager"],
+      ),
+  });
+  bridge.init({ apiUrl: "https://example.invalid", identity: "test" });
+  const state = await bridge.connectSpace("home");
+  const encodedId = encodeFuseComponent(entityId);
+
+  assertEquals(await bridge.prepareLookup(state.entitiesIno, encodedId), true);
+  const entityIno = tree.lookup(state.entitiesIno, encodedId)!;
+  const childIno = tree.addFile(entityIno, "child", "value", "string");
+  const internals = bridge as unknown as {
+    entityProjectionLookupOwners: Map<
+      bigint,
+      { rootIno: bigint; count: bigint }
+    >;
+    entityProjectionLookupRefs: Map<bigint, bigint>;
+  };
+
+  bridge.retainEntityProjectionLookup(childIno, 2n);
+  bridge.retainEntityProjectionOpen(childIno);
+  bridge.retainEntityProjectionOpen(childIno);
+  bridge.retainEntityProjectionLookup(childIno, -1n);
+  bridge.retainEntityProjectionLookup(tree.rootIno);
+  assertEquals(internals.entityProjectionLookupOwners.get(childIno)?.count, 2n);
+  assertEquals(internals.entityProjectionLookupOwners.has(tree.rootIno), false);
+  assertEquals(internals.entityProjectionLookupRefs.get(entityIno), 2n);
+
+  bridge.releaseEntityProjectionLookup(childIno);
+  bridge.releaseEntityProjectionOpen(childIno);
+  bridge.releaseEntityProjectionLookup(childIno, -1n);
+  assertEquals(internals.entityProjectionLookupOwners.get(childIno)?.count, 1n);
+  assertEquals(internals.entityProjectionLookupRefs.get(entityIno), 1n);
+
+  exists = false;
+  assertEquals(await bridge.prepareLookup(state.entitiesIno, encodedId), false);
+  assertEquals(tree.lookup(state.entitiesIno, encodedId), undefined);
+  assertNotEquals(tree.getNode(entityIno), undefined);
+
+  bridge.releaseEntityProjectionLookup(childIno);
+  assertNotEquals(tree.getNode(entityIno), undefined);
+  bridge.releaseEntityProjectionOpen(childIno);
+  assertEquals(tree.getNode(entityIno), undefined);
 });
 
 Deno.test("CellBridge releases descendant references after reactive removal", async () => {
