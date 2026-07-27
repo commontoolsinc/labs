@@ -249,6 +249,43 @@ round-trips on the interaction path — is exactly the unmeasured quantity
     decides speculate-creation-locally vs a declared, budgeted cold
     path; P6 measures creation first-paint as its own class.
 
+## 5b. P0 build log (2026-07-26) — landed, one named residual
+
+P0 shipped in four commits (grace window 7a7470bef, sponsor re-anchor
+275f61af0, Worker-init deadline dial 64ec6e24f, cold-start-protection
+pin 8fe14ab6f), each red-first with mutation discrimination; pool suite
+38/38. The acceptance loop against the real n=10 browser workload then
+peeled three successive liveness layers — each fix exposing the next:
+
+1. **Grace** fixed start-aborts-on-navigation-blip; the executor went
+   live for the first time (`workersStarted=1`, `parkedWakeStarts=1`) —
+   and exposed that with 10s grace its live windows were too short.
+2. A 60s-grace probe kept the Worker up all run: 45 scheduler runs, 34
+   shadow transactions, **32 candidates claim-ready — and all 32 refused
+   with `claim-authority-lost`**: the lease pins its sponsor at
+   acquisition and the pre-grace demand churn had been the de-facto
+   sponsor rotation. → the **sponsor re-anchor** (diagnostic-driven
+   generation replacement, cooldown-bounded).
+3. The defaults rerun then failed both Worker starts at exactly the
+   library's 30s init deadline (boot completing moments later) → the
+   **init-deadline dial** (toolshed default 120s).
+4. **Named residual (P0-R1, blocks the claimsIssued>0 acceptance):**
+   with the deadline at 120s the Workers RAN (43 scheduler runs, 32
+   claim-ready) but `DenoSpaceExecutor.initialize` never completed
+   within the run under live browser load — the start's completion
+   handshake (not the boot) outlasts minutes while the Worker is
+   demonstrably executing, so the pool never marks the generation live
+   (both starts died as close-time aborts). Next session: instrument the
+   initialize path (which await outlasts — ready handshake, lane wire,
+   initial settle?) on the live workload; P1's cold-start distribution
+   measurement rides the same instrumentation. Until P0-R1 closes, every
+   e2e number still reads "not engaged" per the P6 validity rule.
+
+The P1 unserved inventory now has real data across three runs: the
+serving holes on this workload are tiny (`malformed-action-observation`
+1-2×, `incomplete-static-surface` 1×, `dynamic-write-outside-static-
+surface` 2×) — consistent with R5/R13 being the only structural gaps.
+
 ## 6. The amended plan (panel-final; supersedes the pre-panel skeleton)
 
 | Row | Builds | Red-first gate(s) | Dial | Acceptance | Resolves |
