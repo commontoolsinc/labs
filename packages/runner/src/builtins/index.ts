@@ -58,8 +58,24 @@ export function registerBuiltins(runtime: Runtime) {
     "fetchProgram",
     raw(fetchProgram, { isEffect: true }),
   );
-  moduleRegistry.addModuleByRef("streamData", raw(streamData));
+  // streamData performs real network egress (a polling fetch loop against an
+  // arbitrary URL) and writes results back — an effect like the fetch family.
+  // It was misregistered as a computation until the client-passivity P2.0
+  // classification audit (CP6): the effect/computation line gates which
+  // builtins may ever run locally under a server claim (double-egress
+  // prevention keys on this kind), so the registered kind must match the
+  // egress reality. The kind flip lands BEFORE any server descriptor makes
+  // streamData servable, per the P2 ordering.
+  moduleRegistry.addModuleByRef(
+    "streamData",
+    raw(streamData, { isEffect: true }),
+  );
   moduleRegistry.addModuleByRef("llm", raw(llm, { isEffect: true }));
+  // llmDialog stays a computation: it orchestrates llm/generate* nodes (each
+  // an effect with its own broker gate) and performs no direct egress of its
+  // own (verified against the source in the P2.0 audit — the CP6 panel
+  // finding's llmDialog half was refuted as a runtime hole; the R5 register
+  // row carries the doc-side correction).
   moduleRegistry.addModuleByRef("llmDialog", raw(llmDialog));
   moduleRegistry.addModuleByRef(
     "ifElse",

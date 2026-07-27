@@ -1,0 +1,120 @@
+// P2.0 of the client-passivity plan (panel finding CP6): the declared
+// effect/computation kind of every builtin must match its egress reality.
+//
+// WHY this exists: the never-speculate-effects rule — and C2.8's
+// double-egress prevention generally — keys on the REGISTERED kind. CP6
+// found `streamData` performing arbitrary fetch egress while registered as
+// a computation: with that drift, a future passivity/speculation dial would
+// happily re-run it locally under a server claim and egress twice. These
+// tests bind the two facts together STATICALLY (no Runtime construction):
+// the registration source carries the kind literally, and the builtin
+// sources carry the egress calls literally, so drift in either direction
+// fails here before it can reach a servability or speculation decision.
+//
+// The binding is deliberately conservative: a NEW builtin source that
+// matches the network-call pattern must either register as an effect and
+// join EGRESS_EFFECT_IDS, or document itself in NON_EGRESS_MATCH_ALLOWLIST
+// with the reason the match is not egress. Silent additions fail.
+
+import { assert, assertEquals } from "@std/assert";
+import { dirname, fromFileUrl, join } from "@std/path";
+
+const BUILTINS_DIR = join(
+  dirname(fromFileUrl(import.meta.url)),
+  "..",
+  "src",
+  "builtins",
+);
+
+/** Builtins whose implementations perform direct network egress; every one
+ * of these MUST be registered `isEffect: true`. Keep in sync with the R5
+ * register row in context-lattice-execution.md §8. */
+const EGRESS_EFFECT_IDS = [
+  "fetchBinary",
+  "fetchText",
+  "fetchJson",
+  "fetchJsonUnchecked",
+  "fetchProgram",
+  "streamData",
+] as const;
+
+/** Effects for other reasons (server round-trips / broker egress via their
+ * own clients rather than a literal `fetch(` in the builtin source). Their
+ * kind is asserted too — they are the rest of the double-egress surface. */
+const OTHER_EFFECT_IDS = [
+  "llm",
+  "generateObject",
+  "generateText",
+  "sqliteQuery",
+] as const;
+
+/** Files where the network-call regex matches for a reason that is NOT
+ * builtin egress. Every entry carries its justification; an entry that
+ * stops matching should be removed. */
+const NON_EGRESS_MATCH_ALLOWLIST: Record<string, string> = {
+  // A pattern-cache METHOD NAMED `fetch` (pattern-API loading through
+  // runtime infrastructure); no direct network call in the builtin body.
+  // wish's servability is tracked by register row R13, not this test.
+  "wish.ts": "method named fetch on the suggestion-pattern cache",
+  // The fetch FAMILY implementation itself — registered as effects; its
+  // ids are asserted through EGRESS_EFFECT_IDS above.
+  "fetch.ts": "the fetch-family effect implementations",
+  "stream-data.ts": "streamData's polling fetch loop (effect since P2.0)",
+};
+
+const NETWORK_CALL = /\bfetch\s*\(|new\s+WebSocket|EventSource\s*\(/;
+
+/** Extract `addModuleByRef("<id>", raw(...))` registrations with whether the
+ * registration options carry `isEffect: true`, from the literal source. */
+function registeredKinds(source: string): Map<string, boolean> {
+  const kinds = new Map<string, boolean>();
+  const pattern = /addModuleByRef\s*\(\s*"([^"]+)"\s*,([\s\S]*?)\)\s*;/g;
+  for (const match of source.matchAll(pattern)) {
+    kinds.set(match[1], /isEffect:\s*true/.test(match[2]));
+  }
+  return kinds;
+}
+
+Deno.test("P2.0: every egress-capable builtin is registered as an effect (kind matches egress reality)", async () => {
+  const registry = await Deno.readTextFile(join(BUILTINS_DIR, "index.ts"));
+  const kinds = registeredKinds(registry);
+  assert(kinds.size > 10, "registration parse found the builtin registry");
+  for (const id of [...EGRESS_EFFECT_IDS, ...OTHER_EFFECT_IDS]) {
+    assertEquals(
+      kinds.get(id),
+      true,
+      `${id} must be registered isEffect: true — its implementation performs ` +
+        `egress (or a server round-trip); a computation kind here re-opens ` +
+        `the CP6 double-egress hole`,
+    );
+  }
+  // The refuted half of CP6 stays pinned the other way: llmDialog performs
+  // no direct egress and stays a computation until a deliberate decision
+  // flips it (flipping it silently would widen the effect surface without
+  // review).
+  assertEquals(kinds.get("llmDialog"), false, "llmDialog stays a computation");
+});
+
+Deno.test("P2.0: no builtin source performs network egress without a classification", async () => {
+  const registry = await Deno.readTextFile(join(BUILTINS_DIR, "index.ts"));
+  const kinds = registeredKinds(registry);
+  for await (const entry of Deno.readDir(BUILTINS_DIR)) {
+    if (!entry.isFile || !entry.name.endsWith(".ts")) continue;
+    if (entry.name === "index.ts") continue;
+    const source = await Deno.readTextFile(join(BUILTINS_DIR, entry.name));
+    if (!NETWORK_CALL.test(source)) continue;
+    if (entry.name in NON_EGRESS_MATCH_ALLOWLIST) continue;
+    // A matching file must correspond to effect-registered builtins. We
+    // cannot map file -> id mechanically, so the contract is: add the id(s)
+    // to EGRESS_EFFECT_IDS (registered isEffect) or document the file in
+    // NON_EGRESS_MATCH_ALLOWLIST. Failing loudly here is the point.
+    throw new Error(
+      `${entry.name} matches the network-call pattern but is neither ` +
+        `allowlisted nor covered: classify the builtin (isEffect: true + ` +
+        `EGRESS_EFFECT_IDS) or document the false positive in ` +
+        `NON_EGRESS_MATCH_ALLOWLIST. Registered kinds seen: ${
+          JSON.stringify([...kinds.keys()])
+        }`,
+    );
+  }
+});
