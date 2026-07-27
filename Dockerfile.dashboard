@@ -11,12 +11,17 @@
 # it on any host — an Apple-Silicon Mac emulates amd64 through QEMU:
 #
 #   docker build --platform=linux/amd64 -f Dockerfile.dashboard \
+#     --build-arg DASHBOARD_GIT_COMMIT=$(git rev-parse HEAD) \
 #     -t us-central1-docker.pkg.dev/commontools-core/containers/dev-dashboard:$(git rev-parse HEAD) .
 
 FROM --platform=linux/amd64 denoland/deno:2.8.1
 
 WORKDIR /app
 COPY . .
+
+ARG DASHBOARD_GIT_COMMIT
+ENV DASHBOARD_GIT_COMMIT=${DASHBOARD_GIT_COMMIT}
+RUN printf '%s\n' "${DASHBOARD_GIT_COMMIT}" | grep -Eq '^[0-9a-f]{40}$'
 
 # Pre-fetch the dashboard's and the Gantt drill-down's dependencies, and make the
 # cache writable by the non-root runtime user (Deno and resvg write to it).

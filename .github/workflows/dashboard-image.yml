@@ -126,6 +126,8 @@ jobs:
           file: Dockerfile.dashboard
           platforms: linux/amd64
           push: true
+          build-args: |
+            DASHBOARD_GIT_COMMIT=${{ github.sha }}
           tags: |
             ${{ env.IMAGE }}:${{ github.sha }}
             ${{ env.IMAGE }}:latest

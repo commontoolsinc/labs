@@ -152,6 +152,11 @@ Deno.test("Dashboard publishes only from main, never from a pull request", async
   assertStringIncludes(build, "\n          push: true\n");
   assertStringIncludes(
     build,
+    "\n          build-args: |\n" +
+      "            DASHBOARD_GIT_COMMIT=${{ github.sha }}\n",
+  );
+  assertStringIncludes(
+    build,
     "\n          tags: |\n" +
       "            ${{ env.IMAGE }}:${{ github.sha }}\n" +
       "            ${{ env.IMAGE }}:latest\n",

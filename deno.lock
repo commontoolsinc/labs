@@ -2033,7 +2033,6 @@
       },
       "packages/dashboard": {
         "dependencies": [
-          "npm:@noble/hashes@^2.2.0",
           "npm:@resvg/resvg-js@2.6.2"
         ]
       },

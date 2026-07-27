@@ -37,6 +37,7 @@ dashboard/
   favicon.ts    runtime status priority and access to generated PNG favicon copies
   favicon-png.generated.ts  generated runtime PNG favicon copies
   favicon-artwork.ts  build/test-only SVG source for those favicon copies
+  version.ts    Git commit used as the browser/server compatibility version
   render.ts     renderTile(view) + the page shell/CSS
   server.ts     generic runtime: scheduler, SSE, route mounting, page assembly
   registry.ts   THE ONE REGISTRATION POINT — the array of tiles
@@ -76,12 +77,11 @@ snapshot for that source and shows the combined list in gray with the error.
 Each event connection receives the current tile snapshot before it waits for
 new collections. The browser reconciles that snapshot by tile ID, leaving
 unchanged elements, focus, and scroll positions in place. Routine data updates
-never navigate the page. At startup the server hashes the shell renderer and
-wrapper together with fixed rendered HTML for every status. Changes to the
-shell markup, CSS, browser code, embedded assets, or actual refresh interval
-therefore change the version. An unattended display reloads when it reconnects
-to a server with a different version. Routine tile data changes leave the
-version unchanged.
+never navigate the page. The server uses the current Git commit as its
+compatibility version. Local development reads the checked-out commit from Git.
+A deployed image receives the commit that its publishing workflow checked out.
+An unattended display reloads when it reconnects to a server running a
+different commit.
 
 The tab favicon follows the most urgent visible tile. It is red when any tile is
 red, orange when there are no red tiles but at least one orange tile, and green
@@ -711,7 +711,9 @@ some other commit, build and push it by hand:
 ```bash
 SHA=$(git rev-parse HEAD)
 IMG=us-central1-docker.pkg.dev/commontools-core/containers/dev-dashboard
-docker build --platform=linux/amd64 -f Dockerfile.dashboard -t "$IMG:$SHA" .
+docker build --platform=linux/amd64 \
+  --build-arg DASHBOARD_GIT_COMMIT="$SHA" \
+  -f Dockerfile.dashboard -t "$IMG:$SHA" .
 docker push "$IMG:$SHA"
 ```
 
