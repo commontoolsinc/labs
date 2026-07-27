@@ -92,18 +92,36 @@ setServerExecutionFeedMetricsProvider(() => memoryServer.feedStats);
  * env accepts a non-negative integer millisecond count; anything else is
  * ignored WITH a warning (never coerced), matching the canonical env
  * strictness. `0` restores the legacy immediate abort/drain. */
-function demandGraceMsFromEnv(): number {
-  const DEFAULT_DEMAND_GRACE_MS = 10_000;
-  const raw = Deno.env.get(
-    "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DEMAND_GRACE_MS",
-  );
-  if (raw === undefined) return DEFAULT_DEMAND_GRACE_MS;
+function nonNegativeIntMsFromEnv(name: string, defaultMs: number): number {
+  const raw = Deno.env.get(name);
+  if (raw === undefined) return defaultMs;
   if (/^\d+$/.test(raw)) return Number(raw);
   console.warn(
-    `[toolshed] Ignoring EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DEMAND_GRACE_MS=` +
-      `${JSON.stringify(raw)} — expected a non-negative integer (ms).`,
+    `[toolshed] Ignoring ${name}=${JSON.stringify(raw)} — expected a ` +
+      `non-negative integer (ms).`,
   );
-  return DEFAULT_DEMAND_GRACE_MS;
+  return defaultMs;
+}
+
+function demandGraceMsFromEnv(): number {
+  return nonNegativeIntMsFromEnv(
+    "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DEMAND_GRACE_MS",
+    10_000,
+  );
+}
+
+/** P0 companion knob: the executor Worker's init deadline. The library
+ * default (30s) loses to real cold-start on a loaded dev machine — the
+ * 2026-07-26 acceptance run had BOTH Worker starts fail at exactly 30s
+ * with the Worker completing boot moments later (claim-ready traffic
+ * right behind the timeout log). 120s default here; P1 measures the real
+ * cold-start distribution and D4 calibrates. Also bounds claimed-action
+ * activation (deno-space-executor uses one deadline for both). */
+function workerStartupTimeoutMsFromEnv(): number {
+  return nonNegativeIntMsFromEnv(
+    "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_WORKER_STARTUP_TIMEOUT_MS",
+    120_000,
+  );
 }
 
 /** Start client-demand execution after runtime flags are installed, but before
@@ -132,6 +150,7 @@ export function startServerExecutionPool(runtime: Runtime): void {
       apiUrl: new URL(env.API_URL),
       patternApiUrl: new URL(env.API_URL),
       experimental: runtime.experimental,
+      startupTimeoutMs: workerStartupTimeoutMsFromEnv(),
       // F1 claim-coverage counters are the evidence channel (surfaced under
       // /api/health/stats serverExecutionControl); the debug logs remain for
       // per-candidate detail but are no longer what a measurement greps.

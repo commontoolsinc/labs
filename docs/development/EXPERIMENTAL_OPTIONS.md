@@ -563,7 +563,14 @@ propagate](#how-flags-propagate).
   `demandGraceBlipsAbsorbed`, `demandGraceExpiries`, and the P0b
   keep-warm cost `demandGraceIdleWorkerMs` under
   `/api/health/stats` → `serverExecutionPool`.
-- **Removal.** Fold a calibrated fixed value into `serverPrimaryExecution`
+- **Companion knob.** `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_WORKER_STARTUP_TIMEOUT_MS`
+  (same strict integer parse, toolshed default `120000`, library default
+  `30000`): the executor Worker's init deadline, passed as the
+  `DenoSpaceExecutorFactory` `startupTimeoutMs` option. The 30s library
+  default loses to real cold-start on a loaded dev machine (the
+  2026-07-26 acceptance run failed both starts at exactly 30s with boot
+  completing moments later). Also bounds claimed-action activation.
+- **Removal.** Fold calibrated fixed values into `serverPrimaryExecution`
   once P1 measures Worker cold-start and navigation-blip distributions.
 
 ### `commitPreconditions`
