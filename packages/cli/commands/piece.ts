@@ -1135,6 +1135,18 @@ after --. Handlers interpret piped input when no input argument is present.`,
       }
       if (result.outputText) {
         render(result.outputText);
+        if (result.resultRef) {
+          // stderr, so stdout stays exactly the tool's JSON result. Routed
+          // through hint() DELIBERATELY: under --quiet the ref is suppressed —
+          // it is advisory until the invocation protocol carries it in the
+          // stdout Invocation JSON (verb contract WS-D), and --quiet callers
+          // asked for the bare result.
+          const ref = result.resultRef;
+          hint(
+            `Tool result cell: ${ref.id} (space ${ref.space}, scope ${ref.scope})`,
+            false,
+          );
+        }
         return;
       }
       const confirmation =
