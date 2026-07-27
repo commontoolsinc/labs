@@ -1,11 +1,22 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { FakeTime } from "@std/testing/time";
 import {
   sleep,
   timeout,
   unrefTimer,
   yieldToEventLoop,
 } from "@commonfabric/utils/sleep";
+
+// `sleep` and `timeout` are delay utilities, so their tests want controlled
+// time rather than a padded real-time bound. Each opens a `FakeTime` (from
+// `@std/testing/time`) with `using`, which freezes the real timer `sleep` and
+// `timeout` arm and restores the clock when the block ends. `time.tickAsync(ms)`
+// advances the fake clock and settles the promises the fired timers resolve, and
+// `Date.now()` reports the faked time, so the timing assertions are exact and
+// cannot flake. The suites below that measure real elapsed time or touch real
+// Deno timers — `yieldToEventLoop` and `unrefTimer` — open no `FakeTime` and run
+// on the real clock.
 
 /** Hold the event loop synchronously for ~ms, like a CPU-bound compile step. */
 const busySpin = (ms: number) => {
@@ -16,17 +27,43 @@ const busySpin = (ms: number) => {
 };
 
 describe("sleep", () => {
-  it("resolves after the given timeout", async () => {
-    const start = performance.now();
-    await sleep(5);
-    // Timers never fire early; keep the bound loose so the test cannot flake.
-    expect(performance.now() - start).toBeGreaterThanOrEqual(4);
+  it("resolves once logical time reaches the delay, not before", async () => {
+    using time = new FakeTime();
+    const start = Date.now();
+    let resolved = false;
+    const done = sleep(5).then(() => {
+      resolved = true;
+    });
+
+    await time.tickAsync(4);
+    expect(resolved).toBe(false); // four of five milliseconds have elapsed
+
+    await time.tickAsync(1);
+    await done;
+    expect(resolved).toBe(true);
+    // The promise resolved after exactly five milliseconds of faked time.
+    expect(Date.now() - start).toBe(5);
   });
 });
 
 describe("timeout", () => {
-  it("rejects with the given message after the timeout", async () => {
-    await expect(timeout(1, "took too long")).rejects.toThrow("took too long");
+  it("rejects with the given message once the delay elapses, not before", async () => {
+    using time = new FakeTime();
+    let state: "pending" | "rejected" = "pending";
+    let caught: unknown;
+    const settled = timeout(3, "took too long").catch((error) => {
+      state = "rejected";
+      caught = error;
+    });
+
+    await time.tickAsync(2);
+    expect(state).toBe("pending"); // still one millisecond short of rejecting
+
+    await time.tickAsync(1);
+    await settled;
+    expect(state).toBe("rejected");
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe("took too long");
   });
 });
 
