@@ -1,3 +1,4 @@
+import type { FabricValue } from "@commonfabric/api";
 import {
   createSchedulerTestRuntime as createBaseSchedulerTestRuntime,
   describe,
@@ -467,7 +468,7 @@ describe("persistent scheduler observations", () => {
         const actionTx = originalEdit(...args);
         const originalSetSchedulerObservation = actionTx
           .setSchedulerObservation?.bind(actionTx);
-        actionTx.setSchedulerObservation = (observation: unknown) => {
+        actionTx.setSchedulerObservation = (observation: FabricValue) => {
           if (isSchedulerActionObservation(observation)) {
             observations.push(observation);
           }
@@ -583,7 +584,7 @@ describe("persistent scheduler observations", () => {
         const actionTx = originalEdit(...args);
         const originalSetSchedulerObservation = actionTx
           .setSchedulerObservation?.bind(actionTx);
-        actionTx.setSchedulerObservation = (observation: unknown) => {
+        actionTx.setSchedulerObservation = (observation: FabricValue) => {
           if (isSchedulerActionObservation(observation)) {
             observations.push(observation);
           }
@@ -1421,7 +1422,7 @@ describe("persistent scheduler observations", () => {
         const actionTx = originalEdit(...args);
         const originalSetSchedulerObservation = actionTx
           .setSchedulerObservation?.bind(actionTx);
-        actionTx.setSchedulerObservation = (observation: unknown) => {
+        actionTx.setSchedulerObservation = (observation: FabricValue) => {
           if (isSchedulerActionObservation(observation)) {
             observations.push(observation);
           }
