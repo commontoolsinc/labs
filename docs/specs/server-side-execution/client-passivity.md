@@ -409,6 +409,27 @@ peeled three successive liveness layers — each fix exposing the next:
    with its demand long gone, so the n=20 fresh-store ladder is the
    next measurement.
 
+   **Fresh-store n=20 (the current frontier):** test green, workers
+   alive all run, ZERO authority failures of any kind (no lease
+   losses, no declines — R2 and the demand/liveness stack are fully
+   healthy) — and ZERO candidates reached claim-readiness inside a
+   **169-second** demand window (the fresh-store first run bootstraps
+   slowly: ~7-8s per note). 473 cold refreshes (debounce-bounded) and
+   98 shadow transactions show the Worker computing, but the
+   first-piece activation pipeline — the pump's activate +
+   `cell.pull()` settlement barrier + feed integration under
+   continuous client load — never delivered a claim-ready candidate.
+   That pipeline is now the ISOLATED remaining blocker: every layer
+   around it (authority, demand liveness, batch granularity,
+   admission serialization, traversal storms, store hygiene) has been
+   fixed and verified. Next probe (P0-R3d): worker-side phase timing
+   inside the pump — activateDemand (sync+prepare) vs cell.pull
+   (recompute/settle) vs accepted-commit integration stalls — one
+   timestamped run names the dominant phase; candidate emission's
+   dependency on the routed FIRST commit of each action is the
+   companion question (a piece whose actions never complete a routed
+   run emits nothing, however healthy the rest is).
+
    Original diagnosis (superseded in one respect — the dominant class
    was growth, not never-held): the demand-pull traversal scaler.
    With the pump landed,
