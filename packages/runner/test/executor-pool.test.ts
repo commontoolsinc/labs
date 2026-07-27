@@ -2005,3 +2005,62 @@ Deno.test("P0 re-anchor: no live or in-grace demand means no re-anchor (the drai
     await pool.close();
   }
 });
+
+Deno.test("P0: grace expiry never aborts an in-flight cold start; departure drains after boot completes", async () => {
+  const control = new FakeExecutionControl();
+  const timers = new ManualTimers();
+  let clock = 0;
+  const startEntered = Promise.withResolvers<void>();
+  const releaseStart = Promise.withResolvers<void>();
+  const executor = new FakeExecutor();
+  let startupSignal: AbortSignal | undefined;
+  const factory: SpaceExecutorFactory = {
+    async start(options): Promise<SpaceExecutor> {
+      startupSignal = options.signal;
+      startEntered.resolve();
+      await releaseStart.promise;
+      return executor;
+    },
+  };
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    now: () => clock,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    demandGraceMs: 10_000,
+  });
+  pool.start();
+  try {
+    const adding = control.emit(1, [demand(1, ["piece:a"])]);
+    await startEntered.promise;
+
+    // Demand departs while the cold start is in flight, and STAYS gone
+    // past the grace window.
+    clock = 1_000;
+    const emptied = control.emit(2, []);
+    clock = 12_000;
+    timers.fire((delayMs) => delayMs === 10_000);
+    await Promise.resolve();
+    assertEquals(
+      startupSignal?.aborted,
+      false,
+      "a cold start in flight is never aborted for a demand gap",
+    );
+
+    // Boot completes; the queued departure drain runs right behind it (the
+    // slot queue serialized it behind the start job — no abort, no extra
+    // timer).
+    releaseStart.resolve();
+    clock = 45_000;
+    await Promise.all([adding, emptied]);
+    await pool.idle();
+    assertEquals(pool.snapshot(SPACE, BRANCH), undefined, "slot drained");
+    assertEquals(executor.stopped, 1, "booted Worker settled and stopped");
+    assertEquals(pool.metrics().workersStarted, 1);
+    assertEquals(pool.metrics().workerStartAborts, 0);
+  } finally {
+    releaseStart.resolve();
+    await pool.close();
+  }
+});

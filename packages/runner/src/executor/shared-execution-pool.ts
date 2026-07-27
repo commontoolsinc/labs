@@ -1280,6 +1280,12 @@ export class SharedExecutionPool {
     // and the legacy drain below runs (departure).
     if (demandGone && !this.#closed && this.#withinDemandGrace(slot)) return;
     if (demandGone || this.#closed) {
+      // NOTE (P0): an in-flight cold start needs no special case here — the
+      // grace window removed the only synchronous start-killer (the
+      // empty-snapshot abort), and this drain runs on the slot queue, which
+      // serializes it BEHIND the in-flight start job. A lane whose demand
+      // departed mid-boot therefore finishes booting and drains right here
+      // afterwards (settle, stop, lease release) — never an abort.
       if (slot.demandEmptyAt !== null) {
         this.#accrueDemandGraceIdle(slot);
         this.#metrics.demandGraceExpiries++;
