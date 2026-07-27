@@ -766,6 +766,21 @@ FabricSpecialObject (abstract root)
 a single `instanceof FabricSpecialObject` check wherever code needs to recognize
 any fabric-system value without caring which branch it belongs to.
 
+It is **nominal**, not structural: the `@commonfabric/FabricSpecialObject` member is a
+brand that exists only in the type system (`declare` emits no runtime member,
+and nothing reads the key). This matters for what `FabricValue` means as a
+static claim. TypeScript is structurally typed, so were the class empty, every
+object would satisfy `FabricSpecialObject` — and therefore satisfy
+`FabricValue`, since the union includes this type. Annotating a value
+`FabricValue` would then assert nothing at all. The brand is what makes the
+annotation carry information.
+
+The brand is a well-known string key rather than a `unique symbol` because
+`interface.ts` is deliberately free of runtime imports, and a `unique symbol`
+would have to be imported as a *value*. `packages/api/index.ts` declares the
+identical member; the two must agree exactly, since a value branded by one
+would otherwise not satisfy the other.
+
 ```typescript
 // file: packages/data-model/interface.ts
 
@@ -777,7 +792,9 @@ any fabric-system value without caring which branch it belongs to.
  * fabric-system value without caring which branch of the hierarchy it
  * belongs to.
  */
-export abstract class FabricSpecialObject {}
+export abstract class FabricSpecialObject {
+  declare readonly "@commonfabric/FabricSpecialObject": true;
+}
 ```
 
 **`FabricPrimitive`** is the abstract base class for non-`FabricInstance` types

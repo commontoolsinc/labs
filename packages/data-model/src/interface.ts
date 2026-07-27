@@ -21,8 +21,23 @@
  * `instanceof FabricSpecialObject` check wherever code needs to recognize any
  * fabric-system value without caring which branch of the hierarchy it
  * belongs to.
+ *
+ * The `@commonfabric/FabricSpecialObject` member is a nominal brand, and
+ * exists only in the type system: `declare` emits no runtime member, and
+ * nothing ever reads the key. Without it the class is structurally empty, so
+ * *every* object satisfies `FabricSpecialObject` — which in turn makes every
+ * object satisfy `FabricValue`, since that union includes this type. The brand
+ * is what makes `FabricValue` mean anything as a static claim.
+ *
+ * It is a well-known string key rather than a `unique symbol` because that
+ * would require importing a symbol *value*, and this file is deliberately free
+ * of runtime imports (see the file header). `packages/api/index.ts` declares
+ * the identical member; the two must agree exactly, or a value branded by one
+ * will not satisfy the other.
  */
-export abstract class FabricSpecialObject {}
+export abstract class FabricSpecialObject {
+  declare readonly "@commonfabric/FabricSpecialObject": true;
+}
 
 //
 // Fabric instance protocol
