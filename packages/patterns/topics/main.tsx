@@ -17,16 +17,17 @@ import {
 
 import Topic, {
   asArray,
-  crossrefChipRow,
   crossrefJoin,
+  crossrefLinkRow,
   fidPayload,
-  openTopic,
   rejectMutation,
   snippet,
   topicAuthorFromAgent,
   topicAuthorFromPerson,
   topicAuthorLabel,
+  topicCellLink,
   topicCorpus,
+  type TopicNavigationLink,
   type TopicPiece,
   TOPICS_THEME,
   whenLabel,
@@ -43,6 +44,7 @@ export type {
   TopicInput,
   TopicLink,
   TopicLinkKind,
+  TopicNavigationLink,
   TopicOutput,
   TopicPiece,
   TopicReference,
@@ -84,6 +86,13 @@ export interface TopicCrossref {
   referencedBy: TopicPiece[];
 }
 
+/** Private UI projection. Public consumers retain TopicCrossref's deployed
+ * piece-valued schema; navigation uses durable fid/title snapshots. */
+interface TopicCrossrefView extends TopicCrossref {
+  refsOutLinks: TopicNavigationLink[];
+  referencedByLinks: TopicNavigationLink[];
+}
+
 /**
  * Topics — a tracker over #topic pieces: durable units of shared attention
  * (CT-1878). Deliberately minimal: no statuses, labels, or assignees; topics
@@ -112,10 +121,9 @@ export interface TopicsOutput {
   submitTopic: Stream<void>;
 }
 
-// Navigation + chip-row live with the other shared pieces in topic.tsx (the
-// detail page renders the same chips); re-exported here so embedders and
-// tests keep importing them from the tracker.
-export { crossrefChipRow, openTopic } from "./topic.tsx";
+// Navigation helpers live with the shared Topic UI because the board and
+// detail page render the same durable links.
+export { crossrefLinkRow, topicCellLink } from "./topic.tsx";
 
 /** Browser composer submit. Profile wishes are resolved by the pattern and
  * bound into this handler as plain snapshot values, which keeps the mutation
@@ -220,12 +228,10 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
   // any board change (O(topics × text) — trivial at board scale; the growth
   // path is per-topic memoization). Identity is each entry's resolved
   // result-doc fid, so the existing corpus lights up with zero authoring
-  // changes and nothing derived is persisted. Rows carry their pieces
-  // directly: the UI binds navigation handlers to the row pieces (safe since
-  // #4714's path-scoped wildcard fix — before it, a handler bound to a piece
-  // nested inside a derived wrapper object silently kept the consuming UI
-  // computed from ever running, which forced the earlier index-plumbed shape).
-  const crossrefs = computed(() => {
+  // changes and nothing derived is persisted. The private view also carries
+  // fid/title snapshots so rendered navigation is durable across cold loads;
+  // the public result below retains its deployed piece-valued schema.
+  const crossrefView = computed(() => {
     const list = asArray(topics.get());
     // Each entry's own fid payload ("" while unresolved, e.g. mid-sync — such
     // entries simply hold no edges this render). resolveAsCell/entityId are
@@ -240,7 +246,7 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
       list.map((t) => topicCorpus(t)),
       payloads,
     );
-    const rows: TopicCrossref[] = [];
+    const rows: TopicCrossrefView[] = [];
     list.forEach((t, i) => {
       if (!t) return;
       rows.push({
@@ -248,10 +254,27 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
         topic: t,
         refsOut: refsOut[i].map((j) => list[j]),
         referencedBy: referencedBy[i].map((j) => list[j]),
+        refsOutLinks: refsOut[i].map((j) => ({
+          fid: payloads[j] ? `fid1:${payloads[j]}` : "",
+          title: list[j]?.title ?? "",
+        })),
+        referencedByLinks: referencedBy[i].map((j) => ({
+          fid: payloads[j] ? `fid1:${payloads[j]}` : "",
+          title: list[j]?.title ?? "",
+        })),
       });
     });
     return rows;
   });
+
+  const crossrefs = computed(() =>
+    crossrefView.map((row) => ({
+      fid: row.fid,
+      topic: row.topic,
+      refsOut: row.refsOut,
+      referencedBy: row.referencedBy,
+    }))
+  );
 
   const hasNoTopics = computed(() =>
     asArray(topics.get()).filter((t) => t).length === 0
@@ -287,11 +310,9 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
 
           <cf-vstack gap="2" padding="4">
             {computed(() => {
-              // Iterate the piece-valued crossref rows directly (one per
-              // non-null topic); each row carries its topic and the sibling
-              // pieces it links, so the card binds navigation to row pieces
-              // with no index indirection.
-              const rows = crossrefs;
+              // Iterate the private rows directly so card and crossref links
+              // persist ordinary fid data instead of scheduler event streams.
+              const rows = crossrefView;
               const order = rows
                 .map((_, i) => i)
                 .filter((i) => rows[i]?.topic)
@@ -317,24 +338,21 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
                           )
                           : null}
                         <cf-text variant="caption" tone="muted">
-                          {t.commentCount} comments · by{" "}
+                          {t.commentCount ?? 0} comments · by{" "}
                           {topicAuthorLabel(t.createdBy, t.createdByName)} ·
                           {" "}
-                          {whenLabel(t.lastActivityAt)}
+                          {whenLabel(t.lastActivityAt ?? 0)}
                         </cf-text>
-                        {crossrefChipRow("references →", false, row.refsOut)}
-                        {crossrefChipRow(
+                        {crossrefLinkRow(
+                          "references →",
+                          row.refsOutLinks,
+                        )}
+                        {crossrefLinkRow(
                           "← referenced by",
-                          true,
-                          row.referencedBy,
+                          row.referencedByLinks,
                         )}
                       </cf-vstack>
-                      <cf-button
-                        variant="secondary"
-                        onClick={openTopic({ topic: t })}
-                      >
-                        Open
-                      </cf-button>
+                      {topicCellLink(row.fid, "Open")}
                     </cf-hstack>
                   </cf-card>
                 );

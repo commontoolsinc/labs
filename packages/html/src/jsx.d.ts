@@ -3387,8 +3387,10 @@ interface CFScrollAttributes<T> extends CFHTMLAttributes<T> {
 
 interface CFCellLinkAttributes<T> extends CFHTMLAttributes<T> {
   "link"?: string;
-  "$cell": CellLike<any>;
+  "label"?: string;
+  "$cell"?: CellLike<any>;
   "spaceName"?: string;
+  "static"?: boolean;
 }
 
 interface CFSpaceLinkAttributes<T> extends CFHTMLAttributes<T> {
