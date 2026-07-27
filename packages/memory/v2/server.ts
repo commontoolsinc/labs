@@ -51,7 +51,6 @@ import {
   type WatchSetRequest,
   type WatchSetResult,
   type WatchSpec,
-  type WireMemoryProtocolFlags,
 } from "../v2.ts";
 import * as Engine from "./engine.ts";
 import {
@@ -341,6 +340,8 @@ const sessionKey = (space: string, sessionId: string): string =>
 
 type Send = (message: ServerMessage) => void;
 
+export type ConnectionDisposition = "open" | "closed";
+
 type SessionOpenAuthContext = {
   audience: string;
   challenge: SessionOpenChallenge;
@@ -511,7 +512,7 @@ class Connection {
     }
   }
 
-  async receive(payload: string): Promise<void> {
+  async receive(payload: string): Promise<ConnectionDisposition> {
     this.#pendingReceives += 1;
     try {
       const previous = this.#receiving;
@@ -519,7 +520,7 @@ class Connection {
         this.receiveOrdered(payload)
       );
       this.#receiving = current.then(() => undefined, () => undefined);
-      return await current;
+      await current;
     } finally {
       this.#pendingReceives = Math.max(0, this.#pendingReceives - 1);
       if (this.#pendingReceives === 0) {
@@ -527,6 +528,7 @@ class Connection {
         this.#receiveIdle = null;
       }
     }
+    return this.#closed ? "closed" : "open";
   }
 
   hasPendingReceives(): boolean {
@@ -605,6 +607,10 @@ class Connection {
         return;
       }
       const response = respondToHello(parsed);
+      if (response === null) {
+        this.close();
+        return;
+      }
       if (response.type === "hello.ok") {
         response.sessionOpen = this.issueSessionOpenAuth();
       }
@@ -3395,6 +3401,9 @@ export class Server {
     const parsed = parseClientMessage(payload);
     if (parsed?.type === "hello") {
       const response = respondToHello(parsed);
+      if (response === null) {
+        return Promise.resolve(null);
+      }
       if (response.type !== "hello.ok") {
         return Promise.resolve(encodeMemoryBoundary(response));
       }
@@ -3706,9 +3715,20 @@ const parseSchedulerSnapshotQuery = (
   };
 };
 
+export type ParsedHelloMessage =
+  & Omit<HelloMessage, "protocol" | "flags">
+  & {
+    protocol: unknown;
+    flags: unknown;
+  };
+
+export type ParsedClientMessage =
+  | ParsedHelloMessage
+  | Exclude<ClientMessage, HelloMessage>;
+
 export const parseClientMessage = (
   payload: string,
-): ClientMessage | null => {
+): ParsedClientMessage | null => {
   let parsed: unknown;
   try {
     parsed = decodeMemoryBoundary(payload);
@@ -3720,17 +3740,11 @@ export const parseClientMessage = (
     return null;
   }
 
-  if (
-    parsed.type === "hello" &&
-    typeof parsed.protocol === "string"
-  ) {
-    if (parseMemoryProtocolFlags(parsed.flags) === null) {
-      return null;
-    }
+  if (parsed.type === "hello") {
     return {
       type: "hello",
-      protocol: parsed.protocol as HelloMessage["protocol"],
-      flags: parsed.flags as WireMemoryProtocolFlags,
+      protocol: parsed.protocol,
+      flags: parsed.flags,
     };
   }
 

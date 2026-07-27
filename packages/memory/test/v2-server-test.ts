@@ -1181,7 +1181,7 @@ Deno.test("memory v2 server rejects handshakes when modernCellRep flags disagree
   const connection = server.connect((message) => messages.push(message));
 
   try {
-    await connection.receive(encodeMemoryBoundary({
+    const disposition = await connection.receive(encodeMemoryBoundary({
       type: "hello",
       protocol: MEMORY_PROTOCOL,
       flags: {
@@ -1189,6 +1189,7 @@ Deno.test("memory v2 server rejects handshakes when modernCellRep flags disagree
       },
     }));
 
+    assertEquals(disposition, "open");
     assertEquals(shiftMessage(messages), {
       type: "response",
       requestId: "handshake",
@@ -1201,6 +1202,27 @@ Deno.test("memory v2 server rejects handshakes when modernCellRep flags disagree
         } server=${JSON.stringify(HELLO_FLAGS)}`,
       },
     });
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("memory v2 server drops connections when protocol versions disagree", async () => {
+  const server = createServer("memory://memory-v2-server-handshake-version");
+
+  try {
+    for (const protocol of [undefined, "memory/v2.2"]) {
+      const messages: ServerMessage[] = [];
+      const connection = server.connect((message) => messages.push(message));
+      const disposition = await connection.receive(encodeMemoryBoundary({
+        type: "hello",
+        ...(protocol === undefined ? {} : { protocol }),
+        flags: HELLO_FLAGS,
+      }));
+
+      assertEquals(disposition, "closed");
+      assertEquals(messages, []);
+    }
   } finally {
     await server.close();
   }

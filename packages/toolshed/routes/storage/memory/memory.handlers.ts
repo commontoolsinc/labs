@@ -199,14 +199,24 @@ const attachMemorySocketPipeline = (
 
   void (async () => {
     try {
-      await connection.receive(firstMessage);
+      const disposition = await connection.receive(firstMessage);
+      if (disposition === "closed") {
+        safeSocketClose(1002, "Memory protocol mismatch");
+        return;
+      }
       logMemWrites(firstMessage);
       negotiation.handoff({
         onMessage(message) {
           // Trace only after the receive resolves, so a message whose receive
           // fails (the fatal-error path below) is not logged as a write.
           void connection.receive(message).then(
-            () => logMemWrites(message),
+            (nextDisposition) => {
+              if (nextDisposition === "closed") {
+                safeSocketClose(1002, "Memory protocol mismatch");
+                return;
+              }
+              logMemWrites(message);
+            },
             () => {
               safeSocketClose(1011, "Memory websocket receive failure");
               closeConnection();

@@ -34,6 +34,7 @@ import type { URI } from "@commonfabric/memory/interface";
 import {
   type ClientCommit,
   getMemoryProtocolFlags,
+  MEMORY_PROTOCOL,
   resetPersistentSchedulerStateConfig,
   setPersistentSchedulerStateConfig,
 } from "@commonfabric/memory/v2";
@@ -98,7 +99,7 @@ class FlagOffServerTransport implements MemoryV2Client.Transport {
       case "hello":
         this.respond({
           type: "hello.ok",
-          protocol: "memory",
+          protocol: MEMORY_PROTOCOL,
           // The one divergence from this realm's ambient flags: the server
           // never advertises persistentSchedulerState (an off-flag or older
           // deployment). Everything else mirrors the real handshake.

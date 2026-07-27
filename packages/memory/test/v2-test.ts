@@ -48,7 +48,7 @@ const toEntityDocument = (
 
 describe("memory v2 protocol constants", () => {
   it("exports the phase-1 protocol constants", () => {
-    assertEquals(MEMORY_PROTOCOL, "memory");
+    assertEquals(MEMORY_PROTOCOL, "memory/v2.1");
     assertEquals(DEFAULT_BRANCH, "");
   });
 });

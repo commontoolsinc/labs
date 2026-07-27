@@ -687,6 +687,34 @@ serialTest(
 );
 
 serialTest(
+  "memory websocket drops connections when protocol versions disagree",
+  async () => {
+    const server = Deno.serve({ port: 0 }, app.fetch);
+    const address = new URL(
+      `ws://${server.addr.hostname}:${server.addr.port}/api/storage/memory`,
+    );
+
+    try {
+      const socket = await openSocket(address);
+      const closed = new Promise<CloseEvent>((resolve) => {
+        socket.addEventListener("close", (event) => resolve(event), {
+          once: true,
+        });
+      });
+      socket.send(encodeMemoryBoundary({
+        ...HELLO,
+        protocol: "memory/v2.2",
+      }));
+
+      const event = await closed;
+      assertEquals(event.code, 1002);
+    } finally {
+      await server.shutdown();
+    }
+  },
+);
+
+serialTest(
   "memory websocket discovers newly linked documents for a subscribed memory runtime",
   async () => {
     const identity = await Identity.fromPassphrase(

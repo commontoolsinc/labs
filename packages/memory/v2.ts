@@ -16,7 +16,8 @@ import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-commo
 import { isObject, isRecord } from "@commonfabric/utils/types";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 
-export const MEMORY_PROTOCOL = "memory" as const;
+/** Exact hello-handshake compatibility boundary for the memory protocol. */
+export const MEMORY_PROTOCOL = "memory/v2.1" as const;
 export const DEFAULT_BRANCH = "" as const;
 
 export type EntityId = string;

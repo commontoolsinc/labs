@@ -17,6 +17,8 @@ rewrite. In particular:
 
 - the handshake is `hello` / `hello.ok`, not a bare `{ "protocol": ... }`
   declaration
+- the handshake carries an exact, versioned protocol identifier; either peer
+  drops the connection without a response when that identifier does not match
 - request messages are plain JSON envelopes; transport-level UCAN framing
   remains deferred for this pass
 - the toolshed v2 websocket route requires a signed `session.open`
@@ -48,7 +50,7 @@ The client MUST declare its protocol version in the first WebSocket message:
 ```json
 {
   "type": "hello",
-  "protocol": "memory",
+  "protocol": "memory/v2.1",
   "flags": {
     "modernCellRep": true,
     "persistentSchedulerState": true,
@@ -65,7 +67,7 @@ If the server accepts the protocol, it returns:
 ```json
 {
   "type": "hello.ok",
-  "protocol": "memory",
+  "protocol": "memory/v2.1",
   "flags": {
     "modernCellRep": true,
     "persistentSchedulerState": true,
@@ -84,9 +86,14 @@ If the server accepts the protocol, it returns:
 }
 ```
 
-If the server does not support the requested version or the required data-model
-flags do not match what it implements, it returns a typed error response and
-does not mark the connection ready.
+The versioned `protocol` identifier is an exact compatibility boundary. If it
+does not match, the recipient closes the WebSocket without sending a handshake
+response. This is reserved for changes where the two versions cannot
+interoperate safely.
+
+Capability flags remain the finer-grained compatibility mechanism. If required
+data-model flags do not match what the server implements, it returns a typed
+error response and does not mark the connection ready.
 
 Memory hosts include `sessionOpen.audience` and `sessionOpen.challenge` in
 `hello.ok`. The audience is the server DID the client must sign for. Toolshed
@@ -185,7 +192,7 @@ interface SessionOpenInvocation {
   sub: SpaceId;
   aud: DID;
   args: {
-    protocol: "memory";
+    protocol: "memory/v2.1";
     session: {
       sessionId?: SessionId;
       seenSeq?: number;
@@ -265,7 +272,7 @@ semantic commit body. Per-commit signed UCAN envelopes remain deferred.
 // Shown at module scope.
 interface HelloMessage {
   type: "hello";
-  protocol: "memory";
+  protocol: "memory/v2.1";
   flags: {
     modernCellRep: boolean;
     persistentSchedulerState?: boolean;

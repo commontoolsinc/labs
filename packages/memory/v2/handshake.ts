@@ -20,18 +20,24 @@ const toError = (name: string, message: string): TypedError => ({
   message,
 });
 
-export const respondToHello = (message: HelloMessage): ServerMessage => {
-  const expectedFlags = getMemoryProtocolFlags();
+type IncomingHelloMessage =
+  & Omit<HelloMessage, "protocol" | "flags">
+  & {
+    protocol: unknown;
+    flags: unknown;
+  };
+
+/**
+ * Returns `null` when the peer speaks a different protocol version. Callers
+ * must drop the connection without sending a response in that case.
+ */
+export const respondToHello = (
+  message: IncomingHelloMessage,
+): ServerMessage | null => {
   if (message.protocol !== MEMORY_PROTOCOL) {
-    return {
-      type: "response",
-      requestId: "handshake",
-      error: toError(
-        "UnsupportedProtocol",
-        `Unsupported protocol: ${message.protocol}`,
-      ),
-    };
+    return null;
   }
+  const expectedFlags = getMemoryProtocolFlags();
   const parsed = parseMemoryProtocolFlags(message.flags);
   if (
     parsed === null ||

@@ -85,12 +85,22 @@ export class StandaloneMemoryServer {
         if (debugWrites) {
           logCommitOperations(connectionTag, event.data);
         }
-        connection.receive(event.data).catch(() => {
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.close(1011, "memory websocket receive failure");
-          }
-          connection.close();
-        });
+        connection.receive(event.data).then(
+          (disposition) => {
+            if (
+              disposition === "closed" &&
+              socket.readyState === WebSocket.OPEN
+            ) {
+              socket.close(1002, "memory protocol mismatch");
+            }
+          },
+          () => {
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.close(1011, "memory websocket receive failure");
+            }
+            connection.close();
+          },
+        );
       });
       socket.addEventListener("close", () => connection.close());
       socket.addEventListener("error", () => connection.close());

@@ -5,6 +5,7 @@ import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
+  MEMORY_PROTOCOL,
   type SessionOpenAuthMetadata,
   type SessionSync,
 } from "@commonfabric/memory/v2";
@@ -188,7 +189,7 @@ export abstract class ScriptedSessionTransport
         );
         this.respond({
           type: "hello.ok",
-          protocol: "memory",
+          protocol: MEMORY_PROTOCOL,
           flags: this.helloFlags(),
           sessionOpen: this.#sessionOpen,
         });

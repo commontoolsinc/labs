@@ -3137,6 +3137,7 @@ Deno.test("memory v2 client close ends a reconnect parked in the handshake", asy
 
 Deno.test("memory v2 client rejects hello.ok when flags disagree", async () => {
   let receiver = (_payload: string) => {};
+  let closeCount = 0;
   const transport: Transport = {
     send(payload): Promise<void> {
       const message = decodeMemoryBoundary(payload) as { type?: string };
@@ -3151,7 +3152,10 @@ Deno.test("memory v2 client rejects hello.ok when flags disagree", async () => {
       }
       return Promise.resolve();
     },
-    async close() {},
+    close() {
+      closeCount += 1;
+      return Promise.resolve();
+    },
     setReceiver(next) {
       receiver = next;
     },
@@ -3163,6 +3167,52 @@ Deno.test("memory v2 client rejects hello.ok when flags disagree", async () => {
     Error,
     "memory flag mismatch",
   );
+  assertEquals(closeCount, 0);
+});
+
+Deno.test("memory v2 client drops connections when protocol versions disagree", async () => {
+  let receiver = (_payload: string) => {};
+  let closeReceiver = (_error?: Error) => {};
+  let sentProtocol: unknown;
+  let closeCount = 0;
+  let helloCount = 0;
+  const transport: Transport = {
+    send(payload): Promise<void> {
+      const message = decodeMemoryBoundary(payload) as {
+        type?: string;
+        protocol?: unknown;
+      };
+      if (message.type === "hello") {
+        helloCount += 1;
+        sentProtocol = message.protocol;
+        receiver(encodeMemoryBoundary({
+          ...HELLO_OK,
+          protocol: "memory/v2.2",
+        }));
+      }
+      return Promise.resolve();
+    },
+    close() {
+      closeCount += 1;
+      closeReceiver();
+      return Promise.resolve();
+    },
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver(next) {
+      closeReceiver = next;
+    },
+  };
+
+  await assertRejects(
+    () => connect({ transport }),
+    Error,
+    "memory protocol version mismatch",
+  );
+  assertEquals(sentProtocol, MEMORY_PROTOCOL);
+  assertEquals(closeCount, 1);
+  assertEquals(helloCount, 1);
 });
 
 Deno.test("memory v2 client stores the server's advertised flags (capability handshake)", async () => {

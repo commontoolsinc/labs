@@ -119,11 +119,12 @@ export class Client {
   #connected = false;
   #closed = false;
   // Set when a reconnect handshake fails for a reason retrying cannot change (a
-  // protocol-flag mismatch — the transport is fundamentally incompatible). The
-  // client stops reconnecting and fails every further request with it, instead
-  // of looping forever. A per-session authorization denial does NOT land here:
-  // it terminates only that session (see SpaceSession.restore), leaving sessions
-  // for other spaces on this client alive.
+  // protocol-version or flag mismatch — the transport is fundamentally
+  // incompatible). The client stops reconnecting and fails every further
+  // request with it, instead of looping forever. A per-session authorization
+  // denial does NOT land here: it terminates only that session (see
+  // SpaceSession.restore), leaving sessions for other spaces on this client
+  // alive.
   #fatalError: Error | null = null;
 
   private constructor(
@@ -299,7 +300,16 @@ export class Client {
 
     if (this.#helloPending !== null) {
       const helloOk = parseHelloOk(message);
-      if (helloOk !== null) {
+      if (helloOk?.kind === "incompatible") {
+        const error = permanentProtocolError(
+          "memory protocol version mismatch",
+        );
+        this.#fatalError = error;
+        this.#helloPending.reject(error);
+        void this.transport.close().catch(() => undefined);
+        return;
+      }
+      if (helloOk?.kind === "ok") {
         const expectedFlags = getMemoryProtocolFlags();
         if (!compatibleMemoryProtocolFlags(helloOk.flags, expectedFlags)) {
           // A data-model wire-contract mismatch: this client and server cannot
@@ -414,6 +424,9 @@ export class Client {
       session.handleDisconnect();
     }
     this.rejectPending(toConnectionError(error));
+    if (this.#fatalError) {
+      return;
+    }
     void this.reconnect().catch(() => undefined);
   }
 
@@ -429,7 +442,7 @@ export class Client {
     }
     this.#reconnecting = (async () => {
       let attempt = 0;
-      while (!this.#closed) {
+      while (!this.#closed && !this.#fatalError) {
         try {
           await this.hello();
           for (const session of this.#spaces) {
@@ -441,8 +454,8 @@ export class Client {
           const err = error instanceof Error ? error : new Error(String(error));
           if (isPermanentConnectionFailure(err)) {
             // A handshake the server refuses identically every time (a
-            // protocol-flag mismatch). Stop looping and remember the failure so
-            // every present and future request fails fast with it.
+            // protocol-version or flag mismatch). Stop looping and remember the
+            // failure so every present and future request fails fast with it.
             this.#fatalError = err;
             this.rejectPending(err);
             return;
@@ -1526,12 +1539,15 @@ export const connect = Client.connect;
 
 export const loopback = (server: Server): Transport => {
   let receiver = (_payload: string) => {};
+  let closeReceiver = (_error?: Error) => {};
   const connection = server.connect((message) => {
     receiver(encodeMemoryBoundary(message));
   });
   return {
     async send(payload: string) {
-      await connection.receive(payload);
+      if (await connection.receive(payload) === "closed") {
+        closeReceiver(protocolError("memory protocol version mismatch"));
+      }
     },
     close() {
       connection.close();
@@ -1540,7 +1556,9 @@ export const loopback = (server: Server): Transport => {
     setReceiver(next) {
       receiver = next;
     },
-    setCloseReceiver() {},
+    setCloseReceiver(next) {
+      closeReceiver = next;
+    },
   };
 };
 
@@ -1651,10 +1669,14 @@ const requireSessionOpenAuthMetadata = (
 
 const parseHelloOk = (
   message: unknown,
-): {
-  flags: MemoryProtocolFlags;
-  sessionOpen?: unknown;
-} | null => {
+):
+  | {
+    kind: "ok";
+    flags: MemoryProtocolFlags;
+    sessionOpen?: unknown;
+  }
+  | { kind: "incompatible" }
+  | null => {
   if (typeof message !== "object" || message === null) {
     return null;
   }
@@ -1664,14 +1686,17 @@ const parseHelloOk = (
     flags?: unknown;
     sessionOpen?: unknown;
   };
-  if (obj.type !== "hello.ok" || obj.protocol !== MEMORY_PROTOCOL) {
+  if (obj.type !== "hello.ok") {
     return null;
+  }
+  if (obj.protocol !== MEMORY_PROTOCOL) {
+    return { kind: "incompatible" };
   }
   const parsed = parseMemoryProtocolFlags(obj.flags);
   if (parsed === null) {
     return null;
   }
-  return { flags: parsed, sessionOpen: obj.sessionOpen };
+  return { kind: "ok", flags: parsed, sessionOpen: obj.sessionOpen };
 };
 
 const isSessionEffect = (
