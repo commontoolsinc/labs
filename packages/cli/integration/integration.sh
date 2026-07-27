@@ -211,14 +211,67 @@ run_piece_values() {
       jq -r '.patternRef.identity'
   )
 
-  if cf piece setsrc $SPACE_ARGS --piece "$schema_piece_id" \
+  # The preflight answers the same question without touching the piece: exit 3
+  # for "would not be possible", and a report naming the offending field.
+  local check_status check_json
+  set +e
+  cf piece setsrc --check $SPACE_ARGS --piece "$schema_piece_id" \
+    "$SCHEMA_INCOMPATIBLE_PATTERN_SRC" \
+    >"$WORK_DIR/incompatible-check.out" \
+    2>"$WORK_DIR/incompatible-check.err"
+  check_status=$?
+  set -e
+  if [ "$check_status" -ne 3 ]; then
+    error "setsrc --check should exit 3 for an incompatible source (got $check_status)."
+  fi
+  if ! grep -q "INCOMPATIBLE" "$WORK_DIR/incompatible-check.out"; then
+    error "setsrc --check did not report the verdict."
+  fi
+  if ! grep -q "result.value" "$WORK_DIR/incompatible-check.out"; then
+    error "setsrc --check did not name the offending field."
+  fi
+  # The check applies nothing.
+  if [ "$(
+    cf piece inspect --json $SPACE_ARGS --piece "$schema_piece_id" |
+      jq -r '.patternRef.identity'
+  )" != "$schema_identity_before" ]; then
+    error "setsrc --check changed the piece source."
+  fi
+  check_json=$(
+    cf piece setsrc --check --json $SPACE_ARGS --piece "$schema_piece_id" \
+      "$SCHEMA_INCOMPATIBLE_PATTERN_SRC" || true
+  )
+  if [ "$(printf '%s' "$check_json" | jq -r '.compatible')" != "false" ]; then
+    error "setsrc --check --json did not report an incompatible verdict."
+  fi
+  if [ "$(printf '%s' "$check_json" | jq -r '.blockers[0].field')" != "value" ]; then
+    error "setsrc --check --json did not name the offending field."
+  fi
+  # A compatible source passes the same preflight.
+  cf piece setsrc --check $SPACE_ARGS --piece "$schema_piece_id" \
+    "$SCHEMA_COMPATIBLE_PATTERN_SRC" >/dev/null
+
+  local setsrc_status
+  set +e
+  cf piece setsrc $SPACE_ARGS --piece "$schema_piece_id" \
     "$SCHEMA_INCOMPATIBLE_PATTERN_SRC" \
     >"$WORK_DIR/incompatible-setsrc.out" \
-    2>"$WORK_DIR/incompatible-setsrc.err"; then
-    error "Incompatible setsrc should fail without the dangerous override."
+    2>"$WORK_DIR/incompatible-setsrc.err"
+  setsrc_status=$?
+  set -e
+  if [ "$setsrc_status" -ne 3 ]; then
+    error "Incompatible setsrc should fail with exit 3 (got $setsrc_status)."
   fi
-  if ! grep -q "not backward compatible" "$WORK_DIR/incompatible-setsrc.err"; then
-    error "Incompatible setsrc failed for an unexpected reason."
+  # The refusal names the field and the rule, not a low-level rejection, and
+  # points at the preflight that reports the same thing without mutating.
+  if ! grep -q "result.value" "$WORK_DIR/incompatible-setsrc.err"; then
+    error "Incompatible setsrc did not name the offending field."
+  fi
+  if ! grep -q "pattern-contract" "$WORK_DIR/incompatible-setsrc.err"; then
+    error "Incompatible setsrc did not name the rule that refused it."
+  fi
+  if ! grep -q -- "--check" "$WORK_DIR/incompatible-setsrc.err"; then
+    error "Incompatible setsrc did not point at the --check preflight."
   fi
   schema_identity_after_rejection=$(
     cf piece inspect --json $SPACE_ARGS --piece "$schema_piece_id" |
