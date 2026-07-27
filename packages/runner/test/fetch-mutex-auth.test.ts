@@ -97,7 +97,7 @@ describe("fetch-json mutex mechanism: protected request auth", () => {
       undefined,
       tx,
     );
-    const result = runtime.run(
+    runtime.run(
       tx,
       testRecipe,
       { query: "signed request" },
@@ -169,7 +169,7 @@ describe("fetch-json mutex mechanism: protected request auth", () => {
       undefined,
       tx,
     );
-    const result = runtime.run(
+    runtime.run(
       tx,
       testRecipe,
       { query: "replace request" },
@@ -234,7 +234,7 @@ describe("fetch-json mutex mechanism: protected request auth", () => {
       undefined,
       tx,
     );
-    const result = runtime.run(
+    runtime.run(
       tx,
       testRecipe,
       { query: "external request" },
