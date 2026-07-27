@@ -20,6 +20,14 @@ not a parallel invocation field; patterns return child references while clients
 render their ids and paths; and client-local `@name` bindings are deferred
 because they overlap confusingly with fabric-side slugs.
 
+**Review update (2026-07-27).** A second pass extended that same boundary —
+patterns expose their data and verbs; clients project them — to discovery and
+naming. Discovery becomes a client read-depth control rather than a
+pattern-authored index: a parent already links its children, and the unbounded
+read that motivated an index is a reader expanding every reference it crosses.
+Naming becomes fabric-side slugs assigned by the client to a returned
+reference, so no verb mints, stores, or returns a name.
+
 ## Goal
 
 Any pattern drivable by an agent, with no pattern-specific CLI code. Filing one
@@ -275,37 +283,48 @@ required, but is not a prerequisite for runtime-attested execution provenance
 ### Discovery
 
 A client holding only a board URL must reach the board's children without an
-O(children) sweep of per-child reads. So a parent exposes a **compact index** on
-its result — one row per child carrying a stable child reference and the summary
-fields a survey needs (name, author, timestamps, counts) — making the whole
-board one read. The pattern owns the reference and summary; the client, which
-can inspect the backing cells, owns rendering the reference as a fid or full
-path.
+O(children) sweep of per-child reads, and without dragging the whole graph back
+with them. Both halves are properties of the **read**, not of the pattern: a
+parent already links its children, so every reference a survey needs is in the
+durable data. What is missing is a reader that can cross a reference without
+expanding what it points at.
 
-`topics.crossrefs` already carries each `topic` reference, but it is the
-cross-reference graph, not a compact index: each row's `topic`, `refsOut`, and
+`topics.crossrefs` shows this precisely. It already carries each `topic`
+reference — the survey data is there — but each row's `topic`, `refsOut`, and
 `referencedBy` expand to full pieces on read
 (`packages/patterns/topics/main.tsx:70-78`), and a headless survey of the live
-board through it produced over 300k tokens of output. Its explicit `fid` field
-is not the general model either: it is derived indirectly from runtime-only
-cell surface, reads `""` while unresolved, and a pattern cannot reliably see
-its own runtime address. The index is therefore a separate result — one
-reference-plus-summary row per child, reference edges as sibling references,
-never expanded pieces — and generic clients render identity on top: a coarse
-exploration mode such as `--include-ids` can annotate every point where the
-backing identity changes, with a narrower path-selected form to follow if the
-broad form proves too noisy. Both are projections of existing references, not
-fields every pattern must maintain. Acceptance for an index: its serialization
-contains no expanded piece, action, or runtime values, and a full-board read
-stays bounded.
+board through it produced over 300k tokens of output. The defect is expansion
+depth, not an absent index.
 
-Discovery is the parent's job; the child's own verbs are the child's. A comment
-is addressed to the topic, not routed through the board — **but that depends on
-the CLI dispatching a nested piece's streams, which today fails with
-`Transaction required for .set()`** (`packages/runner/src/cell.ts:1294`; its own
-board topic). Until that lands, board-level routing
-(`addComment {topicFid, body}`) is the documented workaround — pragmatic, not
-the target shape.
+Discovery is therefore a **generic client capability**: a read-depth control
+that stops at references instead of expanding them, composed with the identity
+annotation that renders those references as fids or paths (`--include-ids`,
+coarse first, with a narrower path-selected form if the broad one proves too
+noisy). One bounded read of the parent then surveys the board, and every
+pattern gets it without authoring anything — the same relation `cf piece verbs`
+has to handlers, where the listing is derived from the durable schema rather
+than from a list the pattern maintains (Verb discovery).
+
+A **pattern-authored compact index** was the earlier proposal here and is
+rejected. It is a second interface over data the pattern already exposes: it
+must be kept in step with the children by hand, every pattern pays the
+authoring cost again, and it leaves the unbounded read in place for everything
+that is not the index. An explicit `fid` field is not the model either — it is
+derived indirectly from runtime-only cell surface, reads `""` while unresolved,
+and a pattern cannot reliably see its own runtime address. `crossrefs` stays
+what it is, the UI's reference graph, and stops being the documented survey
+surface.
+
+Acceptance for discovery: a full-board survey is one read whose serialization
+contains no expanded piece, action, or runtime value, and whose size is bounded
+by the number of children rather than by their contents.
+
+Verbs stay where their subject is: a comment is addressed to the topic, not
+routed through the board — **but that depends on the CLI dispatching a nested
+piece's streams, which today fails with `Transaction required for .set()`**
+(`packages/runner/src/cell.ts:1294`; its own board topic). Until that lands,
+board-level routing (`addComment {topicFid, body}`) is the documented
+workaround — pragmatic, not the target shape.
 
 ### Composition: the atomic-unit rule
 
@@ -617,12 +636,6 @@ $ cf piece invocation --url "$TOPICS_BOARD_URL" inv_9c1b --await
   "result": { "summary": "..." } }
 ```
 
-Client-local `@name` bindings are deferred. They can encode host + space +
-piece, while slugs (`cf piece set-slug`) are fabric-side names within a space,
-but two overlapping naming systems are too easy to confuse and aliases are not
-required for agent-drivable verbs. Revisit them separately only after concrete
-usage shows that full URLs, configured host/space, and slugs are insufficient.
-
 On any early exit — a timed-out wait, a lost connection — the client reports
 the furthest phase it observed as a structured field beside the invocation id
 it printed before network work began:
@@ -631,6 +644,41 @@ safety gate: with a caller-supplied id, a retry of that id is safe in every
 phase — before dispatch nothing committed; after it, the retry collides on the
 receipt and reads the original back. A `retrySafe` flag is derivable
 client-side sugar, not protocol.
+
+### Naming
+
+The returned reference is identity; a **slug** is the name — and the naming
+layer already exists. A slug is a document at an address derived
+deterministically from `(space, slug)` holding a write-redirect link to its
+target (`packages/runner/src/slugs.ts`), and `cf piece new --slug` already
+assigns one at creation time (`packages/cli/commands/piece.ts:472`). The same
+affordance belongs on `piece call`, applied to whatever reference the verb
+returned:
+
+```text
+$ cf piece call --url "$TOPICS_BOARD_URL" addTopic \
+    --title "Verb contract" --body @body.md --slug verb-contract
+{ "invocation": "inv_7f3a", "status": "settled",
+  "result": { "topic": "fid1:abc" } }
+→ slug "verb-contract" → fid1:abc
+```
+
+A create then yields a human-readable route without any verb minting, storing,
+or returning a name — the same division as identity rendering, one layer up.
+
+Assignment stays client-side deliberately. `setSlugLink` is a client flow
+(`packages/piece/src/slugs.ts:23`), the pattern-facing API exposes no entity-id
+addressing at all, and letting a pattern write a computable space-global
+address would make slug namespaces squattable by any pattern in the space —
+a CFC question, not a plumbing gap. Should pattern-side naming ever be wanted,
+that authorization question is the design, not the missing API.
+
+Client-local `@name` bindings remain deferred, for the reason they were
+deferred before: they can encode host + space + piece where slugs are
+fabric-side names within a space, but two overlapping naming systems are too
+easy to confuse, and aliases are not required for agent-drivable verbs.
+Revisit them only after concrete usage shows that full URLs, configured
+host/space, and slugs are insufficient.
 
 ## Defects and unknowns in the current machinery
 
@@ -668,10 +716,13 @@ that made it drivable. Its topics-board incarnation — the board topic *"Give
 the topics board an agent handle"* (Ben + Claude, 2026-07-22) — asks for five
 things: atomic `addTopic {title, body?}` returning the new topic reference,
 idempotency on create, a board index cell, board-level
-`addComment {topicFid}`, and an identity guard on mutating verbs. Every ask maps to a section above — the
+`addComment {topicFid}`, and an identity guard on mutating verbs. Every ask
+maps to a section above, two of them answered more generically than asked: the
 identity guard is the interim required `agentName` on every mutating event,
-pending general CFC ingress provenance. This document is their pattern-agnostic
-generalization. Deeper detail lives in the arc's defect register and
+pending general CFC ingress provenance, and the board index cell is answered by
+a client read-depth control that needs no cell (Discovery). This document is
+their pattern-agnostic generalization. Deeper detail lives in the arc's defect
+register and
 `docs/development/projects/fuse-fabric-access/topics-agent-ergonomics.md` on
 the loom PR.
 
@@ -754,10 +805,18 @@ end-to-end acceptance fixture in the implementation plan.
 - **Execution attribution is CFC provenance, not an invocation payload field.**
   `topics.agentName` remains an atomic interim argument until trusted `cf`
   ingress can mint and propagate the general provenance.
-- **Patterns return references; clients render identities.** A compact index
-  carries stable child references and summaries. Generic `--include-ids`
-  annotation belongs to the CLI because the pattern cannot reliably author its
-  own fid.
+- **Patterns return references; clients render identities.** Generic
+  `--include-ids` annotation belongs to the CLI because the pattern cannot
+  reliably author its own fid.
+- **Discovery is a read-depth control, not a pattern-authored index.** The
+  parent already links its children; the unbounded read is a reader expanding
+  every reference it crosses. Fixing it once in the client gives every pattern
+  bounded discovery with nothing to author or keep in step — the relation
+  `cf piece verbs` already has to handlers.
+- **Naming is slugs, assigned by the client.** `--slug` on `piece call` names
+  the reference a verb returned, generalizing `piece new --slug`. No verb
+  mints, stores, or returns a name. Pattern-side assignment is a CFC
+  namespace-authorization question, not a missing API.
 - **Client-local `@name` bindings are deferred.** Their distinction from slugs
   is real but confusing, and they are unnecessary for the core contract.
 
@@ -770,11 +829,11 @@ the steps below are the design-level order.
 1. Agree this document — particularly the open questions.
 2. Finish the Part 1 rework of `topics` / `topic` — the attribution rules
    already hold. Remaining, with no runtime change: a body argument on
-   `addTopic`, thrown rejections in place of silent early-returns — empty
-   titles and blank agent names both drop without a trace today — and the
-   reference-plus-summary discovery index (Discovery). (A thrown handler
-   error already surfaces as a nonzero CLI exit; stable codes arrive with the
-   protocol.)
+   `addTopic`, and thrown rejections in place of silent early-returns — empty
+   titles and blank agent names both drop without a trace today. (A thrown
+   handler error already surfaces as a nonzero CLI exit; stable codes arrive
+   with the protocol.) Discovery no longer appears in this step: it left the
+   pattern entirely and is client work, in step 6.
 3. Replace the tool-result poll with sink-based settlement and return the
    result cell's address to the caller. Standing fix, useful regardless.
 4. Plumb the id and the readback: pass a caller-supplied `eventId` from
@@ -789,7 +848,8 @@ the steps below are the design-level order.
    `AgentActor` propagation, metadata protection, and extraction. Retire
    per-event `agentName` fields only after that path is proven end to end.
 6. Add the client surface around invocation ids (mint-and-print,
-   `--invocation`, `--await` / `--no-wait`), verb listing, and generic
-   identity annotation for returned references and discovery indexes.
+   `--invocation`, `--await` / `--no-wait`), verb listing, generic identity
+   annotation for returned references, the read-depth control that makes
+   discovery bounded, and `--slug` assignment on a returned reference.
 
 Steps 2 and 3 stand on their own regardless of how the open questions land.

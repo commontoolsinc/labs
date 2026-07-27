@@ -14,6 +14,12 @@ post-merge review amendments (decisions 5–7: attribution via CFC provenance,
 patterns return references while clients render identity, `@name` deferred);
 index and fixture wording follows the references model.
 
+**Amended 2026-07-27** by a second review pass, extending decision 6 to
+discovery and naming (decisions 8–9). A2's pattern-authored index is retired in
+favour of a generic client read-depth control (F4), and `--slug` on
+`piece call` becomes the naming affordance (F5). Risks names #5059 as the
+`setsrc` preflight the write-storm gate wants.
+
 ## Governing decisions
 
 Made 2026-07-24, shaping everything below:
@@ -33,12 +39,24 @@ Made 2026-07-24, shaping everything below:
    parallel `actor` field. `topics.agentName` stays as an interim atomic
    argument until trusted `cf` ingress can mint and propagate general
    `AgentActor` provenance.
-6. **Patterns return references; clients render identity.** Discovery indexes
-   carry stable child references and summaries. Fid/path annotation belongs to
-   the CLI, which can see backing cell identities.
+6. **Patterns return references; clients render identity.** Fid/path
+   annotation belongs to the CLI, which can see backing cell identities.
 7. **Client-local `@name` bindings are deferred.** Their overlap with
    fabric-side slugs needs a separate naming design and is not required by this
    plan.
+
+Added 2026-07-27, extending decision 6 to the two surfaces it had not yet
+reached:
+
+8. **Discovery is a client read-depth control, not a pattern-authored index.**
+   The parent already links its children; the 300k-token board read was a
+   reader expanding every reference it crossed. Fixing depth once in the client
+   gives every pattern bounded discovery with nothing to author or keep in
+   step. A2 is retired and replaced by F4.
+9. **Naming is slugs, assigned by the client.** `--slug` on `piece call` names
+   the reference a verb returned, generalizing `piece new --slug` (F5). No verb
+   mints, stores, or returns a name; pattern-side assignment is a CFC
+   namespace-authorization question, out of scope here.
 
 ## Non-goals
 
@@ -51,6 +69,8 @@ Named so their absence reads as intent, not oversight:
   delegated agent, but does not deliver delegation.
 - **Client-local aliases** — `@name` / `cf bind` are deferred pending a
   separate comparison with existing slugs and configured host/space addressing.
+  Naming itself is *not* deferred: slugs already work, and F5 applies them to
+  returned references. What is deferred is a *second* naming system.
 - **Cross-space effect atomicity** — the spec's I11 gap stands; the guarantee
   is same-space, which covers `topics`.
 - **Batch / session mode** for the CLI — orthogonal call-cost work, linked
@@ -64,7 +84,8 @@ Named so their absence reads as intent, not oversight:
 
 ### WS-A — `topics` Part 1 finish
 
-Size S–M (~2–4 days). No dependencies. `packages/patterns/topics`.
+Size S (~1–2 days, down from S–M when A2 was retired). No dependencies.
+`packages/patterns/topics`.
 
 - `AddTopicEvent` gains optional `body` — argument widening, compat-checker
   clean — and `addTopic` creates the child with it, making `setBody` an
@@ -73,23 +94,20 @@ Size S–M (~2–4 days). No dependencies. `packages/patterns/topics`.
   `agentName`, empty comment body, invalid link URL. UI composer wrappers
   (`submitTopic`, `submitComment`, `saveBody`, …) keep their silent guards —
   an empty draft is a non-event in a composer, a defect headlessly.
-- A compact discovery `index` result on the board — one reference-plus-summary
-  row per topic: the child reference plus scalar summaries (`title`,
-  `createdAt`, `createdBy`, `commentCount`, `lastActivityAt`) and reference
-  edges as sibling references — never expanded pieces, and no pattern-authored
-  fid fields (identity rendering is the CLI's job — decision 6, F2).
-  `crossrefs` stays as the UI's reference graph; it is not compact — each row
-  expands to full pieces, and a live full-board read through it exceeded 300k
-  tokens — and stops being the documented survey surface.
-- Tests: `topics.test.tsx` / `multi-user.test.tsx` cover body-at-create,
-  each thrown rejection (asserting no write happened), and the index
-  (asserting no expanded piece/action/runtime values serialize).
+- **No discovery index** (decision 8, amended 2026-07-27). The board authors
+  nothing for discovery: `crossrefs` stays the UI's reference graph and simply
+  stops being the documented survey surface, and bounded surveying arrives
+  generically in F4. The retired A2 would have had the board hand-maintain a
+  reference-plus-summary row per topic — a second interface over children it
+  already links, and no help for any read that is not the index.
+- Tests: `topics.test.tsx` / `multi-user.test.tsx` cover body-at-create and
+  each thrown rejection (asserting no write happened).
 - Docs riding the change: `packages/patterns/topics/README.md`,
   `skills/topics/SKILL.md` (`addTopic` example gains `body`;
   `deno task check-skill-facts` gates the citations).
 - **Exit:** filing-with-body is five CLI calls; a blank `agentName` fails with
-  a nonzero exit; a full-board survey is one bounded read of `index`; live
-  board updated via `setsrc` (gated — see Risks).
+  a nonzero exit; live board updated via `setsrc` (gated — see Risks). The
+  bounded-survey criterion moves to F4, where the capability now lives.
 
 ### WS-B — CLI settlement hygiene
 
@@ -241,6 +259,21 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
   backing identity changes; evaluate a narrower path-selected form if broad
   output is too noisy. Patterns return child references and never manufacture
   their own fid fields for this purpose.
+- **Read-depth control for reads (F4, decision 8).** A read that stops at a
+  reference instead of expanding what it points at, so one read of a parent
+  surveys its children. This is what makes discovery bounded for every pattern,
+  and it is where WS-A's retired index criterion now lives. Pairs with
+  `--include-ids`: depth bounds the read, annotation makes the references
+  addressable. **Exit:** a full-board `topics` read is one call whose
+  serialization contains no expanded piece, action, or runtime value, and whose
+  size scales with the number of topics rather than their contents — measured
+  against the same live board that produced the 300k-token read.
+- **`--slug <name>` on `piece call` (F5, decision 9).** Assigns a fabric-side
+  slug to the reference the verb returned, reusing `assignSlug`
+  (`packages/piece/src/slugs.ts:15`) exactly as `piece new --slug` already does
+  (`packages/cli/commands/piece.ts:472`). No runtime and no pattern change;
+  depends only on verbs returning a reference (Phase 4). **Exit:** a create
+  names its child in one call, and the slug resolves to the canonical child.
 - `--await` / `--no-wait` and the caller-controlled wait bound — with WS-D.
 - Skill updates ride each surface (`skills/cf`, `skills/topics`): the handle
   lookup and verification read leave the documented workflow when Phase 4
@@ -250,7 +283,7 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
 
 ```text
 Phase 1 (parallel, now): WS-A, WS-B, WS-F verb listing + identity
-                         annotation; WS-C starts
+                         annotation + read depth; WS-C starts
 Phase 2: WS-D idempotency-only  → duplicate bug dead on the live board
 Phase 3: WS-C lands             → topics verbs return values; flag still off
 Phase 4: WS-C + WS-D join       → full Invocation JSON; --await; flag flips
@@ -292,10 +325,11 @@ change that alters them.
     canonical child, not an intermediate wrapper;
   - attribution persists in `createdBy` / `bodyUpdatedBy`;
   - an undeclared field fails with a nonzero exit;
-  - a full-board discovery read stays bounded;
+  - a full-board discovery read stays bounded (via read depth, F4 — nothing
+    board-authored);
   - commit acknowledgement does not wait on cross-reference recomputation;
-  - update rehearsal and commit-rate monitoring pass before any live
-    `setsrc` (Risks — the write-storm gate).
+  - `setsrc --check` (#5059) passes, then update rehearsal and commit-rate
+    monitoring, before any live `setsrc` (Risks — the write-storm gate).
 - **Doc gates:** `deno task check-docs`, `deno task check-skill-facts` on
   every change touching docs or skills.
 
@@ -320,6 +354,14 @@ change that alters them.
   #4956, merged 2026-07-24 — is the candidate fix; confirm before the first
   Phase 1 deploy). Until the gate clears, a "live-board acceptance pass"
   degrades to a scratch board and must say so rather than pass silently.
+  **#5059 (`cf piece setsrc --check`) is the preflight half of this gate**: it
+  answers whether a given source can be applied to a given piece *before*
+  attempting it, driving the real rules in dry-run — the pattern-contract
+  subset proof, the CFC envelope merge, and the retained-link validator —
+  rather than reimplementing them. It does not measure commit rates, so the
+  rehearsal stands; what it removes is discovering an incompatibility by
+  attempting the swap on the live board. Adopt it as the first step of every
+  phase's deploy checklist once it lands.
 - **WS-E's gates may stall it** (OQ1, CFC review, collection unknown, trusted
   ingress mint and propagation): it is last and severable; everything through
   Phase 4 delivers without it, and `topics.agentName` remains the safe interim.
@@ -331,7 +373,7 @@ Importable one-to-one into the tracker; `blocks →` names the dependency edge.
 | id | title | size | depends on |
 | --- | --- | --- | --- |
 | A1 | topics: body at create + thrown rejections | S | — |
-| A2 | topics: reference-plus-summary discovery index | S | — |
+| ~~A2~~ | ~~topics: reference-plus-summary discovery index~~ — retired 2026-07-27 (decision 8); replaced by F4 | — | — |
 | B1 | cli: sink-based settlement, result cell address | S | — |
 | C1 | api: action return types, `Stream<T, R>`, VerbError | M | — |
 | C2 | ts-transformers: value-returning action lowering + CTS spec | M | C1 |
@@ -349,3 +391,5 @@ Importable one-to-one into the tracker; `blocks →` names the dependency edge.
 | F1 | cli: `cf piece verbs --json` | S | — (result schemas after C3) |
 | F2 | cli: generic identity/path annotation | M | — |
 | F3 | cli: `--await` / `--no-wait`, caller-controlled bound | S | D2 |
+| F4 | cli: read-depth control — bounded discovery for every pattern | M | — |
+| F5 | cli: `--slug` on `piece call`, naming a returned reference | S | C1–C3, D2 |
