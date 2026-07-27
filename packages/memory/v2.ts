@@ -7,7 +7,11 @@ import {
   valueFromJson,
 } from "@commonfabric/data-model/codec-json";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
-import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
+import type {
+  FabricPlainObject,
+  FabricValue,
+  SchemaPathSelector,
+} from "@commonfabric/api";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import { isObject, isRecord } from "@commonfabric/utils/types";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
@@ -517,7 +521,7 @@ export function dbNeedsColumnProvenance(
 }
 
 export type SqliteQueryResult = {
-  rows: unknown[];
+  rows: FabricPlainObject[];
   /** Per-result-column origin, present ONLY when the db needs provenance for
    *  CFC labeling — any column declares `ifc` (Phase 2) or any table declares
    *  a per-row label rule (Phase 3); see `dbNeedsColumnProvenance`. An aliased
@@ -692,7 +696,10 @@ export type SchedulerActionSnapshotResult = {
   commitSeq: number | null;
   observedAtSeq: number;
   executionContextKey: SchedulerExecutionContextKey;
-  observation: unknown;
+  /** The observation, opaque here: this layer stores and forwards it, and the
+   *  runner owns its shape and validation. `FabricValue` says only what the
+   *  wire requires of it. */
+  observation: FabricValue;
   directDirtySeq?: number;
   staleSeq?: number;
   unknownReason?: string;
@@ -774,7 +781,7 @@ export type ClientMessage =
   | SessionAckRequest;
 export type ServerMessage =
   | HelloOkMessage
-  | ResponseMessage<unknown>
+  | ResponseMessage<FabricValue>
   | SessionEffectMessage
   | SessionRevokedMessage;
 
@@ -989,11 +996,16 @@ export const encodeMemoryBoundary = (value: FabricValue): string =>
  * The memory protocol's own message types are the callers here. They are
  * fabric values in fact — they cross this boundary on every request and
  * response, and would fail loudly if they were not — but they cannot be
- * *stated* as such, because several of their fields are declared `unknown`
- * (notably `SchedulerActionSnapshotResult.observation`, and `SqliteDbRef`'s
- * `tables`, whose `TableSchema` carries a `[key: string]: unknown` catch-all).
- * A type containing an `unknown` field is not assignable to `FabricValue`, so
- * the whole enclosing message is rejected however sound its actual contents.
+ * *stated* as such, because some of their fields are declared `unknown`. A type
+ * containing an `unknown` field is not assignable to `FabricValue`, so the
+ * whole enclosing message is rejected however sound its actual contents.
+ *
+ * Every remaining caller is blocked by the same root: `SqliteDbRef.tables` is
+ * `Record<string, unknown>`, which reaches `SqliteOperation` → `Operation` →
+ * `ClientCommit`, and from there every message that carries a commit. Its
+ * natural element type, `TableSchema`, carries a `[key: string]: unknown`
+ * catch-all, so tightening `tables` means tightening that too, plus the
+ * runner's own copy of the `SqliteDbRef` shape.
  *
  * What is given up is narrower than it looks: the encoding *verifies*. A value
  * that no codec can represent throws — at any depth, naming the offending

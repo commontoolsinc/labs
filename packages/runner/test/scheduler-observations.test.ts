@@ -1513,9 +1513,8 @@ describe("persistent scheduler observations", () => {
         ownerSnapshots?.snapshots[0]?.executionContextKey,
       );
       expect(
-        (ownerSnapshots?.snapshots[0]?.observation as
-          & SchedulerActionObservation
-          & { ownerSpace?: string }).ownerSpace,
+        (ownerSnapshots?.snapshots[0] as SchedulerSnapshotWithObservation)
+          ?.observation.ownerSpace,
       ).toBe(ownerSpace);
     } finally {
       await disposeSchedulerTestRuntime(testRuntime);

@@ -1,3 +1,4 @@
+import type { FabricPlainObject } from "@commonfabric/api";
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
 import { resolveSpaceStoreUrl } from "./storage-path.ts";
@@ -8,7 +9,6 @@ import {
   dbNeedsColumnProvenance,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
-  encodeMemoryBoundaryUnprovenFabricValue,
   type EntityDocument,
   getPersistentSchedulerStateConfig,
   type GraphQuery,
@@ -1362,7 +1362,7 @@ export class Server {
     params: SqliteParamsWire | undefined,
     scopeKey: string,
     wantColumns: boolean,
-  ): Promise<{ rows: unknown[]; columns?: SqliteResultColumn[] }> {
+  ): Promise<{ rows: FabricPlainObject[]; columns?: SqliteResultColumn[] }> {
     // Apply the statement guard BEFORE the file-existence short-circuit, so a
     // rejected statement (non-SELECT, core-table/qualified ref, ATTACH/PRAGMA,
     // multi-statement) is refused even against a never-written cell-db rather
@@ -3214,9 +3214,7 @@ export class Server {
     if (parsed?.type === "hello") {
       const response = respondToHello(parsed);
       if (response.type !== "hello.ok") {
-        return Promise.resolve(
-          encodeMemoryBoundaryUnprovenFabricValue(response),
-        );
+        return Promise.resolve(encodeMemoryBoundary(response));
       }
       return Promise.resolve(encodeMemoryBoundary({
         type: "response",
