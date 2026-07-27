@@ -1,6 +1,10 @@
 import {
   computed,
   type Default,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   NAME,
   pattern,
   patternTool,
@@ -70,7 +74,13 @@ const SummaryIndex = pattern<Input, Output>(() => {
   const mentionableWish = wish<Default<Writable<SummarizablePiece>[], []>>({
     query: "#mentionable",
   });
-  const mentionable = resultOf(mentionableWish.result);
+  const mentionable = computed(() => {
+    const result = mentionableWish.result;
+    return isPending(result) || hasError(result) ||
+        isSyncing(result) || hasSchemaMismatch(result)
+      ? []
+      : resultOf(result);
+  });
 
   const query = new Writable("");
 

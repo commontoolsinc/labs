@@ -123,4 +123,29 @@ describe("data-unavailability builder helpers", () => {
       await storageManager.close();
     }
   });
+
+  it("retains the partial association after pattern naming", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const frame = pushFrame({ runtime, space: signer.did() });
+
+    try {
+      const request = commonfabric.generateTextStream({ prompt: "hello" });
+      const namedRequest = (
+        request as unknown as {
+          for(cause: unknown, allowIfSet?: boolean): typeof request;
+        }
+      ).for("request", true);
+
+      const partial = commonfabric.partialResultOf(namedRequest);
+      expect((partial as any).export().path).toEqual(["partial"]);
+    } finally {
+      popFrame(frame);
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 });

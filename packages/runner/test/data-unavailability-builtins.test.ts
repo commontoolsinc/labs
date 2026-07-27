@@ -304,7 +304,11 @@ describe("raw builtin data unavailability propagation", () => {
 
     expect(calls).toBe(2);
     expect(finalRaw(result.key("mapped").key(0))).toBe(2);
-    expect(finalRaw(result.key("mapped").key(1))).toBe(marker);
+    const mappedMarker = finalRaw(
+      result.key("mapped").key(1),
+    ) as DataUnavailable;
+    expect(mappedMarker.reason).toBe("pending");
+    expect(mappedMarker.pending).toBe(true);
     expect(finalRaw(result.key("mapped").key(2))).toBe(6);
 
     result.withTx(tx).key("values").set([1, 2, 3]);
@@ -381,7 +385,11 @@ describe("raw builtin data unavailability propagation", () => {
     await commitAndPull(result);
 
     expect(calls).toBe(2);
-    expect(finalRaw(result.key("flattened"))).toBe(marker);
+    const flattenedMarker = finalRaw(
+      result.key("flattened"),
+    ) as DataUnavailable;
+    expect(flattenedMarker.reason).toBe("pending");
+    expect(flattenedMarker.pending).toBe(true);
 
     result.withTx(tx).key("values").set([1, 2, 3]);
     await commitAndPull(result);

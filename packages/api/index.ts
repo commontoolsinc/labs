@@ -68,6 +68,19 @@ export type DataUnavailableReason =
   | "schema-mismatch";
 
 /**
+ * Pattern-visible surface of the fabric-native error carried by an unavailable
+ * producer. The canonical runtime implementation also preserves supported
+ * custom properties through its extras API.
+ */
+export interface FabricError {
+  readonly type: string;
+  readonly name: string;
+  readonly message: string;
+  readonly stack: string | undefined;
+  readonly cause: unknown;
+}
+
+/**
  * Pattern-visible surface of a runtime-owned unavailable-data marker.
  *
  * There is intentionally no public constructor. Plain objects with the same
@@ -75,10 +88,10 @@ export type DataUnavailableReason =
  */
 export interface DataUnavailable extends FabricInstance {
   readonly reason: DataUnavailableReason;
-  readonly pending?: true;
-  readonly error?: Error;
-  readonly syncing?: true;
-  readonly schemaMismatch?: true;
+  readonly pending?: true | undefined;
+  readonly error?: FabricError | undefined;
+  readonly syncing?: true | undefined;
+  readonly schemaMismatch?: true | undefined;
 }
 
 /** A pending unavailable value. */
@@ -90,7 +103,7 @@ export type IsPending = DataUnavailable & {
 /** An unavailable value carrying a producer error. */
 export type HasError = DataUnavailable & {
   readonly reason: "error";
-  readonly error: Error;
+  readonly error: FabricError;
 };
 
 /** An unavailable value whose storage coverage is still synchronizing. */

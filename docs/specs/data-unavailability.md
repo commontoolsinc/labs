@@ -149,7 +149,7 @@ interface DataUnavailable extends FabricInstance {
   readonly pending?: true;
   readonly syncing?: true;
   readonly schemaMismatch?: true;
-  readonly error?: Error;
+  readonly error?: FabricError;
 }
 
 type IsPending = DataUnavailable & {
@@ -159,7 +159,7 @@ type IsPending = DataUnavailable & {
 
 type HasError = DataUnavailable & {
   readonly reason: "error";
-  readonly error: Error;
+  readonly error: FabricError;
 };
 
 type IsSyncing = DataUnavailable & {

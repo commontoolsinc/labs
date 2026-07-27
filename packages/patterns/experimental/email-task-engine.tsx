@@ -880,7 +880,7 @@ Respond with the most appropriate action.`;
                           taskCurrentLabelId,
                           hiddenTasks,
                           processingTasks,
-                          pieceRegistry,
+                          pieceRegistry: resultOf(pieceRegistryWish.result),
                         });
                       } else if (result?.actionType === "create-note") {
                         return executeCreateNote({
@@ -891,7 +891,7 @@ Respond with the most appropriate action.`;
                           taskCurrentLabelId,
                           hiddenTasks,
                           processingTasks,
-                          pieceRegistry,
+                          pieceRegistry: resultOf(pieceRegistryWish.result),
                         });
                       }
                       return null;

@@ -5,9 +5,12 @@ import {
   equals,
   handler,
   hasError,
+  hasSchemaMismatch,
   isPending,
+  isSyncing,
   llmDialog,
   NAME,
+  observeAvailability,
   pattern,
   patternTool,
   resultOf,
@@ -178,7 +181,13 @@ const KnowledgeGraph = pattern<Input>(() => {
   const mentionableWish = wish<Writable<MentionablePiece>[] | Default<[]>>({
     query: "#mentionable",
   });
-  const mentionable = resultOf(mentionableWish.result);
+  const mentionable = computed(() => {
+    const result = mentionableWish.result;
+    return isPending(result) || hasError(result) ||
+        isSyncing(result) || hasSchemaMismatch(result)
+      ? []
+      : resultOf(result);
+  });
 
   const baseEdges = computed(() => {
     const result: GraphEdge[] = [];
@@ -211,7 +220,16 @@ const KnowledgeGraph = pattern<Input>(() => {
       >;
     }
   >({ query: "#summaryIndex" });
-  const { entries: summaryEntries } = resultOf(summaryWish.result);
+  const observedSummaryEntries = observeAvailability(
+    resultOf(summaryWish.result).entries,
+  );
+  const summaryEntries = computed(() => {
+    const result = observedSummaryEntries;
+    return isPending(result) || hasError(result) ||
+        isSyncing(result) || hasSchemaMismatch(result)
+      ? []
+      : resultOf(result);
+  });
 
   // LLM agent state
   const messages = new Writable<BuiltInLLMMessage[]>([]);
@@ -267,11 +285,13 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
   };
   const dialog = llmDialog<GraphAnnotations>(dialogOptions);
   const { addMessage, pending } = dialog;
-  const annotations = computed(() =>
-    isPending(dialog.result) || hasError(dialog.result)
+  const annotations = computed(() => {
+    const result = dialog.result;
+    return isPending(result) || hasError(result) ||
+        isSyncing(result) || hasSchemaMismatch(result)
       ? undefined
-      : resultOf(dialog.result)
-  );
+      : resultOf(result);
+  });
 
   // Resolve annotations into actual GraphEdges by looking up piece refs by name
   const agentEdges = computed(() => {

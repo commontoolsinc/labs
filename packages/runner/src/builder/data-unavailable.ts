@@ -14,6 +14,7 @@ import {
   isPending as isPendingValue,
   isSyncing as isSyncingValue,
 } from "@commonfabric/data-model/fabric-instances";
+import { toCell } from "../back-to-cell.ts";
 
 /** Pure concrete-brand guard for the pending unavailable variant. */
 export const isPending: IsPendingFunction = isPendingValue;
@@ -56,7 +57,21 @@ function partialResultKey(value: unknown): object {
       "partialResultOf() requires a request returned by a streaming built-in",
     );
   }
-  return value;
+
+  // Pattern lowering names reactive values with `.for(...)`. Calling that
+  // method on a reactive proxy returns its underlying Cell, so normalize both
+  // forms to the same identity before consulting the side table.
+  const maybeToCell = (value as { [toCell]?: unknown })[toCell];
+  if (typeof maybeToCell === "function") {
+    const cell = maybeToCell.call(value);
+    if (
+      (typeof cell === "object" && cell !== null) ||
+      typeof cell === "function"
+    ) {
+      return cell;
+    }
+  }
+  return value as object;
 }
 
 /** Associate one direct streaming result with its zero-node partial alias. */
