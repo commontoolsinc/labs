@@ -587,6 +587,11 @@ const postCandidate = (
   const laneGeneration = candidateDemandGeneration(
     candidate.claimKey.contextKey,
   );
+  console.log(
+    "[P0R3d] candidate",
+    `t=${Date.now()}`,
+    candidate.claimKey.actionId.slice(-16),
+  );
   worker.postMessage({
     type: "candidate-claim",
     candidate: {
@@ -894,12 +899,20 @@ const activateDemand = async (
 ): Promise<boolean> => {
   if (runtime === null) throw new Error("executor Worker is not initialized");
   if (instantiatedDemand.has(pieceId)) return true;
+  const syncStartedAt = Date.now();
   await cell.sync();
+  console.log(
+    "[P0R3d] sync",
+    `t=${Date.now()}`,
+    `ms=${Date.now() - syncStartedAt}`,
+    pieceId.slice(-12),
+  );
   if (cell.getRaw() === undefined) {
     pendingDemand.set(pieceId, unavailableAddress(cell));
     return false;
   }
   try {
+    const prepareStartedAt = Date.now();
     const discovery = await prepareExecutorDemandPiece({
       runtime,
       branch,
@@ -907,6 +920,12 @@ const activateDemand = async (
       target: cell,
       instantiate: () => runtime!.start(cell),
     });
+    console.log(
+      "[P0R3d] prepare",
+      `t=${Date.now()}`,
+      `ms=${Date.now() - prepareStartedAt}`,
+      pieceId.slice(-12),
+    );
     // `pull()` below is a bounded settlement barrier, not durable demand. Keep
     // one consumer live so an async host claim can rerun the same action after
     // the initial pull's temporary consumer has been released.
@@ -1074,7 +1093,14 @@ const ensurePullPump = (): void => {
     try {
       const cell = demanded.get(pieceId);
       if (cell !== undefined && (await activateDemand(pieceId, cell))) {
+        const pullStartedAt = Date.now();
         await cell.pull();
+        console.log(
+          "[P0R3d] pull",
+          `t=${Date.now()}`,
+          `ms=${Date.now() - pullStartedAt}`,
+          pieceId.slice(-12),
+        );
       }
     } finally {
       pullPumpQueued = false;

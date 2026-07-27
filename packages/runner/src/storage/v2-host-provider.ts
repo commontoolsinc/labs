@@ -1162,7 +1162,15 @@ class HostReplicaSession implements ReplicaSession {
           : this.#deferredAcceptedCommits.splice(0);
         deferredConsumed = true;
         const batch = this.#pendingAcceptedCommits.splice(0);
+        const passStartedAt = Date.now();
         await this.refreshAndNotifyAcceptedCommits(batch, deferred);
+        console.log(
+          "[P0R3d] wave-pass",
+          `t=${Date.now()}`,
+          `ms=${Date.now() - passStartedAt}`,
+          `batch=${batch.length}`,
+          `deferred=${deferred.length}`,
+        );
       }
     } finally {
       this.#acceptedCommitDeliveryScheduled = false;

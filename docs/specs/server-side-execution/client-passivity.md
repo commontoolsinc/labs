@@ -430,6 +430,29 @@ peeled three successive liveness layers — each fix exposing the next:
    companion question (a piece whose actions never complete a routed
    run emits nothing, however healthy the rest is).
 
+   **P0-R3d ANSWERED (fresh-store n=5, phase probes committed as
+   permanent [P0R3d] debug logs):** the dominant phase is **`prepare`
+   — `runtime.start(cell)` inside `prepareExecutorDemandPiece`: 7.6s
+   / 7.6s / 18.1s per piece** (pattern module fetch + compile + graph
+   instantiation; the writer lookups around it are trivial), with the
+   initial `cell.pull` second (7.4s / 4.0s), `cell.sync`
+   milliseconds, and integration wave-passes mostly 1-3ms with
+   occasional 1.3-3.2s spikes. With the whole prior stack fixed,
+   candidates now emit INSIDE the run (first 22 candidates at 8.2s,
+   more at 11.1s) — the first page's ~5.3s demand window just misses
+   them (declines: sponsor-demand-gone, no re-anchor target — the
+   page was gone). Two named levers for the next build (P0-R3e):
+   (a) cut `runtime.start` cold cost — pre-compile/warm the demanded
+   pieces' patterns concurrently with sync/feed instead of
+   serializing inside prepare (the piece root names its pattern
+   before instantiation), and check the pattern-compile service's
+   cache behavior for the worker's fetches; (b) the probe ALSO caught
+   a `resetClaims` re-instantiation mid-run — the SAME piece prepared
+   twice (7.6s then 18.1s) because a lane-wire change reset
+   `instantiatedDemand` and the pump re-prepared everything; audit
+   whether that reset's blast radius (full re-instantiation) is
+   necessary for a lane-only change.
+
    Original diagnosis (superseded in one respect — the dominant class
    was growth, not never-held): the demand-pull traversal scaler.
    With the pump landed,
