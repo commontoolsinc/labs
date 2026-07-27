@@ -1870,9 +1870,20 @@ const handle = async (request: WorkerRequest): Promise<void> => {
       demandGeneration = Number(request.demandGeneration);
       if (request.resetClaims === true) cancelClaimedAttempts();
       applyLaneDemands(validateWireLanes(request.lanes));
-      // replaceDemand enqueues internally (P0-R3) — wrapping it here would
-      // deadlock its per-piece items behind this outer item.
-      await replaceDemand(request.pieces!, request.resetClaims);
+      // P0-R3f: the reply resolves at LANE APPLICATION, with the
+      // structural swap detached (replaceDemand enqueues internally —
+      // awaiting it here parked the reply behind the in-flight pump item,
+      // and the host holds its candidate-admission lane across this
+      // request: measured, one first-piece 37.8s prepare froze candidate
+      // admission for the whole window while 111 emitted candidates
+      // queued. Authority fencing stayed synchronous above
+      // (cancelClaimedAttempts + applyLaneDemands); a claim racing a
+      // detached stop settles as the documented claim-scoped release
+      // (ClaimedActionGoneError), and activation completion remains
+      // observable through settle()'s fixpoint — never through this
+      // reply.
+      void replaceDemand(request.pieces!, request.resetClaims)
+        .catch(postFatal);
       break;
     case "wake":
       await enqueue(pullDemand);
