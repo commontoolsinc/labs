@@ -1,7 +1,7 @@
 name: "Cached Deno install"
 description: >
   Install Deno project dependencies from the restored cache when it is complete.
-  Fetch dependencies with retries when the cache is incomplete.
+  Fetch dependencies when the cache is incomplete.
 inputs:
   frozen:
     description: "Pass --frozen to deno install."
@@ -33,13 +33,4 @@ runs:
         fi
 
         echo "Deno cache is incomplete; fetching dependencies."
-        delays=(10 30 60)
-        for delay in "${delays[@]}"; do
-          if deno install "${frozen_arg[@]}"; then
-            exit 0
-          fi
-          echo "::warning::deno install failed; retrying in ${delay}s."
-          sleep "$delay"
-        done
-
         deno install "${frozen_arg[@]}"
