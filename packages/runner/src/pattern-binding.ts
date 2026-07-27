@@ -1,3 +1,4 @@
+import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
 import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
@@ -377,6 +378,49 @@ function sendValueToBindingInner<T>(
 }
 
 /**
+ * Whether returning `binding` unchanged is indistinguishable from returning the
+ * `Object.fromEntries(Object.entries(binding))` rebuild that
+ * {@link unwrapOneLevelAndBindtoDoc}'s walk would otherwise produce.
+ *
+ * That rebuild is NOT an identity operation on every record — it silently
+ * drops what `Object.entries()` cannot see and flattens what
+ * `Object.fromEntries()` cannot reproduce:
+ *
+ * - **symbol keys** (`Object.entries()` enumerates string keys only), which
+ *   matter here because result values carry symbol-keyed metadata such as
+ *   `NAME`;
+ * - **non-enumerable own string properties**, likewise invisible to
+ *   `Object.entries()`;
+ * - **the prototype** — `isRecord()` admits any non-null object, so a class
+ *   instance rebuilds into a plain object.
+ *
+ * Sharing a record with any of those would therefore *preserve* something the
+ * rebuild removes, which is a behavior change rather than an optimization. So
+ * this reports `true` only for a plain object whose every own property is an
+ * enumerable string one.
+ *
+ * The prototype test is spelled out rather than delegated to `isPlainObject()`,
+ * which also admits a null-prototype object — a shape `Object.fromEntries()`
+ * never produces, and so one this walk must not hand back unrebuilt.
+ */
+function isReproducibleRecord(binding: object): boolean {
+  return Object.getPrototypeOf(binding) === Object.prototype &&
+    Object.getOwnPropertySymbols(binding).length === 0 &&
+    Object.getOwnPropertyNames(binding).length === Object.keys(binding).length;
+}
+
+/**
+ * The array counterpart of {@link isReproducibleRecord}. `Array.prototype.map()`
+ * copies index properties only, so an array carrying any other own property is
+ * not reproduced by the walk's rebuild and must not be shared. Sparse arrays
+ * are shareable: `map()` preserves holes, as does handing back the original.
+ */
+function isReproducibleArray(binding: unknown[]): boolean {
+  return isArrayWithOnlyIndexProperties(binding) &&
+    Object.getOwnPropertySymbols(binding).length === 0;
+}
+
+/**
  * Unwraps one level of aliases, and
  * - binds top-level aliases to passed doc
  *
@@ -496,18 +540,32 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
         );
       }
     } else if (Array.isArray(binding)) {
-      return binding.map((value, index) =>
-        convert(
+      let changed = false;
+      const converted = binding.map((value, index) => {
+        const next = convert(
           value,
           cfc.getSchemaAtPath(targetSchema, [String(index)]),
-        )
-      );
+        );
+        if (next !== value) changed = true;
+        return next;
+      });
+      return (!changed && isReproducibleArray(binding)) ? binding : converted;
     } else if (isRecord(binding)) {
+      let changed = false;
+      const entries = Object.entries(binding).map(([key, value]) => {
+        const next = convert(value, cfc.getSchemaAtPath(targetSchema, [key]));
+        if (next !== value) changed = true;
+        return [key, next] as const;
+      });
+      if (!changed && isReproducibleRecord(binding)) {
+        // Nothing under here rebound, and rebuilding would have produced an
+        // equal object, so hand back the original. `noteDerivedCopy()` is
+        // skipped deliberately: it no-ops when copy and original are the same
+        // value, and `resolveOriginal()` already answers with the original.
+        return binding;
+      }
       const result: Record<string | symbol, unknown> = Object.fromEntries(
-        Object.entries(binding).map(([key, value]) => [
-          key,
-          convert(value, cfc.getSchemaAtPath(targetSchema, [key])),
-        ]),
+        entries,
       );
       // Carry the derivation link (trust + content-addressed entry ref) onto
       // the bound copy so a pattern value re-bound here still resolves its
