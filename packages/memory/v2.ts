@@ -996,40 +996,6 @@ export const wireMemoryProtocolFlags = (
 export const encodeMemoryBoundary = (value: FabricValue): string =>
   jsonFromValue(value);
 
-/**
- * Encodes a wire payload that the type system cannot yet prove is a
- * `FabricValue`. Identical to `encodeMemoryBoundary()` in every respect but the
- * declared parameter type; prefer that one wherever it type-checks.
- *
- * The memory protocol's own message types are the callers here. They are
- * fabric values in fact — they cross this boundary on every request and
- * response, and would fail loudly if they were not — but they cannot be
- * *stated* as such, because some of their fields are declared `unknown`. A type
- * containing an `unknown` field is not assignable to `FabricValue`, so the
- * whole enclosing message is rejected however sound its actual contents.
- *
- * Every remaining caller is blocked by the same root: `ClientCommit`'s
- * `schedulerObservation` is `unknown`, which reaches every message that carries
- * a commit.
- *
- * What is given up is narrower than it looks: the encoding *verifies*. A value
- * that no codec can represent throws — at any depth, naming the offending
- * subvalue ("Cannot encode new ArrayBuffer(...): no applicable codec"). So this
- * trades a compile-time guarantee for a runtime one that already ran, rather
- * than for no guarantee at all. What it does lose is the early, local report:
- * a bad value is caught at the encode, not at the assignment that introduced
- * it.
- *
- * Every use marks a declaration that has not been tightened yet, which is why
- * the name is what it is — the count of callers is the size of the remaining
- * job, and `grep` measures it. As those `unknown` fields acquire real types,
- * move the corresponding calls back to `encodeMemoryBoundary()`; when the last
- * one moves, delete this.
- */
-export const encodeMemoryBoundaryUnprovenFabricValue = (
-  value: unknown,
-): string => jsonFromValue(value as FabricValue);
-
 export const commitPreconditionValueHash = (value: FabricValue): string =>
   hashStringOf(encodeMemoryBoundary(value));
 
