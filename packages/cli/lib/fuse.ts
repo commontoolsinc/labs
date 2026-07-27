@@ -418,7 +418,7 @@ export function buildFuseChildDenoArgs(
 }
 
 /**
- * Build the args for the compiled cf binary's hidden fuse subcommands. The
+ * Build the args for the compiled cf binary's direct FUSE entry points. The
  * compiled binary takes the mountpoint and mount flags directly, where a
  * deno invocation needs a script path and permission flags first.
  */

@@ -5,6 +5,7 @@ import {
   UserAgentOptions,
   WaitForOptions,
 } from "@astral/astral";
+import { closeAstralBrowser } from "./astral-adapter.ts";
 import { Page } from "./page.ts";
 
 const DEFAULT_ASTRAL_TIMEOUT = 60_000;
@@ -59,7 +60,7 @@ export class Browser {
     this.checkIsOk();
     const browser = this.browser;
     this.browser = null;
-    await browser!.close();
+    await closeAstralBrowser(browser!);
   }
 
   private checkIsOk() {

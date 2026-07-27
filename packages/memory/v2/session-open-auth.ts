@@ -28,8 +28,24 @@ import { MEMORY_PROTOCOL, type SessionOpenChallenge } from "../v2.ts";
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
-export const authorizationError = (message: string): Error =>
-  Object.assign(new Error(message), { name: "AuthorizationError" });
+/**
+ * Build an `AuthorizationError`. Pass `retriable: true` for the anti-replay
+ * races a fresh handshake heals (an expired, already-used, or mismatched
+ * challenge; a stale signed `exp`); omit it for a permanent denial (an audience
+ * mismatch, a malformed invocation, an ACL shortfall) that retrying cannot fix.
+ * The flag rides on the thrown error and is copied onto the wire `V2Error` so
+ * the client can classify the failure without parsing its message.
+ */
+export const authorizationError = (
+  message: string,
+  options?: { retriable?: boolean },
+): Error =>
+  Object.assign(
+    new Error(message),
+    options?.retriable === true
+      ? { name: "AuthorizationError", retriable: true }
+      : { name: "AuthorizationError" },
+  );
 
 const sameSessionDescriptor = (
   left: Record<string, unknown>,
@@ -47,6 +63,33 @@ export type SessionOpenMessage = {
   session: { sessionId?: string; seenSeq?: number; sessionToken?: string };
   invocation?: Record<string, unknown>;
   authorization?: unknown;
+};
+
+/**
+ * The `session.open` authorization AFTER validation. Deliberately not the
+ * declared type of `SessionOpenMessage.authorization`: that field is whatever
+ * the peer sent, so it stays `unknown` and only
+ * {@link wireAuthorizationOf} may produce this type.
+ *
+ * The signature crosses the wire as a `FabricBytes` -- the canonical binary
+ * fabric value -- not as the `Uint8Array`-derived `Signature<T>` used
+ * in-process.
+ */
+export type WireSessionOpenAuthorization = {
+  signature: FabricBytes;
+};
+
+/**
+ * Narrow a peer-supplied `authorization` to {@link WireSessionOpenAuthorization},
+ * or `undefined` if it is not one. This is the only sanctioned way to go from
+ * the untrusted field to the named shape.
+ */
+export const wireAuthorizationOf = (
+  authorization: unknown,
+): WireSessionOpenAuthorization | undefined => {
+  if (!isRecord(authorization)) return undefined;
+  const { signature } = authorization;
+  return signature instanceof FabricBytes ? { signature } : undefined;
 };
 
 export type VerifySessionOpenOptions = {
@@ -70,12 +113,8 @@ export const verifySessionOpenAuthorization = async (
   message: SessionOpenMessage,
   options: VerifySessionOpenOptions,
 ): Promise<string> => {
-  const rawSignature = isRecord(message.authorization)
-    ? message.authorization.signature
-    : undefined;
-  const signature = rawSignature instanceof FabricBytes
-    ? rawSignature.slice()
-    : null;
+  const wireAuthorization = wireAuthorizationOf(message.authorization);
+  const signature = wireAuthorization?.signature.slice() ?? null;
   if (!isRecord(message.invocation) || signature === null) {
     throw authorizationError("memory session.open requires authorization");
   }
@@ -104,11 +143,15 @@ export const verifySessionOpenAuthorization = async (
     throw authorizationError("memory session.open requires challenge");
   }
   if (invocation.challenge !== options.challenge.value) {
-    throw authorizationError("memory session.open challenge mismatch");
+    throw authorizationError("memory session.open challenge mismatch", {
+      retriable: true,
+    });
   }
   const challengeNow = options.nowSeconds ?? Math.floor(Date.now() / 1000);
   if (options.challenge.expiresAt <= challengeNow) {
-    throw authorizationError("memory session.open challenge expired");
+    throw authorizationError("memory session.open challenge expired", {
+      retriable: true,
+    });
   }
 
   if (typeof invocation.iat !== "number" || !Number.isFinite(invocation.iat)) {
@@ -120,7 +163,9 @@ export const verifySessionOpenAuthorization = async (
   const now = options.nowSeconds ?? Math.floor(Date.now() / 1000);
   const skew = options.clockSkewSeconds ?? DEFAULT_CLOCK_SKEW_SECONDS;
   if (invocation.exp < now - skew) {
-    throw authorizationError("memory session.open authorization expired");
+    throw authorizationError("memory session.open authorization expired", {
+      retriable: true,
+    });
   }
 
   const issuer = await fromDID(invocation.iss);

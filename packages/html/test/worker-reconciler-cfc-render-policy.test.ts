@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { Identity } from "@commonfabric/identity";
 import {
   isCell as isRuntimeCell,
@@ -2983,7 +2984,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       "H3b resolver admits User/Space-via-HasRole and blocks the unresolvable",
       async () => {
         const seedTx = runtime.edit();
-        const seedLabeled = (id: string, value: string, atom: unknown) => {
+        const seedLabeled = (id: string, value: string, atom: CfcAtom) => {
           const cell = runtime.getCell<string>(
             signer.did(),
             id,
@@ -3093,7 +3094,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           },
         };
         const seedTx = runtime.edit();
-        const seed = (id: string, value: string, atom: unknown) => {
+        const seed = (id: string, value: string, atom: CfcAtom) => {
           const cell = runtime.getCell<string>(
             signer.did(),
             id,

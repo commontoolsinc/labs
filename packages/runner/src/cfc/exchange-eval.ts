@@ -11,10 +11,12 @@ import {
 import { isRecord } from "@commonfabric/utils/types";
 import {
   CFC_ATOM_TYPE,
+  type CfcAtom,
   type CfcModulePolicyRefAtom,
 } from "@commonfabric/api/cfc";
 import {
   type CfcConfClause,
+  type CfcOrClause,
   clauseAlternatives,
   isOrClause,
   normalizeClause,
@@ -140,7 +142,7 @@ export type CfcGrantResolverQuery = {
  */
 export type CfcGrantResolver = (
   query: CfcGrantResolverQuery,
-) => readonly unknown[];
+) => readonly CfcAtom[];
 
 /** Cold-capable exact-digest lookup supplied by the runner-owned storage seam. */
 export type CfcModulePolicyResolver = (
@@ -153,9 +155,9 @@ export type ExchangeEvalContext = {
    * integrity (boundary-minted facts, consumed-read integrity). The guard
    * pool is `label.integrity ∪ ctx.integrity`.
    */
-  readonly integrity?: readonly unknown[];
+  readonly integrity?: readonly CfcAtom[];
   /** Boundary-context atoms minted for this evaluation site (B5). */
-  readonly boundary?: readonly unknown[];
+  readonly boundary?: readonly CfcAtom[];
   /** Trust closure for concept-valued integrity guards (B3). */
   readonly trustResolver?: TrustResolver;
   readonly actingPrincipal?: string;
@@ -206,12 +208,17 @@ export type ExchangeEvalResult = {
 const extendThroughPattern = (
   environments: readonly AtomPatternBindings[],
   pattern: unknown,
-  pool: readonly unknown[],
+  pool: readonly CfcAtom[],
 ): AtomPatternBindings[] => {
   const next: AtomPatternBindings[] = [];
+  const atoms = pool;
   for (const environment of environments) {
     for (
-      const extended of matchAtomPatternAgainstAtoms(pattern, pool, environment)
+      const extended of matchAtomPatternAgainstAtoms(
+        pattern,
+        atoms,
+        environment,
+      )
     ) {
       if (!next.some((existing) => deepEqual(existing, extended))) {
         next.push(extended);
@@ -572,7 +579,7 @@ const extendThroughGrantGuard = (
 const matchRule = (
   rule: ExchangeRule,
   confidentiality: readonly CfcConfClause[],
-  availableIntegrity: readonly unknown[],
+  availableIntegrity: readonly CfcAtom[],
   ctx: ExchangeEvalContext,
   homeClauses?: ReadonlySet<number>,
 ): RuleMatch[] => {
@@ -742,9 +749,9 @@ const applyRuleMatch = (
   if (added.length === 0) return { confidentiality };
 
   const next = [...confidentiality];
-  next[match.clauseIndex] = normalizeClause({
-    anyOf: [...alternatives, ...added],
-  });
+  next[match.clauseIndex] = normalizeClause(
+    { anyOf: [...alternatives, ...added] } as CfcOrClause,
+  );
   return {
     confidentiality: next,
     firing: { clauseIndex: match.clauseIndex, kind: "add", added },
@@ -769,7 +776,9 @@ export const evaluateExchangeRules = (
   fuel: number = DEFAULT_EXCHANGE_FUEL,
 ): ExchangeEvalResult => {
   const confidentialityInput = label.confidentiality ?? [];
-  const selected = collectSelectedModulePolicyRefs(confidentialityInput);
+  const selected = collectSelectedModulePolicyRefs(
+    confidentialityInput as readonly CfcConfClause[],
+  );
   if (selected.failures.length > 0) {
     return {
       label,
@@ -855,9 +864,10 @@ export const evaluateExchangeRules = (
     ...(ctx.integrity ?? []),
   ];
 
-  let confidentiality: readonly CfcConfClause[] = label.confidentiality.map(
-    normalizeClause,
-  );
+  let confidentiality: readonly CfcConfClause[] =
+    (label.confidentiality as readonly CfcConfClause[]).map(
+      normalizeClause,
+    );
   const firings: RuleFiring[] = [];
   let remainingFuel = fuel;
   let changed = true;

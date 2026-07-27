@@ -2,24 +2,24 @@ import { Command } from "@cliffy/command";
 import { isAbsolute, join } from "@std/path";
 import { render } from "../lib/render.ts";
 import { process } from "../lib/dev.ts";
-import { isRecord } from "@commonfabric/utils/types";
 import { cliText } from "../lib/cli-name.ts";
 
-const createDescription = (cmdName: string) =>
-  cliText(`Compile and execute patterns for debugging.
+const description = cliText(`Compile and execute patterns for debugging.
 
 The pattern is processed through ts-transformers, which converts reactive
 constructs (computed, handler, JSX) into runtime-compatible code.
 
-By default, produces no output on success (like deno check). Use --pattern-json
-to print the evaluated pattern export.
+By default, produces no output on success (like deno check). Use --json to
+compile without evaluating and print the compiled module bodies in a structured
+result, or --pattern-json to print the evaluated pattern export.
 
 COMMON USAGE:
-  cf ${cmdName} ./pattern.tsx              # Compile, transform, and execute (quiet)
-  cf ${cmdName} ./a.tsx ./b.tsx            # Process multiple patterns
-  cf ${cmdName} ./pattern.tsx --pattern-json   # Print JSON result on success
-  cf ${cmdName} ./pattern.tsx --no-run     # Type-check only (fast validation)
-  cf ${cmdName} ./pattern.tsx --show-transformed   # See transformed output
+  cf check ./pattern.tsx                   # Compile, transform, and execute (quiet)
+  cf check ./a.tsx ./b.tsx                 # Process multiple patterns
+  cf check ./pattern.tsx --json            # Print compiled output as JSON
+  cf check ./pattern.tsx --pattern-json    # Print the evaluated pattern export
+  cf check ./pattern.tsx --no-run          # Type-check only (fast validation)
+  cf check ./pattern.tsx --show-transformed   # See transformed output
 
 TIPS:
   • Use --no-run for quick type-checking during development
@@ -28,7 +28,7 @@ TIPS:
   • Transformation errors often stem from reactive constructs the compiler
     doesn't recognize; inspecting transformed output helps identify these`);
 
-async function devAction(
+async function checkAction(
   options: {
     check: boolean;
     run: boolean;
@@ -37,12 +37,19 @@ async function devAction(
     mainExport?: string;
     verboseErrors?: boolean;
     patternJson?: boolean;
+    json?: boolean;
     root?: string;
     space?: string;
   },
   ...files: string[]
 ) {
   let hasError = false;
+  const results: Array<{
+    file: string;
+    output: string;
+    transformed?: string;
+    patternJson?: string;
+  }> = [];
 
   const rootPath = options.root
     ? (isAbsolute(options.root) ? options.root : join(Deno.cwd(), options.root))
@@ -52,40 +59,19 @@ async function devAction(
     const mainPath = isAbsolute(file) ? file : join(Deno.cwd(), file);
 
     try {
-      const { main: exports } = await process({
+      const { output, transformed, patternJson } = await process({
         main: mainPath,
         rootPath,
         check: options.check,
-        run: options.run,
+        run: options.json || options.showTransformed ? false : options.run,
         output: files.length === 1 ? options.output : undefined,
         showTransformed: options.showTransformed,
         mainExport: options.mainExport,
         verboseErrors: options.verboseErrors,
         space: options.space,
+        patternJson: options.patternJson,
       });
-      // Only print JSON output when --pattern-json is used
-      // (and not when --show-transformed is used, as that already prints to stdout)
-      if (options.patternJson && !options.showTransformed && exports) {
-        // Select the export to render. If no --main-export specified, use "default".
-        // This mirrors the logic in Engine.run() which uses program.mainExport ?? "default"
-        const exportName = options.mainExport ?? "default";
-        const mainExport = exportName in exports
-          ? exports[exportName]
-          : exports;
-        try {
-          // Stringify before rendering, as the exported
-          // pattern is a function with extra properties via Object.assign
-          render(JSON.stringify(mainExport, null, 2));
-        } catch (_) {
-          if (
-            isRecord(mainExport) && typeof mainExport.toString === "function"
-          ) {
-            render(mainExport.toString());
-          } else {
-            throw new Error("Main export not serializable.");
-          }
-        }
-      }
+      results.push({ file, output, transformed, patternJson });
     } catch (error) {
       hasError = true;
       // Re-throw for single file, continue for multiple files
@@ -99,31 +85,62 @@ async function devAction(
   if (hasError) {
     Deno.exit(1);
   }
+
+  if (options.showTransformed) {
+    for (const result of results) {
+      if (result.transformed !== undefined) {
+        render(result.transformed);
+      }
+    }
+    return;
+  }
+
+  if (options.patternJson) {
+    for (const result of results) {
+      if (result.patternJson !== undefined) {
+        render(result.patternJson);
+      }
+    }
+    return;
+  }
+
+  if (options.json) {
+    render(
+      {
+        files: results.map(({ file, output }) => ({ path: file, output })),
+      },
+      { json: true },
+    );
+  }
 }
 
 // deno-lint-ignore no-explicit-any
-function createDevCommand(cmdName: string): Command<any> {
+function createCheckCommand(): Command<any> {
   return new Command()
-    .name(cmdName)
-    .description(createDescription(cmdName))
+    .name("check")
+    .description(description)
     .example(
-      cliText(`cf ${cmdName} ./pattern.tsx`),
+      cliText(`cf check ./pattern.tsx`),
       "Compile and evaluate a pattern (quiet on success).",
     )
     .example(
-      cliText(`cf ${cmdName} ./a.tsx ./b.tsx ./c.tsx`),
+      cliText(`cf check ./a.tsx ./b.tsx ./c.tsx`),
       "Compile and evaluate multiple patterns.",
     )
     .example(
-      cliText(`cf ${cmdName} ./pattern.tsx --pattern-json`),
+      cliText(`cf check ./pattern.tsx --json`),
+      "Compile a pattern, printing its compiled module bodies as JSON.",
+    )
+    .example(
+      cliText(`cf check ./pattern.tsx --pattern-json`),
       "Compile and evaluate a pattern, printing export default as JSON.",
     )
     .example(
-      cliText(`cf ${cmdName} ./pattern.tsx --no-run --output out.js`),
+      cliText(`cf check ./pattern.tsx --no-run --output out.js`),
       "Compile a pattern, storing the compiled per-module JavaScript to out.js without evaluating.",
     )
     .example(
-      cliText(`cf ${cmdName} ./pattern.tsx --no-check`),
+      cliText(`cf check ./pattern.tsx --no-check`),
       "Compile and evaluate pattern without typechecking.",
     )
     .option("--no-run", "Do not execute input, only type check.")
@@ -135,6 +152,7 @@ function createDevCommand(cmdName: string): Command<any> {
     .option(
       "--show-transformed",
       "Show only the transformed TypeScript source code without executing the pattern.",
+      { conflicts: ["json", "pattern-json"] },
     )
     .option(
       "--main-export <export:string>",
@@ -147,6 +165,12 @@ function createDevCommand(cmdName: string): Command<any> {
     .option(
       "--pattern-json",
       "Print the evaluated pattern export as JSON.",
+      { conflicts: ["json", "show-transformed"] },
+    )
+    .option(
+      "--json",
+      "Compile without evaluating and print the compiled module bodies in a JSON result.",
+      { conflicts: ["show-transformed", "pattern-json"] },
     )
     .option(
       "--root <path:string>",
@@ -157,8 +181,7 @@ function createDevCommand(cmdName: string): Command<any> {
       "Space DID for resolving fabric imports.",
     )
     .arguments("<files...:string>")
-    .action(devAction);
+    .action(checkAction);
 }
 
-export const check = createDevCommand("check");
-export const dev = createDevCommand("dev").hidden();
+export const check = createCheckCommand();

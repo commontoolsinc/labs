@@ -66,21 +66,6 @@ const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 // `${configPath}\t${alias}` (configPath repo-relative, forward slashes); the
 // value is the reason, surfaced when the allowlist is reported.
 export const ALLOWLIST: ReadonlyMap<string, string> = new Map([
-  // packages/vendor-astral is a verbatim copy of the upstream @astral/astral
-  // package, kept faithful to upstream so it can be re-synced. Its deno.jsonc
-  // mirrors upstream's, including the std packages upstream's own test and
-  // tooling files use. The vendored copy does not carry those files, so no
-  // local source imports these two, but they are declared at the workspace root
-  // and used across the repository, so removing them here would only drift the
-  // config from upstream without changing what installs.
-  [
-    "packages/vendor-astral/deno.jsonc\t@std/assert",
-    "mirrors upstream @astral/astral; also a root dependency used repo-wide",
-  ],
-  [
-    "packages/vendor-astral/deno.jsonc\t@std/testing",
-    "mirrors upstream @astral/astral; also a root dependency used repo-wide",
-  ],
   // Declared to pin one version of a package that only reaches the tree
   // transitively (through @arizeai/openinference-vercel). tasks/
   // check-single-copy-deps.ts requires it to resolve to a single copy, because

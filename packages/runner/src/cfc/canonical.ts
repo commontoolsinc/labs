@@ -1,4 +1,5 @@
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import type { CfcConfClause } from "./clause.ts";
 import { encodePointer } from "../../../memory/v2/path.ts";
 import type {
   AttemptedWrite,
@@ -248,7 +249,9 @@ export const canonicalizeCfcLabel = (label: IFCLabel): IFCLabel => {
   }
   return {
     ...label,
-    confidentiality: confidentiality.map(normalizeClause),
+    confidentiality: (confidentiality as readonly CfcConfClause[]).map(
+      normalizeClause,
+    ),
   };
 };
 

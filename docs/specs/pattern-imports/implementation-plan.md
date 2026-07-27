@@ -946,7 +946,7 @@ File: `packages/runner/src/pattern-manager.ts`.
 
 Files: `packages/cli/lib/dev.ts`, `packages/cli/commands/dev.ts`.
 
-- `cf check`/`cf dev` compile via `engine.compileToRecordGraph` (dev.ts:52).
+- `cf check` compiles via `engine.compileToRecordGraph` (dev.ts:52).
   Thread `fabricImports: { space }` only when the dev session has a space
   (inspect how `dev.ts` builds the runtime and whether a space/identity is
   configured; if none, leave the option absent — the M1.5 friendly error then
@@ -1143,9 +1143,8 @@ file layout, e.g. how `dev.ts` registers).
   every mutable fabric ref (or just `--import`), rewrite pins in place,
   print a per-file diff summary. `--check` flag: exit non-zero if any pin
   would change (CI freshness gate).
-- **`cf dev`/`cf check`**: pass `allowUnpinned: true` + print
-  `resolvedPins` ("resolved cf:… → <hash> (not pinned — deploy or run cf
-  deps update)").
+- **`cf check`**: pass `allowUnpinned: true` + print
+  `resolvedPins` ("resolved cf:… → <hash> (not pinned — run cf deps update)").
 
 Tests: CLI-level tests follow whatever harness existing cli tests use (look
 in `packages/cli` for test conventions; if commands are thin over lib

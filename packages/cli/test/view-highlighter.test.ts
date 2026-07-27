@@ -9,7 +9,10 @@
  * spills onto later lines.
  */
 import { assert, assertEquals } from "@std/assert";
-import { createHighlighter, highlightDocument } from "../lib/view/parse.ts";
+import {
+  createHighlighter,
+  highlightDocument,
+} from "../lib/view/languages/typescript/parse.ts";
 import type { Line } from "../lib/view/model.ts";
 import { SAMPLE, TS_PARSER_REGRESSION } from "./view-helpers.ts";
 

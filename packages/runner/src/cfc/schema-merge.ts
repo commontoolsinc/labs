@@ -1,4 +1,6 @@
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import type { CfcAtom } from "@commonfabric/api/cfc";
+import type { CfcConfClause } from "./clause.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
@@ -50,12 +52,12 @@ const arraySubsetOf = (
 
 const mergeArraySet = (
   ...sources: Array<readonly unknown[]>
-): unknown[] => {
-  const result: unknown[] = [];
+): CfcAtom[] => {
+  const result: CfcAtom[] = [];
   for (const source of sources) {
     for (const value of source) {
       if (!result.some((candidate) => deepEqual(candidate, value))) {
-        result.push(value);
+        result.push(value as CfcAtom);
       }
     }
   }
@@ -201,10 +203,10 @@ const mergeSetLikeIfcArray = (
       // identity on flat atoms and integrity carries no OR-clauses, so the
       // other keys are untouched.
       const existingArray = key === "confidentiality"
-        ? (existing as readonly unknown[]).map(normalizeClause)
+        ? (existing as readonly CfcConfClause[]).map(normalizeClause)
         : existing as readonly unknown[];
       const candidateArray = key === "confidentiality"
-        ? (candidate as readonly unknown[]).map(normalizeClause)
+        ? (candidate as readonly CfcConfClause[]).map(normalizeClause)
         : candidate as readonly unknown[];
       if (!arraySubsetOf(existingArray, candidateArray)) {
         throw new Error(`${key} cannot be weakened at ${path || "/"}`);

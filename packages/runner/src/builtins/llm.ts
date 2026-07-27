@@ -1,4 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import type { CfcConfClause } from "../cfc/clause.ts";
 import {
   DEFAULT_GENERATE_OBJECT_MODELS,
   DEFAULT_MODEL_NAME,
@@ -339,8 +340,8 @@ async function executeWithToolsLoop(params: {
   toolCatalog?:
     | ReturnType<typeof llmToolExecutionHelpers.buildToolCatalog>
     | undefined;
-  initialObservedConfidentiality?: readonly unknown[];
-  observationMaxConfidentiality?: readonly unknown[];
+  initialObservedConfidentiality?: readonly CfcConfClause[];
+  observationMaxConfidentiality?: readonly CfcConfClause[];
   updatePartial: (text: string) => void;
   runtime: Runtime;
   space: any;
@@ -363,7 +364,7 @@ async function executeWithToolsLoop(params: {
 
   const executeRecursive = async (
     currentMessages: readonly BuiltInLLMMessage[],
-    observedConfidentiality: readonly unknown[],
+    observedConfidentiality: readonly CfcConfClause[],
   ): Promise<void> => {
     if (thisRun !== getCurrentRun()) return;
 
@@ -496,7 +497,7 @@ function buildContextDocumentation(
   space: any,
   tx: IExtendedStorageTransaction,
   sink: string,
-): { docs: string; observedConfidentiality: readonly unknown[] } {
+): { docs: string; observedConfidentiality: readonly CfcConfClause[] } {
   const context = inputs.key("context").withTx(tx).get();
   if (!context) {
     return {
@@ -537,7 +538,7 @@ function buildContextDocumentation(
         runtime,
         sink,
         inputs.key("observationMaxConfidentiality").withTx(tx).get() as
-          | readonly unknown[]
+          | readonly CfcConfClause[]
           | undefined,
       ),
     );
@@ -782,7 +783,7 @@ export function llm(
                     runtime,
                     "llm",
                     inputs.key("observationMaxConfidentiality").get() as
-                      | readonly unknown[]
+                      | readonly CfcConfClause[]
                       | undefined,
                   ),
                 updatePartial,
@@ -1125,7 +1126,7 @@ export function generateText(
                     runtime,
                     "generateText",
                     inputs.key("observationMaxConfidentiality").get() as
-                      | readonly unknown[]
+                      | readonly CfcConfClause[]
                       | undefined,
                   ),
                 updatePartial,
@@ -1272,7 +1273,7 @@ export function generateObject<T extends Record<string, unknown>>(
         runtime,
         "generateObject",
         inputs.key("observationMaxConfidentiality").withTx(tx).get() as
-          | readonly unknown[]
+          | readonly CfcConfClause[]
           | undefined,
       );
     const outputScope = tx.getNarrowestReadScope();
@@ -1359,7 +1360,7 @@ export function generateObject<T extends Record<string, unknown>>(
       ? toDeepFrozenSchema(schema)
       : undefined;
     const resultSchemaForObserved = (
-      observedConfidentiality: readonly unknown[],
+      observedConfidentiality: readonly CfcConfClause[],
     ) =>
       schemaSanitizePromptInjection
         ? schemaWithInjectionSafeAnnotations(
@@ -1553,13 +1554,13 @@ export function generateObject<T extends Record<string, unknown>>(
               // Execute with tools - capture presentResult when called
               let finalResult: T | undefined;
               let finalMessages: readonly BuiltInLLMMessage[] = requestMessages;
-              let finalObservedConfidentiality: readonly unknown[] =
+              let finalObservedConfidentiality: readonly CfcConfClause[] =
                 liveInitialObservedConfidentiality;
 
               // Custom execution loop for generateObject with presentResult extraction
               const executeRecursive = async (
                 currentMessages: readonly BuiltInLLMMessage[],
-                observedConfidentiality: readonly unknown[],
+                observedConfidentiality: readonly CfcConfClause[],
               ): Promise<void> => {
                 if (isRunCancelled()) return;
 
@@ -1764,7 +1765,7 @@ export function generateObject<T extends Record<string, unknown>>(
         maxTokens: maxTokens ?? 8192,
         schema: llmToolExecutionHelpers.prepareSchemaForLLM(
           toDeepFrozenSchema(schema),
-        ) as Record<string, unknown>,
+        ),
         model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,
         metadata: {
           ...readyMetadata,

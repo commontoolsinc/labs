@@ -11,6 +11,7 @@
  * recomputed from the edited text.
  */
 import type { Document, Line, Span } from "./model.ts";
+import { cpLen } from "./ansi.ts";
 import {
   buildDiffDocument,
   type DiffEdit,
@@ -30,7 +31,8 @@ import {
   messageAt,
   sameCommit,
 } from "./commitmsg.ts";
-import { highlightDocument, type Highlighter, parseDocument } from "./parse.ts";
+import type { Highlighter } from "./languages/language.ts";
+import { languageForFile } from "./languages/language.ts";
 import type {
   EditableSource,
   EditPolicy,
@@ -211,7 +213,8 @@ export function diffSource(
     // workspace-file syntax highlighting) for the rest. Cost tracks the edit,
     // not the whole diff, and the unchanged headers never flicker colour. The
     // full parse on pause restores workspace-verified spans across the edit.
-    createHighlighter: (text, seed) => createDiffHighlighter(text, seed),
+    createHighlighter: (text, seed) =>
+      createDiffHighlighter(text, seed, edit.oldFileLines),
     dirtyLabels: (original, current) =>
       [
         ...collectFileOutputs(
@@ -969,21 +972,26 @@ function applyExpansion(
  * An incremental highlighter for a diff. It recolours only the lines an edit
  * changes (found by a common prefix/suffix of the line arrays) and keeps `seed`
  * — the colours {@link buildDiffDocument} produced for the unedited text — for
- * every line the edit leaves alone. Edited lines are always body lines (headers
- * are not editable), so a per-line marker-aware render is right for them; the
- * headers stay in the unchanged prefix/suffix and never change colour. When no
- * seed is given (it always is, in the session) it renders every line itself.
+ * every line the edit leaves alone. Edited removed lines use the complete old
+ * file's spans. Other edited body lines use a marker-aware single-line parse.
+ * The headers stay in the unchanged prefix or suffix. When no seed is given,
+ * the highlighter renders every line itself.
  */
 export function createDiffHighlighter(
   initialText: string,
   seed?: readonly Line[],
+  oldFileLines?: readonly (readonly Line[] | null)[],
 ): Highlighter {
   let text = initialText;
   const initialRaw = initialText.split("\n");
   const initialModel = seed ? null : parseDiff(initialText);
   let lines: Line[] = (seed ??
     initialRaw.map((line, index) =>
-      diffLineRender(line, diffFileNameAt(initialRaw, index, initialModel))
+      diffLineRender(
+        line,
+        diffFileNameAt(initialRaw, index, initialModel),
+        oldLineSpansAt(initialModel, index, oldFileLines),
+      )
     )).slice();
   return {
     get lines() {
@@ -1005,7 +1013,11 @@ export function createDiffHighlighter(
       }
       const model = parseDiff(next);
       const recoloured = newRaw.slice(p, newRaw.length - s).map((l, i) =>
-        diffLineRender(l, diffFileNameAt(newRaw, p + i, model))
+        diffLineRender(
+          l,
+          diffFileNameAt(newRaw, p + i, model),
+          oldLineSpansAt(model, p + i, oldFileLines),
+        )
       );
       lines = lines.slice(0, p).concat(
         recoloured,
@@ -1068,7 +1080,11 @@ function editableStart(
  * diff document builder paints a line, so a live edit re-colours correctly
  * without rebuilding the whole diff.
  */
-function diffLineRender(lineText: string, fileName?: string): Line {
+function diffLineRender(
+  lineText: string,
+  fileName?: string,
+  oldSpans?: readonly Span[],
+): Line {
   if (lineText.length === 0) return { text: "", spans: [] };
   // A hunk header carries its own colour and its counts change when an edit
   // grows or shrinks the hunk, so colour it the way the full parse does rather
@@ -1087,12 +1103,41 @@ function diffLineRender(lineText: string, fileName?: string): Line {
     : "whitespace";
   const spans: Span[] = [{ col: 0, text: marker, cls }];
   const code = lineText.slice(1);
-  const content = highlightDocument(code, fileName)[0]?.spans;
+  const oldText = oldSpans?.map((span) => span.text).join("");
+  const useOld = oldText !== undefined &&
+    (oldText === code || `${oldText}\r` === code);
+  const content = useOld
+    ? oldSpans
+    : languageForFile(fileName).highlightLines(code, fileName)[0]?.spans;
   for (const s of content ?? []) {
     spans.push({ ...s, col: s.col + 1 });
   }
+  if (useOld && oldText !== code) {
+    spans.push({
+      col: cpLen(oldText) + 1,
+      text: code.slice(oldText.length),
+      cls: "whitespace",
+    });
+  }
   const bg = marker === "+" ? "add" : marker === "-" ? "del" : undefined;
   return bg ? { text: lineText, spans, bg } : { text: lineText, spans };
+}
+
+/** Complete-old-file spans for a removed diff line. */
+function oldLineSpansAt(
+  model: DiffModel | null,
+  line: number,
+  oldFileLines?: readonly (readonly Line[] | null)[],
+): readonly Span[] | undefined {
+  const entry = model?.lines[line];
+  if (!model || entry?.kind !== "del" || entry.oldLine === undefined) {
+    return undefined;
+  }
+  const fileIndex = model.files.findIndex((file) =>
+    line >= file.headerLine && line <= file.endLine
+  );
+  if (fileIndex < 0) return undefined;
+  return oldFileLines?.[fileIndex]?.[entry.oldLine]?.spans;
 }
 
 /** The old- or new-side file containing `lineIdx`, found from the nearest diff
@@ -1139,6 +1184,7 @@ export const _internal = {
   pendingAmend,
   dropHeaderBetween,
   joinAdjacent,
+  oldLineSpansAt,
 };
 
 function reparse(
@@ -1152,7 +1198,7 @@ function reparse(
   // still updates.
   return model
     ? buildDiffDocument(text, model, ws, cache).doc
-    : parseDocument(text);
+    : languageForFile(undefined).parseDocument(text);
 }
 
 interface FileSplice {

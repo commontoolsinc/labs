@@ -1,4 +1,5 @@
 import type { ImmutableJSONValue, JSONSchema } from "@commonfabric/api";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
@@ -14,15 +15,16 @@ import {
 import { atomEntails, conceptGuard, matchAtomPattern } from "./atom-pattern.ts";
 import type { TrustResolver } from "./trust.ts";
 import {
+  type CfcConfClause,
   clauseAlternatives,
   clausesEqual,
   clauseSubsumes,
   normalizeClause,
 } from "./clause.ts";
 
-export type CfcObservedConfidentiality = readonly unknown[];
+export type CfcObservedConfidentiality = readonly CfcConfClause[];
 export type CfcObservationMaxConfidentiality =
-  | readonly unknown[]
+  | readonly CfcConfClause[]
   | undefined;
 
 // Marker confidentiality atom injected when a cell's label could not be read
@@ -46,7 +48,7 @@ export const CFC_LABEL_READ_FAILED_ATOM = "cfc:label-read-failed";
 // equality now commitment-aware, a marker-naming ceiling would otherwise
 // subsume that spelling. Recognize it here so BOTH forms stay ungrantable.
 const clauseBearsReadFailedMarker = (clause: unknown): boolean =>
-  clauseAlternatives(clause).some((alternative) =>
+  clauseAlternatives(clause as CfcConfClause).some((alternative) =>
     deepEqual(alternative, CFC_LABEL_READ_FAILED_ATOM) ||
     commitmentAwareEquals(alternative, CFC_LABEL_READ_FAILED_ATOM)
   );
@@ -62,8 +64,8 @@ export interface CfcObservationResult<T = unknown> {
 
 export const uniqueCfcAtoms = (
   atoms: Iterable<unknown>,
-): ImmutableJSONValue[] => {
-  const unique: ImmutableJSONValue[] = [];
+): CfcAtom[] => {
+  const unique: CfcAtom[] = [];
   for (const atom of atoms) {
     if (!unique.some((existing) => deepEqual(existing, atom))) {
       unique.push(atom as ImmutableJSONValue);
@@ -75,7 +77,7 @@ export const uniqueCfcAtoms = (
 export const joinCfcObservedConfidentiality = (
   parts: Iterable<readonly unknown[] | undefined>,
 ): CfcObservedConfidentiality => {
-  const joined: unknown[] = [];
+  const joined: CfcConfClause[] = [];
   for (const part of parts) {
     if (Array.isArray(part)) {
       joined.push(...part);
@@ -140,7 +142,7 @@ export const cfcConfidentialityForObservationNode = (
 };
 
 export const cfcObservationFitsCeiling = (
-  confidentiality: readonly unknown[],
+  confidentiality: readonly CfcConfClause[],
   observationMaxConfidentiality: CfcObservationMaxConfidentiality,
 ): boolean => {
   // undefined means no ceiling. A declared but empty ceiling means "public
@@ -204,7 +206,7 @@ export type CfcFloorTrustContext = {
  */
 const integrityAtomSatisfies = (
   required: unknown,
-  actual: unknown,
+  actual: CfcAtom,
   trust?: CfcFloorTrustContext,
 ): boolean => {
   const concept = conceptGuard(required);
@@ -224,7 +226,7 @@ const integrityAtomSatisfies = (
       trust?.trustResolver !== undefined &&
       trust.trustResolver.conceptSatisfied(
         concept.uri,
-        [actual],
+        [actual as CfcAtom],
         trust.actingPrincipal,
       );
   }
@@ -244,8 +246,8 @@ const integrityAtomSatisfies = (
  * (concrete/pattern) floors.
  */
 export const cfcIntegritySatisfiesFloor = (
-  integrity: readonly unknown[],
-  requiredIntegrity: readonly unknown[],
+  integrity: readonly CfcAtom[],
+  requiredIntegrity: readonly CfcAtom[],
   trust?: CfcFloorTrustContext,
 ): boolean =>
   requiredIntegrity.every((required) =>
@@ -272,7 +274,7 @@ export const cfcIntegritySatisfiesFloor = (
  */
 export const cfcIntegrityWitnessKey = (
   required: unknown,
-  actual: unknown,
+  actual: CfcAtom,
   trust?: CfcFloorTrustContext,
 ): string | null => {
   if (!integrityAtomSatisfies(required, actual, trust)) return null;
@@ -303,8 +305,8 @@ export const cfcIntegrityWitnessKey = (
  * incoherent, exactly as two different concrete screening atoms would be.
  */
 export const cfcIntegritySatisfiesFloorCoherently = (
-  consumedIntegrity: readonly (readonly unknown[])[],
-  requiredIntegrity: readonly unknown[],
+  consumedIntegrity: readonly (readonly CfcAtom[])[],
+  requiredIntegrity: readonly CfcAtom[],
   trust?: CfcFloorTrustContext,
 ): boolean =>
   requiredIntegrity.every((required) => {
@@ -352,7 +354,7 @@ export const cfcIntegritySatisfiesFloorCoherently = (
  * by construction.
  */
 export const atomsOutsideCeiling = (
-  confidentiality: readonly unknown[],
+  confidentiality: readonly CfcConfClause[],
   ceiling: CfcObservationMaxConfidentiality,
 ): ImmutableJSONValue[] => {
   if (ceiling === undefined) {
@@ -360,7 +362,9 @@ export const atomsOutsideCeiling = (
   }
   return confidentiality.filter((clause) =>
     clauseBearsReadFailedMarker(clause) ||
-    !ceiling.some((allowed) => clauseSubsumes(allowed, clause))
+    !ceiling.some((allowed) =>
+      clauseSubsumes(allowed as CfcConfClause, clause as CfcConfClause)
+    )
   ) as ImmutableJSONValue[];
 };
 
@@ -422,17 +426,19 @@ export const meetCfcObservationCeilings = (
 ): CfcObservationMaxConfidentiality => {
   if (a === undefined) return b;
   if (b === undefined) return a;
-  const met: unknown[] = [];
+  const met: CfcConfClause[] = [];
   for (const clauseA of a) {
-    const alternativesA = clauseAlternatives(clauseA);
+    const alternativesA = clauseAlternatives(clauseA as CfcConfClause);
     if (alternativesA.length === 0) continue;
     for (const clauseB of b) {
-      const alternativesB = clauseAlternatives(clauseB);
+      const alternativesB = clauseAlternatives(clauseB as CfcConfClause);
       if (alternativesB.length === 0) continue;
       const union = normalizeClause({
         anyOf: [...alternativesA, ...alternativesB],
       });
-      if (!met.some((existing) => clausesEqual(existing, union))) {
+      if (
+        !met.some((existing) => clausesEqual(existing as CfcConfClause, union))
+      ) {
         met.push(union);
       }
     }

@@ -3,11 +3,11 @@
  * semantic layer needs to answer type/definition queries against the CURRENT
  * workspace files the diff names.
  *
- * Rendering keeps the diff text verbatim (colour only). Code lines get full
- * syntax highlighting: a context/addition line whose content matches the
- * workspace file reuses that file's parsed spans (shifted past the marker
- * column); anything else — removals, drifted lines, missing files — falls back
- * to a per-hunk fragment parse, so even the old side reads as code.
+ * Rendering keeps the diff text verbatim (colour only). Context and addition
+ * lines whose content matches the workspace file reuse that file's parsed
+ * spans. Removed lines reuse spans from the complete old file, loaded from the
+ * Git object named by the diff or reconstructed from the complete new file.
+ * Lines without either complete file fall back to a per-hunk fragment parse.
  *
  * The structure tree is: file (a `section` node) → hunk → the workspace file's
  * own structure nodes, clamped and remapped into diff coordinates. So WASD and
@@ -22,11 +22,13 @@ import type {
   StructureNode,
 } from "./model.ts";
 import { flattenStructure } from "./model.ts";
-import type { DiffHunk, DiffModel } from "./diff.ts";
-import { computeLineStarts, lineIndexOf, parseDocument } from "./parse.ts";
-import { isMarkdownPath } from "./markdown.ts";
+import type { DiffFile, DiffHunk, DiffModel } from "./diff.ts";
+import { computeLineStarts, lineIndexOf } from "./lines.ts";
+import type { Language } from "./languages/language.ts";
+import { languageForFile } from "./languages/language.ts";
 import { cpLen } from "./ansi.ts";
 import { dirname, isAbsolute, join, relative } from "@std/path";
+import { spawnSync } from "@node/child_process";
 
 /** How the diff document reaches the workspace. Injectable for tests. */
 export interface DiffWorkspace {
@@ -34,6 +36,12 @@ export interface DiffWorkspace {
   resolve(path: string): string | null;
   /** Read an absolute path's current content, or null. */
   read(absPath: string): string | null;
+  /** Read a Git blob by object name, or null when it is unavailable. */
+  readBlob?(object: string): string | null;
+  /** Read available Git blobs in one local Git operation. */
+  readBlobs?(
+    objects: readonly string[],
+  ): ReadonlyMap<string, string>;
 }
 
 /**
@@ -59,6 +67,25 @@ export function realWorkspace(cwd: string): DiffWorkspace {
     const real = safeRealPath(abs);
     return real !== null && realBases.some((base) => within(real, base));
   };
+  const blobCache = new Map<string, string | null>();
+  const readBlobs = (
+    objects: readonly string[],
+  ): ReadonlyMap<string, string> => {
+    const valid = [...new Set(objects.filter(validGitObject))];
+    const missing = valid.filter((object) => !blobCache.has(object));
+    const loaded = repoRoot === null
+      ? new Map<string, string>()
+      : readGitBlobs(repoRoot, missing);
+    for (const object of missing) {
+      blobCache.set(object, loaded.get(object) ?? null);
+    }
+    const found = new Map<string, string>();
+    for (const object of valid) {
+      const text = blobCache.get(object);
+      if (text !== null && text !== undefined) found.set(object, text);
+    }
+    return found;
+  };
   return {
     resolve(path) {
       if (isAbsolute(path)) return null; // diff paths are repo-relative
@@ -79,15 +106,89 @@ export function realWorkspace(cwd: string): DiffWorkspace {
         return null;
       }
     },
+    readBlob(object) {
+      return readBlobs([object]).get(object) ?? null;
+    },
+    readBlobs,
   };
 }
 
-function safeRealPath(path: string): string | null {
+function validGitObject(object: string): boolean {
+  return /^[0-9a-f]{4,64}$/.test(object) && !/^0+$/.test(object);
+}
+
+function tryOrNull<T>(operation: () => T): T | null {
   try {
-    return Deno.realPathSync(path);
+    return operation();
   } catch {
     return null;
   }
+}
+
+interface GitBatchOptions {
+  cwd: string;
+  env: Record<string, string>;
+  input: string;
+  maxBuffer: number;
+}
+
+type GitBatchRunner = (
+  command: string,
+  args: string[],
+  options: GitBatchOptions,
+) => { status: number | null; stdout: Uint8Array | null };
+
+/** Read several locally available Git objects in one batch. */
+function readGitBlobs(
+  repoRoot: string,
+  objects: readonly string[],
+  run: GitBatchRunner = (command, args, options) =>
+    spawnSync(command, args, options),
+): Map<string, string> {
+  const blobs = new Map<string, string>();
+  if (objects.length === 0) return blobs;
+  return tryOrNull(() => {
+    const result = run("git", ["cat-file", "--batch"], {
+      cwd: repoRoot,
+      env: { ...Deno.env.toObject(), GIT_NO_LAZY_FETCH: "1" },
+      input: `${objects.join("\n")}\n`,
+      maxBuffer: Number.MAX_SAFE_INTEGER,
+    });
+    if (result.status !== 0 || !result.stdout) return blobs;
+    return parseGitBatchOutput(objects, new Uint8Array(result.stdout));
+  }) ?? blobs;
+}
+
+function parseGitBatchOutput(
+  objects: readonly string[],
+  output: Uint8Array,
+): Map<string, string> {
+  const blobs = new Map<string, string>();
+  const decoder = new TextDecoder();
+  let offset = 0;
+  for (const object of objects) {
+    const headerEnd = output.indexOf(10, offset);
+    if (headerEnd < 0) break;
+    const header = decoder.decode(output.subarray(offset, headerEnd));
+    offset = headerEnd + 1;
+    const match = header.match(/^[0-9a-f]{4,64} ([^ ]+) ([0-9]+)$/);
+    if (!match) continue;
+    const size = Number(match[2]);
+    if (
+      !Number.isSafeInteger(size) ||
+      offset + size >= output.length || output[offset + size] !== 10
+    ) {
+      break;
+    }
+    const content = output.subarray(offset, offset + size);
+    offset += size + 1;
+    if (match[1] === "blob") blobs.set(object, decoder.decode(content));
+  }
+  return blobs;
+}
+
+function safeRealPath(path: string): string | null {
+  return tryOrNull(() => Deno.realPathSync(path));
 }
 
 /** Nearest ancestor of `cwd` containing `.git` (a directory or a file). */
@@ -127,6 +228,9 @@ export interface DiffEdit {
   /** The captured new-side content of each touched file, for splicing edited
    * lines back in on save. */
   readonly fileText: ReadonlyMap<string, string>;
+  /** Complete highlighted old files, aligned with the parsed diff's files.
+   * The live highlighter uses these spans when an edit creates a removed line. */
+  readonly oldFileLines: readonly (readonly Line[] | null)[];
   /** Every hunk, in document order, with the file and new-side range it covers
    * and whether its new side matched the workspace (so the captured content is
    * known to be the hunk's new side). Save matches the edited diff's hunks to
@@ -167,12 +271,11 @@ interface FileMapping {
 }
 
 /**
- * Per-session cache of each workspace file's content and parse, keyed by
- * absolute path. The diff is edited, not the workspace, so these are stable: a
- * cache lets the deferred re-parse on every keystroke pause reuse the (costly)
- * TypeScript parses instead of re-reading and re-parsing every named file. It is
- * also consistent with the save map, which captures the same construction-time
- * content.
+ * Per-session cache of complete new and old files. New files use their absolute
+ * paths as keys. Old Git files use their path and object name. Reconstructed
+ * old files use their stable file-section position and paths. File headers are
+ * not editable, so repeated versions remain distinct while a deferred re-parse
+ * can reuse both highlighted files.
  */
 export type WorkspaceCache = Map<string, LoadedFile>;
 
@@ -180,20 +283,283 @@ interface LoadedFile {
   fileText: string | null;
   fileDoc: Document | null;
   fileLineStarts: number[];
+  /** Syntax-only lines used by complete old files. */
+  highlightedLines?: readonly Line[] | null;
 }
 
 function loadFile(
   absPath: string,
+  language: Language,
   ws: DiffWorkspace,
   cache?: WorkspaceCache,
 ): LoadedFile {
   const hit = cache?.get(absPath);
   if (hit) return hit;
   const fileText = ws.read(absPath);
-  const fileDoc = fileText !== null ? parseDocument(fileText, absPath) : null;
+  const fileDoc = fileText !== null
+    ? language.parseDocument(fileText, absPath)
+    : null;
   const fileLineStarts = fileText !== null ? computeLineStarts(fileText) : [];
   const entry: LoadedFile = { fileText, fileDoc, fileLineStarts };
   cache?.set(absPath, entry);
+  return entry;
+}
+
+function isNoNewlineMarker(line: string | undefined): boolean {
+  return line?.replace(/\r$/, "") === "\\ No newline at end of file";
+}
+
+/** A hunk body line without its diff marker. */
+function diffBodyText(
+  rawLines: string[],
+  hunk: DiffHunk,
+  line: number,
+  stripTransport = false,
+): string {
+  let text = rawLines[line].slice(1);
+  if (
+    rawLines[hunk.headerLine].endsWith("\r") &&
+    (stripTransport || isNoNewlineMarker(rawLines[line + 1])) &&
+    text.endsWith("\r")
+  ) {
+    text = text.slice(0, -1);
+  }
+  return text;
+}
+
+function diffBodyMatches(
+  sourceText: string,
+  rawLines: string[],
+  hunk: DiffHunk,
+  line: number,
+): boolean {
+  return sourceText === diffBodyText(rawLines, hunk, line) ||
+    sourceText === diffBodyText(rawLines, hunk, line, true);
+}
+
+function contentLines(text: string): string[] {
+  if (text.length === 0) return [];
+  const lines = text.split("\n");
+  if (text.endsWith("\n")) lines.pop();
+  return lines;
+}
+
+function belongsToSide(
+  kind: DiffModel["lines"][number]["kind"] | undefined,
+  side: "old" | "new",
+): boolean {
+  return kind === "ctx" || kind === (side === "old" ? "del" : "add");
+}
+
+function noTrailingNewline(
+  hunk: DiffHunk,
+  side: "old" | "new",
+  rawLines: string[],
+  modelLines: DiffModel["lines"],
+): boolean {
+  for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
+    if (!isNoNewlineMarker(rawLines[i])) continue;
+    const previous = modelLines[i - 1]?.kind;
+    if (belongsToSide(previous, side)) return true;
+  }
+  return false;
+}
+
+/** Whether every visible line on one side agrees with a complete file. */
+function fileMatchesSide(
+  file: DiffFile,
+  side: "old" | "new",
+  text: string,
+  rawLines: string[],
+  modelLines: DiffModel["lines"],
+): boolean {
+  const sourceLines = contentLines(text);
+  for (const hunk of file.hunks) {
+    for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
+      const entry = modelLines[i];
+      if (!belongsToSide(entry?.kind, side)) continue;
+      const sourceLine = side === "old" ? entry.oldLine : entry.newLine;
+      if (
+        sourceLine === undefined ||
+        !diffBodyMatches(sourceLines[sourceLine], rawLines, hunk, i)
+      ) {
+        return false;
+      }
+    }
+    if (
+      noTrailingNewline(hunk, side, rawLines, modelLines) &&
+      text.endsWith("\n")
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function hunkSideLines(
+  hunk: DiffHunk,
+  side: "old" | "new",
+  rawLines: string[],
+  modelLines: DiffModel["lines"],
+  stripTransport = false,
+): string[] {
+  const out: string[] = [];
+  for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
+    const kind = modelLines[i]?.kind;
+    if (belongsToSide(kind, side)) {
+      out.push(diffBodyText(rawLines, hunk, i, stripTransport));
+    }
+  }
+  return out;
+}
+
+function hunkStart(start: number, count: number): number {
+  return count === 0 ? start : start - 1;
+}
+
+/**
+ * Reverse every hunk against a verified complete new file. Applying from the
+ * bottom preserves the line numbers of the hunks above.
+ */
+function reconstructOldFile(
+  file: DiffFile,
+  newText: string,
+  rawLines: string[],
+  modelLines: DiffModel["lines"],
+): string | null {
+  if (!fileMatchesSide(file, "new", newText, rawLines, modelLines)) return null;
+
+  const lines = contentLines(newText);
+  let trailingNewline = newText.endsWith("\n");
+  const hunks = [...file.hunks].sort((a, b) => {
+    const byStart = hunkStart(b.newStart, b.newCount) -
+      hunkStart(a.newStart, a.newCount);
+    return byStart || b.headerLine - a.headerLine;
+  });
+  for (const hunk of hunks) {
+    let oldSide = hunkSideLines(hunk, "old", rawLines, modelLines);
+    let newSide = hunkSideLines(hunk, "new", rawLines, modelLines);
+    if (
+      oldSide.length !== hunk.oldCount || newSide.length !== hunk.newCount
+    ) {
+      return null;
+    }
+    const start = hunkStart(hunk.newStart, hunk.newCount);
+    if (
+      start < 0 || start + newSide.length > lines.length
+    ) {
+      return null;
+    }
+    const current = lines.slice(start, start + newSide.length);
+    if (current.some((line, i) => line !== newSide[i])) {
+      newSide = hunkSideLines(hunk, "new", rawLines, modelLines, true);
+      if (current.some((line, i) => line !== newSide[i])) return null;
+      oldSide = hunkSideLines(hunk, "old", rawLines, modelLines, true);
+    }
+    const touchesEnd = start + newSide.length === lines.length;
+    lines.splice(start, newSide.length, ...oldSide);
+    if (touchesEnd) {
+      trailingNewline = !noTrailingNewline(
+        hunk,
+        "old",
+        rawLines,
+        modelLines,
+      );
+    }
+  }
+  const oldText = lines.length === 0
+    ? ""
+    : lines.join("\n") + (trailingNewline ? "\n" : "");
+  return fileMatchesSide(file, "old", oldText, rawLines, modelLines)
+    ? oldText
+    : null;
+}
+
+function reconstructedOldFileCacheKey(
+  file: DiffFile,
+  fileIndex: number,
+): string {
+  return `\0diff-old:${
+    JSON.stringify([
+      fileIndex,
+      file.oldPath,
+      file.newPath,
+      file.oldObject,
+    ])
+  }`;
+}
+
+function highlightedFile(
+  fileText: string | null,
+  fileName: string | undefined,
+  language: Language,
+): LoadedFile {
+  return {
+    fileText,
+    fileDoc: null,
+    fileLineStarts: [],
+    highlightedLines: fileText === null
+      ? null
+      : language.highlightLines(fileText, fileName),
+  };
+}
+
+/** Load and highlight the complete old side represented by one diff file. */
+function loadOldFile(
+  file: DiffFile,
+  fileIndex: number,
+  language: Language,
+  newFile: LoadedFile | null,
+  oldBlobs: ReadonlyMap<string, string> | undefined,
+  ws: DiffWorkspace,
+  rawLines: string[],
+  modelLines: DiffModel["lines"],
+  cache?: WorkspaceCache,
+): LoadedFile {
+  if (file.hunks.length === 0) {
+    return {
+      fileText: null,
+      fileDoc: null,
+      fileLineStarts: [],
+      highlightedLines: null,
+    };
+  }
+  const fileName = file.oldPath ?? file.newPath;
+  if (
+    file.oldObject && validGitObject(file.oldObject) &&
+    (oldBlobs !== undefined || ws.readBlob)
+  ) {
+    const blobKey = `\0diff-old-blob:${
+      JSON.stringify([fileName, file.oldObject])
+    }`;
+    let blob = cache?.get(blobKey);
+    if (!blob) {
+      const blobText = oldBlobs
+        ? oldBlobs.get(file.oldObject) ?? null
+        : ws.readBlob!(file.oldObject);
+      blob = highlightedFile(blobText, fileName, language);
+      cache?.set(blobKey, blob);
+    }
+    if (
+      blob.fileText !== null &&
+      fileMatchesSide(file, "old", blob.fileText, rawLines, modelLines)
+    ) {
+      return blob;
+    }
+  }
+
+  const key = reconstructedOldFileCacheKey(file, fileIndex);
+  const hit = cache?.get(key);
+  if (hit) return hit;
+  const newText = newFile?.fileText ?? null;
+  const fileText = newText === null ? null : reconstructOldFile(
+    file,
+    newText,
+    rawLines,
+    modelLines,
+  );
+  const entry = highlightedFile(fileText, fileName, language);
+  cache?.set(key, entry);
   return entry;
 }
 
@@ -210,6 +576,15 @@ export function buildDiffDocument(
   const definitions = new Map<string, Definition[]>();
   const mappings = new Map<string, FileMapping>(); // by abs path
   const hunks: DiffHunkInfo[] = [];
+  const oldFileLines: (readonly Line[] | null)[] = [];
+  const oldBlobs = ws.readBlobs?.(
+    model.files.flatMap((file) =>
+      file.hunks.length > 0 && file.oldObject &&
+        validGitObject(file.oldObject)
+        ? [file.oldObject]
+        : []
+    ),
+  );
 
   // Lines not claimed by any file/hunk below default to plain text.
   for (let i = 0; i < rawLines.length; i++) {
@@ -219,12 +594,30 @@ export function buildDiffDocument(
     }
   }
 
-  for (const file of model.files) {
+  for (const [fileIndex, file] of model.files.entries()) {
+    // The language is chosen once per file, from its path, and every operation
+    // on the file — parsing the workspace copy, colouring fragments, projecting
+    // structure — dispatches through it. A rename can change the extension, so
+    // the old and new sides resolve separately.
+    const newLanguage = languageForFile(file.newPath ?? file.oldPath);
+    const oldLanguage = languageForFile(file.oldPath ?? file.newPath);
     const absPath = file.newPath ? ws.resolve(file.newPath) : null;
-    const loaded = absPath ? loadFile(absPath, ws, cache) : null;
+    const loaded = absPath ? loadFile(absPath, newLanguage, ws, cache) : null;
     const fileText = loaded?.fileText ?? null;
     const fileDoc = loaded?.fileDoc ?? null;
     const fileLineStarts = loaded?.fileLineStarts ?? [];
+    const oldFile = loadOldFile(
+      file,
+      fileIndex,
+      oldLanguage,
+      loaded,
+      oldBlobs,
+      ws,
+      rawLines,
+      model.lines,
+      cache,
+    );
+    oldFileLines.push(oldFile.highlightedLines ?? null);
 
     let mapping: FileMapping | undefined;
     if (absPath && fileText !== null) {
@@ -260,12 +653,14 @@ export function buildDiffDocument(
         fileDoc,
         fileText,
         fileLineStarts,
+        oldFileLines: oldFile.highlightedLines ?? null,
         mapping,
         definitions,
         hunks,
+        newLanguage,
+        oldLanguage,
         newFileName: file.newPath ?? file.oldPath,
         oldFileName: file.oldPath ?? file.newPath,
-        markdown: isMarkdownPath(file.newPath ?? file.oldPath),
       }));
     }
 
@@ -300,7 +695,7 @@ export function buildDiffDocument(
   return {
     doc,
     maps: buildMaps(diffLineStarts, rawLines, mappings),
-    edit: buildEdit(text, rawLines, mappings, hunks),
+    edit: buildEdit(text, rawLines, mappings, hunks, oldFileLines),
   };
 }
 
@@ -312,6 +707,7 @@ function buildEdit(
   rawLines: string[],
   mappings: Map<string, FileMapping>,
   hunks: DiffHunkInfo[],
+  oldFileLines: readonly (readonly Line[] | null)[],
 ): DiffEdit {
   const lines = new Map<
     number,
@@ -325,7 +721,7 @@ function buildEdit(
       lines.set(diffLine, { absPath: m.absPath, newLine, markerLen });
     }
   }
-  return { sourceText, lines, fileText, hunks };
+  return { sourceText, lines, fileText, oldFileLines, hunks };
 }
 
 // --- hunk rendering + structure ------------------------------------------------
@@ -344,21 +740,22 @@ interface HunkCtx {
   fileDoc: Document | null;
   fileText: string | null;
   fileLineStarts: number[];
+  oldFileLines: readonly Line[] | null;
   mapping: FileMapping | undefined;
   definitions: Map<string, Definition[]>;
   hunks: DiffHunkInfo[];
-  /** Paths whose extensions select the new- and old-side fragment parsers. */
+  /** The languages of the new and old sides (they differ across a rename that
+   * changes the extension); each colours its side's fragments and, for the new
+   * side, projects the hunk's structure. */
+  newLanguage: Language;
+  oldLanguage: Language;
+  /** Paths whose extensions the parsers use to pick a script variant. */
   newFileName: string | undefined;
   oldFileName: string | undefined;
-  /** The new-side workspace file is Markdown, so headings form its structure. */
-  markdown: boolean;
 }
 
 function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
   const { rawLines, modelLines, lines, diffLineStarts } = ctx;
-  const isNoNewlineMarker = (line: string | undefined): boolean =>
-    line?.replace(/\r$/, "") === "\\ No newline at end of file";
-  const crlfTransport = rawLines[hunk.headerLine].endsWith("\r");
 
   // Header line.
   lines[hunk.headerLine].spans = [{
@@ -376,31 +773,28 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
   // type/definition queries about the wrong occurrence. All-or-nothing keeps
   // the maps honest: an unverified hunk renders via fragments and maps to
   // nothing.
-  let oldNoTrailingNewline = false;
-  let newNoTrailingNewline = false;
-  for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
-    if (!isNoNewlineMarker(rawLines[i])) continue;
-    const previous = modelLines[i - 1]?.kind;
-    if (previous === "del" || previous === "ctx") {
-      oldNoTrailingNewline = true;
-    }
-    if (previous === "add" || previous === "ctx") {
-      newNoTrailingNewline = true;
-    }
-  }
+  const oldNoTrailingNewline = noTrailingNewline(
+    hunk,
+    "old",
+    rawLines,
+    modelLines,
+  );
+  const newNoTrailingNewline = noTrailingNewline(
+    hunk,
+    "new",
+    rawLines,
+    modelLines,
+  );
 
   let verified = ctx.fileDoc !== null;
   for (let i = hunk.headerLine + 1; verified && i <= hunk.endLine; i++) {
     const entry = modelLines[i];
     if (entry?.kind !== "ctx" && entry?.kind !== "add") continue;
-    let diffText = rawLines[i].slice(1);
+    const fileText = fileLineText(ctx, entry.newLine!);
     if (
-      crlfTransport && isNoNewlineMarker(rawLines[i + 1]) &&
-      diffText.endsWith("\r")
+      fileText === null ||
+      !diffBodyMatches(fileText, rawLines, hunk, i)
     ) {
-      diffText = diffText.slice(0, -1);
-    }
-    if (fileLineText(ctx, entry.newLine!) !== diffText) {
       verified = false;
     }
   }
@@ -442,8 +836,14 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
     if (entry.kind === "del") lines[i].bg = "del";
 
     if (entry.kind === "del") {
-      oldFragment.push({ diffLine: i, code });
-      continue; // spans assigned from the old fragment below
+      const oldSpans = ctx.oldFileLines?.[entry.oldLine!]?.spans;
+      const shifted = oldSpans ? shiftCompleteLineSpans(t, oldSpans) : null;
+      if (shifted) {
+        lines[i].spans = shifted;
+      } else {
+        oldFragment.push({ diffLine: i, code });
+      }
+      continue;
     }
     const n = entry.newLine!;
     if (verified && ctx.fileDoc) {
@@ -454,7 +854,15 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
       if (ctx.mapping && !ctx.mapping.newToDiff.has(n)) {
         ctx.mapping.newToDiff.set(n, i);
       }
-      lines[i].spans = shiftSpans(markerSpan(t), ctx.fileDoc.lines[n].spans);
+      const shifted = shiftCompleteLineSpans(
+        t,
+        ctx.fileDoc.lines[n].spans,
+      );
+      if (shifted) {
+        lines[i].spans = shifted;
+      } else {
+        newFragment.push({ diffLine: i, code });
+      }
     } else {
       newFragment.push({ diffLine: i, code });
     }
@@ -464,64 +872,52 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
     newFragment,
     lines,
     rawLines,
+    ctx.newLanguage,
     ctx.newFileName,
   );
-  applyFragmentSpans(oldFragment, lines, rawLines, ctx.oldFileName);
+  applyFragmentSpans(
+    oldFragment,
+    lines,
+    rawLines,
+    ctx.oldLanguage,
+    ctx.oldFileName,
+  );
 
   // --- structure ---------------------------------------------------------
   // Verified hunks remap the workspace file's own nodes (precise ranges, live
   // semantics). Unverified hunks — drifted workspace, missing file — still get
   // navigable structure from the fragment parse of their new side: the nodes
   // come from the diff text itself, so navigation always works; only the
-  // semantic extras (types, definitions) stay silent there.
+  // semantic extras (types, definitions) stay silent there. Either way the
+  // new-side language projects its own structure into the hunk's coordinates.
   const children: StructureNode[] = [];
-  if (ctx.markdown && ctx.fileDoc && newToDiff.size > 0) {
-    children.push(
-      ...markdownHeadingNodes(
-        ctx.fileDoc.flatStructure,
-        newToDiff,
-        hunk.endLine,
-        diffLineStarts,
-        rawLines,
-      ),
-    );
-  } else if (ctx.fileDoc && newToDiff.size > 0) {
-    for (const root of ctx.fileDoc.structure) {
-      children.push(...remapNode(root, 2, null, {
-        newToDiff,
-        diffLineStarts,
-        rawLines,
-        sourceLineStarts: ctx.fileLineStarts,
-        definitions: ctx.definitions,
-      }));
-    }
+  let source:
+    | { doc: Document; lineToDiff: Map<number, number>; lineStarts: number[] }
+    | null = null;
+  if (ctx.fileDoc && newToDiff.size > 0) {
+    source = {
+      doc: ctx.fileDoc,
+      lineToDiff: newToDiff,
+      lineStarts: ctx.fileLineStarts,
+    };
   } else if (newParsed && newFragment.length > 0) {
     // Fragment line i is the i-th ctx/add line of the hunk, in order.
-    const fragToDiff = new Map(newFragment.map((f, i) => [i, f.diffLine]));
-    if (ctx.markdown) {
-      children.push(
-        ...markdownHeadingNodes(
-          newParsed.flatStructure,
-          fragToDiff,
-          hunk.endLine,
-          diffLineStarts,
-          rawLines,
-        ),
-      );
-    } else {
-      const fragLineStarts = computeLineStarts(
-        newFragment.map((f) => f.code).join("\n"),
-      );
-      for (const root of newParsed.structure) {
-        children.push(...remapNode(root, 2, null, {
-          newToDiff: fragToDiff,
-          diffLineStarts,
-          rawLines,
-          sourceLineStarts: fragLineStarts,
-          definitions: ctx.definitions,
-        }));
-      }
-    }
+    source = {
+      doc: newParsed,
+      lineToDiff: new Map(newFragment.map((f, i) => [i, f.diffLine])),
+      lineStarts: computeLineStarts(newFragment.map((f) => f.code).join("\n")),
+    };
+  }
+  if (source) {
+    children.push(...ctx.newLanguage.hunkStructure({
+      doc: source.doc,
+      lineToDiff: source.lineToDiff,
+      sourceLineStarts: source.lineStarts,
+      hunkEnd: hunk.endLine,
+      diffLineStarts,
+      rawLines,
+      definitions: ctx.definitions,
+    }));
   }
 
   // Tell the user when the workspace could not vouch for this hunk (and the
@@ -578,66 +974,25 @@ function shiftSpans(marker: Span, spans: readonly Span[]): Span[] {
 }
 
 /**
- * Heading nodes for a Markdown hunk's navigation tree. Each heading whose own
- * heading line is shown in the hunk becomes a navigable section, anchored at
- * that line (past the diff marker) and running to the last new-side line before
- * the next shown heading. The general TS structure remap is not used here: it
- * would fold a shown heading into an ancestor whose own heading line is NOT in
- * the diff, so navigation would land on a heading the diff never displays.
+ * Shift complete-file spans and retain a carriage return added by the diff's
+ * CRLF transport. Null means the source spans do not describe this line.
  */
-function markdownHeadingNodes(
-  headings: readonly StructureNode[],
-  lineToDiff: Map<number, number>,
-  hunkEnd: number,
-  diffLineStarts: number[],
-  rawLines: string[],
-): StructureNode[] {
-  const shown: { node: StructureNode; diffLine: number }[] = [];
-  for (const node of headings) {
-    const diffLine = lineToDiff.get(node.startLine);
-    if (diffLine !== undefined) shown.push({ node, diffLine });
+function shiftCompleteLineSpans(
+  lineText: string,
+  spans: readonly Span[],
+): Span[] | null {
+  const code = lineText.slice(1);
+  const sourceText = spans.map((span) => span.text).join("");
+  if (code !== sourceText && code !== `${sourceText}\r`) return null;
+  const shifted = shiftSpans(markerSpan(lineText), spans);
+  if (code.length > sourceText.length) {
+    shifted.push({
+      col: cpLen(sourceText) + 1,
+      text: code.slice(sourceText.length),
+      cls: "whitespace",
+    });
   }
-  if (shown.length === 0) return [];
-  shown.sort((a, b) => a.diffLine - b.diffLine);
-  // The diff lines carrying new-side content (heading or body); a section ends
-  // at the last of these before the next shown heading, so it never spills onto
-  // a trailing removed block or a "\ No newline at end of file" marker (which
-  // the TS remap, clamping to visible new-side lines, also excludes).
-  const newSide = [...lineToDiff.values()].sort((a, b) => a - b);
-  // Depth follows the nesting among the SHOWN headings, walked in document
-  // order: the first heading under the hunk is depth 2 and no step jumps more
-  // than one level — the pre-order invariant the wasd tree navigation relies
-  // on. (A global minimum over the shown set would put a deeper-first window's
-  // first heading below depth 2 and strand the sibling/child steps.)
-  const stack: { level: number; depth: number }[] = [];
-  return shown.map(({ node, diffLine }, i) => {
-    while (stack.length > 0 && stack[stack.length - 1].level >= node.depth) {
-      stack.pop();
-    }
-    const depth = stack.length === 0 ? 2 : stack[stack.length - 1].depth + 1;
-    stack.push({ level: node.depth, depth });
-
-    const boundary = i + 1 < shown.length ? shown[i + 1].diffLine : hunkEnd + 1;
-    let end = diffLine;
-    for (const d of newSide) if (d >= diffLine && d < boundary) end = d;
-
-    const endText = rawLines[end] ?? "";
-    const startText = rawLines[diffLine] ?? "";
-    return {
-      kind: "section",
-      label: node.label,
-      name: node.name,
-      startLine: diffLine,
-      endLine: end,
-      // Past the one-column diff marker.
-      startCol: Math.min(1, cpLen(startText)),
-      endCol: cpLen(endText),
-      startOffset: diffLineStarts[diffLine] + Math.min(1, startText.length),
-      endOffset: diffLineStarts[end] + endText.length,
-      depth,
-      children: [],
-    };
-  });
+  return shifted;
 }
 
 /**
@@ -650,10 +1005,11 @@ function applyFragmentSpans(
   fragment: { diffLine: number; code: string }[],
   lines: MutableLine[],
   rawLines: string[],
+  language: Language,
   fileName: string | undefined,
 ): Document | null {
   if (fragment.length === 0) return null;
-  const parsed = parseDocument(
+  const parsed = language.parseDocument(
     fragment.map((f) => f.code).join("\n"),
     fileName,
   );
@@ -663,176 +1019,6 @@ function applyFragmentSpans(
     lines[diffLine].spans = shiftSpans(markerSpan(rawLines[diffLine]), spans);
   }
   return parsed;
-}
-
-// --- structure remapping ---------------------------------------------------
-
-interface RemapCtx {
-  /** Source line (file or fragment) → diff line, for visible lines. */
-  newToDiff: Map<number, number>;
-  diffLineStarts: number[];
-  rawLines: string[];
-  /** Line starts of the source text the nodes were parsed from. */
-  sourceLineStarts: number[];
-  definitions: Map<string, Definition[]>;
-}
-
-/**
- * Remap a workspace-file structure node into diff coordinates, clamped to the
- * file lines this hunk actually shows. Children recurse. A node whose clamped
- * range coincides with its parent's is folded away — but its CHILDREN are
- * hoisted into the parent, so a hunk interior to deeply nested code still
- * exposes the innermost distinct nodes (and Tab never lands on two
- * identical-looking ones). Returns [] when no line of the node is visible.
- */
-/** An object/array literal or one of its entries — a generic node the diff
- * structure keeps (rather than dissolving) so it can be navigated entry by
- * entry. */
-function isLiteralShape(node: StructureNode): boolean {
-  return node.astKinds?.some((k) =>
-    k === "ObjectLiteralExpression" || k === "ArrayLiteralExpression" ||
-    k === "PropertyAssignment" || k === "ShorthandPropertyAssignment"
-  ) ?? false;
-}
-
-function remapNode(
-  node: StructureNode,
-  depth: number,
-  parentRange: { start: number; end: number } | null,
-  ctx: RemapCtx,
-): StructureNode[] {
-  // A diff's structure stays focused on declarations and the like; the generic
-  // expression and comment nodes that fill the full-AST tree are skipped, but
-  // their meaningful descendants are hoisted into this node's place. Object and
-  // array literals and their entries are kept, though — an object literal in a
-  // diff (an options bag, a returned record) is worth navigating entry by entry.
-  if (
-    (node.kind === "node" || node.kind === "comment") && !isLiteralShape(node)
-  ) {
-    const hoisted: StructureNode[] = [];
-    for (const child of node.children) {
-      hoisted.push(...remapNode(child, depth, parentRange, ctx));
-    }
-    return hoisted;
-  }
-
-  let firstVisible = -1;
-  let lastVisible = -1;
-  for (let n = node.startLine; n <= node.endLine; n++) {
-    if (ctx.newToDiff.has(n)) {
-      if (firstVisible < 0) firstVisible = n;
-      lastVisible = n;
-    }
-  }
-  if (firstVisible < 0) return [];
-
-  const startDiffLine = ctx.newToDiff.get(firstVisible)!;
-  const endDiffLine = ctx.newToDiff.get(lastVisible)!;
-  // Columns: the marker occupies column 0, so code column c becomes c+1. A
-  // clamped boundary (the node's true start/end line is not visible) covers
-  // the whole shown line instead.
-  const startCol = firstVisible === node.startLine ? node.startCol + 1 : 1;
-  const endCol = lastVisible === node.endLine
-    ? node.endCol + 1
-    : cpLen(ctx.rawLines[endDiffLine]);
-  const startOffset = ctx.diffLineStarts[startDiffLine] +
-    cpToUtf16(ctx.rawLines[startDiffLine], startCol);
-  const endOffset = ctx.diffLineStarts[endDiffLine] +
-    cpToUtf16(ctx.rawLines[endDiffLine], endCol);
-
-  // Coincidence fold: a node filling its parent's visible range IS the parent
-  // as far as the diff shows. Hoist its mapped children in its place (same
-  // depth, same parent range) and register its name against the surviving
-  // range so `t` lookups still resolve.
-  if (
-    parentRange && parentRange.start === startOffset &&
-    parentRange.end === endOffset
-  ) {
-    registerDefinition(
-      node,
-      startDiffLine,
-      endDiffLine,
-      startOffset,
-      endOffset,
-      ctx,
-    );
-    const hoisted: StructureNode[] = [];
-    for (const child of node.children) {
-      hoisted.push(...remapNode(child, depth, parentRange, ctx));
-    }
-    return hoisted;
-  }
-
-  const nameOffset = remapNameOffset(node, ctx);
-  const children: StructureNode[] = [];
-  for (const child of node.children) {
-    children.push(...remapNode(
-      child,
-      depth + 1,
-      { start: startOffset, end: endOffset },
-      ctx,
-    ));
-  }
-
-  const mapped: StructureNode = {
-    kind: node.kind,
-    label: node.label,
-    name: node.name,
-    nameOffset,
-    startLine: startDiffLine,
-    endLine: endDiffLine,
-    startCol,
-    endCol,
-    startOffset,
-    endOffset,
-    depth,
-    children,
-    meta: node.meta,
-    astKinds: node.astKinds,
-  };
-  registerDefinition(
-    node,
-    startDiffLine,
-    endDiffLine,
-    startOffset,
-    endOffset,
-    ctx,
-  );
-  return [mapped];
-}
-
-function registerDefinition(
-  node: StructureNode,
-  startLine: number,
-  endLine: number,
-  startOffset: number,
-  endOffset: number,
-  ctx: RemapCtx,
-): void {
-  if (!node.name) return;
-  const list = ctx.definitions.get(node.name) ?? [];
-  list.push({
-    name: node.name,
-    kind: node.kind,
-    startLine,
-    endLine,
-    startOffset,
-    endOffset,
-  });
-  ctx.definitions.set(node.name, list);
-}
-
-/** The node's declared-name offset in diff coordinates, when visible. */
-function remapNameOffset(
-  node: StructureNode,
-  ctx: RemapCtx,
-): number | undefined {
-  if (node.nameOffset === undefined) return undefined;
-  const n = lineIndexOf(ctx.sourceLineStarts, node.nameOffset);
-  const diffLine = ctx.newToDiff.get(n);
-  if (diffLine === undefined) return undefined;
-  const col = node.nameOffset - ctx.sourceLineStarts[n]; // UTF-16 in the line
-  return ctx.diffLineStarts[diffLine] + 1 + col; // +1: the marker is 1 unit
 }
 
 // --- offset maps for semantics ----------------------------------------------
@@ -878,18 +1064,6 @@ function buildMaps(
 
 // --- small helpers -----------------------------------------------------------
 
-/** UTF-16 index of code-point column `col` within `text`. */
-function cpToUtf16(text: string, col: number): number {
-  let cp = 0;
-  let i = 0;
-  for (const ch of text) {
-    if (cp >= col) break;
-    cp++;
-    i += ch.length;
-  }
-  return i;
-}
-
 function lineEndOffset(
   lineStarts: number[],
   text: string,
@@ -898,3 +1072,10 @@ function lineEndOffset(
   if (line + 1 < lineStarts.length) return lineStarts[line + 1] - 1;
   return text.length;
 }
+
+export const _internal = {
+  parseGitBatchOutput,
+  readGitBlobs,
+  reconstructOldFile,
+  shiftCompleteLineSpans,
+};

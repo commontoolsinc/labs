@@ -286,7 +286,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
       (req) =>
         req.messages.some((m) =>
           typeof m.content === "string" && m.content.includes(testPrompt)
-        ) && req.schema.type === "object",
+        ) && typeof req.schema === "object" && req.schema.type === "object",
       {
         object: { title: "Model Title", summary: "Model summary" },
         id: "d1b-go-direct-1",
@@ -402,7 +402,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
       (req) =>
         req.messages.some((m) =>
           typeof m.content === "string" && m.content.includes(testPrompt)
-        ) && req.schema.type === "object",
+        ) && typeof req.schema === "object" && req.schema.type === "object",
       {
         object: { items: [{ name: "alpha" }, { name: "beta" }] },
         id: "d1b-go-child-doc-1",
@@ -504,7 +504,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
       (req) =>
         req.messages.some((m) =>
           typeof m.content === "string" && m.content.includes(testPrompt)
-        ) && req.schema.type === "object",
+        ) && typeof req.schema === "object" && req.schema.type === "object",
       {
         object: {
           tagged: [{ a: "x" }, { b: 2 }],
@@ -633,7 +633,7 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
       (req) =>
         req.messages.some((m) =>
           typeof m.content === "string" && m.content.includes(testPrompt)
-        ) && req.schema.type === "object",
+        ) && typeof req.schema === "object" && req.schema.type === "object",
       { object: { verdict: "unstamped" }, id: "d1b-go-disabled-1" },
     );
 

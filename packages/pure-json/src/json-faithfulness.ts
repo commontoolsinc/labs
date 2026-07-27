@@ -42,6 +42,8 @@
 // properties, use `Object.hasOwn` for array slots, and reject a nonstandard
 // array prototype or an inherited `toJSON`.
 
+import type { JSONValue } from "@commonfabric/api";
+
 import { isPlainObject } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 
@@ -183,4 +185,18 @@ export function findJsonUnfaithfulValues(
   const out: JsonUnfaithfulValue[] = [];
   walk(value, "", new Set<object>(), out);
   return out;
+}
+
+/**
+ * Indicates whether `value` is pure JSON -- that ordinary JSON serialization
+ * carries it faithfully, by the whitelist in the module comment above. This is
+ * the boolean form of {@link findJsonUnfaithfulValues}; reach for that one when
+ * a caller needs to report WHICH parts are unfaithful and where.
+ *
+ * Note the known limitations documented above: an empty result does not certify
+ * adversarially-shaped objects, so this answers "will JSON change this ordinary
+ * value", not "is this hostile input safe".
+ */
+export function isPureJson(value: unknown): value is JSONValue {
+  return findJsonUnfaithfulValues(value).length === 0;
 }

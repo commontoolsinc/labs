@@ -12,7 +12,7 @@
  * bundles.
  */
 
-import { encodeMemoryBoundary } from "../v2.ts";
+import { encodeMemoryBoundaryUnprovenFabricValue } from "../v2.ts";
 import * as MemoryServer from "./server.ts";
 import { verifySessionOpenAuthorization } from "./session-open-auth.ts";
 import { Identity } from "@commonfabric/identity";
@@ -72,7 +72,7 @@ export class StandaloneMemoryServer {
       const connectionTag = nextConnectionTag++;
       const connection = memory.connect((message) => {
         if (socket.readyState === WebSocket.OPEN) {
-          socket.send(encodeMemoryBoundary(message));
+          socket.send(encodeMemoryBoundaryUnprovenFabricValue(message));
         }
       });
       const debugWrites = Deno.env.get("CF_DEBUG_MEMORY_WRITES") === "1";

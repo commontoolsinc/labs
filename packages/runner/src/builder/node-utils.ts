@@ -1,4 +1,5 @@
 import { isRecord } from "@commonfabric/utils/types";
+import type { CfcConfClause } from "../cfc/clause.ts";
 import { type FactoryInput, type JSONSchema, type NodeRef } from "./types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { traverseValue } from "./traverse-utils.ts";
@@ -92,7 +93,7 @@ export function applyInputIfcToOutput<T, R>(
 function attachCfcToOutputs(
   outputs: unknown,
   cfc: ContextualFlowControl,
-  lubConfidentiality: readonly unknown[],
+  lubConfidentiality: readonly CfcConfClause[],
 ) {
   if (isCell(outputs)) {
     const exported = outputs.export();

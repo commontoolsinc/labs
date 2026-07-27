@@ -3,6 +3,7 @@ import { join } from "@std/path";
 import {
   readDenoConfig,
   runDenoCheckWithTemporaryConfig,
+  runFrozenDriftCheck,
 } from "./isolated-deno.ts";
 
 const ROOT = join(import.meta.dirname!, "..", "..", "..");
@@ -33,28 +34,50 @@ Deno.test("nested checks use the checked-in dependency graph", async () => {
   assertEquals(await Deno.readTextFile(lockPath), lockBefore);
 });
 
-Deno.test("nested checks reject dependency graph changes", async () => {
-  const rootConfig = await readDenoConfig(join(ROOT, "deno.jsonc"));
-  const shellConfig = await readDenoConfig(
-    join(ROOT, "packages", "shell", "deno.jsonc"),
+Deno.test("nested frozen checks reject dependency graph drift", async () => {
+  // A frozen check rejects a config whose dependency graph no longer matches
+  // its lockfile. Proving that against the whole workspace would force Deno to
+  // re-resolve every npm package from the registry, so this uses a small
+  // self-contained workspace instead. The imports are two of the repository's
+  // own JSR dependencies, pinned to the versions the checked-in lock resolves,
+  // so generating the baseline lock needs only manifests the dependency cache
+  // already holds and the check needs no network.
+  const rootImports =
+    (await readDenoConfig(join(ROOT, "deno.jsonc"))).imports ?? {};
+  const lock = JSON.parse(await Deno.readTextFile(join(ROOT, "deno.lock")));
+  const pathRange = rootImports["@std/path"];
+  const assertRange = rootImports["@std/assert"];
+  assert(
+    pathRange && assertRange,
+    "root config should declare @std/path and @std/assert",
   );
-  const rootImports = rootConfig.imports ?? {};
-  const packageImport = Object.entries(shellConfig.imports ?? {}).find(
-    ([name]) => !(name in rootImports),
+  const pathVersion = lock.specifiers?.[pathRange];
+  const assertVersion = lock.specifiers?.[assertRange];
+  assert(
+    pathVersion && assertVersion,
+    "deno.lock should pin @std/path and @std/assert",
   );
+  const pathImport = `jsr:@std/path@${pathVersion}`;
+  const assertImport = `jsr:@std/assert@${assertVersion}`;
 
-  assert(packageImport, "shell config should contain a package-only import");
-  const [name, specifier] = packageImport;
-  rootConfig.imports = { ...rootImports, [name]: specifier };
-
-  const output = await runDenoCheckWithTemporaryConfig({
-    root: ROOT,
-    config: rootConfig,
-    files: ["packages/test-support/src/mod.ts"],
-    tempConfigPrefix: "deno.test-support.changed-dependencies",
+  const { generate, check } = await runFrozenDriftCheck({
+    baselineImports: {
+      "@std/path": pathImport,
+      "@std/assert": assertImport,
+    },
+    // The entry never imports @std/assert, so dropping it leaves an entry that
+    // still type-checks while the config no longer matches the generated lock.
+    driftedImports: { "@std/path": pathImport },
+    entrySource: `import { join } from "@std/path";\n` +
+      `export const joined = join("a", "b");\n`,
   });
-  const stderr = decode(output.stderr);
 
-  assert(!output.success, "a changed dependency graph should fail the check");
-  assertMatch(stderr, /lockfile is out of date/i);
+  assert(
+    generate.success,
+    `baseline lock generation failed:\n${decode(generate.stdout)}\n${
+      decode(generate.stderr)
+    }`,
+  );
+  assert(!check.success, "a drifted dependency graph should fail the check");
+  assertMatch(decode(check.stderr), /lockfile is out of date/i);
 });

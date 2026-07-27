@@ -1389,7 +1389,6 @@ When you're done searching, STOP calling tools and produce your final structured
       system: fullSystemPrompt,
       prompt: agentPrompt,
       tools: allTools,
-      model: "anthropic:claude-sonnet-4-5",
       schema: computed(() => {
         const schema = resultSchema;
         if (schema && Object.keys(schema).length > 0) {

@@ -1,4 +1,5 @@
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isRecord } from "@commonfabric/utils/types";
 import {
@@ -41,10 +42,13 @@ import {
  * structurally equal values — this IS the post-match equality constraint
  * between variables (§4.3.3 `constraints`, plan B1 "constraint correlation").
  */
+// NOT a `CfcAtom`: a pattern is atom-shaped but admits things an atom cannot
+// -- `{ var }` placeholders, and an explicitly-`undefined` field, which is an
+// absence check (`CfcJsonValue` has no `undefined`).
 export type AtomPattern = unknown;
 
 /** A binding environment produced by matching (spec §4.3.3 `Bindings`). */
-export type AtomPatternBindings = Readonly<Record<string, unknown>>;
+export type AtomPatternBindings = Readonly<Record<string, CfcAtom>>;
 
 export const EMPTY_ATOM_PATTERN_BINDINGS: AtomPatternBindings = Object.freeze(
   {},
@@ -97,8 +101,8 @@ const patternIsConcrete = (pattern: unknown): boolean => {
  * structural equality.
  */
 const matchPatternValue = (
-  pattern: unknown,
-  value: unknown,
+  pattern: AtomPattern,
+  value: CfcAtom,
   bindings: AtomPatternBindings,
 ): AtomPatternBindings | null => {
   // Reserved-key discipline applies in EITHER direction (module doc): a
@@ -183,7 +187,7 @@ const matchPatternValue = (
       if (!Object.hasOwn(value, key)) return null;
       current = matchPatternValue(
         fieldPattern,
-        (value as Record<string, unknown>)[key],
+        (value as Record<string, CfcAtom>)[key],
         current,
       );
       if (current === null) return null;
@@ -199,7 +203,7 @@ const matchPatternValue = (
  */
 export const matchAtomPattern = (
   pattern: AtomPattern,
-  atom: unknown,
+  atom: CfcAtom,
   bindings: AtomPatternBindings = EMPTY_ATOM_PATTERN_BINDINGS,
 ): AtomPatternBindings | null => matchPatternValue(pattern, atom, bindings);
 
@@ -241,7 +245,7 @@ const pushUniqueBindings = (
  */
 export const matchAtomPatternAgainstAtoms = (
   pattern: AtomPattern,
-  atoms: readonly unknown[],
+  atoms: readonly CfcAtom[],
   bindings: AtomPatternBindings = EMPTY_ATOM_PATTERN_BINDINGS,
 ): AtomPatternBindings[] => {
   const matched: AtomPatternBindings[] = [];
@@ -265,7 +269,7 @@ export const matchAtomPatternAgainstAtoms = (
  */
 export const matchAtomPatternConjunction = (
   patterns: readonly AtomPattern[],
-  atoms: readonly unknown[],
+  atoms: readonly CfcAtom[],
   bindings: AtomPatternBindings = EMPTY_ATOM_PATTERN_BINDINGS,
 ): AtomPatternBindings[] => {
   let environments: AtomPatternBindings[] = [bindings];

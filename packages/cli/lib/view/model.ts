@@ -28,6 +28,7 @@ export type TokenClass =
   | "regex"
   | "comment"
   | "docComment"
+  | "markdownQuote"
   | "sectionHeader" // `// transformed: <name>` divider lines
   | "typeName" // identifier used in a type position
   | "typeKeyword" // string/number/boolean/any/unknown… in a type position
@@ -193,6 +194,11 @@ export interface StructureNode {
    * several nodes share the exact same source range and were merged into one
    * navigable node (e.g. an expression statement and the call it wraps). */
   readonly astKinds?: readonly string[];
+  /** A human description of why this node is machine-generated, when a language
+   * can vouch that it is (e.g. the TypeScript view recognising a transformer's
+   * synthetic helper). Absent means "not known to be generated"; the info card
+   * shows an origin line only when it is present. */
+  readonly generatedOrigin?: string;
 }
 
 /** A named declaration the user can peek (go-to-definition style). */

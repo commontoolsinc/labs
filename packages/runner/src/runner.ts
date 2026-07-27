@@ -1205,7 +1205,7 @@ export class Runner {
     argument: T,
     resultCell: Cell<R>,
   ): void {
-    const defaults = extractDefaultValues(pattern.argumentSchema) as Partial<T>;
+    const defaults = extractDefaultValues(pattern.argumentSchema);
     let argumentLink = getMetaLink(resultCell, "argument");
     const previousInternal = resultCell.getMetaRaw("internal", {
       meta: ignoreReadForScheduling,
@@ -1260,7 +1260,7 @@ export class Runner {
       }) as T | undefined;
       nextArgument = mergeSchemaDefaults<T>(
         argument === undefined ? previousArgument : argument,
-        defaults,
+        defaults as Partial<T>,
         pattern.argumentSchema,
       );
 

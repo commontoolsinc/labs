@@ -1,4 +1,5 @@
 import { deepFreeze } from "@commonfabric/data-model/deep-freeze";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isRecord } from "@commonfabric/utils/types";
 import { type AtomPattern, matchAtomPattern } from "./atom-pattern.ts";
@@ -242,7 +243,7 @@ export type TrustResolver = {
    */
   conceptSatisfied(
     concept: string,
-    integrityAtoms: readonly unknown[],
+    integrityAtoms: readonly CfcAtom[],
     actingPrincipal: string | undefined,
   ): boolean;
 };

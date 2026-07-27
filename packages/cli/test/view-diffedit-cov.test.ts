@@ -652,6 +652,7 @@ Deno.test("diffedit cov: a diff matching no file on disk yields a read-only sour
   const emptyEdit: DiffEdit = {
     lines: new Map(),
     fileText: new Map(),
+    oldFileLines: [],
     hunks: [],
   };
   const ws: DiffWorkspace = { resolve: () => null, read: () => null };
@@ -677,6 +678,7 @@ Deno.test("diffedit cov: save skips a verified hunk whose file was not captured 
   const edit: DiffEdit = {
     lines: new Map([[5, { absPath: "/ghost/m.ts", newLine: 0, markerLen: 1 }]]),
     fileText: new Map(), // deliberately missing /ghost/m.ts
+    oldFileLines: [],
     hunks: [
       { absPath: "/ghost/m.ts", newStart: 1, newCount: 1, verified: true },
     ],

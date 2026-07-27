@@ -1,11 +1,13 @@
 import { encodePointer } from "../../../memory/v2/path.ts";
+import type { CfcAtom } from "@commonfabric/api/cfc";
+import type { CfcConfClause } from "./clause.ts";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { uniqueCfcAtoms } from "./observation.ts";
 import { normalizeClause } from "./clause.ts";
 
 export type IFCLabel = {
-  confidentiality?: unknown[];
-  integrity?: unknown[];
+  confidentiality?: CfcConfClause[];
+  integrity?: CfcAtom[];
 };
 
 /**
@@ -150,7 +152,9 @@ export const redactCaveatSourcesForDisplay = (
     for (const key of LABEL_KEYS) {
       const value = entry.label[key];
       if (Array.isArray(value) && value.length > 0) {
-        label[key] = value.map(redactCaveatSourceAtom);
+        // `value` is the union of both label-key array types, so `.map()`
+        // widens its callback parameter and loses the element type.
+        label[key] = value.map(redactCaveatSourceAtom) as CfcAtom[];
       }
     }
     return {
@@ -190,7 +194,7 @@ export const mergeLabel = (
     // and `normalizeClause` is identity on non-clause atoms, so it is applied
     // only to confidentiality to keep intent explicit.
     const normalized = key === "confidentiality"
-      ? values.map(normalizeClause)
+      ? (values as readonly CfcConfClause[]).map(normalizeClause)
       : values;
     // Dedup structurally via `uniqueCfcAtoms()` rather than by reference
     // (`new Set()`). Atoms can be fabric-converted clones (each call to

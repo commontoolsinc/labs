@@ -112,6 +112,7 @@ describe("cf wish command action", () => {
     expect(calls[0].query).toBe("#profile");
     expect(calls[0].space).toBe("some-space");
     expect(calls[0].apiUrl).toBe("http://127.0.0.1:8000");
+    expect(calls[0].jsonOutput).toBe(true);
     // Explicit --space means the identity file is never read.
     expect(calls[0].identity.endsWith("nonexistent-but-unread.key")).toBe(true);
     expect(exits).toEqual([]);

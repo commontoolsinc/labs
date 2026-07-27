@@ -1,5 +1,5 @@
 /**
- * Gate-coverage tests for lib/view/semantics.ts.
+ * Gate-coverage tests for lib/view/languages/typescript/semantics.ts.
  *
  * The duplicated build/cache/latch logic the two factories shared was factored
  * into `lazyProgram`; the `lazyProgram` test below drives its success, throw,
@@ -17,7 +17,7 @@ import {
   _internal,
   createDiffSemantics,
   createSemantics,
-} from "../lib/view/semantics.ts";
+} from "../lib/view/languages/typescript/semantics.ts";
 import type { DiffMaps } from "../lib/view/diffdoc.ts";
 import type { Document } from "../lib/view/model.ts";
 
@@ -197,15 +197,15 @@ Deno.test("diff semantics: a hostile cwd is rejected by containment before build
   }
 });
 
-Deno.test("diff semantics: no in-workspace root file means a null service (not a failed build)", () => {
-  // With every root file filtered out, the factory returns null up front — the
+Deno.test("diff semantics: no in-workspace root file means no service (not a failed build)", () => {
+  // With every root file filtered out, the factory returns undefined up front — the
   // service is never constructed, so build()'s failure guards are not in play.
   const sem = createDiffSemantics(
     "difftext",
     { rootFiles: [], toFile: () => null, fromFile: () => null },
     { cwd: CWD },
   );
-  assertEquals(sem, null);
+  assertEquals(sem, undefined);
 });
 
 // lazyProgram is the shared build/cache/latch both factories use. The

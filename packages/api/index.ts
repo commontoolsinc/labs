@@ -27,9 +27,15 @@ import type { Cfc, CurrentPrincipal, WriteAuthorizedBy } from "./cfc.ts";
 /**
  * Common base class for `FabricInstance` and `FabricPrimitive`. Enables a
  * single `instanceof` check for any fabric-system value type.
+ *
+ * The `@commonfabric/FabricSpecialObject` member is a nominal brand with no
+ * runtime existence — see the canonical declaration in
+ * `data-model/src/interface.ts` for why it is a well-known string key and not
+ * a `unique symbol`. The two declarations must agree exactly.
  */
-// deno-lint-ignore no-empty-interface
-export interface FabricSpecialObject {}
+export interface FabricSpecialObject {
+  readonly "@commonfabric/FabricSpecialObject": true;
+}
 
 export interface FabricSpecialObjectConstructor {
   prototype: FabricSpecialObject;
@@ -1779,7 +1785,15 @@ export type BuiltInLLMTextPart = {
 
 export type BuiltInLLMImagePart = {
   type: "image";
-  image: string | Uint8Array | ArrayBuffer | URL;
+  /**
+   * The image, as a string -- a URL or a data URI. Deliberately not
+   * `Uint8Array` / `ArrayBuffer` / `URL`: an LLM request is snapshotted through
+   * `createFrozenRequestSnapshot()`, which requires a `FabricValue`, and none of
+   * those three can be stored by the data model. The builtin's own input schema
+   * (`llm-schemas.ts`) already declares this field `{ type: "string" }`, so
+   * those arms were unreachable through the validated path as well.
+   */
+  image: string;
 };
 
 export type BuiltInLLMToolCallPart = {

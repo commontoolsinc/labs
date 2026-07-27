@@ -613,6 +613,26 @@ the per-epic implementation notes).
 >   keeps its write gate failing closed. It was added by Bernhard Seefeld in
 >   "server-side commit-time row-label re-derivation (Epic E4, Phase 3.c)"
 >   (#4552). It is permanent.
+> - **`pendingReadStacks`** is a build-inherent capability, hardwired to `true`,
+>   advertising that this build's engine resolves array-`localSeq` pending reads
+>   (the full-stack dependency sets of CT-1872 1c; `resolvePendingReads` in
+>   [`packages/memory/v2/engine.ts`](../../packages/memory/v2/engine.ts)). It is
+>   not configuration: against a server that advertises it absent, the client
+>   scalarizes each dependency array to its top-of-stack element before sending
+>   (`scalarizePendingReadStacks` in
+>   [`packages/runner/src/storage/v2.ts`](../../packages/runner/src/storage/v2.ts)),
+>   and HOLDS the send until every omitted lower dependency has settled — a
+>   dropped one dooms the commit locally before it reaches the wire; once all
+>   are accepted the scalar shape is sound. (Sending while an omitted
+>   dependency is unsettled would let the old server durably accept a commit
+>   the client cascade-rejects — a split-brain where the caller sees a
+>   conflict for a write that landed.) Scheduler observations degrade instead
+>   of holding: a multi-layer observation is dropped client-side (flag-off
+>   semantics), so the flush that semantic commits await never waits on
+>   verdicts. Added on CT-1872 (PR #4606). Path to removal: retire
+>   the scalarization fallback once every server in the fleet advertises the
+>   capability; the flag itself then reads as permanent documentation of the
+>   wire shape, and the successor design is tracked as CT-1910.
 
 ### `experimentalConcurrentWatchRefresh`
 

@@ -1,4 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
+import type { IFCLabel } from "../src/cfc/mod.ts";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
@@ -196,7 +197,7 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
   const seedLabeledCell = async (
     runtime: Runtime,
     id: string,
-    label: { confidentiality: unknown[]; integrity?: unknown[] },
+    label: IFCLabel,
   ): Promise<void> => {
     const seed = runtime.edit();
     const target = runtime.getCell(signer.did(), id, undefined, seed);

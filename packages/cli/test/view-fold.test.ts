@@ -9,7 +9,7 @@ import {
 import type { Document, Line } from "../lib/view/model.ts";
 import { Session } from "../lib/view/session.ts";
 import { parseDiff } from "../lib/view/diff.ts";
-import { parseDocument } from "../lib/view/parse.ts";
+import { parseDocument } from "../lib/view/languages/typescript/parse.ts";
 import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { diffSource } from "../lib/view/diffedit.ts";
 import { renderFrame, type ViewState } from "../lib/view/render.ts";

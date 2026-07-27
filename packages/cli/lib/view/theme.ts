@@ -1,12 +1,12 @@
 /**
  * Colour theme for the `cf view` pager: a modern dark scheme. Light-grey text on
  * a near-black editor surface, with a One-Dark-inspired accent palette — purple
- * keywords, green strings, amber types, blue functions, orange numbers, grey
- * comments — and a slightly lighter surface for the status bar and dialogs. Each
- * {@link TokenClass} maps to an ANSI {@link Style}; the chrome styles (status
- * bar, selection, search, overlay) and the rainbow bracket cycle round it out.
- * The general aesthetic (double-line dialog frames, drop shadows, green buttons)
- * is unchanged — only the colours differ.
+ * keywords, green strings, amber types, blue functions, orange numbers, and
+ * bright-white comments. A slightly lighter surface holds the status bar and
+ * dialogs. Each {@link TokenClass} maps to an ANSI {@link Style}; the chrome
+ * styles (status bar, selection, search, overlay) and the rainbow bracket cycle
+ * round it out. The general aesthetic (double-line dialog frames, drop shadows,
+ * green buttons) is unchanged — only the colours differ.
  */
 import { hex, type Rgb, type Style } from "./ansi.ts";
 import type { Line, TokenClass } from "./model.ts";
@@ -23,7 +23,7 @@ const C = {
   // Text.
   fg: hex("#abb2bf"), // default text
   fgBright: hex("#e6e6e6"), // titles, the current file, emphasis
-  fgDim: hex("#5c6370"), // comments, punctuation, muted labels
+  fgDim: hex("#5c6370"), // punctuation and muted labels
   ink: hex("#1b1e24"), // dark text drawn on a bright accent (buttons, search)
   // Accents.
   red: hex("#e06c75"),
@@ -55,8 +55,9 @@ const TOKEN_STYLES: Record<TokenClass, Style> = {
   number: { fg: C.orange },
   boolean: { fg: C.orange },
   regex: { fg: C.cyan },
-  comment: { fg: C.fgDim },
-  docComment: { fg: C.fgDim },
+  comment: { fg: C.white },
+  docComment: { fg: C.white },
+  markdownQuote: { fg: C.fgDim },
   sectionHeader: { fg: C.fgBright, bold: true, underline: true },
   typeName: { fg: C.yellow },
   typeKeyword: { fg: C.yellow },
@@ -100,12 +101,12 @@ export function styleFor(cls: TokenClass): Style {
   return TOKEN_STYLES[cls];
 }
 
-/** Token colours for content shown inside a dialog. A dialog panel is only a
- * shade lighter than the editor, so it takes the editor's colours unchanged;
- * only the key column (builderCall) differs, drawn red to match the status bar's
- * shortcut keys rather than the editor's builder-call purple. */
+/** Token colours for content shown inside a dialog. The comment token marks
+ * muted labels there, while builderCall marks shortcut keys. */
 const DIALOG_TOKEN_STYLES: Record<TokenClass, Style> = {
   ...TOKEN_STYLES,
+  comment: { fg: C.fgDim },
+  docComment: { fg: C.fgDim },
   builderCall: { fg: C.red, bold: true },
 };
 

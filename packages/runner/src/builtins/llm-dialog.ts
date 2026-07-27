@@ -2,6 +2,8 @@ import {
   FabricPrimitive,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
+import type { CfcConfClause } from "../cfc/clause.ts";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import {
   DEFAULT_MODEL_NAME,
   LLMClient,
@@ -164,7 +166,7 @@ type SerializeForLLMObservationParams = {
   logicalPath?: readonly string[];
   rootLink?: NormalizedFullLink;
   labelView?: CfcLabelView;
-  observationMaxConfidentiality?: readonly unknown[];
+  observationMaxConfidentiality?: readonly CfcConfClause[];
 };
 
 function normalizeInputSchema(schemaLike: unknown): JSONSchema {
@@ -872,13 +874,13 @@ type DialogRequestSnapshot = {
   toolCatalog: ToolCatalog;
   userResultSchema: JSONSchema | undefined;
   queueName?: string;
-  observationMaxConfidentiality?: readonly unknown[];
-  systemObservedConfidentiality: readonly unknown[];
+  observationMaxConfidentiality?: readonly CfcConfClause[];
+  systemObservedConfidentiality: readonly CfcConfClause[];
 };
 
 type AvailableCellsDocumentation = {
   docs: string;
-  observedConfidentiality: readonly unknown[];
+  observedConfidentiality: readonly CfcConfClause[];
 };
 
 function resolveDirectContextCellRef(cell: unknown): Cell<any> | undefined {
@@ -1417,7 +1419,7 @@ function materializeDialogRequestSnapshot(
     runtime,
     "llmDialog",
     inputs.key("observationMaxConfidentiality").withTx(tx).get() as
-      | readonly unknown[]
+      | readonly CfcConfClause[]
       | undefined,
   );
   const toolsCell = inputs.key("tools").withTx(tx) as Cell<
@@ -1513,7 +1515,7 @@ function buildAvailableCellsDocumentationWithObservation(
   space: MemorySpace,
   context: Record<string, unknown> | undefined,
   pinnedCells: Cell<PinnedCell[]>,
-  observationMaxConfidentiality?: readonly unknown[],
+  observationMaxConfidentiality?: readonly CfcConfClause[],
 ): AvailableCellsDocumentation {
   // Collect all cell entries, deduplicating by resolved path.
   // When the same cell appears multiple times (e.g., from context AND pinned),
@@ -1524,7 +1526,7 @@ function buildAvailableCellsDocumentationWithObservation(
       name: string;
       entry: string;
       hasSchema: boolean;
-      observedConfidentiality: readonly unknown[];
+      observedConfidentiality: readonly CfcConfClause[];
     }
   >();
 
@@ -1546,7 +1548,7 @@ function buildAvailableCellsDocumentationWithObservation(
     if (existing?.hasSchema && !schemaInfo) return;
 
     let entry = `## ${name} (${path})\n`;
-    let observedConfidentiality: readonly unknown[] = [];
+    let observedConfidentiality: readonly CfcConfClause[] = [];
 
     if (schemaInfo !== undefined) {
       const schemaStr = getSchemaTypeString(schemaInfo);
@@ -1664,7 +1666,7 @@ function buildAvailableCellsDocumentation(
   space: MemorySpace,
   context: Record<string, unknown> | undefined,
   pinnedCells: Cell<PinnedCell[]>,
-  observationMaxConfidentiality?: readonly unknown[],
+  observationMaxConfidentiality?: readonly CfcConfClause[],
 ): string {
   return buildAvailableCellsDocumentationWithObservation(
     runtime,
@@ -1681,7 +1683,7 @@ function getObservedDialogMessages(
   messageObservations: DialogMessageObservationMap,
 ): {
   messages: readonly BuiltInLLMMessage[];
-  observedConfidentiality: readonly unknown[];
+  observedConfidentiality: readonly CfcConfClause[];
 } {
   const labelView = cfcLabelViewForCellFailClosed(messagesCell);
   const observedConfidentiality = joinCfcObservedConfidentiality(
@@ -1703,7 +1705,7 @@ function getObservedDialogMessages(
 function mergeDialogMessageObservations(
   current: DialogMessageObservationMap | undefined,
   updates: Array<
-    { index: number; observedConfidentiality: readonly unknown[] }
+    { index: number; observedConfidentiality: readonly CfcConfClause[] }
   >,
 ): DialogMessageObservationMap {
   const merged: Record<string, unknown[]> = {
@@ -1723,7 +1725,7 @@ function recordDialogMessageObservations(
   tx: IExtendedStorageTransaction,
   internal: Cell<Schema<typeof internalSchema>>,
   updates: Array<
-    { index: number; observedConfidentiality: readonly unknown[] }
+    { index: number; observedConfidentiality: readonly CfcConfClause[] }
   >,
 ): void {
   if (updates.length === 0) {
@@ -1991,7 +1993,7 @@ type ToolCallExecutionResult = {
   toolName: string;
   result?: any;
   error?: string;
-  observedConfidentiality?: readonly unknown[];
+  observedConfidentiality?: readonly CfcConfClause[];
 };
 
 /**
@@ -2012,8 +2014,8 @@ type ToolCallExecutionResult = {
 function effectiveObservationCeiling(
   runtime: Runtime,
   sink: string,
-  patternBound: readonly unknown[] | undefined,
-): readonly unknown[] | undefined {
+  patternBound: readonly CfcConfClause[] | undefined,
+): readonly CfcConfClause[] | undefined {
   const ceilings = runtime.cfcSinkMaxConfidentiality;
   // Object.hasOwn guard: the sink name is a runner-controlled literal today, but
   // a name colliding with an Object.prototype member must resolve to "no
@@ -2027,7 +2029,7 @@ function effectiveObservationCeiling(
 function toolAllowsObservedConfidentiality(
   toolCatalog: ToolCatalog,
   toolName: string,
-  observedConfidentiality: readonly unknown[] | undefined,
+  observedConfidentiality: readonly CfcConfClause[] | undefined,
 ): boolean {
   if (!observedConfidentiality || observedConfidentiality.length === 0) {
     return true;
@@ -2094,7 +2096,11 @@ function toolInputRequiredIntegrityFailure(
       // membership the commit-boundary gates use. `trust` carries the acting
       // principal's closure so a CONCEPT-valued floor accepts any concrete
       // atom above the concept (D5), consistently with the read/write gates.
-      const satisfied = cfcIntegritySatisfiesFloor(integrity, required, trust);
+      const satisfied = cfcIntegritySatisfiesFloor(
+        integrity as readonly CfcAtom[],
+        required,
+        trust,
+      );
       if (!satisfied) {
         return `field "${path || "(root)"}" requires integrity the ` +
           `model-supplied value does not carry (pass an integrity-bearing ` +
@@ -2207,8 +2213,8 @@ async function executeToolCalls(
   toolCatalog: ToolCatalog,
   toolCallParts: BuiltInLLMToolCallPart[],
   pinnedCells?: Cell<PinnedCell[]>,
-  observedConfidentiality?: readonly unknown[],
-  observationMaxConfidentiality?: readonly unknown[],
+  observedConfidentiality?: readonly CfcConfClause[],
+  observationMaxConfidentiality?: readonly CfcConfClause[],
 ): Promise<ToolCallExecutionResult[]> {
   const results: ToolCallExecutionResult[] = [];
   for (const part of toolCallParts) {
@@ -2482,11 +2488,11 @@ function handleSchema(
 async function handleRead(
   resolved: ResolvedToolCall & { type: "read" },
   space: MemorySpace,
-  observationMaxConfidentiality?: readonly unknown[],
+  observationMaxConfidentiality?: readonly CfcConfClause[],
 ): Promise<
   {
     result: { type: string; value: unknown };
-    observedConfidentiality: readonly unknown[];
+    observedConfidentiality: readonly CfcConfClause[];
   }
 > {
   let cell = resolved.cellRef.resolveAsCell().asSchemaFromLinks();
@@ -2645,10 +2651,10 @@ async function handleInvoke(
   runtime: Runtime,
   space: MemorySpace,
   resolved: ResolvedToolCall,
-  observationMaxConfidentiality?: readonly unknown[],
+  observationMaxConfidentiality?: readonly CfcConfClause[],
 ): Promise<{
   result: { type: string; value: any };
-  observedConfidentiality: readonly unknown[];
+  observedConfidentiality: readonly CfcConfClause[];
 }> {
   const toolCall = resolved.call;
 
@@ -2847,7 +2853,7 @@ async function invokeToolCall(
   resolved: ResolvedToolCall,
   _catalog?: ToolCatalog,
   pinnedCells?: Cell<PinnedCell[]>,
-  observationMaxConfidentiality?: readonly unknown[],
+  observationMaxConfidentiality?: readonly CfcConfClause[],
 ) {
   // Handle pinned cell tools
   if (resolved.type === "pin") {
@@ -3292,7 +3298,7 @@ async function startRequest(
       runtime,
       "llmDialog",
       inputs.key("observationMaxConfidentiality").get() as
-        | readonly unknown[]
+        | readonly CfcConfClause[]
         | undefined,
     );
   const builtinTools = inputs.key("builtinTools").get() !== false;
@@ -3315,7 +3321,7 @@ async function startRequest(
     messages: Schema<typeof LLMMessageSchema>[],
   ) => {
     const startIndex = (messagesCell.withTx(tx).get() as
-      | readonly unknown[]
+      | readonly CfcConfClause[]
       | undefined)?.length ?? 0;
     messagesCell.withTx(tx).push(...messages);
     if (runtime.cfcEnforcementMode === "disabled") {

@@ -1,6 +1,7 @@
 import {
   type Cell,
   cellEntityIdString,
+  Console as RuntimeConsole,
   EntityId,
   entityIdFrom,
   getEntityId,
@@ -100,6 +101,8 @@ export class PieceManager {
 
   private spaceCell: Cell<SpaceCellContents>;
 
+  private diagnosticConsole: RuntimeConsole;
+
   /**
    * Promise resolved when the piece manager is ready.
    */
@@ -109,6 +112,7 @@ export class PieceManager {
     private session: Session,
     public runtime: Runtime,
   ) {
+    this.diagnosticConsole = new RuntimeConsole(runtime.harness);
     this.space = this.session.space;
 
     // Use the space DID as the cause - it's derived from the space name
@@ -407,7 +411,7 @@ export class PieceManager {
       try {
         argumentValue = argumentCell.getRaw();
       } catch (err) {
-        console.debug("Error getting argument value:", err);
+        this.diagnosticConsole.debug("Error getting argument value:", err);
         return result;
       }
 
@@ -467,6 +471,7 @@ export class PieceManager {
 
             const resultCell = followCellToResult(
               this.runtime.getCellFromLink(link),
+              this.diagnosticConsole,
               new Set(),
               0,
             );
@@ -482,7 +487,7 @@ export class PieceManager {
                   depth + 1,
                 );
               } catch (err) {
-                console.debug(
+                this.diagnosticConsole.debug(
                   `Error processing array item at index ${i}:`,
                   err,
                 );
@@ -502,7 +507,7 @@ export class PieceManager {
                   depth + 1,
                 );
               } catch (err) {
-                console.debug(
+                this.diagnosticConsole.debug(
                   `Error processing object property '${key}':`,
                   err,
                 );
@@ -510,7 +515,7 @@ export class PieceManager {
             }
           }
         } catch (err) {
-          console.debug("Error in processValue:", err);
+          this.diagnosticConsole.debug("Error in processValue:", err);
         }
       };
 
@@ -524,7 +529,10 @@ export class PieceManager {
         );
       }
     } catch (error) {
-      console.debug("Error finding references in piece arguments:", error);
+      this.diagnosticConsole.debug(
+        "Error finding references in piece arguments:",
+        error,
+      );
       // Don't throw the error - return an empty result instead
     }
 
@@ -601,12 +609,13 @@ export class PieceManager {
             // Check if cell link's source chain leads to our target
             const resultCell = followCellToResult(
               this.runtime.getCellFromLink(link),
+              this.diagnosticConsole,
               new Set(),
               0,
             );
             if (resultCell?.sourceURI === piece.sourceURI) return true;
           } catch (err) {
-            console.debug(
+            this.diagnosticConsole.debug(
               "Error handling cell link in checkRefersToTarget:",
               err,
             );
@@ -629,7 +638,10 @@ export class PieceManager {
                 return true;
               }
             } catch (err) {
-              console.debug(`Error checking array item at index ${i}:`, err);
+              this.diagnosticConsole.debug(
+                `Error checking array item at index ${i}:`,
+                err,
+              );
             }
           }
         } else if (isRecord(value)) {
@@ -650,12 +662,15 @@ export class PieceManager {
                 return true;
               }
             } catch (err) {
-              console.debug(`Error checking object property '${key}':`, err);
+              this.diagnosticConsole.debug(
+                `Error checking object property '${key}':`,
+                err,
+              );
             }
           }
         }
       } catch (err) {
-        console.debug("Error in checkRefersToTarget:", err);
+        this.diagnosticConsole.debug("Error in checkRefersToTarget:", err);
       }
 
       return false;
@@ -1003,7 +1018,10 @@ export class PieceManager {
       let targetInputCell = targetCell.withTx(tx);
       if (targetIsPiece) {
         // For pieces, target fields are in the result cell's argument
-        const resultCell = followCellToResult(targetInputCell);
+        const resultCell = followCellToResult(
+          targetInputCell,
+          this.diagnosticConsole,
+        );
         if (!resultCell) {
           throw new Error("Target piece has no result cell");
         }
@@ -1092,6 +1110,7 @@ async function getCellByIdOrPiece(
 const MAX_DEPTH = 10;
 function followCellToResult(
   cell: Cell<unknown>,
+  diagnosticConsole: RuntimeConsole,
   visited = new Set<string>(),
   depth = 0,
 ): Cell<unknown> | undefined {
@@ -1112,16 +1131,21 @@ function followCellToResult(
       const resultLink = getMetaLink(cell, "result");
       if (resultLink !== undefined) {
         const resultCell = cell.runtime.getCellFromLink(resultLink);
-        return followCellToResult(resultCell, visited, depth + 1);
+        return followCellToResult(
+          resultCell,
+          diagnosticConsole,
+          visited,
+          depth + 1,
+        );
       }
     } catch (err) {
       // Ignore errors getting doc value
-      console.debug("Error getting doc value:", err);
+      diagnosticConsole.debug("Error getting doc value:", err);
     }
 
     return cell; // Return the current document's ID if no further references
   } catch (err) {
-    console.debug("Error in followCellToResult:", err);
+    diagnosticConsole.debug("Error in followCellToResult:", err);
     return undefined;
   }
 }

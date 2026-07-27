@@ -9,7 +9,14 @@ import {
 import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 
 const DEFAULT_CFC_BROWSER_TIMEOUT = 30_000;
-const CLICK_TARGET_ATTR = "data-cfc-click-target";
+/**
+ * Attribute a mark predicate stamps on the element it resolved, so the test can
+ * then address exactly that element. What identifies a mark is the attribute's
+ * value — a fresh unique token per click — so the predicates here and in
+ * `note-button-helpers.ts` all stamp this one attribute name, and no helper
+ * resolves or clears a mark another one made.
+ */
+export const CLICK_TARGET_ATTR = "data-cfc-click-target";
 
 // Predicates evaluated in the page by `waitForCondition`. Each is self-contained
 // — it closes over nothing in this module — so it can be serialized and run in
@@ -376,7 +383,6 @@ async function waitForTextWhileSettling(
 export async function clickTrustedAction(
   page: Page,
   action: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   const token = `trusted-action-${crypto.randomUUID()}`;
   let probe: TrustedActionProbe | undefined;
@@ -389,7 +395,7 @@ export async function clickTrustedAction(
     });
     const button = await page.waitForSelector(
       `[${CLICK_TARGET_ATTR}="${token}"]`,
-      { strategy: "pierce", timeout },
+      { strategy: "pierce" },
     );
     await button.click();
   } catch (cause) {
@@ -422,12 +428,10 @@ export async function clickTrustedAction(
 export async function submitViaEnter(
   page: Page,
   inputSelector: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   await settleView(page);
   const input = await page.waitForSelector(inputSelector, {
     strategy: "pierce",
-    timeout,
   });
   await input.focus();
   await page.keyboard.press("Enter");
@@ -454,7 +458,7 @@ export async function clickTrustedActionAndWaitForText(
   // and corrupts the event provenance, so we never re-click.
   try {
     await settleView(page);
-    await clickTrustedAction(page, action, { timeout });
+    await clickTrustedAction(page, action);
   } catch (cause) {
     actionProbe = await readTrustedActionProbe(page, action).catch(() =>
       undefined
@@ -532,12 +536,11 @@ export async function fillCfInput(
   page: Page,
   selector: string,
   value: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   try {
     const presentation = presentationInteractions(page);
     if (presentation) {
-      await presentation.typeIntoCfInput(selector, value, timeout);
+      await presentation.typeIntoCfInput(selector, value);
     } else {
       await waitForCondition(page, fillAndVerify, {
         args: [selector, value],
@@ -562,11 +565,9 @@ export async function fillCfInput(
 export async function readCfInputValue(
   page: Page,
   selector: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ): Promise<string> {
   const field = await page.waitForSelector(selector, {
     strategy: "pierce",
-    timeout,
   });
   const probe = await field.evaluate(
     (element: Element): { found: boolean; value: string } => {
@@ -624,7 +625,6 @@ export async function waitForDisabled(
 export async function clickCfButton(
   page: Page,
   selector: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   const token = `cf-button-${crypto.randomUUID()}`;
   try {
@@ -646,7 +646,7 @@ export async function clickCfButton(
       { cause },
     );
   }
-  await clickMarked(page, token, timeout);
+  await clickMarked(page, token);
 }
 
 /**
@@ -662,7 +662,6 @@ export async function clickNthCfButton(
   page: Page,
   selector: string,
   index: number,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   const token = `cf-nth-button-${crypto.randomUUID()}`;
   try {
@@ -678,25 +677,24 @@ export async function clickNthCfButton(
       { cause },
     );
   }
-  await clickMarked(page, token, timeout);
+  await clickMarked(page, token);
 }
 
 /**
  * Resolve the element tagged with `token` and click it, then clear the tag.
- * Shared by the click helpers above: each one marks its target through its own
- * predicate, and the resolve/click/untag tail is the same for all of them.
+ * Shared by `clickCfButton`, `clickNthCfButton`, and the text-matching click
+ * helpers in `note-button-helpers.ts`: each one marks its target through its
+ * own predicate, and the resolve/click/untag tail is the same for all of them.
  */
-async function clickMarked(
+export async function clickMarked(
   page: Page,
   token: string,
-  timeout: number,
 ): Promise<void> {
   try {
     const clickTarget = await page.waitForSelector(
       `[${CLICK_TARGET_ATTR}="${token}"]`,
       {
         strategy: "pierce",
-        timeout,
       },
     );
     await clickTarget.click();
@@ -728,7 +726,7 @@ export async function clickCfButtonAndWaitForText(
   // dismiss it). See docs/development/UI_TESTING.md.
   try {
     await settleView(page);
-    await clickCfButton(page, buttonSelector, { timeout });
+    await clickCfButton(page, buttonSelector);
   } catch (cause) {
     textProbe = await readTextProbe(page, textSelector).catch(() => undefined);
     throw new Error(

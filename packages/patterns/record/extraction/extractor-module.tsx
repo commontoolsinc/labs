@@ -8,7 +8,8 @@
  * Key architecture:
  * - Receives parentSubPieces and parentTrashedSubPieces as INPUT Cells
  * - Scans for extractable sources: notes, text-import (text), photo (OCR)
- * - Uses generateObject() with dynamic schema from existing modules
+ * - Uses generateObject() with a fixed recommendations schema; field routing
+ *   and validation come from the module registry
  * - Shows diff view: currentValue -> extractedValue for each field
  * - Optionally trashes source modules after successful extraction
  * - Auto-trashes itself after successful apply
@@ -48,7 +49,7 @@ import type {
 } from "./types.ts";
 import { getConfidenceLevel, SOURCE_PRECEDENCE } from "./types.ts";
 import type { JSONSchema } from "./schema-utils.ts";
-import { getResultSchema, getSchemaForType } from "./schema-utils.ts";
+import { getSchemaForType } from "./schema-utils.ts";
 import { getCellValue } from "./schema-utils-pure.ts";
 import { getOcrErrorText } from "./error-utils.ts";
 
@@ -500,7 +501,9 @@ function validateFieldValue(
 }
 
 /**
- * Get schema for a specific field from sub-pieces
+ * Get schema for a specific field of a module type present in the Record.
+ *
+ * The module registry is the source of truth for a module's field shapes.
  */
 function getFieldSchema(
   subPieces: readonly SubPieceEntry[],
@@ -510,13 +513,6 @@ function getFieldSchema(
   const entry = subPieces.find((e) => e?.type === moduleType);
   if (!entry) return undefined;
 
-  // Try stored schema first
-  const storedSchema = entry.schema as JSONSchema | undefined;
-  if (storedSchema?.properties?.[fieldName]) {
-    return storedSchema.properties[fieldName];
-  }
-
-  // Fallback to registry schema (for legacy entries)
   try {
     const registrySchema = getSchemaForType(moduleType);
     if (registrySchema?.properties?.[fieldName]) {
@@ -1192,13 +1188,10 @@ function createModuleWithFields(
 
   try {
     const newPiece = createSubPiece(moduleType, initialValues);
-    // Capture schema at creation time for dynamic discovery
-    const schema = getResultSchema(newPiece);
     return {
       type: moduleType,
       pinned: false,
       piece: newPiece,
-      schema,
     };
   } catch (e) {
     console.warn(`Failed to create module ${moduleType}:`, e);
@@ -1521,12 +1514,10 @@ const applySelected = handler<
               }
 
               const newPiece = createSubPiece(moduleType, initialValues);
-              const schema = getResultSchema(newPiece);
               newEntries.push({
                 type: moduleType,
                 pinned: false,
                 piece: newPiece,
-                schema,
               });
               anySuccess = true;
               console.debug(
@@ -1782,7 +1773,6 @@ export const ExtractorModule = pattern<
         ocr: generateText({
           system: OCR_SYSTEM_PROMPT,
           prompt: prompt as any,
-          model: "anthropic:claude-sonnet-4-5",
         }),
       };
     });

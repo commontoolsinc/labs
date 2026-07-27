@@ -13,11 +13,15 @@ import {
   resetModernCellRepConfig,
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type {
+  FabricPlainObject,
+  FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchema } from "@commonfabric/api";
 import {
   encodeMemoryBoundary,
+  encodeMemoryBoundaryUnprovenFabricValue,
   type EntityDocument,
   getMemoryProtocolFlags,
   type HelloOkMessage,
@@ -48,7 +52,7 @@ import { testSessionOpenServerOptions } from "./v2-auth-test-helpers.ts";
 const textEncoder = new TextEncoder();
 
 const encodedBytes = (value: ServerMessage): number =>
-  textEncoder.encode(encodeMemoryBoundary(value)).byteLength;
+  textEncoder.encode(encodeMemoryBoundaryUnprovenFabricValue(value)).byteLength;
 
 const largeSchema = (): JSONSchema => ({
   type: "object",
@@ -146,12 +150,13 @@ Deno.test("sync schema table experiment captures repeated schema savings", () =>
   const message = syncEffect(sync);
   const bytes = encodedBytes(message);
   const schemaMarkerCount =
-    encodeMemoryBoundary(message).split("$defs").length -
+    encodeMemoryBoundaryUnprovenFabricValue(message).split("$defs").length -
     1;
   const compressed = compressServerMessageSchemas(message);
   const compressedBytes = encodedBytes(compressed);
-  const compressedSchemaMarkerCount = encodeMemoryBoundary(compressed)
-    .split("$defs").length - 1;
+  const compressedSchemaMarkerCount =
+    encodeMemoryBoundaryUnprovenFabricValue(compressed)
+      .split("$defs").length - 1;
   const expanded = expandServerMessageSchemas(compressed);
 
   assertEquals(expanded, message);
@@ -180,10 +185,9 @@ Deno.test("sync schema table reports each repeated schema once", () => {
 });
 
 Deno.test("sync schema table preserves own __proto__ fields", () => {
-  const value = JSON.parse('{"__proto__":{"safe":true}}') as Record<
-    string,
-    unknown
-  >;
+  const value = JSON.parse(
+    '{"__proto__":{"safe":true}}',
+  ) as FabricPlainObject;
   value.ref = linkRefFrom({
     id: "of:target",
     path: [],
@@ -680,7 +684,7 @@ Deno.test("sync schema table rejects refs without a populated table", () => {
 
 Deno.test("sync schema table validates dangling refs without recursive traversal", () => {
   const danglingRef = "schema-ref@2:sha256:missing";
-  let deeplyNested: unknown = {
+  let deeplyNested: FabricValue = {
     $alias: {
       id: "of:deep-target",
       path: [],
