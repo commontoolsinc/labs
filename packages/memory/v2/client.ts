@@ -1,9 +1,9 @@
+import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import {
   type ClientCommit,
   compatibleMemoryProtocolFlags,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
-  encodeMemoryBoundaryUnprovenFabricValue,
   type EntitySnapshot,
   getMemoryProtocolFlags,
   getPersistentSchedulerStateConfig,
@@ -53,8 +53,8 @@ export type MountOptions = {
 };
 
 export type SessionOpenAuth = {
-  invocation: Record<string, unknown>;
-  authorization: unknown;
+  invocation: FabricPlainObject;
+  authorization: FabricValue;
 };
 
 export type SessionOpenAuthContext = {
@@ -179,7 +179,7 @@ export class Client {
     this.#spaces.delete(session);
   }
 
-  async request<Result>(message: Record<string, unknown>): Promise<Result> {
+  async request<Result>(message: FabricPlainObject): Promise<Result> {
     await this.ensureConnected();
     // `ensureConnected()` is async even when the transport is already live, so
     // close() can run while this request is suspended there. Recheck before
@@ -191,7 +191,7 @@ export class Client {
     const requestId = message.requestId as string;
     const pending = Promise.withResolvers<unknown>();
     this.#pending.set(requestId, pending);
-    await this.transport.send(encodeMemoryBoundaryUnprovenFabricValue(message));
+    await this.transport.send(encodeMemoryBoundary(message));
     const result = await pending.promise as ResponseMessage<Result>;
     if (result.error) {
       const error = new Error(result.error.message);
