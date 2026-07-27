@@ -11,6 +11,7 @@
     "fmt": "deno fmt"
   },
   "imports": {
+    // Dependency guide: ../../docs/development/DEPENDENCIES.md
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.1",
     "@opentelemetry/sdk-trace-base": "npm:@opentelemetry/sdk-trace-base@^2.9.0",
     "@opentelemetry/sdk-metrics": "npm:@opentelemetry/sdk-metrics@^2.9.0",

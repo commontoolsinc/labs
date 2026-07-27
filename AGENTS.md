@@ -130,6 +130,8 @@ If you are developing runtime code, read the following documentation:
 
 - `docs/development/DEVELOPMENT.md` - Coding style, design principles, and best
   practices
+- `docs/development/DEPENDENCIES.md` - Adding and rolling dependencies, required
+  version pins, and dependency troubleshooting
 - `docs/development/LOCAL_DEV_SERVERS.md` - **CRITICAL**: How to start local dev
   servers correctly (use `dev-local` for shell, not `dev`)
 - `docs/development/TESTING.md` - Running the test suites and the general unit
@@ -188,4 +190,5 @@ task, Deno falls back to the root workspace's test task, which re-runs the
 entire suite recursively — causing exponential process spawning and CI timeouts.
 
 See `packages/utils/deno.jsonc` for an example of a correctly configured
-package.
+package. When the package needs a dependency, follow
+`docs/development/DEPENDENCIES.md`.

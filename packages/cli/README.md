@@ -33,9 +33,9 @@ standard error and continues searching that piece and the rest of the space.
 - ANSI colors are emitted only when stdout is a TTY. `--no-color` or
   `NO_COLOR=1` disables them everywhere (including Cliffy help/usage output);
   `FORCE_COLOR=1`/`CLICOLOR_FORCE=1` forces them when piped. The policy is
-  applied in `lib/color-mode.ts`; the `@std/fmt/colors` import-map pin in
-  `deno.jsonc` must track Cliffy's own `@std/fmt` dependency range (guarded by
-  `test/color-mode.test.ts`).
+  applied in `lib/color-mode.ts` and guarded by `test/color-mode.test.ts`. The
+  [Cliffy dependency guidance](../../docs/development/DEPENDENCIES.md#cliffy)
+  owns the import-map constraint that keeps this behavior working.
 - `-q/--quiet` (on `piece`/`wish` subcommands) suppresses the stderr hint and
   next-step blocks. It deliberately does NOT change the log floor: consumers
   parse `--quiet` runs' stderr for runtime warnings (Loom's stale-root heal

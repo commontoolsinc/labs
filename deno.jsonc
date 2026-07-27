@@ -136,6 +136,7 @@
     ]
   },
   "imports": {
+    // Dependency guide: docs/development/DEPENDENCIES.md
     "commonfabric": "./packages/api/index.ts",
     "commonfabric/cfc": "./packages/api/cfc-authoring.ts",
     "commonfabric/schema": "./packages/api/schema.ts",
@@ -143,9 +144,7 @@
     "core-js/proposals/async-explicit-resource-management": "https://esm.sh/core-js@3.46.0/proposals/async-explicit-resource-management",
     "@commonfabric/ports": "./ports.json",
     "@astral/astral": "jsr:@astral/astral@0.5.6",
-    // Held at the release candidate: 1.2.1 changes how a required argument
-    // followed by a variadic one is parsed, and `cf piece call` stops seeing its
-    // first argument. Pinned exact so the within-range refresh cannot pull it.
+    // Cliffy rolls as a set; see the "Cliffy" section in the dependency guide.
     "@cliffy/command": "jsr:@cliffy/command@1.0.0-rc.8",
     "@noble/hashes": "npm:@noble/hashes@^2.2.0",
     "@std/assert": "jsr:@std/assert@^1.0.19",
@@ -163,7 +162,6 @@
     "hash-wasm": "npm:hash-wasm@^4.12.0",
     "lit": "npm:lit@^3.3.3",
     "multiformats": "npm:multiformats@^14.0.4",
-    "ses": "npm:ses@^2.2.0",
     "turndown": "npm:turndown@^7.2.4",
     "unicode-case-folding": "npm:unicode-case-folding@1.1.1",
     "zod": "npm:zod@^4.4.3"
