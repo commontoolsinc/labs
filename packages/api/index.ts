@@ -159,6 +159,98 @@ export interface FabricBytesConstructor {
 export declare const FabricBytes: FabricBytesConstructor;
 
 /**
+ * An immutable regular expression. Extends `FabricPrimitive` -- treated like a
+ * primitive in the fabric type system (always frozen, passes through
+ * conversion unchanged).
+ *
+ * The pattern is held as a flavor / source / flags triple rather than as a
+ * native `RegExp`, so that flavors with no native representation can still be
+ * carried. `value` reconstitutes a native `RegExp` where one exists.
+ */
+export interface FabricRegExp extends FabricPrimitive {
+  readonly source: string;
+  readonly flags: string;
+  readonly flavor: string;
+
+  /**
+   * A fresh native `RegExp` equivalent to this value, returned anew on each
+   * call so the internal instance is never aliased out. Throws for a flavor
+   * with no native `RegExp` representation.
+   */
+  readonly value: RegExp;
+}
+
+export interface FabricRegExpConstructor {
+  new (regex: RegExp): FabricRegExp;
+  new (flavor: string, source: string, flags: string): FabricRegExp;
+  prototype: FabricRegExp;
+}
+
+export declare const FabricRegExp: FabricRegExpConstructor;
+
+/**
+ * Structured state for constructing a `FabricError`. The fixed-schema slots
+ * are `FabricValue`-typed; `extras` carries any custom enumerable properties,
+ * whose keys must not collide with the slot names.
+ */
+export type FabricErrorState = {
+  /** Constructor name of the originating native `Error` (e.g. `"TypeError"`). */
+  readonly type: string;
+  /** The `.name` property. Omit to mean "same as `type`". */
+  readonly name?: string | null | undefined;
+  /** The `.message` property. */
+  readonly message: string;
+  /** The `.stack` property, or `undefined`. */
+  readonly stack: string | undefined;
+  /** The `.cause` value, in `FabricValue` form, or `undefined`. */
+  readonly cause: FabricValue | undefined;
+  /** Custom enumerable own properties, in `FabricValue` form. */
+  readonly extras?:
+    | Iterable<readonly [string, FabricValue]>
+    | Readonly<Record<string, FabricValue>>
+    | undefined;
+};
+
+/**
+ * An error carried as fabric data. Extends `FabricInstance` (not
+ * `FabricPrimitive`): it holds fixed-schema slots plus a bag of extras, and
+ * `cause` may be an arbitrary `FabricValue`, so it is a small object graph
+ * rather than a leaf.
+ *
+ * Like every `FabricInstance` it is mutable until frozen: the slots are plain
+ * writable properties, and `setExtra()` / `deleteExtra()` are gated on the
+ * frozen state.
+ */
+export interface FabricError extends FabricInstance {
+  type: string;
+  name: string;
+  message: string;
+  stack: string | undefined;
+  cause: FabricValue | undefined;
+
+  getExtra(key: string): FabricValue | undefined;
+  hasExtra(key: string): boolean;
+  setExtra(key: string, value: FabricValue): void;
+  deleteExtra(key: string): boolean;
+  readonly extraSize: number;
+  extraKeys(): IterableIterator<string>;
+  extraEntries(): IterableIterator<[string, FabricValue]>;
+}
+
+export interface FabricErrorConstructor {
+  new (state: FabricErrorState): FabricError;
+  fromNativeError(error: Error): FabricError;
+  prototype: FabricError;
+}
+
+export declare const FabricError: FabricErrorConstructor;
+
+// TODO(danfuzz): `FabricMap` and `FabricSet` are deliberately absent from the
+// declarations above. Both need substantial rework before they are useful, and
+// declaring them here would imply a utility they do not yet have. Their
+// absence is a decision, not an oversight; revisit once that rework lands.
+
+/**
  * The full set of values that the fabric storage layer can represent.
  */
 export type FabricValue =
