@@ -152,7 +152,7 @@ describe("CLI runtime creation", () => {
     }
   });
 
-  it("defers both space-cell and manager sync when requested", async () => {
+  it("authenticates a deferred manager without syncing its space cell", async () => {
     const identity = await Identity.fromPassphrase(
       "piece manager deferred sync test",
       { implementation: "noble" },
@@ -162,9 +162,12 @@ describe("CLI runtime creation", () => {
 
     const originalHealthCheck = Runtime.prototype.healthCheck;
     const originalGetSpaceCell = Runtime.prototype.getSpaceCell;
+    const originalEnsureSpaceSession =
+      PieceManager.prototype.ensureSpaceSession;
     const originalManagerSynced = PieceManager.prototype.synced;
     const managers: PieceManager[] = [];
     let spaceCellSyncCalls = 0;
+    let spaceSessionCalls = 0;
     let managerSyncCalls = 0;
 
     Runtime.prototype.healthCheck = () => Promise.resolve(true);
@@ -180,6 +183,10 @@ describe("CLI runtime creation", () => {
       managerSyncCalls++;
       return Promise.resolve();
     };
+    PieceManager.prototype.ensureSpaceSession = () => {
+      spaceSessionCalls++;
+      return Promise.resolve();
+    };
 
     try {
       managers.push(
@@ -190,6 +197,7 @@ describe("CLI runtime creation", () => {
         }),
       );
       expect(spaceCellSyncCalls).toBe(1);
+      expect(spaceSessionCalls).toBe(0);
       expect(managerSyncCalls).toBe(1);
 
       managers.push(
@@ -201,10 +209,12 @@ describe("CLI runtime creation", () => {
         }),
       );
       expect(spaceCellSyncCalls).toBe(1);
+      expect(spaceSessionCalls).toBe(1);
       expect(managerSyncCalls).toBe(1);
     } finally {
       Runtime.prototype.healthCheck = originalHealthCheck;
       Runtime.prototype.getSpaceCell = originalGetSpaceCell;
+      PieceManager.prototype.ensureSpaceSession = originalEnsureSpaceSession;
       PieceManager.prototype.synced = originalManagerSynced;
       for (const manager of managers) {
         await (manager.runtime.storageManager as unknown as {

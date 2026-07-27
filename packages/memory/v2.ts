@@ -478,7 +478,7 @@ export type GraphQueryRequest = {
   query: GraphQuery;
 };
 
-export interface EntityIdListRequest {
+export type EntityIdListRequest = {
   type: "entity-id.list";
   requestId: string;
   space: string;
@@ -486,15 +486,15 @@ export interface EntityIdListRequest {
   after?: EntityId;
   limit?: number;
   expectedServerSeq?: number;
-}
+};
 
-export interface EntityIdLookupRequest {
+export type EntityIdLookupRequest = {
   type: "entity-id.exists";
   requestId: string;
   space: string;
   sessionId: SessionId;
   id: EntityId;
-}
+};
 
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
 

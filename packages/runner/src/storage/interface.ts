@@ -392,6 +392,9 @@ export interface IStorageProvider {
 export interface IStorageProviderWithReplica extends IStorageProvider {
   replica: ISpaceReplica;
 
+  /** Establish the authenticated space session without reading entity values. */
+  ensureSession?(): Promise<void>;
+
   /** List live space-scoped entity identifiers without loading their values. */
   listEntityIds?(): Promise<string[] | undefined>;
 

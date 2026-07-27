@@ -1206,9 +1206,18 @@ Deno.test("CellBridge reconnect does not require entity listing support", async 
   const tree = new FsTree();
   let pieceListRequests = 0;
   let disposedManagers = 0;
+  let sessionProbes = 0;
   const reconnectManager = {
+    ensureSpaceSession: () => {
+      sessionProbes++;
+      return Promise.resolve();
+    },
     synced: () => Promise.resolve(),
+    getSpace: () => "did:key:zReconnectSpace",
     runtime: {
+      storageManager: {
+        authorizationError: () => undefined,
+      },
       dispose: () => {
         disposedManagers++;
         return Promise.resolve();
@@ -1235,8 +1244,101 @@ Deno.test("CellBridge reconnect does not require entity listing support", async 
   await reconnectable._attemptReconnect();
 
   assertEquals(reconnectable._disconnected, false);
+  assertEquals(sessionProbes, 1);
   assertEquals(pieceListRequests, 0);
   assertEquals(disposedManagers, 1);
+});
+
+Deno.test("CellBridge reconnect keeps writes disabled after authorization is revoked", async () => {
+  const tree = new FsTree();
+  const authorizationError = Object.assign(
+    new Error("space access revoked"),
+    { name: "AuthorizationError" },
+  );
+  let sessionProbes = 0;
+  let managerSyncs = 0;
+  let disposedManagers = 0;
+  const reconnectManager = {
+    ensureSpaceSession: () => {
+      sessionProbes++;
+      return Promise.resolve();
+    },
+    synced: () => {
+      managerSyncs++;
+      return Promise.resolve();
+    },
+    getSpace: () => "did:key:zRevokedReconnectSpace",
+    runtime: {
+      storageManager: {
+        authorizationError: () => authorizationError,
+      },
+      dispose: () => {
+        disposedManagers++;
+        return Promise.resolve();
+      },
+    },
+  } as unknown as SpaceState["manager"];
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    loadManager: () => Promise.resolve(reconnectManager),
+  });
+  buildTestSpace(bridge, "home", []);
+
+  const reconnectable = bridge as unknown as {
+    _disconnected: boolean;
+    _reconnectTimer: ReturnType<typeof setTimeout> | null;
+    _attemptReconnect(): Promise<void>;
+  };
+  reconnectable._disconnected = true;
+  await reconnectable._attemptReconnect();
+  if (reconnectable._reconnectTimer !== null) {
+    clearTimeout(reconnectable._reconnectTimer);
+    reconnectable._reconnectTimer = null;
+  }
+
+  assertEquals(reconnectable._disconnected, true);
+  assertEquals(sessionProbes, 1);
+  assertEquals(managerSyncs, 1);
+  assertEquals(disposedManagers, 1);
+});
+
+Deno.test("CellBridge rejects an unauthorized initial space connection", async () => {
+  const tree = new FsTree();
+  const authorizationError = Object.assign(
+    new Error("space access denied"),
+    { name: "AuthorizationError" },
+  );
+  let disposedManagers = 0;
+  const manager = {
+    ensureSpaceSession: () => Promise.resolve(),
+    synced: () => Promise.resolve(),
+    getSpace: () => "did:key:zDeniedInitialSpace",
+    runtime: {
+      storageManager: {
+        authorizationError: () => authorizationError,
+      },
+      dispose: () => {
+        disposedManagers++;
+        return Promise.resolve();
+      },
+    },
+  } as unknown as SpaceState["manager"];
+  const bridge = new CellBridge(tree, "/tmp/cf-exec", {
+    loadManager: () => Promise.resolve(manager),
+  });
+  bridge.init({ apiUrl: "https://example.invalid", identity: "test" });
+
+  await assertRejects(
+    () => bridge.connectSpace("denied"),
+    Error,
+    "space access denied",
+  );
+
+  assertEquals(disposedManagers, 1);
+  assertEquals(
+    tree.lookup(tree.rootIno, encodeFuseComponent("denied")),
+    undefined,
+  );
+  assertEquals(bridge.spaces.has("denied"), false);
 });
 
 Deno.test("CellBridge status reports /pieces loaded only after materialization", async () => {

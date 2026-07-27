@@ -114,6 +114,36 @@ describe("Memory v2 lazy session creation", () => {
     expect(sessionCreates).toBe(0);
   });
 
+  it("can authenticate a space without reading entity data", async () => {
+    let sessionCreates = 0;
+    let closes = 0;
+    const storage = TestStorageManager.create({
+      as: signer,
+      memoryHost: new URL("memory://"),
+    }, {
+      create(_space: MemorySpace) {
+        sessionCreates++;
+        return Promise.resolve({
+          client: {
+            close: () => {
+              closes++;
+              return Promise.resolve();
+            },
+          } as never,
+          session: {} as never,
+        });
+      },
+    });
+    const provider = storage.open(space);
+
+    await provider.ensureSession!();
+    await provider.ensureSession!();
+    expect(sessionCreates).toBe(1);
+
+    await storage.close();
+    expect(closes).toBe(1);
+  });
+
   it("creates a session lazily on the first commit", async () => {
     let sessionCreates = 0;
     let commits = 0;

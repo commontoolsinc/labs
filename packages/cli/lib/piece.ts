@@ -366,7 +366,12 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
         }),
     );
     pieceManagerRef.current = pieceManager;
-    if (!config.deferSpaceCellSync) {
+    if (config.deferSpaceCellSync) {
+      await timeCliPhase(
+        "loadManager.ensureSpaceSession",
+        () => pieceManager.ensureSpaceSession(),
+      );
+    } else {
       // `synced()` settles even when this space is permanently denied: the
       // memory client terminates a denied session rather than retrying its
       // reopen. It settles quietly, though — a denied cross-space link stays a
@@ -376,8 +381,8 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
         "loadManager.synced",
         () => pieceManager.synced(),
       );
-      throwOnSpaceAuthorizationError(runtime.storageManager, session.space);
     }
+    throwOnSpaceAuthorizationError(runtime.storageManager, session.space);
     return pieceManager;
   });
 }

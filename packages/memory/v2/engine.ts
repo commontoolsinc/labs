@@ -2355,10 +2355,10 @@ export const listEntityIds = (
   }) as { id: EntityId }[]).map(({ id }) => id);
 };
 
-export interface EntityIdPageOptions {
+export type EntityIdPageOptions = {
   after?: EntityId;
   limit: number;
-}
+};
 
 export const listEntityIdPage = (
   engine: Engine,

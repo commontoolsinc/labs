@@ -1646,6 +1646,10 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.authorizationError();
   }
 
+  ensureSession(): Promise<void> {
+    return this.replica.ensureSession();
+  }
+
   listEntityIds(): Promise<string[] | undefined> {
     return this.replica.listEntityIds();
   }
@@ -2025,6 +2029,10 @@ class SpaceReplica implements ISpaceReplica {
       return;
     }
     this.#lastAuthorizationError = null;
+  }
+
+  async ensureSession(): Promise<void> {
+    await this.sessionHandle();
   }
 
   async sqliteQuery(

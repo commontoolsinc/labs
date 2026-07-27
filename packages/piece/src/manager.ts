@@ -154,6 +154,11 @@ export class PieceManager {
     return await this.runtime.storageManager.synced();
   }
 
+  async ensureSpaceSession(): Promise<void> {
+    await this.ready;
+    await this.runtime.storageManager.open(this.space).ensureSession?.();
+  }
+
   async listEntityIds(): Promise<string[] | undefined> {
     await this.ready;
     return await this.runtime.storageManager.open(this.space).listEntityIds?.();

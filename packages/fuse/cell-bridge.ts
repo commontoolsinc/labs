@@ -447,7 +447,7 @@ export class CellBridge {
           deferSpaceCellSync: true,
         });
         try {
-          await manager.synced();
+          await this.verifyManagerConnection(manager);
           if (state.piecesHydrated) {
             await state.pieces.getRegisteredPieces();
           }
@@ -510,6 +510,15 @@ export class CellBridge {
   }): void {
     this.apiUrl = config.apiUrl;
     this.identity = config.identity;
+  }
+
+  private async verifyManagerConnection(manager: PieceManager): Promise<void> {
+    await manager.ensureSpaceSession?.();
+    await manager.synced?.();
+    if (typeof manager.getSpace !== "function") return;
+    const authorizationError = manager.runtime?.storageManager
+      ?.authorizationError?.(manager.getSpace());
+    if (authorizationError) throw authorizationError;
   }
 
   private async createSpaceManager(spaceName: string): Promise<PieceManager> {
@@ -820,6 +829,7 @@ export class CellBridge {
     let state: SpaceState | undefined;
     try {
       manager = await this.createSpaceManager(spaceName);
+      await this.verifyManagerConnection(manager);
       state = await this.buildSpaceTree(spaceName, manager);
 
       this.updateIndexJson(state);
