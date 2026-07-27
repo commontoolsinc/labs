@@ -273,12 +273,13 @@ function commonPrefixLength(
  * - Everything else: an opaque leaf, changed iff its value changed.
  *
  * Comparing by key set is only meaningful for a plain object or array, where
- * the key set IS the shallow structure and deeper changes are picked up by the
- * recursive path instead. It says nothing useful about any other object: a
- * `FabricPrimitive` holds its state in private fields and presents no
- * enumerable own-props at all, so comparing key sets reports every two of them
- * as unchanged and reactive consumers never re-fire. The same goes for any
- * other non-plain value whose key set doesn't describe it. Those are leaves,
+ * the key set IS the shallow structure and a subscriber on a deeper path still
+ * catches a changed value underneath it. It says nothing useful about any
+ * other object: a `FabricPrimitive` holds its state in private fields, so
+ * comparing key sets reports every two of them as unchanged — and because that
+ * state sits behind no enumerable key, no deeper subscriber path reaches it
+ * either. The change goes unnoticed at every depth, which is what separates
+ * this from a plain object's values being skipped by design. Those are leaves,
  * and a leaf is compared by value.
  *
  * That resolves an ambiguity this function used to leave open — whether a
