@@ -8,12 +8,15 @@ import {
   type FabricValueLayer,
 } from "./interface.ts";
 import { isAdmittedFabricFactory } from "./fabric-factory.ts";
+import { BaseFabricInstance } from "./fabric-instances/BaseFabricInstance.ts";
+import { BaseFabricPrimitive } from "./fabric-primitives/BaseFabricPrimitive.ts";
 
 /**
- * Indicates whether the value is a fabric value, accepting `FabricInstance`
- * values, admitted `FabricFactory` callables, `undefined`, and arrays with
- * `undefined` elements or sparse holes -- in addition to the base fabric types
- * (`null`, `boolean`, `number`, `string`, plain objects, dense arrays).
+ * Indicates whether the value is a fabric value, accepting
+ * `FabricSpecialObject`s (both `FabricInstance` and `FabricPrimitive`),
+ * admitted `FabricFactory` callables, `undefined`, and arrays with `undefined`
+ * elements or sparse holes -- in addition to the base fabric types (`null`,
+ * boolean, number, string, plain objects, dense arrays).
  *
  * This function is a TypeScript type guard for `FabricValueLayer`.
  */
@@ -43,7 +46,7 @@ export function isFabricValueLayer(
         return isArrayWithOnlyIndexProperties(value);
       }
       // Plain objects are accepted; class instances are not (except
-      // `FabricInstance`, handled above).
+      // `FabricSpecialObject`, handled above).
       const proto = Object.getPrototypeOf(value);
       return proto === null || proto === Object.prototype;
     }
@@ -61,6 +64,125 @@ export function isFabricValueLayer(
       return false;
     }
   }
+}
+
+/**
+ * Indicates whether the value is a `FabricValue` -- a recursive check of exact
+ * structural membership in the `FabricValue` type, independent of frozen-ness.
+ *
+ * Returns `true` for any scalar (`null`, `undefined`, `boolean`, `number`
+ * -- including `-0`, `NaN`, and `±Infinity` -- `string`, `bigint`, and
+ * registry-interned (`Symbol.for(...)`) symbols), any `FabricInstance` or
+ * `FabricPrimitive`, an admitted `FabricFactory`, an array of `FabricValue`s
+ * with no enumerable non-index properties (sparse holes allowed), or a plain
+ * object whose values are all `FabricValue`s. Returns `false` for an arbitrary
+ * function or a unique (uninterned) symbol -- whether the value itself or
+ * reached anywhere within it -- and for any other class instance (`Date`,
+ * `Map`, ...) not representable as a `FabricValue`. Handles circular
+ * references.
+ *
+ * This is a *membership* check, not a frozen-ness check: a structurally-valid
+ * but unfrozen object or array is still a `FabricValue`. For the deep-frozen
+ * question, see `isDeepFrozenFabricValue()`. A fabric instance is a member by
+ * type (it is a `FabricSpecialObject`); this does not recurse into its private
+ * interior, whose contents are `FabricValue`s by the instance's construction
+ * contract and are reachable only via frozen-semantic protocols that a
+ * membership check must not invoke.
+ *
+ * Contrast the shallow, single-level sibling `isFabricValueLayer()` and
+ * `isFabricCompatible()` (which additionally accepts native values *convertible*
+ * to fabric form).
+ */
+export function isFabricValue(value: unknown): value is FabricValue {
+  // Fast leaf paths first, so a function or a primitive answers without
+  // allocating the cycle-tracking set or the recursion closure below.
+  if (typeof value === "function") {
+    return isAdmittedFabricFactory(value);
+  } else if (typeof value === "symbol") {
+    // Only registry-interned symbols are `FabricValue`s; unique (uninterned)
+    // symbols are not portable across realms and are rejected, matching
+    // `isFabricValueLayer()`.
+    return Symbol.keyFor(value) !== undefined;
+  } else if (value === null || typeof value !== "object") {
+    // A non-function, non-symbol primitive -- a direct `FabricValue` member.
+    return true;
+  }
+
+  // We have object structure to walk. Allocate the cycle-tracking set and build
+  // the recursion callback once here, reusing the same closure at every layer.
+  const seen = new Set<object>();
+  const check = (item: unknown): boolean => {
+    if (typeof item === "function") return isAdmittedFabricFactory(item);
+    if (typeof item === "symbol") return Symbol.keyFor(item) !== undefined;
+    if (item === null || typeof item !== "object") {
+      // A non-function, non-symbol primitive.
+      return true;
+    } else if (seen.has(item)) {
+      // Already being validated higher in the recursion; treat as a member for
+      // the rest of this walk (a cycle back to an in-progress value).
+      return true;
+    }
+
+    seen.add(item);
+
+    if (BaseFabricPrimitive.isInstance(item)) {
+      // A `FabricPrimitive` is a `FabricValue` with no outbound references.
+      return true;
+    } else if (BaseFabricInstance.isInstance(item)) {
+      // A fabric instance is a `FabricValue` by type. Its logical contents are
+      // private and reachable only through the frozen-semantic
+      // `[IS_DEEP_FROZEN]`/`[DEEP_FREEZE]` protocols, which a pure membership
+      // check must not invoke; the instance's construction contract already
+      // guarantees its interior holds `FabricValue`s. So membership trusts the
+      // type and does not recurse.
+      return true;
+    } else if (Array.isArray(item)) {
+      // Arrays with enumerable named (non-index) properties have no fabric
+      // representation.
+      if (!isArrayWithOnlyIndexProperties(item)) return false;
+      for (let i = 0; i < item.length; i++) {
+        if (!(i in item)) continue; // sparse hole
+        if (!check(item[i])) return false;
+      }
+      return true;
+    } else if (isPlainObject(item)) {
+      const record = item as Record<string, unknown>;
+      for (const key of Object.keys(record)) {
+        if (!check(record[key])) return false;
+      }
+      return true;
+    } else {
+      // An instance of a class not covered by the `FabricValue` type.
+      return false;
+    }
+  };
+
+  return check(value);
+}
+
+/**
+ * Indicates whether a fabric value is a plain object, an array, or a
+ * `FabricSpecialObject` -- everything a `typeof value === "object"` test
+ * accepts, minus `null`. The name spells out the array case because "object"
+ * alone reads as excluding it.
+ *
+ * The runtime behavior matches a bare `isRecord()` exactly. The difference is
+ * static: `isRecord()` narrows to `Record<string | number | symbol, unknown>`,
+ * which discards the fact that the value is a `FabricValue` -- so a guarded
+ * value can no longer be handed to a `FabricValue` API. This keeps that half.
+ *
+ * Contrast `isFabricPlainObject()`, which is strictly narrower at RUNTIME: it
+ * accepts only plain objects, rejecting arrays and `FabricSpecialObject`s. The
+ * two are not interchangeable.
+ */
+export function isFabricObjectOrArray(
+  value: FabricValue,
+): value is FabricValue & object;
+export function isFabricObjectOrArray(
+  value: Immutable<FabricValue>,
+): value is Immutable<FabricValue> & object;
+export function isFabricObjectOrArray(value: unknown): boolean {
+  return typeof value === "object" && value !== null;
 }
 
 /**

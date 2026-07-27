@@ -139,6 +139,7 @@ import {
 import { popFrame, pushFrame } from "./builder/pattern.ts";
 import type { Frame } from "./builder/types.ts";
 import type { ConsoleMessage } from "./interface.ts";
+import type { ConsoleMethod } from "./harness/console.ts";
 import type {
   WriteStackTraceEntry,
   WriteStackTraceMatcher,
@@ -369,9 +370,15 @@ export const DEFAULT_MAX_RETRIES = 5;
 
 export type { IExtendedStorageTransaction, IStorageProvider, MemorySpace };
 
+export interface ConsoleHandlerOutput {
+  method: ConsoleMethod;
+  args: any[];
+  target?: Console;
+}
+
 export type ConsoleHandler = (
   message: ConsoleMessage,
-) => any[];
+) => any[] | ConsoleHandlerOutput;
 
 export type ErrorWithContext = Error & {
   action: Action;
@@ -409,7 +416,8 @@ export interface ExperimentalOptions {
   /**
    * Mint computed-scheme entity ids (`computed:fid1:<hash>`) for derived
    * internal cells classified as replayable by the builder. Gates minting
-   * only; readers accept both forms unconditionally. See
+   * only; readers accept both forms unconditionally. Defaults to on; pass
+   * `false` as a temporary rollback override. See
    * `docs/specs/computed-cell-identity.md`.
    */
   computedCellIds?: boolean | undefined;
@@ -728,6 +736,12 @@ const CFC_POLICY_MANIFEST_DOC_SCHEMA = {
 export interface SpaceCellContents {
   defaultPattern: Cell<unknown>;
 }
+
+type RuntimeSetupOptions = {
+  patternRepository?: string;
+  reapplyStoredSetup?: boolean;
+  prepareForResume?: boolean;
+};
 
 function isMemorySpaceDID(value: string): boolean {
   return /^did:[^:]+:.+/.test(value);
@@ -1112,8 +1126,8 @@ export class Runtime {
 
     // Unlike ambient flags, computedCellIds is consumed from this Runtime's
     // builder frame. Normalize its local default after override logging so an
-    // omitted option does not appear as an explicit `false` override.
-    this.experimental.computedCellIds ??= false;
+    // omitted option does not appear as an explicit `true` override.
+    this.experimental.computedCellIds ??= true;
 
     // Propagate experimental flags to their ambient control points, then read
     // back the effective state so `experimental.*` reflects what is actually in
@@ -2321,26 +2335,32 @@ export class Runtime {
   }
 
   // Convenience methods that delegate to the runner
+  syncStoredSetupArgument(
+    resultCell: Cell<unknown>,
+  ): Promise<(candidate: Cell<unknown>) => boolean> {
+    return this.runner.syncStoredSetupArgument(resultCell);
+  }
+
   setup<T, R>(
     tx: IExtendedStorageTransaction | undefined,
     patternFactory: NodeFactory<T, R>,
     argument: T,
     resultCell: Cell<R>,
-    options?: { patternRepository?: string },
+    options?: RuntimeSetupOptions,
   ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     pattern: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-    options?: { patternRepository?: string },
+    options?: RuntimeSetupOptions,
   ): Promise<Cell<R>>;
   setup<T, R = any>(
     tx: IExtendedStorageTransaction | undefined,
     patternOrModule: Pattern | Module | undefined,
     argument: T,
     resultCell: Cell<R>,
-    options?: { patternRepository?: string },
+    options?: RuntimeSetupOptions,
   ): Promise<Cell<R>> {
     return this.runner.setup<T, R>(
       tx,

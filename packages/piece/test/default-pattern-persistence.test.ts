@@ -21,15 +21,15 @@ const defaultPatternProgram: RuntimeProgram = {
       contents: [
         "/// <cf-disable-transform />",
         "import { handler, pattern } from 'commonfabric';",
-        "const addPiece = handler<{ piece: unknown }, { allPieces: unknown[] }>(",
-        "  ({ piece }, { allPieces }) => {",
-        "    allPieces.push(piece);",
+        "const addPiece = handler<{ piece: unknown }, { pieceRegistry: unknown[] }>(",
+        "  ({ piece }, { pieceRegistry }) => {",
+        "    pieceRegistry.push(piece);",
         "  },",
         "  { proxy: true },",
         ");",
-        "export default pattern<{ allPieces: unknown[] }>(({ allPieces }) => ({",
-        "  allPieces,",
-        "  addPiece: addPiece({ allPieces }),",
+        "export default pattern<{ pieceRegistry: unknown[] }>(({ pieceRegistry }) => ({",
+        "  pieceRegistry,",
+        "  addPiece: addPiece({ pieceRegistry }),",
         "}));",
       ].join("\n"),
     },
@@ -55,23 +55,23 @@ async function createDefaultPatternPieceWithResult(manager: PieceManager) {
 
   const addPiece = handler<
     { piece: Cell<unknown> },
-    { allPieces: Cell<unknown>[] }
+    { pieceRegistry: Cell<unknown>[] }
   >(
-    ({ piece }, { allPieces }) => {
-      allPieces.push(piece);
+    ({ piece }, { pieceRegistry }) => {
+      pieceRegistry.push(piece);
     },
     { proxy: true },
   );
-  const defaultPattern = pattern<{ allPieces: Cell<unknown>[] }>(
-    ({ allPieces }) => ({
-      allPieces,
-      addPiece: addPiece({ allPieces }),
+  const defaultPattern = pattern<{ pieceRegistry: Cell<unknown>[] }>(
+    ({ pieceRegistry }) => ({
+      pieceRegistry,
+      addPiece: addPiece({ pieceRegistry }),
     }),
   );
 
   const defaultPatternPiece = await manager.runPersistent(
     defaultPattern,
-    { allPieces: [] },
+    { pieceRegistry: [] },
     "default-pattern-persistence",
   );
   await manager.linkDefaultPattern(defaultPatternPiece);
@@ -119,29 +119,29 @@ describe("PieceManager default pattern persistence", () => {
     await storageManager?.close();
   });
 
-  it("reads persisted allPieces without restarting the default pattern", async () => {
+  it("reads the persisted registry without restarting the default pattern", async () => {
     const { commonfabric } = createBuilder();
     const { handler, pattern } = commonfabric;
 
     const addPiece = handler<
       { piece: Cell<unknown> },
-      { allPieces: Cell<unknown>[] }
+      { pieceRegistry: Cell<unknown>[] }
     >(
-      ({ piece }, { allPieces }) => {
-        allPieces.push(piece);
+      ({ piece }, { pieceRegistry }) => {
+        pieceRegistry.push(piece);
       },
       { proxy: true },
     );
-    const defaultPattern = pattern<{ allPieces: Cell<unknown>[] }>(
-      ({ allPieces }) => ({
-        allPieces,
-        addPiece: addPiece({ allPieces }),
+    const defaultPattern = pattern<{ pieceRegistry: Cell<unknown>[] }>(
+      ({ pieceRegistry }) => ({
+        pieceRegistry,
+        addPiece: addPiece({ pieceRegistry }),
       }),
     );
 
     const defaultPatternPiece = await manager.runPersistent(
       defaultPattern,
-      { allPieces: [] },
+      { pieceRegistry: [] },
       "default-pattern-persistence",
     );
     await manager.linkDefaultPattern(defaultPatternPiece);
@@ -159,7 +159,7 @@ describe("PieceManager default pattern persistence", () => {
     await manager.add([persistedPiece]);
     await manager.stopPiece(defaultPatternPiece);
 
-    const piecesCell = await manager.getPieces();
+    const piecesCell = await manager.getPieceRegistry();
     const ids = piecesCell.get().map((piece) => pieceId(piece)).filter(Boolean);
 
     expect(ids).toContain(pieceId(persistedPiece));
@@ -172,7 +172,7 @@ describe("PieceManager default pattern persistence", () => {
     );
     const defaultPatternPiece = await manager.runPersistent(
       compiledDefaultPattern,
-      { allPieces: [] },
+      { pieceRegistry: [] },
       "default-pattern-persistence-fresh",
     );
     await manager.linkDefaultPattern(defaultPatternPiece);
@@ -214,12 +214,12 @@ describe("PieceManager default pattern persistence", () => {
       await freshManager.add([freshPiece]);
       await freshManager.stopPiece(defaultPatternPiece);
 
-      const piecesCell = await freshManager.getPieces();
+      const piecesCell = await freshManager.getPieceRegistry();
       const ids = piecesCell.get().map((piece) => pieceId(piece)).filter(
         Boolean,
       );
       const pieces = new PiecesController(freshManager);
-      const listedPiece = (await pieces.getAllPieces()).find((piece) =>
+      const listedPiece = (await pieces.getRegisteredPieces()).find((piece) =>
         piece.id === pieceId(persistedPiece)
       );
       const directPiece = await pieces.get(pieceId(persistedPiece)!, false);
@@ -236,12 +236,12 @@ describe("PieceManager default pattern persistence", () => {
     }
   });
 
-  it("getAllPieces controllers expose the same result root as direct cold lookup", async () => {
+  it("registered piece controllers expose the same result root as direct cold lookup", async () => {
     const persistedPiece = await createDefaultPatternPieceWithResult(manager);
     const id = pieceId(persistedPiece)!;
     const pieces = new PiecesController(manager);
 
-    const listedPiece = (await pieces.getAllPieces()).find((piece) =>
+    const listedPiece = (await pieces.getRegisteredPieces()).find((piece) =>
       piece.id === id
     );
     expect(listedPiece).toBeDefined();
@@ -253,12 +253,12 @@ describe("PieceManager default pattern persistence", () => {
     );
   });
 
-  it("getAllPieces controllers resolve result paths like direct cold lookup", async () => {
+  it("registered piece controllers resolve result paths like direct cold lookup", async () => {
     const persistedPiece = await createDefaultPatternPieceWithResult(manager);
     const id = pieceId(persistedPiece)!;
     const pieces = new PiecesController(manager);
 
-    const listedPiece = (await pieces.getAllPieces()).find((piece) =>
+    const listedPiece = (await pieces.getRegisteredPieces()).find((piece) =>
       piece.id === id
     );
     expect(listedPiece).toBeDefined();

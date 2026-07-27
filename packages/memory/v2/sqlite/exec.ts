@@ -4,6 +4,7 @@
 // the client (runner) before/after these calls.
 
 import { type BindValue, Database } from "@db/sqlite";
+import type { FabricPlainObject } from "@commonfabric/api";
 import { assertReadOnly, assertWriteSafe } from "./guard.ts";
 import { columnOrigins } from "./column-origin.ts";
 import { createTableSQL, type TableSchema } from "./schema.ts";
@@ -64,10 +65,10 @@ export function detachDatabase(db: Database, alias: string): void {
 
 export type SqliteParams = readonly unknown[] | Record<string, unknown>;
 
-export interface WriteResult {
+export type WriteResult = {
   changes: number;
   lastInsertRowid: number;
-}
+};
 
 // @db/sqlite binds positional values as a rest list and named values as a single
 // record argument. Our values are already SQLite scalars (cf_link params are
@@ -80,7 +81,7 @@ export function bindArgs(params?: SqliteParams): BindValue[] {
 }
 
 /** Run a single guarded read-only SELECT and return all rows. */
-export function runQuery<Row = Record<string, unknown>>(
+export function runQuery<Row extends FabricPlainObject = FabricPlainObject>(
   db: Database,
   sql: string,
   params?: SqliteParams,
@@ -91,11 +92,11 @@ export function runQuery<Row = Record<string, unknown>>(
 
 /** A result column's output name plus its TRUE source `(table, column)` origin
  *  (null for an expression/computed/compound column). */
-export interface QueryColumn {
+export type QueryColumn = {
   output: string;
   table: string | null;
   column: string | null;
-}
+};
 
 /**
  * Like {@link runQuery}, but also returns each result column's TRUE origin
@@ -104,7 +105,9 @@ export interface QueryColumn {
  * declared `(table, column)` it came from, soundly. Only used when the db
  * declares per-column `ifc` (zero overhead otherwise — callers use `runQuery`).
  */
-export function runQueryWithOrigins<Row = Record<string, unknown>>(
+export function runQueryWithOrigins<
+  Row extends FabricPlainObject = FabricPlainObject,
+>(
   db: Database,
   sql: string,
   params?: SqliteParams,

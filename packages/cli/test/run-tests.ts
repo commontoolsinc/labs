@@ -39,6 +39,7 @@ function parseCliTestShard(): { index: number; count: number } {
 const SERIAL_TESTS = [
   "test/fuse.test.ts",
   "test/inspect-remote.test.ts",
+  "test/json-command.test.ts",
   "test/log-level.test.ts",
   "test/main-command.test.ts",
   "test/runtime-creation.test.ts",

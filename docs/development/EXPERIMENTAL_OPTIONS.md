@@ -20,7 +20,7 @@ in the same change.
 > flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-07-15. Each flag's section carries the date its status
+**Last reviewed:** 2026-07-23. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -32,7 +32,7 @@ was last checked against the code.
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (same-toolshed system sources, including all roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete flag | implemented, on in the shell |
-| [`computedCellIds`](#computedcellids) | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental` | off | Robin McCollum (in development) | graduate to always-on with the computed-cell write-conflict policy | in development on robin/feat-computed-cell-identity-p2 (redesigned: `computed:` URI scheme) |
+| [`computedCellIds`](#computedcellids) | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental` | on | Robin McCollum (#4659) | graduate to unconditional behavior, then delete flag | implemented, on by default |
 | [`cfcEnforcementMode`](#cfcenforcementmode) | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse) | `enforce-explicit` | Bernhard Seefeld (#3263) | tighten default toward `enforce-strict` | active; ladder is permanent |
 | [`cfcFlowLabels`](#cfcflowlabels) | `RuntimeOptions.cfcFlowLabels` | `off` | Bernhard Seefeld (#4011) | move toward `persist` | implemented, staged rollout |
 | [`cfcWriteFloor`](#cfcwritefloor) | `RuntimeOptions.cfcWriteFloor` | `off` | Bernhard Seefeld (#4479) | move toward `enforce` | implemented, staged rollout |
@@ -43,6 +43,7 @@ was last checked against the code.
 | [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection) | `RuntimeOptions.cfcLabelMetadataProtection` | `off` | Bernhard Seefeld (#4638) | `observe` (divergence counting) first, then `enforce` | implemented, staged rollout |
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237) | keep as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative or neutral |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
+| [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off | Ben Follington (#4937; shell toggle #4974) | graduate to always-on after live measurement, or remove if superseded | implemented behind the flag, off by default, not yet measured over real latency |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
 
@@ -59,9 +60,9 @@ B](#appendix-b-related-toggles-that-are-not-experimental-flags).
 These flags make up the `ExperimentalOptions` interface in
 [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). They
 are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
-`undefined`, which means "take the built-in default". `commitPreconditions`
-defaults on; the other flags in this category default off unless their section
-says otherwise.
+`undefined`, which means "take the built-in default". `commitPreconditions` and
+`computedCellIds` default on; the other flags in this category default off
+unless their section says otherwise.
 
 The mapping from environment variable to flag is defined once, canonically, as
 `EXPERIMENTAL_ENV_VARS` in
@@ -255,6 +256,17 @@ propagate](#how-flags-propagate).
   identity/source/import revisions fails closed at the compiled-identity
   comparison. See
   [`docs/specs/pattern-imports/pattern-updates.md`](../specs/pattern-imports/pattern-updates.md).
+
+  **Current behavior.** Before a release, the existing golden replay tests load
+  representative state written by the previous pattern version. They verify
+  that the new version preserves the state's intended meaning and behavior. The
+  updater itself does not infer stable-key, stable-cause, migration, or
+  behavioral compatibility during deployment.
+
+  **Planned behavior.** The general piece-source lifecycle will reject known
+  structural schema incompatibilities before applying an unattended source
+  transition. Semantic compatibility will continue to be checked before release
+  rather than inferred by the runtime.
 - **Current default and planned end state.** The runner built-in default is off
   like every flag in this category; the shell build injects `true` unless the
   define is set to `"false"`, so the deployed product (and local shell dev
@@ -276,7 +288,7 @@ propagate](#how-flags-propagate).
 - **Toggle via.** `EXPERIMENTAL_COMPUTED_CELL_IDS` environment variable
   (through the canonical env registry) or
   `RuntimeOptions.experimental.computedCellIds`.
-- **Added by.** Robin McCollum, on the computed-cell-identity branch (spec:
+- **Added by.** Robin McCollum, in #4659 (spec:
   [`docs/specs/computed-cell-identity.md`](../specs/computed-cell-identity.md)).
 - **Purpose.** Mints kind-schemed entity ids (`computed:fid1:<hash>`, the
   `computed:` URI scheme replacing `of:`) for derived internal cells. The
@@ -288,19 +300,19 @@ propagate](#how-flags-propagate).
   reference. The flag gates minting only; readers accept both id forms
   unconditionally, so it can flip either way without a migration — but see the
   version-skew note below.
-- **Current default and planned end state.** Off by default. Graduates to
-  always-on together with the computed-cell write-conflict policy (ack-and-drop
-  for stale all-computed commits), then the flag is deleted. The flag is the
-  rollout gate for version skew: clients predating the `computed:` scheme
-  throw on such ids arriving via sync, so it must not graduate until every
-  syncing client carries the readers (old servers are safe — an unknown
-  scheme parses as no kind and stays strict).
-- **Status on 2026-07-15.** In development on
-  `robin/feat-computed-cell-identity-p2`: phase 1 (kind-schemed minting,
-  redesigned from a retired kind-in-hash-tag format that never shipped)
-  implemented behind the flag. Phase 2 (ack-and-drop of stale all-computed
-  commits) is split into its own follow-up PR with its own flag, so this
-  branch changes no conflict semantics.
+- **Current default and planned end state.** On by default. An explicit
+  `false` remains a rollback override for version skew while the flag soaks;
+  clients predating the `computed:` scheme throw on such ids arriving via sync
+  (old servers are safe — an unknown scheme parses as no kind and stays
+  strict). Once the rollout is stable, make minting unconditional and delete
+  the flag. The computed-cell write-conflict policy (ack-and-drop for stale
+  all-computed commits) remains a separately gated follow-up.
+- **Status on 2026-07-23.** Kind-schemed minting landed in #4659 and is on by
+  default. Readers accept both schemes unconditionally, and explicit `false`
+  retains the legacy `of:` minting behavior as a temporary rollback path.
+- **Path to removal.** Confirm all syncing clients carry `computed:`-aware
+  readers and the default-on rollout has soaked; then remove the environment
+  mapping, runtime option, builder guard, and legacy rollback tests.
 
 ---
 
@@ -601,6 +613,63 @@ the per-epic implementation notes).
 >   keeps its write gate failing closed. It was added by Bernhard Seefeld in
 >   "server-side commit-time row-label re-derivation (Epic E4, Phase 3.c)"
 >   (#4552). It is permanent.
+> - **`pendingReadStacks`** is a build-inherent capability, hardwired to `true`,
+>   advertising that this build's engine resolves array-`localSeq` pending reads
+>   (the full-stack dependency sets of CT-1872 1c; `resolvePendingReads` in
+>   [`packages/memory/v2/engine.ts`](../../packages/memory/v2/engine.ts)). It is
+>   not configuration: against a server that advertises it absent, the client
+>   scalarizes each dependency array to its top-of-stack element before sending
+>   (`scalarizePendingReadStacks` in
+>   [`packages/runner/src/storage/v2.ts`](../../packages/runner/src/storage/v2.ts)),
+>   and HOLDS the send until every omitted lower dependency has settled — a
+>   dropped one dooms the commit locally before it reaches the wire; once all
+>   are accepted the scalar shape is sound. (Sending while an omitted
+>   dependency is unsettled would let the old server durably accept a commit
+>   the client cascade-rejects — a split-brain where the caller sees a
+>   conflict for a write that landed.) Scheduler observations degrade instead
+>   of holding: a multi-layer observation is dropped client-side (flag-off
+>   semantics), so the flush that semantic commits await never waits on
+>   verdicts. Added on CT-1872 (PR #4606). Path to removal: retire
+>   the scalarization fallback once every server in the fleet advertises the
+>   capability; the flag itself then reads as permanent documentation of the
+>   wire shape, and the successor design is tracked as CT-1910.
+
+### `experimentalConcurrentWatchRefresh`
+
+- **Toggle via.** `experimentalConcurrentWatchRefresh` on
+  `IRemoteStorageProviderSettings`
+  ([`packages/runner/src/storage/interface.ts`](../../packages/runner/src/storage/interface.ts)),
+  passed through `StorageManager` settings. The runner mirrors it onto each
+  memory session via `SpaceSession.setConcurrentWatchRefresh()`
+  ([`packages/memory/v2/client.ts`](../../packages/memory/v2/client.ts)) —
+  per-session, not a process global. In the **shell** it is a per-browser-profile
+  dogfood toggle: run `commonfabric.concurrentWatchRefresh(true)` in the console
+  and reload. The flag crosses the worker IPC in `InitializationData` and is
+  fixed at `StorageManager.open` time, so — like the render ceiling — it takes
+  effect on the next runtime (reload), not live. Threaded shell → worker via
+  `runtimeHostFlags()`
+  ([`packages/shell/src/lib/host-toggles.ts`](../../packages/shell/src/lib/host-toggles.ts))
+  → `RuntimeInternals.create` → `runtime-processor.ts`'s storage settings.
+- **Added by.** Ben Follington (#4937; shell dogfood toggle #4974).
+- **Purpose.** By default watch acquisition is strict single-flight per space: a
+  guard holds every watch refresh after the first until the prior response
+  lands, so traversal-driven pulls discovered a tick apart serialize into
+  one-round-trip-each frames even when nothing depends on the prior response. On
+  a high-RTT link this dominates cold-load wall-clock. With the flag on,
+  refreshes overlap up to a bounded window (`CONCURRENT_WATCH_REFRESH_WINDOW`,
+  currently 8) in `storage/v2.ts`, and the memory client issues the whole
+  watch-mutation family (`watch.set` + `watch.add`) in an ordered issue phase so
+  wire order is preserved and application stays ordered. Same-tick microtask
+  coalescing is unchanged.
+- **Current default and planned end state.** Off by default. It is a spike
+  pending live measurement on a real (estuary-latency) load; the window size is
+  a tuning value. End state is either graduation to always-on with a settled
+  window, or removal if the render-side fix (initial-render descent) makes the
+  waterfall shallow enough that concurrency no longer pays.
+- **Status on 2026-07-24.** Implemented behind the flag, off by default; not yet
+  measured end-to-end over real latency.
+- **Path to removal.** Graduate to always-on once measured safe and beneficial,
+  or remove if superseded by reducing the round-trip count at the source.
 
 ---
 

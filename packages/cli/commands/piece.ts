@@ -21,6 +21,7 @@ import {
   removePiece,
   resetHomePattern,
   savePiecePattern,
+  searchPieces,
   setCellValue,
   setHomePattern,
   setPiecePattern,
@@ -39,6 +40,7 @@ import { parseCellPath } from "@commonfabric/runner";
 import { UI } from "@commonfabric/runner";
 import ports from "@commonfabric/ports" with { type: "json" };
 import type { PiecePatternRef } from "@commonfabric/piece/ops";
+import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
 
 // Hint system: print helpful next-step suggestions after operations
 let quietMode = false;
@@ -102,6 +104,38 @@ export function formatPatternIdentity(
     : `cf:module/${patternRef.identity}#${patternRef.symbol}`;
 }
 
+export function renderPieceSummaries(
+  pieces: Array<{
+    id: string;
+    name?: string;
+    patternRef?: PiecePatternRef;
+    error?: string;
+  }>,
+  json: boolean,
+): void {
+  if (json) {
+    render(
+      pieces.map((piece) => ({
+        id: piece.id,
+        name: piece.name ?? null,
+        patternRef: piece.patternRef ?? null,
+      })),
+      { json: true },
+    );
+    return;
+  }
+
+  const rows = [
+    ["ID", "NAME", "PATTERN"],
+    ...pieces.map((piece) => [
+      piece.id,
+      piece.error ? `<error: ${piece.error}>` : (piece.name ?? "<unnamed>"),
+      piece.error ? "" : formatPatternRef(piece.patternRef),
+    ]),
+  ];
+  if (rows.length > 1) render(Table.from(rows).toString());
+}
+
 export function localPatternEntry(
   mainPath: string,
   options: {
@@ -118,8 +152,101 @@ export function localPatternEntry(
   };
 }
 
-function pieceCallRawArgs(tail: string[], literalArgs: string[]): string[] {
+/**
+ * A `piece get` failure caused by a data condition rather than bad arguments:
+ * a path that doesn't resolve, or a result schema that can't project the
+ * stored data (PieceResultProjectionError). Reported as a plain error on
+ * stderr with exit 1, never as a Cliffy ValidationError (which would dump the
+ * usage screen and read as an arg-parse failure).
+ */
+export function isPieceGetDataError(error: unknown): error is Error {
+  return error instanceof PieceResultProjectionError ||
+    (error instanceof Error &&
+      error.message.startsWith("Cannot access path"));
+}
+
+/**
+ * Build the stderr report for a `piece get` failure. Returns null when the
+ * error is not a data error (the caller should rethrow). `message` is the
+ * one-line error; `hint` is an optional next-step tip. A projection error
+ * already carries its own `--step` guidance, and an input-mode read has
+ * nothing more to suggest — only a result-mode unresolved path gets the
+ * `--input` tip.
+ */
+export function pieceGetDataErrorReport(
+  error: unknown,
+  opts: { input?: boolean; piece?: string },
+): { message: string; hint?: string } | null {
+  if (!isPieceGetDataError(error)) return null;
+  if (error instanceof PieceResultProjectionError || opts.input) {
+    return { message: error.message };
+  }
+  return {
+    message: error.message,
+    hint: cliText(
+      `TIP: The path was read from the result cell. If the field is an input, retry with --input, or run 'cf piece inspect --piece ${opts.piece} ...' to see both cells.`,
+    ),
+  };
+}
+
+/**
+ * Build the stderr report for a `piece link` validation failure. Returns null
+ * when the error is not a LinkValidationError (the caller should rethrow).
+ * Link validation fails on data conditions — a source/target piece or path
+ * that doesn't exist, read over the network — so it reports like `piece get`'s
+ * unresolved-path data error rather than as a Cliffy usage error.
+ */
+export function pieceLinkDataErrorReport(
+  error: unknown,
+  opts: { sourcePieceId: string; targetPieceId: string },
+): { message: string; hint: string } | null {
+  if (!(error instanceof LinkValidationError)) return null;
+  return {
+    message: error.message,
+    hint: cliText(
+      `TIP: Run 'cf piece inspect --piece ${opts.sourcePieceId} ...' and '--piece ${opts.targetPieceId} ...' to see the fields each piece actually has.`,
+    ),
+  };
+}
+
+/**
+ * Print a data-error report — message plus optional hint — to stderr and exit
+ * 1. The single exit path for the `piece get` / `piece link` data errors
+ * above. The `deps` seam lets unit tests observe the wiring without a real
+ * process exit; runtime callers use the defaults.
+ */
+export function exitWithDataError(
+  report: { message: string; hint?: string },
+  deps?: {
+    printError?: (message: string) => void;
+    printHint?: (message: string) => void;
+    exit?: (code: number) => never;
+  },
+): never {
+  const printError = deps?.printError ?? console.error;
+  const printHint = deps?.printHint ?? hint;
+  const exit = deps?.exit ?? Deno.exit;
+  printError(report.message);
+  if (report.hint) printHint(report.hint);
+  return exit(1);
+}
+
+export function pieceCallRawArgs(
+  tail: string[],
+  literalArgs: string[],
+): string[] {
   if (literalArgs.length > 0) {
+    // Schema-derived flags after `--`. A payload token before `--` (inline
+    // JSON or the `-` stdin sentinel) would be silently dropped here, so
+    // reject the combination loudly instead — the same no-op this family of
+    // fixes is stamping out. Mirrors the `tail.length > 1` rejection below.
+    if (tail.length > 0) {
+      throw new ValidationError(
+        'Callable arguments cannot appear on both sides of "--". ' +
+          'Pass either a payload argument (inline JSON or "-" for stdin) ' +
+          'or schema-derived flags after "--", not both.',
+      );
+    }
     return literalArgs;
   }
 
@@ -139,14 +266,19 @@ function pieceCallRawArgs(tail: string[], literalArgs: string[]): string[] {
     );
   }
 
+  // Explicit two-token stdin sentinels (a JSON/value flag plus "-"), forwarded
+  // to the exec layer so the friendly surface matches `cf exec` and the bare
+  // "-" form. Without this they'd hit the multi-argument rejection below.
+  if (
+    tail.length === 2 && tail[1] === "-" &&
+    (tail[0] === "--json" || tail[0] === "--json-file" ||
+      tail[0] === "--value-file")
+  ) {
+    return [tail[0], "-"];
+  }
+
   if (tail[0] === "--json") {
-    if (tail.length === 1) {
-      // --json alone is a no-op: cf piece call always outputs JSON.
-      // Return machine-readable schema (same as --help --json) to exit cleanly.
-      return ["--help", "--json"];
-    }
-    // --json followed by other args: existing behavior (forward as-is).
-    return ["--json"];
+    return tail;
   }
 
   if (tail.length > 1) {
@@ -155,7 +287,51 @@ function pieceCallRawArgs(tail: string[], literalArgs: string[]): string[] {
     );
   }
 
+  // "-" is the conventional stdin sentinel; route it through the existing
+  // --json-file stdin path so empty stdin still fails loudly.
+  if (tail[0] === "-") {
+    return ["--json-file", "-"];
+  }
+
   return ["--json", tail[0]];
+}
+
+export function pieceCallInvocation(
+  tail: string[],
+  literalArgs: string[],
+): { rawArgs: string[]; jsonOutput: boolean } {
+  const rawArgs = pieceCallRawArgs(tail, literalArgs);
+  const argumentOffset = rawArgs[0] === "invoke" || rawArgs[0] === "run"
+    ? 1
+    : 0;
+  const firstArgument = rawArgs[argumentOffset];
+  const jsonOutput = firstArgument === "--json" ||
+    firstArgument === "--json-file" ||
+    (firstArgument === "--help" &&
+      rawArgs.length === argumentOffset + 2 &&
+      rawArgs[argumentOffset + 1] === "--json");
+  return { rawArgs, jsonOutput };
+}
+
+export function writePieceRenderStatus(
+  message: string,
+  jsonOutput: boolean,
+): void {
+  if (jsonOutput) {
+    console.error(message);
+  } else {
+    console.log(message);
+  }
+}
+
+export function handlePieceRenderNoUi(
+  error: Error,
+  jsonOutput: boolean,
+): void {
+  if (jsonOutput) {
+    throw error;
+  }
+  render("<piece has no UI>");
 }
 
 // Override usage, since we do not "require" args that can be reflected by env vars.
@@ -171,6 +347,12 @@ const EX_ID = `--identity ./my.key`;
 const EX_URL = `--url ${RAW_EX_URL}`;
 const EX_COMP = `--api-url ${RAW_EX_COMP.apiUrl} --space ${RAW_EX_COMP.space}`;
 const EX_COMP_PIECE = `${EX_COMP} --piece ${RAW_EX_COMP.piece!}`;
+const PIECE_REGISTRY_LINK_EXAMPLE = [
+  cliText(
+    `cf piece link ${EX_ID} ${EX_COMP} fid1:abc123 fid1:piece1/pieceRegistry`,
+  ),
+  `Link the well-known "pieceRegistry" list to a piece field.`,
+] as const;
 
 // Enhanced description with workflow tips
 function pieceEnvStatus(): string {
@@ -208,6 +390,12 @@ TIPS:
 export const piece = new Command()
   .name("piece")
   .description(pieceDescription)
+  .error((error, command) => {
+    const args = command.getMainCommand().getRawArgs();
+    if (reservesStdoutForCommandOutput(args)) {
+      throw error;
+    }
+  })
   .default("help")
   .globalOption("-q,--quiet", "Suppress hints and next-step suggestions")
   .globalOption(
@@ -235,40 +423,24 @@ export const piece = new Command()
     `Display a list of all pieces in "${RAW_EX_COMP.space}".`,
   )
   .option("--json", "Output machine-readable JSON.")
-  .action(async (options) => {
-    const pieces = await listPieces(parseSpaceOptions(options));
-    if (options.json) {
-      render(
-        pieces.map((p) => ({
-          id: p.id,
-          name: p.name ?? null,
-          patternRef: p.patternRef ?? null,
-        })),
-        { json: true },
-      );
-      return;
-    }
-    const piecesData = [
-      ["ID", "NAME", "PATTERN"],
-      ...(pieces.map(
-        (data) => [
-          data.id,
-          data.error ? `<error: ${data.error}>` : (data.name ?? "<unnamed>"),
-          data.error ? "" : formatPatternRef(data.patternRef),
-        ],
-      )),
-    ];
-    if (piecesData.length === 1) {
-      // Only header fields -- render nothing.
-      return;
-    }
-    render(
-      Table.from(piecesData).toString(),
-    );
-  })
+  .action(listPiecesFromCommand)
+  /* piece search */
+  .command("search", "Search readable input and result data in every piece.")
+  .usage(`${spaceUsage} <query>`)
+  .example(
+    cliText(`cf piece search ${EX_ID} ${EX_COMP} "meeting notes"`),
+    `Find pieces containing "meeting notes" in nested input or result data.`,
+  )
+  .example(
+    cliText(`cf piece search ${EX_ID} ${EX_URL} invoice --json`),
+    `Return matching pieces as machine-readable JSON.`,
+  )
+  .arguments("<query:string>")
+  .option("--json", "Output machine-readable JSON.")
+  .action(searchPiecesFromCommand)
   /* piece new */
   .command("new", "Create a new piece with a pattern.")
-  .usage(spaceUsage)
+  .usage(`${spaceUsage} <main>`)
   .example(
     cliText(`cf piece new ${EX_ID} ${EX_COMP} ./main.tsx`),
     `Create a new piece, using ./main.tsx as source.`,
@@ -326,7 +498,7 @@ export const piece = new Command()
     "set-slug",
     "Set a slug redirect to a piece or cell link.",
   )
-  .usage(spaceUsage)
+  .usage(`${spaceUsage} <slug> <source>`)
   .example(
     cliText(`cf piece set-slug ${EX_ID} ${EX_COMP} project-notes fid1:piece1`),
     `Set slug "project-notes" to piece "fid1:piece1".`,
@@ -390,7 +562,7 @@ export const piece = new Command()
   )
   /* piece getsrc */
   .command("getsrc", "Retrieve the pattern source for the given piece.")
-  .usage(pieceUsage)
+  .usage(`${pieceUsage} <outpath>`)
   .example(
     cliText(`cf piece getsrc ${EX_ID} ${EX_COMP_PIECE} ./out`),
     `Retrieve the source for "${RAW_EX_COMP.piece!}" and place in ./out`,
@@ -406,7 +578,7 @@ export const piece = new Command()
   )
   /* piece setsrc */
   .command("setsrc", "Update the pattern source for the given piece.")
-  .usage(pieceUsage)
+  .usage(`${pieceUsage} <main>`)
   .example(
     cliText(`cf piece setsrc ${EX_ID} ${EX_COMP_PIECE} ./main.tsx`),
     `Update the source for "${RAW_EX_COMP.piece!}" with ./main.tsx`,
@@ -591,11 +763,17 @@ Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
 
     try {
       if (options.watch) {
-        console.log("Watching for changes... Press Ctrl+C to exit.\n");
+        writePieceRenderStatus(
+          "Watching for changes... Press Ctrl+C to exit.\n",
+          !!options.json,
+        );
 
         // Initial render
         const pieceData = await inspectPiece(pieceConfig);
-        console.log(`Rendering piece: ${pieceData.name || pieceConfig.piece}`);
+        writePieceRenderStatus(
+          `Rendering piece: ${pieceData.name || pieceConfig.piece}`,
+          !!options.json,
+        );
 
         let renderCount = 0;
         const cleanup = await renderPiece(pieceConfig, {
@@ -603,7 +781,10 @@ Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
           start: options.start,
           onUpdate: (html) => {
             renderCount++;
-            console.log(`\n--- Render #${renderCount} ---`);
+            writePieceRenderStatus(
+              `\n--- Render #${renderCount} ---`,
+              !!options.json,
+            );
             if (options.json) {
               render({ html, renderCount }, { json: true });
             } else {
@@ -614,7 +795,7 @@ Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
 
         // Handle Ctrl+C gracefully
         Deno.addSignalListener("SIGINT", () => {
-          console.log("\nStopping watch mode...");
+          writePieceRenderStatus("\nStopping watch mode...", !!options.json);
           cleanup();
           Deno.exit(0);
         });
@@ -633,7 +814,7 @@ Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
       }
     } catch (error) {
       if (error instanceof Error && error.message.includes("has no UI")) {
-        render("<piece has no UI>");
+        handlePieceRenderNoUi(error, !!options.json);
       } else {
         throw error;
       }
@@ -644,10 +825,10 @@ Source Origin: ${pieceData.patternRef?.source.origin ?? "<unknown>"}
     "link",
     `Link a field from one piece to another for reactive data flow.
 
-WELL-KNOWN IDS: System-level data (like allPieces) can be linked using
+WELL-KNOWN IDS: System-level data (like pieceRegistry) can be linked using
 well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
   )
-  .usage(spaceUsage)
+  .usage(`${spaceUsage} <source> <target>`)
   .example(
     cliText(
       `cf piece link ${EX_ID} ${EX_COMP} fid1:piece1/outputEmails fid1:piece2/emails`,
@@ -666,12 +847,7 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     ),
     `Link scoped cell instances using @user or @session on the piece ID.`,
   )
-  .example(
-    cliText(
-      `cf piece link ${EX_ID} ${EX_COMP} fid1:abc123 fid1:piece1/allPieces`,
-    ),
-    `Link well-known "allPieces" list to a piece field.`,
-  )
+  .example(...PIECE_REGISTRY_LINK_EXAMPLE)
   .example(
     cliText(
       `cf piece link ${EX_ID} ${EX_COMP} sqlite:/data/reference.db fid1:piece1/refDb`,
@@ -744,9 +920,15 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
         },
       );
     } catch (error) {
-      if (error instanceof LinkValidationError) {
-        throw new ValidationError(error.message, { exitCode: 1 });
-      }
+      // A link that fails validation is a data error (the pieces/paths read
+      // over the network don't support the link), not a usage error — report
+      // it like `piece get` does instead of letting Cliffy dump the help
+      // screen over it.
+      const report = pieceLinkDataErrorReport(error, {
+        sourcePieceId: source.pieceId,
+        targetPieceId: target.pieceId,
+      });
+      if (report) exitWithDataError(report);
       throw error;
     }
 
@@ -763,7 +945,7 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
 PATH FORMAT: Use forward slashes and numeric indices for arrays.
   ✓ items/0/name    ✓ config/db/host    ✗ items[0].name`,
   )
-  .usage(pieceUsage)
+  .usage(`${pieceUsage} [path]`)
   .example(
     cliText(`cf piece get ${EX_ID} ${EX_COMP_PIECE} name`),
     `Get the "name" field from piece result "${RAW_EX_COMP.piece!}".`,
@@ -795,9 +977,17 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
     "--step",
     "Start and recompute the piece in this session before reading",
   )
+  .option(
+    "--json",
+    "Select JSON output explicitly. This command always outputs JSON.",
+  )
   .arguments("[path:string]")
   .action(async (options, pathString) => {
-    const pieceConfig = parsePieceOptions(options);
+    setQuietMode(!!options.quiet);
+    const pieceConfig = {
+      ...parsePieceOptions(options),
+      jsonOutput: true,
+    };
     const pathSegments = pathString ? parseCellPath(pathString) : [];
     try {
       const value = await getCellValue(pieceConfig, pathSegments, {
@@ -806,12 +996,15 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
       });
       render(value, { json: true });
     } catch (error) {
-      if (
-        error instanceof PieceResultProjectionError ||
-        error instanceof Error && error.message.startsWith("Cannot access path")
-      ) {
-        throw new ValidationError(error.message, { exitCode: 1 });
-      }
+      // A read that fails on a data condition — the path doesn't resolve, or
+      // the result schema can't project the stored data (PieceResultProjection
+      // Error) — is a data error, not a usage error. Report it on stderr
+      // instead of letting Cliffy dump the help screen over it.
+      const report = pieceGetDataErrorReport(error, {
+        input: options.input,
+        piece: pieceConfig.piece,
+      });
+      if (report) exitWithDataError(report);
       throw error;
     }
   })
@@ -825,7 +1018,7 @@ PATH FORMAT: Use forward slashes and numeric indices for arrays.
 
 JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
   )
-  .usage(pieceUsage)
+  .usage(`${pieceUsage} <path>`)
   .example(
     cliText(`echo '"New Name"' | cf piece set ${EX_ID} ${EX_COMP_PIECE} name`),
     `Set the "name" field in piece result "${RAW_EX_COMP.piece!}".`,
@@ -878,8 +1071,18 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
     render(map);
   })
   /* piece call */
-  .command("call", "Invoke a callable within a piece")
-  .usage(pieceUsage)
+  .command(
+    "call",
+    `Invoke a callable within a piece.
+
+The callable name separates piece-call options from the callable's arguments.
+Arguments after the callable use the same parser as cf exec. Use --json with an
+optional inline value for complete JSON input; bare --json reads JSON from
+stdin. A single positional JSON value or "-" stdin sentinel is also accepted.
+Use --help --json for machine-readable schema help. Put schema-derived flags
+after --. Handlers interpret piped input when no input argument is present.`,
+  )
+  .usage(`${pieceUsage} <callable> [input]`)
   .example(
     cliText(`cf piece call ${EX_ID} ${EX_COMP_PIECE} increment`),
     `Call the "increment" handler on piece "${RAW_EX_COMP.piece!}".`,
@@ -892,25 +1095,39 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
       .piece!}".`,
   )
   .example(
+    cliText(
+      `echo '{"value":"My Name"}' | cf piece call ${EX_ID} ${EX_COMP_PIECE} setName -`,
+    ),
+    `Read the JSON payload from stdin ("-" is the stdin sentinel).`,
+  )
+  .example(
+    cliText(
+      `cf piece call ${EX_ID} ${EX_COMP_PIECE} setName --json '{"value":"My Name"}'`,
+    ),
+    "Call a handler with explicit inline JSON input.",
+  )
+  .example(
     cliText(`cf piece call ${EX_ID} ${EX_COMP_PIECE} search -- --query milk`),
     `Run the "search" tool using schema-derived flags after "--".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
-  .option(
-    "--json",
-    "Input/output format (JSON is the only supported format; this flag is a no-op)",
-  )
   .stopEarly()
   .arguments("<callable:string> [tail...:string]")
   .action(async function (options, callableName, ...tail) {
     try {
       setQuietMode(!!options.quiet);
-      const pieceConfig = parsePieceOptions(options);
-      const rawArgs = pieceCallRawArgs(tail, this.getLiteralArgs());
+      const invocation = pieceCallInvocation(
+        tail,
+        this.getLiteralArgs(),
+      );
+      const pieceConfig = parsePieceOptions({
+        ...options,
+        json: invocation.jsonOutput,
+      });
       const result = await executePieceCallable(
         pieceConfig,
         callableName,
-        rawArgs,
+        invocation.rawArgs,
       );
       if (result.helpText) {
         render(result.helpText);
@@ -920,11 +1137,20 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
         render(result.outputText);
         return;
       }
-      render(`Called handler "${callableName}" on piece ${pieceConfig.piece}`);
+      const confirmation =
+        `Called handler "${callableName}" on piece ${pieceConfig.piece}`;
+      if (result.parsed.usedJsonInput) {
+        console.error(confirmation);
+      } else {
+        render(confirmation);
+      }
       hint(cliText(`NEXT STEPS:
   → Verify state:  cf piece get --piece ${pieceConfig.piece} <path> ...
   → Full inspect:  cf piece inspect --piece ${pieceConfig.piece} ...`));
     } catch (error) {
+      if (error instanceof ValidationError) {
+        throw error;
+      }
       const message = error instanceof Error ? error.message : String(error);
       console.error(message);
       Deno.exit(1);
@@ -1050,6 +1276,43 @@ export interface PieceCLIOptions {
   repository?: string;
   root?: string;
   dangerouslyAllowIncompatibleSchema?: boolean;
+  json?: boolean;
+}
+
+export interface PieceSummaryCLIOptions extends PieceCLIOptions {
+  json?: boolean;
+}
+
+export interface PieceListCommandDependencies {
+  listPieces?: typeof listPieces;
+  renderPieceSummaries?: typeof renderPieceSummaries;
+}
+
+export async function listPiecesFromCommand(
+  options: PieceSummaryCLIOptions,
+  deps: PieceListCommandDependencies = {},
+): Promise<void> {
+  const pieces = await (deps.listPieces ?? listPieces)(
+    parseSpaceOptions(options),
+  );
+  (deps.renderPieceSummaries ?? renderPieceSummaries)(pieces, !!options.json);
+}
+
+export interface PieceSearchCommandDependencies {
+  searchPieces?: typeof searchPieces;
+  renderPieceSummaries?: typeof renderPieceSummaries;
+}
+
+export async function searchPiecesFromCommand(
+  options: PieceSummaryCLIOptions,
+  query: string,
+  deps: PieceSearchCommandDependencies = {},
+): Promise<void> {
+  const pieces = await (deps.searchPieces ?? searchPieces)(
+    parseSpaceOptions(options),
+    query,
+  );
+  (deps.renderPieceSummaries ?? renderPieceSummaries)(pieces, !!options.json);
 }
 
 /** Injectable dependencies for testing the `piece setsrc` command boundary. */
@@ -1150,6 +1413,7 @@ export function parseSpaceOptions(
   const output: Partial<PieceConfig> = {
     identity: absPath(input.identity),
   };
+  if (input.json) output.jsonOutput = true;
 
   if (input.url) {
     const { apiUrl, space, piece, pieceScope } = parseUrl(input.url);

@@ -1,7 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { FabricInstance, type FabricValue } from "@/interface.ts";
+import {
+  FabricInstance,
+  type FabricOrConvertibleNativeValue,
+  type FabricValue,
+} from "@/interface.ts";
 import { CODEC } from "@/codec-common/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-common/codec-type-tags.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
@@ -41,7 +45,7 @@ const FACTORY_REF = {
  * `fabricFromNativeValue()` and decodes it back to native form via
  * `nativeFromFabricValue()`.
  */
-function roundTrip(value: FabricValue): FabricValue {
+function roundTrip(value: FabricValue): FabricOrConvertibleNativeValue {
   return nativeFromFabricValue(fabricFromNativeValue(value));
 }
 
@@ -1683,6 +1687,16 @@ describe("native-conversion", () => {
         // -- so the result equals the constructed sentinel by identity.
         const out = fabricFromNativeValue(Symbol.for("identity-check"));
         expect(Object.is(out, Symbol.for("identity-check"))).toBe(true);
+      });
+
+      it("throws on a top-level unique symbol (freeze default)", () => {
+        // A unique symbol is not a `FabricValue`; conversion rejects it
+        // regardless of the `freeze` flag -- the deep-frozen fast-path
+        // (`isDeepFrozenFabricValue`) must not admit it and short-circuit the
+        // validation that `freeze=false` performs (see below).
+        expect(() => fabricFromNativeValue(Symbol("bad"))).toThrow(
+          "Cannot store unique (uninterned) symbol",
+        );
       });
     });
 

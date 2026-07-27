@@ -239,11 +239,13 @@ describe("trigger reads survive failed runs", () => {
       tx,
       log: { reads: [], shallowReads: [], writes: [] },
       retries: args.retries ?? new WeakMap(),
+      offBudgetRetries: new WeakMap(),
       pending: new Set(),
       commitPromise,
       resubscribe: () => args.onResubscribe?.(),
       markInvalid: () => args.onMarkInvalid?.(),
       queueExecution: () => args.onQueueExecution?.(),
+      getActionId: () => "test-action",
       restoreInvalidCauses: args.onRestore,
       isActionGenerationCurrent: () => true,
     });

@@ -26,7 +26,6 @@ import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { ExecCommandSpec } from "./exec-schema.ts";
 
 export const CF_RUNTIME_ERROR_LOG = Symbol.for("cf.cli.runtimeErrorLog");
-const DEFAULT_TOOL_RESULT_TIMEOUT_MS = 15_000;
 const preparedCallableTools = new WeakSet<object>();
 
 export interface CliRuntimeErrorRecord {
@@ -77,6 +76,11 @@ export interface CallableRuntimeLike {
   [CF_RUNTIME_ERROR_LOG]?: CliRuntimeErrorRecord[];
   storageManager?: { synced: () => Promise<void> };
   idle: () => Promise<void>;
+  // Drain to full quiescence: scheduler idle, storage synced, and every
+  // in-flight async builtin (an LLM call, a fetch) finished. This is how a tool
+  // whose result arrives asynchronously is awaited without polling or a
+  // deadline. Optional so lightweight test doubles can omit it.
+  settled?: () => Promise<void>;
   edit: () => CallableTransactionLike;
   getCell: (
     space: string,
@@ -120,12 +124,7 @@ export interface CallableResolution {
 }
 
 export interface CallableExecutionDeps {
-  timeoutMs?: number;
   uuid?: () => string;
-  waitForResult?: (
-    resultCell: CallableCellLike,
-    timeoutMs: number,
-  ) => Promise<unknown>;
   prepareFactory?: (
     factory: unknown,
     context: { runtime: CallableRuntimeLike; artifactSpace: string },
@@ -205,7 +204,7 @@ function readCellCandidates(cell: CallableCellLike): unknown[] {
   return candidates;
 }
 
-function runtimeErrorLog(runtime: unknown): CliRuntimeErrorRecord[] {
+export function runtimeErrorLog(runtime: unknown): CliRuntimeErrorRecord[] {
   if (typeof runtime !== "object" || runtime === null) {
     return [];
   }
@@ -234,24 +233,6 @@ function normalizeToolInput(input: unknown): Record<string, unknown> {
     : input === undefined
     ? {}
     : { value: input };
-}
-
-async function defaultWaitForResult(
-  resultCell: CallableCellLike,
-  timeoutMs: number,
-): Promise<unknown> {
-  if (typeof resultCell.pull !== "function") {
-    throw new Error("Callable result cell cannot be pulled");
-  }
-  const startedAt = Date.now();
-  while (Date.now() - startedAt <= timeoutMs) {
-    const value = await resultCell.pull();
-    if (value !== undefined) {
-      return value;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error(`Timed out waiting for tool result after ${timeoutMs}ms`);
 }
 
 export function detectCallableKind(
@@ -432,21 +413,27 @@ export async function executeResolvedCallable(
     prepared.frameworkProvidedPaths,
     callableStableEntityId(resolved.identityCell ?? resolved.callableCell),
   );
-  const tx = resolved.manager.runtime.edit();
+  const runtime = resolved.manager.runtime;
+  const runtimeErrors = runtimeErrorLog(runtime);
+  const errorCountBefore = runtimeErrors.length;
+  const tx = runtime.edit();
   const resultScope = resolved.callableCell.getAsNormalizedFullLink?.().scope;
-  const resultCell = resolved.manager.runtime.getCell(
+  const resultCell = runtime.getCell(
     resolved.space,
     deps.uuid?.() ?? crypto.randomUUID(),
     prepared.resultSchema,
     tx,
     resultScope,
   );
-  const running = resolved.manager.runtime.run(
+  const running = runtime.run(
     tx,
     prepared.factory,
     inputWithFrameworkValues,
     resultCell,
   );
+  // Capture the tool's result off its cell's sink. sink() fires immediately with
+  // the current (initially undefined) value and re-fires on every committed
+  // change, including the server-pushed writeback of an async tool's result.
   let sinkValue: unknown;
   let hasSinkValue = false;
   const cancelSink = typeof running?.sink === "function"
@@ -460,24 +447,48 @@ export async function executeResolvedCallable(
 
   let outputValue: unknown;
   try {
-    await resolved.manager.runtime.idle();
-    resolved.manager.runtime.prepareTxForCommit?.(tx);
+    await runtime.idle();
+    runtime.prepareTxForCommit?.(tx);
     if (typeof tx.commit !== "function") {
       throw new Error("Callable runtime transaction is not committable");
     }
     await tx.commit();
-    const waitForResult = deps.waitForResult ?? defaultWaitForResult;
-    const timeoutMs = deps.timeoutMs ?? DEFAULT_TOOL_RESULT_TIMEOUT_MS;
 
-    await resolved.manager.runtime.idle();
-    await resolved.manager.synced();
-    await resolved.manager.runtime.storageManager?.synced();
+    // Drain the tool to a fully settled state — scheduler idle, storage synced,
+    // and every in-flight async builtin finished — so the result is final by the
+    // time we read it. A synchronous tool has already written its result; an
+    // async tool's LLM/fetch call is awaited to completion here, with no poll
+    // interval under it and no deadline over it. `settled()` normalizes a failed
+    // builtin to "settled", so a broken tool converges here rather than hanging.
+    if (typeof runtime.settled === "function") {
+      await runtime.settled();
+    } else {
+      await runtime.idle();
+      await resolved.manager.synced();
+      await runtime.storageManager?.synced();
+    }
+
     if (hasSinkValue) {
       outputValue = sinkValue;
     } else {
-      await waitForResult(resultCell, timeoutMs);
-      await resolved.manager.runtime.storageManager?.synced();
-      outputValue = await waitForResult(resultCell, timeoutMs);
+      // Fully settled with nothing on the sink: read once (a server-pushed value
+      // can land without re-triggering the local effect).
+      outputValue = typeof resultCell.pull === "function"
+        ? await resultCell.pull()
+        : resultCell.get();
+      if (outputValue === undefined) {
+        // The tool ran to a fully settled state without producing a result.
+        // Keep the caller's contract of a defined result or an explicit
+        // failure: surface the runtime error the pattern recorded when there
+        // is one, and otherwise fail loudly rather than emitting nothing.
+        const latestError = runtimeErrors.slice(errorCountBefore).at(-1)
+          ?.message;
+        throw new Error(
+          latestError !== undefined
+            ? `Tool "${resolved.cellKey}" failed: ${latestError}`
+            : `Tool "${resolved.cellKey}" produced no result.`,
+        );
+      }
     }
   } finally {
     cancelSink?.();

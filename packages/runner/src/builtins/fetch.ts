@@ -1,4 +1,9 @@
-import type { FetchBinaryResult, JSONSchema } from "@commonfabric/api";
+import type {
+  FetchBinaryResult,
+  JSONSchema,
+  JSONSchemaObj,
+} from "@commonfabric/api";
+import { isRecord } from "@commonfabric/utils/types";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { type Cell } from "../cell.ts";
 import { type Action } from "../scheduler.ts";
@@ -11,6 +16,7 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { validateAgainstSchema } from "../cfc/schema-sanitization.ts";
+import { mapSubschemas } from "../schema-walk.ts";
 import {
   isProtectedToolshedFirstPartyRoute,
   isToolshedApiOrigin,
@@ -163,47 +169,33 @@ const asTypeArray = (type: unknown): string[] =>
  * treats such schemas as closed (a CFC-sanitization rule); fetch
  * verification follows standard JSON Schema semantics, where unknown object
  * properties are allowed unless the schema names `additionalProperties`.
+ *
+ * Exported for unit testing only — not part of the fetch builtin surface.
  */
-function schemaWithOpenObjects(schema: JSONSchema): JSONSchema {
-  if (typeof schema === "boolean") return schema;
-  const result: Record<string, unknown> = { ...schema };
+export function schemaWithOpenObjects(schema: JSONSchema): JSONSchema {
+  if (!isRecord(schema)) return schema;
+  // Default-tier walk plus `$defs`. The never-emitted keywords (`contains`,
+  // `if`/`then`/`else`, ...) are deliberately NOT rewritten — opening objects
+  // under them would make those paths look supported; if one becomes emitted,
+  // it moves to the used tier in schema-walk and this walk picks it up.
+  const mapped = mapSubschemas(
+    schema as JSONSchemaObj,
+    (child) =>
+      // Draft-07 array-form `items`; the 2020-12 tuple form is `prefixItems`,
+      // which mapSubschemas already walks element-wise.
+      Array.isArray(child)
+        ? child.map(schemaWithOpenObjects) as unknown as JSONSchema
+        : schemaWithOpenObjects(child),
+    { includeDefs: true },
+  );
 
-  for (const key of ["not", "additionalProperties"]) {
-    if (typeof result[key] === "object" && result[key] !== null) {
-      result[key] = schemaWithOpenObjects(result[key] as JSONSchema);
-    }
+  const declaresObjectShape = asTypeArray(mapped.type).includes("object") ||
+    mapped.properties !== undefined ||
+    mapped.required !== undefined;
+  if (declaresObjectShape && mapped.additionalProperties === undefined) {
+    return { ...mapped, additionalProperties: true } as JSONSchema;
   }
-  if (Array.isArray(result.items)) {
-    result.items = result.items.map((item) =>
-      schemaWithOpenObjects(item as JSONSchema)
-    );
-  } else if (typeof result.items === "object" && result.items !== null) {
-    result.items = schemaWithOpenObjects(result.items as JSONSchema);
-  }
-  for (const key of ["allOf", "anyOf", "oneOf"]) {
-    if (Array.isArray(result[key])) {
-      result[key] = (result[key] as JSONSchema[]).map((branch) =>
-        schemaWithOpenObjects(branch)
-      );
-    }
-  }
-  for (const key of ["properties", "$defs"]) {
-    if (typeof result[key] === "object" && result[key] !== null) {
-      result[key] = Object.fromEntries(
-        Object.entries(result[key] as Record<string, JSONSchema>).map((
-          [name, child],
-        ) => [name, schemaWithOpenObjects(child)]),
-      );
-    }
-  }
-
-  const declaresObjectShape = asTypeArray(result.type).includes("object") ||
-    result.properties !== undefined ||
-    result.required !== undefined;
-  if (declaresObjectShape && result.additionalProperties === undefined) {
-    result.additionalProperties = true;
-  }
-  return result as JSONSchema;
+  return mapped;
 }
 
 const fetchBinaryKind: FetchKind = {

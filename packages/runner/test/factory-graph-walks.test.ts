@@ -96,11 +96,15 @@ describe("factory-aware graph and static walks", () => {
       { type: "object" },
     );
     const state = factoryStateOf(base);
-    if (state.kind !== "pattern" || !("rootToken" in state)) {
+    if (
+      state.kind !== "pattern" || !("rootToken" in state) ||
+      state.rootToken === null || typeof state.rootToken !== "object"
+    ) {
       throw new Error("expected a live pattern factory");
     }
     const boundState: LivePatternFactoryState = {
       ...state,
+      rootToken: state.rootToken,
       paramsSchema: { type: "object" },
       params,
       ...(spaceSelector === undefined ? {} : { spaceSelector }),

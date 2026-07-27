@@ -270,9 +270,9 @@ const appendAtPath = (
 };
 
 // Set-add by identity: append each value to the tail only if no existing element
-// equals it (by stored-value deep equality), creating the array if absent. The
-// dedup runs against durable state on the server, so it is idempotent and merges
-// with concurrent adds of distinct elements.
+// equals it (by stored-value content equality), creating the array if absent.
+// The dedup runs against durable state on the server, so it is idempotent and
+// merges with concurrent adds of distinct elements.
 const addUniqueAtPath = (
   root: FabricValue,
   path: string[],
@@ -297,7 +297,7 @@ const addUniqueAtPath = (
 };
 
 // Remove every element of the array at `path` that equals `value` by stored-value
-// deep equality. A missing path or non-array target is a no-op (nothing to
+// content equality. A missing path or non-array target is a no-op (nothing to
 // remove). Resolved against durable state, so it never clobbers via a whole-array
 // rewrite.
 const removeByValueAtPath = (
@@ -357,9 +357,9 @@ const incrementAtPath = (
   if (path.length === 0) {
     throw new Error("increment requires a non-root path");
   }
-  if (by === 0) {
+  if (!Number.isFinite(by) || by === 0) {
     throw new Error(
-      `increment requires a non-zero amount at ${encodePointer(path)}`,
+      `increment requires a finite non-zero amount at ${encodePointer(path)}`,
     );
   }
   const current = readNumberOrAbsent(root, path);
@@ -488,12 +488,12 @@ const isContainer = (value: FabricValue): value is PatchContainer =>
  * union) a compile error, so `apply` and the path matchers can never silently
  * fall out of step with the union.
  */
-export interface PatchOpDescriptor<Op extends PatchOp = PatchOp> {
+export type PatchOpDescriptor<Op extends PatchOp = PatchOp> = {
   readonly op: Op["op"];
   readonly pointerFields: readonly string[];
   readonly structural: boolean;
   readonly apply: (state: FabricValue, op: Op) => FabricValue;
-}
+};
 
 const descriptor = <Op extends PatchOp>(
   d: PatchOpDescriptor<Op>,

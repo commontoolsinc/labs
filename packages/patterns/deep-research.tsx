@@ -92,7 +92,6 @@ When done, call presentResult with your structured findings.`,
       searchWeb,
       readWebpage,
     },
-    model: "anthropic:claude-sonnet-4-5",
     context: computed(() => context ?? {}),
     resultSchema: toSchema<ResearchResult>(),
   });

@@ -9,11 +9,8 @@ import "../src/globals.ts";
 const { FRONTEND_URL, SPACE_NAME } = env;
 
 /** Pierce shadow DOM to find an element by selector. */
-function pierce(page: Page, selector: string, timeout?: number) {
-  return page.waitForSelector(selector, {
-    strategy: "pierce",
-    ...(timeout != null ? { timeout } : {}),
-  });
+function pierce(page: Page, selector: string) {
+  return page.waitForSelector(selector, { strategy: "pierce" });
 }
 
 /** Wait until the menu container has (or lacks) the "open" class. */

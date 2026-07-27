@@ -1,8 +1,9 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
   DEFAULT_GATEWAY_BASE_URL,
   DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE,
+  type HarnessConfig,
   parseCfcEnforcementMode,
   parseHarnessGatewayAuthMode,
   resolveCfcEnforcementMode,
@@ -11,6 +12,17 @@ import {
   resolveHarnessConfig,
 } from "../src/config.ts";
 import { resolveDockerRunscSandboxConfig } from "../src/sandbox/docker-runsc.ts";
+
+Deno.test("HarnessConfig preserves legacy gateway object literals", () => {
+  const legacy: HarnessConfig = {
+    gatewayBaseUrl: "https://gateway.example/",
+    gatewayAuthMode: "bearer",
+    skillScriptExecutionTarget: "sandbox",
+    cfcEnforcementMode: "observe",
+    cfcEnforcementModeSource: "default",
+  };
+  assertEquals(legacy.modelProvider, undefined);
+});
 
 Deno.test("parseCfcEnforcementMode accepts runner-aligned values", () => {
   assertEquals(parseCfcEnforcementMode("observe"), "observe");
@@ -173,6 +185,31 @@ Deno.test("resolveHarnessConfig normalizes the gateway base URL", () => {
   assertEquals(config.gatewayAuthMode, "bearer");
   assertEquals(config.cfcEnforcementMode, DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE);
   assertEquals(config.cfcEnforcementModeSource, "default");
+});
+
+Deno.test("resolveHarnessConfig preserves legacy gateway fields for openai-codex callers", () => {
+  const config = resolveHarnessConfig({
+    modelProvider: "openai-codex",
+    credentialOwnerKey: "loom:user-1",
+  });
+  assertEquals(config, {
+    modelProvider: "openai-codex",
+    credentialOwnerKey: "loom:user-1",
+    gatewayBaseUrl: DEFAULT_GATEWAY_BASE_URL,
+    gatewayAuthMode: "bearer",
+    skillScriptExecutionTarget: "sandbox",
+    cfcEnforcementMode: "enforce-explicit",
+    cfcEnforcementModeSource: "default",
+  });
+  assertThrows(
+    () =>
+      resolveHarnessConfig({
+        modelProvider: "openai-codex",
+        gatewayBaseUrl: "https://example.invalid",
+      }),
+    Error,
+    "gateway URL/auth configuration cannot be combined",
+  );
 });
 
 Deno.test("resolveHarnessConfig accepts an explicit mode override string", () => {

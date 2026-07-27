@@ -59,12 +59,7 @@ export interface ExecDependencies extends CallableExecutionDeps {
   stat?: (path: string) => Promise<Deno.FileInfo>;
   readDir?: (path: string) => AsyncIterable<Deno.DirEntry>;
   delay?: (ms: number) => Promise<void>;
-  timeoutMs?: number;
   uuid?: () => string;
-  waitForResult?: (
-    resultCell: CallableCellLike,
-    timeoutMs: number,
-  ) => Promise<unknown>;
   invocationStyle?: "cf" | "direct";
   readJsonInput?: () => Promise<unknown>;
   readTextInput?: () => Promise<string>;
@@ -77,6 +72,10 @@ export interface ExecutedMountedCallableFile {
   outputText?: string;
   parsed: ParsedExecArgs;
   resolved: ResolvedMountedCallableFile;
+}
+
+export interface ResolveMountedCallableOptions {
+  jsonOutput?: boolean;
 }
 
 async function defaultLoadPiece(
@@ -240,6 +239,7 @@ async function assertMountedCallableFileExists(
 export async function resolveMountedCallableFile(
   filePath: string,
   deps: ExecDependencies = {},
+  options: ResolveMountedCallableOptions = {},
 ): Promise<ResolvedMountedCallableFile> {
   const absPath = resolve(filePath);
   const mount = await findMountForPath(absPath, deps.stateDir);
@@ -269,11 +269,13 @@ export async function resolveMountedCallableFile(
       apiUrl: mount.entry.apiUrl,
       identity: mount.entry.identity,
       space: callablePath.spaceName,
+      ...(options.jsonOutput ? { jsonOutput: true } : {}),
     })
     : await loadManager({
       apiUrl: mount.entry.apiUrl,
       identity: mount.entry.identity,
       space: callablePath.spaceName,
+      ...(options.jsonOutput ? { jsonOutput: true } : {}),
     }) as unknown as CallableManagerLike;
   const piece = await (deps.loadPiece ?? defaultLoadPiece)(
     manager,
@@ -307,7 +309,9 @@ export async function executeMountedCallableFile(
   rawArgs: string[],
   deps: ExecDependencies = {},
 ): Promise<ExecutedMountedCallableFile> {
-  const resolved = await resolveMountedCallableFile(filePath, deps);
+  const resolved = await resolveMountedCallableFile(filePath, deps, {
+    jsonOutput: true,
+  });
   const invocationStyle = deps.invocationStyle ??
     (Deno.env.get("CF_EXEC_SHEBANG") === "1" ? "direct" : "cf");
   const result = await executeCallableCommand({

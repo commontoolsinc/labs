@@ -44,6 +44,20 @@ export const NATIVE_TAGS = Object.freeze(
 export type NativeTag = typeof NATIVE_TAGS[keyof typeof NATIVE_TAGS];
 
 /**
+ * Checks whether a value is a native `Error`.
+ *
+ * `Error.isError()` recognizes errors from other realms when the engine
+ * provides it. Engines without it fall back to `instanceof`, which recognizes
+ * errors that share the current realm's prototype hierarchy.
+ */
+export function isNativeError(value: unknown): value is Error {
+  const isError = (Error as { isError?: (value: unknown) => boolean }).isError;
+  return typeof isError === "function"
+    ? isError(value)
+    : value instanceof Error;
+}
+
+/**
  * Maps a constructor to its native-instance tag. Returns the tag string if
  * the constructor is a recognized type (JS builtins or system-defined
  * special primitives), or `null` otherwise.
@@ -151,7 +165,7 @@ function constructorFromPrototype(
  * Dispatches via constructor metadata on the value's prototype chain (O(1)
  * switch in `tagFromNativeClass`) without observing an inherited
  * `value.constructor` property through a Proxy trap. Falls back to the
- * feature-detected `Error.isError()` intrinsic and `Array.isArray()` when a
+ * native error detector and `Array.isArray()` when a
  * constructor is unreachable (for example, a severed prototype or another
  * realm), and to a prototype check for null-prototype objects.
  *
@@ -190,11 +204,8 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     // been severed, or one from another realm. An ordinary subclass (including
     // `DOMException`) never gets here: `tagFromNativeClass()` matches it via
     // `prototype instanceof Error`. The internal slot survives either way,
-    // which is what `Error.isError()` reads. Some supported compartments may
-    // omit the newer intrinsic, so feature-detect it before use.
-    if (typeof Error.isError === "function" && Error.isError(value)) {
-      return NATIVE_TAGS.Error;
-    }
+    // which is what `Error.isError()` reads when available.
+    if (isNativeError(value)) return NATIVE_TAGS.Error;
 
     // `FabricInstance` values (object-like protocol types).
     if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;

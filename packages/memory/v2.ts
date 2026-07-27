@@ -7,7 +7,11 @@ import {
   valueFromJson,
 } from "@commonfabric/data-model/codec-json";
 import { internPathSelector } from "@commonfabric/data-model/schema-utils";
-import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
+import type {
+  FabricPlainObject,
+  FabricValue,
+  SchemaPathSelector,
+} from "@commonfabric/api";
 import { EmptyReconstructionContext } from "@commonfabric/data-model/codec-common";
 import { isObject, isRecord } from "@commonfabric/utils/types";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
@@ -44,18 +48,18 @@ export type ValueSchemaPathSelector =
  * future use and carried as opaque payload (a document is validated merely as
  * "an object" — see {@link isEntityDocument}).
  */
-export interface EntityDocument {
+export type EntityDocument = {
   value?: FabricValue;
   source?: EntityRef;
   [key: string]: FabricValue;
-}
+};
 
-export interface Blob {
+export type Blob = {
   hash: Reference;
   value: Uint8Array;
   contentType: string;
   size: number;
-}
+};
 
 export type PatchOp =
   | { op: "replace"; path: string; value: FabricValue }
@@ -105,12 +109,12 @@ export type PatchOp =
 // over-conflicts a parent shape reader conservatively (an extra retry), never
 // missing one. See docs/specs/memory-v2/08-conflict-granularity.md.
 
-export interface SetOperation {
+export type SetOperation = {
   op: "set";
   id: EntityId;
   scope?: CellScope;
   value: EntityDocument;
-}
+};
 
 /**
  * Idempotently install content-addressed data. An absent entity is written as a
@@ -135,18 +139,18 @@ export interface EnsureOperation {
   addUnique?: DocumentPath[];
 }
 
-export interface PatchOperation {
+export type PatchOperation = {
   op: "patch";
   id: EntityId;
   scope?: CellScope;
   patches: PatchOp[];
-}
+};
 
-export interface DeleteOperation {
+export type DeleteOperation = {
   op: "delete";
   id: EntityId;
   scope?: CellScope;
-}
+};
 
 /**
  * A SQLite write folded into the commit, applied inside the same transaction as
@@ -154,12 +158,12 @@ export interface DeleteOperation {
  * enters the revision/head/snapshot/dirty machinery (see SqliteDbRef below /
  * docs/specs/sqlite-builtin/plans/atomic-writes.md).
  */
-export interface SqliteOperation {
+export type SqliteOperation = {
   op: "sqlite";
   db: SqliteDbRef;
   sql: string;
   params?: SqliteParamsWire;
-}
+};
 
 export type Operation =
   | SetOperation
@@ -168,7 +172,7 @@ export type Operation =
   | DeleteOperation
   | SqliteOperation;
 
-export interface ConfirmedRead {
+export type ConfirmedRead = {
   id: EntityId;
   scope?: CellScope;
   branch?: BranchName;
@@ -184,25 +188,38 @@ export interface ConfirmedRead {
    * recursive read (the historical behavior).
    */
   nonRecursive?: boolean;
-}
+};
 
-export interface PendingRead {
+export type PendingRead = {
   id: EntityId;
   scope?: CellScope;
   path: ReadPath;
-  localSeq: number;
+  /**
+   * The reader's pending-stack dependency set for this document. An array
+   * lists EVERY pending layer the read's materialized view sat on; each
+   * element must have resolved to an accepted commit for this commit to be
+   * applicable, and the staleness (conflict) check runs exactly once, based
+   * at the resolution of the HIGHEST element — the document's top-of-stack
+   * layer below the reader, which the array MUST include. A scalar is the
+   * degenerate single-layer form (also what pre-`pendingReadStacks` peers
+   * emit: top-of-stack only, carrying no lower-layer dependencies).
+   */
+  localSeq: number | number[];
   /** See {@link ConfirmedRead.nonRecursive}. */
   nonRecursive?: boolean;
-}
+};
 
-export interface SchedulerObservationCommit {
+export type SchedulerObservationCommit = {
   localSeq: number;
   reads: {
     confirmed: ConfirmedRead[];
     pending: PendingRead[];
   };
-  schedulerObservation: unknown;
-}
+  /** The observation, opaque here: this layer stores and forwards it, and
+   *  the runner owns its shape and validation. `FabricValue` says only what
+   *  the wire requires of it. */
+  schedulerObservation: FabricValue;
+};
 
 export type CommitPrecondition =
   | {
@@ -223,7 +240,7 @@ export type CommitPrecondition =
     valueHash: string | null;
   };
 
-export interface ClientCommit {
+export type ClientCommit = {
   localSeq: number;
   reads: {
     confirmed: ConfirmedRead[];
@@ -231,7 +248,10 @@ export interface ClientCommit {
   };
   operations: Operation[];
   preconditions?: CommitPrecondition[];
-  schedulerObservation?: unknown;
+  /** The observation, opaque here: this layer stores and forwards it, and
+   *  the runner owns its shape and validation. `FabricValue` says only what
+   *  the wire requires of it. */
+  schedulerObservation?: FabricValue;
   schedulerObservationBatch?: SchedulerObservationCommit[];
   codeCID?: Reference;
   branch?: BranchName;
@@ -241,22 +261,22 @@ export interface ClientCommit {
     baseBranch: BranchName;
     baseSeq: number;
   };
-}
+};
 
-export interface SessionOpenArgs {
+export type SessionOpenArgs = {
   sessionId?: SessionId;
   seenSeq?: number;
   sessionToken?: SessionToken;
-}
+};
 
-export interface SessionOpenCommand {
+export type SessionOpenCommand = {
   cmd: "session.open";
   id: JobId;
   protocol: typeof MEMORY_PROTOCOL;
   args: SessionOpenArgs;
-}
+};
 
-export interface SessionOpenResult {
+export type SessionOpenResult = {
   sessionId: SessionId;
   sessionToken: SessionToken;
   serverSeq: number;
@@ -264,9 +284,9 @@ export interface SessionOpenResult {
   resumed?: boolean;
   sync?: SessionSync;
   sessionOpen: SessionOpenAuthMetadata;
-}
+};
 
-export interface MemoryProtocolFlags {
+export type MemoryProtocolFlags = {
   modernCellRep: boolean;
   persistentSchedulerState: boolean;
   commitPreconditions: boolean;
@@ -285,7 +305,19 @@ export interface MemoryProtocolFlags {
    * (not configuration), so a server of this version always advertises it.
    */
   sqliteCommitRowLabelEval: boolean;
-}
+  /**
+   * Server capability (CT-1872 1c): pending reads may carry an ARRAY
+   * `localSeq` naming every pending layer the read sat on (resolution
+   * required for each element; staleness based at the highest — see
+   * `PendingRead.localSeq`). A client that sees this absent (an older
+   * server) falls back to scalar top-of-stack emission, and MUST hold each
+   * such send until every omitted lower dependency has settled — otherwise
+   * the old server could durably accept a commit the client cascade-rejects
+   * (03-commit-model.md §3.5). Inherent to the build, so a server of this
+   * version always advertises it.
+   */
+  pendingReadStacks: boolean;
+};
 
 /**
  * Wire-format flags object.
@@ -297,102 +329,103 @@ export type WireMemoryProtocolFlags = {
   syncSchemaTable?: boolean;
   syncSchemaTableV2?: boolean;
   sqliteCommitRowLabelEval?: boolean;
+  pendingReadStacks?: boolean;
 };
 
-export interface HelloMessage {
+export type HelloMessage = {
   type: "hello";
   protocol: typeof MEMORY_PROTOCOL;
   flags: WireMemoryProtocolFlags;
-}
+};
 
-export interface HelloOkMessage {
+export type HelloOkMessage = {
   type: "hello.ok";
   protocol: typeof MEMORY_PROTOCOL;
   flags: WireMemoryProtocolFlags;
   sessionOpen?: SessionOpenAuthMetadata;
-}
+};
 
-export interface SessionOpenChallenge {
+export type SessionOpenChallenge = {
   value: string;
   expiresAt: number;
-}
+};
 
-export interface SessionOpenAuthMetadata {
+export type SessionOpenAuthMetadata = {
   challenge: SessionOpenChallenge;
   audience: string;
-}
+};
 
-export interface SessionDescriptor {
+export type SessionDescriptor = {
   sessionId?: SessionId;
   seenSeq?: number;
   sessionToken?: SessionToken;
-}
+};
 
-export interface SessionOpenRequest {
+export type SessionOpenRequest = {
   type: "session.open";
   requestId: string;
   space: string;
   session: SessionDescriptor;
   invocation?: Record<string, unknown>;
   authorization?: FabricValue;
-}
+};
 
-export interface GraphQueryRoot {
+export type GraphQueryRoot = {
   id: EntityId;
   scope?: CellScope;
   selector: SchemaPathSelector;
-}
+};
 
-export interface GraphQuery {
+export type GraphQuery = {
   roots: GraphQueryRoot[];
   atSeq?: number;
   branch?: BranchName;
   excludeSent?: boolean;
-}
+};
 
-export interface EntitySnapshot {
+export type EntitySnapshot = {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
   seq: number;
   document: EntityDocument | null;
-}
+};
 
-export interface GraphQueryResult {
+export type GraphQueryResult = {
   serverSeq: number;
   entities: EntitySnapshot[];
-}
+};
 
-export interface QueryWatchSpec {
+export type QueryWatchSpec = {
   id: string;
   kind: "query";
   query: GraphQuery;
-}
+};
 
-export interface GraphWatchSpec {
+export type GraphWatchSpec = {
   id: string;
   kind: "graph";
   query: GraphQuery;
-}
+};
 
 export type WatchSpec = QueryWatchSpec | GraphWatchSpec;
 
-export interface SessionSyncUpsert {
+export type SessionSyncUpsert = {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
   seq: number;
   doc?: EntityDocument;
   deleted?: true;
-}
+};
 
-export interface SessionSyncRemove {
+export type SessionSyncRemove = {
   branch: BranchName;
   id: EntityId;
   scope?: CellScope;
-}
+};
 
-export interface SessionSync {
+export type SessionSync = {
   type: "sync";
   fromSeq: number;
   toSeq: number;
@@ -408,42 +441,44 @@ export interface SessionSync {
   // scheduler.snapshot.list result; `observation` is intentionally
   // `unknown` — the runner owns validation.
   observations?: SchedulerActionSnapshotResult[];
-}
+};
 
-export interface WatchSetResult {
+export type WatchSetResult = {
   serverSeq: number;
   sync: SessionSync;
-}
+};
 
-export interface WatchAddResult {
+export type WatchAddResult = {
   serverSeq: number;
   sync: SessionSync;
-}
+};
 
-export interface SessionAckResult {
+export type SessionAckResult = {
   serverSeq: number;
-}
+};
 
-export interface TransactRequest {
+export type TransactRequest = {
   type: "transact";
   requestId: string;
   space: string;
   sessionId: SessionId;
   commit: ClientCommit;
-}
+};
 
-export interface GraphQueryRequest {
+export type GraphQueryRequest = {
   type: "graph.query";
   requestId: string;
   space: string;
   sessionId: SessionId;
   query: GraphQuery;
-}
+};
 
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
 
 /** Wire form of SQLite bind parameters. */
-export type SqliteParamsWire = ReadonlyArray<unknown> | Record<string, unknown>;
+export type SqliteParamsWire =
+  | ReadonlyArray<FabricValue>
+  | Record<string, FabricValue>;
 
 /** Reference to a cell-derived SQLite database: an opaque id (the handle cell's
  *  entity id) plus the declared table schemas (for additive create/migrate).
@@ -452,17 +487,17 @@ export type SqliteParamsWire = ReadonlyArray<unknown> | Record<string, unknown>;
  *  server folds it (with the request's principal / session id) into the on-disk
  *  filename so a `user`/`session`-scoped db gets a per-user / per-session file;
  *  `space` (or absent) keeps the original unqualified name. */
-export interface SqliteDbRef {
+export type SqliteDbRef = {
   id: string;
-  tables?: Record<string, unknown>;
+  tables?: Record<string, FabricValue>;
   scope?: CellScope;
   /** The db's owner — the principal that created the SqliteDb cell. Resolves
    *  the per-row label rule's `dbOwner()` term (CFC Phase 3); a FIXED db
    *  property, captured once at handle creation, never the acting reader. */
   owner?: string;
-}
+};
 
-export interface SqliteQueryRequest {
+export type SqliteQueryRequest = {
   type: "sqlite.query";
   requestId: string;
   space: string;
@@ -470,15 +505,15 @@ export interface SqliteQueryRequest {
   db: SqliteDbRef;
   sql: string;
   params?: SqliteParamsWire;
-}
+};
 
 /** A result column's output name plus its TRUE source `(table, column)` origin
  *  (null for an expression/computed/compound column). */
-export interface SqliteResultColumn {
+export type SqliteResultColumn = {
   output: string;
   table: string | null;
   column: string | null;
-}
+};
 
 /** Whether a column's `ifc` annotation is present and non-empty — the single
  *  predicate for "this column participates in CFC labeling". Shared by the
@@ -517,15 +552,15 @@ export function dbNeedsColumnProvenance(
   return false;
 }
 
-export interface SqliteQueryResult {
-  rows: unknown[];
+export type SqliteQueryResult = {
+  rows: FabricPlainObject[];
   /** Per-result-column origin, present ONLY when the db needs provenance for
    *  CFC labeling — any column declares `ifc` (Phase 2) or any table declares
    *  a per-row label rule (Phase 3); see `dbNeedsColumnProvenance`. An aliased
    *  or joined column maps back to its declared `(table, column)`. Undefined
    *  otherwise, so unlabeled queries pay nothing. */
   columns?: SqliteResultColumn[];
-}
+};
 
 // NOTE: there is no `sqlite.execute` write verb. Writes go through the commit
 // fold (a `sqlite` op inside `transact`, applied atomically with cell ops by the
@@ -537,7 +572,7 @@ export interface SqliteQueryResult {
  * given file (read-only) for the handle id instead of the cell-derived path. The
  * descriptor is server-side state — it is NOT written into the handle cell value.
  */
-export interface SqliteRegisterDiskSourceRequest {
+export type SqliteRegisterDiskSourceRequest = {
   type: "sqlite.register-disk-source";
   requestId: string;
   space: string;
@@ -546,37 +581,37 @@ export interface SqliteRegisterDiskSourceRequest {
   id: string;
   /** Absolute path to the on-disk SQLite file. */
   path: string;
-}
+};
 
-export interface SqliteRegisterDiskSourceResult {
+export type SqliteRegisterDiskSourceResult = {
   registered: true;
-}
+};
 
-export interface WatchSetRequest {
+export type WatchSetRequest = {
   type: "session.watch.set";
   requestId: string;
   space: string;
   sessionId: SessionId;
   watches: WatchSpec[];
-}
+};
 
-export interface WatchAddRequest {
+export type WatchAddRequest = {
   type: "session.watch.add";
   requestId: string;
   space: string;
   sessionId: SessionId;
   watches: WatchSpec[];
-}
+};
 
-export interface SessionAckRequest {
+export type SessionAckRequest = {
   type: "session.ack";
   requestId: string;
   space: string;
   sessionId: SessionId;
   seenSeq: number;
-}
+};
 
-export interface SchedulerActionSnapshotQuery {
+export type SchedulerActionSnapshotQuery = {
   branch?: BranchName;
   ownerSpace?: string;
   pieceId?: string;
@@ -590,86 +625,177 @@ export interface SchedulerActionSnapshotQuery {
   throughCommitSeq?: number;
   limit?: number;
   cursor?: SchedulerActionSnapshotCursor;
-}
+};
 
 /**
  * Server-derived ownership partition for durable scheduler state. The opaque
  * principal and session components use the same encoding as resolved memory
  * scope keys; clients must never construct one to select another context.
  */
+export type SchedulerActionKind =
+  | "computation"
+  | "effect"
+  | "event-handler";
+
+export type SchedulerObservationTransactionKind =
+  | "dependency-collection"
+  | "action-run"
+  | "event-preflight";
+
+export type SchedulerObservationAddress = {
+  space: string;
+  id: EntityId;
+  scope?: CellScope;
+  path: readonly string[];
+};
+
+export type CompleteActionScopeSummary = {
+  version: 1;
+  complete: true;
+  implementationFingerprint: string;
+  runtimeFingerprint: string;
+  piece: SchedulerObservationAddress;
+  reads: SchedulerObservationAddress[];
+  writes: SchedulerObservationAddress[];
+  materializerWriteEnvelopes: SchedulerObservationAddress[];
+  directOutputs: SchedulerObservationAddress[];
+};
+
+/**
+ * A scheduler action observation as it is stored and carried across the memory
+ * boundary.
+ *
+ * A parallel declaration of the same concept lives in the runner, at
+ * `runner/src/scheduler/persistent-observation.ts`. The two are not the same
+ * type and differ in strictness:
+ *
+ * - addresses here are {@link SchedulerObservationAddress} (`space: string`);
+ *   the runner uses `IMemorySpaceAddress` (`space: MemorySpace`)
+ * - `branch` here is `BranchName`; the runner declares it `string`
+ *
+ * The runner produces observations and this side stores them, so this one is
+ * deliberately the wider of the pair. Nothing checks that they agree: the wire
+ * fields that carry an observation (`CommitData.schedulerObservation` and
+ * `SchedulerActionSnapshotResult.observation`) are declared `unknown`, so a
+ * change to either declaration will not surface at the seam. Keep them in sync
+ * by hand until one of them owns the shape.
+ */
+export type SchedulerActionObservation = {
+  version: 1 | 2;
+  ownerSpace?: string;
+  branch: BranchName;
+  pieceId: string;
+  processGeneration: number;
+  actionId: string;
+  actionKind: SchedulerActionKind;
+  implementationFingerprint: string;
+  runtimeFingerprint: string;
+  completeActionScopeSummary?: CompleteActionScopeSummary;
+  observedAtSeq: number;
+  observedAtLocalSeq?: number;
+  transactionKind: SchedulerObservationTransactionKind;
+  reads: SchedulerObservationAddress[];
+  shallowReads: SchedulerObservationAddress[];
+  actualChangedWrites: SchedulerObservationAddress[];
+  currentKnownWrites: SchedulerObservationAddress[];
+  declaredWrites?: SchedulerObservationAddress[];
+  materializerWriteEnvelopes: SchedulerObservationAddress[];
+  ignoredSchedulingWrites?: SchedulerObservationAddress[];
+  actionOptions?: {
+    debounceMs?: number;
+    noDebounce?: boolean;
+    throttleMs?: number;
+  };
+  status: "success" | "failed";
+  errorFingerprint?: string;
+};
+
 export type SchedulerExecutionContextKey =
   | "space"
   | `user:${string}`
   | `session:${string}:${string}`;
 
-export interface SchedulerActionSnapshotCursor {
+export type SchedulerActionSnapshotCursor = {
   ownerSpace?: string;
   pieceId: string;
   processGeneration: number;
   actionId: string;
   executionContextKey: SchedulerExecutionContextKey;
-}
+};
 
-export interface SchedulerActionSnapshotResult {
+export type SchedulerActionSnapshotResult = {
   observationId: number;
   commitSeq: number | null;
   observedAtSeq: number;
   executionContextKey: SchedulerExecutionContextKey;
-  observation: unknown;
+  /** The observation, opaque here: this layer stores and forwards it, and the
+   *  runner owns its shape and validation. `FabricValue` says only what the
+   *  wire requires of it. */
+  observation: FabricValue;
   directDirtySeq?: number;
   staleSeq?: number;
   unknownReason?: string;
-}
+};
 
-export interface SchedulerSnapshotListResult {
+export type SchedulerSnapshotListResult = {
   serverSeq: number;
   snapshots: SchedulerActionSnapshotResult[];
   nextCursor?: SchedulerActionSnapshotCursor;
-}
+};
 
-export interface SchedulerSnapshotListRequest {
+export type SchedulerSnapshotListRequest = {
   type: "scheduler.snapshot.list";
   requestId: string;
   space: string;
   sessionId: SessionId;
   query: SchedulerActionSnapshotQuery;
-}
+};
 
-export interface ResponseMessage<Result> {
+export type ResponseMessage<Result> = {
   type: "response";
   requestId: string;
   ok?: Result;
   error?: V2Error;
-}
+};
 
-export interface SessionEffectMessage {
+export type SessionEffectMessage = {
   type: "session/effect";
   space: string;
   sessionId: SessionId;
   effect: SessionSync;
-}
+};
 
-export interface SessionRevokedMessage {
+export type SessionRevokedMessage = {
   type: "session/revoked";
   space: string;
   sessionId: SessionId;
   reason: "taken-over" | "unauthorized";
-}
+};
 
-export interface V2Error {
+export type V2Error = {
   name: string;
   message: string;
   precondition?: string;
   retryAfterSeq?: number;
-}
+  /**
+   * Present on an `AuthorizationError` that a fresh handshake can heal — the
+   * connection-challenge and invocation-freshness anti-replay races (an expired,
+   * already-used, or mismatched challenge; a stale signed `exp`). Each reconnect
+   * runs a new `hello` that issues a fresh challenge, so these do not recur. Its
+   * absence marks a permanent denial (an audience mismatch, a malformed
+   * invocation, or an ACL capability shortfall) that retrying cannot fix — the
+   * client stops reopening the session and surfaces the error instead of looping.
+   */
+  retriable?: boolean;
+};
 
 export type V2Result<Value> = { ok: Value } | { error: V2Error };
 
-export interface TaskReturn<Result> {
+export type TaskReturn<Result> = {
   the: "task/return";
   of: JobId;
   is: Result;
-}
+};
 
 export type Receipt<Result> = TaskReturn<Result>;
 export type LegacyClientMessage = SessionOpenCommand;
@@ -687,7 +813,7 @@ export type ClientMessage =
   | SessionAckRequest;
 export type ServerMessage =
   | HelloOkMessage
-  | ResponseMessage<unknown>
+  | ResponseMessage<FabricValue>
   | SessionEffectMessage
   | SessionRevokedMessage;
 
@@ -764,6 +890,10 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // advertises the fact. Peers that see it absent (an older server) keep their
   // write gate failing closed.
   sqliteCommitRowLabelEval: true,
+  // Likewise build-inherent: this build's engine resolves array-localSeq
+  // pending reads (resolvePendingReads), so it always advertises it. Clients
+  // that see it absent scalarize to top-of-stack before sending.
+  pendingReadStacks: true,
   syncSchemaTableV2: getSyncSchemaTableConfig(),
 });
 
@@ -837,6 +967,14 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const pendingReadStacks = value.pendingReadStacks;
+  if (
+    pendingReadStacks !== undefined &&
+    typeof pendingReadStacks !== "boolean"
+  ) {
+    return null;
+  }
+
   return {
     modernCellRep: modernCellRep === true,
     persistentSchedulerState: persistentSchedulerState === true,
@@ -846,6 +984,9 @@ export const parseMemoryProtocolFlags = (
     // Absent (an older peer) parses to false: the capability must be
     // POSITIVELY advertised for the runner to relax its write gate.
     sqliteCommitRowLabelEval: sqliteCommitRowLabelEval === true,
+    // Absent (an older server) parses to false: clients scalarize pending
+    // reads to top-of-stack unless the array capability is advertised.
+    pendingReadStacks: pendingReadStacks === true,
   };
 };
 
@@ -861,6 +1002,7 @@ export const wireMemoryProtocolFlags = (
   syncSchemaTable: flags.syncSchemaTable,
   syncSchemaTableV2: flags.syncSchemaTableV2,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
+  pendingReadStacks: flags.pendingReadStacks,
 });
 
 /**
@@ -877,6 +1019,40 @@ export const wireMemoryProtocolFlags = (
  */
 export const encodeMemoryBoundary = (value: FabricValue): string =>
   jsonFromValue(value);
+
+/**
+ * Encodes a wire payload that the type system cannot yet prove is a
+ * `FabricValue`. Identical to `encodeMemoryBoundary()` in every respect but the
+ * declared parameter type; prefer that one wherever it type-checks.
+ *
+ * The memory protocol's own message types are the callers here. They are
+ * fabric values in fact — they cross this boundary on every request and
+ * response, and would fail loudly if they were not — but they cannot be
+ * *stated* as such, because some of their fields are declared `unknown`. A type
+ * containing an `unknown` field is not assignable to `FabricValue`, so the
+ * whole enclosing message is rejected however sound its actual contents.
+ *
+ * Every remaining caller is blocked by the same root: `ClientCommit`'s
+ * `schedulerObservation` is `unknown`, which reaches every message that carries
+ * a commit.
+ *
+ * What is given up is narrower than it looks: the encoding *verifies*. A value
+ * that no codec can represent throws — at any depth, naming the offending
+ * subvalue ("Cannot encode new ArrayBuffer(...): no applicable codec"). So this
+ * trades a compile-time guarantee for a runtime one that already ran, rather
+ * than for no guarantee at all. What it does lose is the early, local report:
+ * a bad value is caught at the encode, not at the assignment that introduced
+ * it.
+ *
+ * Every use marks a declaration that has not been tightened yet, which is why
+ * the name is what it is — the count of callers is the size of the remaining
+ * job, and `grep` measures it. As those `unknown` fields acquire real types,
+ * move the corresponding calls back to `encodeMemoryBoundary()`; when the last
+ * one moves, delete this.
+ */
+export const encodeMemoryBoundaryUnprovenFabricValue = (
+  value: unknown,
+): string => jsonFromValue(value as FabricValue);
 
 export const commitPreconditionValueHash = (value: FabricValue): string =>
   hashStringOf(encodeMemoryBoundary(value));

@@ -105,6 +105,18 @@ export abstract class BaseFabricInstance extends FabricInstance {
    *
    * Side-effect-free and must not throw: an instance that is not in
    * canonical deep-frozen form returns `false`.
+   *
+   * **Deep-frozen honesty (mandatory).** This report must be truthful and
+   * permanent: an implementation must not return `true` unless the instance is,
+   * and will remain, deeply immutable (including its private slots). Once it
+   * reports deep-frozen, that is permanent for the life of the instance.
+   * The rest of the system -- the data model in general and `isDeepFrozen()`
+   * specifically, but also the entire codebase that _uses_ the data model -- is
+   * entitled to rely on this: a deep-frozen proof is cached by root identity and
+   * not re-validated, so an instance that lies here (reports deep-frozen while
+   * still mutable) can corrupt data-model invariants, exactly as any other
+   * broken class contract can. Making this correct is the implementing class's
+   * responsibility, not something the freeze-checking code papers over.
    */
   abstract [IS_DEEP_FROZEN](
     subIsDeepFrozen: (value: FabricValue) => boolean,

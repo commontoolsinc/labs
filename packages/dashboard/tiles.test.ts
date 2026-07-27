@@ -2,8 +2,8 @@
 // hand-made Ctx. No server, no network, no subprocess — the CI tiles get canned
 // runs and the token-gated tiles get an empty env (their gray-out contract).
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import type { Ctx, Run } from "./types.ts";
-import { LOOM_REPO, REPO } from "./config.ts";
+import { runSource, type Ctx, type Run } from "./types.ts";
+import { CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_REPO, REPO } from "./config.ts";
 import { labsCi, loomCi } from "./tiles/main-build.ts";
 import { labsCiTrust, loomCiTrust } from "./tiles/ci-trust.ts";
 import { labsCiDuration, loomCiDuration } from "./tiles/ci-duration.ts";
@@ -41,9 +41,11 @@ function ctx(
   };
 }
 
+let nextRunId = 1;
+
 function run(over: Partial<Run>): Run {
   return {
-    id: 1,
+    id: nextRunId++,
     status: "completed",
     conclusion: "success",
     run_attempt: 1,
@@ -299,6 +301,25 @@ Deno.test("tile labels: the labs/loom ci family is renamed and paired", async ()
   assertEquals((await loomCiDuration.collect(one)).label, "loom ci duration");
 });
 
+Deno.test("runSource creates workflow snapshot metadata", () => {
+  assertEquals(runSource(REPO, CI_WORKFLOW), {
+    repo: REPO,
+    workflow: CI_WORKFLOW,
+  });
+});
+
+Deno.test("CI tiles declare the workflow snapshots that drive them", () => {
+  const labsSource = [{ repo: REPO, workflow: CI_WORKFLOW }];
+  const loomSource = [{ repo: LOOM_REPO, workflow: LOOM_CI_WORKFLOW }];
+  for (const tile of [labsCi, labsCiTrust, labsCiDuration]) {
+    assertEquals(tile.runSources, labsSource);
+  }
+  for (const tile of [loomCi, loomCiTrust, loomCiDuration]) {
+    assertEquals(tile.runSources, loomSource);
+  }
+  assertEquals(recentRuns.runSources, [...labsSource, ...loomSource]);
+});
+
 Deno.test("labs ci: an in-flight build renders at the bottom (extra), not the header (aside)", async () => {
   const runs = [
     run({ status: "in_progress", conclusion: null, display_title: "wip" }),
@@ -391,11 +412,11 @@ Deno.test("gated tiles gray out cleanly without their env", async () => {
   }
 });
 
-Deno.test("discord snapshot: splits online members into Team Member and Visitors", () => {
+Deno.test("discord snapshot: splits online members into Team and Visitors", () => {
   const guild = {
     id: "g",
     roles: [
-      { id: "team", name: "Team Member", color: 0x2ecc71, position: 5 },
+      { id: "team", name: "Team", color: 0x2ecc71, position: 5 },
       { id: "g", name: "@everyone", color: 0, position: 0 },
     ],
     members: [
@@ -412,6 +433,7 @@ Deno.test("discord snapshot: splits online members into Team Member and Visitors
     ],
   };
   const snap = buildSnapshot(guild);
+  assert(snap);
   assertEquals(snap.online, 3); // a, b, d (c is offline)
   assertEquals(snap.team, 2); // a, d carry the role and are online
   assertEquals(snap.visitors, 1); // b

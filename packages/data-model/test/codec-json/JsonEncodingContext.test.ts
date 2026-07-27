@@ -1131,7 +1131,7 @@ describe("JsonEncodingContext", () => {
     it("throws on `FabricInstance` whose state references itself", () => {
       const { context } = makeTestContext();
       // Create an instance with a circular reference in its state.
-      const state = { eek: [] as unknown[] };
+      const state = { eek: [] as FabricValue[] };
       state.eek.push(state);
 
       const us = new UnknownValue("Test@1", state);

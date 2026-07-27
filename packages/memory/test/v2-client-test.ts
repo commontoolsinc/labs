@@ -51,7 +51,7 @@ const sessionOpenFor = (id: string) => ({
 
 const handshakeTransport = (
   helloOk: FabricValue,
-  sessionOpen: unknown = undefined,
+  sessionOpen: FabricValue = undefined,
 ): Transport => {
   let receiver = (_payload: string) => {};
   return {
@@ -1261,7 +1261,7 @@ class ReconnectableLoopbackTransport implements Transport {
       if (this.connectionCount >= 2) {
         this.#reconnected.resolve();
       }
-      this.#connection = this.server.connect((message: FabricValue) => {
+      this.#connection = this.server.connect((message) => {
         this.#receiver(encodeMemoryBoundary(message));
       });
     }

@@ -84,6 +84,7 @@ describe("pattern", () => {
     expect(doublePattern.derivedInternalCells).toEqual([
       {
         partialCause: "double",
+        kind: "computed",
         scope: "space",
       },
       {
@@ -105,10 +106,12 @@ describe("pattern", () => {
     expect(testPattern.derivedInternalCells).toEqual([
       {
         partialCause: { $generated: 0 },
+        kind: "computed",
         scope: "space",
       },
       {
         partialCause: "doubled",
+        kind: "computed",
         scope: "space",
       },
     ]);
@@ -145,6 +148,7 @@ describe("pattern", () => {
       {
         partialCause: "isSelected",
         schema: { type: "boolean" },
+        kind: "computed",
         scope: "space",
       },
       {
@@ -153,6 +157,7 @@ describe("pattern", () => {
           $generated: 0,
         },
         schema: { type: "boolean" },
+        kind: "computed",
         scope: "space",
       },
     ]);

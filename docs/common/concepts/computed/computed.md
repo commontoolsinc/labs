@@ -114,8 +114,9 @@ Reading the ambient clock or entropy inside a `computed()` — `Date.now()`,
 no-argument `new Date()`, or `Math.random()` — throws a `TimeCapabilityError`:
 those are reactive inputs that would themselves break the idempotency this
 section is about. Capture a timestamp inside a handler (where `Date.now()` is
-allowed, coarsened to one-second resolution), or read the reactive `#now` wish
-for a value that updates on its own.
+allowed, coarsened to one-second resolution), or read the interval `#now/N`
+wish for a value that updates on its own (the bare `#now` wish is a durable
+one-shot — the piece's first-ever load time — and never updates).
 
 The scheduler re-runs computations when their dependencies change. If a computation modifies a cell it depends on, it triggers itself. With idempotent operations, the second run produces no change, so the system settles.
 

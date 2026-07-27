@@ -530,6 +530,10 @@ export class Engine extends EventTarget implements Harness {
               .CommonFabricTransformerPipeline)({
               patternCoverage,
               moduleIdentities: identityByPath,
+              // Writer identities record authored paths: unmap the engine's
+              // per-load `/<id>` prefix (and mount paths) before spelling.
+              canonicalWriterIdentityFile: (name) =>
+                storedFilenameFor(name, id, mounts),
             });
             return {
               factories: pipeline.toFactories(program),
@@ -752,8 +756,10 @@ export class Engine extends EventTarget implements Harness {
     const runTransform = options.transform ?? true;
     const resolvedBatches: ResolvedProgramBatch[] = [];
     const mains: string[] = [];
+    const batchIds: string[] = [];
     for (const program of programs) {
       const id = computeId(program);
+      batchIds.push(id);
       const mapped = pretransformProgramForModules(program, id);
       const resolver = new EngineProgramResolver(
         mapped,
@@ -788,7 +794,18 @@ export class Engine extends EventTarget implements Harness {
               mergedFiles.map(({ name }) => [name, `check:${name}`]),
             );
             const pipeline = new (compilerStack()
-              .CommonFabricTransformerPipeline)({ moduleIdentities });
+              .CommonFabricTransformerPipeline)({
+              moduleIdentities,
+              // The union carries a different `/<id>` prefix per batched
+              // program; strip whichever one matches.
+              canonicalWriterIdentityFile: (name) => {
+                for (const batchId of batchIds) {
+                  const stripped = stripModuleIdPrefix(name, batchId);
+                  if (stripped !== name) return stripped;
+                }
+                return name;
+              },
+            });
             return {
               factories: pipeline.toFactories(program),
               getDiagnostics: () => pipeline.getDiagnostics(),
@@ -943,6 +960,10 @@ export class Engine extends EventTarget implements Harness {
           .CommonFabricTransformerPipeline)({
           patternCoverage,
           moduleIdentities: identityByPath,
+          // Names on this path are already stored-shaped (no `/<id>` prefix);
+          // only mount paths need unmapping to authored spellings.
+          canonicalWriterIdentityFile: (name) =>
+            storedFilenameFor(name, undefined, mounts),
         });
         return {
           factories: pipeline.toFactories(program),

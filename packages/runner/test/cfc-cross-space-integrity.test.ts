@@ -1,5 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
+import type { IFCLabel } from "../src/cfc/mod.ts";
+import { type CfcConfClause } from "../src/cfc/clause.ts";
 import { expect } from "@std/expect";
+import type { FabricValue } from "@commonfabric/data-model/interface";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -48,7 +51,7 @@ const spaceB = (await Identity.fromPassphrase("cfc-cross-space-integrity B"))
 
 type LabelMapEntry = {
   path: string[];
-  label: { confidentiality?: unknown[]; integrity?: unknown[] };
+  label: IFCLabel;
   origin?: string;
 };
 type PersistedDoc = {
@@ -86,7 +89,7 @@ const seedLabeledDoc = async (
   runtime: Runtime,
   space: MemorySpace,
   id: string,
-  value: unknown,
+  value: FabricValue,
   entries: LabelMapEntry[],
 ): Promise<string> => {
   const seed = runtime.edit();
@@ -734,8 +737,16 @@ const clauseSetsEqual = (
   b: readonly unknown[],
 ): boolean =>
   a.length === b.length &&
-  a.every((clause) => b.some((other) => clausesEqual(clause, other))) &&
-  b.every((clause) => a.some((other) => clausesEqual(clause, other)));
+  a.every((clause) =>
+    b.some((other) =>
+      clausesEqual(clause as CfcConfClause, other as CfcConfClause)
+    )
+  ) &&
+  b.every((clause) =>
+    a.some((other) =>
+      clausesEqual(clause as CfcConfClause, other as CfcConfClause)
+    )
+  );
 
 // A value confined to space A may be released to a reader of space A: the rule
 // adds User($p) as an alternative to the Space($s) clause when the label proves

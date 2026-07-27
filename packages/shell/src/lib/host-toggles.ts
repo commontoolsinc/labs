@@ -15,6 +15,10 @@ import {
   isCfcRenderCeilingEnabled,
   setupCfcRenderCeilingToggle,
 } from "./render-ceiling.ts";
+import {
+  isConcurrentWatchRefreshEnabled,
+  setupConcurrentWatchRefreshToggle,
+} from "./concurrent-watch-refresh.ts";
 
 /**
  * Install every `commonfabric.*` host-toggle console command. Run once at
@@ -24,6 +28,7 @@ import {
 export function setupHostToggles(): void {
   setupWorkerConsoleToggle();
   setupCfcRenderCeilingToggle();
+  setupConcurrentWatchRefreshToggle();
 }
 
 /**
@@ -49,10 +54,12 @@ export function runtimeHostFlags(): {
   forwardWorkerConsole: boolean;
   cfcRenderCeiling: boolean;
   patternCoverage: boolean;
+  concurrentWatchRefresh: boolean;
 } {
   return {
     forwardWorkerConsole: isWorkerConsoleForwardingEnabled(),
     cfcRenderCeiling: isCfcRenderCeilingEnabled(),
     patternCoverage: isPatternCoverageEnabled(),
+    concurrentWatchRefresh: isConcurrentWatchRefreshEnabled(),
   };
 }

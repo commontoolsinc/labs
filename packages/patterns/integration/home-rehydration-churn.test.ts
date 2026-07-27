@@ -26,7 +26,7 @@ const TRUSTED_PROFILE_CREATE_ACTION = "CreateProfile";
 // greppable.
 //
 // To pull the distribution from the most recent 100 CI runs (this test runs in
-// the "Deno Workflow" / deno.yml `package-integration-test` job; PRs land on
+// the "CI" / deno.yml `package-integration-test` job; PRs land on
 // commontoolsinc/labs — adjust -R for a fork). Requires the `gh` CLI:
 //
 //   gh run list -R commontoolsinc/labs --workflow deno.yml --limit 100 \

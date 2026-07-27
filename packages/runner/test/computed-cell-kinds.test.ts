@@ -43,7 +43,6 @@ describe("computed cell kinds", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { computedCellIds: true },
     });
     frame = pushFrame({
       space,
@@ -334,12 +333,14 @@ describe("computed cell kinds", () => {
     });
 
     it("mints nothing when the flag is off", async () => {
-      // Replace the flag-on runtime from beforeEach with a default one.
+      // Replace the default-on runtime from beforeEach with an explicit
+      // rollback override.
       popFrame(frame);
       await runtime.dispose();
       runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
+        experimental: { computedCellIds: false },
       });
       frame = pushFrame({
         space,
@@ -383,7 +384,7 @@ describe("computed cell kinds", () => {
         await otherStorageManager.close();
       }
 
-      // The original flag-on runtime remains the active frame. Constructing
+      // The original default-on runtime remains the active frame. Constructing
       // and disposing the flag-off runtime above must not change its behavior.
       const double = lift((x: number) => x * 2);
       const flagOnPattern = pattern<{ x: number }>(({ x }) => ({
@@ -559,6 +560,178 @@ describe("computed cell kinds", () => {
       // The walk models only single-schema items; a schema ARRAY is not a
       // plain object and fails safe at the element step.
       expect(descriptorFor(testPattern, "list")?.kind).toBeUndefined();
+    });
+
+    it("grant-free tuple (prefixItems) slots stay computed", () => {
+      // Covered by the provably-handle-free gate (no grant anywhere in the
+      // schema); pins that tuple schemas don't regress that shortcut.
+      const double = lift((x: number) => x * 2);
+      const bump = handler(
+        true as const,
+        {
+          type: "object",
+          properties: {
+            target: {
+              type: "array",
+              prefixItems: [{ type: "number" }, { type: "string" }],
+            },
+          },
+        } as const,
+        (_event, _ctx) => {},
+      );
+      const testPattern = pattern<{ x: number }>(({ x }) => {
+        const doubled = double(x);
+        return { doubled, on: bump({ target: [doubled, "label"] }) };
+      });
+      expect(descriptorFor(testPattern, "doubled")?.kind).toBe("computed");
+    });
+
+    it("a capture in a grant-free tuple slot stays computed beside a granting slot", () => {
+      // CT-1895: prefixItems used to be an unmodeled keyword, so a grant in
+      // ANY slot collected the whole subtree. The aligned walk now proves the
+      // capture in slot 1 unreachable through the slot-0 grant.
+      const double = lift((x: number) => x * 2);
+      const bump = handler(
+        true as const,
+        {
+          type: "object",
+          properties: {
+            target: {
+              type: "array",
+              prefixItems: [
+                { type: "number", asCell: ["cell"] },
+                { type: "number" },
+              ],
+            },
+          },
+        } as const,
+        (_event, _ctx) => {},
+      );
+      const testPattern = pattern<{ x: number }>(({ x }) => {
+        const doubled = double(x);
+        return { doubled, on: bump({ target: [5, doubled] }) };
+      });
+      expect(descriptorFor(testPattern, "doubled")?.kind).toBe("computed");
+    });
+
+    it("a writable grant in a tuple slot disqualifies the capture bound there", () => {
+      const double = lift((x: number) => x * 2);
+      const bump = handler(
+        true as const,
+        {
+          type: "object",
+          properties: {
+            target: {
+              type: "array",
+              prefixItems: [
+                { type: "number", asCell: ["cell"] },
+                { type: "string" },
+              ],
+            },
+          },
+        } as const,
+        (_event, _ctx) => {},
+      );
+      const testPattern = pattern<{ x: number }>(({ x }) => {
+        const doubled = double(x);
+        return { doubled, on: bump({ target: [doubled, "label"] }) };
+      });
+      expect(descriptorFor(testPattern, "doubled")?.kind).toBeUndefined();
+    });
+
+    it("a grant in the items rest schema disqualifies elements past the tuple slots", () => {
+      const double = lift((x: number) => x * 2);
+      const bump = handler(
+        true as const,
+        {
+          type: "object",
+          properties: {
+            target: {
+              type: "array",
+              prefixItems: [{ type: "string" }],
+              items: { type: "number", asCell: ["cell"] },
+            },
+          },
+        } as unknown as JSONSchema,
+        (_event, _ctx) => {},
+      );
+      const testPattern = pattern<{ x: number }>(({ x }) => {
+        const doubled = double(x);
+        return { doubled, on: bump({ target: ["label", doubled] }) };
+      });
+      expect(descriptorFor(testPattern, "doubled")?.kind).toBeUndefined();
+    });
+
+    it("elements past the tuple slots with no items schema have no asCell position", () => {
+      const double = lift((x: number) => x * 2);
+      const bump = handler(
+        true as const,
+        {
+          type: "object",
+          properties: {
+            target: {
+              type: "array",
+              // The grant sits in slot 0, where a plain string is bound; the
+              // capture at index 1 is past the tuple arity with no `items`
+              // schema, so no covering subschema exists for it.
+              prefixItems: [{ type: "string", asCell: ["cell"] }],
+            },
+          },
+        } as const,
+        (_event, _ctx) => {},
+      );
+      const testPattern = pattern<{ x: number }>(({ x }) => {
+        const doubled = double(x);
+        return { doubled, on: bump({ target: ["label", doubled] }) };
+      });
+      expect(descriptorFor(testPattern, "doubled")?.kind).toBe("computed");
+    });
+
+    it("malformed prefixItems (not a schema array) fails closed", () => {
+      const double = lift((x: number) => x * 2);
+      const bump = handler(
+        true as const,
+        {
+          type: "object",
+          properties: {
+            target: {
+              type: "array",
+              prefixItems: { 0: { type: "number", asCell: ["cell"] } },
+            },
+          },
+        } as unknown as JSONSchema,
+        (_event, _ctx) => {},
+      );
+      const testPattern = pattern<{ x: number }>(({ x }) => {
+        const doubled = double(x);
+        return { doubled, on: bump({ target: [doubled] }) };
+      });
+      expect(descriptorFor(testPattern, "doubled")?.kind).toBeUndefined();
+    });
+
+    it("unused-tier keywords (contains) stay in the derived unmodeled list", () => {
+      // Pins that the derivation from schema-walk's vocabulary keeps the
+      // never-emitted tier failing closed.
+      const double = lift((x: number) => x * 2);
+      const bump = handler(
+        true as const,
+        {
+          type: "object",
+          properties: {
+            target: {
+              type: "array",
+              items: { type: "number" },
+              contains: { type: "number", asCell: ["cell"] },
+            },
+          },
+        } as unknown as JSONSchema,
+        (_event, _ctx) => {},
+      );
+      const testPattern = pattern<{ x: number }>(({ x }) => {
+        const doubled = double(x);
+        return { doubled, on: bump({ target: [doubled] }) };
+      });
+      expect(descriptorFor(testPattern, "doubled")?.kind).toBeUndefined();
     });
 
     it("an array value under an object-shaped subschema fails closed", () => {

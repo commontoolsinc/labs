@@ -125,7 +125,7 @@ export function boundPatternFactoryScope(
       if (seen.has(key)) return;
       seen.add(key);
       const state = factoryStateOf(value);
-      if ("defaultScope" in state) scopes.push(state.defaultScope);
+      if (state.kind !== "handler") scopes.push(state.defaultScope);
       mapFactoryStateValues(state, (nested) => {
         visit(nested, base);
         return nested;

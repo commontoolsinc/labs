@@ -129,6 +129,7 @@ describe("scheduler generation fencing", () => {
       tx: {} as IExtendedStorageTransaction,
       log: { reads: [], shallowReads: [], writes: [] },
       retries: new WeakMap(),
+      offBudgetRetries: new WeakMap(),
       pending: new Set(),
       commitPromise,
       resubscribe: () => {},
@@ -140,6 +141,7 @@ describe("scheduler generation fencing", () => {
       },
       restoreInvalidCauses: () => {},
       isActionGenerationCurrent: () => current,
+      getActionId: () => "generation-fenced-action",
     });
 
     await retryReady.promise;

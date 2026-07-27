@@ -1,5 +1,6 @@
 import {
   action,
+  assert,
   computed,
   handler,
   pattern,
@@ -118,7 +119,7 @@ export default pattern(() => {
     setOptionImage,
   });
 
-  const assert_my_green_vote_label_renders = computed(() =>
+  const assert_my_green_vote_label_renders = assert(() =>
     findNodeByProp(
       card[UI],
       "aria-label",
@@ -126,23 +127,23 @@ export default pattern(() => {
     ) !== undefined
   );
 
-  const assert_unset_rank_renders_placeholder = computed(() =>
+  const assert_unset_rank_renders_placeholder = assert(() =>
     hasText(card[UI], "—") && !hasText(card[UI], "#0")
   );
 
   const action_resolve_rank = action(() => rank.set(1));
 
-  const assert_resolved_rank_renders = computed(() =>
+  const assert_resolved_rank_renders = assert(() =>
     hasText(card[UI], "#1") && !hasText(card[UI], "—")
   );
 
   const action_set_zero_rank = action(() => rank.set(0));
 
-  const assert_zero_rank_renders_placeholder = computed(() =>
+  const assert_zero_rank_renders_placeholder = assert(() =>
     hasText(card[UI], "—") && !hasText(card[UI], "#0")
   );
 
-  const assert_my_green_vote_styles_buttons = computed(() => {
+  const assert_my_green_vote_styles_buttons = assert(() => {
     const green = findNodeByProp(
       card[UI],
       "aria-label",
@@ -160,18 +161,18 @@ export default pattern(() => {
       propValue(red, "style") === "opacity: 0.4;";
   });
 
-  const assert_remove_control_contains_only_link_text = computed(() => {
+  const assert_remove_control_contains_only_link_text = assert(() => {
     const remove = findElementByExactText(card[UI], "button", "remove");
     return remove !== undefined &&
       propValue(remove, "aria-label") === "Remove option (host)";
   });
 
-  const assert_remove_control_is_clickable = computed(() => {
+  const assert_remove_control_is_clickable = assert(() => {
     const remove = findElementByExactText(card[UI], "button", "remove");
     return propsOf(remove)?.onClick !== undefined;
   });
 
-  const assert_remove_control_is_underlined = computed(() => {
+  const assert_remove_control_is_underlined = assert(() => {
     const remove = findElementByExactText(card[UI], "button", "remove");
     const removeStyle = propValue(remove, "style");
     return typeof removeStyle === "object" && removeStyle !== null &&
@@ -180,7 +181,7 @@ export default pattern(() => {
         ) === "underline";
   });
 
-  const assert_remove_separator_is_plain = computed(() => {
+  const assert_remove_separator_is_plain = assert(() => {
     const separator = findElementByExactText(card[UI], "span", "·");
     const separatorAriaHidden = propValue(separator, "aria-hidden");
     const separatorStyle = propValue(separator, "style");
@@ -202,7 +203,7 @@ export default pattern(() => {
         separatorTextDecorationLine === "none");
   });
 
-  const assert_log_visit_control_renders = computed(() =>
+  const assert_log_visit_control_renders = assert(() =>
     findNodeByProp(
       card[UI],
       "aria-label",
@@ -211,7 +212,7 @@ export default pattern(() => {
   );
 
   // Stored art ⇒ artSyncState "stored" ⇒ no keep affordance.
-  const assert_no_keep_button_when_stored = computed(() =>
+  const assert_no_keep_button_when_stored = assert(() =>
     readValue(card.artSyncState) === "stored" &&
     findNodeByProp(
         card[UI],
@@ -237,7 +238,7 @@ export default pattern(() => {
     setOptionImage,
   });
 
-  const assert_keep_button_when_generated = computed(() =>
+  const assert_keep_button_when_generated = assert(() =>
     readValue(generatingCard.artSyncState) === "generated" &&
     findNodeByProp(
         generatingCard[UI],
@@ -258,7 +259,7 @@ export default pattern(() => {
     }
   });
 
-  const assert_keep_sends_generated_image = computed(() => {
+  const assert_keep_sends_generated_image = assert(() => {
     const event = readValue(lastSetOptionImage);
     return typeof event === "object" && event !== null &&
       readValue((event as SetOptionImageEvent).optionId) === "opt-tacos" &&

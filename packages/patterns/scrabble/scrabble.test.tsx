@@ -1,4 +1,4 @@
-import { action, computed, pattern } from "commonfabric";
+import { action, assert, computed, pattern } from "commonfabric";
 import Scrabble, { type Letter } from "./scrabble.tsx";
 
 const tile = (char: string, id: string): Letter => ({
@@ -66,7 +66,7 @@ export default pattern(() => {
     scrabble.resetGame.send();
   });
 
-  const assert_off_center_word_rejected = computed(() =>
+  const assert_off_center_word_rejected = assert(() =>
     scrabble.players.length === 1 &&
     scrabble.players[0]?.name === "Alice" &&
     scrabble.board.length === 0 &&
@@ -76,7 +76,7 @@ export default pattern(() => {
     scrabble.message === "The first word must cover the center star."
   );
 
-  const assert_joined_name_is_immutable = computed(() =>
+  const assert_joined_name_is_immutable = assert(() =>
     scrabble.players.length === 1 &&
     scrabble.players[0]?.name === "Alice" &&
     scrabble.myName === "Alice" &&
@@ -104,13 +104,13 @@ export default pattern(() => {
       scrabble.message.startsWith("Scored 4:");
   });
 
-  const assert_clear_returns_tiles = computed(() =>
+  const assert_clear_returns_tiles = assert(() =>
     scrabble.placed.length === 0 &&
     scrabble.rack.length === 7 &&
     scrabble.message === "Cleared your unsubmitted tiles."
   );
 
-  const assert_reset_clears_game = computed(() =>
+  const assert_reset_clears_game = assert(() =>
     scrabble.board.length === 0 &&
     scrabble.players.length === 0 &&
     scrabble.gameEvents.length === 0 &&

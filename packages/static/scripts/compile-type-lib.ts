@@ -11,8 +11,8 @@ import { stripWithheldGlobals } from "./strip-withheld-globals.ts";
  * and creates a single `.d.ts` output file for use in browser and Deno environments.
  *
  * The output describes the sandbox the patterns run in, not stock TypeScript,
- * so the `declare var` for each global in `SANDBOX_WITHHELD_GLOBALS` is dropped
- * on the way out.
+ * so the declaration of each global in `SANDBOX_WITHHELD_GLOBALS` is dropped on
+ * the way out.
  */
 
 function help() {

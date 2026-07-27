@@ -469,6 +469,7 @@ describe("RuntimeInternals", () => {
   describe("create() forwards host flags to the worker", () => {
     type CapturedInitData = {
       forwardWorkerConsole?: boolean;
+      concurrentWatchRefresh?: boolean;
       renderDeclassificationPolicy?: string;
       renderConfidentialityCeiling?: {
         atoms?: unknown[];
@@ -476,7 +477,7 @@ describe("RuntimeInternals", () => {
       };
     };
 
-    it("includes forwardWorkerConsole and the render ceiling in the Initialize request", async () => {
+    it("includes forwardWorkerConsole, concurrentWatchRefresh, and the render ceiling in the Initialize request", async () => {
       const { RuntimeInternals, defaultRenderConfidentialityCeiling } =
         await import("@commonfabric/lib-shell");
       const { Identity } = await import("@commonfabric/identity");
@@ -520,6 +521,7 @@ describe("RuntimeInternals", () => {
             workerUrl: new URL("http://shell.test/scripts/worker-runtime.js"),
             getBuildHash: () => Promise.resolve(undefined),
             forwardWorkerConsole: true,
+            concurrentWatchRefresh: true,
             cfcRenderCeiling: true,
           }),
         ).rejects.toThrow("stub init failure");
@@ -529,6 +531,9 @@ describe("RuntimeInternals", () => {
 
       expect(initRequests).toHaveLength(1);
       expect(initRequests[0].data.forwardWorkerConsole).toBe(true);
+      // The dogfood storage toggle rides the same InitializationData path; the
+      // worker maps it into StorageManager.open's experimentalConcurrentWatchRefresh.
+      expect(initRequests[0].data.concurrentWatchRefresh).toBe(true);
       // Epic H3a: the ceiling crosses the worker IPC as InitializationData —
       // exactly the fields the worker-side reconciler consumes.
       expect(initRequests[0].data.renderDeclassificationPolicy).toBe("deny");

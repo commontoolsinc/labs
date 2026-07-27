@@ -47,7 +47,7 @@ function getTraverser(
 function putDoc(
   store: Map<string, Revision<State>>,
   uri: URI,
-  value: unknown,
+  value: FabricValue,
   since = 1,
 ): void {
   const revision: Revision<State> = {

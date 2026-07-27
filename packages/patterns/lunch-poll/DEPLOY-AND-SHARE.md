@@ -19,9 +19,10 @@ addressed by `(space, causal-cell-id)` — not to "the pattern" in the abstract.
 So "share the state" = "everyone points at the same piece"; "copy the state" =
 "move that piece's values into a new piece." It all lives in **`PerSpace` input
 cells**, shared by everyone in the space: `question`, `options`, `votes`,
-`users`, `adminName`, and **`visits`** (the "Recently eaten" log + embedded vote
-snapshots that feed "Lunch stats"). Plus **`myName`**, which is **`PerUser`**
-(keyed by your DID).
+`users`, `participantProfiles` (the object-wrapped directory of live canonical
+profile links for profile-backed joiners), `adminName`, and **`visits`** (the
+"Recently eaten" log + embedded vote snapshots that feed "Lunch stats"). Plus
+**`myName`**, which is **`PerUser`** (keyed by your DID).
 
 All of these survive an in-place `setsrc` (Option A) and — because `visits` is
 now an ordinary `PerSpace` cell — can all be copied to another piece via the CLI
@@ -67,14 +68,21 @@ SPACE=team-lunch
 
 **Identity key:**
 
-- **Local dev** — the local toolshed trusts the identity derived from the
-  passphrase `"implicit trust"`. Mint a matching key (use `deno run`, **not**
-  `deno task`, when redirecting — the task wrapper prints ANSI preamble that
-  pollutes the file):
+- **Local dev** — mint your own unique key (use `deno run`, **not** `deno task`,
+  when redirecting — the task wrapper prints ANSI preamble that pollutes the
+  file):
   ```bash
-  deno run -A packages/cli/mod.ts id derive "implicit trust" > cf.key
-  chmod 600 cf.key
+  mkdir -p .cf
+  deno run -A packages/cli/mod.ts id new > .cf/shared-dev.key
+  chmod 600 .cf/shared-dev.key
+  export CF_IDENTITY="$PWD/.cf/shared-dev.key"   # replaces the ./your-identity.key placeholder above
   ```
+  The local toolshed accepts any identity; import the same key in the browser
+  (`Import CLI Key` on the login screen) when the CLI and browser should act as
+  one user. Do NOT derive the shared `"implicit trust"` passphrase for deploys —
+  that fixed, publicly-derivable DID is reserved for acting as the local
+  server's own operator identity, and it collapses you into the server
+  principal. See `docs/development/SHARED_IDENTITY.md`.
 - **Prod** — deploy with your own identity, or mint a fresh one
   (`deno run -A packages/cli/mod.ts id new > prod.key`) and share that key with
   whoever should be able to update the piece. Whoever deployed owns it; the
@@ -125,7 +133,7 @@ MINE=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
 
 # 2. Copy each PerSpace field from the canonical piece into yours.
 #    `--input` reads/writes the input cell where these live.
-for field in question users options votes adminName visits; do
+for field in question users options votes participantProfiles adminName visits; do
   deno task cf piece get --piece "$PIECE" -s "$SPACE" "$field" --input -q \
     | deno task cf piece set --piece "$MINE" -s "$SPACE" "$field" --input -q
 done

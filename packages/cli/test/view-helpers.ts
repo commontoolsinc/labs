@@ -2,7 +2,7 @@
  * Shared fixtures and helpers for the `cf view` test suites. Not a test file
  * itself (the test task globs `*.test.ts`), just an import.
  */
-import { parseDocument } from "../lib/view/parse.ts";
+import { parseDocument } from "../lib/view/languages/typescript/parse.ts";
 import type { ViewState } from "../lib/view/render.ts";
 import type { Rgb } from "../lib/view/ansi.ts";
 
@@ -66,6 +66,21 @@ type Foo = {
 };
 interface Bar {
     x: number;
+}
+`;
+
+/** Valid TypeScript that triggers a compiler crash when parsed as TSX. The
+ * generic arrow enters JSX recovery. The later private member produces a
+ * malformed private identifier. */
+export const TS_PARSER_REGRESSION =
+  `export const identity = <T>(value: T): T => {
+  return value;
+};
+class Tx {
+  #floor = 0;
+  set(mode: number): void {
+    if (mode < this.#floor) {}
+  }
 }
 `;
 

@@ -3,8 +3,8 @@
  *
  * This module provides a reusable Google Docs client that handles:
  * - Token refresh on 401 errors (via Cell<Auth> pattern)
- * - Rate limit handling (429) with exponential backoff
- * - Configurable retry logic
+ * - Surfacing other failures (including 429 rate limits) to the caller
+ * - Configurable token-refresh retry count
  * - Proper pagination for comments
  *
  * Usage:
@@ -35,12 +35,8 @@ export type { GoogleComment, GoogleDocsDocument };
 // ============================================================================
 
 export interface GoogleDocsClientConfig {
-  /** How many times the client will retry after an HTTP failure */
+  /** How many times to refresh an expired token and retry before giving up. */
   retries?: number;
-  /** In milliseconds, the delay between making any subsequent requests due to failure */
-  delay?: number;
-  /** In milliseconds, the amount to permanently increment to the `delay` on every 429 response */
-  delayIncrement?: number;
   /** Enable verbose console logging */
   debugMode?: boolean;
   /**
@@ -55,19 +51,6 @@ export interface GoogleDocsClientConfig {
 // ============================================================================
 // HELPERS
 // ============================================================================
-
-// The SES pattern sandbox endows no timers, so a real delay happens only in
-// host contexts that expose setTimeout; in-sandbox this resolves immediately
-// rather than throwing ReferenceError (retries stay ~1s apart anyway via the
-// gated fetch's grid-aligned settlement).
-const sleep = (ms: number): Promise<void> => {
-  if (ms <= 0) return Promise.resolve();
-  const timer = (globalThis as { setTimeout?: typeof setTimeout }).setTimeout;
-  if (typeof timer !== "function") return Promise.resolve();
-  return new Promise((resolve) => {
-    timer(resolve, ms);
-  });
-};
 
 function debugLog(debugMode: boolean, ...args: unknown[]) {
   if (debugMode) console.log("[GoogleDocsClient]", ...args);
@@ -140,14 +123,10 @@ export const GoogleDocsClient = function GoogleDocsClient(
   auth: Writable<Auth>,
   {
     retries = 3,
-    delay = 1000,
-    delayIncrement = 1000,
     debugMode = false,
     onRefresh,
   }: GoogleDocsClientConfig = {},
 ): GoogleDocsClient {
-  let requestDelay = delay;
-
   /**
    * Refresh the OAuth token using the refresh token.
    * Updates the auth cell with new token data.
@@ -197,8 +176,10 @@ export const GoogleDocsClient = function GoogleDocsClient(
   }
 
   /**
-   * Make an authenticated request to Google APIs.
-   * Handles 401 (token refresh) and 429 (rate limit) automatically.
+   * Make an authenticated request to Google APIs. A 401 refreshes the token and
+   * retries, up to `retries` times; every other failure — including a 429 rate
+   * limit — is thrown, since a compartment has no timers to back off with and
+   * the reactive layer re-drives the work.
    */
   async function request(
     url: URL,
@@ -216,18 +197,11 @@ export const GoogleDocsClient = function GoogleDocsClient(
     opts.headers = new Headers(opts.headers);
     opts.headers.set("Authorization", `Bearer ${token}`);
 
-    // Add delay if we've been rate limited
-    if (requestDelay > 1000) {
-      await sleep(requestDelay - 1000);
-    }
-
     const res = await fetch(url, opts);
     const { ok, status, statusText } = res;
 
     if (ok) {
       debugLog(debugMode, `${url}: ${status} ${statusText}`);
-      // Reset delay on success
-      requestDelay = 1000;
       return res;
     }
 
@@ -237,40 +211,29 @@ export const GoogleDocsClient = function GoogleDocsClient(
       `Remaining retries: ${retriesLeft}`,
     );
 
-    if (retriesLeft === 0) {
-      // Handle specific error codes with helpful messages
-      if (status === 401) {
-        throw new Error(
-          "Token expired. Please re-authenticate in your Google Auth piece.",
-        );
-      }
-      if (status === 403) {
-        const text = await res.text();
-        throw new Error(
-          `Access denied (403). This could mean:\n` +
-            `- The document is not shared with your Google account\n` +
-            `- Your account doesn't have access to this document\n` +
-            `- The required API is not enabled in your Google Cloud project\n\n` +
-            `Details: ${text}`,
-        );
-      }
-      throw new Error(`Google API error: ${status} ${statusText}`);
-    }
-
-    await sleep(requestDelay);
-
-    if (status === 401) {
+    // Recover from an expired token by refreshing and retrying.
+    if (status === 401 && retriesLeft > 0) {
       await refreshAuth();
-    } else if (status === 429) {
-      requestDelay += delayIncrement;
-      debugLog(
-        debugMode,
-        `Rate limited, incrementing delay to ${requestDelay}ms`,
-      );
-      await sleep(requestDelay);
+      return request(url, options, retriesLeft - 1);
     }
 
-    return request(url, options, retriesLeft - 1);
+    // Handle specific error codes with helpful messages.
+    if (status === 401) {
+      throw new Error(
+        "Token expired. Please re-authenticate in your Google Auth piece.",
+      );
+    }
+    if (status === 403) {
+      const text = await res.text();
+      throw new Error(
+        `Access denied (403). This could mean:\n` +
+          `- The document is not shared with your Google account\n` +
+          `- Your account doesn't have access to this document\n` +
+          `- The required API is not enabled in your Google Cloud project\n\n` +
+          `Details: ${text}`,
+      );
+    }
+    throw new Error(`Google API error: ${status} ${statusText}`);
   }
 
   /**

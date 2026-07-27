@@ -1,4 +1,8 @@
-import type { CellScope, JSONSchema } from "@commonfabric/api";
+import type {
+  CellScope,
+  EmbeddedFactorySchema,
+  JSONSchema,
+} from "@commonfabric/api";
 import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
 import { isPlainObject } from "@commonfabric/utils/types";
 import {
@@ -22,21 +26,21 @@ import {
 } from "./fabric-instances/BaseFabricInstance.ts";
 
 /** Content-addressed reference to a builder factory artifact. */
-export interface FactoryArtifactRef {
+export interface FactoryArtifactRef extends FabricPlainObject {
   readonly identity: string;
   readonly symbol: string;
 }
 
-interface FactoryStateBaseV1 {
+interface FactoryStateBaseV1 extends FabricPlainObject {
   readonly ref: FactoryArtifactRef;
 }
 
 /** Canonical serialized state for a pattern factory. */
 export interface PatternFactoryStateV1 extends FactoryStateBaseV1 {
   readonly kind: "pattern";
-  readonly argumentSchema: JSONSchema;
-  readonly resultSchema: JSONSchema;
-  readonly paramsSchema?: JSONSchema;
+  readonly argumentSchema: EmbeddedFactorySchema;
+  readonly resultSchema: EmbeddedFactorySchema;
+  readonly paramsSchema?: EmbeddedFactorySchema;
   readonly params?: FabricPlainObject;
   readonly defaultScope?: CellScope;
   readonly spaceSelector?: FabricValue;
@@ -45,16 +49,16 @@ export interface PatternFactoryStateV1 extends FactoryStateBaseV1 {
 /** Canonical serialized state for a module or lift factory. */
 export interface ModuleFactoryStateV1 extends FactoryStateBaseV1 {
   readonly kind: "module";
-  readonly argumentSchema?: JSONSchema;
-  readonly resultSchema?: JSONSchema;
+  readonly argumentSchema?: EmbeddedFactorySchema;
+  readonly resultSchema?: EmbeddedFactorySchema;
   readonly defaultScope?: CellScope;
 }
 
 /** Canonical serialized state for a handler factory. */
 export interface HandlerFactoryStateV1 extends FactoryStateBaseV1 {
   readonly kind: "handler";
-  readonly contextSchema?: JSONSchema;
-  readonly eventSchema?: JSONSchema;
+  readonly contextSchema?: EmbeddedFactorySchema;
+  readonly eventSchema?: EmbeddedFactorySchema;
 }
 
 /** Complete canonical `Factory@1` state. */

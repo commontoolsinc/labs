@@ -1,6 +1,7 @@
 export { Runtime } from "./runtime.ts";
 export type {
   ConsoleHandler,
+  ConsoleHandlerOutput,
   ErrorHandler,
   ErrorWithContext as RuntimeErrorWithContext,
   ExperimentalOptions, // Space-model feature flags; see ExperimentalOptions in runtime.ts
@@ -56,7 +57,12 @@ export {
   summarizeTransaction,
   type TransactionSummary,
 } from "./storage/transaction-summary.ts";
-export { convertCellsToLinks, isCell, isStream } from "./cell.ts";
+export {
+  convertCellsToLinks,
+  isCell,
+  isReadableCell,
+  isStream,
+} from "./cell.ts";
 export {
   getCellOrThrow,
   isCellResult,
@@ -119,6 +125,7 @@ export {
   extractDefaultValues,
   getPatternIdentityRef,
   getPatternRepository,
+  getPatternSetupIdentityRef,
   getPatternSource,
   mergeSchemaDefaults,
   patternIdentityKey,
@@ -233,6 +240,7 @@ export { ACLManager } from "./acl-manager.ts";
 export {
   cellEntityIdString,
   type CellPath,
+  cellWithScopedLinkRequiredsRelaxed,
   compileAndSavePattern,
   parseCellPath,
   resolveCellPath,

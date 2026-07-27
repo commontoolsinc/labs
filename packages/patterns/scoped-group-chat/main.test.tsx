@@ -1,4 +1,4 @@
-import { action, computed, pattern, Writable } from "commonfabric";
+import { action, assert, pattern, Writable } from "commonfabric";
 import ScopedGroupChat, {
   type Conversation,
   type SelectedRoom,
@@ -32,21 +32,21 @@ export default pattern(() => {
     });
   });
 
-  const assert_initial_scoped_fields = computed(() => chat.roomCount === 0);
+  const assert_initial_scoped_fields = assert(() => chat.roomCount === 0);
 
-  const assert_added_room_is_selected = computed(() =>
+  const assert_added_room_is_selected = assert(() =>
     chat.roomCount === 1 &&
     chat.selectedRoom.room?.name === "Garden" &&
     chat.messageCount === 0
   );
 
-  const assert_second_room_is_selected = computed(() =>
+  const assert_second_room_is_selected = assert(() =>
     chat.roomCount === 2 &&
     chat.selectedRoom.room?.name === "Library" &&
     chat.messageCount === 0
   );
 
-  const assert_selected_room_reference_changed = computed(() =>
+  const assert_selected_room_reference_changed = assert(() =>
     chat.selectedRoom.room?.name === "Garden"
   );
 

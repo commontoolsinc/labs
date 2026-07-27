@@ -44,6 +44,20 @@ describe("types", () => {
         },
         cache: true,
       }));
+      // Any JSON-faithful value is valid metadata, not just strings.
+      assert(isLLMRequest({
+        messages: [],
+        model: DEFAULT_MODEL_NAME,
+        metadata: {
+          retryCount: 1,
+          enabled: true,
+          nothing: null,
+          nested: { deep: ["a", 2] },
+          // `undefined` means "absent" -- JSON drops the key.
+          absent: undefined,
+        },
+        cache: true,
+      }));
       assert(isLLMRequest({
         messages: [],
         model: DEFAULT_MODEL_NAME,
@@ -84,6 +98,11 @@ describe("types", () => {
       failRequest({ stop: {} });
       failRequest({ mode: "html" });
       failRequest({ metadata: "via piece" });
+      // Not carried faithfully across the JSON boundary to the model API.
+      failRequest({ metadata: { when: new Date() } });
+      failRequest({ metadata: { fn: () => 1 } });
+      failRequest({ metadata: { big: 1n } });
+      failRequest({ metadata: { nope: Number.NaN } });
       failRequest({ nativeModelToolIds: ["unknown_search"] });
       failRequest({ nativeModelToolIds: [GOOGLE_SEARCH_NATIVE_MODEL_TOOL, 1] });
     });

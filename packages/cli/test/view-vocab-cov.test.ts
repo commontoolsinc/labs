@@ -6,7 +6,7 @@ import {
   FUNCTION_HARDENING_HELPER_PREFIX,
   SYNTHETIC_LIFT_HOIST_PREFIX,
   SYNTHETIC_MODULE_CALLBACK_PREFIX,
-} from "../lib/view/vocab.ts";
+} from "../lib/view/languages/typescript/vocab.ts";
 
 Deno.test("describeSynthetic: helpers and data-helper identifiers describe as Common Fabric helpers", () => {
   // Both the bare helpers object and the data helper resolve to one descriptor.

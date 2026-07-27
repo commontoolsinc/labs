@@ -87,6 +87,8 @@ One line per archived document; each document's header carries the fuller
 
 ### Audits and reports
 
+- [cf-json-argument-audit-2026-07.md](packages/cli/cf-json-argument-audit-2026-07.md)
+  — command-by-command audit of `cf --json` behavior, July 2026.
 - [cts-docs-audit-2026-07.md](cts-docs-audit-2026-07.md) —
   ts-transformers/schema-generator documentation audit, July 2026.
 - [cfc-spec-audit.md](cfc-spec-audit.md) — the CFC spec versus the
@@ -99,12 +101,17 @@ One line per archived document; each document's header carries the fuller
   — the v1 scheduler's mechanisms and their v2 dispositions, June 2026.
 - [PREEXISTING_BUGS.md](packages/patterns/PREEXISTING_BUGS.md) — pattern
   runtime bug survey, December 2025.
+- [piece-timeout-hangs-investigation.md](packages/cli/piece-timeout-hangs-investigation.md)
+  — why the CLI tool-result poll was replaced event-driven and why the
+  piece-start and sync bounds could not be removed at the CLI layer, July 2026.
 
 ### Executed plans and work orders
 
 - [first-class-serializable-factories.md](plans/first-class-serializable-factories.md)
   — first-class Factory@1 pattern, module, and handler values, closure
   conversion, dynamic materialization, and pre-launch compatibility cleanup.
+- [cf-harness implementation plan](packages/cf-harness/docs/IMPLEMENTATION_PLAN.md)
+  — April 2026 package bootstrap plan and implementation checkpoint.
 - [2026-03-17-ct-exec-fuse-callables.md](plans/2026-03-17-ct-exec-fuse-callables.md)
   and [its test plan](plans/2026-03-17-ct-exec-fuse-callables-test-plan.md) —
   `cf exec` and mounted callable files.
@@ -197,6 +204,8 @@ One line per archived document; each document's header carries the fuller
 
 ### Investigations, journals, and working notes
 
+- [cf-harness Loom migration notes](packages/cf-harness/docs/LOOM_MIGRATION_NOTES.md)
+  — April 2026 pre-integration assessment of Loom's Codex batch and interactive paths.
 - [bug3-suggestion-alias-verification-2026-07.md](packages/patterns/bug3-suggestion-alias-verification-2026-07.md)
   — verification that the December 2025 survey's Bug 3 (Counter values
   rendering as raw `$alias` objects when instantiated via `fetchAndRunPattern`)

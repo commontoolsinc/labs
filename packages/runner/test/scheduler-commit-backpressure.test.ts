@@ -126,7 +126,7 @@ async function waitFor(
   const deadline = performance.now() + timeoutMs;
   while (!condition() && performance.now() < deadline) {
     await runtime.idle();
-    await new Promise((resolve) => setTimeout(resolve, 1));
+    await clock.tick(1);
   }
   if (!condition()) {
     throw new Error(message);
@@ -357,7 +357,7 @@ describe("committed-write backpressure", () => {
 
         // Give any erroneous retry a chance to run, then confirm none did.
         await runtime.idle();
-        await new Promise((resolve) => setTimeout(resolve, 30));
+        await clock.tick(30);
         await runtime.idle();
 
         // Failed fast: the handler ran exactly once (no windowed re-queue) and
@@ -425,7 +425,7 @@ describe("committed-write backpressure", () => {
         await commitTelemetry.firstMarker;
         // Give any erroneous retry a chance to run, then confirm none did.
         await runtime.idle();
-        await new Promise((resolve) => setTimeout(resolve, 30));
+        await clock.tick(30);
         await runtime.idle();
 
         // The handler ran once; a permanent rejection must not re-run it.
@@ -489,7 +489,7 @@ describe("committed-write backpressure", () => {
         // misclassification would re-run the handler up to
         // DEFAULT_RETRIES_FOR_EVENTS more times), then confirm none did.
         await runtime.idle();
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await clock.tick(50);
         await runtime.idle();
 
         // The doomed handler ran exactly once — no retry budget consumed.
@@ -615,7 +615,7 @@ describe("committed-write backpressure", () => {
 
         // Give any erroneous retry a chance to run, then confirm none did.
         await runtime.idle();
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        await clock.tick(20);
         await runtime.idle();
 
         // Loud, not silent: a terminal error surfaced.

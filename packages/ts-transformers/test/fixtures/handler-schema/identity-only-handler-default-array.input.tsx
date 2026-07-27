@@ -15,11 +15,11 @@ type MentionablePiece = {
 // equals()-based removal.
 const removePiece = handler<
   { piece: MentionablePiece },
-  { allPieces: Writable<MentionablePiece[] | Default<[]>> }
->(({ piece }, { allPieces }) => {
-  const current = allPieces.get();
+  { pieceRegistry: Writable<MentionablePiece[] | Default<[]>> }
+>(({ piece }, { pieceRegistry }) => {
+  const current = pieceRegistry.get();
   const idx = current.findIndex((c) => equals(c, piece));
-  if (idx >= 0) allPieces.set(current.toSpliced(idx, 1));
+  if (idx >= 0) pieceRegistry.set(current.toSpliced(idx, 1));
 });
 
 // FIXTURE: identity-only-handler-default-array

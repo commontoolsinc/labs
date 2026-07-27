@@ -1,5 +1,6 @@
 import type { JSONSchema } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { schemaToTypeString } from "@commonfabric/runner";
 import { cliCommand } from "./cli-name.ts";
 
 export interface ExecCommandSpec {
@@ -117,13 +118,17 @@ function parseJson(value: string, flagName: string): unknown {
 function parseInlineOrStdinJson(
   args: string[],
   index: number,
-): { inlineValue?: string; consumeNext: boolean } {
+): { inlineValue?: string; consumeNext: boolean; fromStdin?: boolean } {
   const candidate = args[index + 1];
   if (candidate === undefined) {
     return { consumeNext: false };
   }
   if (candidate.startsWith("--")) {
     throw new Error("--json cannot be combined with generated flags");
+  }
+  if (candidate === "-") {
+    // stdin sentinel, same as --json-file -
+    return { consumeNext: true, fromStdin: true };
   }
   return { inlineValue: candidate, consumeNext: true };
 }
@@ -234,8 +239,16 @@ function parseObjectInput(
       if (usedJson) {
         throw new Error("--json can only be provided once");
       }
-      const { inlineValue, consumeNext } = parseInlineOrStdinJson(args, i);
+      const { inlineValue, consumeNext, fromStdin } = parseInlineOrStdinJson(
+        args,
+        i,
+      );
       usedJson = true;
+      if (fromStdin) {
+        readJsonFromStdin = true;
+        i++;
+        continue;
+      }
       if (inlineValue === undefined) {
         readJsonFromStdin = true;
         continue;
@@ -427,6 +440,15 @@ function parseNonObjectInput(
   if (flag === "--json") {
     if (rawValue.startsWith("--")) {
       throw new Error("--json cannot be combined with generated flags");
+    }
+    if (rawValue === "-") {
+      // stdin sentinel, same as --json-file -
+      return {
+        input: undefined,
+        readJsonFromStdin: true,
+        readTextFromStdin: false,
+        usedJsonInput: true,
+      };
     }
     return {
       input: parseJson(rawValue, flag),
@@ -1010,74 +1032,27 @@ export function renderExecHelp(
   return lines.join("\n");
 }
 
-function schemaShapeString(
-  schema: JSONSchema,
-  depth = 0,
-): string {
+function schemaShapeString(schema: JSONSchema): string {
   if (isSchemaLessHandlerInput(schema)) {
     return "void";
   }
-
-  if (depth >= 4) {
-    return "{...}";
-  }
-
-  if (!isSchemaObject(schema)) {
-    return "unknown";
-  }
-
-  if (Array.isArray(schema.enum)) {
-    return schema.enum.map((value) => toCompactDebugString(value)).join(" | ");
-  }
-
-  const unionSchemas = Array.isArray(schema.anyOf)
-    ? schema.anyOf
-    : Array.isArray(schema.oneOf)
-    ? schema.oneOf
-    : null;
-  if (unionSchemas) {
-    return unionSchemas.map((variant) =>
-      schemaShapeString(variant as JSONSchema, depth + 1)
-    ).join(" | ");
-  }
-
-  const type = schemaType(schema);
-  if (type === "string") return "string";
-  if (type === "number" || type === "integer") return "number";
-  if (type === "boolean") return "boolean";
-  if (type === "null") return "null";
-
-  if (type === "array") {
-    // We don't handle tuples here (prefixItems)
-    const items = isSchemaObject(schema)
-      ? schema.items as JSONSchema
-      : undefined;
-    return `${items ? schemaShapeString(items, depth + 1) : "unknown"}[]`;
-  }
-
-  const properties = objectProperties(schema);
-  if (!properties) {
-    return "unknown";
-  }
-
-  const keys = Object.keys(properties).filter((key) => !key.startsWith("$"));
-  if (keys.length === 0) {
-    return "{}";
-  }
-
-  const required = requiredFlags(schema);
-  const lines = keys.map((key) => {
-    const propSchema = properties[key];
-    return `${"  ".repeat(depth + 1)}${key}${required.has(key) ? "" : "?"}: ${
-      schemaShapeString(propSchema, depth + 1)
-    }`;
+  // Same TS-like rendering the runner uses for LLM context; CLI help only adds
+  // the "void" spelling for schema-less handler inputs above. The formatter
+  // resolves $refs against options.defs, not the schema's own $defs, so
+  // thread them through.
+  return schemaToTypeString(schema, {
+    defs: isSchemaObject(schema)
+      ? schema.$defs as Record<string, JSONSchema> | undefined
+      : undefined,
   });
-
-  return `{\n${lines.join("\n")}\n${"  ".repeat(depth)}}`;
 }
 
 function pieceJsonUsageLine(commandPrefix: string): string {
   return `${commandPrefix} <json>`;
+}
+
+function pieceExplicitJsonUsageLine(commandPrefix: string): string {
+  return `${commandPrefix} --json [<json>]`;
 }
 
 function pieceFlagUsageLine(
@@ -1100,6 +1075,7 @@ function pieceUsageLines(
       ? [`  ${commandPrefix}`, `  ${commandPrefix} -- invoke`]
       : []),
     `  ${pieceJsonUsageLine(commandPrefix)}`,
+    `  ${pieceExplicitJsonUsageLine(commandPrefix)}`,
     `  ${commandPrefix} -- --json-file <path>`,
     `  ${pieceFlagUsageLine(commandPrefix, spec)}`,
     ...(!properties ? [`  ${commandPrefix} -- --value-file <path>`] : []),
@@ -1108,7 +1084,8 @@ function pieceUsageLines(
 
 function pieceJsonInputLines(schema: JSONSchema): string[] {
   return [
-    "  Pass inline JSON as the next argument, use `-- --json-file <path>`, or pipe JSON on stdin with `-- --json`.",
+    "  Pass inline JSON as one positional argument or after `--json`. Bare `--json` reads JSON from stdin.",
+    "  Use `-- --json-file <path>` for a file. Schema-derived flags also follow `--`.",
     ...schemaShapeString(schema).split("\n").map((line) => `  ${line}`),
   ];
 }

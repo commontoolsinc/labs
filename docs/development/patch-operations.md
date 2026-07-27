@@ -52,8 +52,14 @@ Take `Cell.increment(2)`:
    calling `tx.recordMergeableOp(link, { op: "increment", by: 2 })`.
 2. **Intent** — the transaction folds the delta into a per-path intent
    (`packages/runner/src/storage/mergeable-ops.ts`, `foldMergeableIntent`).
-   Repeated calls at one path combine (increments sum, tail counts sum, removed
-   values accumulate); a different op at the same path replaces the intent.
+   Repeated same-kind calls at one path combine (increments sum, tail counts sum,
+   removed values accumulate). A different op kind at the same path cannot share
+   one intent, so `recordMergeableOp` poisons the path — it drops the intent and
+   the commit falls back to the whole-array diff for that path (correct, but not
+   merge-friendly), rather than letting the second op replace and silently drop
+   the first. A foreign write that reshapes the array after an op — a proxy
+   in-place mutator (`sort`/`splice`/`unshift`/…) or a whole-value `Cell.set` —
+   poisons the same way via `poisonMergeableOp`.
 3. **Commit** — at commit the intent becomes wire ops plus the diff-suppression
    they imply (`buildMergeableIntent`), and the whole-value diff for the paths the
    op covers is dropped. The op travels in `ClientCommit.operations`.

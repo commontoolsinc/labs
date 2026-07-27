@@ -9,6 +9,7 @@ import {
 } from "../typescript/cell-brand.ts";
 import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
 import { numberFromExpression } from "../typescript/numeric-expression.ts";
+import { dedupeByValueEqual } from "../value-equality.ts";
 import type {
   AsCellEntry,
   JSONSchemaMutable,
@@ -1723,7 +1724,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     context: GenerationContext,
     bindingName: ts.Identifier,
     normalizeFile = true,
-  ): { file: string; path: string[] } {
+  ): { file: string; path: string[]; moduleIdentity?: string } {
     const symbol = context.typeChecker.getSymbolAtLocation(bindingName);
     const declarationSymbol = symbol && (symbol.flags & ts.SymbolFlags.Alias)
       ? context.typeChecker.getAliasedSymbol(symbol)
@@ -1741,6 +1742,13 @@ export class CommonFabricFormatter implements TypeFormatter {
       bindingName.getSourceFile().fileName ??
       context.sourceFileName ??
       "unknown";
+
+    if (normalizeFile && context.writerIdentityForSourceFile) {
+      return {
+        ...context.writerIdentityForSourceFile(sourceFileName),
+        path: [declaredName],
+      };
+    }
 
     return {
       file: normalizeFile
@@ -2303,16 +2311,10 @@ export class CommonFabricFormatter implements TypeFormatter {
     } else if (schemas.length === 1) {
       return schemas[0]!;
     } else {
-      // Deduplicate identical schemas
-      const seen = new Set<string>();
-      const unique: JSONSchemaMutable[] = [];
-      for (const schema of schemas) {
-        const key = JSON.stringify(schema);
-        if (!seen.has(key)) {
-          seen.add(key);
-          unique.push(schema);
-        }
-      }
+      // Deduplicate identical schemas. `valueEqual` (Object.is at leaves) is
+      // the honest comparison: a `JSON.stringify` dedup key collides distinct
+      // values (`-0`/`0`, `NaN`/`Infinity`) and is key-order sensitive.
+      const unique = dedupeByValueEqual(schemas);
 
       if (unique.length === 1) {
         return unique[0]!;

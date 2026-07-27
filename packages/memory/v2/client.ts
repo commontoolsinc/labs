@@ -3,6 +3,7 @@ import {
   compatibleMemoryProtocolFlags,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
+  encodeMemoryBoundaryUnprovenFabricValue,
   type EntitySnapshot,
   getMemoryProtocolFlags,
   getPersistentSchedulerStateConfig,
@@ -34,32 +35,32 @@ import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { expandServerMessageSchemas } from "./sync-schema-table.ts";
 import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
 
-export interface Transport {
+export type Transport = {
   send(payload: string): Promise<void>;
   close(): Promise<void>;
   setReceiver(receiver: (payload: string) => void): void;
   setCloseReceiver?(receiver: (error?: Error) => void): void;
-}
+};
 
-export interface ConnectOptions {
+export type ConnectOptions = {
   transport: Transport;
-}
+};
 
-export interface MountOptions {
+export type MountOptions = {
   sessionId?: string;
   seenSeq?: number;
   sessionToken?: string;
-}
+};
 
-export interface SessionOpenAuth {
+export type SessionOpenAuth = {
   invocation: Record<string, unknown>;
   authorization: unknown;
-}
+};
 
-export interface SessionOpenAuthContext {
+export type SessionOpenAuthContext = {
   challenge: SessionOpenChallenge;
   audience: string;
-}
+};
 
 export type SessionOpenAuthFactory = (
   space: string,
@@ -67,10 +68,10 @@ export type SessionOpenAuthFactory = (
   context: SessionOpenAuthContext,
 ) => Promise<SessionOpenAuth | undefined> | SessionOpenAuth | undefined;
 
-export interface WatchMutationResult {
+export type WatchMutationResult = {
   view: WatchView;
   sync: SessionSync;
-}
+};
 
 const RECONNECT_BASE_DELAY_MS = 25;
 const RECONNECT_MAX_DELAY_MS = 30_000;
@@ -112,6 +113,13 @@ export class Client {
   #cancelReconnectDelay: (() => void) | null = null;
   #connected = false;
   #closed = false;
+  // Set when a reconnect handshake fails for a reason retrying cannot change (a
+  // protocol-flag mismatch — the transport is fundamentally incompatible). The
+  // client stops reconnecting and fails every further request with it, instead
+  // of looping forever. A per-session authorization denial does NOT land here:
+  // it terminates only that session (see SpaceSession.restore), leaving sessions
+  // for other spaces on this client alive.
+  #fatalError: Error | null = null;
 
   private constructor(
     private readonly transport: Transport,
@@ -183,7 +191,7 @@ export class Client {
     const requestId = message.requestId as string;
     const pending = Promise.withResolvers<unknown>();
     this.#pending.set(requestId, pending);
-    await this.transport.send(encodeMemoryBoundary(message));
+    await this.transport.send(encodeMemoryBoundaryUnprovenFabricValue(message));
     const result = await pending.promise as ResponseMessage<Result>;
     if (result.error) {
       const error = new Error(result.error.message);
@@ -195,6 +203,10 @@ export class Client {
       if (result.error.retryAfterSeq !== undefined) {
         (error as Error & { retryAfterSeq?: number }).retryAfterSeq =
           result.error.retryAfterSeq;
+      }
+      if (result.error.retriable !== undefined) {
+        (error as Error & { retriable?: boolean }).retriable =
+          result.error.retriable;
       }
       throw error;
     }
@@ -285,12 +297,15 @@ export class Client {
       if (helloOk !== null) {
         const expectedFlags = getMemoryProtocolFlags();
         if (!compatibleMemoryProtocolFlags(helloOk.flags, expectedFlags)) {
-          const error = new Error(
+          // A data-model wire-contract mismatch: this client and server cannot
+          // talk at all, and no retry changes that. Mark it permanent so a
+          // reconnect that hits it gives up rather than retrying a doomed
+          // handshake.
+          const error = permanentProtocolError(
             `memory flag mismatch: client=${
               toCompactDebugString(expectedFlags)
             } server=${toCompactDebugString(helloOk.flags)}`,
           );
-          error.name = "ProtocolError";
           this.#helloPending.reject(error);
           return;
         }
@@ -371,10 +386,18 @@ export class Client {
     if (this.#closed) {
       throw new Error("memory client is closed");
     }
+    if (this.#fatalError) {
+      throw this.#fatalError;
+    }
     if (this.#connected) {
       return;
     }
     await this.reconnect();
+    // reconnect() resolves without connecting when it gives up on a permanent
+    // handshake failure; surface it here rather than returning as if connected.
+    if (this.#fatalError) {
+      throw this.#fatalError;
+    }
   }
 
   private onClose(error?: Error): void {
@@ -393,6 +416,9 @@ export class Client {
     if (this.#closed) {
       throw new Error("memory client is closed");
     }
+    if (this.#fatalError) {
+      throw this.#fatalError;
+    }
     if (this.#reconnecting) {
       return await this.#reconnecting;
     }
@@ -407,9 +433,16 @@ export class Client {
           return;
         } catch (error) {
           this.#connected = false;
-          this.rejectPending(
-            error instanceof Error ? error : new Error(String(error)),
-          );
+          const err = error instanceof Error ? error : new Error(String(error));
+          if (isPermanentConnectionFailure(err)) {
+            // A handshake the server refuses identically every time (a
+            // protocol-flag mismatch). Stop looping and remember the failure so
+            // every present and future request fails fast with it.
+            this.#fatalError = err;
+            this.rejectPending(err);
+            return;
+          }
+          this.rejectPending(err);
           await this.waitForReconnectDelay(reconnectDelayMs(attempt));
           attempt += 1;
         }
@@ -470,7 +503,20 @@ export class SpaceSession {
   #ackScheduled = false;
   #ackFlushing = false;
   #background = new Set<Promise<void>>();
-  #watchMutation: Promise<void> = Promise.resolve();
+  // Watch-mutation ordering. `#watchApply` serializes the APPLICATION of watch
+  // responses (the `#watchSpecs` / `#watchView` mutations) in call order.
+  // `#watchIssue` serializes REQUEST ISSUE in call order and, in concurrent
+  // mode, advances as soon as a request has been *sent* (not answered), so
+  // multiple watch round trips overlap on the wire while application stays
+  // ordered. In single-flight mode `#watchIssue` is unused and each mutation's
+  // request+apply run together on `#watchApply` (byte-identical to the pre-
+  // concurrency behavior).
+  #watchApply: Promise<void> = Promise.resolve();
+  #watchIssue: Promise<void> = Promise.resolve();
+  // Per-session (default off): allow watch-refresh round trips to overlap.
+  // Set by the runner from the `experimentalConcurrentWatchRefresh` storage
+  // setting; see docs/development/EXPERIMENTAL_OPTIONS.md. NOT a process global.
+  #concurrentWatchRefresh = false;
   #closed = false;
   #closeError: Error | null = null;
   #readyOnConnection = true;
@@ -511,6 +557,15 @@ export class SpaceSession {
 
   get serverSeq(): number {
     return this.#serverSeq;
+  }
+
+  /** The error this session was terminated with, or undefined while it is open.
+   *  A permanent reopen denial stores its `AuthorizationError` here (see
+   *  `restore`), which is what `#assertOpen` rethrows; a storage subscriber reads
+   *  it to observe a denial that terminated the session without a fresh watch
+   *  result to carry it. */
+  get closeError(): Error | undefined {
+    return this.#closeError ?? undefined;
   }
 
   #assertOpen(): void {
@@ -634,27 +689,30 @@ export class SpaceSession {
 
   async watchSetSync(watches: WatchSpec[]): Promise<WatchMutationResult> {
     this.#assertOpen();
-    return await this.runWatchMutation(async () => {
-      const result = await this.client.request<WatchSetResult>({
-        type: "session.watch.set",
-        requestId: crypto.randomUUID(),
-        space: this.space,
-        sessionId: this.#sessionId,
-        watches,
-      });
-      this.noteResult(result.serverSeq);
-      this.#watchSpecs = watches;
-      if (this.#watchView === null) {
-        this.#watchView = WatchView.fromSync(result.sync);
-      } else {
-        this.#watchView.applySync(result.sync, false);
-      }
-      this.scheduleAck(result.serverSeq);
-      return {
-        view: this.#watchView,
-        sync: result.sync,
-      };
-    });
+    return await this.runWatchMutation(
+      () =>
+        this.client.request<WatchSetResult>({
+          type: "session.watch.set",
+          requestId: crypto.randomUUID(),
+          space: this.space,
+          sessionId: this.#sessionId,
+          watches,
+        }),
+      (result) => {
+        this.noteResult(result.serverSeq);
+        this.#watchSpecs = watches;
+        if (this.#watchView === null) {
+          this.#watchView = WatchView.fromSync(result.sync);
+        } else {
+          this.#watchView.applySync(result.sync, false);
+        }
+        this.scheduleAck(result.serverSeq);
+        return {
+          view: this.#watchView,
+          sync: result.sync,
+        };
+      },
+    );
   }
 
   async watchAdd(watches: WatchSpec[]): Promise<WatchView> {
@@ -669,31 +727,34 @@ export class SpaceSession {
 
   async watchAddSync(watches: WatchSpec[]): Promise<WatchMutationResult> {
     this.#assertOpen();
-    return await this.runWatchMutation(async () => {
-      const result = await this.client.request<WatchAddResult>({
-        type: "session.watch.add",
-        requestId: crypto.randomUUID(),
-        space: this.space,
-        sessionId: this.#sessionId,
-        watches,
-      });
-      this.noteResult(result.serverSeq);
-      this.#watchSpecs = [
-        ...new Map(
-          [...this.#watchSpecs, ...watches].map((watch) => [watch.id, watch]),
-        ).values(),
-      ];
-      if (this.#watchView === null) {
-        this.#watchView = WatchView.fromSync(result.sync);
-      } else {
-        this.#watchView.applySync(result.sync, false);
-      }
-      this.scheduleAck(result.serverSeq);
-      return {
-        view: this.#watchView,
-        sync: result.sync,
-      };
-    });
+    return await this.runWatchMutation(
+      () =>
+        this.client.request<WatchAddResult>({
+          type: "session.watch.add",
+          requestId: crypto.randomUUID(),
+          space: this.space,
+          sessionId: this.#sessionId,
+          watches,
+        }),
+      (result) => {
+        this.noteResult(result.serverSeq);
+        this.#watchSpecs = [
+          ...new Map(
+            [...this.#watchSpecs, ...watches].map((watch) => [watch.id, watch]),
+          ).values(),
+        ];
+        if (this.#watchView === null) {
+          this.#watchView = WatchView.fromSync(result.sync);
+        } else {
+          this.#watchView.applySync(result.sync, false);
+        }
+        this.scheduleAck(result.serverSeq);
+        return {
+          view: this.#watchView,
+          sync: result.sync,
+        };
+      },
+    );
   }
 
   async ack(seenSeq: number): Promise<void> {
@@ -796,6 +857,19 @@ export class SpaceSession {
         }
       }
       await Promise.all(replayTasks);
+    } catch (error) {
+      // A permanent authorization denial ANYWHERE in the reopen — the initial
+      // session.open OR the watch re-establishment (watchSetSync) that follows a
+      // fresh, non-resumed session — terminates just this session with the real
+      // error: its pending commits and waiters reject with it, and its next watch
+      // or transact rethrows it. It must NOT propagate to the client-wide
+      // reconnect loop, which would then fail sessions for other spaces on the
+      // same client. Every other error propagates so the loop retries it.
+      if (isPermanentAuthorizationError(error)) {
+        this.terminateSession(error as Error);
+        return;
+      }
+      throw error;
     } finally {
       this.#restoring = false;
       if (!this.#closed && this.#outstandingCommits.size > 0) {
@@ -831,6 +905,17 @@ export class SpaceSession {
     }
     const error = new Error(`memory session revoked: ${reason}`);
     error.name = "SessionRevokedError";
+    this.terminateSession(error);
+  }
+
+  /**
+   * Close this session terminally with `error`: reject its outstanding commits
+   * and caught-up waiters, forget it from the client, and drop its watch state.
+   * The stored error is what `#assertOpen()` rethrows for any later call, so a
+   * storage subscriber observes the real cause on its next watch or transact.
+   * Shared by session revocation and a permanent reopen authorization denial.
+   */
+  private terminateSession(error: Error): void {
     this.#closed = true;
     this.#closeError = error;
     this.#readyOnConnection = false;
@@ -912,11 +997,66 @@ export class SpaceSession {
     }
   }
 
-  private async runWatchMutation<T>(work: () => Promise<T>): Promise<T> {
+  /**
+   * Enable/disable concurrent watch refresh for THIS session (default off).
+   * Set by the runner from the `experimentalConcurrentWatchRefresh` storage
+   * setting. Per-session by design — no process global — so one storage
+   * manager's choice never leaks to another client in the same process.
+   */
+  setConcurrentWatchRefresh(enabled: boolean): void {
+    this.#concurrentWatchRefresh = enabled;
+  }
+
+  /**
+   * Serialize a watch mutation (`watch.set` / `watch.add`). `send` issues the
+   * request; `apply` mutates the session view (`#watchSpecs` / `#watchView`)
+   * from the response. Splitting them lets concurrent mode overlap the request
+   * round trips while keeping application ordered.
+   */
+  private async runWatchMutation<R, T>(
+    send: () => Promise<R>,
+    apply: (result: R) => T,
+  ): Promise<T> {
     this.#assertOpen();
-    const previous = this.#watchMutation;
-    const current = previous.catch(() => undefined).then(work);
-    this.#watchMutation = current.then(() => undefined, () => undefined);
+    if (!this.#concurrentWatchRefresh) {
+      // Single-flight (default): send + apply run together, chained on the
+      // prior mutation's completion. Nothing is issued until the previous
+      // mutation fully resolves. Structurally identical to the pre-concurrency
+      // path (a single `work` closure chained on the mutation promise, then
+      // `await`-ed) so its microtask timing — which some downstream ordering
+      // depends on — is unchanged.
+      const previous = this.#watchApply;
+      const current = previous.catch(() => undefined).then(async () =>
+        apply(await send())
+      );
+      this.#watchApply = current.then(() => undefined, () => undefined);
+      return await current;
+    }
+    // Concurrent: preserve wire order across the WHOLE watch-mutation family
+    // (set + add) by issuing requests in call order, while applying responses
+    // in that same order.
+    //  - `#watchIssue` advances as soon as `send()` has been CALLED (its frame
+    //    scheduled ahead of the next mutation's), so an earlier `watch.set` can
+    //    never be overtaken on the wire by a later `watch.add`.
+    //  - the apply step waits for [prior apply, this response], so `#watchSpecs`
+    //    / `#watchView` mutate in call order regardless of which response lands
+    //    first.
+    let response!: Promise<R>;
+    const issued = this.#watchIssue.catch(() => undefined).then(() => {
+      response = send();
+      // Attach a rejection handler immediately: a later request may reject
+      // while an earlier mutation is still pending, which would otherwise
+      // surface as an unhandled rejection even though the caller-facing
+      // apply-chain promise below has its own catch.
+      response.catch(() => undefined);
+    });
+    this.#watchIssue = issued.then(() => undefined, () => undefined);
+
+    const current = Promise.all([
+      this.#watchApply.catch(() => undefined),
+      issued,
+    ]).then(() => response).then((result) => apply(result));
+    this.#watchApply = current.then(() => undefined, () => undefined);
     return await current;
   }
 
@@ -1375,6 +1515,27 @@ const protocolError = (message: string): Error => {
   error.name = "ProtocolError";
   return error;
 };
+
+// A ProtocolError that no retry can heal (the peers disagree on a data-model
+// wire contract). Tagged so the reconnect loop gives up rather than retrying it.
+const permanentProtocolError = (message: string): Error =>
+  Object.assign(new Error(message), { name: "ProtocolError", permanent: true });
+
+// An authorization denial retrying cannot change. A retriable auth failure — an
+// anti-replay race the server marked `retriable` (an expired/used/mismatched
+// challenge, a stale signed `exp`) — is excluded, so the client keeps reopening
+// through a token-refresh window or a challenge race a fresh handshake heals.
+const isPermanentAuthorizationError = (error: unknown): boolean =>
+  error instanceof Error && error.name === "AuthorizationError" &&
+  (error as { retriable?: unknown }).retriable !== true;
+
+// A reconnect handshake failure the whole client must give up on rather than
+// retry: an incompatible protocol negotiation at hello. An authorization denial
+// is deliberately NOT here — it is per-space, handled inside restore() by
+// terminating just that session, so it never escalates to a client-wide failure
+// that would take down sessions for other spaces.
+const isPermanentConnectionFailure = (error: Error): boolean =>
+  (error as { permanent?: unknown }).permanent === true;
 
 const requireSessionOpenAuthMetadata = (
   value: unknown,

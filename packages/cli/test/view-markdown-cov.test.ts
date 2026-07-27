@@ -1,6 +1,6 @@
 /**
  * Coverage-focused behavioural tests for the Markdown highlighter
- * (`lib/view/markdown.ts`). Each test drives a specific code path —
+ * (`lib/view/languages/markdown/markdown.ts`). Each test drives a specific code path —
  * the whole-document `Highlighter` wrapper, the empty/non-empty single-span
  * helper, the horizontal-rule branch, mismatched and unclosed inline-code
  * backtick runs, and a heading tree that opens on a deeper-than-top level —
@@ -11,7 +11,7 @@ import {
   createMarkdownHighlighter,
   highlightMarkdownLines,
   markdownDocument,
-} from "../lib/view/markdown.ts";
+} from "../lib/view/languages/markdown/markdown.ts";
 
 Deno.test("markdown: createMarkdownHighlighter exposes lines and re-highlights on update", () => {
   const hl = createMarkdownHighlighter("# First\n\nplain prose\n");

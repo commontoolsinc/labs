@@ -431,6 +431,7 @@ export class Scheduler {
   private retries = new WeakMap<Action, number>();
   private actionGenerations = new WeakMap<Action, number>();
   private actionReadinessAttempts = new WeakMap<Action, symbol>();
+  private offBudgetRetries = new WeakMap<Action, number>();
 
   // Effect/computation tracking for pull-based scheduling
   private nodes = new NodeRegistry();
@@ -632,7 +633,9 @@ export class Scheduler {
       const { method, args } = e as ConsoleEvent;
       const metadata = getPieceMetadataFromFrame();
       const result = this.consoleHandler({ metadata, method, args });
-      console[method].apply(console, result);
+      const output = Array.isArray(result) ? { method, args: result } : result;
+      const target = output.target ?? console;
+      target[output.method].apply(target, output.args);
     });
   }
 
@@ -2585,6 +2588,7 @@ export class Scheduler {
       actionChangeGroups: this.actionChangeGroups,
       actionTimingState: this.actionTimingState,
       retries: this.retries,
+      offBudgetRetries: this.offBudgetRetries,
       pending: this.pending,
       actionRunTrace: this.actionRunTrace,
       getActionGeneration: (target) => this.getActionGeneration(target),

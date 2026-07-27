@@ -14,7 +14,7 @@
  *
  * NOTE: Uses .filter(() => true).length for array lengths per reactivity tracking note.
  */
-import { action, computed, pattern, UI, wish } from "commonfabric";
+import { action, assert, computed, pattern, UI, wish } from "commonfabric";
 import {
   findNodeById,
   findNodeByProp,
@@ -69,7 +69,7 @@ export default pattern(() => {
     s1.enableAdminManager.send()
   );
 
-  const assert_s1_manager_can_start_people_flow = computed(() =>
+  const assert_s1_manager_can_start_people_flow = assert(() =>
     s1.currentUserCanManageAdmins === true &&
     nodeIncludesText(
       findNodeById(s1[UI], "parking-admin-add-person-open"),
@@ -119,41 +119,41 @@ export default pattern(() => {
   });
 
   // Initial state
-  const assert_s1_no_people = computed(() => len(s1.people) === 0);
-  const assert_s1_three_spots = computed(() => len(s1.spots) === 3);
+  const assert_s1_no_people = assert(() => len(s1.people) === 0);
+  const assert_s1_three_spots = assert(() => len(s1.spots) === 3);
 
   // After adding Alice
-  const assert_s1_alice_exists = computed(() =>
+  const assert_s1_alice_exists = assert(() =>
     s1.people.some((p: Person) => p.name === "Alice")
   );
-  const assert_s1_alice_default_spot = computed(() => {
+  const assert_s1_alice_default_spot = assert(() => {
     const alice = s1.people.find((p: Person) => p.name === "Alice");
     return alice?.defaultSpot === "5";
   });
-  const assert_s1_alice_preferences = computed(() => {
+  const assert_s1_alice_preferences = assert(() => {
     const alice = s1.people.find((p: Person) => p.name === "Alice");
-    return alice?.spotPreferences.some((s) => s === "5") &&
-      alice?.spotPreferences.some((s) => s === "1");
+    return alice?.spotPreferences.some((s) => s === "5") === true &&
+      alice?.spotPreferences.some((s) => s === "1") === true;
   });
-  const assert_s1_one_person = computed(() => len(s1.people) === 1);
-  const assert_s1_alice_unchanged = computed(() => {
+  const assert_s1_one_person = assert(() => len(s1.people) === 1);
+  const assert_s1_alice_unchanged = assert(() => {
     const alice = s1.people.find((p: Person) => p.name === "Alice");
     return len(s1.people) === 1 && alice?.email === "alice@co.com";
   });
 
   // After adding Bob
-  const assert_s1_two_people = computed(() => len(s1.people) === 2);
-  const assert_s1_bob_preferences = computed(() => {
+  const assert_s1_two_people = assert(() => len(s1.people) === 2);
+  const assert_s1_bob_preferences = assert(() => {
     const bob = s1.people.find((p: Person) => p.name === "Bob");
     return bob?.spotPreferences.some((s) => s === "12") === true;
   });
 
   // Duplicate rejected
-  const assert_s1_still_two = computed(() => len(s1.people) === 2);
+  const assert_s1_still_two = assert(() => len(s1.people) === 2);
 
   // After removing Bob
-  const assert_s1_one_after_remove = computed(() => len(s1.people) === 1);
-  const assert_s1_bob_gone = computed(() =>
+  const assert_s1_one_after_remove = assert(() => len(s1.people) === 1);
+  const assert_s1_bob_gone = assert(() =>
     !s1.people.some((p: Person) => p.name === "Bob")
   );
 
@@ -198,24 +198,24 @@ export default pattern(() => {
     s2.movePersonDown.send({ name: "Alice" })
   );
 
-  const assert_s2_alice_rank1 = computed(() => {
+  const assert_s2_alice_rank1 = assert(() => {
     return s2.people.find((p: Person) => p.name === "Alice")?.priorityRank ===
       1;
   });
-  const assert_s2_carol_rank3 = computed(() => {
+  const assert_s2_carol_rank3 = assert(() => {
     return s2.people.find((p: Person) => p.name === "Carol")?.priorityRank ===
       3;
   });
   // After moving Carol up (should swap Carol rank 3 with Bob rank 2)
-  const assert_s2_carol_rank2 = computed(() => {
+  const assert_s2_carol_rank2 = assert(() => {
     return s2.people.find((p: Person) => p.name === "Carol")?.priorityRank ===
       2;
   });
-  const assert_s2_bob_rank3 = computed(() => {
+  const assert_s2_bob_rank3 = assert(() => {
     return s2.people.find((p: Person) => p.name === "Bob")?.priorityRank === 3;
   });
   // After moving Alice down (rank 1 should swap with rank 2 = Carol now)
-  const assert_s2_alice_rank2 = computed(() => {
+  const assert_s2_alice_rank2 = assert(() => {
     return s2.people.find((p: Person) => p.name === "Alice")?.priorityRank ===
       2;
   });
@@ -259,26 +259,26 @@ export default pattern(() => {
     s3.editSpot.send(undefined as never);
   });
 
-  const assert_s3_three_spots = computed(() => len(s3.spots) === 3);
-  const assert_s3_non_admin_spot_blocked = computed(() => len(s3.spots) === 3);
-  const assert_s3_can_manage_admins = computed(() =>
+  const assert_s3_three_spots = assert(() => len(s3.spots) === 3);
+  const assert_s3_non_admin_spot_blocked = assert(() => len(s3.spots) === 3);
+  const assert_s3_can_manage_admins = assert(() =>
     s3.currentUserCanManageAdmins === true
   );
-  const assert_s3_alice_is_admin = computed(() =>
+  const assert_s3_alice_is_admin = assert(() =>
     s3.currentPersonIsAdmin === true
   );
-  const assert_s3_four_spots = computed(() => len(s3.spots) === 4);
-  const assert_s3_spot7_label = computed(() => {
+  const assert_s3_four_spots = assert(() => len(s3.spots) === 4);
+  const assert_s3_spot7_label = assert(() => {
     const s = s3.spots.find((sp: ParkingSpot) => sp.spotNumber === "7");
     return s?.label === "Level 2" && s?.active === true;
   });
-  const assert_s3_spot7_unchanged = computed(() => {
+  const assert_s3_spot7_unchanged = assert(() => {
     const s = s3.spots.find((sp: ParkingSpot) => sp.spotNumber === "7");
     return len(s3.spots) === 4 && s?.label === "Level 2" && s?.active === true;
   });
-  const assert_s3_still_four = computed(() => len(s3.spots) === 4); // dup rejected
-  const assert_s3_three_after_remove = computed(() => len(s3.spots) === 3);
-  const assert_s3_spot5_gone = computed(() =>
+  const assert_s3_still_four = assert(() => len(s3.spots) === 4); // dup rejected
+  const assert_s3_three_after_remove = assert(() => len(s3.spots) === 3);
+  const assert_s3_spot5_gone = assert(() =>
     !s3.spots.some((sp: ParkingSpot) => sp.spotNumber === "5")
   );
 
@@ -343,10 +343,10 @@ export default pattern(() => {
     s4.submitRequest.send({ personName: "Alice", date: nextTestDate });
   });
 
-  const assert_s4_no_requests = computed(() => len(s4.requests) === 0);
+  const assert_s4_no_requests = assert(() => len(s4.requests) === 0);
 
   // After Alice requests the test date
-  const assert_s4_alice_allocated = computed(() => {
+  const assert_s4_alice_allocated = assert(() => {
     const req = s4.requests.find((r: SpotRequest) =>
       r.personName === "Alice" && r.date === testDate
     );
@@ -355,7 +355,7 @@ export default pattern(() => {
   });
 
   // After Bob requests the test date
-  const assert_s4_bob_allocated_pref = computed(() => {
+  const assert_s4_bob_allocated_pref = assert(() => {
     const req = s4.requests.find((r: SpotRequest) =>
       r.personName === "Bob" && r.date === testDate
     );
@@ -363,7 +363,7 @@ export default pattern(() => {
   });
 
   // After Carol requests the test date (only "12" left)
-  const assert_s4_carol_allocated = computed(() => {
+  const assert_s4_carol_allocated = assert(() => {
     const req = s4.requests.find((r: SpotRequest) =>
       r.personName === "Carol" && r.date === testDate
     );
@@ -371,7 +371,7 @@ export default pattern(() => {
   });
 
   // Alice dupe: still only one request for the test date
-  const assert_s4_alice_still_one_today = computed(() => {
+  const assert_s4_alice_still_one_today = assert(() => {
     const aliceToday = s4.requests.filter((r: SpotRequest) =>
       r.personName === "Alice" && r.date === testDate
     );
@@ -379,12 +379,12 @@ export default pattern(() => {
   });
 
   // Duplicate shows in result message
-  const assert_s4_dupe_result = computed(() =>
+  const assert_s4_dupe_result = assert(() =>
     s4.requestResult.toLowerCase().includes("already")
   );
 
   // Alice's following-date request gets allocated (any spot)
-  const assert_s4_alice_tomorrow_allocated = computed(() => {
+  const assert_s4_alice_tomorrow_allocated = assert(() => {
     const req = s4.requests.find((r: SpotRequest) =>
       r.personName === "Alice" && r.date === nextTestDate
     );
@@ -438,7 +438,7 @@ export default pattern(() => {
     s5.submitRequest.send({ personName: "Dave", date: testDate });
   });
 
-  const assert_s5_dave_denied = computed(() => {
+  const assert_s5_dave_denied = assert(() => {
     const req = s5.requests.find((r: SpotRequest) =>
       r.personName === "Dave" && r.date === testDate
     );
@@ -467,11 +467,11 @@ export default pattern(() => {
     s6.cancelRequest.send({ requestId: "rx1" })
   );
 
-  const assert_s6_allocated = computed(() => {
+  const assert_s6_allocated = assert(() => {
     return s6.requests.find((r: SpotRequest) => r.id === "rx1")?.status ===
       "allocated";
   });
-  const assert_s6_cancelled = computed(() => {
+  const assert_s6_cancelled = assert(() => {
     return s6.requests.find((r: SpotRequest) => r.id === "rx1")?.status ===
       "cancelled";
   });
@@ -506,16 +506,16 @@ export default pattern(() => {
     });
   });
 
-  const assert_s7_non_admin_override_blocked = computed(() =>
+  const assert_s7_non_admin_override_blocked = assert(() =>
     len(s7.requests) === 0
   );
-  const assert_s7_can_manage_admins = computed(() =>
+  const assert_s7_can_manage_admins = assert(() =>
     s7.currentUserCanManageAdmins === true
   );
-  const assert_s7_alice_is_admin = computed(() =>
+  const assert_s7_alice_is_admin = assert(() =>
     s7.currentPersonIsAdmin === true
   );
-  const assert_s7_bob_override = computed(() => {
+  const assert_s7_bob_override = assert(() => {
     return s7.requests.some(
       (r: SpotRequest) =>
         r.personName === "Bob" && r.date === testDate &&
@@ -533,7 +533,7 @@ export default pattern(() => {
     });
   });
 
-  const assert_s7_alice_has_spot5 = computed(() => {
+  const assert_s7_alice_has_spot5 = assert(() => {
     return s7.requests.some(
       (r: SpotRequest) =>
         r.personName === "Alice" && r.assignedSpot === "5" &&
@@ -541,7 +541,7 @@ export default pattern(() => {
     );
   });
 
-  const assert_s7_bob_spot5_cancelled = computed(() => {
+  const assert_s7_bob_spot5_cancelled = assert(() => {
     // Bob's original spot 5 allocation should be cancelled
     return s7.requests.some(
       (r: SpotRequest) =>
@@ -567,8 +567,8 @@ export default pattern(() => {
     s8.togglePersonAdmin.send({ name: "Alice" })
   );
 
-  const assert_s8_admin_off = computed(() => s8.adminMode === false);
-  const assert_s8_admin_view_locked = computed(() => {
+  const assert_s8_admin_off = assert(() => s8.adminMode === false);
+  const assert_s8_admin_view_locked = assert(() => {
     const adminAccess = findNodeById(s8[UI], "parking-admin-access");
     const enableManager = findNodeById(
       s8[UI],
@@ -587,10 +587,10 @@ export default pattern(() => {
       propValue(adminToggle, "disabled") === true &&
       findNodeById(s8[UI], "parking-admin-people-section") === undefined;
   });
-  const assert_s8_can_manage_admins = computed(() =>
+  const assert_s8_can_manage_admins = assert(() =>
     s8.currentUserCanManageAdmins === true
   );
-  const assert_s8_admin_view_manager_enabled = computed(() => {
+  const assert_s8_admin_view_manager_enabled = assert(() => {
     const adminAccess = findNodeById(s8[UI], "parking-admin-access");
     const enableManager = findNodeById(
       s8[UI],
@@ -606,10 +606,10 @@ export default pattern(() => {
       propValue(enableManager, "disabled") === true &&
       propValue(aliceAdminToggle, "disabled") === false;
   });
-  const assert_s8_alice_is_admin = computed(() =>
+  const assert_s8_alice_is_admin = assert(() =>
     s8.currentPersonIsAdmin === true
   );
-  const assert_s8_admin_view_alice_admin = computed(() => {
+  const assert_s8_admin_view_alice_admin = assert(() => {
     const adminToggle = findNodeById(s8[UI], "parking-admin-mode-toggle");
     const aliceRow = findNodeByProp(
       s8[UI],
@@ -626,8 +626,8 @@ export default pattern(() => {
       propValue(adminToggle, "disabled") === false &&
       nodeIncludesText(adminToggle, "Admin: OFF");
   });
-  const assert_s8_admin_on = computed(() => s8.adminMode === true);
-  const assert_s8_admin_view_admin_mode_visible = computed(() =>
+  const assert_s8_admin_on = assert(() => s8.adminMode === true);
+  const assert_s8_admin_view_admin_mode_visible = assert(() =>
     nodeIncludesText(
       findNodeById(s8[UI], "parking-admin-mode-toggle"),
       "Admin: ON",
@@ -676,7 +676,7 @@ export default pattern(() => {
     });
   });
 
-  const assert_s9a_zara_has_vehicles = computed(() => {
+  const assert_s9a_zara_has_vehicles = assert(() => {
     const zara = s9a.people.find((p: Person) => p.name === "Zara");
     const vs: Vehicle[] = zara?.vehicles ?? [];
     return (
@@ -713,7 +713,7 @@ export default pattern(() => {
     });
   });
 
-  const assert_s9b_blank_plate_dropped = computed(() => {
+  const assert_s9b_blank_plate_dropped = assert(() => {
     const ben = s9b.people.find((p: Person) => p.name === "Ben");
     const vs: Vehicle[] = ben?.vehicles ?? [];
     return len(vs) === 1 && vs[0].plateId === "ABC123" &&
@@ -738,7 +738,7 @@ export default pattern(() => {
     });
   });
 
-  const assert_s9c_no_vehicles_default = computed(() => {
+  const assert_s9c_no_vehicles_default = assert(() => {
     const carol = s9c.people.find((p: Person) => p.name === "Carol");
     const vs: Vehicle[] = carol?.vehicles ?? [];
     return len(vs) === 0;
@@ -772,7 +772,7 @@ export default pattern(() => {
     });
   });
 
-  const assert_s9e_model_dropped = computed(() => {
+  const assert_s9e_model_dropped = assert(() => {
     const eve = s9e.people.find((p: Person) => p.name === "Eve");
     const vs: Vehicle[] = eve?.vehicles ?? [];
     return len(vs) === 1 && vs[0].make === "Honda" && vs[0].model === "";
@@ -805,7 +805,7 @@ export default pattern(() => {
     });
   });
 
-  const assert_s9f_valid_combo_kept = computed(() => {
+  const assert_s9f_valid_combo_kept = assert(() => {
     const frank = s9f.people.find((p: Person) => p.name === "Frank");
     const vs: Vehicle[] = frank?.vehicles ?? [];
     return len(vs) === 1 && vs[0].make === "Honda" && vs[0].model === "Civic";
@@ -845,7 +845,7 @@ export default pattern(() => {
     });
   });
 
-  const assert_s9g_deduped = computed(() => {
+  const assert_s9g_deduped = assert(() => {
     const grace = s9g.people.find((p: Person) => p.name === "Grace");
     const vs: Vehicle[] = grace?.vehicles ?? [];
     // First occurrence kept, second dropped
@@ -879,7 +879,7 @@ export default pattern(() => {
     });
   });
 
-  const assert_s9h_invalid_color_cleared = computed(() => {
+  const assert_s9h_invalid_color_cleared = assert(() => {
     const hank = s9h.people.find((p: Person) => p.name === "Hank");
     const vs: Vehicle[] = hank?.vehicles ?? [];
     return len(vs) === 1 && vs[0].color === "";
@@ -930,7 +930,7 @@ export default pattern(() => {
     });
   });
 
-  const assert_s9d_vehicles_replaced = computed(() => {
+  const assert_s9d_vehicles_replaced = assert(() => {
     const dana = s9d.people.find((p: Person) => p.name === "Dana");
     const vs: Vehicle[] = dana?.vehicles ?? [];
     return len(vs) === 1 && vs[0].plateId === "NEW456" &&
@@ -951,7 +951,7 @@ export default pattern(() => {
     });
   });
 
-  const assert_s9d_vehicles_preserved = computed(() => {
+  const assert_s9d_vehicles_preserved = assert(() => {
     const dana = s9d.people.find((p: Person) => p.name === "Dana");
     const vs: Vehicle[] = dana?.vehicles ?? [];
     // vehicles from previous edit still present, email changed

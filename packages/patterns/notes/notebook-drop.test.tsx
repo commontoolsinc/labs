@@ -14,7 +14,7 @@
  *
  * Run: deno task cf test packages/patterns/notes/notebook-drop.test.tsx --root packages/patterns --verbose
  */
-import { action, computed, pattern, UI } from "commonfabric";
+import { action, assert, pattern, UI } from "commonfabric";
 import { findNode, propsOf, readValue } from "../test/vnode-helpers.ts";
 import Notebook from "./notebook.tsx";
 import Note from "./note.tsx";
@@ -102,7 +102,7 @@ export default pattern(() => {
     sendDropOntoRow(subject, "Second Note", looseNote)
   );
 
-  const assert_initial_order = computed(() => {
+  const assert_initial_order = assert(() => {
     const titles = noteTitlesOf(subject);
     return titles.length === 2 && titles[0] === "First Note" &&
       titles[1] === "Second Note";
@@ -111,7 +111,7 @@ export default pattern(() => {
   // An in-notebook drop of an already-present note is a no-op: same
   // memberships, same order. (Removing then re-adding would file the note
   // back at the tail.)
-  const assert_re_drop_keeps_order = computed(() => {
+  const assert_re_drop_keeps_order = assert(() => {
     const titles = noteTitlesOf(subject);
     return titles.length === 2 && titles[0] === "First Note" &&
       titles[1] === "Second Note";
@@ -119,24 +119,24 @@ export default pattern(() => {
 
   // A multi-select drop within the notebook must not remove the selection
   // from the notebook it is already in.
-  const assert_multi_drop_keeps_notes = computed(() => {
+  const assert_multi_drop_keeps_notes = assert(() => {
     const titles = noteTitlesOf(subject);
     return titles.length === 2 && titles[0] === "First Note" &&
       titles[1] === "Second Note";
   });
 
   // The selection is consumed by the drop either way.
-  const assert_multi_drop_clears_selection = computed(() =>
+  const assert_multi_drop_clears_selection = assert(() =>
     [...(subject.selectedNoteIndices ?? [])].length === 0
   );
 
   // A note from outside the notebook is added once and hidden from the
   // space-wide list.
-  const assert_loose_note_added = computed(() => {
+  const assert_loose_note_added = assert(() => {
     const titles = noteTitlesOf(subject);
     return titles.length === 3 && titles[2] === "Loose Note";
   });
-  const assert_loose_note_hidden = computed(() => looseNote.isHidden === true);
+  const assert_loose_note_hidden = assert(() => looseNote.isHidden === true);
 
   return {
     tests: [

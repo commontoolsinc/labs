@@ -65,11 +65,15 @@ describe("hidden factory-state traversal", () => {
       { type: "object" },
     );
     const state = factoryStateOf(base);
-    if (state.kind !== "pattern" || !("rootToken" in state)) {
+    if (
+      state.kind !== "pattern" || !("rootToken" in state) ||
+      state.rootToken === null || typeof state.rootToken !== "object"
+    ) {
       throw new Error("expected a live pattern factory");
     }
     const boundState: LivePatternFactoryState = {
       ...state,
+      rootToken: state.rootToken,
       paramsSchema: { type: "object" },
       params,
       ...(spaceSelector === undefined ? {} : { spaceSelector }),
@@ -79,10 +83,16 @@ describe("hidden factory-state traversal", () => {
 
   const stateOfPattern = (value: unknown): LivePatternFactoryState => {
     const state = factoryStateOf(value);
-    if (state.kind !== "pattern" || !("rootToken" in state)) {
+    if (
+      state.kind !== "pattern" || !("rootToken" in state) ||
+      state.rootToken === null || typeof state.rootToken !== "object"
+    ) {
       throw new Error("expected live pattern state");
     }
-    return state;
+    return {
+      ...state,
+      rootToken: state.rootToken,
+    };
   };
 
   it("maps nested Cells and Reactives without exposing hidden state", () => {

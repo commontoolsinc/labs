@@ -1,7 +1,8 @@
 # Adding Pieces
 
-To add a new piece to the space's piece list, use the `addPiece` handler
-exported by the default app pattern. **Never** push to `allPieces` directly.
+To add a new piece to the space's piece registry, use the `addPiece` handler
+exported by the default app pattern. **Never** push to `pieceRegistry`
+directly.
 
 ## Why
 
@@ -72,9 +73,9 @@ return {
 ```tsx
 // Shown for illustration only.
 // BAD — direct mutation, no deduplication
-const { allPieces } =
-  wish<{ allPieces: Writable<NotePiece[]> }>({ query: "#default" }).result;
-allPieces.push(newNote);
+const { pieceRegistry } =
+  wish<{ pieceRegistry: Writable<NotePiece[]> }>({ query: "#default" }).result;
+pieceRegistry.push(newNote);
 ```
 
 ### Type hack
@@ -82,16 +83,16 @@ allPieces.push(newNote);
 ```tsx
 // Shown inside a pattern body.
 // WORSE — hides type errors behind `as any`
-allPieces.push(note as any);
-(allPieces as any).push(note);
+pieceRegistry.push(note as any);
+(pieceRegistry as any).push(note);
 ```
 
-### Wishing for `allPieces` as Writable
+### Wishing for `pieceRegistry` as Writable
 
 ```tsx
 // Shown inside a pattern body.
 // BAD — exposes internal implementation of default-app
-wish<{ allPieces: Writable<MinimalPiece[]> }>({ query: "#default" });
+wish<{ pieceRegistry: Writable<MinimalPiece[]> }>({ query: "#default" });
 ```
 
 Instead, wish only for the `addPiece` stream:
@@ -108,9 +109,18 @@ wish<{ addPiece: Stream<{ piece: MentionablePiece }> }>({
 
 The `addPiece` handler is defined in `default-app.tsx` and exported as a
 `Stream<{ piece: MentionablePiece }>`. Internally it checks for duplicates
-and pushes to the owned `allPieces` Writable. The runtime infrastructure
+and writes to the owned `pieceRegistry` Writable. The runtime infrastructure
 (`PieceManager.add()`) also uses this handler — patterns should follow the
 same approach.
+
+The `#allPieces` wish target and `allPieces` output have been removed. Use
+`pieceRegistry` and `#pieceRegistry`.
+
+The default app retains the old `allPieces` owned-cell cause for a one-time
+migration. When `pieceRegistry` is empty, it copies the legacy list and marks
+the migration complete. Existing canonical data wins when both cells contain
+data. `#pieceRegistry` and `PieceManager` can read the retired registry from a
+provenance-free legacy default-app root that remains pinned to its old source.
 
 See [handler()](../concepts/handler.md) for handler mechanics and
 [wish()](wish.md) for wish usage.

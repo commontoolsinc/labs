@@ -41,6 +41,7 @@ import {
   createTrustedBuilder,
   installTestPatternArtifact,
 } from "./support/trusted-builder.ts";
+import { waitForLlmSettled } from "./support/llm-result.ts";
 import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -199,8 +200,7 @@ describe("auto-provided sandboxId", () => {
     const result = runtime.run(runTx, testPattern, {}, resultCell);
     runTx.commit();
 
-    await waitForPendingToBecomeFalse(result);
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     expect(result.key("pending").get()).toBe(false);
     expect(result.key("error").get()).toBeUndefined();
@@ -390,8 +390,7 @@ describe("auto-provided sandboxId", () => {
       const result = runtime.run(runTx, testPattern, {}, resultCell);
       runTx.commit();
 
-      await waitForPendingToBecomeFalse(result);
-      await runtime.idle();
+      await waitForLlmSettled(runtime, result);
       expect(result.key("error").get()).toBeUndefined();
 
       const recvA = runtime.getCell(space, "d-A", ECHO_RESULT_SCHEMA)
@@ -466,8 +465,7 @@ describe("auto-provided sandboxId", () => {
       );
       const result = runtime.run(runTx, testPattern, {}, resultCell);
       runTx.commit();
-      await waitForPendingToBecomeFalse(result);
-      await runtime.idle();
+      await waitForLlmSettled(runtime, result);
 
       console.log("model-facing echoSandbox schema:", toolJson);
       expect(toolJson).toBeDefined();
@@ -532,36 +530,13 @@ describe("auto-provided sandboxId", () => {
         ),
       );
       runTx.commit();
-      await waitForPendingToBecomeFalse(result);
-      await runtime.idle();
+      await waitForLlmSettled(runtime, result);
 
       expect(toolJson).toContain("command");
       expect(toolJson).toContain("sandboxId");
     },
   );
 });
-
-function waitForPendingToBecomeFalse(result: ReturnType<Runtime["getCell"]>) {
-  const liveResult = result.withTx();
-  const timeoutMs = 2000;
-  return new Promise<void>((resolve, reject) => {
-    const start = Date.now();
-    const tick = async () => {
-      await liveResult.sync();
-      const pending = liveResult.key("pending").get() as unknown;
-      if (pending === false) {
-        resolve();
-        return;
-      }
-      if (Date.now() - start > timeoutMs) {
-        reject(new Error("Timeout waiting for pending to become false"));
-        return;
-      }
-      setTimeout(tick, 10);
-    };
-    tick().catch(reject);
-  });
-}
 
 // Direct unit tests for the framework-provided-field helpers, covering the
 // defensive branches the dialog-driven cases above don't reach: malformed

@@ -1,4 +1,4 @@
-name: Deno Workflow
+name: CI
 
 on:
   push:
@@ -20,6 +20,14 @@ jobs:
   # ---------------------------------------------------------------------------
   # Tier 0 – These jobs all start immediately with no dependencies
   # ---------------------------------------------------------------------------
+  dashboard:
+    name: "Dashboard"
+    if: ${{ github.event_name == 'pull_request' }}
+    uses: ./.github/workflows/dashboard-image.yml
+    permissions:
+      contents: read
+      id-token: write
+
   check:
     name: "Check"
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -173,9 +181,6 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
-      - name: 📥 Download Deno dependency binaries
-        run: deno task initialize-db
-
       - name: 🧪 Run runner tests
         working-directory: packages/runner
         env:
@@ -189,9 +194,13 @@ jobs:
           printf 'Runner test shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
           printf '  %s\n' $TEST_FILES
           # --no-check: the Check job type-checks packages/runner
-          # (tasks/check.sh).
+          # (tasks/check.sh). --preload runs the fake clock before every test
+          # module, the same as the package test task; without it the global
+          # `clock` the converted tests use is undefined. See
+          # test/clock-preload.ts.
           ENV=test deno test \
             --no-check \
+            --preload=test/clock-preload.ts \
             --allow-ffi \
             --allow-env \
             --allow-read \
@@ -314,16 +323,13 @@ jobs:
           restore-keys: |
             cc-generated-patterns-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
 
-      - name: 🧾 Record compile cache state for the Performance Check
+      - name: 🧾 Record compile cache state for the Coverage Check
         uses: ./.github/actions/record-compile-cache-state
         with:
           family: generated-patterns
           shard: ${{ matrix.shard }}
           cache-file: ${{ github.workspace }}/.compile-cache/generated-patterns-${{ matrix.shard }}.json
           exact-hit: ${{ steps.compile-cache.outputs.cache-hit }}
-
-      - name: 📥 Download Deno dependency binaries
-        run: deno task initialize-db
 
       - name: 🧪 Run generated patterns integration tests
         working-directory: packages/generated-patterns
@@ -414,9 +420,14 @@ jobs:
           TOOLSHED_PORT: 8000
         run: |
           chmod +x ./common-binaries/toolshed
+          # --background spawns the server, waits until it has bound its port,
+          # then returns, so the test steps never race a not-yet-listening
+          # server. The server logs to --log-file, which the launcher prints on
+          # success and dumps if the server exits before binding.
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
-          ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
+          ./common-binaries/toolshed --port="$TOOLSHED_PORT" \
+            --background --log-file="$RUNNER_TEMP/toolshed.log"
 
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
@@ -533,12 +544,11 @@ jobs:
           # Set tools to path
           # Integration script needs `cf`
           echo "${{ github.workspace }}/common-binaries" >> $GITHUB_PATH
-          CFTS_AI_GATEWAY_URL="" MEMORY_URL="$TOOLSHED_URL" API_URL="$TOOLSHED_URL" ./common-binaries/toolshed --port="$TOOLSHED_PORT" &
-
-      - name: ⏳ Wait for Toolshed to be ready
-        uses: ./.github/actions/wait-for-toolshed
-        with:
-          url: http://localhost:${{ matrix.toolshed_port }}
+          # --background waits until the server has bound its port before it
+          # returns, so the test steps never race a not-yet-listening server.
+          CFTS_AI_GATEWAY_URL="" MEMORY_URL="$TOOLSHED_URL" API_URL="$TOOLSHED_URL" \
+            ./common-binaries/toolshed --port="$TOOLSHED_PORT" \
+            --background --log-file="$RUNNER_TEMP/toolshed.log"
 
       - name: 📦 Install CLI integration dependencies
         uses: ./.github/actions/apt-install
@@ -675,7 +685,7 @@ jobs:
           restore-keys: |
             cc-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.shard }}-
 
-      - name: 🧾 Record compile cache state for the Performance Check
+      - name: 🧾 Record compile cache state for the Coverage Check
         uses: ./.github/actions/record-compile-cache-state
         with:
           family: pattern-integration
@@ -692,14 +702,12 @@ jobs:
       - name: 🔌 Start Toolshed server for testing
         run: |
           chmod +x ./common-binaries/toolshed
+          # --background waits until the server has bound its port before it
+          # returns, so the test steps never race a not-yet-listening server.
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
-          ./common-binaries/toolshed &
-
-      - name: ⏳ Wait for Toolshed to be ready
-        uses: ./.github/actions/wait-for-toolshed
-        with:
-          url: http://localhost:8000
+          ./common-binaries/toolshed \
+            --background --log-file="$RUNNER_TEMP/toolshed.log"
 
       # For Astral
       # https://github.com/lino-levan/astral/blob/f5ef833b2c5bde3783564a6b925073d5d46bb4b8/README.md#no-usable-sandbox-with-user-namespace-cloning-enabled
@@ -743,7 +751,7 @@ jobs:
         run: deno run --allow-read --allow-write --allow-run tasks/write-coverage-lcov.ts coverage/raw/pattern-integration-${{ matrix.shard }} coverage/lcov/pattern-integration-${{ matrix.shard }}.lcov
 
       # The whole directory: the V8 report plus the authored-pattern LCOV the
-      # harness wrote under pattern-runtime/. perf-check joins every .lcov in
+      # harness wrote under pattern-runtime/. coverage-check joins every .lcov in
       # the artifact, so both streams reach the gate.
       - name: 📤 Upload coverage report
         if: always()
@@ -842,9 +850,6 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
-      - name: 📥 Download Deno dependency binaries
-        run: deno task initialize-db
-
       - name: ♻️ Restore/save pattern unit compile byte cache
         id: compile-cache
         uses: actions/cache@v4
@@ -854,7 +859,7 @@ jobs:
           restore-keys: |
             cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.chunk }}-
 
-      - name: 🧾 Record compile cache state for the Performance Check
+      - name: 🧾 Record compile cache state for the Coverage Check
         uses: ./.github/actions/record-compile-cache-state
         with:
           family: pattern-unit
@@ -904,8 +909,8 @@ jobs:
   # Tier 2 – Post-test gates and deployments
   # ---------------------------------------------------------------------------
 
-  perf-check:
-    name: "Performance Check"
+  coverage-check:
+    name: "Coverage Check"
     if: (github.event_name == 'pull_request') || (github.ref_name == 'main')
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 30
@@ -948,13 +953,13 @@ jobs:
           skip-decompress: false
           digest-mismatch: error
 
-      - name: 📊 Run performance check
+      - name: 📊 Run coverage check
         env:
           COVERAGE_ARTIFACTS_DIR: coverage-artifacts
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: deno run --allow-net --allow-env --allow-read --allow-run --allow-write tasks/perf-check.ts
+        run: deno run --allow-net --allow-env --allow-read --allow-run --allow-write tasks/coverage-check.ts
 
       - name: 📤 Upload coverage regression comment
         if: always()
@@ -965,7 +970,11 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-      - name: 📤 Upload performance metrics
+      # The per-run coverage baseline (this run's coverage-debt metrics and
+      # compile cache states). Named perf-metrics for historical continuity —
+      # the coverage ratchet reads recent main runs' artifacts by this name, so
+      # keeping it avoids a baseline migration.
+      - name: 📤 Upload coverage baseline
         if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -974,14 +983,42 @@ jobs:
           retention-days: 90
           if-no-files-found: ignore
 
-      - name: 📤 Upload performance metrics backfill
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: perf-metrics-backfill
-          path: perf-metrics-backfill.json
-          retention-days: 90
-          if-no-files-found: ignore
+  status:
+    name: "Status"
+    if: ${{ always() && github.event_name == 'pull_request' }}
+    needs:
+      - dashboard
+      - check
+      - cfcheck
+      - test
+      - runner-test
+      - build-toolshed
+      - build-bg-piece-service
+      - build-cf
+      - generated-patterns-integration-test
+      - package-integration-test
+      - cli-integration-test
+      - pattern-integration-test
+      - pattern-reload-integration-test
+      - pattern-unit-test
+      - coverage-check
+    permissions: {}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: 🔎 Verify pull request jobs
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          failures=$(jq -r '
+            to_entries[]
+            | select(.value.result != "success")
+            | "\(.key): \(.value.result)"
+          ' <<< "$JOB_RESULTS")
+
+          if [[ -n "$failures" ]]; then
+            printf 'Unsuccessful pull request jobs:\n%s\n' "$failures"
+            exit 1
+          fi
 
   attest-binaries:
     name: "Attest and Upload Binaries"

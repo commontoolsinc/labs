@@ -29,6 +29,7 @@ import { Identity } from "@commonfabric/identity";
 import {
   ConsoleMethod,
   experimentalOptionsFromEnv,
+  parseLink,
   PatternCoverageCollector,
   patternCoverageOutputPath,
   Runtime,
@@ -1127,7 +1128,7 @@ export async function runTestPattern(
     // 3. Set up defaultPattern so wish({ query: "#default" }) resolves.
     // In production, default-app.tsx provides this. The test harness must
     // create a minimal equivalent so patterns that use wish("#default") to
-    // access allPieces, recentPieces, etc. work correctly.
+    // access pieceRegistry, recentPieces, etc. work correctly.
     await withPhase(["runTestPattern", "defaultPatternSetup"], async () => {
       const setupTx = runtime.edit();
       const spaceCell = runtime.getCell(space, space, undefined, setupTx);
@@ -1137,7 +1138,29 @@ export async function runTestPattern(
         undefined,
         setupTx,
       );
-      (defaultPatternCell as any).key("allPieces").set([]);
+      const pieceRegistry = (defaultPatternCell as any).key("pieceRegistry");
+      pieceRegistry.set([]);
+      const addPiece = runtime.getCell(
+        space,
+        "test-default-add-piece",
+        undefined,
+        setupTx,
+      );
+      addPiece.setRaw({ $stream: true });
+      (defaultPatternCell as any).key("addPiece").set(addPiece);
+      const testPieceRegistrationCount = (defaultPatternCell as any).key(
+        "testPieceRegistrationCount",
+      );
+      testPieceRegistrationCount.set(0);
+      runtime.scheduler.addEventHandler(
+        (handlerTx, event) => {
+          const piece = event?.piece;
+          if (!piece) return;
+          pieceRegistry.withTx(handlerTx).addUnique(piece);
+          testPieceRegistrationCount.withTx(handlerTx).increment();
+        },
+        parseLink(addPiece),
+      );
       (defaultPatternCell as any).key("recentPieces").set([]);
       (defaultPatternCell as any).key("backlinksIndex").set({
         mentionable: [],

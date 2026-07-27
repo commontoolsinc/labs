@@ -27,7 +27,7 @@ Check that these are not inside the pattern body:
 | `lift()` immediately invoked (`lift(...)(args)`) | Use `computed()` or define lift at module scope |
 | helper functions defined inside pattern | Move to module scope |
 | top-level `let`, `var`, or class | Convert to `const` plain data, or move stateful logic into actions, handlers, or helpers |
-| `setTimeout()` or `setInterval()` in authored pattern code | Use a reactive/runtime primitive instead; authored timers are not available yet |
+| `setTimeout()` or `setInterval()` in authored pattern code | Use a reactive/runtime primitive instead; authored timers are not part of the sandbox and do not compile |
 
 Allowed inside patterns:
 
@@ -46,7 +46,7 @@ Allowed inside patterns:
 | `.get()` on computed or lift result | Access directly; only `Writable` uses `.get()` |
 | `items.filter(...)` inline in JSX | Wrap in `computed()` outside JSX |
 | `items.sort(...)` inline in JSX | Wrap in `computed()` outside JSX |
-| `Date.now()`/`new Date()` or `Math.random()` in a `computed()` or `lift()`, or at pattern-body level | These built-ins throw a `TimeCapabilityError` outside a handler; read them in `action()`/`handler()`, or use the `#now` wish for reactive time |
+| `Date.now()`/`new Date()` or `Math.random()` in a `computed()` or `lift()`, or at pattern-body level | These built-ins throw a `TimeCapabilityError` outside a handler; read them in `action()`/`handler()`, or use the interval `#now/N` wish for reactive time (bare `#now` is a frozen one-shot) |
 | `Date.now()`/`new Date()` or `Math.random()` inside a re-running computation (`computed()` or `lift()`) without clear intent | Move the snapshot into `action()`, `handler()`, or one-time initialization |
 | nested computed with outer-scope reactive vars | Pre-compute with lift or an outer computed |
 | `lift()` closing over reactive deps | Pass dependencies as explicit parameters |

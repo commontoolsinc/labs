@@ -5,7 +5,6 @@
  * TTY) or prints the colourised text and exits, mirroring how `less`/`bat`
  * behave when their output is redirected.
  */
-import { parseDocument } from "./parse.ts";
 import { renderLineColored } from "./highlight.ts";
 import { runPager } from "./pager.ts";
 import type { Document } from "./model.ts";
@@ -16,11 +15,12 @@ import {
   realWorkspace,
   type WorkspaceCache,
 } from "./diffdoc.ts";
+import type { Semantics } from "./languages/language.ts";
 import {
-  createDiffSemantics,
-  createSemantics,
-  type Semantics,
-} from "./semantics.ts";
+  diffSemanticsFor,
+  distinctLanguages,
+  languageForFile,
+} from "./languages/language.ts";
 import {
   type EditableSource,
   fileSource,
@@ -117,20 +117,25 @@ export function buildView(
     // re-parse, so the named files are read and parsed once per session.
     const cache: WorkspaceCache = new Map();
     const { doc, maps, edit } = buildDiffDocument(text, model, ws, cache);
+    // The diff's semantic layer comes from the languages the diff touches.
+    const languages = distinctLanguages(
+      model.files.map((f) => f.newPath ?? f.oldPath),
+    );
     return {
       doc,
       semantics: () =>
-        createDiffSemantics(text, maps, { cwd: safeCwd() }) ?? undefined,
+        diffSemanticsFor(languages, text, maps, { cwd: safeCwd() }),
       // A diff edits the new side of the files it touches, in place. Saving
       // edited `git show` output amends HEAD with those file and message edits.
       editSource: diffSource(ws, edit, cache, realGit(safeCwd())),
     };
   }
-  const doc = parseDocument(text, file ?? "transformed.ts");
+  const language = languageForFile(file);
+  const doc = language.parseDocument(text, file ?? "transformed.tsx");
   return {
     doc,
     semantics: () =>
-      createSemantics(text, { cwd: safeCwd(), fileName: file }) ?? undefined,
+      language.createSemantics?.(text, { cwd: safeCwd(), fileName: file }),
     // A real file is editable; a pipe (transformed output, etc.) is not.
     editSource: file ? fileSource(file) : readonlySource(
       "This view is of a pipe — there is no underlying file to edit.",

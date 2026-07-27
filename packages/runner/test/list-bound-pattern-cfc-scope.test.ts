@@ -426,7 +426,7 @@ describe("bound list factory CFC and scope", () => {
       type: "application/json",
       path: [],
     }, {
-      value: mapSelector.getRaw(),
+      value: mapSelector.getRaw() as FabricValue,
       cfc: {
         version: 1,
         schemaHash: "bound-list-map-selector",

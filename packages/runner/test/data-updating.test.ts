@@ -8,6 +8,7 @@ import {
   compactChangeSet,
   diffAndUpdate,
   normalizeAndDiff,
+  schemaIfcOverlapsPath,
 } from "../src/data-updating.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
@@ -2129,5 +2130,61 @@ describe("scope-isolation write guard", () => {
       dest.key("item").getAsNormalizedFullLink(),
     );
     expect(isSigilLink(stored)).toBe(true);
+  });
+});
+
+// CT-1895: the overlap predicate deciding whether a schema-policy write
+// input might cover a written path missed ifc labels in tuple slots, so
+// schema-policy inputs for tuple positions were skipped (fail-open).
+describe("schemaIfcOverlapsPath", () => {
+  const tupleSchema = {
+    type: "object",
+    properties: {
+      pair: {
+        type: "array",
+        prefixItems: [
+          { type: "string", ifc: { confidentiality: ["x"] } },
+          { type: "number" },
+        ],
+      },
+    },
+  } as const satisfies JSONSchema;
+
+  it("overlaps a write into a labeled tuple slot", () => {
+    expect(schemaIfcOverlapsPath(tupleSchema, [], ["pair", "0"])).toBe(true);
+  });
+
+  it("does not overlap the unlabeled slot", () => {
+    expect(schemaIfcOverlapsPath(tupleSchema, [], ["pair", "1"])).toBe(false);
+  });
+
+  it("still overlaps items-covered elements via the wildcard", () => {
+    const restSchema = {
+      type: "object",
+      properties: {
+        list: {
+          type: "array",
+          items: { type: "string", ifc: { confidentiality: ["x"] } },
+        },
+      },
+    } as const satisfies JSONSchema;
+    expect(schemaIfcOverlapsPath(restSchema, [], ["list", "3"])).toBe(true);
+  });
+
+  it("sees labels inside combinator branches (shared-walk descent)", () => {
+    // Gained by the forEachSubschema rework: ifc under an anyOf branch was
+    // previously invisible to the predicate (fail-open).
+    const branchSchema = {
+      type: "object",
+      properties: {
+        field: {
+          anyOf: [
+            { type: "string", ifc: { confidentiality: ["x"] } },
+            { type: "number" },
+          ],
+        },
+      },
+    } as const satisfies JSONSchema;
+    expect(schemaIfcOverlapsPath(branchSchema, [], ["field"])).toBe(true);
   });
 });

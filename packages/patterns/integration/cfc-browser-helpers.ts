@@ -9,7 +9,14 @@ import {
 import { toIndentedDebugString } from "@commonfabric/data-model/value-debug";
 
 const DEFAULT_CFC_BROWSER_TIMEOUT = 30_000;
-const CLICK_TARGET_ATTR = "data-cfc-click-target";
+/**
+ * Attribute a mark predicate stamps on the element it resolved, so the test can
+ * then address exactly that element. What identifies a mark is the attribute's
+ * value — a fresh unique token per click — so the predicates here and in
+ * `note-button-helpers.ts` all stamp this one attribute name, and no helper
+ * resolves or clears a mark another one made.
+ */
+export const CLICK_TARGET_ATTR = "data-cfc-click-target";
 
 // Predicates evaluated in the page by `waitForCondition`. Each is self-contained
 // — it closes over nothing in this module — so it can be serialized and run in
@@ -34,24 +41,43 @@ const textAbsent = (
     probe.deepText(element).includes(text)
   );
 
+// Resolve a control's disabled state and compare it to `disabled`. An inner
+// <button> is authoritative when present: its `.disabled` DOM property is the
+// control's real state. Without one, fall back to the host — a native form
+// control exposes `.disabled`, and a custom element like cf-checkbox reflects
+// `disabled` to an attribute and also sets `aria-disabled`. A control that is
+// neither disabled nor carries the attribute resolves to enabled, so
+// `waitForDisabled(el, false)` satisfies immediately instead of hanging.
 export const buttonDisabledIs = (
   probe: ProbeApi,
   selector: string,
   disabled: boolean,
 ): boolean => {
   for (const element of probe.collect(selector)) {
+    if (!probe.isRendered(element)) continue;
     const button = element instanceof HTMLButtonElement
       ? element
       : element.shadowRoot?.querySelector("button");
-    if (
-      button instanceof HTMLButtonElement && probe.isRendered(element) &&
-      probe.isRendered(button) && button.disabled === disabled
+    let resolved: boolean;
+    if (button instanceof HTMLButtonElement) {
+      if (!probe.isRendered(button)) continue;
+      resolved = button.disabled;
+    } else if (
+      element instanceof HTMLInputElement ||
+      element instanceof HTMLSelectElement ||
+      element instanceof HTMLTextAreaElement
     ) {
-      return true;
+      resolved = element.disabled;
+    } else {
+      resolved = element.hasAttribute("disabled") ||
+        element.getAttribute("aria-disabled") === "true";
     }
+    if (resolved === disabled) return true;
   }
   return false;
 };
+
+const disabledIs = buttonDisabledIs;
 
 const runtimeIdle = async (): Promise<boolean> => {
   const rt = (globalThis as typeof globalThis & {
@@ -366,12 +392,11 @@ const markTrustedAction = (
 
 // Resolve once the shell's reactive view has caught up to runtime state and is
 // interactive, so a click lands on a bound handler. Waits for the shell to
-// expose `viewSettled` (notification-driven), then awaits the settle.
-export async function settleView(
-  page: Page,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
-): Promise<void> {
-  await waitForCondition(page, viewSettledReady, { timeout });
+// expose `viewSettled` (notification-driven), then awaits the settle. Neither
+// wait takes a timeout: the readiness poll carries `waitForCondition`'s built-in
+// safety net, and the settle itself awaits a real promise.
+export async function settleView(page: Page): Promise<void> {
+  await waitForCondition(page, viewSettledReady);
   await awaitViewSettled(page);
 }
 
@@ -415,7 +440,6 @@ async function waitForTextWhileSettling(
 export async function clickTrustedAction(
   page: Page,
   action: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   const token = `trusted-action-${crypto.randomUUID()}`;
   let probe: TrustedActionProbe | undefined;
@@ -424,12 +448,11 @@ export async function clickTrustedAction(
     // click it exactly once. Marking attaches the provenance listener, so the
     // single click is the trusted dispatch we record.
     await waitForCondition(page, markTrustedAction, {
-      timeout,
       args: [action, token, CLICK_TARGET_ATTR],
     });
     const button = await page.waitForSelector(
       `[${CLICK_TARGET_ATTR}="${token}"]`,
-      { strategy: "pierce", timeout },
+      { strategy: "pierce" },
     );
     await button.click();
   } catch (cause) {
@@ -462,12 +485,10 @@ export async function clickTrustedAction(
 export async function submitViaEnter(
   page: Page,
   inputSelector: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
-  await settleView(page, { timeout });
+  await settleView(page);
   const input = await page.waitForSelector(inputSelector, {
     strategy: "pierce",
-    timeout,
   });
   await input.focus();
   await page.keyboard.press("Enter");
@@ -480,11 +501,6 @@ export async function clickTrustedActionAndWaitForText(
   text: string,
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
-  // Single timeout budget shared across the fast path, settle, click, and the
-  // wait for the effect.
-  const deadline = Date.now() + timeout;
-  const remaining = () => Math.max(1, deadline - Date.now());
-
   let actionProbe: TrustedActionProbe | undefined;
   let textProbe: TextProbe | undefined;
 
@@ -498,8 +514,8 @@ export async function clickTrustedActionAndWaitForText(
   // trusted click lands; re-dispatching on a later tick is what double-fires
   // and corrupts the event provenance, so we never re-click.
   try {
-    await settleView(page, { timeout: remaining() });
-    await clickTrustedAction(page, action, { timeout: remaining() });
+    await settleView(page);
+    await clickTrustedAction(page, action);
   } catch (cause) {
     actionProbe = await readTrustedActionProbe(page, action).catch(() =>
       undefined
@@ -518,9 +534,7 @@ export async function clickTrustedActionAndWaitForText(
   // optimistic perUser/perSpace write whose chip trails the commit is caught by
   // the same wait.
   try {
-    await waitForTextWhileSettling(page, selector, text, {
-      timeout: remaining(),
-    });
+    await waitForTextWhileSettling(page, selector, text, { timeout });
   } catch (cause) {
     actionProbe ??= await readTrustedActionProbe(page, action).catch(() =>
       undefined
@@ -539,11 +553,9 @@ export async function waitForText(
   page: Page,
   selector: string,
   text: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   try {
     await waitForCondition(page, textPresent, {
-      timeout,
       args: [selector, text],
     });
   } catch (cause) {
@@ -561,11 +573,9 @@ export async function waitForTextAbsent(
   page: Page,
   selector: string,
   text: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   try {
     await waitForCondition(page, textAbsent, {
-      timeout,
       args: [selector, text],
     });
   } catch (cause) {
@@ -583,15 +593,13 @@ export async function fillCfInput(
   page: Page,
   selector: string,
   value: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   try {
     const presentation = presentationInteractions(page);
     if (presentation) {
-      await presentation.typeIntoCfInput(selector, value, timeout);
+      await presentation.typeIntoCfInput(selector, value);
     } else {
       await waitForCondition(page, fillAndVerify, {
-        timeout,
         args: [selector, value],
       });
     }
@@ -614,11 +622,9 @@ export async function fillCfInput(
 export async function readCfInputValue(
   page: Page,
   selector: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ): Promise<string> {
   const field = await page.waitForSelector(selector, {
     strategy: "pierce",
-    timeout,
   });
   const probe = await field.evaluate(
     (element: Element): { found: boolean; value: string } => {
@@ -638,18 +644,15 @@ export async function readCfInputValue(
 
 export async function waitForRuntimeIdle(
   page: Page,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
-  await waitForCondition(page, runtimeIdle, { timeout });
+  await waitForCondition(page, runtimeIdle);
 }
 
 export async function waitForActiveSpaceRoot(
   page: Page,
   expectedSpace: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   await waitForCondition(page, activeSpaceRootReady, {
-    timeout,
     args: [expectedSpace],
   });
 }
@@ -658,11 +661,9 @@ export async function waitForDisabled(
   page: Page,
   selector: string,
   disabled: boolean,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   try {
-    await waitForCondition(page, buttonDisabledIs, {
-      timeout,
+    await waitForCondition(page, disabledIs, {
       args: [selector, disabled],
     });
   } catch (cause) {
@@ -681,7 +682,6 @@ export async function waitForDisabled(
 export async function clickCfButton(
   page: Page,
   selector: string,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   const token = `cf-button-${crypto.randomUUID()}`;
   try {
@@ -689,7 +689,6 @@ export async function clickCfButton(
     // exactly once; the mark is the predicate, so the re-check on each DOM
     // mutation retries finding the button without re-clicking anything.
     await waitForCondition(page, markForClick, {
-      timeout,
       args: [selector, token, CLICK_TARGET_ATTR],
     });
   } catch (cause) {
@@ -704,7 +703,7 @@ export async function clickCfButton(
       { cause },
     );
   }
-  await clickMarked(page, token, timeout);
+  await clickMarked(page, token);
 }
 
 /**
@@ -720,12 +719,10 @@ export async function clickNthCfButton(
   page: Page,
   selector: string,
   index: number,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   const token = `cf-nth-button-${crypto.randomUUID()}`;
   try {
     await waitForCondition(page, markNthForClick, {
-      timeout,
       args: [selector, index, token, CLICK_TARGET_ATTR],
     });
   } catch (cause) {
@@ -737,25 +734,24 @@ export async function clickNthCfButton(
       { cause },
     );
   }
-  await clickMarked(page, token, timeout);
+  await clickMarked(page, token);
 }
 
 /**
  * Resolve the element tagged with `token` and click it, then clear the tag.
- * Shared by the click helpers above: each one marks its target through its own
- * predicate, and the resolve/click/untag tail is the same for all of them.
+ * Shared by `clickCfButton`, `clickNthCfButton`, and the text-matching click
+ * helpers in `note-button-helpers.ts`: each one marks its target through its
+ * own predicate, and the resolve/click/untag tail is the same for all of them.
  */
-async function clickMarked(
+export async function clickMarked(
   page: Page,
   token: string,
-  timeout: number,
 ): Promise<void> {
   try {
     const clickTarget = await page.waitForSelector(
       `[${CLICK_TARGET_ATTR}="${token}"]`,
       {
         strategy: "pierce",
-        timeout,
       },
     );
     await clickTarget.click();
@@ -771,10 +767,6 @@ export async function clickCfButtonAndWaitForText(
   text: string,
   { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
-  // Single timeout budget shared across settle, click, and wait-for-effect.
-  const deadline = Date.now() + timeout;
-  const remaining = () => Math.max(1, deadline - Date.now());
-
   let textProbe: TextProbe | undefined;
 
   // Fast path: the effect may already be present (idempotent re-entry).
@@ -790,8 +782,8 @@ export async function clickCfButtonAndWaitForText(
   // can double-fire, and against a dismissable overlay the repeat clicks
   // dismiss it). See docs/development/UI_TESTING.md.
   try {
-    await settleView(page, { timeout: remaining() });
-    await clickCfButton(page, buttonSelector, { timeout: remaining() });
+    await settleView(page);
+    await clickCfButton(page, buttonSelector);
   } catch (cause) {
     textProbe = await readTextProbe(page, textSelector).catch(() => undefined);
     throw new Error(
@@ -807,9 +799,7 @@ export async function clickCfButtonAndWaitForText(
   // few cycles after the click — including an optimistic perUser/perSpace write
   // whose chip trails the commit — is captured without ever re-clicking.
   try {
-    await waitForTextWhileSettling(page, textSelector, text, {
-      timeout: remaining(),
-    });
+    await waitForTextWhileSettling(page, textSelector, text, { timeout });
   } catch (cause) {
     textProbe = await readTextProbe(page, textSelector).catch(() => undefined);
     throw new Error(
@@ -823,11 +813,10 @@ export async function clickCfButtonAndWaitForText(
 
 export async function waitForRuntimeSynced(
   page: Page,
-  { timeout = DEFAULT_CFC_BROWSER_TIMEOUT }: { timeout?: number } = {},
 ) {
   // Quiescence isn't a per-space question: allSynced awaits every space the
   // worker has opened.
-  await waitForCondition(page, runtimeSynced, { timeout });
+  await waitForCondition(page, runtimeSynced);
 }
 
 export type SchedulerLoadSummary = {
@@ -1707,14 +1696,29 @@ async function readDisabledProbe(
     collect(document, matches);
     const element = matches[0];
     if (!element) return { selector: targetSelector, disabled: undefined };
+    // Resolve disabled the same way `disabledIs` does, so the diagnostic reports
+    // the state the wait was actually testing: an inner <button> when present,
+    // else the host's own `.disabled` (native controls) or its `disabled` /
+    // `aria-disabled` attributes (custom elements like cf-checkbox).
     const button = element instanceof HTMLButtonElement
       ? element
       : element.shadowRoot?.querySelector("button");
+    let disabled: boolean;
+    if (button instanceof HTMLButtonElement) {
+      disabled = button.disabled;
+    } else if (
+      element instanceof HTMLInputElement ||
+      element instanceof HTMLSelectElement ||
+      element instanceof HTMLTextAreaElement
+    ) {
+      disabled = element.disabled;
+    } else {
+      disabled = element.hasAttribute("disabled") ||
+        element.getAttribute("aria-disabled") === "true";
+    }
     return {
       selector: element.tagName.toLowerCase(),
-      disabled: button instanceof HTMLButtonElement
-        ? button.disabled
-        : undefined,
+      disabled,
     };
   }, { args: [selector] });
 }

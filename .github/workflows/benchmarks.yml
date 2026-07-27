@@ -25,9 +25,6 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
-      - name: 📥 Download Deno dependency binaries
-        run: deno task initialize-db
-
       - name: 🏋️ Run benchmarks
         env:
           CF_LOG_LEVEL: silent

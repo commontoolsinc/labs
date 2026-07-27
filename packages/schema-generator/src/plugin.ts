@@ -1,6 +1,6 @@
 import ts from "typescript";
 import { SchemaGenerator } from "./schema-generator.ts";
-import type { SchemaHint } from "./interface.ts";
+import type { SchemaGenerationOptions, SchemaHint } from "./interface.ts";
 
 /**
  * Plugin function that creates a schema transformer with access to both
@@ -14,7 +14,7 @@ export function createSchemaTransformerV2() {
       type: ts.Type,
       checker: ts.TypeChecker,
       typeArg?: ts.TypeNode,
-      options?: { widenLiterals?: boolean },
+      options?: SchemaGenerationOptions,
       schemaHints?: WeakMap<ts.Node, SchemaHint>,
       sourceFile?: ts.SourceFile,
       typeRegistry?: WeakMap<ts.Node, ts.Type>,
@@ -36,6 +36,7 @@ export function createSchemaTransformerV2() {
       typeRegistry?: WeakMap<ts.Node, ts.Type>,
       schemaHints?: WeakMap<ts.Node, SchemaHint>,
       sourceFile?: ts.SourceFile,
+      options?: SchemaGenerationOptions,
     ) {
       return generator.generateSchemaFromSyntheticTypeNode(
         typeNode,
@@ -43,6 +44,7 @@ export function createSchemaTransformerV2() {
         typeRegistry,
         schemaHints,
         sourceFile,
+        options,
       );
     },
   };
@@ -52,5 +54,10 @@ export function createSchemaTransformerV2() {
  * Alternative export for direct usage
  */
 export { SchemaGenerator };
-export type { GenerationContext, TypeFormatter } from "./interface.ts";
+export type {
+  GenerationContext,
+  SchemaGenerationOptions,
+  TypeFormatter,
+  WriterSourceIdentity,
+} from "./interface.ts";
 export type { JSONSchemaObjMutable } from "@commonfabric/api";

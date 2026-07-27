@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import type { SqliteDbRef } from "@commonfabric/memory/v2";
+import type { SqliteDbRef, SqliteParamsWire } from "@commonfabric/memory/v2";
 import { Runtime } from "../src/runtime.ts";
 import { labelResultSchema } from "../src/builtins/sqlite-builtins.ts";
 import { cfcLabelViewForCell } from "../src/cfc/label-view.ts";
@@ -195,7 +195,11 @@ describe({
     await storageManager?.close();
   });
 
-  const seed = async (db: SqliteDbRef, sql: string, params?: unknown[]) => {
+  const seed = async (
+    db: SqliteDbRef,
+    sql: string,
+    params?: SqliteParamsWire,
+  ) => {
     const tx = runtime.edit();
     tx.recordSqliteWrite!(space, { op: "sqlite", db, sql, params });
     return await tx.commit();

@@ -70,6 +70,7 @@ Everything a pattern exports (Chapter 3) is drivable without a browser:
 
 ```bash
 deno task cf piece ls -s myspace                       # list pieces
+deno task cf piece search -s myspace "invoice"         # find pieces by their data
 deno task cf piece inspect --piece <ID>                # dump structure/state
 deno task cf piece get --piece <ID> items              # read one exported field
 deno task cf piece call addItem '{"title": "Test"}' --piece <ID>   # send to a stream

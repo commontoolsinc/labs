@@ -29,7 +29,7 @@
  *
  * Run: deno task cf test packages/patterns/battleship/pass-and-play/main.test.tsx --verbose
  */
-import { action, computed, pattern } from "commonfabric";
+import { action, assert, pattern } from "commonfabric";
 import Battleship, { type SquareState } from "./main.tsx";
 
 export default pattern(() => {
@@ -70,74 +70,74 @@ export default pattern(() => {
   // ==========================================================================
 
   // Initial state assertions
-  const assert_initial_phase_playing = computed(
+  const assert_initial_phase_playing = assert(
     () => game.game.get().phase === "playing",
   );
-  const assert_initial_turn_player1 = computed(
+  const assert_initial_turn_player1 = assert(
     () => game.game.get().currentTurn === 1,
   );
-  const assert_initial_viewingAs_null = computed(
+  const assert_initial_viewingAs_null = assert(
     () => game.game.get().viewingAs === null,
   );
-  const assert_initial_winner_null = computed(
+  const assert_initial_winner_null = assert(
     () => game.game.get().winner === null,
   );
-  const assert_initial_not_awaiting_pass = computed(
+  const assert_initial_not_awaiting_pass = assert(
     () => game.game.get().awaitingPass === false,
   );
 
   // After playerReady - Player 1 is now viewing
-  const assert_viewingAs_player1 = computed(
+  const assert_viewingAs_player1 = assert(
     () => game.game.get().viewingAs === 1,
   );
-  const assert_still_turn_player1 = computed(
+  const assert_still_turn_player1 = assert(
     () => game.game.get().currentTurn === 1,
   );
 
   // After firing a miss
-  const assert_shot_recorded_miss = computed(() => {
+  const assert_shot_recorded_miss = assert(() => {
     return game.game.get().player2.shots[9][0] === "miss";
   });
-  const assert_turn_switched_to_player2 = computed(
+  const assert_turn_switched_to_player2 = assert(
     () => game.game.get().currentTurn === 2,
   );
-  const assert_awaiting_pass_after_shot = computed(
+  const assert_awaiting_pass_after_shot = assert(
     () => game.game.get().awaitingPass === true,
   );
 
   // After passDevice
-  const assert_viewingAs_null_after_pass = computed(
+  const assert_viewingAs_null_after_pass = assert(
     () => game.game.get().viewingAs === null,
   );
-  const assert_not_awaiting_pass_after_pass = computed(
+  const assert_not_awaiting_pass_after_pass = assert(
     () => game.game.get().awaitingPass === false,
   );
 
   // After player 2 ready
-  const assert_viewingAs_player2 = computed(
+  const assert_viewingAs_player2 = assert(
     () => game.game.get().viewingAs === 2,
   );
 
   // After player 2 fires a hit
-  const assert_shot_recorded_hit = computed(() => {
+  const assert_shot_recorded_hit = assert(() => {
     // Player 2 fires at Player 1's carrier at row 0, col 0
     return game.game.get().player1.shots[0][0] === "hit";
   });
-  const assert_turn_back_to_player1 = computed(
+  const assert_turn_back_to_player1 = assert(
     () => game.game.get().currentTurn === 1,
   );
 
   // After reset
-  const assert_reset_phase_playing = computed(
+  const assert_reset_phase_playing = assert(
     () => game.game.get().phase === "playing",
   );
-  const assert_reset_turn_player1 = computed(
+  const assert_reset_turn_player1 = assert(
     () => game.game.get().currentTurn === 1,
   );
-  const assert_reset_viewingAs_null = computed(
+  const assert_reset_viewingAs_null = assert(
     () => game.game.get().viewingAs === null,
   );
-  const assert_reset_shots_cleared = computed(() => {
+  const assert_reset_shots_cleared = assert(() => {
     // All shots should be empty after reset
     const p1Clear = game.game.get().player1.shots.every((row: SquareState[]) =>
       row.every((cell: SquareState) => cell === "empty")

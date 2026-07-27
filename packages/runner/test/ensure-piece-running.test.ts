@@ -409,7 +409,6 @@ describe("ensurePieceRunning", () => {
 
     // Wait for processing - should complete without errors
     await runtime.idle();
-    await new Promise((resolve) => setTimeout(resolve, 50));
     await runtime.idle();
 
     // If we get here, the event was handled gracefully (dropped)
@@ -556,6 +555,7 @@ describe("queueEvent with auto-start", () => {
     runtime.scheduler.queueEvent(eventsLink, { type: "click" });
 
     await runtime.idle();
+    await runtime.idle();
 
     expect(handlerRunCount).toBe(2);
     expect(liftRunCount).toBe(1);
@@ -696,7 +696,6 @@ describe("queueEvent with auto-start", () => {
 
     // Wait for processing
     await resultCell.pull();
-    await new Promise((resolve) => setTimeout(resolve, 100));
     await runtime.idle();
 
     // The piece should have been started
@@ -710,7 +709,6 @@ describe("queueEvent with auto-start", () => {
     runtime.scheduler.queueEvent(eventsLink, { type: "click", x: 20 });
 
     await runtime.idle();
-    await new Promise((resolve) => setTimeout(resolve, 50));
     await runtime.idle();
 
     // Handler should have run twice now
@@ -837,7 +835,6 @@ describe("queueEvent with auto-start", () => {
     runtime.scheduler.queueEvent(eventsLink, { type: "click", x: 42 });
 
     await resultCell.pull();
-    await new Promise((resolve) => setTimeout(resolve, 100));
     await runtime.idle();
 
     expect(liftRunCount).toBe(1);

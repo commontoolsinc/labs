@@ -1,5 +1,6 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { FabricValue } from "@commonfabric/data-model/interface";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -39,7 +40,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
   const seedLabeledDoc = async (
     rt: Runtime,
     cause: string,
-    value: unknown,
+    value: FabricValue,
     atom: string,
   ): Promise<string> => {
     const seed = rt.edit();
@@ -735,7 +736,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     const { pattern, lift } = commonfabric as unknown as {
       pattern: typeof commonfabric.pattern;
       lift: (fn: (value: { n: number }) => unknown) => (
-        value: unknown,
+        value: FabricValue,
       ) => unknown;
     };
     // Reads element content, drops everything: the result stays [] across

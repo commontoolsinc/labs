@@ -18,7 +18,7 @@ export type CaptureStopState = {
 
 type CommandStatus = Deno.CommandStatus;
 
-type KillableProcess = {
+export type KillableProcess = {
   kill(signal: Deno.Signal): void;
 };
 
@@ -147,6 +147,50 @@ export function stopCaptureOnce(
   } catch {
     // Already exited.
   }
+}
+
+/**
+ * The pair of handlers cf-profile attaches to its child's mirrored stdout and
+ * stderr. `onCliOutput` keeps a bounded window of recent output, hands back the
+ * child's inspector WebSocket URL the first time it appears (through
+ * `onInspectorUrl`), and once the child prints the debugger-waiting message
+ * stops the capture. `stopCapture` signals the capture process, but only when
+ * one is running — its reference is filled in after the capture spawns. The
+ * recent-output window and the "URL already seen" flag live here so the caller
+ * only wires the dependencies.
+ */
+export function createProfileOutputRelay(deps: {
+  captureRef: { current?: KillableProcess };
+  captureStopState: CaptureStopState;
+  captureStopSignal: Deno.Signal;
+  onInspectorUrl: (url: string) => void;
+}): {
+  onCliOutput: (text: string) => void;
+  stopCapture: () => void;
+} {
+  let recentOutput = "";
+  let inspectorUrlFound = false;
+  const stopCapture = () => {
+    if (deps.captureRef.current) {
+      stopCaptureOnce(
+        deps.captureStopState,
+        deps.captureRef.current,
+        deps.captureStopSignal,
+      );
+    }
+  };
+  const onCliOutput = (text: string) => {
+    recentOutput = (recentOutput + text).slice(-8192);
+    const foundInspectorUrl = findInspectorWebSocketUrl(recentOutput);
+    if (foundInspectorUrl && !inspectorUrlFound) {
+      inspectorUrlFound = true;
+      deps.onInspectorUrl(foundInspectorUrl);
+    }
+    if (recentOutput.includes(DEBUGGER_WAITING_MESSAGE)) {
+      stopCapture();
+    }
+  };
+  return { onCliOutput, stopCapture };
 }
 
 export async function waitForCliStatusOrStopOnCaptureFailure(

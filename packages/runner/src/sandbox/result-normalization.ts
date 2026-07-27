@@ -13,6 +13,7 @@ import {
   FabricEpochNsec,
   FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
+import { isNativeError } from "@commonfabric/data-model/native-type-tags";
 
 import { isReactive } from "../builder/types.ts";
 import {
@@ -43,7 +44,6 @@ const regexpFlagsGetter = Object.getOwnPropertyDescriptor(
   RegExp.prototype,
   "flags",
 )!.get!;
-const errorIsError = Error.isError;
 
 const hasToJSON = (value: object): boolean =>
   "toJSON" in value &&
@@ -120,7 +120,7 @@ function normalizeSandboxNativeLeaf(value: unknown): unknown {
     return new FabricBytes(new Uint8Array(value as Uint8Array));
   }
 
-  if (errorIsError(value)) {
+  if (isNativeError(value)) {
     return FabricError.fromNativeError(value as Error);
   }
 
@@ -154,7 +154,7 @@ function formatActionResultError(
   const actionStr = actionName ? `\n  in action: ${actionName}` : "";
   const hint = hintForActionResult(value);
   const hintStr = hint ? ` ${hint}` : "";
-  const causeIsError = errorIsError(cause) || cause instanceof Error;
+  const causeIsError = isNativeError(cause);
   const causeStr = causeIsError ? `\n${(cause as Error).message}` : "";
   return new Error(
     `Action returned a ${typeNameForActionResult(value)}${pathStr}.` +

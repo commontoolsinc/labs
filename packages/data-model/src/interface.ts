@@ -23,8 +23,23 @@ import type { FabricFactory as ApiFabricFactory } from "@commonfabric/api";
  * `instanceof FabricSpecialObject` check wherever code needs to recognize any
  * fabric-system value without caring which branch of the hierarchy it
  * belongs to.
+ *
+ * The `@commonfabric/FabricSpecialObject` member is a nominal brand, and
+ * exists only in the type system: `declare` emits no runtime member, and
+ * nothing ever reads the key. Without it the class is structurally empty, so
+ * *every* object satisfies `FabricSpecialObject` — which in turn makes every
+ * object satisfy `FabricValue`, since that union includes this type. The brand
+ * is what makes `FabricValue` mean anything as a static claim.
+ *
+ * It is a well-known string key rather than a `unique symbol` because that
+ * would require importing a symbol *value*, and this file is deliberately free
+ * of runtime imports (see the file header). `packages/api/index.ts` declares
+ * the identical member; the two must agree exactly, or a value branded by one
+ * will not satisfy the other.
  */
-export abstract class FabricSpecialObject {}
+export abstract class FabricSpecialObject {
+  declare readonly "@commonfabric/FabricSpecialObject": true;
+}
 
 //
 // Fabric instance protocol
@@ -146,6 +161,18 @@ export interface FabricFactory<
  * separately rejects all symbols at the entrance (relaxation deferred to a
  * follow-up); the type union admits `symbol` so the lower layers (hashing,
  * JSON encoding) can be written and tested ahead of that gate change.
+ *
+ * **Deep-frozen honesty (mandatory).** A `FabricValue` must report its frozen
+ * state truthfully and permanently. In particular, a fabric record or array is
+ * data-only: it must not expose an own accessor (getter/setter) whose result
+ * can contradict, or change after, the value's frozen state -- once a
+ * `FabricValue` graph is deeply frozen, its contents are fixed. (For a
+ * `FabricInstance`, the analogous obligation is on its `[IS_DEEP_FROZEN]`
+ * report; see `BaseFabricInstance`.) The rest of the system -- the data model
+ * in general and `isDeepFrozen()` specifically, but also the entire codebase
+ * that _uses_ the data model -- relies on this to cache deep-frozen proofs by
+ * root identity without re-validating; a value that violates it can corrupt
+ * data-model invariants, as any broken contract can.
  */
 export type FabricValue =
   // -- Primitives --
@@ -215,3 +242,19 @@ export type FabricNativeObject =
   | RegExp
   | Uint8Array
   | { toJSON(): unknown };
+
+/**
+ * A `FabricValue`, a `FabricNativeObject`, or a deep tree thereof -- the values
+ * that convert to and from fabric form. This is the precondition of
+ * `fabricFromNativeValue()` (which fails on anything else), the result of
+ * `nativeFromFabricValue()`, and what `isFabricCompatible()` tests for.
+ *
+ * Distinct from `FabricValue`: containers here may hold `FabricNativeObject`s.
+ * Converting a `FabricError` yields an `Error`, so an array of them is an array
+ * of natives, which has no `FabricValue` name.
+ */
+export type FabricOrConvertibleNativeValue =
+  | FabricValue
+  | FabricNativeObject
+  | readonly FabricOrConvertibleNativeValue[]
+  | { readonly [key: string]: FabricOrConvertibleNativeValue };

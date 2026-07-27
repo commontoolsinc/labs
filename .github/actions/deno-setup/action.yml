@@ -107,3 +107,81 @@ runs:
         restore-keys: |
           deno-deps-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.resolve.outputs.version }}-
           deno-deps-v4-${{ runner.os }}-${{ runner.arch }}-
+
+    # The @db/sqlite FFI driver downloads its native library (libsqlite3) from a
+    # GitHub release the first time a process opens a database, via @denosaurs/plug.
+    # Plug caches the library under <DENO_DIR>/plug, which is ~/.cache/deno/plug on
+    # the Linux runners. Left to the deno-deps cache above, that library would be
+    # evicted on every unrelated dependency change, because that cache's key hashes
+    # the whole lockfile; each eviction re-exposes the run-time download, and a
+    # transient GitHub failure there fails the job. A separate cache keyed on only
+    # the resolved driver version survives unrelated dependency changes, so the
+    # download happens at most once per driver version.
+    #
+    # The provisioning is best-effort. The download runs in every job that opts into
+    # dependency caching, but a failure only warns, so a job that never opens a
+    # database (lint, build, deploy) is not failed by a SQLite download. The cache is
+    # saved only after `deno task initialize-db` both fetches the library and opens a
+    # database with it, and only when the library is present under a cached path — so
+    # a flaked, partial, or misplaced (custom DENO_DIR) download never persists an
+    # empty entry under the immutable version key. Restore and save are split for
+    # that reason: the combined actions/cache saves in a post-job step that runs even
+    # after the job fails.
+    #
+    # Cache version: bump the `deno-sqlite-v1` token to invalidate all SQLite caches.
+    - name: 🔍 Resolve SQLite driver version
+      id: sqlite
+      if: inputs.cache == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        # deno.lock's specifiers map records the exact resolved version in a line
+        # of the form "jsr:@db/sqlite@<version>": "<version>". Take the first such
+        # mapping's value and stop there.
+        version="$(awk -F'"' '/^[[:space:]]*"jsr:@db\/sqlite@[^"]*":[[:space:]]*"[0-9]/ { print $4; exit }' deno.lock)"
+        if [ -z "$version" ]; then
+          # Degrade to the lazy run-time download rather than failing every job that
+          # uses this action.
+          echo "::warning::Could not resolve the @db/sqlite version from deno.lock; skipping the SQLite library cache."
+        fi
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    - name: 🗃️ Restore SQLite native library ${{ steps.sqlite.outputs.version }}
+      id: sqlite-cache
+      if: inputs.cache == 'true' && steps.sqlite.outputs.version != ''
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          ~/.cache/deno/plug
+          ~/Library/Caches/deno/plug
+        key: deno-sqlite-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.sqlite.outputs.version }}
+
+    - name: 📥 Download SQLite native library ${{ steps.sqlite.outputs.version }}
+      id: sqlite-download
+      # Open an in-memory database once so @db/sqlite fetches and exercises the
+      # native library, then confirm it landed under a cached directory. Non-fatal:
+      # on failure the library is left to be fetched lazily at run time.
+      if: inputs.cache == 'true' && steps.sqlite.outputs.version != '' && steps.sqlite-cache.outputs.cache-hit != 'true'
+      continue-on-error: true
+      shell: bash
+      run: |
+        set -euo pipefail
+        deno task initialize-db
+        for dir in "$HOME/.cache/deno/plug" "$HOME/Library/Caches/deno/plug"; do
+          if [ -n "$(find "$dir" -type f \( -name '*.so' -o -name '*.dylib' -o -name '*.dll' \) 2>/dev/null)" ]; then
+            exit 0
+          fi
+        done
+        echo "::warning::SQLite library not found under the cached plug directories; skipping cache save."
+        exit 1
+
+    - name: 💾 Save SQLite native library ${{ steps.sqlite.outputs.version }}
+      # Runs only after a verified download, so a failed or misplaced download never
+      # persists an empty cache under this version's key.
+      if: inputs.cache == 'true' && steps.sqlite.outputs.version != '' && steps.sqlite-cache.outputs.cache-hit != 'true' && steps.sqlite-download.outcome == 'success'
+      uses: actions/cache/save@v6
+      with:
+        path: |
+          ~/.cache/deno/plug
+          ~/Library/Caches/deno/plug
+        key: deno-sqlite-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.sqlite.outputs.version }}

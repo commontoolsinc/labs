@@ -154,7 +154,7 @@ class RejectThenSucceedTransport extends ScriptedSessionTransport {
         const commit = message.commit as { localSeq?: number } | undefined;
         const localSeq = commit?.localSeq ?? -1;
         if (localSeq === 1) {
-          await new Promise((resolve) => setTimeout(resolve, 5));
+          await clock.tick(5);
           this.respond({
             type: "response",
             requestId: message.requestId!,
@@ -198,7 +198,7 @@ const waitFor = async (
     if (Date.now() - start > timeout) {
       throw new Error("Timed out waiting for condition");
     }
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await clock.tick(5);
   }
 };
 

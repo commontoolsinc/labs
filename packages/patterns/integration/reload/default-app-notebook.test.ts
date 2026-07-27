@@ -3,7 +3,6 @@ import {
   env,
   Page,
   type ProbeApi,
-  waitFor,
   waitForCondition,
 } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
@@ -12,7 +11,6 @@ import { Identity } from "@commonfabric/identity";
 import { assert, assertEquals } from "@std/assert";
 import {
   collectSchedulerLoadSummary,
-  vdomHasButton,
   waitForActiveSpaceRoot,
   waitForRuntimeIdle,
   waitForRuntimeSynced,
@@ -21,7 +19,6 @@ import {
   clickButtonWithExactText,
   clickButtonWithText,
   clickButtonWithTitle,
-  findButtonWithText,
 } from "../note-button-helpers.ts";
 import { resolveSpaceDid } from "@commonfabric/lib-shell";
 
@@ -30,7 +27,6 @@ const { FRONTEND_URL } = env;
 // slightly while still exercising persisted scheduler-state reuse.
 const NOTEBOOK_RELOAD_TOTAL_ACTION_RUN_LIMIT = 150;
 const NOTEBOOK_RELOAD_COMPUTATION_RUN_LIMIT = 90;
-const NOTEBOOK_RELOAD_TIMEOUT_MS = 180_000;
 
 const EXPECT_PERSISTENT_SCHEDULER_STATE = (() => {
   const raw = Deno.env.get("CF_EXPECT_PERSISTENT_SCHEDULER_STATE");
@@ -65,11 +61,6 @@ describe("default-app notebook reload integration test", () => {
 
     await waitForActiveSpaceRoot(page, notebookSpaceDid);
     await waitForRuntimeIdle(page);
-    // Runtime idle can precede the replacement worker VDOM mount. The retired
-    // DOM remains visible briefly, but its numeric handler IDs are no longer
-    // valid for the active reconciler. Require Notes in the current worker
-    // tree and drain that mount before interacting with it.
-    await waitFor(async () => await vdomHasButton(page, "Notes"));
     await awaitViewSettled(page);
     await clickButtonWithText(page, "Notes");
     await awaitViewSettled(page);
@@ -105,11 +96,6 @@ describe("default-app notebook reload integration test", () => {
       await clickButtonWithTitle(page, "New Note"),
       "Expected New Note click to succeed",
     );
-    await waitFor(async () => {
-      await awaitViewSettled(page);
-      return !!(await findButtonWithText(page, "Create Another"));
-    });
-    await waitFor(async () => await resetEventInvocationTrace(page));
 
     const noteCreates = 7;
     for (let i = 0; i < noteCreates - 1; i++) {
@@ -125,10 +111,9 @@ describe("default-app notebook reload integration test", () => {
 
     await waitForCondition(page, notebookSourceStateMatches, {
       args: [noteCreates],
-      timeout: NOTEBOOK_RELOAD_TIMEOUT_MS,
     });
 
-    await waitForRuntimeSynced(page, { timeout: NOTEBOOK_RELOAD_TIMEOUT_MS });
+    await waitForRuntimeSynced(page);
 
     const startedAt = performance.now();
     await page.reload({ waitUntil: "load" });
@@ -137,9 +122,8 @@ describe("default-app notebook reload integration test", () => {
 
     await waitForCondition(page, notebookReloadRendered, {
       args: [noteCreates],
-      timeout: NOTEBOOK_RELOAD_TIMEOUT_MS,
     });
-    await waitForRuntimeIdle(page, { timeout: NOTEBOOK_RELOAD_TIMEOUT_MS });
+    await waitForRuntimeIdle(page);
 
     const reloadRenderState = await collectNotebookRenderState(page);
     assertEquals(reloadRenderState.noteCount, noteCreates);
@@ -258,45 +242,6 @@ async function collectBrowserLoadMetrics(page: Page): Promise<{
       ),
       postRenderStableMs: round(postRenderStableMs)!,
     };
-  });
-}
-
-async function resetEventInvocationTrace(page: Page): Promise<boolean> {
-  return await page.evaluate(async () => {
-    const api = globalThis.commonfabric as {
-      rt?: {
-        setTelemetryEnabled?: (enabled: boolean) => Promise<void>;
-        on?: (event: string, handler: (marker: unknown) => void) => void;
-        off?: (event: string, handler: (marker: unknown) => void) => void;
-        idle?: () => Promise<void>;
-      };
-      __eventInvocationTrace?: unknown[];
-      __eventInvocationTraceHandler?: (marker: unknown) => void;
-    } | undefined;
-    const rt = api?.rt;
-    if (!api || !rt?.setTelemetryEnabled || !rt.on || !rt.off) return false;
-
-    if (api.__eventInvocationTraceHandler) {
-      rt.off("telemetry", api.__eventInvocationTraceHandler);
-    }
-
-    api.__eventInvocationTrace = [];
-    api.__eventInvocationTraceHandler = (marker: unknown) => {
-      const type = marker && typeof marker === "object"
-        ? (marker as { type?: unknown }).type
-        : undefined;
-      if (
-        type === "scheduler.invocation" ||
-        type === "scheduler.event.commit" ||
-        type === "scheduler.event.preflight"
-      ) {
-        api.__eventInvocationTrace?.push(marker);
-      }
-    };
-    rt.on("telemetry", api.__eventInvocationTraceHandler);
-    await rt.setTelemetryEnabled(true);
-    await rt.idle?.();
-    return true;
   });
 }
 

@@ -27,7 +27,12 @@ import {
   ruleInputFields,
   validateRowLabelSpec,
 } from "@commonfabric/memory/sqlite/row-label";
-import { tableDeclaresRowLabel } from "@commonfabric/memory/v2";
+import type { CfcConfClause } from "../../cfc/clause.ts";
+import type { CfcAtom } from "@commonfabric/api/cfc";
+import {
+  type SqliteDbRef,
+  tableDeclaresRowLabel,
+} from "@commonfabric/memory/v2";
 import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
 import {
   blankWriteSql,
@@ -40,14 +45,17 @@ import {
  *  input (sink-request) before the commit. */
 export interface RowLabelWritePolicy {
   table: string;
-  label: { confidentiality: unknown[]; integrity: unknown[] };
+  label: { confidentiality: CfcConfClause[]; integrity: CfcAtom[] };
 }
 
 export interface RowLabelWriteArgs {
   sql: string;
+  /** Bind values as `.exec()` received them — NOT `SqliteParamsWire`. The
+   *  gate runs before encoding, so a value here may still be a `Cell`
+   *  (that is what `confidentialityOf` reads a label off). */
   params: ReadonlyArray<unknown> | Record<string, unknown> | undefined;
   /** Declared table schemas (`db.tables`, wire-supplied — re-validated). */
-  tables: Record<string, unknown> | undefined;
+  tables: SqliteDbRef["tables"];
   /** The db's owner (db ref), resolving the rule's `dbOwner()` term. */
   owner?: string;
   /** The confidentiality atoms carried by a bound value ([] if unlabeled). */
@@ -282,7 +290,12 @@ export function checkSqliteRowLabelWrite(
             "ceiling); storing the value would launder its label; fail closed",
         };
       }
-      if (!cfcObservationFitsCeiling(conf, res.confidentiality)) {
+      if (
+        !cfcObservationFitsCeiling(
+          conf as readonly CfcConfClause[],
+          res.confidentiality as readonly CfcConfClause[],
+        )
+      ) {
         return {
           error: `sqlite: a value bound to rule-bearing table ` +
             `"${declaredKey}" carries confidentiality not captured by the ` +
@@ -293,7 +306,10 @@ export function checkSqliteRowLabelWrite(
     }
     policies.push({
       table: declaredKey,
-      label: { confidentiality: res.confidentiality, integrity: res.integrity },
+      label: {
+        confidentiality: res.confidentiality as CfcConfClause[],
+        integrity: res.integrity as CfcAtom[],
+      },
     });
   }
   return { policies };

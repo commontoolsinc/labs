@@ -10,7 +10,7 @@ import {
   sealFactoryState,
 } from "@/fabric-factory.ts";
 import { FabricLink } from "@/fabric-instances/FabricLink.ts";
-import type { FabricFactory } from "@/interface.ts";
+import type { FabricFactory, FabricPlainObject } from "@/interface.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { isDeepFrozen } from "@/deep-freeze.ts";
 
@@ -304,7 +304,7 @@ describe("FactoryCodec", () => {
         argumentSchema: true,
         resultSchema: true,
         paramsSchema: true,
-        params,
+        params: params as unknown as FabricPlainObject,
       },
       EMPTY_RECONSTRUCTION_CONTEXT,
     ) as FabricFactory<[]>;

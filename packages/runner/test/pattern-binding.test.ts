@@ -161,10 +161,8 @@ describe("params pseudo-alias runtime seam", () => {
         argumentCell.getAsNormalizedFullLink(),
         resultCell,
       )
-    ).toThrow("Invalid pseudo-alias cell: params");
+    ).toThrow("Cannot bind params alias: no cell link available");
 
-    // These casts keep the regression focused on the missing runtime seam.
-    // WP3.4 widens the public metadata vocabulary in the green change.
     const paramsCell = getMetaCell(
       resultCell,
       "params" as Parameters<typeof getMetaCell>[1],
@@ -618,6 +616,52 @@ describe("pattern-binding", () => {
       ).toBe(true);
     });
 
+    it("binds result aliases without an argument link", () => {
+      // collectResumeOwnedCells passes an undefined argument link when the
+      // argument meta is not yet written (fresh run) or not yet synced (cold
+      // resume); bindings that never touch the argument must still unwrap.
+      const binding = {
+        y: { $alias: { cell: "result", path: ["b"] } },
+        z: 3,
+      };
+      const resultCell = runtime.getCell<{ b: number }>(
+        space,
+        "no argument link result cell",
+        undefined,
+        tx,
+      );
+      const result = unwrapOneLevelAndBindtoDoc(
+        runtime.cfc,
+        binding,
+        undefined,
+        resultCell,
+      );
+      expect(
+        areLinksSame(result.y, resultCell.key("b").getAsWriteRedirectLink()),
+      ).toBe(true);
+      expect(result.z).toBe(3);
+    });
+
+    it("throws when an argument alias binds without an argument link", () => {
+      const binding = {
+        y: { $alias: { cell: "argument", path: ["b"] } },
+      };
+      const resultCell = runtime.getCell<{ b: number }>(
+        space,
+        "missing argument link result cell",
+        undefined,
+        tx,
+      );
+      expect(() =>
+        unwrapOneLevelAndBindtoDoc(
+          runtime.cfc,
+          binding,
+          undefined,
+          resultCell,
+        )
+      ).toThrow("Cannot bind argument alias: no argument cell link available");
+    });
+
     it("uses the argument link schema when converting aliases", () => {
       const profileSchema = {
         type: "object",
@@ -872,9 +916,13 @@ describe("pattern-binding", () => {
         const { pattern } = createTrustedBuilder(runtime).commonfabric;
         const base = pattern(() => ({ value: 1 }));
         const state = factoryStateOf(base);
-        if (state.kind !== "pattern" || !("rootToken" in state)) {
+        if (
+          state.kind !== "pattern" || !("rootToken" in state) ||
+          state.rootToken === null || typeof state.rootToken !== "object"
+        ) {
           throw new Error("expected live pattern factory state");
         }
+        const rootToken = state.rootToken;
         const derive = (
           params: unknown,
           spaceSelector?: unknown,
@@ -883,6 +931,7 @@ describe("pattern-binding", () => {
             base,
             {
               ...state,
+              rootToken,
               paramsSchema: true,
               params,
               ...(spaceSelector === undefined ? {} : { spaceSelector }),

@@ -70,11 +70,23 @@ describe("fabric ref resolution", () => {
     });
   });
 
-  it("rejects space names until name to DID resolution exists", async () => {
+  it("rejects subpaths before resolving an entry identity", async () => {
+    await expect(
+      resolveFabricRefToIdentity(
+        runtime,
+        space,
+        parse(`cf:pattern:${ENTRY_A}/schemas`),
+      ),
+    ).rejects.toThrow(
+      `subpaths not yet supported (M4): cf:pattern:${ENTRY_A}/schemas`,
+    );
+  });
+
+  it("rejects space names", async () => {
     await expect(
       resolveFabricRefToIdentity(runtime, space, parse("cf:/kitchen/todo")),
     ).rejects.toThrow(
-      "space names require name→DID resolution (open question 2); use a DID",
+      "space names are currently unsupported; resolve the name to a DID first",
     );
   });
 

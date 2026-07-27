@@ -100,17 +100,13 @@ Deno.test("source inventory helpers group tracked files by package", () => {
     shouldTrackSourceFile("packages/runner/test/cell.test.ts"),
     false,
   );
-  assertEquals(
-    shouldTrackSourceFile("packages/vendor-astral/src/page.ts"),
-    false,
-  );
   assertEquals(shouldTrackSourceFile("scripts/start-local-dev.sh"), false);
   assertEquals(shouldTrackSourceFile("scripts/build.ts"), false);
   assertEquals(
     metricGroupFor("packages/runner/src/cell.ts"),
     "packages/runner",
   );
-  assertEquals(metricGroupFor("tasks/perf-check.ts"), "tasks");
+  assertEquals(metricGroupFor("tasks/coverage-check.ts"), "tasks");
 });
 
 Deno.test("collectSourceFiles excludes generated and dependency directories", async () => {

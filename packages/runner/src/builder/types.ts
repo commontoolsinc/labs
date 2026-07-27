@@ -11,6 +11,7 @@ import type {
   AsReadonlyCell,
   AssertCaptureFunction,
   AssertFunction,
+  AssertRenderPartsFunction,
   AsStream,
   AsWriteonlyCell,
   ByRefFunction,
@@ -117,6 +118,7 @@ export type {
   AsOpaqueCell,
   AsReadonlyCell,
   AssertPart,
+  AssertRawPart,
   AssertRecord,
   AsStream,
   AsWriteonlyCell,
@@ -371,9 +373,12 @@ export interface BuilderFunctionsAndConstants {
   assert: AssertFunction;
 
   // Operand recording for `assert` bodies. The assert-diagnostics transformer
-  // emits calls to this against the injected `__cfHelpers` object; it is not
-  // meant to be called from authored code.
+  // emits calls to these against the injected `__cfHelpers` object; they are
+  // not meant to be called from authored code. `assertCapture` stashes each
+  // operand's resolved value; `assertRenderParts` renders them into the
+  // record's `parts`, but only when the assertion failed.
   assertCapture: AssertCaptureFunction;
+  assertRenderParts: AssertRenderPartsFunction;
 
   // Built-in modules
   str: StrFunction;
@@ -482,6 +487,9 @@ export interface BuilderFunctionsAndConstants {
     typeof import("@commonfabric/data-model/value-debug").toCompactDebugString;
   toIndentedDebugString:
     typeof import("@commonfabric/data-model/value-debug").toIndentedDebugString;
+
+  // Value comparison
+  valueEqual: typeof import("@commonfabric/data-model/fabric-value").valueEqual;
 }
 
 /**

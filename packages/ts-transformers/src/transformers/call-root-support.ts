@@ -12,7 +12,6 @@ export type SupportedCallRootKind =
 
 export type UnsupportedCallRootKind =
   | "restricted-get-call"
-  | "optional-call"
   | "unsupported-receiver-method";
 
 export type CallRootPolicyDecision =
@@ -37,7 +36,6 @@ export type ExpressionSiteCallRootKind =
   | "ordinary-call"
   | "parameterized-inline-call"
   | "receiver-method"
-  | "optional-call"
   | "other";
 
 type CallRootPolicySiteInfo = {
@@ -46,15 +44,6 @@ type CallRootPolicySiteInfo = {
   readonly helperBoundaryKind?: ExpressionSiteHelperBoundaryKind;
   readonly callRootKind?: ExpressionSiteCallRootKind;
 };
-
-function hasOptionalChainedCallee(
-  callee: ts.LeftHandSideExpression,
-): boolean {
-  return (
-    ts.isPropertyAccessExpression(callee) ||
-    ts.isElementAccessExpression(callee)
-  ) && !!callee.questionDotToken;
-}
 
 function hasOpaquePathTerminalReceiverChain(
   callee: ts.LeftHandSideExpression,
@@ -111,16 +100,6 @@ export function classifyCallRootPolicy(
     siteInfo.reactiveContext.kind !== "pattern"
   ) {
     return { kind: "none" };
-  }
-
-  if (
-    siteInfo.callRootKind === "optional-call" ||
-    hasOptionalChainedCallee(expression.expression)
-  ) {
-    return {
-      kind: "unsupported",
-      unsupportedKind: "optional-call",
-    };
   }
 
   if (siteInfo.callRootKind !== "receiver-method") {

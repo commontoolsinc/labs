@@ -123,8 +123,45 @@ wait_http "http://localhost:$TOOLSHED_PORT/_health" toolshed || exit 1
 wait_http "http://localhost:$SHELL_PORT/" shell || exit 1
 
 # ---------- identity + deploy ----------
-cd "$REPO_ROOT"
-[ -f cf.key ] || deno run -A packages/cli/mod.ts id derive "implicit trust" > cf.key
+cd "$REPO_ROOT" || exit 1   # cf.key is minted/resolved relative to here
+
+# Deploy as a unique per-user key, NOT the shared "implicit trust" operator key.
+# This piece is your work, and the toolshed accepts any identity; deploying as
+# the operator key collapses you into the local server principal (and into one
+# identity for user counting). See docs/development/SHARED_IDENTITY.md.
+cf_cli() { deno run -A packages/cli/mod.ts "$@"; }
+
+# Mint via a temp file and move into place only on success — a failed keygen
+# must never leave an empty/partial cf.key that the guard below would then trust.
+mint_key() {
+  local tmp
+  tmp="$(mktemp)" || { echo "mktemp failed" >&2; exit 1; }
+  if cf_cli id new > "$tmp" && [ -s "$tmp" ]; then
+    chmod 600 "$tmp"; mv "$tmp" cf.key
+  else
+    rm -f "$tmp"; echo "failed to mint deploy identity" >&2; exit 1
+  fi
+}
+
+if [ ! -f cf.key ]; then
+  echo "Minting a unique deploy identity (cf.key)..."
+  mint_key
+else
+  # Older versions of this script derived the shared "implicit trust" key into
+  # cf.key. Keeping such a key would silently keep deploying (and, via the
+  # tailnet URL, acting) as the server operator. Detect it by DID and re-mint.
+  existing_did="$(cf_cli id did cf.key 2>/dev/null || true)"
+  implicit_tmp="$(mktemp)" || { echo "mktemp failed" >&2; exit 1; }
+  cf_cli id derive "implicit trust" > "$implicit_tmp" 2>/dev/null
+  implicit_did="$(cf_cli id did "$implicit_tmp" 2>/dev/null || true)"
+  rm -f "$implicit_tmp"
+  if [ -n "$existing_did" ] && [ "$existing_did" = "$implicit_did" ]; then
+    echo "  cf.key is the shared \"implicit trust\" operator key — re-minting a unique one" >&2
+    echo "  (previous key backed up to cf.key.implicit-trust.bak)" >&2
+    mv cf.key cf.key.implicit-trust.bak
+    mint_key
+  fi
+fi
 echo "Deploying $(basename "$PATTERN_ABS")..."
 DEPLOY_OUT="$(deno task cf piece new "$PATTERN_ABS" -i cf.key -a "http://localhost:$TOOLSHED_PORT" -s "$SPACE" 2>&1)"
 PIECE_ID="$(printf '%s' "$DEPLOY_OUT" | grep -oE 'fid[0-9]+:[A-Za-z0-9_-]+' | head -1)"

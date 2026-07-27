@@ -19,6 +19,26 @@ export interface DenoCheckWithTemporaryConfigOptions {
   tempConfigPrefix: string;
 }
 
+export interface FrozenDriftCheckOptions {
+  /** Import map the baseline lockfile is generated from. */
+  baselineImports: Record<string, string>;
+  /**
+   * Import map the frozen check runs against. It must differ from
+   * `baselineImports`, and the entry module must only import specifiers that it
+   * still maps.
+   */
+  driftedImports: Record<string, string>;
+  /** Source of the entry module the checks type-check. */
+  entrySource: string;
+}
+
+export interface FrozenDriftCheckResult {
+  /** Output of generating the baseline lockfile from `baselineImports`. */
+  generate: Deno.CommandOutput;
+  /** Output of the frozen check run against `driftedImports`. */
+  check: Deno.CommandOutput;
+}
+
 // Read and parse a Deno config file (`deno.json` / `deno.jsonc`) with the JSONC
 // parser, so a config that carries comments is read correctly.
 export async function readDenoConfig(
@@ -99,5 +119,54 @@ export async function runDenoCheckWithTemporaryConfig(
     });
   } finally {
     await removeIfPresent(tempConfig);
+  }
+}
+
+// Build a self-contained Deno workspace in a temporary directory, generate a
+// lockfile for `baselineImports`, then run a frozen check against
+// `driftedImports`. Everything lives under the temporary directory, so the
+// repository config and lockfile are untouched.
+//
+// The check needs no network when the metadata for the imports it resolves is
+// already cached. A frozen check recomputes the whole graph only when the
+// config differs from the lockfile, so the generate step is what pins the
+// baseline offline, and the frozen check resolves `driftedImports` against that
+// baseline. Choose imports the repository already depends on so their metadata
+// is present in any cache that can build the repository.
+export async function runFrozenDriftCheck(
+  options: FrozenDriftCheckOptions,
+): Promise<FrozenDriftCheckResult> {
+  const tempDir = await Deno.makeTempDir({
+    prefix: "commonfabric-frozen-drift-",
+  });
+  const configPath = join(tempDir, "deno.json");
+  const lockPath = join(tempDir, "deno.lock");
+  const entryPath = join(tempDir, "entry.ts");
+
+  const runCheck = async (imports: Record<string, string>, frozen: boolean) => {
+    await Deno.writeTextFile(configPath, JSON.stringify({ imports }, null, 2));
+    return await new Deno.Command("deno", {
+      cwd: tempDir,
+      args: [
+        "check",
+        "--config",
+        configPath,
+        "--lock",
+        lockPath,
+        ...(frozen ? ["--frozen=true"] : []),
+        entryPath,
+      ],
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+  };
+
+  try {
+    await Deno.writeTextFile(entryPath, options.entrySource);
+    const generate = await runCheck(options.baselineImports, false);
+    const check = await runCheck(options.driftedImports, true);
+    return { generate, check };
+  } finally {
+    await removeIfPresent(tempDir, { recursive: true });
   }
 }

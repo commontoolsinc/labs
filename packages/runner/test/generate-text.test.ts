@@ -14,8 +14,8 @@ import {
   createTrustedBuilder,
   installTestPatternArtifact,
 } from "./support/trusted-builder.ts";
+import { waitForLlmSettled } from "./support/llm-result.ts";
 import { Runtime } from "../src/runtime.ts";
-import { type Cell } from "../src/cell.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
@@ -91,8 +91,7 @@ describe("generateText", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     expect(result.key("pending").get()).toBe(false);
     expect(result.key("result").get()).toBe(expectedResponse);
@@ -142,9 +141,7 @@ describe("generateText", () => {
       expect(sendRequestCalls).toEqual([]);
 
       await commitPromise;
-      await expect(waitForPendingToBecomeFalse(result)).resolves
-        .toBeUndefined();
-      await runtime.idle();
+      await waitForLlmSettled(runtime, result);
 
       expect(sendRequestCalls.length).toBeGreaterThan(0);
       expect(result.key("result").get()).toBe("gated response");
@@ -189,8 +186,7 @@ describe("generateText", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     expect(result.key("pending").get()).toBe(false);
     expect(result.key("result").get()).toBe(expectedResponse);
@@ -231,8 +227,7 @@ describe("generateText", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     expect(result.key("pending").get()).toBe(false);
     expect(result.key("result").get()).toBe(expectedResponse);
@@ -301,8 +296,7 @@ describe("generateText", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     expect(result.key("pending").get()).toBe(false);
     expect(result.key("result").get()).toBe(expectedResponse);
@@ -371,8 +365,7 @@ describe("generateText with queue", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     expect(result.key("pending").get()).toBe(false);
     expect(result.key("result").get()).toBe(expectedResponse);
@@ -405,8 +398,7 @@ describe("generateText with queue", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     // Verify the queue was created in the runtime registry
     const queue = runtime.getOrCreateQueue("my-named-queue");
@@ -443,8 +435,7 @@ describe("generateText with queue", () => {
     const result = runtime.run(tx, testPattern, {}, resultCell);
     tx.commit();
 
-    await expect(waitForPendingToBecomeFalse(result)).resolves.toBeUndefined();
-    await runtime.idle();
+    await waitForLlmSettled(runtime, result);
 
     expect(result.key("pending").get()).toBe(false);
     expect(result.key("result").get()).toBe("response");
@@ -454,29 +445,3 @@ describe("generateText with queue", () => {
     expect(queue.maxConcurrency).toBe(5);
   });
 });
-
-// Helper to wait for pending to become false
-function waitForPendingToBecomeFalse(
-  cell: Cell<unknown>,
-  timeoutMs = 1000,
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      cancel?.();
-      reject(new Error("Timeout waiting for pending to become false"));
-    }, timeoutMs);
-
-    // Use sink to subscribe as an effect - this triggers the computation chain
-    const cancel = cell.asSchema({
-      type: "object",
-      properties: { pending: { type: "boolean" } },
-      default: {},
-    }).sink((value) => {
-      if (value.pending === false) {
-        clearTimeout(timeout);
-        cancel?.();
-        resolve();
-      }
-    });
-  });
-}

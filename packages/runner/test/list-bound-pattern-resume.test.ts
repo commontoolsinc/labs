@@ -12,6 +12,7 @@ import {
   resetAllLoggerCounts,
   resetAllTimingStats,
 } from "@commonfabric/utils/logger";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 
 import type { Cell, PatternFactory } from "../src/builder/types.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
@@ -105,44 +106,17 @@ function curry<T, R>(
   return (factory as CurryView<T, R>).curry(params);
 }
 
-async function within<T>(
-  promise: Promise<T>,
-  label: string,
-  timeoutMs = 8_000,
-): Promise<T> {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<T>((_resolve, reject) => {
-        timeout = setTimeout(
-          () => reject(new Error(`Timed out waiting for ${label}`)),
-          timeoutMs,
-        );
-      }),
-    ]);
-  } finally {
-    if (timeout !== undefined) clearTimeout(timeout);
-  }
-}
-
 async function expectMapped(
   runtime: Runtime,
   root: Cell<unknown>,
   expected: number[],
-  label: string,
 ): Promise<void> {
-  await within(
-    (async () => {
-      for (let attempt = 0; attempt < 20; attempt++) {
-        const actual = await root.key("mapped").pull();
-        if (JSON.stringify(actual) === JSON.stringify(expected)) return;
-        await runtime.idle();
-      }
-      expect(root.key("mapped").get()).toEqual(expected);
-    })(),
-    label,
+  const actual = await waitForCellValue<number[]>(
+    runtime,
+    root.key("mapped"),
+    (value) => JSON.stringify(value) === JSON.stringify(expected),
   );
+  expect(actual).toEqual(expected);
 }
 
 describe("bound PatternFactory list operation cold resume", () => {
@@ -238,7 +212,7 @@ describe("bound PatternFactory list operation cold resume", () => {
       );
       runtime.prepareTxForCommit(tx);
       expect((await tx.commit()).error).toBeUndefined();
-      await expectMapped(runtime, result, [22, 43], "initial bound map");
+      await expectMapped(runtime, result, [22, 43]);
 
       const rootLink = result.getAsNormalizedFullLink();
       const aggregateLink = result.key("mapped").resolveAsCell()
@@ -301,14 +275,17 @@ describe("bound PatternFactory list operation cold resume", () => {
       };
       resetAllLoggerCounts();
       resetAllTimingStats();
-      expect(await within(runtime.start(resumedRoot), "cold resume start"))
-        .toBe(true);
-      const resumedMapped = resumedRoot.key("mapped").pull();
+      expect(await runtime.start(resumedRoot)).toBe(true);
+      const resumedMapped = waitForCellValue<number[]>(
+        runtime,
+        resumedRoot.key("mapped"),
+        (value) => JSON.stringify(value) === JSON.stringify([22, 43]),
+      );
       const mapRuns = () =>
         runtime!.scheduler.getGraphSnapshot().nodes.find((node) =>
           node.id.startsWith("raw:map:")
         )?.stats?.runCount ?? 0;
-      await within(retryStarted.promise, "resumed-row sync retry");
+      await retryStarted.promise;
       const parkedRuns = mapRuns();
       const argument = runtime.getCellFromLink(
         getMetaLink(resumedRoot, "argument")!,
@@ -325,8 +302,7 @@ describe("bound PatternFactory list operation cold resume", () => {
       resetAllLoggerCounts();
       resetAllTimingStats();
       rowReadiness.resolve();
-      await within(resumedMapped, "resumed map after row readiness");
-      await expectMapped(runtime, resumedRoot, [22, 43], "resumed bound map");
+      expect(await resumedMapped).toEqual([22, 43]);
       expect(
         getLoggerCountsBreakdown()["storage.v2"]?.["commit-conflict"]
           ?.total ?? 0,
@@ -366,7 +342,7 @@ describe("bound PatternFactory list operation cold resume", () => {
         runtime!.getCellFromLink(factorLink, undefined, updateTx).set(3);
       });
       expect(update.error).toBeUndefined();
-      await expectMapped(runtime, resumedRoot, [8, 15], "updated capture");
+      await expectMapped(runtime, resumedRoot, [8, 15]);
 
       expect(areNormalizedLinksSame(
         resumedRoot.key("mapped").resolveAsCell().getAsNormalizedFullLink(),

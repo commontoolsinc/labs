@@ -5,7 +5,9 @@
  * and lets you feel the typing latency firsthand, while displaying
  * timing instrumentation.
  *
- * Deploy: deno task cf deploy packages/patterns/experimental/folksonomy-stress-test.tsx
+ * Deploy:
+ *   deno task cf piece new \
+ *     packages/patterns/experimental/folksonomy-stress-test.tsx
  *
  * HOW TO USE:
  * 1. Click a scale button (100, 500, 1K, 5K, 10K) to load synthetic events

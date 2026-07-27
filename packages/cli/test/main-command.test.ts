@@ -3,7 +3,7 @@ import { expect } from "@std/expect";
 import { join } from "@std/path";
 import { exec } from "../commands/exec.ts";
 import { test as testCommand } from "../commands/test-command.ts";
-import { withEnv } from "./utils.ts";
+import { cf, checkStderr, stripAnsi, withEnv } from "./utils.ts";
 
 class ExitError extends Error {
   constructor(readonly code: number) {
@@ -49,7 +49,117 @@ async function withCapturedErrors(
 }
 
 describe("main command", () => {
-  it("registers view and reports configured environment defaults", async () => {
+  it("keeps command usage aligned with accepted positional syntax", async () => {
+    const { main } = await import(
+      "../commands/main.ts?main-command-usage-test"
+    );
+    const commands = [main];
+    const mismatchedUsage: string[] = [];
+    const customUsageCommands = new Set(["cf piece call"]);
+
+    for (const command of commands) {
+      commands.push(...command.getCommands());
+      if (customUsageCommands.has(command.getPath())) continue;
+
+      const typedArguments = command.getArgsDefinition();
+      if (!typedArguments) continue;
+
+      const untypedArguments = typedArguments.replaceAll(/:[^>\]]+/g, "");
+      const usage = command.getUsage();
+      const expectedArguments = [typedArguments, untypedArguments];
+      const matches = expectedArguments.some((expected) =>
+        usage.endsWith(expected)
+      );
+      if (!matches) {
+        mismatchedUsage.push(
+          `${command.getPath()}: expected usage to end with ${
+            expectedArguments.join(" or ")
+          }, got ${usage}`,
+        );
+      }
+    }
+
+    expect(mismatchedUsage).toEqual([]);
+  });
+
+  it("describes and parses piece call's accepted input forms", async () => {
+    const { piece } = await import(
+      "../commands/piece.ts?piece-call-usage-test"
+    );
+    const call = piece.getCommand("call")!;
+    const expectedUsage =
+      "--identity <identity> --url <url> --api-url <api-url> --space <space> --piece <piece> <callable> [input]";
+
+    expect(call.getArgsDefinition()).toBe(
+      "<callable:string> [tail...:string]",
+    );
+    expect(call.getUsage()).toBe(expectedUsage);
+    const { code, stdout, stderr } = await cf("piece call --help");
+    checkStderr(stderr);
+    const help = stripAnsi(stdout.join("\n"));
+    const renderedUsage = help.split("\n").find((line) =>
+      line.trimStart().startsWith("Usage:")
+    );
+    expect(renderedUsage?.replaceAll(/\s+/g, " ").trim()).toBe(
+      `Usage: cf piece call ${expectedUsage}`,
+    );
+    const normalizedHelp = help.replaceAll(/\s+/g, " ");
+    expect(normalizedHelp).toContain(
+      `The callable name separates piece-call options from the callable's arguments. Arguments after the callable use the same parser as cf exec. Use --json with an optional inline value for complete JSON input; bare --json reads JSON from stdin. A single positional JSON value or "-" stdin sentinel is also accepted. Use --help --json for machine-readable schema help. Put schema-derived flags after --. Handlers interpret piped input when no input argument is present.`,
+    );
+    expect(code).toBe(0);
+
+    const parsedCalls: Array<{
+      positionals: unknown[];
+      literalArguments: string[];
+    }> = [];
+    call.action(function (_options, ...positionals) {
+      parsedCalls.push({
+        positionals,
+        literalArguments: this.getLiteralArgs(),
+      });
+    });
+    await piece.parse(["call", "search", '{"query":"tea"}']);
+    await piece.parse(["call", "search", "--help"]);
+    await piece.parse(["call", "search", "-"]);
+    await piece.parse(["call", "search", "--", "--json"]);
+    expect(parsedCalls).toEqual([
+      {
+        positionals: ["search", '{"query":"tea"}'],
+        literalArguments: [],
+      },
+      { positionals: ["search", "--help"], literalArguments: [] },
+      { positionals: ["search", "-"], literalArguments: [] },
+      { positionals: ["search"], literalArguments: ["--json"] },
+    ]);
+  });
+
+  it("rejects multiple inline inputs to piece call", async () => {
+    const { main } = await import(
+      "../commands/main.ts?piece-call-inline-validation-test"
+    );
+    await expect(
+      main.parse([
+        "piece",
+        "--identity",
+        "./identity.key",
+        "--api-url",
+        "https://cf.dev",
+        "--space",
+        "common-knowledge",
+        "call",
+        "--piece",
+        "abcdefghijklmnopqrstuvwxyz",
+        "search",
+        '{"query":"tea"}',
+        '{"limit":5}',
+      ]),
+    ).rejects.toThrow(
+      'Use a single inline JSON argument or "--" before schema-derived flags.',
+    );
+  });
+
+  it("registers visible commands and reports configured environment defaults", async () => {
     await withEnv("CF_IDENTITY", "./identity.key", async () => {
       await withEnv("CF_API_URL", "http://127.0.0.1:8000", async () => {
         const { main } = await import(
@@ -60,6 +170,17 @@ describe("main command", () => {
           command.getName()
         );
         expect(commandNames).toContain("view");
+        expect(commandNames).toContain("fuse-daemon");
+        expect(commandNames).toContain("fuse-supervisor");
+        expect(commandNames).not.toContain("dev");
+        expect(commandNames).not.toContain("deploy");
+
+        const allCommandNames = main.getCommands(true).map((command) =>
+          command.getName()
+        );
+        expect(allCommandNames).not.toContain("dev");
+        expect(allCommandNames).not.toContain("deploy");
+        main.getHelp();
 
         const description = main.getDescription();
         expect(description).toContain("ENVIRONMENT:");
@@ -69,23 +190,37 @@ describe("main command", () => {
         expect(description).toContain(
           "CF_API_URL  = http://127.0.0.1:8000 (set, no need to pass --api-url)",
         );
-
-        const logs: string[] = [];
-        const originalLog = console.log;
-        console.log = (...args: unknown[]) => {
-          logs.push(args.join(" "));
-        };
-        try {
-          await main.parse(["deploy"]);
-        } finally {
-          console.log = originalLog;
-        }
-
-        expect(logs).toEqual([
-          "The 'deploy' command does not exist. Use 'cf piece new' to deploy a pattern.",
-        ]);
       });
     });
+  });
+
+  it("shows exec command help before trying to resolve a mounted file", async () => {
+    const { code, stdout } = await cf("exec --help");
+
+    expect(code).toBe(0);
+    expect(stdout.join("\n")).toContain(
+      "Execute a mounted callable file from a Common Fabric FUSE mount.",
+    );
+    expect(stdout.join("\n")).not.toContain("not within a mounted cf fuse");
+  });
+
+  it("shows help for the direct FUSE daemon entry point", async () => {
+    const { code, stdout } = await cf("fuse-daemon --help");
+
+    expect(code).toBe(0);
+    expect(stdout.join("\n")).toContain(
+      "Usage:   cf fuse-daemon <mountpoint> [options]",
+    );
+  });
+
+  it("keeps rejection help off stdout when --json is unsupported", async () => {
+    const { code, stdout, stderr } = await cf("acl --json");
+
+    expect(code).not.toBe(0);
+    expect(stdout).toEqual([]);
+    expect(stripAnsi(stderr.join("\n"))).toContain(
+      'Unknown option "--json"',
+    );
   });
 
   it("reports mounted exec errors without a stack", async () => {

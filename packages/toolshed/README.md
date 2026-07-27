@@ -90,6 +90,26 @@ directory, and then run the following command:
 deno task dev
 ```
 
+### Running in the background
+
+Passing `--background` starts the server without the caller having to put it in
+the background and then wait for it to come up. The command spawns the server as
+a child, waits until it has bound its port, and only then returns. Its exit code
+reports whether the server started: zero once the server is listening, non-zero
+if the server exits before it binds. So a script can start the toolshed and move
+straight on to work that needs it, with no readiness poll of its own:
+
+```shell
+./toolshed --port=8000 --background --log-file=/tmp/toolshed.log
+```
+
+The background server sends its own output to `--log-file` (a temporary file
+when the flag is omitted); the command prints that path on success and dumps the
+file if the server exits before binding. Readiness travels from the child to the
+command over a pipe, so the wait resolves on the event rather than on a poll.
+`--background` re-runs the program, so it needs the compiled binary or a
+`deno run` launch, not `deno --watch`.
+
 To run the tests:
 
 ```shell

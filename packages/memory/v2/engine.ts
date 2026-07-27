@@ -26,23 +26,34 @@ import {
   type CellScope,
   type ClientCommit,
   commitPreconditionValueHash,
+  type CompleteActionScopeSummary,
   decodeMemoryBoundary,
   DEFAULT_BRANCH,
   encodeMemoryBoundary,
+  encodeMemoryBoundaryUnprovenFabricValue,
   type EntityDocument,
   type EntityId,
   isEntityDocument,
   type Operation,
   type PatchOp,
   type Reference,
+  type SchedulerActionObservation,
   type SchedulerActionSnapshotCursor,
   type SchedulerExecutionContextKey,
+  type SchedulerObservationAddress,
   type SessionId,
   type SqliteOperation,
   tableDeclaresRowLabel,
 } from "../v2.ts";
 
-export type { SchedulerExecutionContextKey } from "../v2.ts";
+export type {
+  CompleteActionScopeSummary,
+  SchedulerActionKind,
+  SchedulerActionObservation,
+  SchedulerExecutionContextKey,
+  SchedulerObservationAddress,
+  SchedulerObservationTransactionKind,
+} from "../v2.ts";
 
 const DEFAULT_SCOPE: CellScope = "space";
 const DEFAULT_SCOPE_KEY = "space" as const;
@@ -53,10 +64,10 @@ const MAX_SCHEDULER_SNAPSHOT_LIST_LIMIT = 1_000;
 // sessions cannot grow the cross-space read-index fanout without limit.
 const MAX_RETAINED_SCHEDULER_SESSION_CONTEXTS_PER_ACTION = 32;
 
-export interface SchedulerScopeContext {
+export type SchedulerScopeContext = {
   principal: string;
   sessionId: SessionId;
-}
+};
 
 export type SchedulerActionSnapshotCursorWithContext =
   & SchedulerActionSnapshotCursor
@@ -754,14 +765,14 @@ interface PreparedStatements {
   deleteOldSnapshots: PreparedStatement;
 }
 
-export interface Engine {
+export type Engine = {
   url: URL;
   database: Database;
   snapshotInterval: number;
   snapshotRetention: number;
   legacyCommitMetadataRefsRequired: boolean;
   statements: PreparedStatements;
-}
+};
 
 export class ConflictError extends Error {
   /** Entity whose confirmed read went stale (stale-read conflicts only). */
@@ -802,24 +813,24 @@ export class ProtocolError extends Error {
   }
 }
 
-export interface OpenOptions {
+export type OpenOptions = {
   url: URL;
   snapshotInterval?: number;
   snapshotRetention?: number;
-}
+};
 
-export interface InvocationRecord {
+export type InvocationRecord = {
   iss: string;
   aud?: string | null;
   cmd: string;
   sub: string;
   args?: FabricValue;
-  [key: string]: unknown;
-}
+  [key: string]: FabricValue;
+};
 
 export type AuthorizationRecord = FabricValue;
 
-export interface ApplyCommitOptions {
+export type ApplyCommitOptions = {
   sessionId: SessionId;
   space?: string;
   principal?: string;
@@ -832,9 +843,9 @@ export interface ApplyCommitOptions {
    *  apply loop executes the SQL inside the commit's transaction against the
    *  alias. (docs/specs/sqlite-builtin/plans/atomic-writes.md) */
   sqliteAttachments?: ReadonlyMap<string, string>;
-}
+};
 
-export interface AppliedRevision {
+export type AppliedRevision = {
   id: EntityId;
   scope?: CellScope;
   scopeKey: string;
@@ -845,98 +856,38 @@ export interface AppliedRevision {
   op: Operation["op"];
   document?: EntityDocument;
   patches?: PatchOp[];
-}
+};
 
-export interface AppliedSchedulerObservationResult {
+export type AppliedSchedulerObservationResult = {
   localSeq: number;
   status: "kept" | "dropped";
   schedulerObservationId?: number;
   /** Effective owner-derived context; emitted metadata, never client input. */
   executionContextKey?: SchedulerExecutionContextKey;
   reason?: CommitReadDropReason;
-}
+};
 
 export type CommitReadDropReason =
   | "stale-confirmed-read"
   | "stale-pending-read"
   | "pending-read-missing";
 
-export interface AppliedCommit {
+export type AppliedCommit = {
   seq: number;
   branch: BranchName;
   revisions: AppliedRevision[];
   schedulerObservationId?: number;
   schedulerObservationResults?: AppliedSchedulerObservationResult[];
   schedulerDirtiedReaders?: SchedulerReaderIndexEntry[];
-}
+};
 
-export type SchedulerActionKind =
-  | "computation"
-  | "effect"
-  | "event-handler";
-
-export type SchedulerObservationTransactionKind =
-  | "dependency-collection"
-  | "action-run"
-  | "event-preflight";
-
-export interface SchedulerObservationAddress {
-  space: string;
-  id: EntityId;
-  scope?: CellScope;
-  path: readonly string[];
-}
-
-export interface ResolvedSchedulerObservationAddress
-  extends SchedulerObservationAddress {
-  scopeKey: string;
-}
+export type ResolvedSchedulerObservationAddress =
+  & SchedulerObservationAddress
+  & { scopeKey: string };
 
 type SchedulerWriteAddress = SchedulerObservationAddress & {
   scopeKey?: string;
 };
-
-export interface CompleteActionScopeSummary {
-  version: 1;
-  complete: true;
-  implementationFingerprint: string;
-  runtimeFingerprint: string;
-  piece: SchedulerObservationAddress;
-  reads: SchedulerObservationAddress[];
-  writes: SchedulerObservationAddress[];
-  materializerWriteEnvelopes: SchedulerObservationAddress[];
-  directOutputs: SchedulerObservationAddress[];
-}
-
-export interface SchedulerActionObservation {
-  version: 1 | 2;
-  ownerSpace?: string;
-  branch: BranchName;
-  pieceId: string;
-  processGeneration: number;
-  actionId: string;
-  actionKind: SchedulerActionKind;
-  implementationFingerprint: string;
-  runtimeFingerprint: string;
-  completeActionScopeSummary?: CompleteActionScopeSummary;
-  observedAtSeq: number;
-  observedAtLocalSeq?: number;
-  transactionKind: SchedulerObservationTransactionKind;
-  reads: SchedulerObservationAddress[];
-  shallowReads: SchedulerObservationAddress[];
-  actualChangedWrites: SchedulerObservationAddress[];
-  currentKnownWrites: SchedulerObservationAddress[];
-  declaredWrites?: SchedulerObservationAddress[];
-  materializerWriteEnvelopes: SchedulerObservationAddress[];
-  ignoredSchedulingWrites?: SchedulerObservationAddress[];
-  actionOptions?: {
-    debounceMs?: number;
-    noDebounce?: boolean;
-    throttleMs?: number;
-  };
-  status: "success" | "failed";
-  errorFingerprint?: string;
-}
 
 const isSchedulerRecord = (
   value: unknown,
@@ -1036,13 +987,13 @@ export const schedulerObservationFromValue = (
   return value as unknown as SchedulerActionObservation;
 };
 
-export interface SchedulerObservationSnapshot {
+export type SchedulerObservationSnapshot = {
   observationId: number;
   executionContextKey: SchedulerExecutionContextKey;
   commitSeq: number | null;
   observedAtSeq: number;
   observation: SchedulerActionObservation;
-}
+};
 
 export interface SchedulerObservationSnapshotWithState
   extends SchedulerObservationSnapshot {
@@ -1054,12 +1005,12 @@ export interface SchedulerObservationSnapshotWithState
   writerSessionId?: string;
 }
 
-export interface SchedulerObservationSnapshotPage {
+export type SchedulerObservationSnapshotPage = {
   snapshots: SchedulerObservationSnapshotWithState[];
   nextCursor?: SchedulerActionSnapshotCursorWithContext;
-}
+};
 
-export interface SchedulerReaderIndexEntry {
+export type SchedulerReaderIndexEntry = {
   branch: BranchName;
   ownerSpace?: string;
   pieceId: string;
@@ -1069,9 +1020,9 @@ export interface SchedulerReaderIndexEntry {
   observationId: number;
   readKind: "recursive" | "shallow";
   read: ResolvedSchedulerObservationAddress;
-}
+};
 
-export interface SchedulerActionState {
+export type SchedulerActionState = {
   branch: BranchName;
   ownerSpace?: string;
   pieceId: string;
@@ -1082,18 +1033,18 @@ export interface SchedulerActionState {
   directDirtySeq: number | null;
   staleSeq: number | null;
   unknownReason: string | null;
-}
+};
 
-export interface ReadOptions {
+export type ReadOptions = {
   id: EntityId;
   scope?: CellScope;
   principal?: string;
   sessionId?: SessionId;
   branch?: BranchName;
   seq?: number;
-}
+};
 
-export interface EntityState {
+export type EntityState = {
   id: EntityId;
   scope: CellScope;
   scopeKey: string;
@@ -1102,21 +1053,21 @@ export interface EntityState {
   opIndex: number;
   op: Operation["op"];
   document: EntityDocument | null;
-}
+};
 
-export interface PutBlobOptions {
+export type PutBlobOptions = {
   value: Uint8Array;
   contentType: string;
-}
+};
 
-export interface BranchState {
+export type BranchState = {
   name: BranchName;
   parentBranch: BranchName | null;
   forkSeq: number | null;
   createdSeq: number;
   headSeq: number;
   status: string;
-}
+};
 
 type HeadRow = {
   seq: number;
@@ -2392,7 +2343,7 @@ export const applyCommit = (
   );
 };
 
-export interface UpsertSchedulerObservationOptions {
+export type UpsertSchedulerObservationOptions = {
   branch?: BranchName;
   ownerSpace?: string;
   commitSeq?: number | null;
@@ -2406,14 +2357,14 @@ export interface UpsertSchedulerObservationOptions {
   writerSessionId?: string;
   localSeq?: number;
   observation: SchedulerActionObservation;
-}
+};
 
-export interface UpsertSchedulerObservationResult {
+export type UpsertSchedulerObservationResult = {
   observationId: number;
   commitSeq: number | null;
   executionContextKey: SchedulerExecutionContextKey;
   invalidatedExecutionContextKeys: SchedulerExecutionContextKey[];
-}
+};
 
 export const upsertSchedulerObservation = (
   engine: Engine,
@@ -5142,7 +5093,7 @@ const applyCommitTransaction = (
   const authorizationRef = engine.legacyCommitMetadataRefsRequired
     ? LEGACY_EMPTY_AUTHORIZATION_REF
     : null;
-  const original = encodeMemoryBoundary(commit);
+  const original = encodeMemoryBoundaryUnprovenFabricValue(commit);
   const resolution = encodeMemoryBoundary(
     resolvedPendingReads.length > 0 ? { seq, resolvedPendingReads } : { seq },
   );
@@ -5713,6 +5664,29 @@ const validateConfirmedReads = (
   }
 };
 
+// Shared normalization/validation for a pending read's dependency set: a
+// non-empty array (or scalar) of integer localSeqs. Malformed shapes are a
+// protocol violation regardless of which validator (ordinary commit or
+// scheduler observation) encounters them.
+const pendingReadLayers = (
+  read: { id: string; localSeq: number | number[] },
+): number[] => {
+  const layers = Array.isArray(read.localSeq) ? read.localSeq : [read.localSeq];
+  if (layers.length === 0) {
+    throw new ProtocolError(
+      `pending read on ${read.id} names no localSeq`,
+    );
+  }
+  for (const layer of layers) {
+    if (!Number.isInteger(layer)) {
+      throw new ProtocolError(
+        `pending read on ${read.id} names a non-integer localSeq`,
+      );
+    }
+  }
+  return layers;
+};
+
 const resolvePendingReads = (
   engine: Engine,
   sessionKey: string,
@@ -5724,22 +5698,31 @@ const resolvePendingReads = (
   const resolutions = new Map<number, { localSeq: number; seq: number }>();
 
   for (const read of commit.reads.pending) {
-    let resolution = resolutions.get(read.localSeq);
-    if (!resolution) {
-      const row = engine.statements.selectPendingResolution.get({
-        session_id: sessionKey,
-        local_seq: read.localSeq,
-      }) as { seq: number } | undefined;
-      if (!row) {
-        throw new ConflictError(
-          `pending dependency not resolved: ${read.localSeq}`,
-        );
+    // An array localSeq names EVERY pending layer the read's view sat on:
+    // each element must have resolved to an accepted commit, and staleness
+    // is checked exactly once, based at the HIGHEST element — the document's
+    // top-of-stack layer below the reader, which the array MUST include
+    // (03-commit-model.md §3.5). A scalar is the single-layer form.
+    const layers = pendingReadLayers(read);
+    let basis: { localSeq: number; seq: number } | undefined;
+    for (const localSeq of layers) {
+      let resolution = resolutions.get(localSeq);
+      if (!resolution) {
+        const row = engine.statements.selectPendingResolution.get({
+          session_id: sessionKey,
+          local_seq: localSeq,
+        }) as { seq: number } | undefined;
+        if (!row) {
+          throw new ConflictError(
+            `pending dependency not resolved: ${localSeq}`,
+          );
+        }
+        resolution = { localSeq, seq: row.seq };
+        resolutions.set(localSeq, resolution);
       }
-      resolution = {
-        localSeq: read.localSeq,
-        seq: row.seq,
-      };
-      resolutions.set(read.localSeq, resolution);
+      if (basis === undefined || localSeq > basis.localSeq) {
+        basis = resolution;
+      }
     }
 
     const conflictSeq = findConflictSeq(
@@ -5747,13 +5730,15 @@ const resolvePendingReads = (
       branch,
       read.id,
       resolveScopeKey(read.scope, { principal, sessionId }),
-      resolution.seq,
+      basis!.seq,
       read.path,
       read.nonRecursive ?? false,
     );
     if (conflictSeq !== null) {
       throw new ConflictError(
-        `stale pending read: ${read.id} via localSeq ${read.localSeq} conflicted with seq ${conflictSeq}`,
+        `stale pending read: ${read.id} via localSeq ${
+          basis!.localSeq
+        } conflicted with seq ${conflictSeq}`,
       );
     }
   }
@@ -5848,20 +5833,28 @@ const schedulerObservationReadDropReason = (
 
   const resolutions = new Map<number, { localSeq: number; seq: number }>();
   for (const read of reads.pending) {
-    let resolution = resolutions.get(read.localSeq);
-    if (!resolution) {
-      const row = engine.statements.selectPendingResolution.get({
-        session_id: sessionKey,
-        local_seq: read.localSeq,
-      }) as { seq: number } | undefined;
-      if (!row) {
-        return "pending-read-missing";
+    // Same contract as resolvePendingReads: every listed layer must have
+    // resolved; staleness is checked once, based at the highest layer. A
+    // malformed dependency set throws the same ProtocolError as on the
+    // ordinary-commit path rather than degrading to a drop reason.
+    const layers = pendingReadLayers(read);
+    let basis: { localSeq: number; seq: number } | undefined;
+    for (const localSeq of layers) {
+      let resolution = resolutions.get(localSeq);
+      if (!resolution) {
+        const row = engine.statements.selectPendingResolution.get({
+          session_id: sessionKey,
+          local_seq: localSeq,
+        }) as { seq: number } | undefined;
+        if (!row) {
+          return "pending-read-missing";
+        }
+        resolution = { localSeq, seq: row.seq };
+        resolutions.set(localSeq, resolution);
       }
-      resolution = {
-        localSeq: read.localSeq,
-        seq: row.seq,
-      };
-      resolutions.set(read.localSeq, resolution);
+      if (basis === undefined || localSeq > basis.localSeq) {
+        basis = resolution;
+      }
     }
 
     const conflictSeq = findConflictSeq(
@@ -5869,7 +5862,7 @@ const schedulerObservationReadDropReason = (
       branch,
       read.id,
       resolveScopeKey(read.scope, { principal, sessionId }),
-      resolution.seq,
+      basis!.seq,
       read.path,
       read.nonRecursive ?? false,
     );
@@ -6687,7 +6680,7 @@ const sameStoredOriginal = (
   stored: string,
   incoming: ClientCommit,
 ): boolean => {
-  return stored === encodeMemoryBoundary(incoming);
+  return stored === encodeMemoryBoundaryUnprovenFabricValue(incoming);
 };
 
 const revisionKey = (

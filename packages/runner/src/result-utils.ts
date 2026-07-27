@@ -1,6 +1,7 @@
 import type { Cell } from "./cell.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { ignoreReadForScheduling } from "./storage/reactivity-log.ts";
+import type { FabricValue } from "@commonfabric/api";
 
 /**
  * @param resultCell The cell whose meta pattern will be set
@@ -16,7 +17,10 @@ export function setPatternCell(
   // available, so for now, we stil link to a pattern cell.
   const parentPattern = patternCell.getRaw();
   if (parentPattern !== undefined) {
-    resultCell.setMetaRaw("pattern", parentPattern);
+    // A `Cell`'s type parameter is always `FabricValue`-compatible, so
+    // `getRaw()` yields a fabric value. `Cell<unknown>` just cannot say so;
+    // constraining `Cell<T extends FabricValue>` is what would remove this.
+    resultCell.setMetaRaw("pattern", parentPattern as FabricValue);
   }
 }
 

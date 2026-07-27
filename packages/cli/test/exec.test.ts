@@ -28,6 +28,7 @@ import {
   brandTrustedBuilderArtifact,
   setFrameworkProvidedPaths,
 } from "../../runner/src/builder/pattern-metadata.ts";
+import type { SpaceConfig } from "../lib/piece.ts";
 import { cf, isIgnorableDenoWarningLine } from "./utils.ts";
 
 const canonicalSearchFactory = createFactoryShell({
@@ -339,6 +340,34 @@ describe("parseExecArgs", () => {
 
     expect(result.readTextFromStdin).toBe(true);
     expect(result.readJsonFromStdin).toBe(false);
+    expect(result.input).toBeUndefined();
+  });
+
+  it('treats "--json -" as the stdin sentinel for non-object schemas', () => {
+    const result = parseExecArgs(
+      makeSpec("handler", { type: "number" }),
+      ["--json", "-"],
+    );
+
+    expect(result.readJsonFromStdin).toBe(true);
+    expect(result.usedJsonInput).toBe(true);
+    expect(result.input).toBeUndefined();
+  });
+
+  it('treats "--json -" as the stdin sentinel for object schemas', () => {
+    const result = parseExecArgs(
+      makeSpec("tool", {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+        },
+        required: ["query"],
+      }),
+      ["--json", "-"],
+    );
+
+    expect(result.readJsonFromStdin).toBe(true);
+    expect(result.usedJsonInput).toBe(true);
     expect(result.input).toBeUndefined();
   });
 
@@ -739,6 +768,99 @@ describe("renderExecHelp", () => {
     expect(help).not.toContain("Input schema:");
   });
 
+  it("renders tuples, const, type arrays, and index signatures in the input type", () => {
+    // CT-1895: tuples used to render as "unknown[]"; const, type arrays, and
+    // index-signature value types were lossy the same way
+    const help = renderExecHelp(
+      "/tmp/shapes.tool",
+      makeSpec("tool", {
+        type: "object",
+        properties: {
+          pair: {
+            type: "array",
+            prefixItems: [{ type: "string" }, { type: "number" }],
+          },
+          rest: {
+            type: "array",
+            prefixItems: [{ type: "string" }],
+            items: { type: "boolean" },
+          },
+          kind: { type: "string", const: "point" },
+          maybe: { type: ["string", "null"] },
+          counts: { type: "object", additionalProperties: { type: "number" } },
+        },
+      } as JSONSchema),
+    );
+
+    expect(help).toContain("pair?: [string, number, ...unknown[]]");
+    expect(help).toContain("rest?: [string, ...boolean[]]");
+    expect(help).toContain('kind?: "point"');
+    expect(help).toContain("maybe?: string | null");
+    expect(help).toContain("counts?: Record<string, number>");
+  });
+
+  it("threads the schema's own $defs into the input type", () => {
+    const help = renderExecHelp(
+      "/tmp/defs.tool",
+      makeSpec("tool", {
+        type: "object",
+        properties: {
+          user: { $ref: "#/$defs/User" },
+        },
+        $defs: {
+          User: { type: "string" },
+        },
+      } as JSONSchema),
+    );
+    // The small definition inlines through the threaded $defs instead of
+    // rendering "unknown".
+    expect(help).toContain("user?: string");
+  });
+
+  it("renders a boolean input schema as unknown", () => {
+    const help = renderExecHelp(
+      "/tmp/boolean.tool",
+      makeSpec("tool", false as JSONSchema),
+    );
+    expect(help).toContain("Input type:");
+    expect(help).toContain("  unknown");
+  });
+
+  it("abbreviates the input type at the depth cap", () => {
+    // The shared formatter's default maxDepth (4) matches the cap the CLI's
+    // own renderer used before it delegated to schemaToTypeString
+    const help = renderExecHelp(
+      "/tmp/deep.tool",
+      makeSpec("tool", {
+        type: "object", // depth 0
+        properties: {
+          a: {
+            type: "object", // depth 1
+            properties: {
+              b: {
+                type: "object", // depth 2
+                properties: {
+                  c: {
+                    type: "object", // depth 3
+                    properties: {
+                      d: { // depth 4: abbreviated
+                        type: "object",
+                        properties: { e: { type: "string" } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      } as JSONSchema),
+    );
+
+    expect(help).toContain("d?: {...}");
+    expect(help).not.toContain("e?:");
+  });
+
   it("renders direct mounted-file usage when called via shebang", () => {
     const help = renderExecHelp(
       "./legacyWrite.handler",
@@ -964,11 +1086,14 @@ describe("renderPieceCallHelp", () => {
     expect(help).toContain("cf piece call ... search --help");
     expect(help).toContain("cf piece call ... search --help --json");
     expect(help).toContain("cf piece call ... search <json>");
+    expect(help).toContain("cf piece call ... search --json [<json>]");
     expect(help).toContain(
       "cf piece call ... search -- [run] --query <string>",
     );
     expect(help).toContain("JSON input:");
-    expect(help).toContain("Pass inline JSON as the next argument");
+    expect(help).toContain(
+      "Pass inline JSON as one positional argument or after `--json`",
+    );
     expect(help).toContain("query: string");
     expect(help).toContain("help?: string");
     expect(help).toContain("Flags after `--`:");
@@ -1794,17 +1919,23 @@ describe("mounted callable resolution and execution", () => {
       loadManager: () => Promise.resolve(harness.manager),
       loadPiece: () => Promise.resolve(harness.piece),
     });
+    const loadConfigs: SpaceConfig[] = [];
     const result = await executeMountedCallableFile(
       filePath,
       ["--query", "tea"],
       {
         stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
+        loadManager: (config) => {
+          loadConfigs.push(config);
+          return Promise.resolve(harness.manager);
+        },
         loadPiece: () => Promise.resolve(harness.piece),
         uuid: () => "tool-result-id",
       },
     );
 
+    expect(loadConfigs).toHaveLength(1);
+    expect(loadConfigs[0].jsonOutput).toBe(true);
     expect(
       Object.keys(
         (resolved.commandSpec.inputSchema as {
@@ -2055,7 +2186,7 @@ describe("mounted callable resolution and execution", () => {
     expect(JSON.parse(result.outputText!)).toEqual({ echoed: "tea" });
   });
 
-  it("idles before committing mounted tool results and syncs before waiting", async () => {
+  it("settles mounted tool results before reading, without polling", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
       relativePath: "home/pieces/notes-2/result/search.tool",
@@ -2088,8 +2219,8 @@ describe("mounted callable resolution and execution", () => {
           },
         },
       },
+      toolResult: { echoed: "tea" },
     });
-    const timeouts: number[] = [];
 
     await writeLiveMountState(stateDir, mountpoint);
 
@@ -2101,25 +2232,17 @@ describe("mounted callable resolution and execution", () => {
         loadManager: () => Promise.resolve(harness.manager),
         loadPiece: () => Promise.resolve(harness.piece),
         uuid: () => "tool-result-id",
-        waitForResult: (_cell, timeoutMs) => {
-          harness.tracker.events.push("wait");
-          timeouts.push(timeoutMs);
-          return Promise.resolve({ echoed: "tea" });
-        },
       },
     );
 
-    expect(timeouts).toEqual([15_000, 15_000]);
+    // Commit, then drain to a fully settled state, then read the result cell
+    // once. No poll loop and no deadline: `settled()` awaits the tool's async
+    // work to completion.
     expect(harness.tracker.events).toEqual([
       "run",
       "idle",
       "commit",
-      "idle",
-      "manager.synced",
-      "storage.synced",
-      "wait",
-      "storage.synced",
-      "wait",
+      "settled",
     ]);
     expect(JSON.parse(result.outputText!)).toEqual({ echoed: "tea" });
   });
@@ -2170,22 +2293,99 @@ describe("mounted callable resolution and execution", () => {
         loadManager: () => Promise.resolve(harness.manager),
         loadPiece: () => Promise.resolve(harness.piece),
         uuid: () => "tool-result-id",
-        waitForResult: () => {
-          throw new Error("waitForResult should not be used");
-        },
       },
     );
 
+    // The sink reported the result, so after settling there is no result-cell
+    // read at all — the sink value is authoritative.
     expect(harness.tracker.events).toEqual([
       "run",
       "sink",
       "idle",
       "commit",
-      "idle",
-      "manager.synced",
-      "storage.synced",
+      "settled",
     ]);
     expect(JSON.parse(result.outputText!)).toEqual({ echoed: "from-sink" });
+  });
+
+  it("fails loudly when a mounted tool settles without a result", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/search.tool",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "tool",
+      cellProp: "result",
+      cellKey: "search",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+          required: ["query"],
+        },
+        resultSchema: { type: "object" },
+      },
+      // No toolResult, no sink value, no recorded error: the tool settled
+      // without producing anything.
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    await expect(
+      executeMountedCallableFile(filePath, ["--query", "tea"], {
+        stateDir,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        uuid: () => "tool-result-id",
+      }),
+    ).rejects.toThrow('Tool "search" produced no result.');
+  });
+
+  it("surfaces the recorded runtime error when a mounted tool produces no result", async () => {
+    const mountpoint = join(tmpDir, "mount");
+    const filePath = await createMountedFile(mountpoint, {
+      relativePath: "home/pieces/notes-2/result/search.tool",
+      pieceId: "of:piece-123",
+    });
+    const harness = createExecHarness({
+      callableKind: "tool",
+      cellProp: "result",
+      cellKey: "search",
+      pieceId: "of:piece-123",
+      inputSchema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+        required: ["query"],
+      },
+      pattern: {
+        argumentSchema: {
+          type: "object",
+          properties: { query: { type: "string" } },
+          required: ["query"],
+        },
+        resultSchema: { type: "object" },
+      },
+      // The tool run records a runtime error and writes no result.
+      toolRunError: "boom from the tool pattern",
+    });
+
+    await writeLiveMountState(stateDir, mountpoint);
+
+    await expect(
+      executeMountedCallableFile(filePath, ["--query", "tea"], {
+        stateDir,
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        uuid: () => "tool-result-id",
+      }),
+    ).rejects.toThrow('Tool "search" failed: boom from the tool pattern');
   });
 
   it("pulls mounted tool result cells before serializing output", async () => {
@@ -2787,6 +2987,7 @@ function createExecHarness(options: {
   toolResultGetValue?: unknown;
   toolResultPullValue?: unknown;
   toolSinkValue?: unknown;
+  toolRunError?: string;
   handlerFailureMessage?: string;
   handlerSendRequiresReceiver?: boolean;
   sparseHandlerCell?: boolean;
@@ -2965,6 +3166,9 @@ function createExecHarness(options: {
       ) => {
         tracker.events.push("run");
         tracker.toolRunInput = input;
+        if (options.toolRunError !== undefined) {
+          runtimeErrors.push({ message: options.toolRunError });
+        }
         state.value = options.toolResult;
         state.getValue = options.toolResultGetValue ?? options.toolResult;
         state.pullValue = options.toolResultPullValue ?? options.toolResult;
@@ -2980,6 +3184,10 @@ function createExecHarness(options: {
       },
       idle: () => {
         tracker.events.push("idle");
+        return Promise.resolve();
+      },
+      settled: () => {
+        tracker.events.push("settled");
         return Promise.resolve();
       },
     },

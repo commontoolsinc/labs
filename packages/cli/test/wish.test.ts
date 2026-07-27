@@ -113,6 +113,28 @@ describe("cf wish headless read (resolveWish)", () => {
     expect(error).toBe("No profile exists yet");
   });
 
+  it("surfaces a permanent authorization denial for the wish's space", async () => {
+    const denial = Object.assign(
+      new Error("Principal lacks READ on space"),
+      { name: "AuthorizationError" },
+    );
+    // The storage layer keeps synced() quiet on a denial and records it per
+    // space; resolveWish reads that status for its own space after syncing and
+    // rethrows the real error instead of returning an empty "no profile" result.
+    (storageManager as unknown as {
+      authorizationError: () => Error | undefined;
+    }).authorizationError = () => denial;
+
+    let thrown: unknown;
+    try {
+      await resolveWish(runtime, userIdentity.did(), { query: "#profile" });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBe(denial);
+    expect((thrown as Error).name).toBe("AuthorizationError");
+  });
+
   it("appends extra path segments to the resolved target", async () => {
     await seedProfile();
     const { result, error } = await resolveWish(runtime, userIdentity.did(), {

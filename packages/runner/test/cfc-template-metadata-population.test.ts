@@ -1,5 +1,9 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
+import type { IFCLabel } from "../src/cfc/mod.ts";
+import type { CfcConfClause } from "../src/cfc/clause.ts";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { expect } from "@std/expect";
+import type { FabricValue } from "@commonfabric/data-model/interface";
 import { Identity } from "@commonfabric/identity";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
@@ -31,7 +35,7 @@ const foreignSpace = foreignSigner.did();
 
 type StoredEntry = {
   path: string[];
-  label: { confidentiality?: unknown[]; integrity?: unknown[] };
+  label: IFCLabel;
   origin?: string;
   observes?: string;
 };
@@ -39,7 +43,7 @@ type StoredEntry = {
 const SOURCE_A = { space: "did:key:remote-a", id: "of:origin-a", path: [] };
 const SOURCE_B = { space: "did:key:remote-b", id: "of:origin-b", path: [] };
 
-const caveatAtom = (source: unknown = SOURCE_A) => ({
+const caveatAtom = (source: CfcAtom = SOURCE_A) => ({
   type: CFC_ATOM_TYPE.Caveat,
   kind: "prompt-influence",
   source,
@@ -57,7 +61,7 @@ const metadataWith = (
 const templateEntry = (
   targetPath: string[],
   tail: string[],
-  confidentiality: unknown[],
+  confidentiality: CfcConfClause[],
 ): LabelMapEntry => ({
   path: [
     "cfc",
@@ -110,7 +114,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
   const seedDoc = async (
     rt: Runtime,
     cause: string,
-    value: unknown,
+    value: FabricValue,
     entries: LabelMapEntry[],
   ): Promise<string> => {
     const seed = rt.edit();
@@ -332,7 +336,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     expect(
       entriesOf(outId).some((e) => e.origin === "label-metadata"),
     ).toBe(true);
-    const before = JSON.stringify(entriesOf(outId));
+    const before = entriesOf(outId);
 
     const again = rt.edit();
     again.readOrThrow(readAddress(criteriaId, []));
@@ -353,7 +357,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     );
     expect(wroteCfc).toBe(false);
     expect((await again.commit()).ok).toBeDefined();
-    expect(JSON.stringify(entriesOf(outId))).toEqual(before);
+    expect(entriesOf(outId)).toEqual(before);
   });
 
   // Stage-A composition: the membership templates a declared list
@@ -695,7 +699,9 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
 describe("CFC template metadata population (Stage B): evaluator resolution", () => {
   // A derived-component entry guarding /value/body with a source-bearing
   // caveat clause — the interim-rule shape.
-  const derivedBodyEntry = (atom: unknown = caveatAtom()): LabelMapEntry => ({
+  const derivedBodyEntry = (
+    atom: CfcAtom = caveatAtom(),
+  ): LabelMapEntry => ({
     path: ["body"],
     label: { confidentiality: ["secret", atom] },
     origin: "derived",
@@ -880,7 +886,9 @@ describe("CFC template metadata population (Stage B): evaluator resolution", () 
 });
 
 describe("CFC template metadata population (Stage B): derivation unit properties", () => {
-  const derivedEntry = (confidentiality: unknown[]): LabelMapEntry => ({
+  const derivedEntry = (
+    confidentiality: CfcConfClause[],
+  ): LabelMapEntry => ({
     path: ["body"],
     label: { confidentiality },
     origin: "derived",

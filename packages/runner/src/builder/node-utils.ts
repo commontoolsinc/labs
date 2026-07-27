@@ -13,6 +13,7 @@ import {
   type JSONSchema,
   type NodeRef,
 } from "./types.ts";
+import type { CfcConfClause } from "../cfc/clause.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { traverseValue } from "./traverse-utils.ts";
 import {
@@ -180,7 +181,7 @@ function visitGraphCells(
 function attachCfcToOutput(
   output: Cell<unknown>,
   cfc: ContextualFlowControl,
-  lubConfidentiality: readonly unknown[],
+  lubConfidentiality: readonly CfcConfClause[],
 ): void {
   const exported = output.export();
   const outputSchema = exported.schema ?? true;

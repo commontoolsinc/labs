@@ -11,11 +11,7 @@ import {
   moduleToJSON,
   toJSONWithAliasBindings,
 } from "../src/builder/json-utils.ts";
-import {
-  type FabricValue,
-  type JSONSchema,
-  type JSONSchemaObj,
-} from "../src/builder/types.ts";
+import { type JSONSchema, type JSONSchemaObj } from "../src/builder/types.ts";
 import { isInternedSchema } from "@commonfabric/data-model/schema-hash";
 import { popFrame, pushFrame } from "../src/builder/pattern.ts";
 import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
@@ -487,7 +483,9 @@ describe("json-utils", () => {
         },
       );
 
-      const create = (value: FabricValue) =>
+      // `createJsonSchema()` accepts cells as well as fabric data -- which is
+      // exactly what these cases exercise -- so this cannot be `FabricValue`.
+      const create = (value: unknown) =>
         createJsonSchema(value, false, runtime);
 
       // Preflight expectations.

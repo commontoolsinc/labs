@@ -11,6 +11,7 @@ import { pattern, withPatternParamsSchema } from "../src/builder/pattern.ts";
 import { setDurableArtifactEntryRef } from "../src/builder/pattern-metadata.ts";
 import type {
   BuilderFunctionsAndConstants,
+  FabricValue,
   JSONSchema,
   PatternFactory,
   Reactive,
@@ -197,7 +198,7 @@ describe("factory-valued pattern closure params provenance", () => {
     );
   }
 
-  async function seedLabeledSelector(shell: unknown, cause: string) {
+  async function seedLabeledSelector(shell: FabricValue, cause: string) {
     const selector = runtime.getCell<unknown>(
       sourceSpace,
       cause,

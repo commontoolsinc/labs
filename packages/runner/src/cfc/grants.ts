@@ -1,4 +1,5 @@
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import type { CfcAtom } from "@commonfabric/api/cfc";
 import { isRecord } from "@commonfabric/utils/types";
 import type { FabricValue } from "@commonfabric/api";
 import type { URI } from "@commonfabric/memory/interface";
@@ -584,7 +585,7 @@ export const cfcGrantIsLive = (grant: CfcGrant, now: number): boolean =>
  * principal. Fact order follows the stored audience array (content-
  * determined, deterministic).
  */
-export const expandCfcGrantFacts = (grant: CfcGrant): readonly unknown[] =>
+export const expandCfcGrantFacts = (grant: CfcGrant): readonly CfcAtom[] =>
   grant.audience.map((entry) => ({
     kind: grant.kind,
     space: grant.space,
@@ -600,7 +601,7 @@ export const expandCfcGrantFacts = (grant: CfcGrant): readonly unknown[] =>
     // a guard pattern MAY bind on `singleUse: true` if a rule wants to scope
     // itself to single-use releases.
     ...(grant.singleUse === true ? { singleUse: true as const } : {}),
-  }));
+  } as CfcAtom));
 
 const INTERNAL_VERIFIER_META = { ...internalVerifierRead };
 
@@ -646,7 +647,7 @@ const resolveSingleUseGrant = (
   grantId: URI,
   consumption: CfcGrantResolverQuery["consumption"],
   now: () => number,
-): readonly unknown[] => {
+): readonly CfcAtom[] => {
   if (consumption !== "consuming") return [];
   if (!cfcGrantReceiptsAvailable()) {
     tx.noteCfcDiagnostic(
@@ -739,8 +740,8 @@ export const createTxCfcGrantResolver = (
   opts: { readonly now?: () => number } = {},
 ): CfcGrantResolver => {
   const now = opts.now ?? Date.now;
-  const memo = new Map<string, readonly unknown[]>();
-  return (query: CfcGrantResolverQuery): readonly unknown[] => {
+  const memo = new Map<string, readonly CfcAtom[]>();
+  return (query: CfcGrantResolverQuery): readonly CfcAtom[] => {
     const owner = query.fields.owner;
     const resource = query.fields.resource;
     if (!isDid(owner) || resource === undefined || resource === null) {
@@ -750,7 +751,7 @@ export const createTxCfcGrantResolver = (
     // bound `space` field must agree; anything else fails closed.
     const space = query.fields.space ?? owner;
     if (space !== owner) return [];
-    let facts: readonly unknown[] = [];
+    let facts: readonly CfcAtom[] = [];
     try {
       // Inside the catch so a bound field the hasher cannot digest fails the
       // GUARD closed rather than throwing out of the resolver (the

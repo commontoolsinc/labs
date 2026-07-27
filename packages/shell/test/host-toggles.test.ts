@@ -71,6 +71,7 @@ describe("setupHostToggles", () => {
       }).commonfabric;
       expect(typeof cf?.forwardWorkerConsole).toBe("function");
       expect(typeof cf?.cfcRenderCeiling).toBe("function");
+      expect(typeof cf?.concurrentWatchRefresh).toBe("function");
     } finally {
       h.restore();
     }
@@ -112,6 +113,7 @@ describe("runtimeHostFlags", () => {
         forwardWorkerConsole: false,
         cfcRenderCeiling: false,
         patternCoverage: false,
+        concurrentWatchRefresh: false,
       });
     } finally {
       h.restore();
@@ -126,18 +128,28 @@ describe("runtimeHostFlags", () => {
         forwardWorkerConsole: true,
         cfcRenderCeiling: false,
         patternCoverage: false,
+        concurrentWatchRefresh: false,
       });
       h.storage.map.set("cfcRenderCeiling", "true");
       expect(runtimeHostFlags()).toEqual({
         forwardWorkerConsole: true,
         cfcRenderCeiling: true,
         patternCoverage: false,
+        concurrentWatchRefresh: false,
       });
       h.storage.map.set("patternCoverage", "true");
       expect(runtimeHostFlags()).toEqual({
         forwardWorkerConsole: true,
         cfcRenderCeiling: true,
         patternCoverage: true,
+        concurrentWatchRefresh: false,
+      });
+      h.storage.map.set("concurrentWatchRefresh", "true");
+      expect(runtimeHostFlags()).toEqual({
+        forwardWorkerConsole: true,
+        cfcRenderCeiling: true,
+        patternCoverage: true,
+        concurrentWatchRefresh: true,
       });
     } finally {
       h.restore();
