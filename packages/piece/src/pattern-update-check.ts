@@ -37,6 +37,11 @@ export type PatternUpdateBlockerClass =
   /** Any other CFC envelope merge rejection (an incompatible type change, an
    * IFC claim that cannot be weakened). Also enforced at commit time. */
   | "cfc-schema-merge"
+  /** The document's stored CFC metadata names a schema envelope that cannot
+   * be loaded (missing cid document, content-hash mismatch). The commit path
+   * records this load failure as a rejection reason and refuses the update,
+   * so the preflight refuses too — never "not applicable". */
+  | "cfc-envelope-unreadable"
   /** A durable link already supplied into an argument slot would no longer
    * satisfy the candidate's schema for that slot. */
   | "retained-link";
@@ -130,18 +135,33 @@ export class PatternUpdateIncompatibleError extends Error {
   }
 }
 
+/**
+ * What the shared gatherer (`loadStoredCfcEnvelope` in the runner's CFC
+ * layer — the SAME function the commit path calls) found at rest for one
+ * document. Declared structurally here so this module stays pure; the
+ * runner's `StoredCfcEnvelope` is assignable to it.
+ */
+export type StoredEnvelopeState =
+  /** No stored CFC metadata: the merge never runs for this document. */
+  | { readonly status: "none" }
+  /** A verified envelope is at rest; the merge runs against `schema`. */
+  | { readonly status: "loaded"; readonly schema: JSONSchema }
+  /** Metadata names an envelope that cannot be loaded. The commit path
+   * rejects this state, so it is a blocker — never "not applicable". */
+  | { readonly status: "unreadable"; readonly reason: string };
+
 /** Everything the verdict needs, gathered read-only by the caller. */
 export interface PatternUpdateCheckInput {
   piece: string;
   previous: Pattern;
   candidate: Pattern;
   /**
-   * The CFC schema envelopes currently at rest for the piece's argument and
-   * result documents. `undefined` for a role means that document carries no
-   * stored CFC envelope, in which case the CFC merge never runs for it at
-   * commit time and the class genuinely cannot fail.
+   * What the shared gatherer found for the piece's argument and result
+   * documents. `undefined` for a role means the piece has no such document
+   * (e.g. no argument cell), which — like `none` — leaves the CFC merge with
+   * nothing to run against.
    */
-  storedCfcEnvelopes: Partial<Record<PatternUpdateRole, JSONSchema>>;
+  storedCfcEnvelopes: Partial<Record<PatternUpdateRole, StoredEnvelopeState>>;
   /**
    * Outcome of the caller's run of the real retained-link validator. `ran:
    * false` means the caller could not evaluate it (no argument cell), which is
@@ -301,7 +321,7 @@ export function checkPatternUpdate(
 
   for (const role of ["argument", "result"] as const) {
     const stored = input.storedCfcEnvelopes[role];
-    if (stored === undefined) {
+    if (stored === undefined || stored.status === "none") {
       steps.push({
         name: `CFC document migration (${role})`,
         status: "not-applicable",
@@ -311,10 +331,30 @@ export function checkPatternUpdate(
       });
       continue;
     }
+    if (stored.status === "unreadable") {
+      // The commit path records this exact load failure as a rejection
+      // reason, so the real update WOULD be refused. Reporting it as
+      // "not applicable" is how a preflight green-lights a doomed swap.
+      blockers.push({
+        class: "cfc-envelope-unreadable",
+        role,
+        reason: stored.reason,
+        message:
+          `the stored CFC schema envelope for the ${role} document could ` +
+          `not be read (${stored.reason}) — a real update would be rejected ` +
+          `over the same failure. Repair the stored envelope before ` +
+          `retrying.`,
+      });
+      steps.push({
+        name: `CFC document migration (${role})`,
+        status: "fail",
+      });
+      continue;
+    }
     const candidateSchema = role === "argument"
       ? input.candidate.argumentSchema
       : input.candidate.resultSchema;
-    const issue = cfcSchemaMergeIssue(stored, candidateSchema);
+    const issue = cfcSchemaMergeIssue(stored.schema, candidateSchema);
     if (issue === undefined) {
       steps.push({
         name: `CFC document migration (${role})`,

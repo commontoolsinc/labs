@@ -97,7 +97,8 @@ export {
 } from "./schema-merge.ts";
 export type { CfcSchemaMergeIssue } from "./schema-merge.ts";
 export { readStoredCfcMetadata } from "./metadata.ts";
-export { loadSchemaDocument } from "./prepare.ts";
+export { loadSchemaDocument, loadStoredCfcEnvelope } from "./prepare.ts";
+export type { StoredCfcEnvelope } from "./prepare.ts";
 export { LABEL_METADATA_OBSERVATION } from "./observation-classes.ts";
 export type { LabelMetadataObservationClass } from "./observation-classes.ts";
 export {

@@ -29,10 +29,10 @@ import {
 import type { CellKind, LinkScope } from "@commonfabric/api";
 import {
   cfcSchemaChildRoot,
-  loadSchemaDocument,
-  readStoredCfcMetadata,
+  loadStoredCfcEnvelope,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
+  type StoredCfcEnvelope,
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
 import { pieceId, PieceManager } from "../manager.ts";
@@ -2681,14 +2681,17 @@ export function pieceArgumentCellOrUndefined(
 }
 
 /**
- * The CFC schema envelopes at rest for the given role/cell pairs — the
- * `existing` side of the merge the next setup commit would perform. Read
- * through `runtime.readTx()`, which cannot write.
+ * What is at rest for the given role/cell pairs — the `existing` side of the
+ * merge the next setup commit would perform. Read through
+ * `runtime.readTx()`, which cannot write.
  *
- * A role is absent when its cell is absent, when its document carries no
- * stored CFC metadata, or when that metadata cannot be read back. That is not
- * a gap in the check: the merge only runs against a stored envelope, so with
- * none there is nothing for it to reject.
+ * This deliberately contains NO error handling of its own: each document is
+ * resolved by `loadStoredCfcEnvelope`, the SAME gatherer the real commit path
+ * runs, so what counts as "nothing stored" versus "stored but unreadable" is
+ * decided once, by one function, for both the preflight and the enforced
+ * update. An unreadable envelope therefore reaches the verdict as a blocker
+ * (the commit path rejects that state), and only a role with no cell at all
+ * is absent from the result.
  */
 export function storedCfcEnvelopes(
   manager: PieceManager,
@@ -2696,29 +2699,17 @@ export function storedCfcEnvelopes(
     PatternUpdateRole,
     Cell<unknown> | undefined,
   ])[],
-): Partial<Record<PatternUpdateRole, JSONSchema>> {
+): Partial<Record<PatternUpdateRole, StoredCfcEnvelope>> {
   const tx = manager.runtime.readTx();
-  const envelopes: Partial<Record<PatternUpdateRole, JSONSchema>> = {};
+  const envelopes: Partial<Record<PatternUpdateRole, StoredCfcEnvelope>> = {};
   for (const [role, cell] of cells) {
     if (cell === undefined) continue;
-    try {
-      const link = cell.getAsNormalizedFullLink();
-      const metadata = readStoredCfcMetadata(tx, {
-        space: link.space,
-        id: link.id,
-        scope: link.scope,
-      });
-      if (metadata?.schemaHash === undefined) continue;
-      envelopes[role] = loadSchemaDocument(
-        tx,
-        link.space,
-        metadata.schemaHash,
-      );
-    } catch {
-      // An unreadable envelope is reported as "not applicable" rather than
-      // guessed at; the caller sees the role missing.
-      continue;
-    }
+    const link = cell.getAsNormalizedFullLink();
+    envelopes[role] = loadStoredCfcEnvelope(tx, {
+      space: link.space,
+      id: link.id,
+      scope: link.scope,
+    });
   }
   return envelopes;
 }

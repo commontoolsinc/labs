@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { loadStoredCfcEnvelope } from "@commonfabric/runner/cfc";
 import {
   type Cell,
   getPatternIdentityRef,
@@ -291,6 +292,154 @@ describe("pattern update check", () => {
 
     expect(getPatternIdentityRef(piece.getCell())).not.toEqual(before);
   });
+
+  it("reports an unreadable stored envelope on a live piece as a blocker", async () => {
+    // The reviewed false-COMPATIBLE bug, at the controller: a piece whose
+    // argument document's stored CFC metadata names an envelope that cannot
+    // be loaded must FAIL the preflight, not sail through as not-applicable.
+    const piece = await pieces.create(BASE, { input: {} });
+    await manager.synced();
+
+    // Corrupt the argument document the way the runner's cfc-boundary
+    // "missing or unreadable" test does: stored CFC metadata naming a schema
+    // envelope that does not exist. The raw seed transaction bypasses CFC
+    // preparation, exactly like a partially-replicated or damaged store.
+    const link = pieceArgumentCellOrUndefined(manager, piece.getCell())!
+      .getAsNormalizedFullLink();
+    const seed = runtime.edit();
+    const record = seed.readOrThrow({
+      space: link.space,
+      id: link.id,
+      scope: link.scope,
+      type: "application/json",
+      path: [],
+    });
+    seed.writeOrThrow({
+      space: link.space,
+      id: link.id,
+      scope: link.scope,
+      type: "application/json",
+      path: [],
+    }, {
+      ...(record as Record<string, unknown>),
+      cfc: {
+        version: 1,
+        schemaHash: "missing-hash",
+        labelMap: {
+          version: 1,
+          entries: [{ path: [], label: { confidentiality: [] } }],
+        },
+      },
+    });
+    const seedResult = await seed.commit();
+    expect(seedResult.ok).toBeDefined();
+    await manager.synced();
+
+    // The preflight refuses: unreadable is a blocker, never not-applicable.
+    const report = await piece.checkPattern(ADDS_OPTIONAL_INPUT);
+    expect(report.compatible).toBe(false);
+    const blocker = report.blockers.find((entry) =>
+      entry.class === "cfc-envelope-unreadable"
+    );
+    expect(blocker).toBeDefined();
+    expect(blocker!.role).toBe("argument");
+    expect(blocker!.reason).toContain("missing or unreadable");
+    expect(
+      report.steps.find((step) =>
+        step.name === "CFC document migration (argument)"
+      )!.status,
+    ).toBe("fail");
+  });
+
+  it("agrees with the enforced commit about an unreadable envelope, through the shared gatherer", async () => {
+    // ONE corrupted document, BOTH consumers of `loadStoredCfcEnvelope`:
+    // the real commit machinery (`prepareCfc`, which every setsrc setup
+    // commit runs when its writes are CFC-relevant) and the preflight
+    // verdict. The agreement is literal — the commit's rejection reason is
+    // the very string the check reports as the blocker's reason.
+    //
+    // The commit side writes the corrupted document directly (the runner's
+    // cfc-boundary recipe) rather than driving a full `setPattern`: whether
+    // a given source swap's setup produces a CFC-recorded write to a given
+    // document depends on which values actually change, so a direct labeled
+    // write is the deterministic way to pin what the commit does when it
+    // DOES touch the document.
+    const ifcSchema = {
+      type: "object",
+      properties: {
+        secret: { type: "string", ifc: { confidentiality: ["secret"] } },
+      },
+      required: ["secret"],
+    } as const;
+    const docCell = runtime.getCell(
+      manager.getSpace(),
+      "shared-gatherer-agreement-doc",
+      { type: "object", properties: { secret: { type: "string" } } },
+    );
+    const docId = docCell.getAsNormalizedFullLink().id;
+
+    const seed = runtime.edit();
+    seed.writeOrThrow({
+      space: manager.getSpace(),
+      scope: "space",
+      id: docId,
+      type: "application/json",
+      path: [],
+    }, {
+      value: { secret: "seed" },
+      cfc: {
+        version: 1,
+        schemaHash: "missing-hash",
+        labelMap: {
+          version: 1,
+          entries: [{
+            path: ["secret"],
+            label: { confidentiality: ["secret"] },
+          }],
+        },
+      },
+    });
+    const seedResult = await seed.commit();
+    expect(seedResult.ok).toBeDefined();
+
+    // The check's side of the agreement: the shared gatherer calls the state
+    // unreadable, and the verdict turns that into a blocker.
+    const stored = loadStoredCfcEnvelope(runtime.readTx(), {
+      space: manager.getSpace(),
+      id: docId,
+      scope: "space",
+    });
+    expect(stored.status).toBe("unreadable");
+    const reason = (stored as { reason: string }).reason;
+    expect(reason).toContain("missing or unreadable");
+
+    const pattern = patternOf({ type: "object" }, { type: "object" });
+    const report = checkPatternUpdate({
+      piece: "of:test",
+      previous: pattern,
+      candidate: pattern,
+      storedCfcEnvelopes: { result: stored },
+      retainedLinks: { ran: false },
+    });
+    expect(report.compatible).toBe(false);
+    expect(report.blockers[0].class).toBe("cfc-envelope-unreadable");
+    expect(report.blockers[0].reason).toBe(reason);
+
+    // The commit's side: a labeled write to the same document runs the same
+    // gatherer inside `prepareCfc` and rejects with the same reason.
+    const tx = runtime.edit();
+    const writer = runtime.getCell(
+      manager.getSpace(),
+      "shared-gatherer-agreement-doc",
+      ifcSchema,
+      tx,
+    );
+    writer.set({ secret: "updated" });
+    tx.prepareCfc();
+    const result = await tx.commit();
+    expect(result.error).toBeDefined();
+    expect(result.error!.message).toContain(reason);
+  });
 });
 
 describe("pattern update check — CFC document migration", () => {
@@ -320,7 +469,7 @@ describe("pattern update check — CFC document migration", () => {
       piece: "of:test",
       previous,
       candidate,
-      storedCfcEnvelopes: { result: stored },
+      storedCfcEnvelopes: { result: { status: "loaded", schema: stored } },
       retainedLinks: { ran: false },
     });
 
@@ -350,7 +499,7 @@ describe("pattern update check — CFC document migration", () => {
       piece: "of:test",
       previous,
       candidate,
-      storedCfcEnvelopes: { result: stored },
+      storedCfcEnvelopes: { result: { status: "loaded", schema: stored } },
       retainedLinks: { ran: false },
     });
 
@@ -377,7 +526,7 @@ describe("pattern update check — CFC document migration", () => {
       piece: "of:test",
       previous,
       candidate,
-      storedCfcEnvelopes: { result: stored },
+      storedCfcEnvelopes: { result: { status: "loaded", schema: stored } },
       retainedLinks: { ran: false },
     });
 
@@ -399,7 +548,7 @@ describe("pattern update check — CFC document migration", () => {
       piece: "of:test",
       previous,
       candidate,
-      storedCfcEnvelopes: { result: stored },
+      storedCfcEnvelopes: { result: { status: "loaded", schema: stored } },
       retainedLinks: { ran: false },
     });
 
@@ -407,6 +556,40 @@ describe("pattern update check — CFC document migration", () => {
     expect(
       report.blockers.some((entry) => entry.class === "cfc-schema-merge"),
     ).toBe(true);
+  });
+
+  it("refuses an unreadable stored envelope, as the commit would", () => {
+    // The false-COMPATIBLE trap this class exists for: metadata names an
+    // envelope that cannot be loaded. The commit path records that load
+    // failure as a rejection reason, so the real update is refused — the
+    // preflight must say so, not shrug it off as "not applicable".
+    const report = checkPatternUpdate({
+      piece: "of:test",
+      previous,
+      candidate: previous,
+      storedCfcEnvelopes: {
+        result: {
+          status: "unreadable",
+          reason: "stored schemaHash missing-hash is missing or unreadable",
+        },
+      },
+      retainedLinks: { ran: false },
+    });
+
+    expect(report.compatible).toBe(false);
+    const blocker = report.blockers.find((entry) =>
+      entry.class === "cfc-envelope-unreadable"
+    );
+    expect(blocker).toBeDefined();
+    expect(blocker!.role).toBe("result");
+    expect(blocker!.reason).toContain("missing or unreadable");
+    expect(blocker!.message).toContain("could not be read");
+    expect(blocker!.message).toContain("would be rejected");
+    expect(
+      report.steps.find((step) =>
+        step.name === "CFC document migration (result)"
+      )!.status,
+    ).toBe("fail");
   });
 
   it("marks the CFC step not-applicable when no envelope is stored", () => {
@@ -590,28 +773,21 @@ describe("pattern update check — gathering the piece's side of the verdict", (
     expect(storedCfcEnvelopes(manager, [["argument", undefined]])).toEqual({});
   });
 
-  it("skips a role whose envelope cannot be read", () => {
-    const unreadable = {
-      getAsNormalizedFullLink() {
-        throw new Error("document unavailable");
-      },
-    } as unknown as Cell<unknown>;
-
-    expect(storedCfcEnvelopes(manager, [["result", unreadable]])).toEqual({});
-  });
-
-  it("skips a live document that stores no schema envelope", async () => {
+  it("reports a live document that stores no schema envelope as none", async () => {
     const piece = await pieces.create(BASE, { input: {} });
     await manager.synced();
 
     // No envelope at rest means the CFC merge never runs for that role at
-    // commit time, so the role is simply absent rather than guessed at.
+    // commit time — `none`, not a guess and not a failure.
     expect(
       storedCfcEnvelopes(manager, [
         ["result", piece.getCell()],
         ["argument", pieceArgumentCellOrUndefined(manager, piece.getCell())],
       ]),
-    ).toEqual({});
+    ).toEqual({
+      result: { status: "none" },
+      argument: { status: "none" },
+    });
   });
 
   it("loads the envelope a document's stored metadata names", () => {
@@ -627,9 +803,11 @@ describe("pattern update check — gathering the piece's side of the verdict", (
         readTx: () => ({
           readOrThrow: (target: { id: string }) =>
             target.id.startsWith("cid:") ? { value: schema } : {
-              version: 1,
-              labelMap: { entries: [] },
-              schemaHash: taggedHashString,
+              cfc: {
+                version: 1,
+                labelMap: { entries: [] },
+                schemaHash: taggedHashString,
+              },
             },
         }),
       },
@@ -642,9 +820,45 @@ describe("pattern update check — gathering the piece's side of the verdict", (
       }),
     } as unknown as Cell<unknown>;
 
-    expect(storedCfcEnvelopes(stubbedManager, [["result", cell]])).toEqual({
-      result: schema,
-    });
+    const result = storedCfcEnvelopes(stubbedManager, [["result", cell]])
+      .result!;
+    expect(result.status).toBe("loaded");
+    expect((result as { schema: unknown }).schema).toEqual(schema);
+  });
+
+  it("reports metadata whose envelope cannot be loaded as unreadable", () => {
+    // Stored metadata names a schema hash, but the content-addressed schema
+    // document is gone. The commit path records exactly this as a rejection
+    // reason (see the cfc-boundary "missing or unreadable" test), so the
+    // gatherer must surface it — not skip the role.
+    const stubbedManager = {
+      runtime: {
+        readTx: () => ({
+          readOrThrow: (target: { id: string }) =>
+            target.id.startsWith("cid:") ? undefined : {
+              cfc: {
+                version: 1,
+                labelMap: { entries: [] },
+                schemaHash: "missing-hash",
+              },
+            },
+        }),
+      },
+    } as unknown as PieceManager;
+    const cell = {
+      getAsNormalizedFullLink: () => ({
+        space: "did:key:envelope-test",
+        id: "of:piece",
+        scope: undefined,
+      }),
+    } as unknown as Cell<unknown>;
+
+    const result = storedCfcEnvelopes(stubbedManager, [["result", cell]])
+      .result!;
+    expect(result.status).toBe("unreadable");
+    expect((result as { reason: string }).reason).toContain(
+      "missing or unreadable",
+    );
   });
 
   it("marks the retained-link proof not-applicable with no argument cell", () => {
