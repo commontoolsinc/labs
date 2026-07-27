@@ -290,9 +290,6 @@ export const normalizeTerminalResponse = (
           state: {
             version: 1,
             sourceModel,
-            ...(typeof response.id === "string"
-              ? { responseId: response.id }
-              : {}),
             output: continuation,
             ...(Object.keys(functionCallItemIds).length > 0
               ? { functionCallItemIds }

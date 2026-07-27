@@ -4057,6 +4057,8 @@ Deno.test("resume preserves the recorded Codex provider and continuation", async
     content: "Working",
     providerContinuation: {
       providerId: "openai-codex",
+      // Legacy artifact shape: `responseId` is no longer recorded, and this
+      // keeps a run persisted before that change resumable.
       state: { responseId: "resp-retained", output: [] },
     },
   }];
