@@ -14,6 +14,7 @@ import {
   FabricHash,
 } from "@commonfabric/data-model/fabric-primitives";
 import { createBuilder } from "../src/builder/factory.ts";
+import { getRuntimeModuleExports } from "../src/sandbox/runtime-modules.ts";
 
 // The Fabric value classes reach pattern code as `export declare const`s in
 // `api/index.ts`, but the runtime values behind those declarations are bound
@@ -33,10 +34,9 @@ const declaredClasses = [
   ...patternVisibleTypes.matchAll(/^export declare const (Fabric\w+)/gm),
 ].map((match) => match[1]);
 
-// The `data-model` classes the bindings are expected to be. Listed explicitly
-// rather than looked up by name in the spread module namespaces: the classes
-// come from three different modules, and a name missing from all of them would
-// compare `undefined` to `undefined` and pass without asserting anything.
+// The `data-model` class each binding is expected to be. This table is the
+// test's own knowledge of the eight classes, and the first assertion below
+// pins it against the derived list, so the two cannot drift apart silently.
 const expectedBindings: Record<string, unknown> = {
   FabricSpecialObject,
   FabricInstance,
@@ -58,10 +58,16 @@ describe("commonfabric Fabric value classes", () => {
   >;
 
   describe("runtime bindings", () => {
-    // Without this, a derivation that matched nothing would leave every check
-    // below vacuously passing.
-    it("derives a non-empty class list from the pattern-visible types", () => {
-      expect(declaredClasses.length).toBeGreaterThan(0);
+    // This is what stops the per-class checks below from passing vacuously.
+    // Each of them is driven by the derived list and looks its expectation up
+    // in the table, so a name that appears in only one of the two would
+    // compare `undefined` against `undefined` and assert nothing. Requiring
+    // the two to match exactly also catches a derivation that matched fewer
+    // classes than it should have, which a mere non-empty check would not.
+    it("derives exactly the classes this test knows how to check", () => {
+      expect([...declaredClasses].sort()).toEqual(
+        Object.keys(expectedBindings).sort(),
+      );
     });
 
     for (const name of declaredClasses) {
@@ -98,6 +104,34 @@ describe("commonfabric Fabric value classes", () => {
 
       expect(instance).toBeInstanceOf(FabricLink);
       expect(instance.payload).toEqual(payload);
+    });
+  });
+
+  // What a pattern actually receives is not `createBuilder().commonfabric` but
+  // that object after `freezeSandboxValue()`, which -- unlike `deepFreeze` --
+  // recurses into functions and freezes each exposed constructor's
+  // `.prototype`. A class that behaves on the unfrozen surface could fail here
+  // and nowhere else, so the delivered surface gets its own checks.
+  //
+  // Deliberately coarser than the per-class checks above: freezing is one
+  // operation over the whole surface, so a failure would take every class at
+  // once and per-name diagnostics would add nothing.
+  describe("the frozen sandbox surface", () => {
+    const sandboxCommonfabric = getRuntimeModuleExports()
+      .runtimeExports["commonfabric"] as unknown as Record<string, unknown>;
+
+    it("carries every binding through to pattern code", () => {
+      for (const name of declaredClasses) {
+        expect(sandboxCommonfabric[name]).toBe(expectedBindings[name]);
+      }
+    });
+
+    it("allows construction after hardening", () => {
+      const BoundFabricBytes = sandboxCommonfabric
+        .FabricBytes as typeof FabricBytes;
+      const bytes = new Uint8Array([7, 8, 9]);
+
+      expect(new BoundFabricBytes(bytes).slice()).toEqual(bytes);
     });
   });
 
