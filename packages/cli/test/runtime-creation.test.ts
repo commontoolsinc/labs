@@ -3,7 +3,6 @@ import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PieceManager } from "@commonfabric/piece";
 import { Runtime } from "@commonfabric/runner";
-import { PieceManager } from "@commonfabric/piece";
 import { createRuntime as createAclRuntime } from "../lib/acl.ts";
 import { loadManager } from "../lib/piece.ts";
 import { withEnv } from "./utils.ts";

@@ -450,13 +450,6 @@ export class CellBridge {
           await manager.synced();
           if (state.piecesHydrated) {
             await state.pieces.getRegisteredPieces();
-          } else {
-            const page = await manager.listEntityIdPage?.({ limit: 1 });
-            if (page === undefined) {
-              throw new Error(
-                "memory server does not support paginated entity identifier listing",
-              );
-            }
           }
           // If a fresh manager can connect and the existing pieces view can sync,
           // connection is back. manager.synced() alone can succeed from local
