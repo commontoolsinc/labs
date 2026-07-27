@@ -304,6 +304,10 @@ before the test modules (through Deno's `--preload`); it replaces `Deno.test`
 so each test runs under a clock that freezes only positive-delay timers, and it
 adds `settle` to the context. `test/clock.d.ts` gives `t.settle` its type, which
 `deno check` sees because it type-checks the package directory as one program.
+The preload is a thin wrapper: it calls `installFakeClock` from the shared
+harness in `packages/test-support/test/clock-preload.ts`, selecting that harness's
+`freeze-all` mode. The runner preload calls the same harness in its
+`auto-advance` mode (below), so the timer-faking core lives in one place.
 
 A zero-delay `setTimeout(fn, 0)` still fires, driven through the real event
 loop, so the scheduler's dispatch, the reconciler's flush, and teardown all
@@ -328,10 +332,11 @@ announce itself.
 
 ## The runner suite: advancing the runtime's own timers
 
-`packages/runner` has the same preload (`packages/runner/test/clock-preload.ts`,
-wired through `--preload` on the package test task) and the same rule for test
-sleeps, but it cannot simply freeze positive-delay timers the way the reconciler
-tests do. Runner's own reactivity is time-coupled: the scheduler, the wake
+`packages/runner` loads the same shared harness — its
+`packages/runner/test/clock-preload.ts` calls `installFakeClock` in the
+`auto-advance` mode, wired through `--preload` on the package test task — and
+follows the same rule for test sleeps, but it cannot simply freeze positive-delay
+timers the way the reconciler tests do. Runner's own reactivity is time-coupled: the scheduler, the wake
 shaper, and storage arm positive-delay timers — throttle and debounce windows,
 committed-write backoff, conflict retries — that `runtime.idle()`,
 `cell.pull()`, and commit then await. Freeze those and a plain reactive test
@@ -366,8 +371,9 @@ logical time to zero and drops pending timers: one frozen clock wraps a whole
 `describe`, so a suite whose cases each read absolute coarsened time (the `#now`
 grid tests) calls it from `beforeEach` to start each case from a known instant.
 
-Two files stay on the real clock, listed with their reasons at the top of the
-preload. A resume runtime drives a real loopback memory-client transport whose
+Two files stay on the real clock, listed with their reasons in the runner
+preload's `realClockFiles` list. A resume runtime drives a real loopback
+memory-client transport whose
 connect/mount/sync does not complete under the fake clock, so the resume
 deadlocks. And a nested-subagent generateObject aborts its delegate tool because
 the tool-calling path's own timeout auto-advances against the subagent's outbox

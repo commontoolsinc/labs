@@ -3,15 +3,16 @@
   "version": "0.1.0",
   "exports": {
     ".": "./src/mod.ts",
+    "./clock-preload": "./test/clock-preload.ts",
     "./compile-byte-cache": "./src/compile-byte-cache.ts",
     "./fixture-runner": "./src/fixture-runner.ts",
     "./isolated-deno": "./src/isolated-deno.ts"
   },
   "tasks": {
     "test": "deno test --frozen=true --allow-env=CF_COMPILE_CACHE_FILE --allow-read --allow-write --allow-run=deno src/*.test.ts",
-    "check": "deno check src/**/*.ts",
-    "fmt": "deno fmt src/",
-    "lint": "deno lint src/"
+    "check": "deno check src/**/*.ts test/clock-preload.ts",
+    "fmt": "deno fmt src/ test/",
+    "lint": "deno lint src/ test/"
   },
   "compilerOptions": {
     "strict": true,
