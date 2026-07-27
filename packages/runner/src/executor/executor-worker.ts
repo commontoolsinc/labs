@@ -427,6 +427,79 @@ const cancelClaimedAttempts = (lane?: string): void => {
   }
 };
 
+/**
+ * P0-R3e piece linger. Measured: a piece's full instantiation
+ * (`prepareExecutorDemandPiece` → runtime.start) costs 7-33s under live
+ * load, and ordinary navigation removes a piece from demand only to
+ * re-demand it one page later — today that re-pays the whole
+ * instantiation in the SAME Worker. With the linger dial set, a
+ * structurally removed piece keeps its live graph for the window while
+ * its AUTHORITY is fenced immediately (claims released host-visibly
+ * below, exactly the action-unregistered shape — the promptness the
+ * claim-lifecycle contracts pin; server-side issuance stays fail-closed
+ * on the missing demand row regardless). Re-demand inside the window
+ * reactivates for free; expiry performs the ordinary stop; reset and
+ * worker stop flush immediately. Dial (worker-realm lazy env read, the
+ * CF_LOG_TIMING inheritance channel): unset/0 = legacy immediate stop —
+ * the shape every existing suite pins; startServerExecutionPool
+ * defaults it on for server-primary deployments.
+ */
+const PIECE_LINGER_ENV = "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_PIECE_LINGER_MS";
+const pieceLingerWindowMs = (): number => {
+  try {
+    const raw = Deno.env.get(PIECE_LINGER_ENV);
+    if (raw === undefined || raw === "0") return 0;
+    if (/^\d+$/.test(raw)) return Number(raw);
+    console.warn(
+      `[executor] Ignoring ${PIECE_LINGER_ENV}=${JSON.stringify(raw)} — ` +
+        `expected a non-negative integer (ms).`,
+    );
+    return 0;
+  } catch {
+    return 0;
+  }
+};
+const lingeringPieces = new Map<
+  string,
+  { cell: Cell<unknown>; timer: ReturnType<typeof setTimeout> }
+>();
+
+/** Host-visible release of every claim this piece's actions hold — the
+ * same shape the scheduler-unregister hook posts when a stop retires the
+ * actions, issued eagerly because the linger defers that stop. */
+const releasePieceClaims = (pieceId: string): void => {
+  const canonical = canonicalSchedulerPieceIdForDemandRoot(pieceId);
+  for (
+    const { claim, action } of claimedAttempts.cancelMatching((claim) =>
+      claim.pieceId === canonical
+    )
+  ) {
+    releaseClaimedAttempt(
+      "invalidated-claim",
+      claim,
+      action,
+      "action-unregistered",
+    );
+  }
+};
+
+const stopPieceNow = (pieceId: string, cell: Cell<unknown>): void => {
+  demandSinks.get(pieceId)?.();
+  demandSinks.delete(pieceId);
+  runtime?.runner.stop(cell);
+  instantiatedDemand.delete(pieceId);
+};
+
+/** Immediate teardown of every lingering piece (reset and worker stop —
+ * the linger is a keep-warm, never an authority or shutdown extension). */
+const flushLingeringPieces = (): void => {
+  for (const [pieceId, entry] of lingeringPieces) {
+    clearTimeout(entry.timer);
+    stopPieceNow(pieceId, entry.cell);
+  }
+  lingeringPieces.clear();
+};
+
 const validateWireLanes = (
   lanes: unknown,
 ): WireLaneDemand[] | undefined => {
@@ -1002,6 +1075,10 @@ const replaceDemand = (
     const growsOnly = !resetClaims &&
       [...demanded.keys()].every((pieceId) => nextSet.has(pieceId));
     if (resetClaims) {
+      // The reset rebuilds the whole demand surface — lingering graphs
+      // must not survive it (their teardown loop below only covers
+      // `demanded`).
+      flushLingeringPieces();
       for (const [pieceId, cell] of demanded) {
         demandSinks.get(pieceId)?.();
         runtime.runner.stop(cell);
@@ -1031,6 +1108,25 @@ const replaceDemand = (
     }
     for (const [pieceId, cell] of demanded) {
       if (nextSet.has(pieceId)) continue;
+      const lingerMs = pieceLingerWindowMs();
+      if (lingerMs > 0 && instantiatedDemand.has(pieceId)) {
+        // P0-R3e: keep the live graph warm — a re-demand inside the
+        // window reactivates for free instead of re-paying the 7-33s
+        // instantiation. AUTHORITY still fences now: the stop this branch
+        // defers is what would have posted the action-unregistered
+        // releases, so issue them eagerly (same host-visible shape). The
+        // standing sink stays — it is what keeps the graph current;
+        // expiry runs the ordinary stop.
+        demanded.delete(pieceId);
+        pendingDemand.delete(pieceId);
+        releasePieceClaims(pieceId);
+        const timer = setTimeout(() => {
+          lingeringPieces.delete(pieceId);
+          stopPieceNow(pieceId, cell);
+        }, lingerMs);
+        lingeringPieces.set(pieceId, { cell, timer });
+        continue;
+      }
       demandSinks.get(pieceId)?.();
       demandSinks.delete(pieceId);
       runtime.runner.stop(cell);
@@ -1041,6 +1137,15 @@ const replaceDemand = (
     const added = new Set<string>();
     for (const pieceId of next) {
       if (demanded.has(pieceId)) continue;
+      const lingering = lingeringPieces.get(pieceId);
+      if (lingering !== undefined) {
+        // Revival: the graph never stopped and its sink kept it current —
+        // no re-activation, no initial pull.
+        clearTimeout(lingering.timer);
+        lingeringPieces.delete(pieceId);
+        demanded.set(pieceId, lingering.cell);
+        continue;
+      }
       const cell = runtime.getCellFromEntityId<unknown>(
         space,
         entityIdFrom(normalizePieceId(pieceId)),
@@ -1662,6 +1767,8 @@ const stop = async (): Promise<void> => {
   // Final-settlement waiters intentionally sit outside `work`. End their exact
   // local authority before settle waits on queued demand/pull operations.
   cancelClaimedAttempts();
+  // The linger is a keep-warm, never a shutdown extension.
+  flushLingeringPieces();
   await settle();
   for (const cancel of demandSinks.values()) cancel();
   demandSinks.clear();

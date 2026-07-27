@@ -142,6 +142,15 @@ export function startServerExecutionPool(runtime: Runtime): void {
   if (Deno.env.get(coldRefreshEnv) === undefined) {
     Deno.env.set(coldRefreshEnv, "2000");
   }
+  // P0-R3e: same worker-realm-env pattern for the piece linger — a
+  // structurally removed piece keeps its live graph warm for the window
+  // (authority fenced immediately), so ordinary navigation churn does not
+  // re-pay the measured 7-33s piece instantiation. `...=0` restores the
+  // legacy immediate stop.
+  const pieceLingerEnv = "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_PIECE_LINGER_MS";
+  if (Deno.env.get(pieceLingerEnv) === undefined) {
+    Deno.env.set(pieceLingerEnv, "30000");
+  }
   executionPool = new SharedExecutionPool({
     control: memoryServer,
     demandGraceMs: demandGraceMsFromEnv(),

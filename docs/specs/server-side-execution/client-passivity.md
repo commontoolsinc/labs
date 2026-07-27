@@ -490,6 +490,23 @@ peeled three successive liveness layers — each fix exposing the next:
    runtime.start) remains the follow-on lever once linger removes the
    duplicate work.
 
+   **Piece linger BUILT** (dial
+   `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_PIECE_LINGER_MS`, worker-
+   realm lazy env read, pool-start default 30000, unset/0 = legacy —
+   the shape every existing executor suite pins): removal releases the
+   piece's claims host-visibly (the exact action-unregistered shape
+   the deferred stop would have posted) and lingers the live graph;
+   revival reuses it with no re-activation and no initial pull; expiry
+   runs the ordinary stop; reset and worker stop flush immediately.
+   Contract test (`executor-piece-linger.test.ts`): a demand blip
+   revives without re-preparing (writer-lookup count flat) and an
+   expired linger re-prepares. Verification-protocol note learned the
+   hard way twice this arc: run real-Worker e2e suites ONE FILE PER
+   deno invocation — multi-file batteries contend in-process and
+   manufacture timing failures (three "regressions" this session were
+   battery/load artifacts, confirmed green serially and at every
+   commit via an isolated bisect worktree).
+
    Original diagnosis (superseded in one respect — the dominant class
    was growth, not never-held): the demand-pull traversal scaler.
    With the pump landed,

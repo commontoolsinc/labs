@@ -587,6 +587,18 @@ propagate](#how-flags-propagate).
   were closure-growth (one watch 147×), and their aggregate engine
   time pushed cold start-to-claim-ready past the demanding page's
   lifetime.
+- **Companion knob (P0-R3e).**
+  `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_PIECE_LINGER_MS` (same strict
+  integer parse; `0`/unset = legacy immediate stop): the executor
+  Worker's piece linger, read lazily in the Worker realm by
+  [`packages/runner/src/executor/executor-worker.ts`](../../packages/runner/src/executor/executor-worker.ts).
+  A structurally removed piece keeps its live graph for the window
+  while its AUTHORITY fences immediately (claims release host-visibly
+  at removal, the action-unregistered shape); a re-demand inside the
+  window reactivates for free instead of re-paying the measured 7-33s
+  `runtime.start` instantiation; expiry performs the ordinary stop, and
+  reset/worker-stop flush lingers immediately.
+  `startServerExecutionPool` defaults it to `30000`.
 - **Removal.** Fold calibrated fixed values into `serverPrimaryExecution`
   once P1 measures Worker cold-start and navigation-blip distributions.
 
