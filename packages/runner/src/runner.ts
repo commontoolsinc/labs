@@ -1099,9 +1099,14 @@ export class Runner {
     }
     // Convert-and-freeze (default): a deep-frozen value lets the storage write
     // boundary's `cloneIfNecessary` identity-pass instead of
-    // deep-cloning-to-freeze. Converting before the no-op gate makes both sides
-    // of the comparison `FabricValue`s — the stored value is one already — so
-    // the gate compares what a write would actually store.
+    // deep-cloning-to-freeze.
+    //
+    // The conversion MUST precede the no-op gate. A raw result is not
+    // necessarily a `FabricValue` — one carrying `toJSON`, say, only becomes one
+    // here — and `valueEqual` hashes its operands, so comparing a raw result
+    // throws `hashOf: unsupported object type` instead of deciding anything.
+    // Converting first also makes the gate compare what a write would actually
+    // store, since the stored side is already a `FabricValue`.
     const fabricResult = fabricFromNativeValue(result);
     if (!valueEqual(fabricResult, previousResult)) {
       recordSetupProjectionPolicyInputs(
