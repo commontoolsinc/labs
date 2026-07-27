@@ -817,7 +817,9 @@ Deno.test("dbNeedsColumnProvenance: rowLabel-only tables need origin capture too
 
   const unlabeled = { notes: table({ body: "text" }) };
   assert(!tableDeclaresRowLabel(unlabeled.notes));
+  assert(!tableDeclaresRowLabel(null));
   assert(!dbNeedsColumnProvenance(unlabeled));
+  assert(!dbNeedsColumnProvenance({ notes: {} }));
   assert(!dbNeedsColumnProvenance(undefined));
 });
 

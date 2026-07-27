@@ -633,6 +633,17 @@ the per-epic implementation notes).
 >   the scalarization fallback once every server in the fleet advertises the
 >   capability; the flag itself then reads as permanent documentation of the
 >   wire shape, and the successor design is tracked as CT-1910.
+> - **`entityIdListing`** is a build-inherent capability, hardwired to `true`.
+>   It advertises that the memory server can list live space-scoped entity
+>   identifiers without returning stored values. Older servers omit it, which
+>   parses as `false`. It is permanent.
+> - **`entityIdPagination`** is a build-inherent capability, hardwired to
+>   `true`. It advertises snapshot-checked, server-capped pages for
+>   `entity-id.list`. Older servers return the historical complete response.
+>   It is permanent.
+> - **`entityIdLookup`** is a build-inherent capability, hardwired to `true`.
+>   It advertises identifier-only `entity-id.exists` point lookup. Older
+>   servers omit it, which parses as `false`. It is permanent.
 
 ### `experimentalConcurrentWatchRefresh`
 

@@ -83,6 +83,7 @@ export interface SpaceConfig {
   space: string;
   identity: string;
   jsonOutput?: boolean;
+  deferSpaceCellSync?: boolean;
 }
 
 /** Metadata returned for a piece whose stored data matches a search query. */
@@ -362,18 +363,28 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
 
     const pieceManager = await timeCliPhase(
       "loadManager.pieceManager",
-      () => new PieceManager(session, runtime),
+      () =>
+        new PieceManager(session, runtime, {
+          deferSpaceCellSync: config.deferSpaceCellSync,
+        }),
     );
     pieceManagerRef.current = pieceManager;
-    // `synced()` settles even when this space is permanently denied: the memory
-    // client terminates a denied session rather than retrying its reopen. It
-    // settles quietly, though — a denied cross-space link stays a silent absent
-    // read — so surface a denial on THIS space deliberately, with the server's
-    // real AuthorizationError.
-    await timeCliPhase(
-      "loadManager.synced",
-      () => pieceManager.synced(),
-    );
+    if (config.deferSpaceCellSync) {
+      await timeCliPhase(
+        "loadManager.ensureSpaceSession",
+        () => pieceManager.ensureSpaceSession(),
+      );
+    } else {
+      // `synced()` settles even when this space is permanently denied: the
+      // memory client terminates a denied session rather than retrying its
+      // reopen. It settles quietly, though — a denied cross-space link stays a
+      // silent absent read — so surface a denial on THIS space deliberately,
+      // with the server's real AuthorizationError.
+      await timeCliPhase(
+        "loadManager.synced",
+        () => pieceManager.synced(),
+      );
+    }
     throwOnSpaceAuthorizationError(runtime.storageManager, session.space);
     return pieceManager;
   });

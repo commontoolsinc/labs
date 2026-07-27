@@ -4,6 +4,8 @@ import {
   Console as RuntimeConsole,
   EntityId,
   entityIdFrom,
+  type EntityIdListOptions,
+  type EntityIdListResult,
   getEntityId,
   getMetaLink,
   getPatternIdentityRef,
@@ -96,6 +98,10 @@ async function timePiecePhase<T>(
   }
 }
 
+export interface PieceManagerOptions {
+  deferSpaceCellSync?: boolean;
+}
+
 export class PieceManager {
   private space: MemorySpace;
 
@@ -111,6 +117,7 @@ export class PieceManager {
   constructor(
     private session: Session,
     public runtime: Runtime,
+    options: PieceManagerOptions = {},
   ) {
     this.diagnosticConsole = new RuntimeConsole(runtime.harness);
     this.space = this.session.space;
@@ -122,7 +129,9 @@ export class PieceManager {
       ? this.runtime.getHomeSpaceCell()
       : this.runtime.getSpaceCell(this.space);
 
-    const syncSpaceCellContents = Promise.resolve(this.spaceCell.sync());
+    const syncSpaceCellContents = options.deferSpaceCellSync
+      ? Promise.resolve()
+      : Promise.resolve(this.spaceCell.sync());
 
     // Note: pieceRegistry and recentPieces are managed by the default pattern,
     // not directly on the space cell. The space cell only contains a link to
@@ -143,6 +152,33 @@ export class PieceManager {
   async synced(): Promise<void> {
     await this.ready;
     return await this.runtime.storageManager.synced();
+  }
+
+  async ensureSpaceSession(): Promise<void> {
+    await this.ready;
+    await this.runtime.storageManager.open(this.space).ensureSession?.();
+  }
+
+  async listEntityIds(): Promise<string[] | undefined> {
+    await this.ready;
+    return await this.runtime.storageManager.open(this.space).listEntityIds?.();
+  }
+
+  async listEntityIdPage(
+    options: EntityIdListOptions = {},
+  ): Promise<EntityIdListResult | undefined> {
+    await this.ready;
+    return await this.runtime.storageManager.open(this.space)
+      .listEntityIdPage?.(
+        options,
+      );
+  }
+
+  async entityIdExists(id: string): Promise<boolean | undefined> {
+    await this.ready;
+    return await this.runtime.storageManager.open(this.space).entityIdExists?.(
+      id,
+    );
   }
 
   getSpaceCellContents(): Cell<SpaceCellContents> {

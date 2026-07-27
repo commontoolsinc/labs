@@ -15,6 +15,11 @@ import {
   sourceRelPathToTreeSegments,
   writeUnavailableErrno,
 } from "./mod.ts";
+import { HandleMap } from "./handles.ts";
+import {
+  closeKernelFileHandle,
+  createFuseOperationState,
+} from "./operation-wiring.ts";
 import {
   ATTRCACHE_TIMEOUT_MAX_SECONDS,
   buildMountFuseArgs,
@@ -24,7 +29,8 @@ import {
 } from "./mount-options.ts";
 import darwinPlatform, { libfusePaths } from "./platform-darwin.ts";
 import linuxPlatform from "./platform-linux.ts";
-import { EACCES, EINVAL, EROFS } from "./platform.ts";
+import { EACCES, EINVAL, EROFS, FILE_MODE_RW } from "./platform.ts";
+import { FsTree } from "./tree.ts";
 
 function env(values: Record<string, string | undefined>) {
   return {
@@ -114,6 +120,38 @@ Deno.test("FUSE namespace writeback decodes path component names", () => {
     appendDecodedJsonPath(["items"], "of%3Aentity"),
     ["items", "of:entity"],
   );
+});
+
+Deno.test("FUSE operation wiring marks writable entries and closes projection handles", () => {
+  const tree = new FsTree();
+  const directory = tree.addDir(tree.rootIno, "directory");
+  const file = tree.addFile(directory, "value", "text", "string");
+  const writePathRequests: bigint[] = [];
+  const released: bigint[] = [];
+  const bridge = {
+    resolveWritePath: (ino: bigint) => {
+      writePathRequests.push(ino);
+      return ino === file ? {} : null;
+    },
+    resolveSourceWritePath: () => null,
+    releaseEntityProjectionOpen: (ino: bigint) => released.push(ino),
+  };
+  const operations = createFuseOperationState(tree, bridge as never);
+  const directoryHandle = operations.openDirectory(directory)!;
+
+  const entries = operations.directorySnapshot(directoryHandle, directory);
+  assertEquals(
+    entries.find((entry) => entry.name === "value")?.mode,
+    FILE_MODE_RW,
+  );
+  assertEquals(writePathRequests, [file]);
+
+  const handles = new HandleMap();
+  const fileHandle = handles.open(file, 0);
+  closeKernelFileHandle(handles, bridge, fileHandle);
+  closeKernelFileHandle(handles, bridge, fileHandle);
+  assertEquals(handles.get(fileHandle), undefined);
+  assertEquals(released, [file]);
 });
 
 Deno.test("source writeback re-encodes decoded source relpaths for tree lookup", () => {
