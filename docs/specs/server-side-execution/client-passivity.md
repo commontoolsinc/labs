@@ -269,7 +269,42 @@ peeled three successive liveness layers — each fix exposing the next:
 3. The defaults rerun then failed both Worker starts at exactly the
    library's 30s init deadline (boot completing moments later) → the
    **init-deadline dial** (toolshed default 120s).
-4. **Named residual (P0-R1, blocks the claimsIssued>0 acceptance):**
+4. **P0-R1 CLOSED (087ba15a5):** the Worker's initialize handler gated
+   its "ready" reply on `await enqueue(replaceDemand(pieces))` — full
+   initial piece activation, which under live client load outlasts any
+   deadline while the runtime is already executing. Detaching the await
+   (activation still serialized on the work queue; failures via
+   postFatal) made starts reliable: 2/2 Workers live, zero
+   aborts/failures/expiries, still active at run end, across every
+   subsequent acceptance run.
+5. **P0 continuation (edbbcd588, 67c529a55):** leg-discriminated decline
+   observability (permanent) then peeled two more causes: (a)
+   `sponsor-demand-gone` 53/53 — the client publishes a transient EMPTY
+   demand set on every same-space navigation and claim issuance
+   re-validates the sponsor's demand row at claim time; fixed at the
+   producer by the ExecutionDemandShrinkGate (growth immediate, shrink
+   held 10s and folded; 53 → 1); the server-side sponsor REBIND
+   (re-point a live lease's sponsor triple in place, no Worker restart)
+   landed for the session-churn case with generation replacement demoted
+   to fallback. (b) Also found and cleaned: the pre-rebind wedged drains
+   leak ORPHANED toolshed processes that keep appending to the shared
+   log — always verify serverStart before trusting log/stats agreement.
+6. **Named residual (P0-R2, now the sole claimsIssued>0 blocker):** with
+   demand stable and sponsors rebindable, 68/68 declines on one space
+   are `not-owned` — the executor's START-TIME lease handle resolves via
+   the authority WeakMap to an authority object that is no longer the
+   owned one. Next probe (one run): extend the not-owned decline log
+   with {ownedPresent, authority.firstDemandOrder,
+   owned?.firstDemandOrder} and read pool
+   workerStartAttempts/leaseLosses/leaseReplacements — distinguishing
+   owned-deleted (expiry/release) from owned-replaced (silent
+   re-acquisition). Likely durable fix either way: resolve the claim
+   path's authority by (space,branch) KEY with field-validated handle
+   (generation + host + onBehalfOf) instead of WeakMap object identity —
+   handle-object identity across a Worker's lifetime is exactly the
+   coupling the renewal/reuse paths do not maintain.
+
+**(superseded numbering below)**
    with the deadline at 120s the Workers RAN (43 scheduler runs, 32
    claim-ready) but `DenoSpaceExecutor.initialize` never completed
    within the run under live browser load — the start's completion
