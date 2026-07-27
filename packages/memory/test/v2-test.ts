@@ -328,6 +328,8 @@ describe("parseMemoryProtocolFlags", () => {
         sqliteCommitRowLabelEval: true,
         pendingReadStacks: false,
         entityIdListing: false,
+        entityIdPagination: false,
+        entityIdLookup: false,
       },
     );
   });
@@ -383,6 +385,7 @@ describe("parseMemoryProtocolFlags", () => {
         syncSchemaTable: false,
         syncSchemaTableV2: false,
         sqliteCommitRowLabelEval: false,
+        pendingReadStacks: false,
         entityIdListing: false,
         entityIdPagination: true,
         entityIdLookup: true,
