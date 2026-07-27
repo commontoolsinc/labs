@@ -453,6 +453,43 @@ peeled three successive liveness layers — each fix exposing the next:
    whether that reset's blast radius (full re-instantiation) is
    necessary for a lane-only change.
 
+   **P0-R3e probe results (compile-phase timing via the pre-existing
+   logger.time seams, CF_LOG_TIMING=pattern-manager,engine):** BOTH
+   R3e hypotheses were wrong in the details. (a) The compile cache is
+   EXONERATED: the worker HITS the persisted compiled-closure cache —
+   `load-pattern-by-identity` 243ms-1.0s, `evaluateRecordGraph`
+   359-486ms — so of a 13.9s prepare only ~1.5s is pattern load+eval;
+   the 12-32s remainder is GRAPH INSTANTIATION I/O (`runtime.start`
+   building and first-running the reactive graph through the worker's
+   feed-backed replica — the same per-read round-trip surface as the
+   pull). Numbers swing 2-4× with machine load (7.6s → 13.9s → 33.6s
+   for the same piece across runs; competing agent sessions share
+   this host), so a QUIET-MACHINE note joins the fresh-store protocol
+   requirement. (b) The "resetClaims blast radius" reading was wrong:
+   per-lane resetClaims is ALREADY surgical (`applyLaneDemands`
+   cancels only that lane's attempts and re-emits from templates),
+   and the top-level nuke path appears unreachable from the pool. The
+   duplicate prepare was plain navigation semantics: a page change
+   genuinely removed the list piece from demand → structural stop →
+   the next page re-demanded it → full 33.6s re-instantiation in the
+   SAME Worker (workersStarted stayed 2).
+
+   **The P0-R3e build, now precisely shaped — worker-side PIECE
+   LINGER:** on structural removal, fence AUTHORITY immediately
+   (cancel the piece's claimed attempts and release its claims — the
+   promptness the executor claim-lifecycle/drain contracts pin) but
+   KEEP the graph instantiated for a bounded linger window; re-demand
+   inside the window cancels the linger and reactivates instantly
+   (the graph never stopped) instead of re-preparing for 13-33s;
+   linger expiry performs today's full stop/cleanup, and worker
+   stop/resetClaims flush lingers immediately. This is the
+   pool-level demand-grace philosophy applied per piece, composable
+   with the pump and the debounce; claims for un-demanded pieces
+   remain fail-closed server-side regardless (sponsor-demand-gone).
+   The deeper instantiation-I/O cost (per-read round trips during
+   runtime.start) remains the follow-on lever once linger removes the
+   duplicate work.
+
    Original diagnosis (superseded in one respect — the dominant class
    was growth, not never-held): the demand-pull traversal scaler.
    With the pump landed,
