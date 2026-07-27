@@ -446,7 +446,9 @@ export type GraphQueryRequest = {
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
 
 /** Wire form of SQLite bind parameters. */
-export type SqliteParamsWire = ReadonlyArray<unknown> | Record<string, unknown>;
+export type SqliteParamsWire =
+  | ReadonlyArray<FabricValue>
+  | Record<string, FabricValue>;
 
 /** Reference to a cell-derived SQLite database: an opaque id (the handle cell's
  *  entity id) plus the declared table schemas (for additive create/migrate).
@@ -457,7 +459,7 @@ export type SqliteParamsWire = ReadonlyArray<unknown> | Record<string, unknown>;
  *  `space` (or absent) keeps the original unqualified name. */
 export type SqliteDbRef = {
   id: string;
-  tables?: Record<string, unknown>;
+  tables?: Record<string, FabricValue>;
   scope?: CellScope;
   /** The db's owner — the principal that created the SqliteDb cell. Resolves
    *  the per-row label rule's `dbOwner()` term (CFC Phase 3); a FIXED db
@@ -1000,12 +1002,9 @@ export const encodeMemoryBoundary = (value: FabricValue): string =>
  * containing an `unknown` field is not assignable to `FabricValue`, so the
  * whole enclosing message is rejected however sound its actual contents.
  *
- * Every remaining caller is blocked by the same root: `SqliteDbRef.tables` is
- * `Record<string, unknown>`, which reaches `SqliteOperation` → `Operation` →
- * `ClientCommit`, and from there every message that carries a commit. Its
- * natural element type, `TableSchema`, carries a `[key: string]: unknown`
- * catch-all, so tightening `tables` means tightening that too, plus the
- * runner's own copy of the `SqliteDbRef` shape.
+ * Every remaining caller is blocked by the same root: `ClientCommit`'s
+ * `schedulerObservation` is `unknown`, which reaches every message that carries
+ * a commit.
  *
  * What is given up is narrower than it looks: the encoding *verifies*. A value
  * that no codec can represent throws — at any depth, naming the offending

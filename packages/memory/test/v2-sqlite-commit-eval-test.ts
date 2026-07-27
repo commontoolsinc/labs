@@ -18,6 +18,7 @@ import {
   runQuery,
 } from "../v2/sqlite/exec.ts";
 import { table } from "../v2/sqlite/schema.ts";
+import type { SqliteDbRef, SqliteParamsWire } from "../v2.ts";
 import {
   all,
   authoredBy,
@@ -132,7 +133,7 @@ async function withAttached(
   }
 }
 
-const sqliteOp = (sql: string, params?: unknown[]): Operation => ({
+const sqliteOp = (sql: string, params?: SqliteParamsWire): Operation => ({
   op: "sqlite",
   db: { id: DB_ID, tables: TABLES, owner: OWNER },
   sql,
@@ -462,8 +463,8 @@ function bareDb(): Database {
 
 const bareOp = (
   sql: string,
-  params?: unknown[],
-  tables: Record<string, unknown> = TABLES,
+  params?: SqliteParamsWire,
+  tables: SqliteDbRef["tables"] = TABLES,
 ) => ({
   op: "sqlite" as const,
   db: { id: DB_ID, tables, owner: OWNER },

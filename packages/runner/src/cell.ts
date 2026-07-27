@@ -27,7 +27,7 @@ import {
 } from "@commonfabric/data-model/schema-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { ReadonlyCell } from "@commonfabric/api";
-import type { SqliteParamsWire } from "@commonfabric/memory/v2";
+import type { SqliteDbRef, SqliteParamsWire } from "@commonfabric/memory/v2";
 import { isCfLinkColumn } from "@commonfabric/memory/sqlite/columns";
 import { encodeCellToSigilString } from "./builtins/sqlite/cf-link-codec.ts";
 import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
@@ -1166,8 +1166,10 @@ export class CellImpl<T extends FabricValue>
       ? cloneIfNecessary(
         materialized.tables as Parameters<typeof cloneIfNecessary>[0],
         { frozen: false },
-      ) as Record<string, unknown>
-      : handle.tables as Record<string, unknown> | undefined;
+      ) as SqliteDbRef["tables"]
+      // `handle` is a raw, unvalidated read (see above), so this states the
+      // wire shape rather than proving it.
+      : handle.tables as SqliteDbRef["tables"];
     // CFC write-ceiling (Phase 2): a value bound to a labeled column must fit the
     // column's `ifc.maxConfidentiality`. The label rides the bound value (a Cell
     // or any carried-label value); fail closed when a labeled value's target
