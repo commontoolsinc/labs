@@ -65,10 +65,10 @@ App and integration directories: `activity-log/`, `agent/`, `airtable/`,
 `auth/`, `base/`, `battleship/`, `budget-tracker/`, `calendar/`, `card-piles/`,
 `contacts/`, `cozy-poll/`, `examples/`, `experimental/` (explicitly unhardened
 explorations), `github-activity/`, `google/` (the `core/` tree; `google/WIP/` is
-legacy), `habit-tracker/`, `lobby/`, `lunch-poll/`, `profile-group-chat/`,
-`project-list/`, `router/`, `scoped-group-chat/`, `scoped-user-directory/`,
-`scrabble/`, `shared-profile-demo/`, `shared-profile-roster/`, `suggestable/`,
-`weekly-calendar/`.
+legacy), `habit-tracker/`, `lobby/`, `lunch-poll/`, `mappa-mundi/`,
+`profile-group-chat/`, `project-list/`, `router/`, `scoped-group-chat/`,
+`scoped-user-directory/`, `scrabble/`, `shared-profile-demo/`,
+`shared-profile-roster/`, `suggestable/`, `weekly-calendar/`.
 
 CFC spec demos (intentionally verbose wiring): `cfc/`,
 `cfc-agent-prompt-injection-demo/`, `cfc-authorized-save/`,
@@ -332,6 +332,30 @@ interface CounterOutput {
   value: number;
   increment: Stream<void>;
   decrement: Stream<void>;
+}
+```
+
+## `mappa-mundi/main.tsx`
+
+A read-only editorial document: the Common Fabric "mappa mundi". Five tabs (why
+the paradigm, the five promises, the three layers, what the Loom prototype has
+charted, and a 115-row concerns ledger) over static content in `content.ts`. The
+ledger's three orderings live in `ordering.ts` and are selected by a
+`computed()`; both `activeTab` and the sort mode are `perSession`. Keywords:
+document, tabs, reference, editorial, ledger.
+
+### Input Schema
+
+```ts
+// No inputs: the document's content is static.
+interface MappaMundiInput {}
+```
+
+### Output Schema
+
+```ts
+interface MappaMundiOutput {
+  activeTab: Writable<string>;
 }
 ```
 
