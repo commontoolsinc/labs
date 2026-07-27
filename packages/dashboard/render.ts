@@ -1,5 +1,6 @@
 // Uniform rendering: every tile becomes the same markup from its TileView, and
 // the shell wraps the grid + wide tiles in the dark page with the SSE client.
+import { sha256 } from "@noble/hashes/sha2.js";
 import type { TileView } from "./types.ts";
 import { durationTag, escapeHtml, STATUS_DOT } from "./lib.ts";
 import { REPO } from "./config.ts";
@@ -13,12 +14,13 @@ const FAVICON_PNG_HREFS = JSON.stringify({
   "bad-crying": faviconHref("bad-crying"),
 });
 const PAINT_STATUS_FAVICON = paintStatusFavicon.toString();
+const FAVICON_STATUSES: Record<FaviconStatus, FaviconStatus> = {
+  good: "good",
+  warn: "warn",
+  bad: "bad",
+};
 
 export const FAVICON_CRY_AFTER_MS = 60 * 60 * 1000;
-
-// Open dashboards reload when this changes. Increment it with shell markup,
-// styles, client code, or the update payload shape.
-export const SHELL_VERSION = 4;
 
 type ViewerTimeElement = Pick<HTMLTimeElement, "dateTime" | "textContent">;
 
@@ -75,12 +77,12 @@ export function renderTile(v: TileView, id?: string, wide = false): string {
   }"${tgt}>${inner}</a>`;
 }
 
-export function shell(
+function renderShell(
   gridHtml: string,
   wideHtml: string,
   ago: number,
   refreshMs: number,
-  shellVersion: number,
+  shellVersion: string,
   status: FaviconStatus,
   serverRedSince: number | null = null,
   serverRedAgeMs: number | null = null,
@@ -143,7 +145,7 @@ ${faviconLink(status)}
   <div id="dashboard-wide">${wideHtml}</div>
 <script>
   const REFRESH = ${refreshMs};
-  const SHELL_VERSION = ${shellVersion};
+  const SHELL_VERSION = ${JSON.stringify(shellVersion)};
   const COL = { green: '#43c574', amber: '#e0a852', red: '#e2504a' };
   const FAVICONS = ${FAVICON_PNG_HREFS};
   const FAVICON_CRY_AFTER_MS = ${FAVICON_CRY_AFTER_MS};
@@ -235,4 +237,67 @@ ${faviconLink(status)}
   paint();
   setInterval(paint, 1000);
 </script></body></html>`;
+}
+
+export function shellFingerprint(content: string): string {
+  const digest = sha256(new TextEncoder().encode(content));
+  const hex = Array.from(
+    digest,
+    (byte) => byte.toString(16).padStart(2, "0"),
+  ).join("");
+  return `sha256:${hex}`;
+}
+
+// Function source covers every renderer branch and the production wrapper.
+// Fixed rendered examples add the output of called helpers and assets. Live
+// values use placeholders because updates replace them without reloading.
+export function shellVersionContent(refreshMs: number): string {
+  return JSON.stringify({
+    renderShell: renderShell.toString(),
+    shell: shell.toString(),
+    representatives: Object.values(FAVICON_STATUSES).map((status) =>
+      renderShell(
+        "<!-- live grid -->",
+        "<!-- live wide tiles -->",
+        123,
+        refreshMs,
+        "__shell_version__",
+        status,
+        456,
+        789,
+      )
+    ),
+  });
+}
+
+const SHELL_VERSIONS = new Map<number, string>();
+
+export function shellVersion(refreshMs: number): string {
+  let version = SHELL_VERSIONS.get(refreshMs);
+  if (!version) {
+    version = shellFingerprint(shellVersionContent(refreshMs));
+    SHELL_VERSIONS.set(refreshMs, version);
+  }
+  return version;
+}
+
+export function shell(
+  gridHtml: string,
+  wideHtml: string,
+  ago: number,
+  refreshMs: number,
+  status: FaviconStatus,
+  serverRedSince: number | null = null,
+  serverRedAgeMs: number | null = null,
+): string {
+  return renderShell(
+    gridHtml,
+    wideHtml,
+    ago,
+    refreshMs,
+    shellVersion(refreshMs),
+    status,
+    serverRedSince,
+    serverRedAgeMs,
+  );
 }
