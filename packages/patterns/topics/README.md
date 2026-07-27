@@ -74,7 +74,13 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
 
 ## Headless / agent use
 
-Agents are first-class participants. Against a deployed board piece:
+Agents are first-class participants. **Deployed lag:** a live board can run an
+older pattern than this source — the Estuary team board does today — and an
+older schema silently discards fields it does not declare. Until a migration
+lands, `body`-at-create and the loud rejections described here may not be live
+on a given board; check `cf piece verbs`, whose listing carries the deployed
+pattern's source identity, before relying on either. Against a deployed board
+piece:
 
 ```bash
 cf piece call --piece <board> addTopic \
