@@ -418,6 +418,9 @@ export class FabricError extends FabricNativeWrapper<Error>
 }
 
 // Compile-time check that the exported `FabricError` constructor matches the
-// `FabricErrorConstructor` declared in `@commonfabric/api`. This catches drift
-// between the public type contract and this implementation.
+// `FabricErrorConstructor` declared in `@commonfabric/api`. This catches a
+// declared member that is missing here or has the wrong type. It does NOT
+// catch the other direction: `satisfies` is an assignability check, so a
+// public member on this class that the declaration omits passes silently.
+// Members added here need adding there by hand.
 FabricError satisfies ApiFabricErrorConstructor;

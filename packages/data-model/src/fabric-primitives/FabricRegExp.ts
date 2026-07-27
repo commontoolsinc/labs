@@ -202,6 +202,9 @@ function rejectExtraRegExpProperties(regex: RegExp): void {
 }
 
 // Compile-time check that the exported `FabricRegExp` constructor matches the
-// `FabricRegExpConstructor` declared in `@commonfabric/api`. This catches drift
-// between the public type contract and this implementation.
+// `FabricRegExpConstructor` declared in `@commonfabric/api`. This catches a
+// declared member that is missing here or has the wrong type. It does NOT
+// catch the other direction: `satisfies` is an assignability check, so a
+// public member on this class that the declaration omits passes silently.
+// Members added here need adding there by hand.
 FabricRegExp satisfies ApiFabricRegExpConstructor;
