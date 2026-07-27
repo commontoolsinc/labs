@@ -100,16 +100,10 @@ export interface TopicInput {
 }
 
 /**
- * A #topic — a durable unit of shared attention: a title, a living body
- * document, a flat chronological comment thread, and typed links out to other
- * core objects (PRs, agent sessions, other topics). Deliberately has no
- * status, labels, or assignees; what a topic grows next is part of the
- * experiment (CT-1878).
- */
-/**
- * The shared-safe projection stored in the tracker's list. Session-local UI
- * controls are intentionally excluded: a TopicPiece can be followed from a
- * shared list even when the viewer has no matching session-local cells.
+ * A sibling Topic as seen from another Topic: enough to render and navigate a
+ * crossref chip and to scan its prose for references, and deliberately not its
+ * own crossref graph. Keeping this projection non-recursive is what lets one
+ * Topic's schema describe its siblings without traversing the whole board.
  */
 export interface TopicReference {
   [NAME]: string;
@@ -133,9 +127,18 @@ export interface TopicReference {
 }
 
 /**
- * The board-facing Topic projection. Crossref targets deliberately use the
- * non-recursive TopicReference contract: a Topic needs enough sibling data to
- * render and navigate chips, not each sibling's entire crossref graph.
+ * A #topic — a durable unit of shared attention: a title, a living body
+ * document, a flat chronological comment thread, and typed links out to other
+ * core objects (PRs, agent sessions, other topics). Deliberately has no
+ * status, labels, or assignees; what a topic grows next is part of the
+ * experiment (CT-1878).
+ *
+ * This is the board-facing projection, and the one stored in the tracker's
+ * list. Session-local UI controls are intentionally excluded: a TopicPiece can
+ * be followed from a shared list even when the viewer has no matching
+ * session-local cells. Crossref targets deliberately use the non-recursive
+ * TopicReference contract: a Topic needs enough sibling data to render and
+ * navigate chips, not each sibling's entire crossref graph.
  */
 export interface TopicPiece extends TopicReference {
   /** This topic's own place in the board's prose graph, derived read-side
