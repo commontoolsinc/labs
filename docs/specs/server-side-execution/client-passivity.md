@@ -358,8 +358,60 @@ peeled three successive liveness layers — each fix exposing the next:
    the A24 demandGeneration candidate fence does NOT drop space-lane
    candidates (the space generation is a constant 0; only scoped lanes
    carry live generations).
-8. **Named residual (P0-R3c, the sole remaining claimsIssued>0
-   blocker): the demand-pull traversal scaler.** With the pump landed,
+8. **P0-R3c BUILT — the adaptive cold-refresh debounce.** (Diagnosis
+   below written first; the fix as landed:) the per-refresh attribution
+   probe overturned the never-held theory — **99.6% of the 562 cold
+   refreshes were `closure-growth`** (one watch 147×: every note-create
+   and content commit grows some watch's closure and re-ran its FULL
+   traversal). Fix: a demand-triggered cold refresh is rate-bounded
+   per watch by `COLD_REFRESH_DUTY(4) × its own last refresh cost`
+   (clamped [250ms, dial]), so each watch spends a bounded fraction of
+   wall time re-traversing regardless of commit rate. Growth events
+   inside the cooldown defer their notices via the FB13 carrier; a
+   tail timer guarantees the flush when no later wave retriggers;
+   wave-triggered re-colds (shrink/re-key/untracked-root — they carry
+   removes) bypass the debounce. TWO subtle bugs found red-first by
+   the new contract test: (a) the growth detector is deliberately
+   EDGE-triggered (old-vs-new target diff — the guard against
+   selector-cut links re-colding forever) and the debounced pass's
+   point update consumes the edge, so the deferral must carry an
+   explicit owed-traversal debt (`#owedColdRefresh`, cleared only when
+   the traversal runs, restored on refresh failure — the pre-existing
+   FB13 failure path had the same latent consumed-edge gap); (b) the
+   owed debt must merge into the cold set BEFORE the empty-wave early
+   return, because a deferred notice's retry produces neither point
+   tasks nor fresh cold marks. Dial:
+   `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_COLD_REFRESH_COOLDOWN_MAX_MS`
+   read lazily in the Worker realm (Workers inherit process env — the
+   CF_LOG_TIMING channel); unset/0 = legacy refresh-every-wave (the
+   whole existing provider suite pins that contract);
+   startServerExecutionPool defaults it to 2000 so server-primary
+   implies the debounce. New contract test: two in-cooldown growth
+   waves (the second RETARGETS the link) coalesce into ONE traversal
+   at the latest sequence — the retargeted-away doc never enters the
+   replica.
+
+   **Measurement-hygiene finding (P0-R3c epilogue, 2026-07-27):** three
+   consecutive harness failures (the notebook rapid-create test, 23s →
+   3m+ stalls) implicated the debounce until a dial=0 control ALSO
+   failed — the real driver was the acceptance toolshed's
+   **accumulated store** (`packages/toolshed/cache`, 5.7 GB across ~12
+   runs since 2026-07-17): a fresh store passed immediately, dial on.
+   Consequences: (a) every timing number in this log was measured
+   against a monotonically growing store — cross-run comparisons
+   (7.8s vs 40s first-candidate) partly reflect store growth, not just
+   client load; (b) the acceptance recipe gains a mandatory step:
+   stop servers, move/remove `packages/toolshed/cache`, THEN run —
+   every measured run starts from a fresh store (the P1/P6 protocol
+   inherits this); (c) the first fresh-store run shows the cold-cold
+   shape (fresh space + cold compile): first candidates at ~90s,
+   declining `not-owned[owned-missing]` — the lease correctly expired
+   with its demand long gone, so the n=20 fresh-store ladder is the
+   next measurement.
+
+   Original diagnosis (superseded in one respect — the dominant class
+   was growth, not never-held): the demand-pull traversal scaler.
+   With the pump landed,
    the n=20 rerun put a 27s demand window against a ~40s first pull —
    the pull cost SCALES with the same client load that defines the
    window, so the worker structurally loses the race on this harness.

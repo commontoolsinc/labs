@@ -838,6 +838,42 @@ class MessagePortTransport implements MemoryClient.Transport {
 // Instance identity prefers the RESOLVED scope key (present on every
 // C1.4b-and-later snapshot): two lanes' instances of one id must never
 // collide in the tracked-entity maps or the before/after diff.
+/** P0-R3c adaptive cold-refresh debounce (see the field docblock on
+ * HostReplicaSession): with the dial set, a watch spends a bounded
+ * fraction of wall time in demand-triggered full re-traversals — DUTY 4 ⇒
+ * a refresh that cost 500ms cannot re-run for 2s (clamped to [250ms,
+ * maxMs]). Correctness comes from the FB13 deferral + tail timer, not
+ * from these numbers; they only bound the traversal duty cycle.
+ *
+ * Enabled by the env dial (read LAZILY per session so tests can set it):
+ * `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_COLD_REFRESH_COOLDOWN_MAX_MS` —
+ * a positive integer enables with that max; `0`, unset, or malformed
+ * (ignored with a warning) keeps the legacy refresh-every-wave behavior.
+ * The executor Worker inherits the toolshed's env (the same channel
+ * CF_LOG_TIMING rides), and the pool-start path defaults the dial ON for
+ * server-primary deployments — see startServerExecutionPool. */
+const COLD_REFRESH_DUTY = 4;
+const COLD_REFRESH_COOLDOWN_MIN_MS = 250;
+const COLD_REFRESH_COOLDOWN_ENV =
+  "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_COLD_REFRESH_COOLDOWN_MAX_MS";
+
+const coldRefreshCooldownMaxMs = (): number => {
+  try {
+    const raw = Deno.env.get(COLD_REFRESH_COOLDOWN_ENV);
+    if (raw === undefined || raw === "0") return 0;
+    if (/^\d+$/.test(raw)) return Number(raw);
+    console.warn(
+      `[executor] Ignoring ${COLD_REFRESH_COOLDOWN_ENV}=${
+        JSON.stringify(raw)
+      } — expected a non-negative integer (ms).`,
+    );
+    return 0;
+  } catch {
+    // No env permission in this realm: legacy behavior.
+    return 0;
+  }
+};
+
 const snapshotKey = (snapshot: {
   branch: string;
   id: string;
@@ -966,6 +1002,40 @@ class HostReplicaSession implements ReplicaSession {
    * anything integrate trivially). */
   #deferredAcceptedCommits: AcceptedCommitNotice[] = [];
   #acceptedCommitDeliveryScheduled = false;
+  /** P0-R3c cold-refresh debounce (client-passivity plan §5b item 8):
+   * closure GROWTH re-runs a watch's FULL cold traversal, and on the real
+   * workload growth arrives with every commit (a note-create per ~1-2s), so
+   * one watch re-traversed 147× in a single n=20 run — 99.6% of the
+   * executor replica's 858 stateless demand traversals were growth-class,
+   * and their aggregate engine time is what pushed first-pull past the
+   * demanding page's lifetime. A watch's demand-triggered cold refresh is
+   * therefore rate-bounded ADAPTIVELY: it cannot re-run within
+   * `COLD_REFRESH_DUTY × its own last refresh cost` (clamped), so each
+   * watch spends a bounded fraction of wall time re-traversing no matter
+   * how fast its closure grows. Growth events inside the window defer
+   * their notices through the FB13 carrier (nothing lost — the growth
+   * condition is LEVEL-triggered, re-derived from held state on retry) and
+   * a timer guarantees the tail flush when no later wave retriggers.
+   * Wave-triggered re-colds (shrink, resolution re-key, untracked root)
+   * BYPASS the debounce: they carry removes/re-keys that must not delay.
+   */
+  #coldRefreshLastAt = new Map<string, number>();
+  #coldRefreshCostMs = new Map<string, number>();
+  /** Watches that OWE a cold traversal deferred by the cooldown. The
+   * growth detector is deliberately edge-triggered (old-vs-new target
+   * diff — the guard against selector-cut links re-colding forever), and
+   * the debounced pass still applies the parent's point update, which
+   * consumes that edge: the retry pass would classify the wave as steady
+   * and the grown subtree would never be traversed. This map turns the
+   * consumed edge back into a level: set when a demand re-cold is
+   * debounced, merged into every later pass's cold set, and cleared only
+   * when the traversal actually runs (or the watch is gone). */
+  #owedColdRefresh = new Map<string, GraphQueryTrigger>();
+  #deferredColdFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 0 = debounce disabled (legacy refresh-every-wave). Read once per
+   * session at construction — the dial names a deployment posture, not a
+   * live tunable. */
+  readonly #coldRefreshCooldownMaxMs = coldRefreshCooldownMaxMs();
   #schedulerDeliverySeq: number;
   #executionDeliverySeq: number;
   #pendingExecutionEvents: ExecutionControlEvent[] = [];
@@ -1438,7 +1508,15 @@ class HostReplicaSession implements ReplicaSession {
     // "wave" wins when one wave produces both causes for a watch — the F2
     // floor signal must not be hidden under a coincident growth.
     const coldWatches = new Map<string, GraphQueryTrigger>();
-    const markCold = (watchId: string, trigger: GraphQueryTrigger) => {
+    const coldReasons = new Map<string, string>();
+    const markCold = (
+      watchId: string,
+      trigger: GraphQueryTrigger,
+      reason?: string,
+    ) => {
+      if (reason !== undefined && !coldReasons.has(watchId)) {
+        coldReasons.set(watchId, reason);
+      }
       if (trigger === "wave" || !coldWatches.has(watchId)) {
         coldWatches.set(watchId, trigger);
       }
@@ -1457,7 +1535,9 @@ class HostReplicaSession implements ReplicaSession {
       if (held === undefined) {
         // Registration never completed a pull; a named root is a cold repull
         // — the first-demand pull retrying, so demand-attributed.
-        if (watch.query.roots.some(rootDirty)) markCold(watchId, "demand");
+        if (watch.query.roots.some(rootDirty)) {
+          markCold(watchId, "demand", "never-held-retry");
+        }
         continue;
       }
       const heldDeclared = new Set(
@@ -1471,7 +1551,7 @@ class HostReplicaSession implements ReplicaSession {
       ) {
         // A wave names a root this watch does not track even as an absent
         // snapshot: only a traversal can (re)establish the closure.
-        markCold(watchId, "wave");
+        markCold(watchId, "wave", "untracked-root");
         continue;
       }
       for (const snapshot of held.values()) {
@@ -1500,6 +1580,23 @@ class HostReplicaSession implements ReplicaSession {
           expected: snapshot,
           watchIds: [watchId],
         });
+      }
+    }
+
+    // P0-R3c: owed traversals from earlier debounced (or failed) passes
+    // re-enter the cold set here, BEFORE the empty-wave early return — a
+    // deferred growth notice's retry produces neither point tasks (its
+    // revisions already match the held snapshots the debounced pass point-
+    // updated) nor fresh cold marks (the growth edge was consumed), so the
+    // owed map is the only thing carrying the traversal debt into this
+    // pass. Cooldown gating below may debounce it again.
+    if (this.#coldRefreshCooldownMaxMs > 0 && this.#owedColdRefresh.size > 0) {
+      for (const [watchId, trigger] of this.#owedColdRefresh) {
+        if (this.#watches.get(watchId) === undefined) {
+          this.#owedColdRefresh.delete(watchId);
+          continue;
+        }
+        if (!coldWatches.has(watchId)) coldWatches.set(watchId, trigger);
       }
     }
 
@@ -1586,7 +1683,9 @@ class HostReplicaSession implements ReplicaSession {
           );
           if (snapshot === undefined) {
             // Resolution moved under us (FA6): the wave forces the re-key.
-            for (const watchId of task.watchIds) markCold(watchId, "wave");
+            for (const watchId of task.watchIds) {
+              markCold(watchId, "wave", "resolution-rekey");
+            }
             continue;
           }
           steady.push({ task, snapshot });
@@ -1637,7 +1736,9 @@ class HostReplicaSession implements ReplicaSession {
       }
       if (shrank) {
         // Shrink removes flow only from a traversal: wave-forced (FB12).
-        for (const watchId of task.watchIds) markCold(watchId, "wave");
+        for (const watchId of task.watchIds) {
+          markCold(watchId, "wave", "closure-shrink");
+        }
         continue;
       }
       const steadyWatchIds: string[] = [];
@@ -1652,7 +1753,7 @@ class HostReplicaSession implements ReplicaSession {
         }
         // Growth admits a NEW doc: demand-triggered (FA5's new-doc
         // closure-growth class), bounded to one query per cold event.
-        if (grew) markCold(watchId, "demand");
+        if (grew) markCold(watchId, "demand", "closure-growth");
         else steadyWatchIds.push(watchId);
       }
       if (steadyWatchIds.length > 0) {
@@ -1689,11 +1790,21 @@ class HostReplicaSession implements ReplicaSession {
     // watermark comment above they are not completeness proofs — the
     // deferred notices themselves carry the retry.
     const settleBlockedNotices = (): AcceptedCommitNotice[] => {
-      if (failedTasks.length === 0 && failedColdWatchIds.size === 0) {
+      if (
+        failedTasks.length === 0 && failedColdWatchIds.size === 0 &&
+        debouncedColdWatchIds.size === 0
+      ) {
         return accepted;
       }
+      // P0-R3c: a debounced watch's notices defer exactly like a failed
+      // cold refresh's — the growth condition is level-triggered, so the
+      // retry (next wave, or the cooldown timer) re-derives it and runs
+      // the traversal once the window lapses.
+      const blockedWatchIds = failedColdWatchIds.size === 0
+        ? debouncedColdWatchIds
+        : new Set([...failedColdWatchIds, ...debouncedColdWatchIds]);
       const blockedByFailedWatch = (declared: string): boolean => {
-        for (const watchId of failedColdWatchIds) {
+        for (const watchId of blockedWatchIds) {
           const watch = this.#watches.get(watchId);
           if (
             watch?.query.roots.some((root) =>
@@ -1726,7 +1837,58 @@ class HostReplicaSession implements ReplicaSession {
       return integrated;
     };
 
+    // P0-R3c adaptive debounce: a demand-triggered cold refresh (closure
+    // growth, first-pull retry) re-runs only after this watch's cooldown —
+    // COLD_REFRESH_DUTY × its own last refresh cost, clamped — has lapsed.
+    // Debounced watches keep their notices via the FB13 deferral below and
+    // a timer re-triggers delivery at the earliest cooldown expiry, so a
+    // quiet tail still flushes. Wave-triggered re-colds (shrink/re-key/
+    // untracked-root carry removes and re-keys) always run now.
+    const debouncedColdWatchIds = new Set<string>();
+    if (this.#coldRefreshCooldownMaxMs > 0) {
+      const now = Date.now();
+      let earliestReadyMs = Infinity;
+      for (const [watchId, trigger] of coldWatches) {
+        if (trigger !== "demand") continue;
+        const lastAt = this.#coldRefreshLastAt.get(watchId);
+        if (lastAt === undefined) continue;
+        const cooldownMs = Math.min(
+          this.#coldRefreshCooldownMaxMs,
+          Math.max(
+            COLD_REFRESH_COOLDOWN_MIN_MS,
+            COLD_REFRESH_DUTY * (this.#coldRefreshCostMs.get(watchId) ?? 0),
+          ),
+        );
+        const readyInMs = lastAt + cooldownMs - now;
+        if (readyInMs <= 0) continue;
+        coldWatches.delete(watchId);
+        debouncedColdWatchIds.add(watchId);
+        this.#owedColdRefresh.set(watchId, trigger);
+        earliestReadyMs = Math.min(earliestReadyMs, readyInMs);
+      }
+      // Every watch that stays cold gets its traversal NOW — the debt is
+      // paid the moment refreshWatches below runs it.
+      for (const watchId of coldWatches.keys()) {
+        this.#owedColdRefresh.delete(watchId);
+      }
+      if (
+        debouncedColdWatchIds.size > 0 && Number.isFinite(earliestReadyMs)
+      ) {
+        this.#scheduleDeferredColdFlush(earliestReadyMs);
+      }
+    }
     if (coldWatches.size > 0) {
+      // Permanent attribution: one line per ACTUAL cold traversal (bounded
+      // by the debounce), naming its class — the P0-R3c probe that located
+      // the 147×-per-watch growth amplification stays as observability.
+      for (const [watchId, trigger] of coldWatches) {
+        console.debug(
+          "executor cold refresh:",
+          trigger,
+          coldReasons.get(watchId) ?? "unknown",
+          watchId,
+        );
+      }
       const before = this.allEntities();
       applyPointUpdates();
       // Cold path (unchanged semantics): closure growth, shrink, unresolved
@@ -1742,6 +1904,13 @@ class HostReplicaSession implements ReplicaSession {
         coldWatches,
         (watchId, error) => {
           failedColdWatchIds.add(watchId);
+          // A failed refresh did NOT pay the traversal debt — restore it
+          // so the FB13 retry re-runs the traversal instead of
+          // re-deriving a consumed growth edge as steady.
+          this.#owedColdRefresh.set(
+            watchId,
+            coldWatches.get(watchId) ?? "demand",
+          );
           console.warn(
             "executor accepted-commit cold refresh failed; deferring",
             watchId,
@@ -1881,6 +2050,28 @@ class HostReplicaSession implements ReplicaSession {
     this.#pendingAcceptedCommits.length = 0;
     this.#pendingExecutionEvents.length = 0;
     this.#pendingExecutionBatches.length = 0;
+    if (this.#deferredColdFlushTimer !== null) {
+      clearTimeout(this.#deferredColdFlushTimer);
+      this.#deferredColdFlushTimer = null;
+    }
+  }
+
+  /** P0-R3c: guarantee the debounce tail — when growth notices were
+   * deferred inside a watch's cooldown and NO later wave arrives to retry
+   * them, this timer re-triggers delivery (deferred queue included) at the
+   * earliest cooldown expiry. First-armed wins (a later, sooner request
+   * rides the armed timer's firing: the retry pass re-debounces whatever
+   * is still cooling and re-arms); a firing with nothing deferred is a
+   * no-op schedule. */
+  #scheduleDeferredColdFlush(delayMs: number): void {
+    if (this.#closed) return;
+    const delay = Math.max(1, Math.ceil(delayMs));
+    if (this.#deferredColdFlushTimer !== null) return;
+    this.#deferredColdFlushTimer = setTimeout(() => {
+      this.#deferredColdFlushTimer = null;
+      if (this.#closed) return;
+      this.scheduleAcceptedCommitDelivery(true);
+    }, delay);
   }
 
   private async adoptionObservations(
@@ -1947,6 +2138,7 @@ class HostReplicaSession implements ReplicaSession {
       const watchTrigger = typeof trigger === "string"
         ? trigger
         : trigger?.get(watchId);
+      const startedAt = Date.now();
       let result;
       try {
         result = await this.queryGraph(
@@ -1966,6 +2158,12 @@ class HostReplicaSession implements ReplicaSession {
         onError(watchId, error);
         continue;
       }
+      // P0-R3c: the refresh cost feeds this watch's adaptive debounce
+      // window (any full refresh is a valid estimate, registration pulls
+      // included).
+      const finishedAt = Date.now();
+      this.#coldRefreshLastAt.set(watchId, finishedAt);
+      this.#coldRefreshCostMs.set(watchId, finishedAt - startedAt);
       if (atSeq === undefined) {
         this.#appliedSeq = Math.max(this.#appliedSeq, result.serverSeq);
       }

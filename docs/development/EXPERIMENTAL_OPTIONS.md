@@ -570,6 +570,23 @@ propagate](#how-flags-propagate).
   default loses to real cold-start on a loaded dev machine (the
   2026-07-26 acceptance run failed both starts at exactly 30s with boot
   completing moments later). Also bounds claimed-action activation.
+- **Companion knob (P0-R3c).**
+  `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_COLD_REFRESH_COOLDOWN_MAX_MS`
+  (same strict integer parse; `0`/unset = legacy refresh-every-wave):
+  the executor replica's adaptive cold-refresh debounce ceiling, read
+  LAZILY in the Worker realm by
+  [`packages/runner/src/storage/v2-host-provider.ts`](../../packages/runner/src/storage/v2-host-provider.ts)
+  (Workers inherit the toolshed process env — the CF_LOG_TIMING
+  channel). `startServerExecutionPool` defaults it to `2000` before any
+  Worker spawns, so server-primary implies the debounce. A
+  demand-triggered (closure-growth) cold refresh cannot re-run for a
+  watch within `4 × its own last refresh cost` (clamped to [250ms,
+  this dial]); growth waves inside the window defer through the FB13
+  deferred-notice carrier and a tail timer flushes them. Measured
+  motivation: 99.6% of one n=20 run's 562 executor cold traversals
+  were closure-growth (one watch 147×), and their aggregate engine
+  time pushed cold start-to-claim-ready past the demanding page's
+  lifetime.
 - **Removal.** Fold calibrated fixed values into `serverPrimaryExecution`
   once P1 measures Worker cold-start and navigation-blip distributions.
 

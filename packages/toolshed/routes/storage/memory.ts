@@ -131,6 +131,17 @@ export function startServerExecutionPool(runtime: Runtime): void {
     executionPool !== null ||
     runtime.experimental.serverPrimaryExecution !== true
   ) return;
+  // P0-R3c: the executor replica's cold-refresh debounce defaults ON for
+  // server-primary deployments. The dial lives in the WORKER realm
+  // (v2-host-provider reads it lazily; Workers inherit this process's
+  // env — the same channel CF_LOG_TIMING rides), so defaulting it here —
+  // before any Worker spawns — makes server-primary imply the debounce
+  // while `...=0` still restores the legacy refresh-every-wave behavior.
+  const coldRefreshEnv =
+    "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_COLD_REFRESH_COOLDOWN_MAX_MS";
+  if (Deno.env.get(coldRefreshEnv) === undefined) {
+    Deno.env.set(coldRefreshEnv, "2000");
+  }
   executionPool = new SharedExecutionPool({
     control: memoryServer,
     demandGraceMs: demandGraceMsFromEnv(),

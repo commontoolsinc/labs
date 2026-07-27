@@ -519,6 +519,103 @@ Deno.test("executor provider attributes cold graph queries: first-demand and clo
   }
 });
 
+// P0-R3c: with the cooldown dial set, demand-triggered (closure-growth)
+// cold refreshes are rate-bounded per watch — growth waves inside the
+// cooldown defer through the FB13 carrier and the tail timer flushes them
+// with ONE traversal, so a commit-per-second client cannot make the
+// executor replica re-traverse its whole closure per commit (the measured
+// 147×-per-watch amplification behind P0-R3c). Every other test in this
+// file runs with the dial unset and pins the legacy refresh-every-wave
+// contract — the pair is mutation-discriminating.
+Deno.test("executor provider coalesces growth cold refreshes under the cooldown dial", async () => {
+  Deno.env.set(
+    "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_COLD_REFRESH_COOLDOWN_MAX_MS",
+    "2000",
+  );
+  let fixture: Awaited<ReturnType<typeof setUpLinkedClosure>> | undefined;
+  try {
+    fixture = await setUpLinkedClosure();
+    const { server, storage, provider, writerTransact, space, root } = fixture;
+    const extraOne = "of:executor-point-reads:debounce-one" as URI;
+    const extraTwo = "of:executor-point-reads:debounce-two" as URI;
+    const graphQueriesBefore = server.graphQueryCount;
+    // Two growth waves in quick succession — both inside the watch's
+    // cooldown (its registration refresh just ran). The second RETARGETS
+    // the grown link, so the coalesced flush must reflect the LATEST
+    // topology, not replay the first wave's.
+    await writerTransact([
+      {
+        op: "set",
+        id: root,
+        value: {
+          value: {
+            child: linkTo(fixture.target, space),
+            extra: linkTo(extraOne, space),
+          },
+        },
+      },
+      { op: "set", id: extraOne, value: { value: { version: 1 } } },
+    ]);
+    await writerTransact([
+      {
+        op: "set",
+        id: root,
+        value: {
+          value: {
+            child: linkTo(fixture.target, space),
+            extra: linkTo(extraTwo, space),
+          },
+        },
+      },
+      { op: "set", id: extraTwo, value: { value: { version: 1 } } },
+    ]);
+    await storage.acceptedCommitsSettled();
+    assertEquals(
+      server.graphQueryCount - graphQueriesBefore,
+      0,
+      "growth inside the cooldown defers instead of traversing",
+    );
+    assertEquals(
+      provider.replica.get({
+        id: extraOne,
+        type: "application/json" as MIME,
+      }),
+      undefined,
+      "a grown target is not integrated until the cooldown flush",
+    );
+    // The tail timer (min cooldown, no later wave needed) flushes the
+    // deferred growth with ONE traversal at the latest sequence.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await storage.acceptedCommitsSettled();
+    assertEquals(
+      provider.replica.get({
+        id: extraTwo,
+        type: "application/json" as MIME,
+      })?.is,
+      { value: { version: 1 } },
+      "the latest grown target integrates at the flush",
+    );
+    assertEquals(
+      provider.replica.get({
+        id: extraOne,
+        type: "application/json" as MIME,
+      }),
+      undefined,
+      "the retargeted-away first target never enters the replica",
+    );
+    assertEquals(
+      server.graphQueryCount - graphQueriesBefore,
+      1,
+      "both growth waves coalesce into one traversal",
+    );
+  } finally {
+    Deno.env.delete(
+      "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_COLD_REFRESH_COOLDOWN_MAX_MS",
+    );
+    await fixture?.close();
+  }
+});
+
 Deno.test("executor provider steady wave delivers when the global watermark already covers it", async () => {
   const fixture = await setUpLinkedClosure();
   const { server, storage, provider, writerTransact, target, targetAddress } =
