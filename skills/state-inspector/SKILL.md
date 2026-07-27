@@ -144,6 +144,16 @@ fixed recipe. The recurring debugging questions and where they resolve:
   `setsrc` on a populated space; `--bucket`/`--since`/`--until` frame the
   window. It reports rates and never judges them — what counts as "settled" is
   yours to decide.
+- _"Did a migration preserve this space's content?"_ → `cf space` (a sibling
+  command, not `inspect` — a clone exists to be written to, so it lives outside
+  inspect's read-only contract). `cf space clone <did> --from <snapshot> --to
+  <dir>` builds a writable rehearsal copy plus a manifest; `verify` reports
+  whether durable content still matches the baseline (exiting nonzero when it
+  does not) and `reset` restores it for the next attempt.
+  `cf space fingerprint <space>` runs the content check alone against any store.
+  Compiler-generated internal cells are excluded by default: a pattern update
+  rotates their identities on purpose, so counting them would change the
+  fingerprint on every legitimate migration.
 - _"Is this entity the same across spaces / did a replica drift?"_ →
   `converge <id>
   --all` / `converge-scan --all`, trusting the
