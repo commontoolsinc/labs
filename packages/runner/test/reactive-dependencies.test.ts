@@ -9,6 +9,7 @@ import {
 } from "../src/reactive-dependencies.ts";
 import type { Action, SpaceScopeAndURI } from "../src/scheduler.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { FabricMap } from "@commonfabric/data-model/fabric-instances";
 import type {
   IMemorySpaceAddress,
   MemoryAddressPathComponent,
@@ -1960,6 +1961,31 @@ describe("determineTriggeredActions", () => {
         before as FabricValue,
         after as FabricValue,
         ["value", "a", "added"],
+        { nonRecursive: true },
+      );
+      expect(result).toEqual([action]);
+    });
+
+    // A non-recursive read compares an opaque leaf by value, and not every
+    // fabric class can answer that: `FabricMap` and `FabricSet` are protocol
+    // stubs whose comparison throws. Change detection has to survive one
+    // arriving rather than propagating the failure into the scheduler, so it
+    // reports a change instead -- a redundant re-evaluation, never a silent
+    // miss. `FabricMap` stands in here for any value whose comparison is
+    // unavailable, whatever the reason.
+    it("triggers rather than throwing on a value it cannot compare", () => {
+      const action = createAction("nonRecursiveUncomparableLeaf");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a"]]],
+      ]);
+      const before = { value: { a: new FabricMap(new Map([["k", 1]])) } };
+      const after = { value: { a: new FabricMap(new Map([["k", 2]])) } };
+
+      const result = determineTriggeredActions(
+        dependencies,
+        before as unknown as FabricValue,
+        after as unknown as FabricValue,
+        ["value", "a"],
         { nonRecursive: true },
       );
       expect(result).toEqual([action]);

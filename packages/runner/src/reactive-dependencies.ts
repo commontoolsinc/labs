@@ -1,6 +1,5 @@
 import { isPlainContainer, isRecord } from "@commonfabric/utils/types";
 import {
-  FabricSpecialObject,
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
@@ -315,42 +314,29 @@ function shallowEqual(
  * Compares two opaque leaf values. Defined for every input, including ones
  * outside `FabricValue` that reach here despite the declared parameter types.
  *
- * Anything not known to be comparable falls back to identity. Identity errs
- * toward reporting a change, which costs at worst a redundant re-evaluation;
- * the opposite error — reporting "unchanged" for something that changed — is
- * silent, and is the one this function exists to avoid.
+ * Anything `valueEqual()` turns out not to answer for is compared by identity
+ * instead. Identity errs toward reporting a change, which costs at worst a
+ * redundant re-evaluation; the opposite error — reporting "unchanged" for
+ * something that changed — is silent, and is the one this function exists to
+ * avoid.
  */
 function leafEqual(before: FabricValue, after: FabricValue): boolean {
   if (Object.is(before, after)) return true;
 
-  if (!isValueComparable(before) || !isValueComparable(after)) {
+  try {
+    return valueEqual(before, after);
+  } catch {
+    // `valueEqual()` refuses some values outright — a `Date`, a `Map`, a
+    // function — and for some fabric classes its comparison is not written
+    // yet. Neither is predictable from a value's type: whether it is frozen
+    // decides the first, and which classes are finished decides the second.
+    // So this doesn't try to predict them; it just declines to be surprised.
+    //
+    // Reporting a change is the safe answer. It costs a redundant
+    // re-evaluation, where reporting "unchanged" for something that did change
+    // is silent — the failure this whole function exists to prevent.
     return false;
   }
-
-  return valueEqual(before, after);
-}
-
-/**
- * Returns true if `value` is one of the shapes `objectSubtypeOf()` classifies
- * in the `data-model` `valueEqual` module: a primitive, a plain container, or
- * a `FabricSpecialObject`. Functions are excluded, since `valueEqual()` turns
- * them away before classifying anything.
- *
- * This is deliberately narrower than everything `valueEqual()` will answer. A
- * frozen value routes to a hash comparison that skips the subtype check, so
- * whether a given type is accepted depends on whether that particular value is
- * frozen rather than on the type itself — not a stable thing to depend on.
- * Anything outside the classified shapes is treated as not comparable and
- * compared by identity instead, which is the conservative direction.
- */
-function isValueComparable(value: unknown): boolean {
-  // Rejected before any classification happens.
-  if (typeof value === "function") return false;
-
-  // Primitives, which `valueEqual()` settles directly.
-  if (typeof value !== "object" || value === null) return true;
-
-  return isPlainContainer(value) || value instanceof FabricSpecialObject;
 }
 
 function comparePaths(
