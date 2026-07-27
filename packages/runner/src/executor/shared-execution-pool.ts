@@ -184,6 +184,23 @@ export interface SharedExecutionPoolOptions {
   crashBackoffMaxMs?: number;
   /** Maximum graceful-settle window before the generation is fenced. */
   settleTimeoutMs?: number;
+  /**
+   * P0 of the client-passivity plan (CP12/CP14/CP26): how long a lane
+   * tolerates EMPTY demand before it aborts an in-flight Worker start or
+   * drains a live Worker. The real browser client clears execution demand
+   * on every navigation transition, and navigation cadence beats Worker
+   * cold-start — with no grace the pool converges to never-live under the
+   * real workload (measured 2026-07-26: 15 demand snapshots, 2 start
+   * attempts, both aborted, zero Workers). The window is POOL-SIDE
+   * START/STOP DAMPING ONLY: host-side authority (lease sponsorship, lane
+   * grants) keeps its own session-anchored lifecycle, so a genuinely
+   * departed session's claims still fence host-side regardless of this
+   * value; the grace only bounds how long a Worker outlives demand
+   * (departure parity: stop ≤ grace + settle). Default 0 = byte-identical
+   * legacy behavior (immediate abort/drain); the production value is set
+   * at the construction site (the rollout dial).
+   */
+  demandGraceMs?: number;
 }
 
 export interface SpaceExecutionSnapshot {
@@ -230,6 +247,16 @@ export interface ExecutionPoolMetricsSnapshot {
   readonly acceptedCommitIndexDecisions: number;
   /** Exact-lane host-index results with no stale demanded readers. */
   readonly suppressedUnrelatedCommits: number;
+  /** Demand blips (empty→non-empty inside the grace window) absorbed
+   * without aborting a start or draining a Worker (P0). */
+  readonly demandGraceBlipsAbsorbed: number;
+  /** Grace windows that expired with demand still empty — the lane then
+   * drained exactly as the legacy path would have (departure). */
+  readonly demandGraceExpiries: number;
+  /** Accumulated milliseconds a LIVE Worker spent inside empty-demand
+   * grace windows — the keep-warm cost of the grace dial (P0b), reported
+   * against the context-lattice §4 cost-honesty budget. */
+  readonly demandGraceIdleWorkerMs: number;
   /** Coalesced reconciliation passes queued for indexed-relevant
    * executor-null/draining lanes. */
   readonly parkedWakeAttempts: number;
@@ -316,6 +343,12 @@ type Slot = {
    * SEPARATE from the home wake's seq bookkeeping: foreign wakes carry
    * read-space seqs and never touch `pendingWakeSeq`/`lastSettledSeq`. */
   foreignWakeQueued: boolean;
+  /** When the lane's demand last became empty, or null while demanded.
+   * Non-null means the P0 grace window is open (or expired, pending its
+   * drain); cleared on demand return (blip absorbed) and at drain. */
+  demandEmptyAt: number | null;
+  /** The armed grace-expiry timer, cleared on blip/drain/close. */
+  demandGraceTimer: number | null;
   /** Open user lanes keyed by lane principal (C1.8). Grants survive Worker
    * generation replacement; the wire re-delivers them at startup. */
   userLanes: Map<string, SlotUserLane>;
@@ -362,6 +395,7 @@ export class SharedExecutionPool {
   readonly #crashBackoffBaseMs: number;
   readonly #crashBackoffMaxMs: number;
   readonly #settleTimeoutMs: number;
+  readonly #demandGraceMs: number;
   readonly #slots = new Map<string, Slot>();
   readonly #tasks = new Set<Promise<void>>();
   readonly #retiredExecutionPlacement = {
@@ -390,6 +424,9 @@ export class SharedExecutionPool {
     foreignWakeNotifications: 0,
     foreignWakeAttempts: 0,
     demandEmptyHibernations: 0,
+    demandGraceBlipsAbsorbed: 0,
+    demandGraceExpiries: 0,
+    demandGraceIdleWorkerMs: 0,
     userLanesOpened: 0,
     userLanesClosed: 0,
     userLaneReanchors: 0,
@@ -419,6 +456,7 @@ export class SharedExecutionPool {
     // backoff prevents a bad graph or host dependency from hot-spinning.
     this.#crashBackoffBaseMs = options.crashBackoffBaseMs ?? 1_000;
     this.#crashBackoffMaxMs = options.crashBackoffMaxMs ?? 30_000;
+    this.#demandGraceMs = Math.max(0, options.demandGraceMs ?? 0);
     // Graceful drain may legitimately stop making progress. At this safety
     // bound we fence the lease and recompute from durable state; the cost is
     // redundant work, never acceptance under expired authority.
@@ -550,6 +588,7 @@ export class SharedExecutionPool {
     for (const slot of this.#slots.values()) {
       this.#unsubscribeAcceptedCommits(slot);
       slot.startupAbort?.abort(new Error("execution pool is closing"));
+      this.#clearDemandGrace(slot);
     }
     await this.idle();
     const stops = [...this.#slots.values()].map((slot) =>
@@ -593,6 +632,8 @@ export class SharedExecutionPool {
         pendingWakeStartedAt: null,
         acceptedWakeQueued: false,
         foreignWakeQueued: false,
+        demandEmptyAt: null,
+        demandGraceTimer: null,
         userLanes: new Map(),
         sessionLanes: new Map(),
         lanesWired: false,
@@ -625,9 +666,57 @@ export class SharedExecutionPool {
     slot.order = snapshot.order;
     slot.demands = snapshot.demands;
     if (snapshot.demands.length === 0) {
+      // P0 grace (client-passivity plan): defer both the in-flight-start
+      // abort and the drain reconcile — the browser clears demand on every
+      // navigation transition, and killing the start on each blip left the
+      // pool permanently Worker-less under the real workload. The expiry
+      // timer runs the drain if demand stays empty; a returning snapshot
+      // absorbs the blip below. Grace 0 keeps the legacy immediate abort.
+      if (this.#demandGraceMs > 0) {
+        if (slot.demandEmptyAt === null) {
+          slot.demandEmptyAt = this.#now();
+          slot.demandGraceTimer = this.#setTimer(() => {
+            slot.demandGraceTimer = null;
+            if (this.#closed || this.#slots.get(slot.key) !== slot) return;
+            void this.#enqueue(slot, () => this.#reconcile(slot));
+          }, this.#demandGraceMs);
+        }
+        return slot.tail;
+      }
       slot.startupAbort?.abort(new Error("execution demand was removed"));
+    } else if (slot.demandEmptyAt !== null) {
+      // Demand returned inside the grace window: the blip is absorbed —
+      // the in-flight start (or live Worker) survives untouched.
+      this.#accrueDemandGraceIdle(slot);
+      this.#metrics.demandGraceBlipsAbsorbed++;
+      this.#clearDemandGrace(slot);
     }
     return this.#enqueue(slot, () => this.#reconcile(slot));
+  }
+
+  /** Whether the lane's empty demand is still inside the grace window. */
+  #withinDemandGrace(slot: Slot): boolean {
+    return slot.demandEmptyAt !== null &&
+      this.#now() - slot.demandEmptyAt < this.#demandGraceMs;
+  }
+
+  /** P0b keep-warm accounting: milliseconds a LIVE Worker sat in the
+   * just-closing empty-demand window. */
+  #accrueDemandGraceIdle(slot: Slot): void {
+    if (slot.demandEmptyAt !== null && slot.executor !== null) {
+      this.#metrics.demandGraceIdleWorkerMs += Math.max(
+        0,
+        this.#now() - slot.demandEmptyAt,
+      );
+    }
+  }
+
+  #clearDemandGrace(slot: Slot): void {
+    if (slot.demandGraceTimer !== null) {
+      this.#clearTimer(slot.demandGraceTimer);
+      slot.demandGraceTimer = null;
+    }
+    slot.demandEmptyAt = null;
   }
 
   #acceptAcceptedCommit(
@@ -773,6 +862,7 @@ export class SharedExecutionPool {
   #removeSlot(slot: Slot): void {
     if (this.#slots.get(slot.key) !== slot) return;
     this.#unsubscribeAcceptedCommits(slot);
+    this.#clearDemandGrace(slot);
     this.#slots.delete(slot.key);
   }
 
@@ -1120,7 +1210,19 @@ export class SharedExecutionPool {
   async #reconcile(slot: Slot): Promise<void> {
     if (this.#closed && slot.executor === null && slot.lease === null) return;
     const nextPieces = unionPieces(slot.demands);
-    if (slot.demands.length === 0 || nextPieces.length === 0 || this.#closed) {
+    const demandGone = slot.demands.length === 0 || nextPieces.length === 0;
+    // P0 grace: while the window is open, an empty-demand reconcile is a
+    // no-op — the in-flight start keeps starting, a live Worker stays up.
+    // The expiry timer re-runs this reconcile; by then either demand
+    // returned (blip absorbed at the snapshot site) or the window lapsed
+    // and the legacy drain below runs (departure).
+    if (demandGone && !this.#closed && this.#withinDemandGrace(slot)) return;
+    if (demandGone || this.#closed) {
+      if (slot.demandEmptyAt !== null) {
+        this.#accrueDemandGraceIdle(slot);
+        this.#metrics.demandGraceExpiries++;
+        this.#clearDemandGrace(slot);
+      }
       const drainOrder = slot.order;
       const hibernateStartedAt = performance.now();
       this.#cancelBackoff(slot);

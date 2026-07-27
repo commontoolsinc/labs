@@ -83,6 +83,29 @@ setServerExecutionPoolMetricsProvider(serverExecutionPoolMetrics);
 setServerExecutionControlMetricsProvider(() => memoryServer.executionStats);
 setServerExecutionFeedMetricsProvider(() => memoryServer.feedStats);
 
+/** P0 (client-passivity plan): the demand grace window's production value.
+ * The browser client clears execution demand on every navigation
+ * transition; without grace those blips abort in-flight Worker starts and
+ * the pool converges to never-live under real navigation cadence (the
+ * 2026-07-26 dead-executor finding). 10s default comfortably exceeds the
+ * observed Worker cold-start; P1 calibrates it from measured data. The
+ * env accepts a non-negative integer millisecond count; anything else is
+ * ignored WITH a warning (never coerced), matching the canonical env
+ * strictness. `0` restores the legacy immediate abort/drain. */
+function demandGraceMsFromEnv(): number {
+  const DEFAULT_DEMAND_GRACE_MS = 10_000;
+  const raw = Deno.env.get(
+    "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DEMAND_GRACE_MS",
+  );
+  if (raw === undefined) return DEFAULT_DEMAND_GRACE_MS;
+  if (/^\d+$/.test(raw)) return Number(raw);
+  console.warn(
+    `[toolshed] Ignoring EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DEMAND_GRACE_MS=` +
+      `${JSON.stringify(raw)} — expected a non-negative integer (ms).`,
+  );
+  return DEFAULT_DEMAND_GRACE_MS;
+}
+
 /** Start client-demand execution after runtime flags are installed, but before
  * the HTTP server accepts connections. */
 export function startServerExecutionPool(runtime: Runtime): void {
@@ -92,6 +115,7 @@ export function startServerExecutionPool(runtime: Runtime): void {
   ) return;
   executionPool = new SharedExecutionPool({
     control: memoryServer,
+    demandGraceMs: demandGraceMsFromEnv(),
     // C1.8: user-lane lifecycle engages only with the full dial triple —
     // this runner dial plus the host's issuance rank dial and the
     // context-lattice subcapability (checked live via the control).

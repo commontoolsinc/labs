@@ -654,6 +654,9 @@ Deno.test("shared execution pool unions ten client references into one worker", 
       acceptedCommitNotifications: 0,
       acceptedCommitIndexDecisions: 0,
       suppressedUnrelatedCommits: 0,
+      demandGraceBlipsAbsorbed: 0,
+      demandGraceExpiries: 0,
+      demandGraceIdleWorkerMs: 0,
       parkedWakeAttempts: 0,
       parkedWakeStarts: 0,
       foreignWakeNotifications: 0,
@@ -711,6 +714,9 @@ Deno.test("shared execution pool unions ten client references into one worker", 
       acceptedCommitNotifications: 0,
       acceptedCommitIndexDecisions: 0,
       suppressedUnrelatedCommits: 0,
+      demandGraceBlipsAbsorbed: 0,
+      demandGraceExpiries: 0,
+      demandGraceIdleWorkerMs: 0,
       parkedWakeAttempts: 0,
       parkedWakeStarts: 0,
       foreignWakeNotifications: 0,
@@ -1669,6 +1675,204 @@ Deno.test("shared execution pool counts a non-abort Worker start failure", async
       failedBefore + 1,
     );
   } finally {
+    await pool.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// P0 (client-passivity plan, CP12/CP14/CP26): the demand grace window.
+// The real browser clears execution demand on every navigation transition;
+// without grace the empty snapshot aborts the in-flight Worker start and
+// navigation cadence beats cold-start forever (measured 2026-07-26:
+// 15 snapshots, 2 start attempts, both aborted, zero live Workers).
+// ---------------------------------------------------------------------------
+
+Deno.test("P0: a demand blip during a Worker start is absorbed by the grace window (navigation cadence)", async () => {
+  const control = new FakeExecutionControl();
+  const timers = new ManualTimers();
+  let clock = 0;
+  const startEntered = Promise.withResolvers<void>();
+  const releaseStart = Promise.withResolvers<void>();
+  const executor = new FakeExecutor();
+  let startupSignal: AbortSignal | undefined;
+  const factory: SpaceExecutorFactory = {
+    async start(options): Promise<SpaceExecutor> {
+      startupSignal = options.signal;
+      startEntered.resolve();
+      await releaseStart.promise;
+      return executor;
+    },
+  };
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    now: () => clock,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    demandGraceMs: 10_000,
+  });
+  pool.start();
+  try {
+    const adding = control.emit(1, [demand(1, ["piece:a"])]);
+    await startEntered.promise;
+
+    // The navigation blip: demand empties while the start is in flight.
+    clock = 1_000;
+    const emptied = control.emit(2, []);
+    assertEquals(
+      startupSignal?.aborted,
+      false,
+      "grace defers the empty-demand startup abort",
+    );
+    assertEquals(timers.hasActive(10_000), true, "grace expiry timer armed");
+
+    // Demand returns (the next view of the same space) inside the window.
+    clock = 3_000;
+    const returned = control.emit(3, [demand(1, ["piece:a"])]);
+    assertEquals(
+      timers.hasActive(10_000),
+      false,
+      "the returning demand clears the grace timer",
+    );
+
+    releaseStart.resolve();
+    await Promise.all([adding, emptied, returned]);
+    await pool.idle();
+    assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "live");
+    const metrics = pool.metrics();
+    assertEquals(metrics.workerStartAborts, 0, "no start aborted by the blip");
+    assertEquals(metrics.workersStarted, 1);
+    assertEquals(metrics.demandGraceBlipsAbsorbed, 1);
+    assertEquals(metrics.demandGraceExpiries, 0);
+  } finally {
+    releaseStart.resolve();
+    await pool.close();
+  }
+});
+
+Deno.test("P0 departure parity: demand that stays empty drains exactly once the grace expires", async () => {
+  const control = new FakeExecutionControl();
+  const timers = new ManualTimers();
+  let clock = 0;
+  const factory = new FakeExecutorFactory();
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    now: () => clock,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    demandGraceMs: 10_000,
+  });
+  pool.start();
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+    assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "live");
+
+    // The last demanding session departs.
+    clock = 1_000;
+    await control.emit(2, []);
+    await pool.idle();
+    assertEquals(
+      pool.snapshot(SPACE, BRANCH)?.state,
+      "live",
+      "within grace the Worker stays up",
+    );
+    assertEquals(factory.executors[0].stopped, 0);
+
+    // Grace lapses with demand still empty: the legacy drain runs in full.
+    clock = 11_100;
+    timers.fire((delayMs) => delayMs === 10_000);
+    await pool.idle();
+    assertEquals(pool.snapshot(SPACE, BRANCH), undefined, "slot removed");
+    assertEquals(factory.executors[0].stopped, 1, "worker stopped once");
+    assertEquals(control.drains, 1, "lease drained (host authority closed)");
+    const metrics = pool.metrics();
+    assertEquals(metrics.demandEmptyHibernations, 1);
+    assertEquals(metrics.demandGraceExpiries, 1);
+    assertEquals(metrics.demandGraceBlipsAbsorbed, 0);
+    assertEquals(
+      metrics.demandGraceIdleWorkerMs,
+      10_100,
+      "keep-warm cost = live-Worker ms inside the empty window (P0b)",
+    );
+    assertEquals(factory.starts.length, 1, "no start after the drain");
+  } finally {
+    await pool.close();
+  }
+});
+
+Deno.test("P0: a blip against a LIVE Worker neither stops nor restarts it, and counts its keep-warm cost", async () => {
+  const control = new FakeExecutionControl();
+  const timers = new ManualTimers();
+  let clock = 0;
+  const factory = new FakeExecutorFactory();
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    now: () => clock,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    demandGraceMs: 10_000,
+  });
+  pool.start();
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+    assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "live");
+
+    clock = 2_000;
+    await control.emit(2, []);
+    clock = 2_500;
+    await control.emit(3, [demand(2, ["piece:a"])]);
+    await pool.idle();
+
+    assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "live");
+    assertEquals(factory.starts.length, 1, "same Worker generation");
+    assertEquals(factory.executors[0].stopped, 0);
+    const metrics = pool.metrics();
+    assertEquals(metrics.demandGraceBlipsAbsorbed, 1);
+    assertEquals(metrics.demandEmptyHibernations, 0);
+    assertEquals(metrics.demandGraceIdleWorkerMs, 500);
+    assertEquals(timers.hasActive(10_000), false);
+  } finally {
+    await pool.close();
+  }
+});
+
+Deno.test("P0 legacy parity: grace 0 keeps the immediate empty-demand startup abort byte-identical", async () => {
+  const control = new FakeExecutionControl();
+  const startEntered = Promise.withResolvers<void>();
+  const releaseStart = Promise.withResolvers<void>();
+  const executor = new FakeExecutor();
+  let startupSignal: AbortSignal | undefined;
+  const factory: SpaceExecutorFactory = {
+    async start(options): Promise<SpaceExecutor> {
+      startupSignal = options.signal;
+      startEntered.resolve();
+      await releaseStart.promise;
+      return executor;
+    },
+  };
+  const pool = new SharedExecutionPool({ control, factory });
+  pool.start();
+  try {
+    const adding = control.emit(1, [demand(1, ["piece:a"])]);
+    await startEntered.promise;
+    const emptied = control.emit(2, []);
+    assertEquals(
+      startupSignal?.aborted,
+      true,
+      "without grace the empty snapshot aborts the start immediately",
+    );
+    releaseStart.resolve();
+    await Promise.all([adding, emptied]);
+    await pool.idle();
+    assertEquals(pool.metrics().workersStarted, 0);
+    assertEquals(pool.metrics().demandGraceBlipsAbsorbed, 0);
+    assertEquals(pool.snapshot(SPACE, BRANCH), undefined);
+  } finally {
+    releaseStart.resolve();
     await pool.close();
   }
 });

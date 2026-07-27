@@ -35,6 +35,7 @@ was last checked against the code.
 | [`serverPrimaryExecutionCrossSpaceReadCandidates`](#serverprimaryexecutioncrossspacereadcandidates) | `RuntimeOptions.experimental` only (mapped `null` in the canonical env registry) | off | Bernhard Seefeld (server-side execution C3.6) | fold into `serverPrimaryExecution` once cross-space reads graduate | implemented, off by default (CA4/C3A17 ordering-bound: inert until the `cross-space-read` claim-rank stage AND the `cross-space-claims-v1` cohort gate are both live) |
 | [`serverPrimaryExecutionDocSetWatch`](#serverprimaryexecutiondocsetwatch) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH` env (applied at memory-server construction, bridged from `RuntimeOptions.experimental`, and exposed to browser builds via the shell define) — the memory-side ambient is `setServerPrimaryExecutionDocSetWatchConfig()` (negotiated per connection, absent-false) | off | Bernhard Seefeld (server-side execution F3 server / F4 client) | fold into `serverPrimaryExecution` once the feed graduates, then retire the negotiation | implemented, off by default |
 | [`serverPrimaryExecutionGraphRetirement`](#serverprimaryexecutiongraphretirement) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_GRAPH_RETIREMENT_SPACES` env (comma-separated space DIDs or `*`), applied at server construction; ambient `setServerPrimaryExecutionGraphRetirementConfig(spaces)` (host-internal, per-space, not negotiated) | empty set (absent-false: no space admitted to the doc-set surface) | Bernhard Seefeld (server-side execution F5; FW5 admission redesign) | fold into `serverPrimaryExecution` once the feed graduates | implemented, empty by default |
+| [`serverPrimaryExecutionDemandGrace`](#serverprimaryexecutiondemandgrace) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DEMAND_GRACE_MS` env (non-negative integer ms), applied at pool construction in toolshed's storage route; a `SharedExecutionPool` option, host-internal, not negotiated | 10000 ms on toolshed (pool default is 0 = legacy immediate abort/drain) | Bernhard Seefeld (client-passivity P0, 2026-07-26) | fold into `serverPrimaryExecution` once P1 calibrates a fixed value | implemented |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (non-home roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete both auto-update flags | implemented, on in the shell |
@@ -534,6 +535,36 @@ propagate](#how-flags-propagate).
   dial to `*`, make doc-set admission unconditional for negotiated peers,
   fold the dial into `serverPrimaryExecution`, and delete the config
   functions and the counters' eligibility gate.
+
+### `serverPrimaryExecutionDemandGrace`
+
+- **Where set.** `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DEMAND_GRACE_MS`
+  env, read at pool construction in
+  [`packages/toolshed/routes/storage/memory.ts`](../../packages/toolshed/routes/storage/memory.ts)
+  (`demandGraceMsFromEnv`) and passed as the `SharedExecutionPool`
+  `demandGraceMs` option. Host-internal tuning — never negotiated, no
+  ambient global, no client half. Accepts a non-negative integer
+  millisecond count; anything else is ignored with a warning. The pool's
+  own default is `0` (byte-identical legacy behavior); toolshed's
+  construction-site default is `10000`.
+- **Added by.** Bernhard Seefeld, client-passivity plan P0 (2026-07-26).
+- **Purpose.** How long an execution lane tolerates EMPTY demand before
+  aborting an in-flight Worker start or draining a live Worker. The
+  browser client publishes execution demand from its piece start/stop
+  path, so every navigation transition blips demand empty; without grace
+  those blips abort Worker cold-starts faster than they can complete and
+  the pool converges to never-live under real navigation cadence (the
+  2026-07-26 dead-executor finding: 15 demand snapshots, 2 start
+  attempts, both aborted). The window is pool-side start/stop damping
+  only: host-side authority (lease sponsorship, lane grants) keeps its
+  session-anchored lifecycle, so a departed session's claims fence
+  host-side regardless; the grace bounds how long a Worker outlives
+  demand (departure parity: stop ≤ grace + settle). Counters:
+  `demandGraceBlipsAbsorbed`, `demandGraceExpiries`, and the P0b
+  keep-warm cost `demandGraceIdleWorkerMs` under
+  `/api/health/stats` → `serverExecutionPool`.
+- **Removal.** Fold a calibrated fixed value into `serverPrimaryExecution`
+  once P1 measures Worker cold-start and navigation-blip distributions.
 
 ### `commitPreconditions`
 
