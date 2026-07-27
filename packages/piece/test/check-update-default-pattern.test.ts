@@ -1619,6 +1619,70 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(afterEvent.key("count").get()).toBe(1);
   });
 
+  it("cold start heals an already-moved identity with the update flag off", async () => {
+    // The same durable state as the test above, at the posture every deployment
+    // that does not set the flag actually runs: systemPatternAutoUpdate OFF.
+    // That is the runtime default — `Runtime`'s experimental defaults omit the
+    // flag entirely, so it is `undefined` unless a host passes it (the shell
+    // does; an embedding host need not).
+    //
+    // The split this pins: RECONCILING to a newer official pattern is flag-gated
+    // (checkAndUpdateDefaultPattern → "skipped-disabled"), but REPAIRING a doc
+    // onto its own already-pinned identity must NOT be. They are different
+    // operations — the repair changes no identity, rolls nothing forward, and
+    // writes no user data. Gate it too and an aged root has no recovery path at
+    // all on the deployments most likely to be carrying aged roots.
+    await setupHome({ systemPatternAutoUpdate: false });
+    await controller.recreateDefaultPattern({
+      customProgram: {
+        main: "/custom-home.tsx",
+        files: [{ name: "/custom-home.tsx", contents: SOURCE_V1 }],
+      },
+    });
+    const root = (await manager.getDefaultPattern(false))!;
+    await manager.stopPiece(root);
+
+    stub.setSource(SOURCE_V3_HANDLER);
+    // Model the refresh CLI faithfully: it compiles the replacement INTO the
+    // space (so the identity cold-loads — its probeLoad verified exactly that)
+    // and then writes patternIdentity meta only, never running setup. With the
+    // flag off nothing else compiles it, so without this the doc would point at
+    // an unloadable identity — a different failure than the one under test.
+    const targetPattern = await runtime.patternManager.compilePattern(
+      {
+        main: HOME_PATTERN_URL,
+        files: [{ name: HOME_PATTERN_URL, contents: SOURCE_V3_HANDLER }],
+      },
+      { space: manager.getSpace() },
+    );
+    const targetRef = runtime.patternManager.getArtifactEntryRef(
+      targetPattern,
+    )!;
+    const targetId = await identityForSource(
+      SOURCE_V3_HANDLER,
+      {},
+      HOME_PATTERN_URL,
+    );
+    expect(targetRef.identity).toBe(targetId);
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", targetRef);
+    });
+    expect(error).toBeUndefined();
+    expect(runtime.cfcEnforcementMode).not.toBe("disabled");
+
+    await controller.ensureDefaultPattern();
+    await runtime.idle();
+
+    const after = (await manager.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)?.identity).toBe(targetId);
+    expect(after.key("count").get()).toBe(0);
+    (after.key("bump") as unknown as { send: (e: unknown) => void }).send({});
+    await runtime.idle();
+    await (after as unknown as { pull: () => Promise<unknown> }).pull();
+    const afterEvent = (await manager.getDefaultPattern(false))!;
+    expect(afterEvent.key("count").get()).toBe(1);
+  });
+
   it("heals a root whose pinned pattern fails CFC migration by rolling forward to official", async () => {
     // The estuary brick, faithfully: a home root pinned to an OLD home.tsx
     // whose required `favorites` predates its `Default<>`. The doc was
