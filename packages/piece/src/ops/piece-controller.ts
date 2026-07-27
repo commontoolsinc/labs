@@ -44,6 +44,7 @@ import {
 } from "../schema-compatibility.ts";
 import {
   checkPatternUpdate,
+  type PatternUpdateCheckInput,
   type PatternUpdateCheckReport,
   PatternUpdateIncompatibleError,
   type PatternUpdateRole,
@@ -2645,6 +2646,152 @@ class PiecePropIo implements PieceCellIo {
   }
 }
 
+/**
+ * Outcome of running the retained-link validator ahead of a pattern update.
+ * `ran: false` means the proof could not be evaluated at all, which the report
+ * shows as not-applicable rather than as a silent pass.
+ */
+export interface RetainedLinkVerdict {
+  ran: boolean;
+  issue?: string;
+  note?: string;
+}
+
+/**
+ * A piece's argument cell, or `undefined` when the piece has none.
+ *
+ * Why swallow the throw: `getArgument` raises for a piece whose result cell
+ * carries no argument metadata link. To the update check that is a piece with
+ * nothing to validate, not an error — every rule that needs the argument
+ * reports itself not-applicable instead.
+ *
+ * Exported for direct testing: the callers are private methods, and the
+ * absent-argument branch is otherwise only reachable through a malformed
+ * piece.
+ */
+export function pieceArgumentCellOrUndefined(
+  manager: PieceManager,
+  pieceCell: Cell<unknown>,
+): Cell<unknown> | undefined {
+  try {
+    return manager.getArgument(pieceCell);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The CFC schema envelopes at rest for the given role/cell pairs — the
+ * `existing` side of the merge the next setup commit would perform. Read
+ * through `runtime.readTx()`, which cannot write.
+ *
+ * A role is absent when its cell is absent, when its document carries no
+ * stored CFC metadata, or when that metadata cannot be read back. That is not
+ * a gap in the check: the merge only runs against a stored envelope, so with
+ * none there is nothing for it to reject.
+ */
+export function storedCfcEnvelopes(
+  manager: PieceManager,
+  cells: readonly (readonly [
+    PatternUpdateRole,
+    Cell<unknown> | undefined,
+  ])[],
+): Partial<Record<PatternUpdateRole, JSONSchema>> {
+  const tx = manager.runtime.readTx();
+  const envelopes: Partial<Record<PatternUpdateRole, JSONSchema>> = {};
+  for (const [role, cell] of cells) {
+    if (cell === undefined) continue;
+    try {
+      const link = cell.getAsNormalizedFullLink();
+      const metadata = readStoredCfcMetadata(tx, {
+        space: link.space,
+        id: link.id,
+        scope: link.scope,
+      });
+      if (metadata?.schemaHash === undefined) continue;
+      envelopes[role] = loadSchemaDocument(
+        tx,
+        link.space,
+        metadata.schemaHash,
+      );
+    } catch {
+      // An unreadable envelope is reported as "not applicable" rather than
+      // guessed at; the caller sees the role missing.
+      continue;
+    }
+  }
+  return envelopes;
+}
+
+/**
+ * Run the retained-link validator `setPattern` installs, over the argument
+ * links already committed for a piece. Read-only: it inspects `getRaw()` and
+ * the candidate's argument schema, and never writes.
+ */
+export function retainedLinkVerdict(
+  manager: PieceManager,
+  argumentCell: Cell<unknown> | undefined,
+  previousPattern: Pattern,
+  candidate: Pattern,
+): RetainedLinkVerdict {
+  if (argumentCell === undefined) {
+    return { ran: false, note: "this piece has no argument cell" };
+  }
+  try {
+    assertSuppliedLinkSchemasCompatible(
+      suppliedLinks(argumentCell.getRaw()),
+      candidate.argumentSchema,
+      argumentCell,
+      manager,
+      {
+        priorArgumentSchema: previousPattern.argumentSchema,
+        linksPreservedVerbatim: true,
+      },
+    );
+    return { ran: true };
+  } catch (error) {
+    return {
+      ran: true,
+      issue: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * Re-describe a failed update in the same terms `checkPattern` would, so the
+ * user is told WHICH field broke WHICH rule instead of whichever low-level
+ * message surfaced first (a raw CFC commit rejection, most painfully).
+ *
+ * `verdict` is a thunk rather than a value because gathering it re-reads
+ * storage: the two early returns below must not pay for a verdict they are
+ * going to discard. It never retries and never writes — the setup transaction
+ * has already aborted, so the state it re-reads is the untouched pre-update
+ * state and the piece is not half-updated. When the verdict finds no blocker —
+ * a transport failure, a compile error, a genuine bug — the original error is
+ * returned unchanged rather than being dressed up as an incompatibility.
+ */
+export function explainUpdateFailure(
+  piece: string,
+  error: unknown,
+  options: { dangerouslyAllowIncompatibleSchema?: boolean },
+  verdict: () => PatternUpdateCheckReport,
+): unknown {
+  // The override deliberately ran the update without the compatibility
+  // gates; reporting gate findings for its failure would misattribute it.
+  if (options.dangerouslyAllowIncompatibleSchema) return error;
+  if (error instanceof PatternUpdateIncompatibleError) return error;
+  let report: PatternUpdateCheckReport;
+  try {
+    report = verdict();
+  } catch {
+    return error;
+  }
+  if (report.blockers.length === 0) return error;
+  return new PatternUpdateIncompatibleError(piece, report.blockers, {
+    cause: error,
+  });
+}
+
 export class PieceController<T = unknown> {
   #cell: Cell<T>;
   #manager: PieceManager;
@@ -2874,97 +3021,41 @@ export class PieceController<T = unknown> {
     // The retained-link proof reads the argument document's RAW value, so that
     // document has to be loaded first. `setPattern` gets this for free — setup
     // loads the argument before validating it — but the preflight must ask.
-    await this.#argumentCellOrUndefined()?.sync();
+    await pieceArgumentCellOrUndefined(this.#manager, this.#cell)?.sync();
 
-    return checkPatternUpdate({
+    return checkPatternUpdate(
+      this.#updateCheckInput(previousPattern, candidate),
+    );
+  }
+
+  /**
+   * Everything {@link checkPatternUpdate} needs about this piece, gathered
+   * read-only. Shared by the preflight and by the explanation an enforced
+   * update produces when it is refused, so the two cannot disagree.
+   */
+  #updateCheckInput(
+    previousPattern: Pattern,
+    candidate: Pattern,
+  ): PatternUpdateCheckInput {
+    const argumentCell = pieceArgumentCellOrUndefined(
+      this.#manager,
+      this.#cell,
+    );
+    return {
       piece: this.id,
       previous: previousPattern,
       candidate,
-      storedCfcEnvelopes: this.#storedCfcEnvelopes(),
-      retainedLinks: this.#retainedLinkVerdict(previousPattern, candidate),
-    });
-  }
-
-  /**
-   * The CFC schema envelopes at rest for this piece's argument and result
-   * documents — the `existing` side of the merge the next setup commit would
-   * perform. Read through `runtime.readTx()`, which cannot write.
-   *
-   * A role is absent when its document carries no stored CFC metadata. That is
-   * not a gap in the check: the merge only runs against a stored envelope, so
-   * with none there is nothing for it to reject.
-   */
-  #storedCfcEnvelopes(): Partial<Record<PatternUpdateRole, JSONSchema>> {
-    const runtime = this.#manager.runtime;
-    const tx = runtime.readTx();
-    const envelopes: Partial<Record<PatternUpdateRole, JSONSchema>> = {};
-    const cells: [PatternUpdateRole, Cell<unknown> | undefined][] = [
-      ["result", this.#cell],
-      ["argument", this.#argumentCellOrUndefined()],
-    ];
-    for (const [role, cell] of cells) {
-      if (cell === undefined) continue;
-      try {
-        const link = cell.getAsNormalizedFullLink();
-        const metadata = readStoredCfcMetadata(tx, {
-          space: link.space,
-          id: link.id,
-          scope: link.scope,
-        });
-        if (metadata?.schemaHash === undefined) continue;
-        envelopes[role] = loadSchemaDocument(
-          tx,
-          link.space,
-          metadata.schemaHash,
-        );
-      } catch {
-        // An unreadable envelope is reported as "not applicable" rather than
-        // guessed at; the caller sees the role missing.
-        continue;
-      }
-    }
-    return envelopes;
-  }
-
-  #argumentCellOrUndefined(): Cell<unknown> | undefined {
-    try {
-      return this.#manager.getArgument(this.#cell);
-    } catch {
-      return undefined;
-    }
-  }
-
-  /**
-   * Run the retained-link validator `setPattern` installs, over the argument
-   * links already committed for this piece. Read-only: it inspects
-   * `getRaw()` and the candidate's argument schema, and never writes.
-   */
-  #retainedLinkVerdict(
-    previousPattern: Pattern,
-    candidate: Pattern,
-  ): { ran: boolean; issue?: string; note?: string } {
-    const argumentCell = this.#argumentCellOrUndefined();
-    if (argumentCell === undefined) {
-      return { ran: false, note: "this piece has no argument cell" };
-    }
-    try {
-      assertSuppliedLinkSchemasCompatible(
-        suppliedLinks(argumentCell.getRaw()),
-        candidate.argumentSchema,
-        argumentCell,
+      storedCfcEnvelopes: storedCfcEnvelopes(this.#manager, [
+        ["result", this.#cell],
+        ["argument", argumentCell],
+      ]),
+      retainedLinks: retainedLinkVerdict(
         this.#manager,
-        {
-          priorArgumentSchema: previousPattern.argumentSchema,
-          linksPreservedVerbatim: true,
-        },
-      );
-      return { ran: true };
-    } catch (error) {
-      return {
-        ran: true,
-        issue: error instanceof Error ? error.message : String(error),
-      };
-    }
+        argumentCell,
+        previousPattern,
+        candidate,
+      ),
+    };
   }
 
   async setPattern(
@@ -3012,50 +3103,19 @@ export class PieceController<T = unknown> {
           repository: options?.repository,
         }) as Cell<T>;
       } catch (error) {
-        throw this.#explainUpdateFailure(previousPattern, pattern, error, {
-          dangerouslyAllowIncompatibleSchema: options
-            ?.dangerouslyAllowIncompatibleSchema,
-        });
+        throw explainUpdateFailure(
+          this.id,
+          error,
+          {
+            dangerouslyAllowIncompatibleSchema: options
+              ?.dangerouslyAllowIncompatibleSchema,
+          },
+          () =>
+            checkPatternUpdate(
+              this.#updateCheckInput(previousPattern, pattern),
+            ),
+        );
       }
-    });
-  }
-
-  /**
-   * Re-describe a failed update in the same terms `checkPattern` would, so the
-   * user is told WHICH field broke WHICH rule instead of whichever low-level
-   * message surfaced first (a raw CFC commit rejection, most painfully).
-   *
-   * This never retries and never writes: the setup transaction has already
-   * aborted, so the state it re-reads is the untouched pre-update state and the
-   * piece is not half-updated. When the verdict finds no blocker — a transport
-   * failure, a compile error, a genuine bug — the original error is returned
-   * unchanged rather than being dressed up as an incompatibility.
-   */
-  #explainUpdateFailure(
-    previousPattern: Pattern,
-    candidate: Pattern,
-    error: unknown,
-    options: { dangerouslyAllowIncompatibleSchema?: boolean },
-  ): unknown {
-    // The override deliberately ran the update without the compatibility
-    // gates; reporting gate findings for its failure would misattribute it.
-    if (options.dangerouslyAllowIncompatibleSchema) return error;
-    if (error instanceof PatternUpdateIncompatibleError) return error;
-    let report: PatternUpdateCheckReport;
-    try {
-      report = checkPatternUpdate({
-        piece: this.id,
-        previous: previousPattern,
-        candidate,
-        storedCfcEnvelopes: this.#storedCfcEnvelopes(),
-        retainedLinks: this.#retainedLinkVerdict(previousPattern, candidate),
-      });
-    } catch {
-      return error;
-    }
-    if (report.blockers.length === 0) return error;
-    return new PatternUpdateIncompatibleError(this.id, report.blockers, {
-      cause: error,
     });
   }
 

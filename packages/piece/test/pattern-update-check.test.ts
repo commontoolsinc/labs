@@ -16,7 +16,9 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
+  type Cell,
   getPatternIdentityRef,
   type JSONSchema,
   type Pattern,
@@ -27,7 +29,16 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { PieceManager } from "../src/manager.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 import {
+  explainUpdateFailure,
+  pieceArgumentCellOrUndefined,
+  retainedLinkVerdict,
+  storedCfcEnvelopes,
+} from "../src/ops/piece-controller.ts";
+import {
   checkPatternUpdate,
+  parseContractIssue,
+  type PatternUpdateBlocker,
+  type PatternUpdateCheckReport,
   PatternUpdateIncompatibleError,
 } from "../src/pattern-update-check.ts";
 
@@ -415,5 +426,363 @@ describe("pattern update check — CFC document migration", () => {
     expect(cfcSteps.every((step) => step.status === "not-applicable")).toBe(
       true,
     );
+  });
+});
+
+describe("pattern update check — findings that name no field", () => {
+  // A contract issue does not always come with a `role.field` path: a schema
+  // that cannot even be validated is reported against the pattern as a whole.
+  // Such a blocker must still read as a full sentence, and must not be run
+  // through the stream-slot annotation (there is no field to look up).
+  const wellFormed = patternOf({ type: "object" }, { type: "object" });
+
+  it("reports an unvalidatable schema against the pattern, not a field", () => {
+    const candidate = patternOf(
+      {
+        type: "object",
+        properties: { seed: { $ref: "#/definitions/absent" } },
+      },
+      { type: "object" },
+    );
+
+    const report = checkPatternUpdate({
+      piece: "of:test",
+      previous: wellFormed,
+      candidate,
+      storedCfcEnvelopes: {},
+      retainedLinks: { ran: false },
+    });
+
+    expect(report.compatible).toBe(false);
+    const blocker = report.blockers[0];
+    expect(blocker.class).toBe("pattern-contract");
+    expect(blocker.field).toBeUndefined();
+    expect(blocker.role).toBeUndefined();
+    // No field means no stream-slot lookup, so the annotation must not fire.
+    expect(blocker.streamSlot).toBeUndefined();
+    expect(blocker.message).toContain("invalid schema");
+    // Still a full sentence a CLI can print on its own line.
+    expect(blocker.message).toMatch(/ — .+\.$/);
+  });
+
+  it("parses a bare reason that carries no path at all", () => {
+    const blocker = parseContractIssue("something went sideways");
+
+    expect(blocker.class).toBe("pattern-contract");
+    expect(blocker.path).toBeUndefined();
+    expect(blocker.field).toBeUndefined();
+    expect(blocker.reason).toBe("something went sideways");
+    expect(blocker.message).toBe("pattern — something went sideways.");
+  });
+
+  it("survives a pattern that declares no schemas at all", () => {
+    // `argumentSchema`/`resultSchema` are optional on a compiled pattern, and
+    // the advisory scan must not assume an object is there to read properties
+    // off. Whatever the verdict, producing one must not throw.
+    const bare = {
+      derivedInternalCells: [],
+      result: {},
+      nodes: [],
+    } as unknown as Pattern;
+
+    const report = checkPatternUpdate({
+      piece: "of:test",
+      previous: bare,
+      candidate: bare,
+      storedCfcEnvelopes: {},
+      retainedLinks: { ran: false },
+    });
+
+    expect(report.piece).toBe("of:test");
+    expect(report.advisories).toEqual([]);
+  });
+});
+
+describe("pattern update check — stream slot advisories", () => {
+  const stream: JSONSchema = {
+    type: "object",
+    properties: {},
+    asCell: ["stream"],
+  };
+
+  it("reports a stream slot the running pattern did not declare", () => {
+    const report = checkPatternUpdate({
+      piece: "of:test",
+      previous: patternOf({ type: "object" }, { type: "object" }),
+      candidate: patternOf({ type: "object" }, {
+        type: "object",
+        properties: { rename: stream },
+      }),
+      storedCfcEnvelopes: {},
+      retainedLinks: { ran: false },
+    });
+
+    expect(report.advisories.map((entry) => entry.field)).toEqual(["rename"]);
+    expect(report.advisories[0].role).toBe("result");
+  });
+
+  it("stays quiet about a stream slot that was already there", () => {
+    // Setup materializes a stream marker on every run, so a slot the running
+    // pattern already declares is not migration work worth reporting.
+    const withStream = patternOf({ type: "object" }, {
+      type: "object",
+      properties: { rename: stream },
+    });
+
+    const report = checkPatternUpdate({
+      piece: "of:test",
+      previous: withStream,
+      candidate: withStream,
+      storedCfcEnvelopes: {},
+      retainedLinks: { ran: false },
+    });
+
+    expect(report.advisories).toEqual([]);
+  });
+});
+
+describe("pattern update check — gathering the piece's side of the verdict", () => {
+  // The three read-only gatherers behind `checkPattern`. Their absent /
+  // unreadable branches decide whether a rule reports "not applicable" or a
+  // blocker, so each is driven here against real cells rather than inferred.
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let manager: PieceManager;
+  let pieces: PiecesController;
+
+  beforeEach(async () => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    const session = await createSession({
+      identity: signer,
+      spaceName: "pattern-update-gather-" + crypto.randomUUID(),
+    });
+    manager = new PieceManager(session, runtime);
+    await manager.synced();
+    pieces = new PiecesController(manager);
+  });
+
+  afterEach(async () => {
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  it("resolves a piece's argument cell", async () => {
+    const piece = await pieces.create(BASE, { input: {} });
+    expect(pieceArgumentCellOrUndefined(manager, piece.getCell()))
+      .toBeDefined();
+  });
+
+  it("reports no argument cell for a document that has none", async () => {
+    const piece = await pieces.create(BASE, { input: {} });
+    // The argument document itself carries no `argument` metadata link, so it
+    // stands in for a piece that has none: `getArgument` throws, and the
+    // gatherer must answer "absent" rather than propagate.
+    const argument = pieceArgumentCellOrUndefined(manager, piece.getCell())!;
+    expect(pieceArgumentCellOrUndefined(manager, argument)).toBeUndefined();
+  });
+
+  it("skips a role whose cell is absent", () => {
+    expect(storedCfcEnvelopes(manager, [["argument", undefined]])).toEqual({});
+  });
+
+  it("skips a role whose envelope cannot be read", () => {
+    const unreadable = {
+      getAsNormalizedFullLink() {
+        throw new Error("document unavailable");
+      },
+    } as unknown as Cell<unknown>;
+
+    expect(storedCfcEnvelopes(manager, [["result", unreadable]])).toEqual({});
+  });
+
+  it("skips a live document that stores no schema envelope", async () => {
+    const piece = await pieces.create(BASE, { input: {} });
+    await manager.synced();
+
+    // No envelope at rest means the CFC merge never runs for that role at
+    // commit time, so the role is simply absent rather than guessed at.
+    expect(
+      storedCfcEnvelopes(manager, [
+        ["result", piece.getCell()],
+        ["argument", pieceArgumentCellOrUndefined(manager, piece.getCell())],
+      ]),
+    ).toEqual({});
+  });
+
+  it("loads the envelope a document's stored metadata names", () => {
+    const { schema, taggedHashString } = internSchema(
+      { type: "object", properties: { owner: { type: "string" } } },
+      true,
+    );
+    // The read side of a document that HAS a committed envelope: `cfc`
+    // metadata naming a schema hash, and the content-addressed schema document
+    // that hash resolves to.
+    const stubbedManager = {
+      runtime: {
+        readTx: () => ({
+          readOrThrow: (target: { id: string }) =>
+            target.id.startsWith("cid:") ? { value: schema } : {
+              version: 1,
+              labelMap: { entries: [] },
+              schemaHash: taggedHashString,
+            },
+        }),
+      },
+    } as unknown as PieceManager;
+    const cell = {
+      getAsNormalizedFullLink: () => ({
+        space: "did:key:envelope-test",
+        id: "of:piece",
+        scope: undefined,
+      }),
+    } as unknown as Cell<unknown>;
+
+    expect(storedCfcEnvelopes(stubbedManager, [["result", cell]])).toEqual({
+      result: schema,
+    });
+  });
+
+  it("marks the retained-link proof not-applicable with no argument cell", () => {
+    const pattern = patternOf({ type: "object" }, { type: "object" });
+    expect(retainedLinkVerdict(manager, undefined, pattern, pattern)).toEqual({
+      ran: false,
+      note: "this piece has no argument cell",
+    });
+  });
+
+  it("runs the retained-link proof over a real argument cell", async () => {
+    const piece = await pieces.create(BASE, { input: {} });
+    await manager.synced();
+    const argument = pieceArgumentCellOrUndefined(manager, piece.getCell());
+
+    const verdict = retainedLinkVerdict(
+      manager,
+      argument,
+      patternOf({ type: "object" }, { type: "object" }),
+      patternOf({ type: "object" }, { type: "object" }),
+    );
+
+    expect(verdict.ran).toBe(true);
+    expect(verdict.issue).toBeUndefined();
+  });
+
+  it("reports a retained-link proof that could not complete as an issue", () => {
+    const broken = {
+      getRaw() {
+        throw new Error("argument document unavailable");
+      },
+    } as unknown as Cell<unknown>;
+    const pattern = patternOf({ type: "object" }, { type: "object" });
+
+    const verdict = retainedLinkVerdict(manager, broken, pattern, pattern);
+
+    expect(verdict.ran).toBe(true);
+    expect(verdict.issue).toContain("argument document unavailable");
+  });
+
+  it("stringifies a non-Error retained-link failure", () => {
+    const broken = {
+      getRaw() {
+        throw "argument document vanished";
+      },
+    } as unknown as Cell<unknown>;
+    const pattern = patternOf({ type: "object" }, { type: "object" });
+
+    expect(retainedLinkVerdict(manager, broken, pattern, pattern).issue).toBe(
+      "argument document vanished",
+    );
+  });
+});
+
+describe("pattern update check — explaining a refused update", () => {
+  const blocker: PatternUpdateBlocker = {
+    class: "cfc-schema-migration",
+    role: "result",
+    field: "favorites",
+    reason: "required field favorites needs a default",
+    message: "field `favorites` would become required but has no default.",
+  };
+
+  const reportWith = (
+    blockers: PatternUpdateBlocker[],
+  ): PatternUpdateCheckReport => ({
+    piece: "of:test",
+    compatible: blockers.length === 0,
+    steps: [],
+    blockers,
+    advisories: [],
+  });
+
+  it("re-describes the failure with the blockers the check would report", () => {
+    const cause = new Error("commit rejected");
+    const explained = explainUpdateFailure(
+      "of:test",
+      cause,
+      {},
+      () => reportWith([blocker]),
+    );
+
+    expect(explained).toBeInstanceOf(PatternUpdateIncompatibleError);
+    const incompatible = explained as PatternUpdateIncompatibleError;
+    expect(incompatible.piece).toBe("of:test");
+    expect(incompatible.blockers).toEqual([blocker]);
+    expect(incompatible.cause).toBe(cause);
+    // The low-level detail survives as a trailing line rather than being lost.
+    expect(incompatible.message).toContain("commit rejected");
+  });
+
+  it("leaves the failure alone when the override skipped the gates", () => {
+    const cause = new Error("commit rejected");
+    let gathered = false;
+
+    const explained = explainUpdateFailure(
+      "of:test",
+      cause,
+      { dangerouslyAllowIncompatibleSchema: true },
+      () => {
+        gathered = true;
+        return reportWith([blocker]);
+      },
+    );
+
+    expect(explained).toBe(cause);
+    // Attributing gate findings to a run that skipped the gates would be a
+    // lie, and re-reading storage to produce them would be wasted work.
+    expect(gathered).toBe(false);
+  });
+
+  it("does not re-wrap a failure that already names its blockers", () => {
+    const cause = new PatternUpdateIncompatibleError("of:test", [blocker]);
+    let gathered = false;
+
+    const explained = explainUpdateFailure("of:test", cause, {}, () => {
+      gathered = true;
+      return reportWith([blocker]);
+    });
+
+    expect(explained).toBe(cause);
+    expect(gathered).toBe(false);
+  });
+
+  it("keeps the original failure when the verdict itself cannot be gathered", () => {
+    const cause = new Error("transport failure");
+
+    const explained = explainUpdateFailure("of:test", cause, {}, () => {
+      throw new Error("storage unavailable");
+    });
+
+    expect(explained).toBe(cause);
+  });
+
+  it("keeps the original failure when no rule was actually broken", () => {
+    const cause = new Error("something else went wrong");
+
+    expect(explainUpdateFailure("of:test", cause, {}, () => reportWith([])))
+      .toBe(cause);
   });
 });

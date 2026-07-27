@@ -366,6 +366,13 @@ const PIECE_REGISTRY_LINK_EXAMPLE = [
   ),
   `Link the well-known "pieceRegistry" list to a piece field.`,
 ] as const;
+const SETSRC_CHECK_EXAMPLE = [
+  cliText(`cf piece setsrc --check ${EX_ID} ${EX_COMP_PIECE} ./main.tsx`),
+  `Report whether ./main.tsx could be applied to "${RAW_EX_COMP
+    .piece!}", changing nothing. Exits ${SETSRC_INCOMPATIBLE_EXIT_CODE} if it could not.`,
+] as const;
+const SETSRC_CHECK_FLAG_DESCRIPTION =
+  `Report whether the source could be applied, without applying it. Exits ${SETSRC_INCOMPATIBLE_EXIT_CODE} when it could not.`;
 
 // Enhanced description with workflow tips
 function pieceEnvStatus(): string {
@@ -601,11 +608,7 @@ export const piece = new Command()
     cliText(`cf piece setsrc ${EX_ID} ${EX_URL} ./main.tsx`),
     `Update the source for "${RAW_EX_COMP.piece!}" with ./main.tsx`,
   )
-  .example(
-    cliText(`cf piece setsrc --check ${EX_ID} ${EX_COMP_PIECE} ./main.tsx`),
-    `Report whether ./main.tsx could be applied to "${RAW_EX_COMP
-      .piece!}", changing nothing. Exits ${SETSRC_INCOMPATIBLE_EXIT_CODE} if it could not.`,
-  )
+  .example(...SETSRC_CHECK_EXAMPLE)
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .option(
     "--main-export <export:string>",
@@ -623,37 +626,10 @@ export const piece = new Command()
     "--dangerously-allow-incompatible-schema",
     "Replace the source even when pattern or retained-link schema compatibility cannot be proven.",
   )
-  .option(
-    "--check",
-    `Report whether the source could be applied, without applying it. Exits ${SETSRC_INCOMPATIBLE_EXIT_CODE} when it could not.`,
-  )
+  .option("--check", SETSRC_CHECK_FLAG_DESCRIPTION)
   .option("--json", "Output machine-readable JSON. Requires --check.")
   .arguments("<main:string>")
-  .action(async (options, mainPath) => {
-    setQuietMode(!!options.quiet);
-    assertSetSourceFlagCombination(options);
-    if (options.check) {
-      const report = await checkPieceSourceFromCommand(options, mainPath);
-      render(
-        options.json ? report : formatPatternUpdateCheckReport(report),
-        { json: !!options.json },
-      );
-      if (!report.compatible) Deno.exit(SETSRC_INCOMPATIBLE_EXIT_CODE);
-      return;
-    }
-    let pieceConfig: PieceConfig;
-    try {
-      pieceConfig = await setPieceSourceFromCommand(options, mainPath);
-    } catch (error) {
-      reportIncompatibleSetSource(error);
-      throw error;
-    }
-    render(`Updated source for piece ${pieceConfig.piece}`);
-    hint(cliText(`NEXT STEPS:
-  → Test in browser: ${pieceConfig.apiUrl}/${pieceConfig.space}/${pieceConfig.piece}
-  → Test a callable: cf piece call --piece ${pieceConfig.piece} <callableName> ...
-  → Check state:     cf piece inspect --piece ${pieceConfig.piece} ...`));
-  })
+  .action(runSetSourceCommand)
   /* piece inspect */
   .command("inspect", "Inspect detailed information about a piece")
   .usage(pieceUsage)
@@ -1377,6 +1353,70 @@ export async function setPieceSourceFromCommand(
     },
   );
   return pieceConfig;
+}
+
+/** Injectable seams for the `piece setsrc` action body. */
+export interface SetSourceCommandDependencies {
+  checkPieceSource?: typeof checkPieceSourceFromCommand;
+  setPieceSource?: typeof setPieceSourceFromCommand;
+  print?: (message: unknown, options?: { json?: boolean }) => void;
+  printError?: (message: string) => void;
+  printHint?: (message: string) => void;
+  exit?: (code: number) => never;
+}
+
+/**
+ * The whole of `cf piece setsrc`, including its `--check` preflight.
+ *
+ * Why it lives outside the command chain: the routing decisions here are the
+ * load-bearing part of the feature — a `--check` run must never reach the
+ * mutating call, and a refused update must exit
+ * {@link SETSRC_INCOMPATIBLE_EXIT_CODE} rather than the generic failure code.
+ * As a plain function with injectable seams those rules can be tested directly,
+ * which an inline `.action` callback (network, `Deno.exit`) cannot be.
+ */
+export async function runSetSourceCommand(
+  options: PieceCLIOptions & { quiet?: boolean },
+  mainPath: string,
+  deps: SetSourceCommandDependencies = {},
+): Promise<void> {
+  const print = deps.print ?? render;
+  const printHint = deps.printHint ?? hint;
+  setQuietMode(!!options.quiet);
+  assertSetSourceFlagCombination(options);
+  if (options.check) {
+    const report = await (deps.checkPieceSource ?? checkPieceSourceFromCommand)(
+      options,
+      mainPath,
+    );
+    print(
+      options.json ? report : formatPatternUpdateCheckReport(report),
+      { json: !!options.json },
+    );
+    if (!report.compatible) {
+      return (deps.exit ?? Deno.exit)(SETSRC_INCOMPATIBLE_EXIT_CODE);
+    }
+    return;
+  }
+  let pieceConfig: PieceConfig;
+  try {
+    pieceConfig = await (deps.setPieceSource ?? setPieceSourceFromCommand)(
+      options,
+      mainPath,
+    );
+  } catch (error) {
+    reportIncompatibleSetSource(error, {
+      ...(deps.printError ? { printError: deps.printError } : {}),
+      printHint,
+      ...(deps.exit ? { exit: deps.exit } : {}),
+    });
+    throw error;
+  }
+  print(`Updated source for piece ${pieceConfig.piece}`);
+  printHint(cliText(`NEXT STEPS:
+  → Test in browser: ${pieceConfig.apiUrl}/${pieceConfig.space}/${pieceConfig.piece}
+  → Test a callable: cf piece call --piece ${pieceConfig.piece} <callableName> ...
+  → Check state:     cf piece inspect --piece ${pieceConfig.piece} ...`));
 }
 
 /**
