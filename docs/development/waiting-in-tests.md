@@ -304,6 +304,10 @@ before the test modules (through Deno's `--preload`); it replaces `Deno.test`
 so each test runs under a clock that freezes only positive-delay timers, and it
 adds `settle` to the context. `test/clock.d.ts` gives `t.settle` its type, which
 `deno check` sees because it type-checks the package directory as one program.
+The preload is a thin wrapper: it calls `installFakeClock` from the shared
+harness in `packages/test-support/test/clock-preload.ts`, selecting that harness's
+`freeze-all` mode. The runner preload calls the same harness in its
+`auto-advance` mode (below), so the timer-faking core lives in one place.
 
 A zero-delay `setTimeout(fn, 0)` still fires, driven through the real event
 loop, so the scheduler's dispatch, the reconciler's flush, and teardown all
@@ -328,10 +332,11 @@ announce itself.
 
 ## The runner suite: advancing the runtime's own timers
 
-`packages/runner` has the same preload (`packages/runner/test/clock-preload.ts`,
-wired through `--preload` on the package test task) and the same rule for test
-sleeps, but it cannot simply freeze positive-delay timers the way the reconciler
-tests do. Runner's own reactivity is time-coupled: the scheduler, the wake
+`packages/runner` loads the same shared harness — its
+`packages/runner/test/clock-preload.ts` calls `installFakeClock` in the
+`auto-advance` mode, wired through `--preload` on the package test task — and
+follows the same rule for test sleeps, but it cannot simply freeze positive-delay
+timers the way the reconciler tests do. Runner's own reactivity is time-coupled: the scheduler, the wake
 shaper, and storage arm positive-delay timers — throttle and debounce windows,
 committed-write backoff, conflict retries — that `runtime.idle()`,
 `cell.pull()`, and commit then await. Freeze those and a plain reactive test
@@ -366,8 +371,9 @@ logical time to zero and drops pending timers: one frozen clock wraps a whole
 `describe`, so a suite whose cases each read absolute coarsened time (the `#now`
 grid tests) calls it from `beforeEach` to start each case from a known instant.
 
-Two files stay on the real clock, listed with their reasons at the top of the
-preload. A resume runtime drives a real loopback memory-client transport whose
+Two files stay on the real clock, listed with their reasons in the runner
+preload's `realClockFiles` list. A resume runtime drives a real loopback
+memory-client transport whose
 connect/mount/sync does not complete under the fake clock, so the resume
 deadlocks. And a nested-subagent generateObject aborts its delegate tool because
 the tool-calling path's own timeout auto-advances against the subagent's outbox
@@ -433,6 +439,41 @@ op-leak sanitizer under the real clock, but auto-advance ignores unref: a
 builds would drive the clock to the runaway guard. Adopting the harness would
 mean excluding the very files that own timers, and no test in the suite observes
 a controllable time window a fake clock would help with.
+
+## The utils package: a fake clock the test imports
+
+The reconciler and runner harnesses above install their fake clock through a
+`--preload` that wraps every `Deno.test` in the package, so a test gets the
+frozen clock whether or not it asked for one. That default is deliberate there:
+it catches a wall-clock sleep written anywhere in a suite that is meant to wait
+on events instead. `packages/utils` does not want that default. It is a grab-bag
+of utilities; most of its tests are not about time at all, and some — the
+logger's timing tests, for one — busy-spin against the real `performance.now`,
+which a faked clock would leave spinning forever. Only the `sleep` and `timeout`
+tests want controlled time.
+
+So `packages/utils/test/sleep.test.ts` takes the opposite approach: instead of a
+preload forcing a clock on the whole package, the two suites that want one import
+it and open it themselves. They use `FakeTime` from `@std/testing/time`, opened
+with a `using` declaration so it restores the clock when the block ends:
+
+- `using time = new FakeTime()` freezes the real timer that `sleep` or `timeout`
+  arms, so nothing resolves until the test advances the clock.
+- `await time.tickAsync(ms)` advances the fake clock by `ms` and settles the
+  promises the fired timers resolve.
+- `Date.now()` reports the faked time, so a `sleep(5)` is observed as still
+  pending after `tickAsync(4)` and resolved after a further `tickAsync(1)`, with
+  the elapsed time reading exactly five milliseconds — an exact assertion with no
+  real waiting and no flake.
+
+Nothing global is installed for the package, so the other suites in the same file
+need no exception list: `yieldToEventLoop` and `unrefTimer` open no `FakeTime` and
+run on the real clock, which is what they need — `yieldToEventLoop`'s timer-turn
+budget is measured against the real `performance.now` and its test drives a real
+CPU-bound spin, and `unrefTimer` detaches a real Deno timer from the event loop's
+ref-count. This is the lighter tool: reach for the preload harness when a whole
+suite should be held to controlled time, and for a directly-imported `FakeTime`
+when only a test or two measures a delay.
 
 ## Proving a negative
 

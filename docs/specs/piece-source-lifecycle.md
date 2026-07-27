@@ -14,13 +14,14 @@ today and must be migrated into this lifecycle.
 ## Status
 
 The content-addressed source and in-place pattern replacement foundations are
-implemented. Local command-line creation is implemented end to end. Automatic
-updates exist only through a specialized path for same-toolshed system sources.
-That path reconciles roots before bootstrap and checks other successfully
-instantiated patterns in the background. It is not the target model: a space
-root is an ordinary piece under this entire lifecycle. The general origin,
-history, forking, following, reverting, and repointing model in this document
-requires work unless the implementation table says otherwise.
+implemented. Local command-line creation is implemented end to end. A piece
+context menu reads a piece's origin, pattern identity, and retained source.
+Automatic updates exist only through a specialized path for same-toolshed system
+sources. That path reconciles roots before bootstrap and
+checks other successfully instantiated patterns in the background. It is not the
+target model: a space root is an ordinary piece under this entire lifecycle. The
+general origin, history, forking, following, reverting, and repointing model in
+this document requires work unless the implementation table says otherwise.
 
 Status labels in this document have exact meanings:
 
@@ -37,7 +38,7 @@ otherwise complete first-time creation command into an unimplemented command.
 
 ## Last updated
 
-2026-07-22
+2026-07-24
 
 ## Terms
 
@@ -217,7 +218,7 @@ storage schema to use these exact TypeScript field names.
 | Retained authored program | An immutable version-1 manifest for the complete authored program accepted by the current revision, including unreachable files and its exact public-subpath map | **Manifest and exports required**: source documents can retain extra roots, but no piece revision binds the exact accepted file set or public map |
 | Runtime fingerprint | The trusted runtime identity used to calculate the accepted executable pattern identity | **Authoritative provider required**: the optional module-hash input exists, but production compilation and source verification still use the empty default |
 | Runtime-neutral program digest | The version-1 digest of the canonical main filename, every authored file's runtime-neutral module identity, and the public-subpath map | **Digest and lifecycle required**: the module hash can run with the empty fingerprint, but the complete program digest is not recorded |
-| Active origin | No origin, an external `https://` URL with an entry export, a stable mutable fabric-entity URL, or a content-addressed fabric pattern URL with an export symbol | Partial: `patternSource` stores a string for system roots, but general web and fabric URL origins are not supported end to end |
+| Active origin | No origin, an external `https://` URL with an entry export, a stable mutable fabric-entity URL, or a content-addressed fabric pattern URL with an export symbol | Partial: `patternSource` stores a string for system roots, and `classifyOrigin` reads it as a web, mutable-piece, or exact-pattern origin for display. No operation records a general web or fabric URL origin, and nothing reconciles one |
 | Revision head | The stable identifier of the latest accepted source and origin state | Revision head required |
 | Source revision log | Ordered records of every accepted source and origin state, with a durable reference to each immutable authored-program manifest | Revision log required |
 | Descriptive repository | Optional locator shown by tooling; never followed | Implemented as `patternRepository` metadata |
@@ -748,6 +749,17 @@ update even when its historical runtime is no longer executable. If the current
 immutable origin is incompatible, the UI offers detach and rebuild without
 mislabeling the current creation revision as a revert target.
 
+The piece menu, opened by right-clicking a rendered piece, covers the reading
+half of that requirement today. It belongs to `cf-piece-menu` in the component
+package rather than to the shell, so every host that renders pieces has it. It
+names the origin kind, shows the canonical origin URL alongside the string
+recorded on the piece when normalization changed it, and says a piece is detached
+when it records no origin. It shows the current pattern identity and export symbol, the identity
+whose setup state was installed, and the pattern identity a specialized update
+displaced, with the time it was displaced. It lists the piece's retained
+authored source files. It does not offer detach, revert, or repoint, and it says
+that no per-revision history is recorded, because none of those exist yet.
+
 ## Current implementation
 
 | Requested interaction | Status | Evidence and remaining work |
@@ -786,6 +798,13 @@ The implementation evidence for this table is concentrated in:
   for URL-backed page creation without origin stamping;
 - [`packages/piece/src/ops/pieces-controller.ts`](../../packages/piece/src/ops/pieces-controller.ts)
   for system-root origin stamping and pre-start reconciliation;
+- [`packages/piece/src/ops/piece-origin.ts`](../../packages/piece/src/ops/piece-origin.ts)
+  for origin classification and reading a piece's source state;
+- [`packages/ui/src/v2/components/cf-piece-menu/cf-piece-menu.ts`](../../packages/ui/src/v2/components/cf-piece-menu/cf-piece-menu.ts)
+  and
+  [`packages/ui/src/v2/components/cf-render/cf-render.ts`](../../packages/ui/src/v2/components/cf-render/cf-render.ts)
+  for the piece menu, its source and origin panels, and the right-click that
+  opens them;
 - [`packages/patterns/system/common-fabric.tsx`](../../packages/patterns/system/common-fabric.tsx),
   [`packages/patterns/system/omnibox-fab.tsx`](../../packages/patterns/system/omnibox-fab.tsx),
   and

@@ -55,11 +55,12 @@ function isInDeepFrozenCache(obj: object): boolean {
  * `true`, and a frozen graph reaching a function reads as deep-frozen, even
  * though the function's internals -- its `prototype` object and closure state --
  * remain mutable. This is deliberate, so general-purpose callers that freeze
- * objects-with-methods (e.g. `api/cfc.ts`'s `cfcPattern`) keep working; the
- * honest fix is a strict `FabricValue`-only `deepFreeze()` migration (tracked as
- * TASK-0086).
+ * objects-with-methods (e.g. `api/cfc.ts`'s `cfcPattern`) keep working.
  *
- * TODO(danfuzz): Fix the problem.
+ * TODO(danfuzz): Migrate `deepFreeze()` to accept `FabricValue` only. A
+ * function is not a `FabricValue`, so a strict signature removes the case
+ * rather than special-casing it; the blocker is the general-purpose callers
+ * above, which must stop passing objects-with-methods first.
  */
 function isNecessarilyFrozenValue(value: unknown): boolean {
   if (typeof value === "object") {

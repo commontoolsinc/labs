@@ -4,7 +4,6 @@ import { Database } from "@db/sqlite";
 import { Server } from "../v2/server.ts";
 import {
   encodeMemoryBoundary,
-  encodeMemoryBoundaryUnprovenFabricValue,
   getMemoryProtocolFlags,
   type GraphQueryResult,
   type HelloOkMessage,
@@ -113,7 +112,7 @@ const transactOperation = async (
   operation: Record<string, unknown>,
   localSeq: number,
 ): Promise<ResponseMessage<{ seq: number }>> => {
-  await connection.receive(encodeMemoryBoundaryUnprovenFabricValue({
+  await connection.receive(encodeMemoryBoundary({
     type: "transact",
     requestId: nextRequestId("tx"),
     space,

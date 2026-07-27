@@ -5,3 +5,12 @@ export {
   type PiecePatternRef,
   type PiecePatternSourceRef,
 } from "./piece-controller.ts";
+export {
+  classifyOrigin,
+  type PieceOrigin,
+  PieceOriginError,
+  type PieceOriginKind,
+  type PieceSourceState,
+  readPieceOrigin,
+  readPieceSourceState,
+} from "./piece-origin.ts";

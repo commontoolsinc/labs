@@ -302,15 +302,17 @@ function analyzeType(value: any, state: AnalyzeTypeState): JSONSchema {
       // Shouldn't happen: We have a cell link but its link doesn't correspond
       // to a cell.
 
-      // TODO(danfuzz): I think the `TODO(seefeld)` below reflects the old state
-      // of `createJsonSchema()` which was defined to return a
-      // `JSONSchemaObjMutable` (which had to be an `object`) and not a
-      // `JSONSchema` (which includes `boolean`), and not some other problem
-      // with returning `true`. That said, maybe it's more appropriate to
-      // `throw` in this case? Figure out what's what, and take action as
-      // appropriate.
-
-      // TODO(seefeld): Should be `true`.
+      // Returning `true` (the JSON Schema "accept anything" literal) is now
+      // type-legal here: `analyzeType()` returns `JSONSchema`, which is
+      // `JSONSchemaObj | boolean`. The obstacle is no longer the type, it is
+      // schema IDENTITY -- `analyzeType()` results are interned, so `{}` and
+      // `true` are distinct interned schemas with distinct hashes. Swapping
+      // them changes generated schemas that reach storage, which makes it a
+      // migration rather than a cleanup.
+      //
+      // TODO(danfuzz): Decide whether this branch should `throw` instead. It is
+      // reached only when a cell link resolves to no cell, which is a
+      // "shouldn't happen" -- returning an accept-anything schema hides it.
       return emptySchemaObject();
     }
 
@@ -344,10 +346,9 @@ function analyzeType(value: any, state: AnalyzeTypeState): JSONSchema {
 
   const basicSchema = schemaForValueType(value);
   if (basicSchema === undefined) {
-    // TODO(danfuzz): I think it's safe to return `true` here. (See longer
-    // related comment above.)
-
-    // Unrecognized type. Treat it as "any."
+    // Unrecognized type. Treat it as "any." (`true` would say the same thing
+    // and is type-legal; see the interning note above for why it is not a
+    // drop-in swap.)
     return finishResult(emptySchemaObject());
   }
 
@@ -392,9 +393,9 @@ function itemsSchemaFromArray(
   // No need for any fanciness for empty or single-element arrays.
   switch (value.length) {
     case 0: {
-      // TODO(danfuzz): I think it's safe to return `true` here. (See longer
-      // related comment above.)
-      // TODO(seefeld): should be `true` in this case.
+      // An empty array constrains nothing, so `items` accepts anything. (`true`
+      // would say the same thing and is type-legal; see the interning note above
+      // for why it is not a drop-in swap.)
       return emptySchemaObject();
     }
     case 1: {

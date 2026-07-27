@@ -1,21 +1,23 @@
 /**
  * Single-runtime pattern tests for Topics (CT-1878).
  *
- * Complements multi-user.test.tsx (which covers cross-runtime isolation and
- * merge behavior): this file drives every exposed stream and derived value in
- * one runtime — action guards, atomic agent signatures, legacy authorship
- * fallback/shadow fields, the unsafe-scheme link rejection, label defaulting,
- * body updates, activity-based sorting, the derived crossref graph (edges from
- * fids pasted in bodies, comments, and link URLs; never persisted), and the
- * exported pure helpers.
+ * Complements multi-user.test.tsx (cross-runtime isolation and merge
+ * behavior) and topics-rejections.test.tsx (thrown rejections on the mutating
+ * verbs — those runs expect runtime errors): this file drives the happy and
+ * legacy paths in one runtime — atomic agent signatures, body-at-create,
+ * legacy authorship fallback/shadow fields, label defaulting, body updates,
+ * activity-based sorting, the derived crossref graph (edges from fids pasted
+ * in bodies, comments, and link URLs; never persisted), and the exported pure
+ * helpers. UI composer wrappers keep silent guards, exercised here.
  */
 import { action, assert, Default, NAME, UI, Writable } from "commonfabric";
 import { pattern } from "commonfabric";
 import Topics, {
-  crossrefChipRow,
-  openTopic,
+  crossrefLinkRow,
   submitProfileTopic,
+  topicCellLink,
   type TopicPiece,
+  type TopicReference,
 } from "./main.tsx";
 import Topic, {
   crossrefJoin,
@@ -35,6 +37,68 @@ import Topic, {
   whenLabel,
 } from "./topic.tsx";
 
+interface TestVNode {
+  type: "vnode";
+  name: string;
+  // deno-lint-ignore no-explicit-any
+  props: Record<string, any>;
+  children: unknown[];
+}
+
+const isVNode = (node: unknown): node is TestVNode =>
+  typeof node === "object" && node !== null &&
+  (node as { type?: unknown }).type === "vnode";
+
+function findAllByTag(
+  node: unknown,
+  tag: string,
+  found: TestVNode[] = [],
+): TestVNode[] {
+  if (Array.isArray(node)) {
+    node.forEach((child) => findAllByTag(child, tag, found));
+    return found;
+  }
+  if (!isVNode(node)) return found;
+  if (node.name === tag) found.push(node);
+  for (const child of node.children ?? []) findAllByTag(child, tag, found);
+  return found;
+}
+
+// Compiled JSX props can be cell-backed even when the source expression was
+// a plain string or boolean.
+// deno-lint-ignore no-explicit-any
+const propValue = (value: any): unknown =>
+  value && typeof value.get === "function" ? value.get() : value;
+
+// A faithful pre-authorship Topic projection: the legacy schema has no
+// `createdBy` path at all. Pushing one into a current Topic's retained
+// mentionable list exercises the mixed-version boundary that production
+// migration must preserve.
+const LegacyUnsignedTopic = pattern(() => {
+  const addComment = action((_event: { body: string }) => {});
+  const addLink = action(
+    (_event: { kind: TopicLinkKind; url: string; label: string }) => {},
+  );
+  const setBody = action((_event: { body: string }) => {});
+  return {
+    [NAME]: undefined,
+    title: "Legacy unsigned sibling",
+    body: "",
+    comments: [],
+    links: [],
+    createdAt: 1,
+    // The retained mixed-version link materializes the legacy missing path as
+    // a present undefined value, which must survive current list validation.
+    createdBy: undefined,
+    createdByName: "Legacy Person",
+    commentCount: undefined,
+    lastActivityAt: undefined,
+    addComment,
+    addLink,
+    setBody,
+  };
+});
+
 export default pattern(() => {
   const board = Topics({});
   // The board stores only TopicPiece's shared-safe projection. Exercise the
@@ -43,6 +107,17 @@ export default pattern(() => {
   const directTopic = Topic({
     title: "Direct topic",
     body: "line one\nline two",
+  });
+  // A retained mixed-version list link can project the absent optional
+  // createdBy path as an explicit undefined. Keep that sibling in a live
+  // mentionable universe: the consumer must validate and derive crossrefs
+  // without weakening non-empty authorship away from TopicAuthor.
+  const mixedMentionable = new Writable<
+    TopicReference[] | Default<[]>
+  >([]);
+  const mixedMentionConsumer = Topic({
+    title: "Mixed mention consumer",
+    mentionable: mixedMentionable,
   });
 
   // Branch pin for the detail derive: a piece with no `mentionable` wired
@@ -122,20 +197,26 @@ export default pattern(() => {
 
   // --- actions ---
 
-  const action_add_blank_topic = action(() => {
-    board.addTopic.send({ title: "   ", agentName: "Sol" });
-  });
-  const action_add_unsigned_topic = action(() => {
-    board.addTopic.send({ title: "Unsigned", agentName: "   " });
-  });
   const action_add_first_topic = action(() => {
     board.addTopic.send({ title: "  First topic  ", agentName: "  Sol  " });
   });
   const action_add_second_topic = action(() => {
     board.addTopic.send({ title: "Second topic", agentName: "Fable" });
   });
+  // Body at create: the create's atomic unit — no reader observes a
+  // title-only halfway state, and created-with is not an update (the
+  // bodyUpdatedBy/At stamps stay unset; createdBy covers authorship).
   const action_add_third_topic = action(() => {
-    board.addTopic.send({ title: "Composed topic", agentName: "Sol" });
+    board.addTopic.send({
+      title: "Composed topic",
+      body: "    indented code\nline two\n",
+      agentName: "Sol",
+    });
+  });
+  const action_link_unsigned_mixed_version_sibling = action(() => {
+    mixedMentionable.push(
+      LegacyUnsignedTopic({}) as TopicReference,
+    );
   });
 
   // The previous deployed event shapes remain operational while callers
@@ -161,19 +242,7 @@ export default pattern(() => {
   const action_update_legacy_topic_body = action(() => {
     legacyBoard.topics?.[0]?.setBody.send({ body: "legacy body" });
   });
-  const action_reject_explicit_blank_legacy_agent = action(() => {
-    legacyBoard.addTopic.send({ title: "must not land", agentName: " " });
-  });
 
-  const action_blank_comment = action(() => {
-    board.topics?.[0]?.addComment.send({ body: "   ", agentName: "Sol" });
-  });
-  const action_comment_unsigned = action(() => {
-    board.topics?.[0]?.addComment.send({
-      body: "unsigned",
-      agentName: "   ",
-    });
-  });
   const action_comment_signed = action(() => {
     board.topics?.[0]?.addComment.send({
       body: "hello thread",
@@ -183,22 +252,6 @@ export default pattern(() => {
   const action_set_body = action(() => {
     board.topics?.[0]?.setBody.send({
       body: "line one\nline two",
-      agentName: "Sol",
-    });
-  });
-  const action_link_unsafe = action(() => {
-    board.topics?.[0]?.addLink.send({
-      kind: "web",
-      url: "javascript:alert(1)",
-      label: "evil",
-      agentName: "Sol",
-    });
-  });
-  const action_link_blank = action(() => {
-    board.topics?.[0]?.addLink.send({
-      kind: "web",
-      url: "   ",
-      label: "x",
       agentName: "Sol",
     });
   });
@@ -253,16 +306,6 @@ export default pattern(() => {
     directTopic.linkUrlDraft.set("   ");
     directTopic.submitLink.send();
   });
-  // Bound at pattern-body level (binding inside an action is an illegal
-  // position); the reactive reference resolves at send time, by which point
-  // the first topic exists.
-  const boundOpenFirst = openTopic({
-    topic: board.topics[0] as TopicPiece,
-  });
-  const action_open_topic = action(() => {
-    boundOpenFirst.send();
-  });
-
   // --- assertions ---
 
   const assert_initial = assert(() =>
@@ -270,13 +313,22 @@ export default pattern(() => {
     (board.topics ?? []).length === 0 &&
     (board.mentionable ?? []).length === 0
   );
-
-  // Blank titles are rejected by the addTopic guard.
-  const assert_still_empty = assert(() => board.topicCount === 0);
+  const assert_explicit_undefined_author_projection = assert(() =>
+    mixedMentionable.get().length === 1 &&
+    // The explicit undefined was accepted, then shaped through the declared
+    // compatibility default for downstream readers.
+    mixedMentionable.get()[0]?.createdBy?.name === "" &&
+    mixedMentionable.get()[0]?.commentCount === 0 &&
+    mixedMentionable.get()[0]?.lastActivityAt === 0 &&
+    mixedMentionable.get()[0]?.[NAME] === "" &&
+    (mixedMentionConsumer.crossrefs?.refsOut ?? []).length === 0 &&
+    (mixedMentionConsumer.crossrefs?.referencedBy ?? []).length === 0
+  );
 
   const assert_first_topic = assert(() =>
     board.topicCount === 1 &&
     board.topics?.[0]?.title === "First topic" &&
+    board.topics?.[0]?.body === "" &&
     board.topics?.[0]?.createdBy?.kind === "agent" &&
     board.topics?.[0]?.createdBy?.name === "Sol" &&
     board.topics?.[0]?.createdByName === "Sol (agent)" &&
@@ -284,10 +336,6 @@ export default pattern(() => {
     board.topics?.[0]?.commentCount === 0 &&
     board.topics?.[0]?.lastActivityAt === board.topics?.[0]?.createdAt &&
     board.topics?.[0]?.[NAME] === "First topic"
-  );
-
-  const assert_blank_comment_rejected = assert(() =>
-    board.topics?.[0]?.commentCount === 0
   );
 
   const assert_comment_landed = assert(() =>
@@ -308,11 +356,7 @@ export default pattern(() => {
     (board.topics?.[0]?.bodyUpdatedAt ?? 0) > 0
   );
 
-  // javascript: and blank URLs are rejected; a valid https link with a blank
-  // label defaults its label to the URL.
-  const assert_links_guarded = assert(() =>
-    (board.topics?.[0]?.links ?? []).length === 0
-  );
+  // A valid https link with a blank label defaults its label to the URL.
   const assert_link_added = assert(() =>
     (board.topics?.[0]?.links ?? []).length === 1 &&
     board.topics?.[0]?.links?.[0]?.kind === "pr" &&
@@ -333,7 +377,13 @@ export default pattern(() => {
   const assert_third_topic = assert(() =>
     board.topicCount === 3 &&
     board.topics?.[2]?.title === "Composed topic" &&
-    board.topics?.[2]?.createdBy?.name === "Sol"
+    board.topics?.[2]?.createdBy?.name === "Sol" &&
+    // Body-at-create: preserved VERBATIM (whitespace-sensitive Markdown must
+    // survive, matching setBody), and NOT a body update — the update stamps
+    // stay unset (createdBy covers create authorship).
+    board.topics?.[2]?.body === "    indented code\nline two\n" &&
+    (board.topics?.[2]?.bodyUpdatedBy?.name ?? "") === "" &&
+    (board.topics?.[2]?.bodyUpdatedAt ?? 0) === 0
   );
 
   const assert_blank_draft_rejected = assert(() =>
@@ -514,17 +564,31 @@ export default pattern(() => {
       (lone.crossrefs?.referencedBy ?? []).length === 0;
   });
 
-  // Drives the exact chip markup the card map emits, independent of UI
-  // demand timing: a populated row yields the hstack vnode — navigation
-  // binds included — and an edgeless row collapses to null so the card
-  // renders nothing for it. The real in-card path renders too: this suite
-  // exports [UI], so the harness demands the vdom continuously (#4715).
-  const assert_chip_row_markup = assert(() => {
-    const list = (board.topics ?? []) as TopicPiece[];
-    if (list.length < 2) return false;
-    const row = crossrefChipRow("references →", false, [list[0], list[1]]);
+  // Pin the persisted navigation contract directly. A cold renderer must see
+  // ordinary cf-cell-link destinations, never pattern-owned handler streams.
+  const assert_cell_link_markup = assert(() => {
+    const rows = board.crossrefs ?? [];
+    if (rows.length < 2 || !rows[0]?.fid || !rows[1]?.fid) return false;
+    const row = crossrefLinkRow("references →", [
+      { fid: rows[0].fid, title: rows[0].topic.title },
+      { fid: rows[1].fid, title: rows[1].topic.title },
+    ]);
+    const open = topicCellLink(rows[0].fid, "Open");
+    const rowLinks = findAllByTag(row, "cf-cell-link");
+    const openLinks = findAllByTag(open, "cf-cell-link");
     return row !== null &&
-      crossrefChipRow("← referenced by", true, []) === null;
+      open !== null &&
+      rowLinks.length === 2 &&
+      openLinks.length === 1 &&
+      propValue(rowLinks[0].props.link) === `/of:${rows[0].fid}` &&
+      propValue(rowLinks[1].props.link) === `/of:${rows[1].fid}` &&
+      propValue(openLinks[0].props.link) === `/of:${rows[0].fid}` &&
+      propValue(openLinks[0].props.label) === "Open" &&
+      propValue(openLinks[0].props.static) === true &&
+      openLinks[0].props.onClick === undefined &&
+      openLinks[0].props["oncf-click"] === undefined &&
+      crossrefLinkRow("← referenced by", []) === null &&
+      topicCellLink("", "Open") === null;
   });
 
   // A share link in a comment counts too — its colon is percent-encoded.
@@ -646,6 +710,8 @@ export default pattern(() => {
     [UI]: board[UI],
     tests: [
       { assertion: assert_initial },
+      { action: action_link_unsigned_mixed_version_sibling },
+      { assertion: assert_explicit_undefined_author_projection },
       { action: action_submit_profile_topic },
       { assertion: assert_profile_topic_submitted },
       { action: action_submit_profile_comment },
@@ -664,31 +730,17 @@ export default pattern(() => {
       { assertion: assert_legacy_link_landed },
       { action: action_update_legacy_topic_body },
       { assertion: assert_legacy_body_landed },
-      { action: action_reject_explicit_blank_legacy_agent },
-      { assertion: assert_legacy_body_landed },
       // Render the Profile-authored rows after their mutations land, then the
       // edit state whose Save control is disabled until #profile resolves.
       { render: profileTopic[UI] },
       { action: action_start_profile_body_edit },
       { render: profileTopic[UI] },
-      { action: action_add_blank_topic },
-      { assertion: assert_still_empty },
-      { action: action_add_unsigned_topic },
-      { assertion: assert_still_empty },
       { action: action_add_first_topic },
       { assertion: assert_first_topic },
-      { action: action_blank_comment },
-      { assertion: assert_blank_comment_rejected },
-      { action: action_comment_unsigned },
-      { assertion: assert_blank_comment_rejected },
       { action: action_comment_signed },
       { assertion: assert_comment_landed },
       { action: action_set_body },
       { assertion: assert_body_set },
-      { action: action_link_unsafe },
-      { assertion: assert_links_guarded },
-      { action: action_link_blank },
-      { assertion: assert_links_guarded },
       { action: action_link_valid_unlabeled },
       { assertion: assert_link_added },
       { action: action_add_second_topic },
@@ -700,7 +752,7 @@ export default pattern(() => {
       { render: board[UI] },
       { assertion: assert_detail_edges },
       { assertion: assert_lone_edgeless },
-      { assertion: assert_chip_row_markup },
+      { assertion: assert_cell_link_markup },
       { render: board[UI] },
       { action: action_comment_first_again },
       { action: action_add_third_topic },
@@ -717,7 +769,6 @@ export default pattern(() => {
       { render: directTopic[UI] },
       { render: legacy[UI] },
       { assertion: assert_legacy_fields_load },
-      { action: action_open_topic },
       { assertion: assert_pure_helpers },
       { action: action_comment_ref_encoded },
       { assertion: assert_comment_edge },

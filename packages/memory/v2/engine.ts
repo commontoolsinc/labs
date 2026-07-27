@@ -30,7 +30,6 @@ import {
   decodeMemoryBoundary,
   DEFAULT_BRANCH,
   encodeMemoryBoundary,
-  encodeMemoryBoundaryUnprovenFabricValue,
   type EntityDocument,
   type EntityId,
   isEntityDocument,
@@ -5093,7 +5092,7 @@ const applyCommitTransaction = (
   const authorizationRef = engine.legacyCommitMetadataRefsRequired
     ? LEGACY_EMPTY_AUTHORIZATION_REF
     : null;
-  const original = encodeMemoryBoundaryUnprovenFabricValue(commit);
+  const original = encodeMemoryBoundary(commit);
   const resolution = encodeMemoryBoundary(
     resolvedPendingReads.length > 0 ? { seq, resolvedPendingReads } : { seq },
   );
@@ -6680,7 +6679,7 @@ const sameStoredOriginal = (
   stored: string,
   incoming: ClientCommit,
 ): boolean => {
-  return stored === encodeMemoryBoundaryUnprovenFabricValue(incoming);
+  return stored === encodeMemoryBoundary(incoming);
 };
 
 const revisionKey = (
