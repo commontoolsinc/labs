@@ -317,6 +317,12 @@ function freezeAround(
       await fn(t);
       if (config.settleAfterBody) await settle();
     } finally {
+      // A kick or autoAdvance macrotask may still sit queued on the real event
+      // loop when the body returns (settle's own finally re-arms auto-advance).
+      // Emptying the timer map makes those callbacks no-ops, so this test's
+      // timers cannot fire — and reschedule onto the real clock — once real
+      // time is restored.
+      timers.clear();
       Reflect.set(globalThis, "setTimeout", realSetTimeout);
       Reflect.set(globalThis, "clearTimeout", realClearTimeout);
       if (config.fakeInterval) {
