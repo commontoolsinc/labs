@@ -289,10 +289,9 @@ function commonPrefixLength(
  *
  * A leaf whose comparison `valueEqual()` cannot perform will throw, and that
  * is deliberate: the classes it currently cannot compare are ones whose
- * protocol members are unimplemented stubs. Catching here would turn a loud
- * "this class isn't finished" into a quiet answer derived from it, which is
- * both the failure mode this function guards against and a way for an
- * unfinished class to shape behavior elsewhere. Do not add a `catch`.
+ * protocol members are unimplemented stubs. A stub announcing itself loudly is
+ * worth more than a quiet answer derived from it, and swallowing the failure
+ * would let an unfinished class shape behavior here. Do not add a `catch`.
  */
 function shallowEqual(
   before: FabricValue,
