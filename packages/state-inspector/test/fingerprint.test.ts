@@ -8,7 +8,7 @@
 // Topics store, where all 20 write-storm cells are `$generated` and none is
 // authored content.
 
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { Database } from "@db/sqlite";
 
 import { openSpace, type SpaceDb } from "../db.ts";
@@ -16,6 +16,7 @@ import {
   contentFingerprint,
   diffFingerprints,
   generatedInternalCellIds,
+  hashEntityValue,
 } from "../fingerprint.ts";
 
 const SCHEMA = `
@@ -230,6 +231,99 @@ Deno.test("diff names what moved, not merely that something did", () => {
     diffFingerprints(before!, before!).equal,
     "a diff with itself is equal",
   );
+
+  // The reverse direction names the disappearance. A migration that DROPS an
+  // entity is the failure this must catch, and it reads as `removed`, never as
+  // a bare "the fingerprints differ".
+  const reverse = diffFingerprints(after!, before!);
+  assertEquals(reverse.removed, ["of:newcomer"]);
+  assertEquals(reverse.changed, ["of:named"]);
+  assertEquals(reverse.added, []);
+});
+
+Deno.test("a value the canonical hasher rejects is reported, not skipped", () => {
+  // Nothing stored decodes to one of these today, but `decodeStored` spans
+  // several at-rest formats. Silently treating a rejected value as empty would
+  // let real content drift read as "unchanged" — the one lie this must not tell.
+  const ok = hashEntityValue({ title: "a topic" });
+  assert("hash" in ok);
+
+  const rejected = hashEntityValue(new Map([["a", 1]]));
+  assert("error" in rejected, "an unsupported object type must be reported");
+  assert(rejected.error.length > 0, "and must carry a reason");
+});
+
+Deno.test("one unhashable entity is reported without aborting the space", () => {
+  // A ~5,000-deep value stores and parses fine but overflows the canonical
+  // hasher's recursion. The whole-space fingerprint must survive it: report the
+  // entity as unhashable, keep hashing the rest. Aborting would leave a
+  // rehearsal with no verification at all; silently skipping would let that
+  // entity's content drift read as "unchanged".
+  let deep: unknown = null;
+  for (let i = 0; i < 5000; i++) deep = { a: deep };
+
+  withSpace([{ id: "of:pathological", doc: { value: deep } }], (space) => {
+    const fp = contentFingerprint(space);
+    assertEquals(fp.unhashable.length, 1);
+    assertEquals(fp.unhashable[0].id, "of:pathological");
+    assert(fp.unhashable[0].reason.length > 0, "carries a reason");
+    // The rest of the space still produced a fingerprint.
+    assert(fp.entities >= 3);
+    assert(fp.perEntity.every((e) => e.id !== "of:pathological"));
+  });
+});
+
+Deno.test("a possibly truncated enumeration is refused, not fingerprinted", () => {
+  // A hash over part of a space is worse than no hash: it looks authoritative.
+  withSpace([], (space) => {
+    assertThrows(
+      () => contentFingerprint(space, { enumerationCap: 1 }),
+      Error,
+      "truncated enumeration",
+    );
+  });
+});
+
+Deno.test("malformed internal manifests are skipped, not fatal", () => {
+  // A piece whose manifest is the wrong shape must not abort a whole-space
+  // fingerprint; its cells simply go unclassified (and so are fingerprinted).
+  withSpace([
+    {
+      id: "of:bad-manifest",
+      doc: {
+        value: {},
+        internal: "not-an-array",
+        patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
+        schema: {},
+        argument: link("of:input"),
+      },
+    },
+    {
+      id: "of:odd-entries",
+      doc: {
+        value: {},
+        internal: [
+          "not-an-object",
+          { partialCause: "x" },
+          { partialCause: "x", link: "not-an-object" },
+          { partialCause: "x", link: {} },
+          { partialCause: "x", link: { "/": {} } },
+          { partialCause: "x", link: { "/": { "link@1": { id: 42 } } } },
+        ],
+        patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
+        schema: {},
+        argument: link("of:input"),
+      },
+    },
+  ], (space) => {
+    const { generated, named } = generatedInternalCellIds(space);
+    // Only the well-formed fixture piece contributed classifications.
+    assert(generated.has("of:generated"));
+    assert(named.has("of:named"));
+    const fp = contentFingerprint(space);
+    assertEquals(fp.unhashable, []);
+    assert(fp.entities > 0);
+  });
 });
 
 Deno.test("an entity with no value is recorded, not dropped", () => {

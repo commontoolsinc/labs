@@ -170,10 +170,12 @@ export async function createClone(
 export async function resetClone(dir: string): Promise<CloneManifest> {
   const manifest = await readManifest(dir);
   const paths = clonePaths(await resolvePath(dir), manifest.space);
+  // The companions are absent on a clone no engine has opened yet — the normal
+  // case at the start of a rehearsal — so their absence is not an error, while
+  // any OTHER failure must surface rather than leave a half-reset clone.
   for (const suffix of ["", "-wal", "-shm"]) {
-    await Deno.remove(`${paths.workingPath}${suffix}`).catch((error) => {
-      if (!(error instanceof Deno.errors.NotFound)) throw error;
-    });
+    const path = `${paths.workingPath}${suffix}`;
+    if (await pathExists(path)) await Deno.remove(path);
   }
   await Deno.copyFile(paths.pristinePath, paths.workingPath);
   return manifest;
@@ -327,16 +329,30 @@ function assertSafeTarget(
   }
 }
 
+/**
+ * Whether a path exists. An absent path is an ordinary answer; every other
+ * failure (a component that is not a directory, a permission problem) is a real
+ * error and propagates — treating those as "absent" would silently skip a
+ * reset or merge a clone into occupied ground.
+ */
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await Deno.stat(path);
+    return true;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return false;
+    throw error;
+  }
+}
+
 /** A clone directory must not silently merge into existing contents. */
 async function assertEmptyOrAbsent(dir: string): Promise<void> {
-  try {
-    for await (const entry of Deno.readDir(dir)) {
-      throw new Error(
-        `${dir} is not empty (found ${entry.name}); pick a fresh directory or ` +
-          `remove it first.`,
-      );
-    }
-  } catch (error) {
-    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  // Absent is the normal case — we are about to create it.
+  if (!(await pathExists(dir))) return;
+  for await (const entry of Deno.readDir(dir)) {
+    throw new Error(
+      `${dir} is not empty (found ${entry.name}); pick a fresh directory or ` +
+        `remove it first.`,
+    );
   }
 }

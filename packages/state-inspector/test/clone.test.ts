@@ -269,6 +269,95 @@ Deno.test("a directory without a manifest is not a clone", async () => {
   });
 });
 
+Deno.test("reset works on a clone that was never opened", async () => {
+  // The common case at the START of a rehearsal: no engine has run yet, so
+  // there are no WAL companions to remove. Absent companions are not an error.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const paths = clonePaths(clone, SPACE);
+    assertEquals(await exists(`${paths.workingPath}-wal`), false);
+
+    await resetClone(clone);
+    assert((await verifyClone(clone)).ok);
+  });
+});
+
+Deno.test("a manifest from a future tool version is refused, not guessed at", async () => {
+  // Reading a newer layout with older rules could reset to the wrong file or
+  // compare against a fingerprint computed a different way.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const manifestPath = `${clone}/clone.json`;
+    const manifest = JSON.parse(await Deno.readTextFile(manifestPath));
+    await Deno.writeTextFile(
+      manifestPath,
+      JSON.stringify({ ...manifest, version: 2 }),
+    );
+
+    await assertRejects(
+      () => readManifest(clone),
+      Error,
+      "this tool understands 1",
+    );
+  });
+});
+
+Deno.test("an unreadable manifest surfaces its real error", async () => {
+  // Only ENOENT means "not a clone". Any other IO failure must not be
+  // reported as a missing manifest — that would send an operator looking in
+  // the wrong place.
+  await withDirs(async ({ root }) => {
+    const dir = `${root}/odd-clone`;
+    await Deno.mkdir(`${dir}/clone.json`, { recursive: true });
+    const error = await assertRejects(() => readManifest(dir), Error);
+    assert(
+      !error.message.includes("is not a clone directory"),
+      `expected the underlying IO error, got: ${error.message}`,
+    );
+  });
+});
+
+Deno.test("a filesystem error other than 'absent' is surfaced, not swallowed", async () => {
+  // Only ENOENT means "nothing there". Treating any other failure as absent
+  // would let `createClone` merge onto occupied ground, or let `reset` skip a
+  // file it failed to delete and call the clone pristine. A path whose parent
+  // component is a regular file yields NotADirectory — deterministically, with
+  // no permission games that a root-running CI would bypass.
+  await withDirs(async ({ root, source }) => {
+    const regularFile = `${root}/not-a-dir.txt`;
+    await Deno.writeTextFile(regularFile, "x");
+    const error = await assertRejects(
+      () =>
+        createClone({
+          source,
+          space: SPACE,
+          targetDir: `${regularFile}/clone`,
+          now: NOW,
+        }),
+      Error,
+    );
+    assert(
+      error instanceof Deno.errors.NotADirectory,
+      `expected the real IO error, got ${error.constructor.name}`,
+    );
+  });
+});
+
+Deno.test("an empty forbidden-directory entry is ignored, not treated as '/'", async () => {
+  // The CLI builds this list from the environment, where an unset variable can
+  // arrive as "". Treating that as a path prefix would refuse every target.
+  await withDirs(async ({ source, clone }) => {
+    const manifest = await createClone({
+      source,
+      space: SPACE,
+      targetDir: clone,
+      forbiddenDirs: ["", "  ", "/definitely/not/this/one"],
+      now: NOW,
+    });
+    assertEquals(manifest.space, SPACE);
+  });
+});
+
 async function exists(path: string): Promise<boolean> {
   try {
     await Deno.stat(path);

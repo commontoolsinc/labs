@@ -35,6 +35,25 @@ import { listScopes } from "./scopes.ts";
 const ENUMERATION_CAP = 1_000_000;
 
 /**
+ * Hash one entity's durable value, reporting a rejection instead of throwing.
+ *
+ * `hashOf` refuses values it has no canonical form for (functions, symbols,
+ * unsupported object types such as `Map`, cyclic structures). Nothing stored
+ * today decodes to one, but `decodeStored` spans several at-rest formats, and a
+ * single odd entity must not abort a whole-space fingerprint — nor be quietly
+ * treated as empty, which would let real content drift read as "unchanged".
+ */
+export function hashEntityValue(
+  value: unknown,
+): { hash: string } | { error: string } {
+  try {
+    return { hash: hashOf(value).toString() };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
  * Every entity in the space, across EVERY scope.
  *
  * `listEntityModels` defaults to `scope: "space"`, which on a real store
@@ -43,19 +62,23 @@ const ENUMERATION_CAP = 1_000_000;
  * damage just as easily, so the fingerprint walks the scopes `listScopes`
  * reports rather than assuming one.
  */
-function allEntities(space: SpaceDb, branch: string): EntityModel[] {
+function allEntities(
+  space: SpaceDb,
+  branch: string,
+  cap: number = ENUMERATION_CAP,
+): EntityModel[] {
   const out: EntityModel[] = [];
   for (const scope of listScopes(space, { branch })) {
     const models = listEntityModels(space, {
       branch,
       scope: scope.raw,
-      limit: ENUMERATION_CAP,
+      limit: cap,
     });
-    if (models.length >= ENUMERATION_CAP) {
+    if (models.length >= cap) {
       throw new Error(
         `scope ${scope.raw} enumerates ${models.length}+ entities, at or above ` +
-          `the ${ENUMERATION_CAP} cap; refusing to fingerprint a possibly ` +
-          `truncated enumeration.`,
+          `the ${cap} cap; refusing to fingerprint a possibly truncated ` +
+          `enumeration.`,
       );
     }
     out.push(...models);
@@ -96,6 +119,12 @@ export interface FingerprintReport {
 export interface FingerprintOptions {
   branch?: string;
   /**
+   * Refuse rather than fingerprint a space whose scope enumerates at or above
+   * this many entities, since the enumeration may have been truncated. Defaults
+   * to 1,000,000 — far above any real space; raise it only knowingly.
+   */
+  enumerationCap?: number;
+  /**
    * Include compiler-generated internal cells. Default false. Turning this on
    * makes the fingerprint change on every pattern update by design; it exists
    * for "what moved at all?", not for "did content survive?".
@@ -113,11 +142,17 @@ export interface FingerprintOptions {
  */
 export function generatedInternalCellIds(
   space: SpaceDb,
-  options: { branch?: string } = {},
+  options: { branch?: string; enumerationCap?: number } = {},
 ): { generated: Set<string>; named: Set<string> } {
   const generated = new Set<string>();
   const named = new Set<string>();
-  for (const model of allEntities(space, options.branch ?? "")) {
+  for (
+    const model of allEntities(
+      space,
+      options.branch ?? "",
+      options.enumerationCap,
+    )
+  ) {
     if (model.kind !== "piece") continue;
     const doc = reconstructDocument(space, {
       id: model.id,
@@ -164,14 +199,17 @@ export function contentFingerprint(
   const branch = options.branch ?? "";
   const { generated, named } = options.includeGenerated
     ? { generated: new Set<string>(), named: new Set<string>() }
-    : generatedInternalCellIds(space, { branch });
+    : generatedInternalCellIds(space, {
+      branch,
+      enumerationCap: options.enumerationCap,
+    });
 
   const ambiguous = [...generated].filter((id) => named.has(id)).sort();
   const perEntity: EntityFingerprint[] = [];
   const unhashable: { id: string; reason: string }[] = [];
   let excludedGenerated = 0;
 
-  for (const model of allEntities(space, branch)) {
+  for (const model of allEntities(space, branch, options.enumerationCap)) {
     if (generated.has(model.id)) {
       excludedGenerated++;
       continue;
@@ -183,18 +221,12 @@ export function contentFingerprint(
     const value = (doc as Record<string, unknown> | undefined)?.value;
     let hash: string | null = null;
     if (value !== undefined) {
-      try {
-        hash = hashOf(value).toString();
-      } catch (error) {
-        // A value the canonical hasher rejects must be reported, not treated as
-        // absent — silently hashing it to null would let real content drift
-        // through as "unchanged".
-        unhashable.push({
-          id: model.id,
-          reason: error instanceof Error ? error.message : String(error),
-        });
+      const hashed = hashEntityValue(value);
+      if ("error" in hashed) {
+        unhashable.push({ id: model.id, reason: hashed.error });
         continue;
       }
+      hash = hashed.hash;
     }
     perEntity.push({
       id: model.id,
