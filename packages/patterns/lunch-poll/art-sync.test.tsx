@@ -1,28 +1,34 @@
 /**
- * Test: lunch-poll generated-art wiring — host-gated generation + explicit
- * keep-action persistence (the post-CT-1836 structure: the card reads the
- * GeneratedArt sub-pattern's fetch-derived outputs directly; nothing sends
- * from inside a computed).
+ * Test: lunch-poll generated-art wiring — host-gated generation + AUTOMATIC
+ * persistence. The card renders a hidden trigger img over the freshly
+ * generated data URL; the browser's `load` event sends the admin-gated,
+ * idempotent `setOptionImage` handler (the same sanctioned persistence path
+ * the old manual keep button used, minus the click). A stream send is the
+ * one mutation that works from inside the card: map-instantiated children
+ * are minted at user scope, so direct writes through input handles land in
+ * a `user:<did>` instance no other viewer reads, while sends resolve
+ * value-mode to the real space-bound handler.
  *
  * Single-identity caveat (as main.test.tsx): this runtime's one identity IS
  * the host after joining, so the host path runs end-to-end: join → add an
  * option → the host-gated GeneratedArt fetches the mocked /api/ai/img
- * generation (visible as the cf-image overlay) → the host keeps it — the
- * card's keep button sends { optionId, imageUrl } into `setOptionImage`; this
- * test drives that same stream directly with the imageUrl the button would
- * read — → the option carries `imageUrl` and the stored <img> renders. Every
- * other viewer renders that same stored value by construction (sourceUrl
- * short-circuits generation); the gate itself (shouldGenerate) is covered at
- * the sub-pattern level in generated-art.test.tsx.
+ * generation → the trigger img renders (this VNode harness has no real DOM,
+ * so the test fires its `load` by sending into the trigger's onLoad stream —
+ * the browser event and this send reach the identical lowered handler, which
+ * closes over the card's own state) → the option carries `imageUrl` and the
+ * stored <img> renders. Every other viewer renders that same stored value by
+ * construction (sourceUrl short-circuits generation); cross-runtime
+ * visibility is covered by multi-user-art.test.tsx and the gate itself
+ * (shouldGenerate) at the sub-pattern level in generated-art.test.tsx.
  */
 
-import { action, computed, pattern, UI } from "commonfabric";
+import { action, assert, computed, pattern, UI } from "commonfabric";
 import CozyPoll from "./main.tsx";
 
 // 1×1 transparent PNG, the mocked generation response body. The persisted
 // value is its exact data URL: FetchBinary bytes → base64 re-encode is an
-// identity round-trip on the same bytes, so the card's keep button and this
-// test send the same string. (Both plain literals: SES-mode module scope
+// identity round-trip on the same bytes, so the trigger handler and this
+// test compare the same string. (Both plain literals: SES-mode module scope
 // rejects computed top-level values like template joins.)
 const TINY_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
@@ -86,17 +92,10 @@ const findNodeByProp = (
     .find((child) => child !== undefined);
 };
 
-// Walk the rendered tree for a vnode by element name (e.g. "cf-image").
-const findNodeByName = (
-  root: unknown,
-  name: string,
-): unknown | undefined => {
-  const value = readValue(root);
-  if (isRecord(value) && readValue(value.name) === name) return value;
-  return childNodes(value)
-    .map((child) => findNodeByName(child, name))
-    .find((child) => child !== undefined);
-};
+// The hidden auto-persist trigger img for the option with the given id
+// (module scope: SES callbacks must not capture pattern-body callables).
+const findTriggerIn = (root: unknown, optionId: unknown): unknown =>
+  findNodeByProp(root, "data-art-persist-trigger", optionId);
 
 export default pattern(() => {
   const poll = CozyPoll({});
@@ -113,31 +112,36 @@ export default pattern(() => {
     poll.options.length === 1 && poll.options[0]?.title === "Sushi Palace"
   );
 
-  // Post-settle the host's client has generated: the cf-image overlay
-  // (generated, not yet stored) is in the rendered tree — the fetch-derived
-  // read chain through both sub-pattern boundaries works. (Until CT-1836's
-  // traversal fix this file carried a canary pinning the opposite.)
-  const assert_generated_overlay_renders = computed(() =>
-    findNodeByName(poll[UI], "cf-image") !== undefined
-  );
-
-  // The host keeps the art: the same payload the card's keep button sends
-  // (the button reads `art.imageDataUrl`, which equals EXPECTED_DATA_URL for
-  // the mocked bytes — the identity round-trip noted above).
-  const action_keep_art = action(() => {
-    const optionId = readValue(poll.options[0]?.id);
-    poll.setOptionImage.send({
-      optionId: typeof optionId === "string" ? optionId : "",
-      imageUrl: EXPECTED_DATA_URL,
-    });
+  // Post-settle the host's client has generated: the hidden auto-persist
+  // trigger img is in the rendered tree, carrying the generated data URL and
+  // a wired onLoad handler (the fetch-derived read chain through both
+  // sub-pattern boundaries works — until CT-1836's traversal fix this file
+  // carried a canary pinning the opposite).
+  const assert_trigger_renders = assert(() => {
+    const trigger = findTriggerIn(poll[UI], readValue(poll.options[0]?.id));
+    return trigger !== undefined &&
+      readValue(propsOf(trigger)?.src) === EXPECTED_DATA_URL &&
+      propsOf(trigger)?.onLoad !== undefined;
   });
 
-  const assert_image_persisted = computed(() =>
+  // Fire the trigger's `load` (no real DOM here — send into its onLoad
+  // stream; the handler closes over the card's state and builds the real
+  // payload itself).
+  const action_fire_trigger_load = action(() => {
+    const trigger = findTriggerIn(poll[UI], readValue(poll.options[0]?.id));
+    const onLoad = propsOf(trigger)?.onLoad;
+    if (typeof onLoad === "object" && onLoad !== null && "send" in onLoad) {
+      (onLoad as { send: (event: Record<string, never>) => void }).send({});
+    }
+  });
+
+  const assert_image_persisted = assert(() =>
     readValue(poll.options[0]?.imageUrl) === EXPECTED_DATA_URL
   );
 
-  const assert_stored_img_renders = computed(() =>
-    findNodeByProp(poll[UI], "src", EXPECTED_DATA_URL) !== undefined
+  const assert_stored_img_renders = assert(() =>
+    findNodeByProp(poll[UI], "src", EXPECTED_DATA_URL) !== undefined &&
+    findTriggerIn(poll[UI], readValue(poll.options[0]?.id)) === undefined
   );
 
   return {
@@ -147,11 +151,12 @@ export default pattern(() => {
       { assertion: assert_option_added },
       // Drives the mocked generation fetch to completion.
       { settle: true },
-      { assertion: assert_generated_overlay_renders },
-      { action: action_keep_art },
+      { assertion: assert_trigger_renders },
+      { action: action_fire_trigger_load },
       { assertion: assert_image_persisted },
       // One more settle beat: the persisted URL flows back into the card as
-      // `sourceUrl` and the stored-<img> branch re-renders.
+      // `sourceUrl`, the stored-<img> branch renders, and the trigger
+      // unmounts.
       { settle: true },
       { assertion: assert_stored_img_renders },
     ],
