@@ -34,6 +34,7 @@ import {
   SlugResolutionError,
 } from "@commonfabric/piece";
 import {
+  type PatternUpdateCheckReport,
   type PiecePatternRef,
   PiecesController,
 } from "@commonfabric/piece/ops";
@@ -1227,6 +1228,37 @@ export async function setPiecePattern(
         ? { dangerouslyAllowIncompatibleSchema: true }
         : {}),
     },
+  );
+}
+
+/**
+ * Dry-run the pattern swap `setPiecePattern` would perform and return the
+ * verdict. Never mutates the piece.
+ */
+export async function checkPiecePattern(
+  config: PieceConfig,
+  entry: EntryConfig,
+  deps: PieceOperationDependencies = {},
+): Promise<PatternUpdateCheckReport> {
+  const manager = await (deps.loadManager ?? loadManager)(config);
+  const resolvedConfig = await resolvePieceConfigWithManager(
+    config,
+    manager,
+    deps.resolvePieceAddress,
+  );
+  const pieces = deps.createController?.(manager) ??
+    new PiecesController(manager);
+  const piece = await pieces.get(
+    resolvedConfig.piece,
+    false,
+    undefined,
+    resolvedConfig.pieceScope,
+  );
+  return await piece.checkPattern(
+    await (deps.getPinnedProgramFromFile ?? getPinnedProgramFromFile)(
+      manager,
+      entry,
+    ),
   );
 }
 

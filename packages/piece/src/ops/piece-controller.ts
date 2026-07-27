@@ -29,6 +29,8 @@ import {
 import type { CellKind, LinkScope } from "@commonfabric/api";
 import {
   cfcSchemaChildRoot,
+  loadSchemaDocument,
+  readStoredCfcMetadata,
   resolveCfcSchemaRefRoot,
   resolveCfcSchemaRefs,
   validateSchemaValue,
@@ -40,6 +42,12 @@ import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
 } from "../schema-compatibility.ts";
+import {
+  checkPatternUpdate,
+  type PatternUpdateCheckReport,
+  PatternUpdateIncompatibleError,
+  type PatternUpdateRole,
+} from "../pattern-update-check.ts";
 
 interface PieceCellIo {
   get(path?: CellPath): Promise<unknown>;
@@ -2839,6 +2847,126 @@ export class PieceController<T = unknown> {
     return (await this.getPatternSourceProgram())?.files;
   }
 
+  /**
+   * Would {@link setPattern} accept `program`? Answers without mutating the
+   * piece: no setup runs, no transaction commits, and the piece's pattern
+   * identity is untouched whatever the verdict.
+   *
+   * Every rule is the real one. The pattern-contract proof is the same function
+   * `setPattern` asserts with; the CFC verdict drives the real envelope merge
+   * over the schema currently at rest for this piece's documents; the
+   * retained-link proof is the same validator `setPattern` installs as
+   * `validateArgumentLinks`, run against committed state.
+   *
+   * Compiling the candidate is not free of side effects — like any compile it
+   * content-addresses the pattern's source and module closure into the space —
+   * but those documents are immutable and keyed by content, and the piece
+   * itself is never written.
+   */
+  async checkPattern(
+    program: RuntimeProgram,
+  ): Promise<PatternUpdateCheckReport> {
+    const { pattern: previousPattern, ref: previousRef } = await this
+      .#loadCurrentPattern();
+    const candidate = await compileProgram(this.#manager, program, {
+      previousEntryIdentity: previousRef.identity,
+    });
+    // The retained-link proof reads the argument document's RAW value, so that
+    // document has to be loaded first. `setPattern` gets this for free — setup
+    // loads the argument before validating it — but the preflight must ask.
+    await this.#argumentCellOrUndefined()?.sync();
+
+    return checkPatternUpdate({
+      piece: this.id,
+      previous: previousPattern,
+      candidate,
+      storedCfcEnvelopes: this.#storedCfcEnvelopes(),
+      retainedLinks: this.#retainedLinkVerdict(previousPattern, candidate),
+    });
+  }
+
+  /**
+   * The CFC schema envelopes at rest for this piece's argument and result
+   * documents — the `existing` side of the merge the next setup commit would
+   * perform. Read through `runtime.readTx()`, which cannot write.
+   *
+   * A role is absent when its document carries no stored CFC metadata. That is
+   * not a gap in the check: the merge only runs against a stored envelope, so
+   * with none there is nothing for it to reject.
+   */
+  #storedCfcEnvelopes(): Partial<Record<PatternUpdateRole, JSONSchema>> {
+    const runtime = this.#manager.runtime;
+    const tx = runtime.readTx();
+    const envelopes: Partial<Record<PatternUpdateRole, JSONSchema>> = {};
+    const cells: [PatternUpdateRole, Cell<unknown> | undefined][] = [
+      ["result", this.#cell],
+      ["argument", this.#argumentCellOrUndefined()],
+    ];
+    for (const [role, cell] of cells) {
+      if (cell === undefined) continue;
+      try {
+        const link = cell.getAsNormalizedFullLink();
+        const metadata = readStoredCfcMetadata(tx, {
+          space: link.space,
+          id: link.id,
+          scope: link.scope,
+        });
+        if (metadata?.schemaHash === undefined) continue;
+        envelopes[role] = loadSchemaDocument(
+          tx,
+          link.space,
+          metadata.schemaHash,
+        );
+      } catch {
+        // An unreadable envelope is reported as "not applicable" rather than
+        // guessed at; the caller sees the role missing.
+        continue;
+      }
+    }
+    return envelopes;
+  }
+
+  #argumentCellOrUndefined(): Cell<unknown> | undefined {
+    try {
+      return this.#manager.getArgument(this.#cell);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Run the retained-link validator `setPattern` installs, over the argument
+   * links already committed for this piece. Read-only: it inspects
+   * `getRaw()` and the candidate's argument schema, and never writes.
+   */
+  #retainedLinkVerdict(
+    previousPattern: Pattern,
+    candidate: Pattern,
+  ): { ran: boolean; issue?: string; note?: string } {
+    const argumentCell = this.#argumentCellOrUndefined();
+    if (argumentCell === undefined) {
+      return { ran: false, note: "this piece has no argument cell" };
+    }
+    try {
+      assertSuppliedLinkSchemasCompatible(
+        suppliedLinks(argumentCell.getRaw()),
+        candidate.argumentSchema,
+        argumentCell,
+        this.#manager,
+        {
+          priorArgumentSchema: previousPattern.argumentSchema,
+          linksPreservedVerbatim: true,
+        },
+      );
+      return { ran: true };
+    } catch (error) {
+      return {
+        ran: true,
+        issue: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
   async setPattern(
     program: RuntimeProgram,
     options?: {
@@ -2853,35 +2981,81 @@ export class PieceController<T = unknown> {
       const pattern = await compileProgram(this.#manager, program, {
         previousEntryIdentity: previousRef.identity,
       });
-      if (!options?.dangerouslyAllowIncompatibleSchema) {
-        assertPatternSchemasBackwardCompatible(previousPattern, pattern);
+      try {
+        if (!options?.dangerouslyAllowIncompatibleSchema) {
+          assertPatternSchemasBackwardCompatible(previousPattern, pattern);
+        }
+        return await execute(this.#manager, this.id, pattern, undefined, {
+          start: true,
+          expectedPatternIdentity: previousRef,
+          validateArgumentLinks: options?.dangerouslyAllowIncompatibleSchema
+            ? undefined
+            : (argumentCell, argumentSchema) =>
+              assertSuppliedLinkSchemasCompatible(
+                suppliedLinks(argumentCell.getRaw()),
+                argumentSchema,
+                argumentCell,
+                this.#manager,
+                {
+                  priorArgumentSchema: previousPattern.argumentSchema,
+                  // `applySetupState` rewrites the argument from `getRaw()`, so
+                  // every retained link's envelope is written back unchanged and
+                  // nothing here is rebuilt as an alias. The validator verifies
+                  // that per link against committed state rather than taking
+                  // this declaration on trust — anything the setup staged that
+                  // is NOT already committed (e.g. a link-shaped schema
+                  // default from the incoming pattern) still faces the full
+                  // rebuild rules.
+                  linksPreservedVerbatim: true,
+                },
+              ),
+          repository: options?.repository,
+        }) as Cell<T>;
+      } catch (error) {
+        throw this.#explainUpdateFailure(previousPattern, pattern, error, {
+          dangerouslyAllowIncompatibleSchema: options
+            ?.dangerouslyAllowIncompatibleSchema,
+        });
       }
-      return await execute(this.#manager, this.id, pattern, undefined, {
-        start: true,
-        expectedPatternIdentity: previousRef,
-        validateArgumentLinks: options?.dangerouslyAllowIncompatibleSchema
-          ? undefined
-          : (argumentCell, argumentSchema) =>
-            assertSuppliedLinkSchemasCompatible(
-              suppliedLinks(argumentCell.getRaw()),
-              argumentSchema,
-              argumentCell,
-              this.#manager,
-              {
-                priorArgumentSchema: previousPattern.argumentSchema,
-                // `applySetupState` rewrites the argument from `getRaw()`, so
-                // every retained link's envelope is written back unchanged and
-                // nothing here is rebuilt as an alias. The validator verifies
-                // that per link against committed state rather than taking
-                // this declaration on trust — anything the setup staged that
-                // is NOT already committed (e.g. a link-shaped schema
-                // default from the incoming pattern) still faces the full
-                // rebuild rules.
-                linksPreservedVerbatim: true,
-              },
-            ),
-        repository: options?.repository,
-      }) as Cell<T>;
+    });
+  }
+
+  /**
+   * Re-describe a failed update in the same terms `checkPattern` would, so the
+   * user is told WHICH field broke WHICH rule instead of whichever low-level
+   * message surfaced first (a raw CFC commit rejection, most painfully).
+   *
+   * This never retries and never writes: the setup transaction has already
+   * aborted, so the state it re-reads is the untouched pre-update state and the
+   * piece is not half-updated. When the verdict finds no blocker — a transport
+   * failure, a compile error, a genuine bug — the original error is returned
+   * unchanged rather than being dressed up as an incompatibility.
+   */
+  #explainUpdateFailure(
+    previousPattern: Pattern,
+    candidate: Pattern,
+    error: unknown,
+    options: { dangerouslyAllowIncompatibleSchema?: boolean },
+  ): unknown {
+    // The override deliberately ran the update without the compatibility
+    // gates; reporting gate findings for its failure would misattribute it.
+    if (options.dangerouslyAllowIncompatibleSchema) return error;
+    if (error instanceof PatternUpdateIncompatibleError) return error;
+    let report: PatternUpdateCheckReport;
+    try {
+      report = checkPatternUpdate({
+        piece: this.id,
+        previous: previousPattern,
+        candidate,
+        storedCfcEnvelopes: this.#storedCfcEnvelopes(),
+        retainedLinks: this.#retainedLinkVerdict(previousPattern, candidate),
+      });
+    } catch {
+      return error;
+    }
+    if (report.blockers.length === 0) return error;
+    return new PatternUpdateIncompatibleError(this.id, report.blockers, {
+      cause: error,
     });
   }
 

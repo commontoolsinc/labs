@@ -90,6 +90,14 @@ export {
   CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON,
   CfcSchemaMigrationError,
 } from "./migration-reason.ts";
+export {
+  cfcSchemaMergeIssue,
+  isStreamSlot,
+  mergeCfcSchemaEnvelopes,
+} from "./schema-merge.ts";
+export type { CfcSchemaMergeIssue } from "./schema-merge.ts";
+export { readStoredCfcMetadata } from "./metadata.ts";
+export { loadSchemaDocument } from "./prepare.ts";
 export { LABEL_METADATA_OBSERVATION } from "./observation-classes.ts";
 export type { LabelMetadataObservationClass } from "./observation-classes.ts";
 export {

@@ -365,7 +365,7 @@ const assertNoDivergentIfcBranches = (
 // preservable data — and it missed the scoped-descriptor dialect
 // (`[{ kind: "stream", scope: … }]`), which is a string only under the legacy
 // form. `getAsCellKind` normalizes both dialects.
-const isStreamSlot = (schema: JSONSchema | undefined): boolean =>
+export const isStreamSlot = (schema: JSONSchema | undefined): boolean =>
   ContextualFlowControl.getAsCellKind(
     ContextualFlowControl.getAsCellValues(schema).at(0),
   ) === "stream";
@@ -575,4 +575,46 @@ export const mergeCfcSchemaEnvelopes = (
   assertNoDivergentIfcBranches(existing);
   assertNoDivergentIfcBranches(candidate);
   return internSchema(mergeSchemaNode(existing, candidate));
+};
+
+/** Why a stored envelope and a candidate envelope cannot be merged. */
+export interface CfcSchemaMergeIssue {
+  /** The merge's own human-readable reason, verbatim. */
+  message: string;
+  /**
+   * True when the rejection is the additive-required migration class — an old
+   * document predating a now-required field that declares no default. This is
+   * the class the runnability backstop rolls forward on
+   * (see {@link CfcSchemaMigrationError}); everything else is a hard
+   * incompatibility.
+   */
+  migration: boolean;
+}
+
+/**
+ * Would {@link mergeCfcSchemaEnvelopes} accept this candidate over this stored
+ * envelope? `undefined` means yes.
+ *
+ * Why: `cf piece setsrc` used to discover an unmergeable schema only by
+ * attempting the update and taking a low-level commit rejection. This is the
+ * dry-run seam its `--check` preflight drives, so the preflight and the real
+ * commit share ONE implementation of the rules rather than drifting copies.
+ * It is pure — no transaction, no writes — because the merge itself is.
+ */
+export const cfcSchemaMergeIssue = (
+  existing: JSONSchema,
+  candidate: JSONSchema,
+): CfcSchemaMergeIssue | undefined => {
+  try {
+    mergeCfcSchemaEnvelopes(existing, candidate);
+    return undefined;
+  } catch (error) {
+    if (error instanceof CfcSchemaMigrationError) {
+      return { message: error.message, migration: true };
+    }
+    return {
+      message: error instanceof Error ? error.message : String(error),
+      migration: false,
+    };
+  }
 };

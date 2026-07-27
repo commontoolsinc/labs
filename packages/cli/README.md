@@ -133,6 +133,12 @@ The supported output switches are:
   JSON stream.
 - `cf piece get` and `cf wish` always return JSON. Their `--json` options are
   accepted, documented no-ops for callers that select JSON explicitly.
+- `cf piece setsrc --check --json` serializes the compatibility verdict for a
+  source update that is not applied. `--json` requires `--check`, because the
+  verdict is the only thing `setsrc` has to serialize. The command exits `0`
+  when the update would be accepted and `3` when it would not; `3` is also the
+  exit code of a real `setsrc` refused as incompatible, so a caller can branch
+  on "incompatible" without parsing text.
 - `cf check --json` compiles without evaluating and prints one object with a
   `files` array. Each entry has the input `path` and the compiled module bodies
   in `output`.

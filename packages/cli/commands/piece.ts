@@ -2,6 +2,7 @@ import { Table } from "@cliffy/table";
 import { Command, ValidationError } from "@cliffy/command";
 import {
   applyPieceInput,
+  checkPiecePattern,
   type EntryConfig,
   executePieceCallable,
   formatViewTree,
@@ -39,8 +40,20 @@ import type { CellScope } from "@commonfabric/api";
 import { parseCellPath } from "@commonfabric/runner";
 import { UI } from "@commonfabric/runner";
 import ports from "@commonfabric/ports" with { type: "json" };
-import type { PiecePatternRef } from "@commonfabric/piece/ops";
+import {
+  type PatternUpdateCheckReport,
+  PatternUpdateIncompatibleError,
+  type PiecePatternRef,
+} from "@commonfabric/piece/ops";
 import { reservesStdoutForCommandOutput } from "../lib/json-output.ts";
+
+/**
+ * Exit code for `cf piece setsrc --check` when the update would NOT be
+ * possible, and for a real `setsrc` refused as incompatible. Distinct from 1
+ * (operational failure) and 2 (bad arguments) so a caller can branch on
+ * "incompatible" without parsing text.
+ */
+export const SETSRC_INCOMPATIBLE_EXIT_CODE = 3;
 
 // Hint system: print helpful next-step suggestions after operations
 let quietMode = false;
@@ -383,6 +396,7 @@ COMMON WORKFLOWS:
 ${pieceEnvStatus()}
 TIPS:
   • Use 'setsrc' for iteration, not repeated 'new' (avoids clutter)
+  • 'setsrc --check' reports whether an update would be accepted, changing nothing
   • After 'set', run 'step' to trigger computed value updates
   • Path format: forward slashes only (items/0/name, not items[0].name)
   • JSON values: strings need quotes: echo '"hello"' | cf piece set ...`);
@@ -587,6 +601,11 @@ export const piece = new Command()
     cliText(`cf piece setsrc ${EX_ID} ${EX_URL} ./main.tsx`),
     `Update the source for "${RAW_EX_COMP.piece!}" with ./main.tsx`,
   )
+  .example(
+    cliText(`cf piece setsrc --check ${EX_ID} ${EX_COMP_PIECE} ./main.tsx`),
+    `Report whether ./main.tsx could be applied to "${RAW_EX_COMP
+      .piece!}", changing nothing. Exits ${SETSRC_INCOMPATIBLE_EXIT_CODE} if it could not.`,
+  )
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .option(
     "--main-export <export:string>",
@@ -604,10 +623,31 @@ export const piece = new Command()
     "--dangerously-allow-incompatible-schema",
     "Replace the source even when pattern or retained-link schema compatibility cannot be proven.",
   )
+  .option(
+    "--check",
+    `Report whether the source could be applied, without applying it. Exits ${SETSRC_INCOMPATIBLE_EXIT_CODE} when it could not.`,
+  )
+  .option("--json", "Output machine-readable JSON. Requires --check.")
   .arguments("<main:string>")
   .action(async (options, mainPath) => {
     setQuietMode(!!options.quiet);
-    const pieceConfig = await setPieceSourceFromCommand(options, mainPath);
+    assertSetSourceFlagCombination(options);
+    if (options.check) {
+      const report = await checkPieceSourceFromCommand(options, mainPath);
+      render(
+        options.json ? report : formatPatternUpdateCheckReport(report),
+        { json: !!options.json },
+      );
+      if (!report.compatible) Deno.exit(SETSRC_INCOMPATIBLE_EXIT_CODE);
+      return;
+    }
+    let pieceConfig: PieceConfig;
+    try {
+      pieceConfig = await setPieceSourceFromCommand(options, mainPath);
+    } catch (error) {
+      reportIncompatibleSetSource(error);
+      throw error;
+    }
     render(`Updated source for piece ${pieceConfig.piece}`);
     hint(cliText(`NEXT STEPS:
   → Test in browser: ${pieceConfig.apiUrl}/${pieceConfig.space}/${pieceConfig.piece}
@@ -1276,6 +1316,7 @@ export interface PieceCLIOptions {
   repository?: string;
   root?: string;
   dangerouslyAllowIncompatibleSchema?: boolean;
+  check?: boolean;
   json?: boolean;
 }
 
@@ -1336,6 +1377,128 @@ export async function setPieceSourceFromCommand(
     },
   );
   return pieceConfig;
+}
+
+/**
+ * Reject `setsrc` flag combinations that cannot mean anything coherent.
+ *
+ * `--json` shapes the check's verdict, so it needs a verdict to shape. And the
+ * dangerous override exists to SKIP the compatibility proof, which is the only
+ * thing `--check` computes — combining them would print a verdict the caller
+ * has already declared they intend to ignore.
+ */
+export function assertSetSourceFlagCombination(
+  options: Pick<
+    PieceCLIOptions,
+    "check" | "json" | "dangerouslyAllowIncompatibleSchema"
+  >,
+): void {
+  if (options.json && !options.check) {
+    throw new ValidationError('"--json" is only available with "--check".', {
+      exitCode: 1,
+    });
+  }
+  if (options.check && options.dangerouslyAllowIncompatibleSchema) {
+    throw new ValidationError(
+      '"--check" cannot be combined with "--dangerously-allow-incompatible-schema": the check reports the compatibility the override skips.',
+      { exitCode: 1 },
+    );
+  }
+}
+
+/** Injectable dependencies for testing the `piece setsrc --check` boundary. */
+export interface CheckPieceSourceCommandDependencies {
+  checkPiecePattern?: typeof checkPiecePattern;
+}
+
+/** Run the `piece setsrc --check` preflight and return its verdict. */
+export async function checkPieceSourceFromCommand(
+  options: PieceCLIOptions,
+  mainPath: string,
+  deps: CheckPieceSourceCommandDependencies = {},
+): Promise<PatternUpdateCheckReport> {
+  const pieceConfig = parsePieceOptions(options);
+  return await (deps.checkPiecePattern ?? checkPiecePattern)(
+    pieceConfig,
+    localPatternEntry(mainPath, options),
+  );
+}
+
+const CHECK_STATUS_MARK = {
+  pass: "ok  ",
+  fail: "FAIL",
+  "not-applicable": "n/a ",
+} as const;
+
+/**
+ * Human-readable `--check` report. Every line answers one of: what was proved,
+ * what was refused and why, and what setup will migrate on the way through.
+ */
+export function formatPatternUpdateCheckReport(
+  report: PatternUpdateCheckReport,
+): string {
+  const lines: string[] = [];
+  lines.push(
+    report.compatible
+      ? `COMPATIBLE — the pattern source can be applied to piece ${report.piece}.`
+      : `INCOMPATIBLE — the pattern source cannot be applied to piece ${report.piece}.`,
+  );
+  lines.push("");
+  lines.push("Checks:");
+  for (const step of report.steps) {
+    lines.push(
+      `  [${CHECK_STATUS_MARK[step.status]}] ${step.name}${
+        step.note ? ` — ${step.note}` : ""
+      }`,
+    );
+  }
+  if (report.blockers.length > 0) {
+    lines.push("");
+    lines.push("Blockers:");
+    for (const blocker of report.blockers) {
+      lines.push(`  • [${blocker.class}] ${blocker.message}`);
+    }
+  }
+  if (report.advisories.length > 0) {
+    lines.push("");
+    lines.push("Would migrate on update:");
+    for (const advisory of report.advisories) {
+      lines.push(`  • ${advisory.message}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Report a refused `setsrc` the way `--check` would, then exit with the
+ * incompatibility code. Returns null when the error is something else (the
+ * caller rethrows). The `deps` seam lets tests observe the wiring without a
+ * real process exit.
+ */
+export function reportIncompatibleSetSource(
+  error: unknown,
+  deps?: {
+    printError?: (message: string) => void;
+    printHint?: (message: string) => void;
+    exit?: (code: number) => never;
+  },
+): never | null {
+  if (!(error instanceof PatternUpdateIncompatibleError)) return null;
+  const printError = deps?.printError ?? console.error;
+  const printHint = deps?.printHint ?? hint;
+  const exit = deps?.exit ?? Deno.exit;
+  printError(
+    `Pattern source cannot be applied to piece ${error.piece}. The piece was NOT modified.`,
+  );
+  for (const blocker of error.blockers) {
+    printError(`  • [${blocker.class}] ${blocker.message}`);
+  }
+  printHint(cliText(
+    `TIP: Run the same evaluation without attempting the update:
+  cf piece setsrc --check --piece ${error.piece} <main> ...
+Add --dangerously-allow-incompatible-schema only if you accept losing the guarantees above.`,
+  ));
+  return exit(SETSRC_INCOMPATIBLE_EXIT_CODE);
 }
 
 const CELL_SCOPE_VALUES = new Set(["space", "user", "session"]);

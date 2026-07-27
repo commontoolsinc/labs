@@ -126,6 +126,42 @@ export function assertPatternSchemasBackwardCompatible(
   previous: Pattern,
   candidate: Pattern,
 ): void {
+  const issues = patternSchemaCompatibilityIssues(previous, candidate);
+  if (issues.length > 0) {
+    throw new Error(patternSchemaIncompatibilityMessage(issues));
+  }
+}
+
+/** The message {@link assertPatternSchemasBackwardCompatible} throws. */
+export function patternSchemaIncompatibilityMessage(
+  issues: readonly string[],
+): string {
+  return `Pattern schemas are not backward compatible:\n${
+    issues.map((issue) => `- ${issue}`).join("\n")
+  }`;
+}
+
+/**
+ * Every reason `candidate` would be refused as an evolution of `previous`, as
+ * the human-readable strings {@link assertPatternSchemasBackwardCompatible}
+ * reports. Empty means the update is contract-compatible.
+ *
+ * Why this exists separately from the assert: `cf piece setsrc --check` needs
+ * the SAME verdict without a throw, so the preflight and the enforced update
+ * share one rule implementation. Callers that just want the gate should keep
+ * using the assert.
+ *
+ * Each issue is `"<path>: <reason>"`, where the path's first segment is the
+ * role — `argument` for the pattern's INPUT contract, `result` for its OUTPUT
+ * contract. That distinction is load-bearing for readers: a newly-required
+ * INPUT field genuinely needs a default (the pattern reads it, and an existing
+ * caller never supplied it), whereas the result rules govern what downstream
+ * readers were promised.
+ */
+export function patternSchemaCompatibilityIssues(
+  previous: Pattern,
+  candidate: Pattern,
+): string[] {
   const issues: string[] = [];
   for (
     const [label, schema] of [
@@ -140,13 +176,9 @@ export function assertPatternSchemasBackwardCompatible(
       issues.push(`${label} has an invalid schema: ${issue}`);
     }
   }
-  if (issues.length > 0) {
-    throw new Error(
-      `Pattern schemas are not backward compatible:\n${
-        issues.map((issue) => `- ${issue}`).join("\n")
-      }`,
-    );
-  }
+  // An invalid schema definition short-circuits: the subset proof below is only
+  // meaningful over well-formed schemas.
+  if (issues.length > 0) return issues;
 
   const argumentIssue = schemaSubsetIssue(
     previous.argumentSchema,
@@ -182,13 +214,7 @@ export function assertPatternSchemasBackwardCompatible(
   );
   if (resultIssue) issues.push(resultIssue);
 
-  if (issues.length > 0) {
-    throw new Error(
-      `Pattern schemas are not backward compatible:\n${
-        issues.map((issue) => `- ${issue}`).join("\n")
-      }`,
-    );
-  }
+  return issues;
 }
 
 /**

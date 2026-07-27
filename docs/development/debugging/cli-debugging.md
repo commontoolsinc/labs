@@ -140,6 +140,12 @@ deno task cf piece get --piece <piece-id> brokenField -i "$CF_IDENTITY" -a URL -
 
 This keeps you working with the same piece instance, preserving any test data you've set up.
 
+If a `setsrc` is refused as incompatible, the error names the field and the rule
+that refused it, and the piece stays on its original pattern. To ask the same
+question before touching the piece, add `--check`: it applies nothing, reports
+which fields would block the update and why, and exits `3` when the update would
+not be possible (`0` when it would). Add `--json` for a machine-readable verdict.
+
 ## See Also
 
 - ./workflow.md - General debugging workflow

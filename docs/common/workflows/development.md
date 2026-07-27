@@ -10,6 +10,9 @@ deno task cf check pattern.tsx
 # Deploy
 deno task cf piece new ... pattern.tsx
 
+# Ask whether the update would be accepted, without applying it
+deno task cf piece setsrc ... --piece PIECE_ID --check pattern.tsx
+
 # Update existing (faster iteration)
 deno task cf piece setsrc ... --piece PIECE_ID pattern.tsx
 
@@ -65,4 +68,16 @@ deno task cf piece link ... editor-id/items viewer-id/items
   bypass compilation, normal value validation, or atomic stale-update checks.
   `piece new` accepts the same flag for deploy-script symmetry, but a fresh
   piece has no predecessor schema to compare.
+- `setsrc --check` answers all of the above ahead of time and applies nothing.
+  It runs the same rules the update enforces — the pattern-contract subset
+  proof, the CFC document merge against the schema the piece's documents
+  actually carry, and the retained-link proof — and reports which fields would
+  block the update and why, plus the migration work setup would perform (a new
+  handler stream's marker, for example). It exits `0` when the update would be
+  accepted and `3` when it would not, so a deploy script can gate on it.
+  `--json` (only valid with `--check`) emits the same verdict machine-readably.
+  The check never writes to the piece; compiling the candidate does persist the
+  pattern's content-addressed source, exactly as any compile does. A real
+  `setsrc` that is refused now reports the same field-level reasons instead of
+  a low-level rejection, and leaves the piece on its original pattern.
 - Test one feature at a time
