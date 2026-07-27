@@ -5,11 +5,14 @@ against the July Estuary Topics migration, which established that updating a
 deployed pattern on a populated space is a rehearsal-grade event. Decides
 whether the hand-built clone rehearsal becomes a command, and what shape.
 
-**Provisional pending interview.** Wilk built the rehearsal setup with Gideon.
-Everything below is derived from the code, the PR record, and the board; the
-questions his answers settle are listed in [Open questions for
-Wilk](#open-questions-for-wilk) and marked *(W)* inline. Nothing here should be
-implemented before that pass.
+**Revised 2026-07-27.** This doc originally gated on interviewing Wilk, who
+built the rehearsal setup with Gideon; both answered on PR #5009's review
+threads, and the answers are folded in below ([Interview
+results](#interview-results-2026-07-27)). The headline change: the copy/reset
+mechanics were *less* painful in practice than predicted, and the verification
+bookkeeping — counts and fingerprints, re-invented as ad-hoc SQL per run — was
+the actual toil. The recommendation re-weights accordingly: the manifest,
+`--verify`, and `churn` are the payload; the copy mechanics are a thin wrapper.
 
 ## Why
 
@@ -45,11 +48,15 @@ decides what to build so it does.
 
 ## Recommendation in one paragraph
 
-Build a **thin, offline `cf space clone`** — the store-path knowledge, the
-crash-consistent copy, the pristine/working split, and a manifest — plus **`cf
-inspect churn`**, the time-bucketed commit-rate query that makes the write-storm
-gate executable. Clone **same-DID**. Reset by **APFS clonefile from a pristine
-snapshot**. Leave server-side acquisition, toolshed orchestration, and the
+Build a **thin, offline `cf space clone`** whose payload is the bookkeeping —
+the manifest and `--verify`, replacing the ad-hoc SQL and Python one-liners
+each rehearsal has re-invented for counts and fingerprints — plus **`cf
+inspect churn`**, the retrospective commit-rate query that makes the
+write-storm gate executable offline. The copy mechanics (store-path knowledge,
+crash-consistent snapshot, pristine/working split) ride along as a thin
+wrapper; practice showed they were never the hard part. Clone **same-DID**.
+Reset by re-copy from a pristine snapshot (clonefile where the filesystem
+offers it). Leave server-side acquisition, toolshed orchestration, and the
 migration driver **manual**. Roughly 400 lines across two layer-4 packages,
 against a practice the team is already committed to repeating every phase.
 
@@ -75,7 +82,7 @@ exists to buy.
 `{source, cause}` and do **not** include the space DID (`createRef` in
 `packages/runner/src/create-ref.ts`), so the document graph is space-agnostic.
 Same-space links elide the `space` field entirely when it matches the base
-(`packages/runner/src/link-utils.ts:232-243`). On those two dimensions a re-key
+(the base/baseSpace elision in `packages/runner/src/link-utils.ts`). On those two dimensions a re-key
 is a no-op.
 
 **What would break.**
@@ -90,15 +97,16 @@ is a no-op.
    closed** — content silently over-blocks. A rehearsal that over-blocks is
    worse than no rehearsal: it manufactures failures the live update won't have.
 2. **The ACL doc is keyed by the DID.** `aclDocId(space) === "of:" + space`
-   (`server.ts:262`). Re-keying orphans it, and the clone falls through to
+   (`server.ts`). Re-keying orphans it, and the clone falls through to
    `#resolveCapability`'s legacy-compat branch — a populated space with no ACL
-   grants WRITE to any authenticated principal (`server.ts:1002-1006`). That
-   branch is explicitly "temporary pre-launch compatibility" and is on its way
-   out. Rehearsing on it means rehearsing a different authorization world.
+   grants WRITE to any authenticated principal. That branch is explicitly
+   "temporary pre-launch compatibility" and is on its way out. Rehearsing on it
+   means rehearsing a different authorization world.
 3. **History can't be re-signed.** Every `invocation` row records `sub` (the
    space DID) and links to an `authorization` row holding the signed UCAN
-   (`engine.ts:323-334`). Re-keying makes every historical row inconsistent with
-   its signature, and we cannot re-sign them.
+   (the `invocation`/`authorization` tables in `engine.ts`). Re-keying makes
+   every historical row inconsistent with its signature, and we cannot re-sign
+   them.
 4. **Cross-space links are unfixed either way.** Links to *other* spaces keep
    their DIDs under both schemes, so re-keying buys nothing there.
 
@@ -107,8 +115,10 @@ stores now claim one identity, so a mis-pointed client is the hazard. The fix is
 not to change the identity — it is to make the clone unreachable at the prod
 address and loudly labelled at its own. See [Safety rails](#safety-rails).
 
-*(W)* Did the July rehearsal in fact use same-DID, and did it cause any
-near-miss — a `cf` invocation or browser tab that hit the wrong endpoint?
+**Interview result:** the July rehearsal used same-DID, and Wilk noticed no
+trouble — caveated that he drove it mostly through an agent, so a mis-point
+could have gone unseen. That caveat argues for rail 3 (making the clone
+unmistakable at the endpoint), not against same-DID.
 
 ## Write semantics and the reset mechanism
 
@@ -147,15 +157,17 @@ it, which is why reset must delete the companions and not just the `.sqlite`.
   engine-v3/<did>.sqlite            # the working copy; toolshed serves this
 ```
 
-Reset = delete `engine-v3/<did>.sqlite{,-wal,-shm}`, `cp -c` from `pristine/`.
+Reset = delete `engine-v3/<did>.sqlite{,-wal,-shm}`, re-copy from `pristine/`.
 Not `sqlite3 .backup` (needs a live connection, slower, no advantage here). Not
 re-running `VACUUM INTO` (needs the source, which may be a laptop-local scp'd
-file or offline). Clonefile falls back to a plain copy off APFS — same
-semantics, one-time cost proportional to size, which matters on Linux/CI but not
-on the operator laptops where rehearsals happen.
+file or offline). Use clonefile where the filesystem offers it (the 8.9 ms
+above) and a plain copy otherwise — GNU `cp` has no `-c`, so the tool does its
+own fallback (`Deno.copyFile`) rather than shelling out.
 
-*(W)* Did the rehearsal reset per attempt, and roughly how many attempts did the
-73-topic migration take before it was clean?
+**Interview result:** Wilk reset with a plain `cp` — no clonefile — and it was
+fine at Topics-store scale; Gideon likewise drove the mechanics through his
+agents. Clonefile is an optimization, not a requirement. The attempt count went
+unrecorded (Gideon answered live rather than in-thread).
 
 ## Acquisition: scp-then-clone is the honest scope
 
@@ -177,6 +189,14 @@ So:
   down; `cf space clone --from <path>` takes it from there. The command's job is
   to document that one-liner in its error message when `--from-remote` hits a
   404, so the manual path is discoverable rather than folklore.
+
+**Interview result — this matches the practiced flow, plus one hop worth
+keeping:** the July rehearsal did server-side `VACUUM INTO`, scp'd the file
+down, then uploaded it to **S3 so other operators could download the same
+snapshot**, and copied it into a running toolshed's cache dir. One shared
+snapshot is better rehearsal hygiene than per-operator dumps (identical
+baselines, comparable fingerprints), so `--from` should accept an `https://`
+URL as well as a path. What stays out is any *production server* surface.
 
 If prod acquisition later deserves automating, it is a separate mechanism with
 its own access-control design — as the existing comment already says. Bundling
@@ -211,12 +231,17 @@ The write-storm history and the mis-pointed-client hazard drive four rails.
    target directory is the store dir the local toolshed is configured to serve
    (`MEMORY_DIR` / `DB_PATH` from the environment), or is the source directory.
    Both are cheap path comparisons and both are the accidents worth blocking.
-2. **A manifest, and `--verify`.** `clone.json` records source host/path, source
-   DID, VACUUM timestamp, sha256 of the pristine snapshot, `max(seq)` and commit
-   count, and the tool revision. `cf space clone --verify` re-checks the working
-   copy's fingerprint against it. This is the executable form of Gideon's
-   "snapshot manifest + content fingerprint," and it is what turns "did the
-   migration preserve everything" from a judgment call into a diff.
+2. **A manifest, and `--verify` — the command's payload.** `clone.json` records
+   source host/path, source DID, VACUUM timestamp, a hash of the pristine
+   snapshot (via `@commonfabric/content-hash`, the canonical SHA-256 home — not
+   a direct `crypto.subtle.digest`), `max(seq)` and commit count, and the tool
+   revision. `cf space clone --verify` re-checks the working copy's fingerprint
+   against it. This is the executable form of Gideon's "snapshot manifest +
+   content fingerprint," and per the interview it replaces the part of the July
+   rehearsal that was genuinely re-invented each run: counts and fingerprints
+   were ad-hoc SQL and Python heredocs written by an agent per attempt. Two
+   rehearsals whose fingerprints were computed differently can't be compared;
+   the manifest is what makes attempts commensurable.
 3. **Make the clone unmistakable at the endpoint.** The clone directory carries
    a `.cf-clone` marker; the toolshed prints a startup banner naming the clone
    and its source when its store dir contains one. This is a ~7-line toolshed
@@ -227,12 +252,18 @@ The write-storm history and the mis-pointed-client hazard drive four rails.
    api-url differs by construction.
 4. **`cf inspect churn`.** A time-bucketed commit/revision rate query —
    commits and revisions per bucket over `commit.created_at`, plus the top
-   entities in the hottest bucket. **This does not exist today**:
-   `hotEntities` (`packages/state-inspector/queries.ts:183`) gives all-time
-   write counts per entity with no time dimension, which cannot show a storm
-   starting or a settle completing. Churn is what makes "watch commit rates"
-   executable, and it earns its keep on live spaces independent of cloning —
-   it is the query that would have caught the July storm in minutes.
+   entities in the hottest bucket. Two neighbors exist and neither fills this
+   slot: the OTel commit telemetry (SigNoz) shows live rates but only where a
+   collector was attached when it mattered, and [#4950] (open) adds
+   deterministic commit/settle counters for *orchestrated diagnostics runs* of
+   a live runtime. Churn's niche is retrospective and offline — any store, any
+   time window, no instrumentation required at incident time. Within the
+   state-inspector, `hotEntities` (`packages/state-inspector/queries.ts`)
+   gives all-time write counts per entity with no time dimension, which cannot
+   show a storm starting or a settle completing. Churn is what makes "watch
+   commit rates" executable against the flight recorder, and it earns its keep
+   on live spaces independent of cloning — it is the query that would have
+   caught the July storm in minutes.
 
 ## Fidelity caveats the practice must state
 
@@ -240,8 +271,8 @@ A clone is not the production system, and two gaps are worth naming so a
 rehearsal isn't over-trusted:
 
 - **Cross-space references resolve to empty, not to an error.** The memory
-  server creates space stores on demand (`server.ts:3411-3420`, `ensureDir` +
-  `Engine.open` with `create: true`), so any link to another space silently
+  server creates space stores on demand (the space-open path in `server.ts`:
+  `ensureDir` + `Engine.open` with `create: true`), so any link to another space silently
   manufactures an empty local one. A fresh space grants READ only, so the read
   succeeds and returns nothing. Rehearsing a pattern with cross-space reads will
   look cleaner than production.
@@ -249,6 +280,10 @@ rehearsal isn't over-trusted:
   Cold-load timing, CDN/shell versions, and concurrent human traffic are all
   absent. The ~20 s cold-load patience rule exists because of the deployment,
   and a fast clone cold load does not retire it.
+- **Watch item (interview):** nothing lied during the July rehearsal, but Wilk
+  flags that as profile use and cross-space links grow, the empty-space
+  substitution above will matter more. Revisit when a rehearsal first involves
+  profile-linked content.
 
 ## Scope cut
 
@@ -275,16 +310,21 @@ rehearsal isn't over-trusted:
 - Automatic prod detection by heuristic. Explicit path refusal (rail 1) is
   honest; guessing "this looks like production" is not.
 
-**The honest "don't build it" case.** If the July rehearsal turns out to have
-been one afternoon of `cp` and a `README`, and if the verb-contract arc lands in
-two more `setsrc` events rather than five, then a runbook in
-`docs/development/` plus `cf inspect churn` is genuinely sufficient — churn is
-the only piece with no existing substitute. What tips it toward building is the
-repeat count: continuous dogfood means every phase rehearses, and each hand-built
-rehearsal re-derives the `engine-v3/` filename encoding and the WAL companion
-rule from scratch. Those are the two facts people get wrong, and both are silent
-when wrong. *(W)* is the deciding input here — how much of the setup was fiddly
-versus obvious.
+**The honest "don't build it" case — updated by the interview.** The prediction
+this section originally leaned on was wrong: the `engine-v3/` filename encoding
+and the WAL-companion rule cost the July rehearsal nothing, because server-side
+`VACUUM INTO` absorbs both — it emits one correctly-named, companion-free file.
+The copy mechanics alone would not justify a command. What survived, and
+strengthened, is the other half: the verification bookkeeping was re-invented
+per run (ad-hoc SQL and Python heredocs, agent-written each time), both
+operators describe the setup as "told my agent to make it happen," and the
+verb-contract arc repeats this every phase. Per-run agent improvisation is
+exactly the silent-divergence surface the manifest closes — two rehearsals
+whose fingerprints were computed differently can't be compared, and an
+agent-improvised check that quietly measures less than last time looks
+identical to a pass. So the scope cut holds with the weight moved: `--verify`,
+the manifest, and `churn` *are* the command; the copy wrapper is the smaller
+half and can even land second.
 
 ## Blessed practice
 
@@ -333,25 +373,28 @@ Gideon's runbook, made checkable:
 The live run then repeats 2–6 against production, with the rollback manifest in
 hand.
 
-## Open questions for Wilk
+## Interview results (2026-07-27)
 
-1. **What did the rehearsal actually do end to end** — from acquiring the
-   Estuary store to a verified pass? Especially: how the store came off the
-   server, and whether the toolshed was `start-local-dev.sh` with an offset or
-   something bespoke.
-2. **Same-DID or re-keyed?** And did same-DID produce any near-miss — a `cf`
-   command or browser tab that hit the wrong endpoint?
-3. **What was the reset?** `cp -c`, a fresh copy, something else — and how many
-   attempts did the 73-topic migration take before it was clean?
-4. **What was fiddly versus obvious?** This is the load-bearing question for
-   build-vs-runbook. Specifically: did the `engine-v3/<did>.sqlite` path
-   encoding, or WAL companions on reset, cost you time?
-5. **How were counts and the content fingerprint computed** — ad-hoc SQL, `cf
-   inspect`, or by hand? That determines how much of the manifest is new code.
-6. **Was commit rate watched during the rehearsal, and how?** If there is
-   already a query, `cf inspect churn` should adopt it rather than invent one.
-7. **Anything that made the clone lie** — behaved differently from production in
-   a way that mattered?
+The seven questions this doc originally gated on, answered by Wilk (and Gideon,
+live) on PR #5009's review threads; paraphrased.
+
+1. **End to end:** server-side `VACUUM INTO`, scp down, S3 upload so other
+   operators could fetch the same snapshot, copy into a running toolshed's
+   cache dir. Both operators drove the mechanics through their coding agents.
+2. **Same-DID**, no accidents noticed — caveated that interaction was mostly
+   agent-mediated, so a mis-point could have gone unseen. (Rail 3's argument.)
+3. **Reset was a plain `cp`** — no clonefile — and fine at this scale. Attempt
+   count unrecorded.
+4. **Neither the path encoding nor WAL companions cost time**: the VACUUM
+   output was already `<did>.sqlite` with no companions. The build case does
+   not rest here (see the scope cut).
+5. **Counts and fingerprints were ad-hoc SQL and Python one-liners** written by
+   an agent per run — the manifest's job, and the strongest build evidence.
+6. **Commit-rate watching:** OTel commit telemetry exists, and [#4950] adds
+   deterministic workload counters — neither is retrospective-offline, so
+   churn's slot stands, positioned against both.
+7. **Nothing lied**, with the links/profile growth watch item recorded under
+   fidelity caveats.
 
 ## References
 
@@ -360,11 +403,15 @@ hand.
   write storms"; "Pattern verb contract…" (Deployment section); "Board outage
   2026-07-10…".
 - PRs [#4997] (migration-safe legacy Topics; the rehearsal that caught it),
-  [#4916] (generated-cell identity versioning), [#4991] (verb contract WS-A).
+  [#4916] (generated-cell identity versioning), [#4991] (verb contract WS-A),
+  [#4950] (Topics workload diagnostics — churn's live-runtime neighbor).
+- The interview: [PR #5009 review threads](https://github.com/commontoolsinc/labs/pull/5009)
+  (Wilk; Gideon confirmed live).
 - `docs/plans/pattern-verb-contract-implementation.md` — Risks, the write-storm
   gate.
 - `docs/development/LOCAL_DEV_SERVERS.md` — toolshed over a store dir, port
   offsets.
 
 [#4916]: https://github.com/commontoolsinc/labs/pull/4916
+[#4950]: https://github.com/commontoolsinc/labs/pull/4950
 [#4991]: https://github.com/commontoolsinc/labs/pull/4991
