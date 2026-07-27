@@ -27,5 +27,10 @@ export const DUR_GOOD = 12, DUR_WARN = 20; // median CI minutes
 // ci-duration median window — the larger of these two (more runs wins).
 export const DUR_MIN_RUNS = 20;
 export const DUR_MAX_AGE_HOURS = 6;
+// benchmark trend window — the same "larger of the two" idea, but in days: the
+// benchmarks.yml job runs about four-hourly, and the daily-median trend fit needs
+// several distinct days, so the recent slice is measured in days, not hours.
+export const BENCH_TREND_MIN_RUNS = 20;
+export const BENCH_TREND_MAX_AGE_DAYS = 14;
 export const RECENT_WINDOW = 10; // recent completed runs scanned for the recent-runs status
 export const RECENT_DISPLAY = 50; // rows the recent-runs tile shows

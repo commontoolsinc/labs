@@ -440,6 +440,41 @@ builds would drive the clock to the runaway guard. Adopting the harness would
 mean excluding the very files that own timers, and no test in the suite observes
 a controllable time window a fake clock would help with.
 
+## The utils package: a fake clock the test imports
+
+The reconciler and runner harnesses above install their fake clock through a
+`--preload` that wraps every `Deno.test` in the package, so a test gets the
+frozen clock whether or not it asked for one. That default is deliberate there:
+it catches a wall-clock sleep written anywhere in a suite that is meant to wait
+on events instead. `packages/utils` does not want that default. It is a grab-bag
+of utilities; most of its tests are not about time at all, and some — the
+logger's timing tests, for one — busy-spin against the real `performance.now`,
+which a faked clock would leave spinning forever. Only the `sleep` and `timeout`
+tests want controlled time.
+
+So `packages/utils/test/sleep.test.ts` takes the opposite approach: instead of a
+preload forcing a clock on the whole package, the two suites that want one import
+it and open it themselves. They use `FakeTime` from `@std/testing/time`, opened
+with a `using` declaration so it restores the clock when the block ends:
+
+- `using time = new FakeTime()` freezes the real timer that `sleep` or `timeout`
+  arms, so nothing resolves until the test advances the clock.
+- `await time.tickAsync(ms)` advances the fake clock by `ms` and settles the
+  promises the fired timers resolve.
+- `Date.now()` reports the faked time, so a `sleep(5)` is observed as still
+  pending after `tickAsync(4)` and resolved after a further `tickAsync(1)`, with
+  the elapsed time reading exactly five milliseconds — an exact assertion with no
+  real waiting and no flake.
+
+Nothing global is installed for the package, so the other suites in the same file
+need no exception list: `yieldToEventLoop` and `unrefTimer` open no `FakeTime` and
+run on the real clock, which is what they need — `yieldToEventLoop`'s timer-turn
+budget is measured against the real `performance.now` and its test drives a real
+CPU-bound spin, and `unrefTimer` detaches a real Deno timer from the event loop's
+ref-count. This is the lighter tool: reach for the preload harness when a whole
+suite should be held to controlled time, and for a directly-imported `FakeTime`
+when only a test or two measures a delay.
+
 ## Proving a negative
 
 A test that asserts something never happens has no event of its own to wait for.
