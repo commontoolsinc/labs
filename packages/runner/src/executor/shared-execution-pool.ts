@@ -257,6 +257,12 @@ export interface ExecutionPoolMetricsSnapshot {
    * grace windows — the keep-warm cost of the grace dial (P0b), reported
    * against the context-lattice §4 cost-honesty budget. */
   readonly demandGraceIdleWorkerMs: number;
+  /** Generation replacements triggered by claim-authority loss on a live
+   * lane (P0): the lease's pinned sponsor died while the grace window kept
+   * the Worker alive, so re-acquisition re-anchors onto a live demanding
+   * sponsor. (Before the grace window, demand churn itself forced this
+   * rotation as a side effect of constant teardowns.) */
+  readonly sponsorReanchors: number;
   /** Coalesced reconciliation passes queued for indexed-relevant
    * executor-null/draining lanes. */
   readonly parkedWakeAttempts: number;
@@ -349,6 +355,11 @@ type Slot = {
   demandEmptyAt: number | null;
   /** The armed grace-expiry timer, cleared on blip/drain/close. */
   demandGraceTimer: number | null;
+  /** A sponsor re-anchor is queued or in flight (P0: claim-authority loss
+   * on a live lane); collapses repeated loss notes into one replacement. */
+  reanchorQueued: boolean;
+  /** When the last sponsor re-anchor ran (cooldown bookkeeping). */
+  lastReanchorAt: number | null;
   /** Open user lanes keyed by lane principal (C1.8). Grants survive Worker
    * generation replacement; the wire re-delivers them at startup. */
   userLanes: Map<string, SlotUserLane>;
@@ -427,6 +438,7 @@ export class SharedExecutionPool {
     demandGraceBlipsAbsorbed: 0,
     demandGraceExpiries: 0,
     demandGraceIdleWorkerMs: 0,
+    sponsorReanchors: 0,
     userLanesOpened: 0,
     userLanesClosed: 0,
     userLaneReanchors: 0,
@@ -634,6 +646,8 @@ export class SharedExecutionPool {
         foreignWakeQueued: false,
         demandEmptyAt: null,
         demandGraceTimer: null,
+        reanchorQueued: false,
+        lastReanchorAt: null,
         userLanes: new Map(),
         sessionLanes: new Map(),
         lanesWired: false,
@@ -692,6 +706,54 @@ export class SharedExecutionPool {
       this.#clearDemandGrace(slot);
     }
     return this.#enqueue(slot, () => this.#reconcile(slot));
+  }
+
+  /**
+   * P0 sponsor re-anchor: a live lane's claim issuance failed with
+   * authority loss. The lease pins its sponsor (session, connection,
+   * demand row) at acquisition; when that session dies while the demand
+   * grace window keeps the Worker alive, every claim is refused
+   * server-side ("execution lease is not active and authorized") and
+   * nothing rotates — before the grace window, the constant demand-churn
+   * teardowns rotated the sponsor as a side effect. This entry replaces
+   * the generation deliberately: graceful settle under the still-active
+   * lease, drain, and re-acquisition — which picks its sponsor from the
+   * CURRENT demand set (`sponsorRotations` counts an actual change).
+   * Debounced by the queued flag and a cooldown of max(grace, 10s) so a
+   * space with NO authorizable sponsor cannot restart-loop.
+   */
+  noteClaimAuthorityLoss(space: string, branch: BranchName): void {
+    if (this.#closed) return;
+    const slot = this.#slots.get(laneKey(space, branch));
+    if (
+      slot === undefined || slot.executor === null || slot.state !== "live" ||
+      slot.reanchorQueued
+    ) return;
+    const cooldownMs = Math.max(this.#demandGraceMs, 10_000);
+    if (
+      slot.lastReanchorAt !== null &&
+      this.#now() - slot.lastReanchorAt < cooldownMs
+    ) return;
+    slot.reanchorQueued = true;
+    void this.#enqueue(slot, async () => {
+      try {
+        if (
+          this.#closed || slot.executor === null || slot.state !== "live"
+        ) return;
+        // A lane whose demand is genuinely gone drains through the grace
+        // path instead; re-anchoring needs a live (or in-grace) demander
+        // for the re-acquisition to sponsor against.
+        if (slot.demands.length === 0 && !this.#withinDemandGrace(slot)) {
+          return;
+        }
+        this.#metrics.sponsorReanchors++;
+        slot.lastReanchorAt = this.#now();
+        await this.#shutdown(slot, false);
+        await this.#reconcile(slot);
+      } finally {
+        slot.reanchorQueued = false;
+      }
+    });
   }
 
   /** Whether the lane's empty demand is still inside the grace window. */

@@ -144,6 +144,18 @@ export function startServerExecutionPool(runtime: Runtime): void {
       },
       onCandidateDiagnostic: (diagnostic) => {
         memoryServer.recordExecutionCandidateUnserved(diagnostic);
+        // P0 sponsor re-anchor: authority loss on a live lane means the
+        // lease's pinned sponsor died while the demand grace window kept
+        // the Worker alive (before the grace window, demand-churn teardowns
+        // rotated the sponsor as a side effect). The pool replaces the
+        // generation — re-acquisition sponsors against the CURRENT demand
+        // set — debounced pool-side (queued flag + cooldown).
+        if (diagnostic.diagnosticCode === "claim-authority-lost") {
+          const key = diagnostic.claimKey ?? diagnostic.claim;
+          if (key !== undefined) {
+            executionPool?.noteClaimAuthorityLoss(key.space, key.branch);
+          }
+        }
         console.debug(
           "Memory: Server execution candidate unserved",
           diagnostic,

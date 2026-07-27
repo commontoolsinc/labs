@@ -657,6 +657,7 @@ Deno.test("shared execution pool unions ten client references into one worker", 
       demandGraceBlipsAbsorbed: 0,
       demandGraceExpiries: 0,
       demandGraceIdleWorkerMs: 0,
+      sponsorReanchors: 0,
       parkedWakeAttempts: 0,
       parkedWakeStarts: 0,
       foreignWakeNotifications: 0,
@@ -717,6 +718,7 @@ Deno.test("shared execution pool unions ten client references into one worker", 
       demandGraceBlipsAbsorbed: 0,
       demandGraceExpiries: 0,
       demandGraceIdleWorkerMs: 0,
+      sponsorReanchors: 0,
       parkedWakeAttempts: 0,
       parkedWakeStarts: 0,
       foreignWakeNotifications: 0,
@@ -1873,6 +1875,133 @@ Deno.test("P0 legacy parity: grace 0 keeps the immediate empty-demand startup ab
     assertEquals(pool.snapshot(SPACE, BRANCH), undefined);
   } finally {
     releaseStart.resolve();
+    await pool.close();
+  }
+});
+
+Deno.test("P0 re-anchor: claim-authority loss on a live lane replaces the generation onto a live sponsor", async () => {
+  const control = new FakeExecutionControl();
+  const timers = new ManualTimers();
+  let clock = 0;
+  const factory = new FakeExecutorFactory();
+  // Re-acquisition after the drain hands a DIFFERENT sponsor (the live
+  // demander), as the real server does when the pinned sponsor's session
+  // died: the fake mints a fresh lease per acquisition once current clears.
+  const originalAcquire = control.acquireExecutionLease.bind(control);
+  control.acquireExecutionLease = (space, branch, options) => {
+    const acquired = originalAcquire(space, branch, options);
+    if (control.acquired === 2 && control.current !== null) {
+      control.current = {
+        ...control.current,
+        onBehalfOf: "did:key:z6Mk-live-sponsor",
+      } as ExecutionLeaseHandle;
+      return Promise.resolve(control.current);
+    }
+    return acquired;
+  };
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    now: () => clock,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    demandGraceMs: 10_000,
+  });
+  pool.start();
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+    assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "live");
+
+    clock = 5_000;
+    pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    await pool.idle();
+
+    assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "live");
+    assertEquals(factory.starts.length, 2, "a fresh Worker generation");
+    assertEquals(factory.executors[0].stopped, 1, "old generation settled");
+    assertEquals(control.drains, 1, "old lease drained gracefully");
+    const metrics = pool.metrics();
+    assertEquals(metrics.sponsorReanchors, 1);
+    assertEquals(
+      metrics.sponsorRotations,
+      1,
+      "re-acquisition rotated onto the live sponsor",
+    );
+    assertEquals(metrics.leaseLosses, 0, "not a lease loss — a deliberate re-anchor");
+  } finally {
+    await pool.close();
+  }
+});
+
+Deno.test("P0 re-anchor cooldown: repeated authority-loss notes collapse; a fresh window re-anchors again", async () => {
+  const control = new FakeExecutionControl();
+  const timers = new ManualTimers();
+  let clock = 0;
+  const factory = new FakeExecutorFactory();
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    now: () => clock,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    demandGraceMs: 10_000,
+  });
+  pool.start();
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+
+    clock = 1_000;
+    pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    await pool.idle();
+    assertEquals(pool.metrics().sponsorReanchors, 1, "burst collapses to one");
+    assertEquals(factory.starts.length, 2);
+
+    // Inside the cooldown (max(grace, 10s)): a further note is a no-op.
+    clock = 6_000;
+    pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    await pool.idle();
+    assertEquals(pool.metrics().sponsorReanchors, 1, "cooldown holds");
+
+    // A fresh window: the persistent failure re-anchors once more.
+    clock = 20_000;
+    pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    await pool.idle();
+    assertEquals(pool.metrics().sponsorReanchors, 2);
+    assertEquals(factory.starts.length, 3);
+  } finally {
+    await pool.close();
+  }
+});
+
+Deno.test("P0 re-anchor: no live or in-grace demand means no re-anchor (the drain path owns departure)", async () => {
+  const control = new FakeExecutionControl();
+  const timers = new ManualTimers();
+  let clock = 0;
+  const factory = new FakeExecutorFactory();
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    now: () => clock,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    demandGraceMs: 10_000,
+  });
+  pool.start();
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+    clock = 1_000;
+    await control.emit(2, []);
+    clock = 20_000; // grace lapsed; drain not yet fired (timer unfired)
+    pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    await pool.idle();
+    assertEquals(pool.metrics().sponsorReanchors, 0, "no sponsor to re-anchor onto");
+    assertEquals(factory.starts.length, 1);
+  } finally {
     await pool.close();
   }
 });
