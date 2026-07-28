@@ -8,6 +8,31 @@
 import type { Cfc, CurrentPrincipal, WriteAuthorizedBy } from "./cfc.ts";
 
 // ============================================================================
+// Common internal definitions
+// ============================================================================
+
+/**
+ * Recursively adds `readonly` to all properties of `T`.
+ *
+ * Mirrors the definition in `@commonfabric/utils/types` but is duplicated here
+ * so that `@commonfabric/api` remains dependency-free.
+ */
+type Immutable<T> = T extends ReadonlyArray<infer U>
+  ? ReadonlyArray<Immutable<U>>
+  : T extends object ? ({ readonly [P in keyof T]: Immutable<T[P]> })
+  : T;
+
+/**
+  * Recursively removes `readonly` from all properties of `T`.
+  *
+  * Copy of `Mutable` from `@commonfabric/utils/types`. These two definitions
+  * should be unified; see that module for the canonical version.
+  */
+type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
+  : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
+  : T;
+
+// ============================================================================
 // Fabric Value Types
 // ============================================================================
 //
@@ -1523,7 +1548,7 @@ export type HandlerFactory<T, R> =
 // JSON types
 
 /**
- * Pure deeply-immutable JSON value, with the addition of a sidecar of mutable
+ * Pure deeply-immutable JSON value, with the addition of a sidecar of
  * annotations keyed by unique symbols.
  */
 export type JSONValue =
@@ -1541,20 +1566,9 @@ export interface JSONObject extends Readonly<Record<string, JSONValue>> {}
 // Annotations when writing data that help determine the entity id. They are
 // removed before sending to storage.
 export interface IDFields {
-  [ID]?: unknown;
-  [ID_FIELD]?: unknown;
+  readonly [ID]?: unknown;
+  readonly [ID_FIELD]?: unknown;
 }
-
-/**
- * Recursively adds `readonly` to all properties of `T`.
- *
- * Mirrors the definition in `@commonfabric/utils/types` but is duplicated here
- * so that `@commonfabric/api` remains dependency-free.
- */
-type Immutable<T> = T extends ReadonlyArray<infer U>
-  ? ReadonlyArray<Immutable<U>>
-  : T extends object ? ({ readonly [P in keyof T]: Immutable<T[P]> })
-  : T;
 
 /**
  * Deeply-readonly version of `JSONValue`. Used in `JSONSchemaObj` for fields
@@ -1562,6 +1576,11 @@ type Immutable<T> = T extends ReadonlyArray<infer U>
  * mutated after construction.
  */
 export type ImmutableJSONValue = Immutable<JSONValue>;
+
+/**
+ * Deeply-mutable version of `JSONValue`.
+ */
+export type MutableJSONValue = Mutable<JSONValue>;
 
 // Valid values for the "type" property of a JSONSchema
 export type JSONSchemaTypes =
@@ -1709,16 +1728,6 @@ export type JSONSchemaObj = {
     };
   };
 };
-
-/**
- * Recursively removes `readonly` from all properties of `T`.
- *
- * Copy of `Mutable` from `@commonfabric/utils/types`. These two definitions
- * should be unified; see that module for the canonical version.
- */
-type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
-  : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
-  : T;
 
 /**
  * A deep-mutable variant of `JSONSchemaObj`. Recursively strips `readonly`
