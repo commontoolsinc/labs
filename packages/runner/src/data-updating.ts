@@ -1596,7 +1596,7 @@ export function addCommonIDfromObjectID(
 ): void {
   function traverse(obj: unknown): void {
     if (isRecord(obj) && fieldName in obj) {
-      (obj as Record<string, unknown> & IDFields)[ID_FIELD] = fieldName;
+      (obj as IDFields)[ID_FIELD] = fieldName;
     }
 
     // TODO(danfuzz): Latent — this is a public entry point (re-exported,
