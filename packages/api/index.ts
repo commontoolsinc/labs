@@ -12,22 +12,11 @@ import type { Cfc, CurrentPrincipal, WriteAuthorizedBy } from "./cfc.ts";
 // ============================================================================
 
 /**
- * Recursively adds `readonly` to all properties of `T`.
+ * Recursively removes `readonly` from all properties of `T`.
  *
- * Mirrors the definition in `@commonfabric/utils/types` but is duplicated here
- * so that `@commonfabric/api` remains dependency-free.
+ * Copy of `Mutable` from `@commonfabric/utils/types`. These two definitions
+ * should be unified; see that module for the canonical version.
  */
-type Immutable<T> = T extends ReadonlyArray<infer U>
-  ? ReadonlyArray<Immutable<U>>
-  : T extends object ? ({ readonly [P in keyof T]: Immutable<T[P]> })
-  : T;
-
-/**
-  * Recursively removes `readonly` from all properties of `T`.
-  *
-  * Copy of `Mutable` from `@commonfabric/utils/types`. These two definitions
-  * should be unified; see that module for the canonical version.
-  */
 type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
   : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
   : T;
@@ -1573,8 +1562,8 @@ export type AnyCellWrapping<T> =
     // Handle arrays
     : T extends Array<infer U>
       ? Array<AnyCellWrapping<U>> | AnyBrandedCell<Array<AnyCellWrapping<U>>>
-    : T extends ReadonlyArray<infer U>
-      ? ReadonlyArray<AnyCellWrapping<U>>
+    : T extends ReadonlyArray<infer U> ?
+        | ReadonlyArray<AnyCellWrapping<U>>
         | AnyBrandedCell<ReadonlyArray<AnyCellWrapping<U>>>
     // Handle objects (excluding null)
     : T extends object ?
@@ -1663,13 +1652,6 @@ export interface IDFields {
 }
 
 /**
- * Deeply-readonly version of `JSONValue`. Used in `JSONSchemaObj` for fields
- * like `default`, `const`, `enum`, and `examples` whose values must not be
- * mutated after construction.
- */
-export type ImmutableJSONValue = Immutable<JSONValue>;
-
-/**
  * Deeply-mutable version of `JSONValue`.
  */
 export type MutableJSONValue = Mutable<JSONValue>;
@@ -1728,8 +1710,8 @@ export type JSONSchemaObj = {
 
   // Validation for any
   readonly type?: JSONSchemaTypes | readonly JSONSchemaTypes[];
-  readonly enum?: readonly ImmutableJSONValue[]; // not validated
-  readonly const?: ImmutableJSONValue; // not validated
+  readonly enum?: readonly JSONValue[]; // not validated
+  readonly const?: JSONValue; // not validated
   // Validation for numeric - none applied
   readonly multipleOf?: number;
   readonly maximum?: number;
@@ -1763,10 +1745,10 @@ export type JSONSchemaObj = {
   // Meta-Data
   readonly title?: string;
   readonly description?: string;
-  readonly default?: ImmutableJSONValue;
+  readonly default?: JSONValue;
   readonly readOnly?: boolean;
   readonly writeOnly?: boolean;
-  readonly examples?: readonly ImmutableJSONValue[];
+  readonly examples?: readonly JSONValue[];
   readonly $schema?: string;
   readonly $comment?: string;
 
@@ -1781,11 +1763,11 @@ export type JSONSchemaObj = {
   readonly asCell?: readonly AsCellType[];
   // temporarily used to assign labels like "confidential"
   readonly ifc?: {
-    readonly confidentiality?: readonly ImmutableJSONValue[];
-    readonly integrity?: readonly ImmutableJSONValue[];
-    readonly addIntegrity?: readonly ImmutableJSONValue[];
-    readonly requiredIntegrity?: readonly ImmutableJSONValue[];
-    readonly maxConfidentiality?: readonly ImmutableJSONValue[];
+    readonly confidentiality?: readonly JSONValue[];
+    readonly integrity?: readonly JSONValue[];
+    readonly addIntegrity?: readonly JSONValue[];
+    readonly requiredIntegrity?: readonly JSONValue[];
+    readonly maxConfidentiality?: readonly JSONValue[];
     readonly ownerPrincipal?: string | CurrentPrincipal;
     readonly writeAuthorizedBy?:
       | readonly string[]
@@ -2000,7 +1982,7 @@ export interface BuiltInLLMParams {
   stop?: string;
   maxTokens?: number;
   builtinTools?: boolean;
-  observationMaxConfidentiality?: readonly ImmutableJSONValue[];
+  observationMaxConfidentiality?: readonly JSONValue[];
   /**
    * Specifies the mode of operation for the LLM.
    * - `"json"`: Indicates that the LLM should process and return data in JSON format.
@@ -2081,7 +2063,7 @@ export type BuiltInGenerateObjectParams =
     system?: string;
     cache?: boolean;
     maxTokens?: number;
-    observationMaxConfidentiality?: readonly ImmutableJSONValue[];
+    observationMaxConfidentiality?: readonly JSONValue[];
     schemaSanitizePromptInjection?: boolean;
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;
@@ -2108,7 +2090,7 @@ export type BuiltInGenerateObjectParams =
     system?: string;
     cache?: boolean;
     maxTokens?: number;
-    observationMaxConfidentiality?: readonly ImmutableJSONValue[];
+    observationMaxConfidentiality?: readonly JSONValue[];
     schemaSanitizePromptInjection?: boolean;
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;
