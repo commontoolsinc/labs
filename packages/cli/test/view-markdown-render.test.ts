@@ -864,8 +864,8 @@ Deno.test("markdown rendered view handles malformed HTML boundaries", () => {
     [{ start: 1, end: 4 }, { start: 2, end: 5 }],
   );
   assertEquals(lines, [{
-    text: "aef",
-    spans: [{ col: 0, text: "aef", cls: "plain" }],
+    text: "af",
+    spans: [{ col: 0, text: "af", cls: "plain" }],
     renderedSourceHidden: true,
   }]);
 
@@ -879,38 +879,52 @@ Deno.test("markdown rendered view handles malformed HTML boundaries", () => {
   );
 
   assertEquals(
+    renderMarkdownLines("<![CDATA[unterminated").map((line) => line.text),
+    ["<![CDATA[unterminated"],
+  );
+  assertEquals(
     markdownInternals.stripHtmlTags("<![CDATA[unterminated"),
     "<![CDATA[unterminated",
   );
   assertEquals(
-    markdownInternals.stripRawHtmlContainer(
-      '<script title="unterminated',
-      "script",
-    ),
-    '<script title="unterminated',
+    renderMarkdownLines('<script title="unterminated').map((line) => line.text),
+    ['<script title="unterminated'],
   );
   assertEquals(
-    markdownInternals.stripRawHtmlContainer("<script>visible", "script"),
-    "visible",
+    renderMarkdownLines("<script>visible").map((line) => line.text),
+    ["visible"],
   );
-  assertEquals(markdownInternals.stripHtmlTags("<img/>"), "");
+  assertEquals(
+    renderMarkdownLines("<img/>").map((line) => line.text),
+    [""],
+  );
+  assertEquals(
+    renderMarkdownLines("<span @>visible").map((line) => line.text),
+    ["<span @>visible"],
+  );
   assertEquals(
     markdownInternals.stripHtmlTags("<span @>visible"),
     "<span @>visible",
   );
   assertEquals(
-    markdownInternals.stripHtmlTags('<span title="unterminated>'),
-    '<span title="unterminated>',
+    renderMarkdownLines('<span title="unterminated>').map((line) => line.text),
+    ['<span title="unterminated>'],
   );
   assertEquals(
-    markdownInternals.stripHtmlTags(
+    renderMarkdownLines(
       "<span title=value>visible</span>",
-    ),
-    "visible",
+    ).map((line) => line.text),
+    ["visible"],
   );
   assertEquals(
-    markdownInternals.stripHtmlTags("<span disabled>visible</span>"),
-    "visible",
+    renderMarkdownLines("<span disabled>visible</span>").map((line) =>
+      line.text
+    ),
+    ["visible"],
+  );
+  assertEquals(
+    renderMarkdownLines("<span title=>").map((line) => line.text),
+    ["<span title=>"],
   );
   assertEquals(
     markdownInternals.stripHtmlTags("<span title=>"),
@@ -955,12 +969,16 @@ Deno.test("markdown rendered view preserves unusual Unicode token data", () => {
     "plain",
   );
 
+  const pairedSurrogateInputs: string[] = [];
   const pairedSurrogateLexer = {
-    inlineTokens: () => [{
-      type: "text",
-      raw: "😀",
-      text: "😀",
-    }],
+    inlineTokens: (source: string) => {
+      pairedSurrogateInputs.push(source);
+      return [{
+        type: "text",
+        raw: source,
+        text: source,
+      }];
+    },
   } as unknown as Lexer;
   assertEquals(
     markdownInternals.renderInlineLine(
@@ -970,6 +988,7 @@ Deno.test("markdown rendered view preserves unusual Unicode token data", () => {
     ).text,
     "😀",
   );
+  assertEquals(pairedSurrogateInputs, ["😀"]);
 
   const masked = markdownInternals.maskAstralCharacters("☀😀");
   assert(masked);
@@ -1005,9 +1024,10 @@ Deno.test("markdown rendered view preserves unusual Unicode token data", () => {
     { length: 705 },
     (_, index) => String.fromCodePoint(0x10000 + index),
   ).join("");
+  const fallbackSource = `${tooManyAstralCharacters}_a_😀\\😀`;
   assertEquals(
-    markdownInternals.maskAstralCharacters(tooManyAstralCharacters),
-    null,
+    renderMarkdownLines(fallbackSource).map((line) => line.text),
+    [fallbackSource],
   );
 
   assertEquals(

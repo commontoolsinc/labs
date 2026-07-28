@@ -324,13 +324,14 @@ function applyHtmlDeclarations(
   let visible = "";
   let offset = 0;
   for (const declaration of declarations) {
-    if (declaration.start < offset) continue;
-    visible += text.slice(offset, declaration.start);
-    visible += text.slice(declaration.start, declaration.end).replace(
+    const start = Math.max(offset, declaration.start);
+    const end = Math.max(start, declaration.end);
+    visible += text.slice(offset, start);
+    visible += text.slice(start, end).replace(
       /[^\n]/g,
       "",
     );
-    offset = declaration.end;
+    offset = end;
   }
   visible += text.slice(offset);
 
@@ -1537,9 +1538,7 @@ export const _internal = {
   appendTokenChildren,
   codeSpanText,
   declarationMarkupEnd,
-  hasUnpairedSurrogate,
   htmlDeclarationRanges,
-  htmlMarkupEnd,
   maskAstralCharacters,
   openingFence,
   renderBlockToken,
@@ -1556,7 +1555,6 @@ export const _internal = {
   splitRichLine,
   splitTableCells,
   stripHtmlTags,
-  stripRawHtmlContainer,
   tableAlignment,
   tokenLineRange,
 };
