@@ -416,6 +416,18 @@ export class TypeScriptCompiler {
     const checker = new Checker(tsProgram, {
       messageTransformer: inputOptions.diagnosticMessageTransformer,
     });
+    // Parse and program-level errors are fatal unconditionally — `noCheck`
+    // skips type-checking, never parsing. This gate replaced TypeScript's
+    // own `noEmitOnError` veto (see options.ts): without it, malformed
+    // source would EMIT malformed JavaScript.
+    {
+      const errors = checker.collectProgramErrors();
+      for (const sourceFile of checker.checkableSources()) {
+        errors.push(...checker.collectSyntacticErrors(sourceFile));
+      }
+      checker.throwIfErrors(errors);
+      yield;
+    }
     if (!noCheck) {
       const errors = [];
       for (const sourceFile of checker.checkableSources()) {

@@ -82,6 +82,27 @@ export class Checker {
   }
 
   /**
+   * Per-file syntactic diagnostics. With `noEmitOnError` off, TypeScript's
+   * emit no longer refuses malformed source on its own — this collection is
+   * what keeps a parse error fatal, on every path INCLUDING `noCheck` (which
+   * skips type-checking, never parsing). No non-fatal filter: the suppressed
+   * codes are semantic; a file that does not parse can never be loaded.
+   */
+  collectSyntacticErrors(sourceFile: SourceFile): ErrorDetails[] {
+    return this.program.getSyntacticDiagnostics(sourceFile).map(
+      (diagnostic) => ({ diagnostic, source: sourceFile.text }),
+    );
+  }
+
+  /** Program-level (options + global) diagnostics, same fatality contract. */
+  collectProgramErrors(): ErrorDetails[] {
+    return [
+      ...this.program.getOptionsDiagnostics(),
+      ...this.program.getGlobalDiagnostics(),
+    ].map((diagnostic) => ({ diagnostic }));
+  }
+
+  /**
    * Per-file declaration diagnostics, filtered exactly as declarationCheck
    * filters them (known exported-symbol false positives skipped).
    */

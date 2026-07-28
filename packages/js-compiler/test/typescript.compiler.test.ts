@@ -32,9 +32,19 @@ const TESTS: TestDef[] = [
       "Argument of type 'string' is not assignable to parameter of type 'number'.",
   },
   {
+    // Parse errors fail at the syntactic gate, before type-checking.
     name: "Throws: Invalid source",
     source: "}x",
-    expectedError: "Cannot find name 'x'.",
+    expectedError: "Declaration or statement expected.",
+  },
+  {
+    // `noCheck` skips type-checking, never parsing. With noEmitOnError off,
+    // this explicit gate is the only thing between malformed source and a
+    // malformed emit.
+    name: "Throws: syntax error still fatal under noCheck",
+    source: "export const x = ;",
+    noCheck: true,
+    expectedError: "Expression expected.",
   },
   {
     name: "Throws: Invalid import",
