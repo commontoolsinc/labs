@@ -197,6 +197,22 @@ export type FabricValueLayer =
   | unknown[]
   | Record<string, unknown>;
 
+/** A mutable array root whose elements remain fabric values. */
+export type MutableFabricArrayLayer = FabricValue[];
+
+/** A mutable record root whose values remain fabric values. */
+export type MutableFabricPlainObjectLayer = Record<string, FabricValue>;
+
+/**
+ * A fabric value with a mutable root container. Nested containers remain
+ * ordinary (readonly) `FabricValue`s, so this models a single construction
+ * layer rather than a deep thaw.
+ */
+export type MutableFabricValueLayer =
+  | Exclude<FabricValue, FabricArray | FabricPlainObject>
+  | MutableFabricArrayLayer
+  | MutableFabricPlainObjectLayer;
+
 /**
  * Union of raw native JS **object** types that the fabric type system can
  * convert into `FabricInstance` wrappers or `FabricPrimitive` values. These
