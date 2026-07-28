@@ -130,6 +130,21 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   ignored — design rule 1): emit `additionalProperties: false` for event
   payloads, confirm the runner enforces it at dispatch, and record the rule
   in the mapping spec.
+- **Settle before C3 — which signal marks a verb?** "Stream/handler
+  properties" is not a single predicate today. `isStream()` accepts three
+  independent signals, any one of which suffices: the cell's construction kind,
+  `asCell: ["stream"]` in the schema, and a stored `{$stream: true}` value
+  (`packages/runner/src/cell.ts:924-946`). If C3 keys emission off the schema
+  marker alone, a verb carrying only the stored marker gets no result schema
+  and rule 3 silently does not apply to it — and the WS-C exit below would not
+  catch that, since it exercises one CTS pattern that does carry the marker.
+  That the signals diverge in practice is not hypothetical: the CLI has two
+  runtime workarounds for handlers whose schema lost the marker
+  (`tryResolvePieceHandler`, and the forced-stream probe in
+  `listPieceCallables`, whose comment says so). What is *not* yet established
+  is whether any pattern reaches schema-generator in that state. Determine that
+  first; if it can, C3 needs a predicate that agrees with dispatch, and the
+  exit criterion needs a second fixture that lacks the schema marker.
 - ~~**runner:** plain-return projection~~ — **done (C4)**:
   `plainResultReceipts`, default-off, env-reachable
   (`EXPERIMENTAL_PLAIN_RESULT_RECEIPTS`); registry entry in
