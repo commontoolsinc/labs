@@ -262,6 +262,18 @@ a readiness sidecar before the mount command reports success. The child writes
 heartbeat; startup succeeds only when the status matches the current mount
 attempt and recorded child PID.
 
+The `STATUS` column is no longer taken from the heartbeat/child-status sidecar
+alone — it is now gated on the OS mount table (`getfsstat` on darwin,
+`/proc/mounts` on linux), the kernel's own ground truth. A wedged daemon keeps
+answering liveness probes and its sidecar keeps saying `mounted`, so the sidecar
+by itself can lie. Two consequences: a PID-alive entry whose mountpoint is
+absent from the table is reported `dead` (the daemon outlived its mount), and a
+dead-PID entry still present in the table is shown as `dead` and kept (not
+swept) so the stale kernel mount stays visible for cleanup. Only an entry that
+is both absent from the table and has no live process is swept. If the table
+cannot be read, the row is reported `unknown` and preserved rather than
+destroyed.
+
 ### Linux: Docker / other-user access
 
 If you need Docker or another user to traverse a Linux FUSE mount, mount with:

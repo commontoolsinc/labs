@@ -29,6 +29,7 @@ export interface FuseChildDenoArgsOptions {
   execCli: string;
   logFile?: string;
   spaces?: string[];
+  debug?: boolean;
   allowOther?: boolean;
   noattrcache?: boolean;
   attrcacheTimeout?: string;
@@ -304,6 +305,244 @@ export function isMountStateAlive(entry: MountStateEntry): boolean {
     (entry.childPid !== undefined && isAlive(entry.childPid));
 }
 
+/** Whether the OS mount table lists a mountpoint. */
+export type MountTableState = "present" | "absent" | "unknown";
+
+/**
+ * Whether this OS reads the mount table via the macOS `getfsstat` FFI below.
+ * darwin ONLY: the struct offsets here are Apple's `struct statfs` layout; the
+ * BSDs export a `getfsstat` too but with a different struct, so they must not
+ * take this path (they fall through to the `/proc/mounts` attempt → "unknown").
+ */
+function usesGetfsstat(os: string): boolean {
+  return os === "darwin";
+}
+
+// struct statfs (64-bit inode) fields we read. getfsstat with MNT_NOWAIT reads
+// the CACHED kernel mount table and never stats or contacts a backend, so it
+// cannot block on a stale/wedged FUSE-T/NFS mount — no subprocess, no timeout.
+const MNT_NOWAIT = 2;
+// Exported for tests: the pure `parseStatfsMountpoints` parse loop can then be
+// exercised with a hand-built buffer on any OS, without the darwin-only syscall.
+export const STATFS_SIZE = 2168;
+export const F_MNTONNAME_OFF = 88;
+const F_MNTONNAME_LEN = 1024;
+
+/**
+ * Opens libSystem's getfsstat, selecting the symbol by ARCHITECTURE — never by
+ * try-both, which is ABI-unsafe. On x86_64 the plain `getfsstat` symbol is the
+ * LEGACY 32-bit-inode call whose struct differs from the 2168-byte layout we
+ * parse, so we require `getfsstat$INODE64` there and never fall back to it. On
+ * arm64 there is only one `getfsstat` (already the 64-bit-inode variant; the
+ * `$INODE64` alias is not a dlsym symbol). Returns null if unavailable, so the
+ * caller reports "unknown".
+ */
+function openGetfsstat():
+  | {
+    fn: (b: Deno.PointerValue, n: number, f: number) => number;
+    close: () => void;
+  }
+  | null {
+  const name = Deno.build.arch === "aarch64"
+    ? "getfsstat"
+    : "getfsstat$INODE64";
+  try {
+    const lib = Deno.dlopen("libSystem.B.dylib", {
+      [name]: { parameters: ["pointer", "i32", "i32"], result: "i32" },
+    });
+    return {
+      fn: lib.symbols[name] as (
+        b: Deno.PointerValue,
+        n: number,
+        f: number,
+      ) => number,
+      close: () => lib.close(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reads the darwin kernel mount table via getfsstat(MNT_NOWAIT) and returns the
+ * canonical f_mntonname of every mount. Returns null (→ caller reports
+ * "unknown") if FFI is unavailable or the call fails — never a partial or empty
+ * list masquerading as "no mounts" on error.
+ */
+// The libc getfsstat signature we depend on. Injectable so the error-mapping
+// path (native failure → null) is testable without a real syscall.
+export type GetfsstatFn = (
+  buf: Deno.PointerValue,
+  bytes: number,
+  flags: number,
+) => number;
+
+export function readDarwinMountpoints(call?: GetfsstatFn): string[] | null {
+  let fn = call;
+  let close = () => {};
+  if (!fn) {
+    const g = openGetfsstat();
+    if (!g) return null;
+    fn = g.fn;
+    close = g.close;
+  }
+  try {
+    // getfsstat returns -1 on error. Map ANY negative to null → "unknown";
+    // never to [] (which would read as "absent" and hide a real mount).
+    const count = fn(null, 0, MNT_NOWAIT);
+    if (count < 0) return null;
+    if (count === 0) return [];
+    const bytes = count * STATFS_SIZE;
+    const buf = new Uint8Array(bytes);
+    const n = fn(Deno.UnsafePointer.of(buf), bytes, MNT_NOWAIT);
+    if (n < 0) return null;
+    return parseStatfsMountpoints(buf, n);
+  } catch {
+    return null;
+  } finally {
+    close();
+  }
+}
+
+/**
+ * Parse the `f_mntonname` (canonical mountpoint) field out of each `struct
+ * statfs` record packed into a getfsstat buffer. Pure and OS-independent: the
+ * caller supplies the raw bytes and record count, so this FFI-free parse loop
+ * is unit-testable on any platform — linux CI never runs the darwin syscall
+ * that fills the buffer, but it can hand-build one and exercise this loop.
+ */
+export function parseStatfsMountpoints(
+  buf: Uint8Array,
+  count: number,
+): string[] {
+  const dec = new TextDecoder();
+  const out: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const base = i * STATFS_SIZE + F_MNTONNAME_OFF;
+    const slice = buf.subarray(base, base + F_MNTONNAME_LEN);
+    let end = slice.indexOf(0);
+    if (end < 0) end = F_MNTONNAME_LEN;
+    out.push(dec.decode(slice.subarray(0, end)));
+  }
+  return out;
+}
+
+/**
+ * Decode the fstab octal escapes `/proc/mounts` uses for whitespace and
+ * backslash in mountpoint fields: `\040`→space, `\011`→tab, `\012`→newline,
+ * `\134`→backslash. Without this, a mountpoint containing a space is stored as
+ * `/tmp/a\040b` and would never match the real candidate `/tmp/a b`, making a
+ * live mount look "absent" — a dangerous false negative.
+ */
+function decodeProcMountsField(field: string): string {
+  return field.replace(
+    /\\([0-7]{3})/g,
+    (_match, oct: string) => String.fromCharCode(parseInt(oct, 8)),
+  );
+}
+
+/**
+ * Canonicalize only the PARENT directory of the mountpoint and re-append the
+ * basename. We never realPath the mountpoint leaf itself: resolving through a
+ * wedged/stale FUSE-T or NFS mount root can block indefinitely, and the kernel
+ * mount table records the mountpoint under its parent-resolved path anyway.
+ *
+ * Known false-negative: the leaf is DELIBERATELY not realPath'd for hang-safety,
+ * so if the mountpoint's final component is itself a symlink, the kernel records
+ * the mount under the symlink TARGET while these candidates carry the link path,
+ * and the table lookup misses it. Realpathing the leaf to fix it reintroduces
+ * the hang we removed; the correct fix normalizes the symlink at MOUNT time so
+ * the recorded path and our candidates agree. Tracked in CT-1913.
+ */
+async function parentCanonicalizedMountpoint(
+  mountpoint: string,
+): Promise<string> {
+  const resolved = resolve(mountpoint);
+  const parent = dirname(resolved);
+  try {
+    const realParent = await Deno.realPath(parent);
+    return join(realParent, basename(resolved));
+  } catch {
+    return resolved;
+  }
+}
+
+async function mountpointMatchCandidates(
+  mountpoint: string,
+): Promise<string[]> {
+  const resolved = resolve(mountpoint);
+  const canonical = await parentCanonicalizedMountpoint(mountpoint);
+  return canonical === resolved ? [resolved] : [resolved, canonical];
+}
+
+/**
+ * Consults the OS mount table — the kernel's own ground truth of what is
+ * mounted — rather than process existence. A wedged daemon still answers
+ * `isAlive`'s SIGURG probe and its sidecar still says "mounted", so the mount
+ * table is the only honest liveness signal for a severed mount.
+ *
+ * Hang-safety: on darwin this calls getfsstat(MNT_NOWAIT) over FFI; on linux
+ * (and every other OS) it reads `/proc/mounts`. Both read the CACHED kernel
+ * mount table only and never stat or contact the backend, so neither blocks on
+ * a stale/wedged FUSE-T/NFS mount. The `mount(8)` subprocess was DELIBERATELY
+ * removed: after getmntinfo it calls getattrlist() on every mountpoint — a
+ * filesystem op on the stale leaf that can wedge in uninterruptible I/O, where
+ * an AbortController (SIGTERM only) cannot rescue it. Do NOT swap in
+ * `mount`/`df`/`ls`/`stat`/`getfsstat(MNT_WAIT)` — any of those can hang. The
+ * mountpoint leaf is never realPath'd (only its parent is canonicalized), for
+ * the same reason.
+ *
+ * Returns "present"/"absent" from the table, or "unknown" if the probe itself
+ * is unavailable — never "absent" on error, which would be a false negative
+ * that hides a real mount.
+ */
+export async function isMountpointInTable(
+  mountpoint: string,
+  deps: {
+    os?: string;
+    listDarwinMountpoints?: () => string[] | null;
+    readProcMounts?: () => Promise<string>;
+  } = {},
+): Promise<MountTableState> {
+  const os = deps.os ?? Deno.build.os;
+  const candidates = await mountpointMatchCandidates(mountpoint);
+
+  if (usesGetfsstat(os)) {
+    const lister = deps.listDarwinMountpoints ?? readDarwinMountpoints;
+    const mountpoints = lister();
+    // null means the probe could not run (FFI unavailable / call failed). We
+    // never downgrade that to "absent" — an unreadable table is "unknown".
+    if (mountpoints === null) return "unknown";
+    for (const candidate of candidates) {
+      // f_mntonname is the canonical kernel path, so an exact compare suffices.
+      if (mountpoints.includes(candidate)) return "present";
+    }
+    return "absent";
+  }
+
+  // linux (and any other OS): the virtual /proc/mounts file is non-blocking.
+  let text: string;
+  try {
+    text = deps.readProcMounts
+      ? await deps.readProcMounts()
+      : await Deno.readTextFile("/proc/mounts");
+  } catch {
+    return "unknown";
+  }
+  for (const line of text.split("\n")) {
+    const fields = line.split(/\s+/).filter((field) => field.length > 0);
+    // The 2nd field is the mountpoint; decode its fstab octal escapes before
+    // comparing so a space/tab in the path is not a false "absent".
+    if (
+      fields.length >= 2 &&
+      candidates.includes(decodeProcMountsField(fields[1]))
+    ) {
+      return "present";
+    }
+  }
+  return "absent";
+}
+
 /** Default state directory for FUSE mount state. */
 export function defaultStateDir(): string {
   return resolve(Deno.env.get("HOME") ?? "/tmp", ".cf", "fuse");
@@ -392,6 +631,7 @@ export function buildFuseChildDenoArgs(
   if (opts.identity) args.push("--identity", opts.identity);
   if (opts.execCli) args.push("--exec-cli", opts.execCli);
   if (opts.logFile) args.push("--log-file", opts.logFile);
+  if (opts.debug) args.push("--debug");
   if (opts.allowOther) args.push("--allow-other");
   if (opts.noattrcache) args.push("--noattrcache");
   if (opts.attrcacheTimeout) {
@@ -427,6 +667,7 @@ export function buildFuseBinaryArgs(opts: FuseBinaryArgsOptions): string[] {
 
   if (opts.apiUrl) args.push("--api-url", opts.apiUrl);
   if (opts.identity) args.push("--identity", opts.identity);
+  if (opts.debug) args.push("--debug");
   if (opts.allowOther) args.push("--allow-other");
   if (opts.noattrcache) args.push("--noattrcache");
   if (opts.attrcacheTimeout) {
@@ -475,6 +716,7 @@ export function buildBackgroundSupervisorDenoArgs(
   if (opts.identity) args.push("--identity", opts.identity);
   if (opts.execCli) args.push("--exec-cli", opts.execCli);
   if (opts.logFile) args.push("--log-file", opts.logFile);
+  if (opts.debug) args.push("--debug");
   if (opts.allowOther) args.push("--allow-other");
   if (opts.noattrcache) args.push("--noattrcache");
   if (opts.attrcacheTimeout) {
