@@ -336,7 +336,7 @@ declare module "@commonfabric/api" {
     ): Cancel;
     sinkMeta(
       metaField: MetaField,
-      callback: (value: Immutable<FabricValue>) => Cancel | undefined | void,
+      callback: (value: FabricValue) => Cancel | undefined | void,
       options?: SinkOptions,
     ): Cancel;
     sync(): Promise<Cell<T>>;
@@ -370,14 +370,14 @@ declare module "@commonfabric/api" {
      * conform to `T` (e.g., `SigilLink` references, stream markers).
      *
      * By default (or with `{ frozen: true }`), returns a deep-frozen
-     * `Immutable<FabricValue>`. Pass `{ frozen: false }` to get a mutable
+     * `FabricValue`. Pass `{ frozen: false }` to get a mutable
      * deep copy instead.
      *
      * Prefer `getRaw()` when the value is expected to match `T`.
      */
     getRawUntyped(
       options?: RawCellReadOptions & { frozen?: true },
-    ): Immutable<FabricValue>;
+    ): FabricValue;
     getRawUntyped(
       options: RawCellReadOptions & { frozen: false },
     ): FabricValue;
@@ -2084,7 +2084,7 @@ export class CellImpl<T extends FabricValue>
 
   sinkMeta(
     metaField: MetaField,
-    callback: (value: Immutable<FabricValue>) => Cancel | undefined | void,
+    callback: (value: FabricValue) => Cancel | undefined | void,
     options: SinkOptions = {},
   ): Cancel {
     if (!this.synced) this.sync();
@@ -2204,7 +2204,7 @@ export class CellImpl<T extends FabricValue>
    */
   getRawUntyped(
     options?: RawCellReadOptions & { frozen?: true },
-  ): Immutable<FabricValue>;
+  ): FabricValue;
   getRawUntyped(
     options: RawCellReadOptions & { frozen: false },
   ): FabricValue;

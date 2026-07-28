@@ -1,5 +1,5 @@
 import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
-import { type Immutable, isPlainObject } from "@commonfabric/utils/types";
+import { isPlainObject } from "@commonfabric/utils/types";
 
 import {
   type FabricPlainObject,
@@ -173,9 +173,6 @@ export function isFabricValue(value: unknown): value is FabricValue {
 export function isFabricObjectOrArray(
   value: FabricValue,
 ): value is FabricValue & object;
-export function isFabricObjectOrArray(
-  value: Immutable<FabricValue>,
-): value is Immutable<FabricValue> & object;
 export function isFabricObjectOrArray(value: unknown): boolean {
   return typeof value === "object" && value !== null;
 }
@@ -191,9 +188,6 @@ export function isFabricObjectOrArray(value: unknown): boolean {
 export function isFabricPlainObject(
   value: FabricValue,
 ): value is FabricPlainObject;
-export function isFabricPlainObject(
-  value: Immutable<FabricValue>,
-): value is Immutable<FabricPlainObject>;
 export function isFabricPlainObject(value: unknown): boolean {
   return isPlainObject(value);
 }

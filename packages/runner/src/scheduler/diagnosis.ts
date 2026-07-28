@@ -3,7 +3,7 @@ import {
   isFabricPlainObject,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { type Immutable } from "@commonfabric/utils/types";
+
 import type {
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
@@ -69,8 +69,8 @@ export function makeAddressKey(addr: IMemorySpaceAddress): string {
 }
 
 function unwrapTransactionDetailValue(
-  value: Immutable<FabricValue>,
-): Immutable<FabricValue> {
+  value: FabricValue,
+): FabricValue {
   return isFabricPlainObject(value) && "value" in value ? value.value : value;
 }
 
@@ -205,11 +205,11 @@ function transactionReadInvariants(
   spaces: ReadonlySet<IMemorySpaceAddress["space"]>,
 ): Map<
   string,
-  { address: IMemorySpaceAddress; value?: Immutable<FabricValue> }
+  { address: IMemorySpaceAddress; value?: FabricValue }
 > {
   const invariants = new Map<
     string,
-    { address: IMemorySpaceAddress; value?: Immutable<FabricValue> }
+    { address: IMemorySpaceAddress; value?: FabricValue }
   >();
   for (const space of spaces) {
     try {
