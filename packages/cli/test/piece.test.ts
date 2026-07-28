@@ -20,9 +20,11 @@ import { FabricSpecialObject } from "@commonfabric/data-model/fabric-value";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { cf, checkStderr, stripAnsi } from "./utils.ts";
 import {
+  generateSpaceMap,
   getCellValue,
   inspectPiece,
   listPieces,
+  MapFormat,
   newPiece,
   PieceResultProjectionError,
   recreateSpaceRootPattern,
@@ -420,6 +422,16 @@ describe("cli piece parsing", () => {
     expect(output).toContain("<query>");
     expect(output).toContain("--space <space>");
     expect(output).toContain("--json");
+    expect(code).toBe(0);
+  });
+
+  it("documents indexed and registry-only piece listing", async () => {
+    const { code, stdout, stderr } = await cf("piece ls --help");
+    checkStderr(stderr);
+    const output = stripAnsi(stdout.join("\n"));
+    expect(output).toContain("List pieces in space.");
+    expect(output).toContain("--registry");
+    expect(output).toContain("List only the pieces in the space's registry.");
     expect(code).toBe(0);
   });
 
@@ -829,6 +841,7 @@ describe("cli piece parsing", () => {
               symbol: "default",
               repository: "https://example.test/repository",
               entry: "/notes.tsx",
+              origin: "/workspace/notes.tsx",
             },
           },
           {
@@ -878,6 +891,7 @@ describe("cli piece parsing", () => {
             ref: `cf:pattern:${identity}`,
             repository: "https://example.test/repository",
             entry: "/notes.tsx",
+            origin: "/workspace/notes.tsx",
           },
         },
         registered: true,
@@ -889,6 +903,41 @@ describe("cli piece parsing", () => {
         scope: "user",
       },
     ]);
+  });
+
+  it("builds space maps from registered indexed pieces", async () => {
+    let listOptions: { registry?: boolean } | undefined;
+    const inspected: string[] = [];
+    const output = await generateSpaceMap(
+      {
+        apiUrl: API_URL,
+        space: SPACE,
+        identity: ID,
+      },
+      MapFormat.DOT,
+      {
+        listPieces: (_config, options) => {
+          listOptions = options;
+          return Promise.resolve([
+            { id: "piece-a", name: "Piece A" },
+            { id: "piece-b", name: "Piece B" },
+          ]);
+        },
+        inspectPiece: (config) => {
+          inspected.push(config.piece);
+          return Promise.resolve({
+            id: config.piece,
+            result: {},
+            readingFrom: config.piece === "piece-b" ? [{ id: "piece-a" }] : [],
+            readBy: [],
+          });
+        },
+      },
+    );
+
+    expect(listOptions).toEqual({ registry: true });
+    expect(inspected).toEqual(["piece-a", "piece-b"]);
+    expect(output).toContain('"piece-a" -> "piece-b"');
   });
 
   it("searches nested input and result data without matching metadata", async () => {

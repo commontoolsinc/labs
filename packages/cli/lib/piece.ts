@@ -1932,6 +1932,11 @@ export interface PieceConnection {
 
 export type PieceConnectionMap = Map<string, PieceConnection>;
 
+export interface SpaceMapDependencies {
+  listPieces?: typeof listPieces;
+  inspectPiece?: typeof inspectPiece;
+}
+
 // Helper functions for piece mapping
 function createShortId(id: string): string {
   if (id.length <= SHORT_ID_LENGTH * 2 + 3) {
@@ -1959,14 +1964,18 @@ function createPieceConnection(
 
 async function buildConnectionMap(
   config: SpaceConfig,
+  deps: SpaceMapDependencies,
 ): Promise<PieceConnectionMap> {
-  const pieces = await listPieces(config, { registry: true });
+  const pieces = await (deps.listPieces ?? listPieces)(
+    config,
+    { registry: true },
+  );
   const connections: PieceConnectionMap = new Map();
 
   for (const piece of pieces) {
     const pieceConfig: PieceConfig = { ...config, piece: piece.id };
     try {
-      const details = await inspectPiece(pieceConfig);
+      const details = await (deps.inspectPiece ?? inspectPiece)(pieceConfig);
       connections.set(piece.id, createPieceConnection(piece, details));
     } catch (error) {
       // Skip pieces that can't be inspected, but include them with no connections
@@ -2074,8 +2083,9 @@ export function formatSpaceMap(
 export async function generateSpaceMap(
   config: SpaceConfig,
   format: MapFormat = MapFormat.ASCII,
+  deps: SpaceMapDependencies = {},
 ): Promise<string> {
-  const connections = await buildConnectionMap(config);
+  const connections = await buildConnectionMap(config, deps);
   return formatSpaceMap(connections, format);
 }
 

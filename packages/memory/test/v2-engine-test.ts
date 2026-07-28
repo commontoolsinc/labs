@@ -16,6 +16,7 @@ import { toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
 import {
   applyCommit,
+  catchUpPieceRootIndex,
   close,
   ConflictError,
   createBranch,
@@ -32,6 +33,9 @@ import {
   read,
   serverSeq,
 } from "../v2/engine.ts";
+import {
+  catchUpPieceRootIndex as catchUpIndexedPieceRoots,
+} from "../v2/piece-root-index.ts";
 import {
   decodeMemoryBoundary,
   DEFAULT_BRANCH,
@@ -927,6 +931,23 @@ Deno.test("memory v2 engine indexes canonical piece roots and summaries", async 
       }).map(({ entry }) => entry.id),
       ["registered"],
     );
+    const registeredPage = listPieceRootPage(engine, {
+      principal,
+      sessionId,
+      limit: 1,
+      registeredOnly: true,
+    });
+    assertEquals(registeredPage.map(({ entry }) => entry.id), ["registered"]);
+    assertEquals(
+      listPieceRootPage(engine, {
+        principal,
+        sessionId,
+        after: registeredPage[0].cursor,
+        limit: 1,
+        registeredOnly: true,
+      }),
+      [],
+    );
     assertEquals(
       listed.some(({ entry }) => entry.id === "ordinary"),
       false,
@@ -1214,6 +1235,125 @@ Deno.test("memory v2 engine indexes canonical piece roots and summaries", async 
   }
 });
 
+Deno.test("memory v2 piece summaries bound link traversal and preserve scoped names", async () => {
+  const space = "did:key:z6Mk-piece-root-summary-link-bounds";
+  const principal = "did:key:piece-root-summary-principal";
+  const sessionId = "session:piece-root-summary-link-bounds";
+  const { engine, path } = await createEngineWithOptions({ space });
+  const link = (
+    id: string,
+    scope: "space" | "user" | "session" = "space",
+  ) => linkRefFrom({ id, path: [], space, scope });
+  const root = (identity: string, name: unknown) =>
+    toEntityDocument({ $NAME: name }, undefined, {
+      patternIdentity: {
+        identity: identity.repeat(43),
+        symbol: "default",
+      },
+    });
+  const longChainLength = 110;
+
+  try {
+    applyCommit(engine, {
+      space,
+      principal,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: "of:cycle-root",
+            value: root("C", link("of:cycle-a")),
+          },
+          {
+            op: "set",
+            id: "of:cycle-a",
+            value: toEntityDocument(link("of:cycle-b")),
+          },
+          {
+            op: "set",
+            id: "of:cycle-b",
+            value: toEntityDocument(link("of:cycle-a")),
+          },
+          {
+            op: "set",
+            id: "of:long-chain-root",
+            value: root("L", link("of:long-chain-0")),
+          },
+          ...Array.from({ length: longChainLength }, (_, index) => ({
+            op: "set" as const,
+            id: `of:long-chain-${index}`,
+            value: toEntityDocument(
+              index === longChainLength - 1
+                ? "Too far away"
+                : link(`of:long-chain-${index + 1}`),
+            ),
+          })),
+          {
+            op: "set",
+            id: "of:user-name",
+            scope: "user",
+            value: toEntityDocument("User name"),
+          },
+          {
+            op: "set",
+            id: "of:user-root",
+            scope: "user",
+            value: root("U", link("of:user-name", "user")),
+          },
+          {
+            op: "set",
+            id: "of:session-root",
+            scope: "session",
+            value: root("S", link("of:user-name", "user")),
+          },
+          {
+            op: "set",
+            id: "of:invalid-scope-root",
+            value: root("I", {
+              "/": {
+                [LINK_V1_TAG]: {
+                  id: "of:user-name",
+                  path: [],
+                  space,
+                  scope: "invalid",
+                },
+              },
+            } as never),
+          },
+          {
+            op: "set",
+            id: "of:invalid-payload-root",
+            value: root("P", {
+              "/": { [LINK_V1_TAG]: null },
+            } as never),
+          },
+        ],
+      },
+    });
+
+    const pieces = listPieceRootPage(engine, {
+      principal,
+      sessionId,
+      limit: 20,
+    }).map(({ entry }) => entry);
+    const named = new Map(
+      pieces.map((piece) => [`${piece.scope}:${piece.id}`, piece.name]),
+    );
+    assertEquals(named.get("user:user-root"), "User name");
+    assertEquals(named.get("session:session-root"), "User name");
+    assertEquals(named.get("space:cycle-root"), undefined);
+    assertEquals(named.get("space:long-chain-root"), undefined);
+    assertEquals(named.get("space:invalid-scope-root"), undefined);
+    assertEquals(named.get("space:invalid-payload-root"), undefined);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 piece registry tracks malformed links at partial paths", async () => {
   const space = "did:key:z6Mk-piece-root-partial-registry-link";
   const sessionId = "session:piece-root-partial-registry-link";
@@ -1487,7 +1627,7 @@ Deno.test("memory v2 piece registry pages dependency paths on one document", asy
   const sessionId = "session:piece-root-registry-path-pages";
   const { engine, path } = await createEngineWithOptions({ space });
   const spaceCellId = `of:${hashOf({ causal: space }).taggedHashString}`;
-  const registrySize = 300;
+  const registrySize = 512;
   const keys = Array.from(
     { length: registrySize },
     (_, index) => index.toString().padStart(4, "0"),
@@ -1531,6 +1671,7 @@ Deno.test("memory v2 piece registry pages dependency paths on one document", asy
               items: Object.fromEntries(
                 keys.map((key) => [key, link(`of:root-${key}`)]),
               ),
+              unrelated: false,
             }),
           },
           ...keys.map((key) => ({
@@ -1552,7 +1693,7 @@ Deno.test("memory v2 piece registry pages dependency paths on one document", asy
         limit: registrySize + 1,
         registeredOnly: true,
       }).map(({ entry }) => entry.id);
-    assertEquals(registeredIds().at(-1), "root-0299");
+    assertEquals(registeredIds().at(-1), "root-0511");
     assertEquals(
       engine.database.prepare(`
 SELECT COUNT(*) AS count
@@ -1574,7 +1715,7 @@ WHERE dependency_id = 'of:wrapper'
           id: "of:wrapper",
           patches: [{
             op: "replace",
-            path: "/value/items/0299",
+            path: "/value/items/0511",
             value: link("of:replacement"),
           }],
         }],
@@ -1583,7 +1724,26 @@ WHERE dependency_id = 'of:wrapper'
     const updatedIds = registeredIds();
     assertEquals(updatedIds.length, registrySize);
     assertEquals(updatedIds.at(-1), "replacement");
-    assertEquals(updatedIds.includes("root-0299"), false);
+    assertEquals(updatedIds.includes("root-0511"), false);
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:wrapper",
+          patches: [{
+            op: "replace",
+            path: "/value/unrelated",
+            value: true,
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), updatedIds);
   } finally {
     close(engine);
     await Deno.remove(path);
@@ -2237,6 +2397,94 @@ PRAGMA table_info(pragma_piece_registry_dependency)
 SELECT version FROM pragma_piece_root_index_state WHERE singleton = 1
 `).get(),
       { version: 9 },
+    );
+  } finally {
+    if (engine !== undefined) close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine migrates early piece index table shapes", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const url = toFileUrl(path);
+  let engine: Engine | undefined;
+
+  try {
+    engine = await open({ url });
+    engine.database.exec(`
+DROP TABLE pragma_piece_root_dependency;
+DROP TABLE pragma_piece_registry_dependency;
+DROP TABLE pragma_piece_root;
+DROP TABLE pragma_piece_root_index_state;
+CREATE TABLE pragma_piece_root (
+  id                  TEXT NOT NULL,
+  scope_key           TEXT NOT NULL,
+  name                TEXT,
+  pattern_identity    TEXT,
+  pattern_symbol      TEXT,
+  pattern_repository  TEXT,
+  pattern_source      TEXT,
+  pattern_entry       TEXT,
+  registry_position   INTEGER,
+  PRIMARY KEY (id, scope_key)
+) WITHOUT ROWID;
+CREATE TABLE pragma_piece_root_index_state (
+  singleton       INTEGER NOT NULL PRIMARY KEY CHECK (singleton = 1),
+  version         INTEGER NOT NULL,
+  registry_space  TEXT
+);
+INSERT INTO pragma_piece_root_index_state (
+  singleton,
+  version,
+  registry_space
+) VALUES (1, 1, '');
+`);
+    close(engine);
+    engine = undefined;
+
+    engine = await open({ url });
+    const rootColumns = (engine.database.prepare(`
+PRAGMA table_info(pragma_piece_root)
+`).all() as Array<{ name: string }>).map(({ name }) => name);
+    assertEquals(rootColumns.includes("canonical_id"), true);
+    assertEquals(rootColumns.includes("order_key"), true);
+    assertEquals(
+      (engine.database.prepare(`
+PRAGMA table_info(pragma_piece_root_index_state)
+`).all() as Array<{ name: string }>).map(({ name }) => name),
+      [
+        "singleton",
+        "version",
+        "registry_space",
+        "indexed_commit_seq",
+        "registry_id",
+        "registry_scope_key",
+        "registry_path",
+        "registry_length",
+      ],
+    );
+
+    engine.database.exec(`
+DROP TABLE pragma_piece_root_dependency;
+DROP TABLE pragma_piece_registry_dependency;
+DROP TABLE pragma_piece_root;
+DROP TABLE pragma_piece_root_index_state;
+CREATE TABLE pragma_piece_root (
+  branch     TEXT NOT NULL,
+  id         TEXT NOT NULL,
+  scope_key  TEXT NOT NULL,
+  PRIMARY KEY (branch, id, scope_key)
+) WITHOUT ROWID;
+`);
+    close(engine);
+    engine = undefined;
+
+    engine = await open({ url });
+    assertEquals(
+      (engine.database.prepare(`
+PRAGMA table_info(pragma_piece_root)
+`).all() as Array<{ name: string }>).some(({ name }) => name === "branch"),
+      false,
     );
   } finally {
     if (engine !== undefined) close(engine);
@@ -3438,6 +3686,294 @@ END;
   }
 });
 
+Deno.test("memory v2 piece registry catch-up recovers from malformed incremental state", async () => {
+  const space = "did:key:z6Mk-piece-root-registry-recovery";
+  const principal = "did:key:piece-root-registry-recovery";
+  const sessionId = "session:piece-root-registry-recovery";
+  const { engine, path } = await createEngineWithOptions({ space });
+  const spaceCellId = `of:${hashOf({ causal: space }).taggedHashString}`;
+  const link = (id: string) =>
+    linkRefFrom({ id, path: [], space, scope: "space" });
+  const pieceDocument = (identity: string) =>
+    toEntityDocument({}, undefined, {
+      patternIdentity: { identity: identity.repeat(43), symbol: "default" },
+    });
+  const registeredIds = () =>
+    listPieceRootPage(engine, {
+      principal,
+      sessionId,
+      limit: 20,
+      registeredOnly: true,
+    }).map(({ entry }) => entry.id);
+
+  try {
+    applyCommit(engine, {
+      space,
+      principal,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: spaceCellId,
+            value: toEntityDocument({ defaultPattern: link("of:home") }),
+          },
+          {
+            op: "set",
+            id: "of:home",
+            value: toEntityDocument(
+              { pieceRegistry: link("of:registry") },
+              undefined,
+              {
+                patternIdentity: {
+                  identity: "H".repeat(43),
+                  symbol: "default",
+                },
+              },
+            ),
+          },
+          {
+            op: "set",
+            id: "of:registry",
+            value: toEntityDocument([link("of:a")]),
+          },
+          ...["a", "b", "c", "d"].map((id) => ({
+            op: "set" as const,
+            id: `of:${id}`,
+            value: pieceDocument(id.toUpperCase()),
+          })),
+          {
+            op: "set",
+            id: "of:user-registry",
+            scope: "user",
+            value: toEntityDocument([]),
+          },
+          {
+            op: "set",
+            id: "of:user-piece",
+            scope: "user",
+            value: pieceDocument("U"),
+          },
+        ],
+      },
+    });
+    assertEquals(registeredIds(), ["a"]);
+
+    applyCommit(engine, {
+      space,
+      principal,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:registry",
+          patches: [{
+            op: "add-unique",
+            path: "/value",
+            values: [link("of:b")],
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), ["a", "b"]);
+
+    engine.database.exec(`
+UPDATE pragma_piece_root_index_state
+SET registry_length = 100
+WHERE singleton = 1;
+`);
+    applyCommit(engine, {
+      space,
+      principal,
+      sessionId,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:registry",
+          patches: [{
+            op: "add-unique",
+            path: "/value",
+            values: [link("of:c")],
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), ["a", "b", "c"]);
+
+    engine.database.exec(`
+UPDATE pragma_piece_root_index_state
+SET registry_length = -1
+WHERE singleton = 1;
+`);
+    applyCommit(engine, {
+      space,
+      principal,
+      sessionId,
+      commit: {
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:registry",
+          patches: [{
+            op: "append",
+            path: "/value",
+            values: [link("of:d")],
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), ["a", "b", "c", "d"]);
+
+    engine.database.exec(`
+UPDATE pragma_piece_registry_dependency
+SET dependency_path = '!'
+WHERE dependency_id = 'of:home'
+  AND dependency_path = '[]';
+`);
+    assertEquals(
+      engine.database.prepare(`
+SELECT dependency_path
+FROM pragma_piece_registry_dependency
+WHERE dependency_id = 'of:home'
+  AND dependency_path = '!'
+`).get(),
+      { dependency_path: "!" },
+    );
+    applyCommit(engine, {
+      space,
+      principal,
+      sessionId,
+      commit: {
+        localSeq: 5,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:home",
+          patches: [{
+            op: "add",
+            path: "/value/recoveryProbe",
+            value: 1,
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), ["a", "b", "c", "d"]);
+
+    engine.database.exec(`
+UPDATE pragma_piece_registry_dependency
+SET dependency_kind = 'invalid'
+WHERE dependency_id = 'of:home'
+  AND dependency_path = '[]';
+`);
+    assertEquals(
+      engine.database.prepare(`
+SELECT dependency_kind
+FROM pragma_piece_registry_dependency
+WHERE dependency_id = 'of:home'
+  AND dependency_path = '[]'
+`).get(),
+      { dependency_kind: "invalid" },
+    );
+    applyCommit(engine, {
+      space,
+      principal,
+      sessionId,
+      commit: {
+        localSeq: 6,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:home",
+          patches: [{
+            op: "replace",
+            path: "/value/recoveryProbe",
+            value: 2,
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), ["a", "b", "c", "d"]);
+
+    const userRegistryScope = engine.database.prepare(`
+SELECT scope_key
+FROM head
+WHERE branch = ''
+  AND id = 'of:user-registry'
+`).get() as { scope_key: string };
+    engine.database.prepare(`
+UPDATE pragma_piece_root_index_state
+SET
+  registry_id = 'of:user-registry',
+  registry_scope_key = :scope_key,
+  registry_path = '[]',
+  registry_length = 0
+WHERE singleton = 1
+`).run(userRegistryScope);
+    applyCommit(engine, {
+      space,
+      principal,
+      sessionId,
+      commit: {
+        localSeq: 7,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:user-registry",
+          scope: "user",
+          patches: [{
+            op: "append",
+            path: "/value",
+            values: [{
+              "/": {
+                [LINK_V1_TAG]: {
+                  id: "of:user-piece",
+                  path: [],
+                  space,
+                  scope: "inherit",
+                },
+              },
+            } as never],
+          }],
+        }],
+      },
+    });
+    assertEquals(
+      listPieceRootPage(engine, {
+        principal,
+        sessionId,
+        limit: 20,
+      }).find(({ entry }) => entry.id === "user-piece")?.entry.registered,
+      false,
+    );
+
+    applyCommit(engine, {
+      space,
+      principal,
+      sessionId,
+      commit: {
+        localSeq: 8,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "delete",
+          id: "of:user-registry",
+          scope: "user",
+        }],
+      },
+    });
+    assertEquals(registeredIds(), ["a", "b", "c", "d"]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 piece root continuations use ordering indexes", async () => {
   const { engine, path } = await createEngineWithOptions({
     space: "did:key:z6Mk-piece-root-query-plan",
@@ -3690,6 +4226,118 @@ LIMIT 256
     assertEquals(
       changedRegistryDocument.some((detail) => detail.includes("TEMP B-TREE")),
       false,
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 piece index catches up through each transaction entry point", async () => {
+  const space = "did:key:z6Mk-piece-root-transaction-catch-up";
+  const sessionId = "session:piece-root-transaction-catch-up";
+  const { engine, path } = await createEngineWithOptions({ space });
+  const pieceDocument = toEntityDocument({}, undefined, {
+    patternIdentity: {
+      identity: "T".repeat(43),
+      symbol: "default",
+    },
+  });
+  const pageOptions = { sessionId, limit: 10 };
+
+  try {
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: "of:a", value: pieceDocument },
+          { op: "set", id: "of:aa", value: pieceDocument },
+        ],
+      },
+    });
+    const firstRows = engine.database.transaction(() =>
+      listPieceRootPage(engine, pageOptions)
+    )();
+    assertEquals(firstRows.map(({ entry }) => entry.id), ["a", "aa"]);
+    assertEquals(
+      listPieceRootPage(engine, {
+        ...pageOptions,
+        after: firstRows[0].cursor,
+        registeredOnly: true,
+      }),
+      [],
+    );
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: "of:b", value: pieceDocument }],
+      },
+    });
+    const snapshot = engine.database.transaction(() =>
+      listPieceRootSnapshotPage(engine, pageOptions)
+    )();
+    assertEquals(snapshot.serverSeq, 2);
+    assertEquals(snapshot.rows?.map(({ entry }) => entry.id), ["a", "aa", "b"]);
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: "of:c", value: pieceDocument }],
+      },
+    });
+    catchUpPieceRootIndex(engine);
+    assertEquals(
+      listPieceRootPage(engine, pageOptions).map(({ entry }) => entry.id),
+      ["a", "aa", "b", "c"],
+    );
+    catchUpPieceRootIndex(engine);
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: "of:d", value: pieceDocument }],
+      },
+    });
+    const caughtUpSnapshot = listPieceRootSnapshotPage(engine, pageOptions);
+    assertEquals(caughtUpSnapshot.serverSeq, 4);
+    assertEquals(
+      caughtUpSnapshot.rows?.map(({ entry }) => entry.id),
+      ["a", "aa", "b", "c", "d"],
+    );
+
+    catchUpIndexedPieceRoots(engine.database, {
+      space,
+      readDocument: () => {
+        throw new Error("current index catch-up read a document");
+      },
+    });
+
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          space: "did:key:z6Mk-different-piece-root-space",
+          sessionId,
+          commit: {
+            localSeq: 5,
+            reads: { confirmed: [], pending: [] },
+            operations: [],
+          },
+        }),
+      ProtocolError,
+      "memory engine space changed",
     );
   } finally {
     close(engine);

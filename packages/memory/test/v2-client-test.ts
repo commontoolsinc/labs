@@ -658,6 +658,12 @@ Deno.test("memory v2 piece root listing is snapshot-stable and omits entity valu
     assertEquals(secondPage?.pieces.map((piece) => piece.id), ["piece-b"]);
     assertEquals(secondPage?.nextAfter, undefined);
 
+    const completePage = await space.listPieceRoots();
+    assertEquals(
+      completePage.pieces.map((piece) => piece.id),
+      ["piece-a", "piece-b"],
+    );
+
     await space.transact({
       localSeq: 2,
       reads: { confirmed: [], pending: [] },

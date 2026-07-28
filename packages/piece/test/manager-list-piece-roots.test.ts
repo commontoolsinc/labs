@@ -26,6 +26,25 @@ const makeManager = (
 };
 
 describe("PieceManager.listPieceRoots", () => {
+  it("forwards a single indexed page request", async () => {
+    const options = {
+      limit: 17,
+      registeredOnly: true,
+    };
+    const page = {
+      serverSeq: 3,
+      pieces: [],
+    };
+    let received: PieceRootListOptions | undefined;
+    const manager = makeManager((request) => {
+      received = request;
+      return Promise.resolve(page);
+    });
+
+    expect(await manager.listPieceRootPage(options)).toEqual(page);
+    expect(received).toEqual(options);
+  });
+
   it("collects one snapshot across indexed pages", async () => {
     const requests: PieceRootListOptions[] = [];
     const cursor = {

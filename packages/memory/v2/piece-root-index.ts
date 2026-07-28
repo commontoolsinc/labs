@@ -718,23 +718,16 @@ const finalizePieceRootStatements = (
   }
 };
 
-const deletePieceRoots = (
+const deletePieceRoot = (
   statements: PieceRootStatements,
-  addresses: readonly PieceRootIndexAddress[],
+  address: PieceRootIndexAddress,
 ): void => {
-  if (addresses.length === 0) return;
-  const seen = new Set<string>();
-  for (const address of addresses) {
-    const key = addressKey(address);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const parameters = {
-      id: address.id,
-      scope_key: address.scopeKey,
-    };
-    statements.deleteDependencies.run(parameters);
-    statements.deleteRoot.run(parameters);
-  }
+  const parameters = {
+    id: address.id,
+    scope_key: address.scopeKey,
+  };
+  statements.deleteDependencies.run(parameters);
+  statements.deleteRoot.run(parameters);
 };
 
 const insertDependencies = (
@@ -848,39 +841,8 @@ const parseStoredPath = (value: string): string[] | undefined => {
 const registryNeedsRefresh = (
   database: Database,
   changes: readonly PieceRootIndexChange[],
-  space: string,
   readDocument: ReadDocument,
 ): boolean => {
-  const state = indexState(database);
-  if (state?.registry_space !== space) return true;
-  const registryPath = state.registry_path === null
-    ? undefined
-    : parseStoredPath(state.registry_path);
-  if (
-    state.registry_id !== null &&
-    state.registry_scope_key !== null &&
-    registryPath !== undefined
-  ) {
-    const registryDocumentPath = ["value", ...registryPath];
-    for (const change of changes) {
-      if (
-        change.id !== state.registry_id ||
-        change.scopeKey !== state.registry_scope_key
-      ) {
-        continue;
-      }
-      if (change.document === null || change.patches === undefined) return true;
-      if (
-        change.patches.some((patch) =>
-          touchedPointerPaths(patch).some((path) =>
-            pathsOverlap(registryDocumentPath, path)
-          )
-        )
-      ) {
-        return true;
-      }
-    }
-  }
   const firstPage = database.prepare(`
 SELECT dependency_path, dependency_kind
 FROM pragma_piece_registry_dependency
@@ -1309,8 +1271,7 @@ const extendRegistry = (
   ) {
     return false;
   }
-  const registryPath = parseStoredPath(state.registry_path);
-  if (registryPath === undefined) return false;
+  const registryPath = parseStoredPath(state.registry_path)!;
   const registryAddress = {
     branch: DEFAULT_BRANCH,
     id: state.registry_id,
@@ -1337,32 +1298,7 @@ LIMIT 1
   if (hasUnsupportedRegistryDocumentDependency) {
     return false;
   }
-  const registryChanges: PieceRootIndexChange[] = [];
-  const otherChanges: PieceRootIndexChange[] = [];
-  for (const change of changes) {
-    if (
-      change.id === registryAddress.id &&
-      change.scopeKey === registryAddress.scopeKey
-    ) {
-      registryChanges.push(change);
-    } else {
-      otherChanges.push(change);
-    }
-  }
-  if (registryNeedsRefresh(database, otherChanges, space, readDocument)) {
-    return false;
-  }
-  if (registryChanges.length === 0) return false;
-  const patches: PatchOp[] = [];
-  for (const change of registryChanges) {
-    if (change.patches === undefined || change.patches.length === 0) {
-      return false;
-    }
-    for (const patch of change.patches) {
-      if (!isRegistryTailPatch(patch, registryPath)) return false;
-      patches.push(patch);
-    }
-  }
+  const patches = changes.flatMap((change) => change.patches!);
   let appendedValues: Iterable<FabricValue>;
   let registryLength: number;
   if (patches.every((patch) => isRegistryAppendPatch(patch, registryPath))) {
@@ -1378,7 +1314,7 @@ LIMIT 1
         0,
       );
   } else {
-    const registryChange = registryChanges.at(-1)!;
+    const registryChange = changes.at(-1)!;
     const document = registryChange.document === undefined
       ? readDocument(registryAddress)
       : registryChange.document;
@@ -1574,7 +1510,7 @@ const refreshOrDeleteRoot = (
       knownDocument,
     )
   ) {
-    deletePieceRoots(statements, [root]);
+    deletePieceRoot(statements, root);
   }
 };
 
@@ -1681,7 +1617,6 @@ const refreshDependentRoots = (
       cursors.push(cursor);
     }
   }
-  if (cursors.length === 0) return;
   const dependentPageSize = Math.max(
     1,
     Math.min(
@@ -2016,16 +1951,21 @@ LIMIT :limit
 
 const revisionChange = (
   row: PendingRevisionRow,
-): PieceRootIndexChange => ({
-  branch: DEFAULT_BRANCH,
-  id: row.id,
-  scopeKey: row.scope_key,
-  ...(row.op === "delete" ? { document: null } : row.op === "patch"
-    ? {
-      patches: decodeMemoryBoundary<PatchOp[]>(row.data ?? "fvj1:[]"),
-    }
-    : {}),
-});
+): PieceRootIndexChange => {
+  const change: PieceRootIndexChange = {
+    branch: DEFAULT_BRANCH,
+    id: row.id,
+    scopeKey: row.scope_key,
+  };
+  if (row.op === "delete") {
+    change.document = null;
+  } else if (row.op === "patch") {
+    change.patches = decodeMemoryBoundary<PatchOp[]>(
+      row.data ?? "fvj1:[]",
+    );
+  }
+  return change;
+};
 
 export const catchUpPieceRootIndex = (
   database: Database,
@@ -2162,7 +2102,6 @@ LIMIT :limit
                 registryNeedsRefresh(
                   database,
                   revisions.map(revisionChange),
-                  indexSpace,
                   readDocument,
                 )
               ) {

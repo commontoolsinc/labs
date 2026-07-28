@@ -2490,6 +2490,96 @@ export class Server {
     }
   }
 
+  private readPieceRootPage(
+    engine: Engine.Engine,
+    message: PieceRootListRequest,
+    session: SessionState,
+    catchUp: true,
+  ): ResponseMessage<PieceRootListResult>;
+  private readPieceRootPage(
+    engine: Engine.Engine,
+    message: PieceRootListRequest,
+    session: SessionState,
+    catchUp: false,
+  ):
+    | ResponseMessage<PieceRootListResult>
+    | typeof PIECE_ROOT_INDEX_PENDING;
+  private readPieceRootPage(
+    engine: Engine.Engine,
+    message: PieceRootListRequest,
+    session: SessionState,
+    catchUp: boolean,
+  ):
+    | ResponseMessage<PieceRootListResult>
+    | typeof PIECE_ROOT_INDEX_PENDING {
+    const deny = this.#authorizeCurrentSessionWithEngine(
+      engine,
+      message.space,
+      message.sessionId,
+      session,
+      "READ",
+    );
+    if (deny) {
+      return respondTypedError<PieceRootListResult>(
+        message.requestId,
+        deny,
+      );
+    }
+    if (
+      message.after !== undefined &&
+      message.expectedServerSeq === undefined
+    ) {
+      return respondTypedError<PieceRootListResult>(
+        message.requestId,
+        toError(
+          "ProtocolError",
+          "piece root continuation requires expectedServerSeq",
+        ),
+      );
+    }
+
+    const limit = Math.min(
+      message.limit ?? MAX_PIECE_ROOT_PAGE_SIZE,
+      MAX_PIECE_ROOT_PAGE_SIZE,
+    );
+    const serverSeq = Engine.serverSeq(engine);
+    if (
+      message.expectedServerSeq !== undefined &&
+      message.expectedServerSeq !== serverSeq
+    ) {
+      return respondTypedError<PieceRootListResult>(
+        message.requestId,
+        toError(
+          "SnapshotChangedError",
+          `piece root snapshot changed from server sequence ${message.expectedServerSeq} to ${serverSeq}`,
+        ),
+      );
+    }
+    if (!Engine.pieceRootIndexIsCurrent(engine, serverSeq)) {
+      if (!catchUp) return PIECE_ROOT_INDEX_PENDING;
+      Engine.catchUpPieceRootIndex(engine);
+    }
+    const rows = Engine.listCurrentPieceRootPage(engine, {
+      principal: session.principal,
+      sessionId: message.sessionId,
+      after: message.after,
+      limit: limit + 1,
+      registeredOnly: message.registeredOnly,
+    });
+    const page = rows.slice(0, limit);
+    const nextAfter = rows.length > limit ? page.at(-1)?.cursor : undefined;
+
+    return {
+      type: "response",
+      requestId: message.requestId,
+      ok: {
+        serverSeq,
+        pieces: page.map(({ entry }) => entry),
+        ...(nextAfter === undefined ? {} : { nextAfter }),
+      },
+    };
+  }
+
   async listPieceRoots(
     message: PieceRootListRequest,
   ): Promise<ResponseMessage<PieceRootListResult>> {
@@ -2502,87 +2592,13 @@ export class Server {
     }
     try {
       const engine = await this.openEngine(message.space);
-      const readPage = (
-        catchUp: boolean,
-      ):
-        | ResponseMessage<PieceRootListResult>
-        | typeof PIECE_ROOT_INDEX_PENDING => {
-        const deny = this.#authorizeCurrentSessionWithEngine(
-          engine,
-          message.space,
-          message.sessionId,
-          session,
-          "READ",
-        );
-        if (deny) {
-          return respondTypedError<PieceRootListResult>(
-            message.requestId,
-            deny,
-          );
-        }
-        if (
-          message.after !== undefined &&
-          message.expectedServerSeq === undefined
-        ) {
-          return respondTypedError<PieceRootListResult>(
-            message.requestId,
-            toError(
-              "ProtocolError",
-              "piece root continuation requires expectedServerSeq",
-            ),
-          );
-        }
-
-        const limit = Math.min(
-          message.limit ?? MAX_PIECE_ROOT_PAGE_SIZE,
-          MAX_PIECE_ROOT_PAGE_SIZE,
-        );
-        const serverSeq = Engine.serverSeq(engine);
-        if (
-          message.expectedServerSeq !== undefined &&
-          message.expectedServerSeq !== serverSeq
-        ) {
-          return respondTypedError<PieceRootListResult>(
-            message.requestId,
-            toError(
-              "SnapshotChangedError",
-              `piece root snapshot changed from server sequence ${message.expectedServerSeq} to ${serverSeq}`,
-            ),
-          );
-        }
-        if (!Engine.pieceRootIndexIsCurrent(engine, serverSeq)) {
-          if (!catchUp) return PIECE_ROOT_INDEX_PENDING;
-          Engine.catchUpPieceRootIndex(engine);
-        }
-        const rows = Engine.listCurrentPieceRootPage(engine, {
-          principal: session.principal,
-          sessionId: message.sessionId,
-          after: message.after,
-          limit: limit + 1,
-          registeredOnly: message.registeredOnly,
-        });
-        const page = rows.slice(0, limit);
-        const nextAfter = rows.length > limit ? page.at(-1)?.cursor : undefined;
-
-        return {
-          type: "response",
-          requestId: message.requestId,
-          ok: {
-            serverSeq,
-            pieces: page.map(({ entry }) => entry),
-            ...(nextAfter === undefined ? {} : { nextAfter }),
-          },
-        };
-      };
-      const currentPage = engine.database.transaction(() => readPage(false))
-        .deferred();
+      const currentPage = engine.database.transaction(() =>
+        this.readPieceRootPage(engine, message, session, false)
+      ).deferred();
       if (currentPage !== PIECE_ROOT_INDEX_PENDING) return currentPage;
-      const caughtUpPage = engine.database.transaction(() => readPage(true))
-        .immediate();
-      if (caughtUpPage === PIECE_ROOT_INDEX_PENDING) {
-        throw new Error("piece root index catch-up did not run");
-      }
-      return caughtUpPage;
+      return engine.database.transaction(() =>
+        this.readPieceRootPage(engine, message, session, true)
+      ).immediate();
     } catch (error) {
       return respondTypedError<PieceRootListResult>(
         message.requestId,

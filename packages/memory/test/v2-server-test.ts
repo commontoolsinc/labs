@@ -66,6 +66,50 @@ WHERE singleton = 1
   }
 });
 
+Deno.test("memory v2 server contains idle piece index catch-up failures", async () => {
+  const time = new FakeTime();
+  const directory = await Deno.makeTempDir({
+    prefix: "memory-v2-piece-index-idle-failure-",
+  });
+  const store = toFileUrl(`${directory}/`);
+  const space = "did:key:z6Mk-memory-v2-piece-index-idle-failure";
+  const server = createServer(store.href, 1);
+  const warnings: unknown[][] = [];
+  const originalWarn = console.warn;
+
+  try {
+    await server.writeDocument(space, "of:ordinary", { ordinary: true });
+    const database = new Database(
+      fromFileUrl(resolveSpaceStoreUrl(store, space)),
+    );
+    try {
+      database.exec(`
+CREATE TRIGGER reject_piece_root_index_state
+BEFORE INSERT ON pragma_piece_root_index_state
+BEGIN
+  SELECT RAISE(ABORT, 'rejected idle piece index catch-up');
+END;
+`);
+    } finally {
+      database.close();
+    }
+    console.warn = (...args: unknown[]) => warnings.push(args);
+
+    await server.flushSessions([space]);
+
+    assertEquals(warnings.length, 1);
+    assertEquals(
+      warnings[0][0],
+      `piece-root index idle catch-up failed for ${space}`,
+    );
+  } finally {
+    console.warn = originalWarn;
+    await server.close();
+    time.restore();
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
 Deno.test("memory v2 server lists a caught-up piece index beside an active writer", async () => {
   const directory = await Deno.makeTempDir({
     prefix: "memory-v2-piece-index-current-read-",
@@ -320,6 +364,13 @@ Deno.test("memory v2 server parses indexed piece root listing requests", () => {
   assertEquals(
     parseClientMessage(encodeMemoryBoundary({
       ...request,
+      after: [],
+    })),
+    null,
+  );
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      ...request,
       after: {
         id: "of:fid1:first",
         scope: "space",
@@ -363,6 +414,11 @@ Deno.test("memory v2 server rejects unknown entity identifier sessions before di
         space: "did:key:z6Mk-entity-list-unknown-session",
         sessionId: "session:missing",
         id: "of:fid1:first",
+      }, {
+        type: "piece-root.list",
+        requestId: "piece-root-list-unknown-session",
+        space: "did:key:z6Mk-entity-list-unknown-session",
+        sessionId: "session:missing",
       }]
     ) {
       await connection.receive(encodeMemoryBoundary(request));
@@ -375,7 +431,7 @@ Deno.test("memory v2 server rejects unknown entity identifier sessions before di
   }
 });
 
-Deno.test("memory v2 entity identifier methods report session and query errors", async () => {
+Deno.test("memory v2 identifier and piece root methods report session and query errors", async () => {
   const sessions = new SessionRegistry();
   const server = new Server({
     sessions,
@@ -405,6 +461,14 @@ Deno.test("memory v2 entity identifier methods report session and query errors",
     });
     assertEquals(unknownLookup.error?.name, "SessionError");
 
+    const unknownPieceRoots = await server.listPieceRoots({
+      type: "piece-root.list",
+      requestId: "piece-root-list-method-unknown-session",
+      space: validSpace,
+      sessionId: "session:missing",
+    });
+    assertEquals(unknownPieceRoots.error?.name, "SessionError");
+
     sessions.open(
       invalidSpace,
       { sessionId: "session:invalid-space" },
@@ -428,6 +492,14 @@ Deno.test("memory v2 entity identifier methods report session and query errors",
       id: "of:fid1:first",
     });
     assertEquals(failedLookup.error?.name, "QueryError");
+
+    const failedPieceRoots = await server.listPieceRoots({
+      type: "piece-root.list",
+      requestId: "piece-root-list-method-query-error",
+      space: invalidSpace,
+      sessionId: "session:invalid-space",
+    });
+    assertEquals(failedPieceRoots.error?.name, "QueryError");
   } finally {
     await server.close();
   }

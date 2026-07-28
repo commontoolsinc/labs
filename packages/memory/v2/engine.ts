@@ -2506,7 +2506,17 @@ export const listPieceRootSnapshotPage = (
   serverSeq: number;
   rows?: IndexedPieceRoot[];
 } => {
-  const readSnapshot = (catchUp: boolean) => {
+  type SnapshotPage = {
+    serverSeq: number;
+    rows?: IndexedPieceRoot[];
+  };
+  function readSnapshot(catchUp: true): SnapshotPage;
+  function readSnapshot(
+    catchUp: false,
+  ): SnapshotPage | typeof PIECE_ROOT_INDEX_PENDING;
+  function readSnapshot(
+    catchUp: boolean,
+  ): SnapshotPage | typeof PIECE_ROOT_INDEX_PENDING {
     const snapshotServerSeq = serverSeq(engine);
     if (
       options.expectedServerSeq !== undefined &&
@@ -2522,23 +2532,15 @@ export const listPieceRootSnapshotPage = (
       serverSeq: snapshotServerSeq,
       rows: listCurrentPieceRootPage(engine, options),
     };
-  };
+  }
   if (engine.database.inTransaction) {
-    const result = readSnapshot(true);
-    if (result === PIECE_ROOT_INDEX_PENDING) {
-      throw new Error("piece root index catch-up did not run");
-    }
-    return result;
+    return readSnapshot(true);
   }
   const currentPage = engine.database.transaction(() => readSnapshot(false))
     .deferred();
   if (currentPage !== PIECE_ROOT_INDEX_PENDING) return currentPage;
-  const caughtUpPage = engine.database.transaction(() => readSnapshot(true))
+  return engine.database.transaction(() => readSnapshot(true))
     .immediate();
-  if (caughtUpPage === PIECE_ROOT_INDEX_PENDING) {
-    throw new Error("piece root index catch-up did not run");
-  }
-  return caughtUpPage;
 };
 
 export const entityIdExists = (
