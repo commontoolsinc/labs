@@ -689,6 +689,68 @@ type RunnerRunOptions = {
   awaitSyncBeforeInitialRun?: boolean;
 };
 
+// Placeholder standing in for an argument slot whose stored raw value is a
+// link that cannot be dereferenced in the current transaction (target doc
+// absent or not yet synced). Validation accepts it anywhere: the slot HAS a
+// value — we just cannot read it right now — so its schema check is deferred
+// to instantiation-time reactive reads, exactly like the running pattern's
+// own reads of the same slot. See applySetupState's pattern-change branch.
+const UNRESOLVED_LINK_PLACEHOLDER = Object.freeze({
+  "unresolved cell link": true,
+});
+
+const acceptsOpaqueCellOrUnresolvedLink = (
+  value: unknown,
+  schema: JSONSchema,
+): boolean =>
+  value === UNRESOLVED_LINK_PLACEHOLDER ||
+  schemaAcceptsOpaqueCellValue(value, schema);
+
+/**
+ * Rebuild `materialized` so every slot whose counterpart in `raw` is a link
+ * that materialized to nothing carries {@link UNRESOLVED_LINK_PLACEHOLDER}
+ * instead of being absent/undefined. Slots that DID materialize keep their
+ * materialized value (and full strict validation); everything else is
+ * returned unchanged.
+ */
+function overlayUnresolvedLinkPlaceholders(
+  materialized: unknown,
+  raw: unknown,
+): unknown {
+  if (isCellLink(raw)) {
+    return materialized === undefined
+      ? UNRESOLVED_LINK_PLACEHOLDER
+      : materialized;
+  }
+  if (Array.isArray(raw)) {
+    if (!Array.isArray(materialized)) return materialized;
+    let result: unknown[] | undefined;
+    for (let i = 0; i < raw.length; i++) {
+      const child = overlayUnresolvedLinkPlaceholders(materialized[i], raw[i]);
+      if (child !== materialized[i]) {
+        result ??= materialized.slice();
+        result[i] = child;
+      }
+    }
+    return result ?? materialized;
+  }
+  if (isRecord(raw) && isRecord(materialized)) {
+    let result: Record<string, unknown> | undefined;
+    for (const [key, rawChild] of Object.entries(raw)) {
+      const child = overlayUnresolvedLinkPlaceholders(
+        (materialized as Record<string, unknown>)[key],
+        rawChild,
+      );
+      if (child !== (materialized as Record<string, unknown>)[key]) {
+        result ??= { ...(materialized as Record<string, unknown>) };
+        result[key] = child;
+      }
+    }
+    return result ?? materialized;
+  }
+  return materialized;
+}
+
 function dedupeNormalizedLinks(
   links: readonly NormalizedFullLink[],
 ): NormalizedFullLink[] {
@@ -971,16 +1033,28 @@ export class Runner {
   }
 
   /** Stage an argument write, materialize aliases in the same transaction, and
-   * reject the transaction unless the resulting value satisfies its schema. */
+   * reject the transaction unless the resulting value satisfies its schema.
+   * `unresolvedLinkRaw` (the staged pre-materialization value) makes slots
+   * whose raw value is a link that cannot currently be dereferenced validate
+   * as opaque instead of as their unreadable materialization — pass it only
+   * when re-staging a STORED argument (pattern hot-swap), never for a
+   * caller-supplied value. */
   private updateAndValidateArgument<T>(
     tx: IExtendedStorageTransaction,
     argumentLink: NormalizedFullLink,
     argument: T,
     argumentSchema: JSONSchema,
     defaults: FabricValue,
+    options: { unresolvedLinkRaw?: unknown } = {},
   ): void {
     this.updateArgument(tx, argumentLink, argument, argumentSchema);
-    this.validateArgument(tx, argumentLink, argumentSchema, defaults);
+    this.validateArgument(
+      tx,
+      argumentLink,
+      argumentSchema,
+      defaults,
+      options,
+    );
   }
 
   private validateArgument(
@@ -988,6 +1062,7 @@ export class Runner {
     argumentLink: NormalizedFullLink,
     argumentSchema: JSONSchema,
     defaults: FabricValue,
+    options: { unresolvedLinkRaw?: unknown } = {},
   ): void {
     const argumentCell = this.runtime.getCellFromLink(
       argumentLink,
@@ -996,17 +1071,23 @@ export class Runner {
     );
     const materializedArgument = argumentCell.asSchema(undefined).withTx(tx)
       .get();
-    const validationArgument = mergeSchemaDefaults(
+    let validationArgument: unknown = mergeSchemaDefaults(
       materializedArgument,
       defaults,
       argumentSchema,
       { mergeMaterializedLinks: true },
     );
+    if (options.unresolvedLinkRaw !== undefined) {
+      validationArgument = overlayUnresolvedLinkPlaceholders(
+        validationArgument,
+        options.unresolvedLinkRaw,
+      );
+    }
     const validationFailure = validateSchemaValue(
       argumentSchema,
       validationArgument,
       argumentSchema,
-      { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
+      { acceptOpaqueValue: acceptsOpaqueCellOrUnresolvedLink },
     );
     if (validationFailure !== undefined) {
       throw new Error(
@@ -1261,11 +1342,6 @@ export class Runner {
       const previousArgument = previousArgumentCell.getRaw({
         meta: ignoreReadForScheduling,
       }) as T | undefined;
-      nextArgument = mergeSchemaDefaults<T>(
-        argument === undefined ? previousArgument : argument,
-        defaults as Partial<T>,
-        pattern.argumentSchema,
-      );
 
       const nextArgumentCell = previousArgumentCell.asSchema(
         pattern.argumentSchema,
@@ -1278,27 +1354,53 @@ export class Runner {
       resultCell.withTx(tx).setMetaRaw("argument", nextArgumentSigilLink);
       argumentLink = nextArgumentCell.getAsNormalizedFullLink();
 
-      // Stage the exact Fabric-layer representation before validating it. The
-      // untyped materialization below resolves ordinary sigil links through
-      // this same transaction without dropping fields that fail the candidate
-      // schema. A thrown validation error aborts the transaction, so neither
-      // this write nor the schema retarget can become durable on failure.
-      if (nextArgument !== undefined) {
-        this.updateAndValidateArgument(
-          tx,
-          argumentLink,
-          nextArgument,
-          pattern.argumentSchema,
-          defaults,
-        );
-        argumentUpdated = true;
+      if (argument === undefined && previousArgument === undefined) {
+        // Pattern change over an argument doc that reads nothing right now.
+        // This is the normal client state whenever the argument links into a
+        // piece that is down or a doc that has not synced — a nested piece's
+        // argument lives in its HOST's doc (CT-1917: BacklinksIndex's
+        // `pieceRegistry` argument under a host whose own pattern failed to
+        // load). There is no supplied value to stage, and validating — or
+        // writing defaults over — a doc we cannot read would either kill the
+        // swap or clobber whatever the doc really holds. Keep the stored
+        // bytes; instantiation reads the argument reactively once it loads.
+        nextArgument = undefined;
       } else {
-        this.validateArgument(
-          tx,
-          argumentLink,
+        nextArgument = mergeSchemaDefaults<T>(
+          argument === undefined ? previousArgument : argument,
+          defaults as Partial<T>,
           pattern.argumentSchema,
-          defaults,
         );
+
+        // Stage the exact Fabric-layer representation before validating it.
+        // The untyped materialization below resolves ordinary sigil links
+        // through this same transaction without dropping fields that fail the
+        // candidate schema. A thrown validation error aborts the transaction,
+        // so neither this write nor the schema retarget can become durable on
+        // failure. When no argument was supplied (a pattern hot-swap re-using
+        // the stored value), a slot holding a link whose target cannot be
+        // read RIGHT NOW must not fail validation — the staged raw is passed
+        // so such slots validate as opaque instead of as their (unreadable)
+        // materialization. A supplied argument keeps strict validation:
+        // callers stage exactly the value they were given.
+        if (nextArgument !== undefined) {
+          this.updateAndValidateArgument(
+            tx,
+            argumentLink,
+            nextArgument,
+            pattern.argumentSchema,
+            defaults,
+            argument === undefined ? { unresolvedLinkRaw: nextArgument } : {},
+          );
+          argumentUpdated = true;
+        } else {
+          this.validateArgument(
+            tx,
+            argumentLink,
+            pattern.argumentSchema,
+            defaults,
+          );
+        }
       }
     }
     if (nextArgument !== undefined && !argumentUpdated) {
