@@ -8,6 +8,20 @@
 import type { Cfc, CurrentPrincipal, WriteAuthorizedBy } from "./cfc.ts";
 
 // ============================================================================
+// Common internal definitions
+// ============================================================================
+
+/**
+ * Recursively removes `readonly` from all properties of `T`.
+ *
+ * Copy of `Mutable` from `@commonfabric/utils/types`. These two definitions
+ * should be unified; see that module for the canonical version.
+ */
+type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
+  : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
+  : T;
+
+// ============================================================================
 // Fabric Value Types
 // ============================================================================
 //
@@ -1439,6 +1453,7 @@ type CellWrappedData<T> =
   | T
   | AnyBrandedCell<T>
   | (T extends Array<infer U> ? Array<FactoryInput<U>>
+    : T extends ReadonlyArray<infer U> ? ReadonlyArray<FactoryInput<U>>
     : T extends object ? { [K in keyof T]: FactoryInput<T[K]> }
     : never);
 export declare const CELL_LIKE: unique symbol;
@@ -1471,6 +1486,7 @@ type StripCellInner<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - i
   : [T] extends [AnyBrandedCell<infer U>] ? StripCell<U>
   : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
   : [T] extends [Array<infer U>] ? StripCell<U>[]
+  : [T] extends [ReadonlyArray<infer U>] ? readonly StripCell<U>[]
   // deno-lint-ignore ban-types
   : [T] extends [Function] ? T // Preserve function types
   : [T] extends [object] ? { [K in keyof T]: StripCell<T[K]> }
@@ -1506,6 +1522,7 @@ export type FactoryInput<T> =
   // Combined into single check to reduce type instantiation overhead.
   | ([NonNullable<T>] extends [VNode | UIRenderable] ? JSXElement : never)
   | (T extends Array<infer U> ? Array<FactoryInput<U>>
+    : T extends ReadonlyArray<infer U> ? ReadonlyArray<FactoryInput<U>>
     : T extends object ? { [K in keyof T]: FactoryInput<T[K]> }
     : T);
 
@@ -1545,6 +1562,9 @@ export type AnyCellWrapping<T> =
     // Handle arrays
     : T extends Array<infer U>
       ? Array<AnyCellWrapping<U>> | AnyBrandedCell<Array<AnyCellWrapping<U>>>
+    : T extends ReadonlyArray<infer U> ?
+        | ReadonlyArray<AnyCellWrapping<U>>
+        | AnyBrandedCell<ReadonlyArray<AnyCellWrapping<U>>>
     // Handle objects (excluding null)
     : T extends object ?
         | { [K in keyof T]: AnyCellWrapping<T[K]> }
@@ -1608,6 +1628,10 @@ export type HandlerFactory<T, R> =
 
 // JSON types
 
+/**
+ * Pure deeply-immutable JSON value, with the addition of a sidecar of
+ * annotations keyed by unique symbols.
+ */
 export type JSONValue =
   | null
   | boolean
@@ -1616,34 +1640,21 @@ export type JSONValue =
   | JSONArray
   | JSONObject & IDFields;
 
-export interface JSONArray extends ArrayLike<JSONValue> {}
+export interface JSONArray extends ReadonlyArray<JSONValue> {}
 
-export interface JSONObject extends Record<string, JSONValue> {}
+export interface JSONObject extends Readonly<Record<string, JSONValue>> {}
 
 // Annotations when writing data that help determine the entity id. They are
 // removed before sending to storage.
 export interface IDFields {
-  [ID]?: unknown;
-  [ID_FIELD]?: unknown;
+  readonly [ID]?: unknown;
+  readonly [ID_FIELD]?: unknown;
 }
 
 /**
- * Recursively adds `readonly` to all properties of `T`.
- *
- * Mirrors the definition in `@commonfabric/utils/types` but is duplicated here
- * so that `@commonfabric/api` remains dependency-free.
+ * Deeply-mutable version of `JSONValue`.
  */
-type Immutable<T> = T extends ReadonlyArray<infer U>
-  ? ReadonlyArray<Immutable<U>>
-  : T extends object ? ({ readonly [P in keyof T]: Immutable<T[P]> })
-  : T;
-
-/**
- * Deeply-readonly version of `JSONValue`. Used in `JSONSchemaObj` for fields
- * like `default`, `const`, `enum`, and `examples` whose values must not be
- * mutated after construction.
- */
-export type ImmutableJSONValue = Immutable<JSONValue>;
+export type MutableJSONValue = Mutable<JSONValue>;
 
 // Valid values for the "type" property of a JSONSchema
 export type JSONSchemaTypes =
@@ -1699,8 +1710,8 @@ export type JSONSchemaObj = {
 
   // Validation for any
   readonly type?: JSONSchemaTypes | readonly JSONSchemaTypes[];
-  readonly enum?: readonly ImmutableJSONValue[]; // not validated
-  readonly const?: ImmutableJSONValue; // not validated
+  readonly enum?: readonly JSONValue[]; // not validated
+  readonly const?: JSONValue; // not validated
   // Validation for numeric - none applied
   readonly multipleOf?: number;
   readonly maximum?: number;
@@ -1734,10 +1745,10 @@ export type JSONSchemaObj = {
   // Meta-Data
   readonly title?: string;
   readonly description?: string;
-  readonly default?: ImmutableJSONValue;
+  readonly default?: JSONValue;
   readonly readOnly?: boolean;
   readonly writeOnly?: boolean;
-  readonly examples?: readonly ImmutableJSONValue[];
+  readonly examples?: readonly JSONValue[];
   readonly $schema?: string;
   readonly $comment?: string;
 
@@ -1752,11 +1763,11 @@ export type JSONSchemaObj = {
   readonly asCell?: readonly AsCellType[];
   // temporarily used to assign labels like "confidential"
   readonly ifc?: {
-    readonly confidentiality?: readonly ImmutableJSONValue[];
-    readonly integrity?: readonly ImmutableJSONValue[];
-    readonly addIntegrity?: readonly ImmutableJSONValue[];
-    readonly requiredIntegrity?: readonly ImmutableJSONValue[];
-    readonly maxConfidentiality?: readonly ImmutableJSONValue[];
+    readonly confidentiality?: readonly JSONValue[];
+    readonly integrity?: readonly JSONValue[];
+    readonly addIntegrity?: readonly JSONValue[];
+    readonly requiredIntegrity?: readonly JSONValue[];
+    readonly maxConfidentiality?: readonly JSONValue[];
     readonly ownerPrincipal?: string | CurrentPrincipal;
     readonly writeAuthorizedBy?:
       | readonly string[]
@@ -1791,16 +1802,6 @@ export type JSONSchemaObj = {
     };
   };
 };
-
-/**
- * Recursively removes `readonly` from all properties of `T`.
- *
- * Copy of `Mutable` from `@commonfabric/utils/types`. These two definitions
- * should be unified; see that module for the canonical version.
- */
-type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
-  : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
-  : T;
 
 /**
  * A deep-mutable variant of `JSONSchemaObj`. Recursively strips `readonly`
@@ -1981,7 +1982,7 @@ export interface BuiltInLLMParams {
   stop?: string;
   maxTokens?: number;
   builtinTools?: boolean;
-  observationMaxConfidentiality?: readonly ImmutableJSONValue[];
+  observationMaxConfidentiality?: readonly JSONValue[];
   /**
    * Specifies the mode of operation for the LLM.
    * - `"json"`: Indicates that the LLM should process and return data in JSON format.
@@ -2062,7 +2063,7 @@ export type BuiltInGenerateObjectParams =
     system?: string;
     cache?: boolean;
     maxTokens?: number;
-    observationMaxConfidentiality?: readonly ImmutableJSONValue[];
+    observationMaxConfidentiality?: readonly JSONValue[];
     schemaSanitizePromptInjection?: boolean;
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;
@@ -2089,7 +2090,7 @@ export type BuiltInGenerateObjectParams =
     system?: string;
     cache?: boolean;
     maxTokens?: number;
-    observationMaxConfidentiality?: readonly ImmutableJSONValue[];
+    observationMaxConfidentiality?: readonly JSONValue[];
     schemaSanitizePromptInjection?: boolean;
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;

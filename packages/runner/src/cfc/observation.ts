@@ -1,4 +1,4 @@
-import type { ImmutableJSONValue, JSONSchema } from "@commonfabric/api";
+import type { JSONSchema, JSONValue } from "@commonfabric/api";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -68,7 +68,7 @@ export const uniqueCfcAtoms = (
   const unique: CfcAtom[] = [];
   for (const atom of atoms) {
     if (!unique.some((existing) => deepEqual(existing, atom))) {
-      unique.push(atom as ImmutableJSONValue);
+      unique.push(atom as JSONValue);
     }
   }
   return unique;
@@ -356,7 +356,7 @@ export const cfcIntegritySatisfiesFloorCoherently = (
 export const atomsOutsideCeiling = (
   confidentiality: readonly CfcConfClause[],
   ceiling: CfcObservationMaxConfidentiality,
-): ImmutableJSONValue[] => {
+): JSONValue[] => {
   if (ceiling === undefined) {
     return [];
   }
@@ -365,7 +365,7 @@ export const atomsOutsideCeiling = (
     !ceiling.some((allowed) =>
       clauseSubsumes(allowed as CfcConfClause, clause as CfcConfClause)
     )
-  ) as ImmutableJSONValue[];
+  ) as JSONValue[];
 };
 
 /**

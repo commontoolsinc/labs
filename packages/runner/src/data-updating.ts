@@ -1,4 +1,4 @@
-import { isObject, isRecord } from "@commonfabric/utils/types";
+import { isObject, isRecord, type Mutable } from "@commonfabric/utils/types";
 import type { CfcConfClause } from "./cfc/clause.ts";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { forEachSubschema } from "./schema-walk.ts";
@@ -1596,7 +1596,7 @@ export function addCommonIDfromObjectID(
 ): void {
   function traverse(obj: unknown): void {
     if (isRecord(obj) && fieldName in obj) {
-      (obj as IDFields)[ID_FIELD] = fieldName;
+      (obj as Mutable<IDFields>)[ID_FIELD] = fieldName;
     }
 
     // TODO(danfuzz): Latent — this is a public entry point (re-exported,

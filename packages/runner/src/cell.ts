@@ -3,6 +3,7 @@ import {
   isFunction,
   isObject,
   isRecord,
+  type Mutable,
 } from "@commonfabric/utils/types";
 import {
   cloneIfNecessary,
@@ -3105,7 +3106,7 @@ export function recursivelyAddIDIfNeeded<T>(
     return Object.freeze(result) as T;
   } else {
     const sourceRecord = converted as Record<string, unknown>;
-    const result: Record<string, unknown> = {};
+    const result: Record<string, unknown> & Mutable<IDFields> = {};
     let changed = convertedDiffers;
 
     seen.set(value, result);
@@ -3125,9 +3126,9 @@ export function recursivelyAddIDIfNeeded<T>(
     if (isRecord(value)) {
       const valueRecord = value as Record<string, unknown>;
       [ID, ID_FIELD].forEach((symbol) => {
-        if (symbol in valueRecord) {
-          (result as IDFields)[symbol as keyof IDFields] =
-            (valueRecord as IDFields)[symbol as keyof IDFields];
+        const key = symbol as keyof IDFields;
+        if (key in valueRecord) {
+          result[key] = (valueRecord as IDFields)[key];
         }
       });
     }
