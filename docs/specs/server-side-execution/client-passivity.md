@@ -716,6 +716,44 @@ QUANTIFIED (the executor should defer attempts it is about to lose).
 n=1 caveats apply; the scenario is a one-command re-run for n
 growth.
 
+**Growth-work attribution (subagent deep-pass over Runs A/B/C logs)
+— the tail mechanism NAMED:** per-window Spearman attribution
+exonerates every first-guess quantity (wave-pass volume: flat/
+saturated in head AND tail; cold refreshes and claim traffic:
+front-loaded, ANTI-correlated ρ≈−0.5..−0.6; conflicts: zero in the
+tail) and convicts **slow schema traversals on the toolshed's
+SERVING path** — the only quantity co-growing with the tail in both
+flag-on runs (ρ≈+0.75): tracker keys grow 253→850+ with the note
+count, individual traversals cross the 100ms log floor around note
+12-15 and stack 2-12 per iteration, delaying the commit-ack/push
+chain the client's runtime-idle gate waits behind — exactly where
+the sub-timing decomposition puts the growth (viewIdleWaitMs: tail
+excess +1155ms in C vs +375 flag-off). Two clean controls: head
+means are near-identical across all three runs, and a 27.6s
+background prepare ran through Run B's windows 2-9 with client
+iterations at baseline — executor saturation AMPLIFIES (process
+contention on spike iterations) but does not drive. Confirming
+instrument (specified, not yet built): floor-less per-iteration
+traversal timing tagged by call-site (subscription push / candidate
+eval / cold refresh / wave-pass) + an event-loop-lag sampler + a
+client-transact→ack→push timestamp chain. The remedy direction the
+counters point at: traversal memoization/coverage on the serving
+path over the accumulated doc graph — the SAME server-side
+session-tracked-coverage surface as P0-R3c's option (i), now
+implicated by client-visible data, feeding P2/P5 design.
+
+**Measurement-hygiene finding #2 (run-sequence drift):** a
+replication pair (A2/B2) showed BOTH arms degrading monotonically
+with wall-clock order (A1 908 → B1 975 → C 1211 → A2 1543 → B2
+2898 medians — monotone in TIME, not arm), and B2 failed to engage
+(41 claims, 0 commits). Cause found: leftover Playwright browser
+processes from prior runs (one spinning at 104% CPU; load average
+20+). Protocol additions: kill leftover `ms-playwright` browsers
+between runs, record load-average with every run, treat
+cross-run pooling as invalid — only ADJACENT pairs (or future
+within-run interleaving) compare arms. The A1/B1 adjacent pair
+(+7%) remains the valid single-user datum; A2/B2 is discarded.
+
 | Row | Builds | Red-first gate(s) | Dial | Acceptance | Resolves |
 | --- | --- | --- | --- | --- | --- |
 | **P0 — executor liveness + demand lifecycle** | Joint demand+claim retention window (pool start/stop damping only, bounded by host session-anchored authority); parked-wake revival; demand-ADD for never-demanded pieces; lane reconcile keeps consuming raw snapshots | Start-under-navigation-cadence pool test; departure-parity fixture (disconnect mid-grace ⇒ no post-disconnect claims, Worker stopped ≤ grace+TTL, parked-space parity byte-identical); grace ≥ measured cold-start with margin | Grace-window duration | Live Worker + `claimsIssued>0` on the real n=10 workload; zero claim-lapse from same-space navigation; departure parity green | CP12 CP14 CP22 CP26 |
