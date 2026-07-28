@@ -909,6 +909,10 @@ Deno.test("markdown rendered view handles malformed HTML boundaries", () => {
     "visible",
   );
   assertEquals(
+    markdownInternals.stripHtmlTags("<span disabled>visible</span>"),
+    "visible",
+  );
+  assertEquals(
     markdownInternals.stripHtmlTags("<span title=>"),
     "<span title=>",
   );
