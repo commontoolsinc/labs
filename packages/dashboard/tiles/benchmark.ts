@@ -748,18 +748,19 @@ function generatedCpuColor(hash: number): string {
   )}`;
 }
 
-function availableGeneratedCpuColor(
+export function availableGeneratedCpuColor(
   hash: number,
   usedColors: Set<string>,
+  generateColor: (hash: number) => string = generatedCpuColor,
 ): string {
-  // The color uses the low 21 hash bits. Adding an odd number visits each
-  // possible low-bit value once, so one of the first usedColors.size + 1
-  // candidates must be available.
-  for (let salt = 0;; salt++) {
+  // The color uses the low 21 hash bits. Adding an odd number visits every
+  // possible low-bit value before repeating.
+  for (let salt = 0; salt <= usedColors.size; salt++) {
     const mixed = (hash + Math.imul(salt, 0x9e3779b9)) >>> 0;
-    const candidate = generatedCpuColor(mixed);
+    const candidate = generateColor(mixed);
     if (!usedColors.has(candidate)) return candidate;
   }
+  throw new Error("Could not assign a distinct CPU color.");
 }
 
 function cpuColors(cpus: Iterable<string>): Map<string, string> {

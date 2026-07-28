@@ -7,11 +7,17 @@
 // snapshot for the drill-down page. The dashboard test runner gives this module
 // a temporary server-data directory. These tests share that state, use distinct
 // run ids, and read snapshots after the collection that filled them.
-import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
 import type { Ctx, TileView } from "../types.ts";
 import { REPO } from "../config.ts";
 import { BenchmarkHistoryStore } from "../benchmark-history-cache.ts";
 import {
+  availableGeneratedCpuColor,
   benchmark,
   type BenchmarkFetchProgress,
   benchmarkHistoryCheckResponse,
@@ -1990,6 +1996,19 @@ Deno.test("benchmark: CPU lines split across large gaps and use distinct colors"
     } else Deno.env.set("DASHBOARD_CACHE_DIR", previousCacheDirectory);
     await Deno.remove(directory, { recursive: true });
   }
+});
+
+Deno.test("generated CPU colors fail when no candidate is available", () => {
+  assertThrows(
+    () =>
+      availableGeneratedCpuColor(
+        0,
+        new Set(["#707070"]),
+        () => "#707070",
+      ),
+    Error,
+    "Could not assign a distinct CPU color.",
+  );
 });
 
 Deno.test("benchmark: CPU-less reports are not pooled", async () => {
