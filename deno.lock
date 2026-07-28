@@ -103,6 +103,7 @@
     "npm:@types/d3-scale@^4.0.9": "4.0.9",
     "npm:@types/d3-shape@^3.1.8": "3.1.8",
     "npm:@types/leaflet@^1.9.21": "1.9.21",
+    "npm:@viz-js/viz@3.26.0": "3.26.0",
     "npm:ai@^7.0.31": "7.0.31_zod@4.4.3",
     "npm:ajv@^8.20.0": "8.20.0",
     "npm:d3-array@^3.2.4": "3.2.4",
@@ -118,6 +119,7 @@
     "npm:hash-wasm@^4.12.0": "4.12.0",
     "npm:hono-pino@~0.10.3": "0.10.3_hono@4.12.31_pino@10.3.1",
     "npm:hono@^4.12.31": "4.12.31",
+    "npm:htmlparser2@12": "12.0.0",
     "npm:htmlparser2@12.0.0": "12.0.0",
     "npm:json5@^2.2.3": "2.2.3",
     "npm:jsonschema@^1.5.0": "1.5.0",
@@ -1176,6 +1178,9 @@
     "@vercel/oidc@3.2.0": {
       "integrity": "sha512-UycprH3T6n3jH0k44NHMa7pnFHGu/N05MjojYr+Mc6I7obkoLIJujSWwin1pCvdy/eOxrI/l3uDLQsmcrOb4ug=="
     },
+    "@viz-js/viz@3.26.0": {
+      "integrity": "sha512-q/m3rj4aTs38yezZsWABRSsI1auZIWXk5X2aOdz9B7oPR1eYIn9JMEBXY/HbTJwhgS1vEOESC+m0eO6p3imFyQ=="
+    },
     "@workflow/serde@4.1.0": {
       "integrity": "sha512-pav4F2BoirECWR7Nf1TKt+2eETcBj7jj4cBefQ8VXQCA6NPkaKeLfj/zMgi+3zYV5ZIBT4GuUiphsj0/b9hPQQ=="
     },
@@ -2185,6 +2190,13 @@
           "npm:d3-scale@^4.0.2",
           "npm:d3-shape@^3.2.0",
           "npm:leaflet@^1.9.4",
+          "npm:marked@^18.0.6"
+        ]
+      },
+      "scripts": {
+        "dependencies": [
+          "npm:@viz-js/viz@3.26.0",
+          "npm:htmlparser2@12",
           "npm:marked@^18.0.6"
         ]
       }
