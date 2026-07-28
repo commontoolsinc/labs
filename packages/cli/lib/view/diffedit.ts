@@ -31,7 +31,7 @@ import {
   messageAt,
   sameCommit,
 } from "./commitmsg.ts";
-import type { Highlighter } from "./languages/language.ts";
+import type { Highlighter, Language } from "./languages/language.ts";
 import { languageForFile } from "./languages/language.ts";
 import type {
   EditableSource,
@@ -208,13 +208,16 @@ export function diffSource(
     editable: true,
     policy,
     parse: (text) => reparse(ws, text, cache),
-    // Live highlighting recolours only the lines an edit changes and reuses the
-    // seed (buildDiffDocument's colours, including the file/hunk headers and the
-    // workspace-file syntax highlighting) for the rest. Cost tracks the edit,
-    // not the whole diff, and the unchanged headers never flicker colour. The
-    // full parse on pause restores workspace-verified spans across the edit.
+    // Live highlighting recolours the lines an edit changes and reuses the seed
+    // (buildDiffDocument's colours, including the file/hunk headers and the
+    // workspace-file syntax highlighting) for the rest. Languages whose colour
+    // can cross lines re-highlight the complete file. The full parse on
+    // pause restores workspace-verified spans across the edit.
     createHighlighter: (text, seed) =>
-      createDiffHighlighter(text, seed, edit.oldFileLines),
+      createDiffHighlighter(text, seed, edit.oldFileLines, {
+        fileText: expectedFiles,
+        hunks: saveHunks,
+      }),
     dirtyLabels: (original, current) =>
       [
         ...collectFileOutputs(
@@ -974,13 +977,15 @@ function applyExpansion(
  * — the colours {@link buildDiffDocument} produced for the unedited text — for
  * every line the edit leaves alone. Edited removed lines use the complete old
  * file's spans. Other edited body lines use a marker-aware single-line parse.
- * The headers stay in the unchanged prefix or suffix. When no seed is given,
- * the highlighter renders every line itself.
+ * A language can ask to re-highlight complete files when its colours depend on
+ * preceding lines. The headers stay in the unchanged prefix or suffix. When no
+ * seed is given, the highlighter renders every line itself.
  */
 export function createDiffHighlighter(
   initialText: string,
   seed?: readonly Line[],
   oldFileLines?: readonly (readonly Line[] | null)[],
+  completeFiles?: DiffHighlightFiles,
 ): Highlighter {
   let text = initialText;
   const initialRaw = initialText.split("\n");
@@ -993,6 +998,17 @@ export function createDiffHighlighter(
         oldLineSpansAt(initialModel, index, oldFileLines),
       )
     )).slice();
+  if (!seed && initialModel) {
+    rehighlightTouchedHunks(
+      initialRaw,
+      initialModel,
+      lines,
+      0,
+      initialRaw.length,
+      oldFileLines,
+      completeFiles,
+    );
+  }
   return {
     get lines() {
       return lines;
@@ -1023,10 +1039,217 @@ export function createDiffHighlighter(
         recoloured,
         lines.slice(oldRaw.length - s),
       );
+      rehighlightTouchedHunks(
+        newRaw,
+        model,
+        lines,
+        p,
+        newRaw.length - s,
+        oldFileLines,
+        completeFiles,
+      );
       text = next;
       return lines;
     },
   };
+}
+
+interface DiffHighlightFiles {
+  readonly fileText: ReadonlyMap<string, string>;
+  readonly hunks: readonly MutableHunk[];
+}
+
+/** Re-highlight touched YAML sides with complete files when they are available.
+ * A fragment remains the fallback for an unverified hunk. */
+function rehighlightTouchedHunks(
+  rawLines: string[],
+  model: DiffModel | null,
+  lines: Line[],
+  changedStart: number,
+  changedEnd: number,
+  oldFileLines?: readonly (readonly Line[] | null)[],
+  completeFiles?: DiffHighlightFiles,
+): void {
+  if (!model) return;
+  const changedLast = Math.max(changedStart, changedEnd - 1);
+  let fullNewFiles: Map<string, string> | undefined;
+  const indexedHunks = model.files.flatMap((file, fileIndex) =>
+    file.hunks.map((hunk) => ({
+      fileIndex,
+      hunk,
+      newFileName: file.newPath ?? file.oldPath,
+    }))
+  ).map((entry, index) => ({
+    ...entry,
+    index,
+    info: completeFiles?.hunks[index],
+  }));
+  const completeLineDeltas = indexedHunks.map(({ info }) => {
+    const path = info?.absPath;
+    if (!path || !isWritable(info)) return 0;
+    return indexedHunks.reduce((delta, other) => {
+      const otherInfo = other.info;
+      return otherInfo?.absPath === path &&
+          isWritable(otherInfo) &&
+          spliceStart(otherInfo) < spliceStart(info)
+        ? delta + other.hunk.newCount - otherInfo.newCount
+        : delta;
+    }, 0);
+  });
+  for (const [fileIndex, file] of model.files.entries()) {
+    const oldFileName = file.oldPath ?? file.newPath;
+    const newFileName = file.newPath ?? file.oldPath;
+    const oldLanguage = languageForFile(oldFileName);
+    const newLanguage = languageForFile(newFileName);
+    const fileHunks = indexedHunks.filter((entry) =>
+      entry.fileIndex === fileIndex
+    );
+    const touched = fileHunks.filter(({ hunk }) =>
+      changedLast >= hunk.headerLine && changedStart <= hunk.endLine
+    );
+    if (touched.length === 0) continue;
+
+    if (oldLanguage.highlightFullFileOnDiffEdit) {
+      const completeOld = oldFileLines?.[fileIndex];
+      for (const { hunk } of touched) {
+        if (completeOld) {
+          applyCompleteHunkSide(
+            rawLines,
+            model,
+            lines,
+            hunk,
+            "old",
+            completeOld,
+            oldFileName,
+          );
+          continue;
+        }
+        rehighlightHunkSide(
+          rawLines,
+          model,
+          lines,
+          hunk,
+          "old",
+          oldLanguage,
+          oldFileName,
+        );
+      }
+    }
+
+    if (newLanguage.highlightFullFileOnDiffEdit) {
+      const writable = touched.find(({ info }) =>
+        info?.absPath && isWritable(info)
+      )?.info;
+      const path = writable?.absPath;
+      const completeText = path && completeFiles
+        ? (fullNewFiles ??= collectFileOutputs(
+          rawLines.join("\n"),
+          completeFiles.fileText,
+          completeFiles.hunks,
+        )).get(path)
+        : undefined;
+      if (completeText !== undefined && path) {
+        const completeNew = newLanguage.highlightLines(
+          completeText,
+          newFileName,
+        );
+        for (
+          const {
+            hunk,
+            info,
+            index,
+            newFileName: hunkFileName,
+          } of indexedHunks
+        ) {
+          if (info?.absPath !== path || !isWritable(info)) continue;
+          const lineOffset = spliceStart(info) +
+            (completeLineDeltas[index] ?? 0) -
+            spliceStart(hunk);
+          applyCompleteHunkSide(
+            rawLines,
+            model,
+            lines,
+            hunk,
+            "new",
+            completeNew,
+            hunkFileName,
+            lineOffset,
+          );
+        }
+      } else {
+        for (const { hunk } of touched) {
+          rehighlightHunkSide(
+            rawLines,
+            model,
+            lines,
+            hunk,
+            "new",
+            newLanguage,
+            newFileName,
+          );
+        }
+      }
+    }
+  }
+}
+
+function applyCompleteHunkSide(
+  rawLines: string[],
+  model: DiffModel,
+  lines: Line[],
+  hunk: DiffHunk,
+  side: "old" | "new",
+  complete: readonly Line[],
+  fileName: string | undefined,
+  lineOffset = 0,
+): void {
+  for (let line = hunk.headerLine + 1; line <= hunk.endLine; line++) {
+    const entry = model.lines[line];
+    const sourceLine = side === "old" ? entry?.oldLine : entry?.newLine;
+    const included = side === "old"
+      ? entry?.kind === "del"
+      : entry?.kind === "ctx" || entry?.kind === "add";
+    if (!included || sourceLine === undefined) continue;
+    lines[line] = diffLineRender(
+      rawLines[line],
+      fileName,
+      complete[sourceLine + lineOffset]?.spans,
+    );
+  }
+}
+
+function rehighlightHunkSide(
+  rawLines: string[],
+  model: DiffModel,
+  lines: Line[],
+  hunk: DiffHunk,
+  side: "old" | "new",
+  language: Language,
+  fileName: string | undefined,
+): void {
+  const fragment: { diffLine: number; code: string }[] = [];
+  for (let line = hunk.headerLine + 1; line <= hunk.endLine; line++) {
+    const kind = model.lines[line]?.kind;
+    const included = side === "old"
+      ? kind === "ctx" || kind === "del"
+      : kind === "ctx" || kind === "add";
+    if (included) {
+      fragment.push({ diffLine: line, code: rawLines[line].slice(1) });
+    }
+  }
+  const highlighted = language.highlightLines(
+    fragment.map((entry) => entry.code).join("\n"),
+    fileName,
+  );
+  for (let index = 0; index < fragment.length; index++) {
+    const { diffLine } = fragment[index];
+    if (side === "old" && model.lines[diffLine]?.kind === "ctx") continue;
+    lines[diffLine] = diffLineRender(
+      rawLines[diffLine],
+      fileName,
+      highlighted[index]?.spans,
+    );
+  }
 }
 
 /**
