@@ -1115,9 +1115,10 @@ after --. Handlers interpret piped input when no input argument is present.`,
   .option("-c,--piece <piece:string>", "The target piece ID.")
   .option(
     "--invocation <id:string>",
-    "Idempotency key for a handler call (before the callable name). " +
-      "Retrying with the same id settles on the original outcome instead " +
-      "of executing again. Minted automatically when omitted.",
+    "Idempotency key for a handler call (before the callable name). A " +
+      "same-id retry cannot commit twice — it settles on the original " +
+      "outcome — but the handler body does re-run, so effects outside the " +
+      "transaction repeat. Minted automatically when omitted.",
   )
   .stopEarly()
   .arguments("<callable:string> [tail...:string]")

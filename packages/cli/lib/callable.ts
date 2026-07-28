@@ -127,7 +127,11 @@ export interface CallableExecutionDeps {
   /** Caller-supplied idempotency key for handler sends: threads through as
    * the durable event id, so a retry of the same id collides on the
    * handling's create-only receipt and reads the original outcome back
-   * instead of re-executing (verb contract WS-D). */
+   * (verb contract WS-D). The guarantee is at-most-once *commit*, not
+   * at-most-once *execution* — a redelivered event re-runs the handler body
+   * and loses the race for the receipt, so a verb whose body has effects
+   * outside its transaction (an LLM call, a fetch) repeats those effects on
+   * retry even though nothing commits twice. */
   invocationId?: string;
   /** Phase observer for early-exit reporting. */
   onPhase?: (phase: InvocationPhase) => void;
