@@ -616,8 +616,30 @@ run_piece_call_retry() {
     error "cf piece call should announce its invocation id at dispatch"
   fi
 
-  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_2" --invocation "$INVOCATION_2" \
-    recordMessage -- --message "dispatched-then-killed" > /dev/null
+  # Whether the killed call got its commit in is genuinely racy, and both
+  # outcomes are correct — but they exercise different machinery, so record
+  # which one happened instead of letting a weak pass look like a strong one.
+  # If it committed, the retry MUST collide; if it did not, the retry must
+  # apply cleanly. Asserting only "exactly one" would also pass with
+  # --invocation ignored entirely, whenever the first commit failed to land.
+  COMMITTED_BEFORE_KILL=$(message_count "$RETRY_PIECE_2")
+  set +e
+  RETRY_2=$(cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_2" --invocation "$INVOCATION_2" \
+    recordMessage -- --message "dispatched-then-killed" 2>/dev/null)
+  RETRY_2_STATUS=$?
+  set -e
+  if [ "$RETRY_2_STATUS" -ne 0 ]; then
+    error "Retrying a killed-after-dispatch call should exit 0, got $RETRY_2_STATUS"
+  fi
+  echo "killed-after-dispatch: committed before kill = $COMMITTED_BEFORE_KILL"
+  if [ "$COMMITTED_BEFORE_KILL" = "1" ]; then
+    echo "$RETRY_2" | jq -e '.deduplicated == true' > /dev/null ||
+      error "The killed call had committed, so its retry must deduplicate, got: $RETRY_2"
+  elif echo "$RETRY_2" | jq -e '.deduplicated == true' > /dev/null; then
+    # An `x && error` here would abort under set -e on the expected path,
+    # where jq exits non-zero; an if-condition is exempt.
+    error "The killed call never committed, so its retry must not deduplicate, got: $RETRY_2"
+  fi
   assert_message_count "$RETRY_PIECE_2" 1 \
     "Retrying a killed-after-dispatch call with the same id should leave exactly one message"
 
