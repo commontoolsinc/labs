@@ -11,6 +11,7 @@ import type {
   Span,
   StructureNode,
   TokenClass,
+  ViewMode,
 } from "./model.ts";
 import type { Key } from "./keys.ts";
 import { cpLen } from "./ansi.ts";
@@ -81,6 +82,8 @@ import {
 export interface SessionOptions {
   color: boolean;
   showLineNumbers: boolean;
+  /** Initial representation, falling back to source when none is available. */
+  viewMode?: ViewMode;
 }
 
 type Mode =
@@ -161,7 +164,10 @@ interface JumpEntry {
 }
 
 export class Session {
+  /** The parsed source document used for editing, offsets, and source cards. */
+  private sourceDoc: Document;
   private currentDoc: Document;
+  private viewMode: ViewMode = "source";
   private color: boolean;
   private lineNumberMode: LineNumberMode = "off";
   /** Whether long logical lines continue on later screen rows. */
@@ -283,6 +289,7 @@ export class Session {
     source?: EditableSource,
     files?: FileGateway,
   ) {
+    this.sourceDoc = doc;
     this.currentDoc = doc;
     this.color = options.color;
     this.lineNumberMode = options.showLineNumbers ? "input" : "off";
@@ -294,10 +301,63 @@ export class Session {
     // The edit buffer mirrors the document text; for an editable file the two
     // stay in lock-step (the document is a re-parse of the buffer).
     if (source) this.buffer = new EditBuffer(doc.text);
+    if (options.viewMode === "rendered" && source?.render) {
+      this.viewMode = "rendered";
+      this.setSourceDocument(doc);
+    }
   }
 
   get doc(): Document {
     return this.currentDoc;
+  }
+
+  /** Install a newly parsed source document in the active representation. */
+  private setSourceDocument(doc: Document): void {
+    this.sourceDoc = doc;
+    if (this.viewMode === "rendered" && this.source?.render) {
+      const rendered = this.source.render(doc);
+      this.currentDoc = { ...doc, lines: rendered.lines };
+    } else {
+      this.viewMode = "source";
+      this.currentDoc = doc;
+    }
+  }
+
+  /** Change representation while keeping the same source line at the top. */
+  private setViewMode(mode: ViewMode, announce = true): boolean {
+    if (mode === this.viewMode) return false;
+    if (mode === "rendered" && !this.source?.render) return false;
+    const anchor = this.viewportAnchor();
+    this.viewMode = mode;
+    this.setSourceDocument(this.sourceDoc);
+    if (this.wrapLines) {
+      this.restoreWrappedAnchor({ ...anchor, displayCol: 0 });
+    } else {
+      this.top = anchor.foldedLine;
+      this.left = 0;
+      this.clampScroll();
+    }
+    if (this.query.length > 0) {
+      this.matches = findMatches(this.currentDoc, this.query);
+      this.currentMatch = clamp(
+        this.currentMatch,
+        0,
+        Math.max(0, this.matches.length - 1),
+      );
+    }
+    if (announce) {
+      this.message = `View: ${this.viewMode}`;
+    }
+    return true;
+  }
+
+  private toggleViewMode(): void {
+    const changed = this.setViewMode(
+      this.viewMode === "source" ? "rendered" : "source",
+    );
+    if (!changed && this.viewMode === "source") {
+      this.message = "Rendered view isn't available here.";
+    }
   }
 
   // --- file folding ----------------------------------------------------------
@@ -481,8 +541,22 @@ export class Session {
   /** The selected node with its line range mapped into display rows (a node in a
    * collapsed file collapses onto that file's summary row). */
   private displaySelected(): StructureNode | null {
-    const node = this.selectedNode();
-    if (!node || this.collapsed.size === 0) return node;
+    const selected = this.selectedNode();
+    if (!selected) return null;
+    const node = this.viewMode === "rendered"
+      ? {
+        ...selected,
+        startCol: this.renderedLineChangesColumns(selected.startLine)
+          ? 0
+          : selected.startCol,
+        endCol: this.renderedLineChangesColumns(selected.endLine)
+          ? codePointLength(
+            this.currentDoc.lines[selected.endLine]?.text ?? "",
+          )
+          : selected.endCol,
+      }
+      : selected;
+    if (this.collapsed.size === 0) return node;
     const fold = this.foldPlan();
     const startLine = fold.docToDisplay(node.startLine);
     const endLine = fold.docToDisplay(node.endLine);
@@ -654,6 +728,8 @@ export class Session {
       editHint: this.cursorOn ? this.editHint() : null,
       canExpand: this.canExpand(),
       canEdit: !this.cursorOn && !!this.source?.editable,
+      canRender: !!this.source?.render,
+      viewMode: this.viewMode,
       hasNonPrintables: this.hasNonPrintables(),
       notice: null,
       currentFile: this.currentFile(),
@@ -828,11 +904,19 @@ export class Session {
       : null;
   }
 
+  private renderedLineChangesColumns(line: number): boolean {
+    return this.viewMode === "rendered" &&
+      this.sourceDoc.lines[line]?.text !== this.currentDoc.lines[line]?.text;
+  }
+
   /** Screen row containing the first character of a structure node. */
   private nodeStartRow(node: StructureNode): number {
+    const col = this.renderedLineChangesColumns(node.startLine)
+      ? 0
+      : node.startCol;
     return this.toDisplay(
       node.startLine,
-      this.displayCol(node.startLine, node.startCol),
+      this.displayCol(node.startLine, col),
     );
   }
 
@@ -843,9 +927,12 @@ export class Session {
     if (fold.displayLines[folded] !== this.currentDoc.lines[node.endLine]) {
       return this.wrapLines ? this.wrapPlan().lastRow[folded] ?? 0 : folded;
     }
+    const endCol = this.renderedLineChangesColumns(node.endLine)
+      ? codePointLength(this.currentDoc.lines[node.endLine]?.text ?? "")
+      : node.endCol;
     return this.toDisplay(
       node.endLine,
-      this.displayCol(node.endLine, Math.max(0, node.endCol - 1)),
+      this.displayCol(node.endLine, Math.max(0, endCol - 1)),
     );
   }
 
@@ -887,7 +974,7 @@ export class Session {
   }
 
   private openPeek(node: StructureNode, expanded = false): void {
-    const card = buildPeekCard(this.doc, node, this.semantics, expanded);
+    const card = buildPeekCard(this.sourceDoc, node, this.semantics, expanded);
     this.overlay = {
       title: card.title,
       info: card.info,
@@ -904,7 +991,7 @@ export class Session {
    * scroll position so the newly revealed entries appear where "… N more" was. */
   private expandCard(node: StructureNode): void {
     const scroll = this.overlayScroll;
-    const card = buildPeekCard(this.doc, node, this.semantics, true);
+    const card = buildPeekCard(this.sourceDoc, node, this.semantics, true);
     this.overlay = {
       ...this.overlay!,
       info: card.info,
@@ -927,7 +1014,7 @@ export class Session {
       n.startOffset === def.startOffset && n.endOffset === def.endOffset
     );
     if (node) {
-      const card = buildPeekCard(this.doc, node, this.semantics);
+      const card = buildPeekCard(this.sourceDoc, node, this.semantics);
       this.overlay = {
         title: `definition: ${card.title}`,
         info: card.info,
@@ -940,7 +1027,7 @@ export class Session {
     } else {
       this.overlay = {
         title: `definition: ${name}  (${def.kind})`,
-        info: this.doc.lines.slice(def.startLine, def.endLine + 1),
+        info: this.sourceDoc.lines.slice(def.startLine, def.endLine + 1),
         mode: "info",
         targets: [],
         cardSel: -1,
@@ -1050,7 +1137,10 @@ export class Session {
     if (idx < 0) idx = nodeAtLine(this.doc.flatStructure, target.destLine);
     this.selectedIndex = idx >= 0 ? idx : null;
     const node = idx >= 0 ? this.doc.flatStructure[idx] : null;
-    const destCol = this.displayCol(target.destLine, target.destCol);
+    const sourceCol = this.renderedLineChangesColumns(target.destLine)
+      ? 0
+      : target.destCol;
+    const destCol = this.displayCol(target.destLine, sourceCol);
     const destRow = this.toDisplay(target.destLine, destCol);
     // Frame the resolved node and destination together when they fit. Otherwise
     // center the destination row so the referenced text is visible.
@@ -1439,6 +1529,10 @@ export class Session {
         this.input = "";
         this.searchAnchor = null;
         return;
+      case "v":
+      case "V":
+        this.toggleViewMode();
+        return;
       case "e":
         // Enter edit mode: reveal the text cursor at the top of the view.
         this.revealCursor();
@@ -1638,7 +1732,9 @@ export class Session {
         this.currentDoc.lines[node.startLine];
       return {
         docLine: node.startLine,
-        sourceCol: node.startCol,
+        sourceCol: this.renderedLineChangesColumns(node.startLine)
+          ? 0
+          : node.startCol,
         syntheticDisplayCol: synthetic && folded === anchor.foldedLine
           ? anchor.displayCol
           : undefined,
@@ -1764,6 +1860,7 @@ export class Session {
         "This view has no underlying file to edit.";
       return;
     }
+    const leftRenderedView = this.setViewMode("source", false);
     const wasWrapped = this.wrapLines;
     const anchor = wasWrapped ? this.viewportAnchor() : null;
     const topDoc = anchor?.docLine ?? this.toDoc(this.top);
@@ -1787,7 +1884,13 @@ export class Session {
     this.buffer.place(topDoc, cursorCol);
     this.seedHighlighter();
     this.ensureCursorVisible();
-    if (wasWrapped) this.message = "Line wrapping turned off for editing.";
+    if (leftRenderedView && wasWrapped) {
+      this.message = "Source view; line wrapping turned off for editing.";
+    } else if (leftRenderedView) {
+      this.message = "Source view for editing.";
+    } else if (wasWrapped) {
+      this.message = "Line wrapping turned off for editing.";
+    }
   }
 
   private markFoldChanged(): void {
@@ -2341,10 +2444,11 @@ export class Session {
         // fraction of a full parse because it skips the structure tree. The
         // structure (navigation, cross-references) is refreshed on the deferred
         // re-parse.
-        this.currentDoc = { ...this.currentDoc, text, lines };
+        this.sourceDoc = { ...this.sourceDoc, text, lines };
+        this.currentDoc = this.sourceDoc;
         this.needsReparse = true;
       } else {
-        this.currentDoc = this.source.parse(text);
+        this.setSourceDocument(this.source.parse(text));
         this.needsReparse = false;
       }
     }
@@ -2376,7 +2480,7 @@ export class Session {
    * the next edit re-seeds it from this authoritative parse. */
   reparse(): void {
     if (!this.source || !this.buffer || !this.needsReparse) return;
-    this.currentDoc = this.source.parse(this.buffer.text());
+    this.setSourceDocument(this.source.parse(this.buffer.text()));
     this.needsReparse = false;
     // Re-baseline the live highlighter from this authoritative parse while still
     // editing; drop it when leaving edit mode.
@@ -2792,7 +2896,7 @@ export class Session {
     this.buffer.setText(result.text, result.cursorLine, 0);
     this.splitRow = null;
     this.snapCursorToEditable();
-    this.currentDoc = this.source.parse(result.text);
+    this.setSourceDocument(this.source.parse(result.text));
     this.needsReparse = false;
     if (this.cursorOn) this.seedHighlighter();
     this.clampScroll();
@@ -2884,7 +2988,7 @@ export class Session {
     this.buffer.setBaseline(r.baseline);
     this.buffer.setText(r.text, r.cursorLine, col);
     this.splitRow = null;
-    this.currentDoc = this.source.parse(r.text);
+    this.setSourceDocument(this.source.parse(r.text));
     this.needsReparse = false;
     if (this.cursorOn) {
       this.seedHighlighter();
@@ -3234,7 +3338,7 @@ export class Session {
     this.splitRow = null;
     this.highlighter = undefined; // the old highlighter was for the previous file
     this.clearFolds(); // the previous file's fold indices do not carry over
-    this.currentDoc = opened.source.parse(opened.text);
+    this.setSourceDocument(opened.source.parse(opened.text));
     this.semantics = undefined; // the old service was for the previous file
     this.mode = "normal";
     this.cursorOn = false;
@@ -3590,6 +3694,7 @@ export function helpOverlay(): {
     ["  t", "look up a definition by name"],
     ["", ""],
     ["View", ""],
+    ["  V", "toggle source / rendered view when the language supports it"],
     ["  #", "line numbers: off / input position / file or message line"],
     ["  \\", "wrap / unwrap long lines"],
     ["  C", "cycle non-printables: pictures / ANSI colour / hidden"],

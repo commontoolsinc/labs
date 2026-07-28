@@ -5,12 +5,13 @@
  * `diffSemanticsFor` composes the diff view's semantic layer from the languages
  * present, scoped to each one's files.
  */
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import {
   diffSemanticsFor,
   distinctLanguages,
   languageForFile,
+  renderedLinesFor,
 } from "../lib/view/languages/language.ts";
 import { typeScriptLanguage } from "../lib/view/languages/typescript/language.ts";
 import { markdownLanguage } from "../lib/view/languages/markdown/language.ts";
@@ -24,6 +25,7 @@ import {
   type DiffWorkspace,
 } from "../lib/view/diffdoc.ts";
 import { parseDiff } from "../lib/view/diff.ts";
+import type { Line } from "../lib/view/model.ts";
 
 Deno.test("languageForFile: named files resolve and unnamed input defaults to TypeScript", () => {
   for (const ts of ["a.ts", "a.tsx", "a.mts", "a.cts", "a.js", "a.jsx"]) {
@@ -59,6 +61,59 @@ Deno.test("distinctLanguages: dedupes in first-seen order", () => {
   assertEquals(
     languages.map((l) => l.id),
     ["typescript", "markdown", "json", "yaml", "python", "plain-text"],
+  );
+});
+
+Deno.test("renderedLinesFor rejects a renderer that changes line topology", () => {
+  assertEquals(
+    renderedLinesFor(plainTextLanguage, "plain", "notes.txt"),
+    undefined,
+  );
+  assertThrows(
+    () =>
+      renderedLinesFor(
+        {
+          ...markdownLanguage,
+          id: "malformed",
+          renderLines: () => [],
+        },
+        "first\nsecond",
+        "notes.md",
+      ),
+    Error,
+    "malformed rendered 0 lines for 2 source lines",
+  );
+});
+
+Deno.test("renderedLinesFor rejects malformed display lines", () => {
+  const malformed = (renderLines: () => Line[]) => ({
+    ...markdownLanguage,
+    id: "malformed",
+    renderLines,
+  });
+  assertThrows(
+    () =>
+      renderedLinesFor(
+        malformed(() => [{
+          text: "first\nsecond",
+          spans: [{ col: 0, text: "first\nsecond", cls: "plain" }],
+        }]),
+        "source",
+      ),
+    Error,
+    "malformed rendered a line break inside display line 1",
+  );
+  assertThrows(
+    () =>
+      renderedLinesFor(
+        malformed(() => [{
+          text: "visible",
+          spans: [{ col: 0, text: "different", cls: "plain" }],
+        }]),
+        "source",
+      ),
+    Error,
+    "malformed rendered spans that do not reconstruct display line 1",
   );
 });
 

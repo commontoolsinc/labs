@@ -10,7 +10,7 @@
  * edit makes the diff stop matching disk, which is exactly why it must not be
  * recomputed from the edited text.
  */
-import type { Document, Line, Span } from "./model.ts";
+import type { Document, Line, Span, ViewMode } from "./model.ts";
 import { cpLen } from "./ansi.ts";
 import {
   buildDiffDocument,
@@ -47,6 +47,7 @@ export function diffSource(
   edit: DiffEdit,
   cache?: WorkspaceCache,
   git?: GitRunner,
+  hasRenderedView = false,
 ): EditableSource {
   const files = [...edit.fileText.keys()];
   const expectedFiles = new Map(edit.fileText);
@@ -56,6 +57,12 @@ export function diffSource(
   const shownHead = git?.headSha() ?? null;
   const shownRef = git?.headRef?.() ?? null;
   let expectedHead = shownHead;
+  const renderedView = hasRenderedView
+    ? {
+      render: (source: Document) =>
+        reparse(ws, source.text, cache, completeFiles, "rendered"),
+    }
+    : {};
   const resolvedCommits = new Map<string, string | null>();
   const matchesShownHead = (sha: string): boolean => {
     if (!shownHead) return false;
@@ -112,6 +119,7 @@ export function diffSource(
       reason:
         "This diff doesn't match any file on disk, so there is nothing to edit.",
       parse: (text) => reparse(ws, text, cache),
+      ...renderedView,
       save: () => "Nothing to save — this diff matches no file on disk.",
     };
   }
@@ -212,6 +220,7 @@ export function diffSource(
     editable: true,
     policy,
     parse: (text) => reparse(ws, text, cache, completeFiles),
+    ...renderedView,
     // Live highlighting recolours the lines an edit changes and reuses the seed
     // (buildDiffDocument's colours, including the file/hunk headers and the
     // workspace-file syntax highlighting) for the rest. Languages whose colour
@@ -1580,13 +1589,16 @@ function reparse(
   text: string,
   cache?: WorkspaceCache,
   completeFiles?: DiffHighlightFiles,
+  viewMode: ViewMode = "source",
 ): Document {
   const model = parseDiff(text);
   // An edit keeps every line's marker, so the text still parses as a diff; if a
   // pathological edit breaks that, fall back to a plain parse so highlighting
   // still updates.
   if (!model) return languageForFile(undefined).parseDocument(text);
-  if (!completeFiles) return buildDiffDocument(text, model, ws, cache).doc;
+  if (!completeFiles) {
+    return buildDiffDocument(text, model, ws, cache, viewMode).doc;
+  }
   const editedFiles = collectFileOutputs(
     text,
     completeFiles.fileText,
@@ -1610,7 +1622,7 @@ function reparse(
     statefulPaths,
   );
   if (statefulEdits.size === 0) {
-    return buildDiffDocument(text, model, ws, cache).doc;
+    return buildDiffDocument(text, model, ws, cache, viewMode).doc;
   }
   // Reconstructed files make the edited new side the complete source used for
   // syntax highlighting and diff verification.
@@ -1631,7 +1643,13 @@ function reparse(
   };
   const editedCache: WorkspaceCache = new Map(cache);
   for (const path of statefulEdits.keys()) editedCache.delete(path);
-  return buildDiffDocument(text, model, editedWorkspace, editedCache).doc;
+  return buildDiffDocument(
+    text,
+    model,
+    editedWorkspace,
+    editedCache,
+    viewMode,
+  ).doc;
 }
 
 function changedStatefulFileOutputs(
