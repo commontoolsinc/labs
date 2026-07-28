@@ -599,6 +599,19 @@ propagate](#how-flags-propagate).
   `runtime.start` instantiation; expiry performs the ordinary stop, and
   reset/worker-stop flush lingers immediately.
   `startServerExecutionPool` defaults it to `30000`.
+- **Companion knob (P0 shrink gate, producer side).**
+  `RuntimeOptions.experimental.serverPrimaryExecutionDemandShrinkHoldMs`
+  (programmatic-only, mapped `null` in the canonical env registry): the
+  client runner's demand-shrink gate hold
+  ([`packages/runner/src/executor/demand-shrink-gate.ts`](../../packages/runner/src/executor/demand-shrink-gate.ts)).
+  Demand GROWTH publishes immediately; SHRINK is held this long and
+  folded away when growth follows inside the window, so a same-space
+  navigation never publishes the transient empty demand set
+  ("sponsor-demand-gone" — 53/53 claim refusals on the real workload).
+  Default 10s (the gate's own default, matching the pool grace);
+  `0` is byte-identical immediate passthrough; teardown flushes
+  immediately regardless. Tests shorten it to assert the held-shrink
+  contract without the production window.
 - **Removal.** Fold calibrated fixed values into `serverPrimaryExecution`
   once P1 measures Worker cold-start and navigation-blip distributions.
 

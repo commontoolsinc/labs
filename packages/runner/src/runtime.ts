@@ -239,6 +239,17 @@ export interface ExperimentalOptions {
   /** Enable the trusted-client server-primary execution protocol (default off). */
   serverPrimaryExecution?: boolean | undefined;
   /**
+   * Hold window (ms) of the P0 demand-shrink gate: demand GROWTH publishes
+   * immediately, SHRINK is held this long and folded away when growth
+   * follows inside the window, so a same-space navigation never publishes
+   * the transient empty demand set ("sponsor-demand-gone", 53/53 claim
+   * refusals on the real workload). Default 10s (matches the pool's demand
+   * grace); `0` is byte-identical immediate passthrough. Programmatic-only —
+   * tests use a short hold to assert the held-shrink contract without
+   * waiting out the production window.
+   */
+  serverPrimaryExecutionDemandShrinkHoldMs?: number | undefined;
+  /**
    * Let the executor Worker produce USER-RANK candidate claims for
    * computation actions whose surfaces are user-scoped (context-lattice
    * C1.5a). Default off: every observation classifies exactly as the

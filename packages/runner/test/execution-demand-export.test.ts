@@ -29,6 +29,12 @@ type DemandCall = {
 
 const runtimes = new Set<Runtime>();
 
+// The P0 demand-shrink gate holds shrink publications (production default
+// 10s, matching the pool's demand grace) so navigation blips never reach
+// the wire. Tests run a short hold so the held-shrink contract stays
+// assertable without waiting out the production window.
+const TEST_SHRINK_HOLD_MS = 30;
+
 function createRuntime(
   serverPrimaryExecution: boolean,
 ): { runtime: Runtime; storageManager: TestStorageManager } {
@@ -36,10 +42,32 @@ function createRuntime(
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    experimental: { serverPrimaryExecution },
+    experimental: {
+      serverPrimaryExecution,
+      serverPrimaryExecutionDemandShrinkHoldMs: TEST_SHRINK_HOLD_MS,
+    },
   });
   runtimes.add(runtime);
   return { runtime, storageManager };
+}
+
+/** Await the gate's delayed shrink publish: poll until the LAST recorded
+ * demand call carries exactly `pieces`, bounded well above the test hold. */
+async function expectEventualDemand(
+  calls: DemandCall[],
+  pieces: readonly string[],
+): Promise<void> {
+  const expected = [...pieces].sort();
+  const deadline = Date.now() + 2_000;
+  const matches = () => {
+    const last = calls.at(-1);
+    return last !== undefined &&
+      [...last.pieces].sort().join("\0") === expected.join("\0");
+  };
+  while (!matches() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  expect([...(calls.at(-1)?.pieces ?? [])].sort()).toEqual(expected);
 }
 
 function recordDemand(
@@ -99,10 +127,17 @@ describe("runner execution demand export", () => {
     expect(new Set(calls[1].pieces).size).toBe(2);
     expect([...calls[1].pieces].sort()).toEqual([firstId, secondId].sort());
 
+    // P0 demand-shrink gate contract: a stop does NOT publish the shrunken
+    // set immediately (that transient is exactly what broke claim issuance
+    // on navigation); the shrink is held and published once the hold
+    // lapses with no growth folding it away.
     runtime.runner.stop(first);
+    expect(calls).toHaveLength(2);
+    await expectEventualDemand(calls, [secondId]);
     expect(calls.at(-1)).toEqual({ branch: "", pieces: [secondId] });
 
     runtime.runner.stop(second);
+    await expectEventualDemand(calls, []);
     expect(calls.at(-1)).toEqual({ branch: "", pieces: [] });
   });
 

@@ -733,7 +733,7 @@ export class Runner {
   /** P0 demand-blip fix: shrink publications are held briefly so a
    * same-space navigation (stop A -> start B) never publishes the
    * transient empty set that breaks claim issuance and pool liveness. */
-  private executionDemandShrinkGate = new ExecutionDemandShrinkGate();
+  private executionDemandShrinkGate: ExecutionDemandShrinkGate;
   private executionDemandTails = new Map<MemorySpace, Promise<void>>();
   private crossSpaceChildSpaces = new WeakMap<
     IExtendedStorageTransaction,
@@ -741,6 +741,9 @@ export class Runner {
   >();
 
   constructor(readonly runtime: Runtime) {
+    this.executionDemandShrinkGate = new ExecutionDemandShrinkGate({
+      holdMs: runtime.experimental.serverPrimaryExecutionDemandShrinkHoldMs,
+    });
     this.runtime.storageManager.subscribe(this.createStorageSubscription());
   }
 

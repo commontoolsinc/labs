@@ -207,6 +207,11 @@ export const EXPERIMENTAL_ENV_VARS = {
   // until the memory-side `cross-space-read` stage AND the
   // `cross-space-claims-v1` cohort gate are both in place, so no env exposure.
   serverPrimaryExecutionCrossSpaceReadCandidates: null,
+  // P0 demand-shrink-gate hold: NUMERIC, programmatic-only (tests shorten it
+  // to assert the held-shrink contract; production keeps the gate's 10s
+  // default, matching the pool's demand grace). No env exposure — the env
+  // loop below is boolean-valued by construction.
+  serverPrimaryExecutionDemandShrinkHoldMs: null,
   serverPrimaryExecutionDocSetWatch: SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH_ENV,
   eagerSourceAnnotation: "EXPERIMENTAL_EAGER_SOURCE_ANNOTATION",
   // Scheduler-v2 lineage (#4090) is default-on. Keep a programmatic rollback
@@ -222,6 +227,14 @@ export const EXPERIMENTAL_ENV_VARS = {
  * default". Anything else is ignored WITH A WARNING rather than coerced —
  * the old wirings silently coerced garbage, in opposite directions.
  */
+/** Keys of {@link ExperimentalOptions} whose value is boolean — the only
+ * kind the env mapping may expose (non-boolean options must map to `null`
+ * above). */
+type BooleanExperimentalKey = {
+  [K in keyof ExperimentalOptions]-?: ExperimentalOptions[K] extends
+    boolean | undefined ? K : never;
+}[keyof ExperimentalOptions];
+
 export function experimentalOptionsFromEnv(
   env: EnvReader,
 ): ExperimentalOptions {
@@ -236,7 +249,9 @@ export function experimentalOptionsFromEnv(
     const raw = env(envVar);
     if (raw === undefined) continue;
     if (raw === "true" || raw === "false") {
-      opts[key] = raw === "true";
+      // Env-exposed keys are boolean-valued by construction (see the map's
+      // null entries for the numeric/programmatic dials).
+      opts[key as BooleanExperimentalKey] = raw === "true";
     } else {
       console.warn(
         `[runtime-presets] Ignoring ${envVar}="${raw}" — ` +
