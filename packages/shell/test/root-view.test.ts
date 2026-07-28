@@ -312,6 +312,77 @@ describe("XRootView", () => {
     }
   });
 
+  it("keeps the view's space when a superseded runtime creation unwinds", async () => {
+    const restore = installBrowserGlobals();
+    const originalError = console.error;
+    console.error = () => {};
+    const { RuntimeInternals, resolveSpaceDid } = await import(
+      "@commonfabric/lib-shell"
+    );
+    const originalCreate = RuntimeInternals.create;
+    // The abandoned creation disposes the runtime it built. Resolving off that
+    // call lands after the whole abandonment block has run.
+    let abandoned!: () => void;
+    const disposed = new Promise<void>((resolve) => {
+      abandoned = resolve;
+    });
+    RuntimeInternals.create = (() =>
+      Promise.resolve({
+        runtime: () => ({}),
+        dispose: () => {
+          abandoned();
+          return Promise.resolve();
+        },
+      } as unknown as Awaited<
+        ReturnType<typeof RuntimeInternals.create>
+      >)) as typeof RuntimeInternals.create;
+
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      const identity = await Identity.fromPassphrase(
+        "root-view-superseded-runtime-test",
+      );
+      const atlas = await resolveSpaceDid(identity, "atlas");
+      const lifecycle = view as unknown as {
+        willUpdate(changed: Map<string, unknown>): void;
+      };
+
+      view.app = {
+        ...view.app,
+        identity,
+        view: { spaceName: "atlas" } as typeof view.app.view,
+      };
+      lifecycle.willUpdate(new Map([["app", undefined]]));
+      await view.spaceResolved();
+      expect(view.getRuntimeSpaceDID()).toBe(atlas);
+
+      const task = (view as unknown as {
+        _rt: {
+          run(args: [typeof view.app]): void;
+          taskComplete: Promise<unknown>;
+        };
+      })._rt;
+
+      // One runtime creation starts and a second supersedes it, which is what
+      // a compiler stack reload does to a creation already under way.
+      task.run([view.app]);
+      task.run([view.app]);
+      await task.taskComplete;
+      await disposed;
+
+      // The abandoned creation says nothing about which space the view
+      // addresses, so the space it resolved has to survive. Nothing would
+      // restore it: the view still names atlas, so no lookup runs again.
+      expect(view.getRuntimeSpaceDID()).toBe(atlas);
+    } finally {
+      RuntimeInternals.create = originalCreate;
+      console.error = originalError;
+      delete (globalThis as { commonfabric?: unknown }).commonfabric;
+      restore();
+    }
+  });
+
   it("guards a browser reload only while the runtime reports pending writes", async () => {
     const restore = installBrowserGlobals();
     try {

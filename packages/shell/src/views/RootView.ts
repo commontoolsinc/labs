@@ -127,9 +127,10 @@ export class XRootView extends BaseView {
         }
 
         if (!app || !app.identity) {
-          // Clear the runtime and space when no app state
+          // Clear the runtime when no app state. The space belongs to the
+          // view, and #syncViewSpace has already cleared it for the same
+          // change that took the identity away.
           this.runtime = undefined;
-          this.space = undefined;
           this.#telemetry = undefined;
           clearRuntimeDebugGlobals(getCommonfabricGlobal());
           return undefined;
@@ -175,9 +176,11 @@ export class XRootView extends BaseView {
         });
 
         if (signal.aborted) {
+          // A newer creation replaced this one. Drop what this one built and
+          // leave the space alone: which space the view addresses does not
+          // depend on which runtime creation won.
           rt.dispose().catch(console.error);
           this.runtime = undefined;
-          this.space = undefined;
           clearRuntimeDebugGlobals(getCommonfabricGlobal());
           return;
         }
