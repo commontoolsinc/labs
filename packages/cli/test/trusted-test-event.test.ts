@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { isRendererTrustedEvent } from "../../runner/src/cfc/ui-contract.ts";
 import { buildActionEvent } from "../lib/trusted-test-event.ts";
 
 Deno.test("trusted UI action without a payload synthesizes a click event", () => {
@@ -18,4 +19,5 @@ Deno.test("trusted UI action without a payload synthesizes a click event", () =>
       },
     },
   });
+  assertEquals(isRendererTrustedEvent(event), true);
 });

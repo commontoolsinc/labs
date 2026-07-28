@@ -1,6 +1,11 @@
 import { assert, assertEquals } from "@std/assert";
 import { bgCode, fgCode, parseDocument, SAMPLE } from "./view-helpers.ts";
-import { overlayBox, renderFrame, type ViewState } from "../lib/view/render.ts";
+import {
+  labeledDiffMetadataLine,
+  overlayBox,
+  renderFrame,
+  type ViewState,
+} from "../lib/view/render.ts";
 import { _internal } from "../lib/view/render.ts";
 import { stripAnsi, visibleWidth } from "../lib/view/ansi.ts";
 import { renderLineColored } from "../lib/view/highlight.ts";
@@ -383,6 +388,17 @@ Deno.test("renderFrame: a wrapped edge labels only its closest connector", () =>
     "abc   ◢",
     "meta^L█",
   ]);
+});
+
+Deno.test("labeledDiffMetadataLine tolerates a missing expansion line", () => {
+  const doc = parseDocument("metadata");
+  assertEquals(
+    labeledDiffMetadataLine(doc.lines, "pictures", 7, [
+      { line: 1, kind: "expandDown" },
+      { line: 2, kind: "diffMetadata" },
+    ]),
+    2,
+  );
 });
 
 Deno.test("renderFrame: the expansion margin preserves an exact-width line", () => {
