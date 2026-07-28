@@ -255,12 +255,13 @@ function htmlDeclarationRanges(
   if (!prefix) return [];
 
   const declarations: Array<{ start: number; end: number }> = [];
+  const tokenEnd = tokenOffset + token.raw.length;
   let cursor = tokenOffset + prefix[0].length;
   for (;;) {
     if (!/^<![A-Za-z]/.test(text.slice(cursor))) break;
     const end = declarationMarkupEnd(text, cursor + 2);
     if (end === null) break;
-    declarations.push({ start: cursor, end });
+    if (end > tokenEnd) declarations.push({ start: cursor, end });
     cursor = end;
 
     for (;;) {
