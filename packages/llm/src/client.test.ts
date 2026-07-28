@@ -540,6 +540,37 @@ describe("mock response gate", () => {
     }
   });
 
+  it("holds a matched generateObject response too", async () => {
+    // generateObject has its own copy of the gate, on its own mock branch. A
+    // test that only gated sendRequest would leave it unexercised.
+    enableMockMode();
+    try {
+      addMockObjectResponse(() => true, { object: { name: "Alice" } });
+
+      const { promise, resolve } = Promise.withResolvers<void>();
+      setMockResponseGate(() => promise);
+
+      const client = new LLMClient();
+      let answered = false;
+      const request = client.generateObject({
+        messages: [{ role: "user", content: "gated" }],
+        schema: { type: "object", properties: { name: { type: "string" } } },
+      }).then((response) => {
+        answered = true;
+        return response;
+      });
+
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+      expect(answered).toBe(false);
+
+      resolve();
+      expect((await request).object).toEqual({ name: "Alice" });
+    } finally {
+      resetMockMode();
+    }
+  });
+
   it("is cleared by clearMockResponses and resetMockMode", async () => {
     enableMockMode();
     try {
