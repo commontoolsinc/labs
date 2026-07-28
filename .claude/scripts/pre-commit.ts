@@ -145,6 +145,24 @@ function isStaticTypeAsset(path: string): boolean {
   return path.includes("packages/static/assets/");
 }
 
+// The runner's test files read a global `clock`, declared ambiently in
+// packages/runner/test/clock.d.ts with no import anywhere. `tasks/check.sh`
+// sees that declaration because it checks the package directory as one
+// program; checking a handful of files on their own does not, and every such
+// file then fails with "Cannot find name 'clock'". Pass the declaration
+// alongside so the check matches what CI does, rather than skipping these
+// files the way the two exclusions above do.
+const AMBIENT_DECLARATIONS: Array<[prefix: string, declaration: string]> = [
+  ["packages/runner/test/", "packages/runner/test/clock.d.ts"],
+];
+function ambientDeclarationsFor(paths: string[]): string[] {
+  return AMBIENT_DECLARATIONS
+    .filter(([prefix, declaration]) =>
+      paths.some((p) => p.startsWith(prefix) && p !== declaration)
+    )
+    .map(([, declaration]) => declaration);
+}
+
 // 2. Lint and type-check can run in parallel (both read-only)
 const tsFiles = files.filter((f) =>
   /\.(ts|tsx)$/.test(f) && !isSchemaFixtureInput(f) && !isStaticTypeAsset(f)
@@ -155,7 +173,11 @@ const errors = [
   ...(await Promise.all([
     run("Lint errors", ["lint", ...files]),
     tsFiles.length > 0
-      ? run("Type check failed", ["check", ...tsFiles])
+      ? run("Type check failed", [
+        "check",
+        ...ambientDeclarationsFor(tsFiles),
+        ...tsFiles,
+      ])
       : null,
   ])),
 ].filter(Boolean);

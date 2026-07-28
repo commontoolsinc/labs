@@ -120,6 +120,11 @@ const logger = getLogger("llm-dialog", {
 });
 
 const client = new LLMClient();
+// How long to keep believing another replica is still working on a dialog. This
+// is a heartbeat staleness bound, not a bound on a request: `lastActivity` is
+// refreshed by `safelyPerformUpdate` on every durable write of a turn, guarded
+// by a requestId match, so only the replica running the turn refreshes it.
+// Nothing distinguishes a crashed replica from a slow one without a bound.
 const REQUEST_TIMEOUT = 1000 * 60 * 5; // 5 minutes
 // Pattern-backed tools can themselves run LLM/tool loops (for example generic
 // sub-agents), so the dialog needs a budget longer than a single model call.
@@ -2215,6 +2220,10 @@ async function executeToolCalls(
   pinnedCells?: Cell<PinnedCell[]>,
   observedConfidentiality?: readonly CfcConfClause[],
   observationMaxConfidentiality?: readonly CfcConfClause[],
+  // The turn's abort signal. A tool that runs a pattern waits for that pattern,
+  // and cancelling the turn has to reach that wait: without it the tool runs on
+  // after the user has cancelled, and only its writeback is discarded.
+  abortSignal?: AbortSignal,
 ): Promise<ToolCallExecutionResult[]> {
   const results: ToolCallExecutionResult[] = [];
   for (const part of toolCallParts) {
@@ -2283,6 +2292,7 @@ async function executeToolCalls(
         toolCatalog,
         pinnedCells,
         observationMaxConfidentiality,
+        abortSignal,
       );
       results.push({
         id: part.toolCallId,
@@ -2652,6 +2662,7 @@ async function handleInvoke(
   space: MemorySpace,
   resolved: ResolvedToolCall,
   observationMaxConfidentiality?: readonly CfcConfClause[],
+  abortSignal?: AbortSignal,
 ): Promise<{
   result: { type: string; value: any };
   observedConfidentiality: readonly CfcConfClause[];
@@ -2747,6 +2758,21 @@ async function handleInvoke(
     r !== undefined && resolve(r);
   });
 
+  // Ends three ways: the result lands, the turn is cancelled, or the deadline
+  // fires. The deadline is the one that should not be here — it bounds how long
+  // a healthy tool may take, and firing early reports a working tool to the
+  // model as a failure. Removing it needs a signal for "this run finished
+  // without writing anything", which the runtime cannot yet produce; see
+  // docs/development/proposals/retiring-llm-tool-call-deadlines.md.
+  const aborted = abortSignal
+    ? new Promise<void>((resolveAborted) => {
+      if (abortSignal.aborted) return resolveAborted();
+      abortSignal.addEventListener("abort", () => resolveAborted(), {
+        once: true,
+      });
+    })
+    : undefined;
+
   let timeout;
   const timeoutPromise = new Promise((_, reject) => {
     timeout = setTimeout(() => {
@@ -2757,10 +2783,20 @@ async function handleInvoke(
   });
 
   try {
-    await Promise.race([promise, timeoutPromise]);
+    await Promise.race(
+      [promise, timeoutPromise, aborted].filter(Boolean),
+    );
   } finally {
     clearTimeout(timeout);
     cancel();
+  }
+
+  // Cancelling stops this wait; without stopping the run the pattern behind it
+  // keeps computing and keeps its own model calls in flight, so the tool would
+  // go on working after the user has cancelled the turn.
+  if (abortSignal?.aborted) {
+    if (pattern) runtime.runner.stop(result);
+    throw new Error("Tool call cancelled");
   }
 
   // Get the actual entity ID from the result cell
@@ -2854,6 +2890,7 @@ async function invokeToolCall(
   _catalog?: ToolCatalog,
   pinnedCells?: Cell<PinnedCell[]>,
   observationMaxConfidentiality?: readonly CfcConfClause[],
+  abortSignal?: AbortSignal,
 ) {
   // Handle pinned cell tools
   if (resolved.type === "pin") {
@@ -2909,6 +2946,7 @@ async function invokeToolCall(
     space,
     resolved,
     observationMaxConfidentiality,
+    abortSignal,
   );
 }
 
@@ -3115,19 +3153,21 @@ export function llmDialog(
               // Track the dialog turn (LLM call + writeback) as async builtin
               // work so `runtime.settled()` wait for the result;
               // `idle()` does not, so the handler never blocks on the LLM call.
-              runtime.trackAsyncWork(startRequest(
-                runtime,
-                parentCell.space,
-                cause,
-                inputs,
-                pending,
-                internal,
-                pinnedCells,
-                result,
-                nextRequestId,
-                abortController.signal,
-                capturedRequest,
-              ));
+              runtime.trackAsyncWork(
+                startRequest(
+                  runtime,
+                  parentCell.space,
+                  cause,
+                  inputs,
+                  pending,
+                  internal,
+                  pinnedCells,
+                  result,
+                  nextRequestId,
+                  abortController.signal,
+                  capturedRequest,
+                ),
+              );
             },
           );
         },
@@ -3540,7 +3580,10 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
     ? runtime.getOrCreateQueue(queueName).enqueue(doWork)
     : doWork();
 
-  resultPromise
+  // Returned, not fired and forgotten: the caller hands this promise to
+  // `runtime.trackAsyncWork`, so it is what makes `runtime.settled()` span the
+  // model call, the tool calls it makes, and the writeback of their results.
+  return resultPromise
     .then(async (llmResult) => {
       // Validate that the response has valid content
       if (!hasValidContent(llmResult.content)) {
@@ -3621,6 +3664,7 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             pinnedCells,
             requestObservedConfidentiality,
             observationMaxConfidentiality,
+            abortSignal,
           );
 
           // If presentResult was called, cellify the raw input so we can
@@ -3743,7 +3787,10 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
           if (success) {
             logger.info("llm", "Continuing conversation after tool calls...");
 
-            startRequest(
+            // Awaited so the turn that follows the tool calls stays inside this
+            // turn's promise, and so the conversation settles as one unit
+            // rather than one hop at a time.
+            await startRequest(
               runtime,
               space,
               cause,
