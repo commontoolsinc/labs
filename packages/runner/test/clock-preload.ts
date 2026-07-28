@@ -16,10 +16,6 @@ installFakeClock({
   // Test files kept on the real clock for now. These should be converted to use
   // a fake clock. // TODO: convert these tests to a fake clock
   realClockFiles: [
-    // A second (resuming) runtime drives a real loopback memory-client transport
-    // whose connect/mount/sync machinery does not complete under the fake clock:
-    // the resume deadlocks rather than settling.
-    "list-resume-container-defer",
     // The sibling resume test: its reload storage manager holds each per-element
     // child document back by a real delay to open the resume window it observes,
     // and the resuming runtime's pull/idle machinery blocks on those deliveries.
