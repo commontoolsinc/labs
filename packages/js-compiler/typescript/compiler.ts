@@ -584,6 +584,12 @@ export class TypeScriptCompiler {
       }
     };
 
+    // Program-level (options + global) diagnostics first — with noEmitOnError
+    // off these no longer surface through emit, so omitting them here would
+    // return `diagnostics: []` for a program the throwing path refuses.
+    for (const d of tsProgram.getOptionsDiagnostics()) pushTs(d);
+    for (const d of tsProgram.getGlobalDiagnostics()) pushTs(d);
+
     // Type + declaration diagnostics for authored files only (skipLibCheck
     // already excludes the declaration libs). Non-fatal codes are dropped the
     // same way Checker drops them, so a corpus check reports exactly what
