@@ -4199,3 +4199,143 @@ describe("canBranchMatch NaN and Infinity type handling", () => {
     expect(canBranchMatch({ type: "string" }, 42)).toBe(false);
   });
 });
+
+describe("MapSet size and totalValues", () => {
+  // Both getters exist only to fill in the slow-traverse report, so nothing
+  // else in the runtime reads them. Covering them here keeps them off the
+  // machine-speed-dependent path that report used to sit on.
+  it("counts keys and values in the reference-equality mode", () => {
+    const mapSet = new MapSet<string, string>();
+    expect(mapSet.size).toBe(0);
+    expect(mapSet.totalValues).toBe(0);
+
+    mapSet.add("a", "one");
+    mapSet.add("a", "two");
+    mapSet.add("b", "three");
+    // "two" is already present under "a" by reference, so it does not add.
+    mapSet.add("a", "two");
+
+    expect(mapSet.size).toBe(2);
+    expect(mapSet.totalValues).toBe(3);
+  });
+
+  it("counts keys and values in the hash-dedup mode", () => {
+    const mapSet = new MapSet<string, { n: number }>((value) => `${value.n}`);
+    expect(mapSet.size).toBe(0);
+    expect(mapSet.totalValues).toBe(0);
+
+    mapSet.add("a", { n: 1 });
+    mapSet.add("a", { n: 2 });
+    mapSet.add("b", { n: 3 });
+    // A distinct object that hashes the same is a duplicate here, unlike in
+    // the reference-equality mode above.
+    mapSet.add("a", { n: 2 });
+
+    expect(mapSet.size).toBe(2);
+    expect(mapSet.totalValues).toBe(3);
+  });
+});
+
+describe("SchemaObjectTraverser.maybeReportSlowTraverse", () => {
+  // Captures what the logger writes while `run` executes. The report has to
+  // actually be emitted for these tests to mean anything, so the logger is
+  // left enabled and its output intercepted rather than silenced.
+  function captureWarnings(run: () => void): string[] {
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map((arg) => String(arg)).join(" "));
+    };
+    try {
+      run();
+    } finally {
+      console.warn = originalWarn;
+    }
+    return warnings;
+  }
+
+  it("reports the traversal's stats", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:slow-traverse-doc" as URI;
+    const docValue = { employees: [{ name: "Bob" }] };
+
+    const revision: Revision<State> = {
+      the: type,
+      of: docUri as Entity,
+      is: { value: docValue },
+      cause: hashOf({ the: type, of: docUri as Entity }),
+      since: 1,
+    };
+    store.set(`${revision.of}/${revision.the}`, revision);
+
+    const traverser = getTraverser(store, { path: ["value"], schema: true });
+    const doc: IMemorySpaceValueAttestation = {
+      address: {
+        space: "did:null:null",
+        id: docUri,
+        type,
+        path: ["value"],
+      },
+      value: docValue,
+    };
+    traverser.traverse(doc);
+
+    // In production this body is reached only when a traversal exceeds
+    // SLOW_TRAVERSE_MS of real elapsed time. Passing the elapsed time in is
+    // the point: it is what makes the report's coverage independent of
+    // machine speed, which is why the threshold lives in the method.
+    const warnings = captureWarnings(() =>
+      traverser.maybeReportSlowTraverse(150.4, doc)
+    );
+
+    expect(warnings.length).toBe(1);
+    const report = warnings[0];
+    expect(report).toContain("slow-traverse");
+    expect(report).toContain("150ms");
+    expect(report).toContain(`doc=${docUri}/${type}`);
+    // The traversal above ran, so the tracker counters are populated rather
+    // than reporting a zeroed-out traverser.
+    expect(report).toContain("trackerKeys=1");
+    expect(report).toContain("trackerVals=1");
+    expect(report).toContain("traverseSchema=");
+    expect(report).toContain("maxDepth=");
+    // docVisits is populated only under CF_TRAVERSE_DIAGNOSTICS=1.
+    expect(report).toContain("topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)");
+  });
+
+  it("stays quiet for a traversal at or under the threshold", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:fast-traverse-doc" as URI;
+    const docValue = { employees: [{ name: "Bob" }] };
+
+    store.set(`${docUri}/${type}`, {
+      the: type,
+      of: docUri as Entity,
+      is: { value: docValue },
+      cause: hashOf({ the: type, of: docUri as Entity }),
+      since: 1,
+    });
+
+    const traverser = getTraverser(store, { path: ["value"], schema: true });
+    const doc: IMemorySpaceValueAttestation = {
+      address: {
+        space: "did:null:null",
+        id: docUri,
+        type,
+        path: ["value"],
+      },
+      value: docValue,
+    };
+
+    // 100ms is the threshold itself, and the guard is exclusive, so this is
+    // the boundary case that must not report.
+    const warnings = captureWarnings(() => {
+      traverser.traverse(doc);
+      traverser.maybeReportSlowTraverse(100, doc);
+    });
+
+    expect(warnings).toEqual([]);
+  });
+});
