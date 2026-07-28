@@ -4,16 +4,25 @@
 
 `cf view [file]` is an interactive pager for transformed TypeScript, source
 files, and unified diffs. Named Markdown, JSON, JSONC, YAML, and Python files
-use their own syntax highlighting. A piped input without a file name remains
-TypeScript unless it is detected as a diff. A named file with unrecognized
-syntax is shown as plain text. Redirected output keeps the text verbatim and
-adds ANSI color only when the selected color mode permits it.
+use their own syntax highlighting. A named file with unrecognized syntax is
+shown as plain text. Markdown files can switch between the source and a
+rendered terminal view with `V`. The rendered view formats headings, emphasis,
+links, quotes, lists, task markers, tables, rules, and code. The same view is
+available for Markdown files inside a unified diff; diff markers, addition and
+deletion tints, line positions, and hunk expansion remain in place.
+
+A piped input without a file name remains TypeScript unless it is detected as a
+diff. Redirected output keeps the source text verbatim by default and adds ANSI
+color only when the selected color mode permits it. Pass `--rendered` to start
+in, or print, the rendered representation when one is available. Editing from a
+rendered view returns to source first.
 
 ```bash
 cf check pattern.tsx --show-transformed --no-run | cf view
 cf view .github/workflows/deno.yml
 cf view scripts/analyse.py
 git diff upstream/main | cf view
+cf view --rendered README.md
 ```
 
 ## Piece data search

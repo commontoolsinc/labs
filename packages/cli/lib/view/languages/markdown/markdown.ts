@@ -20,7 +20,9 @@ import type {
 import { flattenStructure } from "../../model.ts";
 import type { Highlighter } from "../language.ts";
 import { cpLen } from "../../ansi.ts";
-import { computeLineStarts } from "../../lines.ts";
+import { computeLineStarts, lineIndexOf } from "../../lines.ts";
+import { Lexer } from "marked";
+import { decodeHTMLStrict as decodeEntities } from "entities";
 
 /** Whether `fileName` names a Markdown file. */
 export function isMarkdownPath(fileName: string | undefined): boolean {
@@ -49,6 +51,20 @@ export function highlightMarkdownLines(text: string): Line[] {
     out.push(renderLine(t));
   }
   return out;
+}
+
+/**
+ * Format Markdown for terminal reading while retaining one display line for
+ * every source line. Block delimiters occupy blank display lines. Tables,
+ * headings, quotes, lists, inline formatting, links, and code use terminal
+ * glyphs and rich span modifiers.
+ */
+export function renderMarkdownLines(text: string): Line[] {
+  const normalized = text.split("\n").map(stripCarriageReturn).join("\n");
+  return renderMarkdownBlocks(
+    normalized,
+    referenceAwareLexer(normalized),
+  );
 }
 
 /** A full Markdown {@link Document}: highlighted lines, headings as the
@@ -80,6 +96,854 @@ function oneSpan(text: string, cls: TokenClass): Line {
   return text.length === 0
     ? { text: "", spans: [] }
     : { text, spans: [{ col: 0, text, cls }] };
+}
+
+interface InlineToken {
+  readonly type: string;
+  readonly raw: string;
+  readonly text?: string;
+  readonly href?: string;
+  readonly tokens?: readonly InlineToken[];
+}
+
+interface BlockToken extends InlineToken {
+  readonly codeBlockStyle?: string;
+  readonly items?: readonly ListItemToken[];
+}
+
+interface ListItemToken extends BlockToken {
+  readonly task?: boolean;
+  readonly checked?: boolean;
+}
+
+interface RichStyle {
+  readonly cls: TokenClass;
+  readonly bold?: boolean;
+  readonly italic?: boolean;
+  readonly underline?: boolean;
+  readonly strikethrough?: boolean;
+}
+
+class RichLine {
+  text = "";
+  readonly spans: Span[] = [];
+  private sourceHidden = false;
+
+  append(value: string, style: RichStyle): void {
+    if (value.length === 0) return;
+    const span: Span = {
+      col: cpLen(this.text),
+      text: value,
+      cls: style.cls,
+      ...(style.bold ? { bold: true } : {}),
+      ...(style.italic ? { italic: true } : {}),
+      ...(style.underline ? { underline: true } : {}),
+      ...(style.strikethrough ? { strikethrough: true } : {}),
+    };
+    const last = this.spans[this.spans.length - 1];
+    if (last && sameRichStyle(last, span)) {
+      this.spans[this.spans.length - 1] = {
+        ...last,
+        text: last.text + value,
+      };
+    } else {
+      this.spans.push(span);
+    }
+    this.text += value;
+  }
+
+  appendLine(line: Line, extra: Partial<RichStyle> = {}): void {
+    if (line.renderedSourceHidden) this.sourceHidden = true;
+    if (line.spans.length === 0 && line.text.length > 0) {
+      this.append(line.text, { ...extra, cls: extra.cls ?? "plain" });
+      return;
+    }
+    for (const span of line.spans) {
+      this.append(span.text, {
+        cls: extra.cls ?? span.cls,
+        bold: extra.bold || span.bold,
+        italic: extra.italic || span.italic,
+        underline: extra.underline || span.underline,
+        strikethrough: extra.strikethrough || span.strikethrough,
+      });
+    }
+  }
+
+  hideSource(): void {
+    this.sourceHidden = true;
+  }
+
+  line(): Line {
+    return {
+      text: this.text,
+      spans: this.spans,
+      ...(this.sourceHidden ? { renderedSourceHidden: true } : {}),
+    };
+  }
+}
+
+function sameRichStyle(a: Span, b: Span): boolean {
+  return a.cls === b.cls &&
+    a.bold === b.bold &&
+    a.italic === b.italic &&
+    a.underline === b.underline &&
+    a.strikethrough === b.strikethrough;
+}
+
+function emptyLine(): Line {
+  return { text: "", spans: [] };
+}
+
+function hiddenLine(): Line {
+  return { text: "", spans: [], renderedSourceHidden: true };
+}
+
+function stripCarriageReturn(line: string): string {
+  return line.endsWith("\r") ? line.slice(0, -1) : line;
+}
+
+function singleStyledLine(text: string, cls: TokenClass): Line {
+  return text.length === 0
+    ? emptyLine()
+    : { text, spans: [{ col: 0, text, cls }] };
+}
+
+function renderMarkdownBlocks(
+  text: string,
+  inlineLexer?: Lexer,
+): Line[] {
+  const rawLines = text.split("\n");
+  const out = rawLines.map((line) =>
+    renderMarkdownSourceLine(line, inlineLexer)
+  );
+  let tokens: readonly BlockToken[];
+  try {
+    tokens = Lexer.lex(text) as unknown as readonly BlockToken[];
+  } catch {
+    return out;
+  }
+
+  const lineStarts = computeLineStarts(text);
+  let offset = 0;
+  for (const token of tokens) {
+    const tokenOffset = text.startsWith(token.raw, offset)
+      ? offset
+      : text.indexOf(token.raw, offset);
+    if (tokenOffset < 0) continue;
+    offset = tokenOffset + token.raw.length;
+    const range = tokenLineRange(token.raw, tokenOffset, lineStarts);
+    if (!range) continue;
+    const source = rawLines.slice(range.start, range.end + 1);
+    const rendered = renderBlockToken(token, source, inlineLexer);
+    for (let i = 0; i < source.length; i++) {
+      out[range.start + i] = rendered[i] ?? emptyLine();
+    }
+  }
+  return out;
+}
+
+function tokenLineRange(
+  raw: string,
+  offset: number,
+  lineStarts: number[],
+): { start: number; end: number } | null {
+  let first = 0;
+  while (first < raw.length && raw[first] === "\n") first++;
+  let last = raw.length - 1;
+  while (last >= first && raw[last] === "\n") last--;
+  if (last < first) return null;
+  return {
+    start: lineIndexOf(lineStarts, offset + first),
+    end: lineIndexOf(lineStarts, offset + last),
+  };
+}
+
+function renderBlockToken(
+  token: BlockToken,
+  source: readonly string[],
+  inlineLexer?: Lexer,
+): Line[] {
+  switch (token.type) {
+    case "heading": {
+      const heading = renderInlineLine(
+        token.text ?? "",
+        "sectionHeader",
+        inlineLexer,
+      );
+      return [
+        { ...heading, renderedSourceHidden: true },
+        ...source.slice(1).map(hiddenLine),
+      ];
+    }
+    case "hr":
+      return [
+        singleStyledLine("────────────────────────────────", "punctuation"),
+        ...source.slice(1).map(emptyLine),
+      ];
+    case "code":
+      return renderCodeBlock(token, source);
+    case "table":
+      return renderTableBlock(source, inlineLexer);
+    case "blockquote":
+      return renderBlockquoteBlock(source, inlineLexer);
+    case "list":
+      return renderListBlock(token, source, inlineLexer);
+    case "paragraph":
+    case "text":
+      return renderParagraphBlock(token, source, inlineLexer);
+    case "html":
+      return renderHtmlBlock(source, inlineLexer);
+    case "def":
+      return source.map(hiddenLine);
+    case "space":
+      return source.map(emptyLine);
+    default:
+      return source.map((line) => renderMarkdownSourceLine(line, inlineLexer));
+  }
+}
+
+function renderParagraphBlock(
+  token: BlockToken,
+  source: readonly string[],
+  inlineLexer?: Lexer,
+): Line[] {
+  let tokens = token.tokens;
+  try {
+    tokens = inlineLexer?.inlineTokens(token.text ?? token.raw) as unknown as
+      | readonly InlineToken[]
+      | undefined ?? tokens;
+  } catch {
+    // Keep the block lexer's inline tokens.
+  }
+  if (!tokens) {
+    return source.map((line) => renderInlineLine(line));
+  }
+  const line = new RichLine();
+  appendInlineTokens(line, tokens, { cls: "plain" }, true);
+  return splitRichLine(line.line(), source.length);
+}
+
+function splitRichLine(line: Line, lineCount: number): Line[] {
+  let current = new RichLine();
+  const out: Line[] = [];
+  if (line.renderedSourceHidden) current.hideSource();
+  for (const span of line.spans) {
+    const parts = span.text.split("\n");
+    for (let i = 0; i < parts.length; i++) {
+      current.append(parts[i], {
+        cls: span.cls,
+        bold: span.bold,
+        italic: span.italic,
+        underline: span.underline,
+        strikethrough: span.strikethrough,
+      });
+      if (i + 1 < parts.length) {
+        out.push(current.line());
+        current = new RichLine();
+        if (line.renderedSourceHidden) current.hideSource();
+      }
+    }
+  }
+  out.push(current.line());
+  while (out.length < lineCount) {
+    out.push(line.renderedSourceHidden ? hiddenLine() : emptyLine());
+  }
+  return out.slice(0, lineCount);
+}
+
+function renderHtmlBlock(
+  source: readonly string[],
+  inlineLexer?: Lexer,
+): Line[] {
+  let inComment = false;
+  return source.map((sourceLine) => {
+    let visible = "";
+    let removed = false;
+    for (let at = 0; at < sourceLine.length;) {
+      if (inComment) {
+        const end = sourceLine.indexOf("-->", at);
+        removed = true;
+        if (end < 0) break;
+        inComment = false;
+        at = end + 3;
+        continue;
+      }
+      const start = sourceLine.indexOf("<!--", at);
+      if (start < 0) {
+        visible += sourceLine.slice(at);
+        break;
+      }
+      visible += sourceLine.slice(at, start);
+      removed = true;
+      inComment = true;
+      at = start + 4;
+    }
+    const line = renderMarkdownSourceLine(visible, inlineLexer);
+    return removed && !line.renderedSourceHidden
+      ? { ...line, renderedSourceHidden: true }
+      : line;
+  });
+}
+
+function renderCodeBlock(
+  token: BlockToken,
+  source: readonly string[],
+): Line[] {
+  if (token.codeBlockStyle === "indented") {
+    return source.map((line) =>
+      singleStyledLine(line.replace(/^(?: {4}|\t)/, ""), "string")
+    );
+  }
+
+  const fence = openingFence(source[0] ?? "");
+  if (!fence) {
+    const content = (token.text ?? "").split("\n");
+    return source.map((_, i) => ({
+      ...singleStyledLine(content[i] ?? "", "string"),
+      renderedSourceHidden: true,
+    }));
+  }
+  return source.map((line, i) => {
+    if (i === 0 || (i === source.length - 1 && isClosingFence(line, fence))) {
+      return hiddenLine();
+    }
+    return singleStyledLine(stripFenceIndent(line, fence.indent), "string");
+  });
+}
+
+function renderBlockquoteBlock(
+  source: readonly string[],
+  inlineLexer?: Lexer,
+): Line[] {
+  const inner: string[] = [];
+  const prefixes: string[] = [];
+  for (const line of source) {
+    const marker = line.match(/^([ \t]{0,3})>[ \t]?/);
+    prefixes.push(`${marker?.[1] ?? ""}│ `);
+    inner.push(marker ? line.slice(marker[0].length) : line);
+  }
+  const rendered = renderMarkdownBlocks(inner.join("\n"), inlineLexer);
+  return rendered.map((line, i) =>
+    prependLine(prefixes[i] ?? "│ ", line, "markdownQuote")
+  );
+}
+
+function renderListBlock(
+  token: BlockToken,
+  source: readonly string[],
+  inlineLexer?: Lexer,
+): Line[] {
+  if (!token.items || token.items.length === 0) {
+    return source.map((line) => renderMarkdownSourceLine(line, inlineLexer));
+  }
+
+  const out = source.map(emptyLine);
+  const lineStarts = computeLineStarts(token.raw);
+  let cursor = 0;
+  for (const item of token.items) {
+    const itemOffset = token.raw.startsWith(item.raw, cursor)
+      ? cursor
+      : token.raw.indexOf(item.raw, cursor);
+    if (itemOffset < 0) continue;
+    cursor = itemOffset + item.raw.length;
+    const range = tokenLineRange(item.raw, itemOffset, lineStarts);
+    if (!range) continue;
+    const start = range.start;
+    const end = Math.min(source.length, range.end + 1);
+    const marker = source[start].match(
+      /^(\s*)([-*+]|\d{1,9}[.)])([ \t]+)(.*)$/,
+    );
+    if (!marker) continue;
+    const contentIndent = marker[1].length + marker[2].length +
+      marker[3].length;
+    let inner = (item.text ?? "").split("\n");
+    if (inner.length !== end - start) {
+      inner = [marker[4]];
+      for (let line = start + 1; line < end; line++) {
+        inner.push(stripContainerIndent(source[line], contentIndent));
+      }
+    }
+
+    const unordered = /^[-*+]$/.test(marker[2]);
+    let displayMarker = unordered ? "• " : `${marker[2].replace(/\)$/, ".")} `;
+    if (item.task) {
+      const checkbox = item.checked ? "☑ " : "☐ ";
+      displayMarker = unordered ? checkbox : `${displayMarker}${checkbox}`;
+    }
+
+    const rendered = renderMarkdownBlocks(inner.join("\n"), inlineLexer);
+    for (let line = start; line < end; line++) {
+      if (source[line].trim().length === 0) {
+        out[line] = emptyLine();
+        continue;
+      }
+      const prefix = line === start
+        ? `${marker[1]}${displayMarker}`
+        : `${marker[1]}${" ".repeat(cpLen(displayMarker))}`;
+      out[line] = prependLine(
+        prefix,
+        rendered[line - start] ?? emptyLine(),
+        line === start ? "punctuation" : "plain",
+      );
+    }
+  }
+  return out;
+}
+
+function stripContainerIndent(line: string, width: number): string {
+  let removed = 0;
+  while (removed < width && line[removed] === " ") removed++;
+  return line.slice(removed);
+}
+
+function prependLine(
+  prefix: string,
+  content: Line,
+  cls: TokenClass,
+): Line {
+  const line = new RichLine();
+  line.append(prefix, { cls });
+  line.appendLine(content);
+  return line.line();
+}
+
+function renderMarkdownSourceLine(
+  source: string,
+  inlineLexer?: Lexer,
+): Line {
+  if (source.trim().length === 0) return emptyLine();
+  if (/^ {0,3}\[[^\]]+\]:[ \t]+\S/.test(source)) return hiddenLine();
+
+  const quote = quotePrefix(source);
+  const body = quote.body;
+  const heading = body.match(/^ {0,3}#{1,6}(?:[ \t]+|$)(.*)$/);
+  if (heading) {
+    const title = heading[1].replace(/[ \t]+#+[ \t]*$/, "").trim();
+    const line = new RichLine();
+    line.hideSource();
+    line.append(quote.glyphs, { cls: "markdownQuote" });
+    line.appendLine(renderInlineLine(title, "sectionHeader", inlineLexer));
+    return line.line();
+  }
+
+  if (isThematicRule(body)) {
+    const line = new RichLine();
+    line.append(quote.glyphs, { cls: "markdownQuote" });
+    line.append("────────────────────────────────", { cls: "punctuation" });
+    return line.line();
+  }
+
+  const list = body.match(/^(\s*)([-*+]|\d{1,9}[.)])([ \t]+)(.*)$/);
+  if (list) {
+    const line = new RichLine();
+    line.append(quote.glyphs + list[1], { cls: "markdownQuote" });
+    const unordered = /^[-*+]$/.test(list[2]);
+    const task = list[4].match(/^\[([ xX])\][ \t]+(.*)$/);
+    if (task && unordered) {
+      line.append(task[1] === " " ? "☐ " : "☑ ", { cls: "punctuation" });
+      line.appendLine(renderInlineLine(task[2], "plain", inlineLexer));
+    } else {
+      const marker = unordered ? "•" : list[2].replace(/\)$/, ".");
+      line.append(`${marker} `, { cls: "punctuation" });
+      if (task) {
+        line.append(task[1] === " " ? "☐ " : "☑ ", { cls: "punctuation" });
+        line.appendLine(renderInlineLine(task[2], "plain", inlineLexer));
+      } else {
+        line.appendLine(renderInlineLine(list[4], "plain", inlineLexer));
+      }
+    }
+    return line.line();
+  }
+
+  if (/^ {4}/.test(body)) {
+    const line = new RichLine();
+    line.append(quote.glyphs, { cls: "markdownQuote" });
+    line.append(body.slice(4), { cls: "string" });
+    return line.line();
+  }
+
+  const line = new RichLine();
+  line.append(quote.glyphs, { cls: "markdownQuote" });
+  line.appendLine(
+    renderInlineLine(
+      body,
+      quote.glyphs ? "markdownQuote" : "plain",
+      inlineLexer,
+    ),
+  );
+  return line.line();
+}
+
+function quotePrefix(source: string): { glyphs: string; body: string } {
+  let body = source;
+  let glyphs = "";
+  for (;;) {
+    const match = body.match(/^([ \t]{0,3})>[ \t]?/);
+    if (!match) break;
+    glyphs += `${match[1]}│ `;
+    body = body.slice(match[0].length);
+  }
+  return { glyphs, body };
+}
+
+function isThematicRule(line: string): boolean {
+  return /^ {0,3}((\*[ \t]*){3,}|(-[ \t]*){3,}|(_[ \t]*){3,})$/.test(
+    line,
+  );
+}
+
+function renderInlineLine(
+  source: string,
+  cls: TokenClass = "plain",
+  inlineLexer?: Lexer,
+): Line {
+  const line = new RichLine();
+  let tokens: readonly InlineToken[];
+  try {
+    tokens = (
+      inlineLexer?.inlineTokens(source) ?? Lexer.lexInline(source)
+    ) as unknown as readonly InlineToken[];
+  } catch {
+    line.append(source, { cls });
+    return line.line();
+  }
+  appendInlineTokens(line, tokens, { cls });
+  return line.line();
+}
+
+function referenceAwareLexer(text: string): Lexer | undefined {
+  try {
+    const lexer = new Lexer();
+    lexer.lex(text);
+    return lexer;
+  } catch {
+    return undefined;
+  }
+}
+
+function appendInlineTokens(
+  line: RichLine,
+  tokens: readonly InlineToken[],
+  style: RichStyle,
+  multiline = false,
+): void {
+  for (const token of tokens) {
+    switch (token.type) {
+      case "strong":
+        appendTokenChildren(
+          line,
+          token,
+          { ...style, bold: true },
+          multiline,
+        );
+        break;
+      case "em":
+        appendTokenChildren(
+          line,
+          token,
+          { ...style, italic: true },
+          multiline,
+        );
+        break;
+      case "del":
+        appendTokenChildren(line, token, {
+          ...style,
+          strikethrough: true,
+        }, multiline);
+        break;
+      case "codespan":
+        line.append(codeSpanText(token, multiline), {
+          ...style,
+          cls: "string",
+        });
+        break;
+      case "link":
+        line.hideSource();
+        appendTokenChildren(line, token, {
+          ...style,
+          cls: "callName",
+          underline: true,
+        }, multiline);
+        break;
+      case "image": {
+        line.hideSource();
+        line.append("▧ ", { cls: "punctuation" });
+        const alt = decodeInlineText(token.text ?? "image");
+        line.append(alt || "image", {
+          ...style,
+          cls: "callName",
+          italic: true,
+        });
+        break;
+      }
+      case "escape":
+        line.append(decodeInlineText(token.text ?? token.raw), style);
+        break;
+      case "html": {
+        line.hideSource();
+        const visible = decodeInlineText(
+          stripHtmlTags(token.text ?? token.raw),
+        );
+        line.append(visible, style);
+        break;
+      }
+      case "br":
+        if (multiline) line.append("\n", style);
+        break;
+      default:
+        if (token.tokens && token.tokens.length > 0) {
+          appendInlineTokens(line, token.tokens, style, multiline);
+        } else {
+          line.append(
+            decodeInlineText(token.text ?? token.raw),
+            style,
+          );
+        }
+        break;
+    }
+  }
+}
+
+function codeSpanText(token: InlineToken, multiline: boolean): string {
+  if (!multiline || !token.raw.includes("\n")) return token.text ?? "";
+  const marker = token.raw.match(/^`+/)?.[0];
+  if (!marker || !token.raw.endsWith(marker)) return token.text ?? "";
+
+  let text = token.raw.slice(marker.length, -marker.length);
+  if (
+    text.startsWith(" ") &&
+    text.endsWith(" ") &&
+    /[^ \n]/.test(text)
+  ) {
+    text = text.slice(1, -1);
+  }
+  return text;
+}
+
+function decodeInlineText(text: string): string {
+  return text.split("\n").map((sourceLine) =>
+    decodeEntities(sourceLine).replace(/[\r\n\u2028\u2029]/g, " ")
+  ).join("\n");
+}
+
+function stripHtmlTags(source: string): string {
+  let out = "";
+  for (let i = 0; i < source.length;) {
+    if (source[i] !== "<") {
+      out += source[i++];
+      continue;
+    }
+
+    const commentEnd = source.startsWith("<!--", i)
+      ? source.indexOf("-->", i + 4)
+      : -1;
+    if (commentEnd >= 0) {
+      out += source.slice(i, commentEnd + 3).replace(/[^\n]/g, "");
+      i = commentEnd + 3;
+      continue;
+    }
+    const cdataEnd = source.startsWith("<![CDATA[", i)
+      ? source.indexOf("]]>", i + 9)
+      : -1;
+    if (cdataEnd >= 0) {
+      out += source.slice(i + 9, cdataEnd);
+      i = cdataEnd + 3;
+      continue;
+    }
+
+    let quote: "'" | '"' | null = null;
+    let end = i + 1;
+    for (; end < source.length; end++) {
+      const char = source[end];
+      if (quote) {
+        if (char === quote) quote = null;
+      } else if (char === "'" || char === '"') {
+        quote = char;
+      } else if (char === ">") {
+        break;
+      }
+    }
+    if (end >= source.length) {
+      out += source.slice(i);
+      break;
+    }
+    out += source.slice(i, end + 1).replace(/[^\n]/g, "");
+    i = end + 1;
+  }
+  return out;
+}
+
+function appendTokenChildren(
+  line: RichLine,
+  token: InlineToken,
+  style: RichStyle,
+  multiline = false,
+): void {
+  if (token.tokens && token.tokens.length > 0) {
+    appendInlineTokens(line, token.tokens, style, multiline);
+  } else {
+    line.append(decodeInlineText(token.text ?? token.raw), style);
+  }
+}
+
+interface Fence {
+  readonly marker: "`" | "~";
+  readonly length: number;
+  readonly indent: number;
+}
+
+function openingFence(line: string): Fence | null {
+  const match = line.match(/^( {0,3})(`{3,}|~{3,})(.*)$/);
+  if (!match) return null;
+  const marker = match[2][0] as "`" | "~";
+  if (marker === "`" && match[3].includes("`")) return null;
+  return {
+    marker,
+    length: match[2].length,
+    indent: match[1].length,
+  };
+}
+
+function isClosingFence(line: string, fence: Fence): boolean {
+  const match = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*$/);
+  return !!match &&
+    match[1][0] === fence.marker &&
+    match[1].length >= fence.length;
+}
+
+function stripFenceIndent(line: string, indent: number): string {
+  let remove = 0;
+  while (remove < indent && line[remove] === " ") remove++;
+  return line.slice(remove);
+}
+
+type TableAlign = "left" | "center" | "right";
+
+function renderTableBlock(
+  source: readonly string[],
+  inlineLexer?: Lexer,
+): Line[] {
+  const align = tableAlignment(source[1] ?? "");
+  const cells = source.map(splitTableCells);
+  if (
+    !align ||
+    cells.some((row) => !row || row.length !== align.length)
+  ) {
+    return source.map((line) => renderMarkdownSourceLine(line, inlineLexer));
+  }
+
+  const richRows = cells.map((row, index) =>
+    index === 1
+      ? []
+      : row!.map((cell) => renderInlineLine(cell.trim(), "plain", inlineLexer))
+  );
+  const widths = align.map((_, column) =>
+    Math.max(
+      1,
+      ...richRows.map((row) => cpLen(row[column]?.text ?? "")),
+    )
+  );
+  return source.map((_, index) =>
+    index === 1
+      ? renderTableDivider(widths)
+      : renderTableRow(richRows[index], widths, align, index === 0)
+  );
+}
+
+function tableAlignment(line: string): TableAlign[] | null {
+  const cells = splitTableCells(line);
+  if (!cells || !line.includes("|")) return null;
+  const out: TableAlign[] = [];
+  for (const raw of cells) {
+    const cell = raw.trim();
+    if (!/^:?-{3,}:?$/.test(cell)) return null;
+    out.push(
+      cell.startsWith(":") && cell.endsWith(":")
+        ? "center"
+        : cell.endsWith(":")
+        ? "right"
+        : "left",
+    );
+  }
+  return out.length > 0 ? out : null;
+}
+
+function splitTableCells(line: string): string[] | null {
+  let source = line.trim();
+  if (!source.includes("|")) return null;
+  if (source.startsWith("|")) source = source.slice(1);
+  if (source.endsWith("|") && !source.endsWith("\\|")) {
+    source = source.slice(0, -1);
+  }
+
+  const cells: string[] = [];
+  let current = "";
+  let escaped = false;
+  let ticks = 0;
+  for (let i = 0; i < source.length; i++) {
+    const char = source[i];
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (
+      char === "\\" &&
+      (source[i + 1] === "|" || source[i + 1] === "\\")
+    ) {
+      escaped = true;
+      continue;
+    }
+    if (char === "`") {
+      let run = 1;
+      while (source[i + run] === "`") run++;
+      current += "`".repeat(run);
+      i += run - 1;
+      ticks = ticks === run ? 0 : ticks === 0 ? run : ticks;
+      continue;
+    }
+    if (char === "|" && ticks === 0) {
+      cells.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  if (escaped) current += "\\";
+  cells.push(current);
+  return cells;
+}
+
+function renderTableRow(
+  cells: readonly Line[],
+  widths: readonly number[],
+  align: readonly TableAlign[],
+  header: boolean,
+): Line {
+  const line = new RichLine();
+  line.append("│ ", { cls: "punctuation" });
+  for (let column = 0; column < widths.length; column++) {
+    const cell = cells[column] ?? emptyLine();
+    const missing = widths[column] - cpLen(cell.text);
+    const left = align[column] === "right"
+      ? missing
+      : align[column] === "center"
+      ? Math.floor(missing / 2)
+      : 0;
+    const right = missing - left;
+    line.append(" ".repeat(left), { cls: "plain" });
+    line.appendLine(cell, header ? { bold: true } : {});
+    line.append(" ".repeat(right), { cls: "plain" });
+    line.append(column + 1 < widths.length ? " │ " : " │", {
+      cls: "punctuation",
+    });
+  }
+  return line.line();
+}
+
+function renderTableDivider(widths: readonly number[]): Line {
+  const text = `├${widths.map((width) => "─".repeat(width + 2)).join("┼")}┤`;
+  return singleStyledLine(text, "punctuation");
 }
 
 /** Colour one non-fenced line by classifying each code point, then run-length

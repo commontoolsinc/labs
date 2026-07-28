@@ -3,11 +3,13 @@
  * semantic layer needs to answer type/definition queries against the CURRENT
  * workspace files the diff names.
  *
- * Rendering keeps the diff text verbatim (colour only). Context and addition
- * lines whose content matches the workspace file reuse that file's parsed
- * spans. Removed lines reuse spans from the complete old file, loaded from the
- * Git object named by the diff or reconstructed from the complete new file.
- * Lines without either complete file fall back to a per-hunk fragment parse.
+ * Source rendering keeps the diff text verbatim. Rendered mode replaces the
+ * body of files whose languages provide a rendered representation while
+ * retaining every diff marker and source line. Context and addition lines
+ * whose content matches the workspace file reuse that complete file. Removed
+ * lines use the complete old file, loaded from Git or reconstructed from the
+ * complete new file. Lines without either complete file use a per-hunk
+ * fragment.
  *
  * The structure tree is: file (a `section` node) → hunk → the workspace file's
  * own structure nodes, clamped and remapped into diff coordinates. So WASD and
@@ -20,12 +22,13 @@ import type {
   Line,
   Span,
   StructureNode,
+  ViewMode,
 } from "./model.ts";
 import { flattenStructure } from "./model.ts";
 import type { DiffFile, DiffHunk, DiffModel } from "./diff.ts";
 import { computeLineStarts, lineIndexOf } from "./lines.ts";
 import type { Language } from "./languages/language.ts";
-import { languageForFile } from "./languages/language.ts";
+import { languageForFile, renderedLinesFor } from "./languages/language.ts";
 import { cpLen } from "./ansi.ts";
 import { dirname, isAbsolute, join, relative } from "@std/path";
 import { spawnSync } from "@node/child_process";
@@ -285,6 +288,8 @@ interface LoadedFile {
   fileLineStarts: number[];
   /** Syntax-only lines used by complete old files. */
   highlightedLines?: readonly Line[] | null;
+  /** Alternate rendered lines, computed once when that view is opened. */
+  renderedLines?: readonly Line[] | null;
 }
 
 function loadFile(
@@ -504,6 +509,25 @@ function highlightedFile(
   };
 }
 
+/** The complete file lines to show for one view mode. */
+function displayedFileLines(
+  file: LoadedFile | null,
+  language: Language,
+  fileName: string | undefined,
+  mode: ViewMode,
+): readonly Line[] | null {
+  if (!file) return null;
+  const source = file.fileDoc?.lines ?? file.highlightedLines ?? null;
+  if (mode === "source" || !language.renderLines || file.fileText === null) {
+    return source;
+  }
+  if (file.renderedLines === undefined) {
+    file.renderedLines = renderedLinesFor(language, file.fileText, fileName) ??
+      null;
+  }
+  return file.renderedLines ?? source;
+}
+
 /** Load and highlight the complete old side represented by one diff file. */
 function loadOldFile(
   file: DiffFile,
@@ -568,6 +592,7 @@ export function buildDiffDocument(
   model: DiffModel,
   ws: DiffWorkspace,
   cache?: WorkspaceCache,
+  viewMode: ViewMode = "source",
 ): { doc: Document; maps: DiffMaps; edit: DiffEdit } {
   const rawLines = text.split("\n");
   const diffLineStarts = computeLineStarts(text);
@@ -618,6 +643,24 @@ export function buildDiffDocument(
       cache,
     );
     oldFileLines.push(oldFile.highlightedLines ?? null);
+    const newFileLines = displayedFileLines(
+      loaded,
+      newLanguage,
+      file.newPath ?? file.oldPath,
+      viewMode,
+    );
+    const oldDisplayedLines = displayedFileLines(
+      oldFile,
+      oldLanguage,
+      file.oldPath ?? file.newPath,
+      viewMode,
+    );
+    const newSourceLines = loaded?.fileDoc?.lines ??
+      loaded?.highlightedLines ??
+      null;
+    const oldSourceLines = oldFile.highlightedLines ??
+      oldFile.fileDoc?.lines ??
+      null;
 
     let mapping: FileMapping | undefined;
     if (absPath && fileText !== null) {
@@ -653,7 +696,10 @@ export function buildDiffDocument(
         fileDoc,
         fileText,
         fileLineStarts,
-        oldFileLines: oldFile.highlightedLines ?? null,
+        newFileLines,
+        oldFileLines: oldDisplayedLines,
+        newSourceLines,
+        oldSourceLines,
         mapping,
         definitions,
         hunks,
@@ -661,6 +707,7 @@ export function buildDiffDocument(
         oldLanguage,
         newFileName: file.newPath ?? file.oldPath,
         oldFileName: file.oldPath ?? file.newPath,
+        viewMode,
       }));
     }
 
@@ -730,6 +777,7 @@ interface MutableLine {
   text: string;
   spans: Span[];
   bg?: "add" | "del";
+  renderedSourceHidden?: boolean;
 }
 
 interface FragmentLine {
@@ -747,7 +795,10 @@ interface HunkCtx {
   fileDoc: Document | null;
   fileText: string | null;
   fileLineStarts: number[];
+  newFileLines: readonly Line[] | null;
   oldFileLines: readonly Line[] | null;
+  newSourceLines: readonly Line[] | null;
+  oldSourceLines: readonly Line[] | null;
   mapping: FileMapping | undefined;
   definitions: Map<string, Definition[]>;
   hunks: DiffHunkInfo[];
@@ -759,6 +810,7 @@ interface HunkCtx {
   /** Paths whose extensions the parsers use to pick a script variant. */
   newFileName: string | undefined;
   oldFileName: string | undefined;
+  viewMode: ViewMode;
 }
 
 function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
@@ -824,6 +876,7 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
   const newToDiff = new Map<number, number>();
   const newFragment: FragmentLine[] = [];
   const oldFragment: FragmentLine[] = [];
+  const sourceFallbacks = new Map<number, Line>();
 
   for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
     const entry = modelLines[i];
@@ -848,9 +901,22 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
     if (entry.kind === "del") {
       const fragment = { diffLine: i, code, render: false };
       oldFragment.push(fragment);
+      const sourceLine = ctx.oldSourceLines?.[entry.oldLine!];
+      if (sourceLine) sourceFallbacks.set(i, sourceLine);
       const oldSpans = ctx.oldFileLines?.[entry.oldLine!]?.spans;
-      const shifted = oldSpans ? shiftCompleteLineSpans(t, oldSpans) : null;
+      const displayed = ctx.oldFileLines?.[entry.oldLine!];
+      const lineText = displayed && ctx.viewMode === "rendered" &&
+          !!ctx.oldLanguage.renderLines
+        ? `${t.slice(0, 1)}${displayed.text}`
+        : t;
+      if (ctx.viewMode === "rendered" && displayed?.renderedSourceHidden) {
+        lines[i].renderedSourceHidden = true;
+      }
+      const shifted = oldSpans
+        ? shiftCompleteLineSpans(lineText, oldSpans)
+        : null;
       if (shifted) {
+        lines[i].text = lineText;
         lines[i].spans = shifted;
       } else {
         fragment.render = true;
@@ -860,6 +926,8 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
     const n = entry.newLine!;
     if (verified && ctx.fileDoc) {
       newToDiff.set(n, i);
+      const sourceLine = ctx.newSourceLines?.[n];
+      if (sourceLine) sourceFallbacks.set(i, sourceLine);
       // The global map feeds semantics. Keep the FIRST verified occurrence:
       // `git log -p` repeats a file across commits (newest first), and the
       // newest occurrence is the one the user is reading.
@@ -867,10 +935,22 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
         ctx.mapping.newToDiff.set(n, i);
       }
       const shifted = shiftCompleteLineSpans(
-        t,
-        ctx.fileDoc.lines[n].spans,
+        ctx.viewMode === "rendered" && !!ctx.newLanguage.renderLines &&
+          ctx.newFileLines?.[n]
+          ? `${t.slice(0, 1)}${ctx.newFileLines[n].text}`
+          : t,
+        ctx.newFileLines?.[n]?.spans ?? ctx.fileDoc.lines[n].spans,
       );
       if (shifted) {
+        if (
+          ctx.viewMode === "rendered" && !!ctx.newLanguage.renderLines &&
+          ctx.newFileLines?.[n]
+        ) {
+          lines[i].text = `${t.slice(0, 1)}${ctx.newFileLines[n].text}`;
+          if (ctx.newFileLines[n].renderedSourceHidden) {
+            lines[i].renderedSourceHidden = true;
+          }
+        }
         lines[i].spans = shifted;
       } else {
         newFragment.push({ diffLine: i, code });
@@ -886,15 +966,33 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
     rawLines,
     ctx.newLanguage,
     ctx.newFileName,
+    ctx.viewMode,
   );
+  if (newParsed) {
+    newFragment.forEach((fragment, index) => {
+      const sourceLine = newParsed.lines[index];
+      if (sourceLine) sourceFallbacks.set(fragment.diffLine, sourceLine);
+    });
+  }
+  let oldParsed: Document | null = null;
   if (oldFragment.some((fragment) => fragment.render)) {
-    applyFragmentSpans(
+    oldParsed = applyFragmentSpans(
       oldFragment,
       lines,
       rawLines,
       ctx.oldLanguage,
       ctx.oldFileName,
+      ctx.viewMode,
     );
+  }
+  if (oldParsed) {
+    oldFragment.forEach((fragment, index) => {
+      const sourceLine = oldParsed.lines[index];
+      if (sourceLine) sourceFallbacks.set(fragment.diffLine, sourceLine);
+    });
+  }
+  if (ctx.viewMode === "rendered") {
+    restoreLossyRenderedChanges(hunk, ctx, sourceFallbacks);
   }
 
   // --- structure ---------------------------------------------------------
@@ -971,6 +1069,87 @@ function fileLineText(ctx: HunkCtx, n: number): string | null {
   return ctx.fileText.slice(start, end);
 }
 
+function restoreLossyRenderedChanges(
+  hunk: DiffHunk,
+  ctx: HunkCtx,
+  sourceFallbacks: ReadonlyMap<number, Line>,
+): void {
+  let deletions: number[] = [];
+  let additions: number[] = [];
+  const flush = () => {
+    if (deletions.length === 0 && additions.length === 0) return;
+    restoreLossyChangeGroup(
+      deletions,
+      additions,
+      ctx,
+      sourceFallbacks,
+    );
+    deletions = [];
+    additions = [];
+  };
+
+  for (let line = hunk.headerLine + 1; line <= hunk.endLine; line++) {
+    const kind = ctx.modelLines[line]?.kind;
+    if (kind === "del") {
+      deletions.push(line);
+    } else if (kind === "add") {
+      additions.push(line);
+    } else if (kind === "meta" && isNoNewlineMarker(ctx.rawLines[line])) {
+      continue;
+    } else {
+      flush();
+    }
+  }
+  flush();
+}
+
+function restoreLossyChangeGroup(
+  deletions: readonly number[],
+  additions: readonly number[],
+  ctx: HunkCtx,
+  sourceFallbacks: ReadonlyMap<number, Line>,
+): void {
+  const restore = new Set<number>();
+  for (const line of [...deletions, ...additions]) {
+    if (
+      ctx.lines[line].renderedSourceHidden ||
+      (ctx.rawLines[line].slice(1).length > 0 &&
+        ctx.lines[line].text.slice(1).length === 0)
+    ) {
+      restore.add(line);
+    }
+  }
+
+  for (const deletion of deletions) {
+    for (const addition of additions) {
+      if (
+        ctx.rawLines[deletion].slice(1) !==
+          ctx.rawLines[addition].slice(1) &&
+        ctx.lines[deletion].text.slice(1) ===
+          ctx.lines[addition].text.slice(1)
+      ) {
+        restore.add(deletion);
+        restore.add(addition);
+      }
+    }
+  }
+
+  for (const line of restore) {
+    const raw = ctx.rawLines[line];
+    const source = sourceFallbacks.get(line);
+    ctx.lines[line].text = raw;
+    ctx.lines[line].renderedSourceHidden = undefined;
+    ctx.lines[line].spans = source
+      ? shiftCompleteLineSpans(raw, source.spans) ??
+        shiftSpans(markerSpan(raw), source.spans)
+      : shiftSpans(markerSpan(raw), [{
+        col: 0,
+        text: raw.slice(1),
+        cls: "plain",
+      }]);
+  }
+}
+
 function markerSpan(lineText: string): Span {
   const marker = lineText.slice(0, 1);
   return {
@@ -1021,17 +1200,29 @@ function applyFragmentSpans(
   rawLines: string[],
   language: Language,
   fileName: string | undefined,
+  viewMode: ViewMode,
 ): Document | null {
   if (fragment.length === 0) return null;
-  const parsed = language.parseDocument(
-    fragment.map((f) => f.code).join("\n"),
-    fileName,
-  );
+  const text = fragment.map((f) => f.code).join("\n");
+  const parsed = language.parseDocument(text, fileName);
+  const displayed = viewMode === "rendered"
+    ? renderedLinesFor(language, text, fileName) ?? parsed.lines
+    : parsed.lines;
   for (let i = 0; i < fragment.length; i++) {
     if (fragment[i].render === false) continue;
     const { diffLine } = fragment[i];
-    const spans = parsed.lines[i]?.spans ?? [];
-    lines[diffLine].spans = shiftSpans(markerSpan(rawLines[diffLine]), spans);
+    const rendered = viewMode === "rendered" && !!language.renderLines;
+    const lineText = rendered
+      ? `${rawLines[diffLine].slice(0, 1)}${displayed[i]?.text ?? ""}`
+      : rawLines[diffLine];
+    lines[diffLine].text = lineText;
+    if (rendered && displayed[i]?.renderedSourceHidden) {
+      lines[diffLine].renderedSourceHidden = true;
+    }
+    lines[diffLine].spans = shiftSpans(
+      markerSpan(lineText),
+      displayed[i]?.spans ?? [],
+    );
   }
   return parsed;
 }

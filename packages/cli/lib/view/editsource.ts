@@ -3,13 +3,14 @@
  * when it has an underlying file (or set of files, for a diff); a pipe of
  * transformed output, or a diff that does not match any file on disk, is not.
  *
- * For a plain file the editable text IS the document text, so re-highlighting is
- * a re-parse and saving is a write. The diff source (in `diffedit.ts`) maps the
- * single editable text back onto the files it touches.
+ * For a plain file the editable text is the document's retained source text, so
+ * re-highlighting is a re-parse and saving is a write. Its displayed lines may
+ * be a rendered projection. The diff source (in `diffedit.ts`) maps the single
+ * editable text back onto the files it touches.
  */
 import type { Document, Line } from "./model.ts";
 import type { Highlighter } from "./languages/language.ts";
-import { languageForFile } from "./languages/language.ts";
+import { languageForFile, renderedLinesFor } from "./languages/language.ts";
 
 /** How much a revert restores: the cursor's hunk, the cursor's file, the commit
  * message the cursor is in, or all. */
@@ -74,6 +75,12 @@ export interface EditableSource {
   readonly reason?: string;
   /** Re-parse edited text into a Document — lines, structure and definitions. */
   parse(text: string): Document;
+  /**
+   * Build the alternate rendered representation. Rendered documents retain the
+   * source text and one display line per source line. Absent when the source's
+   * languages offer no rendered view.
+   */
+  render?(source: Document): Document;
   /** Re-highlight the edited text into rendered lines only (no structure tree),
    * for live highlighting on every keystroke. A fraction of a full {@link
    * parse}; the structure is refreshed separately when typing pauses. When
@@ -195,11 +202,22 @@ export function fileSource(path: string): EditableSource {
   // The language is chosen once, from the path, and every edit-time operation
   // dispatches through it.
   const language = languageForFile(path);
+  const render = language.renderLines
+    ? {
+      render: (source: Document): Document => {
+        return {
+          ...source,
+          lines: renderedLinesFor(language, source.text, path) ?? source.lines,
+        };
+      },
+    }
+    : {};
   return {
     label: shortName(path),
     editable: true,
     path,
     parse: (text) => language.parseDocument(text, path),
+    ...render,
     highlight: (text) => language.highlightLines(text, path),
     createHighlighter: (text) => language.createHighlighter(text, path),
     dirtyLabels: (original, current) =>

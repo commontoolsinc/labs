@@ -10,7 +10,7 @@
  * gutter and the structure guide bar are all column maths over that grid.
  */
 import { cpLen, paint, RESET, type Style } from "./ansi.ts";
-import type { Document, Line, StructureNode } from "./model.ts";
+import type { Document, Line, StructureNode, ViewMode } from "./model.ts";
 import {
   type DisplayCell,
   displayLine,
@@ -78,6 +78,10 @@ export interface ViewState {
   canExpand?: boolean;
   /** Whether the view is editable, so the navigation help advertises `e`. */
   canEdit?: boolean;
+  /** Whether this source offers an alternate rendered representation. */
+  canRender?: boolean;
+  /** The representation currently shown. */
+  viewMode?: ViewMode;
   /** Whether the content holds non-printable characters, so the navigation help
    * advertises the display-mode key `C`. */
   hasNonPrintables?: boolean;
@@ -733,6 +737,12 @@ function browseHints(view: ViewState): KeyHint[] {
     { key: "WASD", label: "Tree" },
   ];
   if (view.canExpand) hints.push({ key: "^L", label: "Expand" });
+  if (view.canRender) {
+    hints.push({
+      key: "V",
+      label: view.viewMode === "rendered" ? "Source" : "Rendered",
+    });
+  }
   if (view.canEdit) hints.push({ key: "e", label: "Edit" });
   if (view.hasNonPrintables) hints.push({ key: "C", label: "Chars" });
   hints.push({ key: "\\", label: view.wrapLines ? "Unwrap" : "Wrap" });
