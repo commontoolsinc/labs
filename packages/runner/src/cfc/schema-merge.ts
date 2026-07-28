@@ -2,7 +2,7 @@ import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import type { CfcConfClause } from "./clause.ts";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { isRecord } from "@commonfabric/utils/types";
+import { isReadonlyRecord, isRecord } from "@commonfabric/utils/types";
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import { forEachSubschema } from "../schema-walk.ts";
 import { ContextualFlowControl } from "../cfc.ts";
@@ -421,7 +421,7 @@ const mergeDefaults = (
   if (candidate === undefined) {
     return existing;
   }
-  if (isRecord(existing) && isRecord(candidate)) {
+  if (isReadonlyRecord(existing) && isReadonlyRecord(candidate)) {
     return { ...existing, ...candidate };
   }
   return candidate;
