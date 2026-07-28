@@ -69,6 +69,16 @@ The response adapter accepts `response.completed`, `response.done`,
 the compared clients normalize those terminal forms. It persists encrypted
 reasoning output items only as provider-tagged opaque continuation state.
 
+Under `store: false` the ChatGPT Codex backend streams each completed item via
+`response.output_item.done` but returns **no assembled output** on the terminal
+event — an empty `output` array, or `null` — because it keeps no stored response
+to echo back. The adapter therefore accumulates the streamed `output_item.done`
+items and normalizes from them whenever the terminal output is empty/null; a
+populated terminal `output` (other providers, or stored responses) always wins,
+so the two representations never double-count, and `failed`/`incomplete`
+statuses still fail before normalization. Reading only the terminal `output`
+silently drops the model's message and tool calls.
+
 ## Product boundary
 
 The local filesystem credential adapter is keyed to a local owner. Loom must
