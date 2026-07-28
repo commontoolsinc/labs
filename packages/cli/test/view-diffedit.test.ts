@@ -327,6 +327,222 @@ export const shown = 2;
   }
 });
 
+Deno.test("diffedit: stateful languages keep complete-file colours after edits", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    const cases = [
+      {
+        path: "notes.md",
+        file: ["```python", "before", "```", ""].join("\n"),
+        cls: "string",
+      },
+      {
+        path: "config.jsonc",
+        file: ["/* opening", "before", "*/", ""].join("\n"),
+        cls: "comment",
+      },
+      {
+        path: "template.ts",
+        file: ["const value = `", "before", "`;", ""].join("\n"),
+        cls: "template",
+      },
+    ] as const;
+    const ws: DiffWorkspace = {
+      resolve: (path) => join(root, path),
+      read: (path) => {
+        try {
+          return Deno.readTextFileSync(path);
+        } catch {
+          return null;
+        }
+      },
+    };
+
+    for (const testCase of cases) {
+      Deno.writeTextFileSync(join(root, testCase.path), testCase.file);
+      const diff = [
+        `diff --git a/${testCase.path} b/${testCase.path}`,
+        `--- a/${testCase.path}`,
+        `+++ b/${testCase.path}`,
+        "@@ -2 +2 @@",
+        "-old",
+        "+before",
+        "",
+      ].join("\n");
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const source = diffSource(ws, built.edit);
+      const highlighter = source.createHighlighter!(diff, built.doc.lines);
+      const editedText = diff.replace("+before", "+after");
+      const edited = highlighter.update(editedText);
+      const editedLine = edited[editedText.split("\n").indexOf("+after")];
+      assertEquals(
+        editedLine.spans.find((span) => span.text === "after")?.cls,
+        testCase.cls,
+        `${testCase.path} live colour`,
+      );
+
+      const editedAgainText = editedText.replace("+after", "+again");
+      const editedAgain = highlighter.update(editedAgainText);
+      const editedAgainLine = editedAgain[
+        editedAgainText.split("\n").indexOf("+again")
+      ];
+      assertEquals(
+        editedAgainLine.spans.find((span) => span.text === "again")?.cls,
+        testCase.cls,
+        `${testCase.path} repeated live colour`,
+      );
+
+      const reparsed = source.parse(editedAgainText);
+      const parsedLine = reparsed.lines[
+        editedAgainText.split("\n").indexOf("+again")
+      ];
+      assertEquals(
+        parsedLine.spans.find((span) => span.text === "again")?.cls,
+        testCase.cls,
+        `${testCase.path} deferred colour`,
+      );
+    }
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: a local string edit leaves surrounding template state intact", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    const file = [
+      "const value = `head ${",
+      '  "AAHED"',
+      "} tail`;",
+      "",
+    ].join("\n");
+    const path = join(root, "template.ts");
+    Deno.writeTextFileSync(path, file);
+    const diff = [
+      "diff --git a/template.ts b/template.ts",
+      "--- a/template.ts",
+      "+++ b/template.ts",
+      "@@ -2,2 +2,2 @@",
+      '-  "AAHE"',
+      '+  "AAHED"',
+      " } tail`;",
+      "",
+    ].join("\n");
+    const ws: DiffWorkspace = {
+      resolve: () => path,
+      read: () => file,
+    };
+    const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+    const highlighter = diffSource(ws, built.edit).createHighlighter!(
+      diff,
+      built.doc.lines,
+    );
+    const editedText = diff.replace('"AAHED"', '"AAHEDS"');
+    const edited = highlighter.update(editedText);
+    const raw = editedText.split("\n");
+    const stringLine = edited[raw.indexOf('+  "AAHEDS"')];
+    assertEquals(
+      stringLine.spans.find((span) => span.text === '"AAHEDS"')?.cls,
+      "string",
+    );
+    const tailLine = edited[raw.indexOf(" } tail`;")];
+    assertEquals(
+      tailLine.spans.find((span) => span.text.includes(" tail`"))?.cls,
+      "template",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: a local string edit retains same-line contextual colours", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    const file = [
+      "const obj = {",
+      '  label: "AAHED",',
+      "};",
+      "",
+    ].join("\n");
+    const path = join(root, "object.ts");
+    Deno.writeTextFileSync(path, file);
+    const diff = [
+      "diff --git a/object.ts b/object.ts",
+      "--- a/object.ts",
+      "+++ b/object.ts",
+      "@@ -2 +2 @@",
+      '-  label: "AAHE",',
+      '+  label: "AAHED",',
+      "",
+    ].join("\n");
+    const ws: DiffWorkspace = {
+      resolve: () => path,
+      read: () => file,
+    };
+    const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+    const highlighter = diffSource(ws, built.edit).createHighlighter!(
+      diff,
+      built.doc.lines,
+    );
+    const editedText = diff.replace('"AAHED"', '"AAHEDS"');
+    const highlighted = highlighter.update(editedText);
+    const line = highlighted[
+      editedText.split("\n").indexOf('+  label: "AAHEDS",')
+    ];
+    assertEquals(
+      line.spans.find((span) => span.text === "label")?.cls,
+      "propertyName",
+    );
+    assertEquals(
+      line.spans.find((span) => span.text === '"AAHEDS"')?.cls,
+      "string",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("diffedit: an edit beside a string escape updates later hunks", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    const first = 'const v = "a\\"b"; // \\';
+    const editedFirst = 'const v = "a\\x"b"; // \\';
+    const file = `${first}\nNEXT token\n`;
+    const path = join(root, "state.ts");
+    Deno.writeTextFileSync(path, file);
+    const diff = [
+      "diff --git a/state.ts b/state.ts",
+      "--- a/state.ts",
+      "+++ b/state.ts",
+      "@@ -1 +1 @@",
+      "-old first",
+      `+${first}`,
+      "@@ -2 +2 @@",
+      "-old next",
+      "+NEXT token",
+      "",
+    ].join("\n");
+    const ws: DiffWorkspace = {
+      resolve: () => path,
+      read: () => file,
+    };
+    const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+    const highlighter = diffSource(ws, built.edit).createHighlighter!(
+      diff,
+      built.doc.lines,
+    );
+    const editedText = diff.replace(`+${first}`, `+${editedFirst}`);
+    const highlighted = highlighter.update(editedText);
+    const nextLine = highlighted[editedText.split("\n").indexOf("+NEXT token")];
+    assertEquals(
+      nextLine.spans.find((span) => span.text === "NEXT token")?.cls,
+      "string",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("diffedit: editing a context line shows it as a removed/added pair", () => {
   const { root, ws, done } = tempWorkspace();
   try {

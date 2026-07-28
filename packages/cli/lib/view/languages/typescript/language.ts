@@ -12,6 +12,7 @@ import { remapStructure } from "../../diffremap.ts";
 import {
   createHighlighter,
   highlightDocument,
+  highlightLineEditLocally,
   parseDocument,
 } from "./parse.ts";
 import { createDiffSemantics, createSemantics } from "./semantics.ts";
@@ -29,6 +30,10 @@ export const typeScriptLanguage: Language = {
   parseDocument: (text, fileName) => parseDocument(text, fileName),
 
   highlightLines: (text, fileName) => highlightDocument(text, fileName),
+
+  highlightFullFileOnDiffEdit: true,
+
+  highlightDiffLineEditLocally: highlightLineEditLocally,
 
   createHighlighter: (text, fileName) => createHighlighter(text, fileName),
 

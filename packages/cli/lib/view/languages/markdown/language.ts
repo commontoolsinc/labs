@@ -25,6 +25,8 @@ export const markdownLanguage: Language = {
 
   highlightLines: (text) => highlightMarkdownLines(text),
 
+  highlightFullFileOnDiffEdit: true,
+
   createHighlighter: (text) => createMarkdownHighlighter(text),
 
   hunkStructure(ctx: HunkStructureContext): StructureNode[] {

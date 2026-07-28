@@ -529,6 +529,30 @@ Deno.test("diffedit cov: the highlighter's lines getter returns the seeded lines
   }
 });
 
+Deno.test("diffedit cov: deferred parsing selects only changed stateful files", () => {
+  const baselines = new Map([
+    ["/workspace/changed.ts", "const changed = 1;\n"],
+    ["/workspace/untouched.ts", "const untouched = 1;\n"],
+    ["/workspace/plain.txt", "plain\n"],
+  ]);
+  const edited = new Map([
+    ["/workspace/changed.ts", "const changed = 2;\n"],
+    ["/workspace/untouched.ts", "const untouched = 1;\n"],
+    ["/workspace/plain.txt", "changed plain\n"],
+  ]);
+  assertEquals(
+    [..._de.changedStatefulFileOutputs(
+      edited,
+      baselines,
+      new Set([
+        "/workspace/changed.ts",
+        "/workspace/untouched.ts",
+      ]),
+    )],
+    [["/workspace/changed.ts", "const changed = 2;\n"]],
+  );
+});
+
 Deno.test("diffedit cov: the highlighter recolours a Markdown body line via the +++ header scan", () => {
   // Seed-less so the highlighter renders every line itself, then edit a body
   // line whose nearest preceding header is `+++ b/doc.md` — exercising the
