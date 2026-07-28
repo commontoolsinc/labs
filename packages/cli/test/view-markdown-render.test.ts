@@ -138,6 +138,19 @@ Deno.test("markdown rendered view handles setext, rules, images, and fenced tabl
     renderLineColored(lines[8], true).includes("\x1b[9;"),
     "rich modifiers reach ANSI output",
   );
+
+  assertEquals(
+    renderMarkdownLines("foo\nbar\n---").map((line) => line.text),
+    ["foo", "bar", ""],
+  );
+  assertEquals(
+    renderMarkdownLines("![**bold**](x)").map((line) => line.text),
+    ["▧ bold"],
+  );
+  assertEquals(
+    renderMarkdownLines("![a *b* `c`](x)").map((line) => line.text),
+    ["▧ a b c"],
+  );
 });
 
 Deno.test("markdown rendered view covers nested blocks and table alignment", () => {
@@ -215,6 +228,14 @@ Deno.test("markdown rendered view preserves nested and multiline structure", () 
     "  • inner",
     "    • deep",
   ]);
+  assertEquals(
+    renderMarkdownLines("-\n  continuation").map((line) => line.text),
+    ["• ", "  continuation"],
+  );
+  assertEquals(
+    renderMarkdownLines("1.\n   continuation").map((line) => line.text),
+    ["1. ", "   continuation"],
+  );
 
   const code = renderMarkdownLines([
     "- outer",
@@ -256,7 +277,19 @@ Deno.test("markdown rendered view keeps inline content on its source lines", () 
   const comment = renderMarkdownLines("before <!--\nhidden --> after");
   assertEquals(comment.map((line) => line.text), ["before ", " after"]);
 
-  for (const line of [...code, ...entity, ...html, ...comment]) {
+  const link = renderMarkdownLines(
+    '[link](https://example.com\n  "title") after',
+  );
+  assertEquals(link.map((line) => line.text), ["link", " after"]);
+
+  const image = renderMarkdownLines(
+    '![alt](diagram.png\n  "title") after',
+  );
+  assertEquals(image.map((line) => line.text), ["▧ alt", " after"]);
+
+  for (
+    const line of [...code, ...entity, ...html, ...comment, ...link, ...image]
+  ) {
     assertEquals(
       line.spans.map((span) => span.text).join(""),
       line.text,
@@ -287,6 +320,18 @@ Deno.test("markdown rendered view strips multiline block HTML", () => {
       `spans reconstruct ${JSON.stringify(line.text)}`,
     );
   }
+
+  const script = renderMarkdownLines([
+    "<script>",
+    'if (a < b) alert("safe");',
+    "</script>",
+  ].join("\n"));
+  assertEquals(script.map((line) => line.text), [
+    "",
+    'if (a < b) alert("safe");',
+    "",
+  ]);
+  assertEquals(script[1].renderedSourceHidden, undefined);
 });
 
 Deno.test("rendered Markdown diff keeps changed multiline HTML tags visible", () => {
@@ -326,6 +371,32 @@ index 1234..5678 100644
   assertEquals(doc.lines[7].text, '+  class="new">');
   assertEquals(doc.lines[6].renderedSourceHidden, undefined);
   assertEquals(doc.lines[7].renderedSourceHidden, undefined);
+});
+
+Deno.test("rendered Markdown diff keeps contextless fragments in source form", () => {
+  const diffText = `diff --git a/notes.md b/notes.md
+index 1234..5678 100644
+--- a/notes.md
++++ b/notes.md
+@@ -10 +10 @@
+-**old**
++**new**`;
+  const model = parseDiff(diffText);
+  assert(model);
+  const workspace: DiffWorkspace = {
+    resolve: () => "/missing/notes.md",
+    read: () => null,
+  };
+  const doc = buildDiffDocument(
+    diffText,
+    model,
+    workspace,
+    new Map(),
+    "rendered",
+  ).doc;
+
+  assertEquals(doc.lines[5].text, "-**old**");
+  assertEquals(doc.lines[6].text, "+**new**");
 });
 
 Deno.test("markdown rendered view composes lines without prebuilt spans", () => {
@@ -560,6 +631,30 @@ Deno.test("markdown rendered view handles incomplete HTML, fences, and tables", 
     markdownInternals.stripHtmlTags("before <!-- hidden\nstill hidden"),
     "before \n",
   );
+  assertEquals(
+    markdownInternals.stripHtmlTags(
+      '<?xml version="1.0"?><!DOCTYPE html><span>visible</span>',
+    ),
+    "visible",
+  );
+  assertEquals(
+    markdownInternals.stripHtmlTags("if (a < b && c > d)"),
+    "if (a < b && c > d)",
+  );
+  assertEquals(
+    renderMarkdownLines("<![CDATA[\nvisible <tag>").map((line) => line.text),
+    ["<![CDATA[", "visible <tag>"],
+  );
+  assertEquals(
+    renderMarkdownLines("<?target\ndata > still instruction\n?>").map((line) =>
+      line.text
+    ),
+    ["", "", ""],
+  );
+  assertEquals(
+    renderMarkdownLines("<?target\ndata <tag>\n?>").map((line) => line.text),
+    ["", "", ""],
+  );
   assertEquals(markdownInternals.openingFence("plain"), null);
   assertEquals(markdownInternals.openingFence("```bad`info"), null);
 
@@ -577,6 +672,36 @@ Deno.test("markdown rendered view handles incomplete HTML, fences, and tables", 
       "only one cell",
     ]).map((line) => line.text),
     ["a | b", "--- | ---", "only one cell"],
+  );
+
+  const literalBackslashes = renderMarkdownLines([
+    "code | value",
+    "--- | ---",
+    "`a\\\\b` | x",
+  ].join("\n"));
+  assert(literalBackslashes[2].text.includes("a\\\\b"));
+});
+
+Deno.test("markdown rendered view makes decoded controls inert", () => {
+  const line = renderMarkdownLines(
+    "safe&#27;[31mred&#7;&#127;\u0085",
+  )[0];
+  assertEquals(line.text, "safe␛[31mred␇␡␦");
+  assert(!line.text.includes("\x1b"));
+  assert(!line.text.includes("\x07"));
+
+  const malformedQuote = renderMarkdownLines("\r>");
+  assertEquals(malformedQuote.map((row) => row.text), [" >"]);
+  assertEquals(
+    malformedQuote[0].spans.map((span) => span.text).join(""),
+    malformedQuote[0].text,
+  );
+
+  const astral = renderMarkdownLines("_a_😀\\😀")[0];
+  assertEquals(astral.text, "a😀\\😀");
+  assertEquals(
+    astral.spans.map((span) => span.text).join(""),
+    astral.text,
   );
 });
 

@@ -797,18 +797,20 @@ Deno.test("renderFrame: the guide rail is blank on lines outside the selected no
   assertEquals(stripAnsi(rows[1])[0], "▶", "single-line node carries a glyph");
 });
 
-// --- SGR encoding helpers (dim/italic and background merge) -------------------
+// --- SGR encoding helpers (rich modifiers and background merge) ---------------
 
-Deno.test("cellsToAnsi: encodes dim, italic and underline attributes", () => {
+Deno.test("cellsToAnsi: encodes rich text attributes", () => {
   const cells = [
     { ch: "a", style: { dim: true } },
     { ch: "b", style: { italic: true } },
     { ch: "c", style: { underline: true } },
+    { ch: "d", style: { strikethrough: true } },
   ];
   const out = _internal.cellsToAnsi(cells, true);
   assert(out.includes("\x1b[2m"), "dim → SGR 2");
   assert(out.includes("\x1b[3m"), "italic → SGR 3");
   assert(out.includes("\x1b[4m"), "underline → SGR 4");
+  assert(out.includes("\x1b[9m"), "strikethrough → SGR 9");
 });
 
 Deno.test("mergeBg: overlays a background, or leaves the style when there is none", () => {

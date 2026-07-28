@@ -270,10 +270,10 @@ function renderBlockToken(
         "sectionHeader",
         inlineLexer,
       );
-      return [
+      return splitRichLine(
         { ...heading, renderedSourceHidden: true },
-        ...source.slice(1).map(hiddenLine),
-      ];
+        source.length,
+      );
     }
     case "hr":
       return [
@@ -309,9 +309,7 @@ function renderParagraphBlock(
 ): Line[] {
   let tokens = token.tokens;
   try {
-    tokens = inlineLexer?.inlineTokens(token.text ?? token.raw) as unknown as
-      | readonly InlineToken[]
-      | undefined ?? tokens;
+    tokens = inlineTokensFor(token.text ?? token.raw, inlineLexer);
   } catch {
     // Keep the block lexer's inline tokens.
   }
@@ -355,7 +353,14 @@ function renderHtmlBlock(
   source: readonly string[],
   inlineLexer?: Lexer,
 ): Line[] {
-  const visibleLines = stripHtmlTags(source.join("\n")).split("\n");
+  const block = source.join("\n");
+  if (
+    /^ {0,3}<!\[CDATA\[/.test(source[0] ?? "") &&
+    !block.includes("]]>")
+  ) {
+    return source.map((line) => singleStyledLine(line, "plain"));
+  }
+  const visibleLines = stripHtmlTags(block).split("\n");
   return source.map((sourceLine, index) => {
     const visible = visibleLines[index] ?? "";
     const line = renderMarkdownSourceLine(visible, inlineLexer);
@@ -397,10 +402,15 @@ function renderBlockquoteBlock(
 ): Line[] {
   const inner: string[] = [];
   const prefixes: string[] = [];
+  let removedMarker = false;
   for (const line of source) {
     const marker = line.match(/^([ \t]{0,3})>[ \t]?/);
+    if (marker) removedMarker = true;
     prefixes.push(`${marker?.[1] ?? ""}│ `);
     inner.push(marker ? line.slice(marker[0].length) : line);
+  }
+  if (!removedMarker) {
+    return source.map((line) => renderMarkdownSourceLine(line, inlineLexer));
   }
   const rendered = renderMarkdownBlocks(inner.join("\n"), inlineLexer);
   return rendered.map((line, i) =>
@@ -431,14 +441,16 @@ function renderListBlock(
     const start = range.start;
     const end = Math.min(source.length, range.end + 1);
     const marker = source[start].match(
-      /^(\s*)([-*+]|\d{1,9}[.)])([ \t]+)(.*)$/,
+      /^(\s*)([-*+]|\d{1,9}[.)])(?:([ \t]+)(.*))?$/,
     );
     if (!marker) continue;
+    const markerSpace = marker[3] ?? "";
+    const firstContent = marker[4] ?? "";
     const contentIndent = marker[1].length + marker[2].length +
-      marker[3].length;
+      markerSpace.length;
     let inner = (item.text ?? "").split("\n");
     if (inner.length !== end - start) {
-      inner = [marker[4]];
+      inner = [firstContent];
       for (let line = start + 1; line < end; line++) {
         inner.push(stripContainerIndent(source[line], contentIndent));
       }
@@ -580,15 +592,100 @@ function renderInlineLine(
   const line = new RichLine();
   let tokens: readonly InlineToken[];
   try {
-    tokens = (
-      inlineLexer?.inlineTokens(source) ?? Lexer.lexInline(source)
-    ) as unknown as readonly InlineToken[];
+    tokens = inlineTokensFor(source, inlineLexer);
   } catch {
     line.append(source, { cls });
     return line.line();
   }
   appendInlineTokens(line, tokens, { cls });
   return line.line();
+}
+
+function inlineTokensFor(
+  source: string,
+  inlineLexer?: Lexer,
+): readonly InlineToken[] {
+  const lex = (text: string) =>
+    (inlineLexer?.inlineTokens(text) ??
+      Lexer.lexInline(text)) as unknown as readonly InlineToken[];
+  const tokens = lex(source);
+  if (!inlineTokensHaveUnpairedSurrogate(tokens)) return tokens;
+
+  const masked = maskAstralCharacters(source);
+  if (!masked) return [{ type: "text", raw: source, text: source }];
+  return restoreInlineTokens(lex(masked.text), masked.original);
+}
+
+function inlineTokensHaveUnpairedSurrogate(
+  tokens: readonly InlineToken[],
+): boolean {
+  return tokens.some((token) =>
+    hasUnpairedSurrogate(token.raw) ||
+    (token.text !== undefined && hasUnpairedSurrogate(token.text)) ||
+    (token.href !== undefined && hasUnpairedSurrogate(token.href)) ||
+    (token.tokens !== undefined &&
+      inlineTokensHaveUnpairedSurrogate(token.tokens))
+  );
+}
+
+function hasUnpairedSurrogate(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = text.charCodeAt(i + 1);
+      if (i + 1 >= text.length || next < 0xdc00 || next > 0xdfff) return true;
+      i++;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function maskAstralCharacters(
+  source: string,
+): { text: string; original: ReadonlyMap<string, string> } | null {
+  const astral = [...new Set([...source].filter((char) => char.length > 1))];
+  if (astral.length === 0) return null;
+  const used = new Set([...source]);
+  const replacement = new Map<string, string>();
+  const original = new Map<string, string>();
+  const ranges = [[0x2600, 0x26ff], [0x2700, 0x27bf], [0x2b00, 0x2bff]];
+  for (const [from, to] of ranges) {
+    for (
+      let code = from;
+      code <= to && replacement.size < astral.length;
+      code++
+    ) {
+      const candidate = String.fromCodePoint(code);
+      if (used.has(candidate) || !/\p{So}/u.test(candidate)) continue;
+      const value = astral[replacement.size];
+      replacement.set(value, candidate);
+      original.set(candidate, value);
+    }
+  }
+  if (replacement.size !== astral.length) return null;
+  return {
+    text: [...source].map((char) => replacement.get(char) ?? char).join(""),
+    original,
+  };
+}
+
+function restoreInlineTokens(
+  tokens: readonly InlineToken[],
+  original: ReadonlyMap<string, string>,
+): InlineToken[] {
+  const restore = (value: string) =>
+    [...value].map((char) => original.get(char) ?? char).join("");
+  return tokens.map((token) => ({
+    type: token.type,
+    raw: restore(token.raw),
+    ...(token.text !== undefined ? { text: restore(token.text) } : {}),
+    ...(token.href !== undefined ? { href: restore(token.href) } : {}),
+    ...(token.tokens !== undefined
+      ? { tokens: restoreInlineTokens(token.tokens, original) }
+      : {}),
+  }));
 }
 
 function referenceAwareLexer(text: string): Lexer | undefined {
@@ -639,21 +736,34 @@ function appendInlineTokens(
         break;
       case "link":
         line.hideSource();
-        appendTokenChildren(line, token, {
-          ...style,
-          cls: "callName",
-          underline: true,
-        }, multiline);
+        {
+          const start = line.text.length;
+          appendTokenChildren(line, token, {
+            ...style,
+            cls: "callName",
+            underline: true,
+          }, multiline);
+          appendHiddenLineBreaks(line, token.raw, start, style);
+        }
         break;
       case "image": {
         line.hideSource();
+        const start = line.text.length;
         line.append("▧ ", { cls: "punctuation" });
-        const alt = decodeInlineText(token.text ?? "image");
-        line.append(alt || "image", {
+        const contentStart = line.text.length;
+        appendTokenChildren(line, token, {
           ...style,
           cls: "callName",
           italic: true,
         });
+        if (line.text.length === contentStart) {
+          line.append("image", {
+            ...style,
+            cls: "callName",
+            italic: true,
+          });
+        }
+        appendHiddenLineBreaks(line, token.raw, start, style);
         break;
       }
       case "escape":
@@ -684,6 +794,23 @@ function appendInlineTokens(
   }
 }
 
+function appendHiddenLineBreaks(
+  line: RichLine,
+  raw: string,
+  renderedStart: number,
+  style: RichStyle,
+): void {
+  const hidden = countLineBreaks(raw) -
+    countLineBreaks(line.text.slice(renderedStart));
+  if (hidden > 0) line.append("\n".repeat(hidden), style);
+}
+
+function countLineBreaks(text: string): number {
+  let count = 0;
+  for (const char of text) if (char === "\n") count++;
+  return count;
+}
+
 function codeSpanText(token: InlineToken, multiline: boolean): string {
   if (!multiline || !token.raw.includes("\n")) return token.text ?? "";
   const marker = token.raw.match(/^`+/)?.[0];
@@ -701,9 +828,26 @@ function codeSpanText(token: InlineToken, multiline: boolean): string {
 }
 
 function decodeInlineText(text: string): string {
-  return text.split("\n").map((sourceLine) =>
-    decodeEntities(sourceLine).replace(/[\r\n\u2028\u2029]/g, " ")
-  ).join("\n");
+  return text.split("\n").map((sourceLine) => {
+    let decoded = "";
+    for (const char of decodeEntities(sourceLine)) {
+      const code = char.codePointAt(0)!;
+      if (
+        char === "\r" || char === "\n" || code === 0x2028 || code === 0x2029
+      ) {
+        decoded += " ";
+      } else if (code < 0x20) {
+        decoded += String.fromCodePoint(0x2400 + code);
+      } else if (code === 0x7f) {
+        decoded += "␡";
+      } else if (code >= 0x80 && code <= 0x9f) {
+        decoded += "␦";
+      } else {
+        decoded += char;
+      }
+    }
+    return decoded;
+  }).join("\n");
 }
 
 function stripHtmlTags(source: string): string {
@@ -729,32 +873,58 @@ function stripHtmlTags(source: string): string {
     const cdataEnd = source.startsWith("<![CDATA[", i)
       ? source.indexOf("]]>", i + 9)
       : -1;
+    if (source.startsWith("<![CDATA[", i) && cdataEnd < 0) {
+      out += source.slice(i);
+      break;
+    }
     if (cdataEnd >= 0) {
       out += source.slice(i + 9, cdataEnd);
       i = cdataEnd + 3;
       continue;
     }
 
-    let quote: "'" | '"' | null = null;
-    let end = i + 1;
-    for (; end < source.length; end++) {
-      const char = source[end];
-      if (quote) {
-        if (char === quote) quote = null;
-      } else if (char === "'" || char === '"') {
-        quote = char;
-      } else if (char === ">") {
-        break;
-      }
+    const markupEnd = htmlMarkupEnd(source, i);
+    if (markupEnd === null) {
+      out += source[i++];
+      continue;
     }
-    if (end >= source.length) {
-      out += source.slice(i);
-      break;
-    }
-    out += source.slice(i, end + 1).replace(/[^\n]/g, "");
-    i = end + 1;
+    out += source.slice(i, markupEnd).replace(/[^\n]/g, "");
+    i = markupEnd;
   }
   return out;
+}
+
+function htmlMarkupEnd(source: string, start: number): number | null {
+  if (source.startsWith("<?", start)) {
+    const end = source.indexOf("?>", start + 2);
+    return end < 0 ? null : end + 2;
+  }
+
+  let nameStart = start + 1;
+  if (source[nameStart] === "!") {
+    nameStart++;
+  } else if (source[nameStart] === "/") {
+    nameStart++;
+  }
+  if (!/[A-Za-z]/.test(source[nameStart] ?? "")) return null;
+
+  let nameEnd = nameStart + 1;
+  while (/[A-Za-z0-9-]/.test(source[nameEnd] ?? "")) nameEnd++;
+  if (!/[\t\n\f\r />]/.test(source[nameEnd] ?? "")) return null;
+
+  let quote: "'" | '"' | null = null;
+  let end = nameEnd;
+  for (; end < source.length; end++) {
+    const char = source[end];
+    if (quote) {
+      if (char === quote) quote = null;
+    } else if (char === "'" || char === '"') {
+      quote = char;
+    } else if (char === ">") {
+      break;
+    }
+  }
+  return end < source.length ? end + 1 : null;
 }
 
 function appendTokenChildren(
@@ -872,6 +1042,7 @@ function splitTableCells(line: string): string[] | null {
       continue;
     }
     if (
+      ticks === 0 &&
       char === "\\" &&
       (source[i + 1] === "|" || source[i + 1] === "\\")
     ) {
@@ -1142,7 +1313,6 @@ export const _internal = {
   appendTokenChildren,
   codeSpanText,
   openingFence,
-  referenceAwareLexer,
   renderBlockToken,
   renderCodeBlock,
   renderHtmlBlock,
@@ -1153,7 +1323,6 @@ export const _internal = {
   renderTableBlock,
   splitRichLine,
   splitTableCells,
-  stripContainerIndent,
   stripHtmlTags,
   tableAlignment,
   tokenLineRange,

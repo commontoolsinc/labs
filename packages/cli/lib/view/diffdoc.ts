@@ -967,6 +967,7 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
     ctx.newLanguage,
     ctx.newFileName,
     ctx.viewMode,
+    verified || hunk.newStart <= 1,
   );
   if (newParsed) {
     newFragment.forEach((fragment, index) => {
@@ -983,6 +984,7 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
       ctx.oldLanguage,
       ctx.oldFileName,
       ctx.viewMode,
+      ctx.oldFileLines !== null || hunk.oldStart <= 1,
     );
   }
   if (oldParsed) {
@@ -1200,17 +1202,20 @@ function applyFragmentSpans(
   language: Language,
   fileName: string | undefined,
   viewMode: ViewMode,
+  completeFileContext: boolean,
 ): Document | null {
   if (fragment.length === 0) return null;
   const text = fragment.map((f) => f.code).join("\n");
   const parsed = language.parseDocument(text, fileName);
-  const displayed = viewMode === "rendered"
+  const rendered = viewMode === "rendered" &&
+    !!language.renderLines &&
+    (!language.renderNeedsCompleteFile || completeFileContext);
+  const displayed = rendered
     ? renderedLinesFor(language, text, fileName) ?? parsed.lines
     : parsed.lines;
   for (let i = 0; i < fragment.length; i++) {
     if (fragment[i].render === false) continue;
     const { diffLine } = fragment[i];
-    const rendered = viewMode === "rendered" && !!language.renderLines;
     const lineText = rendered
       ? `${rawLines[diffLine].slice(0, 1)}${displayed[i]?.text ?? ""}`
       : rawLines[diffLine];

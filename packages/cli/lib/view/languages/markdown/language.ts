@@ -28,6 +28,8 @@ export const markdownLanguage: Language = {
 
   renderLines: (text) => renderMarkdownLines(text),
 
+  renderNeedsCompleteFile: true,
+
   highlightFullFileOnDiffEdit: true,
 
   createHighlighter: (text) => createMarkdownHighlighter(text),
