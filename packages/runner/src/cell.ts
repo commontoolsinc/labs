@@ -1284,9 +1284,11 @@ export class CellImpl<T extends FabricValue>
      * Internal-only stream-send options. `eventId` supplies the durable event
      * id (spec §7.5) instead of minting one: an ingress caller that owns a
      * delivery id passes it through so a retry of the same id collides on the
-     * handling's create-only receipt instead of re-executing (verb contract
-     * WS-D, docs/plans/pattern-verb-contract-implementation.md). Ignored on
-     * the plain-cell write path.
+     * handling's create-only receipt (verb contract WS-D,
+     * docs/plans/pattern-verb-contract-implementation.md). The receipt is a
+     * COMMIT witness, not an execution witness — the redelivered event still
+     * runs the handler body and then loses the race, so effects outside the
+     * transaction repeat. Ignored on the plain-cell write path.
      */
     sendOptions?: { eventId?: string },
   ): Cell<T> {
@@ -1425,8 +1427,9 @@ export class CellImpl<T extends FabricValue>
         /**
          * Internal-only stream-send options: `eventId` passes a
          * caller-supplied durable event id through to the scheduler, so a
-         * same-id retry collides on the handling's create-only receipt
-         * instead of re-executing (verb contract WS-D).
+         * same-id retry collides on the handling's create-only receipt and
+         * cannot commit twice — though the body does re-run (verb contract
+         * WS-D).
          */
         { eventId?: string },
       ]
