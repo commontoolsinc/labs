@@ -13,6 +13,9 @@
  * dialog opened with a body that was always null. record.tsx now takes them
  * through lifts whose operands name the fields being read.
  *
+ * The shell is navigated once in the setup, and each case below drives the
+ * page from there, so neither depends on the other having run.
+ *
  * This is a browser test because the values it checks exist only in the
  * rendered UI. `record-module-fields.test.tsx` covers the same reads where a
  * headless pattern test can see them: the icon and the aliases in [NAME].
@@ -139,6 +142,15 @@ describe("record module chrome integration test", () => {
     );
     await cc.manager().runtime.idle();
     await cc.manager().synced();
+
+    // Navigate once, here rather than in the first case, so each case below
+    // starts from a shell showing the Record and none of them depends on an
+    // earlier one having navigated.
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: { spaceName: SPACE_NAME, pieceId },
+      identity,
+    });
   });
 
   afterAll(async () => {
@@ -147,11 +159,6 @@ describe("record module chrome integration test", () => {
   });
 
   it("heads each module with that module's own label", async () => {
-    await shell.goto({
-      frontendUrl: FRONTEND_URL,
-      view: { spaceName: SPACE_NAME, pieceId },
-      identity,
-    });
     const page = shell.page();
     await settleView(page);
 
@@ -164,7 +171,7 @@ describe("record module chrome integration test", () => {
     await waitForText(page, "body", "📷 Portrait");
   });
 
-  it("opens a module's own settings under a title naming that module", async () => {
+  it("opens a module's own settings, bound to the module they came from", async () => {
     const page = shell.page();
     await settleView(page);
 
@@ -181,14 +188,10 @@ describe("record module chrome integration test", () => {
     // module's own settings control.
     await waitForText(page, "cf-modal[open]", "📷 Portrait Settings");
     await waitForText(page, "cf-modal[open]", "Photo Label");
-  });
 
-  it("keeps the dialog's controls bound to the module they came from", async () => {
-    const page = shell.page();
-
-    // The dialog holds the module's own settings node rather than a copy of it:
-    // typing a new label into it reaches the photo module, and the Record's
-    // header follows the module's new label.
+    // That control is the module's own node rather than a copy of it: typing a
+    // new label into it reaches the photo module, and the Record's header
+    // follows the module's new label.
     await fillCfInput(page, "cf-modal[open] cf-input", "Headshot");
     await settleView(page);
     await waitForText(page, "body", "📷 Headshot");
