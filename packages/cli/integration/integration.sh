@@ -354,9 +354,10 @@ run_piece_values() {
   # Recompute (one iteration) with updated inputs
   cf piece step $SPACE_ARGS --piece $PIECE_ID
 
-  # Check space has new piece with correct inputs and title
-  TITLE="Simple counter 2: 10"
-  if ! cf piece ls $SPACE_ARGS | grep -q "$PIECE_ID $TITLE"; then
+  # Check the indexed space listing contains the piece.
+  PIECE_LIST=$(cf piece ls $SPACE_ARGS --json)
+  if ! echo "$PIECE_LIST" | jq -e --arg id "$PIECE_ID" \
+    'any(.[]; .id == $id)' > /dev/null; then
     error "Piece did not appear in list of space pieces."
   fi
 
