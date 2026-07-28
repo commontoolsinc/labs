@@ -141,8 +141,14 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   this entry called for widening every `[T] extends [Stream<any>]` guard,
   on the theory that a result-carrying stream would silently stop matching.
   It does stop matching — but that does not reach the schema layer, which
-  reads the *written* `ts.TypeNode` and takes the result off the annotation's
-  second type argument (`schema-generator/src/type-utils.ts:427-437`). The
+  detects wrappers from the author's annotation by two annotation-rooted
+  paths: the written `ts.TypeNode` name
+  (`schema-generator/src/type-utils.ts:427-437`) and the `[CELL_BRAND]:
+  "stream"` literal on the resolved type
+  (`schema-generator/src/typescript/cell-brand.ts:97-114`), whose
+  `extractWrapperTypeReference` exposes the full `typeArguments` where `R`
+  sits — so detection even survives an alias like
+  `type MyVerb = Stream<E, R>`. The
   guards shape inference and authoring ergonomics, not schema extraction, and
   dropping a result there is harmless for every helper that does not care
   about one. Where a guard genuinely mishandles a returning verb it shows up
