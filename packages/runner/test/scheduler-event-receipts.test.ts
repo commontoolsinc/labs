@@ -19,6 +19,7 @@ import type {
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { resolveLink } from "../src/link-resolution.ts";
 import { dispatchQueuedEvent } from "../src/scheduler/events.ts";
+import { scopeCallerEventId } from "../src/scheduler/event-identity.ts";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
@@ -949,6 +950,139 @@ describe("scheduler event receipts", () => {
     } finally {
       commitTelemetry.dispose();
     }
+  });
+
+  it("cell.send carries a caller-supplied eventId and exposes the receipt link", async () => {
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { handler, pattern } = commonfabric;
+    let handlerInvocations = 0;
+    const noLaunch = handler<unknown, Record<string, never>>(
+      () => {
+        handlerInvocations++;
+      },
+      { proxy: true },
+    );
+    const rootPattern = pattern(() => {
+      return { stream: noLaunch({}) };
+    });
+    const rootCell = runtime.getCell<{ stream: unknown }>(
+      space,
+      "receipts cell-send caller id root",
+      undefined,
+      tx,
+    );
+    const root = runtime.run(tx, rootPattern, {}, rootCell);
+    await tx.commit();
+    tx = runtime.edit();
+    await root.pull();
+
+    // Ingress-caller path (verb contract WS-D): the id rides cell.send's
+    // internal options instead of queueEvent directly — the CLI's route.
+    const eventId = "evt:receipt-cell-send:0:caller-id-root";
+    const outcomes: Array<{
+      status: string;
+      precondition?: string;
+      receiptLink?: ReturnType<Cell<unknown>["getAsNormalizedFullLink"]>;
+    }> = [];
+    const record = (t: IExtendedStorageTransaction) => {
+      const status = t.status();
+      outcomes.push({
+        status: status.status,
+        precondition: (status as { error?: { precondition?: string } }).error
+          ?.precondition,
+        receiptLink: t.handlingReceiptLink,
+      });
+    };
+    const streamCell = root.key("stream") as Cell<unknown>;
+    streamCell.send({}, record, { eventId });
+    await waitForSchedulerCondition(
+      runtime,
+      () => handlerInvocations === 1 && outcomes.length === 1,
+      "cell-send event did not settle",
+    );
+    // Same id again: the body re-runs (exactly-once is per commit) but the
+    // create-only receipt collides, and the loser's callback still carries
+    // the SAME receipt address — the winner's original outcome.
+    streamCell.send({}, record, { eventId });
+    await waitForSchedulerCondition(
+      runtime,
+      () => handlerInvocations === 2 && outcomes.length === 2,
+      "cell-send redelivery did not settle",
+    );
+    await runtime.scheduler.idleWithPendingCommits();
+
+    // The caller's id is scoped to the stream before it becomes the durable
+    // event id, so the receipt address derives from the scoped form.
+    const expectedLink = receiptCellForEvent<Record<string, never>>(
+      runtime,
+      scopeCallerEventId(eventId, resolvedStreamLink(streamCell, runtime)),
+    ).getAsNormalizedFullLink();
+
+    expect(outcomes[0].status).toBe("done");
+    expect(outcomes[0].receiptLink?.id).toBe(expectedLink.id);
+    expect(outcomes[0].receiptLink?.space).toBe(expectedLink.space);
+    expect(outcomes[1].status).toBe("error");
+    expect(outcomes[1].precondition).toBe("receipt-exists");
+    expect(outcomes[1].receiptLink?.id).toBe(expectedLink.id);
+  });
+
+  it("two verbs sharing one caller-supplied id do not collide", async () => {
+    const { commonfabric } = createTrustedBuilder(runtime);
+    const { handler, pattern } = commonfabric;
+    let incremented = 0;
+    let decremented = 0;
+    // Two distinct verbs with IDENTICAL input bindings (both bound {}) — the
+    // shape the receipt cause cannot tell apart once $event is overwritten by
+    // a caller-supplied id. A minted id embeds the stream link and keeps them
+    // apart; a caller-supplied one must not lose that.
+    const increment = handler<unknown, Record<string, never>>(() => {
+      incremented++;
+    }, { proxy: true });
+    const decrement = handler<unknown, Record<string, never>>(() => {
+      decremented++;
+    }, { proxy: true });
+    const rootPattern = pattern(() => ({
+      increment: increment({}),
+      decrement: decrement({}),
+    }));
+    const rootCell = runtime.getCell<
+      { increment: unknown; decrement: unknown }
+    >(space, "receipts cross-verb caller id root", undefined, tx);
+    const root = runtime.run(tx, rootPattern, {}, rootCell);
+    await tx.commit();
+    tx = runtime.edit();
+    await root.pull();
+
+    const outcomes: Array<{ status: string; precondition?: string }> = [];
+    const record = (t: IExtendedStorageTransaction) => {
+      const status = t.status();
+      outcomes.push({
+        status: status.status,
+        precondition: (status as { error?: { precondition?: string } }).error
+          ?.precondition,
+      });
+    };
+    // The SAME caller id addressed at two different verbs. Each is a distinct
+    // invocation of a distinct verb; neither may deduplicate onto the other.
+    const eventId = "caller-shared-id";
+    (root.key("increment") as Cell<unknown>).send({}, record, { eventId });
+    await waitForSchedulerCondition(
+      runtime,
+      () => incremented === 1 && outcomes.length === 1,
+      "increment did not settle",
+    );
+    (root.key("decrement") as Cell<unknown>).send({}, record, { eventId });
+    await waitForSchedulerCondition(
+      runtime,
+      () => outcomes.length === 2,
+      "decrement did not settle",
+    );
+    await runtime.scheduler.idleWithPendingCommits();
+
+    expect(outcomes[0].status).toBe("done");
+    expect(outcomes[1].precondition).toBeUndefined();
+    expect(outcomes[1].status).toBe("done");
+    expect(decremented).toBe(1);
   });
 
   it("creates a receipt document for handlers that launch nothing", async () => {

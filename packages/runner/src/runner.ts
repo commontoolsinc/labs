@@ -4135,6 +4135,12 @@ export class Runner {
       undefined,
       tx,
     );
+    // Expose the handling's receipt address on the transaction, where the
+    // sender's commit callback can read it (verb contract WS-D). Stashed
+    // before the branches so BOTH outcomes carry it: a committed handling
+    // hands back its own receipt, and a create-only collision loser hands
+    // back the same address — which is the winner's original outcome.
+    tx.handlingReceiptLink = receiptCell.getAsNormalizedFullLink();
     const receiptsEnabled =
       this.runtime.experimental.commitPreconditions === true;
     if (!resultHasReactives && frame.reactives.size === 0) {

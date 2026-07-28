@@ -1,0 +1,298 @@
+// Durable-content fingerprints — "did this space's content survive?" as a
+// number you can compare, and a diff when it didn't.
+//
+// Why (docs/plans/space-clone-rehearsal.md): the July 2026 Topics rehearsal
+// verified content preservation with ad-hoc SQL and Python heredocs written
+// fresh each attempt. Two rehearsals whose fingerprints were computed
+// differently cannot be compared, and an improvised check that quietly measures
+// less than last time looks exactly like a pass. This is that check, computed
+// one way.
+//
+// COMPILER-GENERATED CELLS ARE EXCLUDED BY DEFAULT. A pattern update rotates
+// generated internal-cell identities on purpose (labs#4916), so including them
+// guarantees the fingerprint changes on every legitimate migration — which
+// makes it useless as a "content survived" signal. Verified against the real
+// Estuary Topics store: all 20 write-storm cells (192,381 revisions, 90.3% of
+// every revision) are `$generated`, and NONE of them is authored content.
+//
+// Hashing goes through `@commonfabric/data-model/value-hash` — the same
+// canonicalizing hash the runtime derives entity ids with, so this cannot drift
+// from the engine's notion of value identity.
+
+import { hashOf } from "@commonfabric/data-model/value-hash";
+import { utf8Compare } from "@commonfabric/utils/utf8";
+import type { SpaceDb } from "./db.ts";
+import { type EntityModel, listEntityModels } from "./model.ts";
+import { reconstructDocument } from "./reconstruct.ts";
+import { listScopes } from "./scopes.ts";
+
+/**
+ * `listEntityModels` caps at 5,000 by default — a real Estuary space already
+ * exceeds that. A fingerprint computed over a truncated enumeration would still
+ * return a confident-looking hash, which is the exact failure this whole module
+ * exists to prevent, so we raise the cap and REFUSE when even that is reached
+ * rather than hash a partial space.
+ */
+const ENUMERATION_CAP = 1_000_000;
+
+/**
+ * Hash one entity's durable value, reporting a rejection instead of throwing.
+ *
+ * `hashOf` refuses values it has no canonical form for (functions, symbols,
+ * unsupported object types such as `Map`, cyclic structures). Nothing stored
+ * today decodes to one, but `decodeStored` spans several at-rest formats, and a
+ * single odd entity must not abort a whole-space fingerprint — nor be quietly
+ * treated as empty, which would let real content drift read as "unchanged".
+ */
+export function hashEntityValue(
+  value: unknown,
+): { hash: string } | { error: string } {
+  try {
+    return { hash: hashOf(value).toString() };
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * Every entity in the space, across EVERY scope.
+ *
+ * `listEntityModels` defaults to `scope: "space"`, which on a real store
+ * silently omits all PerUser/PerSession state (579 of 6,379 entities on the
+ * Estuary Topics store). Per-scope state is durable content a migration can
+ * damage just as easily, so the fingerprint walks the scopes `listScopes`
+ * reports rather than assuming one.
+ */
+function allEntities(
+  space: SpaceDb,
+  branch: string,
+  cap: number = ENUMERATION_CAP,
+): EntityModel[] {
+  const out: EntityModel[] = [];
+  for (const scope of listScopes(space, { branch })) {
+    const models = listEntityModels(space, {
+      branch,
+      scope: scope.raw,
+      limit: cap,
+    });
+    if (models.length >= cap) {
+      throw new Error(
+        `scope ${scope.raw} enumerates ${models.length}+ entities, at or above ` +
+          `the ${cap} cap; refusing to fingerprint a possibly truncated ` +
+          `enumeration.`,
+      );
+    }
+    out.push(...models);
+  }
+  return out;
+}
+
+/** One entity's content hash at head. */
+export interface EntityFingerprint {
+  id: string;
+  scope: string;
+  /** Entity classification (`piece`, `cell`, …) as the model reports it. */
+  kind: string;
+  /** `hashOf` the entity's durable `value`, or null when it has no value. */
+  hash: string | null;
+}
+
+export interface FingerprintReport {
+  /** Hash over every included entity's (id, scope, hash) — the one number. */
+  hash: string;
+  /** Entities included in `hash`. */
+  entities: number;
+  /** Internal cells skipped because a manifest calls them compiler-generated. */
+  excludedGenerated: number;
+  /**
+   * Ids some manifest calls generated and another calls named. Counted as
+   * generated (rotation-prone wins, so the fingerprint stays stable) but
+   * reported, because that choice can hide a real content change and must never
+   * be silent. Zero on every store observed so far.
+   */
+  ambiguous: string[];
+  /** Entities whose value could not be hashed, with the reason. Never silent. */
+  unhashable: { id: string; reason: string }[];
+  /** Per-entity hashes, id-sorted — the input to `diffFingerprints`. */
+  perEntity: EntityFingerprint[];
+}
+
+export interface FingerprintOptions {
+  branch?: string;
+  /**
+   * Refuse rather than fingerprint a space whose scope enumerates at or above
+   * this many entities, since the enumeration may have been truncated. Defaults
+   * to 1,000,000 — far above any real space; raise it only knowingly.
+   */
+  enumerationCap?: number;
+  /**
+   * Include compiler-generated internal cells. Default false. Turning this on
+   * makes the fingerprint change on every pattern update by design; it exists
+   * for "what moved at all?", not for "did content survive?".
+   */
+  includeGenerated?: boolean;
+}
+
+/**
+ * Entity ids that some piece's `internal` manifest attributes to a
+ * compiler-generated cause (`partialCause: { $generated: N }`) rather than an
+ * authored name (`partialCause: "entries"`).
+ *
+ * The manifest is the only place this distinction is recorded: entity ids are
+ * content hashes and carry no marker of their own.
+ */
+export function generatedInternalCellIds(
+  space: SpaceDb,
+  options: { branch?: string; enumerationCap?: number } = {},
+): { generated: Set<string>; named: Set<string> } {
+  const generated = new Set<string>();
+  const named = new Set<string>();
+  for (
+    const model of allEntities(
+      space,
+      options.branch ?? "",
+      options.enumerationCap,
+    )
+  ) {
+    if (model.kind !== "piece") continue;
+    const doc = reconstructDocument(space, {
+      id: model.id,
+      scope: model.scope,
+    });
+    const internal = (doc as Record<string, unknown> | undefined)?.internal;
+    if (!Array.isArray(internal)) continue;
+    for (const entry of internal) {
+      const id = manifestLinkId(entry);
+      if (id === undefined) continue;
+      if (isGeneratedCause((entry as Record<string, unknown>).partialCause)) {
+        generated.add(id);
+      } else {
+        named.add(id);
+      }
+    }
+  }
+  return { generated, named };
+}
+
+/** `{ $generated: N }` — the compiler's anonymous per-build ordinal. */
+function isGeneratedCause(cause: unknown): boolean {
+  return typeof cause === "object" && cause !== null && "$generated" in cause;
+}
+
+/** The link target id of a manifest entry (`{ partialCause, link }`). */
+function manifestLinkId(entry: unknown): string | undefined {
+  if (typeof entry !== "object" || entry === null) return undefined;
+  const link = (entry as Record<string, unknown>).link;
+  if (typeof link !== "object" || link === null) return undefined;
+  const envelope = (link as Record<string, unknown>)["/"];
+  if (typeof envelope !== "object" || envelope === null) return undefined;
+  const payload = (envelope as Record<string, unknown>)["link@1"];
+  if (typeof payload !== "object" || payload === null) return undefined;
+  const id = (payload as Record<string, unknown>).id;
+  return typeof id === "string" ? id : undefined;
+}
+
+/** Content fingerprint of a space at head. */
+export function contentFingerprint(
+  space: SpaceDb,
+  options: FingerprintOptions = {},
+): FingerprintReport {
+  const branch = options.branch ?? "";
+  const { generated, named } = options.includeGenerated
+    ? { generated: new Set<string>(), named: new Set<string>() }
+    : generatedInternalCellIds(space, {
+      branch,
+      enumerationCap: options.enumerationCap,
+    });
+
+  const ambiguous = [...generated].filter((id) => named.has(id)).sort(
+    utf8Compare,
+  );
+  const perEntity: EntityFingerprint[] = [];
+  const unhashable: { id: string; reason: string }[] = [];
+  let excludedGenerated = 0;
+
+  for (const model of allEntities(space, branch, options.enumerationCap)) {
+    if (generated.has(model.id)) {
+      excludedGenerated++;
+      continue;
+    }
+    const doc = reconstructDocument(space, {
+      id: model.id,
+      scope: model.scope,
+    });
+    const value = (doc as Record<string, unknown> | undefined)?.value;
+    let hash: string | null = null;
+    if (value !== undefined) {
+      const hashed = hashEntityValue(value);
+      if ("error" in hashed) {
+        unhashable.push({ id: model.id, reason: hashed.error });
+        continue;
+      }
+      hash = hashed.hash;
+    }
+    perEntity.push({
+      id: model.id,
+      scope: model.scope,
+      kind: model.kind,
+      hash,
+    });
+  }
+
+  // Sort so the roll-up is independent of enumeration order.
+  perEntity.sort((a, b) =>
+    a.id === b.id ? utf8Compare(a.scope, b.scope) : utf8Compare(a.id, b.id)
+  );
+
+  return {
+    hash: hashOf(
+      perEntity.map((e) => [e.id, e.scope, e.hash] as const),
+    ).toString(),
+    entities: perEntity.length,
+    excludedGenerated,
+    ambiguous,
+    unhashable,
+    perEntity,
+  };
+}
+
+export interface FingerprintDiff {
+  equal: boolean;
+  added: string[];
+  removed: string[];
+  changed: string[];
+}
+
+/**
+ * What moved between two fingerprints. This is the answer a rehearsal actually
+ * needs: not "the fingerprint differs" but "these three topic bodies differ".
+ */
+export function diffFingerprints(
+  before: FingerprintReport,
+  after: FingerprintReport,
+): FingerprintDiff {
+  const key = (e: EntityFingerprint) => `${e.id} ${e.scope}`;
+  const a = new Map(before.perEntity.map((e) => [key(e), e]));
+  const b = new Map(after.perEntity.map((e) => [key(e), e]));
+
+  const added: string[] = [];
+  const removed: string[] = [];
+  const changed: string[] = [];
+
+  for (const [k, e] of b) if (!a.has(k)) added.push(e.id);
+  for (const [k, e] of a) {
+    const other = b.get(k);
+    if (other === undefined) removed.push(e.id);
+    else if (other.hash !== e.hash) changed.push(e.id);
+  }
+
+  added.sort(utf8Compare);
+  removed.sort(utf8Compare);
+  changed.sort(utf8Compare);
+  return {
+    equal: added.length === 0 && removed.length === 0 && changed.length === 0,
+    added,
+    removed,
+    changed,
+  };
+}

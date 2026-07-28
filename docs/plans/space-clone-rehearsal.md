@@ -160,9 +160,15 @@ it, which is why reset must delete the companions and not just the `.sqlite`.
 Reset = delete `engine-v3/<did>.sqlite{,-wal,-shm}`, re-copy from `pristine/`.
 Not `sqlite3 .backup` (needs a live connection, slower, no advantage here). Not
 re-running `VACUUM INTO` (needs the source, which may be a laptop-local scp'd
-file or offline). Use clonefile where the filesystem offers it (the 8.9 ms
-above) and a plain copy otherwise — GNU `cp` has no `-c`, so the tool does its
-own fallback (`Deno.copyFile`) rather than shelling out.
+file or offline).
+
+**Implemented as a portable `Deno.copyFile`, not clonefile** (revised
+2026-07-27 during implementation). Clonefile needs a `cp -c` subprocess and a
+platform branch — GNU `cp` has no `-c` — and measured against the real 1.1 GB
+Estuary store a plain-copy reset costs **14.2 s**, against a rehearsal whose
+migration phase runs for minutes. Wilk's rehearsal used plain `cp` for the same
+reason. Clonefile stays available as a later optimization if reset ever sits on
+the critical path; the numbers to beat are in the table above.
 
 **Interview result:** Wilk reset with a plain `cp` — no clonefile — and it was
 fine at Topics-store scale; Gideon likewise drove the mechanics through his
@@ -290,8 +296,8 @@ rehearsal isn't over-trusted:
 **Build (increment 1).**
 
 - `cf space clone <did> --from <path|dir> | --from-remote <url> --to <dir>` —
-  resolve the store path, `VACUUM INTO` to `pristine/`, clonefile to
-  `engine-v3/`, write `clone.json`, write `.cf-clone`, print the launch command.
+  resolve the store path, copy to `pristine/`, copy that to `engine-v3/`,
+  write `clone.json`, write `.cf-clone`, print the launch command.
 - `cf space clone --reset` — restore the working copy from pristine.
 - `cf space clone --verify` — fingerprint check against the manifest.
 - `cf inspect churn <space> [--bucket 1m] [--since …] [--top N]`.

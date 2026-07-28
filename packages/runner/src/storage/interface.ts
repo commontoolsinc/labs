@@ -1047,6 +1047,17 @@ export interface IExtendedStorageTransaction
   dispatchedEventId?: string;
 
   /**
+   * The durable address of this handling's result/receipt cell (spec §7.6:
+   * "the receipt is the handling's result cell"). Set by the runner when a
+   * handler's outcome is written; consumed by a sender's commit callback to
+   * hand the caller a readable handle — on success AND on a create-only
+   * receipt collision, where it addresses the winner's original outcome
+   * (verb contract WS-D). Structural exposure so no caller ever reconstructs
+   * the `{ $ctx, $event }` cause or parses error prose.
+   */
+  handlingReceiptLink?: NormalizedFullLink;
+
+  /**
    * The wall-clock instant (ms) of the event whose dispatch opened this
    * transaction. Set by the scheduler's event dispatch; consumed by the runner
    * to freeze the handler frame's ambient clock (see Frame.eventTime). Carried
