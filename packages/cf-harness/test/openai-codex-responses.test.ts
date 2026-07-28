@@ -231,7 +231,6 @@ Deno.test("Codex Responses client normalizes tool calls and preserves encrypted 
     {
       version: 1,
       sourceModel: "gpt-5.4",
-      responseId: "resp_tools",
       output: [{
         type: "reasoning",
         id: "rs_1",

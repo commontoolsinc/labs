@@ -1,4 +1,9 @@
 import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import {
+  chatViewOfRequest,
+  responsesBodyFromChatFixture,
+} from "./support/responses-fixture.ts";
+
 import { decodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
 import {
@@ -89,7 +94,7 @@ Deno.test("parseCfHarnessCliArgs resolves defaults from cwd and positional promp
   }
   assertEquals(parsed.workspace, "/tmp/project");
   assertEquals(parsed.prompt, "Summarize this workspace");
-  assertEquals(parsed.model, "gpt-5.5");
+  assertEquals(parsed.model, "gpt-5.6-terra");
   assertEquals(parsed.gatewayAuthMode, "bearer");
   assertEquals(parsed.outputMode, "operator");
   assertEquals(parsed.streamEvents, false);
@@ -478,7 +483,7 @@ Deno.test("parseCfHarnessCliArgs ignores blank gateway environment values", asyn
   }
   assertEquals(parsed.gatewayBaseUrl, "https://llm.stage.commontools.dev/");
   assertEquals(parsed.gatewayAuthMode, "bearer");
-  assertEquals(parsed.model, "gpt-5.5");
+  assertEquals(parsed.model, "gpt-5.6-terra");
 });
 
 Deno.test("parseCfHarnessCliArgs supports batch output mode override", async () => {
@@ -2839,7 +2844,10 @@ Deno.test({
                     }],
                   };
                 return Promise.resolve(
-                  new Response(JSON.stringify(payload), { status: 200 }),
+                  new Response(
+                    JSON.stringify(responsesBodyFromChatFixture(payload)),
+                    { status: 200 },
+                  ),
                 );
               },
             });
@@ -2855,7 +2863,7 @@ Deno.test({
       const secondRequest = JSON.parse(String(fetchCalls[1]?.body)) as {
         messages: Array<{ role: string; content: string }>;
       };
-      const toolMessage = secondRequest.messages.at(-1);
+      const toolMessage = chatViewOfRequest(secondRequest).messages.at(-1);
       assertEquals(toolMessage?.role, "tool");
       const toolOutput = JSON.parse(toolMessage!.content) as {
         status: string;
@@ -4049,6 +4057,8 @@ Deno.test("resume preserves the recorded Codex provider and continuation", async
     content: "Working",
     providerContinuation: {
       providerId: "openai-codex",
+      // Legacy artifact shape: `responseId` is no longer recorded, and this
+      // keeps a run persisted before that change resumable.
       state: { responseId: "resp-retained", output: [] },
     },
   }];

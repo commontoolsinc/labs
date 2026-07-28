@@ -5,6 +5,11 @@ This file pins the direct OAuth and ChatGPT Codex Responses contract used by
 contract. Update it together with fixtures when either upstream implementation
 changes.
 
+The wire mapping this pins now lives in `src/model/responses-protocol.ts`, which
+is shared with the OpenAI-compatible gateway client. A change made there for
+gateway reasons also changes the contract described here, so edits to that
+module need checking against this reference and its fixtures.
+
 Reviewed sources:
 
 - OpenCode `411eff73f026d4950c07947c4d983788cb615baa`,
