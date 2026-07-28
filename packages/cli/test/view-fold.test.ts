@@ -244,6 +244,55 @@ Deno.test("fold: f hides the file the viewport is on, f again shows it", () => {
   assertEquals(s.displayDoc().lines.length, full, "showing again restores it");
 });
 
+Deno.test("fold: a summary omits markers for a hidden expansion edge", () => {
+  const ws: DiffWorkspace = {
+    resolve: (path) => path,
+    read: (path) =>
+      path.endsWith("app.test.ts") ? "x\nadded\nafter" : "keep\nnew\nafter",
+  };
+  const model = parseDiff(TWO_FILES)!;
+  const { doc, edit } = buildDiffDocument(TWO_FILES, model, ws);
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 80, height: 30 },
+    undefined,
+    diffSource(ws, edit),
+  );
+  press(s, "f");
+  const view = s.view();
+  assertEquals(view.canExpand, true);
+  assertEquals(view.expandRow, 7);
+  assertEquals(view.expandUp, false);
+  assertEquals(view.diffAnnotations, [{ line: 7, kind: "expandDown" }]);
+  const rendered = renderFrame(s.displayDoc(), view);
+  assertEquals(rendered[0].trimEnd(), "▸ src/app.ts  +1 −1");
+  assertEquals(rendered[7].at(-1), "◢");
+
+  const internals = s as unknown as {
+    displayDiffAnnotations(expand: {
+      row: number;
+      markerLine: number;
+      line: number;
+      up: boolean;
+    }): readonly unknown[];
+    displayAdjacentDiffMetadataRows(expand: {
+      row: number;
+      markerLine: number;
+      line: number;
+      up: boolean;
+    }): readonly number[];
+  };
+  const hiddenEdge = {
+    row: 5,
+    markerLine: 5,
+    line: 4,
+    up: true,
+  };
+  assertEquals(internals.displayDiffAnnotations(hiddenEdge), []);
+  assertEquals(internals.displayAdjacentDiffMetadataRows(hiddenEdge), []);
+});
+
 Deno.test("fold: a smaller file-number gutter clamps horizontal panning", () => {
   const root = Deno.makeTempDirSync();
   try {
