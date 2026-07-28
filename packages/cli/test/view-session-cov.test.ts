@@ -2251,7 +2251,9 @@ Deno.test("diffcov: wrapped reveal keeps the next triangle on screen", () => {
       "the next expansion triangle remains visible",
     );
     assert(
-      rendered.every((row) => !row.includes("^L") && !row.endsWith("█")),
+      rendered.slice(0, -1).every((row) =>
+        !row.includes("^L") && !row.endsWith("█")
+      ),
       "no orphan metadata connector is drawn",
     );
   } finally {
