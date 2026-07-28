@@ -914,6 +914,164 @@ function getChildSchema(
   return properties[key] as JSONSchema | undefined;
 }
 
+describe("forced-stream fallback dispatch", () => {
+  /** A verb that defeats ordinary detection — plain object value, no `$stream`
+   * marker, no stream schema — but that the forced stream cast proves is a
+   * handler. This is the only case `tryResolvePieceHandler` exists for, and
+   * the one where the cell that passed detection and the cell built by reading
+   * the schema back from links are not interchangeable. */
+  function createFallbackHarness() {
+    const sends: unknown[] = [];
+    const dataWrites: unknown[] = [];
+
+    // The cell the forced cast proves. Only this one dispatches.
+    const streamCell = {
+      isStream: () => true,
+      send: (value: unknown, onCommit?: (tx: unknown) => void) => {
+        sends.push(value);
+        onCommit?.({ status: () => ({ status: "done" }) });
+      },
+    };
+
+    // What `rootCell.key(name).asSchemaFromLinks()` yields: carries the
+    // published payload schema, but nothing marking it a stream. A real cell
+    // here has a `send` that routes to `.set()`'s non-stream branch and
+    // throws "Transaction required for .set()".
+    // `key()` must yield nothing for "pattern"/"extraParams", or
+    // detectCallableKind's tool probe classifies this as a tool and the
+    // fallback path under test is never reached.
+    const emptyChild = {
+      get: () => undefined,
+      getRaw: () => undefined,
+    };
+    const linkDerivedCell = {
+      schema: {
+        type: "object",
+        properties: { note: { type: "string" } },
+      } as JSONSchema,
+      get: () => ({}),
+      getRaw: () => ({}),
+      asSchemaFromLinks: () => linkDerivedCell,
+      key: () => emptyChild,
+    };
+
+    const rootValue = { hiddenPing: {} };
+    const rootCell = {
+      schema: {
+        type: "object",
+        properties: { hiddenPing: { type: "object" } },
+      } as JSONSchema,
+      get: () => rootValue,
+      getRaw: () => rootValue,
+      asSchemaFromLinks: () => rootCell,
+      key: (name: string) => name === "hiddenPing" ? linkDerivedCell : absent,
+    };
+    // The input root offers nothing, so resolution falls past both ordinary
+    // paths to the forced cast.
+    const absent: {
+      schema?: JSONSchema;
+      get: () => unknown;
+      getRaw: () => unknown;
+      asSchemaFromLinks: () => unknown;
+      key: () => unknown;
+    } = {
+      get: () => undefined,
+      getRaw: () => undefined,
+      asSchemaFromLinks: () => absent,
+      key: () => emptyChild,
+    };
+    const emptyCell = {
+      schema: { type: "object" } as JSONSchema,
+      get: () => ({}),
+      getRaw: () => ({}),
+      asSchemaFromLinks: () => emptyCell,
+      key: () => absent,
+    };
+
+    const piece = {
+      getCell: () => ({
+        get: () => rootValue,
+        asSchema: () => ({ key: () => streamCell }),
+      }),
+      input: {
+        getCell: () => Promise.resolve(emptyCell),
+        set: (value: unknown) => {
+          dataWrites.push(value);
+          return Promise.resolve();
+        },
+      },
+      result: {
+        getCell: () => Promise.resolve(rootCell),
+        set: (value: unknown) => {
+          dataWrites.push(value);
+          return Promise.resolve();
+        },
+      },
+    };
+
+    const manager = {
+      getSpace: () => "home",
+      synced: async () => {},
+      runtime: {
+        [CF_RUNTIME_ERROR_LOG]: [] as Array<{ message: string }>,
+        idle: async () => {},
+      },
+    };
+
+    return { sends, dataWrites, piece, manager, linkDerivedCell, streamCell };
+  }
+
+  const config = {
+    apiUrl: "http://localhost:8000",
+    identity: "/tmp/test-identity.pem",
+    piece: "fid1:piece-123",
+    space: "home",
+  };
+
+  it("sends through the cell whose stream-ness was proven, not a link-derived one", async () => {
+    const harness = createFallbackHarness();
+
+    const result = await executePieceCallable(
+      config,
+      "hiddenPing",
+      ["--note", "hi"],
+      {
+        loadManager: () => Promise.resolve(harness.manager as never),
+        loadPiece: () => Promise.resolve(harness.piece as never),
+        isStdinTerminal: () => true,
+      },
+    );
+
+    expect(result.resolved.callableKind).toBe("handler");
+    // Dispatched as an event through the proven cell. Resolving to the
+    // link-derived cell instead leaves a cell that `.set()` treats as data.
+    expect(result.resolved.callableCell).toBe(harness.streamCell);
+    expect(harness.sends).toEqual([{ note: "hi" }]);
+    expect(harness.dataWrites).toEqual([]);
+  });
+
+  it("keeps the published payload schema for the command spec", async () => {
+    const harness = createFallbackHarness();
+
+    const result = await executePieceCallable(
+      config,
+      "hiddenPing",
+      ["--note", "hi"],
+      {
+        loadManager: () => Promise.resolve(harness.manager as never),
+        loadPiece: () => Promise.resolve(harness.piece as never),
+        isStdinTerminal: () => true,
+      },
+    );
+
+    // The forced cast's own schema is just the stream marker; `--help` and
+    // input validation must still see what the piece publishes.
+    expect(result.resolved.commandSpec.inputSchema).toEqual(
+      harness.linkDerivedCell.schema,
+    );
+  });
+});
+
 describe("piece call stdin payloads", () => {
   it("identifies JSON output without treating delimited fields as selectors", () => {
     expect(

@@ -1348,18 +1348,30 @@ async function tryResolvePieceHandler(
     },
     required: [callableName],
   });
-  if (!isHandlerCell(streamRoot.key(callableName))) {
+  const streamCell = streamRoot.key(callableName);
+  if (!isHandlerCell(streamCell)) {
     return null;
   }
 
+  // Dispatch through the cell whose stream-ness this path just proved, not a
+  // second cell built by reading the schema back from links. Both address the
+  // same target — `getResult` is the identity on the piece cell — so they
+  // differ only in schema, and a link-derived schema is exactly what defeated
+  // the ordinary detection paths above. Sending on that cell takes `.set()`'s
+  // non-stream branch (`packages/runner/src/cell.ts:1316`) and fails with
+  // "Transaction required for .set()" instead of queueing the event, so a verb
+  // this path lists is a verb that could not be called.
   const rootCell = await piece.result.getCell();
-  const callableCell = rootCell.key(callableName).asSchemaFromLinks();
+  const linkDerivedCell = rootCell.key(callableName).asSchemaFromLinks();
   return {
-    callableCell,
+    callableCell: streamCell,
     callableKind: "handler",
     cellKey: callableName,
     cellProp: "result",
-    commandSpec: callableCommandSpec(callableCell, "handler"),
+    // The link-derived cell still carries whatever payload schema the piece
+    // does publish, which the forced stream cast does not; keep using it for
+    // the command spec so `--help` and input validation are unaffected.
+    commandSpec: callableCommandSpec(linkDerivedCell, "handler"),
     manager,
     piece,
     space,
