@@ -980,8 +980,11 @@ Deno.test("session: the help overlay documents file folding and scrolling", () =
   assert(text.includes("hide test"), "documents hiding test files");
   assert(text.includes("wrap / unwrap long lines"), "documents line wrapping");
   assert(
-    text.includes("reveal more context at the marked edge"),
-    "documents the pager's Ctrl-L marker",
+    ov.lines.some((line) =>
+      line.text.includes("^L") &&
+      line.text.includes("reveal more context at the marked edge")
+    ),
+    "documents the pager's Ctrl-L marker and its key",
   );
   assert(
     ov.footer.includes("scroll"),
