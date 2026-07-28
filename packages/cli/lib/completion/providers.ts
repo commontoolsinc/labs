@@ -112,15 +112,29 @@ async function pieceCandidates(line: CompletionLine): Promise<ProviderResult> {
   const config = resolveSpaceContext(line);
   if (!config) return NOTHING;
   const { listPieces } = await import("../piece.ts");
-  const pieces = await listPieces(config);
-  return values(
-    pieces.map((piece) => ({
-      value: piece.id,
-      // The piece's own name reads best; the pattern symbol is the fallback
-      // for a piece that has not been given one.
-      description: piece.name ?? piece.patternRef?.symbol ?? undefined,
-    })),
-  );
+  return values(shapePieceCandidates(await listPieces(config)));
+}
+
+/** Listing shape used by `shapePieceCandidates`, structural so tests need no runtime. */
+export interface PieceListingLike {
+  readonly id: string;
+  readonly name?: string;
+  readonly patternRef?: { readonly symbol?: string } | null;
+}
+
+/**
+ * Label pieces for the annotation column: the piece's own name reads best, and
+ * the pattern symbol is the fallback for a piece never given one. A piece that
+ * failed to load still lists — its id is exactly what an operator reaches for
+ * completion to recover.
+ */
+export function shapePieceCandidates(
+  pieces: readonly PieceListingLike[],
+): Candidate[] {
+  return pieces.map((piece) => ({
+    value: piece.id,
+    description: piece.name ?? piece.patternRef?.symbol ?? undefined,
+  }));
 }
 
 /** Callables (handlers and streams) exposed by the line's `--piece`. */
@@ -131,12 +145,20 @@ async function callableCandidates(
   if (!config) return NOTHING;
   const { listPieceCallables } = await import("../piece.ts");
   const listing = await listPieceCallables(config);
-  return values(
-    listing.verbs.map((verb) => ({
-      value: verb.name,
-      description: verb.kind,
-    })),
-  );
+  return values(shapeVerbCandidates(listing.verbs));
+}
+
+/** Verb shape used by `shapeVerbCandidates`, structural so tests need no runtime. */
+export interface VerbListingLike {
+  readonly name: string;
+  readonly kind: string;
+}
+
+/** Callables annotated by kind, matching what `cf piece verbs` reports. */
+export function shapeVerbCandidates(
+  verbs: readonly VerbListingLike[],
+): Candidate[] {
+  return verbs.map((verb) => ({ value: verb.name, description: verb.kind }));
 }
 
 /**
@@ -152,11 +174,7 @@ async function cellPathCandidates(
   const config = resolvePieceContext(line);
   if (!config) return NOTHING;
 
-  const typed = line.word;
-  const cut = typed.lastIndexOf("/");
-  const parentPath = cut === -1 ? "" : typed.slice(0, cut);
-  const prefix = cut === -1 ? "" : `${parentPath}/`;
-
+  const { parentPath, prefix } = splitPathPrefix(line.word);
   const keys = await childKeys(config, parentPath, {
     input: line.flags.has("input"),
   });
@@ -181,13 +199,36 @@ async function childKeys(
   const { getCellValue } = await import("../piece.ts");
   const { parseCellPath } = await import("@commonfabric/runner");
   const segments = path ? parseCellPath(path) : [];
-  const value = await getCellValue(config, segments, options);
+  return keysOf(await getCellValue(config, segments, options));
+}
 
+/**
+ * The completable keys of one cell value: an array yields its indices, an
+ * object its property names, and a leaf yields nothing — which is the correct
+ * signal that the path already names a value rather than a container.
+ */
+export function keysOf(value: unknown): string[] {
   if (Array.isArray(value)) return value.map((_, index) => String(index));
   if (value && typeof value === "object") {
     return Object.keys(value as Record<string, unknown>);
   }
   return [];
+}
+
+/**
+ * Split the word being typed into the parent path to read and the prefix each
+ * candidate must carry, so the shell replaces the whole token.
+ *
+ * `items/0/ti` reads `items/0` and offers `items/0/title`: the prefix is what
+ * keeps a completed deep path from collapsing to its last segment.
+ */
+export function splitPathPrefix(
+  typed: string,
+): { parentPath: string; prefix: string } {
+  const cut = typed.lastIndexOf("/");
+  if (cut === -1) return { parentPath: "", prefix: "" };
+  const parentPath = typed.slice(0, cut);
+  return { parentPath, prefix: `${parentPath}/` };
 }
 
 /**
@@ -210,18 +251,27 @@ async function linkEndpointCandidates(
   const config = resolveSpaceContext(line);
   if (!config) return NOTHING;
   const pieceId = typed.slice(0, cut);
-  const rest = typed.slice(cut + 1);
-  const lastSlash = rest.lastIndexOf("/");
-  const parentPath = lastSlash === -1 ? "" : rest.slice(0, lastSlash);
+  const { parentPath } = splitPathPrefix(typed.slice(cut + 1));
 
   const keys = await childKeys({ ...config, piece: pieceId }, parentPath);
   if (keys.length === 0) return NOTHING;
 
-  const prefix = parentPath ? `${pieceId}/${parentPath}/` : `${pieceId}/`;
+  const prefix = linkEndpointPrefix(pieceId, parentPath);
   return {
     candidates: keys.map((key) => ({ value: `${prefix}${key}` })),
     directives: [{ kind: "nospace" }],
   };
+}
+
+/**
+ * Prefix for a `piece link` endpoint candidate. The empty parent path is the
+ * case that matters: `id//key` would be a different, invalid reference.
+ */
+export function linkEndpointPrefix(
+  pieceId: string,
+  parentPath: string,
+): string {
+  return parentPath ? `${pieceId}/${parentPath}/` : `${pieceId}/`;
 }
 
 /**

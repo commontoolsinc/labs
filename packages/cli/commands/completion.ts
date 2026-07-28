@@ -60,42 +60,71 @@ so they keep working as commands are added — reinstall only if this CLI moves.
  * `--cword`, bash forwards the raw buffer with `--line`/`--point` (its own
  * word-splitting mangles `:` and `=`, which cf values are full of).
  */
+export interface CompleteRequest {
+  readonly shell: "bash" | "zsh";
+  readonly words: string[];
+  readonly cword: number;
+}
+
+/**
+ * Parse the callback's arguments by hand.
+ *
+ * Deliberately not Cliffy options: this command's stdout is a data channel a
+ * shell reads on every keystroke, and Cliffy answers a malformed invocation by
+ * printing usage text to stdout — which the shell would then offer as
+ * completion candidates ("Usage:", "-h, --help", ...). Raw args mean no input,
+ * however mangled, can put anything on stdout but candidates. An empty
+ * `--line` is a value here, not the missing-value error Cliffy reports.
+ */
+export function parseCompleteRequest(args: readonly string[]): CompleteRequest {
+  let shell: "bash" | "zsh" = "bash";
+  let line: string | undefined;
+  let point: number | undefined;
+  let cword: number | undefined;
+  const words: string[] = [];
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--shell") shell = args[++i] === "zsh" ? "zsh" : "bash";
+    else if (arg === "--line") line = args[++i] ?? "";
+    else if (arg === "--point") point = Number(args[++i]);
+    else if (arg === "--cword") cword = Number(args[++i]);
+    else if (arg === "--") words.push(...args.slice(i + 1)), i = args.length;
+    else if (!arg.startsWith("-")) words.push(arg);
+  }
+
+  if (line !== undefined) {
+    const offset = Number.isFinite(point) ? point as number : line.length;
+    return { shell, ...tokenizeLine(line, offset) };
+  }
+  return {
+    shell,
+    words,
+    cword: Number.isFinite(cword)
+      ? cword as number
+      : Math.max(0, words.length - 1),
+  };
+}
+
 const completeCommand = new Command()
   .description("Internal: emit completion candidates for a command line.")
-  .option("--shell <shell:string>", "Shell requesting completion.", {
-    default: "bash",
-  })
-  .option("--cword <index:integer>", "Index of the word under the cursor.")
-  .option("--line <line:string>", "Raw command line, for shells without words.")
-  .option("--point <point:integer>", "Cursor offset into --line.")
-  .arguments("[words...:string]")
-  .noGlobals()
-  .action(async (options, ...words: string[]) => {
-    const shell = options.shell === "zsh" ? "zsh" : "bash";
-
-    let resolved: { words: string[]; cword: number };
-    if (options.line !== undefined) {
-      resolved = tokenizeLine(
-        options.line,
-        options.point ?? options.line.length,
-      );
-    } else {
-      resolved = {
-        words: [...words],
-        cword: options.cword ?? Math.max(0, words.length - 1),
-      };
-    }
-
-    // Resolved lazily: importing the root command pulls in the whole command
-    // tree, and doing it inside the guard keeps a failure silent.
-    const { main } = await import("./main.ts");
-
+  .usage(
+    "[--shell <shell>] [--cword <n> -- <words...>] [--line <line> --point <n>]",
+  )
+  .useRawArgs()
+  .action(async (_options: unknown, ...rawArgs: unknown[]) => {
     try {
+      const request = parseCompleteRequest(rawArgs.map(String));
+
+      // Resolved lazily: importing the root command pulls in the whole command
+      // tree, and doing it inside the guard keeps a failure silent.
+      const { main } = await import("./main.ts");
+
       const lines = await complete(
         main,
-        resolved.words,
-        resolved.cword,
-        shell,
+        request.words,
+        request.cword,
+        request.shell,
       );
       if (lines.length > 0) console.log(lines.join("\n"));
     } catch {
