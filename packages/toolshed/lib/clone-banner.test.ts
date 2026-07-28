@@ -47,6 +47,22 @@ Deno.test("a served clone is announced with its provenance", async () => {
   }, { marker: MARKER_BODY });
 });
 
+Deno.test("announcing a clone emits the banner exactly once", async () => {
+  // `announceCloneIfServed` is what `startServer` calls, so its emitting path
+  // is the one production takes — the other cases here exercise `cloneBanner`
+  // underneath it.
+  await withStore((dir) => {
+    const lines: string[] = [];
+    announceCloneIfServed(
+      { memoryDir: `file://${dir}/` },
+      (m) => lines.push(m),
+    );
+    assertEquals(lines.length, 1);
+    assert(lines[0].includes("NOT PRODUCTION"));
+    assert(lines[0].includes("did:key:z6MkExample"));
+  }, { marker: MARKER_BODY });
+});
+
 Deno.test("an ordinary store says nothing", async () => {
   await withStore((dir) => {
     assertEquals(cloneBanner({ memoryDir: `file://${dir}/` }), null);
