@@ -64,6 +64,10 @@ done.
 
 ## Map of this tree
 
+- [`why.md`](why.md) — the short statement of what Common Fabric is for and
+  which parts already run
+- [`FAQ.md`](FAQ.md) — frequently asked questions with pointers to the
+  authoritative answers
 - [`common/`](common/README.md) — pattern-author documentation: concepts,
   components, conventions, workflows
 - [`development/`](development/DEVELOPMENT.md) — runtime-developer
@@ -75,7 +79,8 @@ done.
 - [`plans/`](plans/README.md) — pending implementation plans
 - [`tutorial/`](tutorial/README.md) — the two-part system tutorial
 - `future-tasks/` — parked ideas and future work
-- `features/` — feature design documents
+- [`features/CANONICAL_BASE_PATTERNS.md`](features/CANONICAL_BASE_PATTERNS.md)
+  — the canonical base-pattern design
 - [`history/`](history/README.md) — archived point-in-time records (see
   above)
 - [`check.md`](check.md) — how the TypeScript code blocks embedded in these

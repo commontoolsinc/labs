@@ -56,6 +56,8 @@ on the Common Fabric runtime.
 - [patterns/view-switching.md](patterns/view-switching.md) — switching between views with `computed()`
 - [patterns/navigation.md](patterns/navigation.md) — navigating to detail views
 - [patterns/composition.md](patterns/composition.md) — composing patterns into reactive graphs
+- [patterns/primitives.md](patterns/primitives.md) — the composition contract
+  for reusable pattern logic and state
 - [patterns/multi-user-patterns.md](patterns/multi-user-patterns.md) — shared spaces, per-user state, collaboration
 - [patterns/style.md](patterns/style.md) — styling and theme guide (design brief, tokens, fonts)
 - [patterns/ui-cookbook.md](patterns/ui-cookbook.md) — worked UI layout vignettes
