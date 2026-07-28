@@ -132,10 +132,23 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   `Stream<string>` when `R` appears nowhere), while `R` in a property
   position discriminates and forces the author to declare what the body
   returns.
-  The costs are bounded and mechanical: ten `Stream<any>` guards widen to
-  `Stream<any, any>` (`api/index.ts:867`, `:1488`, `:1967`, `:2320`,
+  Prototyped to measure rather than estimate the cost, following the
+  `CELL_INNER_TYPE` precedent — a `declare const` unique symbol read as a
+  property, which `AnyBrandedCell` already uses for exactly this reason
+  ("without a concrete property mentioning T, T would be a phantom
+  parameter"). The whole workspace type-checks clean with `Stream` widened:
+  **zero** compile errors, not the handful a grep suggested.
+  That is worse news than it sounds, and it is the one thing C1 must not get
+  wrong. The ten `Stream<any>` guards do not break — they *stop matching*.
+  `[T] extends [Stream<any>]` evaluates to a miss for `Stream<E, R>`, silently,
+  because nothing declares a result yet; `Stream<any, any>` matches both.
+  So widening those guards (`api/index.ts:867`, `:1488`, `:1967`, `:2320`,
   `:3256`, `runner/src/link-utils.ts:54`, three in
-  `runner/src/builtins/llm-dialog.ts`, one pattern), and `AsStream` — one
+  `runner/src/builtins/llm-dialog.ts`, one pattern) is mandatory and **not
+  compiler-enforced**: the first pattern to declare a result would otherwise
+  change wrapping behaviour across the type system with nothing failing.
+  C1 carries a type-level test that a result-carrying stream satisfies each
+  guard. `AsStream` — one
   slot, `Apply` and `IKeyable` assume that — keeps producing `Stream<A,
   void>`, so a projection through the HKT drops a declared result. That is
   acceptable because streams are leaves: patterns do not `key()` into a
