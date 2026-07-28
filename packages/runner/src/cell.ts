@@ -1,9 +1,9 @@
 import {
   type Immutable,
-  type Mutable,
   isFunction,
   isObject,
   isRecord,
+  type Mutable,
 } from "@commonfabric/utils/types";
 import {
   cloneIfNecessary,
