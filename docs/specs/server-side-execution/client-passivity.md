@@ -53,14 +53,26 @@ precisely the foundation those need.
 
 **Forward steps, in order, each with its motivation and gate:**
 
-1. **Serving-path traversal coverage/memoization** — doubly
-   motivated: it is the engaged-tail driver (client-visible, §5c
-   attribution) AND the cold-start amplifier (P0-R3c option (i),
-   `graph.query.demand` 97% of read work). First instrument the
-   confirmation (floor-less call-site-tagged traversal timing,
-   event-loop-lag sampler, transact→ack→push chain), then memoize/
-   cover against the session's tracked state. Gate: tail slope ≈
-   flag-off slope; cold first-prepare under the P1 budget.
+1. **Serving-path traversal coverage/memoization — BUILT 2026-07-28
+   (§5d), gate substantially met, residuals named.** The instrument
+   (`50af1a5d3`) REVISED the attribution: per-wave serving traversal
+   time was flat — the mechanism was per-call demand-pull cost growing
+   with closure size (8→21ms avg, single pulls stalling the serving
+   loop up to 1.2s) at ZERO selector coverage, plus a broken interior
+   link-coverage key that had the skip machinery inert for unscoped
+   links. Landed (`225a4c6b2` + `9bb9e5eec`): interior skips
+   un-broken; `omitWatchCovered` wire opt-in for watch-tracked
+   sessions; executor closure-growth pulls integrate the enumerated
+   frontier via exact `docs.read` POINT READS (zero traversal; the
+   schema-true frontier graph-pull first cut was REFUTED by its gate
+   pair — backlinks re-entered the whole closure). Result (§5d):
+   `graph.query.demand` 20.6s→3.9s (max stall 1.2s→132ms); engaged
+   late-half median EXCESS over flag-off +617→+201ms at ~2× the
+   engagement. Residuals → follow-up: (a) same-flush demand+wave
+   trigger override sends growth down the full-pull path (233 wave
+   re-colds, `graph.query.wave` now the second cost); (b) docs.read
+   frontier batching (5.5k calls/9.8s); (c) an unattributed 3.5s
+   spike note in the flag-on arm (plausibly the P4 conflict class).
 2. **P4 defer-then-(b) speculation discipline** — quantified
    motivation: 594 server retries for 14 commits; the executor should
    defer attempts it is about to lose (warm-set budget hard gate per
@@ -851,6 +863,101 @@ within-run interleaving) compare arms. The A1/B1 adjacent pair
 Parent-doc edits owed with P-rows: README §5.B.3 retry citation (CP7);
 R5 register rows for `streamData`/`llmDialog` (CP6/CP31); the
 implementation-plan three-way attribution sentence (CP11).
+
+## 5d. Step-1 build + gate (2026-07-28): the serving-path fix, one refuted cut, the honest gate
+
+**Instrument first (`50af1a5d3`, permanent):** floor-less
+`totalMs`/`maxMs` on every `traversalByOperation` bucket; wave
+drain-vs-fanout split + per-wave `Memory: wave:` log; `Memory:
+transact ack:` chain leg; toolshed 1s serving sampler (per-op deltas +
+tracked-graph gauge + 100ms event-loop-lag window, both arms). The
+confirm run (flag-on, engaged: claims 78 / committed 12 / failed 0;
+load ~20-26) REVISED §5c's attribution:
+
+- Drain-wait was DEAD (88ms total; the 2×-last-refresh budget never
+  engages) — the compounding-drain hypothesis eliminated.
+- Per-wave serving traversal time was FLAT early→late (refresh 2.8s→
+  2.5s per 45s half) — aggregate serving does not grow.
+- The mechanism: PER-CALL demand-pull cost grows with closure size
+  (`graph.query.demand` avg 8.3→21.0ms early→late; 20.6s/run total;
+  single synchronous pulls up to 1.2s blocking every concurrent
+  ack/push — lag≥100ms events 20→32 with 1.3-2.6s stalls all late) at
+  ZERO selector coverage (0 skips vs ~6k on the watch paths).
+- The adjacent flag-off arm (claims 0): both arms grow (+36.9 vs
+  +64.7 ms/note OLS) — flag-on EXCESS +27.8 ms/note; late-half median
+  excess +617ms (1588 vs 971).
+
+**The fix (`225a4c6b2` + `9bb9e5eec`), three composable mechanisms:**
+
+1. Interior link-coverage skips UN-BROKEN: `isLinkedDocumentCovered`
+   keyed unscoped links as `<space>/undefined/<id>` (vs
+   `getTrackerKey`'s `?? "space"`), so the interior skip machinery was
+   inert for the COMMON link shape; plus the DAG walker's ARRAY branch
+   (lists!) had no coverage check at all. Fixed + `coveredLinkSkips`
+   counter. Immediate effect: intra-traversal dedup engages (the query
+   stats fixture now counts 24 skips where shared subgraphs re-walked;
+   loads stay one-per-doc), watch-path refreshes stop at covered
+   boundaries, and 5/2396 notebook golden-oracle invocations return
+   covered-null holes per the established querySchema contract
+   (goldens regenerated per the documented workflow).
+2. `omitWatchCovered` graph.query opt-in: the server seeds the query
+   traversal's tracker from the SESSION's tracked watch surface —
+   covered descents skip, covered docs are omitted, callers must
+   merge. Engine probe: 1 read / 2 DAG / 0 getDocAtPath vs 2/4/2.
+   Refused under an acting context (tracker keys are scope CLASSES).
+   NOTE the architectural discovery: the EXECUTOR session registers no
+   server-side watches (it lives on the F1/F2 notice+point-read feed),
+   so this opt-in can never serve the executor's pulls — it stays for
+   watch-tracked callers.
+3. Executor frontier growth pulls (`9bb9e5eec`): the growth detector
+   already enumerates the grown targets; the (debounced) growth
+   refresh integrates them via exact `docs.read` POINT READS and walks
+   the new subgraph CLIENT-side — the held set is the boundary, so
+   backlinks into held docs terminate immediately; zero server
+   traversal; snapshots merge; the revised held doc applies as an F2
+   point update; bounded loudly (16 rounds / 2048 docs, spill back to
+   the pending set). Dial
+   `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_COVERED_GROWTH_PULL`,
+   toolshed default ON.
+
+**The REFUTED first cut (gate honesty):** `225a4c6b2` originally
+rooted a schema-true `graph.query` at the frontier. Its adjacent gate
+pair measured it WORSE than the full pull — excess slope +52.5 ms/note
+(vs +27.8 pre-fix), demand 27.9s / max stall 2.5s, reads UP — because
+the frontier's BACKLINKS re-entered the entire held closure and
+nothing bounded the walk (no server-side tracked surface for the
+executor session). The client-bounded point-read walk replaced it same
+day. Flag-off stayed stable across pairs (+36.9 → +38.1 → +36.3
+ms/note), so the within-pair comparisons are valid.
+
+**Gate2 pair (post-`9bb9e5eec`; load ~12-21):**
+
+| quantity | pre-fix pair | gate2 pair |
+| --- | --- | --- |
+| flag-on engagement | claims 78 / committed 12 | claims 136 / committed 28 / failed 0 |
+| `graph.query.demand` | 1743 calls / 20.6s / max 1201ms | 456 calls / 3.9s / max 132ms |
+| frontier reads | — | `docs.read` 5552 calls / 9.8s / max 906ms |
+| flag-on med notes 2-10 / 11-20 | 879 / 1588 | 763 / 1252 |
+| flag-off med notes 2-10 / 11-20 | 664 / 971 | 663 / 1051 |
+| late-half median EXCESS | **+617ms** | **+201ms** |
+| early-half median excess | +215ms | +100ms |
+| OLS slope excess | +27.8 ms/note | +34.2 ms/note (one 3.5s spike note drags OLS; median halves are the robust read at n=20) |
+
+**Verdict:** the mechanism is CONFIRMED and the dominant serving cost
+collapsed 5× with the max stall down 10×; the engaged tail excess
+collapsed 3× at ~2× the engagement. The gate ("tail slope ≈
+flag-off") is substantially but not strictly met: +201ms late-half
+excess and a spike class remain. Residuals, named for follow-up
+rather than silently absorbed: (a) same-flush demand+wave trigger
+override — a watch marked closure-growth (demand) AND
+untracked-root/re-key (wave) in one flush takes the WAVE trigger and
+the full-pull path (233 wave-classified growth re-colds;
+`graph.query.wave` 250 calls / 5.3s is now the second serving cost);
+(b) frontier read batching (5.5k point reads could coalesce); (c) the
+unattributed 3.5s spike note (plausibly the P4 conflict class —
+re-examine after step 2). The remaining excess is at the level where
+the plan's own next steps (P4 speculation discipline, P3/P5 removal
+of client work) are the levers.
 
 ## 7. Owner decisions — RESOLVED 2026-07-26
 
