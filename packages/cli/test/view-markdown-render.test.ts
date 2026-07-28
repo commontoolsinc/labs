@@ -421,6 +421,25 @@ Deno.test("markdown rendered view strips multiline block HTML", () => {
     "<!DOCTYPE svg [<!ELEMENT svg ANY>]><p>visible</p>",
   );
   assertEquals(declarationSubset.map((line) => line.text), ["visible"]);
+  const multilineDeclarationSubset = renderMarkdownLines([
+    "<!DOCTYPE svg [",
+    "<!ELEMENT svg ANY>",
+    "]>",
+    "<p>visible</p>",
+  ].join("\n"));
+  assertEquals(multilineDeclarationSubset.map((line) => line.text), [
+    "",
+    "",
+    "",
+    "visible",
+  ]);
+  const commentedDeclarationSubset = renderMarkdownLines(
+    "<!DOCTYPE svg [<!-- ] --> <!ELEMENT svg ANY>]><p>visible</p>",
+  );
+  assertEquals(
+    commentedDeclarationSubset.map((line) => line.text),
+    ["visible"],
+  );
 });
 
 Deno.test("rendered Markdown diff keeps changed multiline HTML tags visible", () => {

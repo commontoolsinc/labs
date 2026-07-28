@@ -225,6 +225,7 @@ function renderMarkdownBlocks(
 
   const lineStarts = computeLineStarts(text);
   let offset = 0;
+  const declarations: Array<{ start: number; end: number }> = [];
   for (const token of tokens) {
     const tokenOffset = text.startsWith(token.raw, offset)
       ? offset
@@ -238,8 +239,55 @@ function renderMarkdownBlocks(
     for (let i = 0; i < source.length; i++) {
       out[range.start + i] = rendered[i] ?? emptyLine();
     }
+    const declarationStart = htmlDeclarationStart(token);
+    if (declarationStart !== null) {
+      const start = tokenOffset + declarationStart;
+      const end = declarationMarkupEnd(text, start + 2);
+      if (end !== null) declarations.push({ start, end });
+    }
   }
+  applyHtmlDeclarations(text, rawLines, out, declarations, inlineLexer);
   return out;
+}
+
+function htmlDeclarationStart(token: BlockToken): number | null {
+  if (token.type !== "html") return null;
+  const match = token.raw.match(/^(?:\n)*( {0,3})<![A-Za-z]/);
+  return match ? match[0].lastIndexOf("<") : null;
+}
+
+function applyHtmlDeclarations(
+  text: string,
+  sourceLines: readonly string[],
+  lines: Line[],
+  declarations: readonly { start: number; end: number }[],
+  inlineLexer?: Lexer,
+): void {
+  if (declarations.length === 0) return;
+
+  let visible = "";
+  let offset = 0;
+  for (const declaration of declarations) {
+    if (declaration.start < offset) continue;
+    visible += text.slice(offset, declaration.start);
+    visible += text.slice(declaration.start, declaration.end).replace(
+      /[^\n]/g,
+      "",
+    );
+    offset = declaration.end;
+  }
+  visible += text.slice(offset);
+
+  const visibleLines = visible.split("\n");
+  for (let index = 0; index < sourceLines.length; index++) {
+    const sourceLine = sourceLines[index];
+    const visibleLine = visibleLines[index] ?? "";
+    if (visibleLine === sourceLine) continue;
+    lines[index] = {
+      ...renderMarkdownSourceLine(visibleLine, inlineLexer),
+      renderedSourceHidden: true,
+    };
+  }
 }
 
 function tokenLineRange(
@@ -1025,6 +1073,14 @@ function declarationMarkupEnd(source: string, start: number): number | null {
     const char = source[end];
     if (quote) {
       if (char === quote) quote = null;
+    } else if (source.startsWith("<!--", end)) {
+      const commentEnd = source.indexOf("-->", end + 4);
+      if (commentEnd < 0) return null;
+      end = commentEnd + 2;
+    } else if (source.startsWith("<?", end)) {
+      const instructionEnd = source.indexOf("?>", end + 2);
+      if (instructionEnd < 0) return null;
+      end = instructionEnd + 1;
     } else if (char === "'" || char === '"') {
       quote = char;
     } else if (char === "[") {
