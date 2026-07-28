@@ -176,7 +176,7 @@ surveillance tool.
 | commit CI Gantt → `/ci-gantt` | job and step timing for every successful main workflow run attached to one commit, linked from run durations in recent main runs | `GH_TOKEN` |
 | CI duration history → `/bench?view=ci` | labs and loom job, shard-group, and end-to-end workflow duration trends. The duration tiles open their matching repository view | `GH_TOKEN` |
 | CI run Gantt → `/bench?view=gantt` | detailed labs or loom job phases from `scripts/ci-gantt.ts`, backed by the CI history cache | `GH_TOKEN` |
-| production | synthetic HTTP check of the production server: `/_health` on `PROD_URL`'s origin, which answers only while the server is really serving. Defaults to estuary, the production toolshed. Estuary is on the tailnet, so a dashboard that cannot reach the tailnet needs `PROD_URL` pointed at something it can | `PROD_URL` (optional) |
+| production | synthetic HTTP check of the production server: `/_health` on `PROD_URL`'s origin, which answers only while the server is really serving. Defaults to estuary, the production toolshed. Estuary is on the tailnet, so a dashboard without direct tailnet access can route this check through `PROD_PROXY` or point `PROD_URL` at another truthful health source | `PROD_URL`, `PROD_PROXY` (optional) |
 | common.tools | synthetic HTTP check of the public site | `COMMON_TOOLS_URL` (optional; defaults to `https://common.tools`) |
 | prod errors | SigNoz trace error rate for one service (errored spans / all spans): last-12h headline, with a per-hour sparkline over the retained trace history (~2 weeks) and the last-12h slice that feeds the headline highlighted. Scoped to `PROD_SERVICE` — the same SigNoz holds staging and one-off perf runs, whose rates are not production's. Gray (not red) when SigNoz is unreachable. Pops out to the SigNoz logs explorer | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `SIGNOZ_UI_URL` for the pop-out |
 | cloud spend | BigQuery billing export, projected to month-end from the available part of a 14-day daily-cost window early in the month. The header shows actual MTD spend. The highlighted part of the 45-day chart shows the days used for the estimate | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
@@ -307,13 +307,13 @@ dataset.
 6. For local development instead, grant those two roles to a service account,
    download a key for it, and set `GCP_SA_KEY` to the file's contents.
 
-The tile sums the raw `cost` column, i.e. total GCP spend across all services,
-gross of credits. It shows the estimated full-month spend as its headline and
-the actual month-to-date value in the header. The estimate uses every settled
-day in the current month. During the first half of the month, it fills that rate
-window from the prior month's tail until it covers 14 days or reaches the first
-available billing day. The chart shows up to 45 complete UTC days and
-highlights the part used for the estimate.
+The tile sums the raw `cost` column, i.e. total spend across every project tied
+to the exported billing account, gross of credits. It shows the estimated
+full-month spend as its headline and the actual month-to-date value in the
+header. The estimate uses every settled day in the current month. During the
+first half of the month, it fills that rate window from the prior month's tail
+until it covers 14 days or reaches the first available billing day. The chart
+shows up to 45 complete UTC days and highlights the part used for the estimate.
 
 ### `OPENAI_ADMIN_KEY`
 
@@ -384,6 +384,7 @@ it.
 | `GCP_SA_KEY` | cloud spend | a service-account key JSON (the whole file, as the value) for local development; in GKE, Workload Identity supplies the token and this is unset. |
 | `GCP_DAILY_BUDGET` | cloud spend | daily USD budget. The projected month is compared with this daily rate multiplied by the number of days in the month. |
 | `PROD_URL` | production | the production **server**, as an origin — the tile checks `/_health` on it and links to it. Defaults to estuary, the production toolshed. Note `production.commontools.dev` is the shell, a static site in a GCS bucket: it has no health endpoint, and its index page answers 200 whether or not the server behind it is serving, so it cannot see an outage. |
+| `PROD_PROXY` | production | optional proxy used only for the production health check. Use `socks5h://127.0.0.1:1055` with the Tailscale userspace proxy so the tailnet hostname resolves through it. Also accepts `socks5://`, `http://`, and `https://`; invalid values and URLs containing credentials fail closed instead of fetching directly. |
 | `COMMON_TOOLS_URL` | common.tools | override the public-site URL (e.g. the `www` host if the apex redirects). |
 | `DASHBOARD_REPO` | CI tiles, github users | which repo the CI tiles read. Its owner is the organization the **github users** tile reads (default `commontoolsinc/labs`). |
 | `DASHBOARD_CACHE_DIR` | server caches | directory for all persistent dashboard cache files (default: the platform temp directory). |
@@ -627,6 +628,8 @@ Env knobs for the dev loop:
 - `DASHBOARD_REPO` — point the CI tiles at any repo. Its owner selects the
   organization for GitHub users.
 - `PROD_URL` — point the production tile at a local server (`http://localhost:8000/`) instead of prod. It checks `/_health` on that origin.
+- `PROD_PROXY` — route only the production health check through a proxy, for
+  example `socks5h://127.0.0.1:1055` with a local Tailscale userspace proxy.
 - The other credential envs (see **Credentials** above — `SIGNOZ_*`, `GCP_*`,
   `OPENAI_ADMIN_KEY`/`ANTHROPIC_ADMIN_KEY`/`OPENROUTER_KEY`, `DISCORD_*`) — set
   one to develop that gated tile against its real backend.
@@ -678,19 +681,25 @@ its embedded tsnet).
 **One-time setup (human steps):**
 
 1. Tailscale admin console: add `tag:dashboard` to `tagOwners`, grant who may
-   reach it, and mint an **ephemeral** `tag:dashboard` auth key. The tailnet
-   also needs MagicDNS and HTTPS certificates enabled — `tailscale serve` fetches
-   a cert for `dashboard.<tailnet>.ts.net` and can't without them.
-2. `tofu apply` in `infra/tofu/gke` creates all the dev-dashboard Secret Manager
-   containers (authkey, github token, and the optional discord/signoz ones). Then
-   store the two required values:
+   reach it, and configure a federated identity restricted to `auth_keys` and
+   `tag:dashboard`. The infra overlay supplies that identity's public client ID
+   with `ephemeral=false&preauthorized=true` and its audience; no Tailscale auth
+   key or OAuth secret is stored in Kubernetes or Secret Manager. The tailnet
+   also needs MagicDNS and HTTPS certificates enabled — `tailscale serve`
+   fetches a cert for `dashboard.<tailnet>.ts.net` and can't without them.
+2. `tofu apply` in `infra/tofu/gke` creates the dev-dashboard Secret Manager
+   containers and Workload Identity/BigQuery grants. Store the required GitHub
+   token (and each provider credential you want to enable):
    ```bash
-   printf %s "tskey-auth-…" | gcloud secrets versions add k8s-stage-dashboard-authkey --data-file=-
    printf %s "github_pat_…" | gcloud secrets versions add k8s-stage-dashboard-github-token --data-file=-
    ```
    The GitHub token is fine-grained and read-only. It has Actions read for the
-   dashboard repositories. GitHub users also needs org Members read. CI spend
-   also needs org Administration read.
+   dashboard repositories. The GitHub users tile also needs org Members read;
+   CI spend also needs org Administration read.
+3. The infra manifests create separate 1 Gi `standard-rwo` PVCs for the Discord
+   history file and Tailscale node state. The dashboard remains a one-replica
+   `Recreate` Deployment; pod replacement reuses the same non-ephemeral
+   Tailscale node ID and `dashboard.<tailnet>.ts.net` name.
 
 **Build, push, deploy**
 
@@ -744,20 +753,21 @@ Tailscale console as `tag:dashboard`; open
 `https://dashboard.<tailnet>.ts.net/`. (The sidecar image is already pinned by
 `@sha256` digest in `03-deployment.yaml`, matching golink.)
 
-**Gated tiles** stay gray until wired: add the Secret Manager *value* (the
-container already exists from `tofu apply`), uncomment the ExternalSecret in
-`dashboard-secrets.yaml` and the env block in `03-deployment.yaml`, then re-run
-`make apply-dev-dashboard-stage`. So you can deploy green and light tiles up one
-at a time.
+**Provider-gated tiles** stay gray until their credential or public configuration
+is wired: add the Secret Manager *value* (the container already exists from
+`tofu apply`), enable the matching ExternalSecret/env when needed, then re-run
+`make apply-dev-dashboard-stage`. Stage's Cloud Billing table is already wired;
+during Google's initial export backfill it reports `no billing data yet` rather
+than a false zero.
 
 Every backend is reached over HTTP, so the image carries no cloud CLI. The
 GitHub tiles use `GH_TOKEN`. The Blacksmith share of CI spend uses
 `BLACKSMITH_API_TOKEN`. The cloud-spend tile queries BigQuery as the pod's
 own service account through Workload Identity. The infra repo's
 `tofu/gke/dashboard.tf` provisions that account, the Workload Identity binding,
-and its BigQuery Job User and Data Viewer grants. Lighting the cloud-spend tile
-up is then just setting `GCP_BILLING_TABLE` and
-`dashboard_billing_dataset` for the export dataset.
+and its BigQuery Job User and Data Viewer grants, so no key is stored in the
+cluster. The stage deployment sets `GCP_BILLING_TABLE` to the standard export
+table, and `dashboard_billing_dataset` scopes its dataset reader grant.
 
 ## Design notes
 

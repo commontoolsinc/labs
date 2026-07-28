@@ -179,7 +179,7 @@ export const gcpSpend: Tile = {
       status,
       value: `~${usd(summary.projected)}/mo`,
       aside: `<span class="hmtd">${usd(history.actualMtd)} MTD</span>`,
-      sub: "project spend",
+      sub: "billing account spend",
       extra: chart.chart,
       duration: chart.duration,
     };
