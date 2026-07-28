@@ -42,10 +42,22 @@ export const providerRunAffinityKey = (runId: string): string => {
   return `${runId.slice(0, prefixLength)}-${digest}`;
 };
 
+/**
+ * What to do when a stored continuation was produced by a different model.
+ *
+ * The encrypted reasoning is bound to the model that produced it, so it can
+ * never be replayed to another one. Providers differ on whether that is fatal:
+ * Codex pins the provider on resume and treats a mismatch as a caller error,
+ * while the gateway lets `--resume-run X --model other` change models, where
+ * the reasoning is optional and dropping it just costs continuity.
+ */
+export type ContinuationModelMismatch = "throw" | "drop";
+
 export const continuationOutput = (
   continuation: HarnessProviderContinuation | undefined,
   model: string,
   providerId: string,
+  onModelMismatch: ContinuationModelMismatch = "throw",
 ): ResponsesInputItem[] => {
   if (continuation?.providerId !== providerId) return [];
   const state = continuation.state;
@@ -55,9 +67,12 @@ export const continuationOutput = (
   const record = state as Record<string, unknown>;
   if (record.version !== 1 || typeof record.sourceModel !== "string") return [];
   if (record.sourceModel !== model) {
-    throw new Error(
-      `${providerId} continuation model ${record.sourceModel} does not match requested model ${model}`,
-    );
+    if (onModelMismatch === "throw") {
+      throw new Error(
+        `${providerId} continuation model ${record.sourceModel} does not match requested model ${model}`,
+      );
+    }
+    return [];
   }
   const output = record.output;
   if (!Array.isArray(output)) return [];
@@ -125,6 +140,7 @@ export const toResponsesInput = async (
   // it send no `instructions` at all, so a run without a system prompt is not
   // silently given one.
   defaultInstructions?: string,
+  onModelMismatch: ContinuationModelMismatch = "throw",
 ): Promise<
   { instructions: string | undefined; input: ResponsesInputItem[] }
 > => {
@@ -147,6 +163,7 @@ export const toResponsesInput = async (
             message.providerContinuation,
             model,
             providerId,
+            onModelMismatch,
           ),
         );
         if (message.content.length > 0) {

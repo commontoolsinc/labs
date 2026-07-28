@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { OpenAICompatibleGatewayClient } from "../src/gateway/openai-client.ts";
 import {
   OpenAICompatibleGatewayModelClient,
@@ -6,6 +6,10 @@ import {
 } from "../src/model/openai-compatible-gateway.ts";
 import type { HarnessModelTurnRequest } from "../src/model/client.ts";
 import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
+import {
+  WEB_SEARCH_SUBAGENT_MODEL,
+  WEB_SEARCH_SUBAGENT_NATIVE_MODEL_TOOL_IDS,
+} from "../src/contracts/subagent.ts";
 
 const GATEWAY = "https://gateway.test";
 
@@ -207,7 +211,8 @@ Deno.test("non-OpenAI models and native tools stay on Chat Completions", async (
   assertEquals(usesResponsesApi("gpt-5.5", []), true);
   assertEquals(usesResponsesApi("gemini-3.5-flash", []), false);
   assertEquals(usesResponsesApi("claude-opus-5", []), false);
-  assertEquals(usesResponsesApi("gpt-5.6-sol", ["google_search"]), false);
+  // gpt-* plus native tools is rejected before routing, so it is covered by
+  // the dedicated guard test rather than asserted as a routing outcome here.
 
   const captured: Captured[] = [];
   const client = clientWith(captured, [{
@@ -248,6 +253,77 @@ Deno.test("a chat turn with no content field is handled", async () => {
   assertEquals(captured[0].url, `${GATEWAY}/v1/chat/completions`);
   assertEquals(result.assistant.content, "");
   assertEquals(result.assistant.toolCalls?.[0].id, "call-1");
+});
+
+Deno.test("resuming with a different model drops the stale continuation", async () => {
+  // The CLI pins the provider on resume but not the model, so
+  // `--resume-run X --model other` is legal. Encrypted reasoning is bound to
+  // the model that produced it, so it is dropped rather than failing the run.
+  const captured: Captured[] = [];
+  const client = clientWith(captured, [
+    completedResponse([{
+      type: "message",
+      id: "msg_6",
+      role: "assistant",
+      status: "completed",
+      content: [{ type: "output_text", text: "resumed", annotations: [] }],
+    }]),
+  ]);
+
+  const result = await client.complete(turn({
+    model: "gpt-5.6-sol",
+    transcript: [
+      { role: "user", content: "Continue." },
+      {
+        role: "assistant",
+        content: "Working.",
+        providerContinuation: {
+          providerId: "openai-compatible-gateway",
+          state: {
+            version: 1,
+            sourceModel: "gpt-5.6-terra",
+            output: [{
+              type: "reasoning",
+              id: "rs_1",
+              encrypted_content: "bound-to-terra",
+            }],
+          },
+        },
+      },
+    ],
+  }));
+
+  const input = captured[0].body.input as Array<Record<string, unknown>>;
+  assertEquals(input.some((item) => item.type === "reasoning"), false);
+  assertEquals(result.assistant.content, "resumed");
+});
+
+Deno.test("native tools on an OpenAI model fail with a named error", async () => {
+  // Chat Completions is the only path that serves native tools, and it rejects
+  // function tools while reasoning is on — so this combination must not route
+  // silently into a provider 400.
+  const client = clientWith([], [completedResponse([])]);
+  await assertRejects(
+    () =>
+      client.complete(turn({
+        model: "gpt-5.6-sol",
+        nativeModelToolIds: ["google_search"],
+      })),
+    Error,
+    "cannot combine provider-native tools",
+  );
+});
+
+Deno.test("the web_search profile keeps a non-OpenAI model", () => {
+  // The guard above is only unreachable while this stays true.
+  assertEquals(WEB_SEARCH_SUBAGENT_MODEL.startsWith("gpt-"), false);
+  assertEquals(
+    usesResponsesApi(
+      WEB_SEARCH_SUBAGENT_MODEL,
+      WEB_SEARCH_SUBAGENT_NATIVE_MODEL_TOOL_IDS,
+    ),
+    false,
+  );
 });
 
 Deno.test("the Responses turn stays stateless", async () => {

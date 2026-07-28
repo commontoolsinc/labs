@@ -100,7 +100,6 @@ export interface OpenAIResponsesRequest {
   store?: boolean;
   stream?: boolean;
   include?: readonly string[];
-  reasoning?: { effort?: string };
   prompt_cache_key?: string;
 }
 

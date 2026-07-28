@@ -1,6 +1,7 @@
 import { assert, assertEquals } from "@std/assert";
 import { describe, it } from "@std/testing/bdd";
 import { fromFileUrl } from "@std/path";
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import {
   DEFAULT_GENERATE_OBJECT_MODELS,
   DEFAULT_IFRAME_MODELS,
@@ -22,6 +23,7 @@ import {
  * renaming a model and missing a default would surface only at runtime.
  */
 const TOOLSHED_ROOT = fromFileUrl(new URL("../../..", import.meta.url));
+const REPO_ROOT = fromFileUrl(new URL("../../../../..", import.meta.url));
 
 let cached: Record<string, unknown> | undefined;
 
@@ -36,11 +38,15 @@ const registeredModelNames = async (): Promise<string[]> => {
         `console.log(JSON.stringify(Object.keys(mod.MODELS)));\n`,
     );
     try {
-      const command = new Deno.Command(Deno.execPath(), {
-        args: [
+      // Goes through the shared helper so the probe runs against a copied
+      // lockfile and cannot mutate the workspace `deno.lock`.
+      const output = await runDenoCommandWithTemporaryLock({
+        root: REPO_ROOT,
+        args: (lockPath) => [
           "run",
           "--no-check",
           "-A",
+          `--lock=${lockPath}`,
           // Both flags need the `=` form: passed as separate argv entries,
           // Deno reads the value as the script path instead.
           `--config=${TOOLSHED_ROOT}deno.jsonc`,
@@ -48,6 +54,8 @@ const registeredModelNames = async (): Promise<string[]> => {
           probe,
         ],
         env: {
+          PATH: Deno.env.get("PATH") ?? "",
+          HOME: Deno.env.get("HOME") ?? "",
           ENV: "test",
           // Any non-empty value registers the OpenAI provider; nothing here
           // reaches the network, since createOpenAI only builds a client.
@@ -59,12 +67,15 @@ const registeredModelNames = async (): Promise<string[]> => {
             ? { DENO_COVERAGE_DIR: Deno.env.get("DENO_COVERAGE_DIR")! }
             : {}),
         },
-        stdout: "piped",
-        stderr: "null",
       });
-      const { code, stdout } = await command.output();
-      assertEquals(code, 0, "model registry probe should exit cleanly");
-      const lines = new TextDecoder().decode(stdout).trim().split("\n");
+      assertEquals(
+        output.code,
+        0,
+        `model registry probe should exit cleanly: ${
+          new TextDecoder().decode(output.stderr)
+        }`,
+      );
+      const lines = new TextDecoder().decode(output.stdout).trim().split("\n");
       cached = { names: JSON.parse(lines[lines.length - 1]) as string[] };
     } finally {
       await Deno.remove(probe).catch(() => {});

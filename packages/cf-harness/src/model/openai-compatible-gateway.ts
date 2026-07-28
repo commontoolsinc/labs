@@ -160,6 +160,32 @@ export const usesResponsesApi = (
   nativeModelToolIds: readonly LLMNativeModelToolId[],
 ): boolean => nativeModelToolIds.length === 0 && model.startsWith("gpt-");
 
+/**
+ * `gpt-*` models reason by default, and Chat Completions rejects function
+ * tools whenever reasoning is active. Provider-native tools force a turn onto
+ * Chat Completions, so combining them with an OpenAI model would route
+ * straight into that 400 with cf-harness's function tools attached.
+ *
+ * Nothing produces this combination today — the only native-tool profile is
+ * `web_search`, which overrides the model to Gemini — so this fails loudly
+ * rather than letting a future profile discover it as a provider error.
+ */
+const assertSupportedToolCombination = (
+  model: string,
+  nativeModelToolIds: readonly LLMNativeModelToolId[],
+): void => {
+  if (model.startsWith("gpt-") && nativeModelToolIds.length > 0) {
+    throw new Error(
+      `openai-compatible-gateway cannot combine provider-native tools ` +
+        `(${
+          nativeModelToolIds.join(", ")
+        }) with ${model}: native tools require ` +
+        `chat completions, which rejects function tools while reasoning is on. ` +
+        `Use a non-OpenAI model for native-tool turns.`,
+    );
+  }
+};
+
 const toModelAttempt = (
   attempt: OpenAIChatCompletionAttemptDiagnostic,
 ): HarnessModelAttemptDiagnostic => ({
@@ -194,6 +220,7 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
   async complete(
     request: HarnessModelTurnRequest,
   ): Promise<HarnessModelTurnResult> {
+    assertSupportedToolCombination(request.model, request.nativeModelToolIds);
     return usesResponsesApi(request.model, request.nativeModelToolIds)
       ? await this.#completeViaResponses(request)
       : await this.#completeViaChatCompletions(request);
@@ -238,6 +265,12 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
       request.model,
       this.providerId,
       GATEWAY_RESPONSES_LABEL,
+      undefined,
+      // `--resume-run X --model other` is allowed here (the CLI pins the
+      // provider on resume, not the model), so a continuation from the old
+      // model is dropped rather than failing the run. Reasoning replay is an
+      // optimisation; the turn is still correct without it.
+      "drop",
     );
     const tools = toResponsesTools(request.tools);
     const payload: OpenAIResponsesRequest = {
