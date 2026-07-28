@@ -360,26 +360,43 @@ describe("the origin and history panel", () => {
 function statefulPiece(
   {
     result = {},
-    argument = {} as unknown,
+    argument: initialArgument = {} as unknown,
+    argumentRef,
     getPageFails = false,
+    deferGetPage = false,
     sendFails = false,
     pieceSchema = { type: "object" } as Record<string, unknown>,
   }: {
     result?: Record<string, unknown>;
     argument?: unknown;
+    /** When set, the argument read also returns this schema-bearing ref. */
+    argumentRef?: CellRef;
     getPageFails?: boolean;
+    /** When true, getPage stays pending until `resolveGetPage()` is called. */
+    deferGetPage?: boolean;
     sendFails?: boolean;
     pieceSchema?: Record<string, unknown>;
   } = {},
 ) {
   const requests: Array<Record<string, unknown>> = [];
+  const counters = { subscribes: 0, unsubscribes: 0 };
+  const argument = initialArgument;
   const conn = {
-    subscribe: () => {},
-    unsubscribe: () => Promise.resolve(),
+    subscribe: () => {
+      counters.subscribes++;
+    },
+    unsubscribe: () => {
+      counters.unsubscribes++;
+      return Promise.resolve();
+    },
     request: (request: Record<string, unknown>) => {
       requests.push(request);
       if (request.type === RequestType.CellGet) {
-        return Promise.resolve({ value: argument });
+        return Promise.resolve(
+          request.includeRef && argumentRef
+            ? { value: argument, cell: argumentRef }
+            : { value: argument },
+        );
       }
       if (request.type === RequestType.CellSet) {
         return Promise.resolve({});
@@ -393,14 +410,22 @@ function statefulPiece(
     },
     signal: { aborted: false },
   };
+  const pendingPages: Array<() => void> = [];
   const rt = {
     [$conn]: () => conn,
     signal: { aborted: false },
     getPieceSource: () => Promise.resolve(SOURCE),
-    getPage: (..._args: unknown[]) =>
-      getPageFails
-        ? Promise.reject(new Error("no page for this piece"))
-        : Promise.resolve(page),
+    getPage: (..._args: unknown[]) => {
+      if (getPageFails) {
+        return Promise.reject(new Error("no page for this piece"));
+      }
+      if (deferGetPage) {
+        return new Promise((resolve) => {
+          pendingPages.push(() => resolve(page));
+        });
+      }
+      return Promise.resolve(page);
+    },
   } as unknown as RuntimeClient;
 
   const pieceRef: CellRef = {
@@ -411,6 +436,9 @@ function statefulPiece(
   } as unknown as CellRef;
   const cell = new CellHandle(rt, pieceRef, result);
   const page = { cell: () => cell };
+
+  /** Resolve the oldest still-pending deferred getPage call. */
+  const resolveGetPage = () => pendingPages.shift()?.();
 
   /** A nested handler stream whose own ref schema carries the stream tag. */
   const streamHandle = (name: string): CellHandle =>
@@ -434,7 +462,15 @@ function statefulPiece(
       schema: eventSchema,
     } as unknown as CellRef);
 
-  return { cell, requests, streamHandle, handlerHandle, rt };
+  return {
+    cell,
+    requests,
+    counters,
+    streamHandle,
+    handlerHandle,
+    resolveGetPage,
+    rt,
+  };
 }
 
 describe("the data panel", () => {
@@ -542,6 +578,61 @@ describe("the actions panel", () => {
     expect(shows(menu)).toContain('"addSpace": "[stream]"');
   });
 
+  it("does not offer a cell that merely contains a stream", async () => {
+    // asCell ["cell", "stream"] is a CELL wrapping a stream: sending to the
+    // outer cell would overwrite data, so it must not be dispatchable.
+    const piece = statefulPiece({
+      pieceSchema: {
+        type: "object",
+        properties: {
+          wrapped: { asCell: ["cell", "stream"], type: "object" },
+        },
+      },
+    });
+    await piece.cell.set({
+      wrapped: piece.handlerHandle("wrapped", { type: "object" }),
+    });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    expect(shows(menu)).toContain("no handler streams");
+  });
+
+  it("finds handlers the argument schema declares", async () => {
+    // The argument arrives in wire form: sigil links that deserialize back
+    // into handles carrying the handler's event schema, while the stream
+    // declaration lives on the argument schema's property.
+    const piece = statefulPiece({
+      argument: {
+        ping: {
+          "/": {
+            "link@1": {
+              id: "of:fid1:handler-ping",
+              space: SPACE,
+              path: [],
+              schema: { type: "object" },
+            },
+          },
+        },
+      },
+      argumentRef: {
+        id: "of:fid1:argument",
+        space: SPACE,
+        path: [],
+        schema: {
+          type: "object",
+          properties: { ping: { asCell: ["stream"] } },
+        },
+      } as unknown as CellRef,
+    });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("piece-action-ping");
+    expect(rendered).toContain("argument");
+  });
+
   it("says so when the piece exposes no handlers", async () => {
     const piece = statefulPiece({ argument: { a: 1 } });
     await piece.cell.set({ count: 3 });
@@ -568,7 +659,9 @@ describe("the actions panel", () => {
     expect(sends.length).toBe(1);
     expect(sends[0].event).toEqual({ title: "new item" });
     expect((sends[0].cell as CellRef).path).toEqual(["addItem"]);
-    expect(shows(menu)).toContain("Sent to addItem");
+    // "Accepted", not "sent": the worker commits asynchronously after
+    // acknowledging, so the panel only claims what the request proves.
+    expect(shows(menu)).toContain("Event accepted for addItem");
   });
 
   it("rejects an unparsable payload without dispatching", async () => {
@@ -597,6 +690,76 @@ describe("the actions panel", () => {
     await menu.dispatchAction(action);
 
     expect(shows(menu)).toContain("handler refused the event");
+  });
+
+  it("sends once for a rapid double-click", async () => {
+    const piece = statefulPiece();
+    await piece.cell.set({ addItem: piece.streamHandle("addItem") });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    const [action] = menu.collectActions();
+    // Both clicks land before the first request settles.
+    await Promise.all([
+      menu.dispatchAction(action),
+      menu.dispatchAction(action),
+    ]);
+
+    expect(
+      piece.requests.filter((r) => r.type === RequestType.CellSend).length,
+    ).toBe(1);
+  });
+});
+
+describe("piece-state read lifecycle", () => {
+  it("a refresh during a pending read drops the older read entirely", async () => {
+    const piece = statefulPiece({ deferGetPage: true });
+    await piece.cell.set({ value: "current" });
+    const menu = openMenu(piece.cell);
+
+    const first = menu.showPanel("data");
+    menu.refreshData();
+    // The OLDER read resolves after the refresh started a newer one; it must
+    // not install a second subscription or overwrite anything.
+    piece.resolveGetPage();
+    await first;
+    piece.resolveGetPage();
+    await Promise.resolve();
+
+    expect(piece.counters.subscribes).toBe(1);
+    menu.close();
+    expect(piece.counters.unsubscribes).toBe(piece.counters.subscribes);
+  });
+
+  it("a read resolving after disconnect installs nothing", async () => {
+    const piece = statefulPiece({ deferGetPage: true });
+    const menu = openMenu(piece.cell);
+
+    const pending = menu.showPanel("data");
+    menu.disconnectedCallback();
+    piece.resolveGetPage();
+    await pending;
+
+    expect(piece.counters.subscribes).toBe(0);
+  });
+
+  it("balances subscriptions when the menu closes", async () => {
+    const piece = statefulPiece({
+      argumentRef: {
+        id: "of:fid1:argument",
+        space: SPACE,
+        path: [],
+        schema: { type: "object" },
+      } as unknown as CellRef,
+    });
+    await piece.cell.set({ value: 1 });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("data");
+
+    // One subscription per side: result and argument.
+    expect(piece.counters.subscribes).toBe(2);
+    menu.close();
+    expect(piece.counters.unsubscribes).toBe(piece.counters.subscribes);
   });
 });
 
