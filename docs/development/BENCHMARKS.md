@@ -17,7 +17,11 @@ manual trigger measures a specific commit.
 
 The team ops dashboard charts benchmark trends on its `/bench` page, sampling
 one successful run per four-hour window from those artifacts. Each
-benchmark's series is identified by its origin file, group, and name.
+benchmark is identified by its origin file, group, and name. The report's CPU
+field divides that benchmark into one line per processor. The dashboard never
+connects measurements from different processors. A report without a CPU
+identity is unusable for trends because its measurements cannot be assigned to
+a processor.
 
 Benchmark numbers are not gated, and neither is CI wall time. The only per-PR
 gate is the coverage-debt ratchet (`tasks/coverage-check.ts`), which never

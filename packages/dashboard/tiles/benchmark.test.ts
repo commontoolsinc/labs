@@ -21,6 +21,7 @@ import {
   formatNs,
   jsonFromZip,
   pointsForWindow,
+  representativeBenchmarkCpu,
   sampleBenchmarkRuns,
   trendPct,
   trendStatus,
@@ -281,14 +282,32 @@ const bench = (
   results: [ok ? { ok } : {}],
 });
 
+const TEST_CPU = "AMD EPYC 7763 64-Core Processor";
+
+function contrastRatio(foreground: string, background: string): number {
+  const luminance = (color: string): number => {
+    const channels = [1, 3, 5].map((offset) =>
+      Number.parseInt(color.slice(offset, offset + 2), 16) / 255
+    ).map((channel) =>
+      channel <= 0.04045
+        ? channel / 12.92
+        : ((channel + 0.055) / 1.055) ** 2.4
+    );
+    return 0.2126 * channels[0] + 0.7152 * channels[1] +
+      0.0722 * channels[2];
+  };
+  const foregroundLuminance = luminance(foreground);
+  const backgroundLuminance = luminance(background);
+  return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
+    (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
+}
+
 // The deno bench report. `noise` stands in for a benchmark's own console output
 // landing on stdout ahead of the JSON.
-const report = (benches: unknown[], noise = "") =>
-  noise + JSON.stringify({ version: 1, runtime: "deno", benches });
+const report = (benches: unknown[], noise = "", cpu = TEST_CPU) =>
+  noise + JSON.stringify({ version: 1, runtime: "deno", cpu, benches });
 
-// The tile sums each benchmark's average per-op time, so most tile tests only need
-// to control that sum. A bench-results artifact carrying one benchmark whose avg is
-// `avgNs` gives a run total of exactly `avgNs`.
+// Most tile tests use one benchmark whose average per-op time is `avgNs`.
 const totalZip = (avgNs: number): Promise<Uint8Array<ArrayBuffer>> =>
   benchZip(
     report([bench("packages/a/x.bench.ts", null, "b", { avg: avgNs } as Timings)]),
@@ -658,7 +677,7 @@ Deno.test("/bench?view=runtime serves the runtime history page", async () => {
   );
   const fragment = await fragmentResponse.text();
   assert(fragment.startsWith('<div id="range-content">'));
-  assertStringIncludes(fragment, "selected 7-day trend");
+  assertStringIncludes(fragment, "selected 7-day window");
   assert(!fragment.includes("<!doctype html>"));
   assert(!fragment.includes('<form class="controls"'));
 });
@@ -981,7 +1000,10 @@ Deno.test("benchmark: the trend reads the recent window only, not the whole hist
     assertEquals(v.duration, 39 * DAY); // the sparkline still spans the full history
     // The count line names the highlighted window's span: the newest 20 daily runs
     // (the run floor beats the 14-day age here) reach back 19 days.
-    assertStringIncludes(v.extra ?? "", "1 benchmark · last 19 days");
+    assertStringIncludes(
+      v.extra ?? "",
+      ">1 benchmark · last 19 days</div>",
+    );
   });
 });
 
@@ -1006,8 +1028,20 @@ Deno.test("benchmark: the tile paints its headline from cache before the backfil
   const seed = new BenchmarkHistoryStore();
   await seed.load();
   const cachedRuns = [
-    { runId: 84_001, runAttempt: 1, at: BASE - 2 * DAY, metrics: new Map([[key, stats]]) },
-    { runId: 84_002, runAttempt: 1, at: BASE - DAY, metrics: new Map([[key, stats]]) },
+    {
+      runId: 84_001,
+      runAttempt: 1,
+      at: BASE - 2 * DAY,
+      cpu: TEST_CPU,
+      metrics: new Map([[key, stats]]),
+    },
+    {
+      runId: 84_002,
+      runAttempt: 1,
+      at: BASE - DAY,
+      cpu: TEST_CPU,
+      metrics: new Map([[key, stats]]),
+    },
   ];
   for (const cachedRun of cachedRuns) seed.set(cachedRun);
   seed.markRefreshed(BASE - DAY, cachedRuns);
@@ -1486,14 +1520,20 @@ Deno.test("benchmark: the tile sums the totals, and one artifact per bucket is k
     // No "version" key here: the report is parsed whole when there is no console
     // output to skip past.
     zips[id * 10] = await benchZip(
-      JSON.stringify({ benches: [bench(key, null, "tick", timings(1_000))] }),
+      JSON.stringify({
+        cpu: TEST_CPU,
+        benches: [bench(key, null, "tick", timings(1_000))],
+      }),
     );
   }
   // The stale twin, listed before its window's winner so the newer one displaces it.
   runs.push(ghRun(599, at(11) - COLLECTION_BUCKET / 2));
   artifacts[599] = [{ id: 5_990, name: "bench-results", expired: false }];
   zips[5_990] = await benchZip(
-    JSON.stringify({ benches: [bench(key, null, "tick", timings(9_999_999))] }),
+    JSON.stringify({
+      cpu: TEST_CPU,
+      benches: [bench(key, null, "tick", timings(9_999_999))],
+    }),
   );
 
   await withApi({
@@ -1659,7 +1699,7 @@ async function fillVaried(): Promise<Api> {
 // Pull the rendered rows out of the drill-down html.
 function rows(html: string) {
   return [...html.matchAll(
-    /<div class="brow (\w+)">[\s\S]*?<span class="bname">([^<]*)<\/span><span class="bval">([^<]*)<span class="btrend">([^<]*)<\/span>/g,
+    /<div class="brow (\w+)">[\s\S]*?<span class="bname">([^<]*)<\/span><span class="bval"[^>]*><a class="cpu-id" [^>]*>CPU \d+<\/a>([^<]*)<span class="btrend">([^<]*)<\/span>/g,
   )].map((m) => ({ status: m[1], name: m[2], value: m[3], trend: m[4] }));
 }
 
@@ -1680,9 +1720,408 @@ Deno.test("benchmark: the tile indexes every benchmark equally; the drill-down k
     assertEquals(v.duration, 11 * DAY);
     assertStringIncludes(v.value ?? "", "▲"); // the rising trend is the headline
     assertStringIncludes(v.extra ?? "", "6 benchmarks"); // the count line
+    assert(!v.extra?.includes('class="swatch"'));
+    assert(!v.extra?.includes(TEST_CPU));
     // The per-benchmark history the drill-down reads is still assembled.
     assert(!v.extra?.includes("hot/steep"));
   });
+});
+
+Deno.test("benchmark: CPU lines split across large gaps and use distinct colors", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "benchmark-cpus-" });
+  const previousCacheDirectory = Deno.env.get("DASHBOARD_CACHE_DIR");
+  Deno.env.set("DASHBOARD_CACHE_DIR", directory);
+  const cpus = [
+    "AMD EPYC 7763 64-Core Processor",
+    "Apple M2 Processor",
+    "ARM Neoverse V1 Processor",
+    ...Array.from(
+      { length: 13 },
+      (_, index) => `A Test CPU ${String(index).padStart(2, "0")}`,
+    ),
+    // These hashes produce the same initial generated color.
+    "CPU-03098",
+    "CPU-06084",
+  ].sort((a, b) => a.localeCompare(b));
+  const artifacts: Api["artifacts"] = {};
+  const zips: Api["zips"] = {};
+  const runs: GhRun[] = [];
+  const samples: {
+    cpuIndex: number;
+    at: number;
+    avg?: number;
+    day?: number;
+  }[] = [];
+  for (let day = 0; day < 8; day++) {
+    samples.push({
+      cpuIndex: 0,
+      at: BASE - (8 - day) * DAY,
+      day,
+    });
+    if (day === 0) {
+      samples.push({
+        cpuIndex: 0,
+        at: BASE - 8 * DAY + COLLECTION_BUCKET,
+        day,
+      });
+    }
+    samples.push({
+      cpuIndex: 1,
+      at: BASE - (8 - day) * DAY + 2 * COLLECTION_BUCKET,
+      avg: 1_000_000 * Math.pow(2, day / 7),
+      day,
+    });
+  }
+  for (let cpuIndex = 2; cpuIndex < 9; cpuIndex++) {
+    const offset = (cpuIndex + 2) * COLLECTION_BUCKET;
+    samples.push({
+      cpuIndex,
+      at: BASE - (cpuIndex === 2 ? 20 : 2) * DAY + offset,
+    });
+    samples.push({ cpuIndex, at: BASE - DAY + offset });
+  }
+  for (let cpuIndex = 9; cpuIndex < cpus.length; cpuIndex++) {
+    samples.push({
+      cpuIndex,
+      at: BASE - (cpuIndex + 2) * COLLECTION_BUCKET,
+    });
+  }
+  for (
+    const [sample, { cpuIndex, at, avg: sampleAvg, day }] of samples.entries()
+  ) {
+    const id = 90_000 + sample;
+    const cpu = cpus[cpuIndex];
+    const avg = sampleAvg ?? (cpuIndex === 0 ? 1_000 : cpuIndex * 1_000_000);
+    const benches = [
+      bench("packages/a/cpu.bench.ts", null, "flat", { avg } as Timings),
+    ];
+    if (day !== undefined && cpuIndex < 2) {
+      const representativeAvg = cpuIndex === 0
+        ? 1_000 * Math.pow(1.5, day / 7)
+        : 500_000;
+      benches.push(
+        bench(
+          "packages/a/cpu.bench.ts",
+          null,
+          "representative",
+          { avg: representativeAvg } as Timings,
+        ),
+      );
+    }
+    runs.push(ghRun(id, at));
+    artifacts[id] = [{ id: id * 10, name: "bench-results", expired: false }];
+    zips[id * 10] = await benchZip(
+      report(benches, "", cpu),
+    );
+  }
+  runs.sort((a, b) =>
+    Date.parse(b.created_at) - Date.parse(a.created_at)
+  );
+  try {
+    await withApi({
+      pages: { 1: runs },
+      artifacts,
+      zips,
+    }, async () => {
+      const isolated = await import(
+        `./benchmark.ts?cpus=${crypto.randomUUID()}`
+      );
+      const tile = await isolated.benchmark.collect(ctx({ GH_TOKEN: "t" }));
+      assertEquals(tile.status, "warn");
+      assertStringIncludes(tile.value ?? "", "▲");
+      assertStringIncludes(tile.extra ?? "", ">1 benchmark</div>");
+      assert(!/\bCPUs?\b/.test(tile.extra ?? ""));
+      assert(!(tile.extra ?? "").includes('class="swatch"'));
+      assert(!(tile.extra ?? "").includes("AMD EPYC 7763"));
+      assert(!(tile.extra ?? "").includes("Apple M2"));
+      assert(!(tile.extra ?? "").includes("ARM Neoverse V1"));
+      const tileLines = [
+        ...(tile.extra ?? "").matchAll(
+          /<polyline points="([^"]+)"[^>]*stroke="([^"]+)"/g,
+        ),
+      ].map((match) => ({
+        pointCount: match[1].split(" ").length,
+        stroke: match[2],
+      }));
+      assertEquals(
+        tileLines.map((line) => line.pointCount).sort((a, b) => a - b),
+        [2, 2, 2, 2, 2, 2, 8, 9],
+      );
+      assertEquals(new Set(tileLines.map((line) => line.stroke)).size, 8);
+      const tileMarkerColors = [
+        ...(tile.extra ?? "").matchAll(/<circle[^>]*fill="([^"]+)"/g),
+      ].map((match) => match[1]);
+      assertEquals(tileMarkerColors.length, 11);
+      assertEquals(new Set(tileMarkerColors).size, 10);
+      assert(!(tile.extra ?? "").includes("<mask"));
+
+      const html = isolated.benchPage("p99", "file", 45, BASE);
+      assertEquals(rows(html), [
+        {
+          status: "good",
+          name: "flat",
+          value: "1.0µs",
+          trend: "flat",
+        },
+        {
+          status: "bad",
+          name: "representative",
+          value: "1.5µs",
+          trend: "▲50%",
+        },
+      ]);
+      assertEquals([...html.matchAll(/<div class="brow /g)].length, 2);
+      const pageLines = [
+        ...html.matchAll(
+          /<polyline points="([^"]+)"[^>]*stroke="([^"]+)"/g,
+        ),
+      ].map((match) => ({
+        pointCount: match[1].split(" ").length,
+        stroke: match[2],
+      }));
+      assertEquals(
+        pageLines.map((line) => line.pointCount).sort((a, b) => a - b),
+        [2, 2, 2, 2, 2, 2, 8, 8, 8, 8],
+      );
+      assertEquals(new Set(pageLines.map((line) => line.stroke)).size, 10);
+      const pageMarkerColors = [
+        ...html.matchAll(/<circle[^>]*fill="([^"]+)"/g),
+      ].map((match) => match[1]);
+      assertEquals(pageMarkerColors.length, 11);
+      assertEquals(new Set(pageMarkerColors).size, 10);
+      assert(!html.includes("<mask"));
+      assertEquals([...html.matchAll(/class="bcpu"/g)].length, 0);
+      assertEquals([...html.matchAll(/class="cpu-key"/g)].length, 18);
+      const legendColors = [
+        ...html.matchAll(
+          /class="cpu-key"[^>]*><span class="swatch" style="background:([^"]+)"/g,
+        ),
+      ].map((match) => match[1]);
+      assertEquals(legendColors.length, 18);
+      assertEquals(new Set(legendColors).size, 18);
+      for (const color of legendColors) {
+        assert(
+          contrastRatio(color, "#16181d") >= 3,
+          `${color} does not contrast with the CPU legend background`,
+        );
+      }
+      const rowCpuIds = [
+        ...html.matchAll(/class="bval" data-cpu-id="([^"]+)"/g),
+      ].map((match) => match[1]);
+      const legendCpuIds = [
+        ...html.matchAll(/class="cpu-key"[^>]*data-cpu-id="([^"]+)"/g),
+      ].map((match) => match[1]);
+      const legendTargets = new Map(
+        [
+          ...html.matchAll(
+            /class="cpu-key" id="([^"]+)" data-cpu-id="([^"]+)"/g,
+          ),
+        ].map((match) => [match[1], match[2]]),
+      );
+      const rowCpuLinks = [
+        ...html.matchAll(
+          /<a class="cpu-id" href="#([^"]+)"[^>]*>(CPU \d+)<\/a>/g,
+        ),
+      ].map((match) => ({ target: match[1], cpuId: match[2] }));
+      assertEquals(rowCpuIds, ["CPU 1", "CPU 1"]);
+      assertEquals(new Set(legendCpuIds).size, 18);
+      assertEquals(legendTargets.size, 18);
+      assertEquals(rowCpuLinks, [
+        { target: "cpu-type-1", cpuId: "CPU 1" },
+        { target: "cpu-type-1", cpuId: "CPU 1" },
+      ]);
+      for (const link of rowCpuLinks) {
+        assertEquals(legendTargets.get(link.target), link.cpuId);
+      }
+      assertStringIncludes(html, 'data-sample-count="9"');
+      assertStringIncludes(
+        html,
+        'aria-label="Representative CPU A Test CPU 00: 1.0µs, flat; 9 samples in the selected window"',
+      );
+      assertStringIncludes(
+        html,
+        'aria-label="Representative CPU A Test CPU 00: 1.5µs, ▲50%; 9 samples in the selected window"',
+      );
+      assertStringIncludes(
+        html,
+        'aria-label="CPU 1: A Test CPU 00; jump to CPU types legend"',
+      );
+      assertStringIncludes(html, "AMD EPYC 7763 64-Core Processor");
+      assertStringIncludes(html, "CPU-03098");
+      assertStringIncludes(html, "CPU-06084");
+      assertStringIncludes(
+        html,
+        '<span class="cpu-detail">2 benchmarks · 8 runs · observed ',
+      );
+      assertStringIncludes(
+        html,
+        '<span class="cpu-detail">1 benchmark · 1 run · observed ',
+      );
+      assert(
+        html.indexOf('class="cpu-legend"') >
+          html.lastIndexOf('class="brow '),
+      );
+      assert(!html.includes("1.0ms"));
+      assert(!html.includes("17ms"));
+      // The other CPU's latest values and trends put these benchmarks in the
+      // opposite order.
+      assertEquals(
+        rows(isolated.benchPage("p99", "duration", 45, BASE)).map((row) =>
+          row.name
+        ),
+        [
+          "packages/a/cpu.bench.ts &gt; representative",
+          "packages/a/cpu.bench.ts &gt; flat",
+        ],
+      );
+      assertEquals(
+        rows(isolated.benchPage("p99", "trend", 45, BASE)).map((row) =>
+          row.name
+        ),
+        [
+          "packages/a/cpu.bench.ts &gt; representative",
+          "packages/a/cpu.bench.ts &gt; flat",
+        ],
+      );
+    });
+  } finally {
+    if (previousCacheDirectory === undefined) {
+      Deno.env.delete("DASHBOARD_CACHE_DIR");
+    } else Deno.env.set("DASHBOARD_CACHE_DIR", previousCacheDirectory);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("benchmark: CPU-less reports are not pooled", async () => {
+  const directory = await Deno.makeTempDir({
+    prefix: "benchmark-no-cpu-",
+  });
+  const previousCacheDirectory = Deno.env.get("DASHBOARD_CACHE_DIR");
+  Deno.env.set("DASHBOARD_CACHE_DIR", directory);
+  const runs = [
+    ghRun(90_102, BASE),
+    ghRun(90_101, BASE - DAY),
+  ];
+  const artifacts: Api["artifacts"] = {
+    90_101: [{ id: 901_010, name: "bench-results", expired: false }],
+    90_102: [{ id: 901_020, name: "bench-results", expired: false }],
+  };
+  const noCpuReport = (avg: number) =>
+    report(
+      [bench("packages/a/cpu.bench.ts", null, "flat", {
+        avg,
+      } as Timings)],
+      "",
+      "",
+    );
+  const zips: Api["zips"] = {
+    901_010: await benchZip(noCpuReport(1_000)),
+    901_020: await benchZip(noCpuReport(1_000_000)),
+  };
+  try {
+    await withApi(
+      { pages: { 1: runs }, artifacts, zips },
+      async (calls) => {
+        const isolated = await import(
+          `./benchmark.ts?no-cpu=${crypto.randomUUID()}`
+        );
+        const tile = await isolated.benchmark.collect(
+          ctx({ GH_TOKEN: "t" }),
+        );
+        assertEquals(tile.status, "bad");
+        assertEquals(tile.sub, "no benchmark data");
+        assert(!(tile.extra ?? "").includes("Unknown CPU"));
+        assertEquals(artifactCalls(calls).length, 4);
+
+        await isolated.benchmark.collect(ctx({ GH_TOKEN: "t" }));
+        assertEquals(artifactCalls(calls).length, 4);
+        assert(
+          !isolated.benchPage("p99", "file", 45, BASE).includes(
+            'class="cpu-key"',
+          ),
+        );
+      },
+    );
+  } finally {
+    if (previousCacheDirectory === undefined) {
+      Deno.env.delete("DASHBOARD_CACHE_DIR");
+    } else Deno.env.set("DASHBOARD_CACHE_DIR", previousCacheDirectory);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("benchmark: CPU-less cached runs are fetched again", async () => {
+  const directory = await Deno.makeTempDir({
+    prefix: "benchmark-cpu-migration-",
+  });
+  const previousCacheDirectory = Deno.env.get("DASHBOARD_CACHE_DIR");
+  Deno.env.set("DASHBOARD_CACHE_DIR", directory);
+  const key = "packages/a/cpu.bench.ts > flat";
+  const legacyStats = {
+    min: 1_000,
+    avg: 1_000,
+    max: 1_000,
+    p75: 1_000,
+    p99: 1_000,
+    p995: 1_000,
+    p999: 1_000,
+  };
+  const legacy = new BenchmarkHistoryStore();
+  await legacy.load();
+  const legacyRuns = [
+    {
+      runId: 91_001,
+      runAttempt: 1,
+      at: BASE - DAY,
+      metrics: new Map([[key, legacyStats]]),
+    },
+    {
+      runId: 91_002,
+      runAttempt: 1,
+      at: BASE,
+      metrics: new Map([[key, legacyStats]]),
+    },
+  ];
+  for (const run of legacyRuns) legacy.set(run);
+  legacy.markRefreshed(Date.now(), legacyRuns);
+  await legacy.save();
+
+  const runs = [
+    ghRun(91_002, BASE),
+    ghRun(91_001, BASE - DAY),
+  ];
+  const artifacts: Api["artifacts"] = {
+    91_001: [{ id: 910_010, name: "bench-results", expired: false }],
+    91_002: [{ id: 910_020, name: "bench-results", expired: false }],
+  };
+  const zips: Api["zips"] = {
+    910_010: await totalZip(1_000),
+    910_020: await totalZip(1_000),
+  };
+  try {
+    await withApi({ pages: { 1: runs }, artifacts, zips }, async (calls) => {
+      const isolated = await import(
+        `./benchmark.ts?cpu-migration=${crypto.randomUUID()}`
+      );
+      const tile = await isolated.benchmark.collect(ctx({ GH_TOKEN: "t" }));
+      assertEquals(artifactCalls(calls).length, 4);
+      assert(!(tile.extra ?? "").includes(TEST_CPU));
+      assert(!(tile.extra ?? "").includes("Unknown CPU"));
+      const html = isolated.benchPage("p99", "file", 45, BASE);
+      assertStringIncludes(html, TEST_CPU);
+      assertEquals([...html.matchAll(/class="cpu-key"/g)].length, 1);
+
+      const migrated = new BenchmarkHistoryStore();
+      await migrated.load();
+      assertEquals(migrated.get(91_001)?.cpu, TEST_CPU);
+      assertEquals(migrated.get(91_002)?.cpu, TEST_CPU);
+    });
+  } finally {
+    if (previousCacheDirectory === undefined) {
+      Deno.env.delete("DASHBOARD_CACHE_DIR");
+    } else Deno.env.set("DASHBOARD_CACHE_DIR", previousCacheDirectory);
+    await Deno.remove(directory, { recursive: true });
+  }
 });
 
 Deno.test("/bench: grouped by source file, each benchmark coloured by its own trend", async () => {
@@ -1694,6 +2133,10 @@ Deno.test("/bench: grouped by source file, each benchmark coloured by its own tr
       "packages/memory/query.bench.ts",
       "packages/runner/scheduler-persistent-state.bench.ts",
     ],
+  );
+  assertEquals(
+    [...html.matchAll(/<section class="benchmark-group">/g)].length,
+    3,
   );
   assertEquals(rows(html), [
     { status: "good", name: "easing", value: "900ns", trend: "▼10%" },
@@ -1759,6 +2202,15 @@ Deno.test("/bench: grouped by source file, each benchmark coloured by its own tr
   );
   assertStringIncludes(html, "rangeRequest.abort()");
   assertStringIncludes(html, "refreshRangeWhenIdle()");
+  assertStringIncludes(html, "const isSameDocumentFragment = (link) => {");
+  assertStringIncludes(
+    html,
+    'url.search === location.search &&\n      url.hash !== ""',
+  );
+  assertStringIncludes(
+    html,
+    "link && isSameTabLink(event, link) && !isSameDocumentFragment(link)",
+  );
   assert(!html.includes("location.reload()"));
   assert(!html.includes("benchRestoreDaysFocus"));
   assertStringIncludes(html, "setInterval(checkForUpdates, 60000)");
@@ -1776,6 +2228,45 @@ Deno.test("/bench: grouped by source file, each benchmark coloured by its own tr
     html,
     '<div class="axisrow"><div class="timeaxis"><span>',
   );
+  assertEquals([...html.matchAll(/class="bcpu"/g)].length, 0);
+  assertEquals([...html.matchAll(/class="cpu-key"/g)].length, 1);
+  assertStringIncludes(html, TEST_CPU);
+  assertStringIncludes(
+    html,
+    '<span class="cpu-detail">6 benchmarks · 12 runs · observed ',
+  );
+  assertEquals(
+    [...html.matchAll(/class="bval" data-cpu-id="CPU 1"/g)].length,
+    6,
+  );
+  assertEquals(
+    [
+      ...html.matchAll(
+        /<a class="cpu-id" href="#cpu-type-1"[^>]*>CPU 1<\/a>/g,
+      ),
+    ].length,
+    6,
+  );
+  assertStringIncludes(
+    html,
+    `aria-label="Representative CPU ${TEST_CPU}: 2.5ms, flat;`,
+  );
+  assertStringIncludes(
+    html,
+    'class="cpu-key" id="cpu-type-1" data-cpu-id="CPU 1"',
+  );
+  assertStringIncludes(html, ".bval a.cpu-id{text-decoration:none}");
+  assert(!html.includes("text-underline-offset"));
+  assert(!html.includes("Its numbered CPU key maps to the legend below."));
+  assert(
+    html.indexOf('class="cpu-legend"') >
+      html.lastIndexOf('class="brow '),
+  );
+  assertStringIncludes(
+    html,
+    "body.hide-green .benchmark-group:not(:has(.brow:not(.good)))",
+  );
+  assert(!html.includes("body.hide-green section:not("));
 });
 
 Deno.test("/bench?sort=trend: a flat list, biggest rise first, showing the full key", async () => {
@@ -1789,14 +2280,17 @@ Deno.test("/bench?sort=trend: a flat list, biggest rise first, showing the full 
     "packages/html/render.bench.ts &gt; easing",
     "packages/memory/query.bench.ts &gt; quarter",
   ]);
-  assert(!html.includes("<h2>"), "a flat list has no file headings");
+  assert(
+    !html.includes('<section class="benchmark-group">'),
+    "a flat list has no file groups",
+  );
   assertStringIncludes(
     html,
     `<a class="stat on" href="/bench?view=runtime&amp;repo=labs&amp;days=45&amp;sort=trend&amp;stat=p99" aria-current="true">trend</a>`,
   );
 });
 
-Deno.test("/bench?sort=duration lists the longest current benchmark first", async () => {
+Deno.test("/bench?sort=duration lists the longest displayed benchmark first", async () => {
   const html = await page("?stat=p99&sort=duration");
   assertEquals(rows(html).map((row) => row.name).slice(0, 3), [
     "packages/memory/query.bench.ts &gt; quarter",
@@ -1825,6 +2319,36 @@ Deno.test("/bench history windows keep about the same chart point count", () => 
 
   assert(full.length >= 89 && full.length <= 91);
   assert(short.length >= 89 && short.length <= 91);
+});
+
+Deno.test("representative benchmark CPU prefers coverage, recency, then name", () => {
+  const series = (cpu: string, sampleCount: number, points: number[]) => ({
+    cpu,
+    sampleCount,
+    points: points.map((at) => ({ at })),
+  });
+  assertEquals(
+    representativeBenchmarkCpu([
+      series("more recent", 100, [1, 4]),
+      series("more covered", 1_000, [1, 3]),
+    ])?.cpu,
+    "more covered",
+  );
+  assertEquals(
+    representativeBenchmarkCpu([
+      series("older", 100, [1, 3]),
+      series("newer", 100, [1, 4]),
+    ])?.cpu,
+    "newer",
+  );
+  assertEquals(
+    representativeBenchmarkCpu([
+      series("z CPU", 100, [1, 4]),
+      series("a CPU", 100, [1, 4]),
+    ])?.cpu,
+    "a CPU",
+  );
+  assertEquals(representativeBenchmarkCpu([]), undefined);
 });
 
 Deno.test("benchmark collection retains enough runs for the shortest history window", () => {
@@ -1883,7 +2407,7 @@ Deno.test("/bench: the history slider selects and clamps the displayed days", as
     short,
     'id="days" name="days" min="1" max="45" step="1" value="1"',
   );
-  assertStringIncludes(short, "selected 1-day trend");
+  assertStringIncludes(short, "selected 1-day window");
   assertStringIncludes(
     await page("?days=7"),
     '<div class="axisrow"><div class="timeaxis"><span>',
@@ -2122,10 +2646,9 @@ Deno.test("benchmark: an early-paint publish that throws is caught, and the coll
   }
 });
 
-Deno.test("benchmark: the tile totals a run even when no benchmark has a drawable series", async () => {
-  // Two runs, each reporting a different benchmark: no benchmark has two points,
-  // so the per-benchmark drill-down has nothing to plot. The tile still totals the
-  // latest run's benchmark(s) — here the set even changed, so it resets to run 802.
+Deno.test("benchmark: the drill-down keeps one-sample benchmarks", async () => {
+  // Each run reports a different benchmark. The tile still indexes both runs.
+  // The drill-down shows each benchmark's one sample as a point.
   const runs = [ghRun(801, BASE - DAY), ghRun(802, BASE)];
   await withApi({
     pages: { 1: runs },
@@ -2148,10 +2671,10 @@ Deno.test("benchmark: the tile totals a run even when no benchmark has a drawabl
     assertEquals(v.sub, undefined);
     assertStringIncludes(v.extra ?? "", "1 benchmark"); // the count line
     assertEquals(v.href, "/bench?view=runtime&repo=labs");
-    // Neither single-point benchmark reaches the drill-down: it needs >= 2 points.
     const drill = await page("");
-    assert(!drill.includes("one.bench.ts"));
-    assert(!drill.includes("two.bench.ts"));
+    assertStringIncludes(drill, "one.bench.ts");
+    assertStringIncludes(drill, "two.bench.ts");
+    assertEquals([...drill.matchAll(/<circle/g)].length, 2);
   });
 });
 
@@ -2395,12 +2918,14 @@ Deno.test("runtime history reconstructs unmanifested cache data before asking fo
       runId: 81_001,
       runAttempt: 1,
       at: BASE - DAY,
+      cpu: TEST_CPU,
       metrics: new Map([["packages/a/cache.bench.ts > cached", stats]]),
     });
     store.set({
       runId: 81_002,
       runAttempt: 1,
       at: BASE,
+      cpu: TEST_CPU,
       metrics: new Map([["packages/a/cache.bench.ts > cached", stats]]),
     });
     await store.save(BASE);
