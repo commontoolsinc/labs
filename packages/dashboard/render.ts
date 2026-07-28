@@ -16,10 +16,6 @@ const PAINT_STATUS_FAVICON = paintStatusFavicon.toString();
 
 export const FAVICON_CRY_AFTER_MS = 60 * 60 * 1000;
 
-// Open dashboards reload when this changes. Increment it with shell markup,
-// styles, client code, or the update payload shape.
-export const SHELL_VERSION = 4;
-
 type ViewerTimeElement = Pick<HTMLTimeElement, "dateTime" | "textContent">;
 
 /** Replace marked absolute timestamps with the viewer's local wall-clock time. */
@@ -75,12 +71,12 @@ export function renderTile(v: TileView, id?: string, wide = false): string {
   }"${tgt}>${inner}</a>`;
 }
 
-export function shell(
+function renderShell(
   gridHtml: string,
   wideHtml: string,
   ago: number,
   refreshMs: number,
-  shellVersion: number,
+  shellVersion: string,
   status: FaviconStatus,
   serverRedSince: number | null = null,
   serverRedAgeMs: number | null = null,
@@ -143,7 +139,7 @@ ${faviconLink(status)}
   <div id="dashboard-wide">${wideHtml}</div>
 <script>
   const REFRESH = ${refreshMs};
-  const SHELL_VERSION = ${shellVersion};
+  const SHELL_VERSION = ${JSON.stringify(shellVersion)};
   const COL = { green: '#43c574', amber: '#e0a852', red: '#e2504a' };
   const FAVICONS = ${FAVICON_PNG_HREFS};
   const FAVICON_CRY_AFTER_MS = ${FAVICON_CRY_AFTER_MS};
@@ -235,4 +231,26 @@ ${faviconLink(status)}
   paint();
   setInterval(paint, 1000);
 </script></body></html>`;
+}
+
+export function shell(
+  gridHtml: string,
+  wideHtml: string,
+  ago: number,
+  refreshMs: number,
+  shellVersion: string,
+  status: FaviconStatus,
+  serverRedSince: number | null = null,
+  serverRedAgeMs: number | null = null,
+): string {
+  return renderShell(
+    gridHtml,
+    wideHtml,
+    ago,
+    refreshMs,
+    shellVersion,
+    status,
+    serverRedSince,
+    serverRedAgeMs,
+  );
 }

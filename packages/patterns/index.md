@@ -209,8 +209,10 @@ interface TopicsInput {
   topics?: Writable<TopicPiece[] | Default<[]>>;
   myName?: PerUser<Writable<string | Default<"">>>;
 }
-// TopicInput additionally takes mentionable?: Writable<TopicPiece[]> — the
-// board's own list, wired at creation, for detail-page Connections.
+// TopicInput additionally takes mentionable?: Writable<TopicReference[]> —
+// the board's own list, wired at creation, for detail-page Connections.
+// TopicReference is TopicPiece minus its own crossrefs, so a Topic's schema
+// describes its siblings without recursing over the whole board.
 ```
 
 ### Output Schema

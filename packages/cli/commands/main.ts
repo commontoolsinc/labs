@@ -132,6 +132,7 @@ export const main = new Command()
       .option("--identity <path:string>", "Path to an identity keyfile.")
       .option("--exec-cli <path:string>", "Path to the cf exec shim.")
       .option("--log-file <path:string>", "Path to the FUSE child log file.")
+      .option("--debug", "Enable FUSE debug output.")
       .option("--allow-other", "Pass allow_other through to the FUSE child.")
       .option("--noattrcache", "Pass noattrcache through to the FUSE child.")
       .option(

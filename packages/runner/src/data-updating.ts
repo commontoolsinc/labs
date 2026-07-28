@@ -18,7 +18,7 @@ import {
   ID_FIELD,
   type JSONSchema,
 } from "./builder/types.ts";
-import type { JSONSchemaObj } from "@commonfabric/api";
+import type { IDFields, JSONSchemaObj } from "@commonfabric/api";
 import { ContextualFlowControl } from "./cfc.ts";
 import { isCellScope, scopeRank } from "./scope.ts";
 import { createRef } from "./create-ref.ts";
@@ -515,18 +515,16 @@ export function normalizeAndDiff(
   // back, we want to assume removing and adding with the same id is
   // semantically a new item (in fact we otherwise run into compare-and-swap
   // transaction errors).
-  if (
-    isRecord(newValue) &&
-    newValue[ID_FIELD] !== undefined
-  ) {
+  const idFieldValue = newValue as FabricPlainObject & { [ID_FIELD]?: string };
+  if (isRecord(newValue) && idFieldValue[ID_FIELD] !== undefined) {
     diffLogger.debug(
       "diff",
       () => `[BRANCH_ID_FIELD] Processing ID_FIELD redirect at path=${pathStr}`,
     );
-    const { [ID_FIELD]: fieldName, ...rest } = newValue as
+    const { [ID_FIELD]: fieldName, ...rest } = idFieldValue as
       & { [ID_FIELD]: string }
       & FabricPlainObject;
-    const id = newValue[fieldName as PropertyKey];
+    const id = idFieldValue[fieldName];
     if (link.path.length > 1) {
       const parent = tx.readValueOrThrow({
         ...link,
@@ -954,12 +952,13 @@ export function normalizeAndDiff(
   }
 
   // Handle ID-based object (convert to entity)
-  if (isRecord(newValue) && newValue[ID] !== undefined) {
+  const idValue = newValue as FabricPlainObject & { [ID]?: string };
+  if (isRecord(newValue) && idValue[ID] !== undefined) {
     diffLogger.debug(
       "diff",
       () => `[BRANCH_ID_OBJECT] Processing ID-based object at path=${pathStr}`,
     );
-    const { [ID]: id, ...rest } = newValue as
+    const { [ID]: id, ...rest } = idValue as
       & { [ID]: string }
       & FabricPlainObject;
     let path = link.path;
@@ -1597,7 +1596,7 @@ export function addCommonIDfromObjectID(
 ): void {
   function traverse(obj: unknown): void {
     if (isRecord(obj) && fieldName in obj) {
-      obj[ID_FIELD] = fieldName;
+      (obj as IDFields)[ID_FIELD] = fieldName;
     }
 
     // TODO(danfuzz): Latent — this is a public entry point (re-exported,

@@ -8,11 +8,13 @@ sponsored shared workers, positive per-action authority, writer-index
 producer lookup, scope-safe fallback, causal settlement acknowledgements,
 and server egress parity). No implementation in this spec.
 
-Related specs: `docs/specs/scheduler-v2/`,
-`docs/specs/persistent-scheduler-state.md`,
-`docs/specs/content-addressed-action-identity.md`,
-`docs/history/specs/pattern-id-retirement.md`, `docs/specs/memory-v2/`,
-`docs/specs/toolshed-access-control.md`, `docs/specs/cfc-write-prefix-provenance.md`.
+Related specs: [scheduler v2](../scheduler-v2/),
+[persistent scheduler state](../persistent-scheduler-state.md),
+[content-addressed action identity](../content-addressed-action-identity.md),
+[pattern ID retirement](../../history/specs/pattern-id-retirement.md),
+[memory v2](../memory-v2/),
+[toolshed access control](../toolshed-access-control.md), and
+[CFC write-prefix provenance](../cfc-write-prefix-provenance.md).
 Related PRs: #4288 (scheduler-v2 cutover, assumed baseline);
 #4495 (conflict catch-up, landed); #4139 (seq-token draft), #4115
 (closeSpace), and #2659 (per-space LLM throttling) remain in flight.
@@ -756,7 +758,8 @@ claims, the overlay, and explicit settlements.
 **Model.** Clients do not commit at all. A UI event becomes a **signed
 event envelope**: `{space, piece, handler-link, payload, provenance,
 user-DID, session, nonce/expiry, signature}` — the request-proof format of
-`toolshed-access-control.md:35` applied to events, replacing the
+[Toolshed Access Control](../toolshed-access-control.md) applied to events,
+replacing the
 non-serializable WeakSet trusted-event mark
 (`packages/runner/src/cfc/ui-contract.ts:95`). The server verifies the
 envelope, marks renderer-trust server-side, and runs the handler in the

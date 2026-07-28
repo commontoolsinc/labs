@@ -3,7 +3,7 @@ import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 import { isRecord } from "@commonfabric/utils/types";
 import { getTopFrame } from "./builder/pattern.ts";
 import { isStreamValue } from "./builder/types.ts";
-import { toCell } from "./back-to-cell.ts";
+import { type BackToCellInternals, toCell } from "./back-to-cell.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
@@ -732,7 +732,8 @@ export function getCellOrThrow<T = any>(value: any): Cell<T> {
  * @returns {boolean}
  */
 export function isCellResult(value: any): value is CellResult<any> {
-  return isRecord(value) && typeof value[toCell] === "function";
+  return isRecord(value) &&
+    typeof (value as Partial<BackToCellInternals>)[toCell] === "function";
 }
 
 /**

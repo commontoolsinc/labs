@@ -87,6 +87,94 @@ Deno.test("rename carries CFC directory entry annotation to the new name", () =>
   assertEquals(entries?.[0].nameDigest.startsWith("fnv1a32:"), true);
 });
 
+Deno.test("CFC directory entry ordering is sorted once when read", () => {
+  const tree = new FsTree();
+  const annotator = new CfcProjectionAnnotator(tree, {
+    space: "did:key:zSpace",
+    generation: "generation-1",
+    labelView: { version: 1, entries: [] },
+  });
+  const parentIno = tree.addDir(tree.rootIno, "values", "object");
+  annotator.annotateJsonDirectory(parentIno, [], {});
+
+  const names = Array.from(
+    { length: 1_000 },
+    (_, index) => `entry-${(1_000 - index).toString().padStart(4, "0")}`,
+  );
+  for (const name of names) {
+    const childIno = tree.addFile(parentIno, name, name, "string");
+    annotator.annotateJsonScalar(childIno, [name], name);
+    annotator.annotateEntry(parentIno, name, childIno);
+  }
+
+  const pendingEntries = tree.getNode(parentIno)?.cfc?.entries?.entries ?? [];
+  assertEquals(pendingEntries.map((entry) => entry.name), names);
+
+  const entries = tree.getCfcAnnotation(parentIno)?.entries?.entries ?? [];
+  assertEquals(
+    entries.map((entry) => entry.nameDigest),
+    entries.map((entry) => entry.nameDigest).toSorted(),
+  );
+});
+
+Deno.test("CFC entry updates rebuild a missing lookup index", () => {
+  const tree = new FsTree();
+  const annotator = new CfcProjectionAnnotator(tree, {
+    space: "did:key:zSpace",
+    generation: "generation-1",
+    labelView: { version: 1, entries: [] },
+  });
+  const parentIno = tree.addDir(tree.rootIno, "values", "object");
+  annotator.annotateJsonDirectory(parentIno, [], { first: "old" });
+  const firstIno = tree.addFile(parentIno, "first", "old", "string");
+  annotator.annotateJsonScalar(firstIno, ["first"], "old");
+  annotator.annotateEntry(parentIno, "first", firstIno);
+
+  const indexes = (tree as unknown as {
+    cfcEntryIndexes: Map<bigint, Map<string, number>>;
+  }).cfcEntryIndexes;
+  indexes.delete(parentIno);
+
+  annotator.annotateEntry(parentIno, "first", firstIno);
+  assertEquals(indexes.get(parentIno)?.get("first"), 0);
+  assertEquals(
+    tree.getCfcAnnotation(parentIno)?.entries?.entries.length,
+    1,
+  );
+});
+
+Deno.test("removing an unannotated child leaves CFC entries unchanged", () => {
+  const tree = new FsTree();
+  const annotator = new CfcProjectionAnnotator(tree, {
+    space: "did:key:zSpace",
+    generation: "generation-1",
+    labelView: { version: 1, entries: [] },
+  });
+  const parentIno = tree.addDir(tree.rootIno, "values", "object");
+  annotator.annotateJsonDirectory(parentIno, [], { kept: "value" });
+  const keptIno = tree.addFile(parentIno, "kept", "value", "string");
+  annotator.annotateJsonScalar(keptIno, ["kept"], "value");
+  annotator.annotateEntry(parentIno, "kept", keptIno);
+  tree.addFile(parentIno, "unannotated", "temporary", "string");
+
+  tree.removeChild(parentIno, "unannotated");
+
+  assertEquals(
+    tree.getCfcAnnotation(parentIno)?.entries?.entries.map((entry) =>
+      entry.name
+    ),
+    ["kept"],
+  );
+});
+
+Deno.test("detachChild rejects a missing parent or child", () => {
+  const tree = new FsTree();
+  const parentIno = tree.addDir(tree.rootIno, "parent");
+
+  assertEquals(tree.detachChild(999_999n, "child"), undefined);
+  assertEquals(tree.detachChild(parentIno, "child"), undefined);
+});
+
 Deno.test("rename across parents updates paths transitively", () => {
   const tree = new FsTree();
   const src = tree.addDir(tree.rootIno, "src");
@@ -130,6 +218,23 @@ Deno.test("removeChild clears dir and nested file recursively", () => {
   assertEquals(tree.lookup(tree.rootIno, "dir"), undefined);
 });
 
+Deno.test("detachChild retains an unlinked subtree until it is cleared", () => {
+  const tree = new FsTree();
+  const detached = tree.addDir(tree.rootIno, "entity");
+  const child = tree.addFile(detached, "value.txt", "old", "string");
+
+  assertEquals(tree.detachChild(tree.rootIno, "entity"), detached);
+  assertEquals(tree.lookup(tree.rootIno, "entity"), undefined);
+  assertEquals(tree.inodes.has(detached), true);
+  assertEquals(tree.inodes.has(child), true);
+
+  const replacement = tree.addDir(tree.rootIno, "entity");
+  tree.clear(detached);
+  assertEquals(tree.lookup(tree.rootIno, "entity"), replacement);
+  assertEquals(tree.inodes.has(detached), false);
+  assertEquals(tree.inodes.has(child), false);
+});
+
 Deno.test("clear removes subtree but keeps sibling", () => {
   const tree = new FsTree();
   const a = tree.addDir(tree.rootIno, "a");
@@ -149,6 +254,12 @@ Deno.test("getNameForIno returns the registered child name", () => {
   const tree = new FsTree();
   const ino = tree.addFile(tree.rootIno, "myfile.txt", "data", "string");
   assertEquals(tree.getNameForIno(ino), "myfile.txt");
+
+  tree.rename(tree.rootIno, "myfile.txt", tree.rootIno, "renamed.txt");
+  assertEquals(tree.getNameForIno(ino), "renamed.txt");
+
+  tree.removeChild(tree.rootIno, "renamed.txt");
+  assertEquals(tree.getNameForIno(ino), undefined);
 });
 
 // --- transplantSubtree ---------------------------------------------------

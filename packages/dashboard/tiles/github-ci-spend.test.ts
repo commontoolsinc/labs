@@ -5,10 +5,8 @@ import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import type { Ctx, TileView } from "../types.ts";
 import { REPO } from "../config.ts";
 import { blacksmithRoutes } from "../blacksmith.ts";
-import {
-  githubCiSpend,
-  projectMonthly,
-} from "./github-ci-spend.ts";
+import { projectMonthly } from "../spend.ts";
+import { githubCiSpend } from "./github-ci-spend.ts";
 
 const ORG = "acme";
 const D = 86_400_000;

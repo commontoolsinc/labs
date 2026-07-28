@@ -22,6 +22,8 @@ export interface CachedBenchmarkRun {
   runId: number;
   runAttempt: number;
   at: number;
+  // Entries written before processor-specific charts are fetched again.
+  cpu?: string;
   metrics: Map<string, BenchmarkStats>;
 }
 
@@ -29,6 +31,7 @@ interface StoredBenchmarkRun {
   runId: number;
   runAttempt: number;
   at: number;
+  cpu?: string;
   metrics: Record<string, BenchmarkStats>;
 }
 
@@ -85,7 +88,10 @@ const isStoredRun = (value: unknown): value is StoredBenchmarkRun => {
   const run = value as StoredBenchmarkRun;
   return Number.isInteger(run.runId) && run.runId > 0 &&
     Number.isInteger(run.runAttempt) && run.runAttempt > 0 &&
-    Number.isFinite(run.at) && typeof run.metrics === "object" &&
+    Number.isFinite(run.at) &&
+    (run.cpu === undefined ||
+      (typeof run.cpu === "string" && run.cpu.trim().length > 0)) &&
+    typeof run.metrics === "object" &&
     run.metrics !== null && !Array.isArray(run.metrics) &&
     Object.values(run.metrics).every(isStats);
 };
@@ -195,6 +201,7 @@ export class BenchmarkHistoryStore {
         runId: run.runId,
         runAttempt: run.runAttempt,
         at: run.at,
+        cpu: run.cpu,
         metrics: new Map(Object.entries(run.metrics)),
       });
     }
@@ -243,7 +250,10 @@ export class BenchmarkHistoryStore {
   #merge(contents: BenchmarkHistoryContents): void {
     for (const run of contents.runs) {
       const key = runKey(run.runId, run.runAttempt);
-      if (!this.#runs.has(key)) this.#runs.set(key, run);
+      const current = this.#runs.get(key);
+      if (!current || (current.cpu === undefined && run.cpu !== undefined)) {
+        this.#runs.set(key, run);
+      }
     }
     this.#invalidatedAt = Math.max(
       this.#invalidatedAt,
@@ -401,11 +411,14 @@ export class BenchmarkHistoryStore {
   set(run: CachedBenchmarkRun): CachedBenchmarkRun {
     const key = runKey(run.runId, run.runAttempt);
     const current = this.#runs.get(key);
-    if (current) return current;
+    if (current && (current.cpu !== undefined || run.cpu === undefined)) {
+      return current;
+    }
     const stored = {
       runId: run.runId,
       runAttempt: run.runAttempt,
       at: run.at,
+      cpu: run.cpu,
       metrics: new Map(run.metrics),
     };
     this.#runs.set(key, stored);
@@ -457,6 +470,7 @@ export class BenchmarkHistoryStore {
             runId: run.runId,
             runAttempt: run.runAttempt,
             at: run.at,
+            cpu: run.cpu,
             metrics: Object.fromEntries(run.metrics),
           })),
         };

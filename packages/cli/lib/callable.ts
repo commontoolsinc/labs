@@ -33,7 +33,11 @@ export interface CallableCellLike {
   asSchemaFromLinks?: () => CallableCellLike;
   key: (segment: string) => CallableCellLike;
   pull?: () => Promise<unknown>;
-  getAsNormalizedFullLink?: () => { scope?: CellScope };
+  getAsNormalizedFullLink?: () => {
+    scope?: CellScope;
+    id?: string;
+    space?: string;
+  };
   send?: (
     value: unknown,
     onCommit?: (tx: CallableTransactionLike) => void,
@@ -97,8 +101,22 @@ export interface CallableExecutionDeps {
   uuid?: () => string;
 }
 
+/** Durable address of a tool's per-invocation result cell. The scope is part
+ * of the address: reopening a user- or session-scoped cell without it
+ * resolves the space-scoped instance — a different cell. */
+export interface CallableResultRef {
+  space: string;
+  id: string;
+  scope: CellScope;
+}
+
 export interface ExecutedCallable {
   outputText?: string;
+  /** The tool result cell's address, when the runtime exposes it — the handle
+   * a caller can revisit later instead of re-running the tool (verb contract
+   * Part 2, docs/plans/pattern-verb-contract.md). Handlers gain their
+   * equivalent with the invocation protocol's caller-supplied ids. */
+  resultRef?: CallableResultRef;
 }
 
 interface CallablePatternLike extends Record<string, unknown> {
@@ -398,7 +416,22 @@ export async function executeResolvedCallable(
     cancelSink?.();
   }
 
+  // The result cell's durable address rides along when the runtime exposes
+  // it: today the cell is otherwise unlinked — reachable by nobody once this
+  // process exits (a named defect in the verb-contract design). Handing the
+  // address back is the smallest honest handle.
+  const resultLink = resultCell.getAsNormalizedFullLink?.();
   return {
     outputText: JSON.stringify(outputValue, null, 2),
+    ...(resultLink?.id && resultLink?.space
+      ? {
+        resultRef: {
+          space: resultLink.space,
+          id: resultLink.id,
+          // Absent scope on a normalized link means the space scope.
+          scope: resultLink.scope ?? "space",
+        },
+      }
+      : {}),
   };
 }

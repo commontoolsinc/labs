@@ -186,6 +186,9 @@ export const EXPERIMENTAL_ENV_VARS = {
   // Scheduler-v2 lineage (#4090) is default-on. Keep a programmatic rollback
   // override while the flag exists; no environment exposure is needed.
   commitPreconditions: null,
+  // Verb-contract WS-C: env-reachable so the CLI invocation-protocol work can
+  // enable it per process during the integration proof.
+  plainResultReceipts: "EXPERIMENTAL_PLAIN_RESULT_RECEIPTS",
   systemPatternAutoUpdate: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
   computedCellIds: "EXPERIMENTAL_COMPUTED_CELL_IDS",
 } as const satisfies Record<keyof ExperimentalOptions, string | null>;

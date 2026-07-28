@@ -38,7 +38,7 @@ cf fuse unmount /tmp/cf
 ```
 /tmp/cf/                              # mount root
   home/                               # space (connected on demand)
-    pieces/
+    pieces/                            # named projections load on first access
       todo-app/                       # piece directory
         result.json                   # full result cell as JSON
         result/                       # exploded JSON tree
@@ -61,7 +61,7 @@ cf fuse unmount /tmp/cf
         meta.json                     # piece ID, entity, running pattern ref
       .index.json                     # piece name → entity ID mapping
       pieces.json                     # discovery manifest with pattern refs
-    entities/                         # access cells by entity ID
+    entities/                         # all live space entities, loaded lazily by ID
     space.json                        # { did, name }
   .spaces.json                        # known space name → DID mapping
 ```
@@ -262,6 +262,18 @@ a readiness sidecar before the mount command reports success. The child writes
 heartbeat; startup succeeds only when the status matches the current mount
 attempt and recorded child PID.
 
+The `STATUS` column is no longer taken from the heartbeat/child-status sidecar
+alone — it is now gated on the OS mount table (`getfsstat` on darwin,
+`/proc/mounts` on linux), the kernel's own ground truth. A wedged daemon keeps
+answering liveness probes and its sidecar keeps saying `mounted`, so the sidecar
+by itself can lie. Two consequences: a PID-alive entry whose mountpoint is
+absent from the table is reported `dead` (the daemon outlived its mount), and a
+dead-PID entry still present in the table is shown as `dead` and kept (not
+swept) so the stale kernel mount stays visible for cleanup. Only an entry that
+is both absent from the table and has no live process is swept. If the table
+cannot be read, the row is reported `unknown` and preserved rather than
+destroyed.
+
 ### Linux: Docker / other-user access
 
 If you need Docker or another user to traverse a Linux FUSE mount, mount with:
@@ -392,8 +404,10 @@ avoid FUSE-T crashes from `notify_inval_entry` during callbacks).
 ### The `.status` file
 
 `.status` at the mount root reports the daemon's API URL, debug flag, connection
-state, per-space piece counts, subtree rebuild metrics, write statistics, and a
-`cfc` section carrying writeback phase counts and recent diagnostics.
+state, per-space materialized piece counts, subtree rebuild metrics, write
+statistics, and a `cfc` section carrying writeback phase counts and recent
+diagnostics. Each space has a `piecesLoaded` flag. Its piece count remains zero
+until the named `pieces/` projection is first accessed.
 
 The file is generated rather than written. `CellBridge.initStatus` registers it
 with `FsTree.addGeneratedFile`, giving the tree a function that renders the JSON

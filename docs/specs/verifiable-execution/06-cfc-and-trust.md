@@ -1,6 +1,6 @@
 # CF Protocol: CFC & Trust Profiles (Sections 10–12)
 
-See `docs/specs/verifiable-execution/README.md` for navigation.
+See the [verifiable-execution document map](README.md) for navigation.
 
 ## 10. Contextual Flow Control (CFC)
 

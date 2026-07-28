@@ -732,6 +732,13 @@ interface MutableLine {
   bg?: "add" | "del";
 }
 
+interface FragmentLine {
+  diffLine: number;
+  code: string;
+  /** Context can establish old-side state without replacing new-side colours. */
+  render?: boolean;
+}
+
 interface HunkCtx {
   rawLines: string[];
   modelLines: DiffModel["lines"];
@@ -815,8 +822,8 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
   // Mapping of this hunk's visible new-file lines → diff lines, and lazily-
   // parsed fragments for lines the workspace cannot vouch for.
   const newToDiff = new Map<number, number>();
-  const newFragment: { diffLine: number; code: string }[] = [];
-  const oldFragment: { diffLine: number; code: string }[] = [];
+  const newFragment: FragmentLine[] = [];
+  const oldFragment: FragmentLine[] = [];
 
   for (let i = hunk.headerLine + 1; i <= hunk.endLine; i++) {
     const entry = modelLines[i];
@@ -835,13 +842,18 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
     if (entry.kind === "add") lines[i].bg = "add";
     if (entry.kind === "del") lines[i].bg = "del";
 
+    if (entry.kind === "ctx") {
+      oldFragment.push({ diffLine: i, code, render: false });
+    }
     if (entry.kind === "del") {
+      const fragment = { diffLine: i, code, render: false };
+      oldFragment.push(fragment);
       const oldSpans = ctx.oldFileLines?.[entry.oldLine!]?.spans;
       const shifted = oldSpans ? shiftCompleteLineSpans(t, oldSpans) : null;
       if (shifted) {
         lines[i].spans = shifted;
       } else {
-        oldFragment.push({ diffLine: i, code });
+        fragment.render = true;
       }
       continue;
     }
@@ -875,13 +887,15 @@ function buildHunk(hunk: DiffHunk, ctx: HunkCtx): StructureNode {
     ctx.newLanguage,
     ctx.newFileName,
   );
-  applyFragmentSpans(
-    oldFragment,
-    lines,
-    rawLines,
-    ctx.oldLanguage,
-    ctx.oldFileName,
-  );
+  if (oldFragment.some((fragment) => fragment.render)) {
+    applyFragmentSpans(
+      oldFragment,
+      lines,
+      rawLines,
+      ctx.oldLanguage,
+      ctx.oldFileName,
+    );
+  }
 
   // --- structure ---------------------------------------------------------
   // Verified hunks remap the workspace file's own nodes (precise ranges, live
@@ -1002,7 +1016,7 @@ function shiftCompleteLineSpans(
  * fragment so its structure tree can be remapped too.
  */
 function applyFragmentSpans(
-  fragment: { diffLine: number; code: string }[],
+  fragment: FragmentLine[],
   lines: MutableLine[],
   rawLines: string[],
   language: Language,
@@ -1014,6 +1028,7 @@ function applyFragmentSpans(
     fileName,
   );
   for (let i = 0; i < fragment.length; i++) {
+    if (fragment[i].render === false) continue;
     const { diffLine } = fragment[i];
     const spans = parsed.lines[i]?.spans ?? [];
     lines[diffLine].spans = shiftSpans(markerSpan(rawLines[diffLine]), spans);

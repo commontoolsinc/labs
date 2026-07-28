@@ -37,6 +37,7 @@ dashboard/
   favicon.ts    runtime status priority and access to generated PNG favicon copies
   favicon-png.generated.ts  generated runtime PNG favicon copies
   favicon-artwork.ts  build/test-only SVG source for those favicon copies
+  version.ts    Git commit used as the browser/server compatibility version
   render.ts     renderTile(view) + the page shell/CSS
   server.ts     generic runtime: scheduler, SSE, route mounting, page assembly
   registry.ts   THE ONE REGISTRATION POINT — the array of tiles
@@ -76,8 +77,11 @@ snapshot for that source and shows the combined list in gray with the error.
 Each event connection receives the current tile snapshot before it waits for
 new collections. The browser reconciles that snapshot by tile ID, leaving
 unchanged elements, focus, and scroll positions in place. Routine data updates
-never navigate the page. A changed shell version reloads once so an unattended
-display picks up new CSS or client code after a dashboard deployment.
+never navigate the page. The server uses the current Git commit as its
+compatibility version. Local development reads the checked-out commit from Git.
+A deployed image receives the commit that its publishing workflow checked out.
+An unattended display reloads when it reconnects to a server running a
+different commit.
 
 The tab favicon follows the most urgent visible tile. It is red when any tile is
 red, orange when there are no red tiles but at least one orange tile, and green
@@ -175,11 +179,11 @@ surveillance tool.
 | production | synthetic HTTP check of the production server: `/_health` on `PROD_URL`'s origin, which answers only while the server is really serving. Defaults to estuary, the production toolshed. Estuary is on the tailnet, so a dashboard that cannot reach the tailnet needs `PROD_URL` pointed at something it can | `PROD_URL` (optional) |
 | common.tools | synthetic HTTP check of the public site | `COMMON_TOOLS_URL` (optional; defaults to `https://common.tools`) |
 | prod errors | SigNoz trace error rate for one service (errored spans / all spans): last-12h headline, with a per-hour sparkline over the retained trace history (~2 weeks) and the last-12h slice that feeds the headline highlighted. Scoped to `PROD_SERVICE` — the same SigNoz holds staging and one-off perf runs, whose rates are not production's. Gray (not red) when SigNoz is unreachable. Pops out to the SigNoz logs explorer | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `SIGNOZ_UI_URL` for the pop-out |
-| cloud spend | BigQuery billing export, via the REST API | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
+| cloud spend | BigQuery billing export, projected to month-end from the available part of a 14-day daily-cost window early in the month. The header shows actual MTD spend. The highlighted part of the 45-day chart shows the days used for the estimate | `GCP_BILLING_TABLE` (+ Workload Identity, or `GCP_SA_KEY` locally), optional `GCP_DAILY_BUDGET` |
 | ci spend | GitHub Actions and Blacksmith billing, projected to month-end in USD. Each configured source gets a line in the shared 45-day chart and an MTD label. The header shows combined MTD spend. A source that cannot be read shows `$???`, while the headline remains a lower bound from the sources that did respond | either or both of `GH_TOKEN` (with org billing read) and `BLACKSMITH_API_TOKEN`; optional `GH_BILLING_ORG`, `BLACKSMITH_ORG`, `CI_MONTHLY_BUDGET` |
 | benchmarks | a scale-invariant index of benchmark performance on `benchmarks.yml` main runs, trended over ~45 days (each run vs the last, geometric mean of per-benchmark changes, so every benchmark weighs the same): red when the most recent run failed or produced no valid data (the main signal), orange only on a broad across-the-board rise. Adding or removing a benchmark is a non-event. Drills through to the per-benchmark history | `GH_TOKEN` |
 | performance history → `/bench?view=runtime` | runtime benchmark trends, labs or loom CI duration history, and a detailed CI run Gantt. Historical views support windows from 1 through 45 days, date axes, and duration sorting. CI includes end-to-end workflow time, every job, and slowest-shard group lines | `GH_TOKEN` |
-| model spend | OpenAI + Anthropic + OpenRouter usage APIs. Headline is the projected full-month spend (extrapolated from the recent daily rate, spilling into last month when this month is under two weeks old), summed across providers. OpenAI and Anthropic (which expose per-day cost) are charted as one line each over ~45 days, dimmed except for the current-month slice that feeds the headline, with each line's MTD in the right gutter; OpenRouter (monthly total only, abbreviated "OR") is folded into the totals. The subtitle is the bullet-separated key (`OpenAI • Anthropic • OR $0`); the combined MTD sits in the header (the `aside` slot); the span the chart covers is in its bottom-left corner (the `duration` slot). A provider we can't read shows `$???` and drops the tile to gray, but the rest still chart and total | any of `OPENAI_ADMIN_KEY`, `ANTHROPIC_ADMIN_KEY`, `OPENROUTER_KEY`; optional `MODEL_MONTHLY_BUDGET` |
+| model spend | OpenAI + Anthropic + OpenRouter usage APIs. Headline is the projected full-month spend (extrapolated from the recent daily rate, spilling into last month when this month is under two weeks old), summed across providers. OpenAI and Anthropic (which expose per-day cost) are charted as one line each over ~45 days, with a recent daily-rate slice highlighted and each line's MTD in the right gutter; OpenRouter (monthly total only, abbreviated "OR") is folded into the totals. The subtitle is the bullet-separated key (`OpenAI • Anthropic • OR $0`); the combined MTD sits in the header (the `aside` slot); the span the chart covers is in its bottom-left corner (the `duration` slot). A provider we can't read shows `$???` and drops the tile to gray, but the rest still chart and total | any of `OPENAI_ADMIN_KEY`, `ANTHROPIC_ADMIN_KEY`, `OPENROUTER_KEY`; optional `MODEL_MONTHLY_BUDGET` |
 | discord online | Discord gateway presence, team vs visitors over time | `DISCORD_BOT_TOKEN`, `DISCORD_GUILD_ID` (Server Members + Presence intents) |
 | dau | distinct identities active per UTC day on one named service, counted from the `user.did` attribute on the `memory.transact` and `memory.subscriber.sync` spans in SigNoz. The headline is the last day that ran to the end (today is still filling, and a part-day always reads as a drop); the sparkline is the retained history. Gray while the named service has no such spans — which is the resting state until a deployment's tracing is switched on. It counts keypairs rather than people; see [dau](#dau) below | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `DAU_EXCLUDE_DIDS`, `SIGNOZ_UI_URL` |
 | github users | organization members plus outside collaborators, with each roster's size charted over about two months. The headline counts unique users across both rosters | `GH_TOKEN` (with org Members read) |
@@ -304,7 +308,12 @@ dataset.
    download a key for it, and set `GCP_SA_KEY` to the file's contents.
 
 The tile sums the raw `cost` column, i.e. total GCP spend across all services,
-gross of credits.
+gross of credits. It shows the estimated full-month spend as its headline and
+the actual month-to-date value in the header. The estimate uses every settled
+day in the current month. During the first half of the month, it fills that rate
+window from the prior month's tail until it covers 14 days or reaches the first
+available billing day. The chart shows up to 45 complete UTC days and
+highlights the part used for the estimate.
 
 ### `OPENAI_ADMIN_KEY`
 
@@ -373,7 +382,7 @@ it.
 | `CI_MONTHLY_BUDGET` | ci spend | combined monthly USD budget across GitHub and Blacksmith. Without it, a single provider uses its configured budget. Two providers use the sum when both have a configured budget. |
 | `MODEL_MONTHLY_BUDGET` | model spend | combined monthly USD budget across providers. |
 | `GCP_SA_KEY` | cloud spend | a service-account key JSON (the whole file, as the value) for local development; in GKE, Workload Identity supplies the token and this is unset. |
-| `GCP_DAILY_BUDGET` | cloud spend | daily USD budget. |
+| `GCP_DAILY_BUDGET` | cloud spend | daily USD budget. The projected month is compared with this daily rate multiplied by the number of days in the month. |
 | `PROD_URL` | production | the production **server**, as an origin — the tile checks `/_health` on it and links to it. Defaults to estuary, the production toolshed. Note `production.commontools.dev` is the shell, a static site in a GCS bucket: it has no health endpoint, and its index page answers 200 whether or not the server behind it is serving, so it cannot see an outage. |
 | `COMMON_TOOLS_URL` | common.tools | override the public-site URL (e.g. the `www` host if the apex redirects). |
 | `DASHBOARD_REPO` | CI tiles, github users | which repo the CI tiles read. Its owner is the organization the **github users** tile reads (default `commontoolsinc/labs`). |
@@ -430,40 +439,45 @@ Notes:
   gray and shows `$???` for that source. The values from responding sources
   remain as a lower bound. A GitHub classic-plan setup still falls back to
   minutes when Blacksmith is not configured.
-- **`benchmarks`** trends a **scale-invariant index** of benchmark performance on the
-  `benchmarks.yml` runs on main over ~45 days. The job runs `deno bench --json` over
-  the runner, cache, and deep-equal benchmarks and uploads the report as a
-  `bench-results` artifact (90-day retention; there is no committed history). Each
-  run's index is the previous run's index times the **geometric mean of the
-  per-benchmark changes** between the two runs, so every benchmark weighs the same
-  regardless of size and **only a broad, across-the-board move shifts it** — a
-  regression in one benchmark, however slow, barely registers (that is the
-  drill-down's job; a summed total, by contrast, is dominated by the few slowest
-  benchmarks). The headline is the **trend** itself — the fractional change of the
-  index across the recent window — over a second line naming how many benchmarks the
-  latest run measured and, when a recent window is highlighted, how many days that
-  window spans. **Red** — the signal this tile is mainly here to
-  raise — is the **most recent run failing outright, or finishing green on CI with no
-  readable benchmark data** (it ran and made nothing usable, so it is as good as
-  failed); red reads the workflow-run list and the latest run's cached result, so it
-  fires even when the artifacts cannot be read. **Orange** is the index **trending
-  up** (past 5%). The trend reads a recent window only — the runs in the last
-  `BENCH_TREND_MAX_AGE_DAYS` or the newest `BENCH_TREND_MIN_RUNS`, whichever is more,
-  the same "larger of the two" idea as CI duration's median window — while the
-  sparkline still spans the full ~45 days with that window drawn brighter. Green
-  while flat or falling. `deno bench` samples
-  each benchmark to a fixed time budget, so the run's wall clock barely moves with
-  performance; the per-op times do, which is why the tile trends those rather than
-  the run's duration. Because the index comes from the artifacts, the tile grays when
-  no in-window run has readable data and the latest run is neither failed nor empty:
-  **collecting…** while a fetch is still in progress — shown from the moment a
-  collection starts, before the run list is even fetched, so a freshly loaded
-  dashboard is never blank — and **benchmark data unavailable** once a fetch has
-  finished and found none. Chaining the per-run ratios makes **adding or removing a benchmark
-  a non-event**: it is in only one run of the adjacent pair at that step, so it drops
-  out of the geometric mean and the index does not step — no reset needed. A large
-  rise reads as a fold multiplier (`▲44×`) once it passes 4x, rather
-  than a long percentage. The trend is a robust
+- **`benchmarks`** trends one **scale-invariant index per CPU** on the
+  `benchmarks.yml` runs on main over ~45 days. The job runs `deno bench --json`
+  over the runner, cache, and deep-equal benchmarks. It uploads the report as a
+  `bench-results` artifact with 90-day retention. There is no committed
+  history. Each CPU's index compares a run with the previous run on the same
+  CPU. It multiplies the previous index by the **geometric mean of the
+  per-benchmark changes**. Every benchmark weighs the same regardless of size.
+  **Only a broad, across-the-board move shifts an index.** A regression in one
+  benchmark barely registers, however slow that benchmark is. The drill-down
+  covers individual benchmarks. A summed total would instead be dominated by
+  the few slowest benchmarks. Each CPU has its own coloured line. The headline
+  shows the largest established CPU trend. A second line names how many
+  benchmarks the latest run measured and the highlighted window when applicable.
+  **Red** marks the **most recent run failing outright, or finishing green on CI
+  with no readable benchmark data**. A successful run with no usable output is
+  treated as failed. This
+  state reads the workflow-run list and the latest run's cached result. It
+  therefore fires when the artifacts cannot be read. **Orange** means at least
+  one CPU index is **trending up** past 5%. Each CPU trend uses the runs in the
+  last `BENCH_TREND_MAX_AGE_DAYS` or the newest `BENCH_TREND_MIN_RUNS`,
+  whichever set is larger. This matches the window rule used for the CI
+  duration median. The corresponding line still spans the full ~45 days. Its
+  trend window is brighter. Green means every established CPU is flat or
+  falling. `deno bench` samples each benchmark to a fixed time budget. The
+  run's wall clock therefore barely moves with performance. The per-operation
+  times do move, so the tile trends those values instead. Because the index
+  comes from artifacts, the tile turns gray when no in-window run has readable
+  data and the latest run is neither failed nor empty. It shows
+  **collecting…** while a fetch is in progress. This state appears before the
+  run list is fetched, so a newly loaded dashboard is never blank. It shows
+  **benchmark data unavailable** after an empty fetch finishes. Adding or
+  removing a benchmark does not move an index. The benchmark is absent from
+  one side of that adjacent comparison, so it drops out of the geometric mean.
+  A CPU change starts another line instead of connecting measurements from
+  unlike machines. A gap longer than one fifth of the chart width breaks a
+  CPU's line. Any sample isolated by those breaks appears as a point. A CPU
+  with one sample also appears as a point until another sample can form a line.
+  A large rise reads as a fold multiplier (`▲44×`) once it passes 4x. This
+  avoids a long percentage. The trend is a robust
   **daily-median Theil–Sen** fit: the sub-daily samples are first collapsed to one
   median per calendar day, then the trend is the median of the pairwise log-slopes
   between days, projected across the day span. The daily median absorbs within-day
@@ -475,16 +489,21 @@ Notes:
   The window is capped by the 90-day artifact retention, so it shows at most ~45
   days and only as far back as the job has run.
   - The tile drills through to the per-benchmark history behind `/bench`, which the
-    tile's collection keeps warm in the background. That collection lists benchmark
-    runs on main, samples one run per shortest-view bucket, downloads that artifact,
-    unzips it in-process, and reads each benchmark's timings. Each completed
-    artifact check is persisted before it is counted as finished, so only new runs
-    and new attempts are fetched after the first fill or a server restart. (The
-    shortest-view buckets are about 16 minutes wide, so the first cache fill can
-    download correspondingly more artifacts.)
-  - Its **runtime benchmarks** view at `/bench?view=runtime` shows a sparkline
-    for **every** benchmark on a shared calendar-time axis, so a late-starting
-    benchmark sits at the right and a stale one visibly ends short of it.
+    tile's collection keeps warm in the background. The collection lists
+    benchmark runs on main. It samples one run per shortest-view bucket,
+    downloads that artifact, and unzips it in the process. It then reads each
+    benchmark's timings and CPU. A report without a CPU identity is cached as
+    unusable instead of being pooled with measurements from unknown machines.
+    Cache entries written before CPU identity was stored are fetched again.
+    Each completed artifact check is persisted before it is counted as
+    finished. Only new runs and attempts are fetched after the first fill or a
+    server restart. The shortest-view buckets are about 16 minutes wide. The
+    first cache fill can therefore download more artifacts.
+  - Its **runtime benchmarks** view at `/bench?view=runtime` shows one coloured
+    line per CPU for **every** benchmark. The lines share a calendar-time axis.
+    A late-starting CPU line sits at the right. A single sample appears as a
+    point. A stale line visibly ends short of the current date. The dashboard
+    tile leaves out the CPU legend to keep the compact chart readable.
     Selectors choose which measurement to plot (a percentile ladder — **p0** =
     min, **p50** = the mean, **p75**, **p99**, **p99.5**, **p99.9**, **p100** =
     max) and whether to group by source **file** or sort by latest **duration**
@@ -494,11 +513,20 @@ Notes:
     the collected samples per day. Keyboard arrows adjust the window without
     moving focus. Enter applies the range immediately. Another selector carries
     the range into its own navigation, and leaving the controls applies it
-    directly. Each row is coloured by its own trend, and the page reads from the
+    directly. Each row shows one latest value and trend from the CPU with the
+    most benchmark samples in the selected window. A tie uses the CPU with the
+    newest sample, then its name for a stable result. That representative CPU
+    also sets the row colour and sorting. A numbered CPU key identifies the
+    representative series and links to its definition. The same key and a
+    colour swatch appear in one CPU legend after all benchmark graphs instead
+    of repeating processor names in every row. It includes the full processor
+    identity reported by the artifacts, the number of benchmark graphs and runs
+    shown for that CPU, and the observed date range. The page reads from the
     server cache so it re-renders instantly. Its progress panel stays visible as
-    Idle between collections. During collection it shows cached, queued, requested,
-    responded, outstanding, and failed artifact checks. Changing the range leaves
-    the server collection running and joins it from the new page.
+    Idle between
+    collections. During collection it shows cached, queued, requested,
+    responded, outstanding, and failed artifact checks. Changing the range
+    leaves the server collection running and joins it from the new page.
   - The **CI duration history** view at `/bench?view=ci` selects either labs
     `deno.yml` or loom `test-fast.yml`. It charts every job's start-to-finish
     duration on one calendar-time axis. An overall row measures the workflow
@@ -666,39 +694,51 @@ its embedded tsnet).
 
 **Build, push, deploy**
 
-On pull requests, the CI workflow calls
-`.github/workflows/dashboard-image.yml` as a reusable workflow. Every pull
-request runs the dashboard tests and an amd64 image build without cloud
-credentials. The internal `Status` job verifies the dashboard workflow, and the
-CI workflow's required `Status` job waits for that result. Main-branch pushes
-start the Dashboard workflow directly only when the dashboard image,
-dashboard package, Gantt drill-down, Deno dependency metadata, or the workflow
-itself changes.
+`.github/workflows/dashboard-image.yml` publishes the image, and it publishes
+only from `main`. A push to `main` starts it when the dashboard image, the
+dashboard package, the Gantt drill-down, the Deno dependency metadata, or the
+workflow itself changes. You can also start it by hand from the repository's
+Actions tab, which is how to publish a `main` commit whose files fall outside
+that path list. A manual run can name any branch or tag, so the workflow's
+first step fails a run that is not on `main`: publishing moves the `latest` tag
+the stage deployment follows. That step runs before anything from the named ref
+is checked out.
 
-For organization-member pull requests, a passing dashboard test and image build
-publish the source commit as `dev-dashboard:<full-sha>`. A controlled rerun may
-override a failed dashboard test by temporarily setting the repository Actions
-variable `PUSH_BRANCH=true`; the image build must still pass, the rerun must have
-`github.run_attempt > 1`, and GCP independently verifies the actor's numeric org
-membership ID. Reset `PUSH_BRANCH=false` immediately after testing. Main-branch
-pushes publish both the immutable SHA tag and `latest`. Once a SHA tag exists,
-reruns reuse its digest instead of rebuilding or moving the tag.
+The workflow runs the dashboard tests, then builds the amd64 image and pushes
+it under both the immutable `dev-dashboard:<full-sha>` tag and `latest`. Once a
+SHA tag exists, a rerun of that commit reuses its digest: it moves `latest` onto
+the image already there rather than rebuilding it or repushing the immutable
+tag.
+
+The same tests also run in CI, on pull requests and on main alike, because the
+dashboard is a workspace package and CI's `Test` job runs each package's test
+task. The publish workflow runs them again rather than leaning on that. The two
+workflows are independent — neither waits for the other, and this one cannot
+read CI's verdict — so its own test job is the only thing standing between a
+dashboard that fails its tests and the `latest` tag. Leave it in place even
+though it looks redundant.
+
+No image is built or published for a pull request.
 
 The publish job authenticates with GitHub OIDC and GCP Workload Identity
 Federation. It emits the immutable `sha256:` image reference in the workflow
 summary; no service-account JSON key is used.
 
-Manual build fallback:
+The manual trigger publishes whatever `main` currently points at. To publish
+some other commit, build and push it by hand:
 
 ```bash
 SHA=$(git rev-parse HEAD)
 IMG=us-central1-docker.pkg.dev/commontools-core/containers/dev-dashboard
-docker build --platform=linux/amd64 -f Dockerfile.dashboard -t "$IMG:$SHA" .
+docker build --platform=linux/amd64 \
+  --build-arg DASHBOARD_GIT_COMMIT="$SHA" \
+  -f Dockerfile.dashboard -t "$IMG:$SHA" .
 docker push "$IMG:$SHA"
 ```
 
-Copy the published digest from the workflow summary into the infra stage
-overlay's `images[].digest`, commit that immutable pin, then run
+Copy the published digest — from the workflow summary, or from `docker push`'s
+output for a hand build — into the infra stage overlay's `images[].digest`,
+commit that immutable pin, then run
 `make apply-dev-dashboard-stage` from `infra/k8s`. The node then appears in the
 Tailscale console as `tag:dashboard`; open
 `https://dashboard.<tailnet>.ts.net/`. (The sidecar image is already pinned by

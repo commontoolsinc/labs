@@ -95,13 +95,16 @@ Size S–M (~2–4 days). No dependencies. `packages/patterns/topics`.
 
 Size S (~1 day). No dependencies. `packages/cli`.
 
-- Replace `defaultWaitForResult` (25 ms poll, 15 s ceiling,
-  `lib/callable.ts:206-222`) with settlement observed through the existing
-  `running.sink(…)` path. The default time bound remains until WS-F makes the
-  wait caller-controlled, but it bounds an observation, not a poll.
-- Surface the tool result cell's address in `ExecutedCallable` output.
-- **Exit:** no sleep/poll in the callable wait path; `deno task test` in
-  `packages/cli` green.
+- ~~Replace the `defaultWaitForResult` poll with observed settlement~~ —
+  **landed independently as #4946** (2026-07-24): the wait is
+  `runtime.settled()`, draining scheduler, storage, and in-flight async
+  builtins with no poll interval and no deadline. Scope change recorded; this
+  workstream shrank to the second bullet.
+- Surface the tool result cell's address in `ExecutedCallable` output
+  (`resultRef`), threaded through the exec/piece-call wrappers and printed to
+  stderr so stdout stays exactly the tool's JSON result.
+- **Exit:** no sleep/poll in the callable wait path (met by #4946);
+  `resultRef` returned and printed; `deno task test` in `packages/cli` green.
 
 ### WS-C — verb results authoring surface *(critical path)*
 
@@ -121,19 +124,24 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
 - **schema-generator:** emit a result schema for stream/handler properties so
   it reaches the piece's **durable** schema — the dependency verb discovery
   named; mapping spec update in
-  `docs/specs/schema-generator/ts_to_json_schema_mapping.md`. Verb **input**
+  [the TypeScript-to-JSON-Schema mapping](../specs/schema-generator/ts_to_json_schema_mapping.md).
+  Verb **input**
   schemas become closed-world (an undeclared field is a rejection, never
   ignored — design rule 1): emit `additionalProperties: false` for event
   payloads, confirm the runner enforces it at dispatch, and record the rule
   in the mapping spec.
-- **runner:** plain-return projection — the receipt-only branch
-  (`runner.ts:3713-3725`) writes the validated plain return instead of `{}`,
-  behind a new experimental option (registry entry in
-  `docs/development/EXPERIMENTAL_OPTIONS.md` with owner and end state:
-  default-off → flip after Phase 4's integration proof → fold in). Spec note
-  in scheduler-v2 §7.6 (receipt content), and
-  `packages/runner/test/scheduler-event-receipts.test.ts` extended for both
-  plain and reactive-bearing returns.
+- ~~**runner:** plain-return projection~~ — **done (C4)**:
+  `plainResultReceipts`, default-off, env-reachable
+  (`EXPERIMENTAL_PLAIN_RESULT_RECEIPTS`); registry entry in
+  `EXPERIMENTAL_OPTIONS.md`, scheduler-v2 §7.6 receipt-content note, both
+  flag states tested in `scheduler-event-receipts.test.ts`, including
+  same-id redelivery retaining the original result.
+- **C1 design fork, decide first:** `Stream<T>` is a branded-cell interface
+  wired through a one-slot HKT (`AsStream`, `packages/api/index.ts:1239`), so
+  `Stream<T, R = void>` ripples through the cell-type machinery; the
+  alternative is a separate declared-result carrier (e.g.
+  `StreamWithResult<T, R> extends Stream<T>`) that only the schema layer
+  interprets. Settle this at the top of the C1 PR.
 - **Exit:** a CTS pattern declares a verb returning `AddTopicResult`; the
   result schema appears in the durable schema; under the flag, both plain and
   reactive returns are readable in the receipt cell.
@@ -229,13 +237,13 @@ The provenance half is a separate CFC-gated track:
 
 Size M, mostly parallel. `packages/cli`, `skills/cf`.
 
-- `cf piece verbs --json` — name, kind, input schema per verb from the
-  existing classification (`packages/fuse/callables.ts:88`), plus the
-  deployed pattern's source identity so a skill can detect it targets a newer
-  contract than the live piece; result schemas appear once WS-C lands; v1
-  lists everything, per the decided semantics (every verb listable; tier
-  filtering arrives with the marker, later). **Independent — can ship
-  first.**
+- ~~`cf piece verbs --json`~~ — **shipped** (F1): name, kind, on
+  (result/input), input schema per verb; tools carry their output schema.
+  Walks result-then-input with the same classification `cf piece call`
+  resolves through — including the forced-stream fallback path. v1 lists
+  everything per the decided semantics; handler result schemas appear once
+  WS-C lands, tier filtering with the marker, later. The 2026-07-24 amendment is absorbed: the listing carries the
+  deployed pattern's source identity (skew detection).
 - Generic identity annotation for data reads and callable results. Start with
   an exploration form such as `--include-ids` that annotates points where the
   backing identity changes; evaluate a narrower path-selected form if broad
