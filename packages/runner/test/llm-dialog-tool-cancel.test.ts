@@ -7,17 +7,28 @@
  * path took no signal, so a tool that was mid-run carried on to its own
  * deadline, and only its writeback was discarded. The work was never stopped.
  *
- * Here the model's first answer calls a tool, and the turn is cancelled while
- * that call is in progress. The tool reports the cancellation, the runtime
- * settles, and logical time has not jumped the tool-call deadline.
+ * The two cases here cancel a turn at the same moment and check different
+ * halves of what that has to mean.
  *
- * What this does NOT pin: that the abort ends a tool call which would otherwise
- * never finish. Doing that needs a pattern tool whose result cell genuinely
- * stays undefined, and the obvious spellings do not — a pattern returning `{}`
- * or `undefined` still leaves the cell defined, so the wait ends on its own and
- * the abort is never the thing that freed it. Until such a fixture exists, the
- * race participant is covered by inspection rather than by this test; the
- * cancellation reporting and the run being stopped are covered here.
+ * The first calls one tool and requires the turn to come to rest without
+ * logical time jumping the tool-call deadline — that is, to have ended on the
+ * cancel rather than by waiting the deadline out.
+ *
+ * The second calls two tools in one answer and requires the one not yet reached
+ * never to run. Its side effect is a flag set inside the handler, so it fails
+ * if the loop invokes that tool before consulting the signal. This is the
+ * sharper of the two: `handleInvoke` runs the pattern or sends to the handler
+ * before reaching its own wait, so racing the signal inside that wait leaves
+ * the later tools of a turn free to fire their effects first.
+ *
+ * Neither pins the race participant inside the wait — that the abort ends a
+ * call which would otherwise never finish. Doing so needs a pattern tool whose
+ * result cell genuinely stays undefined, and the obvious spellings do not: a
+ * pattern returning `{}` or `undefined` still leaves the cell defined, so the
+ * wait ends on its own and the abort is never what freed it. Until such a
+ * fixture exists that participant is covered by inspection, while the loop
+ * guard, the cancellation reporting, and the run being stopped are covered
+ * here.
  */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
