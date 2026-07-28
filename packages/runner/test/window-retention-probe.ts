@@ -258,9 +258,10 @@ try {
   for (let move = 0; move < moves; move++) {
     await moveWindow(move % 2 === 0 ? WINDOW_SIZE : 0);
     if (move % 2 === 1) {
+      const heap = heapMb();
       console.log(
-        `after ${move + 1} more moves: ${heapMb().toFixed(1)} MB ` +
-          `(+${(heapMb() - baseline).toFixed(1)})`,
+        `after ${move + 1} more moves: ${heap.toFixed(1)} MB ` +
+          `(+${(heap - baseline).toFixed(1)})`,
       );
     }
   }

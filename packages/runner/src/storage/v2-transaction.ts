@@ -2072,7 +2072,10 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const validation = this.validate();
     if (validation.error) {
-      this.#finish({ error: validation.error });
+      this.#state = {
+        status: "done",
+        result: { error: validation.error },
+      };
       return { error: validation.error };
     }
 
