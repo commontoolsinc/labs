@@ -118,6 +118,23 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return new Identity(signer);
   }
 
+  // Recover the raw 32-byte ed25519 seed for this identity — the exact inverse
+  // of `fromRaw`, mirroring the `fromPkcs8`/`toPkcs8` pair.
+  //
+  // Named `toRaw`, NOT `toEntropy`, on purpose: it returns a SEED. Those bytes
+  // are *also* valid BIP39 entropy only because `fromMnemonic` uses the
+  // entropy directly as the seed with no KDF between — so a caller can do
+  // `entropyToMnemonic(identity.toRaw())` to re-encode an existing key as a
+  // phrase without re-keying. But the BIP39 vocabulary belongs at that call
+  // site: if a KDF is ever introduced, `toRaw` stays true (it still returns the
+  // seed) while a hypothetical `toEntropy` would silently start lying.
+  //
+  // Like `toPkcs8`, only "noble" implementations can do this — WebCrypto hides
+  // the private key material — and it throws otherwise.
+  toRaw(): Uint8Array {
+    return this.#keypair.toRaw();
+  }
+
   static async fromPassphrase<ID extends DIDKey>(
     passphrase: string,
     config: IdentityCreateConfig = {},
