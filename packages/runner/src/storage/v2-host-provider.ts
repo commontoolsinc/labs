@@ -1564,6 +1564,23 @@ class HostReplicaSession implements ReplicaSession {
         coldReasons.set(watchId, reason);
       }
       if (trigger === "wave" || !coldWatches.has(watchId)) {
+        // §5d residual (a) attribution: a wave mark OVERRIDING an earlier
+        // demand mark is the class that sends a coincident closure-growth
+        // down the full-pull path (233/run measured). The override is
+        // DESIGNED (shrink/re-key need the full re-walk); this names the
+        // coincident wave cause so the split growth-only vs genuinely
+        // mixed is measurable.
+        if (
+          trigger === "wave" && coldWatches.get(watchId) === "demand"
+        ) {
+          console.debug(
+            "executor cold trigger override:",
+            `t=${Date.now()}`,
+            `first=${coldReasons.get(watchId) ?? "unknown"}`,
+            `wave=${reason ?? "unknown"}`,
+            watchId,
+          );
+        }
         coldWatches.set(watchId, trigger);
       }
     };
