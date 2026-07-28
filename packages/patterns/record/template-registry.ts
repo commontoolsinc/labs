@@ -198,7 +198,11 @@ export function createTemplateModules(
         type: moduleType,
         pinned: template.defaultPinned.includes(moduleType),
         piece,
-        label,
+        // Omitted rather than stored as undefined when the type has no
+        // standard labels: the field is declared a string, and a write of the
+        // whole list through the piece API validates a present-but-undefined
+        // property against that declaration and rejects the write.
+        ...(label ? { label } : {}),
       });
     } catch (error) {
       console.warn(

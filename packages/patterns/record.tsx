@@ -51,6 +51,7 @@ interface RecordInput {
 }
 
 export interface RecordOutput {
+  [NAME]?: string;
   [UI]?: VNode;
   title?: string | Default<"">;
   subPieces?: SubPieceEntry[] | Default<[]>;
@@ -98,7 +99,12 @@ const seedRecord = lift<{
   notesPiece: Cell<NoteOutput>;
   typePickerPiece: Cell<TypePickerOutput>;
   isInitialized: Writable<boolean>;
-}>(({
+  // The result type is declared rather than inferred. The body reads this
+  // lift's result to demand the seed, and a capture the schema generator leaves
+  // out of the reading lift's input schema is dropped on read: the read came
+  // back undefined, the guard on it treated a seeded Record as unseeded, and
+  // the module list rendered empty.
+}, boolean>(({
   currentPieces,
   subPieces,
   notesPiece,
@@ -128,6 +134,40 @@ const seedRecord = lift<{
   return true;
 });
 
+// ===== Reading a sub-piece's own fields =====
+//
+// SubPieceEntry.piece is typed `unknown`, which lowers to `{ type: "unknown" }`,
+// and an object read under that schema comes back as undefined rather than
+// materialized. So `entry.piece.label` and its siblings read as undefined
+// wherever the entry carries its declared schema. What materializes a read is
+// the schema of the operand it is read into, so the lifts below name the fields
+// they want: the read then follows the entry's link into the sub-piece and
+// materializes them, and re-runs when the sub-piece changes them. The call sites
+// cast the `unknown` handle to the operand's shape; the cell is the same either
+// way.
+
+/** What the Record's own chrome displays about a module it holds. */
+interface SubPieceDisplayFields {
+  /** The module type, carried through so a reader can pick modules by it. */
+  type: string;
+  /** Instance label, e.g. the email module's "Personal" or "Work". */
+  label?: string;
+  /** Icon chosen in a record-icon module. */
+  icon?: string;
+  /** Alias held by a nickname module. */
+  nickname?: string;
+}
+
+const readDisplayFields = lift<
+  { type: string; piece: Omit<SubPieceDisplayFields, "type"> },
+  SubPieceDisplayFields
+>(({ type, piece }) => ({
+  type,
+  label: piece?.label,
+  icon: piece?.icon,
+  nickname: piece?.nickname,
+}));
+
 // Helper to check if a module has settings UI
 const moduleHasSettings = lift(
   // deno-lint-ignore no-explicit-any
@@ -136,6 +176,33 @@ const moduleHasSettings = lift(
     return !!piece?.settingsUI;
   },
 );
+
+// The settings UI exported by the module at `index`, or null when no module is
+// selected or the module exports none. Naming `piece` on the operand is what
+// makes the read follow the link: an operand that only says the entries are
+// permissive leaves each element resolving against its own declared schema,
+// with `piece: unknown` still in it. The settings node itself is left
+// permissive, which keeps it a reference to the sub-piece's own UI rather than
+// a copy, so the controls in it stay bound to the sub-piece.
+const readSettingsUI = lift(
+  ({ entries, index }: {
+    // deno-lint-ignore no-explicit-any
+    entries?: { piece: any }[];
+    index?: number;
+  }) => {
+    if (index === undefined || index === null) return null;
+    return entries?.[index]?.piece?.settingsUI ?? null;
+  },
+);
+
+// The same field reads inside a handler go through a live Cell rather than a
+// declared operand shape: a handler receives the entry list as a value, so the
+// piece has to survive the boundary as a handle it can call `get()` on. A
+// handler that reads or writes a module's fields takes this view of the same
+// `subPieces` cell, and the call site casts to bridge the two views.
+type SubPieceEntryHandle =
+  & Omit<SubPieceEntry, "piece">
+  & { piece: Cell<Record<string, unknown>> };
 
 // ===== Module-Scope Handlers (avoid closures, use references not indices) =====
 
@@ -241,7 +308,12 @@ const addSubPiece = handler<
     pinned: false,
     collapsed: false,
     piece,
-    label: nextLabel,
+    // Omitted rather than stored as undefined when the type has no standard
+    // labels: the field is declared a string, and a write of the whole list
+    // through the piece API validates a present-but-undefined property against
+    // that declaration and rejects the write ("subPieces: N: label: value does
+    // not match type string").
+    ...(nextLabel ? { label: nextLabel } : {}),
   }]);
   sat.set("");
 });
@@ -437,16 +509,6 @@ const toggleTrashExpanded = handler<unknown, { expanded: Writable<boolean> }>(
 // IMPORTANT: Handlers must use result.set() to return data to the LLM.
 // The 'result' Cell is injected by llm-dialog.ts invoke() - return statements are ignored!
 
-// SubPieceEntry as an LLM handler that touches the piece must type it. The
-// shared SubPieceEntry declares `piece: unknown`, and a field typed `unknown`
-// reads back across the handler boundary as undefined, so a handler that needs
-// to read the piece's fields or write them types the piece as a live Cell
-// instead. The handler still receives the same `subPieces` cell; the call site
-// casts to bridge the two views.
-type SubPieceEntryHandle =
-  & Omit<SubPieceEntry, "piece">
-  & { piece: Cell<Record<string, unknown>> };
-
 // Get a structured summary of all modules in this record
 // Returns module types, their data, and schemas for LLM context
 const handleGetSummary = handler<
@@ -573,7 +635,7 @@ const handleAddModule = handler<
     pinned: false,
     collapsed: false,
     piece,
-    label: entryLabel,
+    ...(entryLabel ? { label: entryLabel } : {}),
   }]);
 
   if (result) {
@@ -747,7 +809,7 @@ const createSibling = handler<
     pinned: false,
     collapsed: false,
     piece,
-    label: nextLabel,
+    ...(nextLabel ? { label: nextLabel } : {}),
   });
   sc.set(updated);
 });
@@ -824,6 +886,27 @@ const Record = pattern<RecordInput, RecordOutput>(
     // Display name with fallback
     const displayName = computed(() => title?.trim() || "(Untitled Record)");
 
+    // Each module's own label, icon and nickname, in list order. The reads live
+    // here rather than inside the computeds below because a `.map()` at pattern
+    // scope keeps each element a link, so `readDisplayFields` is applied to the
+    // entry's piece itself; the same `.map()` inside a `computed()` would run
+    // over the already-materialized list, where the piece is undefined. Each
+    // element carries its module type, so a reader that wants one kind of
+    // module picks it out of this list rather than pairing it with `subPieces`
+    // by position.
+    const displayFields = subPieces.map((entry) =>
+      readDisplayFields({
+        type: entry.type,
+        piece: entry.piece as Omit<SubPieceDisplayFields, "type">,
+      })
+    );
+    const trashedDisplayFields = trashedSubPieces.map((entry) =>
+      readDisplayFields({
+        type: entry.type,
+        piece: entry.piece as Omit<SubPieceDisplayFields, "type">,
+      })
+    );
+
     // Entry with index for rendering - preserves piece references (no spreading!)
     // isExpanded is pre-computed to avoid closure issues inside .map() callbacks
     // displayInfo is computed using module-scope lift() that properly unwraps Cell values
@@ -852,8 +935,7 @@ const Record = pattern<RecordInput, RecordOutput>(
         // This works because CTS transforms .map() to properly unwrap reactive values
         const displayInfo = getDisplayInfo(
           entry.type,
-          // deno-lint-ignore no-explicit-any
-          (entry.piece as any)?.label,
+          displayFields[index]?.label,
         );
         return {
           entry,
@@ -923,11 +1005,10 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // Check for manual icon override from record-icon module
     const manualIcon = computed(() => {
-      const iconModule = subPieces.find((e) => e?.type === "record-icon");
-      if (!iconModule) return null;
-      // deno-lint-ignore no-explicit-any
-      const iconValue = (iconModule.piece as any)?.icon;
-      if (!iconValue) return null;
+      const iconModule = (displayFields || []).find((fields) =>
+        fields?.type === "record-icon"
+      );
+      const iconValue = iconModule?.icon;
       return typeof iconValue === "string" && iconValue.trim()
         ? iconValue.trim()
         : null;
@@ -942,17 +1023,12 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // Extract nicknames from nickname modules for display in NAME
     const nicknamesList = computed(() => {
-      const nicknameModules = subPieces.filter((e) => e?.type === "nickname");
       const nicknames: string[] = [];
-      for (const mod of nicknameModules) {
-        try {
-          // deno-lint-ignore no-explicit-any
-          const nicknameValue = (mod.piece as any)?.nickname;
-          if (typeof nicknameValue === "string" && nicknameValue.trim()) {
-            nicknames.push(nicknameValue.trim());
-          }
-        } catch {
-          // Ignore errors
+      for (const fields of displayFields || []) {
+        if (fields?.type !== "nickname") continue;
+        const nicknameValue = fields.nickname;
+        if (typeof nicknameValue === "string" && nicknameValue.trim()) {
+          nicknames.push(nicknameValue.trim());
         }
       }
       return nicknames;
@@ -975,8 +1051,7 @@ const Record = pattern<RecordInput, RecordOutput>(
         // Get display info using plain helper function
         const displayInfo = getDisplayInfo(
           entry.type,
-          // deno-lint-ignore no-explicit-any
-          (entry.piece as any)?.label,
+          trashedDisplayFields[trashIndex]?.label,
         );
         return { entry, trashIndex, displayInfo };
       });
@@ -991,13 +1066,9 @@ const Record = pattern<RecordInput, RecordOutput>(
     // ===== Settings Modal Computed Values =====
 
     // Get the settings UI for the currently selected module (if any)
-    const currentSettingsUI = computed(() => {
-      const idx = settingsModuleIndex.get();
-      if (idx === undefined) return null;
-      const entry = subPieces[idx];
-      if (!entry) return null;
-      // deno-lint-ignore no-explicit-any
-      return (entry.piece as any)?.settingsUI || null;
+    const currentSettingsUI = readSettingsUI({
+      entries: subPieces,
+      index: settingsModuleIndex,
     });
 
     // Get display info for the module whose settings are open
@@ -1007,11 +1078,7 @@ const Record = pattern<RecordInput, RecordOutput>(
       const entry = subPieces[idx];
       if (!entry) return { icon: "", label: "Settings" };
       // Use plain helper function to get display info
-      return getDisplayInfo(
-        entry.type,
-        // deno-lint-ignore no-explicit-any
-        (entry.piece as any)?.label,
-      );
+      return getDisplayInfo(entry.type, displayFields[idx]?.label);
     });
 
     // ===== Main UI =====
