@@ -52,37 +52,33 @@ export default pattern<LLMTestInput>(({ title }) => {
           />
         </div>
 
-        <cf-cell-context $cell={question}>
-          {question.get()
-            ? (
-              <div>
-                <h3>Your Question:</h3>
-                <blockquote>
-                  {question.get()}
-                </blockquote>
-              </div>
-            )
-            : null}
-        </cf-cell-context>
+        {question.get()
+          ? (
+            <div>
+              <h3>Your Question:</h3>
+              <blockquote>
+                {question.get()}
+              </blockquote>
+            </div>
+          )
+          : null}
 
-        <cf-cell-context $cell={llmResponse}>
-          {llmResponse.pending
-            ? (
-              <div>
-                <cf-loader show-elapsed /> Thinking...
-              </div>
-            )
-            : llmResponse.result
-            ? (
-              <div>
-                <h3>LLM Response:</h3>
-                <pre>
-                  {llmResponse.result}
-                </pre>
-              </div>
-            )
-            : null}
-        </cf-cell-context>
+        {llmResponse.pending
+          ? (
+            <div>
+              <cf-loader show-elapsed /> Thinking...
+            </div>
+          )
+          : llmResponse.result
+          ? (
+            <div>
+              <h3>LLM Response:</h3>
+              <pre>
+                {llmResponse.result}
+              </pre>
+            </div>
+          )
+          : null}
       </div>
     ),
     question,

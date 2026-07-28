@@ -48,7 +48,6 @@ export function getActiveRenders(): ReadonlyMap<HTMLElement, ActiveRender> {
 export interface RenderOptions {
   setProp?: SetPropHandler;
   document?: Document;
-  rootCell?: CellHandle<VNode>;
   /** Force use of legacy main-thread rendering (default: false) */
   useLegacyRenderer?: boolean;
   /** Optional error handler */
@@ -192,8 +191,6 @@ function renderLegacy(
   };
   activeRenders.set(parent, entry);
 
-  const optionsWithCell = rootCell ? { ...options, rootCell } : options;
-
   const cancelEffect = effect(view as VNode, (value: VNode | undefined) => {
     if (!value) {
       return;
@@ -202,7 +199,7 @@ function renderLegacy(
     if (rootCell) {
       visited.add(rootCell);
     }
-    return renderImpl(parent, value, optionsWithCell, visited);
+    return renderImpl(parent, value, options, visited);
   });
 
   return () => {
@@ -247,9 +244,6 @@ function renderNode(
 
   const doc = options.document ?? globalThis.document;
   const [cancel, addCancel] = useCancelGroup();
-
-  const shouldWrapWithContext = inputNode[UI] && options.rootCell;
-  const cellForContext = shouldWrapWithContext ? options.rootCell : undefined;
 
   let node = inputNode;
   // Follow [UI] chain
@@ -299,15 +293,6 @@ function renderNode(
 
   if (sanitizedNode.children !== undefined) {
     addCancel(bindChildren(element, sanitizedNode.children, options, visited));
-  }
-
-  if (cellForContext && element) {
-    const wrapper = doc.createElement("cf-cell-context") as HTMLElement & {
-      cell?: CellHandle<VNode>;
-    };
-    wrapper.cell = cellForContext;
-    wrapper.appendChild(element);
-    return [wrapper, cancel];
   }
 
   return [element, cancel];

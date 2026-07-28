@@ -108,7 +108,6 @@ cell means none confirmed — check the component source before assuming.
 | `cf-calendar` | Month-grid mini calendar | `$value`, `$markedDates` |
 | `cf-canvas` | Fixed-size canvas surface emitting `cf-canvas-click` with x/y | |
 | `cf-card` | Content container with header/content/footer (built-in 1rem padding) | |
-| `cf-cell-context` | Associates a page region with a cell for inspection (see [CELL_CONTEXT.md](CELL_CONTEXT.md)) | `$cell` |
 | `cf-cell-link` | Renders a link or cell as a clickable, draggable pill | |
 | `cf-cfc-authorship` | Shows trusted authorship state for CFC-labeled content | `$value`, `$author` |
 | `cf-cfc-label` | Renders the CFC label of a bound cell value | `$value` |
@@ -443,9 +442,14 @@ See `packages/patterns/examples/ui-variants-demo.tsx` for a full example.
 
 ### The piece context menu
 
-Right-clicking a rendered piece opens `cf-piece-menu` for it, with two entries:
-**View source** shows the piece's retained authored files, and **Origin and
-history** shows the origin it records and the pattern identities it has run. The
+Right-clicking a rendered piece opens `cf-piece-menu` for it, with four entries:
+**View source** shows the piece's retained authored files, **Origin and
+history** shows the origin it records and the pattern identities it has run,
+**Data** shows the piece's argument and result values (the result stays live
+while the panel is open; linked cells appear as `{"@cell": …}` stubs), and
+**Actions** lists the handler streams the piece exposes and dispatches an
+event to one, with an optional JSON payload. Dispatches from the menu are not
+renderer-trusted, so a handler gated on UI provenance will refuse them. The
 menu comes with `cf-render` — importing the component registers it — and mounts
 itself on `document.body` so a piece's clipping or a tile's scaling cannot reach
 it.
