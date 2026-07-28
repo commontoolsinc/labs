@@ -250,10 +250,13 @@ The write-storm history and the mis-pointed-client hazard drive four rails.
    the manifest is what makes attempts commensurable.
 3. **Make the clone unmistakable at the endpoint.** The clone directory carries
    a `.cf-clone` marker; the toolshed prints a startup banner naming the clone
-   and its source when its store dir contains one. This is a ~7-line toolshed
-   change (layer 5) and I recommend it as a second increment rather than a
-   blocker — but a printed hint from `cf space clone` alone is weak, and "make
-   prod-vs-clone unmistakable" was the explicit ask. The clone launches on an
+   and its source when its store dir contains one. Both halves are now built:
+   the marker ships with `cf space clone`, and the banner with
+   `packages/toolshed/lib/clone-banner.ts`. A printed hint from `cf space clone`
+   alone was weak, and "make prod-vs-clone unmistakable" was the explicit ask.
+   Note the banner fires at boot and then scrolls away — it does not help
+   someone returning to a browser tab an hour later; surfacing clone-ness in the
+   shell UI would, and is not designed. The clone launches on an
    offset port via the existing `start-local-dev.sh --port-offset`, so the
    api-url differs by construction.
 4. **`cf inspect churn`.** A time-bucketed commit/revision rate query —
@@ -302,7 +305,10 @@ rehearsal isn't over-trusted:
 - `cf space clone --verify` — fingerprint check against the manifest.
 - `cf inspect churn <space> [--bucket 1m] [--since …] [--top N]`.
 
-**Build (increment 2, optional).** Toolshed clone banner.
+**Build (increment 2, optional).** Toolshed clone banner. **Shipped** —
+`packages/toolshed/lib/clone-banner.ts` reads the `.cf-clone` marker at
+startup and prints the clone's provenance, so a served clone is visible in
+the log an operator is already watching rather than only on disk.
 
 **Explicitly not building.**
 
