@@ -303,7 +303,9 @@ describe("runtimePresets conformance (CT-1814)", () => {
     // (the `satisfies Record<keyof ExperimentalOptions, ...>` clause enforces
     // that at compile time) AND appear here — so a flag added without a
     // deliberate registry decision fails by design. C3.6 adds
-    // `serverPrimaryExecutionCrossSpaceReadCandidates`.
+    // `serverPrimaryExecutionCrossSpaceReadCandidates`; the P0 shrink-gate
+    // hold adds `serverPrimaryExecutionDemandShrinkHoldMs` (numeric,
+    // programmatic-only — mapped null).
     it("pins the exhaustive experimental flag keyset (C3A20)", () => {
       expect(Object.keys(EXPERIMENTAL_ENV_VARS).toSorted()).toEqual([
         "commitPreconditions",
@@ -312,6 +314,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
         "persistentSchedulerState",
         "serverPrimaryExecution",
         "serverPrimaryExecutionCrossSpaceReadCandidates",
+        "serverPrimaryExecutionDemandShrinkHoldMs",
         "serverPrimaryExecutionDocSetWatch",
         "serverPrimaryExecutionSessionRankCandidates",
         "serverPrimaryExecutionUserRankCandidates",
