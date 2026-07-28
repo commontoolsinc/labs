@@ -1,6 +1,6 @@
 import ts from "typescript";
 import type {
-  JSONSchemaMutable,
+  MutableJSONSchema,
   MutableJSONSchemaObj,
 } from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
@@ -20,7 +20,7 @@ export class ArrayFormatter implements TypeFormatter {
     if (context.arrayItemsOverride !== undefined) {
       return {
         type: "array",
-        items: context.arrayItemsOverride as JSONSchemaMutable,
+        items: context.arrayItemsOverride as MutableJSONSchema,
       };
     }
 

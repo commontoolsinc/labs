@@ -1,6 +1,6 @@
 import ts from "typescript";
 import type {
-  JSONSchemaMutable,
+  MutableJSONSchema,
   MutableJSONSchemaObj,
 } from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
@@ -29,7 +29,7 @@ export class IntersectionFormatter implements TypeFormatter {
   formatType(
     type: ts.Type,
     context: GenerationContext,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     const checker = context.typeChecker;
     const native = getNativeTypeSchema(type, checker);
     if (native !== undefined) {
@@ -159,7 +159,7 @@ export class IntersectionFormatter implements TypeFormatter {
     documentedSources: string[];
     missingSources: string[];
   } {
-    const mergedProps: Record<string, JSONSchemaMutable> = {};
+    const mergedProps: Record<string, MutableJSONSchema> = {};
     const requiredSet = new Set<string>();
 
     const docTexts: string[] = [];
@@ -232,7 +232,7 @@ export class IntersectionFormatter implements TypeFormatter {
   }
 
   private isObjectSchema(
-    schema: JSONSchemaMutable,
+    schema: MutableJSONSchema,
   ): schema is MutableJSONSchemaObj & { type: "object" } {
     return (
       typeof schema === "object" &&
@@ -242,7 +242,7 @@ export class IntersectionFormatter implements TypeFormatter {
   }
 
   private resolveObjectSchema(
-    schema: JSONSchemaMutable,
+    schema: MutableJSONSchema,
     context: GenerationContext,
   ): (MutableJSONSchemaObj & { type: "object" }) | undefined {
     if (this.isObjectSchema(schema)) return schema;

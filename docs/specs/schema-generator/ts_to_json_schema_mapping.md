@@ -13,7 +13,7 @@ corrected in the same 2026-07 audit that produced this document) and
 
 This document specifies what the schema generator currently does, not what it
 is intended to do. It covers the conversion of `ts.Type` / `ts.TypeNode`
-inputs into `JSONSchemaMutable` values; not schema validation, runtime schema
+inputs into `MutableJSONSchema` values; not schema validation, runtime schema
 interpretation, or the transformer stages that decide *when* to generate.
 
 Authoritative implementation sources:

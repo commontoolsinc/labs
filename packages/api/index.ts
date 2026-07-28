@@ -1824,7 +1824,7 @@ export type MutableJSONSchemaObj = Mutable<JSONSchemaObj>;
  * A `MutableJSONSchemaObj` or a boolean. JSON Schema allows `true` (accept any
  * value) and `false` (reject all values) as valid schemas.
  */
-export type JSONSchemaMutable = MutableJSONSchemaObj | boolean;
+export type MutableJSONSchema = MutableJSONSchemaObj | boolean;
 
 export type * from "./cfc.ts";
 export { CFC_CANONICAL_ALIAS_NAMES } from "./cfc.ts";

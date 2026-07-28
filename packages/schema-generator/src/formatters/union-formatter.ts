@@ -1,6 +1,6 @@
 import ts from "typescript";
 import type {
-  JSONSchemaMutable,
+  MutableJSONSchema,
   MutableJSONSchemaObj,
 } from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
@@ -89,7 +89,7 @@ export class UnionFormatter implements TypeFormatter {
   formatType(
     type: ts.Type,
     context: GenerationContext,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     const union = type as ts.UnionType;
     const members = union.types ?? [];
     const unionNode = this.getUnionTypeNode(
@@ -140,7 +140,7 @@ export class UnionFormatter implements TypeFormatter {
       t: ts.Type,
       memberIndex: number,
       typeNode?: ts.TypeNode,
-    ): JSONSchemaMutable => {
+    ): MutableJSONSchema => {
       const memberNode = typeNode ?? orderedMemberNodes?.[memberIndex];
       const wrapperKind = detectWrapperViaNode(
         memberNode,
@@ -258,7 +258,7 @@ export class UnionFormatter implements TypeFormatter {
     members: readonly ts.Type[],
     orderedMemberNodes: ReadonlyArray<ts.TypeNode | undefined> | undefined,
     context: GenerationContext,
-  ): JSONSchemaMutable | undefined {
+  ): MutableJSONSchema | undefined {
     const checker = context.typeChecker;
     const branded = members.filter((m) => isDefaultBrandedMember(m, checker));
     if (branded.length === 0) return undefined;
@@ -300,7 +300,7 @@ export class UnionFormatter implements TypeFormatter {
         ? getNativeTypeSchema(m, context.typeChecker)
         : undefined;
       if (native !== undefined) {
-        return cloneSchemaDefinition(native) as JSONSchemaMutable;
+        return cloneSchemaDefinition(native) as MutableJSONSchema;
       }
       return this.schemaGenerator.formatChildType(m, context, memberNode);
     });
@@ -313,7 +313,7 @@ export class UnionFormatter implements TypeFormatter {
   private tryFormatDefaultUnion(
     memberNodes: readonly ts.TypeNode[],
     context: GenerationContext,
-  ): JSONSchemaMutable | undefined {
+  ): MutableJSONSchema | undefined {
     const defaultEntries = memberNodes
       .map((node, index) => ({
         index,
@@ -340,7 +340,7 @@ export class UnionFormatter implements TypeFormatter {
       index !== defaultEntry.index
     );
 
-    const schemas: JSONSchemaMutable[] = [];
+    const schemas: MutableJSONSchema[] = [];
     for (const node of nonDefaultNodes) {
       schemas.push(this.formatTypeNodeMember(node, context));
     }
@@ -592,7 +592,7 @@ export class UnionFormatter implements TypeFormatter {
   private formatTypeNodeMember(
     typeNode: ts.TypeNode,
     context: GenerationContext,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     const type = context.typeChecker.getTypeFromTypeNode(typeNode);
     const native = detectWrapperViaNode(typeNode, context.typeChecker) ===
         undefined
@@ -605,9 +605,9 @@ export class UnionFormatter implements TypeFormatter {
   }
 
   private combineUnionSchemas(
-    schemas: JSONSchemaMutable[],
+    schemas: MutableJSONSchema[],
     context: GenerationContext,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     if (schemas.length === 0) {
       return true;
     }
@@ -645,9 +645,9 @@ export class UnionFormatter implements TypeFormatter {
   }
 
   private applySchemaDefault(
-    schema: JSONSchemaMutable,
+    schema: MutableJSONSchema,
     defaultValue: unknown,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     if (defaultValue === undefined) {
       return schema;
     }
@@ -666,10 +666,10 @@ export class UnionFormatter implements TypeFormatter {
   }
 
   private applyDeepDefaultToSchema(
-    schema: JSONSchemaMutable,
+    schema: MutableJSONSchema,
     defaultValue: unknown,
     rootDefs?: Record<string, unknown>,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     const withDefault = this.applySchemaDefault(schema, defaultValue);
     if (!this.isDefaultObject(defaultValue) || !isRecord(withDefault)) {
       return withDefault;
@@ -688,7 +688,7 @@ export class UnionFormatter implements TypeFormatter {
     defaults: Record<string, unknown>,
     path: string[] = [],
     rootDefs?: Record<string, unknown>,
-    targetSchema?: JSONSchemaMutable,
+    targetSchema?: MutableJSONSchema,
   ): MutableJSONSchemaObj {
     const properties = isRecord(schema.properties)
       ? { ...schema.properties }
@@ -701,7 +701,7 @@ export class UnionFormatter implements TypeFormatter {
     for (const [name, value] of Object.entries(defaults)) {
       const fullPath = [...path, name];
       const targetExisting = (properties[name] ??
-        targetProperties?.[name]) as JSONSchemaMutable | undefined;
+        targetProperties?.[name]) as MutableJSONSchema | undefined;
       if (targetExisting === undefined) {
         throw new Error(
           `DeepDefault key "${
@@ -710,7 +710,7 @@ export class UnionFormatter implements TypeFormatter {
         );
       }
       properties[name] = this.applyDeepDefaultToProperty(
-        properties[name] as JSONSchemaMutable | undefined,
+        properties[name] as MutableJSONSchema | undefined,
         value,
         fullPath,
         rootDefs,
@@ -725,12 +725,12 @@ export class UnionFormatter implements TypeFormatter {
   }
 
   private applyDeepDefaultToProperty(
-    schema: JSONSchemaMutable | undefined,
+    schema: MutableJSONSchema | undefined,
     defaultValue: unknown,
     path: string[] = [],
     rootDefs?: Record<string, unknown>,
-    targetSchema?: JSONSchemaMutable,
-  ): JSONSchemaMutable {
+    targetSchema?: MutableJSONSchema,
+  ): MutableJSONSchema {
     const withDefault = this.applySchemaDefault(schema ?? true, defaultValue);
     if (!this.isDefaultObject(defaultValue) || !isRecord(withDefault)) {
       return withDefault;
@@ -1001,12 +1001,12 @@ export class UnionFormatter implements TypeFormatter {
    * {x: {enum: [10]}} | {x: {enum: [20]}} into {x: {type: "number"}}
    */
   private mergeIdenticalSchemas(
-    schemas: JSONSchemaMutable[],
-  ): JSONSchemaMutable[] {
+    schemas: MutableJSONSchema[],
+  ): MutableJSONSchema[] {
     if (schemas.length <= 1) return schemas;
 
     // Group schemas by their structure (ignoring enum values)
-    const groups = new Map<string, JSONSchemaMutable[]>();
+    const groups = new Map<string, MutableJSONSchema[]>();
 
     for (const schema of schemas) {
       const normalized = this.normalizeSchemaForComparison(schema);
@@ -1017,7 +1017,7 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     // For each group with multiple schemas, try to merge them
-    const result: JSONSchemaMutable[] = [];
+    const result: MutableJSONSchema[] = [];
     for (const group of groups.values()) {
       if (group.length === 1) {
         result.push(group[0]!);
@@ -1036,7 +1036,7 @@ export class UnionFormatter implements TypeFormatter {
    */
   private mergePrimitiveSchemaIntoAnyOf(
     anyOf: MutableJSONSchemaObj[],
-    cur: JSONSchemaMutable,
+    cur: MutableJSONSchema,
   ): boolean {
     if (cur === true) {
       // One of our anyOf values was true, so return true to let our caller
@@ -1131,7 +1131,7 @@ export class UnionFormatter implements TypeFormatter {
    * and converting them to base types
    */
   private normalizeSchemaForComparison(
-    schema: JSONSchemaMutable,
+    schema: MutableJSONSchema,
   ): Record<string, unknown> {
     if (typeof schema === "boolean") return { _bool: schema };
 
@@ -1156,7 +1156,7 @@ export class UnionFormatter implements TypeFormatter {
       const props: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(schema.properties)) {
         props[key] = this.normalizeSchemaForComparison(
-          value as JSONSchemaMutable,
+          value as MutableJSONSchema,
         );
       }
       result.properties = props;
@@ -1165,7 +1165,7 @@ export class UnionFormatter implements TypeFormatter {
     // Recursively normalize items
     if ("items" in schema && schema.items) {
       result.items = this.normalizeSchemaForComparison(
-        schema.items as JSONSchemaMutable,
+        schema.items as MutableJSONSchema,
       );
     }
 
@@ -1182,8 +1182,8 @@ export class UnionFormatter implements TypeFormatter {
    * Merge a group of structurally identical schemas by widening their enums
    */
   private mergeSchemaGroup(
-    schemas: JSONSchemaMutable[],
-  ): JSONSchemaMutable {
+    schemas: MutableJSONSchema[],
+  ): MutableJSONSchema {
     if (schemas.length === 0) {
       throw new Error("Cannot merge empty schema group");
     }
@@ -1209,7 +1209,7 @@ export class UnionFormatter implements TypeFormatter {
 
     // Recursively merge properties
     if ("properties" in first && isRecord(first.properties)) {
-      const props: Record<string, JSONSchemaMutable> = {};
+      const props: Record<string, MutableJSONSchema> = {};
       for (const key of Object.keys(first.properties)) {
         const propSchemas = schemas
           .map((s) =>
@@ -1217,7 +1217,7 @@ export class UnionFormatter implements TypeFormatter {
               ? s.properties[key]
               : undefined
           )
-          .filter((p): p is JSONSchemaMutable => p !== undefined);
+          .filter((p): p is MutableJSONSchema => p !== undefined);
 
         if (propSchemas.length > 0) {
           props[key] = this.mergeSchemaGroup(propSchemas);
@@ -1234,7 +1234,7 @@ export class UnionFormatter implements TypeFormatter {
             ? s.items
             : undefined
         )
-        .filter((i): i is JSONSchemaMutable => i !== undefined);
+        .filter((i): i is MutableJSONSchema => i !== undefined);
 
       if (itemSchemas.length > 0) {
         result.items = this.mergeSchemaGroup(itemSchemas);
