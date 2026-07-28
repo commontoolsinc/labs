@@ -8,6 +8,8 @@ import {
 } from "../lib/piece.ts";
 import {
   exitWithDataError,
+  invocationJson,
+  invocationPhaseReporter,
   isPieceGetDataError,
   pieceCallInvocation,
   pieceCallRawArgs,
@@ -1138,6 +1140,71 @@ describe("piece call stdin payloads", () => {
     // not be safe.
     expect(() => resolveInvocationId("")).toThrow(/non-blank id/);
     expect(() => resolveInvocationId("   ")).toThrow(/non-blank id/);
+  });
+
+  it("announces the invocation id once, at dispatch", () => {
+    const announced: string[] = [];
+    const seen: string[] = [];
+    const report = invocationPhaseReporter(
+      "inv-9",
+      (p) => seen.push(p),
+      (m) => announced.push(m),
+    );
+    // Nothing is announced before dispatch: until the event is on its way
+    // there is nothing a retry would deduplicate against.
+    report("initial_sync");
+    expect(announced).toEqual([]);
+    report("dispatched");
+    expect(announced).toEqual(["invocation: inv-9"]);
+    // Later phases, and a second dispatch, must not re-announce — a caller
+    // scraping stderr should not have to pick among several ids.
+    report("committed");
+    report("dispatched");
+    report("readback");
+    expect(announced).toEqual(["invocation: inv-9"]);
+    expect(seen).toEqual([
+      "initial_sync",
+      "dispatched",
+      "committed",
+      "dispatched",
+      "readback",
+    ]);
+  });
+
+  it("shapes the settled Invocation JSON an agent parses", () => {
+    expect(invocationJson({ id: "inv-1", status: "settled" })).toEqual({
+      invocation: "inv-1",
+      status: "settled",
+    });
+    expect(
+      invocationJson({ id: "inv-1", status: "settled", deduplicated: true }),
+    ).toEqual({
+      invocation: "inv-1",
+      status: "settled",
+      deduplicated: true,
+    });
+    expect(
+      invocationJson({
+        id: "inv-1",
+        status: "settled",
+        result: { commentId: "c-1" },
+      }),
+    ).toEqual({
+      invocation: "inv-1",
+      status: "settled",
+      result: { commentId: "c-1" },
+    });
+    // deduplicated: false is never emitted — its absence is the signal.
+    expect(
+      invocationJson({ id: "inv-1", status: "settled", deduplicated: false }),
+    ).not.toHaveProperty("deduplicated");
+    // A verb that genuinely returned null keeps it; a value-less verb omits
+    // the key entirely, so the two stay distinguishable on the wire.
+    expect(invocationJson({ id: "inv-1", status: "settled", result: null }))
+      .toEqual({ invocation: "inv-1", status: "settled", result: null });
+    expect(
+      invocationJson({ id: "inv-1", status: "settled", result: undefined }),
+    ).not.toHaveProperty("result");
   });
 
   it('maps a bare "-" payload onto the --json-file stdin path', () => {

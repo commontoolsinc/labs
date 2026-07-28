@@ -30,7 +30,7 @@ import {
   SpaceConfig,
   stepPiece,
 } from "../lib/piece.ts";
-import type { InvocationPhase } from "../lib/callable.ts";
+import type { InvocationOutcome, InvocationPhase } from "../lib/callable.ts";
 import { renderPiece } from "../lib/piece-render.ts";
 import { parseSqliteSource } from "../lib/sqlite-source.ts";
 import { render, safeStringify } from "../lib/render.ts";
@@ -331,6 +331,49 @@ export function resolveInvocationId(
     throw new ValidationError("--invocation requires a non-blank id");
   }
   return raw;
+}
+
+/**
+ * Build the phase observer for a handler invocation. Its whole job is to put
+ * the invocation id on stderr at the moment the event is about to dispatch —
+ * BEFORE any network work — so a caller whose process dies past that line
+ * still holds the exact id to retry with, and the retry deduplicates instead
+ * of executing a second time. Announcing once matters: a caller scraping
+ * stderr for its id should not have to decide which of several to trust.
+ */
+export function invocationPhaseReporter(
+  invocationId: string,
+  onAdvance: (phase: InvocationPhase) => void,
+  announce: (message: string) => void = console.error,
+): (phase: InvocationPhase) => void {
+  let announced = false;
+  return (next) => {
+    if (next === "dispatched" && !announced) {
+      announced = true;
+      announce(`invocation: ${invocationId}`);
+    }
+    onAdvance(next);
+  };
+}
+
+/**
+ * Shape a settled handler invocation for stdout. This is the wire contract an
+ * agent parses, so the optional keys are load-bearing: `deduplicated` appears
+ * only when the call collided on an existing receipt, and `result` only when
+ * the receipt carried one — a value-less verb omits it rather than reporting
+ * `null`, which would be indistinguishable from a verb that returned null.
+ */
+export function invocationJson(
+  outcome: InvocationOutcome,
+): Record<string, unknown> {
+  return {
+    invocation: outcome.id,
+    status: outcome.status,
+    ...(outcome.deduplicated ? { deduplicated: true } : {}),
+    ...("result" in outcome && outcome.result !== undefined
+      ? { result: outcome.result }
+      : {}),
+  };
 }
 
 export function writePieceRenderStatus(
@@ -1159,16 +1202,10 @@ after --. Handlers interpret piped input when no input argument is present.`,
         invocation.rawArgs,
         {
           invocationId,
-          onPhase: (next) => {
-            // The id goes to stderr the moment the event is about to
-            // dispatch, BEFORE any network work: if this process dies past
-            // this line, the caller holds the exact id to retry with, and
-            // the retry deduplicates instead of double-executing.
-            if (next === "dispatched" && phase === "initial_sync") {
-              console.error(`invocation: ${invocationId}`);
-            }
-            phase = next;
-          },
+          onPhase: invocationPhaseReporter(
+            invocationId,
+            (next) => phase = next,
+          ),
         },
       );
       if (result.helpText) {
@@ -1194,18 +1231,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
       if (result.invocation) {
         // The machine surface for a handler invocation: stdout carries the
         // settled Invocation JSON, prose stays on stderr via hint().
-        render(JSON.stringify(
-          {
-            invocation: result.invocation.id,
-            status: result.invocation.status,
-            ...(result.invocation.deduplicated ? { deduplicated: true } : {}),
-            ...("result" in result.invocation
-              ? { result: result.invocation.result }
-              : {}),
-          },
-          null,
-          2,
-        ));
+        render(JSON.stringify(invocationJson(result.invocation), null, 2));
         hint(cliText(`NEXT STEPS:
   → Verify state:  cf piece get --piece ${pieceConfig.piece} <path> ...
   → Full inspect:  cf piece inspect --piece ${pieceConfig.piece} ...`));
