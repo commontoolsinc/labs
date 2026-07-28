@@ -817,6 +817,204 @@ Deno.test("markdown rendered view handles incomplete HTML, fences, and tables", 
   assert(literalBackslashes[2].text.includes("a\\\\b"));
 });
 
+Deno.test("markdown rendered view handles malformed HTML boundaries", () => {
+  assertEquals(
+    markdownInternals.htmlDeclarationRanges(
+      "<!DOCTYPE",
+      0,
+      { type: "html", raw: "<!DOCTYPE" },
+    ),
+    [],
+  );
+  assertEquals(
+    markdownInternals.htmlDeclarationRanges(
+      "<!DOCTYPE a><!--",
+      0,
+      { type: "html", raw: "<!DOCTYPE a>" },
+    ),
+    [],
+  );
+  assertEquals(
+    markdownInternals.htmlDeclarationRanges(
+      "<!DOCTYPE a><?next",
+      0,
+      { type: "html", raw: "<!DOCTYPE a>" },
+    ),
+    [],
+  );
+
+  assertEquals(
+    markdownInternals.skipAdjacentDeclarationWhitespace("    next", 0),
+    3,
+  );
+  assertEquals(
+    markdownInternals.skipAdjacentDeclarationWhitespace("\tnext", 0),
+    0,
+  );
+  assertEquals(
+    markdownInternals.skipAdjacentDeclarationWhitespace("x \tnext", 1),
+    3,
+  );
+
+  const lines = renderMarkdownLines("abcdef");
+  markdownInternals.applyHtmlDeclarations(
+    "abcdef",
+    ["abcdef"],
+    lines,
+    [{ start: 1, end: 4 }, { start: 2, end: 5 }],
+  );
+  assertEquals(lines, [{
+    text: "aef",
+    spans: [{ col: 0, text: "aef", cls: "plain" }],
+    renderedSourceHidden: true,
+  }]);
+
+  assertEquals(
+    markdownInternals.renderBlockquoteBlock(["plain"]).map((line) => line.text),
+    ["plain"],
+  );
+  assertEquals(
+    renderMarkdownLines("![](image.png)").map((line) => line.text),
+    ["▧ image"],
+  );
+
+  assertEquals(
+    markdownInternals.stripHtmlTags("<![CDATA[unterminated"),
+    "<![CDATA[unterminated",
+  );
+  assertEquals(
+    markdownInternals.stripRawHtmlContainer(
+      '<script title="unterminated',
+      "script",
+    ),
+    '<script title="unterminated',
+  );
+  assertEquals(
+    markdownInternals.stripRawHtmlContainer("<script>visible", "script"),
+    "visible",
+  );
+  assertEquals(markdownInternals.stripHtmlTags("<img/>"), "");
+  assertEquals(
+    markdownInternals.stripHtmlTags("<span @>visible"),
+    "<span @>visible",
+  );
+  assertEquals(
+    markdownInternals.stripHtmlTags('<span title="unterminated>'),
+    '<span title="unterminated>',
+  );
+  assertEquals(
+    markdownInternals.stripHtmlTags(
+      "<span title=value>visible</span>",
+    ),
+    "visible",
+  );
+  assertEquals(
+    markdownInternals.stripHtmlTags("<span title=>"),
+    "<span title=>",
+  );
+
+  assertEquals(
+    markdownInternals.declarationMarkupEnd(
+      "<!DOCTYPE a [<!-- unfinished",
+      2,
+    ),
+    null,
+  );
+  assertEquals(
+    markdownInternals.declarationMarkupEnd(
+      "<!DOCTYPE a [<?next] >",
+      2,
+    ),
+    null,
+  );
+  const declarationWithInstruction = "<!DOCTYPE a [<?next?>]>";
+  assertEquals(
+    markdownInternals.declarationMarkupEnd(declarationWithInstruction, 2),
+    declarationWithInstruction.length,
+  );
+});
+
+Deno.test("markdown rendered view preserves unusual Unicode token data", () => {
+  const loneLowSurrogateLexer = {
+    inlineTokens: () => [{
+      type: "text",
+      raw: "\udc00",
+      text: "\udc00",
+    }],
+  } as unknown as Lexer;
+  assertEquals(
+    markdownInternals.renderInlineLine(
+      "plain",
+      "plain",
+      loneLowSurrogateLexer,
+    ).text,
+    "plain",
+  );
+
+  const pairedSurrogateLexer = {
+    inlineTokens: () => [{
+      type: "text",
+      raw: "😀",
+      text: "😀",
+    }],
+  } as unknown as Lexer;
+  assertEquals(
+    markdownInternals.renderInlineLine(
+      "😀",
+      "plain",
+      pairedSurrogateLexer,
+    ).text,
+    "😀",
+  );
+
+  const masked = markdownInternals.maskAstralCharacters("☀😀");
+  assert(masked);
+  const placeholder = masked.text.at(-1)!;
+  assert(placeholder !== "☀");
+  assertEquals(masked.original.get(placeholder), "😀");
+  assertEquals(
+    markdownInternals.restoreInlineTokens([{
+      type: "link",
+      raw: placeholder,
+      text: placeholder,
+      href: `https://${placeholder}`,
+      tokens: [{
+        type: "text",
+        raw: placeholder,
+        text: placeholder,
+      }],
+    }], masked.original),
+    [{
+      type: "link",
+      raw: "😀",
+      text: "😀",
+      href: "https://😀",
+      tokens: [{
+        type: "text",
+        raw: "😀",
+        text: "😀",
+      }],
+    }],
+  );
+
+  const tooManyAstralCharacters = Array.from(
+    { length: 705 },
+    (_, index) => String.fromCodePoint(0x10000 + index),
+  ).join("");
+  assertEquals(
+    markdownInternals.maskAstralCharacters(tooManyAstralCharacters),
+    null,
+  );
+
+  assertEquals(
+    markdownInternals.codeSpanText(
+      { type: "codespan", raw: "`unfinished\nspan", text: "fallback" },
+      true,
+    ),
+    "fallback",
+  );
+});
+
 Deno.test("markdown rendered view makes decoded controls inert", () => {
   const line = renderMarkdownLines(
     "safe&#27;[31mred&#7;&#127;\u0085",

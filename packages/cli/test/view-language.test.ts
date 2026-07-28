@@ -65,6 +65,10 @@ Deno.test("distinctLanguages: dedupes in first-seen order", () => {
 });
 
 Deno.test("renderedLinesFor rejects a renderer that changes line topology", () => {
+  assertEquals(
+    renderedLinesFor(plainTextLanguage, "plain", "notes.txt"),
+    undefined,
+  );
   assertThrows(
     () =>
       renderedLinesFor(
