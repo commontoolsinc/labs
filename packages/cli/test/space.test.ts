@@ -188,6 +188,202 @@ describe("cf space", () => {
     });
   });
 
+  it("requires --from and --to, and says what they are for", async () => {
+    await withFixture(async ({ snapshot, clone }) => {
+      const noFrom = await cf(`space clone ${SPACE} --to ${clone}`);
+      expect(noFrom.code).not.toBe(0);
+      expect(text(noFrom.stderr)).toContain("--from is required");
+      // The message points at the sanctioned way to obtain a production
+      // snapshot, since the dump endpoint is deliberately off there.
+      expect(text(noFrom.stderr)).toContain("VACUUM INTO");
+
+      const noTo = await cf(`space clone ${SPACE} --from ${snapshot}`);
+      expect(noTo.code).not.toBe(0);
+      expect(text(noTo.stderr)).toContain("--to is required");
+    });
+  });
+
+  it("downloads an https snapshot and does not leave it behind", async () => {
+    // `--from <url>` is the S3 hop the July rehearsal used to share one
+    // snapshot across operators. A real snapshot is gigabytes, so the staging
+    // copy must not survive the command.
+    await withFixture(async ({ snapshot, clone }) => {
+      const body = await Deno.readFile(snapshot);
+      const server = Deno.serve(
+        { hostname: "127.0.0.1", port: 0, onListen: () => {} },
+        () => new Response(body),
+      );
+      const url = `http://127.0.0.1:${server.addr.port}/snapshot.sqlite`;
+      try {
+        const result = await cf(
+          `space clone ${SPACE} --from ${url} --to ${clone}`,
+        );
+        expect(result.code).toBe(0);
+        expect(text(result.stdout)).toContain("1 generated cells excluded");
+        // The clone is real and verifies against its own manifest.
+        expect((await cf(`space verify ${clone}`)).code).toBe(0);
+      } finally {
+        await server.shutdown();
+      }
+
+      const leaked = [];
+      for await (
+        const entry of Deno.readDir(Deno.env.get("TMPDIR") ?? "/tmp")
+      ) {
+        if (entry.name.startsWith("cf-space-clone-")) leaked.push(entry.name);
+      }
+      expect(leaked).toEqual([]);
+    });
+  });
+
+  it("emits machine-readable JSON for clone, verify and fingerprint", async () => {
+    await withFixture(async ({ snapshot, clone }) => {
+      const cloned = await cf(
+        `space clone ${SPACE} --from ${snapshot} --to ${clone} --json`,
+      );
+      expect(cloned.code).toBe(0);
+      const { manifest, paths } = JSON.parse(text(cloned.stdout));
+      expect(manifest.space).toBe(SPACE);
+      expect(manifest.version).toBe(1);
+      // The reported path is absolute, so the printed serve line is a usable
+      // file:// URL even when --to was relative.
+      expect(paths.workingPath.startsWith("/")).toBe(true);
+
+      const verified = JSON.parse(
+        text((await cf(`space verify ${clone} --json`)).stdout),
+      );
+      expect(verified.ok).toBe(true);
+      expect(verified.fingerprint.match).toBe(true);
+
+      const fp = JSON.parse(
+        text(
+          (await cf(`space fingerprint ${paths.workingPath} --json`)).stdout,
+        ),
+      );
+      expect(fp.hash).toBe(manifest.fingerprint.hash);
+      expect(fp.ambiguous).toEqual([]);
+    });
+  });
+
+  it("lists per-entity hashes and flags entities it could not hash", async () => {
+    // A ~5,000-deep value parses but overflows the canonical hasher. The
+    // listing must name it rather than let it vanish from the roll-up.
+    await withFixture(async ({ snapshot, clone }) => {
+      await cf(`space clone ${SPACE} --from ${snapshot} --to ${clone}`);
+      const working = `${clone}/engine-v3/${SPACE}.sqlite`;
+      let deep: unknown = null;
+      for (let i = 0; i < 5000; i++) deep = { a: deep };
+      writeToWorkingCopy(clone, [["of:pathological", { value: deep }]]);
+
+      const result = await cf(`space fingerprint ${working} --per-entity`);
+      expect(result.code).toBe(0);
+      const output = text(result.stdout);
+      expect(output).toContain("could not be");
+      expect(output).toContain("of:pathological");
+      // --per-entity lists the ordinary entities alongside their kind.
+      expect(output).toContain("of:input");
+    });
+  });
+
+  it("exits nonzero when a reset cannot restore the baseline", async () => {
+    await withFixture(async ({ snapshot, clone }) => {
+      await cf(`space clone ${SPACE} --from ${snapshot} --to ${clone}`);
+      // Corrupt the baseline itself: reset will "succeed" mechanically but the
+      // clone no longer matches its manifest, which must not report success.
+      const pristine = `${clone}/pristine/${SPACE}.sqlite`;
+      const db = new Database(pristine);
+      appendDocs(db, [["of:input", { value: { title: "ROTTED BASELINE" } }]]);
+      db.close();
+
+      const result = await cf(`space reset ${clone}`);
+      expect(result.code).toBe(1);
+    });
+  });
+
+  it("refuses a target inside DB_PATH's directory too", async () => {
+    // Single-file mode: the live store is a file, so its DIRECTORY is what a
+    // clone must stay out of.
+    await withFixture(async ({ snapshot, root }) => {
+      const live = `${root}/single-file`;
+      await Deno.mkdir(live);
+      await withEnv("DB_PATH", `${live}/store.sqlite`, async () => {
+        const result = await cf(
+          `space clone ${SPACE} --from ${snapshot} --to ${live}/clone`,
+        );
+        expect(result.code).not.toBe(0);
+        expect(text(result.stderr)).toContain(
+          "overlaps the live store directory",
+        );
+      });
+    });
+  });
+
+  it("tolerates a malformed MEMORY_DIR instead of crashing", async () => {
+    // MEMORY_DIR comes from the environment and may be junk; that must not
+    // stop an operator from making a clone somewhere harmless.
+    await withFixture(async ({ snapshot, clone }) => {
+      await withEnv("MEMORY_DIR", "file://[not-a-url", async () => {
+        const result = await cf(
+          `space clone ${SPACE} --from ${snapshot} --to ${clone}`,
+        );
+        expect(result.code).toBe(0);
+      });
+    });
+  });
+
+  it("reports an HTTP failure on --from instead of a partial clone", async () => {
+    await withFixture(async ({ clone }) => {
+      const server = Deno.serve(
+        { hostname: "127.0.0.1", port: 0, onListen: () => {} },
+        () => new Response("nope", { status: 404 }),
+      );
+      const url = `http://127.0.0.1:${server.addr.port}/missing.sqlite`;
+      try {
+        const result = await cf(
+          `space clone ${SPACE} --from ${url} --to ${clone}`,
+        );
+        expect(result.code).not.toBe(0);
+        expect(text(result.stderr)).toContain("HTTP 404");
+      } finally {
+        await server.shutdown();
+      }
+      expect(await exists(clone)).toBe(false);
+    });
+  });
+
+  it("keeps a failure off stdout when --json was requested", async () => {
+    // stdout is reserved for the JSON payload, so a failing command must not
+    // print usage help into it and corrupt a caller's parse.
+    await withFixture(async ({ root }) => {
+      const result = await cf(`space verify ${root} --json`);
+      expect(result.code).not.toBe(0);
+      expect(text(result.stdout).trim()).toBe("");
+    });
+  });
+
+  it("flags an id that one manifest generates and another names", async () => {
+    // Rotation-prone wins so the fingerprint stays stable, but that choice can
+    // hide a real content change, so it must never be silent.
+    await withFixture(async ({ snapshot, clone }) => {
+      await cf(`space clone ${SPACE} --from ${snapshot} --to ${clone}`);
+      const working = `${clone}/engine-v3/${SPACE}.sqlite`;
+      writeToWorkingCopy(clone, [
+        ["of:second-piece", {
+          value: { $NAME: "Other" },
+          argument: link("of:input"),
+          // Names the cell the first piece calls compiler-generated.
+          internal: [{ partialCause: "entries", link: link("of:generated") }],
+          patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
+          schema: { type: "object", properties: {}, $defs: {} },
+        }],
+      ]);
+
+      const result = await cf(`space fingerprint ${working}`);
+      expect(result.code).toBe(0);
+      expect(text(result.stdout)).toContain("generated in one");
+    });
+  });
+
   it("rejects a directory that is not a clone", async () => {
     await withFixture(async ({ root }) => {
       const result = await cf(`space verify ${root}`);
