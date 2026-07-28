@@ -322,20 +322,33 @@ export function sparkline(
 // right-hand gutter at the line's end height, in the line color. With
 // `opts.fadeFrom`, each line fades from that color on the far left up to its own
 // color, reaching full color by the midpoint (or by the start of the highlight,
-// if that comes sooner) — like the ci-duration sparkline. `opts.highlight`
-// redraws the trailing `count` points of every line in a lighter tint of that
-// line's own color, picking out the slice that feeds the headline while keeping
-// each line identifiable. All overlays are HTML/gradient, so the
-// preserveAspectRatio="none" stretch can't distort them. Returns "" until there
-// are at least two points to plot. The span it covers is drawn separately by a
-// tile's `duration` slot.
+// if that comes sooner) — like the ci-duration sparkline. A series' `xs`
+// places its points on a shared horizontal axis. Its `highlightCount` redraws
+// its trailing points, including explicit markers, in a lighter tint.
+// `opts.highlight` supplies the count for series that do not set one. `maxXGap`
+// breaks a path when adjacent horizontal positions are farther apart than that
+// fraction of the chart. `showSinglePoint` draws explicit markers for a
+// one-sample series and for points isolated by those breaks. All overlays are
+// HTML or gradients, so preserveAspectRatio="none" cannot distort them. The
+// span it covers is drawn separately by a tile's `duration` slot.
 export function multiSparkline(
-  series: { vals: number[]; color: string; label?: string }[],
+  series: {
+    vals: number[];
+    color: string;
+    label?: string;
+    xs?: number[];
+    highlightCount?: number;
+    maxXGap?: number;
+    showSinglePoint?: boolean;
+  }[],
   opts: { fadeFrom?: string; highlight?: { count: number } } = {},
 ): string {
-  const all = series.flatMap((s) => s.vals);
-  const points = Math.max(0, ...series.map((s) => s.vals.length));
-  if (points < 2 || all.length === 0) return "";
+  const drawable = series.filter((line) =>
+    line.vals.length >= 2 ||
+    (line.showSinglePoint === true && line.vals.length === 1)
+  );
+  const all = drawable.flatMap((line) => line.vals);
+  if (!all.length) return "";
   const w = 220, h = 34, min = Math.min(...all), max = Math.max(...all), rng = (max - min) || 1;
   const yv = (v: number) => h - 3 - ((v - min) / rng) * (h - 6);
 
@@ -344,14 +357,24 @@ export function multiSparkline(
   // that comes sooner (so the base is solid before the handoff). userSpaceOnUse
   // keeps the transition at the same screen x for every line and avoids the
   // zero-bbox quirk when a line is flat.
-  const edge = opts.highlight && points > 1
-    ? Math.max(0, Math.min(1, (points - opts.highlight.count) / (points - 1)))
-    : 1;
-  const tf = Math.min(0.5, edge);
-  const off = String(+tf.toFixed(3));
   const defs: string[] = [];
-  const strokeFor = (color: string): string => {
+  const highlightCount = (
+    line: (typeof series)[number],
+  ): number => line.highlightCount ?? opts.highlight?.count ?? 0;
+  const highlightEdge = (line: (typeof series)[number]): number => {
+    const count = highlightCount(line);
+    if (count < 2) return 1;
+    if (count >= line.vals.length) return 0;
+    const index = line.vals.length - count;
+    return line.xs?.length === line.vals.length
+      ? line.xs[index]
+      : index / (line.vals.length - 1);
+  };
+  const strokeFor = (line: (typeof series)[number]): string => {
+    const color = line.color;
     if (!opts.fadeFrom) return color;
+    const tf = Math.min(0.5, Math.max(0, highlightEdge(line)));
+    const off = String(+tf.toFixed(3));
     const id = `mspk-${opts.fadeFrom.replace(/[^0-9a-fA-F]/g, "")}-${color.replace(/[^0-9a-fA-F]/g, "")}-${Math.round(tf * 100)}`;
     if (!defs.some((d) => d.includes(`"${id}"`))) {
       defs.push(
@@ -362,25 +385,108 @@ export function multiSparkline(
     }
     return `url(#${id})`;
   };
-  const hl = opts.highlight;
-  const poly = (pts: string[], stroke: string) => `<polyline points="${pts.join(" ")}" fill="none" stroke="${stroke}" stroke-width="2"/>`;
-  const drawn = series.filter((s) => s.vals.length >= 2).map((s) => ({
-    s,
-    pts: s.vals.map((v, i) => `${(i / (s.vals.length - 1) * w).toFixed(1)},${yv(v).toFixed(1)}`),
-  }));
+  const highlightStartIndex = (
+    line: (typeof series)[number],
+    pointCount: number,
+  ): number | undefined => {
+    const count = Math.min(highlightCount(line), pointCount);
+    return count >= 2 && count < pointCount ? pointCount - count : undefined;
+  };
+  type SparkPoint = { index: number; x: number; px: number; py: number };
+  const splitPoints = (
+    points: SparkPoint[],
+    maxXGap: number | undefined,
+  ): SparkPoint[][] => {
+    const segments: SparkPoint[][] = [];
+    for (const point of points) {
+      const current = segments[segments.length - 1];
+      const previous = current?.[current.length - 1];
+      const tolerance = maxXGap === undefined || previous === undefined
+        ? 0
+        : Number.EPSILON * 4 *
+          Math.max(
+            1,
+            Math.abs(point.x),
+            Math.abs(previous.x),
+            Math.abs(maxXGap),
+          );
+      if (
+        previous === undefined ||
+        (maxXGap !== undefined &&
+          Math.abs(point.x - previous.x) > maxXGap + tolerance)
+      ) {
+        segments.push([point]);
+      } else {
+        current.push(point);
+      }
+    }
+    return segments;
+  };
+  const svgPoint = (point: SparkPoint) =>
+    `${point.px.toFixed(1)},${point.py.toFixed(1)}`;
+  const poly = (pts: string[], stroke: string) =>
+    `<polyline points="${pts.join(" ")}" fill="none" stroke="${stroke}" stroke-width="2"/>`;
+  const marker = (point: SparkPoint, color: string) =>
+    `<circle cx="${point.px.toFixed(1)}" cy="${
+      point.py.toFixed(1)
+    }" r="1.0" fill="${escapeHtml(color)}"/>`;
+  const drawn = drawable.filter((s) => s.vals.length >= 2).map((s) => {
+    const points = s.vals.map((v, i) => {
+      const x = s.xs?.length === s.vals.length
+        ? s.xs[i]
+        : i / (s.vals.length - 1);
+      return { index: i, x, px: x * w, py: yv(v) };
+    });
+    return {
+      s,
+      points,
+      segments: splitPoints(points, s.maxXGap),
+    };
+  });
   // Every base first, then every tint, so a line drawn later cannot paint over an
   // earlier line's tint where the two cross inside the highlighted slice.
-  const bases = drawn.map(({ s, pts }) => poly(pts, strokeFor(s.color))).join("");
+  const bases = drawn.map(({ s, segments }) => {
+    const paths = segments.filter((segment) => segment.length >= 2);
+    if (!paths.length) return "";
+    const stroke = strokeFor(s);
+    return paths.map((path) => poly(path.map(svgPoint), stroke)).join("");
+  }).join("");
   // The trailing slice, redrawn in a lighter tint of each line's own color. A
   // slice covering the whole line marks nothing off, so it is left alone.
-  const tints = drawn.map(({ s, pts }) => {
-    const n = hl ? Math.min(hl.count, pts.length) : 0;
-    return n >= 2 && n < pts.length ? poly(pts.slice(pts.length - n), lighten(s.color)) : "";
+  const tints = drawn.map(({ s, points }) => {
+    const start = highlightStartIndex(s, points.length);
+    if (start === undefined) return "";
+    return splitPoints(points.slice(start), s.maxXGap)
+      .filter((segment) => segment.length >= 2)
+      .map((segment) => poly(segment.map(svgPoint), lighten(s.color)))
+      .join("");
   }).join("");
-  const lines = bases + tints;
+  const isolatedMarkers = drawn.map(({ s, points, segments }) => {
+    if (!s.showSinglePoint) return "";
+    const highlightStart = highlightStartIndex(s, points.length);
+    return segments
+      .filter((segment) => segment.length === 1)
+      .map((segment) => {
+        const point = segment[0];
+        const color = highlightStart !== undefined &&
+            point.index >= highlightStart
+          ? lighten(s.color)
+          : s.color;
+        return marker(point, color);
+      })
+      .join("");
+  }).join("");
+  const singleSeriesMarkers = drawable
+    .filter((s) => s.vals.length === 1)
+    .map((s) => {
+      const x = s.xs?.length === 1 ? s.xs[0] : 0.5;
+      return marker({ index: 0, x, px: x * w, py: yv(s.vals[0]) }, s.color);
+    })
+    .join("");
+  const lines = bases + tints + isolatedMarkers + singleSeriesMarkers;
   const defsBlock = defs.length ? `<defs>${defs.join("")}</defs>` : "";
 
-  const labeled = series.filter((s) => s.label !== undefined && s.vals.length >= 2);
+  const labeled = drawable.filter((s) => s.label !== undefined);
   if (labeled.length === 0) {
     return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="32" preserveAspectRatio="none" style="margin-top:9px">${defsBlock}${lines}</svg>`;
   }
