@@ -4,8 +4,91 @@
 AMENDMENTS by the adversarial panel (21 verified findings, 2 refuted, 8
 confirmations — archived verbatim at
 `docs/history/development/design/client-passivity-panel-2026-07-26.md`).
-The plan below (§6) is build-ready pending the §7 owner decisions. No
-build authorized yet.**
+P0 built and ACCEPTED, P1 first results in — see §0. The §5b/§5c build
+logs are the evidence record; §6 remains the phase table.**
+
+## 0. Where we are and what's next (2026-07-27 consolidation — START HERE)
+
+**Motivation (the owner's end state, unchanged):** all standing
+reactive work — computations AND effect builtins — runs server-side;
+the client on startup does no compute beyond render; only handler
+invocations trigger client-side speculative work, and only the
+handler's own writes propagate to the server. Multi-user is the
+sharpest payoff: today N clients each recompute everything and thrash
+commits against each other; in the end state the server arbitrates
+once and clients receive canonical values.
+
+**Where we are — P0 ACCEPTED, P1 measuring (all landed on
+`codex/server-execution-w1-2-shared-pool`):**
+
+- The executor-liveness stack works end to end on the real browser
+  workload. Six mechanisms, each measured into existence red-first:
+  demand grace + shrink gate (navigation blips), sponsor re-anchor
+  (`a83598773` — the (connection,session,token) pin heals in place
+  across all four consumers), the activation pump (`ea5e315fa` —
+  per-piece items, newest-first; control ops wait ≤1 pull), the
+  cold-refresh debounce (`869536c75` — growth re-traversals
+  duty-bounded per watch), the piece linger (`e47328b36` — removal
+  fences authority now, keeps the graph warm), and the admission
+  unfreeze (`d28092a64` — set-demand replies at lane application).
+- **P0 acceptance (`223bd46e8`):** the persistent-page scenario
+  (`CF_NOTE_CREATE_TIMING_SERIES=20 CF_NOTE_CREATE_TIMING_DELAY_MS=
+  3000`, fresh store) ENGAGES: claims 78-153/run, settlements
+  committing, zero failures; time-to-first-claim ~1.5s warm. The
+  storm variant (delay 0) is retained as the published cold-start row.
+- **P1 first results (§5c):** single-user engaged cost +7% median
+  (adjacent A/B pair; near-parity ex-tail). Multi-user (new
+  `CF_CHAT_MESSAGE_SERIES` two-browser leg): engaged PARITY — 602 vs
+  637ms propagation — while the server absorbed 594 claimed-attempt
+  conflicts for 14 commits at zero client cost. The engaged tail
+  (+1.5→4.7s late iterations) is ATTRIBUTED: serving-path schema
+  traversals growing with doc count (tracker keys 253→850+), landing
+  in client viewIdleWait; conflicts/claims/refreshes exonerated.
+
+**Why multi-user is not faster YET (the honest core):** arbitration
+alone cannot speed clients that still execute everything locally —
+flag-on today ADDS server execution without REMOVING client
+execution. The removal is P3+P5. Today's parity-at-594-conflicts is
+precisely the foundation those need.
+
+**Forward steps, in order, each with its motivation and gate:**
+
+1. **Serving-path traversal coverage/memoization** — doubly
+   motivated: it is the engaged-tail driver (client-visible, §5c
+   attribution) AND the cold-start amplifier (P0-R3c option (i),
+   `graph.query.demand` 97% of read work). First instrument the
+   confirmation (floor-less call-site-tagged traversal timing,
+   event-loop-lag sampler, transact→ack→push chain), then memoize/
+   cover against the session's tracked state. Gate: tail slope ≈
+   flag-off slope; cold first-prepare under the P1 budget.
+2. **P4 defer-then-(b) speculation discipline** — quantified
+   motivation: 594 server retries for 14 commits; the executor should
+   defer attempts it is about to lose (warm-set budget hard gate per
+   D1). Gate: retry ratio collapses without settlement-latency loss.
+3. **P2 serving coverage** (R5 brokers `llm`/`sqliteQuery`,
+   descriptors, R13 `wish`, sqlite commit path per D2) — the
+   registry holes that keep actions client-only. Gate: P1 unserved
+   inventory empty or per-action-gated.
+4. **P3 passivity mechanism** (per-session subcap, passive-mode
+   demand producer, dynamic-reactivation contract, effect-attempt
+   journal) — the client stops running standing work. THIS is where
+   single-user boot shifts and multi-user gets faster.
+5. **P5 passive delivery + warm spaces** (demote-never-retire, D3
+   push-then-catch-up boot seed) — makes the persistent-page premise
+   true for real returning users; kills the cold-start cliff jointly
+   with step 1.
+6. **P6 acceptance** — the three-way at protocol n, fully-engaged ≤
+   flag-off on interaction AND boot, engagement by counters, cold row
+   published alongside.
+
+**Measurement protocol (hard-won, mandatory):** fresh store per run
+(`rm -rf packages/toolshed/cache` after stopping the 750 servers);
+kill leftover `ms-playwright` browsers between runs; record load
+average; full-capture harness output (never `tail`); curl
+`/api/health/stats` in the same command right after the harness
+exits; compare arms only in ADJACENT pairs; real-Worker e2e suites
+run one file per deno invocation; engagement counters on every
+number or it reads "not engaged".
 
 ## 1. The theory (owner, 2026-07-24; panel-qualified 2026-07-26)
 
