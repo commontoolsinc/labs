@@ -375,7 +375,9 @@ Deno.test("multiSparkline: large horizontal gaps split paths without losing poin
   ]);
   assert(
     svg.includes(
-      '<circle cx="176.0" cy="3.0" r="1.0" fill="#d97757"/>',
+      `<circle cx="176.0" cy="3.0" r="1.0" fill="${
+        lighten("#d97757")
+      }"/>`,
     ),
   );
 
@@ -388,6 +390,22 @@ Deno.test("multiSparkline: large horizontal gaps split paths without losing poin
   }]);
   assertEquals([...offsetBoundary.matchAll(/<polyline/g)].length, 1);
   assertEquals([...offsetBoundary.matchAll(/<circle/g)].length, 0);
+});
+
+Deno.test("multiSparkline: isolated markers use the tint only inside the highlighted tail", () => {
+  const color = "#d97757";
+  const svg = multiSparkline([{
+    vals: [1, 2, 3, 4, 5, 6],
+    color,
+    xs: [0, 0.25, 0.4, 0.5, 0.7, 0.95],
+    highlightCount: 2,
+    maxXGap: 0.2,
+    showSinglePoint: true,
+  }]);
+  const fills = [
+    ...svg.matchAll(/<circle[^>]*fill="([^"]+)"/g),
+  ].map((match) => match[1]);
+  assertEquals(fills, [color, lighten(color)]);
 });
 
 Deno.test("sparkline: xs place points on a shared axis", () => {

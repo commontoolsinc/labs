@@ -324,13 +324,13 @@ export function sparkline(
 // color, reaching full color by the midpoint (or by the start of the highlight,
 // if that comes sooner) — like the ci-duration sparkline. A series' `xs`
 // places its points on a shared horizontal axis. Its `highlightCount` redraws
-// its trailing points in a lighter tint. `opts.highlight` supplies the count
-// for series that do not set one. `maxXGap` breaks a path when adjacent
-// horizontal positions are farther apart than that fraction of the chart.
-// `showSinglePoint` draws explicit markers for a one-sample series and for
-// points isolated by those breaks. All overlays are HTML or gradients, so
-// preserveAspectRatio="none" cannot distort them. The span it covers is drawn
-// separately by a tile's `duration` slot.
+// its trailing points, including explicit markers, in a lighter tint.
+// `opts.highlight` supplies the count for series that do not set one. `maxXGap`
+// breaks a path when adjacent horizontal positions are farther apart than that
+// fraction of the chart. `showSinglePoint` draws explicit markers for a
+// one-sample series and for points isolated by those breaks. All overlays are
+// HTML or gradients, so preserveAspectRatio="none" cannot distort them. The
+// span it covers is drawn separately by a tile's `duration` slot.
 export function multiSparkline(
   series: {
     vals: number[];
@@ -385,7 +385,14 @@ export function multiSparkline(
     }
     return `url(#${id})`;
   };
-  type SparkPoint = { x: number; px: number; py: number };
+  const highlightStartIndex = (
+    line: (typeof series)[number],
+    pointCount: number,
+  ): number | undefined => {
+    const count = Math.min(highlightCount(line), pointCount);
+    return count >= 2 && count < pointCount ? pointCount - count : undefined;
+  };
+  type SparkPoint = { index: number; x: number; px: number; py: number };
   const splitPoints = (
     points: SparkPoint[],
     maxXGap: number | undefined,
@@ -428,7 +435,7 @@ export function multiSparkline(
       const x = s.xs?.length === s.vals.length
         ? s.xs[i]
         : i / (s.vals.length - 1);
-      return { x, px: x * w, py: yv(v) };
+      return { index: i, x, px: x * w, py: yv(v) };
     });
     return {
       s,
@@ -447,26 +454,33 @@ export function multiSparkline(
   // The trailing slice, redrawn in a lighter tint of each line's own color. A
   // slice covering the whole line marks nothing off, so it is left alone.
   const tints = drawn.map(({ s, points }) => {
-    const n = Math.min(highlightCount(s), points.length);
-    if (n < 2 || n >= points.length) return "";
-    const start = points.length - n;
+    const start = highlightStartIndex(s, points.length);
+    if (start === undefined) return "";
     return splitPoints(points.slice(start), s.maxXGap)
       .filter((segment) => segment.length >= 2)
       .map((segment) => poly(segment.map(svgPoint), lighten(s.color)))
       .join("");
   }).join("");
-  const isolatedMarkers = drawn.map(({ s, segments }) => {
+  const isolatedMarkers = drawn.map(({ s, points, segments }) => {
     if (!s.showSinglePoint) return "";
+    const highlightStart = highlightStartIndex(s, points.length);
     return segments
       .filter((segment) => segment.length === 1)
-      .map((segment) => marker(segment[0], s.color))
+      .map((segment) => {
+        const point = segment[0];
+        const color = highlightStart !== undefined &&
+            point.index >= highlightStart
+          ? lighten(s.color)
+          : s.color;
+        return marker(point, color);
+      })
       .join("");
   }).join("");
   const singleSeriesMarkers = drawable
     .filter((s) => s.vals.length === 1)
     .map((s) => {
       const x = s.xs?.length === 1 ? s.xs[0] : 0.5;
-      return marker({ x, px: x * w, py: yv(s.vals[0]) }, s.color);
+      return marker({ index: 0, x, px: x * w, py: yv(s.vals[0]) }, s.color);
     })
     .join("");
   const lines = bases + tints + isolatedMarkers + singleSeriesMarkers;
