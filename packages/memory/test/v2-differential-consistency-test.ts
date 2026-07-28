@@ -305,13 +305,19 @@ const runSchedule = async (seed: number): Promise<ScheduleStats> => {
       // INV-1 (pending reads, CT-1910 repaired shape): a declared basis makes
       // pending reads post-hoc checkable for the first time — no foreign
       // accepted write overlapping the path may land in (basisSeq, seq).
-      // Legacy reads (no basisSeq) stay uncheckable here; their deviation is
-      // recorded against INV-1 in 09-invariants.md.
+      // Own-session writes are skipped only when they are true predecessors
+      // (lower localSeq — the layers the reader's view included); an
+      // out-of-order own write counts like a foreign one. Legacy reads (no
+      // basisSeq) stay uncheckable here; their deviation is recorded against
+      // INV-1 in 09-invariants.md.
       for (const rd of record.commit.reads.pending) {
         if (rd.basisSeq === undefined) continue;
         for (const other of accepted) {
           if (other.seq <= rd.basisSeq || other.seq >= record.seq) continue;
-          if (other.sessionId === record.sessionId) continue;
+          if (
+            other.sessionId === record.sessionId &&
+            other.commit.localSeq < record.commit.localSeq
+          ) continue;
           const hit = toNaiveOps(other.commit.operations).some((op) =>
             op.id === rd.id &&
             (op.kind === "set" ||

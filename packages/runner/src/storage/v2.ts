@@ -331,23 +331,25 @@ type PendingCommitRead = {
   /**
    * Every pending layer the read's materialized view sat on, as an array —
    * each must resolve to an accepted commit (server pending-dependency
-   * check; client cascade), and staleness is based at the HIGHEST element,
-   * the doc's top-of-stack layer below the reader, which the array always
-   * includes (CT-1872 1c; 03-commit-model.md §3.5). Scalarized to the
-   * top-of-stack element at send time when the server does not advertise
-   * `pendingReadStacks` — the pre-stack wire shape — and in that case the
-   * send is HELD until every omitted lower dependency settles, so the old
-   * server can never durably accept a commit the client cascade-rejects.
+   * check; client cascade), and the array always includes the doc's
+   * top-of-stack layer below the reader (CT-1872 1c; 03-commit-model.md
+   * §3.5), whose resolution is the LEGACY staleness basis on servers that
+   * ignore `basisSeq`. Scalarized to the top-of-stack element at send time
+   * when the server does not advertise `pendingReadStacks` — the pre-stack
+   * wire shape — and in that case the send is HELD until every omitted
+   * lower dependency settles, so the old server can never durably accept a
+   * commit the client cascade-rejects.
    */
   localSeq: number | number[];
   /**
    * The reader's confirmed basis for THIS document, in the SERVER's seq
    * space — the same value the confirmed branch emits as `seq`, which the
    * pre-CT-1910 pending shape discarded. A server that understands it scans
-   * staleness over the FULL interval (basisSeq, head] excluding the
-   * session's own accepted commits, repairing the pending-read basis
-   * over-advance; older servers ignore the field and keep the max-dependency
-   * basis. See {@link PendingRead.basisSeq} (memory/v2.ts).
+   * staleness over the FULL interval (basisSeq, head], excluding only the
+   * session's own predecessor commits (localSeq below the reader's),
+   * repairing the pending-read basis over-advance; older servers ignore the
+   * field and keep the max-dependency basis. See
+   * {@link PendingRead.basisSeq} (memory/v2.ts).
    */
   basisSeq: number;
   nonRecursive?: boolean;

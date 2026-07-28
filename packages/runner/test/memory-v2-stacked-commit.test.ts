@@ -2016,6 +2016,44 @@ Deno.test("memory v2 stacked commits: pending reads carry the doc's true confirm
   }
 });
 
+Deno.test("memory v2 stacked commits: divergent basis overrides survive pending-read compaction", async () => {
+  const harness = await createHarness();
+  try {
+    const c1 = beginSet(harness, DOCS.A, valueFor("c1"));
+    harness.model.setOutcome(c1.localSeq, { kind: "accept" });
+    await assertResultOk(c1.promise);
+    const c2 = beginSet(harness, DOCS.A, valueFor("c2"));
+    harness.model.setOutcome(c2.localSeq, { kind: "accept" });
+
+    // Two read activities over the same stacked doc and path: one at the
+    // doc's confirmed basis, one pinned lower via meta.seq. Compaction must
+    // keep BOTH wire reads — merging them would let the surviving read's
+    // higher basis claim the pinned read's interval (0, confirmedBasis],
+    // hiding a foreign write there from the server's staleness scan.
+    const confirmedBasis = harness.model.applied.get(c1.localSeq)!.applied.seq;
+    const reads = harness.replica.buildReads(
+      sourceFromReads([
+        { id: DOCS.A },
+        { id: DOCS.A, seq: 0 },
+      ]),
+      3,
+    );
+    assertEquals(reads.confirmed, []);
+    assertEquals(
+      reads.pending
+        .map((read) => ({ localSeq: read.localSeq, basisSeq: read.basisSeq }))
+        .toSorted((left, right) => left.basisSeq - right.basisSeq),
+      [
+        { localSeq: c2.localSeq, basisSeq: 0 },
+        { localSeq: c2.localSeq, basisSeq: confirmedBasis },
+      ],
+    );
+    await assertResultOk(c2.promise);
+  } finally {
+    await harness.close();
+  }
+});
+
 // An "older server": advertises every current capability EXCEPT the array
 // dependency sets.
 class PreStackTransport extends ScriptedModelTransport {

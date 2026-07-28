@@ -339,6 +339,80 @@ Deno.test("memory v2 engine: CT-1910 repair — a reader that integrated the for
   }
 });
 
+Deno.test("memory v2 engine: CT-1910 repair — an own-session write accepted out of submission order is not excluded from the scan", async () => {
+  const { engine, path } = await createEngine();
+  try {
+    // session:1 localSeq 1: A = {x: 1} -> seq 1.
+    applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: invocationFor(1),
+      authorization,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "entity:A",
+          value: toEntityDocument({ x: 1 }),
+        }],
+      },
+    });
+    // session:1 localSeq 10 OVERTAKES localSeq 5 (out-of-order submission —
+    // e.g. hold-mode admission releasing a later blind commit while an
+    // earlier read-bearing commit waits): x = 2 -> seq 2.
+    applyCommit(engine, {
+      sessionId: "session:1",
+      invocation: invocationFor(10),
+      authorization,
+      commit: {
+        localSeq: 10,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "entity:A",
+          patches: [{ op: "replace", path: "/value/x", value: 2 }],
+        }],
+      },
+    });
+    // session:1 localSeq 5 reads x through its layer [1] at basisSeq 0 and
+    // claims it observed x = 1. The overtaking own write (localSeq 10, seq
+    // 2) was NOT in its view: a session-wide exclusion would excuse it and
+    // accept the incoherent observation — predecessor-only exclusion
+    // (local_seq below the reader's) must conflict, like a foreign write.
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "session:1",
+          invocation: invocationFor(5),
+          authorization,
+          commit: {
+            localSeq: 5,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:A",
+                path: toDocumentPath(["value", "x"]),
+                localSeq: [1],
+                basisSeq: 0,
+              }],
+            },
+            operations: [{
+              op: "set",
+              id: "entity:derived",
+              value: toEntityDocument({ observedX: 1 }),
+            }],
+          },
+        }),
+      ConflictError,
+      "stale pending read",
+    );
+    assertEquals(read(engine, { id: "entity:derived" }), null);
+  } finally {
+    close(engine);
+    await Deno.remove(path).catch(() => {});
+  }
+});
+
 Deno.test("memory v2 engine: CT-1910 repair — basisSeq validation", async () => {
   const { engine, path } = await createEngine();
   try {

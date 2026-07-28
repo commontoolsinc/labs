@@ -202,7 +202,8 @@ stack without any read edge. A commit that reads through a pending stack
 therefore records its FULL dependency set directly: the read's `localSeq`
 array names every pending layer of the document below the reader, in
 ascending order. Each element imposes a resolution requirement; the highest
-element — the document's top-of-stack layer — is the staleness basis. The
+element — the document's top-of-stack layer — is the legacy staleness basis
+when no `basisSeq` is declared (§3.6.3). The
 client mirrors the server cascade at drop time: when a pending commit's
 optimistic writes are dropped, every queued or in-flight commit whose
 recorded dependency set names the dropped `localSeq` is locally rejected
@@ -285,8 +286,9 @@ function validatePendingReads(
       : [read.localSeq];
 
     // Every listed layer must resolve to an ACCEPTED commit. The staleness
-    // check (§3.6.1/§3.6.2) then runs once per read, based at the HIGHEST
-    // element's resolution — the reader's top-of-stack layer (§3.5).
+    // check (§3.6.1/§3.6.2) then runs once per read, from the basis this
+    // section selects below (declared `basisSeq`, or the legacy highest
+    // element's resolution).
     for (const localSeq of layers) {
       const resolution = serverState.resolveLocalSeq(sessionId, localSeq);
 
@@ -312,11 +314,14 @@ Holding is queueing, not reordering: within a logical session, commits are
 resolved (accepted or rejected) in increasing `localSeq` order, and a held
 commit MUST NOT be leapfrogged by a later same-session commit. A commit's
 resolution seq is therefore monotonic in its `localSeq` within a session —
-the property that makes the top-of-stack pending read a sound staleness basis
-(§3.5): every own-session layer below the reader resolves at or before the
-basis layer's seq, so the scan interval past the basis contains no own-session
-commits. (The current implementation rejects rather than holds, which
-preserves this ordering trivially.)
+the property that makes the top-of-stack pending read a sound LEGACY
+staleness basis (§3.5): every own-session layer below the reader resolves at
+or before the basis layer's seq, so the scan interval past the basis
+contains no own-session commits. (The current implementation rejects rather
+than holds, which preserves this ordering trivially.) A `basisSeq` read does
+NOT lean on this ordering: its own-session exclusion checks each excluded
+commit's `localSeq` directly, so an own commit admitted out of submission
+order simply conflicts.
 
 Every element of an array `localSeq` participates in this resolution
 requirement — one unresolved or rejected element rejects the commit. The
@@ -324,16 +329,18 @@ staleness scan (§3.6.1/§3.6.2) then runs once per read, from a basis chosen
 by the read's shape:
 
 - **True basis (`basisSeq` present).** The scan covers the full interval
-  `(basisSeq, head]` and excludes writes produced by the reader's own
-  session. The exclusion is what makes the true basis sound: by the
-  localSeq-ordered resolution above, every own-session commit accepted in
-  that interval has a lower `localSeq` than the reader and was therefore
-  part of the reader's materialized view. Foreign writes in the interval
-  conflict — including those between the reader's confirmed basis and the
-  top layer's resolution seq, which the legacy basis never scanned. A
-  `basisSeq` greater than the server's current head is a protocol error;
-  values at or below head are trusted, like a confirmed read's `seq`
-  (lying corrupts only the session's own data).
+  `(basisSeq, head]` and excludes only the reader's own session's TRUE
+  PREDECESSOR commits — those with `localSeq` below the reader's, the
+  accepted layers its materialized view included. The exclusion is what
+  makes the true basis sound, and its predecessor restriction is what keeps
+  it sound without trusting wire order: an own write with a higher
+  `localSeq` that was admitted first (an out-of-order submission) was not
+  in the reader's view and conflicts exactly like a foreign write. Foreign
+  writes in the interval conflict — including those between the reader's
+  confirmed basis and the top layer's resolution seq, which the legacy
+  basis never scanned. A `basisSeq` greater than the server's current head
+  is a protocol error; values at or below head are trusted, like a
+  confirmed read's `seq` (lying corrupts only the session's own data).
 - **Legacy basis (`basisSeq` absent).** The scan is based at the HIGHEST
   element's resolution seq. Writes landing between the reader's confirmed
   basis and that seq are not scanned — the pending-read basis over-advance

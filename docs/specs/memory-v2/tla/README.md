@@ -31,6 +31,26 @@ failure axis (INV-3(a): a recording shape that drops a layer overlapping the
 read path re-creates the CT-1872 phantom); the filtered configs certify that
 the proposed narrowing keeps every overlapping layer and stays sound.
 
+**Scope of the certification.** The model checks the ADMISSION CORE under
+two structural assumptions the runtime does not automatically share, so the
+Repaired result certifies the rule, not the whole pipeline:
+
+- **Canonical reads.** `Build` constructs one read per path directly from
+  session state (`cbasis = csn`). The runner's raw-activity → wire
+  compaction layer (`compactCommitReads`) is outside the model; losing a
+  divergent basis there is guarded by a runner unit test (divergent basis
+  overrides survive compaction), not by TLC.
+- **FIFO by construction.** `Process` admits `Min(Unresolved(s))`, so a
+  later same-session commit can never overtake an earlier one in any
+  reachable state. The runner's hold-mode admission CAN reorder sends,
+  which is why the shipped exclusion is predecessor-restricted (own commits
+  with `local_seq` below the reader's) rather than session-wide — a rule
+  that coincides with the model's same-session exclusion in every
+  model-reachable state and stays sound under overtaking. Modeling issued
+  versus admitted commits separately, with FIFO as a checked invariant
+  rather than a structural given, is the natural refinement if this area
+  churns.
+
 ## Running
 
 TLC needs Java and `tla2tools.jar`

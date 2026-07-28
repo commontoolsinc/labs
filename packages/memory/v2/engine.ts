@@ -693,13 +693,17 @@ WHERE session_id = :session_id
 `;
 
 // True-basis (CT-1910) variants of the conflict scans: identical intervals,
-// but writes produced by the reader's own session are excluded. Same-session
-// commits resolve in increasing localSeq order (03-commit-model.md §3.6.3 —
-// normative; the transport enforces it per connection, not this engine), so
-// every own accepted commit in `(basis, head]` has a lower localSeq than the
-// reader and was therefore part of the reader's materialized view —
-// conflicting with it would be the self-conflict that forced pending reads
-// to over-advance their basis in the first place.
+// but writes produced by the reader's own session's TRUE PREDECESSORS
+// (`local_seq` below the reader's) are excluded — the accepted own layers
+// the reader's materialized view included; conflicting with them would be
+// the self-conflict that forced pending reads to over-advance their basis
+// in the first place. The exclusion is deliberately NOT session-wide: an
+// own write with a HIGHER localSeq that was accepted first (out-of-order
+// submission — e.g. the runner's hold-mode admission can release a later
+// blind commit while an earlier read-bearing commit waits) was NOT in the
+// reader's view and must conflict exactly like a foreign write. Checking
+// `local_seq` here, rather than assuming the §3.6.3 same-session ordering
+// holds on the wire, keeps the scan sound without trusting the transport.
 const SELECT_SET_DELETE_CONFLICT_EXCLUDING_SESSION = `
 SELECT r.seq AS seq
 FROM revision r
@@ -709,7 +713,7 @@ WHERE r.branch = :branch
   AND r.scope_key = :scope_key
   AND r.seq > :after_seq
   AND r.op IN ('set', 'delete')
-  AND c.session_id <> :exclude_session
+  AND (c.session_id <> :exclude_session OR c.local_seq >= :before_local_seq)
 ORDER BY r.seq DESC, r.op_index DESC
 LIMIT 1
 `;
@@ -723,7 +727,7 @@ WHERE r.branch = :branch
   AND r.scope_key = :scope_key
   AND r.seq > :after_seq
   AND r.op = 'patch'
-  AND c.session_id <> :exclude_session
+  AND (c.session_id <> :exclude_session OR c.local_seq >= :before_local_seq)
 ORDER BY r.seq DESC, r.op_index DESC
 `;
 
@@ -5659,9 +5663,11 @@ const resolvePendingReads = (
   for (const read of commit.reads.pending) {
     // An array localSeq names EVERY pending layer the read's view sat on:
     // each element must have resolved to an accepted commit, and staleness
-    // is checked exactly once, based at the HIGHEST element — the document's
-    // top-of-stack layer below the reader, which the array MUST include
-    // (03-commit-model.md §3.5). A scalar is the single-layer form.
+    // is checked exactly once, from the basis §3.6.3 selects — the declared
+    // `basisSeq` when present, else the resolution of the HIGHEST element —
+    // the document's top-of-stack layer below the reader, which the array
+    // MUST include (03-commit-model.md §3.5). A scalar is the single-layer
+    // form.
     const layers = pendingReadLayers(read);
     let basis: { localSeq: number; seq: number } | undefined;
     for (const localSeq of layers) {
@@ -5685,11 +5691,12 @@ const resolvePendingReads = (
     }
 
     // CT-1910 repair: a reader that names its true confirmed basis is
-    // scanned over the FULL interval (basisSeq, head], excluding its own
-    // session's accepted commits — which FIFO admission guarantees were part
-    // of its materialized view. A legacy reader (no basisSeq) keeps the
-    // max-dependency basis, so the over-advance deviation persists for it
-    // alone (docs/specs/memory-v2/09-invariants.md, INV-1).
+    // scanned over the FULL interval (basisSeq, head], excluding only its
+    // own session's predecessor commits (local_seq below the reader's) —
+    // the accepted layers its materialized view included. A legacy reader
+    // (no basisSeq) keeps the max-dependency basis, so the over-advance
+    // deviation persists for it alone
+    // (docs/specs/memory-v2/09-invariants.md, INV-1).
     const trueBasis = pendingReadBasisSeq(engine, read);
     const conflictSeq = trueBasis !== undefined
       ? findConflictSeq(
@@ -5700,7 +5707,7 @@ const resolvePendingReads = (
         trueBasis,
         read.path,
         read.nonRecursive ?? false,
-        sessionKey,
+        { sessionKey, beforeLocalSeq: commit.localSeq },
       )
       : findConflictSeq(
         engine,
@@ -5737,18 +5744,22 @@ const findConflictSeq = (
   // still conflict. Only Tier-2 (patch) granularity is refined.
   nonRecursive: boolean = false,
   // True-basis reads (CT-1910): skip writes produced by this commit session
-  // key — the reader's own accepted layers, which its view included.
-  excludeSessionKey?: string,
+  // key's TRUE PREDECESSOR commits (`local_seq < beforeLocalSeq`) — the
+  // reader's own accepted layers, which its view included. Own writes with
+  // a higher localSeq (accepted out of submission order) conflict like
+  // foreign writes; see the comment on the *_EXCLUDING_SESSION statements.
+  exclude?: { sessionKey: string; beforeLocalSeq: number },
 ): number | null => {
-  const setDeleteStatement = excludeSessionKey === undefined
+  const setDeleteStatement = exclude === undefined
     ? engine.statements.selectSetDeleteConflict
     : engine.statements.selectSetDeleteConflictExcludingSession;
-  const patchStatement = excludeSessionKey === undefined
+  const patchStatement = exclude === undefined
     ? engine.statements.selectPatchConflicts
     : engine.statements.selectPatchConflictsExcludingSession;
-  const exclusionParams = excludeSessionKey === undefined
-    ? {}
-    : { exclude_session: excludeSessionKey };
+  const exclusionParams = exclude === undefined ? {} : {
+    exclude_session: exclude.sessionKey,
+    before_local_seq: exclude.beforeLocalSeq,
+  };
   const setOrDeleteConflict = setDeleteStatement.get({
     branch,
     id,
@@ -5796,12 +5807,16 @@ const schedulerObservationReadDropReason = (
     principal,
     branch,
     reads,
+    localSeq,
   }: {
     sessionKey: string;
     sessionId: SessionId;
     principal: string | undefined;
     branch: BranchName;
     reads: ClientCommit["reads"];
+    /** The observation commit's localSeq — the predecessor bound for the
+     * true-basis own-session exclusion (CT-1910). */
+    localSeq: number;
   },
 ): SchedulerObservationDropReason | undefined => {
   for (const read of reads.confirmed) {
@@ -5849,8 +5864,8 @@ const schedulerObservationReadDropReason = (
     }
 
     // Same CT-1910 basis selection as resolvePendingReads: true basis with
-    // own-session exclusion when declared, legacy max-dependency basis
-    // otherwise.
+    // predecessor-only own-session exclusion when declared, legacy
+    // max-dependency basis otherwise.
     const trueBasis = pendingReadBasisSeq(engine, read);
     const conflictSeq = trueBasis !== undefined
       ? findConflictSeq(
@@ -5861,7 +5876,7 @@ const schedulerObservationReadDropReason = (
         trueBasis,
         read.path,
         read.nonRecursive ?? false,
-        sessionKey,
+        { sessionKey, beforeLocalSeq: localSeq },
       )
       : findConflictSeq(
         engine,
@@ -5986,6 +6001,7 @@ const applySchedulerObservationOnlyCommit = (
     principal,
     branch,
     reads,
+    localSeq,
   });
   if (dropReason) {
     recordSchedulerObservationReplay(engine, {
