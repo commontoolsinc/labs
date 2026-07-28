@@ -25,6 +25,8 @@ export const jsonLanguage: Language = {
 
   highlightLines: (text) => jsonHighlightLines(text),
 
+  highlightFullFileOnDiffEdit: true,
+
   createHighlighter: (text) => createJsonHighlighter(text),
 
   hunkStructure: (ctx) => remapStructure(ctx),

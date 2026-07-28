@@ -2,10 +2,10 @@
  * The contract every source language plugs into so the `cf view` pager can
  * colour, navigate, edit and (optionally) reason about it, plus selecting the
  * right language for a file. A language is a stateless strategy object: one
- * instance describes TypeScript, one Markdown, one JSON, and one YAML. The
- * pager selects the right one for a file ONCE (via {@link languageForFile}) and
- * then dispatches every operation through that object's methods — there is no
- * per-operation branch on the file extension.
+ * instance describes TypeScript, one Markdown, one JSON, one YAML, and one
+ * Python. The pager selects the right one for a file ONCE (via
+ * {@link languageForFile}), then dispatches every operation through that
+ * object's methods — there is no per-operation branch on the file extension.
  *
  * Per-file mutable state (a warm incremental parse, a language service) is not
  * held on the language; the language is a factory for the small stateful
@@ -22,6 +22,7 @@ import { typeScriptLanguage } from "./typescript/language.ts";
 import { markdownLanguage } from "./markdown/language.ts";
 import { jsonLanguage } from "./json/language.ts";
 import { yamlLanguage } from "./yaml/language.ts";
+import { pythonLanguage } from "./python/language.ts";
 
 /**
  * Live syntax highlighting that re-highlights only the region an edit touches,
@@ -105,8 +106,8 @@ export interface HunkStructureContext {
  * language {@link matches} once per file; all later work is method dispatch.
  */
 export interface Language {
-  /** Stable identifier, such as `"typescript"`, `"markdown"`, `"json"`, or
-   * `"yaml"`. */
+  /** Stable identifier, such as `"typescript"`, `"markdown"`, `"json"`,
+   * `"yaml"`, or `"python"`. */
   readonly id: string;
 
   /** Does this language claim `fileName`? Consulted in order by {@link
@@ -124,9 +125,13 @@ export interface Language {
    * advisory (a language may parse `.ts` and `.tsx` differently). */
   highlightLines(text: string, fileName?: string): Line[];
 
-  /** Whether live diff edits need complete-file highlighting because an earlier
-   * line can determine how later lines are coloured. */
+  /** Whether diff edits need complete-file highlighting because an earlier line
+   * can determine how later lines are coloured. */
   readonly highlightFullFileOnDiffEdit?: boolean;
+
+  /** Highlight one source-line edit from its previous complete-file colours, or
+   * return null when the edit can affect syntax outside one token. */
+  highlightDiffLineEditLocally?(before: Line, after: string): Line | null;
 
   /** An incremental highlighter seeded with `text`, for live editing.
    * `fileName` is advisory, as for {@link highlightLines}. */
@@ -173,6 +178,7 @@ function allLanguages(): readonly Language[] {
     markdownLanguage,
     jsonLanguage,
     yamlLanguage,
+    pythonLanguage,
     typeScriptLanguage,
   ];
 }
@@ -206,11 +212,11 @@ export function distinctLanguages(
  * The semantic service for a diff view, from the languages the diff touches. A
  * diff spans potentially many files of different languages; the service is the
  * first language present that offers one, scoped to just its own files (so a
- * TypeScript program is not seeded with the diff's Markdown, JSON, or YAML
- * files). Only TypeScript offers one today, so this resolves to it whenever the
- * diff includes a TypeScript file and to nothing otherwise. When a second
- * semantic language appears this becomes a per-file composite; the per-language
- * slot the pager dispatches through is already here.
+ * TypeScript program is not seeded with the diff's Markdown, JSON, YAML, or
+ * Python files). Only TypeScript offers one today, so this resolves to it
+ * whenever the diff includes a TypeScript file and to nothing otherwise. When
+ * a second semantic language appears this becomes a per-file composite; the
+ * per-language slot the pager dispatches through is already here.
  */
 export function diffSemanticsFor(
   languages: readonly Language[],

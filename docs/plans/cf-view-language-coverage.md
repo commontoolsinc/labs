@@ -1,11 +1,13 @@
 # `cf view` language and syntax coverage plan
 
-Status: Not started. The order is provisional because recent activity was
+Status: In progress. Python files with recognized extensions now have
+syntax highlighting. The order is provisional because recent activity was
 measured in six of the 24 active organization repositories.
 
 This plan takes `cf view` from its current TypeScript and JavaScript, Markdown,
-JSON and JSONC, YAML, and diff support to honest handling of every textual
-syntax in the active `commontoolsinc` repositories.
+JSON and JSONC, YAML, extension-based Python highlighting, and diff support to
+honest handling of every textual syntax in the active `commontoolsinc`
+repositories.
 
 The frozen evidence is in the
 [July 2026 coverage survey](../history/packages/cli/cf-view-language-coverage-2026-07.md).
@@ -118,8 +120,9 @@ notebook selects JSON or line-oriented JSON without broad suffix guesses.
 
 ## Stage 2: Python
 
-- [ ] Highlight `.py` files and extensionless Python programs.
-- [ ] Recognize direct Python and `uv run` shebangs.
+- [x] Highlight `.py`, `.pyi`, and `.pyw` files.
+- [ ] Recognize extensionless programs from direct Python and `uv run`
+  shebangs.
 - [ ] Add class, function, async function, and decorated-definition structure.
 - [ ] Add representative Loom, Specs, Legibility, Raia, and gVisor fixtures.
 
