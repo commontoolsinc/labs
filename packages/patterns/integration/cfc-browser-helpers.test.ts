@@ -7,6 +7,7 @@ import {
   clickCfButtonsConcurrently,
   clickNthCfButton,
   clickTrustedAction,
+  waitForSettledText,
 } from "./cfc-browser-helpers.ts";
 
 /** One element's live click marks, in attribute order. */
@@ -117,6 +118,115 @@ describe("CFC browser helpers", () => {
       "the click effect was not applied by a post-click view settle",
     );
     assertEquals(result.settleCalls, 2);
+  });
+
+  it("settles the view after a late target appears, before clicking it", async () => {
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      const root = host.attachShadow({ mode: "open" });
+      document.body.append(host);
+
+      let settleCalls = 0;
+      let clickedAtSettle = 0;
+      let bound = false;
+      // The shell binds a control's handler when the vdom batch that rendered
+      // it is applied, which is one of the things a view settle waits for. So
+      // the handler here is bound by the first settle that runs with the
+      // control present, and a click delivered before that reaches nothing.
+      const bind = () => {
+        const button = root.querySelector("#late-vote-button");
+        if (!button || bound) return;
+        bound = true;
+        button.addEventListener("click", () => {
+          clickedAtSettle = settleCalls;
+        }, { once: true });
+      };
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = {
+        viewSettled: () => {
+          settleCalls++;
+          bind();
+          return Promise.resolve();
+        },
+      };
+
+      // The control arrives after the helper has started, the way an option
+      // card added by one browser reaches another. The delay states when the
+      // arrival happens rather than how long to wait for it: the helper's wait
+      // ends on the arrival, and only the five-minute stuck-condition net
+      // bounds it. What the delay has to outlast is one settle on the ordering
+      // this test guards against, which is a single protocol round trip.
+      setTimeout(() => {
+        const button = document.createElement("button");
+        button.id = "late-vote-button";
+        button.textContent = "Veto";
+        root.append(button);
+      }, 250);
+
+      (globalThis as typeof globalThis & {
+        __lateClickResult: () => {
+          settleCalls: number;
+          clickedAtSettle: number;
+        };
+      }).__lateClickResult = () => ({ settleCalls, clickedAtSettle });
+    });
+
+    await clickCfButton(page, "#late-vote-button");
+
+    const result = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __lateClickResult: () => {
+          settleCalls: number;
+          clickedAtSettle: number;
+        };
+      }).__lateClickResult()
+    );
+    assert(
+      result.clickedAtSettle > 0,
+      "the click reached no handler: the view never settled with the target " +
+        "present before the click was dispatched",
+    );
+    // One settle found no control, one found it, and one followed the click.
+    assertEquals(result.settleCalls, 3);
+  });
+
+  it("drives the page while waiting for text", async () => {
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      const root = host.attachShadow({ mode: "open" });
+      const line = document.createElement("p");
+      line.id = "settled-text-line";
+      line.textContent = "no votes yet";
+      root.append(line);
+      document.body.append(host);
+
+      // A rendering the page produces for itself, not one pushed to it. Nothing
+      // outside a settle applies it, which is what makes a wait that only
+      // watches the DOM sit here until the stuck-condition net fires.
+      let settleCalls = 0;
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+      }).commonfabric = {
+        viewSettled: () => {
+          settleCalls++;
+          if (settleCalls >= 2) line.textContent = "3 votes";
+          return Promise.resolve();
+        },
+      };
+      (globalThis as typeof globalThis & {
+        __settledTextCalls: () => number;
+      }).__settledTextCalls = () => settleCalls;
+    });
+
+    await waitForSettledText(page, "#settled-text-line", "3 votes");
+
+    const settleCalls = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __settledTextCalls: () => number;
+      }).__settledTextCalls()
+    );
+    assertEquals(settleCalls, 2);
   });
 
   it("marks grouped targets between settlement barriers", async () => {

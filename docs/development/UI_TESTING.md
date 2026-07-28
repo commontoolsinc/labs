@@ -252,13 +252,19 @@ import {
   waitForCondition,
 } from "@commonfabric/integration";
 
-// Before interacting: wait until the shell has exposed its settle hook, then
-// settle the view so the click lands on a bound handler.
-await waitForCondition(page, () =>
-  typeof (globalThis as {
-    commonfabric?: { viewSettled?: unknown };
-  }).commonfabric?.viewSettled === "function");
-await awaitViewSettled(page);
+// Before interacting: settle the view on each check and pass only once a settle
+// has run with the control present, so the click lands on a bound handler. A
+// settle that ran before the control existed says nothing about it, and a check
+// that only watches the DOM never pumps the work that renders it.
+await waitForCondition(page, async (probe) => {
+  const settle = (globalThis as {
+    commonfabric?: { viewSettled?: () => Promise<void> };
+  }).commonfabric?.viewSettled;
+  if (!settle) return false;
+  await settle();
+  const target = probe.collect("cf-button[role='button']")[0];
+  return target !== undefined && probe.isRendered(target);
+});
 const button = await page.waitForSelector("cf-button[role='button']");
 await button.click(); // delivered to a bound handler
 
@@ -273,7 +279,11 @@ await waitForCondition(page, (probe) =>
 Pattern integration tests can reach for the higher-level wrappers in
 `packages/patterns/integration/cfc-browser-helpers.ts` — `waitForText`,
 `fillCfInput`, `clickCfButton`, `clickCfButtonAndWaitForText` — which bundle
-"settle the view, act once, wait for the effect" on top of these primitives.
+"settle the view with the control present, act once, wait for the effect" on top
+of these primitives. `clickCfButton` settles on each check and proceeds only
+once a settle has run with the control present; see
+`docs/development/waiting-in-tests.md` for why that ordering is the load-bearing
+part, and for which helpers do not yet have it.
 
 ### Do not reach for these instead
 
