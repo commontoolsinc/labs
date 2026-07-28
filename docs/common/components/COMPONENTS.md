@@ -445,11 +445,16 @@ See `packages/patterns/examples/ui-variants-demo.tsx` for a full example.
 Right-clicking a rendered piece opens `cf-piece-menu` for it, with four entries:
 **View source** shows the piece's retained authored files, **Origin and
 history** shows the origin it records and the pattern identities it has run,
-**Data** shows the piece's argument and result values (the result stays live
-while the panel is open; linked cells appear as `{"@cell": …}` stubs), and
-**Actions** lists the handler streams the piece exposes and dispatches an
-event to one, with an optional JSON payload. Dispatches from the menu are not
-renderer-trusted, so a handler gated on UI provenance will refuse them. The
+**Data** shows the piece's argument and result values (both stay live while
+the menu is open; linked cells appear as `{"@cell": …}` stubs), and
+**Actions** lists the handler streams the piece's declared argument and
+result schemas carry and dispatches an event to one, with an optional JSON
+payload. A handler only appears if the stream is declared in the pattern's
+output (or argument) type — the schema'd read is closed-world, so a handler
+returned at runtime behind an index signature is invisible to it. Dispatches
+from the menu are accepted-for-delivery acknowledgements (the commit is
+asynchronous) and are not renderer-trusted, so a handler gated on UI
+provenance will refuse them. The
 menu comes with `cf-render` — importing the component registers it — and mounts
 itself on `document.body` so a piece's clipping or a tile's scaling cannot reach
 it.

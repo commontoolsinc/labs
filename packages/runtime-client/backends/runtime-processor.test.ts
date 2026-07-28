@@ -1536,6 +1536,47 @@ describe("RuntimeProcessor CFC label IPC", () => {
     expect("source" in atom).toBe(false);
   });
 
+  it("returns the read cell's schema-bearing ref when includeRef is set", () => {
+    const ref: CellRef = {
+      id: "of:include-ref-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const processor = {
+      runtime: {
+        getCellFromLink: () => ({
+          get: () => "plain value",
+          getAsLink: () => ({
+            "/": {
+              "link@1": {
+                id: "of:include-ref-cell",
+                space: "did:key:test",
+                path: [],
+                schema: { type: "string" },
+              },
+            },
+          }),
+        }),
+      },
+    } as unknown as RuntimeProcessor;
+
+    const withRef = RuntimeProcessor.prototype.handleCellGet.call(processor, {
+      type: RequestType.CellGet,
+      cell: ref,
+      includeRef: true,
+    });
+    expect(withRef.cell?.id).toBe("of:include-ref-cell");
+    expect(withRef.cell?.schema).toEqual({ type: "string" });
+
+    // Not requested: not returned.
+    const without = RuntimeProcessor.prototype.handleCellGet.call(processor, {
+      type: RequestType.CellGet,
+      cell: ref,
+    });
+    expect(without.cell).toBeUndefined();
+  });
+
   it("redacts Caveat.source in sigil label views inside subscription updates", async () => {
     const ref: CellRef = {
       id: "of:cfc-subscribe-view-cell" as CellRef["id"],
