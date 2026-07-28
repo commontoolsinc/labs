@@ -142,7 +142,7 @@ Deno.test(
       result.aside,
       '<span class="hmtd">$180 MTD</span>',
     );
-    assertEquals(result.sub, "project spend");
+    assertEquals(result.sub, "billing account spend");
     assertEquals(result.duration, 45 * DAY);
 
     const polylines = [
