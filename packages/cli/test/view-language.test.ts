@@ -38,6 +38,13 @@ Deno.test("languageForFile: named files resolve and unnamed input defaults to Ty
   assertEquals(languageForFile(undefined).id, "typescript");
 });
 
+Deno.test("languageForFile: named JavaScript uses the TypeScript-family parser", () => {
+  const source = "export const answer = 42;\n";
+  const doc = languageForFile("answer.js").parseDocument(source, "answer.js");
+  assertEquals(doc.text, source);
+  assert(doc.lines[0].spans.some((span) => span.cls === "storageKeyword"));
+});
+
 Deno.test("distinctLanguages: dedupes in first-seen order", () => {
   const languages = distinctLanguages([
     "a.ts",
