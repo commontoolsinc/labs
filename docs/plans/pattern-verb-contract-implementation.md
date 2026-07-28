@@ -233,7 +233,11 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   without racing a clock; a `--message` that differs on the retry proves the
   settled outcome stands rather than being overwritten. Each scenario spawns
   a fresh `cf` process, so the fresh-process case is the default rather than
-  a special one.
+  a special one. One half of the third scenario is not covered yet: the
+  collision is asserted through `deduplicated` and exit 0, but not by reading
+  a *result* back off the receipt, because a void verb leaves none to read.
+  That assertion joins when WS-C gives verbs return values — or sooner
+  against `plainResultReceipts`.
 - **Exit (Phase 2, before WS-C):** the duplicate-on-retry bug is dead on the
   live board. **Exit (Phase 4, with WS-C):** the retry returns the original
   result.
