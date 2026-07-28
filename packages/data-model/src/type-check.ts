@@ -171,9 +171,8 @@ export function isFabricValue(value: unknown): value is FabricValue {
  * two are not interchangeable.
  */
 export function isFabricObjectOrArray(
-  value: FabricValue,
-): value is FabricValue & object;
-export function isFabricObjectOrArray(value: unknown): boolean {
+  value: unknown,
+): value is FabricValue & object {
   return typeof value === "object" && value !== null;
 }
 
@@ -186,8 +185,7 @@ export function isFabricObjectOrArray(value: unknown): boolean {
  * keeps an indexed value typed as a `FabricValue`.
  */
 export function isFabricPlainObject(
-  value: FabricValue,
-): value is FabricPlainObject;
-export function isFabricPlainObject(value: unknown): boolean {
+  value: unknown,
+): value is FabricPlainObject {
   return isPlainObject(value);
 }
