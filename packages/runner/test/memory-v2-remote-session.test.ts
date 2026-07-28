@@ -305,6 +305,33 @@ describe("WebSocketTransport failure signalling", () => {
     });
   });
 
+  it("surfaces protocol close 1002 as a permanent version mismatch", async () => {
+    await withTransport(async (transport, socket) => {
+      let closeError: Error | undefined;
+      transport.setCloseReceiver((error) => {
+        closeError = error;
+      });
+
+      const send = transport.send("frame");
+      const activeSocket = socket();
+      activeSocket.readyState = DrivableWebSocket.OPEN;
+      activeSocket.dispatchEvent(new Event("open"));
+      await send;
+
+      activeSocket.readyState = DrivableWebSocket.CLOSED;
+      activeSocket.dispatchEvent(
+        new CloseEvent("close", {
+          code: 1002,
+          reason: "Memory protocol mismatch",
+        }),
+      );
+
+      expect(closeError?.name).toBe("ProtocolError");
+      expect(closeError?.message).toBe("memory protocol version mismatch");
+      expect((closeError as { permanent?: boolean }).permanent).toBe(true);
+    });
+  });
+
   it("surfaces the underlying Error of a socket error to the close receiver", async () => {
     await withTransport(async (transport, socket) => {
       let closeError: Error | undefined;

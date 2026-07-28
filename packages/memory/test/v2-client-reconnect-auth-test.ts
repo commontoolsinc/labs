@@ -6,7 +6,11 @@ import {
   getMemoryProtocolFlags,
   MEMORY_PROTOCOL,
 } from "../v2.ts";
-import { connect, type Transport } from "../v2/client.ts";
+import {
+  connect,
+  permanentProtocolError,
+  type Transport,
+} from "../v2/client.ts";
 
 const TEST_AUDIENCE = "did:key:z6Mk-reconnect-auth-audience";
 
@@ -340,6 +344,77 @@ class FlagMismatchOnReconnectTransport implements Transport {
   }
 }
 
+type VersionMismatchSignal = "protocol-close" | "legacy-response";
+
+/**
+ * A transport that connects to the current protocol once, then models the two
+ * signals a mixed-version deployment can produce on reconnect: a current
+ * server's WebSocket close 1002 after `hello`, or a pre-v2.1 server's typed
+ * `UnsupportedProtocol` handshake response.
+ */
+class VersionMismatchOnReconnectTransport implements Transport {
+  helloCount = 0;
+  closeCount = 0;
+  #receiver: (payload: string) => void = () => {};
+  #closeReceiver: (error?: Error) => void = () => {};
+
+  constructor(private readonly signal: VersionMismatchSignal) {}
+
+  setReceiver(receiver: (payload: string) => void): void {
+    this.#receiver = receiver;
+  }
+
+  setCloseReceiver(receiver: (error?: Error) => void): void {
+    this.#closeReceiver = receiver;
+  }
+
+  triggerClose(): void {
+    this.#closeReceiver(new Error("disconnect"));
+  }
+
+  send(payload: string): Promise<void> {
+    const message = decodeMemoryBoundary(payload) as {
+      type: string;
+      requestId?: string;
+    };
+    switch (message.type) {
+      case "hello":
+        this.helloCount += 1;
+        if (this.helloCount === 1) {
+          this.#respond(helloOk());
+        } else if (this.signal === "protocol-close") {
+          this.#closeReceiver(
+            permanentProtocolError("memory protocol version mismatch"),
+          );
+        } else {
+          this.#respond({
+            type: "response",
+            requestId: "handshake",
+            error: {
+              name: "UnsupportedProtocol",
+              message: `Unsupported protocol: ${MEMORY_PROTOCOL}`,
+            },
+          });
+        }
+        return Promise.resolve();
+      case "session.open":
+        this.#respond(openOk(message.requestId!));
+        return Promise.resolve();
+      default:
+        throw new Error(`Unhandled version-mismatch message: ${message.type}`);
+    }
+  }
+
+  close(): Promise<void> {
+    this.closeCount += 1;
+    return Promise.resolve();
+  }
+
+  #respond(message: FabricValue): void {
+    this.#receiver(encodeMemoryBoundary(message));
+  }
+}
+
 Deno.test(
   "a permanent handshake mismatch on reconnect fails fast instead of looping",
   async () => {
@@ -370,3 +445,53 @@ Deno.test(
     }
   },
 );
+
+for (
+  const testCase of [
+    {
+      signal: "protocol-close",
+      name: "ProtocolError",
+      message: "memory protocol version mismatch",
+      closeCount: 0,
+    },
+    {
+      signal: "legacy-response",
+      name: "UnsupportedProtocol",
+      message: "Unsupported protocol",
+      closeCount: 1,
+    },
+  ] as const
+) {
+  Deno.test(
+    `a ${testCase.signal} version mismatch on reconnect is permanent`,
+    async () => {
+      const transport = new VersionMismatchOnReconnectTransport(
+        testCase.signal,
+      );
+      const client = await connect({ transport });
+      await client.mount(`did:key:z6Mk-reconnect-${testCase.signal}`);
+
+      try {
+        transport.triggerClose();
+
+        const error = await assertRejects(
+          () => client.restoreConnection(),
+          Error,
+          testCase.message,
+        );
+        assertEquals(error.name, testCase.name);
+        assertEquals(transport.helloCount, 2);
+        assertEquals(transport.closeCount, testCase.closeCount);
+
+        await assertRejects(
+          () => client.restoreConnection(),
+          Error,
+          testCase.message,
+        );
+        assertEquals(transport.helloCount, 2);
+      } finally {
+        await client.close();
+      }
+    },
+  );
+}

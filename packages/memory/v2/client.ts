@@ -47,6 +47,13 @@ export type Transport = {
   setCloseReceiver?(receiver: (error?: Error) => void): void;
 };
 
+/** A protocol incompatibility that a fresh connection cannot heal. */
+export const permanentProtocolError = (message: string): Error =>
+  Object.assign(new Error(message), {
+    name: "ProtocolError",
+    permanent: true,
+  });
+
 export type ConnectOptions = {
   transport: Transport;
 };
@@ -347,7 +354,14 @@ export class Client {
         if (message.error) {
           const error = new Error(message.error.message);
           error.name = message.error.name;
+          if (error.name === "UnsupportedProtocol") {
+            Object.assign(error, { permanent: true });
+            this.#fatalError = error;
+          }
           this.#helloPending.reject(error);
+          if (error.name === "UnsupportedProtocol") {
+            void this.transport.close().catch(() => undefined);
+          }
         } else {
           const error = new Error("memory handshake failed");
           error.name = "ProtocolError";
@@ -419,11 +433,17 @@ export class Client {
     if (this.#closed) {
       return;
     }
+    const closeError = error && isPermanentConnectionFailure(error)
+      ? error
+      : toConnectionError(error);
+    if (isPermanentConnectionFailure(closeError)) {
+      this.#fatalError = closeError;
+    }
     this.#connected = false;
     for (const session of this.#spaces) {
       session.handleDisconnect();
     }
-    this.rejectPending(toConnectionError(error));
+    this.rejectPending(closeError);
     if (this.#fatalError) {
       return;
     }
@@ -1582,11 +1602,6 @@ const protocolError = (message: string): Error => {
   error.name = "ProtocolError";
   return error;
 };
-
-// A ProtocolError that no retry can heal (the peers disagree on a data-model
-// wire contract). Tagged so the reconnect loop gives up rather than retrying it.
-const permanentProtocolError = (message: string): Error =>
-  Object.assign(new Error(message), { name: "ProtocolError", permanent: true });
 
 // An authorization denial retrying cannot change. A retriable auth failure — an
 // anti-replay race the server marked `retriable` (an expired/used/mismatched

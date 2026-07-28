@@ -18,10 +18,10 @@ never will. A `session.open` is denied for one of two kinds of reason:
   stale signed `exp`. Each reconnect runs a fresh `hello` that issues a new
   challenge, so these do not recur — a token-refresh window or a challenge race
   heals on the next attempt.
-- **Permanent.** An audience or protocol mismatch, a malformed invocation, or an
-  ACL capability shortfall (the principal lacks `READ`, a malformed or ownerless
-  ACL, a genesis requirement). The same configuration or ACL state produces the
-  same denial every time.
+- **Permanent.** An audience or signed `session.open.args.protocol` mismatch, a
+  malformed invocation, or an ACL capability shortfall (the principal lacks
+  `READ`, a malformed or ownerless ACL, a genesis requirement). The same
+  configuration or ACL state produces the same denial every time.
 
 The server marks the recoverable subset with `retriable: true` on the
 `AuthorizationError` response (see
@@ -41,16 +41,23 @@ is read as permanent — the safe default for an authorization decision.
   `session.open` itself or the watch re-establishment a fresh (non-resumed)
   reopen issues. Sessions for other spaces on the same client keep running: a
   denial on one space is not a client-wide failure.
-- A **retriable** authorization race and every transport-level disconnect retry,
-  so a transient blip or a fresh-challenge race heals.
-- A **permanent protocol-flag mismatch at `hello`** — the peers disagree on a
-  data-model wire contract, so no session can open at all — stops the whole
-  reconnect loop and is remembered, so every request on that
-  fundamentally-incompatible transport fails fast with the real error.
+- A **retriable** authorization race and ordinary transport-level disconnect
+  retry, so a transient blip or a fresh-challenge race heals.
+- An **exact protocol identifier mismatch at `hello`** is client-wide and
+  permanent. A current server closes the WebSocket with code `1002` without a
+  response; a pre-`memory/v2.1` server returns its typed
+  `UnsupportedProtocol` rejection. The client recognizes both signals, closes
+  the transport when it is still open, and remembers the failure so it does not
+  reconnect forever.
+- A **capability-flag mismatch at `hello`** is also client-wide and permanent,
+  but remains on the finer-grained typed-error path. The peers agree on the
+  exact protocol identifier but disagree on a required data-model wire
+  capability, so no session can open.
 
 The reconnect loop therefore has no unbounded retry-on-anything path: a permanent
 failure ends it (per session for an authorization denial, client-wide for a
-handshake mismatch), and only recoverable and transport-level conditions retry.
+handshake mismatch), and only recoverable conditions and ordinary
+transport-level disconnects retry.
 
 ## Runner storage: record it per space, keep the barrier silent
 

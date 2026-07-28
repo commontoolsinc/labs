@@ -250,9 +250,13 @@ Rules:
   `retriable` is permanent: the client stops reopening that session and
   terminates it with the real error rather than retrying the identical handshake
   forever. A `retriable` authorization race (an expired, used, or mismatched
-  challenge; a stale signed `exp`) and every transport-level disconnect still
-  retry, so a transient blip or a fresh-challenge race heals. A permanent
-  protocol-flag mismatch at `hello` ends the whole connection the same way. See
+  challenge; a stale signed `exp`) and ordinary transport-level disconnects
+  still retry, so a transient blip or a fresh-challenge race heals. An exact
+  protocol identifier mismatch at `hello` is instead client-wide and permanent:
+  current servers close with WebSocket code `1002`, while pre-`memory/v2.1`
+  servers return a typed `UnsupportedProtocol` rejection. A capability-flag
+  mismatch at `hello` also ends the whole connection, but stays on the typed
+  handshake-error path. See
   [`../../development/authorization-failure-surfacing.md`](../../development/authorization-failure-surfacing.md)
   for how the client, the runner storage layer, and the CLI act on this
   classification end to end.
@@ -321,10 +325,12 @@ interface ResponseMessage<Result> {
     // On an AuthorizationError, present and `true` when the denial is an
     // anti-replay handshake race a fresh reconnect heals (an expired, used, or
     // mismatched connection challenge; a stale signed `exp`). Absent marks a
-    // permanent denial — an audience or protocol mismatch, or an ACL capability
-    // shortfall — that no retry changes. The client uses it to decide whether to
-    // keep reopening a denied session or to terminate it. An older server sends
-    // no marker, so its AuthorizationError is read as permanent.
+    // permanent denial — an audience or signed session.open.args.protocol
+    // mismatch, or an ACL capability shortfall — that no retry changes. This is
+    // distinct from the exact protocol identifier and capability flags
+    // negotiated by `hello`. The client uses this marker to decide whether to
+    // keep reopening a denied session or terminate it. An older server sends no
+    // marker, so its AuthorizationError is read as permanent.
     retriable?: boolean;
   };
 }

@@ -153,14 +153,20 @@ export class WebSocketTransport implements MemoryClient.Transport {
           this.#receiver(event.data);
         }
       });
-      socket.addEventListener("close", () => {
+      socket.addEventListener("close", (event) => {
         if (this.#socket === socket) {
           this.#socket = null;
         }
         if (this.#opening === opening) {
           this.#opening = null;
         }
-        this.#closeReceiver();
+        this.#closeReceiver(
+          (event as CloseEvent).code === 1002
+            ? MemoryClient.permanentProtocolError(
+              "memory protocol version mismatch",
+            )
+            : undefined,
+        );
         if (!opened) {
           reject(new Error("memory websocket transport closed before opening"));
         }
