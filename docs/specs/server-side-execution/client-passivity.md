@@ -73,10 +73,20 @@ precisely the foundation those need.
    re-colds, `graph.query.wave` now the second cost); (b) docs.read
    frontier batching (5.5k calls/9.8s); (c) an unattributed 3.5s
    spike note in the flag-on arm (plausibly the P4 conflict class).
-2. **P4 defer-then-(b) speculation discipline** — quantified
-   motivation: 594 server retries for 14 commits; the executor should
-   defer attempts it is about to lose (warm-set budget hard gate per
-   D1). Gate: retry ratio collapses without settlement-latency loss.
+2. **P4 defer-then-(b) — RETRY-DISCIPLINE HALF DONE 2026-07-28
+   (§5e); (b)-speculation half stays deferred per D1.** The step-2
+   probe found the 594:14 datum had DISSOLVED after step 1 (62
+   conflicts for 59 commits — the storm was a stale-replica artifact
+   of slow growth pulls; re-probe a datum before building on it). The
+   residual: 0ms-gap micro-bursts (one action, 36 straight conflicts —
+   the catch-up gate wins instantly while contention persists). Landed
+   `e6f1315c7`: consecutive-conflict streak backoff (2nd conflict on,
+   25·2^(n-2) ms capped 400; success clears). Gate MET: max streak
+   36→5, per-post max 1259→951ms, median within run noise, failed 0.
+   REMAINING P4 (deferred until P1 coverage data prices the warm set,
+   per D1): the full (b) view-feeding speculation machinery — warm-set
+   enumeration/budget, write-targets-in-doc-set, divergence counters,
+   D5 hold-never-flicker UX.
 3. **P2 serving coverage** (R5 brokers `llm`/`sqliteQuery`,
    descriptors, R13 `wish`, sqlite commit path per D2) — the
    registry holes that keep actions client-only. Gate: P1 unserved
@@ -958,6 +968,37 @@ unattributed 3.5s spike note (plausibly the P4 conflict class —
 re-examine after step 2). The remaining excess is at the level where
 the plan's own next steps (P4 speculation discipline, P3/P5 removal
 of client work) are the levers.
+
+## 5e. Step-2 probe + residual defer (2026-07-28): the 594:14 datum dissolved; streak backoff
+
+**Probe first (permanent `[P4] conflict-retry:` line, `b3505ab09`):**
+the catch-up-gated retry ALREADY existed on both realms (scheduler
+`readyToRetry` + the host provider's conflict-retry barrier), so the
+594:14 chat ratio meant gated re-attempts still losing. The post-step-1
+chat run rewrote the picture: **62 conflicts for 59 commits (~1:1)** —
+the 594 was mostly stale-replica churn from the slow growth pulls that
+step 1 removed. Retry anatomy: 42 retries, ALL gated, catch-up wait
+median 1ms; the residual was ONE action re-losing in a 0ms-gap burst
+(36 straight conflicts) — the catch-up gate resolving instantly while
+the contention window persisted. Per-post median 542ms (flag-ON —
+faster than the pre-fix flag-OFF arm's 602ms; the owner's
+multi-user-should-win direction shows its first sign, n=1).
+
+**The residual defer (`e6f1315c7`):** consecutive-conflict streak
+backoff at the scheduler's conflict re-queue — first conflict keeps
+the immediate catch-up-gated retry, the 2nd-onward waits
+25·2^(n-2) ms capped at 400ms, any success clears the streak
+(WeakMap on the scheduler facade). Gate run: **max streak 36 → 5**
+(histogram 40×1 / 32×2 / 10×3 / 2×4 / 1×5; 1.7s total backoff),
+committed 56 / failed 0, per-post median 683ms q3 769 **max 951**
+(probe run: 542/677/1259 — median within run-to-run noise, tail max
+IMPROVED). The wasted-server-work class is gone without settlement
+latency loss.
+
+**Method note for every future step:** re-probe a motivating datum
+before building on it — the 594:14 was measured pre-step-1 and did
+not survive it; the build that datum originally justified (a full
+pre-attempt defer machinery) would have been aimed at a ghost.
 
 ## 7. Owner decisions — RESOLVED 2026-07-26
 
