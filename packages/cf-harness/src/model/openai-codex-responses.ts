@@ -422,8 +422,17 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
     }
     await emitAttempt(request.onAttempt, baseAttempt);
     let terminal: Record<string, unknown> | undefined;
+    // The ChatGPT Codex backend streams each completed output item via a
+    // `response.output_item.done` event, but with `store: false` it returns an
+    // EMPTY `output` array on the terminal `response.completed` event (it does
+    // not assemble a stored response to echo back). Accumulate the streamed
+    // items so the model's message and tool calls are not silently dropped.
+    const streamedItems: unknown[] = [];
     for await (const event of parseSse(response, request.signal)) {
       const type = event.type;
+      if (type === "response.output_item.done" && event.item !== undefined) {
+        streamedItems.push(event.item);
+      }
       if (type === "error") {
         throw new Error(
           "OpenAI Codex Responses stream returned an error event",
@@ -449,6 +458,18 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
       throw new Error(
         "Codex Responses stream ended without a terminal response event",
       );
+    }
+    // With `store: false` the ChatGPT Codex backend returns no assembled output
+    // on the terminal event — an empty array, or (also observed on this
+    // backend) `null` — even though it streamed the items. Fall back to what we
+    // accumulated so downstream parsing sees the model's message and tool
+    // calls. A POPULATED terminal output always wins (no double-counting); any
+    // other malformed shape is left for normalizeTerminalResponse to reject.
+    const terminalOutputEmpty = terminal.output === null ||
+      terminal.output === undefined ||
+      (Array.isArray(terminal.output) && terminal.output.length === 0);
+    if (terminalOutputEmpty && streamedItems.length > 0) {
+      terminal = { ...terminal, output: streamedItems };
     }
     const usage = typeof terminal.usage === "object" &&
         terminal.usage !== null && !Array.isArray(terminal.usage)
