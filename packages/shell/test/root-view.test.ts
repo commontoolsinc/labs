@@ -194,6 +194,63 @@ describe("XRootView", () => {
     }
   });
 
+  it("drops the previous space before a differently named view renders", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const { resolveSpaceDid } = await import("@commonfabric/lib-shell");
+      const view = new XRootView();
+      const identity = await Identity.fromPassphrase(
+        "root-view-named-space-transition-test",
+      );
+      // willUpdate runs before render, which is the point of the test: what
+      // it leaves behind is what the app view is handed.
+      const lifecycle = view as unknown as {
+        willUpdate(changed: Map<string, unknown>): void;
+      };
+      const appChanged = new Map<string, unknown>([["app", undefined]]);
+      const setView = (next: unknown) => {
+        view.app = {
+          ...view.app,
+          identity,
+          view: next as typeof view.app.view,
+        };
+        lifecycle.willUpdate(appChanged);
+      };
+
+      const atlas = await resolveSpaceDid(identity, "atlas");
+      const notebook = await resolveSpaceDid(identity, "notebook");
+      expect(atlas).not.toBe(notebook);
+
+      // A name is looked up asynchronously, so the view has no space yet.
+      setView({ spaceName: "atlas" });
+      expect(view.getRuntimeSpaceDID()).toBeUndefined();
+      await view.spaceResolved();
+      expect(view.getRuntimeSpaceDID()).toBe(atlas);
+
+      // Moving between pieces of one space keeps the space already resolved.
+      setView({ spaceName: "atlas", pieceId: "piece-1" });
+      expect(view.getRuntimeSpaceDID()).toBe(atlas);
+
+      // Naming a different space drops the old DID in the same step that
+      // adopts the new view, so the two are never rendered together.
+      setView({ spaceName: "notebook" });
+      expect(view.getRuntimeSpaceDID()).toBeUndefined();
+      await view.spaceResolved();
+      expect(view.getRuntimeSpaceDID()).toBe(notebook);
+
+      // A view addressing its space by DID needs no lookup at all.
+      setView({ spaceDid: atlas });
+      expect(view.getRuntimeSpaceDID()).toBe(atlas);
+
+      // The home view addresses the identity's own space.
+      setView({ builtin: "home" });
+      expect(view.getRuntimeSpaceDID()).toBe(identity.did());
+    } finally {
+      restore();
+    }
+  });
+
   it("guards a browser reload only while the runtime reports pending writes", async () => {
     const restore = installBrowserGlobals();
     try {
