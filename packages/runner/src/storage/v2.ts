@@ -681,13 +681,18 @@ const compactCommitReads = <
     nonRecursiveByPath: Map<string, Read>;
   }>();
   for (const candidate of sorted) {
+    // The dependency key carries every admission-relevant field — seq for
+    // confirmed reads, the layer set AND basisSeq for pending reads — so
+    // reads with divergent bases never merge: ancestor-path compaction
+    // within a group may drop a descendant read, and a surviving ancestor
+    // must not claim a higher basis than the dropped read declared.
     const dependencyKey = "seq" in candidate
       ? `confirmed:${
         normalizeCellScope(candidate.scope)
       }:${candidate.id}:${candidate.seq}`
       : `pending:${normalizeCellScope(candidate.scope)}:${candidate.id}:${
         localSeqKey(candidate.localSeq)
-      }`;
+      }:${candidate.basisSeq}`;
     let group = grouped.get(dependencyKey);
     if (!group) {
       group = {

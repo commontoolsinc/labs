@@ -693,11 +693,13 @@ WHERE session_id = :session_id
 `;
 
 // True-basis (CT-1910) variants of the conflict scans: identical intervals,
-// but writes produced by the reader's own session are excluded. FIFO
-// admission guarantees every own accepted commit in `(basis, head]` has a
-// lower localSeq than the reader and was therefore part of the reader's
-// materialized view — conflicting with it would be the self-conflict that
-// forced pending reads to over-advance their basis in the first place.
+// but writes produced by the reader's own session are excluded. Same-session
+// commits resolve in increasing localSeq order (03-commit-model.md §3.6.3 —
+// normative; the transport enforces it per connection, not this engine), so
+// every own accepted commit in `(basis, head]` has a lower localSeq than the
+// reader and was therefore part of the reader's materialized view —
+// conflicting with it would be the self-conflict that forced pending reads
+// to over-advance their basis in the first place.
 const SELECT_SET_DELETE_CONFLICT_EXCLUDING_SESSION = `
 SELECT r.seq AS seq
 FROM revision r
