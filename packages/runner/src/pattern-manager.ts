@@ -37,6 +37,7 @@ import {
   loadVerifiedSourceClosure,
   type ModuleDelegationMap,
   moduleDelegationsFromDocs,
+  planCompileCacheWriteChunks,
   ROOT_LINK_SPECIFIER,
   type SourceDoc,
   sourceDocKey,
@@ -1804,41 +1805,71 @@ export class PatternManager {
   ): Promise<void> {
     const writebackStart = performance.now();
     await this.syncCompileCacheWriteTargets(space, modules, opts);
-    // The write-back re-writes source docs whose values carry quote-cell
-    // indirections (one derived doc per import edge). On a cold replica those
-    // derived docs are unknown, and each commit attempt discovers exactly ONE
-    // of them: the engine rejects on the first stale read, editWithRetry
-    // pulls that doc, and only then does the next attempt's diff reach the
-    // following one (CT-1824, live-traced on the browser rig — the system-app
-    // closure re-write conflicts on ~24 pre-existing edge docs, one per
-    // round). Convergence therefore needs one retry per pre-existing derived
-    // doc; the general DEFAULT_MAX_RETRIES (5) exhausts long before that and
-    // the cache never heals, so every later cold boot recompiles. Budget by
-    // the write set's edge count (source + compiled edge docs) with slack.
-    // Rounds are bounded by actual conflicts — a conflict-free write-back
-    // still commits on the first attempt — so the ceiling is only paid during
-    // recovery after a compiler-version bump.
-    const importEdges = modules.reduce((n, m) => n + m.imports.length, 0);
-    const writebackMaxRetries = Math.max(16, 2 * importEdges + 8);
-    let committedModuleDelegations = moduleDelegations;
-    const { error } = await this.runtime.editWithRetry((tx) => {
-      committedModuleDelegations = writeSourceAndCompiledDocs(
-        this.runtime,
-        space,
-        modules,
-        entryIdentity,
-        { ...opts, moduleDelegations },
-        tx,
-      );
-    }, writebackMaxRetries);
-    logger.time(writebackStart, "compile-cache", "writeback");
-    if (error) {
-      logger.error("compile-cache-writeback-failed", () => [
-        `entry=${entryIdentity}`,
-        error.message,
-      ]);
-      throw throwableStorageError(error);
+    // The closure is committed in CHUNKS of bounded module count rather than
+    // one all-or-nothing transaction. A stale-refs recovery (compiler output
+    // change over a pre-existing space) re-writes the entire closure; as a
+    // single commit, a session killed mid-write persisted NOTHING and every
+    // retrying session redid the whole write — under aggressive client
+    // timeouts no session ever landed it (the estuary first-open outage).
+    // Each committed chunk survives interruption: docs are content-addressed
+    // and the closure loaders fail closed on missing docs, so a partial
+    // prefix reads as a cache miss (never as a corrupt closure), and the next
+    // session's re-write diffs already-durable docs to nothing. Dependencies
+    // commit first and the entry doc last (see planCompileCacheWriteChunks).
+    // The `persistence` promise callers await still resolves only after ALL
+    // chunks are durable, so the "refs-only pattern JSON requires a durable
+    // closure" contract is unchanged.
+    const { chunks, extraRoots } = planCompileCacheWriteChunks(
+      modules,
+      entryIdentity,
+    );
+    // Union of the per-chunk effective delegation maps. Chunks partition the
+    // module set and the effective map is keyed per module, so the union over
+    // all chunks equals the single-transaction effective map exactly.
+    const committedModuleDelegations = new Map<string, ReadonlySet<string>>();
+    for (const chunk of chunks) {
+      // The write-back re-writes source docs whose values carry quote-cell
+      // indirections (one derived doc per import edge). On a cold replica
+      // those derived docs are unknown, and each commit attempt discovers
+      // exactly ONE of them: the engine rejects on the first stale read,
+      // editWithRetry pulls that doc, and only then does the next attempt's
+      // diff reach the following one (CT-1824, live-traced on the browser
+      // rig — the system-app closure re-write conflicts on ~24 pre-existing
+      // edge docs, one per round). Convergence therefore needs one retry per
+      // pre-existing derived doc; the general DEFAULT_MAX_RETRIES (5)
+      // exhausts long before that and the cache never heals, so every later
+      // cold boot recompiles. Budget by the chunk's edge count (source +
+      // compiled edge docs) with slack. Rounds are bounded by actual
+      // conflicts — a conflict-free write-back still commits on the first
+      // attempt — so the ceiling is only paid during recovery after a
+      // compiler-version bump.
+      const importEdges = chunk.reduce((n, m) => n + m.imports.length, 0);
+      const writebackMaxRetries = Math.max(16, 2 * importEdges + 8);
+      let chunkDelegations: ModuleDelegationMap = new Map();
+      const { error } = await this.runtime.editWithRetry((tx) => {
+        chunkDelegations = writeSourceAndCompiledDocs(
+          this.runtime,
+          space,
+          chunk,
+          entryIdentity,
+          { ...opts, moduleDelegations, extraRoots },
+          tx,
+        );
+      }, writebackMaxRetries);
+      if (error) {
+        logger.time(writebackStart, "compile-cache", "writeback");
+        logger.error("compile-cache-writeback-failed", () => [
+          `entry=${entryIdentity}`,
+          `chunkModules=${chunk.length}/${modules.length}`,
+          error.message,
+        ]);
+        throw throwableStorageError(error);
+      }
+      for (const [identity, predecessors] of chunkDelegations) {
+        committedModuleDelegations.set(identity, predecessors);
+      }
     }
+    logger.time(writebackStart, "compile-cache", "writeback");
     this.runtime.registerModuleDelegations(space, committedModuleDelegations);
   }
 
