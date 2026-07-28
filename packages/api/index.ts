@@ -282,11 +282,12 @@ export type FabricValue =
 /** A fabric value other than `null` or `undefined`. */
 export type NonNullableFabricValue = NonNullable<FabricValue>;
 
-/** An array of fabric values. */
-export interface FabricArray extends ArrayLike<FabricValue> {}
+/** Read-only array of fabric values. */
+export interface FabricArray extends ReadonlyArray<FabricValue> {}
 
-/** An object/record of fabric values. */
-export interface FabricPlainObject extends Record<string, FabricValue> {}
+/** Read-only object/record of fabric values. */
+export interface FabricPlainObject
+  extends Readonly<Record<string, FabricValue>> {}
 
 // ============================================================================
 // Runtime Constants

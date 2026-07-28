@@ -173,8 +173,8 @@ export type FabricValue =
 /** A fabric value other than `null` or `undefined`. */
 export type NonNullableFabricValue = NonNullable<FabricValue>;
 
-/** Array of fabric values. */
-export interface FabricArray extends ArrayLike<FabricValue> {}
+/** Read-only array of fabric values. */
+export interface FabricArray extends ReadonlyArray<FabricValue> {}
 
 /**
  * Object/record of fabric values.
@@ -184,7 +184,8 @@ export interface FabricArray extends ArrayLike<FabricValue> {}
  * If prototype pollution becomes a concern, add boundary validation where
  * values enter the fabric system (e.g., `fabricFromNativeValue()`).
  */
-export interface FabricPlainObject extends Record<string, FabricValue> {}
+export interface FabricPlainObject
+  extends Readonly<Record<string, FabricValue>> {}
 
 /**
  * Single "layer" of fabric conversion -- the result of shallow conversion
