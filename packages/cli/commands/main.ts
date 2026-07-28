@@ -8,6 +8,7 @@ import { fuse } from "./fuse.ts";
 import { init } from "./init.ts";
 import { inspect } from "./inspect.ts";
 import { piece } from "./piece.ts";
+import { space } from "./space.ts";
 import { identity } from "./identity.ts";
 import { test } from "./test-command.ts";
 import { view } from "./view.ts";
@@ -93,6 +94,8 @@ export const main = new Command()
   .command("deps", deps)
   // @ts-ignore for the above type issue
   .command("inspect", inspect)
+  // @ts-ignore for the above type issue
+  .command("space", space)
   .command("view", view)
   .command("exec", exec)
   // @ts-ignore for the above type issue

@@ -1,0 +1,422 @@
+// `cf space` end to end through the real CLI process: the rehearsal loop an
+// operator actually runs (clone → attempt → verify → reset → verify) plus the
+// two things a script depends on — a nonzero exit when content moved, and a
+// refusal to write into the live store.
+//
+// The library's semantics are covered in packages/state-inspector/test/; this
+// suite guards the command surface and its exit codes.
+
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import { Database } from "@db/sqlite";
+import { cf, withEnv } from "./utils.ts";
+
+/** `CliResult` streams are line arrays; join before substring assertions. */
+const text = (lines: string[]): string => lines.join("\n");
+
+const SPACE = "did:key:z6MkCliCloneTest";
+const SESSION = "session:did:key:zSpaceAAAA:11111111-2222-3333";
+const MODULE_IDENTITY = "pf1v3J_M5Nep7cq-Uh8EYG0ZQaE217FfDfcjbwGdjVI";
+
+const link = (id: string) => ({ "/": { "link@1": { id, path: [] } } });
+
+/** A source snapshot with one piece, one authored cell, one generated cell. */
+function seedSnapshot(path: string): void {
+  const db = new Database(path, { create: true });
+  db.exec(`
+CREATE TABLE "commit" (
+  seq INTEGER NOT NULL PRIMARY KEY, branch TEXT NOT NULL DEFAULT '',
+  session_id TEXT NOT NULL, local_seq INTEGER NOT NULL,
+  invocation_ref TEXT, authorization_ref TEXT,
+  original JSON NOT NULL, resolution JSON NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE revision (
+  branch TEXT NOT NULL DEFAULT '', id TEXT NOT NULL,
+  scope_key TEXT NOT NULL DEFAULT 'space', seq INTEGER NOT NULL,
+  op_index INTEGER NOT NULL, op TEXT NOT NULL, data JSON, commit_seq INTEGER NOT NULL,
+  PRIMARY KEY (branch, id, scope_key, seq, op_index)
+);`);
+  appendDocs(db, [
+    ["of:piece", {
+      value: { $NAME: "Board" },
+      argument: link("of:input"),
+      internal: [
+        { partialCause: "entries", link: link("of:named") },
+        { partialCause: { $generated: 0 }, link: link("of:generated") },
+      ],
+      patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
+      schema: { type: "object", properties: {}, $defs: {} },
+    }],
+    ["of:input", { value: { title: "a topic" } }],
+    ["of:named", { value: "named-v1", result: link("of:piece") }],
+    ["of:generated", { value: "generated-v1", result: link("of:piece") }],
+  ]);
+  db.close();
+}
+
+function appendDocs(db: Database, docs: [string, unknown][]): void {
+  const base = db.prepare(`SELECT coalesce(max(seq), 0) s FROM "commit"`)
+    .get<{ s: number }>()!.s;
+  const commit = db.prepare(
+    `INSERT INTO "commit" (seq, session_id, local_seq, original, resolution)
+     VALUES (?, ?, ?, '{}', '{}')`,
+  );
+  const rev = db.prepare(
+    `INSERT INTO revision (id, scope_key, seq, op_index, op, data, commit_seq)
+     VALUES (?, 'space', ?, 0, 'set', ?, ?)`,
+  );
+  docs.forEach(([id, doc], i) => {
+    const seq = base + i + 1;
+    commit.run(seq, SESSION, seq);
+    rev.run(id, seq, JSON.stringify(doc), seq);
+  });
+}
+
+/** Apply writes to the clone's working copy, as a rehearsal attempt would. */
+function writeToWorkingCopy(dir: string, docs: [string, unknown][]): void {
+  const db = new Database(`${dir}/engine-v3/${SPACE}.sqlite`);
+  appendDocs(db, docs);
+  db.close();
+}
+
+async function withFixture(
+  run: (t: { snapshot: string; clone: string; root: string }) => Promise<void>,
+): Promise<void> {
+  const root = await Deno.makeTempDir({ prefix: "cf-space-test-" });
+  try {
+    const snapshotDir = `${root}/snapshot`;
+    await Deno.mkdir(snapshotDir);
+    const snapshot = `${snapshotDir}/${SPACE}.sqlite`;
+    seedSnapshot(snapshot);
+    await run({ snapshot, clone: `${root}/clone`, root });
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+}
+
+describe("cf space", () => {
+  it("runs the rehearsal loop: clone, attempt, verify, reset", async () => {
+    await withFixture(async ({ snapshot, clone }) => {
+      const cloned = await cf(
+        `space clone ${SPACE} --from ${snapshot} --to ${clone}`,
+      );
+      expect(cloned.code).toBe(0);
+      // The working copy lands where the memory server resolves a space store,
+      // so MEMORY_DIR can serve the clone under the same DID.
+      expect(text(cloned.stdout)).toContain(`engine-v3/${SPACE}.sqlite`);
+      expect(text(cloned.stdout)).toContain("1 generated cells excluded");
+
+      const clean = await cf(`space verify ${clone}`);
+      expect(clean.code).toBe(0);
+      expect(text(clean.stdout)).toContain("content    unchanged");
+
+      // A rehearsal attempt that damages authored content.
+      writeToWorkingCopy(clone, [["of:input", {
+        value: { title: "CLOBBERED" },
+      }]]);
+
+      const damaged = await cf(`space verify ${clone}`);
+      expect(damaged.code).toBe(1);
+      expect(text(damaged.stdout)).toContain("content    CHANGED");
+
+      const reset = await cf(`space reset ${clone}`);
+      expect(reset.code).toBe(0);
+      expect(text(reset.stdout)).toContain("matches baseline");
+
+      const recovered = await cf(`space verify ${clone}`);
+      expect(recovered.code).toBe(0);
+    });
+  });
+
+  it("passes verification when only generated cells were rewritten", async () => {
+    // A clean pattern update rotates generated cells and adds commits. If that
+    // failed verification, every legitimate migration would look like data loss.
+    await withFixture(async ({ snapshot, clone }) => {
+      await cf(`space clone ${SPACE} --from ${snapshot} --to ${clone}`);
+      writeToWorkingCopy(clone, [
+        ["of:generated", { value: "generated-v2", result: link("of:piece") }],
+      ]);
+
+      const result = await cf(`space verify ${clone}`);
+      expect(result.code).toBe(0);
+      expect(text(result.stdout)).toContain("content    unchanged");
+      // ...and the growth is still reported, not hidden.
+      expect(text(result.stdout)).toContain("commits    4 → 5");
+    });
+  });
+
+  it("refuses to write a clone into the live store directory", async () => {
+    await withFixture(async ({ snapshot, root }) => {
+      const live = `${root}/live-memory`;
+      await Deno.mkdir(live);
+      // The CLI subprocess inherits this env, which is how it learns what the
+      // local server is serving.
+      await withEnv("MEMORY_DIR", `file://${live}/`, async () => {
+        const result = await cf(
+          `space clone ${SPACE} --from ${snapshot} --to ${live}/clone`,
+        );
+        expect(result.code).not.toBe(0);
+        expect(text(result.stderr)).toContain(
+          "overlaps the live store directory",
+        );
+        expect(await exists(`${live}/clone`)).toBe(false);
+      });
+    });
+  });
+
+  it("reports a fingerprint that ignores generated-cell churn", async () => {
+    await withFixture(async ({ snapshot, clone }) => {
+      await cf(`space clone ${SPACE} --from ${snapshot} --to ${clone}`);
+      const working = `${clone}/engine-v3/${SPACE}.sqlite`;
+
+      const before = await cf(`space fingerprint ${working}`);
+      expect(before.code).toBe(0);
+      expect(text(before.stdout)).toContain("3 entities fingerprinted");
+
+      writeToWorkingCopy(clone, [
+        ["of:generated", { value: "generated-v2", result: link("of:piece") }],
+      ]);
+      const after = await cf(`space fingerprint ${working}`);
+      expect(after.stdout[0]).toBe(before.stdout[0]);
+
+      // --include-generated deliberately inverts that.
+      const loose = await cf(
+        `space fingerprint ${working} --include-generated`,
+      );
+      expect(loose.stdout[0]).not.toBe(before.stdout[0]);
+    });
+  });
+
+  it("requires --from and --to, and says what they are for", async () => {
+    await withFixture(async ({ snapshot, clone }) => {
+      const noFrom = await cf(`space clone ${SPACE} --to ${clone}`);
+      expect(noFrom.code).not.toBe(0);
+      expect(text(noFrom.stderr)).toContain("--from is required");
+      // The message points at the sanctioned way to obtain a production
+      // snapshot, since the dump endpoint is deliberately off there.
+      expect(text(noFrom.stderr)).toContain("VACUUM INTO");
+
+      const noTo = await cf(`space clone ${SPACE} --from ${snapshot}`);
+      expect(noTo.code).not.toBe(0);
+      expect(text(noTo.stderr)).toContain("--to is required");
+    });
+  });
+
+  it("downloads an https snapshot and does not leave it behind", async () => {
+    // `--from <url>` is the S3 hop the July rehearsal used to share one
+    // snapshot across operators. A real snapshot is gigabytes, so the staging
+    // copy must not survive the command.
+    await withFixture(async ({ snapshot, clone }) => {
+      // Compare staging directories before and after rather than asserting the
+      // system temp directory holds none: it is shared, so an unrelated
+      // leftover would fail this spuriously and forever.
+      const stagingDirs = async (): Promise<Set<string>> => {
+        const found = new Set<string>();
+        for await (
+          const entry of Deno.readDir(Deno.env.get("TMPDIR") ?? "/tmp")
+        ) {
+          if (entry.name.startsWith("cf-space-clone-")) found.add(entry.name);
+        }
+        return found;
+      };
+      const before = await stagingDirs();
+
+      const body = await Deno.readFile(snapshot);
+      const server = Deno.serve(
+        { hostname: "127.0.0.1", port: 0, onListen: () => {} },
+        () => new Response(body),
+      );
+      const url = `http://127.0.0.1:${server.addr.port}/snapshot.sqlite`;
+      try {
+        const result = await cf(
+          `space clone ${SPACE} --from ${url} --to ${clone}`,
+        );
+        expect(result.code).toBe(0);
+        expect(text(result.stdout)).toContain("1 generated cells excluded");
+        // The clone is real and verifies against its own manifest.
+        expect((await cf(`space verify ${clone}`)).code).toBe(0);
+      } finally {
+        await server.shutdown();
+      }
+
+      const after = await stagingDirs();
+      const leaked = [...after].filter((name) => !before.has(name));
+      expect(leaked).toEqual([]);
+    });
+  });
+
+  it("emits machine-readable JSON for clone, verify and fingerprint", async () => {
+    await withFixture(async ({ snapshot, clone }) => {
+      const cloned = await cf(
+        `space clone ${SPACE} --from ${snapshot} --to ${clone} --json`,
+      );
+      expect(cloned.code).toBe(0);
+      const { manifest, paths } = JSON.parse(text(cloned.stdout));
+      expect(manifest.space).toBe(SPACE);
+      expect(manifest.version).toBe(1);
+      // The reported path is absolute, so the printed serve line is a usable
+      // file:// URL even when --to was relative.
+      expect(paths.workingPath.startsWith("/")).toBe(true);
+
+      const verified = JSON.parse(
+        text((await cf(`space verify ${clone} --json`)).stdout),
+      );
+      expect(verified.ok).toBe(true);
+      expect(verified.fingerprint.match).toBe(true);
+
+      const fp = JSON.parse(
+        text(
+          (await cf(`space fingerprint ${paths.workingPath} --json`)).stdout,
+        ),
+      );
+      expect(fp.hash).toBe(manifest.fingerprint.hash);
+      expect(fp.ambiguous).toEqual([]);
+    });
+  });
+
+  it("lists per-entity hashes and flags entities it could not hash", async () => {
+    // A ~5,000-deep value parses but overflows the canonical hasher. The
+    // listing must name it rather than let it vanish from the roll-up.
+    await withFixture(async ({ snapshot, clone }) => {
+      await cf(`space clone ${SPACE} --from ${snapshot} --to ${clone}`);
+      const working = `${clone}/engine-v3/${SPACE}.sqlite`;
+      let deep: unknown = null;
+      for (let i = 0; i < 5000; i++) deep = { a: deep };
+      writeToWorkingCopy(clone, [["of:pathological", { value: deep }]]);
+
+      const result = await cf(`space fingerprint ${working} --per-entity`);
+      expect(result.code).toBe(0);
+      const output = text(result.stdout);
+      expect(output).toContain("could not be");
+      expect(output).toContain("of:pathological");
+      // --per-entity lists the ordinary entities alongside their kind.
+      expect(output).toContain("of:input");
+    });
+  });
+
+  it("exits nonzero when a reset cannot restore the baseline", async () => {
+    await withFixture(async ({ snapshot, clone }) => {
+      await cf(`space clone ${SPACE} --from ${snapshot} --to ${clone}`);
+      // Corrupt the baseline itself: reset will "succeed" mechanically but the
+      // clone no longer matches its manifest, which must not report success.
+      const pristine = `${clone}/pristine/${SPACE}.sqlite`;
+      const db = new Database(pristine);
+      appendDocs(db, [["of:input", { value: { title: "ROTTED BASELINE" } }]]);
+      db.close();
+
+      const result = await cf(`space reset ${clone}`);
+      expect(result.code).toBe(1);
+    });
+  });
+
+  it("refuses a target inside DB_PATH's directory too", async () => {
+    // Single-file mode: the live store is a file, so its DIRECTORY is what a
+    // clone must stay out of.
+    await withFixture(async ({ snapshot, root }) => {
+      const live = `${root}/single-file`;
+      await Deno.mkdir(live);
+      await withEnv("DB_PATH", `${live}/store.sqlite`, async () => {
+        const result = await cf(
+          `space clone ${SPACE} --from ${snapshot} --to ${live}/clone`,
+        );
+        expect(result.code).not.toBe(0);
+        expect(text(result.stderr)).toContain(
+          "overlaps the live store directory",
+        );
+      });
+    });
+  });
+
+  it("tolerates a malformed MEMORY_DIR instead of crashing", async () => {
+    // MEMORY_DIR comes from the environment and may be junk; that must not
+    // stop an operator from making a clone somewhere harmless.
+    await withFixture(async ({ snapshot, clone }) => {
+      await withEnv("MEMORY_DIR", "file://[not-a-url", async () => {
+        const result = await cf(
+          `space clone ${SPACE} --from ${snapshot} --to ${clone}`,
+        );
+        expect(result.code).toBe(0);
+      });
+    });
+  });
+
+  it("reports an HTTP failure on --from instead of a partial clone", async () => {
+    await withFixture(async ({ clone }) => {
+      const server = Deno.serve(
+        { hostname: "127.0.0.1", port: 0, onListen: () => {} },
+        () => new Response("nope", { status: 404 }),
+      );
+      const url = `http://127.0.0.1:${server.addr.port}/missing.sqlite`;
+      try {
+        const result = await cf(
+          `space clone ${SPACE} --from ${url} --to ${clone}`,
+        );
+        expect(result.code).not.toBe(0);
+        expect(text(result.stderr)).toContain("HTTP 404");
+      } finally {
+        await server.shutdown();
+      }
+      expect(await exists(clone)).toBe(false);
+    });
+  });
+
+  it("keeps usage help off stdout when --json was requested", async () => {
+    // stdout is reserved for the JSON payload, so a failing command must not
+    // print usage help into it and corrupt a caller's parse.
+    //
+    // This must be a VALIDATION error: cliffy prints usage help to stdout for
+    // those and not for ordinary thrown errors, so testing with a plain error
+    // would pass even with the guard deleted.
+    await withFixture(async () => {
+      const withoutJson = await cf(`space clone ${SPACE} --to /tmp/unused`);
+      expect(withoutJson.code).not.toBe(0);
+      expect(text(withoutJson.stdout)).toContain("Usage:"); // help on stdout...
+
+      const withJson = await cf(`space clone ${SPACE} --to /tmp/unused --json`);
+      expect(withJson.code).not.toBe(0);
+      expect(text(withJson.stdout).trim()).toBe(""); // ...suppressed here
+      expect(text(withJson.stderr)).toContain("--from is required");
+    });
+  });
+
+  it("flags an id that one manifest generates and another names", async () => {
+    // Rotation-prone wins so the fingerprint stays stable, but that choice can
+    // hide a real content change, so it must never be silent.
+    await withFixture(async ({ snapshot, clone }) => {
+      await cf(`space clone ${SPACE} --from ${snapshot} --to ${clone}`);
+      const working = `${clone}/engine-v3/${SPACE}.sqlite`;
+      writeToWorkingCopy(clone, [
+        ["of:second-piece", {
+          value: { $NAME: "Other" },
+          argument: link("of:input"),
+          // Names the cell the first piece calls compiler-generated.
+          internal: [{ partialCause: "entries", link: link("of:generated") }],
+          patternIdentity: { identity: MODULE_IDENTITY, symbol: "default" },
+          schema: { type: "object", properties: {}, $defs: {} },
+        }],
+      ]);
+
+      const result = await cf(`space fingerprint ${working}`);
+      expect(result.code).toBe(0);
+      expect(text(result.stdout)).toContain("generated in one");
+    });
+  });
+
+  it("rejects a directory that is not a clone", async () => {
+    await withFixture(async ({ root }) => {
+      const result = await cf(`space verify ${root}`);
+      expect(result.code).not.toBe(0);
+      expect(text(result.stderr)).toContain("is not a clone directory");
+    });
+  });
+});
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await Deno.stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
