@@ -143,6 +143,7 @@ import {
   fromDirtyKey,
   isGraphQueryCoveredByState,
   queryGraph,
+  type QueryGraphCoverage,
   type QueryGraphReuseContext,
   type QueryTraversalStats,
   refreshTrackedGraph,
@@ -8496,6 +8497,21 @@ export class Server {
           scopeResolution.error,
         );
       }
+      // P1 covered growth pulls: the coverage source is this SESSION's own
+      // tracked graph for the queried branch — "tracked" means the wave
+      // path owns delivery of those docs, so the pull may omit them and
+      // skip re-traversing covered (docKey, selector) pairs. Refused (full
+      // reply) for lane-scoped requests: tracker doc keys carry scope
+      // CLASSES, not lane instances, so cross-lane coverage is unsound.
+      const coverage = message.omitWatchCovered === true &&
+          message.actingContext === undefined
+        ? (() => {
+          const tracked = session.graphs.get(message.query.branch ?? "");
+          return tracked === undefined
+            ? undefined
+            : { covered: tracked.tracker };
+        })()
+        : undefined;
       return {
         type: "response",
         requestId: message.requestId,
@@ -8506,6 +8522,7 @@ export class Server {
           undefined,
           scopeResolution.ok,
           message.trigger,
+          coverage,
         ),
       };
     } catch (error) {
@@ -9274,6 +9291,7 @@ export class Server {
     reuse?: QueryGraphReuseContext,
     scopeContext: { principal?: string; sessionId?: string } = {},
     trigger?: GraphQueryTrigger,
+    coverage?: QueryGraphCoverage,
   ): Promise<GraphQueryResult> {
     const startedAt = performance.now();
     const result = queryGraph(
@@ -9282,6 +9300,7 @@ export class Server {
       query,
       reuse,
       scopeContext,
+      coverage,
     );
     const elapsedMs = performance.now() - startedAt;
     this.#recordFeedTraversal("graph.query", result.stats, elapsedMs);
@@ -13611,6 +13630,9 @@ export const parseClientMessage = (
       sessionId: parsed.sessionId,
       ...parsedActingContext(parsed),
       ...parsedGraphQueryTrigger(parsed),
+      // P1 covered growth pulls: strictly `true` opts in; anything else is
+      // the legacy full reply (additive field, never trusted as a shape).
+      ...(parsed.omitWatchCovered === true ? { omitWatchCovered: true } : {}),
       query: parsed.query as unknown as GraphQueryRequest["query"],
     };
   }

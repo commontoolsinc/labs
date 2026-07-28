@@ -612,6 +612,25 @@ propagate](#how-flags-propagate).
   `0` is byte-identical immediate passthrough; teardown flushes
   immediately regardless. Tests shorten it to assert the held-shrink
   contract without the production window.
+- **Companion knob (P1 step 1, frontier growth pulls).**
+  `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_COVERED_GROWTH_PULL` (`"1"` on,
+  `"0"`/unset legacy; worker-realm lazy read in
+  [`packages/runner/src/storage/v2-host-provider.ts`](../../packages/runner/src/storage/v2-host-provider.ts),
+  `startServerExecutionPool` defaults `"1"`): a closure-growth cold
+  refresh roots its `graph.query` at the GROWN FRONTIER the growth
+  detector enumerated — instead of re-walking the whole watch closure —
+  and MERGES the delta into the held set, with the revised held doc
+  itself applied as an F2 point update (never-held retries and
+  wave-triggered re-colds keep the legacy full-reply replace). The
+  request also carries `omitWatchCovered`, which lets a server session
+  that DOES track watches additionally skip covered (docKey, selector)
+  re-descents server-side; the executor session has no server-side
+  watch surface, so its win is the root narrowing. The 2026-07-28
+  instrumented confirm run motivated it: the whole-closure demand pull
+  was the dominant serving cost (`graph.query.demand` 20.6s/run, ZERO
+  coveredSelectorSkips vs ~6k on the watch paths, single pulls
+  stalling the serving loop 1.2s), and the engaged tail carried
+  +28 ms/note excess slope over flag-off.
 - **Removal.** Fold calibrated fixed values into `serverPrimaryExecution`
   once P1 measures Worker cold-start and navigation-blip distributions.
 

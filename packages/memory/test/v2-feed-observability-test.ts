@@ -460,3 +460,168 @@ Deno.test("graph.query trigger attribution splits wave vs demand buckets additiv
     await server.close();
   }
 });
+
+// P1 covered growth pulls (client-passivity §0 step 1): a graph.query that
+// opts in with `omitWatchCovered` returns only docs the session's tracked
+// watch surface does NOT already cover — covered (docKey, selector) pairs
+// skip re-traversal (counted as coveredSelectorSkips) and their snapshots
+// are omitted (the wave path owns their delivery). Without the flag, or on
+// a session with no tracked graph, the reply is byte-identical legacy.
+Deno.test("graph.query omitWatchCovered returns only the uncovered delta for a watching session", async () => {
+  const server = new Server({
+    ...testSessionOpenServerOptions,
+    store: new URL("memory://memory-v2-covered-pull"),
+    subscriptionRefreshDelayMs: 0,
+  });
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  const space = "did:key:z6Mk-covered-pull";
+  const link = (id: string) => ({
+    "/": { "link@1": { id, path: [], space } },
+  });
+
+  try {
+    await connection.receive(encodeMemoryBoundary(HELLO));
+    const sessionOpen = expectHelloOk(messages);
+    await connection.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open",
+      space,
+      session: {},
+      invocation: authInvocation(sessionOpen),
+    }));
+    const open = assertResponse<{ sessionId: string }>(shiftMessage(messages));
+    const sessionId = open.ok!.sessionId;
+
+    // child ← linked from BOTH the watched root and the separate query root.
+    await connection.receive(encodeMemoryBoundary({
+      type: "transact",
+      requestId: "tx-1",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: "of:covered-child",
+            value: { value: { label: "shared child" } },
+          },
+          {
+            op: "set",
+            id: "of:covered-root",
+            value: { value: { items: [link("of:covered-child")] } },
+          },
+          {
+            op: "set",
+            id: "of:uncovered-root",
+            value: { value: { items: [link("of:covered-child")] } },
+          },
+        ],
+      },
+    }));
+    assertExists(assertResponse(shiftMessage(messages)).ok);
+
+    // Track the covered root: the session's watch surface now covers the
+    // root AND the linked child under the schema-true selector.
+    await connection.receive(encodeMemoryBoundary({
+      type: "session.watch.set",
+      requestId: "watch-1",
+      space,
+      sessionId,
+      watches: [{
+        id: "covered-root-watch",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:covered-root",
+            selector: { path: [], schema: true },
+          }],
+        },
+      }],
+    }));
+    assertExists(assertResponse(shiftMessage(messages)).ok);
+
+    const query = {
+      roots: [{
+        id: "of:uncovered-root",
+        selector: { path: [], schema: true },
+      }],
+    };
+    const skipsBefore = server.feedStats
+      .traversalByOperation["graph.query"]?.coveredSelectorSkips ?? 0;
+
+    // Covered pull: the uncovered query root returns; the child — covered
+    // by the live watch surface — is skipped and omitted.
+    await connection.receive(encodeMemoryBoundary({
+      type: "graph.query",
+      requestId: "query-covered",
+      space,
+      sessionId,
+      omitWatchCovered: true,
+      query,
+    }));
+    const covered = assertResponse<GraphQueryResult>(shiftMessage(messages));
+    assertExists(covered.ok);
+    assertEquals(
+      covered.ok.entities.map((entity) => entity.id).toSorted(),
+      ["of:uncovered-root"],
+    );
+    const skipsAfter = server.feedStats
+      .traversalByOperation["graph.query"]?.coveredSelectorSkips ?? 0;
+    assertEquals(skipsAfter > skipsBefore, true);
+
+    // Legacy shape without the flag: full closure.
+    await connection.receive(encodeMemoryBoundary({
+      type: "graph.query",
+      requestId: "query-full",
+      space,
+      sessionId,
+      query,
+    }));
+    const full = assertResponse<GraphQueryResult>(shiftMessage(messages));
+    assertExists(full.ok);
+    assertEquals(
+      full.ok.entities.map((entity) => entity.id).toSorted(),
+      ["of:covered-child", "of:uncovered-root"],
+    );
+
+    // A session with no tracked graph replies in full even with the flag
+    // (fresh connection: session.open challenges are per-connection).
+    const freshMessages: ServerMessage[] = [];
+    const freshConnection = server.connect((message) =>
+      freshMessages.push(message)
+    );
+    await freshConnection.receive(encodeMemoryBoundary(HELLO));
+    const freshOpenAuth = expectHelloOk(freshMessages);
+    await freshConnection.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: "open-fresh",
+      space,
+      session: {},
+      invocation: authInvocation(freshOpenAuth),
+    }));
+    const fresh = assertResponse<{ sessionId: string }>(
+      shiftMessage(freshMessages),
+    );
+    await freshConnection.receive(encodeMemoryBoundary({
+      type: "graph.query",
+      requestId: "query-fresh",
+      space,
+      sessionId: fresh.ok!.sessionId,
+      omitWatchCovered: true,
+      query,
+    }));
+    const freshReply = assertResponse<GraphQueryResult>(
+      shiftMessage(freshMessages),
+    );
+    assertExists(freshReply.ok);
+    assertEquals(
+      freshReply.ok.entities.map((entity) => entity.id).toSorted(),
+      ["of:covered-child", "of:uncovered-root"],
+    );
+  } finally {
+    await server.close();
+  }
+});

@@ -100,6 +100,12 @@ export interface SessionReadOptions {
   /** FA5/FB12 trigger attribution for graph.query accounting (wave-triggered
    * refresh vs demand-triggered pull). Accounting only; optional. */
   trigger?: GraphQueryTrigger;
+  /** P1 covered growth pulls: ask the server to omit docs this session's
+   * tracked watch surface already covers (delta reply). See
+   * `GraphQueryRequest.omitWatchCovered` for the contract — the caller
+   * MUST merge the reply (never replace) and MUST NOT set this on
+   * never-held retries. graph.query only; other reads ignore it. */
+  omitWatchCovered?: boolean;
 }
 
 export interface WatchMutationResult {
@@ -738,6 +744,7 @@ export class SpaceSession {
         ? { actingContext: options.actingContext }
         : {}),
       ...(options?.trigger !== undefined ? { trigger: options.trigger } : {}),
+      ...(options?.omitWatchCovered === true ? { omitWatchCovered: true } : {}),
       query,
     });
 

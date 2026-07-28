@@ -250,6 +250,18 @@ export function startServerExecutionPool(runtime: Runtime): void {
   if (Deno.env.get(pieceLingerEnv) === undefined) {
     Deno.env.set(pieceLingerEnv, "30000");
   }
+  // P1 step-1: covered growth pulls default ON for server-primary
+  // deployments (same worker-realm env channel). A closure-growth cold
+  // refresh asks the server to omit docs the session's tracked surface
+  // already covers and merges the delta — the confirm run measured the
+  // uncovered pull as the dominant serving cost (graph.query.demand
+  // 20.6s/run, zero skips, 1.2s single-call stalls). `...=0` restores
+  // legacy full pulls.
+  const coveredPullEnv =
+    "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_COVERED_GROWTH_PULL";
+  if (Deno.env.get(coveredPullEnv) === undefined) {
+    Deno.env.set(coveredPullEnv, "1");
+  }
   executionPool = new SharedExecutionPool({
     control: memoryServer,
     demandGraceMs: demandGraceMsFromEnv(),

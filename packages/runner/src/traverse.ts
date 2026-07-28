@@ -1384,6 +1384,10 @@ export abstract class BaseObjectTraverser {
   protected dagMemo = new Map<string, Immutable<FabricValue>>();
   traverseDAGCalls = 0;
   getDocAtPathCalls = 0;
+  /** Link descents skipped because the schema tracker already covered the
+   * target (docKey, selector) — the coverage machinery's work-saved count
+   * (feeds `coveredSelectorSkips` in query traversal stats). */
+  coveredLinkSkips = 0;
   abstract traverse(
     doc: IMemorySpaceValueAttestation,
   ): TraverseResult<Immutable<FabricValue>>;
@@ -1476,6 +1480,30 @@ export abstract class BaseObjectTraverser {
         // strangeness with setting item at 0 to item at 1
         let arrayElementLink = itemLink;
         if (isSigilLink(item)) {
+          // Check coverage before getAtPath/followPointer adds this link
+          // target to schemaTracker (mirror of the record-value site below;
+          // without this, array-borne links — the common list shape — always
+          // re-descended even when the tracker already covered the target).
+          // Check coverage before getAtPath/followPointer adds this link
+          // target to schemaTracker (mirror of the SchemaObjectTraverser
+          // array-element site; without this, array-borne links — the
+          // common list shape — always re-descended even when the tracker
+          // already covered the target). The self-link guard compares the
+          // PARSED target: getDocAtPath("writeRedirect") does not follow
+          // ordinary links, so its result still names the containing doc.
+          if (this.traverseCells) {
+            const alreadyTracked = this.isLinkedDocumentCovered(
+              docItem,
+              DEFAULT_SELECTOR,
+            );
+            const itemTarget = parseLink(item, docItem.address);
+            if (alreadyTracked && itemTarget?.id !== docItem.address.id) {
+              this.coveredLinkSkips++;
+              this.tx.read(docItem.address, READ_FOR_SCHEDULING);
+              newValue[index] = null;
+              return;
+            }
+          }
           const [redirDoc, redirSelector] = this.getDocAtPath(
             docItem,
             [],
@@ -1553,6 +1581,7 @@ export abstract class BaseObjectTraverser {
           this.traverseCells && alreadyTracked &&
           doc.address.id !== redirDoc.address.id
         ) {
+          this.coveredLinkSkips++;
           return null;
         }
         // our item link should point to the target of the last redirect
@@ -1668,7 +1697,14 @@ export abstract class BaseObjectTraverser {
 
     return schemaTrackerCoversSelector(
       this.schemaTracker,
-      `${link.space}/${link.scope}/${link.id}`,
+      // Same key spelling as `getTrackerKey` (which ADDS tracked entries):
+      // an absent link scope is the default "space" scope. With the raw
+      // `link.scope` here, every unscoped link built the key with the
+      // literal string "undefined" and coverage never matched — the
+      // interior link-skip machinery was inert for the common unscoped
+      // link shape (found by the P1 covered-growth-pull work; root-level
+      // skips in `loadFactsForDoc` were unaffected).
+      `${link.space}/${link.scope ?? "space"}/${link.id}`,
       this.internCoverageSelector(targetSelector),
     );
   }
@@ -3946,6 +3982,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
           );
           const link = parseLink(item, curDoc.address);
           if (alreadyTracked && link?.id !== doc.address.id) {
+            this.coveredLinkSkips++;
             this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
             arrayObj[index] = null;
             return;
@@ -4410,6 +4447,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       this.traverseCells && alreadyTracked &&
       pointerLink?.id !== doc.address.id
     ) {
+      this.coveredLinkSkips++;
       return { ok: null };
     }
 

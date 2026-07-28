@@ -20,6 +20,11 @@ import {
 
 class CountingServer extends Server {
   graphQueryCount = 0;
+  /** P1 covered growth pulls: whether each graph.query carried the
+   * `omitWatchCovered` opt-in (order-preserved with graphQueryCount). */
+  readonly graphQueryCoveredFlags: boolean[] = [];
+  /** P1 frontier growth pulls: each graph.query's root ids, in order. */
+  readonly graphQueryRootIds: string[][] = [];
   /** Per-commit transact outcomes: operation ids + rejection name, so a
    * fixture can assert "committed in one attempt, zero conflicts" for the
    * FA5 rerun shape (the W2.8 conflict-exhaustion class). */
@@ -32,6 +37,10 @@ class CountingServer extends Server {
     message: Parameters<Server["graphQuery"]>[0],
   ): ReturnType<Server["graphQuery"]> {
     this.graphQueryCount++;
+    this.graphQueryCoveredFlags.push(message.omitWatchCovered === true);
+    this.graphQueryRootIds.push(
+      message.query.roots.map((root) => String(root.id)),
+    );
     return await super.graphQuery(message);
   }
 
@@ -1219,5 +1228,82 @@ Deno.test("FB13: lane drain retires a scoped watch and clears its lane-keyed cov
     );
   } finally {
     await f.close();
+  }
+});
+
+// P1 covered growth pulls (client-passivity §0 step 1): with the dial on, a
+// closure-growth cold refresh sends `omitWatchCovered`, the server omits the
+// docs this session's tracked watch surface already covers (skipping their
+// re-traversal — coveredSelectorSkips counts it), and the provider MERGES
+// the delta so every previously-held doc plus the wave's point updates stay
+// in the replica. Dial off (the other growth test above) keeps the legacy
+// full-reply replace byte-identical.
+Deno.test("executor provider covered growth pull merges the delta and keeps held docs", async () => {
+  const dialEnv = "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_COVERED_GROWTH_PULL";
+  Deno.env.set(dialEnv, "1");
+  const fixture = await setUpLinkedClosure();
+  const { server, storage, provider, writerTransact, space, root } = fixture;
+  const grown = "of:executor-point-reads:covered-grown" as URI;
+  try {
+    const flagsBefore = server.graphQueryCoveredFlags.length;
+    await writerTransact([
+      {
+        op: "set",
+        id: root,
+        value: {
+          value: {
+            child: linkTo(fixture.target, space),
+            extra: linkTo(grown, space),
+          },
+        },
+      },
+      { op: "set", id: grown, value: { value: { version: 41 } } },
+    ]);
+    await storage.acceptedCommitsSettled();
+    // The delta arrived...
+    assertEquals(
+      provider.replica.get({
+        id: grown,
+        type: "application/json" as MIME,
+      })?.is,
+      { value: { version: 41 } },
+      "the grown link target must be pulled into the replica",
+    );
+    // ...the held docs survived the merge (a replace of the delta reply
+    // would have evicted them)...
+    assertEquals(
+      provider.replica.get({
+        id: fixture.target,
+        type: "application/json" as MIME,
+      })?.is !== undefined,
+      true,
+      "the previously-held link target must survive the covered pull",
+    );
+    assertEquals(
+      (provider.replica.get({
+        id: root,
+        type: "application/json" as MIME,
+      })?.is as { value?: { extra?: unknown } })?.value?.extra !== undefined,
+      true,
+      "the revised root must be current in the replica",
+    );
+    // ...the pull carried the opt-in and the server skipped covered work.
+    assertEquals(
+      server.graphQueryCoveredFlags.slice(flagsBefore).some((flag) => flag),
+      true,
+      "the growth refresh must send omitWatchCovered",
+    );
+    // ...and the pull was FRONTIER-ROOTED: its roots are exactly the
+    // grown target, never the watch root (the closure re-walk this fix
+    // removes). Coverage-skip accounting for watch-TRACKED sessions is
+    // pinned separately in the memory wire test — the executor session
+    // has no server-side watch surface, so its delta comes from root
+    // narrowing alone.
+    const coveredIndex = server.graphQueryCoveredFlags.indexOf(true);
+    assertEquals(coveredIndex >= flagsBefore, true);
+    assertEquals(server.graphQueryRootIds[coveredIndex], [grown]);
+  } finally {
+    Deno.env.delete(dialEnv);
+    await fixture.close();
   }
 });

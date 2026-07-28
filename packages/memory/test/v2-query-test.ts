@@ -226,7 +226,12 @@ Deno.test("memory v2 query reports read and traversal stats", async () => {
       fixture.initialReachableIds.length,
     );
     assert(tracked.stats.schemaTraversals > 0);
-    assertEquals(tracked.stats.coveredSelectorSkips, 0);
+    // Interior link-coverage skips fire WITHIN a single traversal too: a
+    // doc reached through several links is walked once and every later
+    // descent skips (the unscoped-link coverage-key fix made these
+    // engage; loads above stay one-per-doc). Zero would mean the interior
+    // dedup regressed to re-walking shared subgraphs.
+    assert(tracked.stats.coveredSelectorSkips > 0);
 
     const extended = extendTrackedGraph(space, engine, tracked.state, {
       roots: [{

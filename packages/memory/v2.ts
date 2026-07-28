@@ -922,6 +922,23 @@ export interface GraphQueryRequest {
    * affects evaluation, authorization, or the response shape. Callers that
    * predate the split omit it and land in the aggregate bucket alone. */
   trigger?: GraphQueryTrigger;
+  /** P1 step-1 covered growth pulls (client-passivity §0/§5c): when true,
+   * the server MAY omit from the response every doc this SESSION's live
+   * watch surface already tracks — their delivery is owned by the wave
+   * path — and skip re-traversing (docKey, selector) pairs the tracked
+   * surface covers, so a closure-growth pull returns only the uncovered
+   * delta instead of re-walking the whole accumulated graph (the 0-skip
+   * `graph.query.demand` full re-traversal the 2026-07-28 confirm run
+   * measured at 20.6s/run with 1.2s single-call event-loop stalls).
+   * Best-effort and additive: a server that predates the field, a session
+   * with no tracked graph for the branch, or a lane-scoped request
+   * (actingContext set — tracker doc keys carry scope CLASSES, not lane
+   * instances, so cross-lane coverage would be unsound) replies in full.
+   * Callers therefore MUST merge — never replace — their held set with
+   * the reply, and MUST NOT set this on pulls that re-fetch docs the
+   * caller may not hold (never-held retries), where a tracked-but-
+   * undelivered doc would be omitted forever. */
+  omitWatchCovered?: boolean;
   query: GraphQuery;
 }
 

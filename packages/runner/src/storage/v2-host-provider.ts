@@ -874,6 +874,37 @@ const coldRefreshCooldownMaxMs = (): number => {
   }
 };
 
+/** P1 covered growth pulls (client-passivity §0 step 1): closure-growth
+ * cold refreshes ask the server to omit docs this session's tracked watch
+ * surface already covers, and MERGE the delta reply into the held set
+ * instead of replacing it. The confirm run measured the uncovered pull as
+ * the dominant serving cost (`graph.query.demand` 20.6s/run at ZERO
+ * selector coverage, single pulls stalling the server loop 1.2s). Growth
+ * only: never-held retries and wave-triggered re-colds (shrink/re-key/
+ * untracked-root) keep the full-reply replace path — a tracked-but-
+ * undelivered doc must never be omitted. Same worker-realm lazy env
+ * pattern as the cooldown dial above; `startServerExecutionPool` defaults
+ * it ON for server-primary deployments; unset/0 = legacy full pulls. */
+const COVERED_GROWTH_PULL_ENV =
+  "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_COVERED_GROWTH_PULL";
+
+const coveredGrowthPullEnabled = (): boolean => {
+  try {
+    const raw = Deno.env.get(COVERED_GROWTH_PULL_ENV);
+    if (raw === undefined || raw === "0") return false;
+    if (raw === "1") return true;
+    console.warn(
+      `[executor] Ignoring ${COVERED_GROWTH_PULL_ENV}=${
+        JSON.stringify(raw)
+      } — expected "1" or "0"/unset.`,
+    );
+    return false;
+  } catch {
+    // No env permission in this realm: legacy behavior.
+    return false;
+  }
+};
+
 const snapshotKey = (snapshot: {
   branch: string;
   id: string;
@@ -1031,6 +1062,13 @@ class HostReplicaSession implements ReplicaSession {
    * debounced, merged into every later pass's cold set, and cleared only
    * when the traversal actually runs (or the watch is gone). */
   #owedColdRefresh = new Map<string, GraphQueryTrigger>();
+  /** P1 frontier growth pulls: per watch, the declared keys
+   * (`scope\0id`) of link targets that GREW into the closure since the
+   * last refresh (enumerated by the growth detector). A covered growth
+   * pull roots HERE — the new frontier — instead of re-walking the whole
+   * watch closure; consumed when the pull runs, restored on failure
+   * (same discipline as #owedColdRefresh). */
+  #pendingGrowthRoots = new Map<string, Set<string>>();
   #deferredColdFlushTimer: ReturnType<typeof setTimeout> | null = null;
   /** 0 = debounce disabled (legacy refresh-every-wave). Read once per
    * session at construction — the dial names a deployment posture, not a
@@ -1750,22 +1788,41 @@ class HostReplicaSession implements ReplicaSession {
         continue;
       }
       const steadyWatchIds: string[] = [];
+      const grownWatchIds: string[] = [];
       for (const watchId of task.watchIds) {
         const held = heldDeclaredFor(watchId);
         let grew = false;
         for (const target of newTargets) {
           if (!oldTargets.has(target) && !held.has(target)) {
             grew = true;
-            break;
+            // P1 frontier growth pulls: enumerate EVERY grown target (not
+            // first-hit) so the eventual — possibly debounced — pull can
+            // root at exactly the new frontier.
+            let roots = this.#pendingGrowthRoots.get(watchId);
+            if (roots === undefined) {
+              roots = new Set();
+              this.#pendingGrowthRoots.set(watchId, roots);
+            }
+            roots.add(target);
           }
         }
         // Growth admits a NEW doc: demand-triggered (FA5's new-doc
         // closure-growth class), bounded to one query per cold event.
-        if (grew) markCold(watchId, "demand", "closure-growth");
-        else steadyWatchIds.push(watchId);
+        if (grew) {
+          markCold(watchId, "demand", "closure-growth");
+          grownWatchIds.push(watchId);
+        } else steadyWatchIds.push(watchId);
       }
       if (steadyWatchIds.length > 0) {
         applicable.push({ watchIds: steadyWatchIds, snapshot });
+      }
+      // P1 frontier growth pulls: the revised HELD doc's own new value is
+      // exactly the F2 steady shape — the growth is about its NEW targets.
+      // The frontier pull no longer re-reads the whole closure (the legacy
+      // full re-walk did), so apply the revision as a point update too.
+      // Dial-gated so legacy growth flow stays byte-identical.
+      if (grownWatchIds.length > 0 && coveredGrowthPullEnabled()) {
+        applicable.push({ watchIds: grownWatchIds, snapshot });
       }
     }
 
@@ -1899,6 +1956,17 @@ class HostReplicaSession implements ReplicaSession {
       }
       const before = this.allEntities();
       applyPointUpdates();
+      // P1 covered growth pulls: exactly the closure-growth demand
+      // refreshes (never never-held retries or wave-triggered re-colds —
+      // those must keep full-reply replace semantics).
+      const coveredPullIds = coveredGrowthPullEnabled()
+        ? new Set(
+          [...coldWatches.keys()].filter((watchId) =>
+            coldWatches.get(watchId) === "demand" &&
+            coldReasons.get(watchId) === "closure-growth"
+          ),
+        )
+        : undefined;
       // Cold path (unchanged semantics): closure growth, shrink, unresolved
       // roots, and resolution moves re-run the traversal at the same batch
       // sequence bound; its before/after diff carries the removes. FB13:
@@ -1925,6 +1993,7 @@ class HostReplicaSession implements ReplicaSession {
             error,
           );
         },
+        coveredPullIds,
       );
       this.#acceptedOrder = acceptedOrder;
       this.#appliedSeq = Math.max(this.#appliedSeq, dataSeq);
@@ -2138,6 +2207,7 @@ class HostReplicaSession implements ReplicaSession {
     atSeq?: number,
     trigger?: GraphQueryTrigger | ReadonlyMap<string, GraphQueryTrigger>,
     onError?: (watchId: string, error: unknown) => void,
+    coveredPullIds?: ReadonlySet<string>,
   ): Promise<void> {
     for (const watchId of watchIds) {
       const watch = this.#watches.get(watchId);
@@ -2146,22 +2216,62 @@ class HostReplicaSession implements ReplicaSession {
       const watchTrigger = typeof trigger === "string"
         ? trigger
         : trigger?.get(watchId);
+      // P1 covered growth pulls: a closure-growth refresh roots at the
+      // GROWN FRONTIER (the targets the growth detector enumerated)
+      // instead of re-walking the whole watch closure, and MERGES the
+      // delta reply into the held set below; every other refresh keeps
+      // the legacy full-reply replace. The executor session has no
+      // server-side tracked watch surface (it lives on the F2
+      // notice+point-read feed), so the delta comes from ROOT NARROWING
+      // — `omitWatchCovered` still rides for sessions that DO track
+      // watches server-side. Frontier roots pull the full subtree
+      // (schema:true): the link-narrowed selector is not recoverable
+      // client-side, and over-held docs simply join the point-read
+      // steady state. Lane-scoped watches keep full pulls.
+      const frontierRoots = coveredPullIds?.has(watchId) === true &&
+          actingContext === undefined
+        ? this.#pendingGrowthRoots.get(watchId)
+        : undefined;
+      const coveredPull = frontierRoots !== undefined &&
+        frontierRoots.size > 0;
+      if (coveredPull) this.#pendingGrowthRoots.delete(watchId);
       const startedAt = Date.now();
       let result;
       try {
         result = await this.queryGraph(
-          {
-            ...watch.query,
-            ...(atSeq !== undefined ? { atSeq } : {}),
-          },
-          actingContext !== undefined || watchTrigger !== undefined
+          coveredPull
+            ? {
+              roots: [...frontierRoots!].map((declaredKey) => {
+                const [scope, id] = declaredKey.split("\0");
+                return {
+                  id,
+                  ...(scope !== "space" ? { scope: scope as CellScope } : {}),
+                  selector: { path: [], schema: true },
+                };
+              }),
+              ...(atSeq !== undefined ? { atSeq } : {}),
+            }
+            : {
+              ...watch.query,
+              ...(atSeq !== undefined ? { atSeq } : {}),
+            },
+          actingContext !== undefined || watchTrigger !== undefined ||
+            coveredPull
             ? {
               ...(actingContext !== undefined ? { actingContext } : {}),
               ...(watchTrigger !== undefined ? { trigger: watchTrigger } : {}),
+              ...(coveredPull ? { omitWatchCovered: true } : {}),
             }
             : undefined,
         );
       } catch (error) {
+        // A failed frontier pull did NOT deliver its targets — restore
+        // them so the FB13 retry re-pulls the same frontier.
+        if (coveredPull) {
+          const restored = this.#pendingGrowthRoots.get(watchId) ?? new Set();
+          for (const key of frontierRoots!) restored.add(key);
+          this.#pendingGrowthRoots.set(watchId, restored);
+        }
         if (onError === undefined) throw error;
         onError(watchId, error);
         continue;
@@ -2175,12 +2285,17 @@ class HostReplicaSession implements ReplicaSession {
       if (atSeq === undefined) {
         this.#appliedSeq = Math.max(this.#appliedSeq, result.serverSeq);
       }
+      const responseEntities = result.entities.map((
+        snapshot,
+      ): [string, typeof snapshot] => [snapshotKey(snapshot), snapshot]);
       this.#watchEntities.set(
         watchId,
-        new Map(result.entities.map((snapshot) => [
-          snapshotKey(snapshot),
-          snapshot,
-        ])),
+        coveredPull
+          ? new Map([
+            ...(this.#watchEntities.get(watchId) ?? new Map()),
+            ...responseEntities,
+          ])
+          : new Map(responseEntities),
       );
     }
   }
