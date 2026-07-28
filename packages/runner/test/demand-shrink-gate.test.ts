@@ -122,3 +122,4 @@ Deno.test("spaces are independent; dispose cancels without publishing", () => {
   timers.fireAll();
   assertEquals(published, [], "disposed holds never publish");
 });
+

@@ -119,12 +119,31 @@ export function startReactiveActionCommit(state: {
   return commitPromise;
 }
 
+/** P4 defer-then-(b) residual backoff (client-passivity §0 step 2): the
+ * catch-up gate resolves in ~1ms under live contention, so a claimed
+ * attempt can re-run and re-lose in a 0ms-gap micro-burst until the
+ * contention window passes (measured: one map action 36 straight
+ * conflicts, gaps 0ms, on the post-step-1 chat leg — down from the 594
+ * pre-step-1, but pure wasted server work). After the SECOND consecutive
+ * conflict the re-queue waits 25·2^(n-2) ms, capped; any success clears
+ * the streak (the map is keyed by action identity, entries die with the
+ * action). First conflicts stay undelayed — the common single-loss race
+ * keeps its immediate catch-up-gated retry. */
+const CONFLICT_STREAK_BACKOFF_BASE_MS = 25;
+const CONFLICT_STREAK_BACKOFF_CAP_MS = 400;
+export const conflictStreakBackoffMs = (streak: number): number =>
+  streak < 2 ? 0 : Math.min(
+    CONFLICT_STREAK_BACKOFF_CAP_MS,
+    CONFLICT_STREAK_BACKOFF_BASE_MS * 2 ** (streak - 2),
+  );
+
 export function watchReactiveActionCommit(state: {
   readonly action: Action;
   readonly actionId: string;
   readonly tx: IExtendedStorageTransaction;
   readonly log: ReactivityLog;
   readonly retries: WeakMap<Action, number>;
+  readonly conflictStreaks?: WeakMap<Action, number>;
   readonly pending: Set<Action>;
   readonly commitPromise: ReturnType<IExtendedStorageTransaction["commit"]>;
   readonly resubscribe: (action: Action, log: ReactivityLog) => void;
@@ -140,6 +159,7 @@ export function watchReactiveActionCommit(state: {
     if (!error) {
       // Clear retries after successful commit.
       state.retries.delete(state.action);
+      state.conflictStreaks?.delete(state.action);
       return;
     }
 
@@ -211,17 +231,30 @@ export function watchReactiveActionCommit(state: {
           );
         }
       }
+      // P4 residual backoff: a streak of consecutive conflicts on ONE
+      // action means the catch-up gate is winning instantly while the
+      // contention window persists — defer the re-attempt briefly rather
+      // than burn a 0ms-gap re-loss.
+      const streak = (state.conflictStreaks?.get(state.action) ?? 0) + 1;
+      state.conflictStreaks?.set(state.action, streak);
+      const backoffMs = state.conflictStreaks === undefined
+        ? 0
+        : conflictStreakBackoffMs(streak);
+      if (backoffMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+      }
       // P4 retry-anatomy attribution (client-passivity §0 step 2): one
-      // line per conflict re-queue with the catch-up wait it paid — the
-      // 594:14 retries-per-commit datum needs per-action burst/spacing
-      // structure to design the defer discipline. Client-side conflicts
-      // are the rare client-commit class; the volume rides the executor
-      // realm, whose stdout lands in the toolshed log.
+      // line per conflict re-queue with the catch-up wait it paid and the
+      // streak backoff added. Client-side conflicts are the rare
+      // client-commit class; the volume rides the executor realm, whose
+      // stdout lands in the toolshed log.
       console.debug(
         "[P4] conflict-retry:",
         `t=${Date.now()}`,
         `waitMs=${Date.now() - readinessStartedAt}`,
         `gated=${typeof readyToRetry === "function" ? 1 : 0}`,
+        `streak=${streak}`,
+        `backoffMs=${backoffMs}`,
         state.actionId,
       );
       state.markInvalid(state.action);
@@ -340,6 +373,7 @@ export interface SchedulerActionRunState {
   readonly actionChangeGroups: WeakMap<Action, ChangeGroup>;
   readonly actionTimingState: ActionTimingState;
   readonly retries: WeakMap<Action, number>;
+  conflictStreaks: WeakMap<Action, number>;
   readonly pending: Set<Action>;
   readonly actionRunTrace: ActionRunTraceEntry[];
   readonly nodes: NodeRegistry;
@@ -647,6 +681,7 @@ function finalizeReactiveActionCommit(
     tx: args.tx,
     log: committedLog,
     retries: state.retries,
+    conflictStreaks: state.conflictStreaks,
     pending: state.pending,
     commitPromise,
     resubscribe: state.resubscribe,

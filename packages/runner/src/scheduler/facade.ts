@@ -427,6 +427,10 @@ export class Scheduler {
   private triggerIndex = new SchedulerTriggerIndex();
   private actionChangeGroups = new WeakMap<Action, ChangeGroup>();
   private retries = new WeakMap<Action, number>();
+  /** P4 residual backoff: consecutive-conflict streak per action (see
+   * conflictStreakBackoffMs in run.ts); cleared on any successful
+   * commit. */
+  private conflictStreaks = new WeakMap<Action, number>();
 
   // Effect/computation tracking for pull-based scheduling
   private nodes = new NodeRegistry();
@@ -2513,6 +2517,7 @@ export class Scheduler {
       actionChangeGroups: this.actionChangeGroups,
       actionTimingState: this.actionTimingState,
       retries: this.retries,
+      conflictStreaks: this.conflictStreaks,
       pending: this.pending,
       actionRunTrace: this.actionRunTrace,
       nodes: this.nodes,
