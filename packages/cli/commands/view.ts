@@ -10,8 +10,8 @@ files. Transformed TypeScript is parsed with the same parser the transformer
 uses, so blocks, closures, schemas, type positions and Common Fabric builders
 (pattern/lift/handler/…) are coloured exactly as the compiler sees them.
 Markdown, JSON, JSONC, YAML and Python files use syntax highlighting selected
-their names. Named files with unrecognized syntax remain plain text. The text
-shown is verbatim — colour only.
+from their names. Named files with unrecognized syntax remain plain text. The
+text shown is verbatim — colour only.
 
 Unified diffs are detected automatically: piping 'git diff' in gives added and
 removed lines their tints, full syntax colour, a structure tree of the code

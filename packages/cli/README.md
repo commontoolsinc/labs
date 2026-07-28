@@ -5,9 +5,9 @@
 `cf view [file]` is an interactive pager for transformed TypeScript, source
 files, and unified diffs. Named Markdown, JSON, JSONC, YAML, and Python files
 use their own syntax highlighting. A piped input without a file name remains
-unless it is detected as a diff. A named file with unrecognized syntax is shown
-as plain text. Redirected output keeps the text verbatim and adds ANSI color
-only when the selected color mode permits it.
+TypeScript unless it is detected as a diff. A named file with unrecognized
+syntax is shown as plain text. Redirected output keeps the text verbatim and
+adds ANSI color only when the selected color mode permits it.
 
 ```bash
 cf check pattern.tsx --show-transformed --no-run | cf view
