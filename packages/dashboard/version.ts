@@ -1,17 +1,26 @@
 type Environment = (name: string) => string | undefined;
 type ReadGitCommit = () => string;
+interface GitCommandOutput {
+  success: boolean;
+  stdout: Uint8Array;
+  stderr: Uint8Array;
+}
+type RunGitCommand = () => GitCommandOutput;
 
 const decoder = new TextDecoder();
 const REPOSITORY_ROOT = new URL("../../", import.meta.url);
 const GIT_COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 
-function currentGitCommit(): string {
-  const result = new Deno.Command("git", {
-    args: ["rev-parse", "--verify", "HEAD^{commit}"],
-    cwd: REPOSITORY_ROOT,
-    stdout: "piped",
-    stderr: "piped",
-  }).outputSync();
+export function currentGitCommit(
+  runGit: RunGitCommand = () =>
+    new Deno.Command("git", {
+      args: ["rev-parse", "--verify", "HEAD^{commit}"],
+      cwd: REPOSITORY_ROOT,
+      stdout: "piped",
+      stderr: "piped",
+    }).outputSync(),
+): string {
+  const result = runGit();
   if (!result.success) {
     const detail = decoder.decode(result.stderr).trim();
     throw new Error(

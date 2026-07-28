@@ -1,8 +1,9 @@
 import { assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
-import { dashboardVersion } from "./version.ts";
+import { currentGitCommit, dashboardVersion } from "./version.ts";
 
 const FIRST_COMMIT = "1".repeat(40);
 const SECOND_COMMIT = "a".repeat(40);
+const encoder = new TextEncoder();
 
 Deno.test("dashboard version uses the deployed image commit", () => {
   assertEquals(
@@ -44,6 +45,29 @@ Deno.test("local dashboard version matches the checked-out commit", () => {
     dashboardVersion(() => undefined),
     new TextDecoder().decode(result.stdout).trim(),
   );
+});
+
+Deno.test("dashboard version reports Git command failures", () => {
+  for (
+    const [stderr, message] of [
+      [
+        "fatal: not a git repository",
+        "Could not read the dashboard Git commit: fatal: not a git repository",
+      ],
+      ["", "Could not read the dashboard Git commit."],
+    ]
+  ) {
+    assertThrows(
+      () =>
+        currentGitCommit(() => ({
+          success: false,
+          stdout: new Uint8Array(),
+          stderr: encoder.encode(stderr),
+        })),
+      Error,
+      message,
+    );
+  }
 });
 
 Deno.test("dashboard image requires the publishing workflow commit", async () => {
