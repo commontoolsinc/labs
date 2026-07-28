@@ -4236,106 +4236,122 @@ describe("MapSet size and totalValues", () => {
   });
 });
 
-describe("SchemaObjectTraverser.maybeReportSlowTraverse", () => {
-  // Captures what the logger writes while `run` executes. The report has to
-  // actually be emitted for these tests to mean anything, so the logger is
-  // left enabled and its output intercepted rather than silenced.
-  function captureWarnings(run: () => void): string[] {
-    const warnings: string[] = [];
-    const originalWarn = console.warn;
-    console.warn = (...args: unknown[]) => {
-      warnings.push(args.map((arg) => String(arg)).join(" "));
-    };
-    try {
-      run();
-    } finally {
-      console.warn = originalWarn;
+describe("SchemaObjectTraverser slow-traverse reporting", () => {
+  const type = "application/json" as const;
+
+  // A store that advances the traversal's clock the first time it is read.
+  // `traverse()` is synchronous, so a test cannot step the clock from outside
+  // while a traversal is in flight; loading a linked doc is the hook that runs
+  // during one. If the traversal never reads the store, `advanceMs` never
+  // lands and the assertions fail rather than passing vacuously — which is
+  // what `readStore` is asserted on.
+  class ClockAdvancingStore extends Map<string, Revision<State>> {
+    advanced = false;
+    constructor(private readonly onFirstRead: () => void) {
+      super();
     }
-    return warnings;
+    override get(key: string): Revision<State> | undefined {
+      if (!this.advanced) {
+        this.advanced = true;
+        this.onFirstRead();
+      }
+      return super.get(key);
+    }
   }
 
-  it("reports the traversal's stats", () => {
-    const store = new Map<string, Revision<State>>();
-    const type = "application/json" as const;
+  // Runs one real traversal with `elapsed` pinned to `advanceMs`, and returns
+  // whatever the logger wrote. `performance.now` is what `logger.timeStart` /
+  // `timeEnd` read, so overriding it is what decides the elapsed time the gate
+  // sees — no sleeping, and no dependence on how fast this machine is. The
+  // package's fake clock has already replaced `performance.now` with its own
+  // stub, so the property is saved and put back rather than assumed native.
+  function traverseWithElapsed(
+    advanceMs: number,
+  ): { warnings: string[]; readStore: boolean } {
+    const targetUri = "of:slow-traverse-target" as URI;
     const docUri = "of:slow-traverse-doc" as URI;
-    const docValue = { employees: [{ name: "Bob" }] };
-
-    const revision: Revision<State> = {
-      the: type,
-      of: docUri as Entity,
-      is: { value: docValue },
-      cause: hashOf({ the: type, of: docUri as Entity }),
-      since: 1,
-    };
-    store.set(`${revision.of}/${revision.the}`, revision);
-
-    const traverser = getTraverser(store, { path: ["value"], schema: true });
-    const doc: IMemorySpaceValueAttestation = {
-      address: {
-        space: "did:null:null",
-        id: docUri,
-        type,
-        path: ["value"],
+    // The container links into the target, so resolving it makes the traversal
+    // load the target out of the store — the moment the clock advances.
+    const docValue = {
+      employeeName: {
+        "/": {
+          [LINK_V1_TAG]: { id: targetUri, path: ["employees", "0", "name"] },
+        },
       },
-      value: docValue,
     };
-    traverser.traverse(doc);
 
-    // In production this body is reached only when a traversal exceeds
-    // SLOW_TRAVERSE_MS of real elapsed time. Passing the elapsed time in is
-    // the point: it is what makes the report's coverage independent of
-    // machine speed, which is why the threshold lives in the method.
-    const warnings = captureWarnings(() =>
-      traverser.maybeReportSlowTraverse(150.4, doc)
-    );
-
-    expect(warnings.length).toBe(1);
-    const report = warnings[0];
-    expect(report).toContain("slow-traverse");
-    expect(report).toContain("150ms");
-    expect(report).toContain(`doc=${docUri}/${type}`);
-    // The traversal above ran, so the tracker counters are populated rather
-    // than reporting a zeroed-out traverser.
-    expect(report).toContain("trackerKeys=1");
-    expect(report).toContain("trackerVals=1");
-    expect(report).toContain("traverseSchema=");
-    expect(report).toContain("maxDepth=");
-    // docVisits is populated only under CF_TRAVERSE_DIAGNOSTICS=1.
-    expect(report).toContain("topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)");
-  });
-
-  it("stays quiet for a traversal at or under the threshold", () => {
-    const store = new Map<string, Revision<State>>();
-    const type = "application/json" as const;
-    const docUri = "of:fast-traverse-doc" as URI;
-    const docValue = { employees: [{ name: "Bob" }] };
-
+    let now = 1000;
+    const store = new ClockAdvancingStore(() => {
+      now += advanceMs;
+    });
+    store.set(`${targetUri}/${type}`, {
+      the: type,
+      of: targetUri as Entity,
+      is: { value: { employees: [{ name: "Bob" }] } },
+      cause: hashOf({ the: type, of: targetUri as Entity }),
+      since: 1,
+    });
     store.set(`${docUri}/${type}`, {
       the: type,
       of: docUri as Entity,
       is: { value: docValue },
       cause: hashOf({ the: type, of: docUri as Entity }),
-      since: 1,
+      since: 2,
     });
 
     const traverser = getTraverser(store, { path: ["value"], schema: true });
     const doc: IMemorySpaceValueAttestation = {
-      address: {
-        space: "did:null:null",
-        id: docUri,
-        type,
-        path: ["value"],
-      },
+      address: { space: "did:null:null", id: docUri, type, path: ["value"] },
       value: docValue,
     };
 
-    // 100ms is the threshold itself, and the guard is exclusive, so this is
-    // the boundary case that must not report.
-    const warnings = captureWarnings(() => {
+    const warnings: string[] = [];
+    const savedWarn = console.warn;
+    const savedNow = performance.now;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map((arg) => String(arg)).join(" "));
+    };
+    Reflect.set(performance, "now", () => now);
+    try {
       traverser.traverse(doc);
-      traverser.maybeReportSlowTraverse(100, doc);
-    });
+    } finally {
+      Reflect.set(performance, "now", savedNow);
+      console.warn = savedWarn;
+    }
+    return { warnings, readStore: store.advanced };
+  }
 
+  it("reports a traversal that crosses the threshold", () => {
+    const { warnings, readStore } = traverseWithElapsed(150);
+
+    expect(readStore).toBe(true);
+    expect(warnings.length).toBe(1);
+    const report = warnings[0];
+    expect(report).toContain("slow-traverse");
+    expect(report).toContain("150ms");
+    expect(report).toContain("doc=of:slow-traverse-doc/application/json");
+    // The container and the doc it links into were both tracked, so the report
+    // is reading live traversal state rather than a zeroed-out traverser.
+    expect(report).toContain("trackerKeys=2");
+    expect(report).toContain("trackerVals=2");
+    expect(report).toContain("traverseSchema=1");
+    expect(report).toContain("maxDepth=1");
+    // docVisits is populated only under CF_TRAVERSE_DIAGNOSTICS=1.
+    expect(report).toContain("topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)");
+  });
+
+  it("stays quiet for a traversal well under the threshold", () => {
+    const { warnings, readStore } = traverseWithElapsed(5);
+
+    expect(readStore).toBe(true);
     expect(warnings).toEqual([]);
+  });
+
+  it("stays quiet at the threshold exactly, and reports one ms past it", () => {
+    // The gate is `elapsed > SLOW_TRAVERSE_MS`, so 100 is silent and 101 is
+    // not. Pinning both sides keeps a later edit from turning it into `>=`
+    // without a test noticing.
+    expect(traverseWithElapsed(100).warnings).toEqual([]);
+    expect(traverseWithElapsed(101).warnings.length).toBe(1);
   });
 });
