@@ -363,12 +363,15 @@ exist only on the admitted type.
 
 ```ts
 // Shown for illustration only.
-// An entity version: memory-v2 seq is per-space (a space-global Lamport
-// clock, monotone per entity), so versions are only comparable within the
-// same space. Read via the changes projection (§10.1). Used by the
-// seen-state track (§5) and by watchers (§5.1); never by the notice
-// lifecycle itself.
-type EntityVersion = { space: string; seq: number };
+// An entity version: an OPAQUE per-entity token read via the changes
+// projection (§10.1) — the runtime provides ordering within one entity
+// and equality; tokens from different entities are not comparable, and
+// the encoding is not part of the contract (internally the space's commit
+// clock, opaque precisely so global commit activity is not
+// pattern-observable — see changes-projection.md). Used by the seen-state
+// track (§5) and by watchers (§5.1); never by the notice lifecycle
+// itself.
+type EntityVersion = { space: string; token: string };
 
 // What a source posts (into the notice inbox, §6.1). Everything on the
 // candidate is descriptive or advisory — no field a source writes can
@@ -379,13 +382,24 @@ type NoticeCandidate = {
   // navigation, policy matching, and watcher-driven retraction (§5.1)
   // all key on it.
   subject: unknown;           // asCell: ["cell"]
-  // OPTIONAL watcher metadata: the subject's version at posting, stamped
-  // by watchers that derive notices from entity changes (§5.1) so the
-  // generic seen watcher can retract on observation. Deliberately NOT
-  // part of the notice contract — a notice's lifecycle never requires
-  // reading versions (the contract: once disposed, disposed; new news is
-  // a new notice).
+  // OPTIONAL seen-watcher metadata: the subject's version, stamped by the
+  // deriving watcher (§5.1) — or, for explicitly posted candidates, BY THE
+  // STEWARD AT ADMISSION (one head read through the changes projection,
+  // in the fold where cross-space reads already happen) whenever the
+  // subject resolves to a versioned entity. That admission stamp is what
+  // makes the generic seen watcher's auto-retract cover explicit posters
+  // too (§5.1, authoring.md). Deliberately NOT part of the notice
+  // contract — a notice's lifecycle never requires reading versions (the
+  // contract: once disposed, disposed; new news is a new notice).
   subjectVersion?: EntityVersion;
+  // Distinguishes claims from the same source about the same subject —
+  // THE coalesce-vs-new-news switch: re-posting with the same eventKey
+  // (or none) refreshes the prior claim in place; a new eventKey is a new
+  // notice (which thread displacement then reconciles, §6.4). Feeds the
+  // steward's id derivation (provenance × subject × eventKey), so it can
+  // scope only your own claims. Contract-testable: same key never
+  // re-alerts, new key never silently merges.
+  eventKey?: string;
   // Source classification ("group-chat", "importer", "agent-run", ...).
   // BOUND BY THE STEWARD to the source's verified identity as a per-source
   // SET: first use of a kind adds it to the source's set (set growth is
@@ -459,7 +473,8 @@ type Notice = NoticeCandidate & {
   // for replace/retract (iOS UNNotificationRequest.identifier +
   // apns-collapse-id, Android notify(id), Web Push options.tag). Derived
   // by the STEWARD from verified provenance (source space DID + entity id
-  // [+ event key]) — never from candidate-supplied strings, so a hostile
+  // + eventKey) — never from raw candidate-supplied strings alone, so a
+  // hostile
   // source cannot collide another source's id to hijack coalescing or OS
   // replace/retract.
   id: string;
@@ -720,7 +735,7 @@ type SeenMark = {
 
 Everything else is the **changes projection** (§10.1) joined against marks:
 
-- `unseen(entity)` = `changes([entity], sinceSeq: seenVersion.seq)` is
+- `unseen(entity)` = `changes([entity], sinceBasis: seenMark.basis)` is
   non-empty → change dots on artifacts and their containers (space lists,
   home).
 - **"While you were away"** = one `changes(watchSet, basis: seenWatermark,
@@ -728,7 +743,8 @@ Everything else is the **changes projection** (§10.1) joined against marks:
   the steward. Renders as a pattern on the home context. This is the
   first-run view and the every-return view — the same query. The affordance
   must answer *what changed, by whom, since you looked* — the projection's
-  `author` field gives session-grain attribution from day one (§10.1) —
+  `author` token gives session-grain, equality-comparable attribution
+  from day one (§10.1; identity resolution is separately gated) —
   with a jump-in to the destination. Emphasizing the changed region at the
   destination (memory-v2 holds both versions; the diff is derivable) is
   the phase-1 stretch of this bar, not its phase-0 gate — but a bare dot
@@ -781,9 +797,11 @@ messages.
   agent-run watcher posts the receipt. Watchers are ordinary pattern code
   folded by the steward — proposable, inspectable, per-source.
 - **The generic seen watcher** is built in and covers every source with no
-  per-kind watcher: it compares the user's seen marks against the
-  `subjectVersion` stamps on derived notices and reports moot any notice
-  whose subject the user has since focused-open. This is what preserves
+  per-kind watcher: it compares the user's seen marks against
+  `subjectVersion` stamps — placed by the deriving watcher, or by the
+  steward at admission for explicitly posted candidates with a versioned
+  subject (§4.4) — and reports moot any notice whose subject the user has
+  since focused-open. This is what preserves
   the cross-device auto-retract (read it anywhere → clears everywhere)
   as a default, with zero source cooperation. One carve-out: it **skips
   notices that carry `actions`** — an approval must not vanish because
@@ -825,9 +843,12 @@ the key multi-user fact being that another user's home space is unknowable
   **profile** — the recipient's addressable identity — via the profile's
   notice inbox, a cross-principal, quota-gated append surface (net-new,
   §10.2): the write gate enforces per-source quotas against the *verified
-  writer identity*, not self-reported fields. The user's home space
-  **aggregates across their profiles' inboxes** (a user with work and
-  personal profiles has two inboxes feeding two independent stewards, §8).
+  writer identity*, not self-reported fields. Each profile's inbox feeds
+  **that profile's own steward and ledger** — there is no cross-profile
+  aggregation in the runtime (a work source never learns the personal
+  profile exists, §8); what looks like aggregation is the *device shell*
+  holding sessions for all the user's profiles and rendering one bell over
+  N independent ledgers.
   Until §10.2 lands, directed candidates rest in a durable per-source cell
   in the space where they arise and the steward reads them there
   (client-side interim), with quotas enforced at fold time — weaker (a
@@ -928,9 +949,16 @@ Two mechanisms at two altitudes:
   Identity is steward-derived from verified provenance (§4.4), so it
   cannot be forged.
 - **`threadKey` is the thread**, and displacement is a *derived rule over
-  it*: **within a threadKey, only the newest live notice is visible**;
-  older live notices in the thread are terminally retracted by the steward
-  (system disposition) when a newer one is admitted. A prepared result
+  it* — **scoped per verified source**: within (source identity ×
+  threadKey), only the newest live notice is visible; older live notices
+  in that scope are terminally retracted by the steward (system
+  disposition) when a newer one is admitted. The scoping is load-bearing:
+  `threadKey` is emitter-chosen and guessable (`conv:<id>`), so an
+  unscoped rule would let a hostile source terminally retract a victim's
+  live notice by posting into its thread — a quota-cheap
+  denial-of-attention. Scoped, a source can only displace *its own*
+  claims. `threadKey` may still *group* notices from different sources
+  for presentation (§9.1); displacement never crosses sources. A prepared result
   therefore displaces the raw occurrence by *sharing its thread*, not by
   naming notice ids — no displacement chains, no tombstone bookkeeping for
   the emitter, and "the displaced notice's subject advances again" needs no
@@ -1275,10 +1303,15 @@ that first needs it (§11), and each needs its own (small) design pass.
 
 1. **Changes projection** *(phase 0)*. One read-only, one-shot,
    session-independent memory-v2 query —
-   `changes(roots, branch, sinceSeq?, attribution?) → {toSeq, entries:
-   [{id, seq, deleted?, author?}]}` — giving a non-reactive head read, the
-   changed-since enumeration behind "while you were away", and
-   session-grain "by whom" from the commit log's persisted `sessionId`.
+   `changes(roots, branch, sinceBasis?, attribution?) → {basis, entries:
+   [{id, version, deleted?, author?}]}` — giving a non-reactive head read,
+   the changed-since enumeration behind "while you were away", and
+   session-grain, equality-comparable "by whom" via opaque author tokens
+   derived from the commit log. Versions and basis are **opaque tokens**
+   (per-entity ordering only; the space's commit clock is deliberately not
+   pattern-observable), the basis never samples the branch head (empty
+   results return the caller's basis; late-readable entities replay), and
+   unauthorized entities are indistinguishable from unchanged ones.
    Small because every load-bearing piece is shipped (the `head` table, the
    session catch-up delta, `FactEntry.seq`); a **security surface** because
    it exposes versions to pattern-space and adds an enumeration read, gated

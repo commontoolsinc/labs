@@ -151,7 +151,9 @@ from routing (§4.4); `id` is steward-derived from verified provenance, so the
 collision is impossible by construction; quotas bind to verified writer
 identity (§10.2); dismiss-without-open writes a legible learned max (§7);
 unconditional alert-once means even fresh-event-key spam can't re-buzz past
-its clamped rung; and the kind-lie fails because above-`review` defaults
+its clamped rung; thread displacement is scoped per verified source
+(§6.4), so posting into the victim's `threadKey` cannot retract the
+victim's live notices; and the kind-lie fails because above-`review` defaults
 key on verified facts, never self-declared `kind` (§4.2) — declaring
 yourself "group-chat" buys nothing without a verified human `actor` the
 user actually knows.

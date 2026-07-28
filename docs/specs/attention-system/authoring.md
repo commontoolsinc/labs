@@ -66,21 +66,24 @@ What to internalize about the envelope:
 
 ## Disposed stays disposed; new news is a new notice
 
-The lifecycle contract (§4.4) is deliberately simple. Re-posting with the
-same event key **coalesces**: the delivered notice updates in place —
-content, `expiresAt`, `progress` — always silently (§9.3). It never
-resurrects: a dismissed id stays dismissed. When something genuinely new
-happens, post a **new event key in the same `threadKey`** — thread
-displacement (§6.4) retires your older claim so the user sees one notice
-per thread, and the fresh notice alerts (once) if its rung warrants.
+The lifecycle contract (§4.4) is deliberately simple, and the switch is
+the envelope's `eventKey` field. Re-posting with the same `eventKey` (or
+none) **coalesces**: the delivered notice updates in place — content,
+`expiresAt`, `progress` — always silently (§9.3). It never resurrects: a
+dismissed claim stays dismissed. When something genuinely new happens,
+post a **new `eventKey` in the same `threadKey`** — thread displacement
+(§6.4) retires your older claim (displacement is scoped to your own
+verified identity — you can't retire anyone else's, and nobody can retire
+yours), and the fresh notice alerts (once) if its rung warrants.
 
 So the canonical agent-run shape:
 
 ```text
-post.send({ threadKey: `run:${runId}`, title: "Looking into your flight…",
+post.send({ threadKey: `run:${runId}`, eventKey: "started",
+            title: "Looking into your flight…",
             postureHint: "silent", progress: {done: 0}, ... })
-// ...progress ticks: same event key, silent coalesce...
-post.send({ threadKey: `run:${runId}`,          // NEW event key
+// ...progress ticks: same eventKey ("started"), silent coalesce...
+post.send({ threadKey: `run:${runId}`, eventKey: "result",
             title: "Rebooking drafted — needs your OK",
             attachment: draftCell, postureHint: "review",
             actions: [{key: "approve", label: "Approve", replyTo: myInbox},
