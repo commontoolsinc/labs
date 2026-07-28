@@ -210,13 +210,7 @@ const attachMemorySocketPipeline = (
           // Trace only after the receive resolves, so a message whose receive
           // fails (the fatal-error path below) is not logged as a write.
           void connection.receive(message).then(
-            (nextDisposition) => {
-              if (nextDisposition === "closed") {
-                safeSocketClose(1002, "Memory protocol mismatch");
-                return;
-              }
-              logMemWrites(message);
-            },
+            () => logMemWrites(message),
             () => {
               safeSocketClose(1011, "Memory websocket receive failure");
               closeConnection();

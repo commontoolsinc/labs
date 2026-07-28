@@ -11,6 +11,7 @@ import {
   permanentProtocolError,
   type Transport,
 } from "../v2/client.ts";
+import { respondToHello } from "../v2/handshake.ts";
 
 const TEST_AUDIENCE = "did:key:z6Mk-reconnect-auth-audience";
 
@@ -295,9 +296,10 @@ Deno.test(
  * data-model flag, the permanent handshake failure.
  */
 class FlagMismatchOnReconnectTransport implements Transport {
+  helloCount = 0;
+  closeCount = 0;
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
-  #helloCount = 0;
 
   setReceiver(receiver: (payload: string) => void): void {
     this.#receiver = receiver;
@@ -318,13 +320,21 @@ class FlagMismatchOnReconnectTransport implements Transport {
     };
     switch (message.type) {
       case "hello": {
-        this.#helloCount += 1;
+        this.helloCount += 1;
         const flags = getMemoryProtocolFlags();
-        this.#respond(
-          this.#helloCount === 1
-            ? helloOk()
-            : helloOk({ ...flags, modernCellRep: !flags.modernCellRep }),
-        );
+        if (this.helloCount === 1) {
+          this.#respond(helloOk());
+        } else {
+          const response = respondToHello({
+            type: "hello",
+            protocol: MEMORY_PROTOCOL,
+            flags: { ...flags, modernCellRep: !flags.modernCellRep },
+          });
+          if (response === null) {
+            throw new Error("Flag mismatch unexpectedly closed the connection");
+          }
+          this.#respond(response);
+        }
         return Promise.resolve();
       }
       case "session.open":
@@ -336,6 +346,7 @@ class FlagMismatchOnReconnectTransport implements Transport {
   }
 
   close(): Promise<void> {
+    this.closeCount += 1;
     return Promise.resolve();
   }
 
@@ -434,12 +445,15 @@ Deno.test(
         "flag mismatch",
       );
       assertEquals(error.name, "ProtocolError");
+      assertEquals(transport.helloCount, 2);
+      assertEquals(transport.closeCount, 0);
       // Still fatal on the next attempt, without reconnecting.
       await assertRejects(
         () => client.restoreConnection(),
         Error,
         "flag mismatch",
       );
+      assertEquals(transport.helloCount, 2);
     } finally {
       await client.close();
     }

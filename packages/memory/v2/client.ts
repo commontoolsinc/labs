@@ -354,7 +354,7 @@ export class Client {
         if (message.error) {
           const error = new Error(message.error.message);
           error.name = message.error.name;
-          if (error.name === "UnsupportedProtocol") {
+          if (isPermanentHandshakeError(error)) {
             Object.assign(error, { permanent: true });
             this.#fatalError = error;
           }
@@ -1618,6 +1618,13 @@ const isPermanentAuthorizationError = (error: unknown): boolean =>
 // that would take down sessions for other spaces.
 const isPermanentConnectionFailure = (error: Error): boolean =>
   (error as { permanent?: unknown }).permanent === true;
+
+// Every typed protocol rejection produced while `hello` is pending describes a
+// peer incompatibility that reconnecting to the same endpoint cannot heal.
+// `UnsupportedProtocol` is the legacy pre-v2.1 version signal; `ProtocolError`
+// is the current capability-flag rejection.
+const isPermanentHandshakeError = (error: Error): boolean =>
+  error.name === "UnsupportedProtocol" || error.name === "ProtocolError";
 
 const requireSessionOpenAuthMetadata = (
   value: unknown,
