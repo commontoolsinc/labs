@@ -132,23 +132,29 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   `Stream<string>` when `R` appears nowhere), while `R` in a property
   position discriminates and forces the author to declare what the body
   returns.
-  Prototyped to measure rather than estimate the cost, following the
-  `CELL_INNER_TYPE` precedent — a `declare const` unique symbol read as a
-  property, which `AnyBrandedCell` already uses for exactly this reason
-  ("without a concrete property mentioning T, T would be a phantom
-  parameter"). The whole workspace type-checks clean with `Stream` widened:
-  **zero** compile errors, not the handful a grep suggested.
-  That is worse news than it sounds, and it is the one thing C1 must not get
-  wrong. The ten `Stream<any>` guards do not break — they *stop matching*.
-  `[T] extends [Stream<any>]` evaluates to a miss for `Stream<E, R>`, silently,
-  because nothing declares a result yet; `Stream<any, any>` matches both.
-  So widening those guards (`api/index.ts:867`, `:1488`, `:1967`, `:2320`,
-  `:3256`, `runner/src/link-utils.ts:54`, three in
-  `runner/src/builtins/llm-dialog.ts`, one pattern) is mandatory and **not
-  compiler-enforced**: the first pattern to declare a result would otherwise
-  change wrapping behaviour across the type system with nothing failing.
-  C1 carries a type-level test that a result-carrying stream satisfies each
-  guard. `AsStream` — one
+  Prototyped to measure rather than estimate, following the `CELL_INNER_TYPE`
+  precedent — a `declare const` unique symbol read as a property, which
+  `AnyBrandedCell` already uses for exactly this reason ("without a concrete
+  property mentioning T, T would be a phantom parameter"). The workspace
+  type-checks clean with `Stream` widened: zero errors.
+  **The conditional-type utilities do not need auditing.** An earlier draft of
+  this entry called for widening every `[T] extends [Stream<any>]` guard,
+  on the theory that a result-carrying stream would silently stop matching.
+  It does stop matching — but that does not reach the schema layer, which
+  reads the *written* `ts.TypeNode` and takes the result off the annotation's
+  second type argument (`schema-generator/src/type-utils.ts:427-437`). The
+  guards shape inference and authoring ergonomics, not schema extraction, and
+  dropping a result there is harmless for every helper that does not care
+  about one. Where a guard genuinely mishandles a returning verb it shows up
+  as a compile error in that pattern, loudly, and only for verbs that opted
+  in — so a single fixture declaring a result catches the class, and guards
+  widen reactively when that fixture proves they must. Removing the default
+  makes the compiler enumerate all 253 `Stream<` sites, which is a useful
+  one-time audit tool but not a prerequisite.
+  What must be threaded is the construction path, not the guards:
+  `Handler`/`HandlerFactory` return the stream, so they carry the result
+  parameter or an author's annotation cannot match what `handler()` produces.
+  `AsStream` — one
   slot, `Apply` and `IKeyable` assume that — keeps producing `Stream<A,
   void>`, so a projection through the HKT drops a declared result. That is
   acceptable because streams are leaves: patterns do not `key()` into a
