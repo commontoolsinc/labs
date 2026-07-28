@@ -1,6 +1,6 @@
 # CF Protocol: Append-Only Log & Authorization (Sections 8–9)
 
-See `docs/specs/verifiable-execution/README.md` for navigation.
+See the [verifiable-execution document map](README.md) for navigation.
 
 ## 8. Append-Only Log
 

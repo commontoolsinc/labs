@@ -9,24 +9,26 @@ update when behavior changes.
 
 | Doc | Status | One line |
 | --- | --- | --- |
-| `ts_transformers_target_pattern_language_spec.md` | **Normative** | What pattern authors may write: Supported / Compatibility-only / Unsupported construct families |
-| `ts_transformers_lowering_contract.md` | **Normative** | Ten semantic invariants every rewrite must preserve |
-| `ts_transformers_current_behavior_spec.md` | **Descriptive** | What the pipeline actually does today, stage by stage; §21.1 maps enumerable claims to their canonical constants |
-| `ts_transformers_goals.md` | Intent | Why the package exists; G-/NG-/C- numbered goals, non-goals, invariants |
-| `ts_transformers_design_deltas.md` | Roadmap/status | Deliberate behavior deltas: landed, partial, open (includes the live follow-up queue) |
-| `ts_transformers_type_driven_behavior_inventory.md` | Descriptive (narrow) | Where checker/type information changes transformer behavior |
-| `cfc_authoring_contract.md` | Contract (core implemented) | CFC-aware authoring surface: alias set + lowering rules to `ifc.*`; see its status header for letter-vs-shipped deltas |
-| `cfc_ui_helper_contract.md` | Contract (implemented) | UiAction / UiPromptSlot / UiDisclosure JSX rewrite + `ifc.uiContract` hints |
-| `../schema-generator/ts_to_json_schema_mapping.md` | **Descriptive** | The TypeScript→JSON Schema mapping rules (the other half of the language contract) |
-| (historical records) | Historical | Superseded designs and PR-scoped artifacts live in `docs/history/` (see `docs/README.md` for the live/historical rules); nothing there describes the current system |
+| [`ts_transformers_target_pattern_language_spec.md`](ts_transformers_target_pattern_language_spec.md) | **Normative** | What pattern authors may write: Supported / Compatibility-only / Unsupported construct families |
+| [`ts_transformers_lowering_contract.md`](ts_transformers_lowering_contract.md) | **Normative** | Ten semantic invariants every rewrite must preserve |
+| [`ts_transformers_current_behavior_spec.md`](ts_transformers_current_behavior_spec.md) | **Descriptive** | What the pipeline actually does today, stage by stage; §21.1 maps enumerable claims to their canonical constants |
+| [`ts_transformers_goals.md`](ts_transformers_goals.md) | Intent | Why the package exists; G-/NG-/C- numbered goals, non-goals, invariants |
+| [`ts_transformers_design_deltas.md`](ts_transformers_design_deltas.md) | Roadmap/status | Deliberate behavior deltas: landed, partial, open (includes the live follow-up queue) |
+| [`ts_transformers_type_driven_behavior_inventory.md`](ts_transformers_type_driven_behavior_inventory.md) | Descriptive (narrow) | Where checker/type information changes transformer behavior |
+| [`cfc_authoring_contract.md`](cfc_authoring_contract.md) | Contract (core implemented) | CFC-aware authoring surface: alias set + lowering rules to `ifc.*`; see its status header for letter-vs-shipped deltas |
+| [`cfc_ui_helper_contract.md`](cfc_ui_helper_contract.md) | Contract (implemented) | UiAction / UiPromptSlot / UiDisclosure JSX rewrite + `ifc.uiContract` hints |
+| [`../schema-generator/ts_to_json_schema_mapping.md`](../schema-generator/ts_to_json_schema_mapping.md) | **Descriptive** | The TypeScript→JSON Schema mapping rules (the other half of the language contract) |
+| [Historical records](../../history/README.md) | Historical | Superseded designs and PR-scoped artifacts; nothing there describes the current system |
 
-Related, outside this directory: `docs/specs/json_schema.md` (the runtime
+Related, outside this directory: [JSON Schema](../json_schema.md), the runtime
 schema dialect these schemas target; the `JSONSchema` type in
-`packages/api/index.ts` is the authoritative field inventory),
-`docs/specs/pattern-construction/` (runner-side builder/graph design),
-`docs/tutorial/07-compilation.md` (the narrative walkthrough — best first read
-for humans and agents new to the system), and `packages/*/AGENTS.md` (the
-per-package working guides: doc maps, instruments, conventions).
+`packages/api/index.ts` is the authoritative field inventory. The
+[pattern-construction specs](../pattern-construction/README.md) define the
+runner-side builder and graph design. The
+[compilation tutorial](../../tutorial/07-compilation.md) is the narrative
+walkthrough and the best first read for humans and agents new to the system.
+The per-package `AGENTS.md` files provide working guides, document maps,
+instruments, and conventions.
 
 ## Which document wins
 
@@ -67,8 +69,8 @@ per-package working guides: doc maps, instruments, conventions).
    you add one.
 3. Prose lists are labeled "as of this writing". Status headers say what kind
    of document you're in. Docs whose content is superseded move to
-   `docs/history/` per the repo-wide live/historical rules (`docs/README.md`)
-   — they do not linger unlabeled.
+   [`docs/history/`](../../history/README.md) per the repo-wide
+   [live/historical rules](../../README.md) — they do not linger unlabeled.
 4. Periodic verification: run the `spec-audit` skill (`skills/spec-audit/`)
    after major landings or quarterly. It maps claim-level checks of this corpus
    to the relevant authority, code, tests, fixtures, and runtime seams. The

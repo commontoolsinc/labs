@@ -4,8 +4,8 @@
 
 Guidance + reference demo. Tracks **CT-1649** ("Document shared-profile
 participant rosters"). Builds directly on the shared profile space work in
-**CT-1645** (`docs/specs/shared-profile-space.md`) and the multi-profile
-`#profile` resolution described there and in PR #3830.
+**CT-1645** ([Shared Profile Space](shared-profile-space.md)) and the
+multi-profile `#profile` resolution described there and in PR #3830.
 
 ## The problem
 
@@ -449,8 +449,8 @@ Two deployable versions:
 
 ## References
 
-- `docs/specs/shared-profile-space.md` — CT-1645 shared profile space, `wish`
-  profile targets, owner-protected profile writes.
+- [Shared Profile Space](shared-profile-space.md) — CT-1645 shared profile
+  space, `wish` profile targets, owner-protected profile writes.
 - `packages/runner/src/builtins/wish.ts` — `#profile`, `#profileName`,
   `#profileAvatar` resolution and the `WishState` result shape.
 - `packages/patterns/system/profile-home.tsx` — `ProfileHomeOutput`

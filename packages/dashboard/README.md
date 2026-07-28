@@ -439,40 +439,45 @@ Notes:
   gray and shows `$???` for that source. The values from responding sources
   remain as a lower bound. A GitHub classic-plan setup still falls back to
   minutes when Blacksmith is not configured.
-- **`benchmarks`** trends a **scale-invariant index** of benchmark performance on the
-  `benchmarks.yml` runs on main over ~45 days. The job runs `deno bench --json` over
-  the runner, cache, and deep-equal benchmarks and uploads the report as a
-  `bench-results` artifact (90-day retention; there is no committed history). Each
-  run's index is the previous run's index times the **geometric mean of the
-  per-benchmark changes** between the two runs, so every benchmark weighs the same
-  regardless of size and **only a broad, across-the-board move shifts it** — a
-  regression in one benchmark, however slow, barely registers (that is the
-  drill-down's job; a summed total, by contrast, is dominated by the few slowest
-  benchmarks). The headline is the **trend** itself — the fractional change of the
-  index across the recent window — over a second line naming how many benchmarks the
-  latest run measured and, when a recent window is highlighted, how many days that
-  window spans. **Red** — the signal this tile is mainly here to
-  raise — is the **most recent run failing outright, or finishing green on CI with no
-  readable benchmark data** (it ran and made nothing usable, so it is as good as
-  failed); red reads the workflow-run list and the latest run's cached result, so it
-  fires even when the artifacts cannot be read. **Orange** is the index **trending
-  up** (past 5%). The trend reads a recent window only — the runs in the last
-  `BENCH_TREND_MAX_AGE_DAYS` or the newest `BENCH_TREND_MIN_RUNS`, whichever is more,
-  the same "larger of the two" idea as CI duration's median window — while the
-  sparkline still spans the full ~45 days with that window drawn brighter. Green
-  while flat or falling. `deno bench` samples
-  each benchmark to a fixed time budget, so the run's wall clock barely moves with
-  performance; the per-op times do, which is why the tile trends those rather than
-  the run's duration. Because the index comes from the artifacts, the tile grays when
-  no in-window run has readable data and the latest run is neither failed nor empty:
-  **collecting…** while a fetch is still in progress — shown from the moment a
-  collection starts, before the run list is even fetched, so a freshly loaded
-  dashboard is never blank — and **benchmark data unavailable** once a fetch has
-  finished and found none. Chaining the per-run ratios makes **adding or removing a benchmark
-  a non-event**: it is in only one run of the adjacent pair at that step, so it drops
-  out of the geometric mean and the index does not step — no reset needed. A large
-  rise reads as a fold multiplier (`▲44×`) once it passes 4x, rather
-  than a long percentage. The trend is a robust
+- **`benchmarks`** trends one **scale-invariant index per CPU** on the
+  `benchmarks.yml` runs on main over ~45 days. The job runs `deno bench --json`
+  over the runner, cache, and deep-equal benchmarks. It uploads the report as a
+  `bench-results` artifact with 90-day retention. There is no committed
+  history. Each CPU's index compares a run with the previous run on the same
+  CPU. It multiplies the previous index by the **geometric mean of the
+  per-benchmark changes**. Every benchmark weighs the same regardless of size.
+  **Only a broad, across-the-board move shifts an index.** A regression in one
+  benchmark barely registers, however slow that benchmark is. The drill-down
+  covers individual benchmarks. A summed total would instead be dominated by
+  the few slowest benchmarks. Each CPU has its own coloured line. The headline
+  shows the largest established CPU trend. A second line names how many
+  benchmarks the latest run measured and the highlighted window when applicable.
+  **Red** marks the **most recent run failing outright, or finishing green on CI
+  with no readable benchmark data**. A successful run with no usable output is
+  treated as failed. This
+  state reads the workflow-run list and the latest run's cached result. It
+  therefore fires when the artifacts cannot be read. **Orange** means at least
+  one CPU index is **trending up** past 5%. Each CPU trend uses the runs in the
+  last `BENCH_TREND_MAX_AGE_DAYS` or the newest `BENCH_TREND_MIN_RUNS`,
+  whichever set is larger. This matches the window rule used for the CI
+  duration median. The corresponding line still spans the full ~45 days. Its
+  trend window is brighter. Green means every established CPU is flat or
+  falling. `deno bench` samples each benchmark to a fixed time budget. The
+  run's wall clock therefore barely moves with performance. The per-operation
+  times do move, so the tile trends those values instead. Because the index
+  comes from artifacts, the tile turns gray when no in-window run has readable
+  data and the latest run is neither failed nor empty. It shows
+  **collecting…** while a fetch is in progress. This state appears before the
+  run list is fetched, so a newly loaded dashboard is never blank. It shows
+  **benchmark data unavailable** after an empty fetch finishes. Adding or
+  removing a benchmark does not move an index. The benchmark is absent from
+  one side of that adjacent comparison, so it drops out of the geometric mean.
+  A CPU change starts another line instead of connecting measurements from
+  unlike machines. A gap longer than one fifth of the chart width breaks a
+  CPU's line. Any sample isolated by those breaks appears as a point. A CPU
+  with one sample also appears as a point until another sample can form a line.
+  A large rise reads as a fold multiplier (`▲44×`) once it passes 4x. This
+  avoids a long percentage. The trend is a robust
   **daily-median Theil–Sen** fit: the sub-daily samples are first collapsed to one
   median per calendar day, then the trend is the median of the pairwise log-slopes
   between days, projected across the day span. The daily median absorbs within-day
@@ -484,16 +489,21 @@ Notes:
   The window is capped by the 90-day artifact retention, so it shows at most ~45
   days and only as far back as the job has run.
   - The tile drills through to the per-benchmark history behind `/bench`, which the
-    tile's collection keeps warm in the background. That collection lists benchmark
-    runs on main, samples one run per shortest-view bucket, downloads that artifact,
-    unzips it in-process, and reads each benchmark's timings. Each completed
-    artifact check is persisted before it is counted as finished, so only new runs
-    and new attempts are fetched after the first fill or a server restart. (The
-    shortest-view buckets are about 16 minutes wide, so the first cache fill can
-    download correspondingly more artifacts.)
-  - Its **runtime benchmarks** view at `/bench?view=runtime` shows a sparkline
-    for **every** benchmark on a shared calendar-time axis, so a late-starting
-    benchmark sits at the right and a stale one visibly ends short of it.
+    tile's collection keeps warm in the background. The collection lists
+    benchmark runs on main. It samples one run per shortest-view bucket,
+    downloads that artifact, and unzips it in the process. It then reads each
+    benchmark's timings and CPU. A report without a CPU identity is cached as
+    unusable instead of being pooled with measurements from unknown machines.
+    Cache entries written before CPU identity was stored are fetched again.
+    Each completed artifact check is persisted before it is counted as
+    finished. Only new runs and attempts are fetched after the first fill or a
+    server restart. The shortest-view buckets are about 16 minutes wide. The
+    first cache fill can therefore download more artifacts.
+  - Its **runtime benchmarks** view at `/bench?view=runtime` shows one coloured
+    line per CPU for **every** benchmark. The lines share a calendar-time axis.
+    A late-starting CPU line sits at the right. A single sample appears as a
+    point. A stale line visibly ends short of the current date. The dashboard
+    tile leaves out the CPU legend to keep the compact chart readable.
     Selectors choose which measurement to plot (a percentile ladder — **p0** =
     min, **p50** = the mean, **p75**, **p99**, **p99.5**, **p99.9**, **p100** =
     max) and whether to group by source **file** or sort by latest **duration**
@@ -503,11 +513,20 @@ Notes:
     the collected samples per day. Keyboard arrows adjust the window without
     moving focus. Enter applies the range immediately. Another selector carries
     the range into its own navigation, and leaving the controls applies it
-    directly. Each row is coloured by its own trend, and the page reads from the
+    directly. Each row shows one latest value and trend from the CPU with the
+    most benchmark samples in the selected window. A tie uses the CPU with the
+    newest sample, then its name for a stable result. That representative CPU
+    also sets the row colour and sorting. A numbered CPU key identifies the
+    representative series and links to its definition. The same key and a
+    colour swatch appear in one CPU legend after all benchmark graphs instead
+    of repeating processor names in every row. It includes the full processor
+    identity reported by the artifacts, the number of benchmark graphs and runs
+    shown for that CPU, and the observed date range. The page reads from the
     server cache so it re-renders instantly. Its progress panel stays visible as
-    Idle between collections. During collection it shows cached, queued, requested,
-    responded, outstanding, and failed artifact checks. Changing the range leaves
-    the server collection running and joins it from the new page.
+    Idle between
+    collections. During collection it shows cached, queued, requested,
+    responded, outstanding, and failed artifact checks. Changing the range
+    leaves the server collection running and joins it from the new page.
   - The **CI duration history** view at `/bench?view=ci` selects either labs
     `deno.yml` or loom `test-fast.yml`. It charts every job's start-to-finish
     duration on one calendar-time axis. An overall row measures the workflow

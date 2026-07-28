@@ -215,9 +215,10 @@ with delayed verdict delivery is the natural next step if this area churns.
 > failure is surfaced to the caller (rejection, revert notification, retry
 > exhaustion). There is no path on which it silently vanishes.
 
-Stated in `docs/development/committed-write-backpressure.md`; listed here
-because retry-loop and backpressure optimizations are the changes most
-likely to violate it.
+Stated in
+[Committed-write backpressure](../../development/committed-write-backpressure.md);
+listed here because retry-loop and backpressure optimizations are the changes
+most likely to violate it.
 
 Layer: client retry/backpressure (`scheduler/backpressure.ts`, storage
 rejection taxonomy in `rejection.ts`).

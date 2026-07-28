@@ -1,6 +1,6 @@
 # CF Protocol: Foundations (Sections 1–4)
 
-See `docs/specs/verifiable-execution/README.md` for navigation.
+See the [verifiable-execution document map](README.md) for navigation.
 
 ## Conventions
 

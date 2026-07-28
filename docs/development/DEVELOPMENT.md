@@ -8,6 +8,29 @@ for Common Fabric development.
 Dependency declarations, version rolls, and dependency troubleshooting are
 covered in [Dependencies](DEPENDENCIES.md).
 
+## Focused guides and design material
+
+- [Engineering priorities](ENGINEERING_PRIORITIES.md) defines how product
+  evidence selects work across correctness, speed, security, and other
+  dimensions.
+- [Performance program](PERFORMANCE_PROGRAM.md) turns the speed priority into
+  measurements and candidate projects.
+- [Committed-write backpressure](committed-write-backpressure.md) explains how
+  the scheduler surfaces or retries a committed write that the server rejects
+  under contention.
+- [Code coverage in CI](COVERAGE.md) explains the runtime and authored-pattern
+  coverage mechanisms. Its
+  [one-line guard note](deno-coverage-guard-line-artifact.md) explains a V8
+  branch-coverage reporting artifact.
+- [Invoking handlers from outside a pattern](handlers/invocation-outside-pattern.md)
+  covers programmatic handler-stream invocation through `RuntimeProcessor`.
+- [Bidirectional sync with an external canonical source](importers/bidirectional_sync.md)
+  covers identity, reconciliation, and write-back for importers.
+- [Ingest channels and the journal sink](proposals/ingest-channels-journal-sink.md)
+  proposes a durable append-only endpoint for external sources.
+- [Vouched ingest channel minting](proposals/vouched-ingest-channel-mint-design.md)
+  records the split-mint seam that the ingest-channel proposal builds on.
+
 ## Style & Conventions
 
 ### Formatting
