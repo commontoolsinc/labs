@@ -1,11 +1,7 @@
 import { AnyCellWrapping } from "@commonfabric/api";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
-import {
-  Immutable,
-  isReadonlyRecord,
-  isRecord,
-} from "@commonfabric/utils/types";
+import { isReadonlyRecord, isRecord } from "@commonfabric/utils/types";
 import { storedCfcMetadataAppliesToPath } from "./cfc/metadata.ts";
 import { ContextualFlowControl } from "./cfc.ts";
 import { type JSONSchema } from "./builder/types.ts";
@@ -1273,7 +1269,7 @@ class TransformObjectCreator
   // This controls the behavior when properties is specified, but
   // additonalProperties is not.
   addOptionalProperty(
-    _obj: Record<string, Immutable<FabricValue>>,
+    _obj: Record<string, FabricValue>,
     _key: string,
     _value: FabricValue,
   ) {

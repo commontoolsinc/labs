@@ -710,11 +710,11 @@ export interface IMemoryChange {
   /**
    * Value memory address had before change.
    */
-  before: Immutable<FabricValue>;
+  before: FabricValue;
   /**
    * Value memory address has after change.
    */
-  after: Immutable<FabricValue>;
+  after: FabricValue;
 }
 
 export type StorageTransactionStatus =
@@ -1785,8 +1785,8 @@ export interface TransactionReactivityLog {
 
 export interface TransactionWriteDetail {
   address: IMemorySpaceAddress;
-  value?: Immutable<FabricValue>;
-  previousValue?: Immutable<FabricValue>;
+  value?: FabricValue;
+  previousValue?: FabricValue;
   /**
    * Pre-transaction slot presence at `address.path` — distinguishes an
    * absent slot from a present slot holding `undefined`, which
@@ -1799,7 +1799,7 @@ export interface TransactionWriteDetail {
 
 export interface TransactionReadDetail {
   address: IMemorySpaceAddress;
-  value?: Immutable<FabricValue>;
+  value?: FabricValue;
 }
 
 export type NativeStorageCommitOperation =
@@ -1943,13 +1943,13 @@ export interface ITypeMismatchError extends IStorageError {
  */
 export interface IAttestation {
   readonly address: IMemoryAddress;
-  readonly value?: Immutable<FabricValue>;
+  readonly value?: FabricValue;
 }
 
 // An IAttestation where the address is an IMemorySpaceAddress
 export interface IMemorySpaceAttestation {
   readonly address: IMemorySpaceAddress;
-  readonly value?: Immutable<FabricValue>;
+  readonly value?: FabricValue;
 }
 
 // Re-export transaction wrapper utilities from implementation

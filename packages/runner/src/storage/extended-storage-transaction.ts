@@ -1,4 +1,4 @@
-import { type Immutable, isRecord } from "@commonfabric/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
@@ -1567,7 +1567,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   readOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): Immutable<FabricValue> {
+  ): FabricValue {
     options = this.#withAmbientReadMeta(options);
     this.prepareRead(address);
     const readResult = this.tx.read(address, options);
@@ -1588,7 +1588,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   readValueOrThrow(
     address: NormalizedFullLink,
     options?: IReadOptions,
-  ): Immutable<FabricValue> {
+  ): FabricValue {
     return this.readOrThrow(toMemorySpaceAddress(address), options);
   }
 
