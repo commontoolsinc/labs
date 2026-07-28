@@ -2188,6 +2188,36 @@ Deno.test("diffcov: wrapped expansion holds the content after the hunk still", (
   }
 });
 
+Deno.test("diffcov: wrapped reveal keeps the next triangle on screen", () => {
+  const { s, done } = tallSession(9);
+  try {
+    s.resize(20, 9);
+    press(s, "\\", "ctrl-l");
+
+    const view = s.view();
+    assert(
+      (view.diffMetadataRows?.length ?? 0) > 0,
+      "the next edge has adjacent metadata",
+    );
+    assertEquals(
+      view.diffAnnotations,
+      [{ line: 5, kind: "expandUp" }],
+      "the metadata label is withheld when its reflow would hide the triangle",
+    );
+    const rendered = renderFrame(s.displayDoc(), view);
+    assert(
+      rendered.slice(0, -1).some((row) => row.endsWith("◥")),
+      "the next expansion triangle remains visible",
+    );
+    assert(
+      rendered.every((row) => !row.includes("^L") && !row.endsWith("█")),
+      "no orphan metadata connector is drawn",
+    );
+  } finally {
+    done();
+  }
+});
+
 /** The row texts a frame — or the session itself — puts on screen. */
 function rows(f: { doc: Document; view: ViewState }): string[] {
   return f.doc.lines.slice(f.view.top, f.view.top + f.view.height - 1)

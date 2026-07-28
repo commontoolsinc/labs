@@ -545,7 +545,6 @@ export class Session {
         if (annotation.line < from || annotation.line >= to) {
           return [{ ...annotation, line: back(annotation.line) }];
         }
-        if (annotation.kind === "diffMetadata") return [];
         return [{
           ...annotation,
           line: rev.up ? from : Math.max(0, from - 1),
@@ -2782,16 +2781,17 @@ export class Session {
     const lines = this.foldPlan().displayLines;
     for (const annotation of annotations) {
       const line = lines[annotation.line];
-      if (!line) continue;
-      width = Math.max(
-        width,
-        displayWidth(line, this.displayMode) -
-          this.lineContentWidth(
-            annotation.line,
-            annotations,
-            contentWidth,
-          ),
-      );
+      if (line) {
+        width = Math.max(
+          width,
+          displayWidth(line, this.displayMode) -
+            this.lineContentWidth(
+              annotation.line,
+              annotations,
+              contentWidth,
+            ),
+        );
+      }
     }
     return Math.max(0, width);
   }
@@ -3505,9 +3505,6 @@ export class Session {
   ): readonly number[] {
     const line = this.adjacentDiffMetadataLine(expand);
     if (line === null) return [];
-    const fold = this.foldPlan();
-    const folded = fold.docToDisplay(line);
-    if (fold.displayLines[folded] !== this.currentDoc.lines[line]) return [];
     const first = this.toDisplay(line);
     const last = this.toDisplayEnd(line);
     const rows: number[] = [];
@@ -3528,11 +3525,6 @@ export class Session {
     }
     const fold = this.foldPlan();
     const marker = fold.docToDisplay(expand.markerLine);
-    if (
-      fold.displayLines[marker] !== this.currentDoc.lines[expand.markerLine]
-    ) {
-      return [];
-    }
     const annotations: DiffAnnotation[] = [{
       line: marker,
       kind: expand.up ? "expandUp" : "expandDown",

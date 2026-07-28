@@ -101,9 +101,9 @@ export function labeledDiffMetadataLine(
   );
   if (!downward || metadata.line !== downward.line + 1) return metadata.line;
   const line = lines[downward.line];
-  if (!line) return metadata.line;
   const firstWidth = diffAnnotationDecoration("expandDown", width).firstWidth;
-  return displayWidth(line, mode) > Math.max(1, width) - firstWidth
+  return line &&
+      displayWidth(line, mode) > Math.max(1, width) - firstWidth
     ? null
     : metadata.line;
 }
@@ -660,8 +660,8 @@ function selectionRowBounds(
   const firstCell = Math.min(lo, display.length - 1);
   const lastCell = Math.max(firstCell, hi - 1);
   return {
-    first: wrappedRowForPosition(plan, line, firstCell)?.offset ?? 0,
-    last: wrappedRowForPosition(plan, line, lastCell)?.offset ?? 0,
+    first: wrappedRowForPosition(plan, line, firstCell)!.offset,
+    last: wrappedRowForPosition(plan, line, lastCell)!.offset,
   };
 }
 

@@ -36,4 +36,8 @@ describe("CLI naming", () => {
     expect(cliName({ envName: "$(touch /tmp/pwned)" })).toBe("cf");
     expect(cliName({ envName: "`touch /tmp/pwned`" })).toBe("cf");
   });
+
+  it("recognizes the executable name when the environment gives no name", () => {
+    expect(cliName({ envName: "", execPath: "/usr/local/bin/cf" })).toBe("cf");
+  });
 });
