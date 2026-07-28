@@ -14,6 +14,12 @@ post-merge review amendments (decisions 5–7: attribution via CFC provenance,
 patterns return references while clients render identity, `@name` deferred);
 index and fixture wording follows the references model.
 
+**Amended 2026-07-28**, context only — no scope or decision changed: Risks
+names #5059 (`cf piece setsrc --check`) as the candidate preflight for the
+write-storm gate, and the design doc records the llm-dialog invocation
+precedent (Prior art) and two deferred `cf piece get` read-control flags
+(Discovery).
+
 ## Governing decisions
 
 Made 2026-07-24, shaping everything below:
@@ -327,6 +333,13 @@ change that alters them.
   #4956, merged 2026-07-24 — is the candidate fix; confirm before the first
   Phase 1 deploy). Until the gate clears, a "live-board acceptance pass"
   degrades to a scratch board and must say so rather than pass silently.
+  **#5059 (`cf piece setsrc --check`) is the candidate preflight for this
+  gate:** it answers whether a source can be applied to a given piece before
+  attempting it, driving the real rules in dry-run — the schema subset proof,
+  the CFC envelope merge, the retained-link validator — rather than a second
+  copy of them. It does not measure commit rates, so the rehearsal above
+  stands; what it removes is discovering an incompatibility by attempting the
+  swap on the live board.
 - **WS-E's gates may stall it** (OQ1, CFC review, collection unknown, trusted
   ingress mint and propagation): it is last and severable; everything through
   Phase 4 delivers without it, and `topics.agentName` remains the safe interim.

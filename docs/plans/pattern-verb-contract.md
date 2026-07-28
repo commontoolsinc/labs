@@ -20,6 +20,12 @@ not a parallel invocation field; patterns return child references while clients
 render their ids and paths; and client-local `@name` bindings are deferred
 because they overlap confusingly with fabric-side slugs.
 
+**Context added (2026-07-28)**, from a further review pass — additive only, no
+decision changed: a second in-tree precedent for the invocation protocol, the
+llm-dialog builtin (Prior art); `cf piece setsrc --check` (#5059) named as the
+candidate preflight for the implementation plan's write-storm gate; and two
+deferred `cf piece get` read-control flags recorded under Discovery.
+
 ## Goal
 
 Any pattern drivable by an agent, with no pattern-specific CLI code. Filing one
@@ -298,6 +304,16 @@ broad form proves too noisy. Both are projections of existing references, not
 fields every pattern must maintain. Acceptance for an index: its serialization
 contains no expanded piece, action, or runtime values, and a full-board read
 stays bounded.
+
+Two client affordances surfaced in review (2026-07-28) and are deferred,
+blocking nothing: `cf piece get` could grow flags that let an agent control
+how much data a read returns when exploring the fabric interactively — a
+`--schema` override that reads through a narrower schema (the runtime's
+`asSchema`; the CLI already narrows its own internal reads this way, e.g.
+`packages/cli/lib/piece-render.ts`), and a limit on the number of records
+returned from a large array. Adjacent CLI work for when board scale demands
+it, recorded here so the deferral is deliberate; neither is an ask on any
+workstream in the implementation plan.
 
 Discovery is the parent's job; the child's own verbs are the child's. A comment
 is addressed to the topic, not routed through the board — **but that depends on
@@ -687,6 +703,17 @@ fixed-timeout sync failures, roughly six minutes of mutation waits, and one
 field silently discarded by a stale deployed schema. Each failure maps to a
 section above, and the session's three-topic scenario is adopted as the
 end-to-end acceptance fixture in the implementation plan.
+
+Closer to home, the llm-dialog builtin already runs the invocation protocol in
+miniature: each tool call mints its result cell at a **caller-supplied id**
+(`toolCall.id`), hands it to the handler as `result` — its own comment reads
+"doesn't HAVE to be used, but can be" — and resolves off the commit callback
+(`packages/runner/src/builtins/llm-dialog.ts`, the tool-invocation path around
+`runtime.run(tx, pattern, invocationArgs, result)`). The scheduler receipt
+remains the right substrate for the reasons given in Part 2 — the create-only
+exactly-once collision is what a client retry needs — but llm-dialog is
+in-production evidence that the caller-supplied-id → durable-result-cell
+ergonomics this design exposes already work.
 
 ## Open questions
 
