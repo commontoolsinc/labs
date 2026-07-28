@@ -240,7 +240,7 @@ run_piece_values() {
   # Update the piece's source code
   replace 's/Simple counter:/Simple counter 2:/g' "$WORK_DIR/main.tsx"
   replace \
-    's|value: cell.value,|sourceVersion: "updated source", value: cell.value,|g' \
+    's|value: cell.value,|sourceVersion: str`updated source: ${cell.value}`, value: cell.value,|g' \
     "$WORK_DIR/main.tsx"
   replace \
     's|stringField: { type: "string" },|sourceVersion: { type: "string" }, stringField: { type: "string" },|g' \
@@ -255,7 +255,7 @@ run_piece_values() {
   if ! grep -q "Simple counter 2" "$WORK_DIR/main.tsx"; then
     error "Retrieved source code was not modified"
   fi
-  if ! grep -q 'sourceVersion: "updated source"' "$WORK_DIR/main.tsx"; then
+  if ! grep -q 'sourceVersion: str`updated source:' "$WORK_DIR/main.tsx"; then
     error "Retrieved source code did not contain the execution marker"
   fi
 
@@ -366,7 +366,7 @@ run_piece_values() {
   SOURCE_VERSION=$(cf piece get $SPACE_ARGS --piece $PIECE_ID sourceVersion)
   assert_json_eq \
     "$SOURCE_VERSION" \
-    '"updated source"' \
+    '"updated source: 10"' \
     "Updated piece source did not produce the expected result."
 
   # Check the indexed space listing contains the piece.
