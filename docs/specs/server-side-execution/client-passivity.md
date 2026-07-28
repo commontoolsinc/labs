@@ -534,6 +534,32 @@ peeled three successive liveness layers — each fix exposing the next:
    Both are legitimate; (ii) matches the plan's own steady-state
    theory and unblocks P1's measurement program immediately.
 
+10. **P0 ACCEPTANCE ACHIEVED (2026-07-27) — the persistent-page leg
+   ENGAGES.** Owner-approved sequencing: (ii) first with the cold row
+   retained, then (i) scoped by P1 data. The harness gained
+   `CF_NOTE_CREATE_TIMING_DELAY_MS` (an inter-create delay models a
+   real session: the demand window grows with the delay while the
+   concurrent write load does NOT; delay 0 remains the cold-start
+   storm row). First engaged run — fresh store,
+   `CF_NOTE_CREATE_TIMING_SERIES=20 CF_NOTE_CREATE_TIMING_DELAY_MS=
+   3000` (~90s window vs ~15-30s activation): test green, and
+   **claimsIssued 78 (4 reissued), acceptedActionAttempts 60,
+   settlementsCommitted 18, settlementsNoOp 42, settlementsFailed 0,
+   claimedActionConflicts 96** (mid-run read shortly before the
+   harness wind-down; only 13 sponsor-demand-gone declines ALL RUN vs
+   54-92 in every storm run — candidates were claimed, not declined).
+   Every P0 mechanism is load-bearing in this run: re-anchor (R2),
+   pump (R3a/b), cold-refresh debounce (R3c), piece linger (R3e),
+   admission unfreeze (R3f). The conflict count is the CP-panel's
+   predicted speculation leg (client racing server on the same
+   actions) — P1/P4 territory, now MEASURABLE. The server executed
+   standing work authoritatively on behalf of a live client for the
+   first time in the arc. NEXT: P1's instrumented program runs on
+   this scenario (engagement counters now non-zero by construction);
+   the cold row keeps being published as cold-start truth; lever (i)
+   (instantiation-I/O, doc-set bulk-seed first) proceeds against P1's
+   cold-start-distribution budget.
+
    Original diagnosis (superseded in one respect — the dominant class
    was growth, not never-held): the demand-pull traversal scaler.
    With the pump landed,

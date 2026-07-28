@@ -157,6 +157,22 @@ const CAPTURE_NOTE_CREATE_PROFILE_SERIES = (() => {
     return 0;
   }
 })();
+// Persistent-page cadence (client-passivity P6): a positive delay between
+// note-create iterations models a REAL session — one page open for a minute
+// or more with periodic interactions — instead of the as-fast-as-possible
+// storm. The demand window grows with the delay while the concurrent write
+// load does NOT, so the server-primary executor's cold activation races a
+// realistic window. The storm variant (delay 0) stays as the cold-start
+// measurement row.
+const NOTE_CREATE_TIMING_DELAY_MS = (() => {
+  try {
+    const raw = Deno.env.get("CF_NOTE_CREATE_TIMING_DELAY_MS");
+    if (raw === undefined || !/^\d+$/.test(raw)) return 0;
+    return Number(raw);
+  } catch {
+    return 0;
+  }
+})();
 const CAPTURE_EVENT_INVOCATION_SERIES = (() => {
   try {
     return parseCaptureSeriesCount(
@@ -367,6 +383,11 @@ describe("default-app flow test", () => {
     }
 
     for (let noteIndex = 1; noteIndex <= noteIterations; noteIndex++) {
+      if (noteIndex > 1 && NOTE_CREATE_TIMING_DELAY_MS > 0) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, NOTE_CREATE_TIMING_DELAY_MS)
+        );
+      }
       const noteTitlesBefore = await collectNoteTitlesInList(page);
       const noteCountBefore = noteTitlesBefore.length;
 
