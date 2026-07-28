@@ -69,7 +69,7 @@ Deno.test("python: the language registry selects Python extensions", () => {
   assertEquals(languageForFile("types.pyi").id, "python");
   assertEquals(languageForFile("app.pyw").id, "python");
   assertEquals(languageForFile("main.ts").id, "typescript");
-  assertEquals(languageForFile(undefined).id, "typescript");
+  assertEquals(languageForFile(undefined).id, "plain-text");
   assertEquals(
     verbatim(python.createHighlighter("answer = True").lines),
     "answer = True",

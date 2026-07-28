@@ -9,7 +9,7 @@
  * editable text back onto the files it touches.
  */
 import type { Document, Line } from "./model.ts";
-import type { Highlighter } from "./languages/language.ts";
+import type { Highlighter, Language } from "./languages/language.ts";
 import { languageForFile, renderedLinesFor } from "./languages/language.ts";
 
 /** How much a revert restores: the cursor's hunk, the cursor's file, the commit
@@ -236,12 +236,16 @@ export function fileSource(path: string): EditableSource {
 }
 
 /** A non-file view (a pipe / a diff matching nothing): readable, not editable. */
-export function readonlySource(reason: string): EditableSource {
+export function readonlySource(
+  reason: string,
+  language: Language = languageForFile(undefined),
+  fileName?: string,
+): EditableSource {
   return {
     label: null,
     editable: false,
     reason,
-    parse: (text) => languageForFile(undefined).parseDocument(text),
+    parse: (text) => language.parseDocument(text, fileName),
     save: () => reason,
   };
 }
