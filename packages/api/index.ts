@@ -1818,13 +1818,13 @@ export type JSONSchemaObj = {
  * A deep-mutable variant of `JSONSchemaObj`. Recursively strips `readonly`
  * from all properties, making the schema safe to build up incrementally.
  */
-export type JSONSchemaObjMutable = Mutable<JSONSchemaObj>;
+export type MutableJSONSchemaObj = Mutable<JSONSchemaObj>;
 
 /**
- * A `JSONSchemaObjMutable` or a boolean. JSON Schema allows `true` (accept any
+ * A `MutableJSONSchemaObj` or a boolean. JSON Schema allows `true` (accept any
  * value) and `false` (reject all values) as valid schemas.
  */
-export type JSONSchemaMutable = JSONSchemaObjMutable | boolean;
+export type JSONSchemaMutable = MutableJSONSchemaObj | boolean;
 
 export type * from "./cfc.ts";
 export { CFC_CANONICAL_ALIAS_NAMES } from "./cfc.ts";

@@ -1,7 +1,7 @@
 import ts from "typescript";
 import type {
   JSONSchemaMutable,
-  JSONSchemaObjMutable,
+  MutableJSONSchemaObj,
 } from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
@@ -222,7 +222,7 @@ export class UnionFormatter implements TypeFormatter {
     if (context.widenLiterals && unionOptions.length > 1) {
       unionOptions = this.mergeIdenticalSchemas(unionOptions);
     }
-    const anyOf: JSONSchemaObjMutable[] = [];
+    const anyOf: MutableJSONSchemaObj[] = [];
     for (const option of unionOptions) {
       // mergePrimitiveSchemaIntoAnyOf mutates anyOf in place; returns true to short-circuit
       if (this.mergePrimitiveSchemaIntoAnyOf(anyOf, option)) {
@@ -627,7 +627,7 @@ export class UnionFormatter implements TypeFormatter {
       unionOptions = this.mergeIdenticalSchemas(unionOptions);
     }
 
-    const anyOf: JSONSchemaObjMutable[] = [];
+    const anyOf: MutableJSONSchemaObj[] = [];
     for (const option of unionOptions) {
       if (this.mergePrimitiveSchemaIntoAnyOf(anyOf, option)) {
         return true;
@@ -651,7 +651,7 @@ export class UnionFormatter implements TypeFormatter {
     if (defaultValue === undefined) {
       return schema;
     }
-    const value = defaultValue as NonNullable<JSONSchemaObjMutable["default"]>;
+    const value = defaultValue as NonNullable<MutableJSONSchemaObj["default"]>;
 
     if (typeof schema === "boolean") {
       return schema === false
@@ -684,12 +684,12 @@ export class UnionFormatter implements TypeFormatter {
   }
 
   private applyObjectPropertyDefaults(
-    schema: JSONSchemaObjMutable,
+    schema: MutableJSONSchemaObj,
     defaults: Record<string, unknown>,
     path: string[] = [],
     rootDefs?: Record<string, unknown>,
     targetSchema?: JSONSchemaMutable,
-  ): JSONSchemaObjMutable {
+  ): MutableJSONSchemaObj {
     const properties = isRecord(schema.properties)
       ? { ...schema.properties }
       : {};
@@ -746,9 +746,9 @@ export class UnionFormatter implements TypeFormatter {
   }
 
   private getObjectTargetProperties(
-    schema: JSONSchemaObjMutable,
+    schema: MutableJSONSchemaObj,
     rootDefs?: Record<string, unknown>,
-    seen = new Set<JSONSchemaObjMutable>(),
+    seen = new Set<MutableJSONSchemaObj>(),
   ): Record<string, unknown> | undefined {
     if (seen.has(schema)) {
       return undefined;
@@ -769,7 +769,7 @@ export class UnionFormatter implements TypeFormatter {
         .map((option) =>
           isRecord(option)
             ? this.getObjectTargetProperties(
-              option as JSONSchemaObjMutable,
+              option as MutableJSONSchemaObj,
               rootDefs,
               new Set(seen),
             )
@@ -788,9 +788,9 @@ export class UnionFormatter implements TypeFormatter {
   }
 
   private resolveLocalRefSchema(
-    schema: JSONSchemaObjMutable,
+    schema: MutableJSONSchemaObj,
     rootDefs?: Record<string, unknown>,
-  ): JSONSchemaObjMutable | undefined {
+  ): MutableJSONSchemaObj | undefined {
     if (typeof schema.$ref !== "string") {
       return undefined;
     }
@@ -801,11 +801,11 @@ export class UnionFormatter implements TypeFormatter {
 
     const defs = this.getSchemaDefs(schema) ?? rootDefs;
     const resolved = defs?.[schema.$ref.slice(prefix.length)];
-    return isRecord(resolved) ? resolved as JSONSchemaObjMutable : undefined;
+    return isRecord(resolved) ? resolved as MutableJSONSchemaObj : undefined;
   }
 
   private getSchemaDefs(
-    schema: JSONSchemaObjMutable,
+    schema: MutableJSONSchemaObj,
   ): Record<string, unknown> | undefined {
     if (isRecord(schema.$defs)) {
       return schema.$defs;
@@ -1035,7 +1035,7 @@ export class UnionFormatter implements TypeFormatter {
    * Returns true if the result is the permissive schema (short-circuit the caller).
    */
   private mergePrimitiveSchemaIntoAnyOf(
-    anyOf: JSONSchemaObjMutable[],
+    anyOf: MutableJSONSchemaObj[],
     cur: JSONSchemaMutable,
   ): boolean {
     if (cur === true) {
@@ -1191,7 +1191,7 @@ export class UnionFormatter implements TypeFormatter {
     const first = schemas[0]!;
     if (typeof first === "boolean") return first;
 
-    const result: JSONSchemaObjMutable = {};
+    const result: MutableJSONSchemaObj = {};
 
     // Handle enum -> base type conversion
     if ("enum" in first && first.enum) {

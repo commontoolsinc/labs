@@ -13,7 +13,7 @@ import { dedupeByValueEqual } from "../value-equality.ts";
 import type {
   AsCellEntry,
   JSONSchemaMutable,
-  JSONSchemaObjMutable,
+  MutableJSONSchemaObj,
   SchemaScope,
 } from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
@@ -284,7 +284,7 @@ export class CommonFabricFormatter implements TypeFormatter {
           if (typeof valueSchema === "boolean") {
             return (valueSchema === false
               ? { not: true, default: defaultValue }
-              : { default: defaultValue }) as JSONSchemaObjMutable;
+              : { default: defaultValue }) as MutableJSONSchemaObj;
           }
           (valueSchema as Record<string, unknown>).default = defaultValue;
         }
@@ -458,7 +458,7 @@ export class CommonFabricFormatter implements TypeFormatter {
         return this.applyWrapperSemantics(innerSchema, "Stream");
       }
       return this.applyWrapperSemantics(
-        innerSchema as JSONSchemaObjMutable,
+        innerSchema as MutableJSONSchemaObj,
         "Stream",
       );
     }
@@ -641,7 +641,7 @@ export class CommonFabricFormatter implements TypeFormatter {
         return this.applyWrapperSemantics(innerSchema, "Stream");
       }
       return this.applyWrapperSemantics(
-        innerSchema as JSONSchemaObjMutable,
+        innerSchema as MutableJSONSchemaObj,
         "Stream",
       );
     }
@@ -956,7 +956,7 @@ export class CommonFabricFormatter implements TypeFormatter {
         // For false: { not: true, default: value } (no value is valid)
         return (valueSchema === false
           ? { not: true, default: defaultValue }
-          : { default: defaultValue }) as JSONSchemaObjMutable;
+          : { default: defaultValue }) as MutableJSONSchemaObj;
       }
       (valueSchema as any).default = defaultValue;
     }

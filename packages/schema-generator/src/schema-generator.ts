@@ -3,7 +3,7 @@ import { isRecord } from "@commonfabric/utils/types";
 
 import type {
   JSONSchemaMutable,
-  JSONSchemaObjMutable,
+  MutableJSONSchemaObj,
 } from "@commonfabric/api";
 import type {
   GenerationContext,
@@ -830,7 +830,7 @@ export class SchemaGenerator implements ISchemaGenerator {
         }
       }
 
-      const schema: JSONSchemaObjMutable = {
+      const schema: MutableJSONSchemaObj = {
         type: "object",
         properties,
       };
@@ -878,7 +878,7 @@ export class SchemaGenerator implements ISchemaGenerator {
       const filtered = memberSchemas.filter((s) => s !== false);
       if (filtered.length === 0) return false;
       if (filtered.length === 1) return filtered[0]!;
-      return { anyOf: filtered as JSONSchemaObjMutable[] };
+      return { anyOf: filtered as MutableJSONSchemaObj[] };
     }
 
     if (ts.isLiteralTypeNode(typeNode)) {

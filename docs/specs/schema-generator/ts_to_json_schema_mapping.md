@@ -30,7 +30,7 @@ six subpaths — `./interface`, `./cell-brand`, `./wrapper-names`,
 `./type-traversal`, `./property-optionality`, `./property-name`.
 `src/index.ts` exports the `SchemaGenerator` class,
 `createSchemaTransformerV2`, the `ISchemaGenerator` type, and re-exports
-`JSONSchemaObjMutable`.
+`MutableJSONSchemaObj`.
 
 Consumers, as of this writing (verified by import grep): the only external
 consumer package is `@commonfabric/ts-transformers`, along two axes:
