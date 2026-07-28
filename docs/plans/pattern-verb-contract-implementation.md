@@ -114,9 +114,34 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
 
 - **api:** `action` overloads accept a return type (today both overloads type
   the callback `=> void`, `builder/module.ts:606-609`); `Stream<T, R = void>`
-  or equivalent so the result type is visible to the schema layer — the
-  defaulted parameter keeps every existing `Stream<T>` use compiling. A
-  `VerbError { code, message }` type for rule 4's typed rejections.
+  so the result type is visible to the schema layer — the defaulted parameter
+  keeps every existing `Stream<T>` use compiling. A `VerbError { code,
+  message }` type for rule 4's typed rejections.
+- **C1 fork — settled: widen `Stream`, do not add a second carrier.** The
+  alternative was a separate `StreamWithResult<T, R> extends Stream<T>` that
+  only the schema layer interprets, which is tempting because it leaves
+  `Stream<T>` and its one-slot `AsStream` HKT untouched. It loses on one
+  point that outweighs the rest: **a forgotten annotation stays silent.**
+  Because the carrier is a subtype, a verb whose body returns a value but
+  whose declaration still reads `Stream<T>` assigns cleanly, and the result
+  is erased exactly where the schema layer reads it — the same shape of
+  failure as the live board accepting and discarding `agentName`. Widening
+  `Stream` makes that a compile error instead, provided `R` sits in a
+  structural position rather than a phantom one: a purely unused parameter is
+  erased by structural typing (verified — `Stream<string, number>` assigns to
+  `Stream<string>` when `R` appears nowhere), while `R` in a property
+  position discriminates and forces the author to declare what the body
+  returns.
+  The costs are bounded and mechanical: ten `Stream<any>` guards widen to
+  `Stream<any, any>` (`api/index.ts:867`, `:1488`, `:1967`, `:2320`,
+  `:3256`, `runner/src/link-utils.ts:54`, three in
+  `runner/src/builtins/llm-dialog.ts`, one pattern), and `AsStream` — one
+  slot, `Apply` and `IKeyable` assume that — keeps producing `Stream<A,
+  void>`, so a projection through the HKT drops a declared result. That is
+  acceptable because streams are leaves: patterns do not `key()` into a
+  stream to reach another. Both options need a result parameter threaded
+  through `Handler`/`HandlerFactory` regardless, since the factory returns
+  the stream, so that work is not a differentiator.
 - **ts-transformers:** lowering for value-returning `action` bodies; CTS spec
   updates under `docs/specs/ts-transformer/`. (The runtime side already
   consumes returns — `handleJavaScriptHandlerResult` — so this is authoring
