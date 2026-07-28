@@ -891,3 +891,235 @@ describe("firstUpdated wiring (component-level, via a stubbed shadow root)", () 
     }
   });
 });
+
+// ── failure reporting + fallback paths ─────────────────────────────────────
+//
+// These cover the error/degradation paths the coverage ratchet flagged as
+// uncovered. They are not padding: `reportDeviceLinkFailure` is the whole
+// reason a failed scan isn't silent, and the two `catch` arms are what keep a
+// hostile or exotic environment from turning a failure into a hang.
+
+describe("reportDeviceLinkFailure", () => {
+  /** Install a document whose createElement yields drivable fake views. */
+  function withFakeViews() {
+    class FakeView extends EventTarget {
+      incomingDid = "";
+      currentDid: string | null = null;
+      failure: string | null = null;
+      removed = false;
+      remove() {
+        this.removed = true;
+      }
+    }
+    const created: FakeView[] = [];
+    // deno-lint-ignore no-explicit-any
+    (globalThis as any).document.createElement = () => {
+      const el = new FakeView();
+      created.push(el);
+      return el;
+    };
+    return created;
+  }
+
+  it("shows the failure screen and resolves when dismissed", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const created = withFakeViews();
+      const { reportDeviceLinkFailure } = await import(
+        "../src/lib/device-link-login.ts"
+      );
+      const pending = reportDeviceLinkFailure("unreadable");
+      assertEquals(created.length, 1);
+      assertEquals(created[0].failure, "unreadable");
+
+      created[0].dispatchEvent(new CustomEvent("device-link-result"));
+      await pending; // must resolve, not hang
+      assert(created[0].removed, "the view must be cleaned up afterwards");
+    } finally {
+      restore();
+    }
+  });
+
+  it("carries the 'failed' reason for a mid-flow error", async () => {
+    // index.ts's catch-all reports this one; a silent boot there is exactly the
+    // failure the screen exists to prevent.
+    const restore = installBrowserGlobals();
+    try {
+      const created = withFakeViews();
+      const { reportDeviceLinkFailure } = await import(
+        "../src/lib/device-link-login.ts"
+      );
+      const pending = reportDeviceLinkFailure("failed");
+      assertEquals(created[0].failure, "failed");
+      created[0].dispatchEvent(new CustomEvent("device-link-result"));
+      await pending;
+    } finally {
+      restore();
+    }
+  });
+
+  it("removes the view even if dismissal rejects", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const created = withFakeViews();
+      const { reportDeviceLinkFailure } = await import(
+        "../src/lib/device-link-login.ts"
+      );
+      const pending = reportDeviceLinkFailure("unreadable");
+      created[0].dispatchEvent(new CustomEvent("device-link-result"));
+      await pending;
+      assert(created[0].removed);
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe("scrub failure is survivable", () => {
+  it("still reports the entropy when history.replaceState throws", () => {
+    // A sandboxed iframe or a locked-down environment can throw here. Losing
+    // the scrub is bad, but abandoning the login on top of it would be worse —
+    // and an uncaught throw at module init would take the whole boot with it.
+    const originalLocation = globalThis.location;
+    const originalHistory = globalThis.history;
+    Object.defineProperty(globalThis, "location", {
+      value: {
+        hash: "#k=" + toBase64Url(ZERO_ENTROPY),
+        pathname: "/p",
+        search: "",
+      },
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(globalThis, "history", {
+      value: {
+        replaceState: () => {
+          throw new Error("SecurityError: sandboxed");
+        },
+      },
+      configurable: true,
+      writable: true,
+    });
+    try {
+      const got = consumeDeviceLinkFragment();
+      assertEquals(got, { kind: "entropy", entropy: ZERO_ENTROPY });
+    } finally {
+      Object.defineProperty(globalThis, "location", {
+        value: originalLocation,
+        configurable: true,
+        writable: true,
+      });
+      Object.defineProperty(globalThis, "history", {
+        value: originalHistory,
+        configurable: true,
+        writable: true,
+      });
+    }
+  });
+
+  it("tolerates a missing history object entirely", () => {
+    const originalLocation = globalThis.location;
+    const originalHistory = globalThis.history;
+    Object.defineProperty(globalThis, "location", {
+      value: {
+        hash: "#k=" + toBase64Url(ZERO_ENTROPY),
+        pathname: "/p",
+        search: "",
+      },
+      configurable: true,
+      writable: true,
+    });
+    Object.defineProperty(globalThis, "history", {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    });
+    try {
+      assertEquals(consumeDeviceLinkFragment(), {
+        kind: "entropy",
+        entropy: ZERO_ENTROPY,
+      });
+    } finally {
+      Object.defineProperty(globalThis, "location", {
+        value: originalLocation,
+        configurable: true,
+        writable: true,
+      });
+      Object.defineProperty(globalThis, "history", {
+        value: originalHistory,
+        configurable: true,
+        writable: true,
+      });
+    }
+  });
+});
+
+describe("activateModalDialog — last-ditch fallback", () => {
+  it("does not throw when BOTH showModal and setAttribute fail", async () => {
+    // The worst case: an exotic/partial <dialog>. We cannot show anything, but
+    // throwing here would propagate out of firstUpdated and hang the promise —
+    // the crash that bricked boot before. It must degrade quietly.
+    const { activateModalDialog } = await import(
+      "../src/views/DeviceLinkView.ts"
+    );
+    let listened = false;
+    const hostile = {
+      showModal: () => {
+        throw new Error("unsupported");
+      },
+      setAttribute: () => {
+        throw new Error("also unsupported");
+      },
+      addEventListener: () => {
+        listened = true;
+      },
+    };
+    activateModalDialog(hostile, () => {});
+    assert(listened, "the cancel signal must still be wired");
+  });
+});
+
+describe("the tap-through guard actually releases", () => {
+  it("flips `guarded` false when the timer fires", async () => {
+    // The timer BODY (not just its scheduling): without this the accept button
+    // would stay disabled forever, which is one half of the boot-brick.
+    const restore = installBrowserGlobals();
+    const realSet = globalThis.setTimeout;
+    let fire: (() => void) | undefined;
+    // deno-lint-ignore no-explicit-any
+    (globalThis as any).setTimeout = (fn: () => void) => {
+      fire = fn;
+      return 1;
+    };
+    try {
+      const { XDeviceLinkView } = await import(
+        "../src/views/DeviceLinkView.ts"
+      );
+      const view = new XDeviceLinkView();
+      Object.defineProperty(view, "renderRoot", {
+        value: { querySelector: () => null },
+        configurable: true,
+      });
+      view.firstUpdated();
+      const answers: boolean[] = [];
+      view.addEventListener(
+        "device-link-result",
+        (e) => answers.push(Boolean((e as CustomEvent).detail?.accepted)),
+      );
+
+      // Before the timer fires, accept is inert...
+      // deno-lint-ignore no-explicit-any
+      (view as any).finish(true);
+      assertEquals(answers, [], "accept must be inert during the guard");
+
+      assert(fire, "the guard timer must have been scheduled");
+      fire!(); // ...and after it fires, accept works.
+      // deno-lint-ignore no-explicit-any
+      (view as any).finish(true);
+      assertEquals(answers, [true], "accept must work once the guard lifts");
+    } finally {
+      globalThis.setTimeout = realSet;
+      restore();
+    }
+  });
+});
