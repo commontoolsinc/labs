@@ -61,6 +61,21 @@ Deno.test("buildView: transformed compiler output keeps the TypeScript default",
   );
 });
 
+Deno.test("buildView: transformed declarations without bodies retain function structure", () => {
+  const r = buildView(
+    "// transformed: /types.ts\nexport declare function run(): void;\n",
+  );
+
+  assert(
+    r.doc.structure.some((node) =>
+      node.children.some((child) =>
+        child.kind === "function" && child.name === "run"
+      )
+    ),
+    "the declaration remains a TypeScript function",
+  );
+});
+
 Deno.test("buildView: only an exact first-line transformed header selects TypeScript", () => {
   for (
     const text of [
