@@ -3,6 +3,7 @@ import {
   type CallableResolution,
   type CallableResultRef,
   executeResolvedCallable,
+  type InvocationOutcome,
 } from "./callable.ts";
 import {
   type ExecCommandSpec,
@@ -15,6 +16,8 @@ import {
 export interface CallableCommandExecutionResult<TResolved> {
   helpText?: string;
   outputText?: string;
+  /** Handler invocation outcome, passed through from ExecutedCallable. */
+  invocation?: InvocationOutcome;
   /** Tool result cell address, passed through from ExecutedCallable. */
   resultRef?: CallableResultRef;
   parsed: ParsedExecArgs;
@@ -111,6 +114,7 @@ export async function executeCallableCommand<
 
   return {
     outputText: executed.outputText,
+    invocation: executed.invocation,
     resultRef: executed.resultRef,
     parsed,
     resolved,

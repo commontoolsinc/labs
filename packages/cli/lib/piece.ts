@@ -59,6 +59,7 @@ import {
   type CliRuntimeErrorRecord,
   detectCallableKind,
   executeResolvedCallable,
+  type InvocationOutcome,
   runtimeErrorLog,
 } from "./callable.ts";
 import { executeCallableCommand } from "./callable-command.ts";
@@ -167,6 +168,8 @@ export interface PieceCallableDependencies extends CallableExecutionDeps {
 export interface ExecutedPieceCallable {
   helpText?: string;
   outputText?: string;
+  /** Handler invocation outcome, passed through from ExecutedCallable. */
+  invocation?: InvocationOutcome;
   /** Tool result cell address, passed through from ExecutedCallable. */
   resultRef?: CallableResultRef;
   parsed: ParsedExecArgs;

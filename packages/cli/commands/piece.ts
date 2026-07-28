@@ -30,6 +30,7 @@ import {
   SpaceConfig,
   stepPiece,
 } from "../lib/piece.ts";
+import type { InvocationOutcome, InvocationPhase } from "../lib/callable.ts";
 import { renderPiece } from "../lib/piece-render.ts";
 import { parseSqliteSource } from "../lib/sqlite-source.ts";
 import { render, safeStringify } from "../lib/render.ts";
@@ -312,6 +313,67 @@ export function pieceCallInvocation(
       rawArgs.length === argumentOffset + 2 &&
       rawArgs[argumentOffset + 1] === "--json");
   return { rawArgs, jsonOutput };
+}
+
+/**
+ * Resolve the invocation id for a handler call: the caller's own id, or a
+ * freshly minted one. A blank id is rejected rather than passed down — it
+ * would read as "the caller supplied one" while carrying nothing that can
+ * distinguish one delivery from another, so the retry it promises to make
+ * safe would not be (verb contract WS-D).
+ */
+export function resolveInvocationId(
+  raw: string | undefined,
+  mint: () => string = () => crypto.randomUUID(),
+): string {
+  if (raw === undefined) return mint();
+  if (!raw.trim()) {
+    throw new ValidationError("--invocation requires a non-blank id");
+  }
+  return raw;
+}
+
+/**
+ * Build the phase observer for a handler invocation. Its whole job is to put
+ * the invocation id on stderr at the moment the event is about to dispatch —
+ * BEFORE any network work — so a caller whose process dies past that line
+ * still holds the exact id to retry with, and the retry deduplicates instead
+ * of executing a second time. Announcing once matters: a caller scraping
+ * stderr for its id should not have to decide which of several to trust.
+ */
+export function invocationPhaseReporter(
+  invocationId: string,
+  onAdvance: (phase: InvocationPhase) => void,
+  announce: (message: string) => void = console.error,
+): (phase: InvocationPhase) => void {
+  let announced = false;
+  return (next) => {
+    if (next === "dispatched" && !announced) {
+      announced = true;
+      announce(`invocation: ${invocationId}`);
+    }
+    onAdvance(next);
+  };
+}
+
+/**
+ * Shape a settled handler invocation for stdout. This is the wire contract an
+ * agent parses, so the optional keys are load-bearing: `deduplicated` appears
+ * only when the call collided on an existing receipt, and `result` only when
+ * the receipt carried one — a value-less verb omits it rather than reporting
+ * `null`, which would be indistinguishable from a verb that returned null.
+ */
+export function invocationJson(
+  outcome: InvocationOutcome,
+): Record<string, unknown> {
+  return {
+    invocation: outcome.id,
+    status: outcome.status,
+    ...(outcome.deduplicated ? { deduplicated: true } : {}),
+    ...("result" in outcome && outcome.result !== undefined
+      ? { result: outcome.result }
+      : {}),
+  };
 }
 
 export function writePieceRenderStatus(
@@ -1112,9 +1174,18 @@ after --. Handlers interpret piped input when no input argument is present.`,
     `Run the "search" tool using schema-derived flags after "--".`,
   )
   .option("-c,--piece <piece:string>", "The target piece ID.")
+  .option(
+    "--invocation <id:string>",
+    "Idempotency key for a handler call (before the callable name). A " +
+      "same-id retry cannot commit twice — it settles on the original " +
+      "outcome — but the handler body does re-run, so effects outside the " +
+      "transaction repeat. Minted automatically when omitted.",
+  )
   .stopEarly()
   .arguments("<callable:string> [tail...:string]")
   .action(async function (options, callableName, ...tail) {
+    const invocationId = resolveInvocationId(options.invocation);
+    let phase: InvocationPhase = "initial_sync";
     try {
       setQuietMode(!!options.quiet);
       const invocation = pieceCallInvocation(
@@ -1129,6 +1200,13 @@ after --. Handlers interpret piped input when no input argument is present.`,
         pieceConfig,
         callableName,
         invocation.rawArgs,
+        {
+          invocationId,
+          onPhase: invocationPhaseReporter(
+            invocationId,
+            (next) => phase = next,
+          ),
+        },
       );
       if (result.helpText) {
         render(result.helpText);
@@ -1150,6 +1228,15 @@ after --. Handlers interpret piped input when no input argument is present.`,
         }
         return;
       }
+      if (result.invocation) {
+        // The machine surface for a handler invocation: stdout carries the
+        // settled Invocation JSON, prose stays on stderr via hint().
+        render(JSON.stringify(invocationJson(result.invocation), null, 2));
+        hint(cliText(`NEXT STEPS:
+  → Verify state:  cf piece get --piece ${pieceConfig.piece} <path> ...
+  → Full inspect:  cf piece inspect --piece ${pieceConfig.piece} ...`));
+        return;
+      }
       const confirmation =
         `Called handler "${callableName}" on piece ${pieceConfig.piece}`;
       if (result.parsed.usedJsonInput) {
@@ -1166,6 +1253,10 @@ after --. Handlers interpret piped input when no input argument is present.`,
       }
       const message = error instanceof Error ? error.message : String(error);
       console.error(message);
+      // Where the invocation stopped decides retry semantics: anything at or
+      // past "dispatched" retries SAFELY ONLY with this same id (same-id
+      // retries deduplicate; a fresh id would re-execute).
+      console.error(`invocation: ${invocationId} phase: ${phase}`);
       Deno.exit(1);
     }
   })
