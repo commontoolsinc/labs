@@ -412,6 +412,27 @@ export function classifyStaticActionServability(
     ) {
       return outputs.find((output) => scopeOf(output) === "space");
     }
+    // At SPACE rank the same §4 pair SHAPE (broad + scoped instance of one
+    // doc/path) is still the documented well-formed declaration of a
+    // scoped-result computation — take the broad instance and let the
+    // scope checks below reject truthfully (`non-space-write-scope`: the
+    // scoped instance rides `writes`). Without this, every scoped UI
+    // derivation reported "malformed-output-surface" and the rank-dial
+    // class was hidden behind a shape complaint (15 distinct group-chat
+    // lifts / 39 live diagnostics, 2026-07-28 taxonomy). Any other
+    // plurality stays malformed.
+    if (
+      laneRank === "space" && outputs.length === 2 &&
+      outputs[0]!.space === outputs[1]!.space &&
+      outputs[0]!.id === outputs[1]!.id &&
+      outputs[0]!.path.length === outputs[1]!.path.length &&
+      outputs[0]!.path.every((segment, index) =>
+        segment === outputs[1]!.path[index]
+      ) &&
+      (scopeOf(outputs[0]!) === "space") !== (scopeOf(outputs[1]!) === "space")
+    ) {
+      return outputs.find((output) => scopeOf(output) === "space");
+    }
     return undefined;
   })();
   if (directOutput === undefined || !isRootValueAddress(directOutput)) {

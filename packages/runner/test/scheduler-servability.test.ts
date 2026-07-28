@@ -237,6 +237,42 @@ describe("static action servability", () => {
     });
   });
 
+  it("labels the space-rank §4 output pair by SCOPE, not as malformed", () => {
+    // The output-widening pair (context-lattice §4) — the broad space
+    // instance plus the scoped instance of the SAME doc/path — is the
+    // DOCUMENTED shape every scoped-result computation declares. At space
+    // rank it is still unservable (the scoped write is), but the truthful
+    // code is non-space-write-scope: "malformed" hid the entire rank-dial
+    // class behind a shape complaint (15 distinct group-chat lifts, 39
+    // live diagnostics, 2026-07-28 taxonomy).
+    for (const scoped of ["user", "session"] as const) {
+      const pair = [
+        address("of:output", { path: ["value"] }),
+        address("of:output", { path: ["value"], scope: scoped }),
+      ];
+      expect(classifyStaticActionServability(
+        withSummary({ directOutputs: pair, writes: pair }),
+        servedSpace,
+      )).toEqual({
+        status: "unservable",
+        reason: "non-space-write-scope",
+      });
+    }
+    // A NON-pair plurality (different docs) stays malformed.
+    expect(classifyStaticActionServability(
+      withSummary({
+        directOutputs: [
+          address("of:output", { path: ["value"] }),
+          address("of:other", { path: ["value"], scope: "user" }),
+        ],
+      }),
+      servedSpace,
+    )).toEqual({
+      status: "unservable",
+      reason: "malformed-output-surface",
+    });
+  });
+
   it("rejects user and session scoped surfaces", () => {
     const cases: Array<{
       candidate: StaticActionServabilityCandidate;
@@ -538,7 +574,12 @@ describe("§4 output-widening pair servability (C1.9)", () => {
       });
     });
 
-    it("keeps the pair malformed without the user lane (space byte-identity)", () => {
+    it("keeps the pair unservable without the user lane, labeled by scope", () => {
+      // The C1.9 byte-identity this pins is ADMISSION: without the lane the
+      // action must stay unservable. Since the 2026-07-28 relabel the
+      // well-formed §4 pair reports its TRUE cause — the scoped write —
+      // instead of a shape complaint (which hid the whole rank-dial class
+      // behind "malformed": 15 group-chat lifts / 39 live diagnostics).
       for (
         const lane of [undefined, { userContext: false }] as const
       ) {
@@ -551,7 +592,7 @@ describe("§4 output-widening pair servability (C1.9)", () => {
           lane,
         )).toEqual({
           status: "unservable",
-          reason: "malformed-output-surface",
+          reason: "non-space-write-scope",
         });
       }
     });
@@ -1179,22 +1220,33 @@ describe("session-lane servability (C2.2)", () => {
       });
     });
 
-    it("keeps the session pair malformed under space and user lanes (regression)", () => {
-      for (
-        const lane of [undefined, { userContext: true }] as const
-      ) {
-        expect(classifyStaticActionServability(
-          withSummary({
-            writes: [broadOutput, sessionTwin],
-            directOutputs: [broadOutput, sessionTwin],
-          }),
-          servedSpace,
-          lane,
-        )).toEqual({
-          status: "unservable",
-          reason: "malformed-output-surface",
-        });
-      }
+    it("keeps the session pair unservable under space and user lanes (regression)", () => {
+      // Space rank: the well-formed pair reports its true cause (scoped
+      // write) since the 2026-07-28 relabel. USER lane: a SESSION twin is
+      // not that lane's instance, so the pair shape itself stays
+      // inadmissible — malformed is still the honest code there.
+      expect(classifyStaticActionServability(
+        withSummary({
+          writes: [broadOutput, sessionTwin],
+          directOutputs: [broadOutput, sessionTwin],
+        }),
+        servedSpace,
+        undefined,
+      )).toEqual({
+        status: "unservable",
+        reason: "non-space-write-scope",
+      });
+      expect(classifyStaticActionServability(
+        withSummary({
+          writes: [broadOutput, sessionTwin],
+          directOutputs: [broadOutput, sessionTwin],
+        }),
+        servedSpace,
+        { userContext: true },
+      )).toEqual({
+        status: "unservable",
+        reason: "malformed-output-surface",
+      });
     });
 
     it("never pairs across document ids or differing paths at session rank", () => {
