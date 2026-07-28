@@ -691,6 +691,31 @@ that would decide the hypothesis: a PERSISTENT two-browser scenario
 the multi-user twin of the persistent-page leg, measuring observer
 convergence latency and per-post latency off vs on.
 
+**Persistent two-browser A/B (built: `CF_CHAT_MESSAGE_SERIES` /
+`CF_CHAT_MESSAGE_DELAY_MS` on the two-browsers test — 20 alternating
+posts at 2s cadence, per-post send→other-browser-sees timing;
+default unset keeps the assertion flow byte-identical):** flag-off
+median **602ms** (q1 478 / q3 827, growing 256→~900 across the
+series) vs flag-on median **637ms** (+6%, q1 461 / q3 921, one 2.1s
+spike) — PARITY within noise, not faster. But the flag-on run was
+deeply engaged: **claims 66 / committed 14 / noop 102 / failed 0 /
+conflicts 594** — the server's claimed attempts lose races
+constantly under two-client write pressure and retry server-side
+with ZERO client-visible cost (the client-free-conflicts finding at
+scale). Both arms grow with transcript length, so that growth is
+flag-INDEPENDENT client work. Interpretation — the honest resolution
+of the expects-faster hypothesis: multi-user cannot get faster from
+arbitration alone while BOTH clients still execute everything
+locally; flag-on today ADDS server execution without REMOVING client
+execution. The removal is precisely P3 (per-session subcap
+passivity) + P5 (passive delivery / demand-time closure); this
+measurement establishes their foundation — server arbitration at
+client-parity cost even under 594 conflicts — and the
+594-retries-for-14-commits ratio is the P4 defer-then-(b) motivation
+QUANTIFIED (the executor should defer attempts it is about to lose).
+n=1 caveats apply; the scenario is a one-command re-run for n
+growth.
+
 | Row | Builds | Red-first gate(s) | Dial | Acceptance | Resolves |
 | --- | --- | --- | --- | --- | --- |
 | **P0 — executor liveness + demand lifecycle** | Joint demand+claim retention window (pool start/stop damping only, bounded by host session-anchored authority); parked-wake revival; demand-ADD for never-demanded pieces; lane reconcile keeps consuming raw snapshots | Start-under-navigation-cadence pool test; departure-parity fixture (disconnect mid-grace ⇒ no post-disconnect claims, Worker stopped ≤ grace+TTL, parked-space parity byte-identical); grace ≥ measured cold-start with margin | Grace-window duration | Live Worker + `claimsIssued>0` on the real n=10 workload; zero claim-lapse from same-space navigation; departure parity green | CP12 CP14 CP22 CP26 |
