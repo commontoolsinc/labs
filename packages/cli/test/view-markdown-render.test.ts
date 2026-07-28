@@ -299,6 +299,16 @@ Deno.test("markdown rendered view keeps inline content on its source lines", () 
   const loneCarriage = renderMarkdownLines("# hi\rbody");
   assertEquals(loneCarriage.map((line) => line.text), ["hi body"]);
 
+  assertEquals(
+    renderMarkdownLines("#\rheading").map((line) => line.text),
+    ["heading"],
+  );
+  assertEquals(
+    renderMarkdownLines("-\ritem").map((line) => line.text),
+    ["• item"],
+  );
+  assertEquals(renderMarkdownLines("a\r&#xE000;")[0].text, "a \uE000");
+
   for (
     const line of [
       ...code,
@@ -380,6 +390,33 @@ Deno.test("markdown rendered view strips multiline block HTML", () => {
     ".x{width:calc(1<em + 2>rem)}",
     "",
   ]);
+
+  const closePrefix = renderMarkdownLines([
+    "<script>",
+    'const x = "</scripture>";',
+    "</script>",
+  ].join("\n"));
+  assertEquals(closePrefix.map((line) => line.text), [
+    "",
+    'const x = "</scripture>";',
+    "",
+  ]);
+
+  const expandingCaseFold = renderMarkdownLines([
+    "<script>",
+    "const İ = 1;",
+    "</script>",
+  ].join("\n"));
+  assertEquals(expandingCaseFold.map((line) => line.text), [
+    "",
+    "const İ = 1;",
+    "",
+  ]);
+
+  const declaration = renderMarkdownLines(
+    '<!DOCTYPE html PUBLIC "x>y"><span>visible</span>',
+  );
+  assertEquals(declaration.map((line) => line.text), ["visible"]);
 });
 
 Deno.test("rendered Markdown diff keeps changed multiline HTML tags visible", () => {
@@ -739,7 +776,7 @@ Deno.test("markdown rendered view makes decoded controls inert", () => {
   assert(!line.text.includes("\x07"));
 
   const malformedQuote = renderMarkdownLines("\r>");
-  assertEquals(malformedQuote.map((row) => row.text), [" >"]);
+  assertEquals(malformedQuote.map((row) => row.text), [" │ "]);
   assertEquals(
     malformedQuote[0].spans.map((span) => span.text).join(""),
     malformedQuote[0].text,

@@ -61,13 +61,10 @@ export function highlightMarkdownLines(text: string): Line[] {
  */
 export function renderMarkdownLines(text: string): Line[] {
   const normalized = normalizeMarkdownText(text);
-  const lines = renderMarkdownBlocks(
-    normalized.text,
-    referenceAwareLexer(normalized.text),
+  return renderMarkdownBlocks(
+    normalized,
+    referenceAwareLexer(normalized),
   );
-  return normalized.loneCarriageMarker
-    ? restoreLoneCarriages(lines, normalized.loneCarriageMarker)
-    : lines;
 }
 
 /** A full Markdown {@link Document}: highlighted lines, headings as the
@@ -201,34 +198,8 @@ function hiddenLine(): Line {
   return { text: "", spans: [], renderedSourceHidden: true };
 }
 
-function normalizeMarkdownText(
-  text: string,
-): { text: string; loneCarriageMarker?: string } {
-  const transportNormalized = text.replace(/\r(?=\n|$)/g, "");
-  if (!transportNormalized.includes("\r")) {
-    return { text: transportNormalized };
-  }
-  for (let code = 0xe000; code <= 0xf8ff; code++) {
-    const marker = String.fromCodePoint(code);
-    if (!transportNormalized.includes(marker)) {
-      return {
-        text: transportNormalized.replaceAll("\r", marker),
-        loneCarriageMarker: marker,
-      };
-    }
-  }
-  return { text: transportNormalized.replaceAll("\r", " ") };
-}
-
-function restoreLoneCarriages(lines: Line[], marker: string): Line[] {
-  return lines.map((line) => ({
-    ...line,
-    text: line.text.replaceAll(marker, " "),
-    spans: line.spans.map((span) => ({
-      ...span,
-      text: span.text.replaceAll(marker, " "),
-    })),
-  }));
+function normalizeMarkdownText(text: string): string {
+  return text.replace(/\r(?=\n|$)/g, "").replaceAll("\r", " ");
 }
 
 function singleStyledLine(text: string, cls: TokenClass): Line {
@@ -951,13 +922,23 @@ function stripRawHtmlContainer(source: string, tag: string): string {
   const openEnd = htmlMarkupEnd(source, openStart);
   if (openEnd === null) return source;
 
-  const lower = source.toLowerCase();
-  let closeStart = lower.indexOf(`</${tag}`, openEnd);
+  const closePrefix = `</${tag}`;
+  let closeStart = source.indexOf("<", openEnd);
   let closeEnd: number | null = null;
   while (closeStart >= 0) {
-    closeEnd = htmlMarkupEnd(source, closeStart);
-    if (closeEnd !== null) break;
-    closeStart = lower.indexOf(`</${tag}`, closeStart + tag.length + 2);
+    const candidate = source.slice(
+      closeStart,
+      closeStart + closePrefix.length,
+    ).toLowerCase();
+    const delimiter = source[closeStart + closePrefix.length];
+    if (
+      candidate === closePrefix &&
+      /[\t\n\f\r >]/.test(delimiter ?? "")
+    ) {
+      closeEnd = htmlMarkupEnd(source, closeStart);
+      if (closeEnd !== null) break;
+    }
+    closeStart = source.indexOf("<", closeStart + 1);
   }
 
   const hiddenOpen = source.slice(openStart, openEnd).replace(/[^\n]/g, "");
@@ -990,8 +971,7 @@ function htmlMarkupEnd(source: string, start: number): number | null {
   if (!/[\t\n\f\r />]/.test(source[nameEnd] ?? "")) return null;
 
   if (source[start + 1] === "!") {
-    const end = source.indexOf(">", nameEnd);
-    return end < 0 ? null : end + 1;
+    return quotedMarkupEnd(source, nameEnd);
   }
 
   let cursor = skipHtmlSpace(source, nameEnd);
@@ -1036,6 +1016,21 @@ function skipHtmlSpace(source: string, start: number): number {
   let end = start;
   while (/[\t\n\f\r ]/.test(source[end] ?? "")) end++;
   return end;
+}
+
+function quotedMarkupEnd(source: string, start: number): number | null {
+  let quote: "'" | '"' | null = null;
+  for (let end = start; end < source.length; end++) {
+    const char = source[end];
+    if (quote) {
+      if (char === quote) quote = null;
+    } else if (char === "'" || char === '"') {
+      quote = char;
+    } else if (char === ">") {
+      return end + 1;
+    }
+  }
+  return null;
 }
 
 function appendTokenChildren(
