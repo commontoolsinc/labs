@@ -1088,7 +1088,7 @@ Deno.test("sse: /events opens a stream, tick pushes new tile markup, disconnect 
   assertEquals(await chunk(reader), ": connected\n\n");
   assertEquals(clients.size, 1);
   const initial = updateFromEvent(await chunk(reader));
-  assertMatch(initial.shellVersion, /^sha256:[0-9a-f]{64}$/);
+  assertMatch(initial.shellVersion, /^[0-9a-f]{40}$/);
   assert(initial.ageSeconds >= 0);
   assert(["good", "warn", "bad"].includes(initial.faviconStatus));
   assert(Object.hasOwn(initial, "faviconRedSince"));
