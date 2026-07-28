@@ -19,6 +19,7 @@
 // Pure module: no FFI, no engine imports — safe for client-side import.
 
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
+import type { MutableFabricPlainObjectLayer } from "@commonfabric/data-model/fabric-value";
 
 /** A reference to a declared column, handed to the rule as `f.<col>`. */
 export type FieldRef = {
@@ -73,7 +74,7 @@ export function match(
   assertField(field, "match()");
   assertRegExp(re, "match()");
   const flags = re.flags.includes("g") ? re.flags : re.flags + "g";
-  const node: FabricPlainObject = {
+  const node: MutableFabricPlainObjectLayer = {
     field: field.field,
     source: re.source,
     flags,

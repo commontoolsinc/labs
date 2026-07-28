@@ -11,6 +11,9 @@ export {
   FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
+  type MutableFabricArrayLayer,
+  type MutableFabricPlainObjectLayer,
+  type MutableFabricValueLayer,
   type NonNullableFabricValue,
 } from "./interface.ts";
 
