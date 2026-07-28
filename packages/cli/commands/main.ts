@@ -2,6 +2,7 @@ import { Command, ValidationError } from "@cliffy/command";
 import { HelpCommand } from "@cliffy/command/help";
 import { acl } from "./acl.ts";
 import { check } from "./dev.ts";
+import { completion } from "./completion.ts";
 import { deps } from "./deps.ts";
 import { exec } from "./exec.ts";
 import { fuse } from "./fuse.ts";
@@ -45,6 +46,11 @@ FIRST TIME SETUP:
   cf id new > claude.key            # Create identity key
   export CF_IDENTITY=./claude.key   # Set default identity
   export CF_API_URL=http://localhost:${ports.toolshed}  # Set default API URL
+
+SHELL COMPLETION:
+  source <(cf completion zsh)      # add to ~/.zshrc  (bash: completion bash)
+  Completes commands and flags, plus live piece ids, callable names, and cell
+  paths. Also completes 'deno task cf ...'. See 'cf completion --help'.
 
 LOCAL DEVELOPMENT:
   ./scripts/start-local-dev.sh      # Start local servers
@@ -172,6 +178,7 @@ export const main = new Command()
         await runFuseSupervisor(fuseSupervisorOptions(options, mountpoint));
       }),
   )
+  .command("completion", completion)
   .command("id", identity)
   .command("init", init)
   .command("test", test)
