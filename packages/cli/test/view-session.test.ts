@@ -113,6 +113,29 @@ Deno.test("session: a diff leaves three quarters below the final line", () => {
   assertEquals(s.view().top, 10, "down stops at the padded diff end");
 });
 
+Deno.test("session: a trailing diff newline is not a padded content row", () => {
+  const source: EditableSource = {
+    label: null,
+    isDiff: true,
+    editable: false,
+    parse: (next) => parseDocument(next),
+    save: () => "",
+  };
+  const s = new Session(
+    parseDocument("done\n"),
+    { color: false, showLineNumbers: false },
+    { width: 30, height: 5 },
+    undefined,
+    source,
+  );
+  press(s, "G");
+  assertEquals(s.view().top, 0);
+  const rows = renderFrame(s.displayDoc(), s.view());
+  assertEquals(rows[0].trim(), "done");
+  assertEquals(rows[1].trim(), "☙   ❦   ❧");
+  assert(rows.at(-1)!.includes("END"), "the content limit is the diff end");
+});
+
 Deno.test("session: edit-mode scrolling keeps the ordinary document limit", () => {
   const text = Array.from({ length: 12 }, (_, i) => `line ${i}`).join("\n");
   const source: EditableSource = {

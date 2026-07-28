@@ -24,6 +24,15 @@ export function maxPagerTop(lineCount: number, height: number): number {
   return Math.max(0, lineCount - visibleDocumentRows);
 }
 
+/** Number of rows occupied by diff content. The empty logical line after a
+ * final line break begins the padded area. */
+export function diffContentRowCount(
+  rowCount: number,
+  hasTrailingEmptyLine: boolean,
+): number {
+  return Math.max(0, rowCount - (hasTrailingEmptyLine ? 1 : 0));
+}
+
 /** All occurrences of `query`, document-ordered. Smartcase: lower-case query
  * matches case-insensitively, any upper-case forces case-sensitivity. */
 export function findMatches(doc: Document, query: string): Match[] {

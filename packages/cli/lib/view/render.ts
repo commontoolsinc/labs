@@ -9,7 +9,7 @@
  * then run-length encoded into ANSI. Horizontal scrolling, the line-number
  * gutter and the structure guide bar are all column maths over that grid.
  */
-import { maxPagerTop, maxTop } from "./actions.ts";
+import { diffContentRowCount, maxPagerTop, maxTop } from "./actions.ts";
 import { cpLen, paint, RESET, type Style } from "./ansi.ts";
 import type { Document, Line, StructureNode, ViewMode } from "./model.ts";
 import {
@@ -408,9 +408,9 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
   const documentRowCount = wrapPlan?.rowCount ?? doc.lines.length;
   const hasTrailingEmptyLine = view.isDiff === true &&
     doc.lines.at(-1)?.text.length === 0;
-  const diffEndRow = Math.max(
-    0,
-    hasTrailingEmptyLine ? documentRowCount - 1 : documentRowCount,
+  const diffEndRow = diffContentRowCount(
+    documentRowCount,
+    hasTrailingEmptyLine,
   );
   const lastDiffLine = doc.lines.length - (hasTrailingEmptyLine ? 2 : 1);
   const finalTriangleRow = annotations.get(lastDiffLine) === "expandDown"
@@ -898,7 +898,13 @@ function renderStatus(
     : Math.round((view.top / (rowCount - 1)) * 100);
   const endTop = view.cursor || view.isDiff !== true
     ? maxTop(rowCount, view.height)
-    : maxPagerTop(rowCount, view.height);
+    : maxPagerTop(
+      diffContentRowCount(
+        rowCount,
+        doc.lines.at(-1)?.text.length === 0,
+      ),
+      view.height,
+    );
   const atEnd = view.top >= endTop;
 
   // The left of the bar is either a message / selected-node label (plain text)

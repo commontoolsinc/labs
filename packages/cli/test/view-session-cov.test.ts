@@ -1733,11 +1733,13 @@ Deno.test("diffcov: pager-mode ctrl-l expands the hunk in view", () => {
       diffSource(ws, edit),
     );
     assert(s.view().canExpand, "expand advertised");
-    press(s, "ctrl-l"); // pager mode expand
-    assert(
-      s.doc.text.includes("alpha") || s.doc.text.includes("beta"),
-      s.doc.text,
+    assertEquals(
+      s.view().expandUp,
+      false,
+      "the quarter-screen target marks the lower hunk edge",
     );
+    press(s, "ctrl-l"); // pager mode expand
+    assert(s.doc.text.includes("theta"), s.doc.text);
   } finally {
     done();
   }
@@ -1845,6 +1847,45 @@ Deno.test("diffcov: pager-mode ctrl-l at a hunk's bottom expands downwards", () 
     assert(!s.doc.text.includes("L24"), "did not reveal above the hunk");
   } finally {
     done();
+  }
+});
+
+Deno.test("diffcov: padded blank rows do not move the quarter-screen target", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    const lines = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`);
+    lines[9] = "new";
+    Deno.writeTextFileSync(join(root, "t.ts"), `${lines.join("\n")}\n`);
+    const diff = `diff --git a/t.ts b/t.ts
+index 0000000..1111111 100644
+--- a/t.ts
++++ b/t.ts
+@@ -10,1 +10,1 @@
+-old
++new`;
+    const ws: DiffWorkspace = {
+      resolve: (path) => join(root, path),
+      read: (path) => Deno.readTextFileSync(path),
+    };
+    const model = parseDiff(diff)!;
+    const { doc, edit } = buildDiffDocument(diff, model, ws);
+    const s = new Session(
+      doc,
+      { color: false, showLineNumbers: false },
+      { width: 80, height: 21 },
+      undefined,
+      diffSource(ws, edit),
+    );
+
+    press(s, "G");
+    assertEquals(s.view().top, 2);
+    assertEquals(
+      s.view().expandUp,
+      false,
+      "the viewport quarter is nearest the hunk's bottom edge",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
   }
 });
 

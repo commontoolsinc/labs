@@ -30,6 +30,7 @@ import {
 } from "./render.ts";
 import {
   clamp,
+  diffContentRowCount,
   findMatches,
   frameTop,
   maxPagerTop,
@@ -1067,8 +1068,14 @@ export class Session {
 
   /** Furthest vertical position for a pager layout with `rowCount` rows. */
   private pagerLastTop(rowCount: number): number {
-    return this.source?.isDiff
-      ? maxPagerTop(rowCount, this.height)
+    const isDiff = this.source?.isDiff === true;
+    const hasTrailingEmptyLine = isDiff &&
+      this.foldPlan().displayLines.at(-1)?.text.length === 0;
+    return isDiff
+      ? maxPagerTop(
+        diffContentRowCount(rowCount, hasTrailingEmptyLine),
+        this.height,
+      )
       : maxTop(rowCount, this.height);
   }
 
@@ -3425,12 +3432,9 @@ export class Session {
       this.nodeStartRowWithPlan(node, plan) < top + this.contentRows();
   }
 
-  /** The row one quarter down the content on screen. This uses the rows that
-   * hold content rather than blank terminal rows below a short document. */
-  private expansionTargetRow(plan: WrapPlan | null, top: number): number {
-    const count = plan?.rowCount ?? this.foldPlan().displayLines.length;
-    const last = Math.min(top + this.contentRows(), count) - 1;
-    return top + Math.floor((last - top) / 4);
+  /** The row one quarter down the screen's content area. */
+  private expansionTargetRow(top: number): number {
+    return top + Math.floor((this.contentRows() - 1) / 4);
   }
 
   /** Expansion layout without the annotations that the chosen edge produces. */
@@ -3718,7 +3722,7 @@ export class Session {
       : [];
     const from = own.length > 0
       ? this.nodeStartRowWithPlan(sel!, plan)
-      : this.expansionTargetRow(plan, top);
+      : this.expansionTargetRow(top);
     const pool = own.length > 0 ? own : edges;
     // Distance in display rows: a collapsed file stands on one row, and the
     // lines it hides are not distance the eye travels.
