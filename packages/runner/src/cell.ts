@@ -34,6 +34,7 @@ import { encodeCellToSigilString } from "./builtins/sqlite/cf-link-codec.ts";
 import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
 import { checkSqliteWriteCeiling } from "./builtins/sqlite/write-ceiling.ts";
 import { checkSqliteRowLabelWrite } from "./builtins/sqlite/row-label-write.ts";
+import { scopeCallerEventId } from "./scheduler/event-identity.ts";
 import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
 import { cfcLabelViewForCell } from "./cfc/label-view.ts";
 import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
@@ -1324,7 +1325,12 @@ export class CellImpl<T extends FabricValue>
         onCommit,
         false,
         {
-          eventId: sendOptions?.eventId,
+          // The caller's key is opaque and unscoped; queueEvent expects a
+          // durable delivery id. Binding it to this stream is what keeps two
+          // verbs that share input bindings from colliding on one receipt.
+          eventId: sendOptions?.eventId === undefined
+            ? undefined
+            : scopeCallerEventId(sendOptions.eventId, resolvedToValueLink),
           originTx: this.tx ?? undefined,
         },
       );
