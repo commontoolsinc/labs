@@ -231,6 +231,16 @@ Only stage 1 is visible through the runtime idle signal, so an element can exist
 in the DOM, be found by a selector, and still drop a click because its handler
 is not bound yet.
 
+Settling first also keeps a trusted click from missing its target. A trusted
+click resolves the element's layout box and then dispatches the mouse events at
+that point. On a cold load the page keeps reflowing for a few frames as content
+above the control fills in — a topic's markdown body renders, a form or card
+below it appears — so a control that has just become rendered is still moving.
+If the box moves between when the click resolves it and when the mouse events
+fire, the click lands on whatever shifted into that spot instead of the control,
+and nothing happens. Settling the view drains the pending reflow so the target
+is stationary when it is clicked.
+
 **Use `awaitViewSettled(page)`** from `@commonfabric/integration` before issuing
 the first click or keystroke after navigation or any state change. It resolves
 once all three stages are done, so a single click then lands on a bound handler:
