@@ -11,6 +11,7 @@ export {
   FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
+  type NonNullableFabricValue,
 } from "./interface.ts";
 
 export {
