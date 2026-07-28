@@ -406,7 +406,7 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
       buildWrapPlan(doc.lines, view.displayMode, contentWidth, decorations)
     : null;
   const documentRowCount = wrapPlan?.rowCount ?? doc.lines.length;
-  const hasTrailingEmptyLine = view.expandMargin &&
+  const hasTrailingEmptyLine = view.isDiff === true &&
     doc.lines.at(-1)?.text.length === 0;
   const diffEndRow = Math.max(
     0,

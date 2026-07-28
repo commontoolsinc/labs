@@ -521,6 +521,19 @@ Deno.test("renderFrame: a trailing diff newline omits an orphan end connector", 
   ]);
 });
 
+Deno.test("renderFrame: a read-only trailing diff newline precedes its end mark", () => {
+  const rows = renderFrame(
+    parseDocument("done\n"),
+    diffView({ width: 9, height: 5, color: false }),
+  );
+  assertEquals(rows.slice(0, 4), [
+    "done     ",
+    "☙   ❦   ❧",
+    "  ☙   ❧  ",
+    "    ❦    ",
+  ]);
+});
+
 Deno.test("renderFrame: a final downward triangle labels the diff connector", () => {
   for (const text of ["done", "done\n"]) {
     const doc = parseDocument(text);
