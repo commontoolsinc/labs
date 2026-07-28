@@ -121,6 +121,7 @@ export function startReactiveActionCommit(state: {
 
 export function watchReactiveActionCommit(state: {
   readonly action: Action;
+  readonly actionId: string;
   readonly tx: IExtendedStorageTransaction;
   readonly log: ReactivityLog;
   readonly retries: WeakMap<Action, number>;
@@ -191,6 +192,7 @@ export function watchReactiveActionCommit(state: {
       // reader-dirty can re-trigger the action while we wait for the catch-up.
       state.restoreInvalidCauses();
       state.resubscribe(state.action, state.log);
+      const readinessStartedAt = Date.now();
       const readyToRetry =
         (error as { readyToRetry?: () => unknown }).readyToRetry;
       if (typeof readyToRetry === "function") {
@@ -209,6 +211,19 @@ export function watchReactiveActionCommit(state: {
           );
         }
       }
+      // P4 retry-anatomy attribution (client-passivity §0 step 2): one
+      // line per conflict re-queue with the catch-up wait it paid — the
+      // 594:14 retries-per-commit datum needs per-action burst/spacing
+      // structure to design the defer discipline. Client-side conflicts
+      // are the rare client-commit class; the volume rides the executor
+      // realm, whose stdout lands in the toolshed log.
+      console.debug(
+        "[P4] conflict-retry:",
+        `t=${Date.now()}`,
+        `waitMs=${Date.now() - readinessStartedAt}`,
+        `gated=${typeof readyToRetry === "function" ? 1 : 0}`,
+        state.actionId,
+      );
       state.markInvalid(state.action);
       state.pending.add(state.action);
       state.queueExecution();
@@ -628,6 +643,7 @@ function finalizeReactiveActionCommit(
   const committedLog = log;
   watchReactiveActionCommit({
     action: args.action,
+    actionId: args.actionId,
     tx: args.tx,
     log: committedLog,
     retries: state.retries,
