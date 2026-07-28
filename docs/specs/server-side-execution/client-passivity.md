@@ -623,7 +623,40 @@ serving holes on this workload are tiny (`malformed-action-observation`
 1-2×, `incomplete-static-surface` 1×, `dynamic-write-outside-static-
 surface` 2×) — consistent with R5/R13 being the only structural gaps.
 
-## 6. The amended plan (panel-final; supersedes the pre-panel skeleton)
+## 5c. P1 first results (2026-07-27): the engaged three-way, n=1 per arm
+
+The first per-iteration flag-off vs flag-on comparison on an ENGAGED
+system (persistent-page recipe, fresh store + quiet machine per run;
+full-capture protocol — no `tail` on the harness output). Run B
+engaged from **iteration 2** (first claim-ready at **+1.5s** from
+first demand — the warm-compile fast path with every P0 fix
+load-bearing; contrast 21-38s in the storm runs), and finished at
+claims 153 / attempts 77 / committed 24 / noop 52 / **failed 0** /
+conflicts 95.
+
+| iter | A flag-off (ms) | B flag-on (ms) | Δ |
+| --- | --- | --- | --- |
+| 1 (cold) | 706 | 606 | -99 |
+| 2-20 (engaged) median | 908 | 975 | **+67 (+7%)** |
+| spike iters 8 / 18 | 842 / 1265 | 1725 / 3308 | +883 / +2043 |
+| full-run median (q1-q3) | 879 (663-1033) | 967 (830-1525) | |
+
+Reading, with the honesty rules applied: (a) the bar ("engaged ≤
+flag-off") is NOT yet met at the median — but the gap is +7% with
+overlapping quartiles at n=1 per arm, against a day of 2-4×
+machine-load swings: directional, not final; the protocol's n=20 per
+arm decides. (b) The delta DECOMPOSES visibly: a small steady
+overhead (~+30-100ms on most iterations, several iterations
+NEGATIVE) plus large spikes on exactly the iterations where
+claimed-action conflicts land (95 conflicts; iters 8/18) — the
+client racing its own server executor on the same actions, i.e. the
+CP-panel's predicted speculation leg. The next P1 instrument is
+per-iteration conflict attribution (correlate conflict events with
+iteration windows) feeding P4's defer-then-(b) speculation design —
+if conflict-retry stalls explain the tail, the steady-state engaged
+cost is already ~parity and P4 is where the bar gets met. (c)
+Cold-start (iteration 1) was FASTER flag-on in this run — noise, but
+consistent with the executor absorbing no client work while cold.
 
 | Row | Builds | Red-first gate(s) | Dial | Acceptance | Resolves |
 | --- | --- | --- | --- | --- | --- |
