@@ -28,7 +28,13 @@ export const getCompilerOptions = (): CompilerOptions => {
      */
 
     removeComments: true,
-    noEmitOnError: true,
+    // Fatality is decided by the pipeline's explicit checks (Checker filters
+    // non-fatal codes like TS2578, then throws on what remains — see
+    // isNonFatalDiagnosticCode). TypeScript's own emit veto is a redundant
+    // second gate that disagrees exactly when a code was deliberately
+    // filtered: with it on, an unused '@ts-expect-error' in a stored pattern
+    // source still blocked emit after the checker accepted the file (CT-1916).
+    noEmitOnError: false,
     // Note: declaration emit is disabled because TypeScript's declaration emit
     // has trouble with unique symbols (CELL_BRAND, CELL_INNER_TYPE) in exported
     // types, causing emit to skip entirely. Declaration checking is done

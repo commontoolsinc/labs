@@ -41,6 +41,31 @@ const TESTS: TestDef[] = [
     source: "import { foo } from './foo.ts';export default foo()",
     expectedError: "Cannot find module './foo.ts'",
   },
+  {
+    // Stored sources are recompiled by every future toolchain against
+    // PLATFORM-supplied types; a directive that becomes unnecessary when
+    // those types improve must not brick the source (CT-1916 — 2026-07-28
+    // estuary, loom-mobile patterns vs. a jsx.d.ts that gained a prop).
+    name: "Unused @ts-expect-error compiles (durable-source drift)",
+    source: [
+      "const add = (x: number, y: number): number => x + y;",
+      "// @ts-expect-error -- suppressed an error under an older type env",
+      "export default add(1, 2);",
+      "",
+    ].join("\n"),
+  },
+  {
+    // The suppression is code-2578-narrow: a directive that still covers a
+    // REAL error keeps suppressing it, and errors outside any directive
+    // still fail (covered by "Throws: type check failure" above).
+    name: "@ts-expect-error still suppresses a live error",
+    source: [
+      "const add = (x: number, y: number): number => x + y;",
+      "// @ts-expect-error -- intentionally wrong argument type",
+      "export default add('1', 2);",
+      "",
+    ].join("\n"),
+  },
 ];
 
 const staticCache = new StaticCacheFS();

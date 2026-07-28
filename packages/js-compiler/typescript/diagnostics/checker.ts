@@ -22,6 +22,21 @@ const KNOWN_EXPORTED_SYMBOLS = [
   "SCOPE_BRAND",
 ];
 
+// TS2578 "Unused '@ts-expect-error' directive." must not fail compilation
+// here. Pattern sources are DURABLE: the same stored bytes are recompiled by
+// every future toolchain, while the type environment they check against
+// (vendored jsx.d.ts and friends) is supplied by the PLATFORM, not the
+// author. A directive that suppressed a real error when authored becomes
+// "unused" the moment the platform's types improve — treating that as fatal
+// retroactively bricks every stored pattern that carried it (2026-07-28
+// estuary: loom-mobile patterns embedding a `cf-cell-link label` directive
+// hard-failed to load after the vendored JSX types gained `label`, CT-1916).
+const UNUSED_TS_EXPECT_ERROR = 2578;
+
+/** Diagnostic codes {@link Checker} refuses to treat as fatal. */
+export const isNonFatalDiagnosticCode = (code: number): boolean =>
+  code === UNUSED_TS_EXPECT_ERROR;
+
 export class Checker {
   private program: Program;
   private messageTransformer?: DiagnosticMessageTransformer;
@@ -59,9 +74,11 @@ export class Checker {
 
   /** Per-file semantic diagnostics, as the error details typeCheck throws. */
   collectSemanticErrors(sourceFile: SourceFile): ErrorDetails[] {
-    return this.program.getSemanticDiagnostics(sourceFile).map(
-      (diagnostic) => ({ diagnostic, source: sourceFile.text }),
-    );
+    return this.program.getSemanticDiagnostics(sourceFile)
+      .filter((diagnostic) => !isNonFatalDiagnosticCode(diagnostic.code))
+      .map(
+        (diagnostic) => ({ diagnostic, source: sourceFile.text }),
+      );
   }
 
   /**
@@ -95,11 +112,16 @@ export class Checker {
   }
 
   check(diagnostics: readonly Diagnostic[] | undefined) {
-    if (!diagnostics || diagnostics.length === 0) {
+    // The emit path re-reports some semantic codes (TS surfaces 2578 through
+    // per-file emit diagnostics), so the non-fatal filter applies here too.
+    const fatal = (diagnostics ?? []).filter(
+      (diagnostic) => !isNonFatalDiagnosticCode(diagnostic.code),
+    );
+    if (fatal.length === 0) {
       return;
     }
     throw new CompilerError(
-      diagnostics.map((diagnostic) => ({ diagnostic })),
+      fatal.map((diagnostic) => ({ diagnostic })),
       this.messageTransformer,
     );
   }

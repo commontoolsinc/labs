@@ -23,6 +23,7 @@ import {
   Checker,
   type DiagnosticMessageTransformer,
   formatTransformerDiagnostic,
+  isNonFatalDiagnosticCode,
   TransformerDiagnosticInfo,
   TransformerError,
 } from "./diagnostics/mod.ts";
@@ -572,10 +573,14 @@ export class TypeScriptCompiler {
     };
 
     // Type + declaration diagnostics for authored files only (skipLibCheck
-    // already excludes the declaration libs).
+    // already excludes the declaration libs). Non-fatal codes are dropped the
+    // same way Checker drops them, so a corpus check reports exactly what
+    // would fail to load.
     for (const sourceFile of tsProgram.getSourceFiles()) {
       if (!authored.has(sourceFile.fileName)) continue;
-      for (const d of tsProgram.getSemanticDiagnostics(sourceFile)) pushTs(d);
+      for (const d of tsProgram.getSemanticDiagnostics(sourceFile)) {
+        if (!isNonFatalDiagnosticCode(d.code)) pushTs(d);
+      }
       for (const d of tsProgram.getSyntacticDiagnostics(sourceFile)) pushTs(d);
     }
 
