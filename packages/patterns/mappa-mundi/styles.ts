@@ -188,19 +188,46 @@ export const STYLES = `
 .mm .cflag[data-tip]:not([data-tip=""]):hover::after{left:auto;right:0}
 .mm [data-tip]{-webkit-tap-highlight-color:transparent}
 
-/* Tap-to-reveal. A hover tooltip is unreachable on a touch screen, so a tap
-   pins the same text into one shared sheet at the foot of the viewport. On a
-   pointer device hover already answers the question, so the sheet only appears
-   once something has actually been tapped. */
-.mm .tipsheet{display:none}
-.mm .tipsheet.open{
-  display:flex;align-items:flex-start;gap:.7rem;
+/* The place panel. Tapping anything annotated pins its referent here and opens
+   its thread — one surface, one anchor at a time, so the document stays a map
+   rather than becoming a chat window. On a pointer device hover still answers
+   "what does this mean" in place; the panel is for the conversation.
+
+   It is always in the DOM and hidden with CSS, never conditionally rendered:
+   it holds $value and $profile bindings, which blank the pattern if they end
+   up inside a computed subtree. */
+.mm .panel{display:none}
+.mm .panel.open{
+  display:flex;flex-direction:column;gap:.5rem;
   position:fixed;left:.8rem;right:.8rem;bottom:.8rem;z-index:80;
-  max-width:60ch;margin:0 auto;padding:.85rem .95rem;border-radius:10px;
-  font-size:.85rem;line-height:1.5;text-align:left;
-  background:var(--ink);color:var(--bg);
-  box-shadow:0 8px 30px rgba(0,0,0,.45);cursor:pointer}
-.mm .tipsheet .tipx{flex:none;font-size:1.1rem;line-height:1.2;opacity:.55}
+  max-width:64ch;margin:0 auto;padding:.8rem .9rem;border-radius:12px;
+  max-height:min(60vh,32rem);
+  background:var(--panel);border:1px solid color-mix(in srgb,var(--ink) 16%,transparent);
+  box-shadow:0 12px 40px rgba(0,0,0,.34)}
+.mm .phead{display:flex;align-items:center;justify-content:space-between;gap:.6rem}
+.mm .pcount{font-family:ui-monospace,Menlo,monospace;font-size:.64rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink3)}
+.mm .px{background:none;border:0;padding:.1rem .35rem;font-size:1.2rem;line-height:1;
+  color:var(--ink3);cursor:pointer;border-radius:6px}
+.mm .px:hover{color:var(--ink);background:var(--panel2)}
+.mm .pref{margin:0;font-size:.88rem;line-height:1.5;color:var(--ink2);
+  padding-bottom:.55rem;border-bottom:1px solid var(--hair2)}
+.mm .pthread{display:flex;flex-direction:column;gap:.55rem;overflow-y:auto;min-height:0}
+.mm .pmsg{display:flex;flex-direction:column;gap:.2rem;font-size:.9rem;line-height:1.5}
+.mm .pbody{color:var(--ink)}
+.mm .pcompose{display:flex;gap:.45rem;align-items:center;padding-top:.55rem;
+  border-top:1px solid var(--hair2)}
+.mm .pcompose cf-input{flex:1}
+
+/* Comment counts. The markers are static; the numbers arrive as generated CSS
+   from one reactive value (discussion.ts), so ~200 anchors cost one computed
+   rather than one each. A marker with no rule renders nothing at all. */
+.mm .ccount{font-family:ui-monospace,Menlo,monospace;font-size:.62rem;
+  color:var(--accent);font-weight:700}
+.mm .ccount:not(:empty),.mm .ccount::after{margin-left:.3rem}
+.mm .cname .ccount::after,.mm .chip .ccount::after{
+  padding:.02em .3em;border-radius:4px;
+  background:color-mix(in srgb,var(--accent) 14%,transparent)}
 
 /* claims */
 .mm .claims-intro{margin:0 0 1.4rem;max-width:74ch}

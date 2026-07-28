@@ -14,6 +14,7 @@
 // already filtered this way, with a `.flags-only` class.
 
 import { type Band, BANDS, type ConcernRow } from "./content.ts";
+import { ANCHOR_INDEX, concernKey, questionKey } from "./discussion.ts";
 
 export const FLAG = "⚑";
 
@@ -38,6 +39,12 @@ export const MODE_CLASS: Record<string, string> = {
 
 export interface RowVM {
   cls: string;
+  /** Anchor for the concern's own thread, and its position for the count CSS. */
+  selfKey: string;
+  selfIdx: number;
+  /** Same for its open question; empty / -1 on an unflagged row. */
+  flagKey: string;
+  flagIdx: number;
   name: string;
   tip: string;
   layerText: string;
@@ -68,9 +75,15 @@ export interface BandVM {
   domains: DomainVM[];
 }
 
-const rowVM = (r: ConcernRow): RowVM => ({
+const rowVM = (r: ConcernRow, band: string, domain: string): RowVM => ({
   // `lr-*` drives the layer sort, `flagged` drives the open-questions filter.
   cls: "crow lr-" + r.layerCls + (r.flag ? " flagged" : ""),
+  selfKey: concernKey(band, domain, r.name),
+  selfIdx: ANCHOR_INDEX[concernKey(band, domain, r.name)] ?? -1,
+  flagKey: r.flag ? questionKey(band, domain, r.name) : "",
+  flagIdx: r.flag
+    ? (ANCHOR_INDEX[questionKey(band, domain, r.name)] ?? -1)
+    : -1,
   name: r.name,
   tip: r.tip ?? "",
   layerText: r.layer,
@@ -94,7 +107,7 @@ const bandVM = (b: Band): BandVM => ({
     strip: d.strip.map((s) => ({
       style: "width:" + s.w + "%;background:var(--" + s.c + ")",
     })),
-    rows: d.rows.map(rowVM),
+    rows: d.rows.map((r) => rowVM(r, b.title, d.title)),
   })),
 });
 

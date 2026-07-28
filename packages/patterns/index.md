@@ -337,12 +337,19 @@ interface CounterOutput {
 
 ## `mappa-mundi/main.tsx`
 
-A read-only editorial document: the Common Fabric "mappa mundi". Five tabs (why
-the paradigm, the five promises, the three layers, what the Loom prototype has
-charted, and a 115-row concerns ledger) over static content in `content.ts`. The
-ledger's three orderings live in `ordering.ts` and are selected by a
-`computed()`; both `activeTab` and the sort mode are `perSession`. Keywords:
-document, tabs, reference, editorial, ledger.
+An editorial document with anchored discussion: the Common Fabric "mappa mundi".
+Five tabs (why the paradigm, the five promises, the three layers, what the Loom
+prototype has charted, and a 115-row concerns ledger) over static content in
+`content.ts`.
+
+The ledger renders once and is sorted/filtered by CSS from a single reactive
+class (`ordering.ts` explains why: mapping a reordered reactive array renders
+corrupt output). Comments hang off content-derived anchors — every concern, its
+open question, and every chip — and surface in one shared panel, with per-anchor
+counts driven by a single generated-CSS value rather than a computed per anchor
+(`discussion.ts`). Discussion is `PerSpace`, the draft is `PerUser`, and
+navigation state is `PerSession`. Keywords: document, tabs, reference,
+editorial, ledger, comments, annotations, multi-user.
 
 ### Input Schema
 
@@ -355,9 +362,17 @@ interface MappaMundiInput {}
 
 ```ts
 interface MappaMundiOutput {
+  /** Anchored comments, space-scoped, readable via `cf piece get discussion`. */
+  discussion?: Writable<DiscussionView>;
+  /** `cf piece call ... addComment '{"anchor":"…","body":"…"}'` */
+  addComment?: Stream<{ anchor: string; body: string }>;
+  /** Session-scoped: not readable from outside a session. */
   activeTab: Writable<string>;
 }
 ```
+
+Both discussion fields are optional because the runtime refuses to add a
+_required_ result field to a piece that already exists.
 
 ## `do-list/do-list.tsx`
 

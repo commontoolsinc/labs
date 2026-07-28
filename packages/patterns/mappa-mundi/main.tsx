@@ -3,8 +3,10 @@ import {
   handler,
   NAME,
   pattern,
+  type Stream,
   UI,
   type VNode,
+  wish,
   Writable,
 } from "commonfabric";
 
@@ -29,6 +31,16 @@ import {
 } from "./content.ts";
 import { MAPPA_IMAGE } from "./mappa-image.ts";
 import { FLAG_COUNT, LEDGER, MODE_CLASS, ROW_COUNT } from "./ordering.ts";
+import {
+  ANCHOR_INDEX,
+  ANCHOR_TEXT,
+  type Comment,
+  countCss,
+  type Discussion,
+  type DiscussionView,
+  layerChipPrefix,
+  tierChipPrefix,
+} from "./discussion.ts";
 import { STYLES } from "./styles.ts";
 
 /**
@@ -80,22 +92,66 @@ const setSort = handler<void, { mode: string; sortMode: Writable<string> }>(
 );
 
 /**
- * Tap-to-reveal for the tooltips. Hover alone leaves every referent unreachable
- * on a touch screen, and the source document had the same problem — it solved
- * it by pinning the tooltip to the bottom of the viewport rather than beside
- * the element it belongs to. Doing the same here means one shared sheet driven
- * by one cell, instead of a reactive class on all ~216 annotated elements.
+ * Opening a place in the map. The cell holds an ANCHOR KEY, and the panel looks
+ * the referent text up from the static registry — so the same tap that reveals
+ * what a concern means also opens its thread.
  *
- * Tapping something with no referent closes the sheet, which is also how you
- * dismiss it.
+ * Tapping something with no anchor closes the panel, which is also how it is
+ * dismissed.
  */
-const showTip = handler<void, { text: string; tip: Writable<string> }>(
-  (_, { text, tip }) => tip.set(text),
+const openAt = handler<void, { anchor: string; open: Writable<string> }>(
+  (_, { anchor, open }) => open.set(anchor),
 );
 
-const hideTip = handler<void, { tip: Writable<string> }>(
-  (_, { tip }) => tip.set(""),
+const closePanel = handler<void, { open: Writable<string> }>(
+  (_, { open }) => open.set(""),
 );
+
+/**
+ * Post a comment. `push` is the mergeable append, so two people commenting at
+ * once merge instead of clobbering; the durable order is the server's, which is
+ * why nothing here sorts.
+ *
+ * Date.now() is legal in a handler (coarsened to one second) and would throw in
+ * a computed. It is stored for display only.
+ */
+const postComment = handler<{ body?: string }, {
+  discussion: Writable<Discussion>;
+  open: Writable<string>;
+  draft: Writable<string>;
+  author: unknown;
+}>(({ body }, { discussion, open, draft, author }) => {
+  const text = (body ?? draft.get() ?? "").trim();
+  const anchor = open.get() ?? "";
+  if (!text || !anchor) return;
+  discussion.key("items").push({
+    anchor,
+    author,
+    body: text,
+    stampedAt: Date.now(),
+  });
+  draft.set("");
+});
+
+/**
+ * The agent-facing post. Everything comes from the payload, so it works from
+ * `cf piece call` where the session-scoped `open` / `draft` cells the UI uses
+ * do not resolve.
+ */
+const addComment = handler<{ anchor: string; body: string }, {
+  discussion: Writable<Discussion>;
+  author: unknown;
+}>(({ anchor, body }, { discussion, author }) => {
+  const text = (body ?? "").trim();
+  const at = (anchor ?? "").trim();
+  if (!text || !at) return;
+  discussion.key("items").push({
+    anchor: at,
+    author,
+    body: text,
+    stampedAt: Date.now(),
+  });
+});
 
 const STATUS_KEY = [
   { cls: "cstat s-live", term: "live", gloss: "shipping" },
@@ -107,18 +163,26 @@ const STATUS_KEY = [
 
 // ------------------------------------------------------------------- fragments
 
-const chipRow = (chips: Chip[], extra: string, tip: Writable<string>) => (
+const chipRow = (
+  chips: Chip[],
+  extra: string,
+  anchorPrefix: string,
+  open: Writable<string>,
+) => (
   <div className="chips">
     {chips.map((c) => {
       const vm = chipVM(c, extra);
+      const key = anchorPrefix + c.label;
       return (
         <span
           className={vm.cls}
           data-tip={vm.tip}
-          onClick={showTip({ text: vm.tip, tip })}
+          data-a={ANCHOR_INDEX[key] ?? -1}
+          onClick={openAt({ anchor: key, open })}
         >
           {vm.label}
           <span className={vm.codeCls}>{vm.code}</span>
+          <span className="ccount"></span>
         </span>
       );
     })}
@@ -159,9 +223,25 @@ const theme = {
 // deno-lint-ignore no-empty-interface
 interface MappaMundiInput {}
 
+/**
+ * A #mappamundi of the Common Fabric, carrying an anchored #discussion that an
+ * agent can read whole and post into.
+ */
 export interface MappaMundiOutput {
   [NAME]: string;
   [UI]: VNode;
+  /**
+   * Every thread in the space, each comment carrying the anchor it hangs off.
+   * Space-scoped, so unlike `activeTab` this is readable from outside a
+   * session — `cf piece get discussion` works.
+   *
+   * Optional, like `addComment`: the runtime rejects adding a REQUIRED result
+   * field to a piece that already exists ("newly required result field has no
+   * default"), so a contract that grows has to grow optionally.
+   */
+  discussion?: Writable<DiscussionView>;
+  /** Post a comment: `cf piece call ... addComment '{"anchor":"…","body":"…"}'`. */
+  addComment?: Stream<{ anchor: string; body: string }>;
   /**
    * The tab on screen, so a host sharing the session can deep-link into a
    * region of the map. Session-scoped: it holds a value inside a session and
@@ -174,8 +254,37 @@ export interface MappaMundiOutput {
 export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
   const activeTab = new Writable.perSession("why");
   const sortMode = new Writable.perSession("maturity");
-  // The referent currently pinned open by tap; "" means the sheet is closed.
-  const tip = new Writable.perSession("");
+  // The place in the map currently open; "" means the panel is closed.
+  const open = new Writable.perSession("");
+  // The comment being written. perUser so it survives a reload for one person.
+  const draft = new Writable.perUser("");
+  // Every thread in the space. Object-wrapped, not a bare array: a bare
+  // Writable<T[]> holding a nested live cell unwraps to a weak object.
+  const discussion = new Writable.perSpace<Discussion>({ items: [] });
+
+  // The viewer, resolved from the runtime — never a typed-in name.
+  const profileWish = wish({ query: "#profile" });
+
+  const referent = computed(() => ANCHOR_TEXT[open.get() ?? ""] ?? "");
+  // Verified safe: filtering a reactive array re-renders correctly on
+  // membership change. Never reorder it — that renders corrupt output.
+  const thread = computed(() =>
+    (discussion.get()?.items ?? []).filter((c) =>
+      c.anchor === (open.get() ?? "")
+    )
+  );
+  const threadCount = computed(() => {
+    const n = (discussion.get()?.items ?? []).filter((c) =>
+      c.anchor === (open.get() ?? "")
+    ).length;
+    return n === 0
+      ? "no comments yet"
+      : n === 1
+      ? "1 comment"
+      : n + " comments";
+  });
+  // One reactive value fills in every count marker. See discussion.ts.
+  const counts = computed(() => countCss(discussion.get()?.items ?? []));
 
   // Sorting and filtering are CSS; only this class is reactive. See ordering.ts.
   const ledgerCls = computed(() =>
@@ -185,6 +294,8 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
   return {
     [NAME]: "Common Fabric mappa mundi",
     activeTab,
+    discussion,
+    addComment: addComment({ discussion, author: profileWish.result }),
     [UI]: (
       <cf-theme theme={theme}>
         <cf-screen>
@@ -334,7 +445,12 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                               <span className="bl">its gate</span>
                               <div>{l.gate}</div>
                             </div>
-                            {chipRow(l.chips, "", tip)}
+                            {chipRow(
+                              l.chips,
+                              "",
+                              layerChipPrefix(l.tone),
+                              open,
+                            )}
                           </div>
                         ))}
                       </div>
@@ -366,7 +482,12 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                               <span className={"glabel l-" + g.layer}>
                                 {g.label}
                               </span>
-                              {chipRow(g.chips, "l-" + g.layer, tip)}
+                              {chipRow(
+                                g.chips,
+                                "l-" + g.layer,
+                                tierChipPrefix(t.tname, g.label),
+                                open,
+                              )}
                             </div>
                           ))}
                         </div>
@@ -413,9 +534,14 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                                 <span
                                   className="cname"
                                   data-tip={r.tip}
-                                  onClick={showTip({ text: r.tip, tip })}
+                                  data-a={r.selfIdx}
+                                  onClick={openAt({
+                                    anchor: r.selfKey,
+                                    open,
+                                  })}
                                 >
                                   {r.name}
+                                  <span className="ccount"></span>
                                 </span>
                                 <span className={r.layerCls}>
                                   {r.layerText}
@@ -424,9 +550,14 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                                 <span
                                   className={r.flagCls}
                                   data-tip={r.flag}
-                                  onClick={showTip({ text: r.flag, tip })}
+                                  data-a={r.flagIdx}
+                                  onClick={openAt({
+                                    anchor: r.flagKey,
+                                    open,
+                                  })}
                                 >
                                   {r.flagMark}
+                                  <span className="ccount"></span>
                                 </span>
                               </div>
                             ))}
@@ -456,16 +587,65 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                 </cf-tab-panel>
               </cf-tabs>
 
+              {
+                /*
+                The panel is ALWAYS in the DOM and hidden with CSS. It must be:
+                $value and $profile below are bidirectional bindings, and a
+                binding inside a {computed(() => <jsx/>)} subtree throws and
+                blanks the whole pattern. Only the class name is reactive.
+              */
+              }
               <div
-                className={computed(() =>
-                  tip.get() ? "tipsheet open" : "tipsheet"
-                )}
-                role="status"
-                onClick={hideTip({ tip })}
+                className={computed(() => open.get() ? "panel open" : "panel")}
               >
-                <span className="tipx">×</span>
-                <span>{tip}</span>
+                <div className="phead">
+                  <span className="pcount">{threadCount}</span>
+                  <button
+                    type="button"
+                    className="px"
+                    onClick={closePanel({ open })}
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <p className="pref">{referent}</p>
+
+                <div className="pthread">
+                  {thread.map((c) => (
+                    <div className="pmsg">
+                      <cf-profile-badge $profile={c.author} variant="chip" />
+                      <span className="pbody">{c.body}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="pcompose">
+                  <cf-input
+                    $value={draft}
+                    placeholder="Add a comment"
+                    oncf-submit={postComment({
+                      discussion,
+                      open,
+                      draft,
+                      author: profileWish.result,
+                    })}
+                  />
+                  <cf-button
+                    onClick={postComment({
+                      discussion,
+                      open,
+                      draft,
+                      author: profileWish.result,
+                    })}
+                  >
+                    Post
+                  </cf-button>
+                </div>
               </div>
+
+              {/* every comment count, in one reactive value */}
+              <style>{counts}</style>
             </div>
           </div>
         </cf-screen>
