@@ -87,19 +87,28 @@ precisely the foundation those need.
    per D1): the full (b) view-feeding speculation machinery — warm-set
    enumeration/budget, write-targets-in-doc-set, divergence counters,
    D5 hold-never-flicker UX.
-3. **P2 serving coverage** — the 2026-07-28 runs measured the LIVE
-   unserved inventory, which re-weights the register list. Note leg:
-   nearly empty (4 codes × 1 offender each). Chat leg's real holes:
-   `non-space-read-scope` ×181/3 offenders (scoped-surface actions
-   unservable at space rank — this is the C1.5a/C2.5 RANK-DIAL
-   enablement question, CA4-ordering/owner-gated, not a register
-   row) and `malformed-output-surface` ×39/18 offenders (the W2.x
-   output-surface class in the group-chat lifts — servability's
-   single-direct-output rule vs what certified lifts declare). Then
-   the original register work: R5 brokers `llm`/`sqliteQuery`,
-   descriptors, R13 `wish`, sqlite commit path per D2. Gate
-   unchanged: P1 unserved inventory empty or per-action-gated —
-   start from the offender lists above, not the generic register.
+3. **P2 serving coverage — first slice DONE 2026-07-28 (§5f); the
+   remaining inventory is the OWNER rank question + the R5 effect
+   rows.** The taxonomy pass proved the chat leg's
+   `malformed-output-surface` ×39/18 was a diagnostic-labeling defect:
+   all offenders are the DOCUMENTED §4 output-widening pair
+   (well-formed certifier summaries), mislabeled because the
+   classifier's pair collapse ran lane-only. Relabeled (`c2cc3891e`,
+   admission byte-identical) — the live inventory shifted to exactly
+   the truthful classes: `non-space-read-scope` ×191/20 offenders
+   (**the C1.5a/C2.5 RANK-DIAL enablement question — owner-gated per
+   CA4; 14/15 fixture offenders classify claim-ready at user rank
+   with the dial on**), lease-fence ×62 transients, two singletons.
+   REMAINING BUILD: R5 brokers `llm`/`sqliteQuery`, descriptors, R13
+   `wish`, sqlite commit path per D2 — the effect rows no relabel can
+   serve. Gate unchanged: inventory empty or per-action-gated — the
+   computation side now IS per-action-gated (on the rank dials);
+   the effect rows are the open build.
+   ALSO CLOSED with the same runs: §5d residual (a) — all 55
+   demand→wave trigger overrides were `closure-growth`+`closure-shrink`
+   composites (the shrink genuinely needs the full re-walk with
+   removes); working as designed, probe (`0cb2ca92e`) stays as the
+   permanent split.
 4. **P3 passivity mechanism** (per-session subcap, passive-mode
    demand producer, dynamic-reactivation contract, effect-attempt
    journal) — the client stops running standing work. THIS is where
@@ -1008,6 +1017,48 @@ latency loss.
 before building on it — the 594:14 was measured pre-step-1 and did
 not survive it; the build that datum originally justified (a full
 pre-attempt defer machinery) would have been aimed at a ghost.
+
+## 5f. Step-3 first slice (2026-07-28): the malformed-output-surface class was a labeling defect
+
+An isolated-worktree taxonomy pass instrumented both
+`malformed-output-surface` return sites in
+`classifyStaticActionServability` over the rollout-products group-chat
+case: **15/15 offenders were the documented context-lattice §4
+output-widening pair** — broad + scoped instance of ONE doc/path,
+`writes` verbatim identical to `directOutputs`, every entry
+individually root-value — i.e. well-formed certifier output. The
+classifier's pair collapse ran only under an active lane
+(`laneRank !== "space"`), so at space rank the pair hit the plurality
+check and reported a shape complaint, hiding the real class: scoped
+UI derivations (profile labels, send-button booleans, rosters) that
+are simply unservable until the rank dials. 14/15 classify
+claim-ready at USER rank with `serverPrimaryExecutionUserRankCandidates`
+on (1 needs the session dial).
+
+Fix (`c2cc3891e`): at space rank the same pair SHAPE resolves the
+broad instance and falls through to the scope checks —
+admission byte-identical, diagnostic truthful
+(`non-space-write-scope` / in practice `non-space-read-scope`, since
+these lifts read scoped cells too and the read check fires first).
+Two C1.9/C2.2 admission pins reconciled with their byte-identity
+rationale preserved. Live chat-leg gate: `malformed-output-surface`
+**39 → 0**; inventory now `non-space-read-scope` ×191/20 (the
+owner-gated rank class, correctly named) + lease-fence ×62 + two
+singletons. Engagement: claims 116 / committed 54 / failed 0.
+
+Same runs closed §5d residual (a): all 55 demand→wave trigger
+overrides were `closure-growth`+`closure-shrink` same-flush
+composites — the shrink leg genuinely requires the full re-walk
+(removes), so the override is design-correct; the
+`executor cold trigger override:` probe stays as the permanent split.
+
+**The pending OWNER question this leaves on the table:** enabling the
+C1.5a/C2.5 rank dials for real deployments (CA4 ordering: memory-side
+claim-rank stage + cohort advertisement + the dials) is now the
+single decision standing between the chat product's computation
+inventory and claim-ready — the measured payoff surface is 20
+offender actions × the multi-user legs. The effect rows (R5 brokers,
+R13 wish, sqlite per D2) remain build work either way.
 
 ## 7. Owner decisions — RESOLVED 2026-07-26
 
