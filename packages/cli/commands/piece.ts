@@ -315,6 +315,24 @@ export function pieceCallInvocation(
   return { rawArgs, jsonOutput };
 }
 
+/**
+ * Resolve the invocation id for a handler call: the caller's own id, or a
+ * freshly minted one. A blank id is rejected rather than passed down — it
+ * would read as "the caller supplied one" while carrying nothing that can
+ * distinguish one delivery from another, so the retry it promises to make
+ * safe would not be (verb contract WS-D).
+ */
+export function resolveInvocationId(
+  raw: string | undefined,
+  mint: () => string = () => crypto.randomUUID(),
+): string {
+  if (raw === undefined) return mint();
+  if (!raw.trim()) {
+    throw new ValidationError("--invocation requires a non-blank id");
+  }
+  return raw;
+}
+
 export function writePieceRenderStatus(
   message: string,
   jsonOutput: boolean,
@@ -1123,7 +1141,7 @@ after --. Handlers interpret piped input when no input argument is present.`,
   .stopEarly()
   .arguments("<callable:string> [tail...:string]")
   .action(async function (options, callableName, ...tail) {
-    const invocationId = options.invocation ?? crypto.randomUUID();
+    const invocationId = resolveInvocationId(options.invocation);
     let phase: InvocationPhase = "initial_sync";
     try {
       setQuietMode(!!options.quiet);

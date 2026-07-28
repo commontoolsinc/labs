@@ -13,6 +13,7 @@ import {
   pieceCallRawArgs,
   pieceGetDataErrorReport,
   pieceLinkDataErrorReport,
+  resolveInvocationId,
 } from "../commands/piece.ts";
 import { LinkValidationError } from "../lib/piece.ts";
 
@@ -1127,6 +1128,16 @@ describe("piece call stdin payloads", () => {
       rawArgs: ["invoke", "--query", "--json"],
       jsonOutput: false,
     });
+  });
+
+  it("mints an invocation id when none is given and rejects a blank one", () => {
+    expect(resolveInvocationId(undefined, () => "minted-1")).toBe("minted-1");
+    expect(resolveInvocationId("caller-supplied")).toBe("caller-supplied");
+    // A blank id would claim caller-supplied idempotency while carrying
+    // nothing that distinguishes deliveries — the retry it promises would
+    // not be safe.
+    expect(() => resolveInvocationId("")).toThrow(/non-blank id/);
+    expect(() => resolveInvocationId("   ")).toThrow(/non-blank id/);
   });
 
   it('maps a bare "-" payload onto the --json-file stdin path', () => {
