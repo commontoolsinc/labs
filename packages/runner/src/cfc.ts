@@ -1,4 +1,4 @@
-import { type ImmutableJSONValue, JSONSchemaObj } from "@commonfabric/api";
+import { JSONSchemaObj, type JSONValue } from "@commonfabric/api";
 import type { CfcConfClause } from "./cfc/clause.ts";
 import { isRecord } from "@commonfabric/utils/types";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
@@ -34,7 +34,7 @@ export {
   cfcAtom,
 } from "@commonfabric/api/cfc";
 
-type IFCAtom = ImmutableJSONValue;
+type IFCAtom = JSONValue;
 
 // schemaAtPath derivations per deep-frozen schema identity. The derivation is
 // pure given (schema, path, boolean default flags) when no extra

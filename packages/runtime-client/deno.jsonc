@@ -1,4 +1,5 @@
 {
+  // Dependency guide: ../../docs/development/DEPENDENCIES.md
   "name": "@commonfabric/runtime-client",
   "tasks": {
     // --no-check: this package is type-checked by `deno task check` (tasks/check.sh).

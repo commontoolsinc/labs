@@ -209,8 +209,10 @@ interface TopicsInput {
   topics?: Writable<TopicPiece[] | Default<[]>>;
   myName?: PerUser<Writable<string | Default<"">>>;
 }
-// TopicInput additionally takes mentionable?: Writable<TopicPiece[]> — the
-// board's own list, wired at creation, for detail-page Connections.
+// TopicInput additionally takes mentionable?: Writable<TopicReference[]> —
+// the board's own list, wired at creation, for detail-page Connections.
+// TopicReference is TopicPiece minus its own crossrefs, so a Topic's schema
+// describes its siblings without recursing over the whole board.
 ```
 
 ### Output Schema
@@ -1188,13 +1190,13 @@ formatting.
 ## `examples/reactive-now.tsx`
 
 Example pattern demonstrating both pattern-facing surfaces of the timing
-side-channel mitigations. Reading time: a one-shot `#now` snapshot (load time),
-a ticking `#now/1` clock (current time), and a `#now`-derived "N seconds ago"
-elapsed label — a worked reference for migrating clock reads off the forbidden
-body-level `Date.now()` onto `#now`. Receiving input: a "Tap" button and a
-`$value` text box, so a live browser can watch the token-bucket delivery shaping
-— bursts are realtime, only sustained mashing/typing is throttled, and nothing
-is dropped.
+side-channel mitigations. Reading time: a one-shot `#now` snapshot (the piece's
+first-ever load, durable), a ticking `#now/1` clock (current time), and a
+`#now`-derived "N seconds ago" elapsed label — a worked reference for migrating
+clock reads off the forbidden body-level `Date.now()` onto `#now`. Receiving
+input: a "Tap" button and a `$value` text box, so a live browser can watch the
+token-bucket delivery shaping — bursts are realtime, only sustained
+mashing/typing is throttled, and nothing is dropped.
 
 **Keywords:** now, wish, time, elapsed, relative-time, reactive,
 capability-gate, timing, delivery-shaping, token-bucket, input

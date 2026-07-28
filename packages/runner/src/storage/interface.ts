@@ -7,6 +7,8 @@ import type {
 import type {
   CommitPrecondition,
   EntityDocument,
+  EntityIdListOptions,
+  EntityIdListResult,
   PatchOp,
   SchedulerActionSnapshotQuery,
   SchedulerExecutionContextKey,
@@ -390,6 +392,20 @@ export interface IStorageProvider {
 export interface IStorageProviderWithReplica extends IStorageProvider {
   replica: ISpaceReplica;
 
+  /** Establish the authenticated space session without reading entity values. */
+  ensureSession?(): Promise<void>;
+
+  /** List live space-scoped entity identifiers without loading their values. */
+  listEntityIds?(): Promise<string[] | undefined>;
+
+  /** List one page from a stable live entity-identifier snapshot. */
+  listEntityIdPage?(
+    options?: EntityIdListOptions,
+  ): Promise<EntityIdListResult | undefined>;
+
+  /** Test one live space-scoped entity identifier without loading its value. */
+  entityIdExists?(id: string): Promise<boolean | undefined>;
+
   /**
    * Internal scheduler persistence query. Memory v2 providers implement this
    * so the runner can rebuild scheduler indexes from persisted observations.
@@ -694,11 +710,11 @@ export interface IMemoryChange {
   /**
    * Value memory address had before change.
    */
-  before: Immutable<FabricValue>;
+  before: FabricValue;
   /**
    * Value memory address has after change.
    */
-  after: Immutable<FabricValue>;
+  after: FabricValue;
 }
 
 export type StorageTransactionStatus =
@@ -794,8 +810,8 @@ export interface IStorageTransaction {
    * memory transaction. When there are no semantic writes, storage backends may
    * still commit this metadata as an internal no-op observation.
    */
-  setSchedulerObservation?(observation: unknown): void;
-  getSchedulerObservation?(): unknown;
+  setSchedulerObservation?(observation: FabricValue): void;
+  getSchedulerObservation?(): FabricValue;
 
   /**
    * Optional commit-time preconditions attached to this transaction's commit in
@@ -1029,6 +1045,17 @@ export interface IExtendedStorageTransaction
    * runner to derive the handler result cell's cause (spec §7.6).
    */
   dispatchedEventId?: string;
+
+  /**
+   * The durable address of this handling's result/receipt cell (spec §7.6:
+   * "the receipt is the handling's result cell"). Set by the runner when a
+   * handler's outcome is written; consumed by a sender's commit callback to
+   * hand the caller a readable handle — on success AND on a create-only
+   * receipt collision, where it addresses the winner's original outcome
+   * (verb contract WS-D). Structural exposure so no caller ever reconstructs
+   * the `{ $ctx, $event }` cause or parses error prose.
+   */
+  handlingReceiptLink?: NormalizedFullLink;
 
   /**
    * The wall-clock instant (ms) of the event whose dispatch opened this
@@ -1641,7 +1668,7 @@ export interface IStorageTransactionComplete extends IStorageError {
  * Represents adddress within the memory space which is like pointer inside the
  * fact value in the memory.
  */
-export interface IMemoryAddress {
+export type IMemoryAddress = {
   /**
    * URI to an entity. It corresponds to `of` field in the memory protocol.
    */
@@ -1660,11 +1687,11 @@ export interface IMemoryAddress {
    * address. It is a path within the `is` field of the fact in memory protocol.
    */
   path: readonly MemoryAddressPathComponent[];
-}
+};
 
-export interface IMemorySpaceAddress extends IMemoryAddress {
+export type IMemorySpaceAddress = IMemoryAddress & {
   space: MemorySpace;
-}
+};
 
 export type MemoryAddressPathComponent = string;
 
@@ -1758,8 +1785,8 @@ export interface TransactionReactivityLog {
 
 export interface TransactionWriteDetail {
   address: IMemorySpaceAddress;
-  value?: Immutable<FabricValue>;
-  previousValue?: Immutable<FabricValue>;
+  value?: FabricValue;
+  previousValue?: FabricValue;
   /**
    * Pre-transaction slot presence at `address.path` — distinguishes an
    * absent slot from a present slot holding `undefined`, which
@@ -1772,7 +1799,7 @@ export interface TransactionWriteDetail {
 
 export interface TransactionReadDetail {
   address: IMemorySpaceAddress;
-  value?: Immutable<FabricValue>;
+  value?: FabricValue;
 }
 
 export type NativeStorageCommitOperation =
@@ -1800,7 +1827,7 @@ export type NativeStorageCommitOperation =
 
 export interface NativeStorageCommit {
   operations: readonly NativeStorageCommitOperation[];
-  schedulerObservation?: unknown;
+  schedulerObservation?: FabricValue;
   preconditions?: readonly CommitPrecondition[];
   /**
    * Folded SQLite write ops, applied in the same wire commit as `operations`
@@ -1916,13 +1943,13 @@ export interface ITypeMismatchError extends IStorageError {
  */
 export interface IAttestation {
   readonly address: IMemoryAddress;
-  readonly value?: Immutable<FabricValue>;
+  readonly value?: FabricValue;
 }
 
 // An IAttestation where the address is an IMemorySpaceAddress
 export interface IMemorySpaceAttestation {
   readonly address: IMemorySpaceAddress;
-  readonly value?: Immutable<FabricValue>;
+  readonly value?: FabricValue;
 }
 
 // Re-export transaction wrapper utilities from implementation

@@ -1883,20 +1883,23 @@ export class CfHarnessPromptLoop {
       });
       if (
         attempt.providerId !== "openai-compatible-gateway" ||
-        attempt.operation !== "chat.completions"
+        (attempt.operation !== "chat.completions" &&
+          attempt.operation !== "responses")
       ) {
         return;
       }
       const {
         providerId: _providerId,
         type: _type,
-        operation: _operation,
+        operation,
         ...rest
       } = attempt;
       gatewayAttempts.push({
         ...rest,
         type: "cf-harness.gateway.chat-completion-attempt",
-        operation: "chat.completions",
+        // Preserve which API served the turn: gpt-* goes to the Responses API,
+        // provider-native tools and non-OpenAI models stay on chat completions.
+        operation,
         runId: this.engine.getRunState().runId,
         sequence: gatewayAttempts.length + 1,
         modelTurn: modelTurns,
@@ -2358,6 +2361,15 @@ export class CfHarnessPromptLoop {
         ...optionalPolicyEventIndexes(policyEventIndexes),
         errorDetail: toErrorDetail(error),
       });
+      // Reaching this catch means a genuinely fatal tool failure — sandbox
+      // spawn/infra, CFC transport, artifact/run-state persistence, an engine
+      // invariant, or a cancelled run. These are not model-correctable, so the
+      // run stays fatal. RECOVERABLE mistakes (a `cwd` outside the sandbox, a
+      // command timeout) never arrive here: the bash tool converts them into an
+      // ordinary failed BashToolOutput the model reacts to, which flows through
+      // the normal CFC-mediated output path below (see bash.ts). Keeping the
+      // narrowing at the tool boundary is what lets this catch stay run-fatal
+      // without matching error-message strings.
       throw error;
     }
     const modelOutputResult = await this.#modelFacingToolOutput(

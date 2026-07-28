@@ -16,7 +16,6 @@ import { cursorScreenPos, renderFrame, type ViewState } from "./render.ts";
 import { Session, type SessionOptions } from "./session.ts";
 import { ui } from "./theme.ts";
 import type { Semantics } from "./languages/language.ts";
-import { languageForFile } from "./languages/language.ts";
 import type { EditableSource } from "./editsource.ts";
 import { realFileGateway } from "./filegateway.ts";
 import { ViewError } from "./errors.ts";
@@ -91,7 +90,7 @@ export function realPagerDeps(): PagerDeps {
 export async function runPager(
   doc: Document,
   options: PagerOptions,
-  semanticsIn?: Semantics,
+  semantics: Semantics | undefined,
   editSource?: EditableSource,
   deps: PagerDeps = realPagerDeps(),
 ): Promise<void> {
@@ -105,17 +104,6 @@ export async function runPager(
       }). Pipe through a real terminal, or use --plain.`,
     );
   }
-
-  // A best-effort semantic service for inferred types / cross-file definitions.
-  // Construction is cheap (the program is built lazily on first use) and every
-  // query degrades to nothing, so this never blocks startup or fails the pager
-  // when the text is not a resolvable module graph. The caller picks the right
-  // service for the input (transformed blob vs diff); fall back to the catch-all
-  // language's whole-document service.
-  const semantics = semanticsIn ??
-    languageForFile(undefined).createSemantics?.(doc.text, {
-      cwd: Deno.cwd(),
-    });
 
   // The terminal fills the area outside the character grid (the sub-cell padding
   // below the last row) with its default background. Set that to the status

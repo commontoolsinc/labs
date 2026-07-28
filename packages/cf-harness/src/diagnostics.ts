@@ -886,7 +886,11 @@ export const classifyHarnessRunError = (
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.toLowerCase();
   if (
-    normalized.includes("chat completion transport request failed") &&
+    // Operation-neutral: the gateway client prefixes this with the operation
+    // ("chat.completions" or "responses"), and runs recorded before that
+    // change say "chat completion". Matching the stable tail classifies all
+    // three.
+    normalized.includes("transport request failed") &&
     (normalized.includes("timed out") ||
       normalized.includes("timeout"))
   ) {

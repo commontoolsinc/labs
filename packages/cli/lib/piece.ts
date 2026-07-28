@@ -22,7 +22,8 @@ import {
   VNode,
 } from "@commonfabric/runner";
 import { validateSchemaValue } from "@commonfabric/runner/cfc";
-import type { CellScope } from "@commonfabric/api";
+import type { CellScope, JSONSchema } from "@commonfabric/api";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 import { StorageManager } from "@commonfabric/runner/storage/cache";
 import {
   assignSlug,
@@ -53,10 +54,12 @@ import {
   callableCommandSpec,
   type CallableExecutionDeps,
   type CallableResolution,
+  type CallableResultRef,
   CF_RUNTIME_ERROR_LOG,
   type CliRuntimeErrorRecord,
   detectCallableKind,
   executeResolvedCallable,
+  type InvocationOutcome,
   runtimeErrorLog,
 } from "./callable.ts";
 import { executeCallableCommand } from "./callable-command.ts";
@@ -82,6 +85,7 @@ export interface SpaceConfig {
   space: string;
   identity: string;
   jsonOutput?: boolean;
+  deferSpaceCellSync?: boolean;
 }
 
 /** Metadata returned for a piece whose stored data matches a search query. */
@@ -164,6 +168,10 @@ export interface PieceCallableDependencies extends CallableExecutionDeps {
 export interface ExecutedPieceCallable {
   helpText?: string;
   outputText?: string;
+  /** Handler invocation outcome, passed through from ExecutedCallable. */
+  invocation?: InvocationOutcome;
+  /** Tool result cell address, passed through from ExecutedCallable. */
+  resultRef?: CallableResultRef;
   parsed: ParsedExecArgs;
   resolved: ResolvedPieceCallable;
 }
@@ -359,18 +367,28 @@ export async function loadManager(config: SpaceConfig): Promise<PieceManager> {
 
     const pieceManager = await timeCliPhase(
       "loadManager.pieceManager",
-      () => new PieceManager(session, runtime),
+      () =>
+        new PieceManager(session, runtime, {
+          deferSpaceCellSync: config.deferSpaceCellSync,
+        }),
     );
     pieceManagerRef.current = pieceManager;
-    // `synced()` settles even when this space is permanently denied: the memory
-    // client terminates a denied session rather than retrying its reopen. It
-    // settles quietly, though — a denied cross-space link stays a silent absent
-    // read — so surface a denial on THIS space deliberately, with the server's
-    // real AuthorizationError.
-    await timeCliPhase(
-      "loadManager.synced",
-      () => pieceManager.synced(),
-    );
+    if (config.deferSpaceCellSync) {
+      await timeCliPhase(
+        "loadManager.ensureSpaceSession",
+        () => pieceManager.ensureSpaceSession(),
+      );
+    } else {
+      // `synced()` settles even when this space is permanently denied: the
+      // memory client terminates a denied session rather than retrying its
+      // reopen. It settles quietly, though — a denied cross-space link stays a
+      // silent absent read — so surface a denial on THIS space deliberately,
+      // with the server's real AuthorizationError.
+      await timeCliPhase(
+        "loadManager.synced",
+        () => pieceManager.synced(),
+      );
+    }
     throwOnSpaceAuthorizationError(runtime.storageManager, session.space);
     return pieceManager;
   });
@@ -1333,18 +1351,30 @@ async function tryResolvePieceHandler(
     },
     required: [callableName],
   });
-  if (!isHandlerCell(streamRoot.key(callableName))) {
+  const streamCell = streamRoot.key(callableName);
+  if (!isHandlerCell(streamCell)) {
     return null;
   }
 
+  // Dispatch through the cell whose stream-ness this path just proved, not a
+  // second cell built by reading the schema back from links. Both address the
+  // same target — `getResult` is the identity on the piece cell — so they
+  // differ only in schema, and a link-derived schema is exactly what defeated
+  // the ordinary detection paths above. Sending on that cell takes `.set()`'s
+  // non-stream branch (`packages/runner/src/cell.ts:1316`) and fails with
+  // "Transaction required for .set()" instead of queueing the event, so a verb
+  // this path lists is a verb that could not be called.
   const rootCell = await piece.result.getCell();
-  const callableCell = rootCell.key(callableName).asSchemaFromLinks();
+  const linkDerivedCell = rootCell.key(callableName).asSchemaFromLinks();
   return {
-    callableCell,
+    callableCell: streamCell,
     callableKind: "handler",
     cellKey: callableName,
     cellProp: "result",
-    commandSpec: callableCommandSpec(callableCell, "handler"),
+    // The link-derived cell still carries whatever payload schema the piece
+    // does publish, which the forced stream cast does not; keep using it for
+    // the command spec so `--help` and input validation are unaffected.
+    commandSpec: callableCommandSpec(linkDerivedCell, "handler"),
     manager,
     piece,
     space,
@@ -1388,11 +1418,18 @@ async function tryResolveLivePieceToolCallable(
   return callableKind === "tool" ? callableCell : null;
 }
 
-async function resolvePieceCallable(
+/** Load the target piece and its manager for callable resolution/listing —
+ * one shared path so `cf piece call` and `cf piece verbs` always see the same
+ * piece state. */
+async function loadPieceForCallables(
   config: PieceConfig,
-  callableName: string,
   deps: PieceCallableDependencies = {},
-): Promise<ResolvedPieceCallable> {
+): Promise<{
+  manager: any;
+  piece: any;
+  space: string;
+  resolvedConfig: Awaited<ReturnType<typeof resolvePieceConfigWithManager>>;
+}> {
   const manager = await (deps.loadManager ?? loadManager)(config);
   const resolvedConfig = await resolvePieceConfigWithManager(config, manager);
   const pieces = new PiecesController(manager);
@@ -1422,6 +1459,18 @@ async function resolvePieceCallable(
       resolvedConfig.pieceScope,
     ));
   const space = manager.getSpace?.() ?? config.space;
+  return { manager, piece, space, resolvedConfig };
+}
+
+async function resolvePieceCallable(
+  config: PieceConfig,
+  callableName: string,
+  deps: PieceCallableDependencies = {},
+): Promise<ResolvedPieceCallable> {
+  const { manager, piece, space, resolvedConfig } = await loadPieceForCallables(
+    config,
+    deps,
+  );
 
   const resolved = (await tryResolvePieceCallableAt(
     piece,
@@ -1462,6 +1511,135 @@ async function resolvePieceCallable(
   }
 
   return resolved;
+}
+
+/** `cf piece verbs` output: the deployed pattern's source identity plus one
+ * row per callable. The identity is the skew detector — a client or skill
+ * comparing it against the contract it was written for can tell it targets a
+ * newer pattern than the live piece, instead of discovering the mismatch
+ * through a silently dropped field (design: Verb discovery). */
+export interface PieceCallablesListing {
+  /** The deployed pattern's source identity; null when the piece exposes
+   * none (e.g. harness doubles). */
+  pattern: PiecePatternRef | null;
+  verbs: PieceCallableListing[];
+}
+
+/** One row of `cf piece verbs`: a callable the piece exposes. */
+export interface PieceCallableListing {
+  name: string;
+  kind: "handler" | "tool";
+  /** Which cell the callable lives on. `result` shadows `input` on a name
+   * collision, matching `cf piece call`'s resolution order. */
+  on: "result" | "input";
+  /** The verb's input schema — the same schema `call <verb> --help --json`
+   * serves. `true` means unconstrained. */
+  inputSchema: JSONSchema | true;
+  /** Tools only, until handlers gain declared results (verb contract WS-C). */
+  outputSchema?: JSONSchema;
+}
+
+/**
+ * Enumerate every callable a piece exposes (verb contract: Verb discovery,
+ * docs/plans/pattern-verb-contract.md). Everything in the durable schema is
+ * listed — hiding is a display default that arrives with the wrapper-tier
+ * marker, never a capability boundary; until the marker exists, the list IS
+ * the full surface. Walks result then input with the same classification
+ * `cf piece call` resolves through, so the listing and the dispatcher can
+ * never disagree about what is callable.
+ */
+export async function listPieceCallables(
+  config: PieceConfig,
+  deps: PieceCallableDependencies = {},
+): Promise<PieceCallablesListing> {
+  const { piece } = await loadPieceForCallables(config, deps);
+  let pattern: PiecePatternRef | null = null;
+  if (typeof piece.getPatternRef === "function") {
+    try {
+      pattern = (await piece.getPatternRef()) ?? null;
+    } catch {
+      pattern = null; // Identity is advisory; the listing itself still holds.
+    }
+  }
+
+  const listings = new Map<string, PieceCallableListing>();
+  // Names ordinary detection rejected: candidates for the forced-stream
+  // fallback below, so the listing covers every path `cf piece call` resolves.
+  const rejected = new Set<string>();
+  let resultRoot: any;
+  for (const cellProp of ["result", "input"] as const) {
+    const rootCell = await piece[cellProp].getCell();
+    if (cellProp === "result") resultRoot = rootCell;
+    const value = rootCell.get?.();
+    const schema = rootCell.schema;
+    const schemaKeys = isRecord(schema) && isRecord(schema.properties)
+      ? Object.keys(schema.properties)
+      : [];
+    const valueKeys = isRecord(value) ? Object.keys(value) : [];
+    for (const name of new Set([...valueKeys, ...schemaKeys])) {
+      if (listings.has(name)) continue; // result shadows input, like call
+      const callableCell = rootCell.key(name).asSchemaFromLinks();
+      const kind = detectCallableKind(
+        getCallableValue(value, name),
+        callableCell,
+      );
+      if (!kind) {
+        rejected.add(name);
+        continue;
+      }
+      rejected.delete(name);
+      const spec = callableCommandSpec(callableCell, kind);
+      listings.set(name, {
+        name,
+        kind,
+        on: cellProp,
+        inputSchema: spec.inputSchema,
+        ...(spec.outputSchemaSummary !== undefined
+          ? { outputSchema: spec.outputSchemaSummary }
+          : {}),
+      });
+    }
+  }
+
+  // Third resolution path, mirrored from resolvePieceCallable: a handler whose
+  // schema lost the stream marker still dispatches via the forced stream cast
+  // (tryResolvePieceHandler). Probe every rejected name the same way so a
+  // callable-by-name verb can never be absent from the listing.
+  const pieceCell = typeof piece.getCell === "function"
+    ? piece.getCell()
+    : undefined;
+  if (pieceCell && typeof pieceCell.asSchema === "function") {
+    const pieceValue = pieceCell.get?.();
+    if (isRecord(pieceValue)) {
+      for (const name of Object.keys(pieceValue)) {
+        if (!listings.has(name)) rejected.add(name);
+      }
+    }
+    for (const name of rejected) {
+      if (listings.has(name)) continue;
+      const streamRoot = pieceCell.asSchema({
+        type: "object",
+        properties: { [name]: { asCell: ["stream"] } },
+        required: [name],
+      });
+      if (!isHandlerCell(streamRoot.key(name))) continue;
+      const callableCell = resultRoot.key(name).asSchemaFromLinks();
+      const spec = callableCommandSpec(callableCell, "handler");
+      listings.set(name, {
+        name,
+        kind: "handler",
+        on: "result",
+        inputSchema: spec.inputSchema,
+      });
+    }
+  }
+
+  // Byte-order, not locale collation: this is a machine-readable surface and
+  // must sort identically on every host (utf8Compare is the repo comparator).
+  return {
+    pattern,
+    verbs: [...listings.values()].sort((a, b) => utf8Compare(a.name, b.name)),
+  };
 }
 
 export async function executePieceCallable(

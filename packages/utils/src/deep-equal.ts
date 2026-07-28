@@ -12,13 +12,16 @@ import { isRecord } from "./types.ts";
  * @param b - Second value to compare
  * @returns True if the values are deeply equal
  *
- * TODO(danfuzz): This function is only suitable for non-class-instance data
- * beyond plain objects and arrays. It compares class instances by enumerable
- * own-props, so two same-class `FabricPrimitive` values (state in private
- * `#fields`, zero own-props) compare equal regardless of value, and
+ * **Not for `FabricValue`s.** This function compares class instances by
+ * enumerable own-props, so two same-class `FabricPrimitive` values (state in
+ * private `#fields`, zero own-props) compare equal regardless of value, and
  * `FabricInstance` values compare by internal slots rather than logical
- * contents. Use the `data-model`-aware `valueEqual()` for any `FabricValue`
- * comparison.
+ * contents. Use `data-model`'s `valueEqual()` for any `FabricValue` comparison.
+ *
+ * This is a property of the function, not a defect awaiting repair: `utils` sits
+ * below `data-model` and cannot reach the codecs that decide fabric equality, and
+ * a second implementation here would duplicate `valueEqual()` rather than extend
+ * it. The scope is the fix.
  */
 export function deepEqual(a: any, b: any): boolean {
   if (Object.is(a, b)) return true;

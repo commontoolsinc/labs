@@ -8,11 +8,14 @@ import {
 } from "../lib/piece.ts";
 import {
   exitWithDataError,
+  invocationJson,
+  invocationPhaseReporter,
   isPieceGetDataError,
   pieceCallInvocation,
   pieceCallRawArgs,
   pieceGetDataErrorReport,
   pieceLinkDataErrorReport,
+  resolveInvocationId,
 } from "../commands/piece.ts";
 import { LinkValidationError } from "../lib/piece.ts";
 
@@ -206,6 +209,13 @@ describe("executePieceCallable", () => {
       summary: "bound-source:tea",
       source: "bound-source",
     });
+    // The result cell's durable address rides along — the handle a caller can
+    // revisit instead of re-running the tool (verb contract Part 2).
+    expect(result.resultRef).toEqual({
+      id: "of:tool-result-cell",
+      space: "did:key:test-home",
+      scope: "space",
+    });
   });
 
   it("passes the configured piece scope when resolving callables", async () => {
@@ -269,7 +279,7 @@ describe("executePieceCallable", () => {
       toolResult: { ok: true },
     });
 
-    await executePieceCallable(
+    const result = await executePieceCallable(
       {
         apiUrl: "http://localhost:8000",
         identity: "/tmp/test-identity.pem",
@@ -286,6 +296,9 @@ describe("executePieceCallable", () => {
     );
 
     expect(harness.tracker.toolResultScope).toBe("user");
+    // The returned handle preserves the scope — dropping it would silently
+    // retarget a user-scoped result to the space-scoped instance.
+    expect(result.resultRef?.scope).toBe("user");
   });
 
   it("reads primitive handler input from --value-file", async () => {
@@ -669,6 +682,148 @@ describe("executePieceCallable", () => {
       ),
     ).rejects.toThrow(/Handler "recordMessage" failed: Bad message payload/);
   });
+
+  it("threads the invocation id to send and settles with receipt readback, without awaiting graph quiescence", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      receiptValue: { commentId: "c-1" },
+    });
+    const phases: string[] = [];
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-123",
+        onPhase: (phase) => phases.push(phase),
+      },
+    );
+
+    expect(harness.tracker.sendOptions).toEqual([{ eventId: "inv-123" }]);
+    expect(result.invocation).toEqual({
+      id: "inv-123",
+      status: "settled",
+      result: { commentId: "c-1" },
+    });
+    expect(phases).toEqual(["dispatched", "committed", "readback"]);
+    expect(harness.tracker.receiptLinkRequested?.id).toBe("of:receipt-1");
+    // Transaction-local acknowledgment: the settled result must come straight
+    // off this handling's commit — never from draining the whole graph.
+    expect(harness.tracker.idleCalls).toBe(0);
+    expect(harness.tracker.syncedCalls).toBe(0);
+  });
+
+  it("reclassifies a receipt-exists collision as the original settled outcome", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "addComment",
+      inputSchema: {
+        type: "object",
+        properties: {
+          message: { type: "string" },
+        },
+        required: ["message"],
+      },
+      receiptExists: true,
+      receiptValue: { commentId: "c-original" },
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "addComment",
+      ["--message", "milk"],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        invocationId: "inv-dup",
+      },
+    );
+
+    expect(result.invocation).toEqual({
+      id: "inv-dup",
+      status: "settled",
+      deduplicated: true,
+      result: { commentId: "c-original" },
+    });
+  });
+
+  it("settles a value-less verb with no result key (existence-only receipt)", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "refresh",
+      inputSchema: { type: "object", properties: {} },
+      receiptValue: {},
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "refresh",
+      [],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => true,
+        invocationId: "inv-empty",
+      },
+    );
+
+    expect(result.invocation).toEqual({ id: "inv-empty", status: "settled" });
+  });
+
+  it("sends without options and returns no invocation when no id is supplied", async () => {
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "refresh",
+      inputSchema: { type: "object", properties: {} },
+      receiptValue: { ignored: true },
+    });
+
+    const result = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "refresh",
+      [],
+      {
+        loadManager: () => Promise.resolve(harness.manager),
+        loadPiece: () => Promise.resolve(harness.piece),
+        isStdinTerminal: () => true,
+      },
+    );
+
+    expect(harness.tracker.sendOptions).toEqual([undefined]);
+    expect(result.invocation).toBeUndefined();
+    expect(harness.tracker.receiptLinkRequested).toBeUndefined();
+  });
 });
 
 function createPieceCallableHarness(options: {
@@ -683,6 +838,12 @@ function createPieceCallableHarness(options: {
   toolResult?: unknown;
   handlerFailureMessage?: string;
   callableScope?: "space" | "user" | "session";
+  /** Value the handling's receipt cell reads back ({} = value-less verb). */
+  receiptValue?: unknown;
+  /** Simulate the create-only receipt collision: commit fails with
+   * precondition "receipt-exists" while the link addresses the winner's
+   * original receipt. */
+  receiptExists?: boolean;
 }) {
   const tracker = {
     handlerWrites: [] as Array<{
@@ -690,6 +851,10 @@ function createPieceCallableHarness(options: {
       path: (string | number)[] | undefined;
       value: unknown;
     }>,
+    sendOptions: [] as Array<{ eventId?: string } | undefined>,
+    receiptLinkRequested: undefined as { id?: string } | undefined,
+    idleCalls: 0,
+    syncedCalls: 0,
     toolRunPattern: undefined as unknown,
     toolRunInput: undefined as unknown,
     toolResultScope: undefined as string | undefined,
@@ -727,14 +892,19 @@ function createPieceCallableHarness(options: {
           send: (
             value: unknown,
             onCommit?: (
-              tx: { status: () => { status: string; error?: Error } },
+              tx: {
+                status: () => { status: string; error?: Error };
+                handlingReceiptLink?: { id: string; space: string };
+              },
             ) => void,
+            sendOptions?: { eventId?: string },
           ) => {
             tracker.handlerWrites.push({
               cellProp: "result",
               path: [options.cellKey],
               value,
             });
+            tracker.sendOptions.push(sendOptions);
             if (options.handlerFailureMessage) {
               runtimeErrors.push({ message: options.handlerFailureMessage });
             }
@@ -745,7 +915,19 @@ function createPieceCallableHarness(options: {
                     status: "error",
                     error: new Error(options.handlerFailureMessage),
                   }
+                  : options.receiptExists
+                  ? {
+                    status: "error",
+                    error: Object.assign(
+                      new Error("Result receipt already exists"),
+                      { precondition: "receipt-exists" },
+                    ),
+                  }
                   : { status: "done" },
+              handlingReceiptLink: {
+                id: "of:receipt-1",
+                space: "did:key:test-home",
+              },
             });
           },
         }
@@ -772,6 +954,11 @@ function createPieceCallableHarness(options: {
     pull: () => Promise.resolve(state.value),
     key: (_key: string) => resultCell,
     asSchemaFromLinks: () => resultCell,
+    getAsNormalizedFullLink: () => ({
+      id: "of:tool-result-cell",
+      space: "did:key:test-home",
+      scope: options.callableScope ?? "space",
+    }),
   };
 
   const piece = {
@@ -799,11 +986,24 @@ function createPieceCallableHarness(options: {
     },
   };
 
+  const receiptCell = {
+    get: () => options.receiptValue,
+    pull: () => Promise.resolve(options.receiptValue),
+    key: (_key: string) => receiptCell,
+  };
+
   const manager = {
     getSpace: () => "home",
-    synced: async () => {},
+    synced: () => {
+      tracker.syncedCalls++;
+      return Promise.resolve();
+    },
     runtime: {
       [CF_RUNTIME_ERROR_LOG]: runtimeErrors,
+      getCellFromLink: (link: { id?: string }) => {
+        tracker.receiptLinkRequested = link;
+        return receiptCell;
+      },
       storageManager: {
         synced: async () => {},
       },
@@ -833,7 +1033,10 @@ function createPieceCallableHarness(options: {
           sink: () => () => {},
         };
       },
-      idle: async () => {},
+      idle: () => {
+        tracker.idleCalls++;
+        return Promise.resolve();
+      },
     },
   };
 
@@ -899,6 +1102,164 @@ function getChildSchema(
   return properties[key] as JSONSchema | undefined;
 }
 
+describe("forced-stream fallback dispatch", () => {
+  /** A verb that defeats ordinary detection — plain object value, no `$stream`
+   * marker, no stream schema — but that the forced stream cast proves is a
+   * handler. This is the only case `tryResolvePieceHandler` exists for, and
+   * the one where the cell that passed detection and the cell built by reading
+   * the schema back from links are not interchangeable. */
+  function createFallbackHarness() {
+    const sends: unknown[] = [];
+    const dataWrites: unknown[] = [];
+
+    // The cell the forced cast proves. Only this one dispatches.
+    const streamCell = {
+      isStream: () => true,
+      send: (value: unknown, onCommit?: (tx: unknown) => void) => {
+        sends.push(value);
+        onCommit?.({ status: () => ({ status: "done" }) });
+      },
+    };
+
+    // What `rootCell.key(name).asSchemaFromLinks()` yields: carries the
+    // published payload schema, but nothing marking it a stream. A real cell
+    // here has a `send` that routes to `.set()`'s non-stream branch and
+    // throws "Transaction required for .set()".
+    // `key()` must yield nothing for "pattern"/"extraParams", or
+    // detectCallableKind's tool probe classifies this as a tool and the
+    // fallback path under test is never reached.
+    const emptyChild = {
+      get: () => undefined,
+      getRaw: () => undefined,
+    };
+    const linkDerivedCell = {
+      schema: {
+        type: "object",
+        properties: { note: { type: "string" } },
+      } as JSONSchema,
+      get: () => ({}),
+      getRaw: () => ({}),
+      asSchemaFromLinks: () => linkDerivedCell,
+      key: () => emptyChild,
+    };
+
+    const rootValue = { hiddenPing: {} };
+    const rootCell = {
+      schema: {
+        type: "object",
+        properties: { hiddenPing: { type: "object" } },
+      } as JSONSchema,
+      get: () => rootValue,
+      getRaw: () => rootValue,
+      asSchemaFromLinks: () => rootCell,
+      key: (name: string) => name === "hiddenPing" ? linkDerivedCell : absent,
+    };
+    // The input root offers nothing, so resolution falls past both ordinary
+    // paths to the forced cast.
+    const absent: {
+      schema?: JSONSchema;
+      get: () => unknown;
+      getRaw: () => unknown;
+      asSchemaFromLinks: () => unknown;
+      key: () => unknown;
+    } = {
+      get: () => undefined,
+      getRaw: () => undefined,
+      asSchemaFromLinks: () => absent,
+      key: () => emptyChild,
+    };
+    const emptyCell = {
+      schema: { type: "object" } as JSONSchema,
+      get: () => ({}),
+      getRaw: () => ({}),
+      asSchemaFromLinks: () => emptyCell,
+      key: () => absent,
+    };
+
+    const piece = {
+      getCell: () => ({
+        get: () => rootValue,
+        asSchema: () => ({ key: () => streamCell }),
+      }),
+      input: {
+        getCell: () => Promise.resolve(emptyCell),
+        set: (value: unknown) => {
+          dataWrites.push(value);
+          return Promise.resolve();
+        },
+      },
+      result: {
+        getCell: () => Promise.resolve(rootCell),
+        set: (value: unknown) => {
+          dataWrites.push(value);
+          return Promise.resolve();
+        },
+      },
+    };
+
+    const manager = {
+      getSpace: () => "home",
+      synced: async () => {},
+      runtime: {
+        [CF_RUNTIME_ERROR_LOG]: [] as Array<{ message: string }>,
+        idle: async () => {},
+      },
+    };
+
+    return { sends, dataWrites, piece, manager, linkDerivedCell, streamCell };
+  }
+
+  const config = {
+    apiUrl: "http://localhost:8000",
+    identity: "/tmp/test-identity.pem",
+    piece: "fid1:piece-123",
+    space: "home",
+  };
+
+  it("sends through the cell whose stream-ness was proven, not a link-derived one", async () => {
+    const harness = createFallbackHarness();
+
+    const result = await executePieceCallable(
+      config,
+      "hiddenPing",
+      ["--note", "hi"],
+      {
+        loadManager: () => Promise.resolve(harness.manager as never),
+        loadPiece: () => Promise.resolve(harness.piece as never),
+        isStdinTerminal: () => true,
+      },
+    );
+
+    expect(result.resolved.callableKind).toBe("handler");
+    // Dispatched as an event through the proven cell. Resolving to the
+    // link-derived cell instead leaves a cell that `.set()` treats as data.
+    expect(result.resolved.callableCell).toBe(harness.streamCell);
+    expect(harness.sends).toEqual([{ note: "hi" }]);
+    expect(harness.dataWrites).toEqual([]);
+  });
+
+  it("keeps the published payload schema for the command spec", async () => {
+    const harness = createFallbackHarness();
+
+    const result = await executePieceCallable(
+      config,
+      "hiddenPing",
+      ["--note", "hi"],
+      {
+        loadManager: () => Promise.resolve(harness.manager as never),
+        loadPiece: () => Promise.resolve(harness.piece as never),
+        isStdinTerminal: () => true,
+      },
+    );
+
+    // The forced cast's own schema is just the stream marker; `--help` and
+    // input validation must still see what the piece publishes.
+    expect(result.resolved.commandSpec.inputSchema).toEqual(
+      harness.linkDerivedCell.schema,
+    );
+  });
+});
+
 describe("piece call stdin payloads", () => {
   it("identifies JSON output without treating delimited fields as selectors", () => {
     expect(
@@ -927,6 +1288,81 @@ describe("piece call stdin payloads", () => {
       rawArgs: ["invoke", "--query", "--json"],
       jsonOutput: false,
     });
+  });
+
+  it("mints an invocation id when none is given and rejects a blank one", () => {
+    expect(resolveInvocationId(undefined, () => "minted-1")).toBe("minted-1");
+    expect(resolveInvocationId("caller-supplied")).toBe("caller-supplied");
+    // A blank id would claim caller-supplied idempotency while carrying
+    // nothing that distinguishes deliveries — the retry it promises would
+    // not be safe.
+    expect(() => resolveInvocationId("")).toThrow(/non-blank id/);
+    expect(() => resolveInvocationId("   ")).toThrow(/non-blank id/);
+  });
+
+  it("announces the invocation id once, at dispatch", () => {
+    const announced: string[] = [];
+    const seen: string[] = [];
+    const report = invocationPhaseReporter(
+      "inv-9",
+      (p) => seen.push(p),
+      (m) => announced.push(m),
+    );
+    // Nothing is announced before dispatch: until the event is on its way
+    // there is nothing a retry would deduplicate against.
+    report("initial_sync");
+    expect(announced).toEqual([]);
+    report("dispatched");
+    expect(announced).toEqual(["invocation: inv-9"]);
+    // Later phases, and a second dispatch, must not re-announce — a caller
+    // scraping stderr should not have to pick among several ids.
+    report("committed");
+    report("dispatched");
+    report("readback");
+    expect(announced).toEqual(["invocation: inv-9"]);
+    expect(seen).toEqual([
+      "initial_sync",
+      "dispatched",
+      "committed",
+      "dispatched",
+      "readback",
+    ]);
+  });
+
+  it("shapes the settled Invocation JSON an agent parses", () => {
+    expect(invocationJson({ id: "inv-1", status: "settled" })).toEqual({
+      invocation: "inv-1",
+      status: "settled",
+    });
+    expect(
+      invocationJson({ id: "inv-1", status: "settled", deduplicated: true }),
+    ).toEqual({
+      invocation: "inv-1",
+      status: "settled",
+      deduplicated: true,
+    });
+    expect(
+      invocationJson({
+        id: "inv-1",
+        status: "settled",
+        result: { commentId: "c-1" },
+      }),
+    ).toEqual({
+      invocation: "inv-1",
+      status: "settled",
+      result: { commentId: "c-1" },
+    });
+    // deduplicated: false is never emitted — its absence is the signal.
+    expect(
+      invocationJson({ id: "inv-1", status: "settled", deduplicated: false }),
+    ).not.toHaveProperty("deduplicated");
+    // A verb that genuinely returned null keeps it; a value-less verb omits
+    // the key entirely, so the two stay distinguishable on the wire.
+    expect(invocationJson({ id: "inv-1", status: "settled", result: null }))
+      .toEqual({ invocation: "inv-1", status: "settled", result: null });
+    expect(
+      invocationJson({ id: "inv-1", status: "settled", result: undefined }),
+    ).not.toHaveProperty("result");
   });
 
   it('maps a bare "-" payload onto the --json-file stdin path', () => {

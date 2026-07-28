@@ -261,6 +261,10 @@ Deno.test("a slice covering the whole series leaves the line in its own color", 
   );
   assertEquals([...whole.matchAll(/<polyline/g)].length, 1, "base only, no tint over it");
   assert(!whole.includes(lighten("#10a37f")), "the line keeps its own color");
+  assert(
+    whole.includes('<stop offset="0" stop-color="#10a37f"'),
+    "the line uses its own color from the left edge",
+  );
   // Same for a count past the end of the series.
   const over = multiSparkline([{ vals: [1, 2, 3, 4], color: "#10a37f" }], { highlight: { count: 9 } });
   assertEquals([...over.matchAll(/<polyline/g)].length, 1);
@@ -279,6 +283,129 @@ Deno.test("multiSparkline: every base is drawn before any tint", () => {
   ], { highlight: { count: 2 } });
   const strokes = [...svg.matchAll(/<polyline[^>]*stroke="([^"]*)"/g)].map((m) => m[1]);
   assertEquals(strokes, ["#10a37f", "#d97757", lighten("#10a37f"), lighten("#d97757")]);
+});
+
+Deno.test("multiSparkline: shared axes and per-line highlights", () => {
+  const svg = multiSparkline([
+    {
+      vals: [1, 2, 3],
+      color: "#10a37f",
+      xs: [0, 0.2, 0.4],
+      highlightCount: 2,
+    },
+    {
+      vals: [4, 5, 6],
+      color: "#d97757",
+      xs: [0.6, 0.8, 1],
+      highlightCount: 0,
+    },
+  ], { fadeFrom: "#111111" });
+  const lines = [
+    ...svg.matchAll(
+      /<polyline points="([^"]*)"[^>]*stroke="([^"]*)"/g,
+    ),
+  ].map((match) => ({
+    points: match[1].split(" "),
+    stroke: match[2],
+  }));
+  assertEquals(lines.length, 3);
+  assertEquals(
+    lines[0].points.map((point) => Number(point.split(",")[0])),
+    [0, 44, 88],
+  );
+  assertEquals(
+    lines[1].points.map((point) => Number(point.split(",")[0])),
+    [132, 176, 220],
+  );
+  assertEquals(lines[2].stroke, lighten("#10a37f"));
+  assertEquals(
+    lines[2].points.map((point) => Number(point.split(",")[0])),
+    [44, 88],
+  );
+  assert(!svg.includes("<mask"));
+  assert(svg.includes('<stop offset="0.2" stop-color="#10a37f"'));
+  assert(svg.includes('<stop offset="0.5" stop-color="#d97757"'));
+});
+
+Deno.test("multiSparkline: one-point markers are explicit", () => {
+  const svg = multiSparkline([
+    {
+      vals: [5],
+      color: "#d97757",
+      xs: [0.75],
+      showSinglePoint: true,
+    },
+  ]);
+  assert(
+    svg.includes(
+      '<circle cx="165.0" cy="31.0" r="1.0" fill="#d97757"/>',
+    ),
+  );
+  assertEquals([...svg.matchAll(/<polyline/g)].length, 0);
+});
+
+Deno.test("multiSparkline: large horizontal gaps split paths without losing points", () => {
+  const svg = multiSparkline([{
+    vals: [1, 2, 3, 4, 5],
+    color: "#d97757",
+    xs: [0, 0.2, 0.41, 0.5, 0.8],
+    highlightCount: 4,
+    maxXGap: 0.2,
+    showSinglePoint: true,
+  }]);
+  const paths = [
+    ...svg.matchAll(/<polyline points="([^"]+)"[^>]*stroke="([^"]+)"/g),
+  ].map((match) => ({
+    points: match[1].split(" "),
+    stroke: match[2],
+  }));
+  assertEquals(paths, [
+    {
+      points: ["0.0,31.0", "44.0,24.0"],
+      stroke: "#d97757",
+    },
+    {
+      points: ["90.2,17.0", "110.0,10.0"],
+      stroke: "#d97757",
+    },
+    {
+      points: ["90.2,17.0", "110.0,10.0"],
+      stroke: lighten("#d97757"),
+    },
+  ]);
+  assert(
+    svg.includes(
+      `<circle cx="176.0" cy="3.0" r="1.0" fill="${
+        lighten("#d97757")
+      }"/>`,
+    ),
+  );
+
+  const offsetBoundary = multiSparkline([{
+    vals: [1, 2],
+    color: "#d97757",
+    xs: [0.6, 0.8],
+    maxXGap: 0.2,
+    showSinglePoint: true,
+  }]);
+  assertEquals([...offsetBoundary.matchAll(/<polyline/g)].length, 1);
+  assertEquals([...offsetBoundary.matchAll(/<circle/g)].length, 0);
+});
+
+Deno.test("multiSparkline: isolated markers use the tint only inside the highlighted tail", () => {
+  const color = "#d97757";
+  const svg = multiSparkline([{
+    vals: [1, 2, 3, 4, 5, 6],
+    color,
+    xs: [0, 0.25, 0.4, 0.5, 0.7, 0.95],
+    highlightCount: 2,
+    maxXGap: 0.2,
+    showSinglePoint: true,
+  }]);
+  const fills = [
+    ...svg.matchAll(/<circle[^>]*fill="([^"]+)"/g),
+  ].map((match) => match[1]);
+  assertEquals(fills, [color, lighten(color)]);
 });
 
 Deno.test("sparkline: xs place points on a shared axis", () => {

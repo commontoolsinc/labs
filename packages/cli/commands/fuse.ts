@@ -10,11 +10,12 @@ import {
   fuseMod,
   fuseSupervisorMod,
   isAlive,
+  isMountpointInTable,
   isMountStateAlive,
   type MountStateEntry,
+  type MountTableState,
   prepareMountStatePath,
   readAllMountStates,
-  readMountState,
   removeMountStateFile,
   writeMountState,
 } from "../lib/fuse.ts";
@@ -375,6 +376,7 @@ export const fuse = new Command()
       identity,
       execCli,
       spaces: options.space ?? [],
+      debug: options.debug,
       allowOther: options.allowOther,
       noattrcache: options.noattrcache,
       attrcacheTimeout,
@@ -515,67 +517,9 @@ export const fuse = new Command()
     "Unmount a FUSE filesystem.",
   )
   .action(async (_options, mountpoint) => {
-    const absMountpoint = resolve(mountpoint);
-    const stateDir = defaultStateDir();
-    const pidFile = await readMountState(stateDir, absMountpoint);
-
-    const targetPid = pidFile && isAlive(pidFile.entry.pid)
-      ? pidFile.entry.pid
-      : pidFile?.entry.childPid;
-
-    if (pidFile && targetPid !== undefined && isAlive(targetPid)) {
-      // Verify the PID belongs to a deno/fuse process before killing
-      let verified = false;
-      try {
-        const ps = new Deno.Command("ps", {
-          args: ["-p", String(targetPid), "-o", "command="],
-          stdout: "piped",
-        });
-        const out = await ps.output();
-        const cmd = new TextDecoder().decode(out.stdout).trim();
-        verified = isFuseProcessCommand(cmd);
-      } catch {
-        // ps failed — proceed cautiously (skip kill)
-      }
-
-      if (verified) {
-        console.log(`Sending SIGTERM to PID ${targetPid}...`);
-        try {
-          Deno.kill(targetPid, "SIGTERM");
-          // Wait briefly for the supervisor to terminate after child cleanup.
-          for (let i = 0; i < 20 && isAlive(targetPid); i++) {
-            await new Promise((r) => setTimeout(r, 100));
-          }
-        } catch {
-          // Process may have already exited
-        }
-      } else if (isAlive(targetPid)) {
-        console.log(
-          `PID ${targetPid} does not appear to be a FUSE process; skipping kill.`,
-        );
-      }
-    }
-
-    // Fallback: try system unmount
-    if (pidFile && isMountStateAlive(pidFile.entry)) {
-      console.log("Process still alive, trying system unmount...");
-      const unmountCmd = Deno.build.os === "darwin"
-        ? new Deno.Command("umount", { args: [absMountpoint] })
-        : new Deno.Command("fusermount3", { args: ["-u", absMountpoint] });
-      try {
-        await unmountCmd.output();
-      } catch {
-        console.error(`Failed to unmount ${absMountpoint}`);
-        Deno.exit(1);
-      }
-    }
-
-    // Clean up PID file
-    if (pidFile && !isMountStateAlive(pidFile.entry)) {
-      await removeMountStateFile(pidFile.path);
-    }
-
-    console.log(`Unmounted ${absMountpoint}`);
+    const { ok, message } = await runUnmount(mountpoint);
+    console.log(message);
+    if (!ok) Deno.exit(1);
   })
   .reset()
   /* status */
@@ -593,6 +537,7 @@ export async function buildMountStatusRows(
     isMountStateAlive?: (entry: MountStateEntry) => boolean;
     removeMountStateFile?: (path: string) => Promise<void>;
     readChildMountStatus?: (entry: MountStateEntry) => Promise<string>;
+    isMountpointInTable?: (mountpoint: string) => Promise<MountTableState>;
   } = {},
 ): Promise<string[][]> {
   const isMountStateAliveFn = deps.isMountStateAlive ?? isMountStateAlive;
@@ -600,18 +545,47 @@ export async function buildMountStatusRows(
     removeMountStateFile;
   const readChildMountStatusFn = deps.readChildMountStatus ??
     readChildMountStatus;
+  const isMountpointInTableFn = deps.isMountpointInTable ?? isMountpointInTable;
   const rows: string[][] = [];
 
   for (const { entry, path } of entries) {
-    if (!isMountStateAliveFn(entry)) {
+    // Query the mount table FIRST, before any PID reasoning. A dead daemon does
+    // NOT imply the mount is gone: a severed mount outliving its daemon is the
+    // exact case this row exists to surface. Only "absent + dead PID" is truly
+    // stale and safe to sweep. PID liveness is a real filesystem-free check.
+    const tableState = await isMountpointInTableFn(entry.mountpoint);
+    const alive = isMountStateAliveFn(entry);
+
+    if (tableState === "absent" && !alive) {
+      // Mount gone AND no process serving it: nothing to show, sweep the file.
       await removeMountStateFileFn(path);
       continue;
+    }
+
+    let status: string;
+    if (tableState === "present") {
+      // Kernel mount exists. If a process still serves it, report its live
+      // state; if the daemon is dead, the mount outlived it — surface "dead"
+      // so the user knows there is a stale mount to clean up. Never sweep.
+      status = alive
+        ? (entry.childStatusPath
+          ? await readChildMountStatusFn(entry)
+          : "running")
+        : "dead";
+    } else if (tableState === "absent") {
+      // Mount gone but the process lingers (alive). Surface it as dead; keep
+      // the state file so the lingering process stays visible.
+      status = "dead";
+    } else {
+      // Probe could not tell (unknown). Never destroy evidence on an unreadable
+      // table: emit the row as "unknown" and keep the state file.
+      status = "unknown";
     }
     rows.push([
       entry.mountpoint,
       String(entry.pid),
       entry.childPid === undefined ? "-" : String(entry.childPid),
-      entry.childStatusPath ? await readChildMountStatusFn(entry) : "running",
+      status,
       entry.startedAt,
       entry.logFile ?? "-",
     ]);
@@ -635,4 +609,201 @@ async function readChildMountStatus(entry: { childStatusPath?: string }) {
   } catch {
     return "unknown";
   }
+}
+
+/** Verify a PID belongs to a deno/fuse process before we SIGTERM it. */
+async function verifyIsFuseProcess(pid: number): Promise<boolean> {
+  try {
+    const ps = new Deno.Command("ps", {
+      args: ["-p", String(pid), "-o", "command="],
+      stdout: "piped",
+    });
+    const out = await ps.output();
+    const cmd = new TextDecoder().decode(out.stdout).trim();
+    return isFuseProcessCommand(cmd);
+  } catch {
+    // ps failed — proceed cautiously and treat as unverified (skip kill).
+    return false;
+  }
+}
+
+const SYSTEM_UNMOUNT_TIMEOUT_MS = 5_000;
+
+/**
+ * Run the OS unmount for a mountpoint. `umount`/`fusermount3` tear down the
+ * kernel mount entry; a non-zero exit (e.g. "Resource busy") is reported back
+ * through `code`/`stderr` rather than swallowed.
+ *
+ * `umount` on a wedged mount can itself block indefinitely, so the child is
+ * raced against a deadline. On timeout we return a non-zero result and abandon
+ * the child (harmless — it holds no lock we need): the point is that runUnmount
+ * always returns, so the "sudo umount -f" hint reliably prints instead of the
+ * command hanging forever.
+ */
+export async function defaultSystemUnmount(
+  mountpoint: string,
+  opts: { command?: Deno.Command; timeoutMs?: number } = {},
+): Promise<{ code: number; stderr: string }> {
+  const cmd = opts.command ??
+    (Deno.build.os === "darwin"
+      ? new Deno.Command("umount", {
+        args: [mountpoint],
+        stdout: "null",
+        stderr: "piped",
+      })
+      : new Deno.Command("fusermount3", {
+        args: ["-u", mountpoint],
+        stdout: "null",
+        stderr: "piped",
+      }));
+  const timeoutMs = opts.timeoutMs ?? SYSTEM_UNMOUNT_TIMEOUT_MS;
+  const timedOut = Symbol("timedOut");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let child: Deno.ChildProcess | undefined;
+  try {
+    child = cmd.spawn();
+    const done = child.output().then((out) => ({
+      code: out.code,
+      stderr: new TextDecoder().decode(out.stderr),
+    }));
+    // If the deadline wins we abandon this promise; guard so its eventual
+    // settlement is never an unhandled rejection.
+    done.catch(() => {});
+    const deadline = new Promise<typeof timedOut>((r) => {
+      timer = setTimeout(() => r(timedOut), timeoutMs);
+    });
+    const result = await Promise.race([done, deadline]);
+    if (result === timedOut) {
+      // A wedged `umount` blocks in the kernel and won't die on SIGKILL until
+      // its I/O returns, but unref() lets THIS process exit immediately rather
+      // than hang waiting on the child — the whole point of the deadline.
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // Already gone.
+      }
+      child.unref();
+      return { code: 1, stderr: "system unmount timed out" };
+    }
+    return result;
+  } catch (error) {
+    child?.unref();
+    return {
+      code: 1,
+      stderr: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/**
+ * Unmount a FUSE filesystem and report whether the mount is actually gone.
+ *
+ * The old flow reported success unconditionally: it only ran the system
+ * unmount when the daemon PID was still alive, ignored the unmount exit code,
+ * and printed "Unmounted" without re-checking. A severed mount whose daemon
+ * had already died was declared unmounted while the kernel entry survived.
+ *
+ * This gates success on the OS mount table (`isMountpointInTable`) — the only
+ * ground truth — and runs the system unmount whenever the table is not already
+ * "absent", regardless of PID liveness.
+ */
+export async function runUnmount(
+  mountpoint: string,
+  deps: {
+    readMountState?: (
+      stateDir: string,
+      mountpoint: string,
+    ) => Promise<{ entry: MountStateEntry; path: string } | null>;
+    isAlive?: (pid: number) => boolean;
+    kill?: (pid: number, signal: Deno.Signal) => void;
+    isMountpointInTable?: (mountpoint: string) => Promise<MountTableState>;
+    systemUnmount?: (
+      mountpoint: string,
+    ) => Promise<{ code: number; stderr: string }>;
+    removeMountStateFile?: (path: string) => Promise<void>;
+    verifyIsFuseProcess?: (pid: number) => Promise<boolean>;
+    stateDir?: string;
+    log?: (message: string) => void;
+  } = {},
+): Promise<{ ok: boolean; message: string }> {
+  const absMountpoint = resolve(mountpoint);
+  // Default lookup enumerates state files and matches lexically. It must NOT
+  // fall back to readMountState(), whose hashing path realPaths the mountpoint
+  // leaf — a filesystem op that hangs on the very stale mount we are here to
+  // tear down. readAllMountStates() reads entries without any realPath, and
+  // every entry is written with resolve(mountpoint), so a resolve() compare
+  // finds it. The dep stays injectable for tests.
+  const readMountStateFn = deps.readMountState ??
+    (async (dir: string, mp: string) => {
+      const all = await readAllMountStates(dir);
+      return all.find((s) => s.entry.mountpoint === resolve(mp)) ?? null;
+    });
+  const isAliveFn = deps.isAlive ?? isAlive;
+  const killFn = deps.kill ??
+    ((pid: number, signal: Deno.Signal) => Deno.kill(pid, signal));
+  const isMountpointInTableFn = deps.isMountpointInTable ?? isMountpointInTable;
+  const systemUnmountFn = deps.systemUnmount ?? defaultSystemUnmount;
+  const removeMountStateFileFn = deps.removeMountStateFile ??
+    removeMountStateFile;
+  const verifyIsFuseProcessFn = deps.verifyIsFuseProcess ?? verifyIsFuseProcess;
+  const stateDir = deps.stateDir ?? defaultStateDir();
+  const log = deps.log ?? ((message: string) => console.log(message));
+
+  const pidFile = await readMountStateFn(stateDir, absMountpoint);
+
+  const targetPid = pidFile && isAliveFn(pidFile.entry.pid)
+    ? pidFile.entry.pid
+    : pidFile?.entry.childPid;
+
+  // 1. Graceful SIGTERM + poll, guarded by a ps check that the PID is a FUSE
+  //    process so we never signal an unrelated PID a stale state file points at.
+  if (pidFile && targetPid !== undefined && isAliveFn(targetPid)) {
+    if (await verifyIsFuseProcessFn(targetPid)) {
+      log(`Sending SIGTERM to PID ${targetPid}...`);
+      try {
+        killFn(targetPid, "SIGTERM");
+        // Wait briefly for the supervisor to terminate after child cleanup.
+        for (let i = 0; i < 20 && isAliveFn(targetPid); i++) {
+          await new Promise((r) => setTimeout(r, 100));
+        }
+      } catch {
+        // Process may have already exited.
+      }
+    } else if (isAliveFn(targetPid)) {
+      log(
+        `PID ${targetPid} does not appear to be a FUSE process; skipping kill.`,
+      );
+    }
+  }
+
+  // 2. Consult the mount table. If the mount is still listed ("present") — or
+  //    the probe could not tell ("unknown") — run the system unmount even if no
+  //    daemon PID is alive: a severed mount whose daemon already died still
+  //    needs its kernel entry torn down.
+  const before = await isMountpointInTableFn(absMountpoint);
+  if (before !== "absent") {
+    log("Mount still present in table, running system unmount...");
+    const result = await systemUnmountFn(absMountpoint);
+    if (result.code !== 0) {
+      const detail = result.stderr.trim();
+      log(`System unmount exited ${result.code}${detail ? `: ${detail}` : ""}`);
+    }
+  }
+
+  // 3. Ground truth: success iff the mount is now absent from the table.
+  const after = await isMountpointInTableFn(absMountpoint);
+  if (after === "absent") {
+    if (pidFile) await removeMountStateFileFn(pidFile.path);
+    return { ok: true, message: `Unmounted ${absMountpoint}` };
+  }
+
+  // Still mounted (or still unknown): do NOT remove the state file — the mount
+  // is real and the user needs the row to find and force-clean it.
+  return {
+    ok: false,
+    message:
+      `${absMountpoint} is still mounted. Try: sudo umount -f ${absMountpoint}`,
+  };
 }

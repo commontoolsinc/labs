@@ -13,6 +13,7 @@ export interface FuseSupervisorOptions {
   execCli: string;
   logFile: string;
   spaces: string[];
+  debug?: boolean;
   allowOther?: boolean;
   noattrcache?: boolean;
   attrcacheTimeout?: string;
@@ -45,6 +46,7 @@ export interface FuseSupervisorCliOptions {
   execCli?: string;
   logFile?: string;
   space?: string[];
+  debug?: boolean;
   allowOther?: boolean;
   noattrcache?: boolean;
   attrcacheTimeout?: string;
@@ -70,6 +72,7 @@ export function fuseSupervisorOptions(
     execCli: options.execCli ?? "",
     logFile: options.logFile ?? "",
     spaces: options.space ?? [],
+    debug: options.debug,
     allowOther: options.allowOther,
     noattrcache: options.noattrcache,
     attrcacheTimeout: options.attrcacheTimeout,
@@ -116,6 +119,7 @@ export function buildFuseChildCommand(
     if (options.identity) args.push("--identity", options.identity);
     if (options.execCli) args.push("--exec-cli", options.execCli);
     if (options.logFile) args.push("--log-file", options.logFile);
+    if (options.debug) args.push("--debug");
     if (options.allowOther) args.push("--allow-other");
     if (options.noattrcache) args.push("--noattrcache");
     if (options.attrcacheTimeout) {
@@ -150,6 +154,7 @@ export function buildFuseChildCommand(
       execCli: options.execCli,
       logFile: options.logFile,
       spaces: options.spaces,
+      debug: options.debug,
       allowOther: options.allowOther,
       noattrcache: options.noattrcache,
       attrcacheTimeout: options.attrcacheTimeout,
@@ -313,6 +318,9 @@ export function parseSupervisorArgs(
       case "--log-file":
         options.logFile = requireValue(rawArgs, ++i, arg);
         break;
+      case "--debug":
+        options.debug = true;
+        break;
       case "--allow-other":
         options.allowOther = true;
         break;
@@ -382,6 +390,7 @@ Options:
   --identity <path>               Path to an identity keyfile
   --exec-cli <path>               Path to the cf exec shim
   --log-file <path>               Path to the FUSE child log file
+  --debug                         Enable FUSE debug output
   --allow-other                   Pass allow_other through to the FUSE child
   --noattrcache                   Pass noattrcache through to the FUSE child
   --attrcache-timeout <seconds>   Pass attrcache-timeout through to the FUSE child

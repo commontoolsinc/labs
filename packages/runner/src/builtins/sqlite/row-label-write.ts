@@ -29,7 +29,10 @@ import {
 } from "@commonfabric/memory/sqlite/row-label";
 import type { CfcConfClause } from "../../cfc/clause.ts";
 import type { CfcAtom } from "@commonfabric/api/cfc";
-import { tableDeclaresRowLabel } from "@commonfabric/memory/v2";
+import {
+  type SqliteDbRef,
+  tableDeclaresRowLabel,
+} from "@commonfabric/memory/v2";
 import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
 import {
   blankWriteSql,
@@ -47,9 +50,12 @@ export interface RowLabelWritePolicy {
 
 export interface RowLabelWriteArgs {
   sql: string;
+  /** Bind values as `.exec()` received them — NOT `SqliteParamsWire`. The
+   *  gate runs before encoding, so a value here may still be a `Cell`
+   *  (that is what `confidentialityOf` reads a label off). */
   params: ReadonlyArray<unknown> | Record<string, unknown> | undefined;
   /** Declared table schemas (`db.tables`, wire-supplied — re-validated). */
-  tables: Record<string, unknown> | undefined;
+  tables: SqliteDbRef["tables"];
   /** The db's owner (db ref), resolving the rule's `dbOwner()` term. */
   owner?: string;
   /** The confidentiality atoms carried by a bound value ([] if unlabeled). */

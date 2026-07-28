@@ -1,14 +1,19 @@
+import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import {
   type ClientCommit,
   compatibleMemoryProtocolFlags,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
-  encodeMemoryBoundaryUnprovenFabricValue,
+  type EntityId,
+  type EntityIdListOptions,
+  type EntityIdListResult,
+  type EntityIdLookupResult,
   type EntitySnapshot,
   getMemoryProtocolFlags,
   getPersistentSchedulerStateConfig,
   type GraphQuery,
   type GraphQueryResult,
+  MAX_ENTITY_ID_PAGE_SIZE,
   MEMORY_PROTOCOL,
   type MemoryProtocolFlags,
   parseMemoryProtocolFlags,
@@ -53,8 +58,8 @@ export type MountOptions = {
 };
 
 export type SessionOpenAuth = {
-  invocation: Record<string, unknown>;
-  authorization: unknown;
+  invocation: FabricPlainObject;
+  authorization: FabricValue;
 };
 
 export type SessionOpenAuthContext = {
@@ -179,7 +184,7 @@ export class Client {
     this.#spaces.delete(session);
   }
 
-  async request<Result>(message: Record<string, unknown>): Promise<Result> {
+  async request<Result>(message: FabricPlainObject): Promise<Result> {
     await this.ensureConnected();
     // `ensureConnected()` is async even when the transport is already live, so
     // close() can run while this request is suspended there. Recheck before
@@ -191,7 +196,7 @@ export class Client {
     const requestId = message.requestId as string;
     const pending = Promise.withResolvers<unknown>();
     this.#pending.set(requestId, pending);
-    await this.transport.send(encodeMemoryBoundaryUnprovenFabricValue(message));
+    await this.transport.send(encodeMemoryBoundary(message));
     const result = await pending.promise as ResponseMessage<Result>;
     if (result.error) {
       const error = new Error(result.error.message);
@@ -610,6 +615,50 @@ export class SpaceSession {
       space: this.space,
       sessionId: this.#sessionId,
       query,
+    });
+
+    this.noteResult(result.serverSeq);
+    return result;
+  }
+
+  async listEntityIds(
+    options: EntityIdListOptions = {},
+  ): Promise<EntityIdListResult | undefined> {
+    this.#assertOpen();
+    if (this.client.serverFlags?.entityIdListing !== true) {
+      return undefined;
+    }
+    const pagination = this.client.serverFlags.entityIdPagination === true;
+    if (!pagination && Object.keys(options).length > 0) {
+      return undefined;
+    }
+    const result = await this.client.request<EntityIdListResult>({
+      type: "entity-id.list",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      ...(pagination
+        ? { ...options, limit: options.limit ?? MAX_ENTITY_ID_PAGE_SIZE }
+        : {}),
+    });
+
+    this.noteResult(result.serverSeq);
+    return result;
+  }
+
+  async entityIdExists(
+    id: EntityId,
+  ): Promise<EntityIdLookupResult | undefined> {
+    this.#assertOpen();
+    if (this.client.serverFlags?.entityIdLookup !== true) {
+      return undefined;
+    }
+    const result = await this.client.request<EntityIdLookupResult>({
+      type: "entity-id.exists",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      id,
     });
 
     this.noteResult(result.serverSeq);

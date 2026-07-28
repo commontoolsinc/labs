@@ -2,10 +2,10 @@
  * The contract every source language plugs into so the `cf view` pager can
  * colour, navigate, edit and (optionally) reason about it, plus selecting the
  * right language for a file. A language is a stateless strategy object: one
- * instance describes TypeScript, one Markdown, one JSON. The pager selects the
- * right one for a file ONCE (via {@link languageForFile}) and then dispatches
- * every operation through that object's methods — there is no per-operation
- * branch on the file extension.
+ * instance describes each supported syntax, and plain text handles unknown
+ * named files. The pager selects the right one for a file ONCE (via {@link
+ * languageForFile}) and then dispatches every operation through that object's
+ * methods — there is no per-operation branch on the file extension.
  *
  * Per-file mutable state (a warm incremental parse, a language service) is not
  * held on the language; the language is a factory for the small stateful
@@ -21,6 +21,9 @@ import type { DiffMaps } from "../diffdoc.ts";
 import { typeScriptLanguage } from "./typescript/language.ts";
 import { markdownLanguage } from "./markdown/language.ts";
 import { jsonLanguage } from "./json/language.ts";
+import { yamlLanguage } from "./yaml/language.ts";
+import { pythonLanguage } from "./python/language.ts";
+import { plainTextLanguage } from "./plain-text/language.ts";
 
 /**
  * Live syntax highlighting that re-highlights only the region an edit touches,
@@ -104,12 +107,12 @@ export interface HunkStructureContext {
  * language {@link matches} once per file; all later work is method dispatch.
  */
 export interface Language {
-  /** Stable identifier, e.g. `"typescript"`, `"markdown"`, `"json"`. */
+  /** Stable identifier, such as `"typescript"`, `"markdown"`, `"json"`,
+   * `"yaml"`, `"python"`, or `"plain-text"`. */
   readonly id: string;
 
   /** Does this language claim `fileName`? Consulted in order by {@link
-   * languageForFile}; TypeScript claims its own family and also backstops
-   * anything unclaimed. */
+   * languageForFile}. */
   matches(fileName: string | undefined): boolean;
 
   /** Parse `text` into the full document model: coloured lines, a structure
@@ -121,6 +124,31 @@ export interface Language {
    * non-interactive fast path and the diff fragment renderer. `fileName` is
    * advisory (a language may parse `.ts` and `.tsx` differently). */
   highlightLines(text: string, fileName?: string): Line[];
+
+  /**
+   * Format `text` as the language's rendered representation. The result keeps
+   * one display line for every source line, including blank display lines for
+   * source-only delimiters. That shared line topology keeps line numbers,
+   * structure ranges, diff markers, expansion, and source editing aligned. A
+   * line that omits meaningful source content sets `renderedSourceHidden` so a
+   * diff can retain its source form when that content changes.
+   */
+  renderLines?(text: string, fileName?: string): Line[];
+
+  /**
+   * Rendering needs the complete file because syntax before a fragment can
+   * determine how the fragment is interpreted. A contextless diff fragment
+   * stays in source form when this is true.
+   */
+  readonly renderNeedsCompleteFile?: boolean;
+
+  /** Whether live diff edits need complete-file highlighting because an earlier
+   * line can determine how later lines are coloured. */
+  readonly highlightFullFileOnDiffEdit?: boolean;
+
+  /** Highlight one source-line edit from its previous complete-file colours, or
+   * return null when the edit can affect syntax outside one token. */
+  highlightDiffLineEditLocally?(before: Line, after: string): Line | null;
 
   /** An incremental highlighter seeded with `text`, for live editing.
    * `fileName` is advisory, as for {@link highlightLines}. */
@@ -148,12 +176,45 @@ export interface Language {
   ): Semantics | undefined;
 }
 
+/** Render through a language and enforce the shared source-line topology. */
+export function renderedLinesFor(
+  language: Language,
+  text: string,
+  fileName?: string,
+): Line[] | undefined {
+  if (!language.renderLines) return undefined;
+  const lines = language.renderLines(text, fileName);
+  const sourceLineCount = text.split("\n").length;
+  if (lines.length !== sourceLineCount) {
+    throw new Error(
+      `${language.id} rendered ${lines.length} lines for ${sourceLineCount} source lines`,
+    );
+  }
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (line.text.includes("\n")) {
+      throw new Error(
+        `${language.id} rendered a line break inside display line ${index + 1}`,
+      );
+    }
+    if (line.spans.map((span) => span.text).join("") !== line.text) {
+      throw new Error(
+        `${language.id} rendered spans that do not reconstruct display line ${
+          index + 1
+        }`,
+      );
+    }
+  }
+  return lines;
+}
+
 // --- selection ---------------------------------------------------------------
 
 /**
  * Every language the pager knows, most specific first, built on first use.
- * TypeScript comes last: it claims the TypeScript family and is also the
- * fallback (below) for anything unclaimed.
+ * Plain text comes last because it claims every named file left after the
+ * syntax-specific languages. An input with no filename is handled by the
+ * fallback below.
  *
  * The list is lazy so this module's top level never reads the concrete language
  * singletons: they and this module form an import cycle (a language's semantic
@@ -163,11 +224,19 @@ export interface Language {
  */
 let languages: readonly Language[] | undefined;
 function allLanguages(): readonly Language[] {
-  return languages ??= [markdownLanguage, jsonLanguage, typeScriptLanguage];
+  return languages ??= [
+    markdownLanguage,
+    jsonLanguage,
+    yamlLanguage,
+    pythonLanguage,
+    typeScriptLanguage,
+    plainTextLanguage,
+  ];
 }
 
-/** The language for `fileName` — the first that claims it. TypeScript is the
- * fallback, so a pipe (no name) or an unrecognised extension resolves to it. */
+/** The language for `fileName` — the first that claims it. Plain text claims
+ * otherwise unknown named files. TypeScript remains the fallback for an
+ * unnamed pipe of transformed compiler output. */
 export function languageForFile(fileName: string | undefined): Language {
   for (const language of allLanguages()) {
     if (language.matches(fileName)) return language;
@@ -195,11 +264,11 @@ export function distinctLanguages(
  * The semantic service for a diff view, from the languages the diff touches. A
  * diff spans potentially many files of different languages; the service is the
  * first language present that offers one, scoped to just its own files (so a
- * TypeScript program is not seeded with the diff's Markdown or JSON files).
- * Only TypeScript offers one today, so this resolves to it whenever the diff
- * includes a TypeScript file and to nothing otherwise. When a second semantic
- * language appears this becomes a per-file composite; the per-language slot the
- * pager dispatches through is already here.
+ * TypeScript program is not seeded with the diff's non-TypeScript files). Only
+ * TypeScript offers one today, so this resolves to it whenever the diff includes
+ * a TypeScript file and to nothing otherwise. When a second semantic language
+ * appears this becomes a per-file composite; the per-language slot the pager
+ * dispatches through is already here.
  */
 export function diffSemanticsFor(
   languages: readonly Language[],

@@ -51,6 +51,13 @@ const space = signer.did();
 const FILTER_CHILD_DOC = /"type":"boolean"/;
 const FLATMAP_CHILD_DOC = /"type":"number"/;
 
+// How long the reload's storage manager holds back each per-element child
+// document before delivering it, which is what opens the resume window the
+// tests observe. The resuming runtime's pull/idle machinery blocks on these
+// deliveries, so this file runs on the real clock (see the `realClockFiles`
+// note in `test/clock-preload.ts`).
+const CHILD_DELAY_MS = 80;
+
 function delayingLoopback(
   server: MemoryV2Server.Server,
   childDelayMs: number,
@@ -190,7 +197,7 @@ describe("list builtin resume preservation", () => {
     sm2 = DelayingStorageManager.make(
       signer,
       server,
-      80,
+      CHILD_DELAY_MS,
       FILTER_CHILD_DOC,
       () => delayed++,
     );
@@ -400,7 +407,7 @@ describe("flatMap builtin resume preservation", () => {
     sm2 = DelayingStorageManager.make(
       signer,
       server,
-      80,
+      CHILD_DELAY_MS,
       FLATMAP_CHILD_DOC,
       () => delayed++,
     );

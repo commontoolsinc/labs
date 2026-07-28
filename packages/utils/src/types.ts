@@ -1,11 +1,23 @@
 /**
- * Predicate for narrowing a `Record` type, with string, symbol, or number (arrays) keys.
+ * Predicate for narrowing a mutable string-keyed record type.
  * @param value - The value to check
  * @returns True if the value is a record object
  */
 export function isRecord(
   value: unknown,
-): value is Record<string | number | symbol, unknown> {
+): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/** A record whose string keys can be read but not assigned through this type. */
+export type ReadonlyRecord = Readonly<Record<string, unknown>>;
+
+/**
+ * Predicate for narrowing a read-only record type, including frozen values.
+ * @param value - The value to check
+ * @returns True if the value is a record object
+ */
+export function isReadonlyRecord(value: unknown): value is ReadonlyRecord {
   return typeof value === "object" && value !== null;
 }
 

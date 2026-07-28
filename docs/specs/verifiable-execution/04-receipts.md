@@ -1,6 +1,6 @@
 # CF Protocol: Receipt Object (Section 7)
 
-See `docs/specs/verifiable-execution/README.md` for navigation.
+See the [verifiable-execution document map](README.md) for navigation.
 
 ## 7. Receipt Object (Future Enhancement)
 

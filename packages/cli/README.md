@@ -1,5 +1,30 @@
 # @commonfabric/cli
 
+## View pager
+
+`cf view [file]` is an interactive pager for transformed TypeScript, source
+files, and unified diffs. Named Markdown, JSON, JSONC, YAML, and Python files
+use their own syntax highlighting. A named file with unrecognized syntax is
+shown as plain text. Markdown files can switch between the source and a rendered
+terminal view with `V`. The rendered view formats headings, emphasis, links,
+quotes, lists, task markers, tables, rules, and code. The same view is available
+for Markdown files inside a unified diff; diff markers, addition and deletion
+tints, line positions, and hunk expansion remain in place.
+
+A piped input without a file name remains TypeScript unless it is detected as a
+diff. Redirected output keeps the source text verbatim by default and adds ANSI
+color only when the selected color mode permits it. Pass `--rendered` to start
+in, or print, the rendered representation when one is available. Editing from a
+rendered view returns to source first.
+
+```bash
+cf check pattern.tsx --show-transformed --no-run | cf view
+cf view .github/workflows/deno.yml
+cf view scripts/analyse.py
+git diff upstream/main | cf view
+cf view --rendered README.md
+```
+
 ## Piece data search
 
 `cf piece search <query>` reads every piece in the selected space and returns
@@ -33,9 +58,9 @@ standard error and continues searching that piece and the rest of the space.
 - ANSI colors are emitted only when stdout is a TTY. `--no-color` or
   `NO_COLOR=1` disables them everywhere (including Cliffy help/usage output);
   `FORCE_COLOR=1`/`CLICOLOR_FORCE=1` forces them when piped. The policy is
-  applied in `lib/color-mode.ts`; the `@std/fmt/colors` import-map pin in
-  `deno.jsonc` must track Cliffy's own `@std/fmt` dependency range (guarded by
-  `test/color-mode.test.ts`).
+  applied in `lib/color-mode.ts` and guarded by `test/color-mode.test.ts`. The
+  [Cliffy dependency guidance](../../docs/development/DEPENDENCIES.md#cliffy)
+  owns the import-map constraint that keeps this behavior working.
 - `-q/--quiet` (on `piece`/`wish` subcommands) suppresses the stderr hint and
   next-step blocks. It deliberately does NOT change the log floor: consumers
   parse `--quiet` runs' stderr for runtime warnings (Loom's stale-root heal

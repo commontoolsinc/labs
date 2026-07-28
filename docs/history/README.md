@@ -87,6 +87,11 @@ One line per archived document; each document's header carries the fuller
 
 ### Audits and reports
 
+- [cf-view-language-coverage-2026-07.md](packages/cli/cf-view-language-coverage-2026-07.md)
+  — active-repository syntax inventory and `cf view` support snapshot, July
+  2026.
+- [cf-view-rendered-markdown-impact-2026-07.md](packages/cli/cf-view-rendered-markdown-impact-2026-07.md)
+  — source/rendered pager and Markdown feature impact report, July 2026.
 - [cf-json-argument-audit-2026-07.md](packages/cli/cf-json-argument-audit-2026-07.md)
   — command-by-command audit of `cf --json` behavior, July 2026.
 - [cts-docs-audit-2026-07.md](cts-docs-audit-2026-07.md) —
@@ -107,6 +112,8 @@ One line per archived document; each document's header carries the fuller
 
 ### Executed plans and work orders
 
+- [cf-harness implementation plan](packages/cf-harness/docs/IMPLEMENTATION_PLAN.md)
+  — April 2026 package bootstrap plan and implementation checkpoint.
 - [2026-03-17-ct-exec-fuse-callables.md](plans/2026-03-17-ct-exec-fuse-callables.md)
   and [its test plan](plans/2026-03-17-ct-exec-fuse-callables-test-plan.md) —
   `cf exec` and mounted callable files.
@@ -199,6 +206,8 @@ One line per archived document; each document's header carries the fuller
 
 ### Investigations, journals, and working notes
 
+- [cf-harness Loom migration notes](packages/cf-harness/docs/LOOM_MIGRATION_NOTES.md)
+  — April 2026 pre-integration assessment of Loom's Codex batch and interactive paths.
 - [bug3-suggestion-alias-verification-2026-07.md](packages/patterns/bug3-suggestion-alias-verification-2026-07.md)
   — verification that the December 2025 survey's Bug 3 (Counter values
   rendering as raw `$alias` objects when instantiated via `fetchAndRunPattern`)

@@ -31,6 +31,7 @@ import {
 } from "./pieces-controller.ts";
 import {
   clickCfButton,
+  clickCfButtonsConcurrently,
   collectBrowserLoadSummary,
   fillCfInput,
   logBrowserLoadSummary,
@@ -166,8 +167,12 @@ describe("lunch poll: two users vote on a shared option", () => {
           ]),
       );
 
-      // Host joins first -> becomes host/admin. The roster chip carrying the
-      // host's name appears once the join lands.
+      // Host joins first -> becomes host/admin. Fresh identities carry no
+      // shared profile, so the join card opens on the profile create/pick
+      // surface; "Continue as guest" reveals the typed-name input this test
+      // drives. The roster chip carrying the host's name appears once the join
+      // lands.
+      await clickCfButton(hostPage, "#lp-guest-button");
       await timer.run(
         "host name filled",
         () => fillCfInput(hostPage, "#lp-join-name", HOST),
@@ -178,9 +183,11 @@ describe("lunch poll: two users vote on a shared option", () => {
         () => waitForText(hostPage, "body", HOST),
       );
 
-      // Guest joins second. The board shows a participant count, not a full
-      // roster, so the host's join landing is observed as "2 joined" (and the
-      // guest's own page shows its name plus "hosted by Alice").
+      // Guest joins second via the same guest path. The board shows a
+      // participant count, not a full roster, so the host's join landing is
+      // observed as "2 joined" (and the guest's own page shows its name plus
+      // "hosted by Alice").
+      await clickCfButton(guestPage, "#lp-guest-button");
       await fillCfInput(guestPage, "#lp-join-name", GUEST);
       await clickCfButton(guestPage, "#lp-join-button");
       await timer.run(
@@ -204,18 +211,25 @@ describe("lunch poll: two users vote on a shared option", () => {
           ]),
       );
 
-      // Both users vote green on the SAME option CONCURRENTLY: both clicks are
-      // dispatched before either browser settles, so the second voter is not
-      // guaranteed to have seen the first vote. The votes are distinct entities
-      // (keyed per voter), so both must survive and the tally reaches "2 love
-      // it" on BOTH browsers. A clobbering whole-list write against a base that
-      // missed the other vote would leave it at "1 love it".
+      // Both users vote green on the SAME option CONCURRENTLY. Both page views
+      // settle before the pair is dispatched. Neither page settles again until
+      // both clicks have been delivered. The second voter is not guaranteed to
+      // have seen the first vote. The votes are distinct entities, keyed per
+      // voter. Both must survive, and the tally reaches "2 love it" on BOTH
+      // browsers. A clobbering whole-list write against a base that missed the
+      // other vote would leave it at "1 love it".
       await timer.run(
         "both cast green concurrently",
         () =>
-          Promise.all([
-            clickCfButton(hostPage, voteButton(OPTION_A, "green")),
-            clickCfButton(guestPage, voteButton(OPTION_A, "green")),
+          clickCfButtonsConcurrently([
+            {
+              page: hostPage,
+              selector: voteButton(OPTION_A, "green"),
+            },
+            {
+              page: guestPage,
+              selector: voteButton(OPTION_A, "green"),
+            },
           ]),
       );
       await timer.run(

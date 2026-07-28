@@ -208,7 +208,8 @@ reads resolve for any authorized viewer (CT-1667/1687), so the badge stays
 current, carries the verified-identity seal, and links to each contributor's
 profile. Snapshotting the `#profileName` / `#profileAvatar` strings instead is
 the self-containment fallback (renders with remote profile spaces offline). See
-`docs/specs/shared-profile-rosters.md`; canonical live-link demo:
+the [shared-profile roster guide](../../specs/shared-profile-rosters.md);
+canonical live-link demo:
 `packages/patterns/profile-roster-live-demo.tsx`; worked examples:
 `packages/patterns/profile-group-chat/main.tsx`,
 `packages/patterns/scrabble/scrabble.tsx`,

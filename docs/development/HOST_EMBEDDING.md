@@ -30,6 +30,7 @@ weeks later.
 | 1 | Wish targets + result semantics | API | `runner` | yes | `test/wish.test.ts` — `host embedding contract: profile wish targets` |
 | 2 | `runtimeContext` / `spaceContext` | API | `ui` | yes | `src/v2/runtime-context.test.ts` |
 | 3 | Navigation events | API | `shell`, `lib-shell` | `cf-navigate` yes; `cf-open-external` yes (with CT-1830); others available, not bound | `test/navigate-contract.test.ts` |
+| 3a | Piece menu | API + component | `ui` | available, not bound | `src/v2/components/cf-render/cf-render.test.ts` — `CFRender piece context menu`; `src/v2/components/cf-piece-menu/cf-piece-menu.test.ts` |
 | 4 | `getCfcLabel` egress check | API | `ui` (label shape in `runner`) | yes | `src/v2/core/cfc-label.test.ts` — `cfcLabelViewIsPublic (egress check)` |
 | 5 | Guarded-define idiom | API | `ui` | yes | `src/v2/components/host-embedding-guarded-define.test.ts` |
 | 6 | Trusted-mark threat model | policy record | `runner` | n/a | `test/cfc-ui-contract.test.ts` — `host embedding contract: trusted-mark threat model` |
@@ -134,6 +135,59 @@ DOM). A host embeds by listening for:
 and detail shapes); the pattern-side shape is also guarded by
 `packages/shell/test/runtime-navigation.test.ts`. `cf-open-external` is
 untested here by design — it lands and is tested with CT-1830.
+
+---
+
+## 3a. The piece menu
+
+**Contract.** A right-click on a piece rendered by `cf-render` opens
+`cf-piece-menu` for that piece, with two entries: **View source** shows the
+piece's retained authored files, and **Origin and history** shows the origin it
+records and the pattern identities it has run. Nothing is required of the host to
+have them — importing `cf-render` registers the menu, and the menu reads its data
+through `RuntimeClient.getPieceSource()` on the runtime the piece already runs in.
+The menu mounts itself on `document.body`, not inside the piece, because a piece's
+own `overflow: hidden` would clip it and the tile variant's
+`transform: scale(0.5)` would shrink it; it copies the `--cf-theme-*` tokens
+across from the element that opened it, so it follows the host's theme.
+
+Before the menu opens, `cf-render` announces the click. The event is
+**cancellable, and cancelling it takes the click**: the built-in menu does not
+open, and the host is responsible for what appears instead. Either way the
+browser's own context menu is suppressed. Unlike the navigation events, this one
+BUBBLES from the DOM (`bubbles`, `composed`), so a host may listen on its mount
+container or on `globalThis`.
+
+```ts
+import type { DID } from "@commonfabric/identity";
+
+// packages/ui/src/v2/components/cf-render/cf-render.ts
+export const PIECE_CONTEXT_MENU_EVENT = "cf-piece-context-menu";
+
+export interface PieceContextMenuDetail {
+  space: DID;
+  /** The piece's full schemed id (`of:fid1:…`). */
+  pieceId: string;
+  /** Client coordinates of the click, for placing the menu. */
+  x: number;
+  y: number;
+  variant: "full" | "chip" | "tile";
+}
+```
+
+Three clicks are never announced, so a host needs no special cases for them: a
+click on a text entry, a click held with Shift, and a `cf-render` bound to a
+value inside a piece rather than to a whole piece. The innermost rendered piece
+announces, so a right-click on a tile inside a piece names the tile.
+
+See [docs/specs/piece-source-lifecycle.md](../specs/piece-source-lifecycle.md)
+for what an origin means.
+
+**Test.** `packages/ui/src/v2/components/cf-render/cf-render.test.ts`,
+`describe("CFRender piece context menu")` — the event name, the detail shape, and
+when the click is taken. `packages/ui/src/v2/components/cf-piece-menu/cf-piece-menu.test.ts`
+— the entries and their test hooks. The menu's DOM behaviour is driven end to end
+by `packages/shell/integration/piece-menu.test.ts`.
 
 ---
 
