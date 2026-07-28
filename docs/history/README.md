@@ -87,6 +87,9 @@ One line per archived document; each document's header carries the fuller
 
 ### Audits and reports
 
+- [cf-view-language-coverage-2026-07.md](packages/cli/cf-view-language-coverage-2026-07.md)
+  — active-repository syntax inventory and `cf view` support snapshot, July
+  2026.
 - [cf-json-argument-audit-2026-07.md](packages/cli/cf-json-argument-audit-2026-07.md)
   — command-by-command audit of `cf --json` behavior, July 2026.
 - [cts-docs-audit-2026-07.md](cts-docs-audit-2026-07.md) —

@@ -10,6 +10,9 @@ a record: archive it to `docs/history/plans/` following the procedure in
 
 ## Current plans
 
+- [`cf view` language and syntax coverage](cf-view-language-coverage.md)
+  orders the remaining language, data, build, and configuration formats needed
+  for honest coverage of the active organization repositories.
 - [cf-harness Codex subscription authentication](cf-harness-codex-subscription-auth.md)
   tracks the remaining shipping gates after the core implementation.
 - [CFC exchange-rule authoring](cfc-exchange-rule-authoring.md) tracks the
