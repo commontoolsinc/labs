@@ -109,6 +109,23 @@ precisely the foundation those need.
    composites (the shrink genuinely needs the full re-walk with
    removes); working as designed, probe (`0cb2ca92e`) stays as the
    permanent split.
+   **RANK-DIAL QUESTION ANSWERED 2026-07-28 (§5g) — NOT a flip.** The
+   CA4 audit found the gate is not ordering (that invariant was lifted
+   with C2.6) but WIRING: all four dials in the bundle are
+   programmatic-only with no deployment path, and the browser client
+   cannot negotiate `context-lattice-claims-v1` at all — which, through
+   the principal-wide cohort gate, makes the two-browser payoff surface
+   §5f named unmeasurable today. Measured buy on the real product
+   (router seam, three arms): **16 of 20 stranded derivations promoted,
+   17 user-rank candidates, ZERO placement regressions** — but two NEW
+   per-attempt rejection classes at the §4 write-shape firewall that
+   "claim-ready" counting cannot see, still unpriced live. Live
+   two-principal arm: the bundle opens both user lanes on group-chat
+   (0/0 → 2/2) with isolation and per-user correctness intact, but the
+   Worker never runs the piece there, so claim/settlement counters for
+   the product remain absent. Sequencing recommendation in §5g:
+   client-side negotiation (F5-style gate) FIRST, then the live
+   measurement, then the dial bridge.
 4. **P3 passivity mechanism** (per-session subcap, passive-mode
    demand producer, dynamic-reactivation contract, effect-attempt
    journal) — the client stops running standing work. THIS is where
@@ -1059,6 +1076,180 @@ single decision standing between the chat product's computation
 inventory and claim-ready — the measured payoff surface is 20
 offender actions × the multi-user legs. The effect rows (R5 brokers,
 R13 wish, sqlite per D2) remain build work either way.
+
+## 5g. The user-rank dial: CA4 audit + the measured buy (2026-07-28)
+
+Answering §5f's pending owner question. Nothing here is enabled by
+default; both probes below land as re-runnable artifacts so the numbers
+are reproducible rather than re-derived.
+
+### The prerequisite audit — what is MET and what is not
+
+The dial "bundle" is four independent switches, not one. Their
+mechanisms are all built; **none of them is reachable from any
+deployment's configuration.**
+
+1. **Memory-side claim-rank ladder reaches `user` — MECHANISM MET,
+   DEPLOYMENT WIRING ABSENT.** The ladder is
+   `space → user → session → cross-space-read`
+   (`packages/memory/v2.ts:1520`), the stage gates issuance and renewal
+   at `#executionClaimRankEnabled`
+   (`packages/memory/v2/server.ts:2394`, consulted at `:2372` and
+   `:6391`) and lane opening at `executionUserLanesEnabled`
+   (`:5278`). The setter is
+   `setServerPrimaryExecutionClaimRankConfig` (`v2.ts:1549`) and it has
+   **no non-test caller anywhere in the repo** — notably not in
+   `applyServerPrimaryExecutionEnvConfig` (`v2.ts:1770`), which applies
+   only the base dial and the doc-set-watch dial. `user` is reachable
+   today only from inside a fixture's own process.
+2. **Cohort advertisement — MECHANISM MET, DEPLOYMENT WIRING ABSENT.**
+   `serverPrimaryExecutionContextLatticeClaimsV1` is a real negotiated
+   subcapability with the amendment-11 principal-wide gate
+   (`server.ts:5060`, enforced at lane open `:5205` and renew `:5250`).
+   Its setter (`v2.ts:1572`) likewise has no env mapping and exactly one
+   non-test caller: the multi-runtime harness worker, behind a
+   harness-local variable
+   (`packages/patterns/integration/multi-runtime-worker.ts:226`).
+3. **Runner-side candidate dial — MECHANISM MET, DEPLOYMENT WIRING
+   ABSENT BY DECLARATION.** The Worker reads it at
+   `packages/runner/src/executor/executor-worker.ts:1248`, the router at
+   `executor/action-transaction-router.ts:366`, and toolshed passes the
+   pool leg at `packages/toolshed/routes/storage/memory.ts:271`. But
+   `serverPrimaryExecutionUserRankCandidates` is mapped `null` in
+   `EXPERIMENTAL_ENV_VARS` (`packages/runner/src/runtime-presets.ts:200`),
+   so `experimentalOptionsFromEnv` never sets it and toolshed's
+   `runtime.experimental` never carries it.
+4. **The CA4 ordering invariant itself — NO LONGER BINDING for user or
+   session rank.** `EXPERIMENTAL_OPTIONS.md`'s `serverPrimaryExecution
+   ClaimRank` entry records it as **lifted** when C2.6 landed
+   (2026-07-17): session-context control events now route only to the
+   named session, so the quadratic sibling-rerun hazard the invariant
+   protected against is gone. The CA4/C3A17 analog for
+   `cross-space-read` is still binding. **§5f's framing — that CA4
+   ordering gates this decision — is out of date; what actually gates it
+   is items 1-3 and 5, which are wiring, not ordering.**
+5. **A browser client that can negotiate the subcapability — NOT MET,
+   and this is the binding blocker for the payoff surface §5f named.**
+   The client half is the same programmatic-only memory ambient flag; the
+   shell bundle has no path to it. Because the cohort gate requires
+   EVERY session of a principal — TTL-detached ones included — to have
+   negotiated, a browser session that cannot negotiate makes
+   `openUserLaneGrant` throw and the lane never opens. **The
+   two-browser leg therefore cannot host this measurement at all today:
+   flipping every server-side dial under it would be inert.** The F5
+   env-bridge gate
+   (`packages/patterns/integration/server-execution-f5-env-bridge-gate.test.ts`)
+   is the precedent and the warning — the identical "dial never reached
+   the advertisement in a realm-separated deployment" miswire already
+   happened once and needed its own red-first gate to catch.
+6. **A fixture that flips the pair together — MET.** The C1.9 gate does
+   exactly that (`server-execution-user-lane-gate.test.ts:529` +
+   `:599`). Re-run on this tree today: **6/6 green, including the A2
+   mid-run WRITE-revocation security fixture.**
+
+### What flipping buys — measured
+
+`packages/runner/test/server-execution-group-chat-rank-probe.test.ts`
+(new): the real `cfc-group-chat-demo/main.tsx` driven through the real
+executor router with trusted-provenance events, three arms, dials the
+only difference. Counts are per reason code as
+`events / action instances / DERIVATIONS` (module + lift identity —
+the granularity the offender inventory is actually about):
+
+| arm | candidates | unserved |
+| --- | --- | --- |
+| space (today) | `space` ×17 | `non-space-read-scope` 34/33/**20** |
+| user | `user` ×17, `space` ×17 | `malformed-scope-naming-link` 12/12/1; `broad-lane-value-write` 3/2/1; `non-space-read-scope` 2/2/2 |
+| session | `user` ×17, `space` ×17, `session` ×1 | as above + `dynamic-non-space-write-scope` 1/1/1; `non-space-read-scope` **0** |
+
+Cross-arm set relations (derivation-keyed): **promoted 16, still
+stranded 2, newly appeared 0, REGRESSED 0.** The space arm's 20
+stranded derivations corroborate §5f's live "20 offender actions" —
+the same surface, counted two independent ways.
+
+So the buy is real and the direction is unambiguous: **16 of 20
+stranded derivations become claim-ready, 17 user-rank candidates
+appear, and nothing that placed at space rank stops placing.**
+
+### What it risks — measured
+
+The dial does not simply promote. Two per-attempt rejection classes
+appear that do not exist at space rank, both at the §4 widening-pair
+write-shape firewall (`scheduler/servability.ts:727` — the runner-side
+mirror of the engine's `assertLaneBroadScopeNamingWrite` backstop):
+`malformed-scope-naming-link` (12 attempts) and `broad-lane-value-write`
+(3 attempts). Two derivations are **claim-ready AND stranded** in the
+same arm — placement succeeds, individual attempts are then rejected.
+That is the claimed-but-unserved shape, and it is invisible to any
+count that asks only "is this action claim-ready?" — including §5f's
+"14/15 classify claim-ready", which is a static-classifier statement
+and does not survive contact with the router's firewall. The session
+arm adds a third, `dynamic-non-space-write-scope` ×1.
+
+None of these is a correctness failure in the probe; all are refusals
+to serve. But they are exactly the class that, live and under
+contention, prices as claimed-then-unserved settlements — and nothing
+has priced them live yet.
+
+### The live half — what it established, and the gap
+
+`packages/patterns/integration/server-execution-group-chat-user-rank-probe.test.ts`
+(new): real Server, file-backed store, real `SharedExecutionPool`, a
+real Deno executor Worker, two principals on the real product,
+adjacent OFF/ON arms with independent stores.
+
+MEASURED, both arms: per-user value correctness holds
+(`{alice: "Alice", bob: "Bob"}`), both messages land, **zero foreign
+`user:` scope keys reach either client** (cross-principal isolation at
+the delivery seam), `settlementsFailed` 0, `leaseFenceRejects` 0.
+
+MEASURED, the discriminator: OFF → `negotiatingDemands` 0,
+`activeUserLanes` 0, `userLanesOpened` 0. ON → **2, 2, 2.** The cohort
+advertisement, the C1.3 lane grants and the C1.8 pool lifecycle all
+engage correctly on the real product with two principals. That is new;
+nothing previously showed the bundle working outside a synthetic
+PerUser fixture.
+
+**THE GAP, stated plainly:** in this topology the Worker goes live and
+takes both lanes but never runs the piece's actions
+(`executionPlacement.schedulerRuns` 0 in both arms), so `claimsIssued`
+is 0 and `candidateUnservedByCode` is empty. **No claim/settlement/
+conflict counters for the group-chat product at user rank exist yet.**
+Serving group-chat in-process needs the
+`runner/test/server-execution-rollout-products.test.ts` sequencing
+(worker-realm clients plus an observer graph watch); that is the
+follow-up, not a result. The live claim-and-settle evidence for user
+rank remains the C1.9 synthetic PerUser gates.
+
+### Recommended sequencing
+
+1. **Do not flip anything yet, and do not add an env bridge as the
+   first step.** With no browser-side negotiation the bridge would
+   enable a configuration that is inert at best; per the cohort gate it
+   would also make user lanes un-openable in exactly the deployments
+   worth measuring.
+2. **Build the client-side negotiation path** (shell/runner) with an
+   F5-style red-first env-bridge gate asserting the subcapability
+   negotiates END TO END from the dials alone. This is the one item
+   that unblocks the two-browser payoff surface, and F5 is the
+   template for how it gets pinned.
+3. **Close the live measurement gap** — get group-chat SERVED in a gate
+   topology, then re-run the ON arm for claims/settlements/conflicts and
+   the `candidateUnservedByCode` delta. Until that number exists, the
+   §4 firewall rejections above are unpriced.
+4. **Then** wire the three server-side dials behind one bridge and
+   measure the two-browser legs, adjacent-pair, on an unloaded box.
+5. The effect rows (R5 brokers, R13 `wish`, sqlite per D2) are
+   unaffected by any of this and remain the open build.
+
+### Measurement conditions
+
+Box load average 19.9-23.3 throughout (other tenants active), so **no
+latency number was taken and none is quoted** — every figure above is a
+count or a set relation, which are load-insensitive. The toolshed
+two-browser arm was deliberately NOT re-run: it can only reproduce the
+dials-off inventory §5f already published from the same command, and
+per item 5 it cannot host the dials-on arm at all.
 
 ## 7. Owner decisions — RESOLVED 2026-07-26
 

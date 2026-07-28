@@ -139,6 +139,9 @@ describe("reactive retries", () => {
     >;
     watchReactiveActionCommit({
       action,
+      // Consumed only by the P4 conflict-retry debug probe; any stable label
+      // identifies this fixture's action in that line.
+      actionId: "scheduler-retries-test-action",
       tx: {} as IExtendedStorageTransaction,
       log: {} as ReactivityLog,
       retries,

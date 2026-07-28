@@ -251,6 +251,9 @@ describe("trigger reads survive failed runs", () => {
     );
     watchReactiveActionCommit({
       action,
+      // Consumed only by the P4 conflict-retry debug probe; any stable label
+      // identifies this fixture's action in that line.
+      actionId: "cfc-trigger-reads-test-action",
       tx,
       log: { reads: [], shallowReads: [], writes: [] },
       retries: args.retries ?? new WeakMap(),
