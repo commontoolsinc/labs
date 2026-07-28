@@ -1054,8 +1054,8 @@ another as fast as the event loop allows, a busy loop hammering the host. The
 growing backoff — 25 milliseconds doubling to a 30-second cap, with up to 20
 percent jitter — is the honest way to keep checking whether the server is back
 without flooding it. It is the same shape as the committed-write backoff in
-`committed-write-backpressure.md`, where a capped exponential backoff also stands
-in for a retry that has no event to wait on.
+[committed-write backpressure](committed-write-backpressure.md), where a capped
+exponential backoff also stands in for a retry that has no event to wait on.
 
 Cancelling an in-progress backoff stays event-driven: the pause between attempts
 is a single timer that `close()` cancels directly, so a client closed mid-backoff

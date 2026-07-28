@@ -1,9 +1,11 @@
 # Incremental observation adoption (subscription-carried scheduler state)
 
-Status: Implemented. Successor to `per-doc-rehydration.md` (reload is the
-degenerate case of this mechanism). Flag-on only (`persistentSchedulerState`).
-Goal: with the flag on, multi-user flows get FASTER than main — clients use
-scheduler information to skip work in ongoing operation, not just on reload.
+Status: Implemented. Successor to
+[per-document rehydration](per-doc-rehydration.md), where reload is the
+degenerate case of this mechanism. Flag-on only
+(`persistentSchedulerState`). Goal: with the flag on, multi-user flows get
+FASTER than main — clients use scheduler information to skip work in ongoing
+operation, not just on reload.
 
 ## 1. The idea
 

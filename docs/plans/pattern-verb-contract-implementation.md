@@ -124,7 +124,8 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
 - **schema-generator:** emit a result schema for stream/handler properties so
   it reaches the piece's **durable** schema — the dependency verb discovery
   named; mapping spec update in
-  `docs/specs/schema-generator/ts_to_json_schema_mapping.md`. Verb **input**
+  [the TypeScript-to-JSON-Schema mapping](../specs/schema-generator/ts_to_json_schema_mapping.md).
+  Verb **input**
   schemas become closed-world (an undeclared field is a rejection, never
   ignored — design rule 1): emit `additionalProperties: false` for event
   payloads, confirm the runner enforces it at dispatch, and record the rule

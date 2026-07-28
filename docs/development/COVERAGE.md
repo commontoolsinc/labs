@@ -357,6 +357,9 @@ like a pattern nobody tested. Writing one warns.
 - [TESTING.md](TESTING.md) — how to run the test suites whose execution this
   coverage is measured from.
 - [CI_PERFORMANCE.md](CI_PERFORMANCE.md) — CI wall-time optimization policy.
+- [One-line guard coverage artifact](deno-coverage-guard-line-artifact.md) —
+  why V8 can report a one-line conditional guard as uncovered when its branch
+  is not taken.
 - [../common/workflows/pattern-testing.md](../common/workflows/pattern-testing.md)
   — writing the pattern unit tests that the `pattern-unit-test` job runs through
   `cf test`, the source of the gated authored-pattern coverage.
