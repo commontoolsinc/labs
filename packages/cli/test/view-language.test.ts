@@ -1,8 +1,9 @@
 /**
- * Language selection: `languageForFile` picks a language by extension (and
- * backstops to TypeScript for pipes and unknown files), `distinctLanguages`
- * dedupes the languages a diff touches, and `diffSemanticsFor` composes the diff
- * view's semantic layer from the languages present, scoped to each one's files.
+ * Language selection: `languageForFile` picks a language by extension, uses
+ * plain text for unknown named files, and keeps TypeScript for unnamed pipes.
+ * `distinctLanguages` dedupes the languages a diff touches, and
+ * `diffSemanticsFor` composes the diff view's semantic layer from the languages
+ * present, scoped to each one's files.
  */
 import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
@@ -16,6 +17,7 @@ import { markdownLanguage } from "../lib/view/languages/markdown/language.ts";
 import { jsonLanguage } from "../lib/view/languages/json/language.ts";
 import { yamlLanguage } from "../lib/view/languages/yaml/language.ts";
 import { pythonLanguage } from "../lib/view/languages/python/language.ts";
+import { plainTextLanguage } from "../lib/view/languages/plain-text/language.ts";
 import {
   buildDiffDocument,
   type DiffMaps,
@@ -23,7 +25,7 @@ import {
 } from "../lib/view/diffdoc.ts";
 import { parseDiff } from "../lib/view/diff.ts";
 
-Deno.test("languageForFile: extensions resolve, and the rest backstops to TS", () => {
+Deno.test("languageForFile: named files resolve and unnamed input defaults to TypeScript", () => {
   for (const ts of ["a.ts", "a.tsx", "a.mts", "a.cts", "a.js", "a.jsx"]) {
     assertEquals(languageForFile(ts).id, "typescript", ts);
   }
@@ -31,9 +33,16 @@ Deno.test("languageForFile: extensions resolve, and the rest backstops to TS", (
   assertEquals(languageForFile("deno.jsonc").id, "json");
   assertEquals(languageForFile("workflow.yml").id, "yaml");
   assertEquals(languageForFile("script.py").id, "python");
-  // No language claims these, so the fallback (TypeScript) resolves them.
-  assertEquals(languageForFile("notes.xyz").id, "typescript");
+  assertEquals(languageForFile("notes.xyz").id, "plain-text");
+  assertEquals(languageForFile("LICENSE").id, "plain-text");
   assertEquals(languageForFile(undefined).id, "typescript");
+});
+
+Deno.test("languageForFile: named JavaScript uses the TypeScript-family parser", () => {
+  const source = "export const answer = 42;\n";
+  const doc = languageForFile("answer.js").parseDocument(source, "answer.js");
+  assertEquals(doc.text, source);
+  assert(doc.lines[0].spans.some((span) => span.cls === "storageKeyword"));
 });
 
 Deno.test("distinctLanguages: dedupes in first-seen order", () => {
@@ -44,11 +53,12 @@ Deno.test("distinctLanguages: dedupes in first-seen order", () => {
     "d.json",
     "e.yaml",
     "f.py",
+    "LICENSE",
     undefined,
   ]);
   assertEquals(
     languages.map((l) => l.id),
-    ["typescript", "markdown", "json", "yaml", "python"],
+    ["typescript", "markdown", "json", "yaml", "python", "plain-text"],
   );
 });
 
@@ -112,7 +122,13 @@ Deno.test("diffSemanticsFor: TypeScript answers over its own files in the diff",
     // those resolves to no service.
     assertEquals(
       diffSemanticsFor(
-        [markdownLanguage, jsonLanguage, yamlLanguage, pythonLanguage],
+        [
+          markdownLanguage,
+          jsonLanguage,
+          yamlLanguage,
+          pythonLanguage,
+          plainTextLanguage,
+        ],
         DIFF,
         maps,
         { cwd: root },

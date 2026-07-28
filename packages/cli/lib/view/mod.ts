@@ -1,9 +1,10 @@
 /**
  * Entry point for `cf view`. Reads the input (a file argument or piped stdin),
- * parses it once — as a unified diff when it reads as one, else as transformed
- * TypeScript — then either launches the interactive pager (when stdout is a
- * TTY) or prints the colourised text and exits, mirroring how `less`/`bat`
- * behave when their output is redirected.
+ * parses it once — as a unified diff when it reads as one, otherwise with the
+ * language selected from its filename — then either launches the interactive
+ * pager (when stdout is a TTY) or prints the colourised text and exits,
+ * mirroring how `less`/`bat` behave when their output is redirected. An unnamed
+ * pipe remains transformed TypeScript.
  */
 import { renderLineColored } from "./highlight.ts";
 import { runPager } from "./pager.ts";

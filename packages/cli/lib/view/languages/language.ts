@@ -2,10 +2,10 @@
  * The contract every source language plugs into so the `cf view` pager can
  * colour, navigate, edit and (optionally) reason about it, plus selecting the
  * right language for a file. A language is a stateless strategy object: one
- * instance describes TypeScript, one Markdown, one JSON, one YAML, and one
- * Python. The pager selects the right one for a file ONCE (via
- * {@link languageForFile}), then dispatches every operation through that
- * object's methods — there is no per-operation branch on the file extension.
+ * instance describes each supported syntax, and plain text handles unknown
+ * named files. The pager selects the right one for a file ONCE (via {@link
+ * languageForFile}) and then dispatches every operation through that object's
+ * methods — there is no per-operation branch on the file extension.
  *
  * Per-file mutable state (a warm incremental parse, a language service) is not
  * held on the language; the language is a factory for the small stateful
@@ -23,6 +23,7 @@ import { markdownLanguage } from "./markdown/language.ts";
 import { jsonLanguage } from "./json/language.ts";
 import { yamlLanguage } from "./yaml/language.ts";
 import { pythonLanguage } from "./python/language.ts";
+import { plainTextLanguage } from "./plain-text/language.ts";
 
 /**
  * Live syntax highlighting that re-highlights only the region an edit touches,
@@ -107,12 +108,11 @@ export interface HunkStructureContext {
  */
 export interface Language {
   /** Stable identifier, such as `"typescript"`, `"markdown"`, `"json"`,
-   * `"yaml"`, or `"python"`. */
+   * `"yaml"`, `"python"`, or `"plain-text"`. */
   readonly id: string;
 
   /** Does this language claim `fileName`? Consulted in order by {@link
-   * languageForFile}; TypeScript claims its own family and also backstops
-   * anything unclaimed. */
+   * languageForFile}. */
   matches(fileName: string | undefined): boolean;
 
   /** Parse `text` into the full document model: coloured lines, a structure
@@ -163,8 +163,9 @@ export interface Language {
 
 /**
  * Every language the pager knows, most specific first, built on first use.
- * TypeScript comes last: it claims the TypeScript family and is also the
- * fallback (below) for anything unclaimed.
+ * Plain text comes last because it claims every named file left after the
+ * syntax-specific languages. An input with no filename is handled by the
+ * fallback below.
  *
  * The list is lazy so this module's top level never reads the concrete language
  * singletons: they and this module form an import cycle (a language's semantic
@@ -180,11 +181,13 @@ function allLanguages(): readonly Language[] {
     yamlLanguage,
     pythonLanguage,
     typeScriptLanguage,
+    plainTextLanguage,
   ];
 }
 
-/** The language for `fileName` — the first that claims it. TypeScript is the
- * fallback, so a pipe (no name) or an unrecognised extension resolves to it. */
+/** The language for `fileName` — the first that claims it. Plain text claims
+ * otherwise unknown named files. TypeScript remains the fallback for an
+ * unnamed pipe of transformed compiler output. */
 export function languageForFile(fileName: string | undefined): Language {
   for (const language of allLanguages()) {
     if (language.matches(fileName)) return language;
@@ -212,11 +215,11 @@ export function distinctLanguages(
  * The semantic service for a diff view, from the languages the diff touches. A
  * diff spans potentially many files of different languages; the service is the
  * first language present that offers one, scoped to just its own files (so a
- * TypeScript program is not seeded with the diff's Markdown, JSON, YAML, or
- * Python files). Only TypeScript offers one today, so this resolves to it
- * whenever the diff includes a TypeScript file and to nothing otherwise. When
- * a second semantic language appears this becomes a per-file composite; the
- * per-language slot the pager dispatches through is already here.
+ * TypeScript program is not seeded with the diff's non-TypeScript files). Only
+ * TypeScript offers one today, so this resolves to it whenever the diff includes
+ * a TypeScript file and to nothing otherwise. When a second semantic language
+ * appears this becomes a per-file composite; the per-language slot the pager
+ * dispatches through is already here.
  */
 export function diffSemanticsFor(
   languages: readonly Language[],

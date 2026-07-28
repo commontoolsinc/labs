@@ -1,10 +1,10 @@
 /**
  * Shared data model for the `cf view` pager.
  *
- * The pipeline is: raw text -> {@link parseDocument} (TypeScript parser) ->
- * {@link Document} -> {@link renderFrame}. Everything downstream of the parser
- * operates on these structures, never on the TypeScript AST directly, which
- * keeps the renderer pure and testable.
+ * The pipeline is: raw text -> selected language parser -> {@link Document} ->
+ * {@link renderFrame}. Everything downstream of the parser operates on these
+ * structures, never on a language-specific syntax tree directly, which keeps
+ * the renderer pure and testable.
  */
 
 /**
