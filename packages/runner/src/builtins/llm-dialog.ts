@@ -2228,6 +2228,21 @@ async function executeToolCalls(
   const results: ToolCallExecutionResult[] = [];
   for (const part of toolCallParts) {
     try {
+      // A model turn can call several tools at once, and they run one after
+      // another here. Checking the signal per tool rather than only inside the
+      // wait is what keeps a cancel from starting the ones not reached yet:
+      // `handleInvoke` runs the pattern or sends to the handler before it
+      // reaches its own wait, so a tool entered after the cancel would fire its
+      // side effects and only then notice.
+      if (abortSignal?.aborted) {
+        results.push({
+          id: part.toolCallId,
+          toolName: part.toolName,
+          error: "Tool call cancelled",
+        });
+        continue;
+      }
+
       if (
         !toolAllowsObservedConfidentiality(
           toolCatalog,

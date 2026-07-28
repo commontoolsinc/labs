@@ -52,6 +52,7 @@ describe("cancelling a dialog turn stops a running tool", () => {
   let tx: IExtendedStorageTransaction;
   let Cell: ReturnType<typeof createBuilder>["commonfabric"]["Cell"];
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
+  let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
   let patternTool: ReturnType<
     typeof createBuilder
   >["commonfabric"]["patternTool"];
@@ -67,7 +68,7 @@ describe("cancelling a dialog turn stops a running tool", () => {
     tx = runtime.edit();
 
     const { commonfabric } = createTrustedBuilder(runtime);
-    ({ pattern, llmDialog, Cell, patternTool } = commonfabric);
+    ({ pattern, llmDialog, Cell, patternTool, handler } = commonfabric);
   });
 
   afterEach(async () => {
@@ -182,5 +183,127 @@ describe("cancelling a dialog turn stops a running tool", () => {
     // clock a turn that ended by waiting the deadline out reaches rest just as
     // quickly in real time, and the 120-second jump is what tells them apart.
     expect(Date.now() - before).toBeLessThan(120_000);
+  });
+
+  it("does not start the later tools of a cancelled multi-tool turn", async () => {
+    // A turn can call several tools at once, and they run one after another.
+    // Racing the signal inside each tool's wait is not enough on its own: the
+    // pattern is run, or the handler sent to, before that wait is reached, so a
+    // tool entered after the cancel fires its side effects first and notices
+    // afterwards. `secondRan` is that side effect.
+    let secondRan = false;
+
+    loadConversationFixture({
+      description: "two tools in one turn, cancelled during the first",
+      responses: [
+        {
+          type: "sendRequest",
+          expectRequest: { hasTools: ["stall", "second"], messageCount: 1 },
+          response: {
+            role: "assistant",
+            content: [
+              {
+                type: "tool-call",
+                toolCallId: "call_stall",
+                toolName: "stall",
+                input: {},
+              },
+              {
+                type: "tool-call",
+                toolCallId: "call_second",
+                toolName: "second",
+                input: {},
+              },
+            ],
+            id: "cancel-multi-r1",
+          },
+        },
+      ],
+    });
+
+    const stallTool = pattern<Record<string, never>, undefined>(
+      () => undefined,
+      { type: "object", additionalProperties: false },
+      true,
+    );
+
+    const secondTool = handler(
+      {
+        type: "object",
+        properties: { result: { type: "object", asCell: ["cell"] } },
+        required: ["result"],
+      },
+      { type: "object", properties: {} },
+      (args: { result: any }) => {
+        secondRan = true;
+        args.result.set({ ok: true });
+      },
+    );
+
+    const resultSchema = {
+      type: "object",
+      properties: {
+        addMessage: { ...LLMMessageSchema, asCell: ["stream"] },
+        cancelGeneration: { type: "object", asCell: ["stream"] },
+        pending: { type: "boolean" },
+        messages: {
+          type: "array",
+          items: { type: "object", additionalProperties: true },
+        },
+      },
+      required: ["addMessage"],
+    } as const satisfies JSONSchema;
+
+    const testPattern = pattern(
+      () => {
+        const messages = Cell.of<BuiltInLLMMessage[]>([]);
+        const dialog = llmDialog({
+          messages,
+          tools: {
+            stall: {
+              description: "Never returns a result.",
+              ...(patternTool(stallTool) as unknown as BuiltInLLMTool),
+            },
+            second: {
+              description: "Must not run once the turn is cancelled.",
+              handler: secondTool({}),
+            },
+          },
+        });
+        return {
+          addMessage: dialog.addMessage,
+          cancelGeneration: dialog.cancelGeneration,
+          pending: dialog.pending,
+          messages,
+        };
+      },
+      false,
+      resultSchema,
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "llmDialog-tool-cancel-multi-test",
+      resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    const addMessage = await result.key("addMessage").pull();
+    addMessage.send({ role: "user", content: "Start both tools." });
+
+    await waitForCellValue(
+      runtime,
+      result,
+      (value: any) => value?.pending === true,
+    );
+
+    const cancelGeneration = await result.key("cancelGeneration").pull();
+    cancelGeneration.send({});
+
+    await runtime.settled();
+    expect(secondRan).toBe(false);
   });
 });
