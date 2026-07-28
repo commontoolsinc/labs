@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import type { Options } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   computeModuleHashes,
@@ -13,10 +16,14 @@ import {
   loadSourceClosure,
   loadVerifiedSourceClosure,
   planCompileCacheWriteChunks,
+  setCompileCacheRuntimeVersionForTesting,
   verifySourceDocs,
+  writeCompiledDocs,
   writeSourceAndCompiledDocs,
+  writeSourceDocs,
 } from "../src/compilation-cache/cell-cache.ts";
 import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
+import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 
 // These tests drive the sync parse internals directly (below the async flow
 // boundaries that normally load the deferred compiler stack), so load it here.
@@ -235,6 +242,54 @@ describe("chunked compile-cache write-back (interruption survivability)", () => 
     tx.abort?.();
   });
 
+  it("entry-present/descendant-missing (not producible by interruption) is a partial compiled read and a source-closure miss", async () => {
+    // Chunk interruption cannot create this state (the entry doc lands
+    // last), but out-of-band loss can. Pin the ACTUAL loader behavior the
+    // safety argument rests on: the compiled loader is NOT fail-closed on a
+    // missing descendant — it returns the entry plus the valid subset — while
+    // the verified source loader rejects the partial graph, so the system
+    // recovers via recompile-from-source (see the degradation test below).
+    const { modules, entryIdentity } = toModules(PROGRAM);
+    const { chunks, extraRoots } = planCompileCacheWriteChunks(
+      modules,
+      entryIdentity,
+      1,
+    );
+    const utilIdentity = modules.find((m) => m.filename === "/util.ts")!
+      .identity;
+    // Commit every chunk EXCEPT the /util.ts dependency — including the
+    // entry chunk.
+    for (const chunk of chunks) {
+      if (chunk.some((m) => m.identity === utilIdentity)) continue;
+      await commitChunk(chunk, entryIdentity, extraRoots);
+    }
+
+    const tx = runtime.edit();
+    // Compiled loader: entry present, missing child skipped along with its
+    // edge (same behavior "skips compiled import links without integrity"
+    // pins) — the result is a PARTIAL closure, not a miss.
+    const compiled = await loadCompiledClosure(
+      runtime,
+      space,
+      entryIdentity,
+      opts(),
+      tx,
+    );
+    expect(compiled.has(entryIdentity)).toBe(true);
+    expect(compiled.has(utilIdentity)).toBe(false);
+    expect(compiled.size).toBe(modules.length - 1);
+    // Verified source loader: fail-closed — the missing import target fails
+    // graph verification, so the caller degrades to a recompile.
+    const source = await loadVerifiedSourceClosure(
+      runtime,
+      space,
+      entryIdentity,
+      tx,
+    );
+    expect(source).toBeUndefined();
+    tx.abort?.();
+  });
+
   it("chunked writes preserve the entry's synthetic root links to unreachable modules", async () => {
     const { modules, entryIdentity } = toModules(PROGRAM);
     const iso = isolatedModule();
@@ -269,5 +324,160 @@ describe("chunked compile-cache write-back (interruption survivability)", () => 
     ))!;
     expect(source.has(iso.identity)).toBe(true);
     tx.abort?.();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// System-level degradation pin: the by-identity load's hit test is ENTRY
+// presence (`closure.has(entryIdentity)`), not closure completeness. Chunked
+// interruption cannot create an entry-present/descendant-missing compiled
+// namespace (the entry doc lands last), but the safety argument in
+// planCompileCacheWriteChunks leans on what happens if that state exists
+// anyway: cached-module evaluation fails on the missing module and the load
+// falls back to a clean recompile from the verified source closure — a
+// working pattern, never a corrupt load — and the recovery write-back heals
+// the compiled namespace.
+// ---------------------------------------------------------------------------
+class SharedServerStorageManager extends EmulatedStorageManager {
+  static connectTo(
+    server: MemoryV2Server.Server,
+    options: Omit<Options, "memoryHost" | "spaceHostMap">,
+  ): SharedServerStorageManager {
+    const manager = new SharedServerStorageManager(
+      { ...options, memoryHost: new URL("memory://") },
+      () => server,
+    );
+    manager._sharedServer = server;
+    return manager;
+  }
+  private _sharedServer!: MemoryV2Server.Server;
+  protected override server(): MemoryV2Server.Server {
+    return this._sharedServer;
+  }
+}
+
+const newSharedServer = () =>
+  new MemoryV2Server.Server({
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
+  });
+
+describe("descendant-missing compiled closure degrades to a clean recompile", () => {
+  it("loadPatternByIdentity recompiles from source and heals the compiled set", async () => {
+    const RTVER = "test-degrade-1";
+    const restoreVersion = setCompileCacheRuntimeVersionForTesting(RTVER);
+    const server = newSharedServer();
+    const space = signer.did();
+    const program = {
+      main: "/main.tsx",
+      files: [
+        {
+          name: "/main.tsx",
+          contents: [
+            `import { bump } from "./util.ts";`,
+            `import { lift, pattern } from "commonfabric";`,
+            `const inc = lift((x: number) => bump(x));`,
+            `export default pattern<{ value: number }>(({ value }) => {`,
+            `  return { result: inc(value) };`,
+            `});`,
+          ].join("\n"),
+        },
+        {
+          name: "/util.ts",
+          contents: `export const bump = (n: number) => n + 1;`,
+        },
+      ],
+    };
+
+    const smA = SharedServerStorageManager.connectTo(server, { as: signer });
+    const runtimeA = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smA,
+    });
+    let smB: SharedServerStorageManager | undefined;
+    let runtimeB: Runtime | undefined;
+    try {
+      // Real compile for real module bodies, but persist BY HAND: the full
+      // source closure plus a compiled set that is missing /util.ts — the
+      // entry-present/descendant-missing state no chunk interruption can
+      // produce.
+      const { modules, entryIdentity } = await runtimeA.harness
+        .compileToRecordGraph(program, { fabricImports: { space } });
+      const utilModule = modules.find((m) => m.filename === "/util.ts");
+      expect(utilModule).toBeDefined();
+      const compiledSubset = modules.filter((m) => m !== utilModule);
+      const tx = runtimeA.edit();
+      writeSourceDocs(runtimeA, space, modules, entryIdentity, tx);
+      writeCompiledDocs(
+        runtimeA,
+        space,
+        compiledSubset,
+        entryIdentity,
+        { runtimeVersion: RTVER },
+        tx,
+      );
+      tx.prepareCfc();
+      expect((await tx.commit()).error).toBeUndefined();
+      await smA.synced();
+
+      // Cold replica: confirm the pre-state actually exercises the intended
+      // path — the compiled ENTRY is present (hit test passes) while the
+      // descendant is absent. Without this guard a mis-stamped write would
+      // silently turn the test into the ordinary absent-entry miss.
+      smB = SharedServerStorageManager.connectTo(server, { as: signer });
+      runtimeB = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: smB,
+      });
+      const preTx = runtimeB.edit();
+      const partial = await loadCompiledClosure(
+        runtimeB,
+        space,
+        entryIdentity,
+        { runtimeVersion: RTVER },
+        preTx,
+      );
+      preTx.abort?.();
+      expect(partial.has(entryIdentity)).toBe(true);
+      expect(partial.has(utilModule!.identity)).toBe(false);
+
+      // The by-identity load must degrade to a clean recompile: a WORKING
+      // pattern from the verified source closure, not a corrupt cached load.
+      const loaded = await runtimeB.patternManager.loadPatternByIdentity(
+        entryIdentity,
+        "default",
+        space,
+      );
+      expect(loaded).toBeDefined();
+      await runtimeB.patternManager.flushCompileCacheWrites();
+      await smB.synced();
+
+      // The recovery write-back healed the compiled namespace: the closure
+      // is complete again (recompile is identity-stable over the same
+      // source).
+      const healTx = runtimeB.edit();
+      const healed = await loadCompiledClosure(
+        runtimeB,
+        space,
+        entryIdentity,
+        { runtimeVersion: RTVER },
+        healTx,
+      );
+      healTx.abort?.();
+      expect(healed.has(entryIdentity)).toBe(true);
+      expect(healed.has(utilModule!.identity)).toBe(true);
+      expect(healed.size).toBe(modules.length);
+    } finally {
+      restoreVersion();
+      await runtimeB?.dispose();
+      await smB?.close();
+      await runtimeA.dispose();
+      await smA.close();
+      await server.close();
+    }
   });
 });

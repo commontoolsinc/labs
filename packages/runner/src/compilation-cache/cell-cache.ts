@@ -1378,11 +1378,28 @@ export const COMPILE_CACHE_WRITEBACK_CHUNK_MODULES = 4;
  *
  * Ordering makes every prefix of committed chunks a maximally useful partial
  * state: dependencies first (DFS post-order over the import graph), the
- * ENTRY module last. The closure loaders (`loadSourceClosure` /
- * `loadCompiledClosure`) start at the entry and fail closed on any missing
- * doc, so a partial prefix is never misread as a complete closure — it is
- * simply a cache miss whose already-durable docs make the next session's
+ * ENTRY module last.
+ *
+ * What the entry-last pin actually guarantees: an interrupted write-back
+ * never persists the entry doc of a namespace that did not already have one
+ * (a fresh compiled `compileCache:<version>/` namespace, or a fresh space's
+ * source set), and an ABSENT ENTRY is exactly the miss test of both load
+ * paths (`loadCompiledClosure` returns empty; `loadSourceClosure` resolves
+ * undefined). So every partial prefix this ordering can produce reads as a
+ * plain cache miss whose already-durable docs make the next session's
  * re-write cheaper (equal-value re-writes diff to nothing).
+ *
+ * The loaders are deliberately NOT fail-closed on missing DESCENDANTS:
+ * `loadCompiledClosure` drops an absent/unstamped child along with the edge
+ * to it (pinned by "skips compiled import links without integrity"), and the
+ * by-identity hit test is entry presence. Chunk interruption cannot create
+ * an entry-present/descendant-missing state, but should one arise out of
+ * band, it degrades to a clean RECOMPILE rather than a corrupt load: the
+ * source path rejects the partial graph in `loadVerifiedSourceClosure`
+ * (verifySourceDocs' missing-import check) and the compiled path fails
+ * cached-module evaluation, both funneling into the cold recompile fallback
+ * — pinned by the descendant-missing tests in
+ * compile-cache-incremental-writeback.test.ts.
  *
  * `extraRoots` is computed over the FULL module set and must be passed to
  * each chunk's write (the entry doc's synthetic root links enumerate every

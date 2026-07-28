@@ -1811,14 +1811,19 @@ export class PatternManager {
     // single commit, a session killed mid-write persisted NOTHING and every
     // retrying session redid the whole write — under aggressive client
     // timeouts no session ever landed it (the estuary first-open outage).
-    // Each committed chunk survives interruption: docs are content-addressed
-    // and the closure loaders fail closed on missing docs, so a partial
-    // prefix reads as a cache miss (never as a corrupt closure), and the next
-    // session's re-write diffs already-durable docs to nothing. Dependencies
-    // commit first and the entry doc last (see planCompileCacheWriteChunks).
-    // The `persistence` promise callers await still resolves only after ALL
-    // chunks are durable, so the "refs-only pattern JSON requires a durable
-    // closure" contract is unchanged.
+    // Each committed chunk survives interruption: docs are content-addressed,
+    // dependencies commit first and the ENTRY doc last, so an interrupted
+    // write-back never persists the entry of a namespace that lacked one —
+    // and an absent entry is exactly the load paths' miss test, so every
+    // producible partial prefix reads as a plain cache miss. (That is the
+    // precise guarantee; the loaders do NOT fail closed on missing
+    // descendants — see planCompileCacheWriteChunks for why the
+    // entry-present/descendant-missing state, not producible by this
+    // ordering, still degrades to a clean recompile.) The next session's
+    // re-write diffs already-durable docs to nothing. The `persistence`
+    // promise callers await still resolves only after ALL chunks are
+    // durable, so the "refs-only pattern JSON requires a durable closure"
+    // contract is unchanged.
     const { chunks, extraRoots } = planCompileCacheWriteChunks(
       modules,
       entryIdentity,
@@ -1843,8 +1848,18 @@ export class PatternManager {
       // conflicts — a conflict-free write-back still commits on the first
       // attempt — so the ceiling is only paid during recovery after a
       // compiler-version bump.
+      //
+      // The historical fixed floor (16) is NOT applied per chunk — that would
+      // multiply the minimum by chunk count (six low-edge chunks = 96 retries
+      // vs the old closure-wide 16; Codex review on #5094). A single-chunk
+      // write-back keeps the exact historical budget; a multi-chunk one gives
+      // each chunk its edge-proportional share plus one round of slack, so
+      // the aggregate stays >= 16 (8 * 2 chunks minimum) without the 16x
+      // chunk-count inflation.
       const importEdges = chunk.reduce((n, m) => n + m.imports.length, 0);
-      const writebackMaxRetries = Math.max(16, 2 * importEdges + 8);
+      const writebackMaxRetries = chunks.length === 1
+        ? Math.max(16, 2 * importEdges + 8)
+        : 2 * importEdges + 8;
       let chunkDelegations: ModuleDelegationMap = new Map();
       const { error } = await this.runtime.editWithRetry((tx) => {
         chunkDelegations = writeSourceAndCompiledDocs(
