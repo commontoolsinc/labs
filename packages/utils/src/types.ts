@@ -1,11 +1,11 @@
 /**
- * Predicate for narrowing a `Record` type, with string, symbol, or number (arrays) keys.
+ * Predicate for narrowing a mutable string-keyed record type.
  * @param value - The value to check
  * @returns True if the value is a record object
  */
 export function isRecord(
   value: unknown,
-): value is Record<string | number | symbol, unknown> {
+): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
