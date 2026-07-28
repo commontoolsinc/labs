@@ -115,6 +115,10 @@ export const TABS: TabDef[] = [
     "id": "ledger",
     "label": "Concerns",
   },
+  {
+    "id": "talk",
+    "label": "Discussion",
+  },
 ];
 
 export const HEADER: { eyebrow: string; dek: string } = {

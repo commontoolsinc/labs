@@ -219,6 +219,31 @@ export const STYLES = `
   border-top:1px solid var(--hair2)}
 .mm .pcompose cf-input{flex:1}
 
+/* The discuss control. Deliberately quiet — the document is a map, and an
+   invitation to argue should sit at the weight of a footnote until someone has
+   actually said something, at which point the count gives it colour. */
+.mm .dmark{display:inline-flex;align-items:center;margin-top:.5rem;
+  background:none;border:0;padding:.15rem 0;cursor:pointer;
+  font-family:ui-monospace,Menlo,monospace;font-size:.62rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink3);opacity:.65;transition:opacity .15s,color .15s}
+.mm .dmark:hover{opacity:1;color:var(--accent)}
+.mm .w3 .dmark,.mm .fmap figcaption .dmark{margin-left:.6rem;margin-top:0}
+
+/* The Discussion tab. Rendered in append order and flipped with
+   column-reverse: reversing the array itself renders corrupt output. */
+.mm .talk{display:flex;flex-direction:column-reverse;gap:.7rem;max-width:76ch}
+.mm .talk .talknone{display:none}
+.mm .talk.empty .talknone{display:block;color:var(--ink3);font-size:.95rem}
+.mm .trow{background:var(--panel);border:1px solid var(--hair);border-radius:10px;
+  padding:.75rem .9rem;box-shadow:var(--shadowcard)}
+.mm .tgo{display:block;background:none;border:0;padding:0;margin:0 0 .35rem;cursor:pointer;
+  font-family:ui-monospace,Menlo,monospace;font-size:.64rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--accent);font-weight:600;text-align:left}
+.mm .tgo:hover{text-decoration:underline;text-underline-offset:3px}
+.mm .tgo::before{content:"→  "}
+.mm .tbody{display:flex;flex-direction:column;gap:.25rem;font-size:.95rem;
+  line-height:1.55;color:var(--ink)}
+
 /* Comment counts. The markers are static; the numbers arrive as generated CSS
    from one reactive value (discussion.ts), so ~200 anchors cost one computed
    rather than one each. A marker with no rule renders nothing at all. */

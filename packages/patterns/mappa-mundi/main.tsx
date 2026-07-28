@@ -34,12 +34,18 @@ import { FLAG_COUNT, LEDGER, MODE_CLASS, ROW_COUNT } from "./ordering.ts";
 import {
   ANCHOR_INDEX,
   ANCHOR_TEXT,
+  claimKey,
   type Comment,
   countCss,
   type Discussion,
   type DiscussionView,
   layerChipPrefix,
+  layerKey,
+  threadRows,
   tierChipPrefix,
+  tierKey,
+  why3Key,
+  whyKey,
 } from "./discussion.ts";
 import { STYLES } from "./styles.ts";
 
@@ -102,6 +108,17 @@ const setSort = handler<void, { mode: string; sortMode: Writable<string> }>(
 const openAt = handler<void, { anchor: string; open: Writable<string> }>(
   (_, { anchor, open }) => open.set(anchor),
 );
+
+/** Follow a thread back to the place it hangs off, and open it there. */
+const goTo = handler<void, {
+  anchor: string;
+  tab: string;
+  activeTab: Writable<string>;
+  open: Writable<string>;
+}>((_, { anchor, tab, activeTab, open }) => {
+  activeTab.set(tab);
+  open.set(anchor);
+});
 
 const closePanel = handler<void, { open: Writable<string> }>(
   (_, { open }) => open.set(""),
@@ -283,6 +300,10 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
       ? "1 comment"
       : n + " comments";
   });
+  const talk = computed(() => threadRows(discussion.get()?.items ?? []));
+  const talkEmpty = computed(() =>
+    (discussion.get()?.items ?? []).length === 0 ? "talk empty" : "talk"
+  );
   // One reactive value fills in every count marker. See discussion.ts.
   const counts = computed(() => countCss(discussion.get()?.items ?? []));
 
@@ -320,10 +341,28 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                   <div className="whytext">
                     <h3>{WHY.title}</h3>
                     {WHY.paras.map((p) => <p>{p}</p>)}
+                    <button
+                      type="button"
+                      className="dmark"
+                      data-a={ANCHOR_INDEX[whyKey("essay")] ?? -1}
+                      onClick={openAt({ anchor: whyKey("essay"), open })}
+                    >
+                      discuss<span className="ccount"></span>
+                    </button>
                   </div>
                   <figure className="fmap">
                     <img src={MAPPA_IMAGE} alt={FIGURE.alt} />
-                    <figcaption>{FIGURE.caption}</figcaption>
+                    <figcaption>
+                      {FIGURE.caption}
+                      <button
+                        type="button"
+                        className="dmark"
+                        data-a={ANCHOR_INDEX[whyKey("map")] ?? -1}
+                        onClick={openAt({ anchor: whyKey("map"), open })}
+                      >
+                        discuss<span className="ccount"></span>
+                      </button>
+                    </figcaption>
                   </figure>
                 </cf-tab-panel>
 
@@ -351,6 +390,14 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                       </summary>
                       <div className="claim-body">
                         <p className="claim-lede">{c.lede}</p>
+                        <button
+                          type="button"
+                          className="dmark"
+                          data-a={ANCHOR_INDEX[claimKey(c.name)] ?? -1}
+                          onClick={openAt({ anchor: claimKey(c.name), open })}
+                        >
+                          discuss<span className="ccount"></span>
+                        </button>
                         {claimBlock("villain", "Status quo", c.villain)}
                         {claimBlock("benefit", "With fabric", c.benefit)}
                         {claimBlock("mech", "Mechanism", c.mech)}
@@ -409,6 +456,14 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                           className={"w3 t-" + ["edge", "shell", "core"][i]}
                         >
                           <span className="w3k">{w.key}</span> {prose(w.body)}
+                          <button
+                            type="button"
+                            className="dmark"
+                            data-a={ANCHOR_INDEX[why3Key(w.key)] ?? -1}
+                            onClick={openAt({ anchor: why3Key(w.key), open })}
+                          >
+                            discuss<span className="ccount"></span>
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -439,6 +494,17 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                                   {l.name} <span className="tag">{l.tag}</span>
                                 </div>
                                 <p className="what">{prose(l.what)}</p>
+                                <button
+                                  type="button"
+                                  className="dmark"
+                                  data-a={ANCHOR_INDEX[layerKey(l.tone)] ?? -1}
+                                  onClick={openAt({
+                                    anchor: layerKey(l.tone),
+                                    open,
+                                  })}
+                                >
+                                  discuss<span className="ccount"></span>
+                                </button>
                               </div>
                             </div>
                             <div className="boundary">
@@ -475,6 +541,14 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                           <span className="tname">{t.tname}</span>
                           <span className="tline">{t.tline}</span>
                           <span className="thealth">{t.health}</span>
+                          <button
+                            type="button"
+                            className="dmark"
+                            data-a={ANCHOR_INDEX[tierKey(t.tname)] ?? -1}
+                            onClick={openAt({ anchor: tierKey(t.tname), open })}
+                          >
+                            discuss<span className="ccount"></span>
+                          </button>
                         </div>
                         <div>
                           {t.groups.map((g) => (
@@ -585,6 +659,43 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                     ))}
                   </div>
                 </cf-tab-panel>
+                {/* ------------------------------------- discussion */}
+                <cf-tab-panel value="talk">
+                  <p className="panel-intro">
+                    <b>Everything said about the map.</b>{" "}
+                    Newest first. Each entry names the place it hangs off —
+                    follow it to read the thread in context.
+                  </p>
+                  <div className={talkEmpty}>
+                    <p className="talknone">
+                      Nothing yet. Tap a concern, a chip, or a promise and say
+                      something.
+                    </p>
+                    {talk.map((t) => (
+                      <div className="trow">
+                        <button
+                          type="button"
+                          className="tgo"
+                          onClick={goTo({
+                            anchor: t.anchor,
+                            tab: t.tab,
+                            activeTab,
+                            open,
+                          })}
+                        >
+                          {t.label}
+                        </button>
+                        <div className="tbody">
+                          <cf-profile-badge
+                            $profile={t.author}
+                            variant="chip"
+                          />
+                          <span>{t.body}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </cf-tab-panel>
               </cf-tabs>
 
               {
@@ -596,7 +707,15 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
               */
               }
               <div
-                className={computed(() => open.get() ? "panel open" : "panel")}
+                className={computed(() => {
+                  // Read both before deciding: a short-circuited `.get()` is a
+                  // dependency the computed may never learn it has.
+                  const at = open.get() ?? "";
+                  const tab = activeTab.get() ?? "";
+                  // The Discussion tab already lists every thread, so the
+                  // floating panel there would only cover its own content.
+                  return at !== "" && tab !== "talk" ? "panel open" : "panel";
+                })}
               >
                 <div className="phead">
                   <span className="pcount">{threadCount}</span>

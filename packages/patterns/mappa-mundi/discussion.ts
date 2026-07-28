@@ -17,7 +17,19 @@
 // Anything that already opens the referent sheet gets a thread; the five
 // promises do not open it, so they are out of scope for now.
 
-import { BANDS, LAYERS, TIERS } from "./content.ts";
+import {
+  BANDS,
+  CLAIMS,
+  FIGURE,
+  LAYERS,
+  type Seg,
+  TIERS,
+  WHY,
+  WHY3,
+} from "./content.ts";
+
+/** The open-question mark. Lives here because anchors label with it too. */
+export const FLAG = "⚑";
 
 export interface Comment {
   /** Which place in the map this hangs off. */
@@ -53,11 +65,40 @@ export interface DiscussionView {
   items: CommentView[];
 }
 
+/** A comment as the Discussion tab lists it: joined to where it hangs off. */
+export interface ThreadRow {
+  anchor: string;
+  tab: string;
+  label: string;
+  body: string;
+  author: unknown;
+}
+
+/**
+ * Join every comment to its anchor's label and tab in ONE pass, so the tab
+ * needs no per-row lookup. Order is the array's append order and is never
+ * touched — the newest-first reading is done with CSS.
+ */
+export const threadRows = (items: readonly Comment[]): ThreadRow[] =>
+  items.map((c) => ({
+    anchor: c.anchor,
+    tab: ANCHOR_TAB[c.anchor] ?? "ledger",
+    label: ANCHOR_LABEL[c.anchor] ?? "a place that has since been reworded",
+    body: c.body,
+    author: c.author,
+  }));
+
 export interface Anchor {
   key: string;
+  /** Which tab holds it, so the Discussion tab can link back. */
+  tab: string;
+  /** Short human name for a thread list. */
+  label: string;
   /** The referent text shown above the thread. */
   text: string;
 }
+
+const flatten = (segs: Seg[]): string => segs.map((s) => s.t).join("");
 
 // The key builders are exported and used both to build the registry below and
 // to stamp the render-time view models, so the two cannot drift apart.
@@ -96,11 +137,15 @@ const concernAnchors = (): Anchor[] =>
       d.rows.flatMap((r) => {
         const self = [{
           key: concernKey(b.title, d.title, r.name),
+          tab: "ledger",
+          label: r.name,
           text: r.tip ?? r.name,
         }];
         return r.flag
           ? self.concat([{
             key: questionKey(b.title, d.title, r.name),
+            tab: "ledger",
+            label: r.name + " " + FLAG,
             text: r.flag,
           }])
           : self;
@@ -110,7 +155,12 @@ const concernAnchors = (): Anchor[] =>
 
 const layerChipAnchors = (): Anchor[] =>
   LAYERS.flatMap((l) =>
-    l.chips.map((c) => ({ key: layerChipKey(l.tone, c.label), text: c.tip }))
+    l.chips.map((c) => ({
+      key: layerChipKey(l.tone, c.label),
+      tab: "orient",
+      label: c.label,
+      text: c.tip,
+    }))
   );
 
 const tierChipAnchors = (): Anchor[] =>
@@ -118,13 +168,77 @@ const tierChipAnchors = (): Anchor[] =>
     t.groups.flatMap((g) =>
       g.chips.map((c) => ({
         key: tierChipKey(t.tname, g.label, c.label),
+        tab: "reach",
+        label: c.label,
         text: c.tip,
       }))
     )
   );
 
+// The whole essay and the map are each one thing to argue with; splitting the
+// prose per paragraph would be an arbitrary cut.
+export const whyKey = (part: string): string => "wh|" + part;
+export const claimKey = (name: string): string => "pr|" + name;
+export const why3Key = (key: string): string => "w3|" + key;
+export const layerKey = (tone: string): string => "ly|" + tone;
+export const tierKey = (tname: string): string => "ti|" + tname;
+
+const whyAnchors = (): Anchor[] => [
+  {
+    key: whyKey("essay"),
+    tab: "why",
+    label: WHY.title,
+    text: WHY.paras[0],
+  },
+  {
+    key: whyKey("map"),
+    tab: "why",
+    label: "The mappa mundi",
+    text: FIGURE.caption,
+  },
+];
+
+const claimAnchors = (): Anchor[] =>
+  CLAIMS.map((c) => ({
+    key: claimKey(c.name),
+    tab: "claims",
+    label: c.name,
+    text: c.lede,
+  }));
+
+const why3Anchors = (): Anchor[] =>
+  WHY3.map((w) => ({
+    key: why3Key(w.key),
+    tab: "orient",
+    label: w.key,
+    text: flatten(w.body),
+  }));
+
+const layerAnchors = (): Anchor[] =>
+  LAYERS.map((l) => ({
+    key: layerKey(l.tone),
+    tab: "orient",
+    label: l.name + " " + l.tag,
+    text: flatten(l.what),
+  }));
+
+const tierAnchors = (): Anchor[] =>
+  TIERS.map((t) => ({
+    key: tierKey(t.tname),
+    tab: "reach",
+    label: t.tname,
+    text: t.tline,
+  }));
+
 const allAnchors = (): Anchor[] =>
-  concernAnchors().concat(layerChipAnchors()).concat(tierChipAnchors());
+  whyAnchors()
+    .concat(claimAnchors())
+    .concat(why3Anchors())
+    .concat(layerAnchors())
+    .concat(concernAnchors())
+    .concat(tierAnchors())
+    .concat(layerChipAnchors())
+    .concat(tierChipAnchors());
 
 /** Every anchor, in a deterministic order. Position is the CSS-side id. */
 export const ANCHORS: Anchor[] = allAnchors();
@@ -144,6 +258,18 @@ const textOf = (): Record<string, string> =>
 
 /** Anchor key to the referent text the sheet shows above the thread. */
 export const ANCHOR_TEXT: Record<string, string> = textOf();
+
+const labelOf = (): Record<string, string> =>
+  Object.fromEntries(ANCHORS.map((a) => [a.key, a.label]));
+
+const tabOf = (): Record<string, string> =>
+  Object.fromEntries(ANCHORS.map((a) => [a.key, a.tab]));
+
+/** Anchor key to a short human name, for the Discussion tab's thread list. */
+export const ANCHOR_LABEL: Record<string, string> = labelOf();
+
+/** Anchor key to the tab that holds it, so a thread can link back to it. */
+export const ANCHOR_TAB: Record<string, string> = tabOf();
 
 const tally = (items: readonly Comment[]): Record<number, number> =>
   items.reduce((acc: Record<number, number>, c) => {

@@ -14,9 +14,9 @@
 // already filtered this way, with a `.flags-only` class.
 
 import { type Band, BANDS, type ConcernRow } from "./content.ts";
-import { ANCHOR_INDEX, concernKey, questionKey } from "./discussion.ts";
+import { ANCHOR_INDEX, concernKey, FLAG, questionKey } from "./discussion.ts";
 
-export const FLAG = "⚑";
+export { FLAG };
 
 /**
  * Layer order for the "layer" sort, keyed by the layer's class suffix. This is
