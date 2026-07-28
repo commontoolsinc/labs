@@ -6,7 +6,10 @@ import {
   it,
   space,
 } from "./scheduler-test-utils.ts";
-import { mintEventId } from "../src/scheduler/event-identity.ts";
+import {
+  mintEventId,
+  scopeCallerEventId,
+} from "../src/scheduler/event-identity.ts";
 import {
   dropQueuedEvent,
   queueSchedulerEvent,
@@ -54,6 +57,56 @@ describe("scheduler event identity", () => {
     expect(first).toMatch(/^evt:[^:]+:of:event-stream$/);
     expect(second).toMatch(/^evt:[^:]+:of:event-stream$/);
     expect(first).not.toBe(second);
+  });
+
+  it("scopes a caller id deterministically, so a retry re-derives it", () => {
+    // A retry may come from a fresh CLI process; same inputs must give the
+    // same durable id or the receipt collision never happens.
+    expect(scopeCallerEventId("inv-1", eventLink)).toBe(
+      scopeCallerEventId("inv-1", eventLink),
+    );
+    expect(scopeCallerEventId("inv-1", eventLink)).not.toBe(
+      scopeCallerEventId("inv-2", eventLink),
+    );
+  });
+
+  it("separates one caller id sent to different streams", () => {
+    // The defect the helper exists for: an invocation id reused across two
+    // verbs of a piece must not make the second collide on the first's
+    // receipt and report as an already-settled success.
+    const other: NormalizedFullLink = { ...eventLink, id: "of:other-stream" };
+    expect(scopeCallerEventId("inv-1", eventLink)).not.toBe(
+      scopeCallerEventId("inv-1", other),
+    );
+  });
+
+  it("distinguishes streams differing only by path or space", () => {
+    // Stream links are whole documents at the empty path today; covering
+    // path and space keeps the helper from depending on that quietly.
+    const atA: NormalizedFullLink = { ...eventLink, path: ["a"] };
+    const atB: NormalizedFullLink = { ...eventLink, path: ["b"] };
+    expect(scopeCallerEventId("inv-1", atA)).not.toBe(
+      scopeCallerEventId("inv-1", atB),
+    );
+    const elsewhere: NormalizedFullLink = {
+      ...eventLink,
+      space: "did:key:z6MkOtherEventIdentity" as MemorySpace,
+    };
+    expect(scopeCallerEventId("inv-1", eventLink)).not.toBe(
+      scopeCallerEventId("inv-1", elsewhere),
+    );
+  });
+
+  it("cannot be confused by a caller id that mimics a delimiter", () => {
+    // The caller's half is opaque and caller-chosen. Under delimited
+    // concatenation these pairs render identically; hashing keeps them apart.
+    // A link id is a URI, so it always carries a colon of its own — the
+    // separator is not distinguishable from the payload by inspection.
+    const ofYZ: NormalizedFullLink = { ...eventLink, id: "of:y:z" };
+    const yZ: NormalizedFullLink = { ...eventLink, id: "y:z" };
+    expect(scopeCallerEventId("x", ofYZ)).not.toBe(
+      scopeCallerEventId("x:of", yZ),
+    );
   });
 
   it("threads explicit event ids into queued events", () => {

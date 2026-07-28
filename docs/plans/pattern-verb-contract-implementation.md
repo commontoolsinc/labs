@@ -175,10 +175,12 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   reconstructs `{ $ctx, $event }` client-side. The caller's key is bound to
   its stream on the way in (`scopeCallerEventId`): a receipt derives from the
   handler's input bindings plus the event id, and bindings alone do not
-  identify the verb, so an unscoped key let one id reused across two verbs of
-  a piece collide — the second call reported as an already-settled success it
-  never made. Scoping restores what minted ids had, since every minted id
-  ends in the stream link.
+  identify the verb, so an unscoped key lets one id reused across two verbs of
+  a piece collide — the second call is reported as an already-settled success
+  it never made. Scoping restores what minted ids had, since every minted id
+  ends in the stream link. The binding is a content hash over the caller's key
+  plus the whole link, not a delimited join: the caller's half is opaque, so
+  concatenation would let a chosen id shift the separator.
 - **cli:** `--invocation <id>` on `piece call` (UUID minted and printed by
   default, including when the wait times out); after commit, sync and read the
   receipt (a cold plain read returns `undefined` — sync first); reclassify
