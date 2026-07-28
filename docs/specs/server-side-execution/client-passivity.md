@@ -87,10 +87,19 @@ precisely the foundation those need.
    per D1): the full (b) view-feeding speculation machinery — warm-set
    enumeration/budget, write-targets-in-doc-set, divergence counters,
    D5 hold-never-flicker UX.
-3. **P2 serving coverage** (R5 brokers `llm`/`sqliteQuery`,
-   descriptors, R13 `wish`, sqlite commit path per D2) — the
-   registry holes that keep actions client-only. Gate: P1 unserved
-   inventory empty or per-action-gated.
+3. **P2 serving coverage** — the 2026-07-28 runs measured the LIVE
+   unserved inventory, which re-weights the register list. Note leg:
+   nearly empty (4 codes × 1 offender each). Chat leg's real holes:
+   `non-space-read-scope` ×181/3 offenders (scoped-surface actions
+   unservable at space rank — this is the C1.5a/C2.5 RANK-DIAL
+   enablement question, CA4-ordering/owner-gated, not a register
+   row) and `malformed-output-surface` ×39/18 offenders (the W2.x
+   output-surface class in the group-chat lifts — servability's
+   single-direct-output rule vs what certified lifts declare). Then
+   the original register work: R5 brokers `llm`/`sqliteQuery`,
+   descriptors, R13 `wish`, sqlite commit path per D2. Gate
+   unchanged: P1 unserved inventory empty or per-action-gated —
+   start from the offender lists above, not the generic register.
 4. **P3 passivity mechanism** (per-session subcap, passive-mode
    demand producer, dynamic-reactivation contract, effect-attempt
    journal) — the client stops running standing work. THIS is where
