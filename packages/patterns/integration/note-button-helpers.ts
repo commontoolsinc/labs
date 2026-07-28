@@ -45,7 +45,7 @@ const markNoteButton = (
     | HTMLElement
     | null) ?? target;
   if (!clickTarget.isConnected || !probe.isRendered(clickTarget)) return false;
-  clickTarget.setAttribute(attr, token);
+  probe.addToken(clickTarget, attr, token);
   return true;
 };
 

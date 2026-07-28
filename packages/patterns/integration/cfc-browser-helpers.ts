@@ -251,11 +251,7 @@ const markForClick = (
     | HTMLElement
     | null) ?? target;
   if (!clickTarget.isConnected || !probe.isRendered(clickTarget)) return false;
-  const tokens = new Set(
-    (clickTarget.getAttribute(attr) ?? "").split(/\s+/).filter(Boolean),
-  );
-  tokens.add(token);
-  clickTarget.setAttribute(attr, [...tokens].join(" "));
+  probe.addToken(clickTarget, attr, token);
   return true;
 };
 
@@ -275,7 +271,7 @@ const markNthForClick = (
   const target = probe.collect(selector)[index] as HTMLElement | undefined;
   if (!target) return false;
   if (!target.isConnected || !probe.isRendered(target)) return false;
-  target.setAttribute(attr, token);
+  probe.addToken(target, attr, token);
   return true;
 };
 
@@ -306,7 +302,7 @@ const markTrustedAction = (
       probe.isRendered(clickTarget) &&
       !isDisabled(target) && !isDisabled(clickTarget)
     ) {
-      clickTarget.setAttribute(attr, token);
+      probe.addToken(clickTarget, attr, token);
       clickTarget.addEventListener(
         "click",
         (event) => {
@@ -396,11 +392,7 @@ export async function clickTrustedAction(
     await waitForCondition(page, markTrustedAction, {
       args: [action, token, CLICK_TARGET_ATTR],
     });
-    const button = await page.waitForSelector(
-      `[${CLICK_TARGET_ATTR}="${token}"]`,
-      { strategy: "pierce" },
-    );
-    await button.click();
+    await clickMarked(page, token);
   } catch (cause) {
     probe ??= await readTrustedActionProbe(page, action).catch(() => undefined);
     // Indented for readable test-log output
@@ -410,8 +402,6 @@ export async function clickTrustedAction(
       }`,
       { cause },
     );
-  } finally {
-    await clearClickMark(page, token).catch(() => {});
   }
 }
 
@@ -766,9 +756,10 @@ export async function clickNthCfButton(
 /**
  * Resolve the element whose click marks contain `token` and click it, then
  * clear that mark.
- * Shared by `clickCfButton`, `clickNthCfButton`, and the text-matching click
- * helpers in `note-button-helpers.ts`: each one marks its target through its
- * own predicate, and the resolve/click/untag tail is the same for all of them.
+ * Shared by `clickCfButton`, `clickNthCfButton`, `clickTrustedAction`, and the
+ * text-matching click helpers in `note-button-helpers.ts`: each one marks its
+ * target through its own predicate, and the resolve/click/untag tail is the
+ * same for all of them.
  */
 export async function clickMarked(
   page: Page,
