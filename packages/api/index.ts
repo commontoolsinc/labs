@@ -1347,6 +1347,7 @@ type CellWrappedData<T> =
   | T
   | AnyBrandedCell<T>
   | (T extends Array<infer U> ? Array<FactoryInput<U>>
+    : T extends ReadonlyArray<infer U> ? ReadonlyArray<FactoryInput<U>>
     : T extends object ? { [K in keyof T]: FactoryInput<T[K]> }
     : never);
 export declare const CELL_LIKE: unique symbol;
@@ -1379,6 +1380,7 @@ type StripCellInner<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - i
   : [T] extends [AnyBrandedCell<infer U>] ? StripCell<U>
   : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
   : [T] extends [Array<infer U>] ? StripCell<U>[]
+  : [T] extends [ReadonlyArray<infer U>] ? readonly StripCell<U>[]
   // deno-lint-ignore ban-types
   : [T] extends [Function] ? T // Preserve function types
   : [T] extends [object] ? { [K in keyof T]: StripCell<T[K]> }
@@ -1414,6 +1416,7 @@ export type FactoryInput<T> =
   // Combined into single check to reduce type instantiation overhead.
   | ([NonNullable<T>] extends [VNode | UIRenderable] ? JSXElement : never)
   | (T extends Array<infer U> ? Array<FactoryInput<U>>
+    : T extends ReadonlyArray<infer U> ? ReadonlyArray<FactoryInput<U>>
     : T extends object ? { [K in keyof T]: FactoryInput<T[K]> }
     : T);
 
@@ -1453,6 +1456,9 @@ export type AnyCellWrapping<T> =
     // Handle arrays
     : T extends Array<infer U>
       ? Array<AnyCellWrapping<U>> | AnyBrandedCell<Array<AnyCellWrapping<U>>>
+    : T extends ReadonlyArray<infer U>
+      ? ReadonlyArray<AnyCellWrapping<U>>
+        | AnyBrandedCell<ReadonlyArray<AnyCellWrapping<U>>>
     // Handle objects (excluding null)
     : T extends object ?
         | { [K in keyof T]: AnyCellWrapping<T[K]> }
@@ -1516,6 +1522,10 @@ export type HandlerFactory<T, R> =
 
 // JSON types
 
+/**
+ * Pure deeply-immutable JSON value, with the addition of a sidecar of mutable
+ * annotations keyed by unique symbols.
+ */
 export type JSONValue =
   | null
   | boolean
@@ -1524,9 +1534,9 @@ export type JSONValue =
   | JSONArray
   | JSONObject & IDFields;
 
-export interface JSONArray extends ArrayLike<JSONValue> {}
+export interface JSONArray extends ReadonlyArray<JSONValue> {}
 
-export interface JSONObject extends Record<string, JSONValue> {}
+export interface JSONObject extends Readonly<Record<string, JSONValue>> {}
 
 // Annotations when writing data that help determine the entity id. They are
 // removed before sending to storage.
