@@ -119,13 +119,19 @@ precisely the foundation those need.
    (router seam, three arms): **16 of 20 stranded derivations promoted,
    17 user-rank candidates, ZERO placement regressions** — but two NEW
    per-attempt rejection classes at the §4 write-shape firewall that
-   "claim-ready" counting cannot see, still unpriced live. Live
-   two-principal arm: the bundle opens both user lanes on group-chat
-   (0/0 → 2/2) with isolation and per-user correctness intact, but the
-   Worker never runs the piece there, so claim/settlement counters for
-   the product remain absent. Sequencing recommendation in §5g:
-   client-side negotiation (F5-style gate) FIRST, then the live
-   measurement, then the dial bridge.
+   "claim-ready" counting cannot see. LIVE, product SERVED by a real
+   executor for two principals up the ladder: `non-space-read-scope`
+   **33 events / 19 offenders → 1 → 0**, claim-ready 27 → 43 → 46, ZERO
+   failed/unserved settlements and zero firewall rejects at every rank,
+   isolation and per-user correctness intact — at roughly double the
+   attempts and conflicts (8 → 22 → 21) for 2 → 8 → 9 committed
+   settlements. Two live residuals the plan did not predict:
+   `dynamic-write-outside-static-surface` ×12 surviving BOTH scoped
+   ranks, and **R7's `claim-context-mismatch` acceptance criterion
+   failing on the flagship product** (5-6 → 2 → 2, expected hard-zero at
+   session rank since C2.10 retired the cause). Sequencing in §5g:
+   diagnose those two residuals FIRST, then client-side negotiation
+   (F5-style gate), then the dial bridge.
 4. **P3 passivity mechanism** (per-session subcap, passive-mode
    demand producer, dynamic-reactivation contract, effect-attempt
    journal) — the client stops running standing work. THIS is where
@@ -1187,39 +1193,94 @@ and does not survive contact with the router's firewall. The session
 arm adds a third, `dynamic-non-space-write-scope` ×1.
 
 None of these is a correctness failure in the probe; all are refusals
-to serve. But they are exactly the class that, live and under
-contention, prices as claimed-then-unserved settlements — and nothing
-has priced them live yet.
+to serve. The live half below prices them: the same territory shows up
+against real commits as `dynamic-write-outside-static-surface` ×12 on a
+single offender, at BOTH scoped ranks.
 
-### The live half — what it established, and the gap
+### The live half — the product SERVED, up the ladder
 
 `packages/patterns/integration/server-execution-group-chat-user-rank-probe.test.ts`
-(new): real Server, file-backed store, real `SharedExecutionPool`, a
-real Deno executor Worker, two principals on the real product,
-adjacent OFF/ON arms with independent stores.
+(new): real Server, file-backed store, real `SharedExecutionPool`, a real
+Deno executor Worker, two principals on the real product, three adjacent
+arms with independent stores.
 
-MEASURED, both arms: per-user value correctness holds
-(`{alice: "Alice", bob: "Bob"}`), both messages land, **zero foreign
-`user:` scope keys reach either client** (cross-principal isolation at
-the delivery seam), `settlementsFailed` 0, `leaseFenceRejects` 0.
+**Getting group-chat served was the whole difficulty, and the cause was
+not the dials.** The pool deliberately does NOT wake an executor that is
+already live (`shared-execution-pool.ts` `#acceptAcceptedCommit` returns
+early on `slot.executor !== null` — its wake path exists to start or
+unpark a Worker, never to drive one), and `set-demand` only ENQUEUES the
+structural swap, with activation completion observable solely through
+`settle()`. A fixture that starts a pool and then just drives clients
+gets a live Worker holding its lanes and running nothing. Driving the
+Worker's `settle()`/`wake()`/`settle()` fixpoint explicitly — as
+`runner/test/server-execution-rollout-products.test.ts` already does for
+this same product — is what turns demand into scheduler runs. With that,
+`schedulerRuns` goes 0 → 142/210 and every counter below exists.
 
-MEASURED, the discriminator: OFF → `negotiatingDemands` 0,
-`activeUserLanes` 0, `userLanesOpened` 0. ON → **2, 2, 2.** The cohort
-advertisement, the C1.3 lane grants and the C1.8 pool lifecycle all
-engage correctly on the real product with two principals. That is new;
-nothing previously showed the bundle working outside a synthetic
-PerUser fixture.
+Engagement, from `server.executionStats` (the object `/api/health/stats`
+serves):
 
-**THE GAP, stated plainly:** in this topology the Worker goes live and
-takes both lanes but never runs the piece's actions
-(`executionPlacement.schedulerRuns` 0 in both arms), so `claimsIssued`
-is 0 and `candidateUnservedByCode` is empty. **No claim/settlement/
-conflict counters for the group-chat product at user rank exist yet.**
-Serving group-chat in-process needs the
-`runner/test/server-execution-rollout-products.test.ts` sequencing
-(worker-realm clients plus an observer graph watch); that is the
-follow-up, not a result. The live claim-and-settle evidence for user
-rank remains the C1.9 synthetic PerUser gates.
+| | space (today) | user | session |
+| --- | --- | --- | --- |
+| `claimsIssued` | 27 | 38 | 40 |
+| by context key | `space` 27 | `space` 26 + `user` 6+6 | `space` 26 + `user` 6+6 + `session` 1+1 |
+| `acceptedActionAttempts` | 39 | 80 | 84 |
+| `claimedActionConflicts` | 8 | 22 | 21 |
+| `settlementsCommitted` | 2 | 8 | 9 |
+| `settlementsFailed` | **0** | **0** | **0** |
+| `settlementsUnserved` | **0** | **0** | **0** |
+| `actionFirewallRejects` | **0** | **0** | **0** |
+| candidate claim-ready | 27 | 43 | 46 |
+| candidate unserved | 38 | 18 | 16 |
+
+The unserved inventory, `events / offenders`:
+
+| code | space | user | session |
+| --- | --- | --- | --- |
+| `non-space-read-scope` | **33 / 19** | 1 / 1 | **0** |
+| `dynamic-write-outside-static-surface` | 0 | **12 / 1** | **12 / 1** |
+| `claim-key-mismatch` | 0 | 2 / 1 | 2 / 1 |
+| `malformed-output-surface` | 0 | 1 / 1 | 0 |
+| `commit-rejected:ExecutionLeaseFenceError` | 5 / 1 | 2 / 1 | 2 / 1 |
+
+**The buy, live and confirmed:** the offender class §5f named collapses
+**33 events / 19 offenders → 1 → 0**, total unserved 38 → 18 → 16,
+claim-ready 27 → 43 → 46, with **zero failed settlements, zero unserved
+settlements and zero firewall rejects at every rank**. Per-user value
+correctness and cross-principal isolation hold in all three arms.
+
+**The cost, live:** attempts roughly double (39 → 80/84) and
+`claimedActionConflicts` roughly doubles-to-triples (8 → 22/21) for
+2 → 8/9 committed settlements. Server-side arbitration work grows
+faster than committed output — expected while clients still execute
+everything too (§0's honest core), but it is now a measured number
+rather than an expectation.
+
+**The new class, live and priced:** `dynamic-write-outside-static-surface`
+×12 on one offender, present at user AND session rank, absent at space
+rank. This is the live form of what the classification probe saw as
+`malformed-scope-naming-link` / `broad-lane-value-write`: the same §4
+widening-pair territory, reported by the dynamic firewall against real
+commits rather than by the static mirror. It does not fail a settlement
+— the attempt simply is not served — but it is 12 of the arm's routed
+lane attempts, and it does not clear at session rank.
+
+**Finding NOT predicted by the plan — R7's acceptance criterion does not
+hold for this product.** `claim-context-mismatch` lease fences measure
+**5-6 → 2 → 2** up the ladder (the space arm's count varies by one
+across runs; the scoped arms reproduced exactly). C2.10 RETIRED that cause from
+`TOLERATED_LEASE_FENCE_CAUSES`
+(`packages/patterns/integration/server-execution-measurement.ts`) on the
+reasoning that "session-context runs now have a lane to route to, so any
+mismatch is a placement defect again", making its return to hard-zero a
+named C2 acceptance criterion. Measured against real group-chat with
+session lanes open and session-rank claims issuing, it is **2, not 0**.
+Opening the lane is evidently not sufficient to route every
+session-context run to it. The probe asserts only that no rank dial
+INCREASES the count and logs the criterion miss; pinning zero would land
+the file red against a pre-existing placement property. **This should be
+diagnosed before the C2 gates are treated as closed.**
+
 
 ### Recommended sequencing
 
@@ -1228,19 +1289,30 @@ rank remains the C1.9 synthetic PerUser gates.
    enable a configuration that is inert at best; per the cohort gate it
    would also make user lanes un-openable in exactly the deployments
    worth measuring.
-2. **Build the client-side negotiation path** (shell/runner) with an
+2. **Diagnose the two live residuals first — they are cheap and they
+   are what a rollout would trip over.** (a) The R7
+   `claim-context-mismatch` miss above: a named C2 acceptance criterion
+   that does not hold on the flagship product, measurable in ~25s by
+   re-running the live probe. (b) The
+   `dynamic-write-outside-static-surface` ×12 offender, which survives
+   both scoped ranks. Both are single-offender defects with a
+   re-runnable reproduction, so neither needs a rollout to study.
+3. **Build the client-side negotiation path** (shell/runner) with an
    F5-style red-first env-bridge gate asserting the subcapability
    negotiates END TO END from the dials alone. This is the one item
    that unblocks the two-browser payoff surface, and F5 is the
    template for how it gets pinned.
-3. **Close the live measurement gap** — get group-chat SERVED in a gate
-   topology, then re-run the ON arm for claims/settlements/conflicts and
-   the `candidateUnservedByCode` delta. Until that number exists, the
-   §4 firewall rejections above are unpriced.
 4. **Then** wire the three server-side dials behind one bridge and
-   measure the two-browser legs, adjacent-pair, on an unloaded box.
+   measure the two-browser legs, adjacent-pair, on an unloaded box —
+   with the arbitration-cost ratio above (attempts and conflicts roughly
+   double for 4× the committed settlements) as the thing to watch.
 5. The effect rows (R5 brokers, R13 `wish`, sqlite per D2) are
    unaffected by any of this and remain the open build.
+
+The live measurement gap named in the first cut of this section is
+CLOSED: group-chat is served in the gate topology and the
+claim/settlement/conflict counters and `candidateUnservedByCode` delta
+are the tables above.
 
 ### Measurement conditions
 
@@ -1250,6 +1322,14 @@ count or a set relation, which are load-insensitive. The toolshed
 two-browser arm was deliberately NOT re-run: it can only reproduce the
 dials-off inventory §5f already published from the same command, and
 per item 5 it cannot host the dials-on arm at all.
+
+Counter stability across re-runs: the `space` arm reproduced exactly;
+the scoped arms varied only in `acceptedActionAttempts` (78-87) and
+`claimedActionConflicts` (17-22) — contention-timing sensitive, as
+expected. Every inventory and claim count above reproduced identically
+across three runs, including one under `--trace-leaks` (the shape CI
+uses for the integration suite, and the reason the probe runs inside
+`withExecutorTeardownBarrier` per FW7).
 
 ## 7. Owner decisions — RESOLVED 2026-07-26
 

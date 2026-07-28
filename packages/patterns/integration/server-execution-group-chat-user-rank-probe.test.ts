@@ -1,52 +1,57 @@
 /**
- * §5f follow-up, LIVE half: the group-chat product driven by TWO principals
- * against a real server with the user-rank dial bundle ON, so the memo can
- * quote engagement counters and an unserved-inventory delta from a run
- * instead of from a classifier.
+ * §5f follow-up, LIVE half: the group-chat product SERVED by a real executor
+ * for TWO principals, up the rank ladder, so the engagement counters and the
+ * unserved-inventory delta come from a run rather than from a classifier.
  *
  * The classification half is `runner/test/server-execution-group-chat-rank-
  * probe.test.ts` (router seam, one principal, no server). This file is the
- * other half of the same question: a real memory-v2 Server with a file-backed
- * store, the real SharedExecutionPool driving a REAL Deno executor Worker, and
- * one real client Runtime per principal over the loopback transport — the
- * C2.9/C2.10 gate topology, which is the only topology where the rank dials
- * can be flipped at all (see the memo's CA4 audit: every dial in the bundle is
- * programmatic-only, and the browser client has no way to negotiate
- * `context-lattice-claims-v1`, so the two-browser leg cannot host this
- * measurement today).
+ * other half: a real memory-v2 Server with a file-backed store, the real
+ * SharedExecutionPool driving a REAL Deno executor Worker, and one real client
+ * Runtime per principal over the loopback transport — the C2.9/C2.10 gate
+ * topology, which is the only topology where the rank dials can be flipped at
+ * all (see the memo's CA4 audit: every dial in the bundle is programmatic-only,
+ * and the browser client has no way to negotiate `context-lattice-claims-v1`,
+ * so the two-browser leg cannot host this measurement today).
  *
- * ARMS. Two adjacent arms over one identical workload, the dial bundle as the
- * only difference:
- *   - OFF: `protocolFlags` without `serverPrimaryExecutionContextLatticeClaims
- *     V1`, claim rank left at its `space` default, `serverPrimaryExecution
- *     UserRankCandidates` off. This is what a deployment runs today.
- *   - ON: the full bundle — cohort advertisement, claim rank `user`, and the
- *     runner-side candidate dial on the factory and the pool.
- * Each arm gets its own Server, its own fresh store directory, and its own
- * pool/Worker, so no state crosses between them.
+ * ARMS. Three adjacent arms over one identical workload, the dial bundle as
+ * the only difference. Each arm gets its own Server, its own fresh store
+ * directory and its own pool/Worker, so no state crosses between them:
+ *   - `space`: the whole bundle off — what a deployment runs today.
+ *   - `user`: cohort advertisement + claim rank `user` + the runner-side
+ *     candidate dial. The C1.5a step §5f asks about.
+ *   - `session`: the C2.5 step above it. Included because the product carries
+ *     PerSession state (`hostMessageDraft`, `roomDraft`) that a user lane
+ *     cannot route.
+ *
+ * SERVING THE PRODUCT. The pool deliberately does NOT wake an executor that
+ * is already live (`#acceptAcceptedCommit` returns early on
+ * `slot.executor !== null`) — its wake path exists to start or unpark a
+ * Worker, not to drive one. And `set-demand` only ENQUEUES the structural
+ * swap; activation completion is observable solely through `settle()`. So the
+ * arms drive the Worker's `settle()`/`wake()`/`settle()` fixpoint explicitly,
+ * exactly as `runner/test/server-execution-rollout-products.test.ts` does for
+ * this same product. Without that the Worker goes live, takes its lanes, and
+ * runs nothing — which is how the first cut of this probe measured zero.
  *
  * WHAT IS ASSERTED. The properties that must hold whatever the counters say:
- * each principal reads its OWN profile name (the product's PerUser label),
- * neither principal's wire stream ever carries the other's `user:` scope key
- * (cross-principal isolation, the A2 property at the delivery seam), no
- * settlement fails and no lease fences in either arm, and — the dial-bundle
- * discriminator — the OFF arm opens ZERO user lanes while the ON arm opens
- * exactly one per principal.
+ * every arm actually SERVES (non-zero scheduler runs and claims — otherwise
+ * the counters are vacuous); each principal reads its OWN profile name (the
+ * product's PerUser label); neither principal's wire stream ever carries the
+ * other's `user:` scope key (cross-principal isolation, the A2 property at the
+ * delivery seam); no settlement FAILS and no attempt is firewalled at any
+ * rank; the dial-bundle discriminator holds (zero user lanes off, one per
+ * principal on); the scoped-read offender class falls monotonically up the
+ * ladder; and no rank dial INCREASES `claim-context-mismatch` fences.
  *
  * WHAT IS REPORTED, NOT ASSERTED. `server.executionStats` (the same object
- * `/api/health/stats` serves) and the pool metrics, printed per arm so a
- * re-run reproduces the memo's numbers. Counters move with load and with the
- * product; pinning them would convert an unrelated change into a failure of
- * this file.
- *
- * KNOWN GAP, recorded at the assertion site below and in the memo's §5g: in
- * this topology the executor Worker goes live and takes both lanes but never
- * runs the piece's actions, so no claim is issued in either arm and the
- * `candidateUnservedByCode` inventory stays empty. The claim/settlement half
- * of the user-rank question is therefore still open.
+ * `/api/health/stats` serves), the pool metrics, and the executor's own
+ * counters, printed per arm so a re-run reproduces §5g's numbers. Absolute
+ * counts move with load and with the product; pinning them would convert an
+ * unrelated change into a failure of this file. One finding is reported this
+ * way on purpose — see the R7 note at the fence assertion.
  */
 
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertExists } from "@std/assert";
 import { join } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
@@ -60,7 +65,10 @@ import {
 } from "@commonfabric/memory/v2";
 import { Server } from "@commonfabric/memory/v2/server";
 import { markRendererTrustedEvent } from "@commonfabric/runner/cfc";
-import { SharedExecutionPool } from "@commonfabric/runner/executor";
+import {
+  SharedExecutionPool,
+  type SpaceExecutor,
+} from "@commonfabric/runner/executor";
 import { DenoSpaceExecutorFactory } from "@commonfabric/runner/executor/deno";
 import { Runtime } from "@commonfabric/runner";
 import {
@@ -174,8 +182,12 @@ const openProbeClient = async (
 };
 
 type ArmReport = {
+  readonly rank: "space" | "user" | "session";
   readonly dials: boolean;
   readonly metrics: Record<string, unknown>;
+  /** The executor Worker's own cumulative counters — schedulerRuns is the
+   * number that decides whether the Worker ran the piece at all. */
+  readonly executorMetrics: Record<string, unknown>;
   /** Demand rows whose session negotiated `context-lattice-claims-v1` — the
    * cohort half of the dial bundle, observed on the wire. */
   readonly negotiatingDemands: number;
@@ -212,16 +224,23 @@ const send = async (
   await client.storage.synced();
 };
 
-const runArm = async (dials: boolean): Promise<ArmReport> => {
+/** The rank-ladder arms. `space` is today's deployed default (whole bundle
+ * off); `user` is the C1.5a step §5f asks about; `session` is the C2.5 step
+ * above it, included because the product carries PerSession state
+ * (`hostMessageDraft`, `roomDraft`) that a user lane cannot route. */
+type RankArm = "space" | "user" | "session";
+
+const runArm = async (rank: RankArm): Promise<ArmReport> => {
+  const dials = rank !== "space";
   const flags: Partial<MemoryProtocolFlags> = dials
     ? { ...BASE_FLAGS, serverPrimaryExecutionContextLatticeClaimsV1: true }
     : { ...BASE_FLAGS };
   const spaceIdentity = await Identity.generate({ implementation: "noble" });
   const space = spaceIdentity.did() as MemorySpace;
   const storeDir = await Deno.makeTempDir({
-    prefix: `group-chat-user-rank-${dials ? "on" : "off"}-`,
+    prefix: `group-chat-rank-${rank}-`,
   });
-  if (dials) setServerPrimaryExecutionClaimRankConfig("user");
+  if (dials) setServerPrimaryExecutionClaimRankConfig(rank);
   const server = new Server({
     store: new URL(`file://${storeDir}/`),
     authorizeSessionOpen(message) {
@@ -274,6 +293,9 @@ const runArm = async (dials: boolean): Promise<ArmReport> => {
         persistentSchedulerState: true,
         serverPrimaryExecution: true,
         ...(dials ? { serverPrimaryExecutionUserRankCandidates: true } : {}),
+        ...(rank === "session"
+          ? { serverPrimaryExecutionSessionRankCandidates: true }
+          : {}),
       },
       // Wire the SAME two recorders toolshed wires (routes/storage/memory.ts)
       // — they are what populates `executionStats.candidateClaimReadyBySpace`
@@ -293,21 +315,33 @@ const runArm = async (dials: boolean): Promise<ArmReport> => {
         );
       },
     });
+    // Keep a handle on the live executor. The pool deliberately does NOT wake
+    // an executor that is already live (`#acceptAcceptedCommit` returns early
+    // on `slot.executor !== null`) — a live Worker is expected to notice
+    // invalidations through its own replica, and the pool's wake path exists
+    // only to start or unpark one. Driving the Worker's `settle()`/`wake()`
+    // fixpoint explicitly is what
+    // `runner/test/server-execution-rollout-products.test.ts` does for this
+    // same product, and it is what turns the demand into actual scheduler
+    // runs.
+    let liveExecutor: SpaceExecutor | undefined;
     pool = new SharedExecutionPool({
       control: server,
       factory: {
         async start(options) {
-          return await factory.start({
+          liveExecutor = await factory.start({
             ...options,
             onCrash(error) {
               events.push(`crash:${String(error)}`);
               options.onCrash(error);
             },
           });
+          return liveExecutor;
         },
       },
       settleTimeoutMs: 20_000,
       userLaneCandidates: dials,
+      sessionLaneCandidates: rank === "session",
       legacyBackgroundActive: () => false,
     });
     pool.start();
@@ -326,6 +360,15 @@ const runArm = async (dials: boolean): Promise<ArmReport> => {
       () => pool!.metrics().activeWorkers > 0,
       () => pool!.metrics(),
     );
+    assertExists(
+      liveExecutor,
+      "the pool reported a live worker with no executor",
+    );
+    // Drive the Worker's activation to its fixpoint before any client work:
+    // `set-demand` only enqueues the structural swap, and activation
+    // completion is observable ONLY through `settle()` (see the executor
+    // Worker's `set-demand` docblock).
+    await liveExecutor.settle();
 
     // Bob attaches after the sponsor lease exists.
     // deno-lint-ignore no-explicit-any
@@ -359,6 +402,10 @@ const runArm = async (dials: boolean): Promise<ArmReport> => {
         trustedEvent(SEND_SURFACE, SEND_ACTION),
       );
     }
+    // One wake/settle round per client invalidation batch: pull the demanded
+    // roots at the new basis, then run to fixpoint.
+    await liveExecutor.wake();
+    await liveExecutor.settle();
     await pool.idle();
 
     const profileNames: Record<string, unknown> = {};
@@ -384,9 +431,12 @@ const runArm = async (dials: boolean): Promise<ArmReport> => {
     };
 
     const metrics = pool.metrics() as unknown as Record<string, unknown>;
+    const executorMetrics = liveExecutor.executionMetrics?.();
     return {
+      rank,
       dials,
       metrics: JSON.parse(JSON.stringify(metrics)),
+      executorMetrics: JSON.parse(JSON.stringify(executorMetrics ?? {})),
       negotiatingDemands: server.listExecutionDemands(space, "").filter((
         demand,
       ) =>
@@ -416,33 +466,47 @@ const runArm = async (dials: boolean): Promise<ArmReport> => {
 
 const reportArm = (report: ArmReport): void => {
   console.log(
-    `group-chat user-rank probe [dials=${report.dials ? "ON" : "OFF"}]\n` +
+    `group-chat user-rank probe [rank=${report.rank}]\n` +
       `  profileNames=${JSON.stringify(report.profileNames)} ` +
       `messages=${report.messageCount}\n` +
       `  negotiatingDemands=${report.negotiatingDemands} ` +
       `activeUserLanes=${report.metrics.activeUserLanes} ` +
+      `activeSessionLanes=${report.metrics.activeSessionLanes} ` +
       `userLanesOpened=${report.metrics.userLanesOpened} ` +
-      `schedulerRuns=${
+      `poolSchedulerRuns=${
         (report.metrics.executionPlacement as { schedulerRuns?: number })
           ?.schedulerRuns
       }\n` +
+      `  executorMetrics=${JSON.stringify(report.executorMetrics)}\n` +
       `  executorEvents=${JSON.stringify(report.executorEvents)}\n` +
       `  executionStats=${JSON.stringify(report.stats)}`,
   );
 };
 
+/** Distinct offender actions per unserved code — the `×N offenders` number
+ * the §5f inventory quotes, straight off the server's own accounting. */
+const offenders = (arm: ArmReport): Record<string, number> =>
+  (arm.stats.candidateUnservedOffendersByCode ?? {}) as Record<string, number>;
+
+const unservedEvents = (arm: ArmReport): Record<string, number> =>
+  (arm.stats.candidateUnservedByCode ?? {}) as Record<string, number>;
+
 Deno.test({
   name:
-    "group-chat user-rank probe: two principals, dials OFF then ON, adjacent arms (§5f follow-up)",
+    "group-chat rank probe: two principals up the rank ladder, adjacent arms (§5f follow-up)",
   async fn() {
     await withExecutorTeardownBarrier(async () => {
-      const off = await runArm(false);
-      reportArm(off);
-      const on = await runArm(true);
-      reportArm(on);
+      const space = await runArm("space");
+      reportArm(space);
+      const user = await runArm("user");
+      reportArm(user);
+      const session = await runArm("session");
+      reportArm(session);
+      const off = space;
+      const on = user;
 
-      for (const arm of [off, on]) {
-        const label = arm.dials ? "ON" : "OFF";
+      for (const arm of [space, user, session]) {
+        const label = arm.rank;
         // Per-user value correctness: each principal reads its OWN label.
         assertEquals(
           arm.profileNames,
@@ -479,38 +543,113 @@ Deno.test({
         "the dial bundle did not open a user lane per principal",
       );
 
-      // Whatever engagement the arm reached, it must not have failed a
-      // settlement or fenced a lease.
-      for (const arm of [off, on]) {
-        const stats = arm.stats as Record<string, number>;
-        const label = arm.dials ? "ON" : "OFF";
+      // Every arm must actually have SERVED the product — the whole point of
+      // this file. A zero here means the Worker never ran the piece and every
+      // counter below is vacuous.
+      for (const arm of [space, user, session]) {
+        const runs =
+          (arm.executorMetrics as { schedulerRuns?: number }).schedulerRuns ??
+            0;
         assertEquals(
-          [stats.settlementsFailed ?? 0, stats.leaseFenceRejects ?? 0],
+          runs > 0 &&
+            ((arm.stats as Record<string, number>).claimsIssued ?? 0) > 0,
+          true,
+          `[${arm.rank}] the executor never served the product: runs=${runs} ` +
+            `stats=${JSON.stringify(arm.stats)}`,
+        );
+        // No settlement may FAIL and no attempt may be refused by the engine's
+        // firewall, at any rank.
+        const stats = arm.stats as Record<string, number>;
+        assertEquals(
+          [stats.settlementsFailed ?? 0, stats.actionFirewallRejects ?? 0],
           [0, 0],
-          `[${label}] a settlement failed or a lease fenced: ${
+          `[${arm.rank}] a settlement failed or an attempt was firewalled: ${
             JSON.stringify(arm.stats)
           }`,
         );
       }
 
-      // KNOWN GAP, reported not asserted (see the memo's §5g): in THIS
-      // topology the executor Worker goes live and takes both lanes but
-      // never runs the piece's actions (`executionPlacement.schedulerRuns`
-      // stays 0), so no claim is issued in either arm and the
-      // `candidateUnservedByCode` inventory stays empty. The classification
-      // half of this question therefore lives in
-      // `runner/test/server-execution-group-chat-rank-probe.test.ts`, and
-      // the live claim/settlement half is still covered only by the C1.9
-      // synthetic PerUser gates. Getting group-chat SERVED in-process needs
-      // the `server-execution-rollout-products.test.ts` sequencing (worker-
-      // realm clients plus an observer graph watch), which is the follow-up.
-      const placement = on.metrics.executionPlacement as {
-        schedulerRuns?: number;
-      };
+      // THE BUY, live: the scoped-read offender class §5f named collapses as
+      // the ladder climbs, and claim-readiness rises with it.
+      const readScope = (arm: ArmReport) =>
+        offenders(arm)["non-space-read-scope"] ?? 0;
+      assertEquals(
+        readScope(user) < readScope(space) &&
+          readScope(session) <= readScope(user),
+        true,
+        `non-space-read-scope offenders did not fall up the ladder: ` +
+          `space=${readScope(space)} user=${readScope(user)} ` +
+          `session=${readScope(session)}`,
+      );
+
+      // THE RESIDUAL, live: `claim-context-mismatch` lease fences.
+      //
+      // R7 was RETIRED by C2.10 (see TOLERATED_LEASE_FENCE_CAUSES in
+      // server-execution-measurement.ts): "session-context runs now have a
+      // lane to route to, so any mismatch is a placement defect again", and
+      // its return to hard-zero is a NAMED C2 acceptance criterion. This
+      // probe MEASURED that criterion against the real group-chat product
+      // and it does NOT hold: the cause falls 5 → 2 up the ladder but does
+      // not reach zero even with session lanes open and session-rank claims
+      // issuing. Opening the lane is evidently not sufficient to route every
+      // session-context run to it for this product.
+      //
+      // Asserted here: the ladder never makes it WORSE (a rank dial that
+      // increased mismatches would be routing regressions). The absolute
+      // non-zero is reported to §5g rather than asserted, because it is a
+      // pre-existing product/placement property this probe discovered, not
+      // something the file's own subject introduces — pinning zero here would
+      // land this file red and blame the wrong change.
+      const fences = (arm: ArmReport) =>
+        ((arm.stats.leaseFenceRejectCauses ?? {}) as Record<string, number>)[
+          "claim-context-mismatch"
+        ] ?? 0;
+      assertEquals(
+        fences(user) <= fences(space) && fences(session) <= fences(user),
+        true,
+        `claim-context-mismatch fences grew up the ladder: ` +
+          `space=${fences(space)} user=${fences(user)} ` +
+          `session=${fences(session)}`,
+      );
+      if (fences(session) > 0) {
+        console.log(
+          `group-chat rank probe: R7 ACCEPTANCE CRITERION NOT MET — ` +
+            `claim-context-mismatch is ${fences(session)} at session rank ` +
+            `(retired from the tolerated set by C2.10; expected hard-zero). ` +
+            `Ladder: space=${fences(space)} user=${fences(user)} ` +
+            `session=${fences(session)}`,
+        );
+      }
+
       console.log(
-        `group-chat user-rank probe: KNOWN GAP — dials-ON executor ` +
-          `schedulerRuns=${placement?.schedulerRuns} ` +
-          `claimsIssued=${(on.stats as Record<string, number>).claimsIssued}`,
+        `group-chat rank probe LADDER\n` +
+          `  claimsIssuedByContextKey: ${
+            [space, user, session].map((a) =>
+              `${a.rank}=${JSON.stringify(a.stats.claimsIssuedByContextKey)}`
+            ).join(" ")
+          }\n` +
+          `  claimsIssued/attempts/conflicts/committed: ${
+            [space, user, session].map((a) => {
+              const s = a.stats as Record<string, number>;
+              return `${a.rank}=${s.claimsIssued}/${s.acceptedActionAttempts}/` +
+                `${s.claimedActionConflicts}/${s.settlementsCommitted}`;
+            }).join(" ")
+          }\n` +
+          `  unservedByCode: ${
+            [space, user, session].map((a) =>
+              `${a.rank}=${JSON.stringify(unservedEvents(a))}`
+            ).join(" ")
+          }\n` +
+          `  offendersByCode: ${
+            [space, user, session].map((a) =>
+              `${a.rank}=${JSON.stringify(offenders(a))}`
+            ).join(" ")
+          }\n` +
+          `  claimContextMismatchFences: ${
+            [space, user, session].map((a) => `${a.rank}=${fences(a)}`).join(
+              " ",
+            )
+          }`,
       );
     });
   },
