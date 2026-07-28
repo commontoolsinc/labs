@@ -917,6 +917,11 @@ export class V2StorageTransaction implements IStorageTransaction {
    * transaction afterwards, such as a cell bound to it or a cleanup closure
    * that captured it, would otherwise also hold every address that
    * transaction read.
+   *
+   * Only a commit that ran ends here. A transaction that never reached storage
+   * — aborted, or rejected by validation — keeps its activity, because the
+   * scheduler retries the action that opened it and re-establishes that
+   * action's dependencies from those reads.
    */
   #finish(result: Result<Unit, StorageTransactionFailed>): void {
     this.#state = { status: "done", result };
@@ -1948,6 +1953,8 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (ready.error) {
       return { error: ready.error };
     }
+    // Aborted before reaching storage, so the activity stays: the scheduler
+    // rebuilds this action's dependencies from it and retries.
     this.#state = {
       status: "done",
       result: { error: TransactionAborted(reason) },
@@ -2009,6 +2016,8 @@ export class V2StorageTransaction implements IStorageTransaction {
       () => this.validate(),
     );
     if (validation.error) {
+      // Rejected before reaching storage, so the activity stays: the scheduler
+      // rebuilds this action's dependencies from it and retries.
       this.#state = {
         status: "done",
         result: { error: validation.error },
@@ -2072,6 +2081,8 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     const validation = this.validate();
     if (validation.error) {
+      // Rejected before reaching storage, so the activity stays: the scheduler
+      // rebuilds this action's dependencies from it and retries.
       this.#state = {
         status: "done",
         result: { error: validation.error },
