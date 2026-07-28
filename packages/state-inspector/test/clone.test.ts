@@ -231,6 +231,61 @@ Deno.test("refuses to write into the live store directory", async () => {
   });
 });
 
+Deno.test("the live-store refusal survives a RELATIVE target path", async () => {
+  // Regression: every other fixture here uses absolute temp-dir paths, and the
+  // rail passed for all of them while a relative `--to` sailed straight
+  // through — a relative path can never overlap an absolute forbidden one, so
+  // the clone landed inside the live store under a banner saying it had not.
+  await withDirs(async ({ root, source }) => {
+    const live = `${root}/live-memory`;
+    await Deno.mkdir(live);
+    const cwd = Deno.cwd();
+    Deno.chdir(root);
+    try {
+      await assertRejects(
+        () =>
+          createClone({
+            source,
+            space: SPACE,
+            targetDir: "./live-memory/clone", // relative, as a shell user types
+            forbiddenDirs: [live],
+            now: NOW,
+          }),
+        Error,
+        "overlaps the live store directory",
+      );
+    } finally {
+      Deno.chdir(cwd);
+    }
+    assertEquals(await exists(`${live}/clone`), false);
+  });
+});
+
+Deno.test("a symlinked spelling of the live store is still refused", async () => {
+  // On macOS `/tmp` is a symlink to `/private/tmp`, so the same directory has
+  // two spellings. Comparing them unresolved would miss the overlap.
+  await withDirs(async ({ root, source }) => {
+    const live = `${root}/live-memory`;
+    await Deno.mkdir(live);
+    const alias = `${root}/live-alias`;
+    await Deno.symlink(live, alias);
+
+    await assertRejects(
+      () =>
+        createClone({
+          source,
+          space: SPACE,
+          targetDir: `${alias}/clone`, // same directory, different spelling
+          forbiddenDirs: [live],
+          now: NOW,
+        }),
+      Error,
+      "overlaps the live store directory",
+    );
+    assertEquals(await exists(`${live}/clone`), false);
+  });
+});
+
 Deno.test("refuses to clone into the snapshot's own directory", async () => {
   await withDirs(async ({ source }) => {
     await assertRejects(

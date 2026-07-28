@@ -20,6 +20,7 @@
 // from the engine's notion of value identity.
 
 import { hashOf } from "@commonfabric/data-model/value-hash";
+import { utf8Compare } from "@commonfabric/utils/utf8";
 import type { SpaceDb } from "./db.ts";
 import { type EntityModel, listEntityModels } from "./model.ts";
 import { reconstructDocument } from "./reconstruct.ts";
@@ -204,7 +205,9 @@ export function contentFingerprint(
       enumerationCap: options.enumerationCap,
     });
 
-  const ambiguous = [...generated].filter((id) => named.has(id)).sort();
+  const ambiguous = [...generated].filter((id) => named.has(id)).sort(
+    utf8Compare,
+  );
   const perEntity: EntityFingerprint[] = [];
   const unhashable: { id: string; reason: string }[] = [];
   let excludedGenerated = 0;
@@ -238,7 +241,7 @@ export function contentFingerprint(
 
   // Sort so the roll-up is independent of enumeration order.
   perEntity.sort((a, b) =>
-    a.id === b.id ? compare(a.scope, b.scope) : compare(a.id, b.id)
+    a.id === b.id ? utf8Compare(a.scope, b.scope) : utf8Compare(a.id, b.id)
   );
 
   return {
@@ -251,15 +254,6 @@ export function contentFingerprint(
     unhashable,
     perEntity,
   };
-}
-
-/**
- * Byte-order string compare. `@commonfabric/utils/utf8` owns cross-platform
- * ordering; state-inspector is deliberately dep-light, and this only orders a
- * local array before hashing, so it uses the same code-point rule inline.
- */
-function compare(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 export interface FingerprintDiff {
@@ -292,9 +286,9 @@ export function diffFingerprints(
     else if (other.hash !== e.hash) changed.push(e.id);
   }
 
-  added.sort(compare);
-  removed.sort(compare);
-  changed.sort(compare);
+  added.sort(utf8Compare);
+  removed.sort(utf8Compare);
+  changed.sort(utf8Compare);
   return {
     equal: added.length === 0 && removed.length === 0 && changed.length === 0,
     added,

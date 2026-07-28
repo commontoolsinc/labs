@@ -23,6 +23,7 @@
 // resolves through `resolveSpaceStoreUrl`, so pointing `MEMORY_DIR` at <dir>
 // serves the clone as a live space under the SAME DID.
 
+import * as Path from "@std/path";
 import { createHasher } from "@commonfabric/content-hash";
 import { openSpace } from "./db.ts";
 import { contentFingerprint, type FingerprintReport } from "./fingerprint.ts";
@@ -103,10 +104,17 @@ export async function createClone(
   options: CreateCloneOptions,
 ): Promise<CloneManifest> {
   const now = options.now ?? (() => new Date());
-  const dir = await resolvePath(options.targetDir);
-  const source = await resolvePath(options.source);
+  const dir = await canonicalPath(options.targetDir);
+  const source = await canonicalPath(options.source);
+  // Drop blank entries BEFORE canonicalizing: `Path.resolve("")` is the current
+  // working directory, which would forbid every target beneath it.
+  const forbidden = await Promise.all(
+    (options.forbiddenDirs ?? [])
+      .filter((entry) => entry.trim() !== "")
+      .map(canonicalPath),
+  );
 
-  assertSafeTarget(dir, source, options.forbiddenDirs ?? []);
+  assertSafeTarget(dir, source, forbidden);
   await assertEmptyOrAbsent(dir);
 
   const paths = clonePaths(dir, options.space);
@@ -169,7 +177,7 @@ export async function createClone(
  */
 export async function resetClone(dir: string): Promise<CloneManifest> {
   const manifest = await readManifest(dir);
-  const paths = clonePaths(await resolvePath(dir), manifest.space);
+  const paths = clonePaths(await canonicalPath(dir), manifest.space);
   // The companions are absent on a clone no engine has opened yet — the normal
   // case at the start of a rehearsal — so their absence is not an error, while
   // any OTHER failure must surface rather than leave a half-reset clone.
@@ -210,7 +218,7 @@ export interface VerifyResult {
  */
 export async function verifyClone(dir: string): Promise<VerifyResult> {
   const manifest = await readManifest(dir);
-  const paths = clonePaths(await resolvePath(dir), manifest.space);
+  const paths = clonePaths(await canonicalPath(dir), manifest.space);
 
   const baselineIntact = await hashFile(paths.pristinePath) ===
     manifest.snapshotHash;
@@ -241,7 +249,7 @@ export async function verifyClone(dir: string): Promise<VerifyResult> {
 
 /** Read and validate a clone manifest. */
 export async function readManifest(dir: string): Promise<CloneManifest> {
-  const path = `${await resolvePath(dir)}/${MANIFEST}`;
+  const path = `${await canonicalPath(dir)}/${MANIFEST}`;
   let text: string;
   try {
     text = await Deno.readTextFile(path);
@@ -285,13 +293,39 @@ async function hashFile(path: string): Promise<string> {
   return hasher.digest("base64url");
 }
 
-async function resolvePath(path: string): Promise<string> {
-  // realPath needs the path to exist; fall back to the literal for a target
-  // directory we are about to create.
-  try {
-    return await Deno.realPath(path);
-  } catch {
-    return path.replace(/\/+$/, "");
+/**
+ * An absolute, symlink-resolved form of `path` — even when it does not exist
+ * yet.
+ *
+ * Both properties are load-bearing for the safety rails. A relative path can
+ * never overlap an absolute live-store directory, so returning one verbatim
+ * silently disarms `assertSafeTarget` — the clone lands inside the store the
+ * rail was meant to protect, under a banner claiming it did not. And on macOS
+ * `/tmp` is a symlink to `/private/tmp`, so two spellings of one directory must
+ * canonicalize together or the comparison misses.
+ *
+ * `realPath` needs the path to exist, so for a target we are about to create we
+ * resolve the nearest existing ancestor and re-append the rest.
+ */
+async function canonicalPath(path: string): Promise<string> {
+  const absolute = Path.resolve(path);
+  const tail: string[] = [];
+  let current = absolute;
+  while (true) {
+    try {
+      const real = await Deno.realPath(current);
+      return tail.length === 0
+        ? real
+        : Path.join(real, ...tail.slice().reverse());
+    } catch (error) {
+      // Anything other than "not there yet" — a component that is a regular
+      // file, a permission problem — is a real error the caller must see.
+      if (!(error instanceof Deno.errors.NotFound)) throw error;
+      const parent = Path.dirname(current);
+      if (parent === current) return absolute; // reached the filesystem root
+      tail.push(Path.basename(current));
+      current = parent;
+    }
   }
 }
 
