@@ -578,7 +578,7 @@ const isExactDerivedCommit = (
 
 for (const product of PRODUCT_CASES) {
   const testName = product.name === "group-chat"
-    ? "group-chat revokes an unserved literal rooms action and converges client-primary"
+    ? "group-chat serves the literal rooms action and resumes client-primary on executor departure"
     : "ten lunch-poll demands share one real Worker and one claimed attempt per invalidation";
   Deno.test(testName, async () => {
     const principal = await Identity.fromPassphrase(
@@ -839,22 +839,29 @@ for (const product of PRODUCT_CASES) {
         event.settlement.inputBasisSeq >= sourceSeq;
 
       if (product.name === "group-chat") {
-        // Recomputing the literal room-list path establishes the claim, but v1
-        // admission rejects its additional entity-backed collection read.
-        const unserved = await waitWithin(
+        // Since the read-fold completion (ceb6cf0ed, "the C2 placement
+        // criterion is MET"), the literal room-list recompute's additional
+        // entity-backed collection read is INSIDE the observed surface, so
+        // the claimed attempt SERVES: it settles no-op (the initial-value
+        // recompute reproduces the durable initial derivation) with no
+        // diagnostic — the pre-read-fold unserved/unobserved-read fail-open
+        // this leg used to pin is structurally unreachable here. Pin the
+        // served outcome instead; the canonical revoke the resume half rides
+        // now comes from the executor's DEPARTURE (release revokes every
+        // owned claim).
+        const served = await waitWithin(
           waitForControl((event): event is Extract<
             ExecutionControlEvent,
             { type: "session.execution.settlement" }
           > =>
             event.type === "session.execution.settlement" &&
             event.settlement.claim.actionId === seeded.actionId &&
-            event.settlement.inputBasisSeq >= initialSource.seq &&
-            event.settlement.outcome === "unserved"
+            event.settlement.inputBasisSeq >= initialSource.seq
           ),
-          "group-chat unserved room-list settlement",
+          "group-chat served room-list settlement",
           events,
         );
-        const claim = unserved.settlement.claim;
+        const claim = served.settlement.claim;
         assert(
           controlEvents.some((event) =>
             event.type === "session.execution.claim.set" &&
@@ -862,28 +869,30 @@ for (const product of PRODUCT_CASES) {
             event.claim.leaseGeneration === claim.leaseGeneration &&
             event.claim.claimGeneration === claim.claimGeneration
           ),
-          "the exact unserved attempt must have crossed claim authority",
+          "the exact served attempt must have crossed claim authority",
         );
-        assertEquals(unserved.settlement.diagnosticCode, "unobserved-read");
-        await waitWithin(
-          waitForControl((event): event is Extract<
-            ExecutionControlEvent,
-            { type: "session.execution.claim.revoke" }
-          > =>
-            event.type === "session.execution.claim.revoke" &&
-            event.claim.actionId === claim.actionId &&
-            event.leaseGeneration === claim.leaseGeneration &&
-            event.claimGeneration === claim.claimGeneration
-          ),
-          "group-chat unserved claim revoke",
-          events,
+        assertEquals(served.settlement.outcome, "no-op");
+        assertEquals(served.settlement.diagnosticCode, undefined);
+        // Stop the shared executor after the served settlement. The release
+        // revokes the owned claim — the canonical revoke — and the same
+        // three clients deterministically resume ordinary client-primary
+        // ownership.
+        const revoked = waitForControl((event): event is Extract<
+          ExecutionControlEvent,
+          { type: "session.execution.claim.revoke" }
+        > =>
+          event.type === "session.execution.claim.revoke" &&
+          event.claim.actionId === claim.actionId &&
+          event.leaseGeneration === claim.leaseGeneration &&
+          event.claimGeneration === claim.claimGeneration
         );
-        // The literal room-list path materializes the non-empty entity list,
-        // which v1 rejects at admission. Stop that shared executor after the
-        // canonical revoke so the same three clients deterministically resume
-        // ordinary client-primary ownership.
         await pool.close();
         pool = undefined;
+        await waitWithin(
+          revoked,
+          "group-chat claim revoke on executor departure",
+          events,
+        );
         for (let index = clients.length; index < 3; index++) {
           await startClient(index);
         }
