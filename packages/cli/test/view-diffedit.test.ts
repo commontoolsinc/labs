@@ -1273,6 +1273,8 @@ Deno.test("diffedit: Ctrl-L reveals more of the file above the hunk", () => {
 Deno.test("diffedit: Ctrl-L expands context in pager mode (no text cursor)", () => {
   const { s, done } = expandSession();
   try {
+    // A twelve-row content area puts its quarter-screen target above the hunk.
+    s.resize(80, 13);
     // No arrow press, so the text cursor is never revealed: we are in the pager.
     const view = s.view();
     assertEquals(view.cursor, null, "no text cursor");
@@ -1314,6 +1316,8 @@ Deno.test("diffedit: Ctrl-L expands context in pager mode (no text cursor)", () 
 Deno.test("diffedit: the expansion marker appears only in pager navigation", () => {
   const { s, done } = expandSession();
   try {
+    // A twelve-row content area puts its quarter-screen target above the hunk.
+    s.resize(80, 13);
     assertEquals(s.view().expandRow, 5, "navigation marks the chosen edge");
     assertEquals(s.view().diffMetadataRows, [4]);
     press(s, "/");
@@ -1489,6 +1493,8 @@ Deno.test("diffedit: in pager mode Ctrl-L expands the selected hunk", () => {
 Deno.test("diffedit: pager Ctrl-L keeps the hunk header in view when expanding up from the top", () => {
   const { s, done } = expandSession();
   try {
+    // A twelve-row content area puts its quarter-screen target above the hunk.
+    s.resize(80, 13);
     assertEquals(s.view().top, 0, "starts at the top, pager mode");
     s.handleKey({ name: "ctrl-l" }); // expands up (reveals alpha/beta)
     // The header and preamble sit above the insertion point, so they do not
@@ -1596,16 +1602,24 @@ Deno.test("diffedit: a whole-file selection uses the quarter-screen expansion ta
     assertEquals(
       s.view().expandUp,
       true,
-      "the quarter-screen target chooses the first hunk's top edge",
+      "the quarter-screen target chooses an upward edge",
+    );
+    assertEquals(
+      s.view().expandRow,
+      10,
+      "the second hunk's top edge wins the equal-distance choice",
     );
     s.handleKey({ name: "ctrl-l" });
-    // The whole diff is on screen, and the quarter-screen target is nearest the
-    // first hunk's top edge.
+    // The target is equally far from the first hunk's bottom and the second
+    // hunk's top. The second edge has more context available.
     assert(s.view().message.startsWith("Showing line"), s.view().message);
-    assert(s.doc.text.includes("@@ -1,6 +1,6 @@"), s.doc.text);
     assert(
-      s.doc.text.includes("@@ -30,3 +30,3 @@"),
-      "the other hunk is untouched",
+      s.doc.text.includes("@@ -4,3 +4,3 @@"),
+      "the first hunk is untouched",
+    );
+    assert(
+      s.doc.text.includes("@@ -20,13 +20,13 @@"),
+      "the second hunk expanded upward",
     );
   } finally {
     Deno.removeSync(root, { recursive: true });
