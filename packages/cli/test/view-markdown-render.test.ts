@@ -265,6 +265,69 @@ Deno.test("markdown rendered view keeps inline content on its source lines", () 
   }
 });
 
+Deno.test("markdown rendered view strips multiline block HTML", () => {
+  const source = [
+    "<section",
+    '  class="note">',
+    "**visible**",
+    "</section>",
+  ].join("\n");
+  const lines = renderMarkdownLines(source);
+
+  assertEquals(lines.map((line) => line.text), ["", "", "visible", ""]);
+  assert(lines[0].renderedSourceHidden);
+  assert(lines[1].renderedSourceHidden);
+  assertEquals(lines[2].renderedSourceHidden, undefined);
+  assert(lines[2].spans.some((span) => span.bold));
+  assert(lines[3].renderedSourceHidden);
+  for (const line of lines) {
+    assertEquals(
+      line.spans.map((span) => span.text).join(""),
+      line.text,
+      `spans reconstruct ${JSON.stringify(line.text)}`,
+    );
+  }
+});
+
+Deno.test("rendered Markdown diff keeps changed multiline HTML tags visible", () => {
+  const oldSource = [
+    "<section",
+    '  class="old">',
+    "**visible**",
+    "</section>",
+  ].join("\n");
+  const newSource = oldSource.replace('class="old"', 'class="new"');
+  const diffText = `diff --git a/notes.md b/notes.md
+index 1234..5678 100644
+--- a/notes.md
++++ b/notes.md
+@@ -1,4 +1,4 @@
+ <section
+-  class="old">
++  class="new">
+ **visible**
+ </section>`;
+  const model = parseDiff(diffText);
+  assert(model);
+  const workspace: DiffWorkspace = {
+    resolve: () => "/workspace/notes.md",
+    read: () => newSource,
+    readBlob: (object) => object === "1234" ? oldSource : null,
+  };
+  const doc = buildDiffDocument(
+    diffText,
+    model,
+    workspace,
+    new Map(),
+    "rendered",
+  ).doc;
+
+  assertEquals(doc.lines[6].text, '-  class="old">');
+  assertEquals(doc.lines[7].text, '+  class="new">');
+  assertEquals(doc.lines[6].renderedSourceHidden, undefined);
+  assertEquals(doc.lines[7].renderedSourceHidden, undefined);
+});
+
 Deno.test("markdown rendered view composes lines without prebuilt spans", () => {
   const composed = new markdownInternals.RichLine();
   composed.appendLine({
@@ -492,6 +555,10 @@ Deno.test("markdown rendered view handles incomplete HTML, fences, and tables", 
   assertEquals(
     markdownInternals.stripHtmlTags("plain <![CDATA[visible]]> <span"),
     "plain visible <span",
+  );
+  assertEquals(
+    markdownInternals.stripHtmlTags("before <!-- hidden\nstill hidden"),
+    "before \n",
   );
   assertEquals(markdownInternals.openingFence("plain"), null);
   assertEquals(markdownInternals.openingFence("```bad`info"), null);

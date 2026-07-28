@@ -355,31 +355,11 @@ function renderHtmlBlock(
   source: readonly string[],
   inlineLexer?: Lexer,
 ): Line[] {
-  let inComment = false;
-  return source.map((sourceLine) => {
-    let visible = "";
-    let removed = false;
-    for (let at = 0; at < sourceLine.length;) {
-      if (inComment) {
-        const end = sourceLine.indexOf("-->", at);
-        removed = true;
-        if (end < 0) break;
-        inComment = false;
-        at = end + 3;
-        continue;
-      }
-      const start = sourceLine.indexOf("<!--", at);
-      if (start < 0) {
-        visible += sourceLine.slice(at);
-        break;
-      }
-      visible += sourceLine.slice(at, start);
-      removed = true;
-      inComment = true;
-      at = start + 4;
-    }
+  const visibleLines = stripHtmlTags(source.join("\n")).split("\n");
+  return source.map((sourceLine, index) => {
+    const visible = visibleLines[index] ?? "";
     const line = renderMarkdownSourceLine(visible, inlineLexer);
-    return removed && !line.renderedSourceHidden
+    return visible !== sourceLine && !line.renderedSourceHidden
       ? { ...line, renderedSourceHidden: true }
       : line;
   });
@@ -737,6 +717,10 @@ function stripHtmlTags(source: string): string {
     const commentEnd = source.startsWith("<!--", i)
       ? source.indexOf("-->", i + 4)
       : -1;
+    if (source.startsWith("<!--", i) && commentEnd < 0) {
+      out += source.slice(i).replace(/[^\n]/g, "");
+      break;
+    }
     if (commentEnd >= 0) {
       out += source.slice(i, commentEnd + 3).replace(/[^\n]/g, "");
       i = commentEnd + 3;
