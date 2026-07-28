@@ -3,8 +3,13 @@ import { createRef, type Ref, ref } from "lit/directives/ref.js";
 import { state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
 import { render } from "@commonfabric/html/client";
-import type { CellHandle } from "@commonfabric/runtime-client";
-import { CHIP_UI, TILE_UI, type VNode } from "@commonfabric/runtime-client";
+import {
+  type CellHandle,
+  CHIP_UI,
+  isCellHandle,
+  TILE_UI,
+  type VNode,
+} from "@commonfabric/runtime-client";
 import { navigate, openInNewTab } from "@commonfabric/shell/shared";
 import type { DID } from "@commonfabric/identity";
 import "../cf-loader/index.ts";
@@ -90,7 +95,8 @@ export function hasVariantValue(value: unknown, key: string): boolean {
  *
  * @element cf-render
  *
- * @property {CellHandle} cell - The cell containing the piece to render
+ * @property {CellHandle | undefined} cell - The cell containing the piece to
+ *   render
  * @property {UIVariant} variant - UI variant to render: "full" | "chip" | "tile"
  *   (default "full"). Renders the piece's matching variant key ([CHIP_UI] /
  *   [TILE_UI]) when exported, otherwise the per-variant platform default. The
@@ -183,17 +189,23 @@ export class CFRender extends BaseElement {
     variant: { type: String, reflect: true },
   };
 
-  declare cell: CellHandle;
+  declare cell: CellHandle | undefined;
   declare variant: UIVariant | undefined;
 
   // Use Lit ref directive for stable container reference across re-renders
   private _containerRef: Ref<HTMLDivElement> = createRef();
 
   private _cleanup?: () => void;
-  // Track the cell ID we're currently rendering to detect stale renders
-  private _renderingCellId?: string;
-  // The root piece cell after resolving the (possibly link) `cell` — used for
-  // chip/tile rendering and navigation. Reset whenever `cell` changes.
+  private _linkTargetCell?: CellHandle;
+  private _linkTargetObserved?: CellHandle;
+  private _linkTargetSetup?: Promise<CellHandle | undefined>;
+  private _linkTargetToken?: object;
+  private _linkTargetUnsubscribe?: () => void;
+  // Each render captures a generation so older asynchronous work cannot
+  // install a result after the cell or variant changes.
+  private _renderGeneration = 0;
+  // The root piece cell after resolving the (possibly link) `cell`. Reset
+  // whenever `cell` changes.
   private _resolvedCell?: CellHandle;
 
   @state()
@@ -247,6 +259,7 @@ export class CFRender extends BaseElement {
 
         if (shouldRerender) {
           // Reset render state when cell changes - ensures we'll render the new cell
+          this._cleanupLinkTargetSubscription();
           this._hasRendered = false;
           this._resolvedCell = undefined;
         }
@@ -270,53 +283,53 @@ export class CFRender extends BaseElement {
   }
 
   private async _renderCell() {
+    const generation = ++this._renderGeneration;
     const container = this._containerRef.value;
-    const cellId = this.cell.id();
-    this._renderingCellId = cellId;
+    const cell = this.cell;
+    this._cleanupRender();
+    if (!container || !cell) return;
 
+    const cellId = cell.id();
     this._log(`_renderCell called: ${cellId}`);
 
-    if (!container || !this.cell) {
-      return;
-    }
-
-    this._cleanupRender();
-
     try {
-      if (this._renderingCellId !== cellId) {
-        this._log("cell changed during render, aborting");
-        return;
-      }
-
       // Normalize to the size spectrum; anything unknown renders full.
       const kind = normalizeVariant(this.variant);
+
+      // Pieces passed through patterns (e.g. piece-grid) arrive as LINKS, not
+      // the root piece cell. Resolve every variant to the target piece so full
+      // nested rendering and its piece menu address the same entity.
+      await this._startPromise;
+      if (this._renderGeneration !== generation) return;
+      const resolved = await cell.resolveAsCell();
+      if (this._renderGeneration !== generation) return;
+      const currentTarget = await this._watchLinkTarget(cell, resolved);
+      if (this._renderGeneration !== generation) return;
+      if (currentTarget === undefined) {
+        this._resolvedCell = undefined;
+        this._hasRendered = true;
+        return;
+      }
+      this._resolvedCell = currentTarget;
 
       // Full is the universal floor: render the piece's [UI] chain directly.
       if (kind === "full") {
         this._log("rendering full [UI] into container");
-        this._cleanup = render(container, this.cell as CellHandle<VNode>);
+        this._cleanup = render(container, cell as CellHandle<VNode>);
         this._hasRendered = true;
         return;
       }
 
-      // Pieces passed through patterns (e.g. piece-grid) arrive as LINKS, not
-      // the root piece cell. Rendering or navigating the raw link yields a
-      // blank tile and a dead click, and hides the exported variant key.
-      // Resolve to the root cell first — exactly as cf-cell-link does — then
-      // sync so we can read the variant key.
-      await this._startPromise;
-      const resolved = await this.cell.resolveAsCell();
-      if (this._renderingCellId !== cellId) return;
-      this._resolvedCell = resolved;
-      await resolved.sync();
-      if (this._renderingCellId !== cellId) return;
+      // Chip and tile inspect exported variant keys before falling back.
+      await currentTarget.sync();
+      if (this._renderGeneration !== generation) return;
 
       const variantKey = kind === "chip" ? CHIP_UI : TILE_UI;
-      if (this._cellHasKey(resolved, variantKey)) {
+      if (this._cellHasKey(currentTarget, variantKey)) {
         this._log(`rendering exported ${variantKey}`);
         this._cleanup = render(
           container,
-          (resolved as CellHandle<Record<string, VNode>>)
+          (currentTarget as CellHandle<Record<string, VNode>>)
             .key(variantKey) as CellHandle<VNode>,
         );
         this._hasRendered = true;
@@ -325,15 +338,117 @@ export class CFRender extends BaseElement {
 
       // Failover to the per-variant platform default.
       this._cleanup = kind === "chip"
-        ? this._renderChipDefault(container, resolved)
-        : this._renderTileDefault(container, resolved);
+        ? this._renderChipDefault(container, currentTarget)
+        : this._renderTileDefault(container, currentTarget);
       this._hasRendered = true;
     } catch (error) {
       // Only show error if we're still rendering this cell
-      if (this._renderingCellId === cellId) {
+      if (this._renderGeneration === generation) {
         this._handleRenderError(error);
       }
     }
+  }
+
+  private async _watchLinkTarget(
+    cell: CellHandle,
+    resolved: CellHandle,
+  ): Promise<CellHandle | undefined> {
+    if (
+      this._linkTargetToken !== undefined &&
+      this._linkTargetCell?.equals(cell)
+    ) {
+      if (this._linkTargetSetup !== undefined) {
+        return await this._linkTargetSetup;
+      }
+      return this._linkTargetObserved;
+    }
+    if (resolved.equals(cell)) {
+      this._cleanupLinkTargetSubscription();
+      return resolved;
+    }
+
+    this._cleanupLinkTargetSubscription();
+    const token = {};
+    this._linkTargetCell = cell;
+    this._linkTargetToken = token;
+    const setup = this._setupLinkTargetSubscription(cell, token);
+    this._linkTargetSetup = setup;
+    try {
+      return await setup;
+    } finally {
+      if (this._linkTargetSetup === setup) {
+        this._linkTargetSetup = undefined;
+      }
+    }
+  }
+
+  private async _setupLinkTargetSubscription(
+    cell: CellHandle,
+    token: object,
+  ): Promise<CellHandle | undefined> {
+    // This schema reports the current target as a Cell. The subscription can
+    // also wake for a write within that target, so the callback compares target
+    // identity before starting another render.
+    const linkCell = cell.asSchema<CellHandle>({ asCell: ["cell"] });
+    try {
+      const synchronizedTarget = await linkCell.sync();
+      if (
+        this._linkTargetToken !== token ||
+        !this.cell?.equals(cell)
+      ) {
+        return undefined;
+      }
+      let observedTarget = isCellHandle(synchronizedTarget)
+        ? synchronizedTarget
+        : undefined;
+      this._linkTargetObserved = observedTarget;
+      const unsubscribe = linkCell.subscribe((nextTarget) => {
+        const validTarget = isCellHandle(nextTarget) ? nextTarget : undefined;
+        if (
+          validTarget === undefined
+            ? observedTarget === undefined
+            : validTarget.equals(observedTarget)
+        ) {
+          return;
+        }
+        observedTarget = validTarget;
+        if (this._linkTargetToken !== token) return;
+        if (!this.cell?.equals(cell)) return;
+        this._linkTargetObserved = validTarget;
+        this._resolvedCell = undefined;
+        if (validTarget === undefined) {
+          this._renderGeneration++;
+          this._hasRendered = true;
+          this._cleanupRender();
+        } else {
+          this._hasRendered = false;
+          void this._renderCell();
+        }
+      });
+      if (this._linkTargetToken === token) {
+        this._linkTargetUnsubscribe = unsubscribe;
+      } else {
+        unsubscribe();
+      }
+      return observedTarget;
+    } catch (error) {
+      if (this._linkTargetToken === token) {
+        this._linkTargetToken = undefined;
+        this._linkTargetCell = undefined;
+        this._linkTargetObserved = undefined;
+      }
+      throw error;
+    }
+  }
+
+  private _cleanupLinkTargetSubscription(): void {
+    const unsubscribe = this._linkTargetUnsubscribe;
+    this._linkTargetToken = undefined;
+    this._linkTargetUnsubscribe = undefined;
+    this._linkTargetCell = undefined;
+    this._linkTargetObserved = undefined;
+    this._linkTargetSetup = undefined;
+    unsubscribe?.();
   }
 
   /** True when the piece output exports a value at `key` (e.g. a variant UI). */
@@ -385,8 +500,8 @@ export class CFRender extends BaseElement {
 
   /**
    * The piece this element renders, when the rendered cell IS a piece: a
-   * whole result cell, not a value inside one. A chip or tile resolves its
-   * (possibly link) cell during render, so that resolved root is the target.
+   * whole result cell, not a value inside one. Every variant resolves its
+   * possibly linked cell during render, so that resolved root is the target.
    */
   private _pieceTarget(): CellHandle | undefined {
     const cell = this._resolvedCell ?? this.cell;
@@ -451,6 +566,7 @@ export class CFRender extends BaseElement {
     e.stopPropagation();
     try {
       const target = this._resolvedCell ?? this.cell;
+      if (!target) return;
       const view = {
         spaceDid: target.space(),
         pieceId: target.id(),
@@ -486,6 +602,9 @@ export class CFRender extends BaseElement {
         `<div style="color: var(--cf-theme-color-error, var(--cf-colors-error, #ff6057))">Error rendering content: ${
           error instanceof Error ? error.message : "Unknown error"
         }</div>`;
+      this._cleanup = () => {
+        container.innerHTML = "";
+      };
     }
   }
 
@@ -493,7 +612,8 @@ export class CFRender extends BaseElement {
     this._log("disconnectedCallback called");
     this.removeEventListener("contextmenu", this._onContextMenu);
     super.disconnectedCallback();
-    this._renderingCellId = undefined;
+    this._renderGeneration++;
+    this._cleanupLinkTargetSubscription();
     this._resolvedCell = undefined;
     this._hasRendered = false;
     this._cleanupRender();

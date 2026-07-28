@@ -443,10 +443,16 @@ See `packages/patterns/examples/ui-variants-demo.tsx` for a full example.
 
 ### The piece context menu
 
-Right-clicking a rendered piece opens `cf-piece-menu` for it, with two entries:
-**View source** shows the piece's retained authored files, and **Origin and
-history** shows the origin it records and the pattern identities it has run. The
-menu comes with `cf-render` — importing the component registers it — and mounts
+Right-clicking a rendered piece opens `cf-piece-menu` for it. **View source**
+shows the piece's retained authored files. **Origin and history** shows its
+active origin and recorded source revisions. A followed piece also has **Stop
+following source**, which keeps the exact current source and clears the origin.
+Historical entries can restore their retained source version or resume
+following their earlier origin. The menu warns before applying a structurally
+incompatible historical source. Its confirmation remains bound to the exact
+candidate that produced the warning.
+
+The menu comes with `cf-render`. Importing the component registers it. It mounts
 itself on `document.body` so a piece's clipping or a tile's scaling cannot reach
 it.
 

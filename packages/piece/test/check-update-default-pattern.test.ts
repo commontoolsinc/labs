@@ -5,6 +5,7 @@ import {
   getPatternRepository,
   getPatternSetupIdentityRef,
   getPatternSource,
+  getPieceSourceRevisions,
   parseLink,
   resolveEntryIdentity,
   Runtime,
@@ -122,6 +123,11 @@ const IMPORTED_MODULE_URL = "/api/patterns/system/update-marker.ts";
 // A same-host custom-app path, as home config would supply via
 // `defaultAppUrl` (a published custom app, NOT a system pattern).
 const CUSTOM_APP_URL = "/api/patterns/custom/my-app.tsx";
+const TEST_TOOLSHED_URL = "http://toolshed.test";
+
+function absoluteSourceUrl(path: string): string {
+  return new URL(path, TEST_TOOLSHED_URL).href;
+}
 
 /** Content identity a toolshed would serve for `source`. */
 function identityForSource(
@@ -424,6 +430,38 @@ describe("checkAndUpdateDefaultPattern", () => {
     const idV2 = getPatternIdentityRef(root)?.identity;
     expect(idV2).toBe(await identityForSource(SOURCE_V2));
     expect(idV2).not.toBe(idV1);
+    expect(
+      getPieceSourceRevisions(root).map((revision) => ({
+        operation: revision.operation,
+        origin: revision.origin,
+      })),
+    ).toEqual([
+      {
+        operation: "baseline",
+        origin: absoluteSourceUrl(DEFAULT_APP_PATTERN_URL),
+      },
+      {
+        operation: "origin-update",
+        origin: absoluteSourceUrl(DEFAULT_APP_PATTERN_URL),
+      },
+    ]);
+  });
+
+  it("does not reconstruct an origin after an explicit detach", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const detachedRef = getPatternIdentityRef(piece.getCell());
+
+    expect(await piece.changeSource({ kind: "detach" })).toEqual({
+      status: "applied",
+    });
+    stub.setSource(SOURCE_V2);
+
+    expect(await controller.checkAndUpdateDefaultPattern()).toBe("current");
+    const root = (await manager.getDefaultPattern(false))!;
+    expect(getPatternSource(root)).toBeUndefined();
+    expect(getPatternIdentityRef(root)).toEqual(detachedRef);
+    expect(getPieceSourceRevisions(root).at(-1)?.operation).toBe("detach");
   });
 
   it("repairs a metadata-only update when the result schema is unchanged", async () => {
@@ -1024,7 +1062,9 @@ describe("checkAndUpdateDefaultPattern", () => {
     );
 
     const root = (await manager.getDefaultPattern(false))!;
-    expect(getPatternSource(root)).toBe(DEFAULT_APP_PATTERN_URL);
+    expect(getPatternSource(root)).toBe(
+      absoluteSourceUrl(DEFAULT_APP_PATTERN_URL),
+    );
     expect(getPatternIdentityRef(root)?.identity).toBe(
       await identityForSource(SOURCE_V1),
     );
@@ -1435,7 +1475,7 @@ describe("checkAndUpdateDefaultPattern", () => {
       await identityForSource(SOURCE_V2, {}, HOME_PATTERN_URL),
     );
     // Provenance back-filled: the root now tracks the official URL.
-    expect(getPatternSource(after)).toBe(HOME_PATTERN_URL);
+    expect(getPatternSource(after)).toBe(absoluteSourceUrl(HOME_PATTERN_URL));
     // The displaced ref is the only record of the replaced sourceless root.
     const displaced = (after as unknown as {
       getMetaRaw: (key: string) => unknown;
@@ -1733,7 +1773,7 @@ describe("checkAndUpdateDefaultPattern", () => {
     const after = (await manager.getDefaultPattern(false))!;
     // Rolled forward to the official identity, official provenance stamped…
     expect(getPatternIdentityRef(after)?.identity).toBe(officialId);
-    expect(getPatternSource(after)).toBe(HOME_PATTERN_URL);
+    expect(getPatternSource(after)).toBe(absoluteSourceUrl(HOME_PATTERN_URL));
     // …recording the displaced pinned pattern for recovery.
     const displaced = (after as unknown as {
       getMetaRaw: (k: string) => unknown;
@@ -1838,6 +1878,49 @@ describe("checkAndUpdateDefaultPattern", () => {
       rt.runSynced = real;
     };
   };
+
+  it("fails clearly when a root loses its source state during repair", async () => {
+    const { oldRef } = await pinOldRequiredHome();
+    const root = (await manager.getDefaultPattern(false))!;
+    const restoreRun = patchRunSynced((opts) =>
+      opts?.expectedPatternIdentity?.identity === oldRef.identity
+        ? Promise.reject(new Error(MIGRATION_REJECTION))
+        : "real"
+    );
+    const originalCompile = runtime.patternManager.compilePattern;
+    const originalGetMetaRaw = root.getMetaRaw;
+    const originalGetDefaultPattern = manager.getDefaultPattern;
+    let clearedSourceState = false;
+    manager.getDefaultPattern =
+      (() => Promise.resolve(root)) as typeof manager.getDefaultPattern;
+    root.getMetaRaw = ((field, options) => {
+      if (clearedSourceState && field === "patternIdentity") return undefined;
+      return originalGetMetaRaw.call(root, field, options);
+    }) as typeof root.getMetaRaw;
+    runtime.patternManager.compilePattern = (async (input, cacheCtx) => {
+      const pattern = await originalCompile.call(
+        runtime.patternManager,
+        input,
+        cacheCtx,
+      );
+      if (!clearedSourceState) {
+        clearedSourceState = true;
+      }
+      return pattern;
+    }) as typeof runtime.patternManager.compilePattern;
+
+    try {
+      await expect(controller.ensureDefaultPattern()).rejects.toThrow(
+        "has no source state to update",
+      );
+      expect(clearedSourceState).toBe(true);
+    } finally {
+      restoreRun();
+      root.getMetaRaw = originalGetMetaRaw;
+      manager.getDefaultPattern = originalGetDefaultPattern;
+      runtime.patternManager.compilePattern = originalCompile;
+    }
+  });
 
   it("stays fail-closed when the repair fails with a CFC rejection that is NOT a schema migration", async () => {
     // The negative twin of the roll-forward test: a repair rejection that
@@ -2437,7 +2520,9 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(getPatternIdentityRef(after)?.identity).toBe(
       await identityForSource(SOURCE_V2),
     );
-    expect(getPatternSource(after)).toBe(DEFAULT_APP_PATTERN_URL);
+    expect(getPatternSource(after)).toBe(
+      absoluteSourceUrl(DEFAULT_APP_PATTERN_URL),
+    );
     const displaced = (after as unknown as {
       getMetaRaw: (key: string) => unknown;
     }).getMetaRaw("displacedPattern") as {
@@ -2559,7 +2644,9 @@ describe("checkAndUpdateDefaultPattern", () => {
       expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
       await runtime.idle();
       const updated = (await manager.getDefaultPattern(false))!;
-      expect(getPatternSource(updated)).toBe(CUSTOM_APP_URL);
+      expect(getPatternSource(updated)).toBe(
+        absoluteSourceUrl(CUSTOM_APP_URL),
+      );
       expect(getPatternIdentityRef(updated)?.identity).toBe(
         await identityForSource(customV2, {}, CUSTOM_APP_URL),
       );

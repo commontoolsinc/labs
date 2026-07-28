@@ -18,6 +18,7 @@ import {
   Module,
   parseLink,
   Pattern,
+  type PieceSourceTransition,
   Runtime,
   type Schema,
   type SpaceCellContents,
@@ -43,6 +44,7 @@ import {
   getResultCellWithSourceSchema,
   isLegacyPieceRegistryRoot,
 } from "../../runner/src/piece-helpers.ts";
+import { prepareSourceClosureVerification } from "../../runner/src/compilation-cache/cell-cache.ts";
 ensureNotRenderThread();
 
 const PRIVILEGED_PIECE_LIST_SCHEMA = internSchema({
@@ -821,14 +823,14 @@ export class PieceManager {
     pattern: Pattern | Module,
     inputs?: unknown,
     cause?: unknown,
-    options?: { start?: boolean; repository?: string },
+    options?: { start?: boolean; repository?: string; origin?: string },
   ): Promise<Cell<T>> {
     const start = options?.start ?? true;
     const piece = await this.setupPersistent<T>(
       pattern,
       inputs,
       cause,
-      { repository: options?.repository },
+      { repository: options?.repository, origin: options?.origin },
     );
     if (start) {
       await this.startPiece(piece);
@@ -847,11 +849,15 @@ export class PieceManager {
     options?: {
       start?: boolean;
       expectedPatternIdentity?: { identity: string; symbol: string };
+      validateCurrentArgument?: (
+        argumentCell: Cell<unknown>,
+      ) => void;
       validateArgumentLinks?: (
         argumentCell: Cell<unknown>,
         argumentSchema: JSONSchema,
       ) => void;
       repository?: string;
+      sourceTransition?: PieceSourceTransition;
     },
   ): Promise<Cell<unknown>> {
     const piece = this.runtime.getCellFromEntityId(
@@ -865,6 +871,8 @@ export class PieceManager {
       currentPiece = await this.runtime.runSynced(piece, pattern, inputs, {
         expectedPatternIdentity: options?.expectedPatternIdentity,
         patternRepository: options?.repository,
+        pieceSourceTransition: options?.sourceTransition,
+        validateCurrentArgument: options?.validateCurrentArgument,
         validateArgumentLinks: options?.validateArgumentLinks,
       });
     } else {
@@ -891,7 +899,7 @@ export class PieceManager {
     pattern: Pattern | Module,
     inputs?: unknown,
     cause?: unknown,
-    options?: { repository?: string },
+    options?: { repository?: string; origin?: string },
   ): Promise<Cell<T>> {
     await timePiecePhase(
       "setupPersistent.runtime.idle",
@@ -908,11 +916,19 @@ export class PieceManager {
     const knownEntryRef = this.runtime.patternManager.getArtifactEntryRef(
       pattern,
     );
+    if (knownEntryRef !== undefined) {
+      await timePiecePhase(
+        "setupPersistent.prepareSourceClosureVerification",
+        () => prepareSourceClosureVerification(),
+      );
+    }
     await timePiecePhase(
       "setupPersistent.runtime.setup",
       () =>
         this.runtime.setup(undefined, pattern, inputs ?? {}, piece, {
           patternRepository: options?.repository,
+          initializePieceSourceHistory: true,
+          initialPieceSourceOrigin: options?.origin,
         }),
     );
     await timePiecePhase(

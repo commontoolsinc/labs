@@ -106,7 +106,7 @@ import { PatternManager } from "./pattern-manager.ts";
 import { PatternUpdater } from "./pattern-updater.ts";
 import type { CompiledModuleArtifact } from "./harness/types.ts";
 import { ModuleRegistry } from "./module.ts";
-import { Runner } from "./runner.ts";
+import { type PieceSourceTransition, Runner } from "./runner.ts";
 import { registerBuiltins } from "./builtins/index.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import { isCellScope, normalizeCellScope } from "./scope.ts";
@@ -548,6 +548,9 @@ export interface SpaceCellContents {
 
 type RuntimeSetupOptions = {
   patternRepository?: string;
+  pieceSourceTransition?: PieceSourceTransition;
+  initializePieceSourceHistory?: boolean;
+  initialPieceSourceOrigin?: string;
   reapplyStoredSetup?: boolean;
   prepareForResume?: boolean;
 };
@@ -1973,11 +1976,15 @@ export class Runtime {
     inputs?: any,
     options?: {
       expectedPatternIdentity?: { identity: string; symbol: string };
+      validateCurrentArgument?: (
+        argumentCell: Cell<unknown>,
+      ) => void;
       validateArgumentLinks?: (
         argumentCell: Cell<unknown>,
         argumentSchema: JSONSchema,
       ) => void;
       patternRepository?: string;
+      pieceSourceTransition?: PieceSourceTransition;
     },
   ) {
     return this.runner.runSynced(resultCell, pattern, inputs, options);

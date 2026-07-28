@@ -834,6 +834,27 @@ export async function loadSourceClosure(
   );
   // One sync pulls the entire link closure (recursive schema). No further syncs.
   await entry.sync();
+  return readLoadedSourceClosure(runtime, space, entryIdentity, tx);
+}
+
+/**
+ * Read a source closure that has already been synchronized into the replica.
+ *
+ * Reads remain attached to `tx`, so a later write commit conflicts if any
+ * source document changes between verification and commit.
+ */
+export function readLoadedSourceClosure(
+  runtime: Runtime,
+  space: MemorySpace,
+  entryIdentity: string,
+  tx: IExtendedStorageTransaction,
+): Map<string, SourceDoc> | undefined {
+  const entry = runtime.getCell(
+    space,
+    sourceDocKey(entryIdentity),
+    SOURCE_DOC_SCHEMA,
+    tx,
+  );
   const root = entry.get() as StoredSourceDoc | undefined;
   if (!root || typeof root.identity !== "string") return undefined;
 
@@ -892,29 +913,14 @@ export async function loadSourceClosure(
   return out;
 }
 
-/**
- * Load the source closure (see {@link loadSourceClosure}) and **graph-wiring
- * verify** it (step 4.3.6): recompute every module's Merkle identity from the
- * loaded source + import graph and require it to equal its document key. This is
- * the content-addressed analog of `verifyModuleGraph` — the source set is
- * self-verifying (content-addressing IS the integrity), so a tampered source, a
- * rewired link, or an incomplete closure is rejected here. Resolves to the
- * verified closure, or `undefined` if the entry is absent or verification fails.
- */
-export async function loadVerifiedSourceClosure(
+function verifyLoadedSourceClosure(
   runtime: Runtime,
   space: MemorySpace,
   entryIdentity: string,
-  tx: IExtendedStorageTransaction,
-  runtimeFingerprint = "",
-): Promise<Map<string, SourceDoc> | undefined> {
-  const closure = await loadSourceClosure(runtime, space, entryIdentity, tx);
+  closure: Map<string, SourceDoc> | undefined,
+  runtimeFingerprint: string,
+): Map<string, SourceDoc> | undefined {
   if (closure === undefined) return undefined;
-  // Identity verification parses source (module hashing scans imports), and
-  // every source-closure consumer parses further downstream (fabric-import
-  // scans, recompiles) — this is the shared entry those flows funnel through,
-  // so load the deferred compiler stack here, once.
-  await ensureCompilerStack();
   const verification = verifySourceDocs(
     entryIdentity,
     closure,
@@ -945,6 +951,67 @@ export async function loadVerifiedSourceClosure(
     moduleDelegationsFromDocs(closure),
   );
   return closure;
+}
+
+/**
+ * Load the deferred parser used by synchronous source-closure verification.
+ */
+export async function prepareSourceClosureVerification(): Promise<void> {
+  await ensureCompilerStack();
+}
+
+/**
+ * Verify a synchronized source closure while retaining its reads in `tx`.
+ *
+ * Callers first synchronize the recursive closure and await
+ * {@link prepareSourceClosureVerification}.
+ */
+export function readVerifiedSourceClosure(
+  runtime: Runtime,
+  space: MemorySpace,
+  entryIdentity: string,
+  tx: IExtendedStorageTransaction,
+  runtimeFingerprint = "",
+): Map<string, SourceDoc> | undefined {
+  return verifyLoadedSourceClosure(
+    runtime,
+    space,
+    entryIdentity,
+    readLoadedSourceClosure(runtime, space, entryIdentity, tx),
+    runtimeFingerprint,
+  );
+}
+
+/**
+ * Load the source closure (see {@link loadSourceClosure}) and **graph-wiring
+ * verify** it (step 4.3.6): recompute every module's Merkle identity from the
+ * loaded source + import graph and require it to equal its document key. This is
+ * the content-addressed analog of `verifyModuleGraph` — the source set is
+ * self-verifying (content-addressing IS the integrity), so a tampered source, a
+ * rewired link, or an incomplete closure is rejected here. Resolves to the
+ * verified closure, or `undefined` if the entry is absent or verification fails.
+ */
+export async function loadVerifiedSourceClosure(
+  runtime: Runtime,
+  space: MemorySpace,
+  entryIdentity: string,
+  tx: IExtendedStorageTransaction,
+  runtimeFingerprint = "",
+): Promise<Map<string, SourceDoc> | undefined> {
+  const closure = await loadSourceClosure(runtime, space, entryIdentity, tx);
+  if (closure === undefined) return undefined;
+  // Identity verification parses source (module hashing scans imports), and
+  // every source-closure consumer parses further downstream (fabric-import
+  // scans, recompiles) — this is the shared entry those flows funnel through,
+  // so load the deferred compiler stack here, once.
+  await prepareSourceClosureVerification();
+  return verifyLoadedSourceClosure(
+    runtime,
+    space,
+    entryIdentity,
+    closure,
+    runtimeFingerprint,
+  );
 }
 
 // --- Compiled-set store (4.3.3): `compileCache:<rtver>/<identity>` + CFC ------
