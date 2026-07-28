@@ -755,12 +755,11 @@ function availableGeneratedCpuColor(
   // The color uses the low 21 hash bits. Adding an odd number visits each
   // possible low-bit value once, so one of the first usedColors.size + 1
   // candidates must be available.
-  for (let salt = 0; salt <= usedColors.size; salt++) {
+  for (let salt = 0;; salt++) {
     const mixed = (hash + Math.imul(salt, 0x9e3779b9)) >>> 0;
     const candidate = generatedCpuColor(mixed);
     if (!usedColors.has(candidate)) return candidate;
   }
-  throw new Error("Could not assign a distinct CPU color.");
 }
 
 function cpuColors(cpus: Iterable<string>): Map<string, string> {
@@ -801,13 +800,14 @@ interface BenchmarkCpuIndex {
   trend: ReturnType<typeof benchmarkTrend>;
 }
 
+type CpuBenchmarkRun = CachedBenchmarkRun & { cpu: string };
+
 function benchmarkCpuIndices(
-  cached: CachedBenchmarkRun[],
+  cached: CpuBenchmarkRun[],
   now: number,
 ): BenchmarkCpuIndex[] {
   const byCpu = new Map<string, CachedBenchmarkRun[]>();
   for (const run of cached) {
-    if (run.cpu === undefined) continue;
     const runs = byCpu.get(run.cpu);
     if (runs) runs.push(run);
     else byCpu.set(run.cpu, [run]);
@@ -884,7 +884,7 @@ function benchmarkIndexView(
   // The successful runs with processor identities and readable artifacts in the
   // window, oldest -> newest.
   const cached = (benchmarkStore.refreshedRuns() ?? benchmarkStore.list(cutoff))
-    .filter((run) =>
+    .filter((run): run is CpuBenchmarkRun =>
       run.at >= cutoff && run.cpu !== undefined && run.metrics.size > 0
     )
     .sort((a, b) => a.at - b.at);
