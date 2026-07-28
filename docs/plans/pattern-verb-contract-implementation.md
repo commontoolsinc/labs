@@ -6,10 +6,12 @@ as work proceeds: check off exit criteria, record scope changes.
 
 **Amended 2026-07-28**, context only — no scope or decision changed: Risks
 names #5059 (`cf piece setsrc --check`) as the candidate preflight for the
-write-storm gate, and WS-F gains a read-path guard so `cf piece get` on a verb
-redirects to `cf piece call`. The design doc carries the same pass's larger
-share: the llm-dialog handler-branch precedent, tools restated as deferred
-rather than rejected, and the structural-interface property.
+write-storm gate, WS-F gains a read-path guard so `cf piece get` on a verb
+redirects to `cf piece call`, and Non-goals records that constraining
+`cf piece set` is out of scope pending a decision this plan does not make. The
+design doc carries the same pass's larger share: the llm-dialog handler-branch
+precedent, tools restated as deferred rather than rejected, and the
+structural-interface property.
 
 **Amended 2026-07-24** from the first live headless session (a three-topic
 graph, ~24 CLI operations): compact discovery index (A2), closed-world inputs
@@ -60,6 +62,15 @@ Named so their absence reads as intent, not oversight:
   separate comparison with existing slugs and configured host/space addressing.
 - **Cross-space effect atomicity** — the spec's I11 gap stands; the guarantee
   is same-space, which covers `topics`.
+- **Constraining direct data writes.** `cf piece set` writes a result field
+  directly, past every rule in Part 1 — no declared payload, no atomic unit,
+  no typed rejection. The LLM tool surface has no equivalent (it can only
+  mutate through verbs), so the CLI is the outlier. Whether this stays a
+  sanctioned escape hatch depends on a declarative notion of pattern-managed
+  state that does not exist yet (the `readonly`/opt-in-writability question),
+  and `set` is also an authoring and debugging tool whose non-agent uses this
+  contract does not touch. Until that decision is made, the contract governs
+  verbs and says nothing about `set`.
 - **Batch / session mode** for the CLI — orthogonal call-cost work, linked
   rather than orphaned: even perfect verbs leave a fresh runtime paying boot
   and sync per call (20–80 s per mutation observed live), so this gets its
