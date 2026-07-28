@@ -65,15 +65,17 @@ Deno.test("buildView: transformed declarations without bodies retain function st
   const r = buildView(
     "// transformed: /types.ts\nexport declare function run(): void;\n",
   );
+  const declaration = r.doc.flatStructure.find((node) => node.name === "run");
 
-  assert(
-    r.doc.structure.some((node) =>
-      node.children.some((child) =>
-        child.kind === "function" && child.name === "run"
-      )
-    ),
-    "the declaration remains a TypeScript function",
-  );
+  assert(declaration, "the declaration remains in the TypeScript structure");
+  assertEquals(declaration.kind, "function");
+  assertEquals(declaration.children, []);
+  assertEquals(declaration.meta, {
+    kind: "closure",
+    params: [],
+    returns: undefined,
+    signature: "() → void",
+  });
 });
 
 Deno.test("buildView: only an exact first-line transformed header selects TypeScript", () => {
