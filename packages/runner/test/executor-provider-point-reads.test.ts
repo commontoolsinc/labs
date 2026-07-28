@@ -60,10 +60,13 @@ class CountingServer extends Server {
 
   /** FB13: rejected point reads (dead-lane `laneReadRejection` shape). */
   docsReadRejections = 0;
+  /** P1 frontier growth pulls: each docs.read's doc ids, in order. */
+  readonly docsReadIds: string[][] = [];
 
   override async docsRead(
     message: Parameters<Server["docsRead"]>[0],
   ): ReturnType<Server["docsRead"]> {
+    this.docsReadIds.push(message.query.docs.map((doc) => String(doc.id)));
     if (this.#docsReadGate !== null) await this.#docsReadGate;
     const response = await super.docsRead(message);
     if (
@@ -1231,13 +1234,12 @@ Deno.test("FB13: lane drain retires a scoped watch and clears its lane-keyed cov
   }
 });
 
-// P1 covered growth pulls (client-passivity §0 step 1): with the dial on, a
-// closure-growth cold refresh sends `omitWatchCovered`, the server omits the
-// docs this session's tracked watch surface already covers (skipping their
-// re-traversal — coveredSelectorSkips counts it), and the provider MERGES
-// the delta so every previously-held doc plus the wave's point updates stay
-// in the replica. Dial off (the other growth test above) keeps the legacy
-// full-reply replace byte-identical.
+// P1 frontier growth pulls (client-passivity §0 step 1): with the dial on, a
+// closure-growth cold refresh integrates via exact docs.read POINT READS of
+// the grown frontier — ZERO graph queries, zero server traversal — and the
+// provider MERGES the snapshots so every previously-held doc plus the
+// wave's point updates stay in the replica. Dial off (the other growth
+// test above) keeps the legacy full-closure graph pull byte-identical.
 Deno.test("executor provider covered growth pull merges the delta and keeps held docs", async () => {
   const dialEnv = "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_COVERED_GROWTH_PULL";
   Deno.env.set(dialEnv, "1");
@@ -1246,6 +1248,8 @@ Deno.test("executor provider covered growth pull merges the delta and keeps held
   const grown = "of:executor-point-reads:covered-grown" as URI;
   try {
     const flagsBefore = server.graphQueryCoveredFlags.length;
+    const graphQueriesBefore = server.graphQueryCount;
+    const docsReadsBefore = server.docsReadIds.length;
     await writerTransact([
       {
         op: "set",
@@ -1287,21 +1291,25 @@ Deno.test("executor provider covered growth pull merges the delta and keeps held
       true,
       "the revised root must be current in the replica",
     );
-    // ...the pull carried the opt-in and the server skipped covered work.
+    // ...and the growth integrated via POINT READS of exactly the grown
+    // frontier with ZERO graph queries (the closure re-walk this fix
+    // removes — a schema-true graph pull from the frontier re-entered
+    // the held closure through backlinks). Coverage-skip accounting for
+    // watch-TRACKED sessions is pinned separately in the memory wire
+    // test.
     assertEquals(
-      server.graphQueryCoveredFlags.slice(flagsBefore).some((flag) => flag),
-      true,
-      "the growth refresh must send omitWatchCovered",
+      server.graphQueryCount - graphQueriesBefore,
+      0,
+      "closure growth must not traverse under the frontier dial",
     );
-    // ...and the pull was FRONTIER-ROOTED: its roots are exactly the
-    // grown target, never the watch root (the closure re-walk this fix
-    // removes). Coverage-skip accounting for watch-TRACKED sessions is
-    // pinned separately in the memory wire test — the executor session
-    // has no server-side watch surface, so its delta comes from root
-    // narrowing alone.
-    const coveredIndex = server.graphQueryCoveredFlags.indexOf(true);
-    assertEquals(coveredIndex >= flagsBefore, true);
-    assertEquals(server.graphQueryRootIds[coveredIndex], [grown]);
+    assertEquals(
+      server.docsReadIds.slice(docsReadsBefore).some((ids) =>
+        ids.includes(grown)
+      ),
+      true,
+      "the grown target must arrive via an exact point read",
+    );
+    assertEquals(flagsBefore >= 0, true);
   } finally {
     Deno.env.delete(dialEnv);
     await fixture.close();

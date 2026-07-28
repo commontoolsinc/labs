@@ -617,20 +617,25 @@ propagate](#how-flags-propagate).
   `"0"`/unset legacy; worker-realm lazy read in
   [`packages/runner/src/storage/v2-host-provider.ts`](../../packages/runner/src/storage/v2-host-provider.ts),
   `startServerExecutionPool` defaults `"1"`): a closure-growth cold
-  refresh roots its `graph.query` at the GROWN FRONTIER the growth
-  detector enumerated — instead of re-walking the whole watch closure —
-  and MERGES the delta into the held set, with the revised held doc
-  itself applied as an F2 point update (never-held retries and
-  wave-triggered re-colds keep the legacy full-reply replace). The
-  request also carries `omitWatchCovered`, which lets a server session
-  that DOES track watches additionally skip covered (docKey, selector)
-  re-descents server-side; the executor session has no server-side
-  watch surface, so its win is the root narrowing. The 2026-07-28
-  instrumented confirm run motivated it: the whole-closure demand pull
-  was the dominant serving cost (`graph.query.demand` 20.6s/run, ZERO
-  coveredSelectorSkips vs ~6k on the watch paths, single pulls
-  stalling the serving loop 1.2s), and the engaged tail carried
-  +28 ms/note excess slope over flag-off.
+  refresh integrates the GROWN FRONTIER the growth detector enumerated
+  via exact `docs.read` POINT READS and walks the new subgraph
+  client-side — the held set is the boundary, so backlinks into
+  already-held docs terminate immediately — merging the snapshots into
+  the held set, with the revised held doc itself applied as an F2
+  point update (never-held retries and wave-triggered re-colds keep
+  the legacy full-closure graph pull). ZERO graph queries on the
+  growth path. (A first cut rooted a schema-true `graph.query` at the
+  frontier; the gate pair measured it WORSE than the full pull — the
+  frontier's backlinks re-entered the whole held closure — which is
+  why the walk is client-bounded point reads.) The 2026-07-28
+  instrumented confirm run motivated the change: the whole-closure
+  demand pull was the dominant serving cost (`graph.query.demand`
+  20.6s/run, ZERO coveredSelectorSkips vs ~6k on the watch paths,
+  single pulls stalling the serving loop 1.2s), and the engaged tail
+  carried +28 ms/note excess slope over flag-off. The separate
+  `omitWatchCovered` graph.query opt-in (server-side coverage seeding
+  for sessions that DO track watches) landed with the same change and
+  stays available to watch-tracked callers.
 - **Removal.** Fold calibrated fixed values into `serverPrimaryExecution`
   once P1 measures Worker cold-start and navigation-blip distributions.
 

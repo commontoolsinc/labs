@@ -2216,62 +2216,56 @@ class HostReplicaSession implements ReplicaSession {
       const watchTrigger = typeof trigger === "string"
         ? trigger
         : trigger?.get(watchId);
-      // P1 covered growth pulls: a closure-growth refresh roots at the
-      // GROWN FRONTIER (the targets the growth detector enumerated)
-      // instead of re-walking the whole watch closure, and MERGES the
-      // delta reply into the held set below; every other refresh keeps
-      // the legacy full-reply replace. The executor session has no
-      // server-side tracked watch surface (it lives on the F2
-      // notice+point-read feed), so the delta comes from ROOT NARROWING
-      // — `omitWatchCovered` still rides for sessions that DO track
-      // watches server-side. Frontier roots pull the full subtree
-      // (schema:true): the link-narrowed selector is not recoverable
-      // client-side, and over-held docs simply join the point-read
-      // steady state. Lane-scoped watches keep full pulls.
+      // P1 frontier growth pulls: a closure-growth refresh fetches the
+      // GROWN FRONTIER (the targets the growth detector enumerated) via
+      // exact `docs.read` POINT READS and walks the new subgraph
+      // client-side — the held set is the boundary, so backlinks into
+      // already-held docs terminate immediately (a schema-true graph
+      // pull from the frontier re-walked the WHOLE closure through
+      // exactly those backlinks — the 2026-07-28 gate pair measured that
+      // as WORSE than the full pull). Zero server traversal; the reply
+      // merges into the held set. Every other refresh keeps the legacy
+      // full-reply replace. Lane-scoped watches keep full pulls.
       const frontierRoots = coveredPullIds?.has(watchId) === true &&
           actingContext === undefined
         ? this.#pendingGrowthRoots.get(watchId)
         : undefined;
-      const coveredPull = frontierRoots !== undefined &&
-        frontierRoots.size > 0;
-      if (coveredPull) this.#pendingGrowthRoots.delete(watchId);
+      if (frontierRoots !== undefined && frontierRoots.size > 0) {
+        this.#pendingGrowthRoots.delete(watchId);
+        const startedAt = Date.now();
+        try {
+          await this.#pullGrowthFrontier(watchId, frontierRoots, atSeq);
+        } catch (error) {
+          // A failed frontier pull did NOT deliver its targets — restore
+          // them so the FB13 retry re-pulls the same frontier.
+          const restored = this.#pendingGrowthRoots.get(watchId) ?? new Set();
+          for (const key of frontierRoots) restored.add(key);
+          this.#pendingGrowthRoots.set(watchId, restored);
+          if (onError === undefined) throw error;
+          onError(watchId, error);
+          continue;
+        }
+        const finishedAt = Date.now();
+        this.#coldRefreshLastAt.set(watchId, finishedAt);
+        this.#coldRefreshCostMs.set(watchId, finishedAt - startedAt);
+        continue;
+      }
       const startedAt = Date.now();
       let result;
       try {
         result = await this.queryGraph(
-          coveredPull
-            ? {
-              roots: [...frontierRoots!].map((declaredKey) => {
-                const [scope, id] = declaredKey.split("\0");
-                return {
-                  id,
-                  ...(scope !== "space" ? { scope: scope as CellScope } : {}),
-                  selector: { path: [], schema: true },
-                };
-              }),
-              ...(atSeq !== undefined ? { atSeq } : {}),
-            }
-            : {
-              ...watch.query,
-              ...(atSeq !== undefined ? { atSeq } : {}),
-            },
-          actingContext !== undefined || watchTrigger !== undefined ||
-            coveredPull
+          {
+            ...watch.query,
+            ...(atSeq !== undefined ? { atSeq } : {}),
+          },
+          actingContext !== undefined || watchTrigger !== undefined
             ? {
               ...(actingContext !== undefined ? { actingContext } : {}),
               ...(watchTrigger !== undefined ? { trigger: watchTrigger } : {}),
-              ...(coveredPull ? { omitWatchCovered: true } : {}),
             }
             : undefined,
         );
       } catch (error) {
-        // A failed frontier pull did NOT deliver its targets — restore
-        // them so the FB13 retry re-pulls the same frontier.
-        if (coveredPull) {
-          const restored = this.#pendingGrowthRoots.get(watchId) ?? new Set();
-          for (const key of frontierRoots!) restored.add(key);
-          this.#pendingGrowthRoots.set(watchId, restored);
-        }
         if (onError === undefined) throw error;
         onError(watchId, error);
         continue;
@@ -2285,17 +2279,94 @@ class HostReplicaSession implements ReplicaSession {
       if (atSeq === undefined) {
         this.#appliedSeq = Math.max(this.#appliedSeq, result.serverSeq);
       }
-      const responseEntities = result.entities.map((
-        snapshot,
-      ): [string, typeof snapshot] => [snapshotKey(snapshot), snapshot]);
       this.#watchEntities.set(
         watchId,
-        coveredPull
-          ? new Map([
-            ...(this.#watchEntities.get(watchId) ?? new Map()),
-            ...responseEntities,
-          ])
-          : new Map(responseEntities),
+        new Map(result.entities.map((snapshot) => [
+          snapshotKey(snapshot),
+          snapshot,
+        ])),
+      );
+    }
+  }
+
+  /** P1 frontier growth pulls: point-read the grown targets and walk the
+   * NEW subgraph client-side — fetch a batch via `docs.read` (zero server
+   * traversal), merge the snapshots into the watch's held set, scan the
+   * fetched documents' links for targets that are still unknown, and
+   * repeat until the new subgraph closes. The held set bounds the walk:
+   * backlinks into already-held docs terminate immediately. Never-written
+   * ids are simply absent from the reply (a later commit for them raises
+   * its own growth). Bounded loudly — leftovers go back to
+   * #pendingGrowthRoots so a later flush continues rather than silently
+   * truncating. */
+  async #pullGrowthFrontier(
+    watchId: string,
+    frontier: ReadonlySet<string>,
+    atSeq?: number,
+  ): Promise<void> {
+    const MAX_ROUNDS = 16;
+    const MAX_DOCS = 2048;
+    const space = this.session.space;
+    const held = this.#watchEntities.get(watchId) ?? new Map();
+    this.#watchEntities.set(watchId, held);
+    const known = new Set<string>();
+    for (const snapshot of held.values()) {
+      known.add(declaredEntityKey(snapshot));
+    }
+    let pending = [...frontier].filter((key) => !known.has(key));
+    for (const key of pending) known.add(key);
+    let fetched = 0;
+    for (let round = 0; round < MAX_ROUNDS && pending.length > 0; round++) {
+      if (fetched + pending.length > MAX_DOCS) {
+        const spill = new Set(
+          [...(this.#pendingGrowthRoots.get(watchId) ?? [])],
+        );
+        for (const key of pending) spill.add(key);
+        this.#pendingGrowthRoots.set(watchId, spill);
+        console.warn(
+          "executor frontier pull capped; deferring remainder",
+          watchId,
+          pending.length,
+        );
+        return;
+      }
+      const result = await this.session.readDocs({
+        docs: pending.map((declaredKey) => {
+          const [scope, id] = declaredKey.split("\0");
+          return {
+            id,
+            ...(scope !== "space" ? { scope: scope as CellScope } : {}),
+          };
+        }),
+        branch: this.branch,
+        ...(atSeq !== undefined ? { atSeq } : {}),
+      });
+      fetched += pending.length;
+      const next = new Set<string>();
+      for (const snapshot of result.entities) {
+        held.set(snapshotKey(snapshot), snapshot);
+        for (
+          const target of collectLinkTargetKeys(
+            snapshot.document,
+            snapshot,
+            space,
+          )
+        ) {
+          if (known.has(target)) continue;
+          known.add(target);
+          next.add(target);
+        }
+      }
+      pending = [...next];
+    }
+    if (pending.length > 0) {
+      const spill = new Set([...(this.#pendingGrowthRoots.get(watchId) ?? [])]);
+      for (const key of pending) spill.add(key);
+      this.#pendingGrowthRoots.set(watchId, spill);
+      console.warn(
+        "executor frontier pull hit round cap; deferring remainder",
+        watchId,
+        pending.length,
       );
     }
   }
