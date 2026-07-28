@@ -63,5 +63,5 @@ The existing Markdown, language selection, session, frame rendering, diff
 document, diff semantics, and diff editing suites also passed with the feature
 enabled.
 
-The complete CLI suite passed 1,468 tests. The repository-wide format, lint,
-type, dependency, documentation, and package test tasks also passed.
+The complete CLI suite passed. The repository-wide format, lint, type,
+dependency, documentation, and package test tasks also passed.
