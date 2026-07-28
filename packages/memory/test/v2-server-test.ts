@@ -1,7 +1,10 @@
 import { assertEquals, assertExists } from "@std/assert";
+import { Database } from "@db/sqlite";
+import { fromFileUrl, toFileUrl } from "@std/path";
 import { FakeTime } from "@std/testing/time";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { parseClientMessage, Server, SessionRegistry } from "../v2/server.ts";
+import { resolveSpaceStoreUrl } from "../v2/storage-path.ts";
 import {
   decodeMemoryBoundary,
   encodeMemoryBoundary,
@@ -29,6 +32,106 @@ const TEST_AUDIENCE = "did:key:z6Mk-memory-v2-server-test-audience";
 const tick = async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
 };
+
+Deno.test("memory v2 server catches up the piece index after write fan-out", async () => {
+  const directory = await Deno.makeTempDir({
+    prefix: "memory-v2-piece-index-idle-",
+  });
+  const store = toFileUrl(`${directory}/`);
+  const space = "did:key:z6Mk-memory-v2-piece-index-idle";
+  const server = createServer(store.href);
+
+  try {
+    await server.writeDocument(space, "of:ordinary", { ordinary: true });
+    await server.flushSessions([space]);
+
+    const database = new Database(
+      fromFileUrl(resolveSpaceStoreUrl(store, space)),
+    );
+    try {
+      assertEquals(
+        database.prepare(`
+SELECT indexed_commit_seq
+FROM pragma_piece_root_index_state
+WHERE singleton = 1
+`).get(),
+        { indexed_commit_seq: 1 },
+      );
+    } finally {
+      database.close();
+    }
+  } finally {
+    await server.close();
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("memory v2 server lists a caught-up piece index beside an active writer", async () => {
+  const directory = await Deno.makeTempDir({
+    prefix: "memory-v2-piece-index-current-read-",
+  });
+  const store = toFileUrl(`${directory}/`);
+  const space = "did:key:z6Mk-memory-v2-piece-index-current-read";
+  const sessionId = "session:piece-index-current-read";
+  const sessions = new SessionRegistry();
+  const server = new Server({
+    sessions,
+    store,
+    subscriptionRefreshDelayMs: 0,
+    authorizeSessionOpen: () =>
+      "did:key:z6Mk-memory-v2-piece-index-current-read",
+    sessionOpenAuth: { audience: TEST_AUDIENCE },
+  });
+  sessions.open(
+    space,
+    { sessionId },
+    0,
+    "piece-index-current-read",
+    "did:key:z6Mk-memory-v2-piece-index-current-read",
+  );
+  let writer: Database | undefined;
+
+  try {
+    const committed = await server.transact({
+      type: "transact",
+      requestId: "piece-index-current-read-write",
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:current",
+          value: {
+            value: { $NAME: "Current" },
+            patternIdentity: {
+              identity: "Q".repeat(43),
+              symbol: "default",
+            },
+          },
+        }],
+      },
+    });
+    assertExists(committed.ok);
+    await server.flushSessions([space]);
+
+    writer = new Database(fromFileUrl(resolveSpaceStoreUrl(store, space)));
+    writer.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE");
+    const listed = await server.listPieceRoots({
+      type: "piece-root.list",
+      requestId: "piece-index-current-read-list",
+      space,
+      sessionId,
+    });
+    assertEquals(listed.ok?.pieces[0].name, "Current");
+  } finally {
+    if (writer?.inTransaction) writer.exec("ROLLBACK");
+    writer?.close();
+    await server.close();
+    await Deno.remove(directory, { recursive: true });
+  }
+});
 
 const shiftMessage = (messages: ServerMessage[]): ServerMessage => {
   const message = messages.shift();
@@ -191,6 +294,51 @@ Deno.test("memory v2 server parses entity identifier listing requests", () => {
       sessionId: "session:1",
       id: "of:fid1:first",
     },
+  );
+});
+
+Deno.test("memory v2 server parses indexed piece root listing requests", () => {
+  const request = {
+    type: "piece-root.list",
+    requestId: "piece-root-list-page",
+    space: "did:key:z6Mk-space",
+    sessionId: "session:1",
+    after: {
+      id: "fid1:first",
+      orderKey: "opaque-order-key",
+      scope: "user",
+      registered: false,
+    },
+    limit: 100,
+    expectedServerSeq: 42,
+    registeredOnly: true,
+  } as const;
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary(request)),
+    request,
+  );
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      ...request,
+      after: {
+        id: "of:fid1:first",
+        scope: "space",
+        registered: true,
+      },
+    })),
+    null,
+  );
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary({
+      ...request,
+      limit: 0,
+    })),
+    null,
+  );
+  const { expectedServerSeq: _expectedServerSeq, ...withoutSequence } = request;
+  assertEquals(
+    parseClientMessage(encodeMemoryBoundary(withoutSequence)),
+    null,
   );
 });
 

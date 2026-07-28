@@ -109,6 +109,12 @@ One line per archived document; each document's header carries the fuller
 - [piece-timeout-hangs-investigation.md](packages/cli/piece-timeout-hangs-investigation.md)
   — why the CLI tool-result poll was replaced event-driven and why the
   piece-start and sync bounds could not be removed at the CLI layer, July 2026.
+- [piece-listing-experiments-2026-07.md](packages/cli/piece-listing-experiments-2026-07.md)
+  — comparison of the C1, C2, and C3 piece-listing experiments and the indexed
+  server-classified design selected for C4, July 2026.
+- [piece-listing-lazy-index-2026-07.md](packages/cli/piece-listing-lazy-index-2026-07.md)
+  — cost and correctness evidence for lazy piece-root index maintenance, July
+  2026.
 
 ### Executed plans and work orders
 

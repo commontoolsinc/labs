@@ -812,45 +812,82 @@ describe("cli piece parsing", () => {
     });
   });
 
-  it("lists pattern provenance and isolates unreadable pieces", async () => {
-    const patternRef = {
-      identity: "A".repeat(43),
-      symbol: "default",
-      source: {
-        ref: `cf:pattern:${"A".repeat(43)}`,
-        repository: "https://github.com/commontoolsinc/labs",
-        entry: "/notes/note.tsx",
+  it("maps indexed piece roots without loading or starting pieces", async () => {
+    const identity = "I".repeat(43);
+    const calls: unknown[] = [];
+    const manager = {
+      listPieceRoots: (options: unknown) => {
+        calls.push(options);
+        return Promise.resolve([
+          {
+            id: "of:registered",
+            scope: "space",
+            registered: true,
+            name: "Registered",
+            pattern: {
+              identity,
+              symbol: "default",
+              repository: "https://example.test/repository",
+              entry: "/notes.tsx",
+            },
+          },
+          {
+            id: "fid1:orphan",
+            entityKind: "computed",
+            scope: "user",
+            registered: false,
+          },
+        ]);
       },
     };
-    const controller = {
-      getRegisteredPieces: () =>
-        Promise.resolve([
-          { id: "of:readable" },
-          { id: "of:unreadable" },
-        ]),
-      get: (id: string) =>
-        id === "of:unreadable"
-          ? Promise.reject(new Error("not readable"))
-          : Promise.resolve({
-            getCell: () => ({
-              key: () => ({ pull: () => Promise.resolve("Readable") }),
-            }),
-            getPatternRef: () => Promise.resolve(patternRef),
-          }),
-    };
+    let loadedConfig: unknown;
 
-    const listed = await listPieces({
+    const listed = await listPieces(
+      {
+        apiUrl: API_URL,
+        space: SPACE,
+        identity: ID,
+      },
+      {},
+      {
+        loadManager: (config) => {
+          loadedConfig = config;
+          return Promise.resolve(manager as any);
+        },
+        createController: () => {
+          throw new Error("indexed listing must not create a controller");
+        },
+      },
+    );
+
+    expect(loadedConfig).toEqual({
       apiUrl: API_URL,
       space: SPACE,
       identity: ID,
-    }, {
-      loadManager: () => Promise.resolve({} as any),
-      createController: () => controller as any,
+      deferSpaceCellSync: true,
     });
-
+    expect(calls).toEqual([{ registeredOnly: false }]);
     expect(listed).toEqual([
-      { id: "of:readable", name: "Readable", patternRef },
-      { id: "of:unreadable", error: "not readable" },
+      {
+        id: "of:registered",
+        name: "Registered",
+        patternRef: {
+          identity,
+          symbol: "default",
+          source: {
+            ref: `cf:pattern:${identity}`,
+            repository: "https://example.test/repository",
+            entry: "/notes.tsx",
+          },
+        },
+        registered: true,
+      },
+      {
+        id: "fid1:orphan",
+        entityKind: "computed",
+        registered: false,
+        scope: "user",
+      },
     ]);
   });
 

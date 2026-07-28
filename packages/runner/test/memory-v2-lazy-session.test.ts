@@ -386,6 +386,41 @@ describe("Memory v2 entity identifier capabilities", () => {
   });
 });
 
+describe("Memory v2 piece root listing", () => {
+  it("forwards indexed piece root page options and results", async () => {
+    const requests: unknown[] = [];
+    const result = {
+      serverSeq: 7,
+      pieces: [{
+        id: "piece-a",
+        scope: "space" as const,
+        registered: false,
+      }],
+    };
+    const { storage, provider } = entityListingStorage({}, {
+      listPieceRoots: (options: unknown) => {
+        requests.push(options);
+        return Promise.resolve(result);
+      },
+    });
+
+    try {
+      expect(
+        await provider.listPieceRootPage!({
+          limit: 1,
+          registeredOnly: true,
+        }),
+      ).toEqual(result);
+      expect(requests).toEqual([{
+        limit: 1,
+        registeredOnly: true,
+      }]);
+    } finally {
+      await storage.close();
+    }
+  });
+});
+
 describe("Memory v2 lazy emulated server creation", () => {
   it("uses the manager id for every emulated space session", async () => {
     const opened: Array<{ space: string; sessionId?: string }> = [];

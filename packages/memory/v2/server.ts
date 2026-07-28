@@ -20,8 +20,11 @@ import {
   type GraphQueryResult,
   type HelloMessage,
   MAX_ENTITY_ID_PAGE_SIZE,
+  MAX_PIECE_ROOT_PAGE_SIZE,
   type Operation,
   parseMemoryProtocolFlags,
+  type PieceRootListRequest,
+  type PieceRootListResult,
   type ResponseMessage,
   type SchedulerActionSnapshotQuery,
   type SchedulerExecutionContextKey,
@@ -120,6 +123,7 @@ const SLOW_QUERY_THRESHOLD_MS = 100;
 const SLOW_QUERY_BUFFER_SIZE = 100;
 const DEFAULT_SESSION_OPEN_CHALLENGE_TTL_SECONDS = 300;
 const SESSION_OPEN_CHALLENGE_BYTES = 32;
+const PIECE_ROOT_INDEX_PENDING = Symbol("piece-root-index-pending");
 // SQLite resource caps (mirror the `sqlite.query` wire-parse caps; also applied
 // to the folded-write path, which is parsed loosely as part of a `transact`).
 const MAX_SQLITE_SQL_LENGTH = 100_000;
@@ -181,6 +185,22 @@ const randomHex = (bytes: number): string => {
 
 const isNonNegativeInteger = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
+const isPieceRootCursor = (
+  value: unknown,
+): value is NonNullable<PieceRootListRequest["after"]> => {
+  if (!isRecord(value)) return false;
+  const scope = value.scope;
+  const registered = value.registered;
+  const registryPosition = value.registryPosition;
+  return typeof value.id === "string" &&
+    typeof value.orderKey === "string" &&
+    (scope === "space" || scope === "user" || scope === "session") &&
+    typeof registered === "boolean" &&
+    (registered
+      ? isNonNegativeInteger(registryPosition)
+      : registryPosition === undefined);
+};
 
 const schedulerApplicableContextKeys = (
   principal: string | undefined,
@@ -703,6 +723,26 @@ class Connection {
         }
         {
           const response = await this.server.entityIdExists(parsed);
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
+        return;
+      case "piece-root.list":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        {
+          const response = await this.server.listPieceRoots(parsed);
           this.sendSessionResponse(
             parsed.space,
             parsed.sessionId,
@@ -2450,6 +2490,110 @@ export class Server {
     }
   }
 
+  async listPieceRoots(
+    message: PieceRootListRequest,
+  ): Promise<ResponseMessage<PieceRootListResult>> {
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session === null) {
+      return respondTypedError<PieceRootListResult>(
+        message.requestId,
+        toError("SessionError", "Unknown session for space"),
+      );
+    }
+    try {
+      const engine = await this.openEngine(message.space);
+      const readPage = (
+        catchUp: boolean,
+      ):
+        | ResponseMessage<PieceRootListResult>
+        | typeof PIECE_ROOT_INDEX_PENDING => {
+        const deny = this.#authorizeCurrentSessionWithEngine(
+          engine,
+          message.space,
+          message.sessionId,
+          session,
+          "READ",
+        );
+        if (deny) {
+          return respondTypedError<PieceRootListResult>(
+            message.requestId,
+            deny,
+          );
+        }
+        if (
+          message.after !== undefined &&
+          message.expectedServerSeq === undefined
+        ) {
+          return respondTypedError<PieceRootListResult>(
+            message.requestId,
+            toError(
+              "ProtocolError",
+              "piece root continuation requires expectedServerSeq",
+            ),
+          );
+        }
+
+        const limit = Math.min(
+          message.limit ?? MAX_PIECE_ROOT_PAGE_SIZE,
+          MAX_PIECE_ROOT_PAGE_SIZE,
+        );
+        const serverSeq = Engine.serverSeq(engine);
+        if (
+          message.expectedServerSeq !== undefined &&
+          message.expectedServerSeq !== serverSeq
+        ) {
+          return respondTypedError<PieceRootListResult>(
+            message.requestId,
+            toError(
+              "SnapshotChangedError",
+              `piece root snapshot changed from server sequence ${message.expectedServerSeq} to ${serverSeq}`,
+            ),
+          );
+        }
+        if (!Engine.pieceRootIndexIsCurrent(engine, serverSeq)) {
+          if (!catchUp) return PIECE_ROOT_INDEX_PENDING;
+          Engine.catchUpPieceRootIndex(engine);
+        }
+        const rows = Engine.listCurrentPieceRootPage(engine, {
+          principal: session.principal,
+          sessionId: message.sessionId,
+          after: message.after,
+          limit: limit + 1,
+          registeredOnly: message.registeredOnly,
+        });
+        const page = rows.slice(0, limit);
+        const nextAfter = rows.length > limit ? page.at(-1)?.cursor : undefined;
+
+        return {
+          type: "response",
+          requestId: message.requestId,
+          ok: {
+            serverSeq,
+            pieces: page.map(({ entry }) => entry),
+            ...(nextAfter === undefined ? {} : { nextAfter }),
+          },
+        };
+      };
+      const currentPage = engine.database.transaction(() => readPage(false))
+        .deferred();
+      if (currentPage !== PIECE_ROOT_INDEX_PENDING) return currentPage;
+      const caughtUpPage = engine.database.transaction(() => readPage(true))
+        .immediate();
+      if (caughtUpPage === PIECE_ROOT_INDEX_PENDING) {
+        throw new Error("piece root index catch-up did not run");
+      }
+      return caughtUpPage;
+    } catch (error) {
+      return respondTypedError<PieceRootListResult>(
+        message.requestId,
+        toError(
+          "QueryError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
   async listSchedulerActionSnapshots(
     message: SchedulerSnapshotListRequest,
   ): Promise<ResponseMessage<SchedulerSnapshotListResult>> {
@@ -3383,6 +3527,14 @@ export class Server {
             }
           },
         );
+        try {
+          Engine.catchUpPieceRootIndex(await this.openEngine(space));
+        } catch (error) {
+          console.warn(
+            `piece-root index idle catch-up failed for ${space}`,
+            error,
+          );
+        }
       }
 
       if (initial !== undefined) {
@@ -3616,7 +3768,7 @@ export class Server {
       if (url.protocol === "file:") {
         await FS.ensureDir(Path.toFileUrl(Path.dirname(Path.fromFileUrl(url))));
       }
-      return await Engine.open({ url });
+      return await Engine.open({ url, space });
     })();
     opened.catch(() => {
       if (this.#engines.get(space) === opened) {
@@ -3833,6 +3985,36 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       id: parsed.id as EntityIdLookupRequest["id"],
+    };
+  }
+
+  if (
+    parsed.type === "piece-root.list" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    (parsed.after === undefined || isPieceRootCursor(parsed.after)) &&
+    (parsed.after === undefined || parsed.expectedServerSeq !== undefined) &&
+    (parsed.limit === undefined ||
+      (isNonNegativeInteger(parsed.limit) && parsed.limit > 0)) &&
+    (parsed.expectedServerSeq === undefined ||
+      isNonNegativeInteger(parsed.expectedServerSeq)) &&
+    (parsed.registeredOnly === undefined ||
+      typeof parsed.registeredOnly === "boolean")
+  ) {
+    return {
+      type: "piece-root.list",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      ...(parsed.after === undefined ? {} : { after: parsed.after }),
+      ...(parsed.limit === undefined ? {} : { limit: parsed.limit }),
+      ...(parsed.expectedServerSeq === undefined
+        ? {}
+        : { expectedServerSeq: parsed.expectedServerSeq }),
+      ...(parsed.registeredOnly === undefined
+        ? {}
+        : { registeredOnly: parsed.registeredOnly }),
     };
   }
 

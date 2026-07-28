@@ -1424,6 +1424,27 @@ Deno.test("acl enforce: auxiliary read and operator surfaces honor capabilities"
     });
     assertEquals(entityExists.ok?.exists, true);
 
+    const pieceRoots = await server.listPieceRoots({
+      type: "piece-root.list",
+      requestId: nextRequestId("acl-piece-roots"),
+      space,
+      sessionId: bobSession.ok.sessionId,
+    });
+    assertEquals(pieceRoots.ok?.pieces, []);
+    const uncheckedContinuation = await server.listPieceRoots({
+      type: "piece-root.list",
+      requestId: nextRequestId("acl-piece-roots-continuation"),
+      space,
+      sessionId: bobSession.ok.sessionId,
+      after: {
+        id: "piece",
+        orderKey: "opaque-order-key",
+        scope: "space",
+        registered: false,
+      },
+    });
+    assertEquals(uncheckedContinuation.error?.name, "ProtocolError");
+
     const watch = await server.watchAdd({
       type: "session.watch.add",
       requestId: nextRequestId("acl-watch-add"),
@@ -1479,6 +1500,14 @@ Deno.test("acl enforce: entity identifier reads require READ capability", async 
       id: `of:${space}`,
     });
     assertEquals(lookup.error?.name, "AuthorizationError");
+
+    const pieceRoots = await server.listPieceRoots({
+      type: "piece-root.list",
+      requestId: nextRequestId("acl-piece-roots-denied"),
+      space,
+      sessionId: "session:entity-identifiers-denied",
+    });
+    assertEquals(pieceRoots.error?.name, "AuthorizationError");
   } finally {
     await server.close();
   }

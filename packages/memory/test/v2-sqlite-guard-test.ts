@@ -12,20 +12,14 @@ import {
   assertReadOnly,
   assertWriteSafe,
   classifyStatement,
-  CORE_TABLE_NAMES,
   GuardError,
 } from "../v2/sqlite/guard.ts";
 import { open } from "../v2/engine.ts";
 
-// S4: the guard's core-table denylist is hand-maintained, but unqualified
-// pattern-SQL names resolve to the attached cell-db ONLY because `main` (the
-// core store) has no table of that name. If the engine ever adds a `main` table
-// whose name a pattern also uses and that name is NOT in CORE_TABLE_NAMES, a
-// pattern write could silently hit core storage. This asserts the denylist
-// covers every real `main` table, so adding an engine table without updating the
-// guard fails CI.
-describe("CORE_TABLE_NAMES vs the engine schema", () => {
-  it("covers every table the engine creates in `main`", async () => {
+// S4: unqualified pattern-SQL names resolve to the attached cell database only
+// when the guard reserves every table in the core store.
+describe("SQLite guard reservations vs the engine schema", () => {
+  it("cover every table the engine creates in `main`", async () => {
     const path = await Deno.makeTempFile({ suffix: ".sqlite" });
     const engine = await open({ url: toFileUrl(path) });
     try {
@@ -35,7 +29,9 @@ describe("CORE_TABLE_NAMES vs the engine schema", () => {
       ).all() as Array<{ name: string }>;
       const missing = rows
         .map((r) => r.name)
-        .filter((name) => !CORE_TABLE_NAMES.includes(name));
+        .filter((name) =>
+          !classifyStatement(`SELECT * FROM "${name}"`).coreRef
+        );
       expect(missing).toEqual([]);
     } finally {
       engine.database.close();
@@ -177,6 +173,9 @@ describe("guard hardening (review findings)", () => {
     );
     expect(() => assertReadOnly("SELECT * FROM pragma_table_info('messages')"))
       .toThrow(GuardError);
+    expect(() => assertWriteSafe("DELETE FROM pragma_piece_root")).toThrow(
+      GuardError,
+    );
   });
 
   it("rejects whitespace-around-dot and forbidden-schema prefixes", () => {

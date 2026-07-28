@@ -54,6 +54,9 @@ export type {
 export type {
   EntityIdListOptions,
   EntityIdListResult,
+  PieceRootEntry,
+  PieceRootListOptions,
+  PieceRootListResult,
 } from "@commonfabric/memory/v2";
 export {
   debugTransactionWrites,

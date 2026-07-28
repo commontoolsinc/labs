@@ -26,6 +26,7 @@ import {
   isEntityDocument,
   type Operation,
   type PatchOp,
+  type PieceRootCursor,
   type Reference,
   type SchedulerActionObservation,
   type SchedulerActionSnapshotCursor,
@@ -35,6 +36,13 @@ import {
   type SqliteOperation,
   tableDeclaresRowLabel,
 } from "../v2.ts";
+import {
+  catchUpPieceRootIndex as catchUpIndexedPieceRoots,
+  type IndexedPieceRoot,
+  initializePieceRootIndex,
+  listPieceRootPage as listIndexedPieceRootPage,
+  pieceRootIndexIsCurrent as indexedPieceRootIndexIsCurrent,
+} from "./piece-root-index.ts";
 
 export type {
   CompleteActionScopeSummary,
@@ -390,7 +398,6 @@ CREATE TABLE IF NOT EXISTS head (
   op        TEXT    NOT NULL CHECK (op IN ('set', 'patch', 'delete')),
   PRIMARY KEY (branch, id, scope_key)
 );
-CREATE INDEX IF NOT EXISTS idx_head_branch ON head (branch);
 
 CREATE TABLE IF NOT EXISTS snapshot (
   branch  TEXT    NOT NULL DEFAULT '',
@@ -802,6 +809,7 @@ interface PreparedStatements {
 
 export type Engine = {
   url: URL;
+  space?: string;
   database: Database;
   snapshotInterval: number;
   snapshotRetention: number;
@@ -850,6 +858,7 @@ export class ProtocolError extends Error {
 
 export type OpenOptions = {
   url: URL;
+  space?: string;
   snapshotInterval?: number;
   snapshotRetention?: number;
 };
@@ -1334,6 +1343,8 @@ DROP INDEX IF EXISTS idx_revision_branch_id_seq;
 DROP INDEX IF EXISTS idx_revision_commit;
 DROP INDEX IF EXISTS idx_revision_branch;
 DROP INDEX IF EXISTS idx_head_branch;
+DROP INDEX IF EXISTS idx_head_branch_seq;
+DROP INDEX IF EXISTS idx_head_branch_sequence;
 DROP INDEX IF EXISTS idx_snapshot_lookup;
 
 ALTER TABLE revision RENAME TO revision_unscoped_migration;
@@ -1368,7 +1379,7 @@ CREATE TABLE head (
   op        TEXT    NOT NULL CHECK (op IN ('set', 'patch', 'delete')),
   PRIMARY KEY (branch, id, scope_key)
 );
-CREATE INDEX idx_head_branch ON head (branch);
+CREATE INDEX idx_head_branch_sequence ON head (branch, seq);
 
 CREATE TABLE snapshot (
   branch    TEXT    NOT NULL DEFAULT '',
@@ -1416,6 +1427,8 @@ const migrateHeadCurrentOp = (database: Database): void => {
 BEGIN TRANSACTION;
 
 DROP INDEX IF EXISTS idx_head_branch;
+DROP INDEX IF EXISTS idx_head_branch_seq;
+DROP INDEX IF EXISTS idx_head_branch_sequence;
 DROP INDEX IF EXISTS idx_head_live_entity_ids;
 
 ALTER TABLE head RENAME TO head_current_op_migration;
@@ -1429,7 +1442,7 @@ CREATE TABLE head (
   op        TEXT    NOT NULL CHECK (op IN ('set', 'patch', 'delete')),
   PRIMARY KEY (branch, id, scope_key)
 );
-CREATE INDEX idx_head_branch ON head (branch);
+CREATE INDEX idx_head_branch_sequence ON head (branch, seq);
 
 INSERT INTO head (branch, id, scope_key, seq, op_index, op)
 SELECT
@@ -1456,6 +1469,10 @@ COMMIT;
   }
 
   database.exec(`
+DROP INDEX IF EXISTS idx_head_branch;
+DROP INDEX IF EXISTS idx_head_branch_seq;
+CREATE INDEX IF NOT EXISTS idx_head_branch_sequence
+  ON head (branch, seq);
 CREATE INDEX IF NOT EXISTS idx_head_live_entity_ids
   ON head (branch, scope_key, id, op)
   WHERE op <> 'delete';
@@ -2260,6 +2277,7 @@ const migrateSchedulerExecutionContextSchema = (database: Database): void => {
 export const open = async (
   {
     url,
+    space,
     snapshotInterval = DEFAULT_SNAPSHOT_INTERVAL,
     snapshotRetention = DEFAULT_SNAPSHOT_RETENTION,
   }: OpenOptions,
@@ -2289,14 +2307,17 @@ export const open = async (
   }
   migrateSchedulerExecutionContextSchema(database);
   migrateSchedulerActionIndexes(database);
-  return {
+  const engine: Engine = {
     url,
+    space,
     database,
     snapshotInterval,
     snapshotRetention,
     legacyCommitMetadataRefsRequired: commitMetadataRefsRequired(database),
     statements: prepareStatements(database),
   };
+  initializePieceRootIndex(database);
+  return engine;
 };
 
 export const close = (engine: Engine): void => {
@@ -2373,6 +2394,151 @@ export const listEntityIdPage = (
     limit,
     ...(after === undefined ? {} : { after }),
   }) as { id: EntityId }[]).map(({ id }) => id);
+};
+
+type PieceRootPageOptions = {
+  principal?: string;
+  sessionId: SessionId;
+  after?: PieceRootCursor;
+  limit: number;
+  registeredOnly?: boolean;
+};
+
+const PIECE_ROOT_INDEX_PENDING = Symbol("piece-root-index-pending");
+
+export const listCurrentPieceRootPage = (
+  engine: Engine,
+  {
+    principal,
+    sessionId,
+    after,
+    limit,
+    registeredOnly,
+  }: PieceRootPageOptions,
+): IndexedPieceRoot[] =>
+  listIndexedPieceRootPage(engine.database, {
+    visibleScopeKeys: {
+      space: resolveScopeKey("space", { principal, sessionId }),
+      user: principal === undefined
+        ? "\0unavailable:user"
+        : resolveScopeKey("user", { principal, sessionId }),
+      session: principal === undefined
+        ? "\0unavailable:session"
+        : resolveScopeKey("session", { principal, sessionId }),
+    },
+    after,
+    limit,
+    registeredOnly,
+  });
+
+export const pieceRootIndexIsCurrent = (
+  engine: Engine,
+  targetCommitSeq = serverSeq(engine),
+): boolean =>
+  indexedPieceRootIndexIsCurrent(engine.database, {
+    space: engine.space,
+    targetCommitSeq,
+  });
+
+export const listPieceRootPage = (
+  engine: Engine,
+  options: PieceRootPageOptions,
+): IndexedPieceRoot[] => {
+  if (engine.database.inTransaction) {
+    if (!pieceRootIndexIsCurrent(engine)) {
+      catchUpPieceRootIndex(engine);
+    }
+    return listCurrentPieceRootPage(engine, options);
+  }
+  const currentPage = engine.database.transaction(() => {
+    const targetCommitSeq = serverSeq(engine);
+    if (!pieceRootIndexIsCurrent(engine, targetCommitSeq)) {
+      return PIECE_ROOT_INDEX_PENDING;
+    }
+    return listCurrentPieceRootPage(engine, options);
+  }).deferred();
+  if (currentPage !== PIECE_ROOT_INDEX_PENDING) return currentPage;
+  return engine.database.transaction(() => {
+    catchUpPieceRootIndex(engine);
+    return listCurrentPieceRootPage(engine, options);
+  }).immediate();
+};
+
+export const catchUpPieceRootIndex = (engine: Engine): void => {
+  const catchUp = () => {
+    const targetCommitSeq = serverSeq(engine);
+    const documentSeq = headSeq(engine, DEFAULT_BRANCH);
+    catchUpIndexedPieceRoots(engine.database, {
+      space: engine.space,
+      targetCommitSeq,
+      readDocument: ({ branch, id, scopeKey }) =>
+        readStateForScopeKey(engine, {
+          branch,
+          id,
+          scopeKey,
+          seq: documentSeq,
+        })?.document ?? null,
+    });
+  };
+  if (engine.database.inTransaction) {
+    catchUp();
+  } else {
+    const current = engine.database.transaction(() => {
+      const targetCommitSeq = serverSeq(engine);
+      return pieceRootIndexIsCurrent(engine, targetCommitSeq);
+    }).deferred();
+    if (current) return;
+    engine.database.transaction(catchUp).immediate();
+  }
+};
+
+export const listPieceRootSnapshotPage = (
+  engine: Engine,
+  options: {
+    principal?: string;
+    sessionId: SessionId;
+    after?: PieceRootCursor;
+    limit: number;
+    expectedServerSeq?: number;
+    registeredOnly?: boolean;
+  },
+): {
+  serverSeq: number;
+  rows?: IndexedPieceRoot[];
+} => {
+  const readSnapshot = (catchUp: boolean) => {
+    const snapshotServerSeq = serverSeq(engine);
+    if (
+      options.expectedServerSeq !== undefined &&
+      options.expectedServerSeq !== snapshotServerSeq
+    ) {
+      return { serverSeq: snapshotServerSeq };
+    }
+    if (!pieceRootIndexIsCurrent(engine, snapshotServerSeq)) {
+      if (!catchUp) return PIECE_ROOT_INDEX_PENDING;
+      catchUpPieceRootIndex(engine);
+    }
+    return {
+      serverSeq: snapshotServerSeq,
+      rows: listCurrentPieceRootPage(engine, options),
+    };
+  };
+  if (engine.database.inTransaction) {
+    const result = readSnapshot(true);
+    if (result === PIECE_ROOT_INDEX_PENDING) {
+      throw new Error("piece root index catch-up did not run");
+    }
+    return result;
+  }
+  const currentPage = engine.database.transaction(() => readSnapshot(false))
+    .deferred();
+  if (currentPage !== PIECE_ROOT_INDEX_PENDING) return currentPage;
+  const caughtUpPage = engine.database.transaction(() => readSnapshot(true))
+    .immediate();
+  if (caughtUpPage === PIECE_ROOT_INDEX_PENDING) {
+    throw new Error("piece root index catch-up did not run");
+  }
+  return caughtUpPage;
 };
 
 export const entityIdExists = (
@@ -2492,6 +2658,14 @@ export const applyCommit = (
   engine: Engine,
   options: ApplyCommitOptions,
 ): AppliedCommit => {
+  if (options.space !== undefined) {
+    if (engine.space !== undefined && engine.space !== options.space) {
+      throw new ProtocolError(
+        `memory engine space changed from ${engine.space} to ${options.space}`,
+      );
+    }
+    engine.space = options.space;
+  }
   return engine.database.transaction(applyCommitTransaction).immediate(
     engine,
     options,

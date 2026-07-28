@@ -65,6 +65,51 @@ Deno.test("piece summaries render human and JSON output", () => {
   expect(captureStdout(() => renderPieceSummaries([], false))).toBe("");
 });
 
+Deno.test("piece summaries render registration and scope when present", () => {
+  const summaries = [
+    {
+      id: "of:notes",
+      name: "Notes",
+      registered: true,
+    },
+    {
+      id: "of:draft",
+      entityKind: "computed" as const,
+      name: "Draft",
+      registered: false,
+      scope: "user",
+    },
+  ];
+
+  const json = captureStdout(() => renderPieceSummaries(summaries, true));
+  expect(JSON.parse(json)).toEqual([
+    {
+      id: "of:notes",
+      name: "Notes",
+      patternRef: null,
+      registered: true,
+    },
+    {
+      id: "of:draft",
+      entityKind: "computed",
+      name: "Draft",
+      patternRef: null,
+      registered: false,
+      scope: "user",
+    },
+  ]);
+
+  const table = captureStdout(() => renderPieceSummaries(summaries, false));
+  expect(table).toContain("SCOPE");
+  expect(table).toContain("ENTITY KIND");
+  expect(table).toContain("computed");
+  expect(table).toContain("space");
+  expect(table).toContain("user");
+  expect(table).toContain("REGISTERED");
+  expect(table).toContain("yes");
+  expect(table).toContain("no");
+});
+
 Deno.test("piece registers its list and search command handlers", () => {
   const actionHandler = (name: string): unknown =>
     (piece.getCommand(name) as unknown as
@@ -164,6 +209,7 @@ Deno.test("piece list command parses options and renders pieces", async () => {
     space: string;
     identity: string;
   } | undefined;
+  let listedOptions: { registry?: boolean } | undefined;
   let rendered:
     | {
       pieces: Parameters<typeof renderPieceSummaries>[0];
@@ -177,8 +223,9 @@ Deno.test("piece list command parses options and renders pieces", async () => {
       identity: "/tmp/estuary.key",
     },
     {
-      listPieces: (config) => {
+      listPieces: (config, options) => {
         listedConfig = config;
+        listedOptions = options;
         return Promise.resolve(pieces);
       },
       renderPieceSummaries: (summaries, json) => {
@@ -192,5 +239,22 @@ Deno.test("piece list command parses options and renders pieces", async () => {
     space: "common-knowledge",
     identity: "/tmp/estuary.key",
   });
+  expect(listedOptions).toEqual({ registry: false });
   expect(rendered).toEqual({ pieces, json: false });
+
+  await listPiecesFromCommand(
+    {
+      url: "https://cf.dev/common-knowledge",
+      identity: "/tmp/estuary.key",
+      registry: true,
+    },
+    {
+      listPieces: (_config, options) => {
+        listedOptions = options;
+        return Promise.resolve(pieces);
+      },
+      renderPieceSummaries: () => {},
+    },
+  );
+  expect(listedOptions).toEqual({ registry: true });
 });

@@ -18,6 +18,9 @@ import {
   Module,
   parseLink,
   Pattern,
+  type PieceRootEntry,
+  type PieceRootListOptions,
+  type PieceRootListResult,
   type PieceSourceTransition,
   Runtime,
   type Schema,
@@ -181,6 +184,55 @@ export class PieceManager {
     return await this.runtime.storageManager.open(this.space).entityIdExists?.(
       id,
     );
+  }
+
+  async listPieceRootPage(
+    options: PieceRootListOptions = {},
+  ): Promise<PieceRootListResult> {
+    await this.ready;
+    return await this.runtime.storageManager.open(this.space)
+      .listPieceRootPage(options);
+  }
+
+  async listPieceRoots(
+    options: Pick<PieceRootListOptions, "registeredOnly"> = {},
+  ): Promise<PieceRootEntry[]> {
+    await this.ready;
+    const pieces: PieceRootEntry[] = [];
+    let after: PieceRootListOptions["after"];
+    let expectedServerSeq: number | undefined;
+    const cursors = new Set<string>();
+    for (;;) {
+      const page = await this.runtime.storageManager.open(this.space)
+        .listPieceRootPage({
+          ...options,
+          ...(after === undefined ? {} : { after }),
+          ...(expectedServerSeq === undefined ? {} : { expectedServerSeq }),
+        });
+      if (
+        expectedServerSeq !== undefined &&
+        page.serverSeq !== expectedServerSeq
+      ) {
+        throw new Error(
+          `piece root snapshot changed from server sequence ${expectedServerSeq} to ${page.serverSeq}`,
+        );
+      }
+      expectedServerSeq ??= page.serverSeq;
+      pieces.push(...page.pieces);
+      if (page.nextAfter === undefined) return pieces;
+      const cursorKey = JSON.stringify([
+        page.nextAfter.registered,
+        page.nextAfter.registryPosition,
+        page.nextAfter.id,
+        page.nextAfter.scope,
+        page.nextAfter.orderKey,
+      ]);
+      if (cursors.has(cursorKey)) {
+        throw new Error("piece root page did not advance");
+      }
+      cursors.add(cursorKey);
+      after = page.nextAfter;
+    }
   }
 
   getSpaceCellContents(): Cell<SpaceCellContents> {

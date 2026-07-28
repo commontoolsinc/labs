@@ -25,6 +25,42 @@ git diff upstream/main | cf view
 cf view --rendered README.md
 ```
 
+## Piece listing
+
+`cf piece ls` returns every indexed piece root visible to the caller. This
+includes unregistered pieces, the space root, pieces held only in another
+piece's internal state, and orphaned pieces with no inbound links. A root is a
+stored document with a valid pattern identity or argument link. Ordinary
+entities are not included.
+
+Data writes leave the index stale. The server catches it up after batched
+subscription fan-out, or at the start of a listing when index work remains.
+Listing then reads stored summaries from the index. It does not transfer piece
+values, start the default pattern, or start any listed piece. Names are optional
+because a computed name may never have had a durable stored value.
+
+The default human-readable table marks each row as registered or unregistered.
+It adds a scope column when a narrower `user` or `session` root is present. JSON
+output includes those narrower scopes as well. Registered pieces appear first in
+registry order. The remaining pieces are ordered by canonical piece ID and
+scope.
+
+Normally every piece root uses the default `of` entity kind. If a root uses any
+other stored URI scheme, JSON output includes that scheme as `entityKind`. The
+human table includes an entity-kind column. Data URI contents are represented by
+a content hash.
+
+Use `--registry` to return only the canonical space-scoped roots named by the
+space's piece registry:
+
+```bash
+cf piece ls --space team-space
+cf piece ls --space team-space --registry --json
+```
+
+Both forms use the server index. `--registry` changes the result filter. It does
+not use the older client-side registry traversal.
+
 ## Piece data search
 
 `cf piece search <query>` reads every piece in the selected space and returns

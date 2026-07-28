@@ -109,18 +109,31 @@ export function formatPatternIdentity(
 export function renderPieceSummaries(
   pieces: Array<{
     id: string;
+    entityKind?: string;
     name?: string;
     patternRef?: PiecePatternRef;
+    registered?: boolean;
+    scope?: string;
     error?: string;
   }>,
   json: boolean,
 ): void {
+  const withRegistration = pieces.some((piece) =>
+    piece.registered !== undefined
+  );
+  const withEntityKind = pieces.some((piece) => piece.entityKind !== undefined);
+  const withScope = pieces.some((piece) => piece.scope !== undefined);
   if (json) {
     render(
       pieces.map((piece) => ({
         id: piece.id,
+        ...(piece.entityKind !== undefined &&
+          { entityKind: piece.entityKind }),
         name: piece.name ?? null,
         patternRef: piece.patternRef ?? null,
+        ...(piece.registered !== undefined &&
+          { registered: piece.registered }),
+        ...(piece.scope !== undefined && { scope: piece.scope }),
       })),
       { json: true },
     );
@@ -128,11 +141,21 @@ export function renderPieceSummaries(
   }
 
   const rows = [
-    ["ID", "NAME", "PATTERN"],
+    [
+      "ID",
+      ...(withEntityKind ? ["ENTITY KIND"] : []),
+      "NAME",
+      "PATTERN",
+      ...(withScope ? ["SCOPE"] : []),
+      ...(withRegistration ? ["REGISTERED"] : []),
+    ],
     ...pieces.map((piece) => [
       piece.id,
+      ...(withEntityKind ? [piece.entityKind ?? "of"] : []),
       piece.error ? `<error: ${piece.error}>` : (piece.name ?? "<unnamed>"),
       piece.error ? "" : formatPatternRef(piece.patternRef),
+      ...(withScope ? [piece.scope ?? "space"] : []),
+      ...(withRegistration ? [piece.registered ? "yes" : "no"] : []),
     ]),
   ];
   if (rows.length > 1) render(Table.from(rows).toString());
@@ -485,6 +508,11 @@ export const piece = new Command()
     cliText(`cf piece ls ${EX_ID} ${EX_URL}`),
     `Display a list of all pieces in "${RAW_EX_COMP.space}".`,
   )
+  .example(
+    cliText(`cf piece ls --registry ${EX_ID} ${EX_COMP}`),
+    `Display only the registered pieces in "${RAW_EX_COMP.space}".`,
+  )
+  .option("--registry", "List only the pieces in the space's registry.")
   .option("--json", "Output machine-readable JSON.")
   .action(listPiecesFromCommand)
   /* piece search */
@@ -1430,17 +1458,22 @@ export interface PieceSummaryCLIOptions extends PieceCLIOptions {
   json?: boolean;
 }
 
+export interface PieceListCLIOptions extends PieceSummaryCLIOptions {
+  registry?: boolean;
+}
+
 export interface PieceListCommandDependencies {
   listPieces?: typeof listPieces;
   renderPieceSummaries?: typeof renderPieceSummaries;
 }
 
 export async function listPiecesFromCommand(
-  options: PieceSummaryCLIOptions,
+  options: PieceListCLIOptions,
   deps: PieceListCommandDependencies = {},
 ): Promise<void> {
   const pieces = await (deps.listPieces ?? listPieces)(
     parseSpaceOptions(options),
+    { registry: options.registry === true },
   );
   (deps.renderPieceSummaries ?? renderPieceSummaries)(pieces, !!options.json);
 }

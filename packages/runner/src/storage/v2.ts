@@ -30,6 +30,8 @@ import {
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   type PatchOp,
+  type PieceRootListOptions,
+  type PieceRootListResult,
   type SchedulerActionSnapshotQuery,
   type SchedulerObservationCommit,
   type SchedulerSnapshotListResult,
@@ -1664,6 +1666,12 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.entityIdExists(id);
   }
 
+  listPieceRootPage(
+    options: PieceRootListOptions = {},
+  ): Promise<PieceRootListResult> {
+    return this.replica.listPieceRootPage(options);
+  }
+
   listSchedulerActionSnapshots(
     query: SchedulerActionSnapshotQuery = {},
   ): Promise<SchedulerSnapshotListResult> {
@@ -2088,6 +2096,13 @@ class SpaceReplica implements ISpaceReplica {
       return undefined;
     }
     return (await session.entityIdExists(id))?.exists;
+  }
+
+  async listPieceRootPage(
+    options: PieceRootListOptions = {},
+  ): Promise<PieceRootListResult> {
+    const { session } = await this.sessionHandle();
+    return await session.listPieceRoots(options);
   }
 
   /**

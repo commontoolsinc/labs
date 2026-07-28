@@ -9,7 +9,9 @@ import {
   type EntityRef,
   entityRefFromString,
   LINK_V1_TAG,
+  linkRefFrom,
 } from "@commonfabric/data-model/cell-rep";
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
 import {
@@ -23,9 +25,12 @@ import {
   listBranches,
   listEntityIdPage,
   listEntityIds,
+  listPieceRootPage,
+  listPieceRootSnapshotPage,
   open,
   ProtocolError,
   read,
+  serverSeq,
 } from "../v2/engine.ts";
 import {
   decodeMemoryBoundary,
@@ -632,6 +637,3185 @@ Deno.test("memory v2 engine lists live space-scoped entity identifiers", async (
   }
 });
 
+Deno.test("memory v2 engine indexes canonical piece roots and summaries", async () => {
+  const space = "did:key:z6Mk-piece-root-index";
+  const principal = "did:key:alice";
+  const sessionId = "session:piece-root-index";
+  const { engine, path } = await createEngineWithOptions({ space });
+  const entityIdForCause = (cause: string) =>
+    `of:${hashOf({ causal: cause }).taggedHashString}`;
+  const spaceCellId = entityIdForCause(space);
+  const sourceIdentity = "P".repeat(43);
+  const sourceDocumentId = entityIdForCause(`pattern:${sourceIdentity}`);
+  const link = (
+    id: string,
+    scope: "space" | "user" | "session" = "space",
+  ) =>
+    linkRefFrom({
+      id,
+      path: [],
+      space,
+      scope,
+    });
+
+  try {
+    applyCommit(engine, {
+      space,
+      principal,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: spaceCellId,
+            value: toEntityDocument({
+              defaultPattern: link("of:root"),
+            }),
+          },
+          {
+            op: "set",
+            id: "of:root",
+            value: toEntityDocument(
+              {
+                $NAME: "Home",
+                pieceRegistry: link("of:registry"),
+              },
+              undefined,
+              {
+                patternIdentity: {
+                  identity: sourceIdentity,
+                  symbol: "default",
+                },
+              },
+            ),
+          },
+          {
+            op: "set",
+            id: "of:registry",
+            value: toEntityDocument([
+              link("of:wrapper"),
+              link("of:registered"),
+              link("of:foreign-wrapper"),
+            ]),
+          },
+          {
+            op: "set",
+            id: "of:wrapper",
+            value: toEntityDocument(link("of:registered")),
+          },
+          {
+            op: "set",
+            id: "of:foreign-wrapper",
+            value: toEntityDocument(linkRefFrom({
+              id: "of:foreign-collision",
+              path: [],
+              space: "did:key:foreign",
+              scope: "space",
+            })),
+          },
+          {
+            op: "set",
+            id: "of:foreign-collision",
+            value: toEntityDocument(
+              { $NAME: "Local collision" },
+              undefined,
+              {
+                patternIdentity: {
+                  identity: "F".repeat(43),
+                  symbol: "default",
+                },
+              },
+            ),
+          },
+          {
+            op: "set",
+            id: "of:registered",
+            value: toEntityDocument(
+              {
+                $NAME: link("of:registered-name"),
+                payload: "secret-document-value",
+              },
+              undefined,
+              {
+                patternIdentity: {
+                  identity: sourceIdentity,
+                  symbol: "default",
+                },
+                patternRepository: "https://example.test/repository",
+                patternSource: "/patterns/notes.tsx",
+              },
+            ),
+          },
+          {
+            op: "set",
+            id: "of:registered-name",
+            value: toEntityDocument("Registered"),
+          },
+          {
+            op: "set",
+            id: sourceDocumentId,
+            value: toEntityDocument({
+              kind: "source",
+              identity: sourceIdentity,
+              filename: "/patterns/notes.tsx",
+            }),
+          },
+          {
+            op: "set",
+            id: "of:orphan",
+            value: toEntityDocument({ $NAME: "Orphan" }, undefined, {
+              patternIdentity: {
+                identity: "O".repeat(43),
+                symbol: "default",
+              },
+            }),
+          },
+          {
+            op: "set",
+            id: "of:argument-only",
+            value: toEntityDocument({ $NAME: "Argument only" }, undefined, {
+              argument: link("of:argument", "user"),
+            }),
+          },
+          {
+            op: "set",
+            id: "of:ordinary",
+            value: toEntityDocument({ $NAME: "Not a piece" }),
+          },
+          {
+            op: "set",
+            id: "of:malformed",
+            value: toEntityDocument({ $NAME: "Malformed" }, undefined, {
+              patternIdentity: { identity: sourceIdentity },
+              argument: { not: "a link" },
+            }),
+          },
+          {
+            op: "set",
+            id: "of:malformed-link-payload",
+            value: toEntityDocument({ $NAME: "Malformed link" }, undefined, {
+              argument: {
+                "/": { [LINK_V1_TAG]: null },
+              } as never,
+            }),
+          },
+          {
+            op: "set",
+            id: "of:malformed-link-id",
+            value: toEntityDocument({ $NAME: "Malformed link" }, undefined, {
+              argument: linkRefFrom({
+                id: 17,
+                path: [],
+                space,
+                scope: "space",
+              } as never),
+            }),
+          },
+          {
+            op: "set",
+            id: "of:z-growing-name",
+            value: toEntityDocument(
+              {
+                $NAME: linkRefFrom({
+                  id: "of:z-growing-name",
+                  path: ["$NAME", "x"],
+                  space,
+                  scope: "space",
+                }),
+              },
+              undefined,
+              {
+                patternIdentity: {
+                  identity: "G".repeat(43),
+                  symbol: "default",
+                },
+              },
+            ),
+          },
+          {
+            op: "set",
+            id: "of:scoped",
+            scope: "user",
+            value: toEntityDocument({ $NAME: "User scoped" }, undefined, {
+              patternIdentity: {
+                identity: "U".repeat(43),
+                symbol: "default",
+              },
+            }),
+          },
+          {
+            op: "set",
+            id: "of:scoped",
+            scope: "session",
+            value: toEntityDocument({ $NAME: "Session scoped" }, undefined, {
+              patternIdentity: {
+                identity: "S".repeat(43),
+                symbol: "default",
+              },
+            }),
+          },
+        ],
+      },
+    });
+    applyCommit(engine, {
+      space,
+      principal: "did:key:bob",
+      sessionId: "session:bob-piece-root-index",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:bob-only",
+          scope: "user",
+          value: toEntityDocument({ $NAME: "Bob only" }, undefined, {
+            patternIdentity: {
+              identity: "B".repeat(43),
+              symbol: "default",
+            },
+          }),
+        }],
+      },
+    });
+
+    const listed = listPieceRootPage(engine, {
+      principal,
+      sessionId,
+      limit: 20,
+    });
+    assertEquals(listed.map(({ entry }) => entry.id), [
+      "registered",
+      "argument-only",
+      "foreign-collision",
+      "orphan",
+      "root",
+      "scoped",
+      "scoped",
+      "z-growing-name",
+    ]);
+    assertEquals(
+      listed.some(({ entry }) => entry.id === "bob-only"),
+      false,
+    );
+    assertEquals(listed[0].entry, {
+      id: "registered",
+      scope: "space",
+      registered: true,
+      name: "Registered",
+      pattern: {
+        identity: sourceIdentity,
+        symbol: "default",
+        repository: "https://example.test/repository",
+        origin: "/patterns/notes.tsx",
+        entry: "/patterns/notes.tsx",
+      },
+    });
+    assertEquals(
+      listed
+        .filter(({ entry }) => entry.id === "scoped")
+        .map(({ entry }) => [entry.scope, entry.name]),
+      [["user", "User scoped"], ["session", "Session scoped"]],
+    );
+    assertEquals(
+      listPieceRootPage(engine, {
+        principal,
+        sessionId,
+        limit: 20,
+        registeredOnly: true,
+      }).map(({ entry }) => entry.id),
+      ["registered"],
+    );
+    assertEquals(
+      listed.some(({ entry }) => entry.id === "ordinary"),
+      false,
+    );
+    assertEquals(
+      listed.some(({ entry }) => entry.id === "malformed"),
+      false,
+    );
+    assertEquals(
+      listed.some(({ entry }) => entry.id === "malformed-link-payload"),
+      false,
+    );
+    assertEquals(
+      listed.some(({ entry }) => entry.id === "malformed-link-id"),
+      false,
+    );
+    assertEquals(
+      listed.find(({ entry }) => entry.id === "z-growing-name")?.entry.name,
+      undefined,
+    );
+    assertEquals(
+      listed.find(({ entry }) => entry.id === "foreign-collision")?.entry
+        .registered,
+      false,
+    );
+
+    const firstPage = listPieceRootPage(engine, {
+      principal,
+      sessionId,
+      limit: 2,
+    });
+    assertEquals(firstPage.map(({ entry }) => entry.id), [
+      "registered",
+      "argument-only",
+    ]);
+    assertEquals(firstPage[1].cursor.id, "argument-only");
+    assertEquals(typeof firstPage[1].cursor.orderKey, "string");
+    assertEquals(
+      listPieceRootPage(engine, {
+        principal,
+        sessionId,
+        after: firstPage[1].cursor,
+        limit: 20,
+      }).map(({ entry }) => entry.id),
+      [
+        "foreign-collision",
+        "orphan",
+        "root",
+        "scoped",
+        "scoped",
+        "z-growing-name",
+      ],
+    );
+    const beforeScoped = listed.find(({ entry }) => entry.id === "root")!
+      .cursor;
+    const userScopedPage = listPieceRootPage(engine, {
+      principal,
+      sessionId,
+      after: beforeScoped,
+      limit: 1,
+    });
+    assertEquals(userScopedPage.map(({ entry }) => entry.scope), ["user"]);
+    const sessionScopedPage = listPieceRootPage(engine, {
+      principal,
+      sessionId,
+      after: userScopedPage[0].cursor,
+      limit: 1,
+    });
+    assertEquals(sessionScopedPage.map(({ entry }) => entry.scope), [
+      "session",
+    ]);
+    assertEquals(
+      listPieceRootPage(engine, {
+        principal,
+        sessionId,
+        after: sessionScopedPage[0].cursor,
+        limit: 1,
+      }).map(({ entry }) => entry.id),
+      ["z-growing-name"],
+    );
+
+    applyCommit(engine, {
+      space,
+      principal,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:registered-name",
+          value: toEntityDocument("Renamed"),
+        }],
+      },
+    });
+    assertEquals(
+      listPieceRootPage(engine, {
+        principal,
+        sessionId,
+        limit: 1,
+      })[0].entry.name,
+      "Renamed",
+    );
+
+    applyCommit(engine, {
+      space,
+      principal,
+      sessionId,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:orphan",
+          value: toEntityDocument({ $NAME: "No longer a piece" }),
+        }],
+      },
+    });
+    assertEquals(
+      listPieceRootPage(engine, {
+        principal,
+        sessionId,
+        limit: 20,
+      }).some(({ entry }) => entry.id === "orphan"),
+      false,
+    );
+
+    const legacyRootValue = {
+      $NAME: "Home",
+      allPieces: link("of:registry"),
+      addPiece: linkRefFrom({
+        id: "of:add-piece-stream",
+        path: [],
+        space,
+        scope: "space",
+        schema: { asCell: ["stream"] },
+      }),
+    };
+    applyCommit(engine, {
+      space,
+      principal,
+      sessionId,
+      commit: {
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:root",
+          value: toEntityDocument(legacyRootValue, undefined, {
+            patternIdentity: {
+              identity: sourceIdentity,
+              symbol: "default",
+            },
+            patternSource: "/patterns/custom-default.tsx",
+          }),
+        }],
+      },
+    });
+    const registeredIds = () =>
+      listPieceRootPage(engine, {
+        principal,
+        sessionId,
+        limit: 20,
+        registeredOnly: true,
+      }).map(({ entry }) => entry.id);
+    assertEquals(registeredIds(), []);
+
+    applyCommit(engine, {
+      space,
+      principal,
+      sessionId,
+      commit: {
+        localSeq: 5,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:root",
+          value: toEntityDocument(legacyRootValue, undefined, {
+            patternIdentity: {
+              identity: sourceIdentity,
+              symbol: "default",
+            },
+            patternSource: "/api/patterns/system/default-app.tsx",
+          }),
+        }],
+      },
+    });
+    assertEquals(registeredIds(), ["registered"]);
+
+    applyCommit(engine, {
+      space,
+      principal,
+      sessionId,
+      commit: {
+        localSeq: 6,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:root",
+          patches: [{
+            op: "replace",
+            path: "/patternSource",
+            value: "/patterns/custom-default.tsx",
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), []);
+
+    applyCommit(engine, {
+      space,
+      principal,
+      sessionId,
+      commit: {
+        localSeq: 7,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:root",
+          patches: [{
+            op: "replace",
+            path: "/patternSource",
+            value: "/api/patterns/system/default-app.tsx",
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), ["registered"]);
+
+    applyCommit(engine, {
+      space,
+      principal,
+      sessionId,
+      commit: {
+        localSeq: 8,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:root",
+          patches: [{
+            op: "add",
+            path: "/value/pieceRegistry/malformed",
+            value: true,
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), []);
+
+    applyCommit(engine, {
+      space,
+      principal,
+      sessionId,
+      commit: {
+        localSeq: 9,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:root",
+          value: toEntityDocument(
+            {
+              ...legacyRootValue,
+              pieceRegistry: link("of:empty-registry"),
+            },
+            undefined,
+            {
+              patternIdentity: {
+                identity: sourceIdentity,
+                symbol: "default",
+              },
+              patternSource: "/api/patterns/system/default-app.tsx",
+            },
+          ),
+        }, {
+          op: "set",
+          id: "of:empty-registry",
+          value: toEntityDocument(undefined),
+        }],
+      },
+    });
+    assertEquals(registeredIds(), []);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 piece registry tracks malformed links at partial paths", async () => {
+  const space = "did:key:z6Mk-piece-root-partial-registry-link";
+  const sessionId = "session:piece-root-partial-registry-link";
+  const { engine, path } = await createEngineWithOptions({ space });
+  const spaceCellId = `of:${hashOf({ causal: space }).taggedHashString}`;
+  const link = (id: string, linkPath: string[] = []) =>
+    linkRefFrom({ id, path: linkPath, space, scope: "space" });
+  const pieceDocument = (identity: string, value: unknown) =>
+    toEntityDocument(value, undefined, {
+      patternIdentity: { identity, symbol: "default" },
+    });
+
+  try {
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: spaceCellId,
+            value: toEntityDocument({ defaultPattern: link("of:home") }),
+          },
+          {
+            op: "set",
+            id: "of:home",
+            value: pieceDocument("H".repeat(43), {
+              pieceRegistry: link("of:registry"),
+            }),
+          },
+          {
+            op: "set",
+            id: "of:registry",
+            value: toEntityDocument([
+              link("of:wrapper", ["alias", "tail"]),
+            ]),
+          },
+          {
+            op: "set",
+            id: "of:wrapper",
+            value: pieceDocument("W".repeat(43), {
+              alias: linkRefFrom({
+                id: 17,
+                path: [],
+                space,
+                scope: "space",
+              } as never),
+            }),
+          },
+          {
+            op: "set",
+            id: "of:actual",
+            value: pieceDocument("A".repeat(43), { tail: {} }),
+          },
+        ],
+      },
+    });
+    const registeredIds = () =>
+      listPieceRootPage(engine, {
+        sessionId,
+        limit: 10,
+        registeredOnly: true,
+      }).map(({ entry }) => entry.id);
+    assertEquals(registeredIds(), ["wrapper"]);
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:wrapper",
+          patches: [{
+            op: "replace",
+            path: `/value/alias/~1/${LINK_V1_TAG}/id`,
+            value: "of:actual",
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), ["actual"]);
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:wrapper",
+          patches: [{
+            op: "add",
+            path: "/value/alias/extra",
+            value: true,
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), ["wrapper"]);
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:wrapper",
+          patches: [{
+            op: "remove",
+            path: "/value/alias/extra",
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), ["actual"]);
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 5,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:wrapper",
+          patches: [{
+            op: "replace",
+            path: "/value/alias",
+            value: { "/": 1 },
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), ["wrapper"]);
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 6,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:wrapper",
+          patches: [{
+            op: "replace",
+            path: "/value/alias/~1",
+            value: {
+              [LINK_V1_TAG]: {
+                id: "of:actual",
+                path: [],
+                space,
+                scope: "space",
+              },
+            },
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), ["actual"]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 piece registry tracks shifted wrapper paths", async () => {
+  const space = "did:key:z6Mk-piece-root-shifted-registry-path";
+  const sessionId = "session:piece-root-shifted-registry-path";
+  const { engine, path } = await createEngineWithOptions({ space });
+  const spaceCellId = `of:${hashOf({ causal: space }).taggedHashString}`;
+  const link = (id: string, linkPath: string[] = []) =>
+    linkRefFrom({ id, path: linkPath, space, scope: "space" });
+  const pieceDocument = (identity: string, value: unknown = {}) =>
+    toEntityDocument(value, undefined, {
+      patternIdentity: { identity, symbol: "default" },
+    });
+
+  try {
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: spaceCellId,
+            value: toEntityDocument({ defaultPattern: link("of:home") }),
+          },
+          {
+            op: "set",
+            id: "of:home",
+            value: pieceDocument("H".repeat(43), {
+              pieceRegistry: link("of:registry"),
+            }),
+          },
+          {
+            op: "set",
+            id: "of:registry",
+            value: toEntityDocument([
+              link("of:wrapper", ["items", "1"]),
+            ]),
+          },
+          {
+            op: "set",
+            id: "of:wrapper",
+            value: pieceDocument("W".repeat(43), {
+              items: [link("of:a"), link("of:b"), link("of:c")],
+            }),
+          },
+          {
+            op: "set",
+            id: "of:a",
+            value: pieceDocument("A".repeat(43)),
+          },
+          {
+            op: "set",
+            id: "of:b",
+            value: pieceDocument("B".repeat(43)),
+          },
+          {
+            op: "set",
+            id: "of:c",
+            value: pieceDocument("C".repeat(43)),
+          },
+        ],
+      },
+    });
+    const registeredIds = () =>
+      listPieceRootPage(engine, {
+        sessionId,
+        limit: 10,
+        registeredOnly: true,
+      }).map(({ entry }) => entry.id);
+    assertEquals(registeredIds(), ["b"]);
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:wrapper",
+          patches: [{
+            op: "remove",
+            path: "/value/items/0",
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), ["c"]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 piece registry pages dependency paths on one document", async () => {
+  const space = "did:key:z6Mk-piece-root-registry-path-pages";
+  const sessionId = "session:piece-root-registry-path-pages";
+  const { engine, path } = await createEngineWithOptions({ space });
+  const spaceCellId = `of:${hashOf({ causal: space }).taggedHashString}`;
+  const registrySize = 300;
+  const keys = Array.from(
+    { length: registrySize },
+    (_, index) => index.toString().padStart(4, "0"),
+  );
+  const link = (id: string, linkPath: string[] = []) =>
+    linkRefFrom({ id, path: linkPath, space, scope: "space" });
+  const pieceDocument = (identity: string, value: unknown = {}) =>
+    toEntityDocument(value, undefined, {
+      patternIdentity: {
+        identity: identity.padEnd(43, "P"),
+        symbol: "default",
+      },
+    });
+
+  try {
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: spaceCellId,
+            value: toEntityDocument({ defaultPattern: link("of:home") }),
+          },
+          {
+            op: "set",
+            id: "of:home",
+            value: pieceDocument("home", {
+              pieceRegistry: keys.map((key) =>
+                link("of:wrapper", ["items", key])
+              ),
+            }),
+          },
+          {
+            op: "set",
+            id: "of:wrapper",
+            value: toEntityDocument({
+              items: Object.fromEntries(
+                keys.map((key) => [key, link(`of:root-${key}`)]),
+              ),
+            }),
+          },
+          ...keys.map((key) => ({
+            op: "set" as const,
+            id: `of:root-${key}`,
+            value: pieceDocument(key),
+          })),
+          {
+            op: "set",
+            id: "of:replacement",
+            value: pieceDocument("replacement"),
+          },
+        ],
+      },
+    });
+    const registeredIds = () =>
+      listPieceRootPage(engine, {
+        sessionId,
+        limit: registrySize + 1,
+        registeredOnly: true,
+      }).map(({ entry }) => entry.id);
+    assertEquals(registeredIds().at(-1), "root-0299");
+    assertEquals(
+      engine.database.prepare(`
+SELECT COUNT(*) AS count
+FROM pragma_piece_registry_dependency
+WHERE dependency_id = 'of:wrapper'
+  AND dependency_scope_key = 'space'
+`).get(),
+      { count: registrySize },
+    );
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:wrapper",
+          patches: [{
+            op: "replace",
+            path: "/value/items/0299",
+            value: link("of:replacement"),
+          }],
+        }],
+      },
+    });
+    const updatedIds = registeredIds();
+    assertEquals(updatedIds.length, registrySize);
+    assertEquals(updatedIds.at(-1), "replacement");
+    assertEquals(updatedIds.includes("root-0299"), false);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 piece registry tracks shifted terminal arrays", async () => {
+  const space = "did:key:z6Mk-piece-root-shifted-registry-array";
+  const sessionId = "session:piece-root-shifted-registry-array";
+  const { engine, path } = await createEngineWithOptions({ space });
+  const spaceCellId = `of:${hashOf({ causal: space }).taggedHashString}`;
+  const link = (id: string, linkPath: string[] = []) =>
+    linkRefFrom({ id, path: linkPath, space, scope: "space" });
+  const pieceDocument = (identity: string, value: unknown = {}) =>
+    toEntityDocument(value, undefined, {
+      patternIdentity: { identity, symbol: "default" },
+    });
+
+  try {
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: spaceCellId,
+            value: toEntityDocument({ defaultPattern: link("of:home") }),
+          },
+          {
+            op: "set",
+            id: "of:home",
+            value: pieceDocument("H".repeat(43), {
+              pieceRegistry: link("of:wrapper", ["items", "1"]),
+            }),
+          },
+          {
+            op: "set",
+            id: "of:wrapper",
+            value: toEntityDocument({
+              items: [
+                "padding",
+                [link("of:a")],
+                [link("of:b")],
+              ],
+            }),
+          },
+          {
+            op: "set",
+            id: "of:a",
+            value: pieceDocument("A".repeat(43)),
+          },
+          {
+            op: "set",
+            id: "of:b",
+            value: pieceDocument("B".repeat(43)),
+          },
+        ],
+      },
+    });
+    const registeredIds = () =>
+      listPieceRootPage(engine, {
+        sessionId,
+        limit: 10,
+        registeredOnly: true,
+      }).map(({ entry }) => entry.id);
+    assertEquals(registeredIds(), ["a"]);
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:wrapper",
+          patches: [{
+            op: "remove",
+            path: "/value/items/0",
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), ["b"]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 registry tails re-resolve wrappers into the new tail", async () => {
+  const space = "did:key:z6Mk-piece-root-registry-tail-wrapper";
+  const sessionId = "session:piece-root-registry-tail-wrapper";
+  const { engine, path } = await createEngineWithOptions({ space });
+  const spaceCellId = `of:${hashOf({ causal: space }).taggedHashString}`;
+  const link = (id: string, linkPath: string[] = []) =>
+    linkRefFrom({ id, path: linkPath, space, scope: "space" });
+  const pieceDocument = (identity: string, value: unknown = {}) =>
+    toEntityDocument(value, undefined, {
+      patternIdentity: { identity, symbol: "default" },
+    });
+
+  try {
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: spaceCellId,
+            value: toEntityDocument({ defaultPattern: link("of:home") }),
+          },
+          {
+            op: "set",
+            id: "of:home",
+            value: pieceDocument("H".repeat(43), {
+              pieceRegistry: link("of:registry"),
+            }),
+          },
+          {
+            op: "set",
+            id: "of:registry",
+            value: pieceDocument("R".repeat(43), [
+              link("of:registry", ["1"]),
+            ]),
+          },
+          {
+            op: "set",
+            id: "of:b",
+            value: pieceDocument("B".repeat(43)),
+          },
+        ],
+      },
+    });
+    const registeredIds = () =>
+      listPieceRootPage(engine, {
+        sessionId,
+        limit: 10,
+        registeredOnly: true,
+      }).map(({ entry }) => entry.id);
+    assertEquals(registeredIds(), ["registry"]);
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:registry",
+          patches: [{
+            op: "append",
+            path: "/value",
+            values: [link("of:b")],
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), ["b"]);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 legacy registry tracks nested stream markers", async () => {
+  const space = "did:key:z6Mk-piece-root-legacy-stream-marker";
+  const sessionId = "session:piece-root-legacy-stream-marker";
+  const { engine, path } = await createEngineWithOptions({ space });
+  const spaceCellId = `of:${hashOf({ causal: space }).taggedHashString}`;
+  const link = (id: string, linkPath: string[] = []) =>
+    linkRefFrom({ id, path: linkPath, space, scope: "space" });
+
+  try {
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: spaceCellId,
+            value: toEntityDocument({ defaultPattern: link("of:home") }),
+          },
+          {
+            op: "set",
+            id: "of:home",
+            value: toEntityDocument(
+              {
+                allPieces: link("of:registry"),
+                addPiece: { $stream: false },
+              },
+              undefined,
+              {
+                patternIdentity: {
+                  identity: "H".repeat(43),
+                  symbol: "default",
+                },
+                patternSource: "/api/patterns/system/default-app.tsx",
+              },
+            ),
+          },
+          {
+            op: "set",
+            id: "of:registry",
+            value: toEntityDocument([
+              link("of:home", ["pieceRegistry"]),
+              link("of:piece"),
+            ]),
+          },
+          {
+            op: "set",
+            id: "of:piece",
+            value: toEntityDocument({}, undefined, {
+              patternIdentity: {
+                identity: "P".repeat(43),
+                symbol: "default",
+              },
+            }),
+          },
+        ],
+      },
+    });
+    const registeredIds = () =>
+      listPieceRootPage(engine, {
+        sessionId,
+        limit: 10,
+        registeredOnly: true,
+      }).map(({ entry }) => entry.id);
+    assertEquals(registeredIds(), []);
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:home",
+          patches: [{
+            op: "replace",
+            path: "/value/addPiece/$stream",
+            value: true,
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), ["home", "piece"]);
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:home",
+          patches: [{
+            op: "add",
+            path: "/value/pieceRegistry/malformed",
+            value: true,
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), []);
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:home",
+          patches: [{
+            op: "remove",
+            path: "/value/pieceRegistry",
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), ["home", "piece"]);
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 5,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:home",
+          patches: [{
+            op: "replace",
+            path: "/value/addPiece/$stream",
+            value: false,
+          }],
+        }],
+      },
+    });
+    assertEquals(registeredIds(), []);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 registry tails refresh colocated root summaries", async () => {
+  const space = "did:key:z6Mk-piece-root-colocated-registry";
+  const sessionId = "session:piece-root-colocated-registry";
+  const { engine, path } = await createEngineWithOptions({ space });
+  const spaceCellId = `of:${hashOf({ causal: space }).taggedHashString}`;
+  const link = (id: string, linkPath: string[] = []) =>
+    linkRefFrom({ id, path: linkPath, space, scope: "space" });
+
+  try {
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: spaceCellId,
+            value: toEntityDocument({ defaultPattern: link("of:home") }),
+          },
+          {
+            op: "set",
+            id: "of:home",
+            value: toEntityDocument(
+              {
+                $NAME: link("of:home", ["pieceRegistry", "1"]),
+                pieceRegistry: [link("of:piece")],
+              },
+              undefined,
+              {
+                patternIdentity: {
+                  identity: "H".repeat(43),
+                  symbol: "default",
+                },
+              },
+            ),
+          },
+          {
+            op: "set",
+            id: "of:piece",
+            value: toEntityDocument({}, undefined, {
+              patternIdentity: {
+                identity: "P".repeat(43),
+                symbol: "default",
+              },
+            }),
+          },
+        ],
+      },
+    });
+    const home = () =>
+      listPieceRootPage(engine, {
+        sessionId,
+        limit: 10,
+      }).find(({ entry }) => entry.id === "home")?.entry;
+    assertEquals(home()?.name, undefined);
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:home",
+          patches: [{
+            op: "append",
+            path: "/value/pieceRegistry",
+            values: ["Home from registry tail"],
+          }],
+        }],
+      },
+    });
+    assertEquals(home()?.name, "Home from registry tail");
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 registry tail batches summarize their final document", async () => {
+  const space = "did:key:z6Mk-piece-root-registry-tail-batch";
+  const sessionId = "session:piece-root-registry-tail-batch";
+  const { engine, path } = await createEngineWithOptions({ space });
+  const spaceCellId = `of:${hashOf({ causal: space }).taggedHashString}`;
+  const link = (id: string, linkPath: string[] = []) =>
+    linkRefFrom({ id, path: linkPath, space, scope: "space" });
+  const pieceDocument = (identity: string, value: unknown = {}) =>
+    toEntityDocument(value, undefined, {
+      patternIdentity: { identity, symbol: "default" },
+    });
+
+  try {
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: spaceCellId,
+            value: toEntityDocument({ defaultPattern: link("of:home") }),
+          },
+          {
+            op: "set",
+            id: "of:home",
+            value: pieceDocument("H".repeat(43), {
+              pieceRegistry: link("of:registry", ["items"]),
+            }),
+          },
+          {
+            op: "set",
+            id: "of:registry",
+            value: toEntityDocument({ items: [link("of:piece")] }),
+          },
+          {
+            op: "set",
+            id: "of:piece",
+            value: pieceDocument("P".repeat(43)),
+          },
+        ],
+      },
+    });
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: "of:registry",
+            value: pieceDocument("R".repeat(43), {
+              $NAME: link("of:registry", ["items", "1"]),
+              items: [link("of:piece")],
+            }),
+          },
+          {
+            op: "patch",
+            id: "of:registry",
+            patches: [{
+              op: "append",
+              path: "/value/items",
+              values: ["Final registry name"],
+            }],
+          },
+        ],
+      },
+    });
+    assertEquals(
+      listPieceRootPage(engine, {
+        sessionId,
+        limit: 10,
+      }).find(({ entry }) => entry.id === "registry")?.entry.name,
+      "Final registry name",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine backfills piece roots with the owning space", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const url = toFileUrl(path);
+  const space = "did:key:z6Mk-piece-root-backfill";
+  const principal = "did:key:alice";
+  const sessionId = "session:piece-root-backfill";
+  const linkedName = linkRefFrom({
+    id: "of:backfilled-name",
+    path: [],
+    space,
+    scope: "space",
+  });
+  let engine: Engine | undefined;
+
+  try {
+    engine = await open({ url });
+    applyCommit(engine, {
+      space,
+      principal,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:backfilled-piece",
+          value: toEntityDocument({ $NAME: linkedName }, undefined, {
+            patternIdentity: {
+              identity: "P".repeat(43),
+              symbol: "default",
+            },
+          }),
+        }, {
+          op: "set",
+          id: "of:backfilled-name",
+          value: toEntityDocument("Backfilled"),
+        }],
+      },
+    });
+    assertEquals(
+      listPieceRootPage(engine, {
+        principal,
+        sessionId,
+        limit: 10,
+      })[0].entry.name,
+      "Backfilled",
+    );
+
+    engine.database.exec(`
+DROP TABLE pragma_piece_root_dependency;
+DROP TABLE pragma_piece_registry_dependency;
+DROP TABLE pragma_piece_root;
+DROP TABLE pragma_piece_root_index_state;
+`);
+    close(engine);
+    engine = undefined;
+    engine = await open({ url });
+    assertEquals(
+      listPieceRootPage(engine, {
+        principal,
+        sessionId,
+        limit: 10,
+      })[0].entry.name,
+      undefined,
+    );
+
+    close(engine);
+    engine = undefined;
+    engine = await open({ url, space });
+    assertEquals(
+      listPieceRootPage(engine, {
+        principal,
+        sessionId,
+        limit: 10,
+      })[0].entry.name,
+      "Backfilled",
+    );
+
+    engine.database.exec(`
+DROP TABLE pragma_piece_root_dependency;
+DROP TABLE pragma_piece_registry_dependency;
+DROP TABLE pragma_piece_root;
+DROP TABLE pragma_piece_root_index_state;
+`);
+    close(engine);
+    engine = undefined;
+    engine = await open({ url, space });
+    assertEquals(
+      listPieceRootPage(engine, {
+        principal,
+        sessionId,
+        limit: 10,
+      })[0].entry.name,
+      "Backfilled",
+    );
+  } finally {
+    if (engine !== undefined) close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine migrates registry dependency paths", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const url = toFileUrl(path);
+  const space = "did:key:z6Mk-piece-root-registry-dependency-migration";
+  const sessionId = "session:piece-root-registry-dependency-migration";
+  let engine: Engine | undefined;
+
+  try {
+    engine = await open({ url, space });
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:migrated-piece",
+          value: toEntityDocument({}, undefined, {
+            patternIdentity: {
+              identity: "M".repeat(43),
+              symbol: "default",
+            },
+          }),
+        }],
+      },
+    });
+    engine.database.exec(`
+DROP TABLE pragma_piece_registry_dependency;
+CREATE TABLE pragma_piece_registry_dependency (
+  branch                TEXT NOT NULL,
+  dependency_id         TEXT NOT NULL,
+  dependency_scope_key  TEXT NOT NULL,
+  PRIMARY KEY (branch, dependency_id, dependency_scope_key)
+);
+UPDATE pragma_piece_root_index_state SET version = 5 WHERE singleton = 1;
+`);
+    close(engine);
+    engine = undefined;
+
+    engine = await open({ url, space });
+    assertEquals(
+      listPieceRootPage(engine, {
+        sessionId,
+        limit: 10,
+      }).map(({ entry }) => entry.id),
+      ["migrated-piece"],
+    );
+    assertEquals(
+      (engine.database.prepare(`
+PRAGMA table_info(pragma_piece_registry_dependency)
+`).all() as Array<{ name: string }>).map(({ name }) => name),
+      [
+        "dependency_id",
+        "dependency_scope_key",
+        "dependency_path",
+        "dependency_kind",
+      ],
+    );
+    assertEquals(
+      engine.database.prepare(`
+SELECT version FROM pragma_piece_root_index_state WHERE singleton = 1
+`).get(),
+      { version: 9 },
+    );
+  } finally {
+    if (engine !== undefined) close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine replaces prerelease piece index tables", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const url = toFileUrl(path);
+  const space = "did:key:z6Mk-piece-root-prerelease-index";
+  const sessionId = "session:piece-root-prerelease-index";
+  let engine: Engine | undefined;
+
+  try {
+    engine = await open({ url, space });
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:piece",
+          value: toEntityDocument({}, undefined, {
+            patternIdentity: {
+              identity: "P".repeat(43),
+              symbol: "default",
+            },
+          }),
+        }],
+      },
+    });
+    engine.database.exec(`
+ALTER TABLE pragma_piece_root_dependency RENAME TO piece_root_dependency;
+ALTER TABLE pragma_piece_registry_dependency
+  RENAME TO piece_registry_dependency;
+ALTER TABLE pragma_piece_root RENAME TO piece_root;
+ALTER TABLE pragma_piece_root_index_state RENAME TO piece_root_index_state;
+`);
+    close(engine);
+    engine = undefined;
+
+    engine = await open({ url, space });
+    assertEquals(
+      listPieceRootPage(engine, { sessionId, limit: 10 }).map(({ entry }) =>
+        entry.id
+      ),
+      ["piece"],
+    );
+    assertEquals(
+      engine.database.prepare(`
+SELECT name
+FROM sqlite_schema
+WHERE type = 'table'
+  AND name IN (
+    'piece_registry_dependency',
+    'piece_root',
+    'piece_root_dependency',
+    'piece_root_index_state'
+  )
+ORDER BY name
+`).all(),
+      [],
+    );
+  } finally {
+    if (engine !== undefined) close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine rebuilds a stale piece index after rollback writes", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const url = toFileUrl(path);
+  const space = "did:key:z6Mk-piece-root-rollback-watermark";
+  const sessionId = "session:piece-root-rollback-watermark";
+  const pieceDocument = (identity: string) =>
+    toEntityDocument({}, undefined, {
+      patternIdentity: { identity, symbol: "default" },
+    });
+  let engine: Engine | undefined;
+
+  try {
+    engine = await open({ url, space });
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:a",
+          value: pieceDocument("A".repeat(43)),
+        }],
+      },
+    });
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:b",
+          value: pieceDocument("B".repeat(43)),
+        }],
+      },
+    });
+    engine.database.exec(`
+DELETE FROM pragma_piece_root_dependency
+WHERE piece_id = 'of:b';
+DELETE FROM pragma_piece_root
+WHERE id = 'of:b';
+UPDATE pragma_piece_root_index_state
+SET indexed_commit_seq = 1
+WHERE singleton = 1;
+`);
+    close(engine);
+    engine = undefined;
+
+    engine = await open({ url, space });
+    assertEquals(
+      listPieceRootPage(engine, { sessionId, limit: 10 }).map(({ entry }) =>
+        entry.id
+      ),
+      ["a", "b"],
+    );
+    assertEquals(
+      engine.database.prepare(`
+SELECT version, indexed_commit_seq
+FROM pragma_piece_root_index_state
+WHERE singleton = 1
+`).get(),
+      { version: 9, indexed_commit_seq: 2 },
+    );
+  } finally {
+    if (engine !== undefined) close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine defers piece index writes until the first read", async () => {
+  const space = "did:key:z6Mk-piece-root-deferred-write";
+  const sessionId = "session:piece-root-deferred-write";
+  const { engine, path } = await createEngineWithOptions({ space });
+
+  try {
+    let rejectedIndexWrites = 0;
+    engine.database.function("reject_piece_index", () => {
+      rejectedIndexWrites++;
+      throw new Error("deferred piece index write");
+    });
+    engine.database.exec(`
+CREATE TRIGGER reject_piece_root_insert
+BEFORE INSERT ON pragma_piece_root
+BEGIN
+  SELECT reject_piece_index();
+END;
+`);
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:deferred",
+          value: toEntityDocument(
+            { $NAME: "Deferred" },
+            undefined,
+            {
+              patternIdentity: {
+                identity: "D".repeat(43),
+                symbol: "default",
+              },
+            },
+          ),
+        }],
+      },
+    });
+    assertEquals(rejectedIndexWrites, 0);
+    assertEquals(
+      engine.database.prepare(`
+SELECT indexed_commit_seq
+FROM pragma_piece_root_index_state
+WHERE singleton = 1
+`).get(),
+      undefined,
+    );
+    assertEquals(
+      engine.database.prepare(`
+SELECT COUNT(*) AS count
+FROM pragma_piece_root
+`).get(),
+      { count: 0 },
+    );
+
+    assertThrows(
+      () => listPieceRootPage(engine, { sessionId, limit: 10 }),
+      Error,
+    );
+    assertEquals(rejectedIndexWrites, 1);
+    assertEquals(
+      engine.database.prepare(`
+SELECT indexed_commit_seq
+FROM pragma_piece_root_index_state
+WHERE singleton = 1
+`).get(),
+      undefined,
+    );
+
+    engine.database.exec(`DROP TRIGGER reject_piece_root_insert`);
+    assertEquals(
+      listPieceRootPage(engine, { sessionId, limit: 10 }).map(({ entry }) =>
+        entry
+      ),
+      [{
+        id: "deferred",
+        scope: "space",
+        registered: false,
+        name: "Deferred",
+        pattern: {
+          identity: "D".repeat(43),
+          symbol: "default",
+        },
+      }],
+    );
+    assertEquals(
+      engine.database.prepare(`
+SELECT indexed_commit_seq
+FROM pragma_piece_root_index_state
+WHERE singleton = 1
+`).get(),
+      { indexed_commit_seq: 1 },
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine coalesces pending root writes during catch-up", async () => {
+  const space = "did:key:z6Mk-piece-root-coalesced-write";
+  const sessionId = "session:piece-root-coalesced-write";
+  const { engine, path } = await createEngineWithOptions({ space });
+  const document = (name: string) =>
+    toEntityDocument(
+      { $NAME: name },
+      undefined,
+      {
+        patternIdentity: {
+          identity: "C".repeat(43),
+          symbol: "default",
+        },
+      },
+    );
+
+  try {
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:coalesced",
+          value: document("Initial"),
+        }],
+      },
+    });
+    listPieceRootPage(engine, { sessionId, limit: 10 });
+    engine.database.exec(`
+CREATE TABLE piece_root_write_audit (
+  count INTEGER NOT NULL
+);
+INSERT INTO piece_root_write_audit (count) VALUES (0);
+CREATE TRIGGER audit_piece_root_update
+AFTER UPDATE ON pragma_piece_root
+BEGIN
+  UPDATE piece_root_write_audit SET count = count + 1;
+END;
+`);
+
+    for (let localSeq = 2; localSeq <= 301; localSeq++) {
+      applyCommit(engine, {
+        space,
+        sessionId,
+        commit: {
+          localSeq,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "set",
+            id: "of:coalesced",
+            value: document(`Final ${localSeq}`),
+          }],
+        },
+      });
+    }
+    assertEquals(
+      engine.database.prepare(`
+SELECT indexed_commit_seq
+FROM pragma_piece_root_index_state
+WHERE singleton = 1
+`).get(),
+      { indexed_commit_seq: 1 },
+    );
+    assertEquals(
+      engine.database.prepare(`
+SELECT name
+FROM pragma_piece_root
+WHERE id = 'of:coalesced'
+`).get(),
+      { name: "Initial" },
+    );
+
+    assertEquals(
+      listPieceRootPage(engine, { sessionId, limit: 10 })[0].entry.name,
+      "Final 301",
+    );
+    assertEquals(
+      engine.database.prepare(`
+SELECT count
+FROM piece_root_write_audit
+`).get(),
+      { count: 1 },
+    );
+    assertEquals(
+      engine.database.prepare(`
+SELECT indexed_commit_seq
+FROM pragma_piece_root_index_state
+WHERE singleton = 1
+`).get(),
+      { indexed_commit_seq: 301 },
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine merges high-fanout root summary refreshes", async () => {
+  const space = "did:key:z6Mk-piece-root-high-fanout";
+  const sessionId = "session:piece-root-high-fanout";
+  const { engine, path } = await createEngineWithOptions({ space });
+  const rootCount = 1_025;
+  const patternIdentity = "H".repeat(43);
+  const sourceId = `of:${
+    hashOf({ causal: `pattern:${patternIdentity}` }).taggedHashString
+  }`;
+  const sharedName = linkRefFrom({
+    id: "of:shared-piece-name",
+    path: [],
+    space,
+    scope: "space",
+  });
+
+  try {
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: "of:shared-piece-name",
+            value: toEntityDocument("Initial"),
+          },
+          {
+            op: "set",
+            id: sourceId,
+            value: toEntityDocument({
+              kind: "source",
+              identity: patternIdentity,
+              filename: "/initial.tsx",
+            }),
+          },
+          ...Array.from({ length: rootCount }, (_, index) => ({
+            op: "set" as const,
+            id: `of:shared-name-root-${index.toString().padStart(4, "0")}`,
+            value: toEntityDocument(
+              { $NAME: sharedName },
+              undefined,
+              {
+                patternIdentity: {
+                  identity: patternIdentity,
+                  symbol: "default",
+                },
+              },
+            ),
+          })),
+        ],
+      },
+    });
+    listPieceRootPage(engine, { sessionId, limit: 1 });
+    engine.database.exec(`
+CREATE TABLE piece_root_fanout_audit (
+  count INTEGER NOT NULL
+);
+INSERT INTO piece_root_fanout_audit (count) VALUES (0);
+CREATE TRIGGER audit_piece_root_fanout_update
+AFTER UPDATE OF name ON pragma_piece_root
+BEGIN
+  UPDATE piece_root_fanout_audit SET count = count + 1;
+END;
+`);
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: "of:shared-piece-name",
+            value: toEntityDocument("Updated"),
+          },
+          {
+            op: "set",
+            id: sourceId,
+            value: toEntityDocument({
+              kind: "source",
+              identity: patternIdentity,
+              filename: "/updated.tsx",
+            }),
+          },
+        ],
+      },
+    });
+    listPieceRootPage(engine, { sessionId, limit: 1 });
+
+    assertEquals(
+      engine.database.prepare(`
+SELECT COUNT(*) AS count
+FROM pragma_piece_root
+WHERE name = 'Updated'
+  AND pattern_entry = '/updated.tsx'
+`).get(),
+      { count: rootCount },
+    );
+    assertEquals(
+      engine.database.prepare(`
+SELECT count
+FROM piece_root_fanout_audit
+`).get(),
+      { count: rootCount },
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine refreshes each root once across changed-head pages", async () => {
+  const space = "did:key:z6Mk-piece-root-changed-name-chain";
+  const sessionId = "session:piece-root-changed-name-chain";
+  const { engine, path } = await createEngineWithOptions({ space });
+  const rootCount = 300;
+  const chainLength = 20;
+  const interveningChanges = 300;
+  const link = (id: string) =>
+    linkRefFrom({ id, path: [], space, scope: "space" });
+  const chainDocument = (index: number, finalName: string) =>
+    toEntityDocument(
+      index === chainLength - 1
+        ? finalName
+        : link(`of:shared-name-${index + 1}`),
+    );
+  const rootDocument = () =>
+    toEntityDocument(
+      { $NAME: link("of:shared-name-0") },
+      undefined,
+      {
+        patternIdentity: {
+          identity: "N".repeat(43),
+          symbol: "default",
+        },
+      },
+    );
+
+  try {
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          ...Array.from({ length: chainLength }, (_, index) => ({
+            op: "set" as const,
+            id: `of:shared-name-${index}`,
+            value: chainDocument(index, "Initial"),
+          })),
+          ...Array.from({ length: rootCount }, (_, index) => ({
+            op: "set" as const,
+            id: `of:name-chain-root-${index.toString().padStart(3, "0")}`,
+            value: rootDocument(),
+          })),
+        ],
+      },
+    });
+    listPieceRootPage(engine, { sessionId, limit: 1 });
+    engine.database.exec(`
+CREATE TABLE piece_root_name_chain_audit (
+  count INTEGER NOT NULL
+);
+INSERT INTO piece_root_name_chain_audit (count) VALUES (0);
+CREATE TRIGGER audit_piece_root_name_chain_update
+AFTER UPDATE OF name ON pragma_piece_root
+BEGIN
+  UPDATE piece_root_name_chain_audit SET count = count + 1;
+END;
+`);
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: "of:shared-name-0",
+            value: chainDocument(0, "Updated"),
+          },
+          {
+            op: "set",
+            id: "of:name-chain-root-000",
+            value: rootDocument(),
+          },
+          ...Array.from({ length: interveningChanges }, (_, index) => ({
+            op: "set" as const,
+            id: `of:intervening-${index.toString().padStart(3, "0")}`,
+            value: toEntityDocument({ index }),
+          })),
+          ...Array.from({ length: chainLength - 1 }, (_, offset) => {
+            const index = offset + 1;
+            return {
+              op: "set" as const,
+              id: `of:shared-name-${index}`,
+              value: chainDocument(index, "Updated"),
+            };
+          }),
+        ],
+      },
+    });
+    listPieceRootPage(engine, { sessionId, limit: 1 });
+
+    assertEquals(
+      engine.database.prepare(`
+SELECT COUNT(*) AS count
+FROM pragma_piece_root
+WHERE name = 'Updated'
+`).get(),
+      { count: rootCount },
+    );
+    assertEquals(
+      engine.database.prepare(`
+SELECT count
+FROM piece_root_name_chain_audit
+`).get(),
+      { count: rootCount },
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 engine bounds broad dependency catch-up with a root scan", async () => {
+  const space = "did:key:z6Mk-piece-root-broad-dependency-catch-up";
+  const sessionId = "session:piece-root-broad-dependency-catch-up";
+  const { engine, path } = await createEngineWithOptions({ space });
+  const rootCount = 300;
+  const link = (id: string) =>
+    linkRefFrom({ id, path: [], space, scope: "space" });
+
+  try {
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: Array.from({ length: rootCount }, (_, index) => [
+          {
+            op: "set" as const,
+            id: `of:broad-name-${index.toString().padStart(3, "0")}`,
+            value: toEntityDocument("Initial"),
+          },
+          {
+            op: "set" as const,
+            id: `of:broad-root-${index.toString().padStart(3, "0")}`,
+            value: toEntityDocument(
+              {
+                $NAME: link(
+                  `of:broad-name-${index.toString().padStart(3, "0")}`,
+                ),
+              },
+              undefined,
+              {
+                patternIdentity: {
+                  identity: "B".repeat(43),
+                  symbol: "default",
+                },
+              },
+            ),
+          },
+        ]).flat(),
+      },
+    });
+    listPieceRootPage(engine, { sessionId, limit: 1 });
+    engine.database.exec(`
+CREATE TABLE piece_root_broad_catch_up_audit (
+  count INTEGER NOT NULL
+);
+INSERT INTO piece_root_broad_catch_up_audit (count) VALUES (0);
+CREATE TRIGGER audit_piece_root_broad_catch_up
+AFTER UPDATE OF name ON pragma_piece_root
+BEGIN
+  UPDATE piece_root_broad_catch_up_audit SET count = count + 1;
+END;
+`);
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: Array.from({ length: rootCount }, (_, index) => ({
+          op: "set" as const,
+          id: `of:broad-name-${index.toString().padStart(3, "0")}`,
+          value: toEntityDocument("Updated"),
+        })),
+      },
+    });
+    listPieceRootPage(engine, { sessionId, limit: 1 });
+
+    assertEquals(
+      engine.database.prepare(`
+SELECT COUNT(*) AS count
+FROM pragma_piece_root
+WHERE name = 'Updated'
+`).get(),
+      { count: rootCount },
+    );
+    assertEquals(
+      engine.database.prepare(`
+SELECT count
+FROM piece_root_broad_catch_up_audit
+`).get(),
+      { count: rootCount },
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 piece root IDs preserve URI kind without exposing data URIs", async () => {
+  const space = "did:key:z6Mk-piece-root-uri-kinds";
+  const sessionId = "session:piece-root-uri-kinds";
+  const { engine, path } = await createEngineWithOptions({ space });
+  const dataId = "data:text/plain,PIECE_ROOT_INLINE_SECRET_7e28325d47e74eaf";
+  const sameCanonicalId = "fid1:same-piece-root";
+  const patternIdentity = {
+    identity: "K".repeat(43),
+    symbol: "default",
+  };
+
+  try {
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: `of:${sameCanonicalId}`,
+            value: toEntityDocument({}, undefined, { patternIdentity }),
+          },
+          {
+            op: "set",
+            id: `computed:${sameCanonicalId}`,
+            value: toEntityDocument({}, undefined, { patternIdentity }),
+          },
+          {
+            op: "set",
+            id: dataId,
+            value: toEntityDocument({}, undefined, { patternIdentity }),
+          },
+          {
+            op: "set",
+            id: "of:urn:piece",
+            value: toEntityDocument({}, undefined, { patternIdentity }),
+          },
+          {
+            op: "set",
+            id: "urn:piece",
+            value: toEntityDocument({}, undefined, { patternIdentity }),
+          },
+        ],
+      },
+    });
+
+    const listed = listPieceRootPage(engine, {
+      sessionId,
+      limit: 10,
+    });
+    assertEquals(
+      listed
+        .filter(({ entry }) => entry.id === sameCanonicalId)
+        .map(({ entry }) => entry.entityKind ?? "of")
+        .sort(),
+      ["computed", "of"],
+    );
+    assertEquals(
+      listed
+        .filter(({ entry }) => entry.id === "urn:piece")
+        .map(({ entry }) => entry.entityKind ?? "of")
+        .sort(),
+      ["of", "urn"],
+    );
+    assertEquals(
+      listed.find(({ entry }) => entry.entityKind === "data")?.entry.id,
+      hashOf(dataId).toString(),
+    );
+    assertEquals(
+      new Set(listed.map(({ cursor }) => cursor.orderKey)).size,
+      listed.length,
+    );
+    assertEquals(JSON.stringify(listed).includes("INLINE_SECRET"), false);
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 piece root index learns its space and retains it", async () => {
+  const space = "did:key:z6Mk-piece-root-late-space";
+  const sessionId = "session:piece-root-late-space";
+  const { engine, path } = await createEngine();
+  const linkedName = linkRefFrom({
+    id: "of:piece-name",
+    path: [],
+    space,
+    scope: "space",
+  });
+
+  try {
+    applyCommit(engine, {
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: "of:piece",
+            value: toEntityDocument(
+              { $NAME: linkedName },
+              undefined,
+              {
+                patternIdentity: {
+                  identity: "L".repeat(43),
+                  symbol: "default",
+                },
+              },
+            ),
+          },
+          {
+            op: "set",
+            id: "of:piece-name",
+            value: toEntityDocument("Learned name"),
+          },
+        ],
+      },
+    });
+    assertEquals(
+      listPieceRootPage(engine, { sessionId, limit: 10 })[0].entry.name,
+      undefined,
+    );
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:unrelated",
+          value: toEntityDocument({ value: "unrelated" }),
+        }],
+      },
+    });
+    assertEquals(
+      listPieceRootPage(engine, { sessionId, limit: 10 })[0].entry.name,
+      "Learned name",
+    );
+
+    applyCommit(engine, {
+      sessionId,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:piece-name",
+          value: toEntityDocument("Updated without space"),
+        }],
+      },
+    });
+    assertEquals(
+      listPieceRootPage(engine, { sessionId, limit: 10 })[0].entry.name,
+      "Updated without space",
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 piece registry tail updates preserve indexed positions", async () => {
+  const space = "did:key:z6Mk-piece-root-registry-tail";
+  const sessionId = "session:piece-root-registry-tail";
+  const { engine, path } = await createEngineWithOptions({ space });
+  const spaceCellId = `of:${hashOf({ causal: space }).taggedHashString}`;
+  const link = (id: string) =>
+    linkRefFrom({ id, path: [], space, scope: "space" });
+  const pieceDocument = (identity: string) =>
+    toEntityDocument({}, undefined, {
+      patternIdentity: { identity, symbol: "default" },
+    });
+
+  try {
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: spaceCellId,
+            value: toEntityDocument({ defaultPattern: link("of:home") }),
+          },
+          {
+            op: "set",
+            id: "of:home",
+            value: toEntityDocument(
+              { pieceRegistry: link("of:registry") },
+              undefined,
+              {
+                patternIdentity: {
+                  identity: "H".repeat(43),
+                  symbol: "default",
+                },
+              },
+            ),
+          },
+          {
+            op: "set",
+            id: "of:registry",
+            value: toEntityDocument([link("of:a")]),
+          },
+          {
+            op: "set",
+            id: "of:a",
+            value: pieceDocument("A".repeat(43)),
+          },
+          {
+            op: "set",
+            id: "of:b",
+            value: pieceDocument("B".repeat(43)),
+          },
+        ],
+      },
+    });
+    assertEquals(
+      listPieceRootPage(engine, {
+        sessionId,
+        limit: 10,
+        registeredOnly: true,
+      }).map(({ entry }) => entry.id),
+      ["a"],
+    );
+
+    engine.database.exec(`
+CREATE TRIGGER reject_existing_registry_position_rewrite
+BEFORE UPDATE OF registry_position ON pragma_piece_root
+WHEN OLD.id = 'of:a'
+BEGIN
+  SELECT RAISE(ABORT, 'existing registry position was rewritten');
+END;
+`);
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:registry",
+          patches: [{
+            op: "append",
+            path: "/value",
+            values: [link("of:b")],
+          }],
+        }],
+      },
+    });
+    assertEquals(
+      listPieceRootPage(engine, {
+        sessionId,
+        limit: 10,
+        registeredOnly: true,
+      }).map(({ entry }) => entry.id),
+      ["a", "b"],
+    );
+
+    applyCommit(engine, {
+      space,
+      sessionId: `${sessionId}:pattern-source`,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:b",
+          patches: [{
+            op: "add",
+            path: "/patternSource",
+            value: "/patterns/registered-piece.tsx",
+          }],
+        }],
+      },
+    });
+    assertEquals(
+      listPieceRootPage(engine, {
+        sessionId,
+        limit: 10,
+        registeredOnly: true,
+      }).map(({ entry }) => entry.id),
+      ["a", "b"],
+    );
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 3,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:b",
+          patches: [{
+            op: "add",
+            path: "/value/x",
+            value: true,
+          }],
+        }],
+      },
+    });
+    assertEquals(
+      listPieceRootPage(engine, {
+        sessionId,
+        limit: 10,
+        registeredOnly: true,
+      }).map(({ entry }) => entry.id),
+      ["a", "b"],
+    );
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 4,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:registry",
+          patches: [{
+            op: "add-unique",
+            path: "/value",
+            values: [link("of:a")],
+          }],
+        }],
+      },
+    });
+    assertEquals(
+      listPieceRootPage(engine, {
+        sessionId,
+        limit: 10,
+        registeredOnly: true,
+      }).map(({ entry }) => entry.id),
+      ["a", "b"],
+    );
+
+    applyCommit(engine, {
+      sessionId,
+      commit: {
+        localSeq: 5,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: "of:c",
+            value: pieceDocument("C".repeat(43)),
+          },
+          {
+            op: "patch",
+            id: "of:a",
+            patches: [{
+              op: "add",
+              path: "/value/x",
+              value: true,
+            }],
+          },
+          {
+            op: "patch",
+            id: "of:registry",
+            patches: [{
+              op: "append",
+              path: "/value",
+              values: [link("of:c")],
+            }],
+          },
+        ],
+      },
+    });
+    assertEquals(
+      listPieceRootPage(engine, {
+        sessionId,
+        limit: 10,
+        registeredOnly: true,
+      }).map(({ entry }) => entry.id),
+      ["a", "b", "c"],
+    );
+
+    engine.database.exec(
+      `DROP TRIGGER reject_existing_registry_position_rewrite`,
+    );
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 6,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set",
+            id: "of:registry",
+            value: toEntityDocument([link("of:b"), link("of:a")]),
+          },
+          {
+            op: "patch",
+            id: "of:registry",
+            patches: [{
+              op: "append",
+              path: "/value",
+              values: [link("of:c")],
+            }],
+          },
+        ],
+      },
+    });
+    assertEquals(
+      listPieceRootPage(engine, {
+        sessionId,
+        limit: 10,
+        registeredOnly: true,
+      }).map(({ entry }) => entry.id),
+      ["b", "a", "c"],
+    );
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 7,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:registry",
+          patches: [{
+            op: "replace",
+            path: "/value/0",
+            value: link("of:a"),
+          }],
+        }],
+      },
+    });
+    assertEquals(
+      listPieceRootPage(engine, {
+        sessionId,
+        limit: 10,
+        registeredOnly: true,
+      }).map(({ entry }) => entry.id),
+      ["a", "c"],
+    );
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 8,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:registry",
+          patches: [{
+            op: "replace",
+            path: "/value/0",
+            value: link("of:b"),
+          }],
+        }],
+      },
+    });
+    assertEquals(
+      listPieceRootPage(engine, {
+        sessionId,
+        limit: 10,
+        registeredOnly: true,
+      }).map(({ entry }) => entry.id),
+      ["b", "a", "c"],
+    );
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 9,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:a",
+          patches: [{
+            op: "remove",
+            path: "/patternIdentity",
+          }],
+        }],
+      },
+    });
+    assertEquals(
+      listPieceRootPage(engine, {
+        sessionId,
+        limit: 10,
+        registeredOnly: true,
+      }).map(({ entry }) => entry.id),
+      ["b", "c"],
+    );
+
+    applyCommit(engine, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 10,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: "of:a",
+          patches: [{
+            op: "add",
+            path: "/patternIdentity",
+            value: {
+              identity: "A".repeat(43),
+              symbol: "default",
+            },
+          }],
+        }],
+      },
+    });
+    assertEquals(
+      listPieceRootPage(engine, {
+        sessionId,
+        limit: 10,
+        registeredOnly: true,
+      }).map(({ entry }) => entry.id),
+      ["b", "a", "c"],
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 piece root continuations use ordering indexes", async () => {
+  const { engine, path } = await createEngineWithOptions({
+    space: "did:key:z6Mk-piece-root-query-plan",
+  });
+  const planDetails = (sql: string): string[] =>
+    (engine.database.prepare(`EXPLAIN QUERY PLAN ${sql}`).all() as Array<
+      { detail: string }
+    >).map(({ detail }) => detail);
+
+  try {
+    const registered = planDetails(`
+SELECT id
+FROM pragma_piece_root
+WHERE scope_key = 'space'
+  AND registry_position IS NOT NULL
+  AND registry_position > 100
+ORDER BY registry_position
+LIMIT 101
+`);
+    assertEquals(
+      registered.some((detail) =>
+        detail.includes("idx_piece_root_registry_position") &&
+        detail.includes("registry_position>?")
+      ),
+      true,
+    );
+    assertEquals(
+      registered.some((detail) => detail.includes("TEMP B-TREE")),
+      false,
+    );
+
+    const unregistered = planDetails(`
+SELECT id
+FROM pragma_piece_root
+  INDEXED BY idx_piece_root_unregistered_scope_listing
+WHERE scope_key = 'user:alice'
+  AND registry_position IS NULL
+  AND (canonical_id, order_key) >
+    ('fid1:cursor', 'opaque-order-key')
+ORDER BY canonical_id, order_key
+LIMIT 101
+`);
+    assertEquals(
+      unregistered.some((detail) =>
+        detail.includes("idx_piece_root_unregistered_scope_listing") &&
+        detail.includes("scope_key=?") &&
+        detail.includes("canonical_id") &&
+        detail.includes("order_key")
+      ),
+      true,
+    );
+    assertEquals(
+      unregistered.some((detail) => detail.includes("TEMP B-TREE")),
+      false,
+    );
+
+    const dependency = planDetails(`
+SELECT piece_id, piece_scope_key
+FROM pragma_piece_root_dependency AS dependency
+  INDEXED BY idx_piece_root_dependency_target
+WHERE dependency_id = 'of:dependency'
+  AND dependency_scope_key = 'space'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM head AS pending_root
+    WHERE pending_root.branch = ''
+      AND pending_root.id = dependency.piece_id
+      AND pending_root.scope_key = dependency.piece_scope_key
+      AND pending_root.seq > 10
+      AND pending_root.seq <= 100
+  )
+  AND (piece_id, piece_scope_key) > ('of:cursor', 'space')
+ORDER BY piece_id, piece_scope_key
+LIMIT 256
+`);
+    assertEquals(
+      dependency.some((detail) =>
+        detail.includes("idx_piece_root_dependency_target") &&
+        detail.includes("dependency_id=?") &&
+        detail.includes("dependency_scope_key=?")
+      ),
+      true,
+    );
+    assertEquals(
+      dependency.some((detail) => detail.includes("TEMP B-TREE")),
+      false,
+    );
+
+    const pendingDependencyTargets = planDetails(`
+SELECT pending.id, pending.scope_key
+FROM head AS pending INDEXED BY idx_head_branch_sequence
+WHERE pending.branch = ''
+  AND pending.seq > 10
+  AND pending.seq <= 100
+  AND EXISTS (
+    SELECT 1
+    FROM pragma_piece_root_dependency AS dependency
+      INDEXED BY idx_piece_root_dependency_target
+    WHERE dependency.dependency_id = pending.id
+      AND dependency.dependency_scope_key = pending.scope_key
+      AND NOT EXISTS (
+        SELECT 1
+        FROM head AS pending_root
+        WHERE pending_root.branch = ''
+          AND pending_root.id = dependency.piece_id
+          AND pending_root.scope_key = dependency.piece_scope_key
+          AND pending_root.seq > 10
+          AND pending_root.seq <= 100
+      )
+  )
+ORDER BY pending.seq, pending.rowid
+LIMIT 257
+`);
+    assertEquals(
+      pendingDependencyTargets.some((detail) =>
+        detail.includes("idx_head_branch_sequence") &&
+        detail.includes("branch=?") &&
+        detail.includes("seq>?")
+      ),
+      true,
+    );
+    assertEquals(
+      pendingDependencyTargets.some((detail) =>
+        detail.includes("idx_piece_root_dependency_target") &&
+        detail.includes("dependency_id=?") &&
+        detail.includes("dependency_scope_key=?")
+      ),
+      true,
+    );
+    assertEquals(
+      pendingDependencyTargets.some((detail) =>
+        detail.includes("sqlite_autoindex_head_1") &&
+        detail.includes("branch=?") &&
+        detail.includes("id=?") &&
+        detail.includes("scope_key=?")
+      ),
+      true,
+    );
+    assertEquals(
+      pendingDependencyTargets.some((detail) => detail.includes("TEMP B-TREE")),
+      false,
+    );
+
+    const broadDependencyCatchUp = planDetails(`
+SELECT dependency.piece_id, dependency.piece_scope_key
+FROM pragma_piece_root_dependency AS dependency
+WHERE (dependency.piece_id, dependency.piece_scope_key) >
+    ('of:cursor', 'space')
+  AND EXISTS (
+    SELECT 1
+    FROM head AS changed_dependency
+    WHERE changed_dependency.branch = ''
+      AND changed_dependency.id = dependency.dependency_id
+      AND changed_dependency.scope_key = dependency.dependency_scope_key
+      AND changed_dependency.seq > 10
+      AND changed_dependency.seq <= 100
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM head AS pending_root
+    WHERE pending_root.branch = ''
+      AND pending_root.id = dependency.piece_id
+      AND pending_root.scope_key = dependency.piece_scope_key
+      AND pending_root.seq > 10
+      AND pending_root.seq <= 100
+  )
+GROUP BY dependency.piece_id, dependency.piece_scope_key
+ORDER BY dependency.piece_id, dependency.piece_scope_key
+LIMIT 256
+`);
+    assertEquals(
+      broadDependencyCatchUp.filter((detail) =>
+        detail.includes("sqlite_autoindex_head_1")
+      ).length >= 2,
+      true,
+      broadDependencyCatchUp.join("\n"),
+    );
+    assertEquals(
+      broadDependencyCatchUp.some((detail) => detail.includes("TEMP B-TREE")),
+      false,
+    );
+
+    const registryDependency = planDetails(`
+SELECT dependency_path, dependency_kind
+FROM pragma_piece_registry_dependency
+WHERE dependency_id = 'of:dependency'
+  AND dependency_scope_key = 'space'
+  AND dependency_path > '["cursor"]'
+ORDER BY dependency_path
+LIMIT 256
+`);
+    assertEquals(
+      registryDependency.some((detail) =>
+        detail.includes("PRIMARY KEY") &&
+        detail.includes("dependency_id=?") &&
+        detail.includes("dependency_scope_key=?")
+      ),
+      true,
+    );
+    assertEquals(
+      registryDependency.some((detail) => detail.includes("TEMP B-TREE")),
+      false,
+    );
+
+    const changedHeads = planDetails(`
+SELECT rowid, id, scope_key, seq
+FROM head INDEXED BY idx_head_branch_sequence
+WHERE branch = ''
+  AND seq > 10
+  AND seq <= 100
+  AND (seq, rowid) > (20, 30)
+ORDER BY seq, rowid
+LIMIT 256
+`);
+    assertEquals(
+      changedHeads.some((detail) =>
+        detail.includes("idx_head_branch_sequence") &&
+        detail.includes("branch=?") &&
+        detail.includes("seq>?")
+      ),
+      true,
+    );
+    assertEquals(
+      changedHeads.some((detail) => detail.includes("TEMP B-TREE")),
+      false,
+    );
+
+    const changedRegistryDocument = planDetails(`
+SELECT id, scope_key, seq, op_index, op, data
+FROM revision
+WHERE branch = ''
+  AND seq > 10
+  AND seq <= 100
+  AND id = 'of:registry'
+  AND scope_key = 'space'
+  AND (seq, op_index) > (20, 0)
+ORDER BY seq, op_index
+LIMIT 256
+`);
+    assertEquals(
+      changedRegistryDocument.some((detail) =>
+        detail.includes("idx_revision_branch_id_seq") &&
+        detail.includes("branch=?") &&
+        detail.includes("id=?") &&
+        detail.includes("scope_key=?") &&
+        detail.includes("seq>?")
+      ),
+      true,
+    );
+    assertEquals(
+      changedRegistryDocument.some((detail) => detail.includes("TEMP B-TREE")),
+      false,
+    );
+  } finally {
+    close(engine);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 piece root pages use one SQLite snapshot", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const url = toFileUrl(path);
+  const space = "did:key:z6Mk-piece-root-read-snapshot";
+  const sessionId = "session:piece-root-read-snapshot";
+  const reader = await open({ url, space });
+  const writer = await open({ url, space });
+  const pieceDocument = toEntityDocument({}, undefined, {
+    patternIdentity: {
+      identity: "R".repeat(43),
+      symbol: "default",
+    },
+  });
+
+  try {
+    applyCommit(reader, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          { op: "set", id: "of:a", value: pieceDocument },
+          { op: "set", id: "of:b", value: pieceDocument },
+        ],
+      },
+    });
+    // Warm the lazy index before opening the deliberate read snapshot.
+    listPieceRootPage(reader, { sessionId, limit: 10 });
+
+    const observed = reader.database.transaction(() => {
+      const checkedSequence = serverSeq(reader);
+      applyCommit(writer, {
+        space,
+        sessionId: "session:piece-root-snapshot-writer",
+        commit: {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{ op: "set", id: "of:c", value: pieceDocument }],
+        },
+      });
+      const ids = listPieceRootPage(reader, {
+        sessionId,
+        limit: 10,
+      }).map(({ entry }) => entry.id);
+      return { checkedSequence, ids };
+    })();
+    assertEquals(observed, { checkedSequence: 1, ids: ["a", "b"] });
+
+    assertEquals(
+      listPieceRootSnapshotPage(reader, {
+        sessionId,
+        limit: 10,
+        expectedServerSeq: observed.checkedSequence,
+      }),
+      { serverSeq: 2 },
+    );
+  } finally {
+    close(writer);
+    close(reader);
+    await Deno.remove(path);
+  }
+});
+
+Deno.test("memory v2 caught-up piece root reads do not reserve the writer slot", async () => {
+  const path = await Deno.makeTempFile({ suffix: ".sqlite" });
+  const url = toFileUrl(path);
+  const space = "did:key:z6Mk-piece-root-caught-up-reader";
+  const sessionId = "session:piece-root-caught-up-reader";
+  const reader = await open({ url, space });
+  const writer = await open({ url, space });
+
+  try {
+    applyCommit(reader, {
+      space,
+      sessionId,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: "of:current",
+          value: toEntityDocument(
+            { $NAME: "Current" },
+            undefined,
+            {
+              patternIdentity: {
+                identity: "Q".repeat(43),
+                symbol: "default",
+              },
+            },
+          ),
+        }],
+      },
+    });
+    listPieceRootPage(reader, { sessionId, limit: 10 });
+    reader.database.exec("PRAGMA busy_timeout = 0");
+    writer.database.exec("BEGIN IMMEDIATE");
+
+    assertEquals(
+      listPieceRootPage(reader, { sessionId, limit: 10 })[0].entry.name,
+      "Current",
+    );
+    assertEquals(
+      listPieceRootSnapshotPage(reader, {
+        sessionId,
+        limit: 10,
+        expectedServerSeq: 1,
+      }).rows?.[0].entry.name,
+      "Current",
+    );
+  } finally {
+    if (writer.database.inTransaction) writer.database.exec("ROLLBACK");
+    close(writer);
+    close(reader);
+    await Deno.remove(path);
+  }
+});
+
 Deno.test("memory v2 engine stores independent scoped instances for the same id", async () => {
   const { engine, path } = await createEngine();
 
@@ -1133,7 +4317,7 @@ Deno.test("memory v2 engine backfills current head operations", async () => {
   try {
     defaultedDb.exec(`
       DROP INDEX idx_head_live_entity_ids;
-      DROP INDEX idx_head_branch;
+      DROP INDEX idx_head_branch_sequence;
       ALTER TABLE head RENAME TO head_defaulted_migration;
       CREATE TABLE head (
         branch    TEXT    NOT NULL,

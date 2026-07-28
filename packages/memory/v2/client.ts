@@ -14,9 +14,12 @@ import {
   type GraphQuery,
   type GraphQueryResult,
   MAX_ENTITY_ID_PAGE_SIZE,
+  MAX_PIECE_ROOT_PAGE_SIZE,
   MEMORY_PROTOCOL,
   type MemoryProtocolFlags,
   parseMemoryProtocolFlags,
+  type PieceRootListOptions,
+  type PieceRootListResult,
   type ResponseMessage,
   type SchedulerActionSnapshotQuery,
   type SchedulerSnapshotListResult,
@@ -659,6 +662,31 @@ export class SpaceSession {
       space: this.space,
       sessionId: this.#sessionId,
       id,
+    });
+
+    this.noteResult(result.serverSeq);
+    return result;
+  }
+
+  async listPieceRoots(
+    options: PieceRootListOptions = {},
+  ): Promise<PieceRootListResult> {
+    this.#assertOpen();
+    if (
+      options.after !== undefined &&
+      options.expectedServerSeq === undefined
+    ) {
+      throw new Error(
+        "piece root continuation requires the first page's server sequence",
+      );
+    }
+    const result = await this.client.request<PieceRootListResult>({
+      type: "piece-root.list",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      ...options,
+      limit: options.limit ?? MAX_PIECE_ROOT_PAGE_SIZE,
     });
 
     this.noteResult(result.serverSeq);

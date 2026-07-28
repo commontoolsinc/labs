@@ -15,6 +15,7 @@ import {
   isReadableCell,
   isSlugAddress,
   NAME,
+  type PieceRootEntry,
   Runtime,
   runtimePresets,
   RuntimeProgram,
@@ -423,37 +424,82 @@ async function getPinnedProgramFromFile(
   return result.program;
 }
 
-// Returns an array of metadata about pieces to display.
+export interface ListPiecesOptions {
+  /** List only pieces named by the space's piece registry. */
+  registry?: boolean;
+}
+
+/** Metadata returned for each listed piece. */
+export interface PieceListEntry {
+  id: string;
+  /** Non-default stored entity URI scheme retained beside the canonical ID. */
+  entityKind?: string;
+  name?: string;
+  patternRef?: PiecePatternRef;
+  /**
+   * Whether the piece is in the space's registry. Absent from registry-only
+   * listings, where every row is registered.
+   */
+  registered?: boolean;
+  /** Cell scope when the piece root is narrower than the space. */
+  scope?: CellScope;
+  error?: string;
+}
+
+const indexedPieceEntry = (
+  piece: PieceRootEntry,
+  registryOnly: boolean,
+): PieceListEntry => {
+  const patternRef: PiecePatternRef | undefined = piece.pattern === undefined
+    ? undefined
+    : {
+      identity: piece.pattern.identity,
+      symbol: piece.pattern.symbol,
+      source: {
+        ref: formatFabricRef({
+          ref: {
+            kind: "uri",
+            scheme: "pattern",
+            hash: piece.pattern.identity,
+          },
+        }),
+        ...(piece.pattern.repository === undefined
+          ? {}
+          : { repository: piece.pattern.repository }),
+        ...(piece.pattern.entry === undefined
+          ? {}
+          : { entry: piece.pattern.entry }),
+        ...(piece.pattern.origin === undefined
+          ? {}
+          : { origin: piece.pattern.origin }),
+      },
+    };
+  return {
+    id: piece.id,
+    ...(piece.entityKind === undefined ? {} : { entityKind: piece.entityKind }),
+    ...(piece.name === undefined ? {} : { name: piece.name }),
+    ...(patternRef === undefined ? {} : { patternRef }),
+    ...(registryOnly ? {} : { registered: piece.registered }),
+    ...(piece.scope === "space" ? {} : { scope: piece.scope }),
+  };
+};
+
+// The indexed path reads summaries maintained by the server. It does not load
+// entity documents or start the default pattern or any listed piece.
 export async function listPieces(
   config: SpaceConfig,
+  options: ListPiecesOptions = {},
   deps: PieceOperationDependencies = {},
-): Promise<
-  { id: string; name?: string; patternRef?: PiecePatternRef; error?: string }[]
-> {
-  const manager = await (deps.loadManager ?? loadManager)(config);
-  const pieces = deps.createController?.(manager) ??
-    new PiecesController(manager);
-  const registeredPieces = await pieces.getRegisteredPieces();
-  return Promise.all(
-    registeredPieces.map(async (piece) => {
-      try {
-        const livePiece = await pieces.get(piece.id, true);
-        const name = (await (
-          livePiece.getCell().key(NAME) as Cell<unknown>
-        ).pull()) as string | undefined;
-        const patternRef = await livePiece.getPatternRef();
-        return {
-          id: piece.id,
-          name,
-          patternRef,
-        };
-      } catch (err) {
-        return {
-          id: piece.id,
-          error: err instanceof Error ? err.message : String(err),
-        };
-      }
-    }),
+): Promise<PieceListEntry[]> {
+  const manager = await (deps.loadManager ?? loadManager)({
+    ...config,
+    deferSpaceCellSync: true,
+  });
+  const indexed = await manager.listPieceRoots({
+    registeredOnly: options.registry === true,
+  });
+  return indexed.map((piece) =>
+    indexedPieceEntry(piece, options.registry === true)
   );
 }
 
@@ -1914,7 +1960,7 @@ function createPieceConnection(
 async function buildConnectionMap(
   config: SpaceConfig,
 ): Promise<PieceConnectionMap> {
-  const pieces = await listPieces(config);
+  const pieces = await listPieces(config, { registry: true });
   const connections: PieceConnectionMap = new Map();
 
   for (const piece of pieces) {

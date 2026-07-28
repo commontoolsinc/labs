@@ -20,7 +20,7 @@ in the same change.
 > flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-07-23. Each flag's section carries the date its status
+**Last reviewed:** 2026-07-28. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -668,7 +668,6 @@ the per-epic implementation notes).
 > - **`entityIdLookup`** is a build-inherent capability, hardwired to `true`.
 >   It advertises identifier-only `entity-id.exists` point lookup. Older
 >   servers omit it, which parses as `false`. It is permanent.
-
 ### `experimentalConcurrentWatchRefresh`
 
 - **Toggle via.** `experimentalConcurrentWatchRefresh` on
@@ -953,6 +952,12 @@ config reaches:
 
 These are recorded so that references to them elsewhere in the tree do not send a
 future reader hunting for a flag that no longer exists.
+
+### `pieceRootListing` (never shipped)
+
+A memory protocol capability that advertised `piece-root.list`. It was removed
+before any relevant client or server was deployed. Indexed piece listing is now
+part of the protocol without a compatibility branch.
 
 ### `systemPatternAutoUpdateHome` / `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME` (removed)
 

@@ -30,6 +30,10 @@ const SESSION_RESULT_PATTERN =
   `${REPO_ROOT}/packages/cli/test/fixtures/session-derived-result.tsx`;
 const SESSION_SCOPED_PATTERN =
   `${REPO_ROOT}/packages/cli/test/fixtures/session-scoped-result.tsx`;
+const UNREGISTERED_CHILD_PATTERN =
+  `${REPO_ROOT}/packages/cli/test/fixtures/unregistered-child.tsx`;
+const INTERNAL_CHILD_PATTERN =
+  `${REPO_ROOT}/packages/cli/test/fixtures/internal-child.tsx`;
 
 const NOTE_CONTENT = "Hello world";
 const REPOSITORY = "https://github.com/commontoolsinc/labs";
@@ -43,6 +47,8 @@ const noteEntry: EntryConfig = {
 let pieceId = "";
 let sessionResultPieceId = "";
 let sessionScopedPieceId = "";
+let childFactoryPieceId = "";
+let internalFactoryPieceId = "";
 let flags = "";
 let identityPath = "";
 let spaceConfig: SpaceConfig;
@@ -99,6 +105,24 @@ describe("cf piece get (integration)", { ignore: !API_URL }, () => {
       mainPath: SESSION_SCOPED_PATTERN,
       rootPath: REPO_ROOT,
     });
+    childFactoryPieceId = await newPiece(spaceConfig, {
+      mainPath: UNREGISTERED_CHILD_PATTERN,
+      rootPath: REPO_ROOT,
+    });
+    await callPieceHandler(
+      { ...spaceConfig, piece: childFactoryPieceId },
+      "createChild",
+      { label: "kept out of the registry" },
+    );
+    internalFactoryPieceId = await newPiece(spaceConfig, {
+      mainPath: INTERNAL_CHILD_PATTERN,
+      rootPath: REPO_ROOT,
+    });
+    await callPieceHandler(
+      { ...spaceConfig, piece: internalFactoryPieceId },
+      "createChild",
+      { label: "held in internal state" },
+    );
     await callPieceHandler(
       { ...spaceConfig, piece: pieceId },
       "setTitle",
@@ -196,5 +220,43 @@ describe("cf piece get (integration)", { ignore: !API_URL }, () => {
     const inspected = await inspectPiece({ ...spaceConfig, piece: pieceId });
     expect(inspected.patternRef).toEqual(listedPiece?.patternRef);
     expect(inspected.patternRef?.symbol).toBe("default");
+  });
+
+  it("lists piece roots that the registry never named", async () => {
+    const listed = await listPieces(spaceConfig);
+    const child = listed.find((piece) =>
+      piece.patternRef?.symbol === "Child" &&
+      piece.patternRef.source.entry?.endsWith("unregistered-child.tsx") === true
+    );
+    expect(child?.registered).toBe(false);
+
+    const root = listed.find((piece) =>
+      piece.patternRef?.source.entry?.endsWith("default-app.tsx") === true
+    );
+    expect(root?.registered).toBe(false);
+
+    const factory = listed.find((piece) => piece.id === childFactoryPieceId);
+    expect(factory?.registered).toBe(true);
+
+    const internalChild = listed.find((piece) =>
+      piece.patternRef?.symbol === "Child" &&
+      piece.patternRef.source.entry?.endsWith("internal-child.tsx") === true
+    );
+    expect(internalChild?.registered).toBe(false);
+
+    const registryOnly = await listPieces(spaceConfig, { registry: true });
+    expect(registryOnly.map((piece) => piece.id)).toContain(
+      childFactoryPieceId,
+    );
+    expect(registryOnly.map((piece) => piece.id)).toContain(
+      internalFactoryPieceId,
+    );
+    expect(registryOnly.map((piece) => piece.id)).not.toContain(child?.id);
+    expect(registryOnly.map((piece) => piece.id)).not.toContain(
+      internalChild?.id,
+    );
+    expect(
+      registryOnly.every((piece) => piece.registered === undefined),
+    ).toBe(true);
   });
 });

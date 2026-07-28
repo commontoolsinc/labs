@@ -10,6 +10,8 @@ import type {
   EntityIdListOptions,
   EntityIdListResult,
   PatchOp,
+  PieceRootListOptions,
+  PieceRootListResult,
   SchedulerActionSnapshotQuery,
   SchedulerExecutionContextKey,
   SchedulerSnapshotListResult,
@@ -405,6 +407,11 @@ export interface IStorageProviderWithReplica extends IStorageProvider {
 
   /** Test one live space-scoped entity identifier without loading its value. */
   entityIdExists?(id: string): Promise<boolean | undefined>;
+
+  /** List one page from the server's indexed piece-root snapshot. */
+  listPieceRootPage(
+    options?: PieceRootListOptions,
+  ): Promise<PieceRootListResult>;
 
   /**
    * Internal scheduler persistence query. Memory v2 providers implement this

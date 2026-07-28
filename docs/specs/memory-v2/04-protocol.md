@@ -28,8 +28,8 @@ rewrite. In particular:
 - route-level `Origin` enforcement remains deferred
 - session resume remains keyed by caller-supplied `(space, sessionId)` rather
   than a server-issued, principal-bound identifier
-- the public one-shot read surfaces are `graph.query`, `entity-id.list`, and
-  `entity-id.exists`
+- the public one-shot read surfaces are `graph.query`, `entity-id.list`,
+  `entity-id.exists`, and `piece-root.list`
 - watch-set mutations return inline `sync` payloads, and steady-state topology
   shrink does not yet guarantee automatic `removes`
 
@@ -283,6 +283,7 @@ interface RequestMessage {
     | "graph.query"
     | "entity-id.list"
     | "entity-id.exists"
+    | "piece-root.list"
     | "session.watch.set"
     | "session.watch.add"
     | "session.ack";
@@ -604,7 +605,103 @@ interface EntityIdLookupResult {
 The command requires `READ` access to the space. It does not reveal user- or
 session-scoped instances of the same identifier.
 
-### 4.3.5 `session.watch.set` — Replace the Session Watch Set
+### 4.3.5 `piece-root.list` — List Indexed Piece Roots
+
+`piece-root.list` returns piece roots from a server-maintained index. A live
+default-branch document is a piece root when it has either a valid pattern
+identity containing string `identity` and `symbol` fields, or a valid argument
+link. The classifier does not inspect ordinary values and does not evaluate
+code.
+
+```typescript
+// Shown at module scope.
+interface PieceRootPattern {
+  identity: string;
+  symbol: string;
+  repository?: string;
+  entry?: string;
+  origin?: string;
+}
+
+interface PieceRootEntry {
+  // Canonical piece ID, without the stored "of:" URI prefix.
+  id: string;
+  // Identifies a non-default stored entity URI scheme.
+  entityKind?: string;
+  scope: "space" | "user" | "session";
+  registered: boolean;
+  name?: string;
+  pattern?: PieceRootPattern;
+}
+
+interface PieceRootCursor {
+  // Canonical ID plus an opaque tie-breaker. Clients return both unchanged.
+  id: string;
+  orderKey: string;
+  scope: "space" | "user" | "session";
+  registered: boolean;
+  registryPosition?: number;
+}
+
+interface PieceRootListRequest {
+  type: "piece-root.list";
+  requestId: string;
+  space: SpaceId;
+  sessionId: SessionId;
+  after?: PieceRootCursor;
+  limit?: number;
+  expectedServerSeq?: number;
+  registeredOnly?: boolean;
+}
+
+interface PieceRootListResult {
+  serverSeq: number;
+  pieces: PieceRootEntry[];
+  nextAfter?: PieceRootCursor;
+}
+```
+
+The command requires `READ` access to the space. It returns space-scoped roots
+and only the user- and session-scoped roots visible to the calling session.
+Registration is defined by the canonical space-scoped targets of the current
+piece registry. Registry wrappers are resolved before matching. Registered
+roots appear first in registry order. Other roots follow in canonical ID and
+scope order. A non-default entity URI kind is returned separately so two
+canonical IDs do not collapse into one identity. Data URI contents are replaced
+by their content hash. Wrapper resolution never crosses the space boundary. A
+retired `allPieces` export is accepted only for a default-app-shaped legacy root
+with no `pieceRegistry` value and an `addPiece` link that has durable stream
+schema or resolves to a stored stream marker.
+
+The index stores only display summaries: a durable string `$NAME`, pattern
+identity and symbol, repository and origin metadata, and the entry filename
+from a matching source document when present. Every summary field except the
+piece ID, scope, and registration state is optional. In particular, a computed
+name with no durable stored value remains absent. Listing selects the index and
+does not select or return entity documents.
+
+Data commits do not update the piece-root index. The index records the latest
+storage commit sequence it processed. The server opportunistically catches up
+after batched subscription fan-out. A `piece-root.list` request also catches up
+before selecting its page. The request holds one SQLite transaction while it
+checks the sequence, applies pending index work, and selects the page. This
+transaction waits for an active writer and prevents a later writer from
+changing the snapshot.
+
+Opening a database creates or migrates the index schema without reading entity
+documents. A missing or incompatible index is rebuilt by the first catch-up.
+The rebuild pages through live default-branch heads in bounded batches. It does
+not collect every head or every root dependency in JavaScript memory.
+
+The server caps `limit` at 1,000 roots. `nextAfter` is present when another page
+exists. A continuation must send the first page's `serverSeq` as
+`expectedServerSeq`; the server rejects an `after` cursor without it. If the
+space changes between pages, the server returns `SnapshotChangedError`. It does
+not restart or combine different snapshots. The sequence check and page query
+use one SQLite read transaction. `registeredOnly: true` restricts the result to
+registered roots without changing registry order.
+
+### 4.3.6 `session.watch.set` — Replace the Session Watch Set
 
 The watch set defines the union of queries whose results the session wants kept
 up to date.
@@ -639,7 +736,7 @@ Semantics:
   line with the new interest set
 - later committed changes continue to arrive via `session/effect`
 
-### 4.3.6 `session.watch.add` — Extend the Session Watch Set
+### 4.3.7 `session.watch.add` — Extend the Session Watch Set
 
 `session.watch.add` incrementally adds new watch specs into the existing
 session watch set by `id`.
@@ -679,7 +776,7 @@ Semantics:
 - watch mutations are applied in order per session; clients must serialize
   `session.watch.set` and `session.watch.add`
 
-### 4.3.7 Branch Lifecycle Commands
+### 4.3.8 Branch Lifecycle Commands
 
 Branch create / delete / merge lifecycle commands are not currently exposed on
 the v2 wire. The engine already carries branch state internally, but public wire

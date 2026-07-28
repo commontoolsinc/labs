@@ -401,6 +401,50 @@ export type EntityIdLookupResult = {
   exists: boolean;
 };
 
+export type PieceRootPattern = {
+  identity: string;
+  symbol: string;
+  repository?: string;
+  entry?: string;
+  origin?: string;
+};
+
+export type PieceRootEntry = {
+  id: string;
+  /** Stored entity URI scheme when it is not the default `of` scheme. */
+  entityKind?: string;
+  scope: CellScope;
+  registered: boolean;
+  name?: string;
+  pattern?: PieceRootPattern;
+};
+
+export type PieceRootCursor = {
+  /** Canonical piece ID. */
+  id: string;
+  /** Opaque hash that distinguishes stored URI kinds with the same ID. */
+  orderKey: string;
+  scope: CellScope;
+  registered: boolean;
+  registryPosition?: number;
+};
+
+export type PieceRootListResult = {
+  serverSeq: number;
+  pieces: PieceRootEntry[];
+  nextAfter?: PieceRootCursor;
+};
+
+export type PieceRootListOptions = {
+  after?: PieceRootCursor;
+  limit?: number;
+  expectedServerSeq?: number;
+  registeredOnly?: boolean;
+};
+
+/** Maximum number of indexed piece roots carried by one protocol response. */
+export const MAX_PIECE_ROOT_PAGE_SIZE = 1_000;
+
 export type QueryWatchSpec = {
   id: string;
   kind: "query";
@@ -494,6 +538,17 @@ export type EntityIdLookupRequest = {
   space: string;
   sessionId: SessionId;
   id: EntityId;
+};
+
+export type PieceRootListRequest = {
+  type: "piece-root.list";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  after?: PieceRootCursor;
+  limit?: number;
+  expectedServerSeq?: number;
+  registeredOnly?: boolean;
 };
 
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
@@ -830,6 +885,7 @@ export type ClientMessage =
   | GraphQueryRequest
   | EntityIdListRequest
   | EntityIdLookupRequest
+  | PieceRootListRequest
   | SqliteQueryRequest
   | SqliteRegisterDiskSourceRequest
   | WatchSetRequest

@@ -2,6 +2,7 @@ import { assertEquals, assertExists, assertRejects } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
 import { defer } from "@commonfabric/utils/defer";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { Server, SessionRegistry } from "../v2/server.ts";
 import {
   decodeMemoryBoundary,
@@ -548,6 +549,140 @@ Deno.test("memory v2 client fails closed without entity identifier capabilities"
     assertEquals(await space.entityIdExists("of:fid1:first"), undefined);
   } finally {
     await client.close();
+  }
+});
+
+Deno.test("memory v2 piece root listing is snapshot-stable and omits entity values", async () => {
+  const server = new Server({
+    ...testSessionOpenServerOptions,
+    store: new URL("memory://memory-v2-client-piece-roots"),
+  });
+  const serverPayloads: string[] = [];
+  let captureServerPayloads = false;
+  let receiver = (_payload: string) => {};
+  const connection = server.connect((message) => {
+    const payload = encodeMemoryBoundary(message);
+    if (captureServerPayloads) serverPayloads.push(payload);
+    receiver(payload);
+  });
+  const transport: Transport = {
+    async send(payload) {
+      await connection.receive(payload);
+    },
+    close() {
+      connection.close();
+      return Promise.resolve();
+    },
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver() {},
+  };
+  const client = await connect({ transport });
+  const spaceDid = "did:key:z6Mk-memory-v2-client-piece-roots";
+  const space = await client.mount(
+    spaceDid,
+    {},
+    testSessionOpenAuthFactory,
+  );
+  const secret = "PIECE_ENTITY_VALUE_19f4bc90".repeat(20);
+  const patternIdentity = {
+    identity: "P".repeat(43),
+    symbol: "default",
+  };
+
+  try {
+    await space.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [
+        {
+          op: "set",
+          id: "of:piece-a",
+          value: {
+            value: { $NAME: "Piece A", secret },
+            patternIdentity,
+          },
+        },
+        {
+          op: "set",
+          id: "of:piece-b",
+          value: {
+            value: { $NAME: "Piece B" },
+            argument: linkRefFrom({
+              id: "of:argument-b",
+              path: [],
+              space: spaceDid,
+              scope: "space",
+            }),
+          },
+        },
+        {
+          op: "set",
+          id: "of:not-a-piece",
+          value: { value: { $NAME: "Ordinary" } },
+        },
+      ],
+    });
+
+    captureServerPayloads = true;
+    const firstPage = await space.listPieceRoots({ limit: 1 });
+    captureServerPayloads = false;
+    assertEquals(firstPage?.pieces, [{
+      id: "piece-a",
+      scope: "space",
+      registered: false,
+      name: "Piece A",
+      pattern: patternIdentity,
+    }]);
+    assertEquals(
+      serverPayloads.some((payload) => payload.includes(secret)),
+      false,
+    );
+    assertExists(firstPage?.nextAfter);
+    await assertRejects(
+      () =>
+        space.listPieceRoots({
+          after: firstPage?.nextAfter,
+          limit: 1,
+        }),
+      Error,
+      "requires the first page's server sequence",
+    );
+
+    const secondPage = await space.listPieceRoots({
+      after: firstPage?.nextAfter,
+      limit: 1,
+      expectedServerSeq: firstPage?.serverSeq,
+    });
+    assertEquals(secondPage?.pieces.map((piece) => piece.id), ["piece-b"]);
+    assertEquals(secondPage?.nextAfter, undefined);
+
+    await space.transact({
+      localSeq: 2,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:piece-c",
+        value: {
+          value: { $NAME: "Piece C" },
+          patternIdentity,
+        },
+      }],
+    });
+    await assertRejects(
+      () =>
+        space.listPieceRoots({
+          after: firstPage?.nextAfter,
+          limit: 1,
+          expectedServerSeq: firstPage?.serverSeq,
+        }),
+      Error,
+      "piece root snapshot changed",
+    );
+  } finally {
+    await client.close();
+    await server.close();
   }
 });
 
