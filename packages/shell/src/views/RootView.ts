@@ -266,8 +266,10 @@ export class XRootView extends BaseView {
   // or no runtime); kept only so space.did attribution can track navigation.
   #telemetry: BrowserTelemetry | undefined;
 
-  // The name `space` was resolved from, while the view addresses its space by
-  // name. Navigating within that name keeps the space already resolved.
+  // The name the current lookup was started for, while the view addresses its
+  // space by name. Navigating within that name keeps the space already
+  // resolved, and keeps a lookup still in flight running. A lookup that fails
+  // clears this, so a later navigation to the same name tries again.
   #resolvedSpaceName: string | undefined;
   // Invalidates a resolution that a newer navigation has superseded.
   #resolveSpaceToken = 0;
@@ -287,7 +289,12 @@ export class XRootView extends BaseView {
     const identity = app?.identity;
     const view = app?.view;
     if (identity && view && "spaceName" in view) {
-      if (view.spaceName === this.#resolvedSpaceName && this.space) return;
+      // The name alone decides the space: a named space's key is derived from
+      // the name and a fixed passphrase, so every identity on one name
+      // addresses the same space. A change of identity leaves the answer
+      // alone. The home view below is the case that does turn on identity,
+      // and it recomputes on every change.
+      if (view.spaceName === this.#resolvedSpaceName) return;
       this.#resolveNamedSpace(identity, view.spaceName);
       return;
     }
@@ -315,6 +322,8 @@ export class XRootView extends BaseView {
       (space) => this.#setSpace(space, token),
       (error) => {
         console.error("[RootView] Failed to resolve space name:", error);
+        if (token !== this.#resolveSpaceToken) return;
+        this.#resolvedSpaceName = undefined;
         this.#setSpace(undefined, token);
       },
     );

@@ -251,6 +251,67 @@ describe("XRootView", () => {
     }
   });
 
+  it("starts one lookup per name, whatever else changes in the app state", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const { resolveSpaceDid } = await import("@commonfabric/lib-shell");
+      const view = new XRootView();
+      const first = await Identity.fromPassphrase("root-view-one-lookup-first");
+      const second = await Identity.fromPassphrase(
+        "root-view-one-lookup-second",
+      );
+      const lifecycle = view as unknown as {
+        willUpdate(changed: Map<string, unknown>): void;
+      };
+      const appChanged = new Map<string, unknown>([["app", undefined]]);
+
+      // A named space is keyed off the name and a fixed passphrase, so it is
+      // the same space for everyone. Identity has no say in the answer.
+      const atlas = await resolveSpaceDid(first, "atlas");
+      expect(await resolveSpaceDid(second, "atlas")).toBe(atlas);
+      expect(first.did()).not.toBe(second.did());
+
+      view.app = {
+        ...view.app,
+        identity: first,
+        view: { spaceName: "atlas" } as typeof view.app.view,
+      };
+      lifecycle.willUpdate(appChanged);
+      // The promise handed back identifies the lookup now in flight.
+      const lookup = view.spaceResolved();
+
+      // An unrelated change while the lookup is still running leaves it be,
+      // rather than abandoning it and starting the same lookup over.
+      view.app = { ...view.app, config: { showDebuggerView: true } };
+      lifecycle.willUpdate(appChanged);
+      expect(view.spaceResolved()).toBe(lookup);
+
+      await lookup;
+      expect(view.getRuntimeSpaceDID()).toBe(atlas);
+
+      // Switching identity on the same name keeps the space, and asks again
+      // for nothing: the answer cannot have changed.
+      view.app = { ...view.app, identity: second };
+      lifecycle.willUpdate(appChanged);
+      expect(view.getRuntimeSpaceDID()).toBe(atlas);
+      expect(view.spaceResolved()).toBe(lookup);
+
+      // Logging out drops the space; logging back in looks it up afresh.
+      view.app = { ...view.app, identity: undefined };
+      lifecycle.willUpdate(appChanged);
+      expect(view.getRuntimeSpaceDID()).toBeUndefined();
+
+      view.app = { ...view.app, identity: second };
+      lifecycle.willUpdate(appChanged);
+      expect(view.spaceResolved()).not.toBe(lookup);
+      await view.spaceResolved();
+      expect(view.getRuntimeSpaceDID()).toBe(atlas);
+    } finally {
+      restore();
+    }
+  });
+
   it("guards a browser reload only while the runtime reports pending writes", async () => {
     const restore = installBrowserGlobals();
     try {
