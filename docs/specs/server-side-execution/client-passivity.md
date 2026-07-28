@@ -658,6 +658,39 @@ cost is already ~parity and P4 is where the bar gets met. (c)
 Cold-start (iteration 1) was FASTER flag-on in this run — noise, but
 consistent with the executor absorbing no client work while cold.
 
+**Conflict attribution (Run C, the timestamped transact-conflict
+probe — permanent, mirrors the decline legs):** the spike hypothesis
+is REFUTED, replaced by two better findings. Run C: claims 95 /
+committed 28 / failed 0; conflicts split **41 claimed-attempt vs 2
+client-commit**. (a) The claimed-attempt conflicts cluster on
+iterations 7-10 (12-14 each) whose latencies are NORMAL (751-1211ms)
+— a claimed attempt losing its race retries server-side and costs
+the client NOTHING; the conflict machinery is client-free. (b) The
+escalating tail (iterations 12-20: 1.5s → 4.7s, monotone) carries
+ZERO conflicts — the engaged overhead SCALES WITH LIST SIZE. Next
+instrument: per-note growth-work attribution (per-iteration
+claim/settle counts + debounced growth-refresh costs + feed delivery
+volume on the growing closure), pointing at the same
+growth-refresh/feed surface P0-R3c bounded per-event but which
+remains linear-per-event on an ever-bigger graph.
+
+**Multi-user first pass (owner hypothesis: flag-on should be FASTER
+— server arbitration replaces commit thrashing):** two-browsers
+group chat 15s off vs 16s on (inner step 7s vs 9s) — noise at n=1,
+but the run ENGAGED in a 9s window (claims 41 / committed 13 /
+conflicts 16): multi-user engages far faster than single-user
+(warm pattern cache + two continuous demand sessions). The
+convergence-storm suite gained `CF_STORM_TOOLSHED=1` (points the
+storm at the integration toolshed; default stays the standalone
+B1/B2 pins): storm case 932ms off → 843ms on (−10%), suite 14s →
+9s — DIRECTIONALLY with the hypothesis, but the flag-on storm
+claimed only 1 action (the case runs <1s — mostly un-engaged), so
+this is not yet an engaged multi-user measurement. The instrument
+that would decide the hypothesis: a PERSISTENT two-browser scenario
+(both sessions open 60s+, continuous posting at a human cadence) —
+the multi-user twin of the persistent-page leg, measuring observer
+convergence latency and per-post latency off vs on.
+
 | Row | Builds | Red-first gate(s) | Dial | Acceptance | Resolves |
 | --- | --- | --- | --- | --- | --- |
 | **P0 — executor liveness + demand lifecycle** | Joint demand+claim retention window (pool start/stop damping only, bounded by host session-anchored authority); parked-wake revival; demand-ADD for never-demanded pieces; lane reconcile keeps consuming raw snapshots | Start-under-navigation-cadence pool test; departure-parity fixture (disconnect mid-grace ⇒ no post-disconnect claims, Worker stopped ≤ grace+TTL, parked-space parity byte-identical); grace ≥ measured cold-start with margin | Grace-window duration | Live Worker + `claimsIssued>0` on the real n=10 workload; zero claim-lapse from same-space navigation; departure parity green | CP12 CP14 CP22 CP26 |

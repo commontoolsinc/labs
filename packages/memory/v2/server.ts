@@ -8315,6 +8315,18 @@ export class Server {
             if (exactClaimedActionAttempt) {
               this.executionStats.claimedActionConflicts += 1;
             }
+            // P1 conflict attribution (client-passivity §5c): WHICH side
+            // lost the race matters — a claimed-attempt conflict retries
+            // server-side and costs the client nothing, while a
+            // client-commit conflict is the client's own retry loop and
+            // lands directly in interaction latency. Timestamped so the
+            // per-iteration table can attribute its spikes.
+            console.debug(
+              "Memory: transact conflict:",
+              `t=${Date.now()}`,
+              exactClaimedActionAttempt ? "claimed-attempt" : "client-commit",
+              message.space,
+            );
             span.setAttribute("ct.conflict", true);
             this.stageConflictRefreshDirtyIds(
               message.space,

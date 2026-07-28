@@ -151,10 +151,27 @@ describe("convergence storm — observer converges under concurrent writes (B2)"
   let observer: MultiRuntimeSession;
 
   beforeAll(async () => {
+    // P1 multi-user measurement (client-passivity §5c): CF_STORM_TOOLSHED=1
+    // points the storm at the integration toolshed (API_URL) instead of the
+    // default standalone server, so the run exercises server-primary
+    // execution when the toolshed has it enabled — the commit-thrashing
+    // shape this storm models is exactly where server arbitration should
+    // pay. Default (unset) keeps the standalone B1/B2 convergence pins
+    // byte-identical.
+    const stormApiUrl = (() => {
+      try {
+        return Deno.env.get("CF_STORM_TOOLSHED") === "1"
+          ? Deno.env.get("API_URL")
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    })();
     harness = await MultiRuntimeHarness.create({
       programPath: fixture("convergence-chat"),
       rootPath: ROOT_PATH,
       sessions: ["storm-alice", "storm-bob", "storm-observer"],
+      ...(stormApiUrl ? { apiUrl: new URL(stormApiUrl) } : {}),
     });
     [alice, bob, observer] = harness.sessions;
     await harness.settle();
