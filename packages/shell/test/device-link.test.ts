@@ -1123,3 +1123,126 @@ describe("the tap-through guard actually releases", () => {
     }
   });
 });
+
+// ── handleDeviceLink: the whole per-scan decision ──────────────────────────
+//
+// This logic used to live in index.ts — an entry module with a top-level await
+// that no unit test can import, so every branch here was uncoverable by
+// construction. Moving it into a real module is what makes these assertions
+// possible at all; the coverage ratchet was pointing at a genuine design smell.
+
+describe("handleDeviceLink", () => {
+  async function load() {
+    return await import("../src/lib/device-link-login.ts");
+  }
+
+  it("reports a malformed fragment and never attempts a login", async () => {
+    const { handleDeviceLink } = await load();
+    const reported: string[] = [];
+    let loggedIn = false;
+    await handleDeviceLink({ kind: "malformed" }, {
+      report: (r) => {
+        reported.push(r);
+        return Promise.resolve();
+      },
+      login: () => {
+        loggedIn = true;
+        return Promise.resolve("accepted" as const);
+      },
+    });
+    assertEquals(reported, ["unreadable"]);
+    assert(!loggedIn, "a malformed payload has no entropy to log in with");
+  });
+
+  it("reports an invalid entropy outcome", async () => {
+    const { handleDeviceLink } = await load();
+    const reported: string[] = [];
+    await handleDeviceLink({ kind: "entropy", entropy: ZERO_ENTROPY }, {
+      report: (r) => {
+        reported.push(r);
+        return Promise.resolve();
+      },
+      login: () => Promise.resolve("invalid" as const),
+    });
+    assertEquals(reported, ["unreadable"]);
+  });
+
+  it("is SILENT on cancel and on already-signed-in", async () => {
+    // Cancel is an intentional "not mine"; already-signed-in is a successful
+    // no-op. Nagging on either would train users to dismiss the real warnings.
+    const { handleDeviceLink } = await load();
+    for (const outcome of ["cancelled", "already-signed-in"] as const) {
+      const reported: string[] = [];
+      let reloaded = false;
+      await handleDeviceLink({ kind: "entropy", entropy: ZERO_ENTROPY }, {
+        reloadOnReplace: true,
+        report: (r) => {
+          reported.push(r);
+          return Promise.resolve();
+        },
+        login: () => Promise.resolve(outcome),
+        reload: () => {
+          reloaded = true;
+        },
+      });
+      assertEquals(reported, [], `${outcome} must not report a failure`);
+      assert(!reloaded, `${outcome} must not reload`);
+    }
+  });
+
+  it("reloads after an accepted replace on the hashchange path", async () => {
+    // The running app still holds the OLD identity; without the reload it would
+    // keep signing as it despite the KeyStore having been updated.
+    const { handleDeviceLink } = await load();
+    let reloaded = false;
+    await handleDeviceLink({ kind: "entropy", entropy: ZERO_ENTROPY }, {
+      reloadOnReplace: true,
+      login: () => Promise.resolve("accepted" as const),
+      reload: () => {
+        reloaded = true;
+      },
+      report: () => Promise.resolve(),
+    });
+    assert(reloaded, "an accepted replace mid-session must re-bootstrap");
+  });
+
+  it("does NOT reload on the bootstrap path", async () => {
+    // initializeKeys() has not run yet there, so it picks the new key up
+    // directly — reloading would be a gratuitous flash.
+    const { handleDeviceLink } = await load();
+    let reloaded = false;
+    await handleDeviceLink({ kind: "entropy", entropy: ZERO_ENTROPY }, {
+      login: () => Promise.resolve("accepted" as const),
+      reload: () => {
+        reloaded = true;
+      },
+      report: () => Promise.resolve(),
+    });
+    assert(!reloaded, "bootstrap must not reload");
+  });
+
+  it("never throws — a mid-flow error is reported, not propagated", async () => {
+    // An uncaught throw on the bootstrap path skips initializeKeys AND
+    // Navigation, stranding the user on a login screen with no explanation.
+    const { handleDeviceLink } = await load();
+    const reported: string[] = [];
+    await handleDeviceLink({ kind: "entropy", entropy: ZERO_ENTROPY }, {
+      login: () => Promise.reject(new Error("KeyStore.open rejected")),
+      report: (r) => {
+        reported.push(r);
+        return Promise.resolve();
+      },
+    });
+    assertEquals(reported, ["failed"]);
+  });
+
+  it("survives the reporter itself failing", async () => {
+    // Last line of defence: if even the failure screen cannot render, boot on
+    // rather than hanging forever.
+    const { handleDeviceLink } = await load();
+    await handleDeviceLink({ kind: "entropy", entropy: ZERO_ENTROPY }, {
+      login: () => Promise.reject(new Error("boom")),
+      report: () => Promise.reject(new Error("the reporter is broken too")),
+    });
+  });
+});

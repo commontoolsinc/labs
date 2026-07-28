@@ -1,5 +1,6 @@
 import { Identity, KeyStore } from "@commonfabric/identity";
 import { ROOT_KEY } from "../../shared/mod.ts";
+import type { DeviceLinkFragment } from "./device-link.ts";
 import "../views/DeviceLinkView.ts";
 
 // Orchestrates device-link login: entropy -> confirm -> KeyStore.
@@ -146,4 +147,60 @@ export async function runDeviceLinkLogin(
   // picker, and re-saves the descriptor on success. `initializeKeys` adopts
   // ROOT_KEY on its own, so nothing here needs the credential record.
   return "accepted";
+}
+
+/**
+ * Drive one device-link scan end to end: report, log in, or fail loudly.
+ *
+ * Lives HERE rather than in `index.ts` on purpose. It is real branching logic —
+ * malformed vs invalid vs accepted vs cancelled, plus the catch-all — and
+ * `index.ts` is an entry module with a top-level `await` that no unit test can
+ * import, so logic parked there is untestable by construction. `index.ts` keeps
+ * only the wiring.
+ *
+ * Never throws: an uncaught error on the bootstrap path would skip
+ * `initializeKeys()` and `Navigation`, stranding the user with no error at all.
+ * A failed pairing must degrade to a normal boot — and must SAY it failed,
+ * because the fragment is already scrubbed and a silent boot is
+ * indistinguishable from "the scan never registered".
+ */
+export async function handleDeviceLink(
+  link: Exclude<DeviceLinkFragment, { kind: "absent" }>,
+  opts: {
+    /**
+     * True when the app is ALREADY booted (the hashchange path): the running
+     * app still holds the previous identity, so an accepted replace has to
+     * re-bootstrap. False at startup, where `initializeKeys()` has not run yet
+     * and picks the new key up directly.
+     */
+    reloadOnReplace?: boolean;
+    reload?: () => void;
+    report?: (reason: DeviceLinkFailure) => Promise<void>;
+    login?: (entropy: Uint8Array) => Promise<DeviceLinkOutcome>;
+  } = {},
+): Promise<void> {
+  const report = opts.report ?? reportDeviceLinkFailure;
+  const login = opts.login ?? ((e: Uint8Array) => runDeviceLinkLogin(e));
+  const reload = opts.reload ?? (() => globalThis.location.reload());
+  try {
+    if (link.kind === "malformed") {
+      await report("unreadable");
+      return;
+    }
+    const outcome = await login(link.entropy);
+    if (outcome === "invalid") {
+      await report("unreadable");
+    } else if (outcome === "accepted" && opts.reloadOnReplace) {
+      reload();
+    }
+    // "cancelled" and "already-signed-in" are deliberately silent: the first is
+    // an intentional "not mine", the second a successful no-op.
+  } catch (error) {
+    console.error("[device-link] pairing failed", error);
+    try {
+      await report("failed");
+    } catch {
+      // The reporter itself failed; continue booting rather than hanging.
+    }
+  }
 }

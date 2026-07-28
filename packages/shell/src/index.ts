@@ -12,10 +12,7 @@ import { consumeDeviceLinkFragment } from "./lib/device-link.ts";
 // and the unit tests do not.) There was nothing to gain either way: the shell's
 // `index` entry sets `splitting: false`, so esbuild inlines dynamic imports
 // rather than emitting a chunk.
-import {
-  reportDeviceLinkFailure,
-  runDeviceLinkLogin,
-} from "./lib/device-link-login.ts";
+import { handleDeviceLink } from "./lib/device-link-login.ts";
 import "./components/index.ts";
 import "./views/index.ts";
 import { App, AppElement, AppUpdateEvent, Navigation } from "../shared/mod.ts";
@@ -59,51 +56,12 @@ if (ENVIRONMENT !== "production") {
     (e as AppUpdateEvent).prettyPrint();
   });
 }
-// Runs BEFORE initializeKeys on the bootstrap path: it writes ROOT_KEY straight
-// into the KeyStore so the normal boot below picks the new identity up. Routing
-// it through App.setIdentity instead would throw whenever a DIFFERENT identity
-// is already active — precisely the re-pair case this exists for.
-//
-// Every path is wrapped: an uncaught throw here (KeyStore.open rejecting, an
-// insecure context) would skip initializeKeys and Navigation entirely,
-// stranding the user with no error. A failed pairing must degrade to a normal
-// boot, not a broken one — and must SAY it failed, because the fragment is
-// already scrubbed and a silent normal boot is indistinguishable from "the scan
-// never registered".
-async function handleDeviceLink(
-  link: Exclude<
-    ReturnType<typeof consumeDeviceLinkFragment>,
-    { kind: "absent" }
-  >,
-  opts: { reloadOnReplace: boolean } = { reloadOnReplace: false },
-): Promise<void> {
-  try {
-    if (link.kind === "malformed") {
-      await reportDeviceLinkFailure("unreadable");
-      return;
-    }
-    const outcome = await runDeviceLinkLogin(link.entropy);
-    if (outcome === "invalid") {
-      await reportDeviceLinkFailure("unreadable");
-    } else if (outcome === "accepted" && opts.reloadOnReplace) {
-      // The app is already booted on the previous identity; a plain continue
-      // would keep signing as it. Re-bootstrap so initializeKeys adopts the
-      // key we just wrote. (Bootstrap path passes reloadOnReplace:false — there
-      // initializeKeys below has not run yet and picks it up directly.)
-      globalThis.location.reload();
-    }
-    // "cancelled" and "already-signed-in" are deliberately silent: the first is
-    // an intentional "not mine", the second a successful no-op.
-  } catch (error) {
-    console.error("[device-link] pairing failed", error);
-    try {
-      await reportDeviceLinkFailure("failed");
-    } catch {
-      // The reporter itself failed; continue booting rather than hanging.
-    }
-  }
-}
-
+// Runs BEFORE initializeKeys: handleDeviceLink writes ROOT_KEY straight into
+// the KeyStore so the normal boot below picks the new identity up. Routing it
+// through App.setIdentity instead would throw whenever a DIFFERENT identity is
+// already active — precisely the re-pair case this exists for. It never throws,
+// so a failed pairing degrades to a normal boot rather than skipping
+// initializeKeys and Navigation entirely.
 if (deviceLink.kind !== "absent") {
   await handleDeviceLink(deviceLink);
 }
