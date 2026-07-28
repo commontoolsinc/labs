@@ -45,6 +45,9 @@ export type ServerExecutionControlMetricsProvider = () =>
  * "session.watch.refresh" and the executor-driven "graph.query". */
 export type ServerExecutionFeedTraversalMetrics = Readonly<{
   calls: number;
+  /** P1 §5c floor-less wall-time attribution (fractional ms). */
+  totalMs: number;
+  maxMs: number;
   managerReads: number;
   coveredSelectorSkips: number;
   schemaTraversals: number;
@@ -58,6 +61,9 @@ export type ServerExecutionFeedTraversalMetrics = Readonly<{
 export type ServerExecutionFeedMetrics = Readonly<{
   refreshWaves: number;
   refreshSessionsTouched: number;
+  /** F6: sessions a wave skipped because every dirty key's cohort excluded
+   * them. */
+  refreshCohortSuppressedSessions: number;
   refreshGraphsRefreshed: number;
   refreshUpsertsPushed: number;
   /** F3 doc-set membership point-read deliveries (zero traversal). */
@@ -83,6 +89,13 @@ export type ServerExecutionFeedMetrics = Readonly<{
   traversalByOperation: Readonly<
     Record<string, ServerExecutionFeedTraversalMetrics>
   >;
+  /** P1 §5c chain decomposition: wave drain-vs-fanout split + transact
+   * receive→ack timing (fractional ms accumulators). */
+  waveDrainWaitMs: number;
+  waveFanoutMs: number;
+  transactAcks: number;
+  transactAckTotalMs: number;
+  transactAckMaxMs: number;
 }>;
 export type ServerExecutionFeedMetricsProvider = () =>
   | ServerExecutionFeedMetrics

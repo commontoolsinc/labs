@@ -352,13 +352,22 @@ export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
 
 /** Aggregate traversal work for one server operation (F1 feed observability).
  * Sums the per-call `QueryTraversalStats` that were previously computed and
- * dropped; `calls` counts the evaluations that contributed. */
+ * dropped; `calls` counts the evaluations that contributed. `totalMs`/`maxMs`
+ * are the P1 step-1 floor-less wall-time attribution (client-passivity §5c):
+ * the slow-query buffer only sees traversals over its 100ms floor, so
+ * sub-floor work that grows with the doc graph — the engaged-tail mechanism —
+ * is invisible there; these accumulate EVERY evaluation's wall time per
+ * call-site tag. */
 export interface FeedTraversalOperationStats extends QueryTraversalStats {
   calls: number;
+  totalMs: number;
+  maxMs: number;
 }
 
 const createFeedTraversalOperationStats = (): FeedTraversalOperationStats => ({
   calls: 0,
+  totalMs: 0,
+  maxMs: 0,
   managerReads: 0,
   coveredSelectorSkips: 0,
   schemaTraversals: 0,
@@ -1840,6 +1849,10 @@ export class Server {
   // an older mirror cannot land after a newer one.
   #schedulerSideEffectsByOwnerSpace = new Map<string, Promise<void>>();
   #lastRefreshDurationMs = 0;
+  /** P1 §5c: drain wait preceding the current wave batch, stamped into the
+   * first wave log of the batch (waves after the first in one loop iteration
+   * shared that single drain, so they log drain=0). */
+  #lastDrainWaitMs = 0;
   #acceptedCommitListeners = new Map<string, Set<AcceptedCommitListener>>();
   #acceptedCommitOrderBySpace = new Map<string, number>();
   #executionDemands = new Map<string, AuthenticatedExecutionDemand>();
@@ -2561,13 +2574,34 @@ export class Server {
      * executor/client "graph.query", "session.watch.set",
      * "session.watch.add"). */
     traversalByOperation: {} as Record<string, FeedTraversalOperationStats>,
+    /** P1 step-1 chain decomposition (client-passivity §0/§5c): the push a
+     * client's runtime-idle gate waits behind is delayed by BOTH the wave's
+     * traversal work (per-op timing above) and the pre-wave receive-queue
+     * drain window — which scales with 2× the LAST refresh duration, so
+     * traversal growth compounds into push latency. These split the two. */
+    /** Cumulative ms refresh scheduling spent in
+     * `waitForConnectionQueuesToDrain` before waves. */
+    waveDrainWaitMs: 0,
+    /** Cumulative ms of per-space wave fan-out (traversal + delivery). */
+    waveFanoutMs: 0,
+    /** Transact receive→ack timing — the first leg of the recv→ack→push
+     * chain (the wave log is the push leg). Accepted commits only. */
+    transactAcks: 0,
+    transactAckTotalMs: 0,
+    transactAckMaxMs: 0,
   };
 
-  #recordFeedTraversal(operation: string, stats: QueryTraversalStats): void {
+  #recordFeedTraversal(
+    operation: string,
+    stats: QueryTraversalStats,
+    elapsedMs = 0,
+  ): void {
     const bucket = this.feedStats.traversalByOperation[operation] ??
       (this.feedStats.traversalByOperation[operation] =
         createFeedTraversalOperationStats());
     bucket.calls += 1;
+    bucket.totalMs += elapsedMs;
+    if (elapsedMs > bucket.maxMs) bucket.maxMs = elapsedMs;
     bucket.managerReads += stats.managerReads;
     bucket.coveredSelectorSkips += stats.coveredSelectorSkips;
     bucket.schemaTraversals += stats.schemaTraversals;
@@ -7961,6 +7995,9 @@ export class Server {
         toError("SessionError", "Unknown session for space"),
       ));
     }
+    // P1 §5c chain instrument: receive→ack leg (the wave log is the push
+    // leg). Captured before the span so queueing inside the handler counts.
+    const receivedAt = performance.now();
 
     return tracer.startActiveSpan(
       "memory.transact",
@@ -8295,6 +8332,25 @@ export class Server {
               operation.op !== "sqlite"
             ).length,
           );
+          {
+            // P1 §5c chain instrument: this timestamp is both the ack send
+            // AND the wave staging point (markSpaceDirty ran just above), so
+            // ack t= → wave t= for the same space measures the push leg.
+            const ackMs = performance.now() - receivedAt;
+            this.feedStats.transactAcks += 1;
+            this.feedStats.transactAckTotalMs += ackMs;
+            if (ackMs > this.feedStats.transactAckMaxMs) {
+              this.feedStats.transactAckMaxMs = ackMs;
+            }
+            console.debug(
+              "Memory: transact ack:",
+              `t=${Date.now()}`,
+              `seq=${commit.seq}`,
+              `localSeq=${message.commit.localSeq ?? -1}`,
+              `ackMs=${Math.round(ackMs)}`,
+              message.space,
+            );
+          }
           return {
             type: "response",
             requestId: message.requestId,
@@ -8565,7 +8621,7 @@ export class Server {
         dagTraversals: 0,
         getDocAtPathCalls: 0,
         schemaMemoHits: 0,
-      });
+      }, performance.now() - startedAt);
       recordSlowQueryDuration("docs.read", message.space, startedAt, {
         roots: docs.length,
       });
@@ -9076,6 +9132,7 @@ export class Server {
       for (const [branch, query] of groupedQueries(newWatches)) {
         const existing = graphs.get(branch);
         if (existing === undefined) {
+          const trackStartedAt = performance.now();
           const tracked = trackGraph(
             message.space,
             engine,
@@ -9083,7 +9140,11 @@ export class Server {
             undefined,
             scopeResolution.ok,
           );
-          this.#recordFeedTraversal("session.watch.add", tracked.stats);
+          this.#recordFeedTraversal(
+            "session.watch.add",
+            tracked.stats,
+            performance.now() - trackStartedAt,
+          );
           graphs.set(branch, tracked.state);
           for (const entity of tracked.state.entities.values()) {
             const entry = toCacheEntry(entity);
@@ -9105,13 +9166,18 @@ export class Server {
 
         const staged = cloneTrackedGraphState(engine, existing);
         graphs.set(branch, staged);
+        const extendStartedAt = performance.now();
         const extended = extendTrackedGraph(
           message.space,
           engine,
           staged,
           query,
         );
-        this.#recordFeedTraversal("session.watch.add", extended.stats);
+        this.#recordFeedTraversal(
+          "session.watch.add",
+          extended.stats,
+          performance.now() - extendStartedAt,
+        );
         for (const entity of extended.updates.values()) {
           const entry = toCacheEntry(entity);
           updates.set(
@@ -9217,14 +9283,15 @@ export class Server {
       reuse,
       scopeContext,
     );
-    this.#recordFeedTraversal("graph.query", result.stats);
+    const elapsedMs = performance.now() - startedAt;
+    this.#recordFeedTraversal("graph.query", result.stats, elapsedMs);
     // FA5/FB12 wave-vs-demand split: the aggregate bucket above stays
     // byte-identical for existing consumers; a trigger-carrying request is
     // ADDITIONALLY attributed to its sub-bucket. The wave bucket is the F5
     // protocol's F2-floor regression signal ("graph.query still at its F2
     // floor, not regressed by demand pulls").
     if (trigger !== undefined) {
-      this.#recordFeedTraversal(`graph.query.${trigger}`, result.stats);
+      this.#recordFeedTraversal(`graph.query.${trigger}`, result.stats, elapsedMs);
     }
     recordSlowQueryDuration("graph.query", space, startedAt, {
       roots: query.roots.length,
@@ -9254,6 +9321,7 @@ export class Server {
     let serverSeq = Engine.serverSeq(resolvedEngine);
 
     for (const [branch, query] of groupedQueries(watches)) {
+      const trackStartedAt = performance.now();
       const result = trackGraph(
         space,
         resolvedEngine,
@@ -9261,7 +9329,11 @@ export class Server {
         reuse,
         scopeContext,
       );
-      this.#recordFeedTraversal("session.watch.set", result.stats);
+      this.#recordFeedTraversal(
+        "session.watch.set",
+        result.stats,
+        performance.now() - trackStartedAt,
+      );
       serverSeq = result.serverSeq;
       graphs.set(branch, result.state);
       for (const entity of result.state.entities.values()) {
@@ -9497,6 +9569,18 @@ export class Server {
     this.feedStats.docSetMembersTracked = this.#sessions.totalDocSetMembers();
   }
 
+  /** P1 §5c serving gauge: current tracked-graph surface across sessions
+   * (trackerKeys is the engaged-tail growth quantity). Polled by the
+   * toolshed serving sampler; never consulted by delivery decisions. */
+  trackedGraphGauge(): {
+    sessions: number;
+    graphs: number;
+    trackerKeys: number;
+    entities: number;
+  } {
+    return this.#sessions.trackedGraphGauge();
+  }
+
   /** The tracked-id key (declared-scope dirty key) for a member — the union
    * surface with graph tracking (FA14). */
   static #docSetMemberTrackedKey(member: DocSetMember): string {
@@ -9527,6 +9611,7 @@ export class Server {
     members: Iterable<DocSetMember>,
     dirtyOrigins: ReadonlyMap<string, DirtyOrigin> | undefined,
   ): SessionCacheEntry[] {
+    const readStartedAt = performance.now();
     const memberList = [...members];
     // A stale lease binding makes the read context unresolvable. Fail open
     // (playbook item 12): skip member deltas this wave rather than aborting
@@ -9609,7 +9694,7 @@ export class Server {
         dagTraversals: 0,
         getDocAtPathCalls: 0,
         schemaMemoHits: 0,
-      });
+      }, performance.now() - readStartedAt);
       this.feedStats.docSetMemberDeliveries += upserts.length;
     }
     return upserts;
@@ -9941,6 +10026,7 @@ export class Server {
             const updates = new Map<string, SessionCacheEntry>();
 
             for (const [branch, graph] of session.graphs) {
+              const refreshStartedAt = performance.now();
               const refreshed = tracer.startActiveSpan(
                 "memory.watch.refresh",
                 (watchSpan) => {
@@ -9967,6 +10053,7 @@ export class Server {
               this.#recordFeedTraversal(
                 "session.watch.refresh",
                 refreshed.stats,
+                performance.now() - refreshStartedAt,
               );
               if (docSetEligible) {
                 // FB28: traversal actually happened for this branch group —
@@ -10362,28 +10449,39 @@ export class Server {
   private async waitForConnectionQueuesToDrain(
     maxWaitMs: number,
   ): Promise<void> {
-    const deadlineMs = Date.now() + maxWaitMs;
-    while (true) {
-      const pending = [...this.#connections.values()].filter((connection) =>
-        connection.hasPendingReceives()
-      );
-      if (pending.length === 0) {
-        return;
+    // P1 §5c chain instrument: this wait sits between a commit's ack and its
+    // wave, and its budget scales with 2× the LAST refresh duration — the
+    // compounding leg of the push chain. Accumulated so the drain share of
+    // push latency is separable from traversal time.
+    const waitStartedAt = performance.now();
+    try {
+      const deadlineMs = Date.now() + maxWaitMs;
+      while (true) {
+        const pending = [...this.#connections.values()].filter((connection) =>
+          connection.hasPendingReceives()
+        );
+        if (pending.length === 0) {
+          return;
+        }
+        if (Date.now() >= deadlineMs) {
+          return;
+        }
+        const drained = await Promise.all(
+          pending.map((connection) =>
+            connection.waitForReceiveQueueToDrain(deadlineMs)
+          ),
+        );
+        if (drained.every(Boolean)) {
+          return;
+        }
+        if (Date.now() >= deadlineMs) {
+          return;
+        }
       }
-      if (Date.now() >= deadlineMs) {
-        return;
-      }
-      const drained = await Promise.all(
-        pending.map((connection) =>
-          connection.waitForReceiveQueueToDrain(deadlineMs)
-        ),
-      );
-      if (drained.every(Boolean)) {
-        return;
-      }
-      if (Date.now() >= deadlineMs) {
-        return;
-      }
+    } finally {
+      const waitedMs = performance.now() - waitStartedAt;
+      this.feedStats.waveDrainWaitMs += waitedMs;
+      this.#lastDrainWaitMs = waitedMs;
     }
   }
 
@@ -10437,6 +10535,7 @@ export class Server {
         // One refresh wave: this space's coalesced dirty set fans out to
         // every connection below.
         this.feedStats.refreshWaves += 1;
+        const fanoutStartedAt = performance.now();
         // Fan-out is a scheduled/batched timer decoupled from transact, so it
         // must be its own root span. `root: true` makes that explicit — the
         // context manager propagates the active context into timer callbacks,
@@ -10463,6 +10562,23 @@ export class Server {
             }
           },
         );
+        {
+          // P1 §5c chain instrument: push leg. ack t= (same space, earlier
+          // seq) → this t= bounds commit-to-push; drainMs vs fanoutMs splits
+          // waiting from traversal+delivery.
+          const fanoutMs = performance.now() - fanoutStartedAt;
+          this.feedStats.waveFanoutMs += fanoutMs;
+          const drainMs = this.#lastDrainWaitMs;
+          this.#lastDrainWaitMs = 0;
+          console.debug(
+            "Memory: wave:",
+            `t=${Date.now()}`,
+            `dirty=${dirtyIds?.size ?? 0}`,
+            `drainMs=${Math.round(drainMs)}`,
+            `fanoutMs=${Math.round(fanoutMs)}`,
+            space,
+          );
+        }
       }
 
       if (initial !== undefined) {

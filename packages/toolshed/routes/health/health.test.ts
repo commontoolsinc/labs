@@ -43,6 +43,8 @@ const poolMetrics = {
   leaseLosses: 0,
   leaseReplacements: 0,
   sponsorRotations: 0,
+  sponsorReanchors: 0,
+  sponsorRebinds: 0,
   crashes: 0,
   acceptedCommitNotifications: 5,
   acceptedCommitIndexDecisions: 4,
@@ -52,6 +54,9 @@ const poolMetrics = {
   foreignWakeNotifications: 0,
   foreignWakeAttempts: 0,
   demandEmptyHibernations: 0,
+  demandGraceBlipsAbsorbed: 0,
+  demandGraceExpiries: 0,
+  demandGraceIdleWorkerMs: 0,
   userLanesOpened: 0,
   userLanesClosed: 0,
   userLaneReanchors: 0,
@@ -93,6 +98,7 @@ const controlMetrics = {
 const feedMetrics = {
   refreshWaves: 6,
   refreshSessionsTouched: 4,
+  refreshCohortSuppressedSessions: 0,
   refreshGraphsRefreshed: 3,
   refreshUpsertsPushed: 9,
   docSetMemberDeliveries: 7,
@@ -102,9 +108,17 @@ const feedMetrics = {
   refreshResidualGraphWatches: 1,
   refreshResidualGraphWatchesTraversed: 1,
   refreshResidualDagTraversalsBySpace: { "did:key:z6Mk-space": 4 },
+  // P1 §5c chain decomposition accumulators.
+  waveDrainWaitMs: 12.5,
+  waveFanoutMs: 40.25,
+  transactAcks: 6,
+  transactAckTotalMs: 18.75,
+  transactAckMaxMs: 7.5,
   traversalByOperation: {
     "session.watch.refresh": {
       calls: 3,
+      totalMs: 21.5,
+      maxMs: 9.25,
       managerReads: 12,
       coveredSelectorSkips: 1,
       schemaTraversals: 8,
@@ -117,6 +131,8 @@ const feedMetrics = {
     },
     "graph.query": {
       calls: 2,
+      totalMs: 8.5,
+      maxMs: 6,
       managerReads: 6,
       coveredSelectorSkips: 0,
       schemaTraversals: 4,
@@ -131,6 +147,8 @@ const feedMetrics = {
     // same open record — additive keys, no schema change.
     "graph.query.wave": {
       calls: 1,
+      totalMs: 2.5,
+      maxMs: 2.5,
       managerReads: 3,
       coveredSelectorSkips: 0,
       schemaTraversals: 2,
@@ -143,6 +161,8 @@ const feedMetrics = {
     },
     "graph.query.demand": {
       calls: 1,
+      totalMs: 6,
+      maxMs: 6,
       managerReads: 3,
       coveredSelectorSkips: 0,
       schemaTraversals: 2,

@@ -10,6 +10,7 @@ import {
 const tags = ["Health"];
 
 const nonNegativeIntegerSchema = z.number().int().nonnegative();
+const nonNegativeNumberSchema = z.number().nonnegative();
 
 export const ServerExecutionPoolMetricsSchema = z.object({
   activeLanes: nonNegativeIntegerSchema,
@@ -41,6 +42,10 @@ export const ServerExecutionPoolMetricsSchema = z.object({
   leaseLosses: nonNegativeIntegerSchema,
   leaseReplacements: nonNegativeIntegerSchema,
   sponsorRotations: nonNegativeIntegerSchema,
+  // P0-R2 sponsor re-anchor counters (stale (connection,session,token) pins
+  // healed in place vs full lease rebinds).
+  sponsorReanchors: nonNegativeIntegerSchema,
+  sponsorRebinds: nonNegativeIntegerSchema,
   crashes: nonNegativeIntegerSchema,
   acceptedCommitNotifications: nonNegativeIntegerSchema,
   acceptedCommitIndexDecisions: nonNegativeIntegerSchema,
@@ -51,6 +56,11 @@ export const ServerExecutionPoolMetricsSchema = z.object({
   foreignWakeNotifications: nonNegativeIntegerSchema,
   foreignWakeAttempts: nonNegativeIntegerSchema,
   demandEmptyHibernations: nonNegativeIntegerSchema,
+  // P0 demand-grace window counters (P0b keep-warm cost accounting: blips
+  // absorbed, windows that expired, and idle Worker-ms spent in grace).
+  demandGraceBlipsAbsorbed: nonNegativeIntegerSchema,
+  demandGraceExpiries: nonNegativeIntegerSchema,
+  demandGraceIdleWorkerMs: nonNegativeNumberSchema,
   // C1 shared-pool user-lane gauges (intra-Worker lane identity).
   userLanesOpened: nonNegativeIntegerSchema,
   userLanesClosed: nonNegativeIntegerSchema,
@@ -104,6 +114,7 @@ export const ServerExecutionControlMetricsSchema = z.object({
 export const ServerExecutionFeedMetricsSchema = z.object({
   refreshWaves: nonNegativeIntegerSchema,
   refreshSessionsTouched: nonNegativeIntegerSchema,
+  refreshCohortSuppressedSessions: nonNegativeIntegerSchema,
   refreshGraphsRefreshed: nonNegativeIntegerSchema,
   refreshUpsertsPushed: nonNegativeIntegerSchema,
   // F3 doc-set membership fan-out gauges.
@@ -125,6 +136,9 @@ export const ServerExecutionFeedMetricsSchema = z.object({
     z.string(),
     z.object({
       calls: nonNegativeIntegerSchema,
+      // P1 §5c floor-less wall-time attribution (fractional ms).
+      totalMs: nonNegativeNumberSchema,
+      maxMs: nonNegativeNumberSchema,
       managerReads: nonNegativeIntegerSchema,
       coveredSelectorSkips: nonNegativeIntegerSchema,
       schemaTraversals: nonNegativeIntegerSchema,
@@ -136,6 +150,13 @@ export const ServerExecutionFeedMetricsSchema = z.object({
       schemaMemoHits: nonNegativeIntegerSchema,
     }).strict(),
   ),
+  // P1 §5c chain decomposition: drain-vs-fanout wave split + transact
+  // receive→ack timing (fractional ms accumulators).
+  waveDrainWaitMs: nonNegativeNumberSchema,
+  waveFanoutMs: nonNegativeNumberSchema,
+  transactAcks: nonNegativeIntegerSchema,
+  transactAckTotalMs: nonNegativeNumberSchema,
+  transactAckMaxMs: nonNegativeNumberSchema,
 }).strict();
 
 export const HealthStatsResponseSchema = z.object({

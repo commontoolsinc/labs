@@ -270,6 +270,30 @@ export class SessionRegistry {
     return total;
   }
 
+  /** P1 §5c serving gauge: size of the tracked-graph surface every wave
+   * re-serves. `trackerKeys` is the quantity the engaged-tail attribution
+   * found co-growing with the tail (253→850+ over the note series); the
+   * sampler polls this so growth is a time series, not a post-run guess. */
+  trackedGraphGauge(): {
+    sessions: number;
+    graphs: number;
+    trackerKeys: number;
+    entities: number;
+  } {
+    this.#prune();
+    let graphs = 0;
+    let trackerKeys = 0;
+    let entities = 0;
+    for (const session of this.#sessions.values()) {
+      for (const graph of session.graphs.values()) {
+        graphs += 1;
+        trackerKeys += graph.tracker.size;
+        entities += graph.entities.size;
+      }
+    }
+    return { sessions: this.#sessions.size, graphs, trackerKeys, entities };
+  }
+
   sessionsForSpace(space: string): SessionState[] {
     this.#prune();
     const sessions: SessionState[] = [];

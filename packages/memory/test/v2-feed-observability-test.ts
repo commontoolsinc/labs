@@ -215,6 +215,16 @@ Deno.test("refresh waves and graph queries attribute traversal work by operation
     assertExists(watchSetBucket);
     assertEquals(watchSetBucket.calls >= 1, true);
     assertEquals(watchSetBucket.managerReads >= 1, true);
+    // P1 §5c floor-less timing: every bucket carries wall time regardless of
+    // the 100ms slow-query floor.
+    assertEquals(watchSetBucket.totalMs > 0, true);
+    assertEquals(watchSetBucket.maxMs > 0, true);
+
+    // P1 §5c serving gauge: the tracked surface the sampler polls.
+    const gauge = server.trackedGraphGauge();
+    assertEquals(gauge.sessions >= 1, true);
+    assertEquals(gauge.graphs >= 1, true);
+    assertEquals(gauge.trackerKeys >= 1, true);
 
     // Let any refresh wave scheduled by tx-1 drain, then measure exactly one
     // commit wave as deltas.
@@ -226,6 +236,11 @@ Deno.test("refresh waves and graph queries attribute traversal work by operation
       upsertsPushed: server.feedStats.refreshUpsertsPushed,
       refreshCalls: server.feedStats
         .traversalByOperation["session.watch.refresh"]?.calls ?? 0,
+      refreshTotalMs: server.feedStats
+        .traversalByOperation["session.watch.refresh"]?.totalMs ?? 0,
+      transactAcks: server.feedStats.transactAcks,
+      transactAckTotalMs: server.feedStats.transactAckTotalMs,
+      waveFanoutMs: server.feedStats.waveFanoutMs,
     };
 
     await writer.receive(encodeMemoryBoundary({
@@ -270,6 +285,19 @@ Deno.test("refresh waves and graph queries attribute traversal work by operation
     assertExists(refreshBucket);
     assertEquals(refreshBucket.calls, before.refreshCalls + 1);
     assertEquals(refreshBucket.managerReads >= 1, true);
+    // P1 §5c: the wave's traversal carried wall time (floor-less), the
+    // accepted transact recorded its receive→ack leg, and the wave recorded
+    // its fanout leg.
+    assertEquals(refreshBucket.totalMs > before.refreshTotalMs, true);
+    assertEquals(refreshBucket.maxMs > 0, true);
+    assertEquals(server.feedStats.transactAcks, before.transactAcks + 1);
+    assertEquals(
+      server.feedStats.transactAckTotalMs > before.transactAckTotalMs,
+      true,
+    );
+    assertEquals(server.feedStats.transactAckMaxMs > 0, true);
+    assertEquals(server.feedStats.waveFanoutMs > before.waveFanoutMs, true);
+    assertEquals(server.feedStats.waveDrainWaitMs >= 0, true);
 
     // graph.query attribution: the executor Worker's per-wave refresh lands
     // here; the response wire shape must stay exactly { serverSeq, entities }.

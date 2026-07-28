@@ -83,6 +83,105 @@ setServerExecutionPoolMetricsProvider(serverExecutionPoolMetrics);
 setServerExecutionControlMetricsProvider(() => memoryServer.executionStats);
 setServerExecutionFeedMetricsProvider(() => memoryServer.feedStats);
 
+// P1 §5c step-1 serving sampler (client-passivity §0 forward step 1): a 1s
+// delta line over the floor-less per-operation traversal timing, the wave
+// drain/fanout split, transact ack timing, the tracked-graph gauge, and an
+// event-loop-lag window. The engaged-tail attribution had to reconstruct
+// these from the >100ms slow-query floor; this makes sub-floor serving work
+// a first-class time series in the toolshed log. Runs in BOTH arms (it does
+// not depend on server-primary execution), so flag-off runs carry the same
+// series. Quiet when idle: emits only when something changed or the event
+// loop stalled ≥50ms. Timers are unref'd so they never hold the process.
+{
+  const LOOP_LAG_TICK_MS = 100;
+  const SERVING_SAMPLE_MS = 1000;
+  const LAG_EMIT_FLOOR_MS = 50;
+  const lagWindow = { ticks: 0, totalMs: 0, maxMs: 0 };
+  let lagExpectedAt = performance.now() + LOOP_LAG_TICK_MS;
+  const lagTimer = setInterval(() => {
+    const now = performance.now();
+    const lag = Math.max(0, now - lagExpectedAt);
+    lagExpectedAt = now + LOOP_LAG_TICK_MS;
+    lagWindow.ticks += 1;
+    lagWindow.totalMs += lag;
+    if (lag > lagWindow.maxMs) lagWindow.maxMs = lag;
+  }, LOOP_LAG_TICK_MS);
+  Deno.unrefTimer(lagTimer);
+
+  type OpSnapshot = Record<string, { c: number; ms: number }>;
+  const snapshotOps = (): OpSnapshot => {
+    const ops: OpSnapshot = {};
+    for (
+      const [operation, bucket] of Object.entries(
+        memoryServer.feedStats.traversalByOperation,
+      )
+    ) {
+      ops[operation] = { c: bucket.calls, ms: bucket.totalMs };
+    }
+    return ops;
+  };
+  let lastOps = snapshotOps();
+  let lastDrainMs = 0;
+  let lastFanoutMs = 0;
+  let lastAcks = 0;
+  let lastAckMs = 0;
+  const samplerTimer = setInterval(() => {
+    const feed = memoryServer.feedStats;
+    const ops = snapshotOps();
+    const opDeltas: Record<string, { c: number; ms: number }> = {};
+    let opActivity = false;
+    for (const [operation, current] of Object.entries(ops)) {
+      const previous = lastOps[operation];
+      const c = current.c - (previous?.c ?? 0);
+      if (c <= 0) continue;
+      opActivity = true;
+      opDeltas[operation] = {
+        c,
+        ms: Math.round(current.ms - (previous?.ms ?? 0)),
+      };
+    }
+    const drainMs = Math.round(feed.waveDrainWaitMs - lastDrainMs);
+    const fanoutMs = Math.round(feed.waveFanoutMs - lastFanoutMs);
+    const acks = feed.transactAcks - lastAcks;
+    const ackMs = Math.round(feed.transactAckTotalMs - lastAckMs);
+    const lagMax = Math.round(lagWindow.maxMs);
+    const lagAvg = lagWindow.ticks > 0
+      ? Math.round(lagWindow.totalMs / lagWindow.ticks)
+      : 0;
+    const active = opActivity || drainMs > 0 || fanoutMs > 0 || acks > 0 ||
+      lagMax >= LAG_EMIT_FLOOR_MS;
+    lastOps = ops;
+    lastDrainMs = feed.waveDrainWaitMs;
+    lastFanoutMs = feed.waveFanoutMs;
+    lastAcks = feed.transactAcks;
+    lastAckMs = feed.transactAckTotalMs;
+    lagWindow.ticks = 0;
+    lagWindow.totalMs = 0;
+    lagWindow.maxMs = 0;
+    if (!active) return;
+    const gauge = memoryServer.trackedGraphGauge();
+    console.debug(
+      "Memory: serving:",
+      `t=${Date.now()}`,
+      JSON.stringify({
+        lag: { max: lagMax, avg: lagAvg },
+        drainMs,
+        fanoutMs,
+        acks,
+        ackMs,
+        tracked: {
+          s: gauge.sessions,
+          g: gauge.graphs,
+          k: gauge.trackerKeys,
+          e: gauge.entities,
+        },
+        ops: opDeltas,
+      }),
+    );
+  }, SERVING_SAMPLE_MS);
+  Deno.unrefTimer(samplerTimer);
+}
+
 /** P0 (client-passivity plan): the demand grace window's production value.
  * The browser client clears execution demand on every navigation
  * transition; without grace those blips abort in-flight Worker starts and
