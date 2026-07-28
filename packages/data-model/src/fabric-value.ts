@@ -10,6 +10,7 @@ export {
   FabricPrimitive,
   FabricSpecialObject,
   type FabricValue,
+  type NonNullableFabricValue,
   type FabricValueLayer,
 } from "./interface.ts";
 
