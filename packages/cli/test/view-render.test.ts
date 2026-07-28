@@ -1112,6 +1112,50 @@ Deno.test("renderFrame: END means the mode-specific scroll limit", () => {
   );
 });
 
+Deno.test("renderFrame: diff status excludes only its terminal parser row", () => {
+  const status = (text: string, view: Partial<ViewState> = {}) =>
+    stripAnsi(
+      renderFrame(
+        parseDocument(text),
+        baseView({
+          width: 30,
+          height: 9,
+          color: false,
+          ...view,
+        }),
+      ).at(-1)!,
+    );
+
+  const lines = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`);
+  const intermediate = status(`${lines.join("\n")}\n`, {
+    top: 5,
+    isDiff: true,
+  });
+  assert(intermediate.includes("6-12/12  45%"), intermediate);
+
+  const wrapped = status(`${"a".repeat(25)}\nz\n`, {
+    width: 20,
+    height: 4,
+    top: 1,
+    isDiff: true,
+    wrapLines: true,
+  });
+  assert(wrapped.includes("1-2/2  50%"), wrapped);
+
+  const emptyDiff = status("", { isDiff: true });
+  assert(emptyDiff.includes("0-0/0  END"), emptyDiff);
+
+  const editableDiff = status("done\n", {
+    height: 3,
+    isDiff: true,
+    cursor: { line: 0, col: 0 },
+  });
+  assert(editableDiff.includes("1-2/2  END"), editableDiff);
+
+  const ordinary = status("done\n", { height: 3 });
+  assert(ordinary.includes("1-2/2  END"), ordinary);
+});
+
 Deno.test("renderFrame: overlay paints its title over the content", () => {
   const doc = parseDocument(SAMPLE);
   const rows = renderFrame(
