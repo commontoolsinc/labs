@@ -63,17 +63,25 @@ function fromFileUrl(url: string): string {
   }
 }
 
-/** Download a remote snapshot to a temp file so `--from` can take a URL. */
-async function fetchSnapshot(url: string): Promise<string> {
+/**
+ * Download a remote snapshot to a temp file so `--from` can take a URL.
+ *
+ * Returns the staging directory alongside the path so the caller can remove it:
+ * a real snapshot is gigabytes, and leaving one per invocation in the system
+ * temp directory would be a quiet disk leak.
+ */
+async function fetchSnapshot(
+  url: string,
+): Promise<{ path: string; stagingDir: string }> {
   const response = await fetch(url);
   if (!response.ok || response.body === null) {
     throw new Error(`could not download ${url}: HTTP ${response.status}`);
   }
-  const dir = await Deno.makeTempDir({ prefix: "cf-space-clone-" });
-  const path = `${dir}/snapshot.sqlite`;
+  const stagingDir = await Deno.makeTempDir({ prefix: "cf-space-clone-" });
+  const path = `${stagingDir}/snapshot.sqlite`;
   using file = await Deno.open(path, { write: true, create: true });
   await response.body.pipeTo(file.writable);
-  return path;
+  return { path, stagingDir };
 }
 
 const bytes = (n: number): string =>
@@ -118,17 +126,30 @@ export const space = new Command()
           "outside any store a local server is serving.",
       );
     }
-    const source = /^https?:\/\//.test(options.from)
+    const remote = /^https?:\/\//.test(options.from)
       ? await fetchSnapshot(options.from)
-      : options.from;
+      : undefined;
 
-    const targetDir = options.to;
-    const manifest = await createClone({
-      source,
-      space: spaceDid,
-      targetDir,
-      forbiddenDirs: liveStoreDirs(),
-    });
+    let manifest;
+    try {
+      manifest = await createClone({
+        source: remote?.path ?? options.from,
+        space: spaceDid,
+        targetDir: options.to,
+        forbiddenDirs: liveStoreDirs(),
+      });
+    } finally {
+      if (remote) {
+        await Deno.remove(remote.stagingDir, { recursive: true }).catch(
+          () => {},
+        );
+      }
+    }
+
+    // Report the RESOLVED directory, not the raw argument: the serve line below
+    // has to be a valid absolute `file://` URL, and a relative `--to` would
+    // otherwise print one that silently does not work when pasted.
+    const targetDir = await Deno.realPath(options.to);
     const paths = clonePaths(targetDir, spaceDid);
 
     out(!!options.json, { manifest, paths }, () => {
