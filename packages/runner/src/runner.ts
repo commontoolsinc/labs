@@ -118,6 +118,12 @@ import {
 import { diffAndUpdate } from "./data-updating.ts";
 import { setResultCell } from "./result-utils.ts";
 import { SigilLink } from "./sigil-types.ts";
+import {
+  prepareSourceClosureVerification,
+  readVerifiedSourceClosure,
+} from "./compilation-cache/cell-cache.ts";
+import { createRef } from "./create-ref.ts";
+import { toURI } from "./uri-utils.ts";
 export {
   extractDefaultValues,
   mergeObjects,
@@ -574,6 +580,8 @@ type SetupResult<R> = {
 };
 
 type SetupValidationOptions = {
+  /** Optional invariant over the argument stored before setup changes it. */
+  validateCurrentArgument?: (argumentCell: Cell<unknown>) => void;
   /** Optional layer-specific invariant checked inside the setup transaction. */
   validateArgumentLinks?: (
     argumentCell: Cell<unknown>,
@@ -581,11 +589,61 @@ type SetupValidationOptions = {
   ) => void;
   /** Optional repository locator written atomically with pattern setup. */
   patternRepository?: string;
+  /** Source lifecycle change written atomically with pattern setup. */
+  pieceSourceTransition?: PieceSourceTransition;
+  /** Record a detached creation revision when setting up a new piece. */
+  initializePieceSourceHistory?: boolean;
+  /** Mutable source origin recorded with a new piece's creation revision. */
+  initialPieceSourceOrigin?: string;
   /** Rebuild stored setup state even when patternIdentity already matches. */
   reapplyStoredSetup?: boolean;
   /** Keep the next start on the persisted-result dependency-sync path. */
   prepareForResume?: boolean;
 };
+
+export type PieceSourceRevisionOperation =
+  | "baseline"
+  | "create"
+  | "edit"
+  | "origin-update"
+  | "detach"
+  | "revert"
+  | "follow"
+  | "repoint";
+
+export interface PieceSourceRevision {
+  revisionId: string;
+  timestamp: number;
+  pattern: { identity: string; symbol: string };
+  /** Link retaining the exact content-addressed source closure. */
+  source: SigilLink;
+  origin?: string;
+  /** The legacy origin string, when normalizing it changed its value. */
+  recordedOrigin?: string;
+  operation: PieceSourceRevisionOperation;
+  selectedRevisionId?: string;
+}
+
+export interface PieceSourceSnapshot {
+  pattern: { identity: string; symbol: string };
+  origin: string | null;
+  revisionId: string | null;
+}
+
+export type PieceSourceTransitionBaseline =
+  | { kind: "retain"; revisionId: string }
+  | { kind: "unavailable" };
+
+export interface PieceSourceTransition {
+  revisionId: string;
+  baseline: PieceSourceTransitionBaseline;
+  timestamp: number;
+  operation: Exclude<PieceSourceRevisionOperation, "baseline" | "create">;
+  /** The active origin after the transition. Null means detached. */
+  origin: string | null;
+  expected: PieceSourceSnapshot;
+  selectedRevisionId?: string;
+}
 
 type RunResult<R> = {
   resultCell: Cell<R>;
@@ -1409,6 +1467,23 @@ export class Runner {
       ) as T;
     }
 
+    if (validationOptions.validateCurrentArgument !== undefined) {
+      const currentArgumentLink = getMetaLink(
+        resultCell.withTx(tx),
+        "argument",
+      );
+      if (currentArgumentLink === undefined) {
+        throw new Error("piece missing its current argument");
+      }
+      validationOptions.validateCurrentArgument(
+        this.runtime.getCellFromLink(
+          currentArgumentLink,
+          undefined,
+          tx,
+        ),
+      );
+    }
+
     this.updateResultSchemaMeta(tx, resultCell, pattern.resultSchema);
 
     if (validationOptions.patternRepository !== undefined) {
@@ -1416,6 +1491,24 @@ export class Runner {
         resultCell,
         tx,
         validationOptions.patternRepository,
+      );
+    }
+    if (validationOptions.initializePieceSourceHistory === true) {
+      initializePieceSourceHistory(
+        this.runtime,
+        resultCell,
+        tx,
+        entryRef,
+        validationOptions.initialPieceSourceOrigin,
+      );
+    }
+    if (validationOptions.pieceSourceTransition !== undefined) {
+      applyPieceSourceTransition(
+        this.runtime,
+        resultCell,
+        tx,
+        entryRef,
+        validationOptions.pieceSourceTransition,
       );
     }
 
@@ -2469,8 +2562,12 @@ export class Runner {
     inputs?: any,
     options?: {
       expectedPatternIdentity?: { identity: string; symbol: string };
+      validateCurrentArgument?: SetupValidationOptions[
+        "validateCurrentArgument"
+      ];
       validateArgumentLinks?: SetupValidationOptions["validateArgumentLinks"];
       patternRepository?: string;
+      pieceSourceTransition?: PieceSourceTransition;
     },
   ) {
     await resultCell.sync();
@@ -2517,6 +2614,8 @@ export class Runner {
         resultCell.withTx(givenTx),
         {
           patternRepository: options?.patternRepository,
+          pieceSourceTransition: options?.pieceSourceTransition,
+          validateCurrentArgument: options?.validateCurrentArgument,
           validateArgumentLinks: options?.validateArgumentLinks,
         },
       );
@@ -2530,6 +2629,8 @@ export class Runner {
           resultCell.withTx(tx),
           {
             patternRepository: options?.patternRepository,
+            pieceSourceTransition: options?.pieceSourceTransition,
+            validateCurrentArgument: options?.validateCurrentArgument,
             validateArgumentLinks: options?.validateArgumentLinks,
           },
         );
@@ -5915,9 +6016,8 @@ export function getPatternSetupIdentityRef(
 }
 
 /**
- * Read a piece's `patternSource` provenance — the source it tracks for updates
- * (a toolshed pattern path today; a `cf:` fabric ref in a later phase).
- * Undefined for pieces created before provenance stamping, or hand-built ones.
+ * Read the active web or fabric source origin stored in `patternSource`.
+ * Undefined means the piece is detached.
  */
 export function getPatternSource(
   resultCell: Cell<unknown>,
@@ -5938,6 +6038,332 @@ export function setPatternSource(
   url: string,
 ): void {
   resultCell.withTx(tx).setMetaRaw("patternSource", url);
+}
+
+/** Read the validated, append-only source revisions carried by a piece. */
+export function getPieceSourceRevisions(
+  resultCell: Cell<unknown>,
+): PieceSourceRevision[] {
+  const raw = resultCell.getMetaRaw("pieceSourceHistory", {
+    meta: ignoreReadForScheduling,
+  });
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) {
+    throw new Error("piece source history is invalid");
+  }
+  const revisions: PieceSourceRevision[] = [];
+  const revisionIds = new Set<string>();
+  for (const value of raw) {
+    if (!isRecord(value)) {
+      throw new Error("piece source history is invalid");
+    }
+    const pattern = asPatternIdentityRef(value.pattern);
+    let sourceLink: NormalizedFullLink | undefined;
+    if (isSigilLink(value.source)) {
+      try {
+        sourceLink = parseLink(
+          value.source,
+          resultCell.getAsNormalizedFullLink(),
+        );
+      } catch {
+        // The validation below reports one stable history error.
+      }
+    }
+    if (
+      typeof value.revisionId !== "string" ||
+      value.revisionId.length === 0 ||
+      revisionIds.has(value.revisionId) ||
+      typeof value.timestamp !== "number" ||
+      !Number.isFinite(value.timestamp) ||
+      value.timestamp < 0 ||
+      pattern === undefined ||
+      sourceLink === undefined ||
+      sourceLink.space !== resultCell.space ||
+      sourceLink.id !== toURI(createRef({}, `pattern:${pattern.identity}`)) ||
+      (sourceLink.scope ?? "space") !== "space" ||
+      sourceLink.path.length !== 0 ||
+      !isPieceSourceRevisionOperation(value.operation) ||
+      value.origin !== undefined && typeof value.origin !== "string" ||
+      value.recordedOrigin !== undefined &&
+        (typeof value.recordedOrigin !== "string" ||
+          typeof value.origin !== "string") ||
+      value.selectedRevisionId !== undefined &&
+        (typeof value.selectedRevisionId !== "string" ||
+          value.selectedRevisionId.length === 0)
+    ) {
+      throw new Error("piece source history is invalid");
+    }
+    const revision: PieceSourceRevision = {
+      revisionId: value.revisionId,
+      timestamp: value.timestamp,
+      pattern,
+      source: value.source as SigilLink,
+      operation: value.operation,
+    };
+    if (typeof value.origin === "string") revision.origin = value.origin;
+    if (typeof value.recordedOrigin === "string") {
+      revision.recordedOrigin = value.recordedOrigin;
+    }
+    if (typeof value.selectedRevisionId === "string") {
+      revision.selectedRevisionId = value.selectedRevisionId;
+    }
+    revisionIds.add(revision.revisionId);
+    revisions.push(revision);
+  }
+  return revisions;
+}
+
+/** The source state guarded by a lifecycle transition. */
+export function getPieceSourceSnapshot(
+  resultCell: Cell<unknown>,
+): PieceSourceSnapshot | undefined {
+  const pattern = getPatternIdentityRef(resultCell);
+  if (pattern === undefined) return undefined;
+  const revisions = getPieceSourceRevisions(resultCell);
+  return {
+    pattern,
+    origin: getPatternSource(resultCell) ?? null,
+    revisionId: revisions.at(-1)?.revisionId ?? null,
+  };
+}
+
+function isPieceSourceRevisionOperation(
+  value: unknown,
+): value is PieceSourceRevisionOperation {
+  return value === "baseline" || value === "create" || value === "edit" ||
+    value === "origin-update" || value === "detach" ||
+    value === "revert" || value === "follow" || value === "repoint";
+}
+
+function sourceRetentionLink(
+  runtime: Runtime,
+  resultCell: Cell<unknown>,
+  tx: IExtendedStorageTransaction,
+  pattern: { identity: string; symbol: string },
+): SigilLink {
+  return runtime.getCell(
+    resultCell.space,
+    `pattern:${pattern.identity}`,
+    undefined,
+    tx,
+  ).getAsLink();
+}
+
+function initializePieceSourceHistory(
+  runtime: Runtime,
+  resultCell: Cell<unknown>,
+  tx: IExtendedStorageTransaction,
+  pattern: { identity: string; symbol: string },
+  origin?: string,
+): void {
+  const candidate = resultCell.withTx(tx);
+  const existingPattern = getPatternIdentityRef(candidate);
+  const existingHistory = candidate.getMetaRaw("pieceSourceHistory", {
+    meta: ignoreReadForScheduling,
+  });
+  if (existingPattern !== undefined) {
+    if (
+      patternIdentityKey(existingPattern) !== patternIdentityKey(pattern)
+    ) {
+      throw new Error("piece already exists with a different pattern");
+    }
+    if (existingHistory !== undefined) getPieceSourceRevisions(candidate);
+    return;
+  }
+  if (existingHistory !== undefined) {
+    getPieceSourceRevisions(candidate);
+    throw new Error("piece source history exists without a pattern identity");
+  }
+  if (
+    readVerifiedSourceClosure(
+      runtime,
+      resultCell.space,
+      pattern.identity,
+      tx,
+    ) === undefined
+  ) {
+    return;
+  }
+  if (origin !== undefined) candidate.setMetaRaw("patternSource", origin);
+  candidate.setMetaRaw("pieceSourceHistory", [{
+    revisionId: crypto.randomUUID(),
+    timestamp: Date.now(),
+    pattern,
+    source: sourceRetentionLink(runtime, resultCell, tx, pattern),
+    ...(origin === undefined ? {} : { origin }),
+    operation: "create",
+  }] as unknown as FabricValue);
+}
+
+function samePieceSourceSnapshot(
+  left: PieceSourceSnapshot,
+  right: PieceSourceSnapshot,
+): boolean {
+  return patternIdentityKey(left.pattern) ===
+      patternIdentityKey(right.pattern) &&
+    left.origin === right.origin &&
+    left.revisionId === right.revisionId;
+}
+
+function normalizePieceSourceOrigin(
+  runtime: Runtime,
+  resultCell: Cell<unknown>,
+  origin: string | null,
+): { origin: string | null; recordedOrigin?: string } {
+  if (origin === null || !origin.startsWith("/")) return { origin };
+  return {
+    origin: new URL(origin, runtime.hostForSpace(resultCell.space)).href,
+    recordedOrigin: origin,
+  };
+}
+
+/**
+ * Verify that a source transition can restore the current source. Recovery
+ * paths may omit an unavailable legacy baseline and retain the displaced
+ * executable identity outside the restorable history instead.
+ */
+export async function preparePieceSourceTransitionBaseline(
+  runtime: Runtime,
+  resultCell: Cell<unknown>,
+  expected: PieceSourceSnapshot,
+  options: { allowUnavailable?: boolean } = {},
+): Promise<PieceSourceTransitionBaseline> {
+  await prepareSourceClosureVerification();
+  const current = getPieceSourceSnapshot(resultCell);
+  if (
+    current === undefined ||
+    !samePieceSourceSnapshot(current, expected)
+  ) {
+    throw new Error(
+      "piece source changed while the source transition was being prepared",
+    );
+  }
+  const baseline = {
+    kind: "retain" as const,
+    revisionId: crypto.randomUUID(),
+  };
+  // Load and verify the current closure before opening the write transaction.
+  // The write transaction verifies it again and keeps those reads in its OCC
+  // set. This first pass synchronizes the recursive closure and compiler stack.
+  const program = await runtime.patternManager
+    .getPatternSourceProgramByIdentity(
+      expected.pattern.identity,
+      resultCell.space,
+    );
+  if (program !== undefined) return baseline;
+  if (options.allowUnavailable) return { kind: "unavailable" };
+  throw new Error("the piece's current source is not available");
+}
+
+/**
+ * Append a source revision and change active origin in the pattern setup
+ * transaction. A legacy or externally changed current state first receives a
+ * baseline revision so no source or origin is skipped.
+ */
+export function applyPieceSourceTransition(
+  runtime: Runtime,
+  resultCell: Cell<unknown>,
+  tx: IExtendedStorageTransaction,
+  nextPattern: { identity: string; symbol: string },
+  transition: PieceSourceTransition,
+): void {
+  const candidate = resultCell.withTx(tx);
+  const current = getPieceSourceSnapshot(candidate);
+  if (
+    current === undefined ||
+    !samePieceSourceSnapshot(current, transition.expected)
+  ) {
+    throw new Error(
+      "piece source changed while the source transition was being prepared",
+    );
+  }
+
+  const verifyRetainedPattern = (
+    pattern: { identity: string; symbol: string },
+  ): void => {
+    if (
+      readVerifiedSourceClosure(
+        runtime,
+        resultCell.space,
+        pattern.identity,
+        tx,
+      ) === undefined
+    ) {
+      throw new Error(
+        `source for pattern ${pattern.identity} is not available`,
+      );
+    }
+  };
+  if (transition.baseline.kind === "retain") {
+    verifyRetainedPattern(current.pattern);
+  }
+  if (
+    transition.baseline.kind !== "retain" ||
+    patternIdentityKey(current.pattern) !== patternIdentityKey(nextPattern)
+  ) {
+    verifyRetainedPattern(nextPattern);
+  }
+  if (transition.baseline.kind === "unavailable") {
+    candidate.setMetaRaw("displacedPattern", {
+      identity: current.pattern.identity,
+      symbol: current.pattern.symbol,
+      displacedAt: transition.timestamp,
+    });
+  }
+
+  const history = getPieceSourceRevisions(candidate);
+  const recordedCurrent = history.at(-1);
+  const currentOrigin = normalizePieceSourceOrigin(
+    runtime,
+    resultCell,
+    current.origin,
+  );
+  const nextOrigin = normalizePieceSourceOrigin(
+    runtime,
+    resultCell,
+    transition.origin,
+  );
+  const needsBaseline = recordedCurrent === undefined ||
+    patternIdentityKey(recordedCurrent.pattern) !==
+      patternIdentityKey(current.pattern) ||
+    (recordedCurrent.origin ?? null) !== currentOrigin.origin;
+  if (needsBaseline && transition.baseline.kind === "retain") {
+    history.push({
+      revisionId: transition.baseline.revisionId,
+      timestamp: transition.timestamp,
+      pattern: current.pattern,
+      source: sourceRetentionLink(runtime, resultCell, tx, current.pattern),
+      ...(currentOrigin.origin === null ? {} : {
+        origin: currentOrigin.origin,
+        ...(currentOrigin.recordedOrigin === undefined
+          ? {}
+          : { recordedOrigin: currentOrigin.recordedOrigin }),
+      }),
+      operation: "baseline",
+    });
+  }
+
+  history.push({
+    revisionId: transition.revisionId,
+    timestamp: transition.timestamp,
+    pattern: nextPattern,
+    source: sourceRetentionLink(runtime, resultCell, tx, nextPattern),
+    ...(nextOrigin.origin === null ? {} : {
+      origin: nextOrigin.origin,
+      ...(nextOrigin.recordedOrigin === undefined
+        ? {}
+        : { recordedOrigin: nextOrigin.recordedOrigin }),
+    }),
+    operation: transition.operation,
+    ...(transition.selectedRevisionId === undefined
+      ? {}
+      : { selectedRevisionId: transition.selectedRevisionId }),
+  });
+  candidate.setMetaRaw("patternSource", nextOrigin.origin ?? undefined);
+  candidate.setMetaRaw(
+    "pieceSourceHistory",
+    history as unknown as FabricValue,
+  );
 }
 
 /** Read an explicitly supplied repository locator for a piece's source. */

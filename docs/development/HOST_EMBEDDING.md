@@ -141,11 +141,37 @@ untested here by design — it lands and is tested with CT-1830.
 ## 3a. The piece menu
 
 **Contract.** A right-click on a piece rendered by `cf-render` opens
-`cf-piece-menu` for that piece, with two entries: **View source** shows the
-piece's retained authored files, and **Origin and history** shows the origin it
-records and the pattern identities it has run. Nothing is required of the host to
-have them — importing `cf-render` registers the menu, and the menu reads its data
-through `RuntimeClient.getPieceSource()` on the runtime the piece already runs in.
+`cf-piece-menu` for that piece. **View source** shows the piece's retained
+authored files. **Origin and history** shows its active origin and recorded
+source revisions. A piece with an active origin also has **Stop following
+source**. That action keeps the exact current source and clears the active
+origin.
+
+Historical entries can restore an exact retained source version or resume
+following an earlier web or fabric origin. An incompatible pattern contract or
+retained link is shown before mutation and requires a second explicit
+confirmation. The runtime binds that confirmation to the exact reviewed code
+and source-state snapshot. If the piece's actual retained input does not satisfy
+the candidate's argument schema, the runtime rejects the transition instead.
+The input must be repaired before that source can be selected. Nothing is
+required of the host to get these controls. Importing `cf-render` registers the
+menu. The menu reads and changes the piece through
+`RuntimeClient.getPieceSource()` and `RuntimeClient.updatePieceSource()` on the
+runtime the piece already runs in.
+
+Calling `RuntimeClient.createPage()` with an HTTP or HTTPS `URL` creates a
+followed piece. The runtime records the canonical URL and retained initial
+source in one creation transaction. Calling it with a source string or
+`Program` creates a detached piece when that source can be retained.
+
+`updatePieceSource()` returns a one-use `confirmationToken` with an
+incompatibility warning. Passing that token back confirms only the reported
+pattern-contract or durable linked-producer warning. The token is valid only
+for the compiled candidate, retained argument evidence, and linked-producer
+contracts that produced the warning. An `executionWarning` means the source
+transition was saved but a later running-piece or source-detail refresh failed;
+hosts must not present that case as an unsaved change.
+
 The menu mounts itself on `document.body`, not inside the piece, because a piece's
 own `overflow: hidden` would clip it and the tile variant's
 `transform: scale(0.5)` would shrink it; it copies the `--cf-theme-*` tokens
@@ -157,6 +183,11 @@ open, and the host is responsible for what appears instead. Either way the
 browser's own context menu is suppressed. Unlike the navigation events, this one
 BUBBLES from the DOM (`bubbles`, `composed`), so a host may listen on its mount
 container or on `globalThis`.
+
+Every `cf-render` variant resolves a link-valued cell to the piece it displays
+before it chooses the menu target. This includes nested pieces rendered with the
+full variant. The renderer observes the link itself and resolves again when its
+target changes.
 
 ```ts
 import type { DID } from "@commonfabric/identity";
@@ -186,8 +217,9 @@ for what an origin means.
 **Test.** `packages/ui/src/v2/components/cf-render/cf-render.test.ts`,
 `describe("CFRender piece context menu")` — the event name, the detail shape, and
 when the click is taken. `packages/ui/src/v2/components/cf-piece-menu/cf-piece-menu.test.ts`
-— the entries and their test hooks. The menu's DOM behaviour is driven end to end
-by `packages/shell/integration/piece-menu.test.ts`.
+— the entries, lifecycle actions, compatibility confirmation, and their test
+hooks. The menu's DOM behaviour is driven end to end by
+`packages/shell/integration/piece-menu.test.ts`.
 
 ---
 

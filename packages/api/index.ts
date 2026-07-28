@@ -495,8 +495,8 @@ export type MetaField =
   | MetaLinkField
   | "patternIdentity" // content-addressed {identity, symbol} pattern reference
   | "patternSetupIdentity" // setup-completion {identity, symbol} marker
-  | "patternSource" // provenance: the source a piece tracks for updates (a
-  // toolshed pattern path, or later a `cf:` fabric ref)
+  | "patternSource" // active web or `cf:` source origin
+  | "pieceSourceHistory" // append-only source revisions and retention roots
   | "patternRepository" // optional caller-supplied repository locator
   | "displacedPattern" // {identity, symbol, displacedAt}: the prior pattern
   // reference recorded when system-pattern auto-update replaces an unloadable
