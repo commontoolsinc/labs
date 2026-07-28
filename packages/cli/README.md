@@ -1,5 +1,19 @@
 # @commonfabric/cli
 
+## View pager
+
+`cf view [file]` is an interactive pager for transformed TypeScript, source
+files, and unified diffs. Named Markdown, JSON, JSONC, and YAML files use their
+own syntax highlighting. A piped input without a file name remains TypeScript
+unless it is detected as a diff. Redirected output keeps the text verbatim and
+adds ANSI color only when the selected color mode permits it.
+
+```bash
+cf check pattern.tsx --show-transformed --no-run | cf view
+cf view .github/workflows/deno.yml
+git diff upstream/main | cf view
+```
+
 ## Piece data search
 
 `cf piece search <query>` reads every piece in the selected space and returns

@@ -3,13 +3,14 @@ import { type ColorWhen, ViewError, viewMain } from "../lib/view/mod.ts";
 import { cliText } from "../lib/cli-name.ts";
 
 const description = cliText(
-  `Interactive, syntax-aware pager for transformed patterns and diffs.
+  `Interactive, syntax-aware pager for transformed patterns, source files and diffs.
 
-A less-like viewer for the dense output of '--show-transformed'. It parses the
-text with the same TypeScript parser the transformer uses, so blocks, closures,
-schemas, type positions and Common Fabric builders (pattern/lift/handler/…) are
-coloured exactly as the compiler sees them. The text shown is verbatim — colour
-only.
+A less-like viewer for the dense output of '--show-transformed' and saved source
+files. Transformed TypeScript is parsed with the same parser the transformer
+uses, so blocks, closures, schemas, type positions and Common Fabric builders
+(pattern/lift/handler/…) are coloured exactly as the compiler sees them.
+Markdown, JSON, JSONC and YAML files use syntax highlighting selected from
+their names. The text shown is verbatim — colour only.
 
 Unified diffs are detected automatically: piping 'git diff' in gives added and
 removed lines their tints, full syntax colour, a structure tree of the code

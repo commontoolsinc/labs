@@ -14,6 +14,7 @@ import {
 import { typeScriptLanguage } from "../lib/view/languages/typescript/language.ts";
 import { markdownLanguage } from "../lib/view/languages/markdown/language.ts";
 import { jsonLanguage } from "../lib/view/languages/json/language.ts";
+import { yamlLanguage } from "../lib/view/languages/yaml/language.ts";
 import {
   buildDiffDocument,
   type DiffMaps,
@@ -27,6 +28,7 @@ Deno.test("languageForFile: extensions resolve, and the rest backstops to TS", (
   }
   assertEquals(languageForFile("README.md").id, "markdown");
   assertEquals(languageForFile("deno.jsonc").id, "json");
+  assertEquals(languageForFile("workflow.yml").id, "yaml");
   // No language claims these, so the fallback (TypeScript) resolves them.
   assertEquals(languageForFile("notes.xyz").id, "typescript");
   assertEquals(languageForFile(undefined).id, "typescript");
@@ -38,9 +40,13 @@ Deno.test("distinctLanguages: dedupes in first-seen order", () => {
     "b.ts",
     "c.md",
     "d.json",
+    "e.yaml",
     undefined,
   ]);
-  assertEquals(languages.map((l) => l.id), ["typescript", "markdown", "json"]);
+  assertEquals(
+    languages.map((l) => l.id),
+    ["typescript", "markdown", "json", "yaml"],
+  );
 });
 
 const FILE_TEXT = `export function double(n: number): number {
@@ -102,9 +108,12 @@ Deno.test("diffSemanticsFor: TypeScript answers over its own files in the diff",
     // Languages without a semantic layer contribute none, so a diff of only
     // those resolves to no service.
     assertEquals(
-      diffSemanticsFor([markdownLanguage, jsonLanguage], DIFF, maps, {
-        cwd: root,
-      }),
+      diffSemanticsFor(
+        [markdownLanguage, jsonLanguage, yamlLanguage],
+        DIFF,
+        maps,
+        { cwd: root },
+      ),
       undefined,
     );
   } finally {
