@@ -179,43 +179,29 @@ function highlightLine(
     ? undefined
     : state.plain;
   if (flowPlain) {
-    if (firstContent >= line.length || line[firstContent] === "\r") {
+    if (firstContent >= line.length) {
       if (firstContent > i) push(i, firstContent, "whitespace");
-      if (firstContent < line.length) {
-        push(firstContent, line.length, "whitespace");
-      }
       return { text: line, spans };
     }
-    if (
-      line[firstContent] === "#" &&
-      isCommentStart(line, firstContent)
-    ) {
-      state.plain = undefined;
-    } else {
-      if (firstContent > i) push(i, firstContent, "whitespace");
-      const end = scanPlainScalar(line, firstContent, state.flow.length);
-      if (end > firstContent) {
-        const scalarEnd = trimTrailingWhitespace(
-          line,
-          firstContent,
-          end,
-        );
-        emitPlainScalar(
-          line,
-          firstContent,
-          scalarEnd,
-          flowPlain.key === true,
-          push,
-          true,
-        );
-        i = scalarEnd;
-        const continues = end === line.length &&
-          flowPlainScalarContinues(rawLines, lineIndex, state.flow.length);
-        state.plain = continues ? flowPlain : undefined;
-      } else {
-        state.plain = undefined;
-      }
-    }
+    if (firstContent > i) push(i, firstContent, "whitespace");
+    const end = scanPlainScalar(line, firstContent, state.flow.length);
+    const scalarEnd = trimTrailingWhitespace(
+      line,
+      firstContent,
+      end,
+    );
+    emitPlainScalar(
+      line,
+      firstContent,
+      scalarEnd,
+      flowPlain.key === true,
+      push,
+      true,
+    );
+    i = scalarEnd;
+    const continues = end === line.length &&
+      flowPlainScalarContinues(rawLines, lineIndex, state.flow.length);
+    state.plain = continues ? flowPlain : undefined;
   }
 
   let explicitKey = continuesExplicitKey;
@@ -471,12 +457,6 @@ function highlightLine(
 
     state.flowKeyCandidate = undefined;
     const end = scanPlainScalar(line, i, state.flow.length);
-    if (end === i) {
-      const size = (line.codePointAt(i) ?? 0) > 0xffff ? 2 : 1;
-      push(i, i + size, "plain");
-      i += size;
-      continue;
-    }
     const scalarEnd = trimTrailingWhitespace(line, i, end);
     const after = skipWhitespace(line, scalarEnd);
     const wasExplicitKey = explicitKey;
@@ -792,7 +772,6 @@ function bomStartsDocumentPrefix(
   lineIndex: number,
 ): boolean {
   const line = rawLines[lineIndex];
-  if (line[0] !== "\uFEFF") return false;
   const first = skipWhitespace(line, 1);
   if (
     first < line.length && line[first] !== "\r" &&

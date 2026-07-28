@@ -2,7 +2,7 @@
  * The YAML language used by `cf view`. Tests cover direct files, diffs, live
  * edits, common scalar forms, flow collections, and state that crosses lines.
  */
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertStrictEquals } from "@std/assert";
 import { join } from "@std/path";
 import {
   createYamlHighlighter,
@@ -136,6 +136,37 @@ Deno.test("yaml: quoted keys and values keep escapes and doubled quotes", () => 
   assertEquals(verbatim(lines), source);
 });
 
+Deno.test("yaml: explicit multiline quoted keys retain key styling", () => {
+  // YAML restricts implicit keys to one line, so multiline keys use `?`.
+  for (
+    const [source, fragments] of [
+      [
+        [
+          '? "multi',
+          "",
+          '  line"',
+          ": value",
+        ].join("\n"),
+        ['"multi', '  line"'],
+      ],
+      [
+        [
+          "mapping: { ? 'multi",
+          "  line' : value }",
+        ].join("\n"),
+        ["'multi", "  line'"],
+      ],
+    ] as const
+  ) {
+    const lines = yamlHighlightLines(source);
+    for (const fragment of fragments) {
+      assertEquals([...classesOf(lines, fragment)], ["propertyName"], source);
+    }
+    assertEquals([...classesOf(lines, "value")], ["string"], source);
+    assertEquals(verbatim(lines), source);
+  }
+});
+
 Deno.test("yaml: comments require separation and do not consume URLs", () => {
   const source = [
     "url: https://example.test/a#fragment",
@@ -233,6 +264,40 @@ Deno.test("yaml: sequence markers, tags, anchors, and aliases are highlighted", 
     ),
   );
   assert(!aliasKey.spans.some((span) => span.text === "*key:"));
+  assertEquals(verbatim(lines), source);
+});
+
+Deno.test("yaml: an alias can be an explicit mapping key", () => {
+  const source = "? *alias\n: value";
+  const lines = yamlHighlightLines(source);
+
+  assertEquals([...classesOf(lines, "*alias")], ["keyword"]);
+  assertEquals([...classesOf(lines, "value")], ["string"]);
+  assertEquals(verbatim(lines), source);
+});
+
+Deno.test("yaml: verbatim tags and property-only lines remain lossless", () => {
+  const source = [
+    "tagged: !<tag:example.org,2026:widget> value",
+    "unfinished: !<tag:example.org,2026:widget",
+    "first:",
+    "  !foo &anchor  ",
+    "  value",
+    "second:",
+    "  !bar &other # properties",
+    "  value",
+  ].join("\n");
+  const lines = yamlHighlightLines(source);
+
+  assertEquals(
+    [...classesOf(lines, "!<tag:example.org,2026:widget>")],
+    ["keyword"],
+  );
+  assertEquals(
+    [...classesOf(lines, "!<tag:example.org,2026:widget")],
+    ["keyword"],
+  );
+  assertEquals([...classesOf(lines, "# properties")], ["comment"]);
   assertEquals(verbatim(lines), source);
 });
 
@@ -353,6 +418,26 @@ Deno.test("yaml: document markers start at the stream's first column", () => {
   assertEquals([...classesOf(embeddedBom, "foo\uFEFF#bar")], ["string"]);
 });
 
+Deno.test("yaml: a BOM only starts a document prefix before a marker", () => {
+  const content = "first: value\n\uFEFFsecond: value";
+  assertEquals(verbatim(yamlHighlightLines(content)), content);
+
+  const prefix = [
+    "first: value",
+    "\uFEFF# next document",
+    "# another prefix comment",
+    "---",
+    "second: value",
+  ].join("\n");
+  const lines = yamlHighlightLines(prefix);
+  assertEquals(
+    [...classesOf(lines, "# another prefix comment")],
+    ["comment"],
+  );
+  assertEquals([...classesOf(lines, "---")], ["sectionHeader"]);
+  assertEquals(verbatim(lines), prefix);
+});
+
 Deno.test("yaml: block scalar content stays string until it dedents", () => {
   const source = [
     "script: |2- # shell text",
@@ -377,6 +462,25 @@ Deno.test("yaml: block scalar content stays string until it dedents", () => {
   assertEquals([...classesOf(lines, "folded text")], ["string"]);
   assertEquals([...classesOf(lines, "done")], ["propertyName"]);
   assertEquals([...classesOf(lines, "true")], ["boolean"]);
+  assertEquals(verbatim(lines), source);
+});
+
+Deno.test("yaml: block scalars accept blank content and reject bad headers", () => {
+  const source = [
+    "literal: |",
+    "  ",
+    "  text",
+    "empty: |",
+    "after: true",
+    "invalid: |x",
+  ].join("\n");
+  const lines = yamlHighlightLines(source);
+
+  assertEquals(lines[1].spans.map((span) => span.cls), ["whitespace"]);
+  assertEquals([...classesOf(lines, "text")], ["string"]);
+  assertEquals([...classesOf(lines, "after")], ["propertyName"]);
+  assertEquals([...classesOf(lines, "true")], ["boolean"]);
+  assertEquals([...classesOf(lines, "|x")], ["string"]);
   assertEquals(verbatim(lines), source);
 });
 
@@ -660,6 +764,59 @@ Deno.test("yaml: multiline plain scalars resolve as strings", () => {
   assertEquals([...classesOf([lines[11]], "false")], ["boolean"]);
   assertEquals([...classesOf([lines[12]], "true")], ["boolean"]);
   assertEquals(verbatim(lines), source);
+});
+
+Deno.test("yaml: multiline plain scalars preserve whitespace and comments", () => {
+  const block = [
+    "message: first",
+    "  \t",
+    "  second   # trailing comment",
+    "next: true",
+  ].join("\n");
+  const blockLines = yamlHighlightLines(block);
+  assertEquals(
+    blockLines[1].spans.map((span) => span.cls),
+    ["whitespace"],
+  );
+  assertEquals([...classesOf(blockLines, "second")], ["string"]);
+  assertEquals(
+    [...classesOf(blockLines, "# trailing comment")],
+    ["comment"],
+  );
+  assertEquals([...classesOf(blockLines, "next")], ["propertyName"]);
+  assertEquals(verbatim(blockLines), block);
+
+  for (
+    const flow of [
+      [
+        "values: [first",
+        "  ",
+        "  second]",
+      ].join("\n"),
+      "values: [first\r\n\r\n  second]\r\n",
+    ]
+  ) {
+    const flowLines = yamlHighlightLines(flow);
+    assertEquals(flowLines[1].spans.map((span) => span.cls), ["whitespace"]);
+    assertEquals([...classesOf(flowLines, "second")], ["string"]);
+    assertEquals(verbatim(flowLines), flow);
+  }
+});
+
+Deno.test("yaml: structural lines end plain scalar continuation", () => {
+  for (
+    const source of [
+      "value: true\n  # separate comment",
+      "value: [true\n # comment",
+      "value: [true\n , false]",
+      "value: [true\n ]",
+      "value: {key: true\n }",
+    ]
+  ) {
+    const lines = yamlHighlightLines(source);
+    assertEquals([...classesOf(lines, "true")], ["boolean"], source);
+    assertEquals(verbatim(lines), source);
+  }
 });
 
 Deno.test("yaml: separate nodes retain multiline plain scalar state", () => {
@@ -1077,6 +1234,74 @@ Deno.test("yaml: a touched path rehighlights every repeated section", () => {
       ),
     );
     assert(!target.spans.some((span) => span.cls === "propertyName"));
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("yaml: live diff highlighting leaves other files unchanged", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(
+      join(root, "config.yml"),
+      "script:\n  child: new\n",
+    );
+    Deno.writeTextFileSync(
+      join(root, "other.yml"),
+      "enabled: true\n",
+    );
+    const workspace: DiffWorkspace = {
+      resolve: (path) => join(root, path),
+      read: (path) => {
+        try {
+          return Deno.readTextFileSync(path);
+        } catch {
+          return null;
+        }
+      },
+    };
+    const diff = [
+      "diff --git a/config.yml b/config.yml",
+      "--- a/config.yml",
+      "+++ b/config.yml",
+      "@@ -1 +1 @@",
+      "-script: old",
+      "+script:",
+      "diff --git a/other.yml b/other.yml",
+      "--- a/other.yml",
+      "+++ b/other.yml",
+      "@@ -1 +1 @@",
+      "-enabled: false",
+      "+enabled: true",
+      "",
+    ].join("\n");
+    const { doc, edit } = buildDiffDocument(
+      diff,
+      parseDiff(diff)!,
+      workspace,
+    );
+    const originalOther = doc.lines.find((line) =>
+      line.text === "+enabled: true"
+    )!;
+    const highlighter = diffSource(workspace, edit).createHighlighter!(
+      diff,
+      doc.lines,
+    );
+    const updated = highlighter.update(
+      diff.replace("+script:", "+script: |"),
+    );
+    const other = updated.find((line) => line.text === "+enabled: true")!;
+    assertStrictEquals(other, originalOther);
+    assert(
+      other.spans.some((span) =>
+        span.text === "enabled" && span.cls === "propertyName"
+      ),
+    );
+    assert(
+      other.spans.some((span) =>
+        span.text === "true" && span.cls === "boolean"
+      ),
+    );
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
