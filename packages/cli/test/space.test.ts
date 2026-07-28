@@ -208,6 +208,20 @@ describe("cf space", () => {
     // snapshot across operators. A real snapshot is gigabytes, so the staging
     // copy must not survive the command.
     await withFixture(async ({ snapshot, clone }) => {
+      // Compare staging directories before and after rather than asserting the
+      // system temp directory holds none: it is shared, so an unrelated
+      // leftover would fail this spuriously and forever.
+      const stagingDirs = async (): Promise<Set<string>> => {
+        const found = new Set<string>();
+        for await (
+          const entry of Deno.readDir(Deno.env.get("TMPDIR") ?? "/tmp")
+        ) {
+          if (entry.name.startsWith("cf-space-clone-")) found.add(entry.name);
+        }
+        return found;
+      };
+      const before = await stagingDirs();
+
       const body = await Deno.readFile(snapshot);
       const server = Deno.serve(
         { hostname: "127.0.0.1", port: 0, onListen: () => {} },
@@ -226,12 +240,8 @@ describe("cf space", () => {
         await server.shutdown();
       }
 
-      const leaked = [];
-      for await (
-        const entry of Deno.readDir(Deno.env.get("TMPDIR") ?? "/tmp")
-      ) {
-        if (entry.name.startsWith("cf-space-clone-")) leaked.push(entry.name);
-      }
+      const after = await stagingDirs();
+      const leaked = [...after].filter((name) => !before.has(name));
       expect(leaked).toEqual([]);
     });
   });
@@ -351,13 +361,22 @@ describe("cf space", () => {
     });
   });
 
-  it("keeps a failure off stdout when --json was requested", async () => {
+  it("keeps usage help off stdout when --json was requested", async () => {
     // stdout is reserved for the JSON payload, so a failing command must not
     // print usage help into it and corrupt a caller's parse.
-    await withFixture(async ({ root }) => {
-      const result = await cf(`space verify ${root} --json`);
-      expect(result.code).not.toBe(0);
-      expect(text(result.stdout).trim()).toBe("");
+    //
+    // This must be a VALIDATION error: cliffy prints usage help to stdout for
+    // those and not for ordinary thrown errors, so testing with a plain error
+    // would pass even with the guard deleted.
+    await withFixture(async () => {
+      const withoutJson = await cf(`space clone ${SPACE} --to /tmp/unused`);
+      expect(withoutJson.code).not.toBe(0);
+      expect(text(withoutJson.stdout)).toContain("Usage:"); // help on stdout...
+
+      const withJson = await cf(`space clone ${SPACE} --to /tmp/unused --json`);
+      expect(withJson.code).not.toBe(0);
+      expect(text(withJson.stdout).trim()).toBe(""); // ...suppressed here
+      expect(text(withJson.stderr)).toContain("--from is required");
     });
   });
 
