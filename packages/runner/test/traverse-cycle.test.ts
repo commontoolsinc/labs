@@ -9,7 +9,7 @@ import type {
   URI,
 } from "@commonfabric/memory/interface";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { Immutable } from "@commonfabric/utils/types";
+
 import {
   CompoundCycleTracker,
   ManagedStorageTransaction,
@@ -77,12 +77,12 @@ describe("SchemaObjectTraverser cycle fallback (traverseDAG, true schema)", () =
     // Confirm the tracker selects the fallback for this value: a second
     // include of the same value with the same schema returns null.
     const tracker = new CompoundCycleTracker<
-      Immutable<FabricValue>,
+      FabricValue,
       JSONSchema | undefined
     >();
-    expect(tracker.include(value as Immutable<FabricValue>, true)).not
+    expect(tracker.include(value as FabricValue, true)).not
       .toBeNull();
-    expect(tracker.include(value as Immutable<FabricValue>, true)).toBeNull();
+    expect(tracker.include(value as FabricValue, true)).toBeNull();
 
     const store = storeWith(docUri, value);
     const traverser = getTraverser(store, { path: ["value"], schema: true });

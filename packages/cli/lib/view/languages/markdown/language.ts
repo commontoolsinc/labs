@@ -14,6 +14,7 @@ import {
   isMarkdownPath,
   markdownDocument,
   markdownHeadingNodes,
+  renderMarkdownLines,
 } from "./markdown.ts";
 
 export const markdownLanguage: Language = {
@@ -24,6 +25,12 @@ export const markdownLanguage: Language = {
   parseDocument: (text) => markdownDocument(text),
 
   highlightLines: (text) => highlightMarkdownLines(text),
+
+  renderLines: (text) => renderMarkdownLines(text),
+
+  renderNeedsCompleteFile: true,
+
+  highlightFullFileOnDiffEdit: true,
 
   createHighlighter: (text) => createMarkdownHighlighter(text),
 

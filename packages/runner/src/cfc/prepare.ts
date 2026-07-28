@@ -2712,8 +2712,8 @@ const writeInstallsInitialSchemaDefault = (
     return false;
   }
   const pathTarget = { ...target, path };
-  // The cast is required: `default` is statically `ImmutableJSONValue`, whose
-  // deeply-`readonly`, `ArrayLike`-based JSON shape is not assignable to
+  // The cast is required: `default` is statically `JSONValue`, whose
+  // deeply-readonly, `ReadonlyArray`-based JSON shape is not assignable to
   // `FabricValue` -- though the runtime value is one (a native
   // `Uint8Array`/`Date` default interns to a `FabricPrimitive`).
   return previousWriteValueForTarget(tx, pathTarget) === undefined &&

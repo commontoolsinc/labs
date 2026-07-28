@@ -18,3 +18,4 @@ Directory listings reflect space contents and JSON structure traversal.
 - [8. Filesystem Projections (`[FS]`)](./8-fs-projections.md)
 - [9. CFC Annotations](./9-cfc-annotations.md)
 - [10. CFC Filesystem API Semantics](./10-cfc-filesystem-api-semantics.md)
+- [11. Entity Lookup, Enumeration, and Performance](./11-entity-lookup-enumeration.md)

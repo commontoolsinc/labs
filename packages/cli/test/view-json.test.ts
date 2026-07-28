@@ -46,7 +46,7 @@ Deno.test("json: isJsonPath recognises json extensions", () => {
 Deno.test("json: the registry selects JSON for .json and .jsonc", () => {
   assertEquals(languageForFile("deno.json").id, "json");
   assertEquals(languageForFile("cfg.jsonc").id, "json");
-  // Anything else falls through to the TypeScript catch-all.
+  // Other registered selections remain unchanged.
   assertEquals(languageForFile("main.ts").id, "typescript");
   assertEquals(languageForFile("notes.md").id, "markdown");
   assertEquals(languageForFile(undefined).id, "typescript");

@@ -9,6 +9,7 @@ import {
   isObject,
   isPlainContainer,
   isPlainObject,
+  isReadonlyRecord,
   isRecord,
   isString,
   isUnsafeObjectKey,
@@ -98,6 +99,31 @@ describe("types", () => {
 
     it("returns false for functions", () => {
       expect(isRecord(() => {})).toBe(false);
+    });
+  });
+
+  describe("isReadonlyRecord", () => {
+    it("returns true for frozen records", () => {
+      expect(isReadonlyRecord(Object.freeze({ a: 1 }))).toBe(true);
+    });
+
+    it("has the same runtime domain as isRecord", () => {
+      for (
+        const value of [
+          {},
+          [],
+          new Date(),
+          null,
+          undefined,
+          42,
+          "string",
+          true,
+          Symbol("test"),
+          () => {},
+        ]
+      ) {
+        expect(isReadonlyRecord(value)).toBe(isRecord(value));
+      }
     });
   });
 

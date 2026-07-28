@@ -16,10 +16,6 @@ const PAINT_STATUS_FAVICON = paintStatusFavicon.toString();
 
 export const FAVICON_CRY_AFTER_MS = 60 * 60 * 1000;
 
-// Open dashboards reload when this changes. Increment it with shell markup,
-// styles, client code, or the update payload shape.
-export const SHELL_VERSION = 4;
-
 type ViewerTimeElement = Pick<HTMLTimeElement, "dateTime" | "textContent">;
 
 /** Replace marked absolute timestamps with the viewer's local wall-clock time. */
@@ -75,12 +71,12 @@ export function renderTile(v: TileView, id?: string, wide = false): string {
   }"${tgt}>${inner}</a>`;
 }
 
-export function shell(
+function renderShell(
   gridHtml: string,
   wideHtml: string,
   ago: number,
   refreshMs: number,
-  shellVersion: number,
+  shellVersion: string,
   status: FaviconStatus,
   serverRedSince: number | null = null,
   serverRedAgeMs: number | null = null,
@@ -104,7 +100,10 @@ ${faviconLink(status)}
   .lbl .spacer{flex:1}
   .drill{font-size:10px;color:#6f757f;letter-spacing:0;text-transform:none}
   .hmtd{font-size:11px;color:#9aa0ab;letter-spacing:0;text-transform:none;font-variant-numeric:tabular-nums;margin-right:8px}
-  .big{font-size:30px;font-weight:600;margin:0}
+  /* Fixed line-height so the headline's line box is the same height regardless of
+     which font the glyph comes from: the ▲/▼ trend arrows fall back to a taller
+     symbol font, and under line-height:normal that stretched the tile. */
+  .big{font-size:30px;font-weight:600;margin:0;line-height:1.2}
   .big.good{color:#62d18d}.big.warn{color:#f0b968}.big.bad{color:#f0726c}.big.unknown{color:#9aa0ab}
   .sub{font-size:13px;color:#9aa0ab;margin:5px 0 0}
   .running{display:inline-flex;align-items:center;gap:5px;font-size:10px;color:#8a93a5;letter-spacing:.02em;text-transform:none;margin-top:10px}
@@ -140,7 +139,7 @@ ${faviconLink(status)}
   <div id="dashboard-wide">${wideHtml}</div>
 <script>
   const REFRESH = ${refreshMs};
-  const SHELL_VERSION = ${shellVersion};
+  const SHELL_VERSION = ${JSON.stringify(shellVersion)};
   const COL = { green: '#43c574', amber: '#e0a852', red: '#e2504a' };
   const FAVICONS = ${FAVICON_PNG_HREFS};
   const FAVICON_CRY_AFTER_MS = ${FAVICON_CRY_AFTER_MS};
@@ -232,4 +231,26 @@ ${faviconLink(status)}
   paint();
   setInterval(paint, 1000);
 </script></body></html>`;
+}
+
+export function shell(
+  gridHtml: string,
+  wideHtml: string,
+  ago: number,
+  refreshMs: number,
+  shellVersion: string,
+  status: FaviconStatus,
+  serverRedSince: number | null = null,
+  serverRedAgeMs: number | null = null,
+): string {
+  return renderShell(
+    gridHtml,
+    wideHtml,
+    ago,
+    refreshMs,
+    shellVersion,
+    status,
+    serverRedSince,
+    serverRedAgeMs,
+  );
 }

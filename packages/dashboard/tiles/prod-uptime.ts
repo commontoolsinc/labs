@@ -11,9 +11,10 @@
 // wants to open. The default is estuary, which is the production toolshed.
 //
 // The old default, production.commontools.dev, is not the server: it is the shell,
-// a static site in a GCS bucket (tofu/shell/README.md). It has no health endpoint,
-// and its index page answers 200 for as long as Google's object storage is up —
-// which is to say, through a total outage of the server behind it.
+// a static site in a GCS bucket (tofu/shell/README.md in the infra repository). It
+// has no health endpoint, and its index page answers 200 for as long as Google's
+// object storage is up — which is to say, through a total outage of the server
+// behind it.
 //
 // Estuary is on the tailnet. A dashboard that cannot reach the tailnet reads it as
 // unreachable, and a sustained run of that is a red "down" about the dashboard

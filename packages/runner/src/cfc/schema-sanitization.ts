@@ -1,4 +1,4 @@
-import type { ImmutableJSONValue, JSONSchema } from "@commonfabric/api";
+import type { JSONSchema, JSONValue } from "@commonfabric/api";
 import type { CfcConfClause } from "./clause.ts";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import {
@@ -36,7 +36,7 @@ import {
 
 export const INJECTION_SAFE_ATOM = {
   type: CFC_ATOM_TYPE.InjectionSafe,
-} as const satisfies ImmutableJSONValue;
+} as const satisfies JSONValue;
 
 const PROMPT_INJECTION_RISK_KINDS = new Set(MATERIAL_RISK_DISCHARGE_KINDS);
 
@@ -86,7 +86,7 @@ const cloneJson = <T>(value: T): T =>
 
 const uniqueAtoms = (
   atoms: Iterable<unknown>,
-): ImmutableJSONValue[] => uniqueCfcAtoms(atoms).map((atom) => cloneJson(atom));
+): JSONValue[] => uniqueCfcAtoms(atoms).map((atom) => cloneJson(atom));
 
 export const isPromptInjectionMaterialRiskAtom = (atom: unknown): boolean => {
   if (typeof atom === "string") {
@@ -142,7 +142,7 @@ const normalizeMaterialRiskStringForms = (
 
 export const dischargeMaterialRiskAtoms = (
   atoms: readonly CfcConfClause[],
-): ImmutableJSONValue[] => {
+): JSONValue[] => {
   // Fuel budget scaled to the label (cubic P2 on #4567): the default 64 would
   // exhaust on a label with more than ~64 droppable alternatives, and the
   // sanitizer would then keep every material-risk caveat — a regression from

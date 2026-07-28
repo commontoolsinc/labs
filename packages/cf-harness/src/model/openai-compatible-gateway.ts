@@ -17,7 +17,14 @@ import {
   type OpenAIChatCompletionTool,
   type OpenAIChatMessageContent,
   OpenAICompatibleGatewayClient,
+  type OpenAIResponsesRequest,
 } from "../gateway/openai-client.ts";
+import {
+  normalizeTerminalResponse,
+  providerRunAffinityKey,
+  toResponsesInput,
+  toResponsesTools,
+} from "./responses-protocol.ts";
 import { materializeImageAttachmentContentPart } from "../image-attachments.ts";
 import type {
   HarnessModelAttemptDiagnostic,
@@ -27,9 +34,14 @@ import type {
   HarnessModelTurnResult,
 } from "./client.ts";
 
-const normalizeTextContent = (content: OpenAIChatMessageContent): string => {
+const normalizeTextContent = (
+  content: OpenAIChatMessageContent | undefined,
+): string => {
   if (typeof content === "string") return content;
-  if (content === null) return "";
+  // Vertex-backed models omit `content` entirely on tool-call-only turns
+  // (gemini-3.5-flash returns just role/thinking_blocks/tool_calls), so this
+  // has to treat "absent" the same as "null" rather than assume an array.
+  if (content === null || content === undefined) return "";
   return content.flatMap((part) =>
     typeof part === "object" && part !== null && part.type === "text" &&
       typeof part.text === "string"
@@ -126,20 +138,95 @@ const createAssistantMessage = (
   };
 };
 
+export const OPENAI_COMPATIBLE_GATEWAY_PROVIDER_ID =
+  "openai-compatible-gateway";
+const GATEWAY_RESPONSES_LABEL = "gateway Responses";
+
+/**
+ * Chooses the Responses API over Chat Completions for a turn.
+ *
+ * OpenAI's reasoning models reject function tools on `/v1/chat/completions`
+ * unless reasoning is disabled outright, so every `gpt-*` turn goes to
+ * `/v1/responses`, where tools and reasoning coexist.
+ *
+ * Two cases stay on Chat Completions because Responses cannot serve them:
+ * provider-native tools such as `google_search` have no Responses equivalent
+ * on this gateway, and non-OpenAI models (Vertex-backed `claude-*`/`gemini-*`)
+ * are not translated to the Responses schema — the gateway answers 500. The
+ * `web_search` subagent profile is exactly that combination.
+ */
+export const usesResponsesApi = (
+  model: string,
+  nativeModelToolIds: readonly LLMNativeModelToolId[],
+): boolean => nativeModelToolIds.length === 0 && model.startsWith("gpt-");
+
+/**
+ * `gpt-*` models reason by default, and Chat Completions rejects function
+ * tools whenever reasoning is active. Provider-native tools force a turn onto
+ * Chat Completions, so combining them with an OpenAI model would route
+ * straight into that 400 with cf-harness's function tools attached.
+ *
+ * Nothing produces this combination today — the only native-tool profile is
+ * `web_search`, which overrides the model to Gemini — so this fails loudly
+ * rather than letting a future profile discover it as a provider error.
+ */
+const assertSupportedToolCombination = (
+  model: string,
+  nativeModelToolIds: readonly LLMNativeModelToolId[],
+): void => {
+  if (model.startsWith("gpt-") && nativeModelToolIds.length > 0) {
+    throw new Error(
+      `openai-compatible-gateway cannot combine provider-native tools ` +
+        `(${
+          nativeModelToolIds.join(", ")
+        }) with ${model}: native tools require ` +
+        `chat completions, which rejects function tools while reasoning is on. ` +
+        `Use a non-OpenAI model for native-tool turns.`,
+    );
+  }
+};
+
 const toModelAttempt = (
   attempt: OpenAIChatCompletionAttemptDiagnostic,
 ): HarnessModelAttemptDiagnostic => ({
   ...attempt,
   type: "cf-harness.model-attempt",
-  providerId: "openai-compatible-gateway",
+  providerId: OPENAI_COMPATIBLE_GATEWAY_PROVIDER_ID,
 });
 
+const toUsage = (
+  usage: Record<string, unknown> | undefined,
+): HarnessModelTurnResult["usage"] | undefined => {
+  if (usage === undefined) return undefined;
+  const mapped = {
+    ...(typeof usage.input_tokens === "number"
+      ? { inputTokens: usage.input_tokens }
+      : {}),
+    ...(typeof usage.output_tokens === "number"
+      ? { outputTokens: usage.output_tokens }
+      : {}),
+    ...(typeof usage.total_tokens === "number"
+      ? { totalTokens: usage.total_tokens }
+      : {}),
+  };
+  return Object.keys(mapped).length > 0 ? mapped : undefined;
+};
+
 export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
-  readonly providerId = "openai-compatible-gateway";
+  readonly providerId = OPENAI_COMPATIBLE_GATEWAY_PROVIDER_ID;
 
   constructor(readonly gatewayClient: OpenAICompatibleGatewayClient) {}
 
   async complete(
+    request: HarnessModelTurnRequest,
+  ): Promise<HarnessModelTurnResult> {
+    assertSupportedToolCombination(request.model, request.nativeModelToolIds);
+    return usesResponsesApi(request.model, request.nativeModelToolIds)
+      ? await this.#completeViaResponses(request)
+      : await this.#completeViaChatCompletions(request);
+  }
+
+  async #completeViaChatCompletions(
     request: HarnessModelTurnRequest,
   ): Promise<HarnessModelTurnResult> {
     const tools: OpenAIChatCompletionTool[] = request.tools.map((tool) => ({
@@ -157,11 +244,6 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
       messages: await Promise.all(request.transcript.map(toOpenAIChatMessage)),
       tools: [...tools, ...toNativeModelTools(request.nativeModelToolIds)],
       tool_choice: "auto",
-      // OpenAI's reasoning models default reasoning on at the gateway, but
-      // Chat Completions rejects reasoning together with function tools.
-      // cf-harness needs function tools here, so make the compatible setting
-      // explicit instead of inheriting a provider/model default.
-      reasoning_effort: "none",
     };
     const response = await this.gatewayClient.createChatCompletionJson(
       payload,
@@ -175,6 +257,58 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
     return { assistant: createAssistantMessage(response) };
   }
 
+  async #completeViaResponses(
+    request: HarnessModelTurnRequest,
+  ): Promise<HarnessModelTurnResult> {
+    const converted = await toResponsesInput(
+      request.transcript,
+      request.model,
+      this.providerId,
+      GATEWAY_RESPONSES_LABEL,
+      undefined,
+      // `--resume-run X --model other` is allowed here (the CLI pins the
+      // provider on resume, not the model), so a continuation from the old
+      // model is dropped rather than failing the run. Reasoning replay is an
+      // optimisation; the turn is still correct without it.
+      "drop",
+    );
+    const tools = toResponsesTools(request.tools);
+    const payload: OpenAIResponsesRequest = {
+      model: request.model,
+      store: false,
+      ...(converted.instructions !== undefined
+        ? { instructions: converted.instructions }
+        : {}),
+      input: converted.input,
+      ...(tools.length > 0 ? { tools } : {}),
+      tool_choice: "auto",
+      parallel_tool_calls: true,
+      // Reasoning items are only replayable across turns when the provider
+      // returns them encrypted, which `store: false` requires.
+      include: ["reasoning.encrypted_content"],
+      prompt_cache_key: providerRunAffinityKey(request.runId),
+    };
+    const response = await this.gatewayClient.createResponseJson(
+      payload,
+      {
+        signal: request.signal,
+        onChatCompletionAttempt: async (attempt) => {
+          await request.onAttempt?.(toModelAttempt(attempt));
+        },
+      },
+    );
+    const usage = toUsage(response.usage);
+    return {
+      assistant: normalizeTerminalResponse(
+        response as unknown as Record<string, unknown>,
+        request.model,
+        this.providerId,
+        GATEWAY_RESPONSES_LABEL,
+      ),
+      ...(usage !== undefined ? { usage } : {}),
+    };
+  }
+
   async listModels(
     signal?: AbortSignal,
   ): Promise<readonly HarnessModelCatalogEntry[]> {
@@ -182,13 +316,17 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
     if (!response.ok) {
       throw new Error(`model list request failed (${response.status})`);
     }
-    const json = await response.json() as { data?: Array<{ id?: unknown }> };
+    const json = await response.json() as {
+      data?: Array<{ id?: unknown; capabilities?: Record<string, unknown> }>;
+    };
     return (json.data ?? []).flatMap((item) =>
       typeof item.id === "string"
         ? [{
           id: item.id,
           displayName: item.id,
-          inputModalities: [],
+          inputModalities: item.capabilities?.images === true
+            ? ["text", "image"]
+            : ["text"],
           supportedReasoningEfforts: [],
           supportsParallelToolCalls: false,
         }]

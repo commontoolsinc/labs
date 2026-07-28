@@ -66,7 +66,8 @@ export type OpenAIChatMessageContent =
 
 export interface OpenAIChatCompletionMessage {
   role: OpenAIChatMessageRole;
-  content: OpenAIChatMessageContent;
+  /** Absent on tool-call-only turns from some providers, not just null. */
+  content?: OpenAIChatMessageContent;
   tool_calls?: readonly OpenAIChatCompletionToolCall[];
   tool_call_id?: string;
   grounding_metadata?: unknown;
@@ -78,7 +79,35 @@ export interface OpenAIChatCompletionRequest {
   tools?: readonly OpenAIChatCompletionRequestTool[];
   native_model_tools?: readonly OpenAIChatCompletionNativeModelTool[];
   tool_choice?: "auto" | "none" | Record<string, unknown>;
-  reasoning_effort?: "none";
+}
+
+/**
+ * OpenAI Responses API payloads.
+ *
+ * The gateway serves `/v1/responses` for OpenAI-backed models. Unlike
+ * `/v1/chat/completions`, it accepts function tools together with reasoning,
+ * which is why cf-harness prefers it for reasoning models.
+ */
+export type OpenAIResponsesInputItem = Record<string, unknown>;
+
+export interface OpenAIResponsesRequest {
+  model: string;
+  instructions?: string;
+  input: readonly OpenAIResponsesInputItem[];
+  tools?: readonly OpenAIResponsesInputItem[];
+  tool_choice?: "auto" | "none" | Record<string, unknown>;
+  parallel_tool_calls?: boolean;
+  store?: boolean;
+  stream?: boolean;
+  include?: readonly string[];
+  prompt_cache_key?: string;
+}
+
+export interface OpenAIResponsesResponse {
+  id?: string;
+  status?: string;
+  output?: readonly unknown[];
+  usage?: Record<string, unknown>;
 }
 
 export interface OpenAIChatCompletionRequestDiagnosticSummary {
@@ -94,9 +123,11 @@ export type OpenAIChatCompletionAttemptOutcome =
   | "http_response"
   | "transport_error";
 
+export type OpenAIGatewayOperation = "chat.completions" | "responses";
+
 export interface OpenAIChatCompletionAttemptDiagnostic {
   type: "cf-harness.gateway.chat-completion-attempt";
-  operation: "chat.completions";
+  operation: OpenAIGatewayOperation;
   endpoint: string;
   attempt: number;
   maxTransportAttempts: number;
@@ -225,6 +256,20 @@ const summarizeChatCompletionRequest = (
   };
 };
 
+const summarizeResponsesRequest = (
+  payload: OpenAIResponsesRequest,
+  serializedPayload: string,
+): OpenAIChatCompletionRequestDiagnosticSummary => ({
+  model: payload.model,
+  // `instructions` carries the system prompt, so count it alongside input items
+  // to keep this comparable with the chat-completions message count.
+  messageCount: payload.input.length +
+    (payload.instructions !== undefined ? 1 : 0),
+  toolCount: payload.tools?.length ?? 0,
+  nativeModelToolCount: 0,
+  serializedBytes: textByteLength(serializedPayload),
+});
+
 const selectResponseHeaders = (
   headers: Headers,
 ): Record<string, string> | undefined => {
@@ -266,12 +311,16 @@ const emitChatCompletionAttempt = async (
 };
 
 const transportErrorAfterRetries = (
+  operation: OpenAIGatewayOperation,
   endpoint: URL,
   attempts: number,
   error: unknown,
 ): Error =>
+  // Names the operation so a Responses failure is not reported as a chat
+  // completion one. `diagnostics.ts` classifies timeouts by matching
+  // "transport request failed", which stays stable across both operations.
   new Error(
-    `chat completion transport request failed after ${attempts} ${
+    `${operation} transport request failed after ${attempts} ${
       attempts === 1 ? "attempt" : "attempts"
     } for ${endpoint.toString()}: ${errorMessage(error)}`,
   );
@@ -362,9 +411,37 @@ export class OpenAICompatibleGatewayClient {
     payload: OpenAIChatCompletionRequest,
     options: OpenAIChatCompletionAttemptOptions,
   ): Promise<ChatCompletionFetchResult> {
-    const endpoint = this.endpoint("/v1/chat/completions");
     const serializedPayload = JSON.stringify(payload);
-    const request = summarizeChatCompletionRequest(payload, serializedPayload);
+    return await this.#fetchOperation(
+      this.endpoint("/v1/chat/completions"),
+      "chat.completions",
+      serializedPayload,
+      summarizeChatCompletionRequest(payload, serializedPayload),
+      options,
+    );
+  }
+
+  async #fetchResponses(
+    payload: OpenAIResponsesRequest,
+    options: OpenAIChatCompletionAttemptOptions,
+  ): Promise<ChatCompletionFetchResult> {
+    const serializedPayload = JSON.stringify(payload);
+    return await this.#fetchOperation(
+      this.endpoint("/v1/responses"),
+      "responses",
+      serializedPayload,
+      summarizeResponsesRequest(payload, serializedPayload),
+      options,
+    );
+  }
+
+  async #fetchOperation(
+    endpoint: URL,
+    operation: OpenAIGatewayOperation,
+    serializedPayload: string,
+    request: OpenAIChatCompletionRequestDiagnosticSummary,
+    options: OpenAIChatCompletionAttemptOptions,
+  ): Promise<ChatCompletionFetchResult> {
     const init: RequestInit = {
       method: "POST",
       headers: this.headers(),
@@ -386,7 +463,7 @@ export class OpenAICompatibleGatewayClient {
           response,
           diagnostic: {
             type: "cf-harness.gateway.chat-completion-attempt",
-            operation: "chat.completions",
+            operation: operation,
             endpoint: endpoint.toString(),
             attempt,
             maxTransportAttempts,
@@ -409,7 +486,7 @@ export class OpenAICompatibleGatewayClient {
         const endedAt = new Date();
         await emitChatCompletionAttempt(options, {
           type: "cf-harness.gateway.chat-completion-attempt",
-          operation: "chat.completions",
+          operation: operation,
           endpoint: endpoint.toString(),
           attempt,
           maxTransportAttempts,
@@ -424,12 +501,17 @@ export class OpenAICompatibleGatewayClient {
           throw chatCompletionAbortReason(options.signal);
         }
         if (attempt >= maxTransportAttempts) {
-          throw transportErrorAfterRetries(endpoint, attempt, error);
+          throw transportErrorAfterRetries(operation, endpoint, attempt, error);
         }
         await sleep(this.#chatCompletionRetryDelayMs * attempt, options.signal);
       }
     }
-    throw transportErrorAfterRetries(endpoint, maxTransportAttempts, lastError);
+    throw transportErrorAfterRetries(
+      operation,
+      endpoint,
+      maxTransportAttempts,
+      lastError,
+    );
   }
 
   async createChatCompletionJson(
@@ -462,5 +544,46 @@ export class OpenAICompatibleGatewayClient {
     }
     await emitChatCompletionAttempt(options, diagnostic);
     return await response.json() as OpenAIChatCompletionResponse;
+  }
+
+  async createResponseJson(
+    payload: OpenAIResponsesRequest,
+    options: OpenAIChatCompletionAttemptOptions = {},
+  ): Promise<OpenAIResponsesResponse> {
+    const { response, diagnostic } = await this.#fetchResponses(
+      payload,
+      options,
+    );
+    if (!response.ok) {
+      const body = await response.text();
+      await emitChatCompletionAttempt(options, {
+        ...diagnostic,
+        ...responseBodyDiagnosticFields(body),
+      });
+      if (response.status === 401) {
+        const sourceText = this.authMode === "none"
+          ? "unauthenticated caller mode was used; gateway or upstream credentials rejected the request"
+          : this.apiKeySource !== undefined
+          ? `api key source: ${this.apiKeySource}; backend rejected the supplied key`
+          : "supplied API key was rejected by the backend";
+        throw new Error(
+          `responses request failed (401, ${sourceText}): ${body}`,
+        );
+      }
+      // Gateways that front non-OpenAI providers (for example Vertex-backed
+      // Claude and Gemini) cannot translate the Responses API and fail without
+      // a usable body. Name that case so the model choice is the obvious fix.
+      if (response.status >= 500 && body.trim() === "") {
+        throw new Error(
+          `responses request failed (${response.status}) with an empty body for model ${payload.model}; ` +
+            "the gateway may not support the Responses API for this model's provider",
+        );
+      }
+      throw new Error(
+        `responses request failed (${response.status}): ${body}`,
+      );
+    }
+    await emitChatCompletionAttempt(options, diagnostic);
+    return await response.json() as OpenAIResponsesResponse;
   }
 }

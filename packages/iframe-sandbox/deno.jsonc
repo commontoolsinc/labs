@@ -1,4 +1,5 @@
 {
+  // Dependency guide: ../../docs/development/DEPENDENCIES.md
   "name": "@commonfabric/iframe-sandbox",
   "tasks": {
     "test": "deno run --allow-env --allow-read --allow-write --allow-run --allow-net ../deno-web-test/cli.ts test/*.test.ts"

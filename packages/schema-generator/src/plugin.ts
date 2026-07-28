@@ -58,4 +58,4 @@ export type {
   TypeFormatter,
   WriterSourceIdentity,
 } from "./interface.ts";
-export type { JSONSchemaObjMutable } from "@commonfabric/api";
+export type { MutableJSONSchemaObj } from "@commonfabric/api";

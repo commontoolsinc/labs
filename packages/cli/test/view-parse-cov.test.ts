@@ -31,6 +31,7 @@ import { assert, assertEquals } from "@std/assert";
 import {
   createHighlighter,
   highlightDocument,
+  highlightLineEditLocally,
   parseDocument,
 } from "../lib/view/languages/typescript/parse.ts";
 import { languageForFile } from "../lib/view/languages/language.ts";
@@ -97,6 +98,11 @@ Deno.test("createHighlighter: update with identical text returns the same lines"
   // diffRange returns null for identical text, so update short-circuits and
   // hands back the exact same array reference.
   assertEquals(after, before);
+});
+
+Deno.test("highlightLineEditLocally: unchanged text returns the original line", () => {
+  const before = createHighlighter('const value = "same";', "m.ts").lines[0];
+  assert(highlightLineEditLocally(before, before.text) === before);
 });
 
 // --- safeStartLine walk-back past a multi-line token (lines 459, 460) --------

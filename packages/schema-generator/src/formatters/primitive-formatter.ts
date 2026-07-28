@@ -1,5 +1,5 @@
 import ts from "typescript";
-import type { JSONSchemaMutable } from "@commonfabric/api";
+import type { MutableJSONSchema } from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import { TypeWithInternals } from "../type-utils.ts";
 
@@ -30,14 +30,14 @@ export class PrimitiveFormatter implements TypeFormatter {
   formatType(
     type: ts.Type,
     context: GenerationContext,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     return PrimitiveFormatter.getSchemaType(type, context);
   }
 
   public static getSchemaType(
     type: ts.Type,
     context: GenerationContext,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     const flags = type.flags;
     // Handle literal types first (more specific)
     // If widenLiterals flag is set, skip enum generation and return base type

@@ -293,6 +293,12 @@ export type MemoryProtocolFlags = {
    * version always advertises it.
    */
   pendingReadStacks: boolean;
+  /** The server can list live space-scoped entity identifiers without values. */
+  entityIdListing: boolean;
+  /** The server can page one stable entity-identifier snapshot. */
+  entityIdPagination: boolean;
+  /** The server can test one entity identifier without loading its value. */
+  entityIdLookup: boolean;
 };
 
 /**
@@ -306,6 +312,9 @@ export type WireMemoryProtocolFlags = {
   syncSchemaTableV2?: boolean;
   sqliteCommitRowLabelEval?: boolean;
   pendingReadStacks?: boolean;
+  entityIdListing?: boolean;
+  entityIdPagination?: boolean;
+  entityIdLookup?: boolean;
 };
 
 export type HelloMessage = {
@@ -370,6 +379,26 @@ export type EntitySnapshot = {
 export type GraphQueryResult = {
   serverSeq: number;
   entities: EntitySnapshot[];
+};
+
+export type EntityIdListResult = {
+  serverSeq: number;
+  ids: EntityId[];
+  nextAfter?: EntityId;
+};
+
+/** Maximum number of entity identifiers carried by one protocol response. */
+export const MAX_ENTITY_ID_PAGE_SIZE = 1_000;
+
+export type EntityIdListOptions = {
+  after?: EntityId;
+  limit?: number;
+  expectedServerSeq?: number;
+};
+
+export type EntityIdLookupResult = {
+  serverSeq: number;
+  exists: boolean;
 };
 
 export type QueryWatchSpec = {
@@ -447,6 +476,24 @@ export type GraphQueryRequest = {
   space: string;
   sessionId: SessionId;
   query: GraphQuery;
+};
+
+export type EntityIdListRequest = {
+  type: "entity-id.list";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  after?: EntityId;
+  limit?: number;
+  expectedServerSeq?: number;
+};
+
+export type EntityIdLookupRequest = {
+  type: "entity-id.exists";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  id: EntityId;
 };
 
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
@@ -781,6 +828,8 @@ export type ClientMessage =
   | SessionOpenRequest
   | TransactRequest
   | GraphQueryRequest
+  | EntityIdListRequest
+  | EntityIdLookupRequest
   | SqliteQueryRequest
   | SqliteRegisterDiskSourceRequest
   | WatchSetRequest
@@ -870,6 +919,11 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   // pending reads (resolvePendingReads), so it always advertises it. Clients
   // that see it absent scalarize to top-of-stack before sending.
   pendingReadStacks: true,
+  // The engine answers this request from its identifier index without
+  // selecting stored entity values.
+  entityIdListing: true,
+  entityIdPagination: true,
+  entityIdLookup: true,
   syncSchemaTableV2: getSyncSchemaTableConfig(),
 });
 
@@ -951,6 +1005,30 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const entityIdListing = value.entityIdListing;
+  if (
+    entityIdListing !== undefined &&
+    typeof entityIdListing !== "boolean"
+  ) {
+    return null;
+  }
+
+  const entityIdPagination = value.entityIdPagination;
+  if (
+    entityIdPagination !== undefined &&
+    typeof entityIdPagination !== "boolean"
+  ) {
+    return null;
+  }
+
+  const entityIdLookup = value.entityIdLookup;
+  if (
+    entityIdLookup !== undefined &&
+    typeof entityIdLookup !== "boolean"
+  ) {
+    return null;
+  }
+
   return {
     modernCellRep: modernCellRep === true,
     persistentSchedulerState: persistentSchedulerState === true,
@@ -963,6 +1041,9 @@ export const parseMemoryProtocolFlags = (
     // Absent (an older server) parses to false: clients scalarize pending
     // reads to top-of-stack unless the array capability is advertised.
     pendingReadStacks: pendingReadStacks === true,
+    entityIdListing: entityIdListing === true,
+    entityIdPagination: entityIdPagination === true,
+    entityIdLookup: entityIdLookup === true,
   };
 };
 
@@ -979,6 +1060,9 @@ export const wireMemoryProtocolFlags = (
   syncSchemaTableV2: flags.syncSchemaTableV2,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
   pendingReadStacks: flags.pendingReadStacks,
+  entityIdListing: flags.entityIdListing,
+  entityIdPagination: flags.entityIdPagination,
+  entityIdLookup: flags.entityIdLookup,
 });
 
 /**

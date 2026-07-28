@@ -16,6 +16,7 @@ export interface Style {
   readonly dim?: boolean;
   readonly italic?: boolean;
   readonly underline?: boolean;
+  readonly strikethrough?: boolean;
 }
 
 export const ESC = "\x1b";
@@ -32,6 +33,7 @@ export function sgr(style: Style): string {
   if (style.dim) codes.push(2);
   if (style.italic) codes.push(3);
   if (style.underline) codes.push(4);
+  if (style.strikethrough) codes.push(9);
   if (style.fg) codes.push(38, 2, style.fg[0], style.fg[1], style.fg[2]);
   if (style.bg) codes.push(48, 2, style.bg[0], style.bg[1], style.bg[2]);
   if (codes.length === 0) return "";

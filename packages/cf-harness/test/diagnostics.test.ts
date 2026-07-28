@@ -592,6 +592,30 @@ Deno.test("classifyHarnessRunError maps timeouts and path escapes deterministica
     ).kind,
     "timeout",
   );
+  // The gateway client now names the operation, and Responses turns must still
+  // classify as timeouts rather than falling through to a generic run error.
+  assertEquals(
+    classifyHarnessRunError(
+      new Error(
+        "responses transport request failed after 2 attempts for https://llm.stage.commontools.dev/v1/responses: client error (SendRequest): connection error: timed out",
+      ),
+      {
+        at: "2026-04-22T23:30:03.000Z",
+      },
+    ).kind,
+    "timeout",
+  );
+  assertEquals(
+    classifyHarnessRunError(
+      new Error(
+        "chat.completions transport request failed after 2 attempts for https://llm.stage.commontools.dev/v1/chat/completions: connection error: timed out",
+      ),
+      {
+        at: "2026-04-22T23:30:04.000Z",
+      },
+    ).kind,
+    "timeout",
+  );
 });
 
 Deno.test("selectPrimaryHarnessFailure prefers the highest-signal failure kind", () => {

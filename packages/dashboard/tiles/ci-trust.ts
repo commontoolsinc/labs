@@ -39,7 +39,7 @@ function makeCiTrust(opts: { id: string; label: string; repo: string; workflow: 
         : pct >= TRUST_GOOD ? "good" : pct >= TRUST_WARN ? "warn" : "bad";
       const runSummary = counted.length === scored.length
         ? `last ${scored.length} runs`
-        : `${counted.length} counted of last ${scored.length} runs`;
+        : `${counted.length} of last ${scored.length} runs`;
       const cells = [...scored].reverse().map(({ run, outcome }) => ({
         outcome,
         href: run.html_url,

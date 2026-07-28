@@ -4135,14 +4135,29 @@ export class Runner {
       undefined,
       tx,
     );
+    // Expose the handling's receipt address on the transaction, where the
+    // sender's commit callback can read it (verb contract WS-D). Stashed
+    // before the branches so BOTH outcomes carry it: a committed handling
+    // hands back its own receipt, and a create-only collision loser hands
+    // back the same address — which is the winner's original outcome.
+    tx.handlingReceiptLink = receiptCell.getAsNormalizedFullLink();
     const receiptsEnabled =
       this.runtime.experimental.commitPreconditions === true;
     if (!resultHasReactives && frame.reactives.size === 0) {
       if (receiptsEnabled) {
         // Receipt-only handling (spec scheduler-v2 §7.6): nothing was
         // launched, but the result cell is still created — its create is the
-        // exactly-once witness for this event id.
-        receiptCell.withTx(tx).setRaw({});
+        // exactly-once witness for this event id. Under plainResultReceipts
+        // the witness also carries the handler's (already-normalized) plain
+        // JSON return, so a caller — or a same-id retry colliding on the
+        // receipt — reads the verb's result back by receipt address (verb
+        // contract Part 2). `{}` remains the value-less shape either way.
+        const receiptValue =
+          this.runtime.experimental.plainResultReceipts === true &&
+            result !== undefined
+            ? result
+            : {};
+        receiptCell.withTx(tx).setRaw(receiptValue);
         tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
       }
       return result;

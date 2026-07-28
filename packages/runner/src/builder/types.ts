@@ -139,15 +139,15 @@ export type {
   JSONArray,
   JSONObject,
   JSONSchema,
-  JSONSchemaMutable,
   JSONSchemaObj,
-  JSONSchemaObjMutable,
   JSONSchemaTypes,
   JSONValue,
   KeyResultType,
   LinkScope,
   Module,
   ModuleFactory,
+  MutableJSONSchema,
+  MutableJSONSchemaObj,
   NodeFactory,
   OpaqueCell,
   Pattern,
@@ -442,7 +442,9 @@ export interface BuilderFunctionsAndConstants {
   UiPromptSlot: (props: UiPromptSlotProps) => JSXElement;
   UiDisclosure: (props: UiDisclosureProps) => JSXElement;
 
-  // Fabric value classes
+  // Fabric value classes, in the order they are declared in api/index.ts.
+  FabricSpecialObject:
+    typeof import("@commonfabric/data-model/fabric-value").FabricSpecialObject;
   FabricInstance:
     typeof import("@commonfabric/data-model/fabric-value").FabricInstance;
   FabricPrimitive:
@@ -453,6 +455,14 @@ export interface BuilderFunctionsAndConstants {
     typeof import("@commonfabric/data-model/fabric-primitives").FabricEpochDays;
   FabricHash:
     typeof import("@commonfabric/data-model/fabric-primitives").FabricHash;
+  FabricLink:
+    typeof import("@commonfabric/data-model/fabric-instances").FabricLink;
+  FabricBytes:
+    typeof import("@commonfabric/data-model/fabric-primitives").FabricBytes;
+  FabricRegExp:
+    typeof import("@commonfabric/data-model/fabric-primitives").FabricRegExp;
+  FabricError:
+    typeof import("@commonfabric/data-model/fabric-instances").FabricError;
 
   // Debug stringifiers
   toCompactDebugString:

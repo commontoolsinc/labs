@@ -335,6 +335,26 @@ Deno.test("renderStatus: the default help line omits expand when not allowed", (
   assert(!status.includes("^L Expand"), "expand hint absent");
 });
 
+Deno.test("renderStatus: the view hint names the alternate representation", () => {
+  const doc = parseDocument(SAMPLE);
+  const line = (viewMode: "source" | "rendered") =>
+    stripAnsi(
+      renderFrame(
+        doc,
+        baseView({
+          canRender: true,
+          color: false,
+          viewMode,
+          width: 100,
+        }),
+      ).at(-1)!,
+    );
+  const source = line("source");
+  const rendered = line("rendered");
+  assert(source.includes("V Rendered"), source);
+  assert(rendered.includes("V Source"), rendered);
+});
+
 Deno.test("renderStatus: e / C / # hints appear only where they apply", () => {
   const doc = parseDocument(SAMPLE);
   const line = (over: Partial<ViewState>) =>
@@ -777,18 +797,20 @@ Deno.test("renderFrame: the guide rail is blank on lines outside the selected no
   assertEquals(stripAnsi(rows[1])[0], "▶", "single-line node carries a glyph");
 });
 
-// --- SGR encoding helpers (dim/italic and background merge) -------------------
+// --- SGR encoding helpers (rich modifiers and background merge) ---------------
 
-Deno.test("cellsToAnsi: encodes dim, italic and underline attributes", () => {
+Deno.test("cellsToAnsi: encodes rich text attributes", () => {
   const cells = [
     { ch: "a", style: { dim: true } },
     { ch: "b", style: { italic: true } },
     { ch: "c", style: { underline: true } },
+    { ch: "d", style: { strikethrough: true } },
   ];
   const out = _internal.cellsToAnsi(cells, true);
   assert(out.includes("\x1b[2m"), "dim → SGR 2");
   assert(out.includes("\x1b[3m"), "italic → SGR 3");
   assert(out.includes("\x1b[4m"), "underline → SGR 4");
+  assert(out.includes("\x1b[9m"), "strikethrough → SGR 9");
 });
 
 Deno.test("mergeBg: overlays a background, or leaves the style when there is none", () => {

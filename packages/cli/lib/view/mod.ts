@@ -1,9 +1,10 @@
 /**
  * Entry point for `cf view`. Reads the input (a file argument or piped stdin),
- * parses it once — as a unified diff when it reads as one, else as transformed
- * TypeScript — then either launches the interactive pager (when stdout is a
- * TTY) or prints the colourised text and exits, mirroring how `less`/`bat`
- * behave when their output is redirected.
+ * parses it once — as a unified diff when it reads as one, otherwise with the
+ * language selected from its filename — then either launches the interactive
+ * TTY) or prints the selected source/rendered representation and exits,
+ * mirroring how `less`/`bat` behave when their output is redirected. An
+ * unnamed pipe remains transformed TypeScript.
  */
 import { renderLineColored } from "./highlight.ts";
 import { runPager } from "./pager.ts";
@@ -37,6 +38,8 @@ export interface ViewOptions {
   color: ColorWhen;
   plain: boolean;
   lineNumbers: boolean;
+  /** Start in the rendered representation when one is available. */
+  rendered?: boolean;
   file?: string;
   /** Force (true) or suppress (false) diff mode; undefined auto-detects. */
   diff?: boolean;
@@ -71,14 +74,19 @@ export async function viewMain(options: ViewOptions): Promise<void> {
   if (interactive) {
     await runPager(
       doc,
-      { color: true, showLineNumbers: options.lineNumbers },
+      {
+        color: true,
+        showLineNumbers: options.lineNumbers,
+        viewMode: options.rendered ? "rendered" : "source",
+      },
       semantics(),
       editSource,
     );
     return;
   }
 
-  printDocument(doc, color, options.lineNumbers);
+  const shown = options.rendered ? editSource.render?.(doc) ?? doc : doc;
+  printDocument(shown, color, options.lineNumbers);
 }
 
 /**
@@ -121,13 +129,24 @@ export function buildView(
     const languages = distinctLanguages(
       model.files.map((f) => f.newPath ?? f.oldPath),
     );
+    const hasRenderedView = model.files.some((diffFile) =>
+      [diffFile.oldPath, diffFile.newPath].some((path) =>
+        path !== undefined && !!languageForFile(path).renderLines
+      )
+    );
     return {
       doc,
       semantics: () =>
         diffSemanticsFor(languages, text, maps, { cwd: safeCwd() }),
       // A diff edits the new side of the files it touches, in place. Saving
       // edited `git show` output amends HEAD with those file and message edits.
-      editSource: diffSource(ws, edit, cache, realGit(safeCwd())),
+      editSource: diffSource(
+        ws,
+        edit,
+        cache,
+        realGit(safeCwd()),
+        hasRenderedView,
+      ),
     };
   }
   const language = languageForFile(file);

@@ -42,7 +42,7 @@ export function hasValueAtPath(obj: any, path: PropertyKey[]): boolean {
     if (!isRecord(current) || !(key in current)) {
       return false;
     }
-    current = current[key];
+    current = (current as Record<PropertyKey, unknown>)[key];
   }
   return true;
 }

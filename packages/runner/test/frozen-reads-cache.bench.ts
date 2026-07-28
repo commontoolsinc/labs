@@ -23,7 +23,7 @@
  *     --allow-write=/tmp,/var/folders test/frozen-reads-cache.bench.ts
  */
 
-import type { FabricPlainObject } from "@commonfabric/data-model/interface";
+import type { MutableFabricPlainObjectLayer } from "@commonfabric/data-model/interface";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
@@ -36,7 +36,7 @@ const ITERATIONS = 200;
 const ID = "of:frozen-reads-cache-bench" as const;
 
 const seedSiblings = (subtreeCount: number) => {
-  const value: FabricPlainObject = {};
+  const value: MutableFabricPlainObjectLayer = {};
   for (let i = 0; i < subtreeCount; i++) {
     value[`sub${i}`] = { count: 0, label: `sub${i}` };
   }

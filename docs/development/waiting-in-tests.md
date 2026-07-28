@@ -371,26 +371,37 @@ logical time to zero and drops pending timers: one frozen clock wraps a whole
 `describe`, so a suite whose cases each read absolute coarsened time (the `#now`
 grid tests) calls it from `beforeEach` to start each case from a known instant.
 
-Two files stay on the real clock, listed with their reasons in the runner
-preload's `realClockFiles` list. A resume runtime drives a real loopback
-memory-client transport whose
-connect/mount/sync does not complete under the fake clock, so the resume
-deadlocks. And a nested-subagent generateObject aborts its delegate tool because
-the tool-calling path's own timeout auto-advances against the subagent's outbox
+Three files stay on the real clock, listed with their reasons in the runner
+preload's `realClockFiles` list. Two are resume tests, where a second runtime
+resumes from storage over a real loopback memory-client transport. In the first,
+the transport's connect/mount/sync does not complete under the fake clock, so
+the resume deadlocks. In the second, the reload holds each per-element child
+document back by a delay to open the resume window it observes; that delay is a
+frozen test-file timer, and the resuming runtime's pull/idle machinery blocks on
+the deliveries it gates, so the resume deadlocks there too. The third is a
+nested-subagent generateObject that aborts its delegate tool because the
+tool-calling path's own timeout auto-advances against the subagent's outbox
 progress rather than the wall clock, so the delegate reports "tool call timed
 out" before it completes. These are the honest exceptions: the clock they need
 is the real one, and their own sleeps are the honest way to wait.
 
-One caveat governs whether a runner test can leave the exemption list, and it is
-worth stating because it is easy to trip over. The `test/` versus `src/`
-classification reads the caller's stack frame through `new Error().stack`, and
-SES's `errorTaming` blanks that stack once a runtime locks down. From the first
-`Runtime` a test builds, the harness can no longer see the `test/` frame that
-scheduled a timer, so a positive-delay `setTimeout` written in test code is
-classified as a production timer and auto-advances instead of freezing. A test
-that schedules its own wall-clock deadline — a `setTimeout(reject, ms)` guarding
-a wait — therefore has that deadline fire early under auto-advance rather than
-acting as a backstop. The fix is the same one the rest of this note prescribes:
+The `test/` versus `src/` classification reads the scheduling frame from a stack
+trace, and that has to keep working after a runtime is running. SES's
+`errorTaming` blanks `new Error().stack` from the first `Runtime` a test builds
+onward — safe taming still captures each error's frames but hides them behind the
+tamed `stack` accessor, which reads back empty for the rest of the process. So
+the harness does not read the frame that way. It reads it through
+`getStackString`, the hook SES installs on the global during lockdown, which
+still returns the real frames after the plain accessor has gone empty; the
+runtime's own error mapping reads stacks through the same hook. A positive-delay
+`setTimeout` written in test code is therefore classified as a `test/` timer and
+freezes across the lockdown boundary, exactly as it does before any runtime
+exists.
+
+One consequence is worth stating because it is easy to trip over. A test that
+guards a wait with its own wall-clock deadline — a `setTimeout(reject, ms)` — has
+that deadline frozen along with every other test sleep, so it never fires and
+backstops nothing. The remedy is the one the rest of this note prescribes:
 resolve the wait on the event itself with no deadline, and let a signal that
 never arrives quiesce the loop so Deno fails the pending wait. That is what let
 the multi-space mergeable-commit test move onto the fake clock — its retry
@@ -398,6 +409,52 @@ backoff is a `src/` timer that auto-advances, and the fast-fail-versus-windowed
 distinction it checks is decided by the rejection's error type rather than by
 elapsed time, so collapsing the backoff timing preserves the outcome each case
 asserts.
+
+## The background-piece-service suite: the same clock for a polling loop
+
+`packages/background-piece-service` loads the same shared harness — its
+`packages/background-piece-service/test/clock-preload.ts` calls
+`installFakeClock` in the `auto-advance` mode, wired through `--preload` on the
+package test task, with the controls exposed as a global `clock` typed in
+`test/clock.d.ts` — and follows the same rule for test sleeps. It needs the
+clock for the same reason the runner does: the service's own machinery is
+time-coupled, so freezing every positive-delay timer would deadlock a plain test
+on the service's own loop rather than on any sleep the test wrote.
+
+Three pieces of the service arm positive-delay timers. `SpaceManager.execLoop`
+parks on `sleep(pollingIntervalMs)` between polls of its task queue.
+`SpaceManager.stop` races a `setInterval` that watches for the active job to
+finish against a `sleep(deactivationTimeoutMs)` deadline. And
+`WorkerController.exec` arms a `setTimeout(timeoutMs)` that rejects a worker
+request the worker never answers. Each of these is scheduled from `src/`, so the
+clock reads it as a production timer. The poll and the deactivation deadline
+reach `setTimeout` indirectly, through the `sleep` helper in
+`@commonfabric/utils`; that does not change the classification, because the
+clock reads the immediate caller's frame, and `sleep`'s own frame is a `src/`
+frame too. They therefore auto-advance: the poll interval elapses instantly,
+and an unanswered worker request's timeout fires on its own.
+The auto-advance mechanism is the runner's, described just above.
+
+Each wait these tests need goes through the clock. A test that exercises one
+branch of the exec loop and then stops it starts the loop, calls
+`clock.settle()` to let it reach its parked `sleep`, clears `isRunning`, and
+calls `clock.tick(1)` to fire that parked sleep so the loop sees the flag and
+exits. A test that waits for a worker's initialize request to time out calls
+`clock.tick(1)` to fire the `timeoutMs` timer. A test that needs only the next
+reactive turn — a sink firing, a shutdown callback running — waits on
+`clock.settle()`.
+
+One file stays on the real clock, listed in the preload's `realClockFiles`:
+`otel.test.ts`. It exercises the real OpenTelemetry SDK against a real loopback
+OTLP receiver. The provider's `forceFlush` and `shutdown` guard each flush with
+their own `setTimeout`, armed inside the vendored SDK rather than from `src/`;
+under auto-advance that guard fires against the real HTTP round trip before it
+completes, and the flush reports that the span processor did not finish within
+its timeout. The SDK's periodic metric reader arms a repeating interval that is
+a production timer too. These tests carry no sleeps or deadlines to convert, so
+the fake clock would buy them no determinism; they keep real time, already opt
+out of the op sanitizer for those timers, and tear them down through
+`shutdownOpenTelemetry`.
 
 ## The runtime-client suite stays on the real clock
 
@@ -439,6 +496,41 @@ op-leak sanitizer under the real clock, but auto-advance ignores unref: a
 builds would drive the clock to the runaway guard. Adopting the harness would
 mean excluding the very files that own timers, and no test in the suite observes
 a controllable time window a fake clock would help with.
+
+## The utils package: a fake clock the test imports
+
+The reconciler and runner harnesses above install their fake clock through a
+`--preload` that wraps every `Deno.test` in the package, so a test gets the
+frozen clock whether or not it asked for one. That default is deliberate there:
+it catches a wall-clock sleep written anywhere in a suite that is meant to wait
+on events instead. `packages/utils` does not want that default. It is a grab-bag
+of utilities; most of its tests are not about time at all, and some — the
+logger's timing tests, for one — busy-spin against the real `performance.now`,
+which a faked clock would leave spinning forever. Only the `sleep` and `timeout`
+tests want controlled time.
+
+So `packages/utils/test/sleep.test.ts` takes the opposite approach: instead of a
+preload forcing a clock on the whole package, the two suites that want one import
+it and open it themselves. They use `FakeTime` from `@std/testing/time`, opened
+with a `using` declaration so it restores the clock when the block ends:
+
+- `using time = new FakeTime()` freezes the real timer that `sleep` or `timeout`
+  arms, so nothing resolves until the test advances the clock.
+- `await time.tickAsync(ms)` advances the fake clock by `ms` and settles the
+  promises the fired timers resolve.
+- `Date.now()` reports the faked time, so a `sleep(5)` is observed as still
+  pending after `tickAsync(4)` and resolved after a further `tickAsync(1)`, with
+  the elapsed time reading exactly five milliseconds — an exact assertion with no
+  real waiting and no flake.
+
+Nothing global is installed for the package, so the other suites in the same file
+need no exception list: `yieldToEventLoop` and `unrefTimer` open no `FakeTime` and
+run on the real clock, which is what they need — `yieldToEventLoop`'s timer-turn
+budget is measured against the real `performance.now` and its test drives a real
+CPU-bound spin, and `unrefTimer` detaches a real Deno timer from the event loop's
+ref-count. This is the lighter tool: reach for the preload harness when a whole
+suite should be held to controlled time, and for a directly-imported `FakeTime`
+when only a test or two measures a delay.
 
 ## Proving a negative
 
@@ -973,8 +1065,8 @@ another as fast as the event loop allows, a busy loop hammering the host. The
 growing backoff — 25 milliseconds doubling to a 30-second cap, with up to 20
 percent jitter — is the honest way to keep checking whether the server is back
 without flooding it. It is the same shape as the committed-write backoff in
-`committed-write-backpressure.md`, where a capped exponential backoff also stands
-in for a retry that has no event to wait on.
+[committed-write backpressure](committed-write-backpressure.md), where a capped
+exponential backoff also stands in for a retry that has no event to wait on.
 
 Cancelling an in-progress backoff stays event-driven: the pause between attempts
 is a single timer that `close()` cancels directly, so a client closed mid-backoff

@@ -6,11 +6,9 @@ import {
   equals,
   handler,
   NAME,
-  navigateTo,
   pattern,
   type PerSession,
   type PerUser,
-  SELF,
   Stream,
   UI,
   type VNode,
@@ -100,42 +98,56 @@ export interface TopicInput {
 }
 
 /**
- * A #topic — a durable unit of shared attention: a title, a living body
- * document, a flat chronological comment thread, and typed links out to other
- * core objects (PRs, agent sessions, other topics). Deliberately has no
- * status, labels, or assignees; what a topic grows next is part of the
- * experiment (CT-1878).
- */
-/**
- * The shared-safe projection stored in the tracker's list. Session-local UI
- * controls are intentionally excluded: a TopicPiece can be followed from a
- * shared list even when the viewer has no matching session-local cells.
+ * A sibling Topic as seen from another Topic: enough to render and navigate a
+ * crossref chip and to scan its prose for references, and deliberately not its
+ * own crossref graph. Keeping this projection non-recursive is what lets one
+ * Topic's schema describe its siblings without traversing the whole board.
  */
 export interface TopicReference {
-  [NAME]: string;
+  /** Like the other derived display fields, a cold retained sibling may not
+   * have produced this path yet. Its persisted title remains authoritative. */
+  [NAME]: string | Default<""> | undefined;
   title: string;
   body: string;
   comments: TopicComment[];
   links: TopicLink[];
   createdAt: number;
-  createdBy?: TopicAuthor;
+  /** Mixed-version list projections can resolve an older sibling's absent
+   * path as undefined. Fabric shapes that absence to this inert legacy
+   * sentinel at the list boundary; newly computed non-empty authorship remains
+   * a structured TopicAuthor. */
+  createdBy?:
+    | TopicAuthor
+    | Default<{ kind: "person"; name: "" }>
+    | undefined;
   /** @deprecated Compatibility shadow for consumers of the previous result
    * schema. New callers must use `createdBy`; the pattern mirrors this field. */
   createdByName: string;
-  bodyUpdatedBy?: TopicAuthor;
-  bodyUpdatedAt?: number;
-  commentCount: number;
+  bodyUpdatedBy?: TopicAuthor | undefined;
+  bodyUpdatedAt?: number | undefined;
+  /** Cold mixed-version references can expose an unresolved computed path as
+   * explicit undefined. Shape it to zero until the sibling starts. */
+  commentCount: number | Default<0> | undefined;
   /** Max of creation, comments, body saves, and link additions. */
-  lastActivityAt: number;
+  lastActivityAt: number | Default<0> | undefined;
   addComment: Stream<AddCommentEvent>;
   addLink: Stream<AddLinkEvent>;
   setBody: Stream<SetBodyEvent>;
 }
 
 /**
- * The board-facing Topic projection. Crossref targets deliberately use the
- * non-recursive TopicReference contract: a Topic needs enough sibling data to
- * render and navigate chips, not each sibling's entire crossref graph.
+ * A #topic — a durable unit of shared attention: a title, a living body
+ * document, a flat chronological comment thread, and typed links out to other
+ * core objects (PRs, agent sessions, other topics). Deliberately has no
+ * status, labels, or assignees; what a topic grows next is part of the
+ * experiment (CT-1878).
+ *
+ * This is the board-facing projection, and the one stored in the tracker's
+ * list. Session-local UI controls are intentionally excluded: a TopicPiece can
+ * be followed from a shared list even when the viewer has no matching
+ * session-local cells. Crossref targets deliberately use the non-recursive
+ * TopicReference contract: a Topic needs enough sibling data to render and
+ * navigate chips, not each sibling's entire crossref graph.
  */
 export interface TopicPiece extends TopicReference {
   /** This topic's own place in the board's prose graph, derived read-side
@@ -170,6 +182,14 @@ export interface TopicOutput extends TopicPiece {
   saveBody: Stream<void>;
   cancelEditBody: Stream<void>;
   submitLink: Stream<void>;
+}
+
+/** The durable, non-reactive information a rendered link needs. Keeping this
+ * separate from TopicReference avoids persisting a scheduler-backed click
+ * stream in VDOM: the shell resolves the fid and owns navigation. */
+export interface TopicNavigationLink {
+  fid: string;
+  title: string;
 }
 
 // ===== Shared theme (calm editorial light) =====
@@ -248,6 +268,17 @@ export const topicAuthorFromPerson = (
   if (!name) return undefined;
   const avatar = (profileAvatar ?? "").trim();
   return avatar ? { kind: "person", name, avatar } : { kind: "person", name };
+};
+
+/** Reject a mutation loudly. To a headless caller a silent early-return is
+ * indistinguishable from success (verb contract rule 4,
+ * docs/plans/pattern-verb-contract.md); a throw surfaces as a failed handler
+ * transaction and a nonzero CLI exit. Stable error codes arrive with the
+ * invocation protocol; until then the message carries a stable
+ * "<verb> rejected:" prefix. UI composer wrappers keep their silent guards —
+ * an empty draft is a non-event in a composer. */
+export const rejectMutation = (verb: string, reason: string): never => {
+  throw new Error(`${verb} rejected: ${reason}`);
 };
 
 /** Structured author first, legacy string second. Agent snapshots are labelled
@@ -343,43 +374,39 @@ export const crossrefJoin = (
   return { refsOut, referencedBy };
 };
 
-/** Row navigation, bound per topic card and per crossref chip. Module-scope
- * handler (not an inline closure) so embedders and tests can bind and drive
- * it directly. */
-export const openTopic = handler<void, { topic: TopicReference }>(
-  (_, { topic }) => {
-    navigateTo(topic);
-  },
-);
+/** A Topic destination rendered as data, not as a pattern-owned handler.
+ * `cf-cell-link` resolves the fid in the active space and delegates ordinary
+ * and Cmd/Ctrl-click navigation to the shell. This remains usable after a
+ * cold load because the persisted VDOM contains no ephemeral event stream. */
+export const topicCellLink = (fid: string, label: string) =>
+  fid
+    ? (
+      <cf-cell-link
+        link={`/of:${fid}`}
+        label={label}
+        static
+      />
+    )
+    : null;
 
-/** One row of crossref chips ("references →" / "← referenced by"): each chip
- * names a sibling topic and navigates to it. Takes the sibling pieces
- * directly and binds navigation to each — #4714's path-scoped wildcard fix
- * makes binding a piece reached through a derived crossref row safe (before
- * it, such a bind silently kept the consuming UI computed from ever running,
- * which forced the earlier index-plumbed shape). Module-scope and pure so the
- * single-runtime suite can also drive the exact markup directly (pinning the
- * no-edges → null branch) alongside the real card path it renders via
- * continuous UI demand. */
-export const crossrefChipRow = (
+/** One row of crossref links ("references →" / "← referenced by"). The view
+ * carries only durable fid/title snapshots; the public crossref result keeps
+ * its existing piece-valued contract. */
+export const crossrefLinkRow = (
   caption: string,
-  accent: boolean,
-  pieces: TopicReference[],
+  links: TopicNavigationLink[],
 ) =>
-  pieces.length === 0
+  links.length === 0
     ? null
     : (
       <cf-hstack gap="1" align="center" style="flex-wrap: wrap;">
         <cf-text variant="caption" tone="muted">{caption}</cf-text>
-        {pieces.map((p) => (
-          <cf-chip
-            label={snippet(p?.title || "(untitled topic)", 40)}
-            size="xs"
-            color={accent ? "accent" : "neutral"}
-            interactive
-            oncf-click={openTopic({ topic: p })}
-          />
-        ))}
+        {links.map((link) =>
+          topicCellLink(
+            link.fid,
+            snippet(link.title || "(untitled topic)", 40),
+          )
+        )}
       </cf-hstack>
     );
 
@@ -494,7 +521,6 @@ export default pattern<TopicInput, TopicOutput>(
       bodyUpdatedBy,
       bodyUpdatedAt,
       mentionable,
-      [SELF]: self,
     },
   ) => {
     // Session-local UI state (new-tab test: none of this should carry over).
@@ -523,11 +549,11 @@ export default pattern<TopicInput, TopicOutput>(
     // optional input path; sibling Topic schemas can then validate the piece.
     const createdByView = computed(() => {
       const name = (createdBy?.name ?? "").trim();
-      if (name) return createdBy;
+      if (name && createdBy) return createdBy;
       const legacyName = (createdByName ?? "").trim();
       return legacyName
         ? { kind: "person" as const, name: legacyName }
-        : undefined;
+        : { kind: "person" as const, name: "" as const };
     });
 
     // --- Streams (external API; also usable headlessly via CLI) ---
@@ -535,7 +561,10 @@ export default pattern<TopicInput, TopicOutput>(
     const addComment = action(({ body: text, agentName }: AddCommentEvent) => {
       const trimmed = (text ?? "").trim();
       const author = topicAuthorFromAgent(agentName ?? "");
-      if (!trimmed || (agentName !== undefined && !author)) return;
+      if (agentName !== undefined && !author) {
+        rejectMutation("addComment", "agentName must be non-blank when given");
+      }
+      if (!trimmed) rejectMutation("addComment", "body must be non-empty");
       const legacyName = author
         ? topicAuthorLabel(author)
         : (myName.get() ?? "").trim() || "someone";
@@ -552,10 +581,13 @@ export default pattern<TopicInput, TopicOutput>(
       ({ kind, url, label, agentName }: AddLinkEvent) => {
         const trimmedUrl = (url ?? "").trim();
         const author = topicAuthorFromAgent(agentName ?? "");
-        if (
-          !trimmedUrl || !isSafeLinkUrl(trimmedUrl) ||
-          (agentName !== undefined && !author)
-        ) return;
+        if (agentName !== undefined && !author) {
+          rejectMutation("addLink", "agentName must be non-blank when given");
+        }
+        if (!trimmedUrl) rejectMutation("addLink", "url must be non-empty");
+        if (!isSafeLinkUrl(trimmedUrl)) {
+          rejectMutation("addLink", "url must be http(s)");
+        }
         links.push({
           kind: kind ?? "web",
           url: trimmedUrl,
@@ -568,7 +600,9 @@ export default pattern<TopicInput, TopicOutput>(
 
     const setBody = action(({ body: text, agentName }: SetBodyEvent) => {
       const author = topicAuthorFromAgent(agentName ?? "");
-      if (agentName !== undefined && !author) return;
+      if (agentName !== undefined && !author) {
+        rejectMutation("setBody", "agentName must be non-blank when given");
+      }
       body.set(text ?? "");
       if (author) {
         bodyUpdatedBy.set(author);
@@ -642,9 +676,16 @@ export default pattern<TopicInput, TopicOutput>(
     // from the mentionable siblings — the same join the board's cards use,
     // reduced to this piece's row (identified via SELF). Nothing persisted;
     // pre-rev pieces without `mentionable` simply derive empty sets.
-    const crossrefs = computed(() => {
+    const crossrefView = computed(() => {
       const sibs = asArray(mentionable.get());
-      if (sibs.length === 0) return { refsOut: [], referencedBy: [] };
+      if (sibs.length === 0) {
+        return {
+          refsOut: [],
+          referencedBy: [],
+          refsOutLinks: [],
+          referencedByLinks: [],
+        };
+      }
       // Each sibling's own fid payload ("" while unresolved — such entries
       // hold no edges this render). Cell-runtime surface cast, as in notes'
       // appendLink.
@@ -654,15 +695,40 @@ export default pattern<TopicInput, TopicOutput>(
         return ref ? fidPayload(entityRefToString(ref)) : "";
       });
       const joined = crossrefJoin(sibs.map((t) => topicCorpus(t)), payloads);
-      // Self-identification via SELF + equals: needs #4714's path-scoped
-      // wildcard fix — before it, the resolveAsCell chain above silently
-      // erased self's comparable marking and this computed never ran.
-      const me = sibs.findIndex((t) => t && equals(t, self));
-      return me < 0 ? { refsOut: [], referencedBy: [] } : {
-        refsOut: joined.refsOut[me].map((j) => sibs[j]),
-        referencedBy: joined.referencedBy[me].map((j) => sibs[j]),
-      };
+      // Select this Topic by a durable field-link identity. Its result title is
+      // a write-through link to its unique argument title cell, so following a
+      // retained sibling's title through any wrapper/result aliases meets the
+      // current input title without relying on the materialized object's
+      // comparable marker (which some derived wrappers lose).
+      const me = sibs.findIndex((t, i) =>
+        t && equals(mentionable.key(i).key("title"), title)
+      );
+      return me < 0
+        ? {
+          refsOut: [],
+          referencedBy: [],
+          refsOutLinks: [],
+          referencedByLinks: [],
+        }
+        : {
+          refsOut: joined.refsOut[me].map((j) => sibs[j]),
+          referencedBy: joined.referencedBy[me].map((j) => sibs[j]),
+          refsOutLinks: joined.refsOut[me].map((j) => ({
+            fid: payloads[j] ? `fid1:${payloads[j]}` : "",
+            title: sibs[j]?.title ?? "",
+          })),
+          referencedByLinks: joined.referencedBy[me].map((j) => ({
+            fid: payloads[j] ? `fid1:${payloads[j]}` : "",
+            title: sibs[j]?.title ?? "",
+          })),
+        };
     });
+    // Preserve the deployed public result schema. Navigation-only fid/title
+    // snapshots stay private to the rendered view.
+    const crossrefs = computed(() => ({
+      refsOut: crossrefView.refsOut,
+      referencedBy: crossrefView.referencedBy,
+    }));
 
     const hasLinks = computed(() => linksView.length > 0);
     const hasComments = computed(() => commentsView.length > 0);
@@ -841,15 +907,19 @@ export default pattern<TopicInput, TopicOutput>(
 
               {/* ── Connections (derived crossrefs; nothing persisted) ── */}
               {computed(() => {
-                const { refsOut, referencedBy } = crossrefs;
-                return refsOut.length === 0 && referencedBy.length === 0
+                const { refsOutLinks, referencedByLinks } = crossrefView;
+                return refsOutLinks.length === 0 &&
+                    referencedByLinks.length === 0
                   ? null
                   : (
                     <cf-card>
                       <cf-vstack gap="2">
                         <cf-heading level={5}>Connections</cf-heading>
-                        {crossrefChipRow("references →", false, refsOut)}
-                        {crossrefChipRow("← referenced by", true, referencedBy)}
+                        {crossrefLinkRow("references →", refsOutLinks)}
+                        {crossrefLinkRow(
+                          "← referenced by",
+                          referencedByLinks,
+                        )}
                       </cf-vstack>
                     </cf-card>
                   );

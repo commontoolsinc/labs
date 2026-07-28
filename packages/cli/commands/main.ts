@@ -8,6 +8,7 @@ import { fuse } from "./fuse.ts";
 import { init } from "./init.ts";
 import { inspect } from "./inspect.ts";
 import { piece } from "./piece.ts";
+import { space } from "./space.ts";
 import { identity } from "./identity.ts";
 import { test } from "./test-command.ts";
 import { view } from "./view.ts";
@@ -93,6 +94,8 @@ export const main = new Command()
   .command("deps", deps)
   // @ts-ignore for the above type issue
   .command("inspect", inspect)
+  // @ts-ignore for the above type issue
+  .command("space", space)
   .command("view", view)
   .command("exec", exec)
   // @ts-ignore for the above type issue
@@ -132,6 +135,7 @@ export const main = new Command()
       .option("--identity <path:string>", "Path to an identity keyfile.")
       .option("--exec-cli <path:string>", "Path to the cf exec shim.")
       .option("--log-file <path:string>", "Path to the FUSE child log file.")
+      .option("--debug", "Enable FUSE debug output.")
       .option("--allow-other", "Pass allow_other through to the FUSE child.")
       .option("--noattrcache", "Pass noattrcache through to the FUSE child.")
       .option(

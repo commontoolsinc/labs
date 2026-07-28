@@ -51,6 +51,10 @@ export type {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "./storage/interface.ts";
+export type {
+  EntityIdListOptions,
+  EntityIdListResult,
+} from "@commonfabric/memory/v2";
 export {
   debugTransactionWrites,
   formatTransactionSummary,
@@ -174,10 +178,10 @@ export {
   isStreamValue,
   type JSONObject,
   type JSONSchema,
-  type JSONSchemaObjMutable,
   type JSONValue,
   type Module,
   type ModuleFactory,
+  type MutableJSONSchemaObj,
   NAME,
   type NodeFactory,
   OAuth2TokenSchema,

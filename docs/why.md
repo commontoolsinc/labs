@@ -45,7 +45,8 @@ What already runs, in this repository, today:
 And on real silicon, a machine you don't own can prove — bit for bit —
 that it runs the open runtime before your data ever reaches it. That
 part runs on the hardware today; the protocol around it is written up
-in `docs/specs/verifiable-execution/`.
+in the
+[verifiable-execution specification](specs/verifiable-execution/README.md).
 
 The people who came before us settled arguments like this one by
 writing code rather than papers, and we would rather be judged the same
@@ -80,8 +81,8 @@ trust be checkable by anyone, from evidence.
 
 Clone it. Run a pattern. Write one — it is plain TypeScript, and the
 checker names the exact flow a policy would forbid before anything runs.
-`docs/tutorial/` walks the mechanisms, and `packages/patterns/` is where
-to start.
+The [tutorial](tutorial/README.md) walks the mechanisms, and
+`packages/patterns/` is where to start.
 
 The aim is not modest. The rule we are trying to replace sits
 underneath everything, and what it has been holding back is most of what

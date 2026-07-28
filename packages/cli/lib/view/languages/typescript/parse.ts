@@ -33,6 +33,7 @@ import { flattenStructure } from "../../model.ts";
 import { cpLen } from "../../ansi.ts";
 import { computeLineStarts, lineIndexOf } from "../../lines.ts";
 import type { Highlighter } from "../language.ts";
+import { plainTextDocument, plainTextLines } from "../plain-text/plain-text.ts";
 import {
   describeSynthetic,
   isBuilderName,
@@ -151,7 +152,7 @@ export function parseDocument(
   try {
     return parseTypeScriptDocument(text, fileName);
   } catch {
-    return plainDocument(text);
+    return plainTextDocument(text);
   }
 }
 
@@ -215,7 +216,7 @@ export function highlightDocument(
       collectSchemaObjects(sf),
     );
   } catch {
-    return plainLines(text);
+    return plainTextLines(text);
   }
 }
 
@@ -238,23 +239,81 @@ function scriptKindFor(fileName: string): ts.ScriptKind {
   return ts.ScriptKind.TSX;
 }
 
-function plainLines(text: string): Line[] {
-  return text.split("\n").map((line) => ({
-    text: line,
-    spans: line.length === 0
-      ? []
-      : [{ col: 0, text: line, cls: "plain" as const }],
-  }));
-}
+/**
+ * A conventional quoted string remains one token when an edit changes only its
+ * unescaped contents. Replacing only that span preserves the complete-file
+ * colours and bracket depths of every other token on the line.
+ */
+export function highlightLineEditLocally(
+  before: Line,
+  after: string,
+): Line | null {
+  const oldText = before.text;
+  if (oldText === after) return before;
+  const minLength = Math.min(oldText.length, after.length);
+  let prefix = 0;
+  while (
+    prefix < minLength &&
+    oldText.charCodeAt(prefix) === after.charCodeAt(prefix)
+  ) {
+    prefix++;
+  }
+  let suffix = 0;
+  while (
+    suffix < minLength - prefix &&
+    oldText.charCodeAt(oldText.length - 1 - suffix) ===
+      after.charCodeAt(after.length - 1 - suffix)
+  ) {
+    suffix++;
+  }
+  const oldEnd = oldText.length - suffix;
+  const newEnd = after.length - suffix;
 
-function plainDocument(text: string): Document {
-  return {
-    text,
-    lines: plainLines(text),
-    structure: [],
-    flatStructure: [],
-    definitions: new Map(),
-  };
+  let spanStart = 0;
+  for (const [spanIndex, span] of before.spans.entries()) {
+    const spanEnd = spanStart + span.text.length;
+    if (span.cls === "string") {
+      const quote = span.text[0];
+      const quoted = (quote === "'" || quote === '"') &&
+        span.text.length >= 2 && span.text.at(-1) === quote;
+      const content = span.text.slice(1, -1);
+      const contentStart = spanStart + 1;
+      const contentEnd = spanEnd - 1;
+      if (
+        quoted &&
+        !content.includes("\\") &&
+        prefix >= contentStart &&
+        oldEnd <= contentEnd &&
+        prefix <= oldEnd
+      ) {
+        const inserted = after.slice(prefix, newEnd);
+        if (
+          inserted.includes("\\") || inserted.includes(quote) ||
+          /[\r\n\u2028\u2029]/u.test(inserted)
+        ) {
+          return null;
+        }
+        const relativeStart = prefix - spanStart;
+        const relativeEnd = oldEnd - spanStart;
+        const newSpanText = span.text.slice(0, relativeStart) +
+          inserted +
+          span.text.slice(relativeEnd);
+        const columnDelta = cpLen(newSpanText) - cpLen(span.text);
+        return {
+          text: after,
+          spans: before.spans.map((current, index) =>
+            index === spanIndex
+              ? { ...current, text: newSpanText }
+              : index > spanIndex
+              ? { ...current, col: current.col + columnDelta }
+              : current
+          ),
+        };
+      }
+    }
+    spanStart = spanEnd;
+  }
+  return null;
 }
 
 function highlightFromSourceFile(
@@ -287,7 +346,7 @@ export function createHighlighter(
 ): Highlighter {
   let text = initial;
   let highlighter = tryCreateTypeScriptHighlighter(initial, fileName);
-  let lines: readonly Line[] = highlighter?.lines ?? plainLines(initial);
+  let lines: readonly Line[] = highlighter?.lines ?? plainTextLines(initial);
 
   return {
     get lines() {
@@ -305,7 +364,7 @@ export function createHighlighter(
         }
       }
       highlighter = tryCreateTypeScriptHighlighter(next, fileName);
-      lines = highlighter?.lines ?? plainLines(next);
+      lines = highlighter?.lines ?? plainTextLines(next);
       return lines;
     },
   };

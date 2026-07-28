@@ -14,13 +14,19 @@ import {
   budgetStatus,
   friendlyError,
   github,
-  multiSparkline,
   readBudget,
-  SPARK_FADE,
   usd,
 } from "../lib.ts";
 import { REPO } from "../config.ts";
 import { BlacksmithClient, blacksmithRoutes } from "../blacksmith.ts";
+import {
+  calendarMonth,
+  DAY_MS,
+  settled,
+  SPEND_HISTORY_DAYS,
+  spendChart,
+  summarizeDailySpend,
+} from "../spend.ts";
 
 interface UsageItem {
   date: string;
@@ -43,6 +49,7 @@ interface DailySpend {
   byDay: Map<string, number>;
   mtd: number;
   projected: number;
+  estimateDays: number;
 }
 
 interface GitHubDollarSpend extends DailySpend {
@@ -88,50 +95,9 @@ const usagePath = (org: string, year: number, month: number) =>
   `organizations/${org}/settings/billing/usage?year=${year}&month=${month}`;
 
 export const GITHUB_LAG_DAYS = 2;
-export const PROVIDER_LAG_DAYS = 1;
-export const MIN_WINDOW_DAYS = 14;
-const SPARK_DAYS = 45;
-const DAY_MS = 86_400_000;
+const BLACKSMITH_LAG_DAYS = 1;
 const GITHUB_COLOR = "#58a6ff";
 const BLACKSMITH_COLOR = "#f59e0b";
-
-export function settled(
-  daily: number[],
-  elapsedDays: number,
-  lagDays: number,
-): number[] {
-  let withData = daily.length;
-  while (withData > 0 && daily[withData - 1] === 0) withData--;
-  const known = Math.max(withData, elapsedDays - lagDays);
-  return daily.slice(0, Math.max(0, Math.min(daily.length, known)));
-}
-
-export function calendarMonth(
-  byDay: Map<string, number>,
-  year: number,
-  month0: number,
-): number[] {
-  const days = new Date(Date.UTC(year, month0 + 1, 0)).getUTCDate();
-  const prefix = `${year}-${String(month0 + 1).padStart(2, "0")}-`;
-  return Array.from(
-    { length: days },
-    (_, index) => byDay.get(prefix + String(index + 1).padStart(2, "0")) ?? 0,
-  );
-}
-
-export function projectMonthly(
-  mtd: number,
-  coveredThis: number,
-  daysInMonth: number,
-  lastMonthDaily: number[],
-): number {
-  const needFromLast = Math.max(0, MIN_WINDOW_DAYS - coveredThis);
-  const tail = needFromLast > 0 ? lastMonthDaily.slice(-needFromLast) : [];
-  const windowDays = coveredThis + tail.length;
-  if (windowDays <= 0) return mtd;
-  const windowSpend = mtd + tail.reduce((sum, daily) => sum + daily, 0);
-  return (windowSpend / windowDays) * daysInMonth;
-}
 
 function dayKey(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -169,41 +135,6 @@ function addGitHubDays(
   }
 }
 
-function summarizeDaily(
-  byDay: Map<string, number>,
-  now: Date,
-  lagDays: number,
-  measuredMtd?: number,
-  priorMonthDaily?: number[],
-): Omit<DailySpend, "byDay"> {
-  const year = now.getUTCFullYear();
-  const month0 = now.getUTCMonth();
-  const dayOfMonth = now.getUTCDate();
-  const thisMonth = calendarMonth(byDay, year, month0);
-  const dailyMtd = thisMonth.reduce((sum, amount) => sum + amount, 0);
-  const mtd = measuredMtd ?? dailyMtd;
-  const coveredThis = settled(thisMonth, dayOfMonth, lagDays).length;
-  const previousMonth = month0 === 0 ? 11 : month0 - 1;
-  const previousYear = month0 === 0 ? year - 1 : year;
-  const previous = calendarMonth(byDay, previousYear, previousMonth);
-  const lastMonthDaily = priorMonthDaily ??
-    settled(
-      previous,
-      previous.length + dayOfMonth,
-      lagDays,
-    );
-  const daysInMonth = new Date(Date.UTC(year, month0 + 1, 0)).getUTCDate();
-  return {
-    mtd,
-    projected: projectMonthly(
-      mtd,
-      coveredThis,
-      daysInMonth,
-      lastMonthDaily,
-    ),
-  };
-}
-
 class GitHubUsageShapeError extends Error {}
 
 async function githubDollarSpend(
@@ -231,7 +162,7 @@ async function githubDollarSpend(
   addGitHubDays(byDay, current);
   let priorMonthDaily: number[] = [];
   let immediatePrior = true;
-  let remaining = SPARK_DAYS - dayOfMonth;
+  let remaining = SPEND_HISTORY_DAYS - dayOfMonth;
   let previousYear = year;
   let previousMonth = month0;
   while (remaining > 0) {
@@ -289,12 +220,14 @@ async function githubDollarSpend(
   return {
     kind: "dollars",
     byDay,
-    ...summarizeDaily(
+    ...summarizeDailySpend(
       byDay,
       now,
-      GITHUB_LAG_DAYS,
-      mtd,
-      priorMonthDaily,
+      {
+        lagDays: GITHUB_LAG_DAYS,
+        measuredMtd: mtd,
+        priorMonthDaily,
+      },
     ),
     budget,
   };
@@ -470,7 +403,7 @@ async function blacksmithSpend(
     now.getUTCDate(),
   );
   const end = new Date(today - 1);
-  const start = new Date(today - SPARK_DAYS * DAY_MS);
+  const start = new Date(today - SPEND_HISTORY_DAYS * DAY_MS);
   const segments = monthSegments(start, end);
   const [daily, stickyDaily, stickyTotals, invoice, threshold] = await Promise
     .all([
@@ -511,62 +444,15 @@ async function blacksmithSpend(
   const measuredMtd = parseBlacksmithInvoice(invoice);
   return {
     byDay: compute,
-    ...summarizeDaily(
+    ...summarizeDailySpend(
       compute,
       now,
-      PROVIDER_LAG_DAYS,
-      measuredMtd,
+      {
+        lagDays: BLACKSMITH_LAG_DAYS,
+        measuredMtd,
+      },
     ),
     budget: parseBlacksmithBudget(threshold),
-  };
-}
-
-function spendChart(
-  sources: Array<{
-    spend: DailySpend | null;
-    color: string;
-  }>,
-  now: Date,
-  status: Status,
-): { chart: string; duration: number } {
-  const allDays = new Set<string>();
-  for (const source of sources) {
-    if (source.spend) {
-      for (const day of source.spend.byDay.keys()) allDays.add(day);
-    }
-  }
-  if (allDays.size < 2) return { chart: "", duration: 0 };
-  const sorted = [...allDays].sort();
-  const timeOf = (day: string) => Date.parse(`${day}T00:00:00Z`);
-  const end = timeOf(sorted[sorted.length - 1]);
-  const start = Math.max(timeOf(sorted[0]), end - (SPARK_DAYS - 1) * DAY_MS);
-  const grid: string[] = [];
-  for (let time = start; time <= end; time += DAY_MS) {
-    grid.push(new Date(time).toISOString().slice(0, 10));
-  }
-  const lines = sources.flatMap((source) =>
-    source.spend
-      ? [{
-        vals: grid.map((day) => source.spend!.byDay.get(day) ?? 0),
-        color: source.color,
-        label: usd(source.spend.mtd),
-      }]
-      : []
-  );
-  const monthStart = `${now.getUTCFullYear()}-${
-    String(now.getUTCMonth() + 1).padStart(2, "0")
-  }-01`;
-  const currentDays = grid.filter((day) => day >= monthStart).length;
-  const windowDays = Math.min(
-    grid.length,
-    Math.max(currentDays, MIN_WINDOW_DAYS),
-  );
-  return {
-    chart: multiSparkline(lines, {
-      fadeFrom: SPARK_FADE[status],
-      highlight: { count: windowDays },
-    }),
-    duration: end - start + DAY_MS,
   };
 }
 
@@ -739,8 +625,16 @@ export const githubCiSpend: Tile = {
       : "unknown";
     const chart = spendChart(
       [
-        { spend: githubDollars, color: GITHUB_COLOR },
-        { spend: blacksmithValue, color: BLACKSMITH_COLOR },
+        {
+          spend: githubDollars,
+          color: GITHUB_COLOR,
+          label: githubDollars ? usd(githubDollars.mtd) : undefined,
+        },
+        {
+          spend: blacksmithValue,
+          color: BLACKSMITH_COLOR,
+          label: blacksmithValue ? usd(blacksmithValue.mtd) : undefined,
+        },
       ],
       now,
       status,

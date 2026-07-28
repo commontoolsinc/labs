@@ -160,9 +160,15 @@ it, which is why reset must delete the companions and not just the `.sqlite`.
 Reset = delete `engine-v3/<did>.sqlite{,-wal,-shm}`, re-copy from `pristine/`.
 Not `sqlite3 .backup` (needs a live connection, slower, no advantage here). Not
 re-running `VACUUM INTO` (needs the source, which may be a laptop-local scp'd
-file or offline). Use clonefile where the filesystem offers it (the 8.9 ms
-above) and a plain copy otherwise — GNU `cp` has no `-c`, so the tool does its
-own fallback (`Deno.copyFile`) rather than shelling out.
+file or offline).
+
+**Implemented as a portable `Deno.copyFile`, not clonefile** (revised
+2026-07-27 during implementation). Clonefile needs a `cp -c` subprocess and a
+platform branch — GNU `cp` has no `-c` — and measured against the real 1.1 GB
+Estuary store a plain-copy reset costs **14.2 s**, against a rehearsal whose
+migration phase runs for minutes. Wilk's rehearsal used plain `cp` for the same
+reason. Clonefile stays available as a later optimization if reset ever sits on
+the critical path; the numbers to beat are in the table above.
 
 **Interview result:** Wilk reset with a plain `cp` — no clonefile — and it was
 fine at Topics-store scale; Gideon likewise drove the mechanics through his
@@ -244,10 +250,13 @@ The write-storm history and the mis-pointed-client hazard drive four rails.
    the manifest is what makes attempts commensurable.
 3. **Make the clone unmistakable at the endpoint.** The clone directory carries
    a `.cf-clone` marker; the toolshed prints a startup banner naming the clone
-   and its source when its store dir contains one. This is a ~7-line toolshed
-   change (layer 5) and I recommend it as a second increment rather than a
-   blocker — but a printed hint from `cf space clone` alone is weak, and "make
-   prod-vs-clone unmistakable" was the explicit ask. The clone launches on an
+   and its source when its store dir contains one. Both halves are now built:
+   the marker ships with `cf space clone`, and the banner with
+   `packages/toolshed/lib/clone-banner.ts`. A printed hint from `cf space clone`
+   alone was weak, and "make prod-vs-clone unmistakable" was the explicit ask.
+   Note the banner fires at boot and then scrolls away — it does not help
+   someone returning to a browser tab an hour later; surfacing clone-ness in the
+   shell UI would, and is not designed. The clone launches on an
    offset port via the existing `start-local-dev.sh --port-offset`, so the
    api-url differs by construction.
 4. **`cf inspect churn`.** A time-bucketed commit/revision rate query —
@@ -290,13 +299,16 @@ rehearsal isn't over-trusted:
 **Build (increment 1).**
 
 - `cf space clone <did> --from <path|dir> | --from-remote <url> --to <dir>` —
-  resolve the store path, `VACUUM INTO` to `pristine/`, clonefile to
-  `engine-v3/`, write `clone.json`, write `.cf-clone`, print the launch command.
+  resolve the store path, copy to `pristine/`, copy that to `engine-v3/`,
+  write `clone.json`, write `.cf-clone`, print the launch command.
 - `cf space clone --reset` — restore the working copy from pristine.
 - `cf space clone --verify` — fingerprint check against the manifest.
 - `cf inspect churn <space> [--bucket 1m] [--since …] [--top N]`.
 
-**Build (increment 2, optional).** Toolshed clone banner.
+**Build (increment 2, optional).** Toolshed clone banner. **Shipped** —
+`packages/toolshed/lib/clone-banner.ts` reads the `.cf-clone` marker at
+startup and prints the clone's provenance, so a served clone is visible in
+the log an operator is already watching rather than only on disk.
 
 **Explicitly not building.**
 

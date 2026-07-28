@@ -160,7 +160,8 @@ created per `execute()` and the entire bundle is run with
 `compartment.evaluate(js)` — string evaluation under `evalTaming: "safe-eval"`
 ([ses-runtime.ts:135][c8]). Runtime modules (`commonfabric`,
 `commonfabric/schema`, aliases) are `define`d into the bundle via `runtimeDeps`
-([engine.ts:503][c1]). SES is pinned at `npm:ses@^1.15.0`.
+([engine.ts:503][c1]). SES resolves through Runner's
+[`deno.jsonc`](../../packages/runner/deno.jsonc) import map.
 
 ### Identity flow into `action.src`
 
