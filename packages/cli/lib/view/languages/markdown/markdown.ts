@@ -971,7 +971,7 @@ function htmlMarkupEnd(source: string, start: number): number | null {
   if (!/[\t\n\f\r />]/.test(source[nameEnd] ?? "")) return null;
 
   if (source[start + 1] === "!") {
-    return quotedMarkupEnd(source, nameEnd);
+    return declarationMarkupEnd(source, nameEnd);
   }
 
   let cursor = skipHtmlSpace(source, nameEnd);
@@ -1018,15 +1018,20 @@ function skipHtmlSpace(source: string, start: number): number {
   return end;
 }
 
-function quotedMarkupEnd(source: string, start: number): number | null {
+function declarationMarkupEnd(source: string, start: number): number | null {
   let quote: "'" | '"' | null = null;
+  let bracketDepth = 0;
   for (let end = start; end < source.length; end++) {
     const char = source[end];
     if (quote) {
       if (char === quote) quote = null;
     } else if (char === "'" || char === '"') {
       quote = char;
-    } else if (char === ">") {
+    } else if (char === "[") {
+      bracketDepth++;
+    } else if (char === "]" && bracketDepth > 0) {
+      bracketDepth--;
+    } else if (char === ">" && bracketDepth === 0) {
       return end + 1;
     }
   }
