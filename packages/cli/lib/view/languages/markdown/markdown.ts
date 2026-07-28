@@ -239,21 +239,76 @@ function renderMarkdownBlocks(
     for (let i = 0; i < source.length; i++) {
       out[range.start + i] = rendered[i] ?? emptyLine();
     }
-    const declarationStart = htmlDeclarationStart(token);
-    if (declarationStart !== null) {
-      const start = tokenOffset + declarationStart;
-      const end = declarationMarkupEnd(text, start + 2);
-      if (end !== null) declarations.push({ start, end });
-    }
+    declarations.push(...htmlDeclarationRanges(text, tokenOffset, token));
   }
   applyHtmlDeclarations(text, rawLines, out, declarations, inlineLexer);
   return out;
 }
 
-function htmlDeclarationStart(token: BlockToken): number | null {
-  if (token.type !== "html") return null;
-  const match = token.raw.match(/^(?:\n)*( {0,3})<![A-Za-z]/);
-  return match ? match[0].lastIndexOf("<") : null;
+function htmlDeclarationRanges(
+  text: string,
+  tokenOffset: number,
+  token: BlockToken,
+): Array<{ start: number; end: number }> {
+  if (token.type !== "html") return [];
+  const prefix = token.raw.match(/^(?:\n)*( {0,3})(?=<![A-Za-z])/);
+  if (!prefix) return [];
+
+  const declarations: Array<{ start: number; end: number }> = [];
+  let cursor = tokenOffset + prefix[0].length;
+  for (;;) {
+    if (!/^<![A-Za-z]/.test(text.slice(cursor))) break;
+    const end = declarationMarkupEnd(text, cursor + 2);
+    if (end === null) break;
+    declarations.push({ start: cursor, end });
+    cursor = end;
+
+    for (;;) {
+      cursor = skipAdjacentDeclarationWhitespace(text, cursor);
+      if (text.startsWith("<!--", cursor)) {
+        const commentEnd = text.indexOf("-->", cursor + 4);
+        if (commentEnd < 0) return declarations;
+        cursor = commentEnd + 3;
+        continue;
+      }
+      if (text.startsWith("<?", cursor)) {
+        const instructionEnd = text.indexOf("?>", cursor + 2);
+        if (instructionEnd < 0) return declarations;
+        cursor = instructionEnd + 2;
+        continue;
+      }
+      break;
+    }
+  }
+  return declarations;
+}
+
+function skipAdjacentDeclarationWhitespace(
+  text: string,
+  start: number,
+): number {
+  let cursor = start;
+  let atLineStart = cursor === 0 || text[cursor - 1] === "\n";
+  let indentation = 0;
+  while (cursor < text.length) {
+    const char = text[cursor];
+    if (char === "\n") {
+      cursor++;
+      atLineStart = true;
+      indentation = 0;
+    } else if (char === " " && atLineStart) {
+      if (indentation === 3) break;
+      cursor++;
+      indentation++;
+    } else if (char === "\t" && atLineStart) {
+      break;
+    } else if (char === " " || char === "\t") {
+      cursor++;
+    } else {
+      break;
+    }
+  }
+  return cursor;
 }
 
 function applyHtmlDeclarations(
