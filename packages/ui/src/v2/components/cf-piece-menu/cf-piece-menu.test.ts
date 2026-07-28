@@ -363,11 +363,13 @@ function statefulPiece(
     argument = {} as unknown,
     getPageFails = false,
     sendFails = false,
+    pieceSchema = { type: "object" } as Record<string, unknown>,
   }: {
     result?: Record<string, unknown>;
     argument?: unknown;
     getPageFails?: boolean;
     sendFails?: boolean;
+    pieceSchema?: Record<string, unknown>;
   } = {},
 ) {
   const requests: Array<Record<string, unknown>> = [];
@@ -405,12 +407,12 @@ function statefulPiece(
     id: "of:fid1:piece",
     space: SPACE,
     path: [],
-    schema: { type: "object" },
+    schema: pieceSchema,
   } as unknown as CellRef;
   const cell = new CellHandle(rt, pieceRef, result);
   const page = { cell: () => cell };
 
-  /** A nested handler stream, tagged the way a schema'd read tags one. */
+  /** A nested handler stream whose own ref schema carries the stream tag. */
   const streamHandle = (name: string): CellHandle =>
     new CellHandle(rt, {
       id: "of:fid1:piece",
@@ -419,7 +421,20 @@ function statefulPiece(
       schema: { asCell: ["stream"] },
     } as unknown as CellRef);
 
-  return { cell, requests, streamHandle, rt };
+  /**
+   * A handler as a schema'd piece read actually delivers one: a handle to the
+   * stream's own doc carrying the handler's EVENT schema, with the stream
+   * declaration living on the piece schema's property instead.
+   */
+  const handlerHandle = (name: string, eventSchema: unknown): CellHandle =>
+    new CellHandle(rt, {
+      id: `of:fid1:handler-${name}`,
+      space: SPACE,
+      path: [],
+      schema: eventSchema,
+    } as unknown as CellRef);
+
+  return { cell, requests, streamHandle, handlerHandle, rt };
 }
 
 describe("the data panel", () => {
@@ -494,6 +509,37 @@ describe("the actions panel", () => {
     expect(rendered).toContain("piece-action-addItem");
     // Plain fields are data, not actions.
     expect(rendered).not.toContain("piece-action-count");
+  });
+
+  it("finds handlers the piece schema declares, and hints their payload", async () => {
+    // The live shape: the handle carries the event schema, the stream
+    // declaration lives on the piece schema's property.
+    const piece = statefulPiece({
+      pieceSchema: {
+        type: "object",
+        properties: {
+          addSpace: { asCell: ["stream"], type: "object" },
+          spaces: { type: "array" },
+        },
+      },
+    });
+    await piece.cell.set({
+      addSpace: piece.handlerHandle("addSpace", {
+        type: "object",
+        properties: { name: { type: "string" } },
+      }),
+      spaces: [],
+    });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("piece-action-addSpace");
+    expect(rendered).toContain("{ name }");
+
+    // The Data panel shows the same key as a stream, not a bare cell link.
+    await menu.showPanel("data");
+    expect(shows(menu)).toContain('"addSpace": "[stream]"');
   });
 
   it("says so when the piece exposes no handlers", async () => {

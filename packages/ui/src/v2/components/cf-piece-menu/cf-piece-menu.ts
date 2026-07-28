@@ -48,21 +48,26 @@ export function pieceMenuEntries(): readonly MenuEntry[] {
   return ENTRIES;
 }
 
-/**
- * A handler stream, as a piece's deserialized value carries one: a nested
- * `CellHandle` whose ref schema keeps the `asCell: ["stream"]` marker the
- * worker preserves when serializing cell links.
- */
-export function isStreamHandle(value: unknown): value is CellHandle {
-  if (!isCellHandle(value)) return false;
-  const schema = value.ref().schema as { asCell?: unknown } | undefined;
-  const asCell = schema?.asCell;
+/** Whether a schema fragment declares the stream kind in its `asCell` list. */
+function schemaDeclaresStream(schema: unknown): boolean {
+  const asCell = (schema as { asCell?: unknown } | null | undefined)?.asCell;
   return Array.isArray(asCell) &&
     asCell.some((entry) =>
       (typeof entry === "string"
         ? entry
         : (entry as { kind?: string } | null)?.kind) === "stream"
     );
+}
+
+/**
+ * A handler stream whose own ref schema carries the `asCell: ["stream"]`
+ * marker. This is not the usual live shape — a handler read through the
+ * piece's schema arrives as a `CellHandle` carrying the handler's *event*
+ * schema, and the stream declaration stays on the piece schema's property —
+ * so callers also consult the parent schema (see `collectActions`).
+ */
+export function isStreamHandle(value: unknown): value is CellHandle {
+  return isCellHandle(value) && schemaDeclaresStream(value.ref().schema);
 }
 
 /** The raw `{ $stream: true }` marker a schema-less read can surface. */
@@ -80,8 +85,11 @@ const VIEW_KEYS = new Set(["$UI", "$TILE_UI", "$CHIP_UI"]);
  * value into a display shape first — handles become `{"@cell": id}` stubs,
  * streams a `[stream]` tag — and cap the depth so a deep graph stays legible.
  */
-export function formatPieceValue(value: unknown): string {
-  const display = toDisplay(value, 0);
+export function formatPieceValue(
+  value: unknown,
+  streamKeys?: ReadonlySet<string>,
+): string {
+  const display = toDisplay(value, 0, streamKeys);
   if (display === undefined) return "undefined";
   try {
     return JSON.stringify(display, null, 2) ?? String(display);
@@ -92,7 +100,11 @@ export function formatPieceValue(value: unknown): string {
   }
 }
 
-function toDisplay(value: unknown, depth: number): unknown {
+function toDisplay(
+  value: unknown,
+  depth: number,
+  streamKeys?: ReadonlySet<string>,
+): unknown {
   if (isStreamHandle(value) || isRawStreamMarker(value)) return "[stream]";
   if (isCellHandle(value)) {
     const ref = value.ref();
@@ -108,7 +120,9 @@ function toDisplay(value: unknown, depth: number): unknown {
     const out: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {
       if (depth === 0 && VIEW_KEYS.has(key)) continue;
-      out[key] = toDisplay(item, depth + 1);
+      out[key] = depth === 0 && streamKeys?.has(key)
+        ? "[stream]"
+        : toDisplay(item, depth + 1);
     }
     return out;
   }
@@ -121,6 +135,22 @@ export interface PieceAction {
   /** Which side of the piece carries it. */
   source: "result" | "argument";
   handle: CellHandle;
+  /**
+   * The event schema the handler declares, when one is known: the schema a
+   * stream handle read through the piece's schema carries is the handler's
+   * payload shape.
+   */
+  eventSchema?: unknown;
+}
+
+/** The top-level property names of an event schema, as a payload hint. */
+export function payloadHint(action: PieceAction): string | undefined {
+  const properties =
+    (action.eventSchema as { properties?: Record<string, unknown> } | undefined)
+      ?.properties;
+  if (!properties) return undefined;
+  const names = Object.keys(properties);
+  return names.length > 0 ? `{ ${names.join(", ")} }` : undefined;
 }
 
 /**
@@ -387,9 +417,22 @@ export class CFPieceMenu extends BaseElement {
 
     .action-name {
       flex: 1;
+      min-width: 6rem;
       font-family: var(--cf-theme-font-mono, "SF Mono", monospace);
       font-size: 0.8125rem;
-      overflow-wrap: anywhere;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .action-hint {
+      font-family: var(--cf-theme-font-mono, "SF Mono", monospace);
+      font-size: 0.6875rem;
+      color: var(--cf-theme-color-text-muted, #6b7280);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 18rem;
     }
 
     .action-source {
@@ -630,21 +673,55 @@ export class CFPieceMenu extends BaseElement {
     void this.#readPieceState(cell);
   }
 
+  /** The piece schema's per-property fragments, for stream detection. */
+  #pieceSchemaProperties(): Record<string, unknown> {
+    const schema = this.#pieceCell?.ref().schema as
+      | { properties?: Record<string, unknown> }
+      | undefined;
+    return schema?.properties ?? {};
+  }
+
+  /** The result keys the piece schema declares as streams. */
+  #declaredStreamKeys(): ReadonlySet<string> {
+    const keys = new Set<string>();
+    for (
+      const [name, fragment] of Object.entries(
+        this.#pieceSchemaProperties(),
+      )
+    ) {
+      if (schemaDeclaresStream(fragment)) keys.add(name);
+    }
+    return keys;
+  }
+
   /**
    * The handler streams the piece's argument and result carry at their top
    * level, deduplicated when the same stream is reachable from both sides.
+   *
+   * A handler read through the piece's schema arrives as a `CellHandle`
+   * carrying the handler's event schema; the `asCell: ["stream"]` declaration
+   * stays on the piece schema's property, so that is the primary signal. The
+   * handle's own schema tag and the raw `{ $stream: true }` marker cover
+   * reads that arrived tagged or schema-less.
    */
   collectActions(): PieceAction[] {
     const actions: PieceAction[] = [];
     const seen = new Set<string>();
+    const declared = this.#pieceSchemaProperties();
     const scan = (value: unknown, source: "result" | "argument") => {
       if (
         typeof value !== "object" || value === null || Array.isArray(value)
       ) return;
       for (const [name, item] of Object.entries(value)) {
         let handle: CellHandle | undefined;
-        if (isStreamHandle(item)) {
+        let eventSchema: unknown;
+        const declaredStream = source === "result" &&
+          schemaDeclaresStream(declared[name]);
+        if (isCellHandle(item) && (declaredStream || isStreamHandle(item))) {
           handle = item;
+          if (!schemaDeclaresStream(item.ref().schema)) {
+            eventSchema = item.ref().schema;
+          }
         } else if (
           source === "result" && isRawStreamMarker(item) && this.#pieceCell
         ) {
@@ -662,7 +739,7 @@ export class CFPieceMenu extends BaseElement {
         const key = `${handle.id()}/${handle.ref().path.join(".")}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        actions.push({ name, source, handle });
+        actions.push({ name, source, handle, eventSchema });
       }
     };
     scan(this.resultValue, "result");
@@ -824,7 +901,10 @@ export class CFPieceMenu extends BaseElement {
           <p>Waiting for a value…</p>
         `
         : html`
-          <pre class="source">${formatPieceValue(this.resultValue)}</pre>
+          <pre class="source">${formatPieceValue(
+            this.resultValue,
+            this.#declaredStreamKeys(),
+          )}</pre>
         `}
       <p class="note">
         The result stays live while this panel is open; the argument is read once.
@@ -875,6 +955,11 @@ export class CFPieceMenu extends BaseElement {
           html`
             <div class="action-row">
               <span class="action-name">${action.name}</span>
+              ${payloadHint(action)
+                ? html`
+                  <span class="action-hint">${payloadHint(action)}</span>
+                `
+                : nothing}
               <span class="action-source">${action.source}</span>
               <button
                 class="action-send"
