@@ -4263,7 +4263,7 @@ export function helpOverlay(): {
     ["  A / D", "parent / first child"],
     ["  Tab / ⇧Tab", "next / previous node (depth-first)"],
     ["  Z", "centre selected node"],
-    ["  ^L", "diff: reveal more of the file one quarter down the view"],
+    ["  ^L", "diff: reveal more context at the marked edge"],
     ["  Esc", "clear selection / search"],
     ["", ""],
     ["Editing (a file or a diff)", ""],
