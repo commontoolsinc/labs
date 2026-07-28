@@ -65,6 +65,56 @@ SCHEMA_INCOMPATIBLE_PATTERN_SRC="$SCRIPT_DIR/pattern/schema-incompatible.tsx"
 CUSTOM_EXPORT="customPatternExport" # for testing this feature
 SECTION="${CF_CLI_INTEGRATION_SECTION:-${1:-all}}"
 
+# A fresh invocation id. uuidgen is not present on every runner image, so this
+# falls back to Python, which the timing helper above already requires.
+new_invocation_id() {
+  if command -v uuidgen > /dev/null 2>&1; then
+    uuidgen
+  else
+    python3 -c 'import uuid; print(uuid.uuid4())'
+  fi
+}
+
+# Kill a backgrounded `cf` invocation. `cf` is a shell function, so $! is the
+# subshell rather than the Deno process doing the work; killing only the
+# subshell would leave that child running and still able to commit. Take the
+# children first, then the subshell.
+kill_process_tree() {
+  local pid="$1"
+  local child
+  for child in $(pgrep -P "$pid" 2>/dev/null); do
+    kill_process_tree "$child"
+  done
+  kill "$pid" 2> /dev/null || true
+  wait "$pid" 2> /dev/null || true
+}
+
+# Count the messages a piece recorded. A piece that has never handled an event
+# has nothing materialized to read, which reads as zero messages rather than as
+# a failure — the same tolerance read_piece_value_or_default gives scalars.
+message_count() {
+  local piece_id="$1"
+  local raw
+  raw=$(cf piece get $SPACE_ARGS --piece "$piece_id" messages 2>/dev/null || true)
+  if [ -z "$raw" ]; then
+    printf '0\n'
+    return 0
+  fi
+  printf '%s\n' "$raw" | jq 'length'
+}
+
+# Assert a piece recorded exactly `expected` messages.
+assert_message_count() {
+  local piece_id="$1"
+  local expected="$2"
+  local message="$3"
+  local actual
+  actual=$(message_count "$piece_id")
+  if [ "$actual" != "$expected" ]; then
+    error "$message (expected $expected, got $actual)"
+  fi
+}
+
 setup_space() {
   if [ -z "$API_URL" ]; then
     error "API_URL must be defined."
@@ -501,6 +551,119 @@ run_piece_call() {
   echo "Successfully ran CLI piece call integration tests for ${API_URL}/${SPACE}/${CALLABLE_PIECE_ID}."
 }
 
+# Retry semantics for caller-supplied invocation ids (verb contract WS-D/D3).
+# Every scenario ends with the SAME assertion — exactly one message recorded —
+# because that is the property an agent depends on: a retry it cannot avoid
+# must never double-apply the mutation.
+run_piece_call_retry() {
+  setup_space
+
+  echo "Testing invocation-id retry semantics..."
+
+  RETRY_PIECE_ID=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
+  echo "Created retry-scenario piece: $RETRY_PIECE_ID"
+
+  # --- 1. A failure before dispatch leaves nothing behind. ------------------
+  # An unreachable API cannot dispatch, so the mutation provably never
+  # happened and no invocation id was ever announced to retry with. The
+  # caller's correct move is a fresh id, and that must yield exactly one.
+  set +e
+  cf piece call --api-url="http://127.0.0.1:1" --identity="$IDENTITY" --space="$SPACE" \
+    --piece "$RETRY_PIECE_ID" --invocation "never-dispatched" \
+    recordMessage -- --message "pre-dispatch" > /dev/null 2>&1
+  PRE_DISPATCH_STATUS=$?
+  set -e
+  if [ "$PRE_DISPATCH_STATUS" -eq 0 ]; then
+    error "A call to an unreachable API should fail, not report success"
+  fi
+  assert_message_count "$RETRY_PIECE_ID" 0 \
+    "A pre-dispatch failure must not record a message"
+
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_ID" --invocation "$(new_invocation_id)" \
+    recordMessage -- --message "pre-dispatch" > /dev/null
+  assert_message_count "$RETRY_PIECE_ID" 1 \
+    "A fresh-id retry after a pre-dispatch failure should record exactly one message"
+
+  # --- 2. Dispatched, then the caller died before acknowledgement. ----------
+  # The riskiest window: the event is on its way and the caller cannot know
+  # whether it committed. The kill is triggered by the CLI's own dispatch
+  # announcement, so this lands in the window deterministically rather than
+  # by racing a clock. Either outcome (committed or not) must leave exactly
+  # one message once the same id is retried.
+  RETRY_PIECE_2=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
+  INVOCATION_2=$(new_invocation_id)
+  ANNOUNCE_FIFO=$(mktemp -u)
+  mkfifo "$ANNOUNCE_FIFO"
+  set +e
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_2" --invocation "$INVOCATION_2" \
+    recordMessage -- --message "dispatched-then-killed" > /dev/null 2> "$ANNOUNCE_FIFO" &
+  CALL_PID=$!
+  set -e
+  # Blocking read on the pipe — no poll, no deadline. If the process exits
+  # without announcing, the writer closes and the read ends at EOF.
+  ANNOUNCED=""
+  while IFS= read -r line; do
+    case "$line" in
+      *"invocation: $INVOCATION_2"*)
+        ANNOUNCED="yes"
+        break
+        ;;
+    esac
+  done < "$ANNOUNCE_FIFO"
+  kill_process_tree "$CALL_PID"
+  rm -f "$ANNOUNCE_FIFO"
+  if [ -z "$ANNOUNCED" ]; then
+    error "cf piece call should announce its invocation id at dispatch"
+  fi
+
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_2" --invocation "$INVOCATION_2" \
+    recordMessage -- --message "dispatched-then-killed" > /dev/null
+  assert_message_count "$RETRY_PIECE_2" 1 \
+    "Retrying a killed-after-dispatch call with the same id should leave exactly one message"
+
+  # --- 3. The commit succeeded but the response was lost. ------------------
+  # The retry collides on the handling's receipt, settles as success (exit 0)
+  # rather than as an error, and says so with deduplicated.
+  RETRY_PIECE_3=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
+  INVOCATION_3=$(new_invocation_id)
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_3" --invocation "$INVOCATION_3" \
+    recordMessage -- --message "lost-response" > /dev/null
+
+  set +e
+  REPLAY=$(cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_3" --invocation "$INVOCATION_3" \
+    recordMessage -- --message "lost-response" 2>/dev/null)
+  REPLAY_STATUS=$?
+  set -e
+  if [ "$REPLAY_STATUS" -ne 0 ]; then
+    error "A same-id retry should exit 0, got status $REPLAY_STATUS"
+  fi
+  echo "$REPLAY" | jq -e '.deduplicated == true' > /dev/null ||
+    error "A same-id retry should report deduplicated, got: $REPLAY"
+  echo "$REPLAY" | jq -e --arg id "$INVOCATION_3" '.invocation == $id' > /dev/null ||
+    error "A same-id retry should echo the caller's invocation id, got: $REPLAY"
+  assert_message_count "$RETRY_PIECE_3" 1 \
+    "A same-id retry after a successful commit should leave exactly one message"
+
+  # --- 4. A fresh process retrying the same id reads the ORIGINAL back. ----
+  # Sending a different payload under an id that already settled must not
+  # overwrite the original: the id identifies the invocation, so the second
+  # call reports the first one's outcome rather than applying its own.
+  RETRY_PIECE_4=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
+  INVOCATION_4=$(new_invocation_id)
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_4" --invocation "$INVOCATION_4" \
+    recordMessage -- --message "original-payload" > /dev/null
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_4" --invocation "$INVOCATION_4" \
+    recordMessage -- --message "second-payload" > /dev/null
+  assert_message_count "$RETRY_PIECE_4" 1 \
+    "Reusing a settled id with a different payload should leave exactly one message"
+  LAST=$(cf piece get $SPACE_ARGS --piece "$RETRY_PIECE_4" lastMessage)
+  if [ "$LAST" != '"original-payload"' ]; then
+    error "The settled invocation's outcome should stand, got lastMessage: $LAST"
+  fi
+
+  echo "Successfully ran CLI piece call retry integration tests for ${API_URL}."
+}
+
 run_wish() {
   setup_space
 
@@ -534,6 +697,7 @@ case "$SECTION" in
     run_piece_values
     run_piece_links
     run_piece_call
+    run_piece_call_retry
     run_wish
     ;;
   piece-basics)
@@ -548,6 +712,10 @@ case "$SECTION" in
     ;;
   piece-call)
     run_piece_call
+    run_piece_call_retry
+    ;;
+  piece-call-retry)
+    run_piece_call_retry
     ;;
   wish)
     run_wish
