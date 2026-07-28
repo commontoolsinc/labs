@@ -266,6 +266,13 @@ export declare const FabricError: FabricErrorConstructor;
 
 /**
  * The full set of values that the fabric storage layer can represent.
+ *
+ * From a typesystem perspective, all `FabricValue`s are immutable (deeply
+ * read-only), _except_ members of the `FabricInstance` tree. `FabricInstance`s
+ * expose arbitrary methods which can cause a change of instance state including
+ * changing the set of outgoing references from the instance. This is an
+ * _intentional_ hole, because TypeScript has no ergonomic/pithy way to express
+ * the desired semantics. (To be clear, it _can_ be done, just not cleanly.)
  */
 export type FabricValue =
   | null
