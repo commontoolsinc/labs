@@ -12,6 +12,7 @@ import {
   loadConversationFixture,
   normalizeLLMResponse,
   resetMockMode,
+  setMockResponseGate,
 } from "./client.ts";
 import { GOOGLE_SEARCH_NATIVE_MODEL_TOOL } from "./types.ts";
 
@@ -495,6 +496,69 @@ describe("LLMClient test-environment guard", () => {
       expect(loggedErrors[1][1]).toBe("not final json");
     } finally {
       console.error = originalConsoleError;
+    }
+  });
+});
+
+describe("mock response gate", () => {
+  it("holds a matched response until the gate resolves", async () => {
+    enableMockMode();
+    try {
+      addMockResponse(
+        (req) =>
+          req.messages.some((m) =>
+            typeof m.content === "string" && m.content.includes("gated")
+          ),
+        { role: "assistant", content: "answered", id: "gated-1" },
+      );
+
+      const { promise, resolve } = Promise.withResolvers<void>();
+      setMockResponseGate(() => promise);
+
+      const client = new LLMClient();
+      let answered = false;
+      const request = client.sendRequest({
+        model: "test-model",
+        messages: [{ role: "user", content: "gated" }],
+      }).then((response) => {
+        answered = true;
+        return response;
+      });
+
+      // Drain a macrotask, which is what an ungated mock needs to answer: it
+      // finishes with a zero-delay `setTimeout`. So reaching here with the
+      // request still outstanding is the gate holding it, not the assertion
+      // running too early.
+      await new Promise((r) => setTimeout(r, 0));
+      await new Promise((r) => setTimeout(r, 0));
+      expect(answered).toBe(false);
+
+      resolve();
+      expect((await request).content).toBe("answered");
+    } finally {
+      resetMockMode();
+    }
+  });
+
+  it("is cleared by clearMockResponses and resetMockMode", async () => {
+    enableMockMode();
+    try {
+      setMockResponseGate(() => Promise.reject(new Error("gate still armed")));
+      clearMockResponses();
+
+      addMockResponse(() => true, {
+        role: "assistant",
+        content: "ungated",
+        id: "gated-2",
+      });
+      const client = new LLMClient();
+      const response = await client.sendRequest({
+        model: "test-model",
+        messages: [{ role: "user", content: "anything" }],
+      });
+      expect(response.content).toBe("ungated");
+    } finally {
+      resetMockMode();
     }
   });
 });
