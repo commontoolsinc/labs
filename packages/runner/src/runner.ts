@@ -1382,25 +1382,18 @@ export class Runner {
         // read RIGHT NOW must not fail validation — the staged raw is passed
         // so such slots validate as opaque instead of as their (unreadable)
         // materialization. A supplied argument keeps strict validation:
-        // callers stage exactly the value they were given.
-        if (nextArgument !== undefined) {
-          this.updateAndValidateArgument(
-            tx,
-            argumentLink,
-            nextArgument,
-            pattern.argumentSchema,
-            defaults,
-            argument === undefined ? { unresolvedLinkRaw: nextArgument } : {},
-          );
-          argumentUpdated = true;
-        } else {
-          this.validateArgument(
-            tx,
-            argumentLink,
-            pattern.argumentSchema,
-            defaults,
-          );
-        }
+        // callers stage exactly the value they were given. (At least one of
+        // `argument`/`previousArgument` is defined here — the skip branch
+        // above owns the both-undefined case — so the merge yields a value.)
+        this.updateAndValidateArgument(
+          tx,
+          argumentLink,
+          nextArgument,
+          pattern.argumentSchema,
+          defaults,
+          argument === undefined ? { unresolvedLinkRaw: nextArgument } : {},
+        );
+        argumentUpdated = true;
       }
     }
     if (nextArgument !== undefined && !argumentUpdated) {

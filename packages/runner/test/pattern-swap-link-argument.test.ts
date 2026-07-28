@@ -138,6 +138,18 @@ describe("pattern swap with a link-valued argument slot", () => {
     expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v2");
   });
 
+  it("swaps when a link INSIDE an array slot is cold (item-level link)", async () => {
+    // Links live at any depth: an array slot whose ITEM is a link to an
+    // absent doc must get the same deferral as a link at the slot itself.
+    const entry = rt.getCell<{ name?: string }>(
+      space,
+      "swap-link-argument-array-item-absent",
+    );
+
+    const { cell } = await startThenSwap([entry]);
+    expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v2");
+  });
+
   it("swaps when the argument doc itself reads cold (nested-piece shape)", async () => {
     // A nested piece's argument meta links into its HOST's doc; when the host
     // is down that whole doc reads cold. Production signature: "missing

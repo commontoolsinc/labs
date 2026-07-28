@@ -141,6 +141,30 @@ describe("TypeScriptCompiler", () => {
     ]);
   });
 
+  it("compileToModulesCollecting reports real errors, drops non-fatal codes", async () => {
+    // The corpus-collecting path applies the same non-fatal filter as the
+    // throwing path: an unused @ts-expect-error (TS2578) is dropped, a real
+    // type error in another file is still attributed and reported.
+    const compiler = new TypeScriptCompiler(types);
+    const resolved = await compiler.resolveProgram(
+      new InMemoryProgram("/main.ts", {
+        "/main.ts": [
+          "import { bad } from './bad.ts';",
+          "const add = (x: number, y: number): number => x + y;",
+          "// @ts-expect-error -- suppressed under an older type env",
+          "export default add(1, 2) + bad;",
+          "",
+        ].join("\n"),
+        "/bad.ts": "export const bad: number = 'not a number';\n",
+      }),
+    );
+    const collected = compiler.compileToModulesCollecting(resolved);
+    expect(collected.diagnostics.map((d) => d.file)).toEqual(["/bad.ts"]);
+    expect(collected.diagnostics[0].message).toContain(
+      "Type 'string' is not assignable to type 'number'.",
+    );
+  });
+
   it("compileToModulesInterleaved emits byte-identical output to compileToModules", async () => {
     // The interleaved driver only changes WHERE the event loop can run
     // (macrotask yields at module boundaries) — never what is emitted. Pin
