@@ -33,6 +33,7 @@ import { flattenStructure } from "../../model.ts";
 import { cpLen } from "../../ansi.ts";
 import { computeLineStarts, lineIndexOf } from "../../lines.ts";
 import type { Highlighter } from "../language.ts";
+import { plainTextDocument, plainTextLines } from "../plain-text/plain-text.ts";
 import {
   describeSynthetic,
   isBuilderName,
@@ -151,7 +152,7 @@ export function parseDocument(
   try {
     return parseTypeScriptDocument(text, fileName);
   } catch {
-    return plainDocument(text);
+    return plainTextDocument(text);
   }
 }
 
@@ -215,7 +216,7 @@ export function highlightDocument(
       collectSchemaObjects(sf),
     );
   } catch {
-    return plainLines(text);
+    return plainTextLines(text);
   }
 }
 
@@ -236,25 +237,6 @@ function scriptKindFor(fileName: string): ts.ScriptKind {
   // Inputs without a TypeScript extension can still be transformed output
   // containing JSX.
   return ts.ScriptKind.TSX;
-}
-
-function plainLines(text: string): Line[] {
-  return text.split("\n").map((line) => ({
-    text: line,
-    spans: line.length === 0
-      ? []
-      : [{ col: 0, text: line, cls: "plain" as const }],
-  }));
-}
-
-function plainDocument(text: string): Document {
-  return {
-    text,
-    lines: plainLines(text),
-    structure: [],
-    flatStructure: [],
-    definitions: new Map(),
-  };
 }
 
 /**
@@ -364,7 +346,7 @@ export function createHighlighter(
 ): Highlighter {
   let text = initial;
   let highlighter = tryCreateTypeScriptHighlighter(initial, fileName);
-  let lines: readonly Line[] = highlighter?.lines ?? plainLines(initial);
+  let lines: readonly Line[] = highlighter?.lines ?? plainTextLines(initial);
 
   return {
     get lines() {
@@ -382,7 +364,7 @@ export function createHighlighter(
         }
       }
       highlighter = tryCreateTypeScriptHighlighter(next, fileName);
-      lines = highlighter?.lines ?? plainLines(next);
+      lines = highlighter?.lines ?? plainTextLines(next);
       return lines;
     },
   };

@@ -22,6 +22,7 @@ import { diffSource } from "../lib/view/diffedit.ts";
 import { ViewError } from "../lib/view/errors.ts";
 import { term } from "../lib/view/ansi.ts";
 import { ui } from "../lib/view/theme.ts";
+import { buildView } from "../lib/view/mod.ts";
 
 const OPTS = { color: false, showLineNumbers: false };
 const DOC = parseDocument("export const x = 1;\nconst y = x;\n");
@@ -140,6 +141,15 @@ Deno.test("pager: draws the document and quits on q", async () => {
   // The alt screen is entered on start and left on cleanup.
   assert(writes.some((w) => w.includes("\x1b[?1049h")), "entered alt screen");
   assert(writes.some((w) => w.includes("\x1b[?1049l")), "left alt screen");
+});
+
+Deno.test("pager: unknown named files schedule no semantic work", async () => {
+  const view = buildView("const incomplete = `plain\n", "LICENSE");
+  const semantics = view.semantics();
+  assertEquals(semantics, undefined);
+  const { deps, timers } = makeFake({ steps: [{ bytes: enc("q") }] });
+  await runPager(view.doc, OPTS, semantics, view.editSource, deps);
+  assertEquals(timers.size, 0);
 });
 
 Deno.test("pager: with colour, matches the terminal background to the status bar and restores it", async () => {

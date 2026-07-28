@@ -1,7 +1,8 @@
 # `cf view` language and syntax coverage plan
 
-Status: In progress. Python files with recognized extensions now have
-syntax highlighting. The order is provisional because recent activity was
+Status: In progress. Unknown named files now use plain text. Python files with
+recognized extensions now have syntax highlighting. The order is provisional
+because recent activity was
 measured in six of the 24 active organization repositories.
 
 This plan takes `cf view` from its current TypeScript and JavaScript, Markdown,
@@ -80,7 +81,7 @@ relative value. Record the reason in this plan.
 
 ## Stage 0: honest selection and implementation foundation
 
-- [ ] Add a plain-text language and select it for unknown named files.
+- [x] Add a plain-text language and select it for unknown named files.
 - [ ] Preserve the intentional TypeScript default only for transformed
   compiler output that has no filename.
 - [ ] Add `--language` and `--filename` overrides for piped input.
