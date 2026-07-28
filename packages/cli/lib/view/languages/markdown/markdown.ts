@@ -909,7 +909,6 @@ function splitTableCells(line: string): string[] | null {
       current += char;
     }
   }
-  if (escaped) current += "\\";
   cells.push(current);
   return cells;
 }
@@ -1152,3 +1151,26 @@ export function markdownHeadingNodes(
     };
   });
 }
+
+export const _internal = {
+  RichLine,
+  appendInlineTokens,
+  appendTokenChildren,
+  codeSpanText,
+  openingFence,
+  referenceAwareLexer,
+  renderBlockToken,
+  renderCodeBlock,
+  renderHtmlBlock,
+  renderInlineLine,
+  renderListBlock,
+  renderMarkdownBlocks,
+  renderParagraphBlock,
+  renderTableBlock,
+  splitRichLine,
+  splitTableCells,
+  stripContainerIndent,
+  stripHtmlTags,
+  tableAlignment,
+  tokenLineRange,
+};

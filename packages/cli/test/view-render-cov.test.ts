@@ -335,6 +335,26 @@ Deno.test("renderStatus: the default help line omits expand when not allowed", (
   assert(!status.includes("^L Expand"), "expand hint absent");
 });
 
+Deno.test("renderStatus: the view hint names the alternate representation", () => {
+  const doc = parseDocument(SAMPLE);
+  const line = (viewMode: "source" | "rendered") =>
+    stripAnsi(
+      renderFrame(
+        doc,
+        baseView({
+          canRender: true,
+          color: false,
+          viewMode,
+          width: 100,
+        }),
+      ).at(-1)!,
+    );
+  const source = line("source");
+  const rendered = line("rendered");
+  assert(source.includes("V Rendered"), source);
+  assert(rendered.includes("V Source"), rendered);
+});
+
 Deno.test("renderStatus: e / C / # hints appear only where they apply", () => {
   const doc = parseDocument(SAMPLE);
   const line = (over: Partial<ViewState>) =>

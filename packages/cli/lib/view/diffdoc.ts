@@ -1139,14 +1139,13 @@ function restoreLossyChangeGroup(
     const source = sourceFallbacks.get(line);
     ctx.lines[line].text = raw;
     ctx.lines[line].renderedSourceHidden = undefined;
-    ctx.lines[line].spans = source
-      ? shiftCompleteLineSpans(raw, source.spans) ??
-        shiftSpans(markerSpan(raw), source.spans)
-      : shiftSpans(markerSpan(raw), [{
-        col: 0,
-        text: raw.slice(1),
-        cls: "plain",
-      }]);
+    ctx.lines[line].spans =
+      (source ? shiftCompleteLineSpans(raw, source.spans) : null) ??
+        shiftSpans(markerSpan(raw), [{
+          col: 0,
+          text: raw.slice(1),
+          cls: "plain",
+        }]);
   }
 }
 
@@ -1283,5 +1282,6 @@ export const _internal = {
   parseGitBatchOutput,
   readGitBlobs,
   reconstructOldFile,
+  restoreLossyChangeGroup,
   shiftCompleteLineSpans,
 };

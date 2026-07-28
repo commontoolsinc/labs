@@ -207,7 +207,7 @@ export function fileSource(path: string): EditableSource {
       render: (source: Document): Document => {
         return {
           ...source,
-          lines: renderedLinesFor(language, source.text, path) ?? source.lines,
+          lines: renderedLinesFor(language, source.text, path)!,
         };
       },
     }

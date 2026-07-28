@@ -1,10 +1,16 @@
 import { assert, assertEquals } from "@std/assert";
+import { Lexer } from "marked";
 import { buildView } from "../lib/view/mod.ts";
 import { Session } from "../lib/view/session.ts";
 import type { Key } from "../lib/view/keys.ts";
-import { renderMarkdownLines } from "../lib/view/languages/markdown/markdown.ts";
+import type { Line } from "../lib/view/model.ts";
+import {
+  _internal as markdownInternals,
+  renderMarkdownLines,
+} from "../lib/view/languages/markdown/markdown.ts";
 import { parseDiff } from "../lib/view/diff.ts";
 import {
+  _internal as diffDocumentInternals,
   buildDiffDocument,
   type DiffWorkspace,
   type WorkspaceCache,
@@ -68,6 +74,14 @@ Deno.test("markdown rendered view formats blocks and inline content", () => {
   assert(
     lines[2].spans.some((span) => span.underline),
     "link text is underlined",
+  );
+  assert(
+    renderLineColored(lines[0], true).includes("\x1b[1;"),
+    "bold spans reach ANSI output",
+  );
+  assert(
+    renderLineColored(lines[2], true).includes("\x1b[4;"),
+    "underlined spans reach ANSI output",
   );
   assert(
     lines[2].spans.some((span) => span.cls === "string"),
@@ -251,6 +265,254 @@ Deno.test("markdown rendered view keeps inline content on its source lines", () 
   }
 });
 
+Deno.test("markdown rendered view composes lines without prebuilt spans", () => {
+  const composed = new markdownInternals.RichLine();
+  composed.appendLine({
+    text: "plain",
+    spans: [],
+    renderedSourceHidden: true,
+  });
+  assertEquals(composed.line(), {
+    text: "plain",
+    spans: [{ col: 0, text: "plain", cls: "plain" }],
+    renderedSourceHidden: true,
+  });
+
+  const padded = markdownInternals.splitRichLine({
+    text: "visible",
+    spans: [{ col: 0, text: "visible", cls: "plain" }],
+    renderedSourceHidden: true,
+  }, 3);
+  assertEquals(padded.map((line) => line.text), ["visible", "", ""]);
+  assert(padded.every((line) => line.renderedSourceHidden));
+});
+
+Deno.test("markdown rendered view retains readable source when lexing fails", () => {
+  const originalStaticLex = Lexer.lex;
+  const originalInstanceLex = Lexer.prototype.lex;
+  const throwLex = () => {
+    throw new Error("lexer unavailable");
+  };
+  Lexer.lex = throwLex as typeof Lexer.lex;
+  Lexer.prototype.lex = throwLex as typeof Lexer.prototype.lex;
+  try {
+    assertEquals(
+      renderMarkdownLines("plain **source**").map((line) => line.text),
+      ["plain source"],
+    );
+  } finally {
+    Lexer.lex = originalStaticLex;
+    Lexer.prototype.lex = originalInstanceLex;
+  }
+
+  const originalInline = Lexer.lexInline;
+  Lexer.lexInline = throwLex as typeof Lexer.lexInline;
+  try {
+    assertEquals(
+      markdownInternals.renderInlineLine("plain **source**").text,
+      "plain **source**",
+    );
+  } finally {
+    Lexer.lexInline = originalInline;
+  }
+
+  const throwingInlineLexer = {
+    inlineTokens: throwLex,
+  } as unknown as Lexer;
+  assertEquals(
+    markdownInternals.renderParagraphBlock(
+      { type: "paragraph", raw: "fallback" },
+      ["fallback"],
+      throwingInlineLexer,
+    ).map((line) => line.text),
+    ["fallback"],
+  );
+});
+
+Deno.test("markdown rendered view handles incomplete block token data", () => {
+  assertEquals(
+    markdownInternals.renderBlockToken(
+      { type: "space", raw: "\n" },
+      [""],
+    ).map((line) => line.text),
+    [""],
+  );
+  assertEquals(
+    markdownInternals.renderBlockToken(
+      { type: "extension", raw: "plain" },
+      ["plain"],
+    ).map((line) => line.text),
+    ["plain"],
+  );
+  assertEquals(
+    markdownInternals.renderCodeBlock(
+      { type: "code", raw: "body", text: "first\nsecond" },
+      ["first", "second"],
+    ),
+    [
+      {
+        text: "first",
+        spans: [{ col: 0, text: "first", cls: "string" }],
+        renderedSourceHidden: true,
+      },
+      {
+        text: "second",
+        spans: [{ col: 0, text: "second", cls: "string" }],
+        renderedSourceHidden: true,
+      },
+    ],
+  );
+  assertEquals(
+    markdownInternals.renderHtmlBlock(["plain"]).map((line) => line.text),
+    ["plain"],
+  );
+
+  const originalLex = Lexer.lex;
+  Lexer.lex = (() => [{
+    type: "space",
+    raw: "not present",
+  }]) as unknown as typeof Lexer.lex;
+  try {
+    assertEquals(
+      markdownInternals.renderMarkdownBlocks("source").map((line) => line.text),
+      ["source"],
+    );
+  } finally {
+    Lexer.lex = originalLex;
+  }
+
+  assertEquals(markdownInternals.tokenLineRange("\n\n", 0, [0, 1, 2]), null);
+});
+
+Deno.test("markdown rendered view handles incomplete list token data", () => {
+  assertEquals(
+    markdownInternals.renderListBlock(
+      { type: "list", raw: "- item" },
+      ["- item"],
+    ).map((line) => line.text),
+    ["• item"],
+  );
+  assertEquals(
+    markdownInternals.renderListBlock(
+      {
+        type: "list",
+        raw: "- item",
+        items: [{ type: "list_item", raw: "missing", text: "item" }],
+      },
+      ["- item"],
+    ).map((line) => line.text),
+    [""],
+  );
+  assertEquals(
+    markdownInternals.renderListBlock(
+      {
+        type: "list",
+        raw: "\n\n",
+        items: [{ type: "list_item", raw: "\n\n", text: "" }],
+      },
+      ["", ""],
+    ).map((line) => line.text),
+    ["", ""],
+  );
+  assertEquals(
+    markdownInternals.renderListBlock(
+      {
+        type: "list",
+        raw: "plain",
+        items: [{ type: "list_item", raw: "plain", text: "plain" }],
+      },
+      ["plain"],
+    ).map((line) => line.text),
+    [""],
+  );
+  assertEquals(
+    markdownInternals.renderListBlock(
+      {
+        type: "list",
+        raw: "- first\n  second",
+        items: [{
+          type: "list_item",
+          raw: "- first\n  second",
+          text: "first",
+        }],
+      },
+      ["- first", "  second"],
+    ).map((line) => line.text),
+    ["• first", "  second"],
+  );
+});
+
+Deno.test("markdown rendered view handles uncommon inline token shapes", () => {
+  const line = new markdownInternals.RichLine();
+  markdownInternals.appendInlineTokens(
+    line,
+    [
+      { type: "br", raw: "  \n" },
+      {
+        type: "extension",
+        raw: "outer",
+        tokens: [{ type: "text", raw: "nested", text: "nested" }],
+      },
+    ],
+    { cls: "plain" },
+    true,
+  );
+  assertEquals(line.line().text, "\nnested");
+
+  assertEquals(
+    markdownInternals.codeSpanText(
+      { type: "codespan", raw: "invalid", text: "fallback" },
+      true,
+    ),
+    "fallback",
+  );
+  assertEquals(
+    markdownInternals.codeSpanText(
+      { type: "codespan", raw: "` padded\ncode `", text: "" },
+      true,
+    ),
+    "padded\ncode",
+  );
+
+  const child = new markdownInternals.RichLine();
+  markdownInternals.appendTokenChildren(
+    child,
+    { type: "strong", raw: "fallback", text: "fallback" },
+    { cls: "plain", bold: true },
+  );
+  assertEquals(child.line().spans, [{
+    col: 0,
+    text: "fallback",
+    cls: "plain",
+    bold: true,
+  }]);
+});
+
+Deno.test("markdown rendered view handles incomplete HTML, fences, and tables", () => {
+  assertEquals(
+    markdownInternals.stripHtmlTags("plain <![CDATA[visible]]> <span"),
+    "plain visible <span",
+  );
+  assertEquals(markdownInternals.openingFence("plain"), null);
+  assertEquals(markdownInternals.openingFence("```bad`info"), null);
+
+  assertEquals(markdownInternals.tableAlignment("plain"), null);
+  assertEquals(markdownInternals.tableAlignment("bad | ---"), null);
+  assertEquals(markdownInternals.splitTableCells("plain"), null);
+  assertEquals(markdownInternals.splitTableCells("a | ``b|c``"), [
+    "a ",
+    " ``b|c``",
+  ]);
+  assertEquals(
+    markdownInternals.renderTableBlock([
+      "a | b",
+      "--- | ---",
+      "only one cell",
+    ]).map((line) => line.text),
+    ["a | b", "--- | ---", "only one cell"],
+  );
+});
+
 Deno.test("session toggles Markdown between source and rendered views", () => {
   const built = buildView(MARKDOWN, "notes.md");
   const session = new Session(
@@ -337,6 +599,43 @@ Deno.test("session can start rendered and recomputes visible search matches", ()
   assertEquals(session.view().viewMode, "source");
   assertEquals(session.view().matches?.length, 1);
   assertEquals(session.doc.lines[0].text, text.trim());
+});
+
+Deno.test("session preserves wrapping while changing Markdown views", () => {
+  const built = buildView(
+    "# Title\nA long line of Markdown content.\n",
+    "notes.md",
+  );
+  const session = new Session(
+    built.doc,
+    { color: false, showLineNumbers: false },
+    { width: 12, height: 5 },
+    undefined,
+    built.editSource,
+  );
+
+  press(session, "\\", "v");
+  assert(session.view().wrapLines);
+  assertEquals(session.view().viewMode, "rendered");
+
+  press(session, "e");
+  assertEquals(
+    session.view().message,
+    "Source view; line wrapping turned off for editing.",
+  );
+
+  const sourceSession = new Session(
+    built.doc,
+    { color: false, showLineNumbers: false },
+    { width: 12, height: 5 },
+    undefined,
+    built.editSource,
+  );
+  press(sourceSession, "\\", "e");
+  assertEquals(
+    sourceSession.view().message,
+    "Line wrapping turned off for editing.",
+  );
 });
 
 Deno.test("languages without a renderer remain in source view", () => {
@@ -540,6 +839,91 @@ Deno.test("rendered Markdown diff retains markers, tints, and source topology", 
     renderedMultilineCode.lines.slice(3, 6).map((line) => line.text),
     [" first", "-second", "+third"],
   );
+});
+
+Deno.test("rendered Markdown diff restores hidden old-file source", () => {
+  const diffText = `diff --git a/notes.md b/notes.md
+index 1234..5678 100644
+--- a/notes.md
++++ b/notes.md
+@@ -1,2 +1 @@
+-# Removed heading
+ keep
+`;
+  const model = parseDiff(diffText);
+  assert(model);
+  const workspace: DiffWorkspace = {
+    resolve: () => "/workspace/notes.md",
+    read: () => "keep\n",
+    readBlob: (object) =>
+      object === "1234" ? "# Removed heading\nkeep\n" : null,
+  };
+  const rendered = buildDiffDocument(
+    diffText,
+    model,
+    workspace,
+    new Map(),
+    "rendered",
+  ).doc;
+  assertEquals(rendered.lines[5].text, "-# Removed heading");
+  assertEquals(rendered.lines[5].renderedSourceHidden, undefined);
+});
+
+Deno.test("rendered Markdown diff restores source with every span fallback", () => {
+  const lines: Line[] = [
+    {
+      text: "-rendered",
+      spans: [],
+      renderedSourceHidden: true,
+    },
+    {
+      text: "-rendered",
+      spans: [],
+      renderedSourceHidden: true,
+    },
+    {
+      text: "-rendered",
+      spans: [],
+      renderedSourceHidden: true,
+    },
+  ];
+  const context = {
+    rawLines: ["-same", "-raw", "-plain"],
+    lines,
+  } as unknown as Parameters<
+    typeof diffDocumentInternals.restoreLossyChangeGroup
+  >[2];
+  const sourceFallbacks = new Map([
+    [
+      0,
+      {
+        text: "same",
+        spans: [{ col: 0, text: "same", cls: "sectionHeader" as const }],
+      },
+    ],
+    [
+      1,
+      {
+        text: "different",
+        spans: [{ col: 0, text: "different", cls: "string" as const }],
+      },
+    ],
+  ]);
+
+  diffDocumentInternals.restoreLossyChangeGroup(
+    [0, 1, 2],
+    [],
+    context,
+    sourceFallbacks,
+  );
+
+  assertEquals(lines.map((line) => line.text), ["-same", "-raw", "-plain"]);
+  assertEquals(lines[0].spans.map((span) => span.cls), [
+    "diffDel",
+    "sectionHeader",
+  ]);
+  assertEquals(lines[1].spans.map((span) => span.cls), ["diffDel", "plain"]);
+  assertEquals(lines[2].spans.map((span) => span.cls), ["diffDel", "plain"]);
 });
 
 Deno.test("diff expansion rebuilds the active rendered Markdown view", () => {

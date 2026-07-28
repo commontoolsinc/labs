@@ -5,12 +5,13 @@
  * `diffSemanticsFor` composes the diff view's semantic layer from the languages
  * present, scoped to each one's files.
  */
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import {
   diffSemanticsFor,
   distinctLanguages,
   languageForFile,
+  renderedLinesFor,
 } from "../lib/view/languages/language.ts";
 import { typeScriptLanguage } from "../lib/view/languages/typescript/language.ts";
 import { markdownLanguage } from "../lib/view/languages/markdown/language.ts";
@@ -59,6 +60,23 @@ Deno.test("distinctLanguages: dedupes in first-seen order", () => {
   assertEquals(
     languages.map((l) => l.id),
     ["typescript", "markdown", "json", "yaml", "python", "plain-text"],
+  );
+});
+
+Deno.test("renderedLinesFor rejects a renderer that changes line topology", () => {
+  assertThrows(
+    () =>
+      renderedLinesFor(
+        {
+          ...markdownLanguage,
+          id: "malformed",
+          renderLines: () => [],
+        },
+        "first\nsecond",
+        "notes.md",
+      ),
+    Error,
+    "malformed rendered 0 lines for 2 source lines",
   );
 });
 
