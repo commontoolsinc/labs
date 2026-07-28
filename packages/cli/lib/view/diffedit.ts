@@ -1341,34 +1341,19 @@ function applyCompleteNewFile(
     spliceStart(a.info) - spliceStart(b.info)
   );
   let delta = 0;
-  let groupStart = 0;
-  while (groupStart < ordered.length) {
-    const start = spliceStart(ordered[groupStart].info);
-    let groupEnd = groupStart + 1;
-    while (
-      groupEnd < ordered.length &&
-      spliceStart(ordered[groupEnd].info) === start
-    ) {
-      groupEnd++;
-    }
-    for (let index = groupStart; index < groupEnd; index++) {
-      const { hunk, fileName } = ordered[index];
-      applyCompleteHunkSide(
-        rawLines,
-        model,
-        lines,
-        hunk,
-        "new",
-        complete,
-        fileName,
-        start + delta - spliceStart(hunk),
-      );
-    }
-    for (let index = groupStart; index < groupEnd; index++) {
-      const { hunk, info } = ordered[index];
-      delta += hunk.newCount - info.newCount;
-    }
-    groupStart = groupEnd;
+  for (const { hunk, info, fileName } of ordered) {
+    const start = spliceStart(info);
+    applyCompleteHunkSide(
+      rawLines,
+      model,
+      lines,
+      hunk,
+      "new",
+      complete,
+      fileName,
+      start + delta - spliceStart(hunk),
+    );
+    delta += hunk.newCount - info.newCount;
   }
 }
 

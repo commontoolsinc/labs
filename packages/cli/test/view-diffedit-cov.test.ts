@@ -21,6 +21,7 @@ import {
   createDiffHighlighter,
   diffSource,
 } from "../lib/view/diffedit.ts";
+import { typeScriptLanguage } from "../lib/view/languages/typescript/language.ts";
 
 /** A workspace backed by a real temp dir. */
 function tempWs(
@@ -529,6 +530,23 @@ Deno.test("diffedit cov: the highlighter's lines getter returns the seeded lines
   }
 });
 
+Deno.test("diffedit cov: a partial seed falls back to rendering the edited line", () => {
+  const bodyLine = DIFF.split("\n").indexOf("+const y = 2;");
+  const partialSeed = createDiffHighlighter(DIFF).lines.slice(0, bodyLine);
+  const highlighter = createDiffHighlighter(
+    DIFF,
+    partialSeed,
+  );
+  const edited = DIFF.replace("+const y = 2;", "+const y = 20;");
+  const changed = highlighter.update(edited)[bodyLine];
+  assertEquals(changed.text, "+const y = 20;");
+  assertEquals(changed.spans[0].cls, "diffAdd");
+  assertEquals(
+    changed.spans.find((span) => span.text === "20")?.cls,
+    "number",
+  );
+});
+
 Deno.test("diffedit cov: deferred parsing selects only changed stateful files", () => {
   const baselines = new Map([
     ["/workspace/changed.ts", "const changed = 1;\n"],
@@ -551,6 +569,129 @@ Deno.test("diffedit cov: deferred parsing selects only changed stateful files", 
     )],
     [["/workspace/changed.ts", "const changed = 2;\n"]],
   );
+});
+
+Deno.test("diffedit cov: repeated non-overlapping file sections are highlighted once", () => {
+  const file = [
+    "const value = `",
+    "first",
+    "middle",
+    "second",
+    "`;",
+    "",
+  ].join("\n");
+  const firstSection = [
+    "diff --git a/template.ts b/template.ts",
+    "--- a/template.ts",
+    "+++ b/template.ts",
+    "@@ -2 +2 @@",
+    "-old first",
+    "+first",
+  ].join("\n");
+  const secondSection = [
+    "diff --git a/template.ts b/template.ts",
+    "--- a/template.ts",
+    "+++ b/template.ts",
+    "@@ -4 +4 @@",
+    "-old second",
+    "+second",
+  ].join("\n");
+  const diff = `${firstSection}\n${secondSection}\n`;
+  const { ws, done } = tempWs({ "template.ts": file });
+  const language = typeScriptLanguage as {
+    createHighlighter: typeof typeScriptLanguage.createHighlighter;
+  };
+  const createHighlighter = language.createHighlighter;
+  let completeCreates = 0;
+  let completeUpdates = 0;
+  language.createHighlighter = (text, fileName) => {
+    completeCreates++;
+    const highlighter = createHighlighter(text, fileName);
+    return {
+      get lines() {
+        return highlighter.lines;
+      },
+      update: (next) => {
+        completeUpdates++;
+        return highlighter.update(next);
+      },
+    };
+  };
+  try {
+    const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+    const highlighter = diffSource(ws, built.edit).createHighlighter!(
+      diff,
+      built.doc.lines,
+    );
+    const editedText = diff
+      .replace("+first", "+first changed")
+      .replace("+second", "+second changed");
+    const highlighted = highlighter.update(editedText);
+    for (const text of ["first changed", "second changed"]) {
+      const changed = highlighted.find((line) => line.text === `+${text}`);
+      assertEquals(
+        changed?.spans.find((span) => span.text === text)?.cls,
+        "template",
+      );
+    }
+    assertEquals(completeCreates, 1);
+    assertEquals(completeUpdates, 0);
+  } finally {
+    language.createHighlighter = createHighlighter;
+    done();
+  }
+});
+
+Deno.test("diffedit cov: deferred parsing preserves optional blob readers", () => {
+  const file = ["const value = `", "before", "`;", ""].join("\n");
+  const diff = [
+    "diff --git a/template.ts b/template.ts",
+    "index 1111111..2222222 100644",
+    "--- a/template.ts",
+    "+++ b/template.ts",
+    "@@ -2 +2 @@",
+    "-old",
+    "+before",
+    "",
+  ].join("\n");
+  const { root, done } = tempWs({ "template.ts": file });
+  try {
+    for (const reader of ["readBlob", "readBlobs"] as const) {
+      let calls = 0;
+      const optionalReader: Pick<DiffWorkspace, typeof reader> =
+        reader === "readBlob"
+          ? {
+            readBlob: () => {
+              calls++;
+              return null;
+            },
+          }
+          : {
+            readBlobs: () => {
+              calls++;
+              return new Map();
+            },
+          };
+      const ws: DiffWorkspace = {
+        resolve: (path) => join(root, path),
+        read: (path) => Deno.readTextFileSync(path),
+        ...optionalReader,
+      };
+      const built = buildDiffDocument(diff, parseDiff(diff)!, ws);
+      const source = diffSource(ws, built.edit);
+      calls = 0;
+      const editedText = diff.replace("+before", "+after");
+      const reparsed = source.parse(editedText);
+      assert(calls > 0, `${reader} was forwarded to the deferred parse`);
+      const changed = reparsed.lines.find((line) => line.text === "+after");
+      assertEquals(
+        changed?.spans.find((span) => span.text === "after")?.cls,
+        "template",
+      );
+    }
+  } finally {
+    done();
+  }
 });
 
 Deno.test("diffedit cov: the highlighter recolours a Markdown body line via the +++ header scan", () => {
@@ -690,6 +831,13 @@ Deno.test("diffedit cov: a diff matching no file on disk yields a read-only sour
   assertEquals(
     src.save("any text"),
     "Nothing to save — this diff matches no file on disk.",
+  );
+  const parsed = src.parse(DIFF);
+  assertEquals(parsed.text, DIFF);
+  assert(
+    parsed.lines.some((line) =>
+      line.spans.some((span) => span.cls === "diffHunk")
+    ),
   );
 });
 

@@ -421,6 +421,49 @@ Deno.test("python: soft keywords remain identifiers outside statements", () => {
   assertEquals(verbatim(lines), source);
 });
 
+Deno.test("python: soft-keyword scanners handle nested and incomplete forms", () => {
+  const misplacedType = pythonHighlightLines("value type Alias = int");
+  assertEquals([...classesOf(misplacedType, "type")], ["identifier"]);
+
+  const genericAlias = [
+    "type Alias[",
+    '    T: tuple[str, "]"],',
+    "    # punctuation in this comment does not close the parameters: ]",
+    "] = list[T]",
+  ].join("\n");
+  const genericLines = pythonHighlightLines(genericAlias);
+  assertEquals([...classesOf(genericLines, "type")], ["storageKeyword"]);
+  assertEquals(verbatim(genericLines), genericAlias);
+
+  const commentedMatch = pythonHighlightLines(
+    "match subject # fake suite colon:",
+  );
+  assertEquals([...classesOf(commentedMatch, "match")], ["identifier"]);
+
+  const stringMatch = pythonHighlightLines('match "fake:"');
+  assertEquals([...classesOf(stringMatch, "match")], ["identifier"]);
+
+  const incompleteMatch = pythonHighlightLines("match subject");
+  assertEquals([...classesOf(incompleteMatch, "match")], ["identifier"]);
+
+  const escapedFormatSpec = 'value = f"{item:{{x}" + after';
+  const formatLines = pythonHighlightLines(escapedFormatSpec);
+  assertEquals([...classesOf(formatLines, "after")], ["identifier"]);
+  assertEquals(verbatim(formatLines), escapedFormatSpec);
+
+  const crlfAlias = "type Alias \\\r\n    = int";
+  assertEquals(
+    [...classesOf(pythonHighlightLines(crlfAlias), "type")],
+    ["storageKeyword"],
+  );
+
+  for (const source of [String.raw`type \ Alias = int`, "type"]) {
+    const lines = pythonHighlightLines(source);
+    assertEquals([...classesOf(lines, "type")], ["identifier"]);
+    assertEquals(verbatim(lines), source);
+  }
+});
+
 Deno.test("python: malformed and incomplete input stays lossless", () => {
   for (
     const source of [
