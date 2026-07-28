@@ -9,6 +9,18 @@ export function isRecord(
   return typeof value === "object" && value !== null;
 }
 
+/** A record whose string keys can be read but not assigned through this type. */
+export type ReadonlyRecord = Readonly<Record<string, unknown>>;
+
+/**
+ * Predicate for narrowing a read-only record type, including frozen values.
+ * @param value - The value to check
+ * @returns True if the value is a record object
+ */
+export function isReadonlyRecord(value: unknown): value is ReadonlyRecord {
+  return typeof value === "object" && value !== null;
+}
+
 /**
  * Predicate for narrowing a `function` type.
  * @param value - The value to check
