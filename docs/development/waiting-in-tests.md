@@ -371,26 +371,37 @@ logical time to zero and drops pending timers: one frozen clock wraps a whole
 `describe`, so a suite whose cases each read absolute coarsened time (the `#now`
 grid tests) calls it from `beforeEach` to start each case from a known instant.
 
-Two files stay on the real clock, listed with their reasons in the runner
-preload's `realClockFiles` list. A resume runtime drives a real loopback
-memory-client transport whose
-connect/mount/sync does not complete under the fake clock, so the resume
-deadlocks. And a nested-subagent generateObject aborts its delegate tool because
-the tool-calling path's own timeout auto-advances against the subagent's outbox
+Three files stay on the real clock, listed with their reasons in the runner
+preload's `realClockFiles` list. Two are resume tests, where a second runtime
+resumes from storage over a real loopback memory-client transport. In the first,
+the transport's connect/mount/sync does not complete under the fake clock, so
+the resume deadlocks. In the second, the reload holds each per-element child
+document back by a delay to open the resume window it observes; that delay is a
+frozen test-file timer, and the resuming runtime's pull/idle machinery blocks on
+the deliveries it gates, so the resume deadlocks there too. The third is a
+nested-subagent generateObject that aborts its delegate tool because the
+tool-calling path's own timeout auto-advances against the subagent's outbox
 progress rather than the wall clock, so the delegate reports "tool call timed
 out" before it completes. These are the honest exceptions: the clock they need
 is the real one, and their own sleeps are the honest way to wait.
 
-One caveat governs whether a runner test can leave the exemption list, and it is
-worth stating because it is easy to trip over. The `test/` versus `src/`
-classification reads the caller's stack frame through `new Error().stack`, and
-SES's `errorTaming` blanks that stack once a runtime locks down. From the first
-`Runtime` a test builds, the harness can no longer see the `test/` frame that
-scheduled a timer, so a positive-delay `setTimeout` written in test code is
-classified as a production timer and auto-advances instead of freezing. A test
-that schedules its own wall-clock deadline — a `setTimeout(reject, ms)` guarding
-a wait — therefore has that deadline fire early under auto-advance rather than
-acting as a backstop. The fix is the same one the rest of this note prescribes:
+The `test/` versus `src/` classification reads the scheduling frame from a stack
+trace, and that has to keep working after a runtime is running. SES's
+`errorTaming` blanks `new Error().stack` from the first `Runtime` a test builds
+onward — safe taming still captures each error's frames but hides them behind the
+tamed `stack` accessor, which reads back empty for the rest of the process. So
+the harness does not read the frame that way. It reads it through
+`getStackString`, the hook SES installs on the global during lockdown, which
+still returns the real frames after the plain accessor has gone empty; the
+runtime's own error mapping reads stacks through the same hook. A positive-delay
+`setTimeout` written in test code is therefore classified as a `test/` timer and
+freezes across the lockdown boundary, exactly as it does before any runtime
+exists.
+
+One consequence is worth stating because it is easy to trip over. A test that
+guards a wait with its own wall-clock deadline — a `setTimeout(reject, ms)` — has
+that deadline frozen along with every other test sleep, so it never fires and
+backstops nothing. The remedy is the one the rest of this note prescribes:
 resolve the wait on the event itself with no deadline, and let a signal that
 never arrives quiesce the loop so Deno fails the pending wait. That is what let
 the multi-space mergeable-commit test move onto the fake clock — its retry
