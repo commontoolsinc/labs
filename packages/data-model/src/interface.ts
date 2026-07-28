@@ -171,7 +171,7 @@ export type FabricValue =
   | undefined;
 
 /** A fabric value other than `null` or `undefined`. */
-export type NonNullableFabricValue = Exclude<FabricValue, null | undefined>;
+export type NonNullableFabricValue = NonNullable<FabricValue>;
 
 /** Array of fabric values. */
 export interface FabricArray extends ArrayLike<FabricValue> {}
