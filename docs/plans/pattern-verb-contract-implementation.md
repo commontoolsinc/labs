@@ -217,13 +217,27 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   fails if the path ever awaits `runtime.idle()` or `manager.synced()`. The
   live acceptance check — a deliberately slow derived recomputation cannot
   delay `addTopic` acknowledgement — rides with D3's integration scenarios.
-- Integration tests (isolated toolshed, `isolated-test-processes`
+- ~~Integration tests (isolated toolshed, `isolated-test-processes`
   conventions), four timeout/retry scenarios: timeout before dispatch (retry
   re-executes; one topic); timeout after dispatch, before commit
   acknowledgement; commit succeeded but the response was lost (retry
   collides, reads the original back, exits 0); and a retry from a fresh
   process with the same id — in every case exactly one topic exists
-  afterwards.
+  afterwards.~~ — **done (D3)**: `run_piece_call_retry` in
+  `packages/cli/integration/integration.sh`, running in the existing
+  `piece-call` shard against its own toolshed, each scenario in its own
+  space. Every scenario ends on the same assertion — exactly one message
+  recorded — because that is the property an agent depends on. The
+  killed-after-dispatch case is triggered by the CLI's own `invocation:`
+  announcement, read through a blocking pipe read, so it lands in the window
+  without racing a clock; a `--message` that differs on the retry proves the
+  settled outcome stands rather than being overwritten. Each scenario spawns
+  a fresh `cf` process, so the fresh-process case is the default rather than
+  a special one. One half of the third scenario is not covered yet: the
+  collision is asserted through `deduplicated` and exit 0, but not by reading
+  a *result* back off the receipt, because a void verb leaves none to read.
+  That assertion joins when WS-C gives verbs return values — or sooner
+  against `plainResultReceipts`.
 - **Exit (Phase 2, before WS-C):** the duplicate-on-retry bug is dead on the
   live board. **Exit (Phase 4, with WS-C):** the retry returns the original
   result.
