@@ -5,11 +5,11 @@
 `cf view [file]` is an interactive pager for transformed TypeScript, source
 files, and unified diffs. Named Markdown, JSON, JSONC, YAML, and Python files
 use their own syntax highlighting. A named file with unrecognized syntax is
-shown as plain text. Markdown files can switch between the source and a
-rendered terminal view with `V`. The rendered view formats headings, emphasis,
-links, quotes, lists, task markers, tables, rules, and code. The same view is
-available for Markdown files inside a unified diff; diff markers, addition and
-deletion tints, line positions, and hunk expansion remain in place.
+shown as plain text. Markdown files can switch between the source and a rendered
+terminal view with `V`. The rendered view formats headings, emphasis, links,
+quotes, lists, task markers, tables, rules, and code. The same view is available
+for Markdown files inside a unified diff; diff markers, addition and deletion
+tints, line positions, and hunk expansion remain in place.
 
 A piped input without a file name remains TypeScript unless it is detected as a
 diff. Redirected output keeps the source text verbatim by default and adds ANSI

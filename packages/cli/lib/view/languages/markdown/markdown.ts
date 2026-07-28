@@ -60,11 +60,14 @@ export function highlightMarkdownLines(text: string): Line[] {
  * glyphs and rich span modifiers.
  */
 export function renderMarkdownLines(text: string): Line[] {
-  const normalized = text.split("\n").map(stripCarriageReturn).join("\n");
-  return renderMarkdownBlocks(
-    normalized,
-    referenceAwareLexer(normalized),
+  const normalized = normalizeMarkdownText(text);
+  const lines = renderMarkdownBlocks(
+    normalized.text,
+    referenceAwareLexer(normalized.text),
   );
+  return normalized.loneCarriageMarker
+    ? restoreLoneCarriages(lines, normalized.loneCarriageMarker)
+    : lines;
 }
 
 /** A full Markdown {@link Document}: highlighted lines, headings as the
@@ -198,8 +201,34 @@ function hiddenLine(): Line {
   return { text: "", spans: [], renderedSourceHidden: true };
 }
 
-function stripCarriageReturn(line: string): string {
-  return line.endsWith("\r") ? line.slice(0, -1) : line;
+function normalizeMarkdownText(
+  text: string,
+): { text: string; loneCarriageMarker?: string } {
+  const transportNormalized = text.replace(/\r(?=\n|$)/g, "");
+  if (!transportNormalized.includes("\r")) {
+    return { text: transportNormalized };
+  }
+  for (let code = 0xe000; code <= 0xf8ff; code++) {
+    const marker = String.fromCodePoint(code);
+    if (!transportNormalized.includes(marker)) {
+      return {
+        text: transportNormalized.replaceAll("\r", marker),
+        loneCarriageMarker: marker,
+      };
+    }
+  }
+  return { text: transportNormalized.replaceAll("\r", " ") };
+}
+
+function restoreLoneCarriages(lines: Line[], marker: string): Line[] {
+  return lines.map((line) => ({
+    ...line,
+    text: line.text.replaceAll(marker, " "),
+    spans: line.spans.map((span) => ({
+      ...span,
+      text: span.text.replaceAll(marker, " "),
+    })),
+  }));
 }
 
 function singleStyledLine(text: string, cls: TokenClass): Line {
@@ -269,6 +298,7 @@ function renderBlockToken(
         token.text ?? "",
         "sectionHeader",
         inlineLexer,
+        true,
       );
       return splitRichLine(
         { ...heading, renderedSourceHidden: true },
@@ -359,6 +389,20 @@ function renderHtmlBlock(
     !block.includes("]]>")
   ) {
     return source.map((line) => singleStyledLine(line, "plain"));
+  }
+  const rawTag = rawHtmlBlockTag(block);
+  if (rawTag) {
+    const visibleLines = stripRawHtmlContainer(block, rawTag).split("\n");
+    return source.map((sourceLine, index) => {
+      const visible = visibleLines[index] ?? "";
+      const line = singleStyledLine(
+        visible,
+        rawTag === "pre" ? "string" : "plain",
+      );
+      return visible !== sourceLine
+        ? { ...line, renderedSourceHidden: true }
+        : line;
+    });
   }
   const visibleLines = stripHtmlTags(block).split("\n");
   return source.map((sourceLine, index) => {
@@ -588,6 +632,7 @@ function renderInlineLine(
   source: string,
   cls: TokenClass = "plain",
   inlineLexer?: Lexer,
+  multiline = false,
 ): Line {
   const line = new RichLine();
   let tokens: readonly InlineToken[];
@@ -597,7 +642,7 @@ function renderInlineLine(
     line.append(source, { cls });
     return line.line();
   }
-  appendInlineTokens(line, tokens, { cls });
+  appendInlineTokens(line, tokens, { cls }, multiline);
   return line.line();
 }
 
@@ -755,7 +800,7 @@ function appendInlineTokens(
           ...style,
           cls: "callName",
           italic: true,
-        });
+        }, multiline);
         if (line.text.length === contentStart) {
           line.append("image", {
             ...style,
@@ -894,6 +939,36 @@ function stripHtmlTags(source: string): string {
   return out;
 }
 
+function rawHtmlBlockTag(source: string): string | null {
+  const match = source.match(
+    /^ {0,3}<(script|pre|style|textarea)(?=[\t\n\f\r />])/i,
+  );
+  return match?.[1].toLowerCase() ?? null;
+}
+
+function stripRawHtmlContainer(source: string, tag: string): string {
+  const openStart = source.indexOf("<");
+  const openEnd = htmlMarkupEnd(source, openStart);
+  if (openEnd === null) return source;
+
+  const lower = source.toLowerCase();
+  let closeStart = lower.indexOf(`</${tag}`, openEnd);
+  let closeEnd: number | null = null;
+  while (closeStart >= 0) {
+    closeEnd = htmlMarkupEnd(source, closeStart);
+    if (closeEnd !== null) break;
+    closeStart = lower.indexOf(`</${tag}`, closeStart + tag.length + 2);
+  }
+
+  const hiddenOpen = source.slice(openStart, openEnd).replace(/[^\n]/g, "");
+  if (closeStart < 0 || closeEnd === null) {
+    return source.slice(0, openStart) + hiddenOpen + source.slice(openEnd);
+  }
+  const hiddenClose = source.slice(closeStart, closeEnd).replace(/[^\n]/g, "");
+  return source.slice(0, openStart) + hiddenOpen +
+    source.slice(openEnd, closeStart) + hiddenClose + source.slice(closeEnd);
+}
+
 function htmlMarkupEnd(source: string, start: number): number | null {
   if (source.startsWith("<?", start)) {
     const end = source.indexOf("?>", start + 2);
@@ -901,9 +976,11 @@ function htmlMarkupEnd(source: string, start: number): number | null {
   }
 
   let nameStart = start + 1;
+  let closing = false;
   if (source[nameStart] === "!") {
     nameStart++;
   } else if (source[nameStart] === "/") {
+    closing = true;
     nameStart++;
   }
   if (!/[A-Za-z]/.test(source[nameStart] ?? "")) return null;
@@ -912,19 +989,53 @@ function htmlMarkupEnd(source: string, start: number): number | null {
   while (/[A-Za-z0-9-]/.test(source[nameEnd] ?? "")) nameEnd++;
   if (!/[\t\n\f\r />]/.test(source[nameEnd] ?? "")) return null;
 
-  let quote: "'" | '"' | null = null;
-  let end = nameEnd;
-  for (; end < source.length; end++) {
-    const char = source[end];
-    if (quote) {
-      if (char === quote) quote = null;
-    } else if (char === "'" || char === '"') {
-      quote = char;
-    } else if (char === ">") {
-      break;
-    }
+  if (source[start + 1] === "!") {
+    const end = source.indexOf(">", nameEnd);
+    return end < 0 ? null : end + 1;
   }
-  return end < source.length ? end + 1 : null;
+
+  let cursor = skipHtmlSpace(source, nameEnd);
+  if (closing) {
+    return source[cursor] === ">" ? cursor + 1 : null;
+  }
+
+  for (;;) {
+    if (source[cursor] === ">") return cursor + 1;
+    if (source[cursor] === "/" && source[cursor + 1] === ">") {
+      return cursor + 2;
+    }
+    if (!/[A-Za-z_:]/.test(source[cursor] ?? "")) return null;
+
+    cursor++;
+    while (/[A-Za-z0-9_.:-]/.test(source[cursor] ?? "")) cursor++;
+    cursor = skipHtmlSpace(source, cursor);
+    if (source[cursor] !== "=") continue;
+
+    cursor = skipHtmlSpace(source, cursor + 1);
+    const quote = source[cursor];
+    if (quote === "'" || quote === '"') {
+      const end = source.indexOf(quote, cursor + 1);
+      if (end < 0) return null;
+      cursor = skipHtmlSpace(source, end + 1);
+      continue;
+    }
+
+    const valueStart = cursor;
+    while (
+      cursor < source.length &&
+      !/[\t\n\f\r "'=<>`]/.test(source[cursor])
+    ) {
+      cursor++;
+    }
+    if (cursor === valueStart) return null;
+    cursor = skipHtmlSpace(source, cursor);
+  }
+}
+
+function skipHtmlSpace(source: string, start: number): number {
+  let end = start;
+  while (/[\t\n\f\r ]/.test(source[end] ?? "")) end++;
+  return end;
 }
 
 function appendTokenChildren(

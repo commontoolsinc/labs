@@ -287,8 +287,30 @@ Deno.test("markdown rendered view keeps inline content on its source lines", () 
   );
   assertEquals(image.map((line) => line.text), ["▧ alt", " after"]);
 
+  const heading = renderMarkdownLines("foo  \nbar\n---");
+  assertEquals(heading.map((line) => line.text), ["foo", "bar", ""]);
+
+  const imageBreak = renderMarkdownLines("![first  \nsecond](x) after");
+  assertEquals(imageBreak.map((line) => line.text), [
+    "▧ first",
+    "second after",
+  ]);
+
+  const loneCarriage = renderMarkdownLines("# hi\rbody");
+  assertEquals(loneCarriage.map((line) => line.text), ["hi body"]);
+
   for (
-    const line of [...code, ...entity, ...html, ...comment, ...link, ...image]
+    const line of [
+      ...code,
+      ...entity,
+      ...html,
+      ...comment,
+      ...link,
+      ...image,
+      ...heading,
+      ...imageBreak,
+      ...loneCarriage,
+    ]
   ) {
     assertEquals(
       line.spans.map((span) => span.text).join(""),
@@ -332,6 +354,32 @@ Deno.test("markdown rendered view strips multiline block HTML", () => {
     "",
   ]);
   assertEquals(script[1].renderedSourceHidden, undefined);
+
+  const rawScript = renderMarkdownLines([
+    "<script>",
+    'if (a<b && c>d) alert("safe");',
+    "const template = `[x](url)`;",
+    "</script>",
+  ].join("\n"));
+  assertEquals(rawScript.map((line) => line.text), [
+    "",
+    'if (a<b && c>d) alert("safe");',
+    "const template = `[x](url)`;",
+    "",
+  ]);
+  assertEquals(rawScript[1].renderedSourceHidden, undefined);
+  assertEquals(rawScript[2].renderedSourceHidden, undefined);
+
+  const style = renderMarkdownLines([
+    "<style>",
+    ".x{width:calc(1<em + 2>rem)}",
+    "</style>",
+  ].join("\n"));
+  assertEquals(style.map((line) => line.text), [
+    "",
+    ".x{width:calc(1<em + 2>rem)}",
+    "",
+  ]);
 });
 
 Deno.test("rendered Markdown diff keeps changed multiline HTML tags visible", () => {
