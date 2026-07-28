@@ -181,6 +181,24 @@ export type PendingRead = {
    * emit: top-of-stack only, carrying no lower-layer dependencies).
    */
   localSeq: number | number[];
+  /**
+   * The reader's confirmed basis for THIS document, in the SERVER's
+   * space-log seq space (an accepted-commit `seq`, NOT the session's
+   * localSeq space): the seq of the last accepted write to this document
+   * that the client's confirmed view reflected at build time, or 0 for a
+   * document its subscriptions never covered.
+   *
+   * When present, the staleness scan covers the FULL interval
+   * `(basisSeq, head]`, excluding the session's own accepted commits — FIFO
+   * admission guarantees every own accepted commit in that interval has a
+   * lower localSeq than the reader and was therefore part of the reader's
+   * materialized view. This is the CT-1910 repair
+   * (`PendingStacks_Repaired.cfg` certifies it); when absent (a legacy
+   * client), staleness is based at the HIGHEST dependency's resolution seq,
+   * whose known unsoundness is recorded against INV-1 in
+   * docs/specs/memory-v2/09-invariants.md.
+   */
+  basisSeq?: number;
   /** See {@link ConfirmedRead.nonRecursive}. */
   nonRecursive?: boolean;
 };

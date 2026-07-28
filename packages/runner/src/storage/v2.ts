@@ -340,6 +340,16 @@ type PendingCommitRead = {
    * server can never durably accept a commit the client cascade-rejects.
    */
   localSeq: number | number[];
+  /**
+   * The reader's confirmed basis for THIS document, in the SERVER's seq
+   * space — the same value the confirmed branch emits as `seq`, which the
+   * pre-CT-1910 pending shape discarded. A server that understands it scans
+   * staleness over the FULL interval (basisSeq, head] excluding the
+   * session's own accepted commits, repairing the pending-read basis
+   * over-advance; older servers ignore the field and keep the max-dependency
+   * basis. See {@link PendingRead.basisSeq} (memory/v2.ts).
+   */
+  basisSeq: number;
   nonRecursive?: boolean;
 };
 
@@ -3456,6 +3466,9 @@ class SpaceReplica implements ISpaceReplica {
           scope,
           path,
           localSeq: layers.length === 1 ? layers[0] : layers,
+          // The true confirmed basis this doc's view sat on — the same value
+          // the confirmed branch below emits (CT-1910).
+          basisSeq: confirmedSeq ?? record?.confirmed.seq ?? 0,
           ...shape,
         });
       } else {

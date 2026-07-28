@@ -72,14 +72,20 @@ Checked by: the durable-history oracle (any hit is by construction a
 violation); the TLA+ model's `ReadCoherence` invariant; the differential
 harness's replay comparison.
 
-Known deviations: **CT-1910** (pending-read basis over-advance): the
-staleness scan for a pending read is based at the highest dependency's
-resolution seq, so overlapping foreign writes landing between the reader's
-confirmed basis and that seq are not scanned. The planned repair (scan the
-full interval from the reader's confirmed basis, excluding only the reader's
-own resolved session stack) restores INV-1; the TLA+ config
-`PendingStacks_Current.cfg` reproduces the violation and
-`PendingStacks_Repaired.cfg` certifies the repair in the bounded model.
+Known deviations: **CT-1910** (pending-read basis over-advance), repaired
+for readers that declare `basisSeq` and RETAINED for legacy readers that do
+not: a pending read without `basisSeq` is scanned from the highest
+dependency's resolution seq, so overlapping foreign writes landing between
+the reader's confirmed basis and that seq are not scanned. A read declaring
+`basisSeq` is scanned over the full interval from that basis, excluding the
+reader's own session's accepted commits (03-commit-model.md §3.6.3) — the
+shape current clients always emit. The TLA+ config
+`PendingStacks_Current.cfg` reproduces the legacy-shape violation (kept as a
+regression witness, alongside the legacy-shape engine test in
+`packages/memory/test/v2-pending-read-basis-overadvance.test.ts`) and
+`PendingStacks_Repaired.cfg` certifies the repaired shape in the bounded
+model. The residual deviation retires when clients that omit `basisSeq`
+fall below the support floor.
 
 ### INV-2 — Overlap over-approximation only
 

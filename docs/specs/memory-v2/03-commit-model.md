@@ -154,13 +154,22 @@ interface PendingRead {
   path: ReadPath;
   // The dependency set: every pending layer the read's materialized view
   // sat on. Each element must have resolved to an ACCEPTED commit for this
-  // commit to be applicable; the staleness check (§3.6.1) runs once, based
-  // at the resolution of the HIGHEST element — the document's top-of-stack
-  // layer below the reader, which the array MUST include (§3.5). A scalar
-  // is the single-layer form, and the only form a client may send to a
-  // server that has not advertised the `pendingReadStacks` capability in
-  // the hello exchange.
+  // commit to be applicable; the staleness check (§3.6.1) runs once per
+  // read, from the basis §3.6.3 selects. A scalar is the single-layer
+  // form, and the only form a client may send to a server that has not
+  // advertised the `pendingReadStacks` capability in the hello exchange.
   localSeq: number | number[];
+  // The reader's confirmed basis for THIS document, in the SERVER's seq
+  // space: the seq of the last accepted write to the document that the
+  // client's confirmed view reflected at build time (0 for a document its
+  // subscriptions never covered). When present, the staleness check scans
+  // the FULL interval from this basis, excluding the session's own accepted
+  // commits (§3.6.3) — the CT-1910 repair. When absent (a legacy client),
+  // staleness is based at the resolution of the HIGHEST localSeq element —
+  // the document's top-of-stack layer below the reader, which the array
+  // MUST include (§3.5). Servers ignore unknown fields, so clients attach
+  // this unconditionally; older servers keep the legacy basis.
+  basisSeq?: number;
 }
 ```
 
@@ -200,13 +209,17 @@ recorded dependency set names the dropped `localSeq` is locally rejected
 without waiting for the server's per-commit verdict.
 
 The dependency array MUST include the document's top-of-stack pending layer
-below the reader: the staleness basis is always the stack top (implicitly,
-the array's highest element). Any narrowing of the dependency set (for
-example, pruning layers whose write footprint provably cannot influence the
-read path) may drop only NON-top layers. Basing the staleness scan at a
-lower layer is unsound, not merely conservative: the session's own newer
-stacked commits then land inside the scan interval, where the path-blind
-set/delete check false-conflicts with the reader's own stack.
+below the reader. For a read that declares no `basisSeq`, the staleness
+basis is the stack top (implicitly, the array's highest element), and basing
+the scan at a lower layer is unsound, not merely conservative: the session's
+own newer stacked commits then land inside the scan interval, where the
+path-blind set/delete check false-conflicts with the reader's own stack. A
+read that declares `basisSeq` does not have this constraint on its basis —
+own-session exclusion (§3.6.3) removes the self-conflict, which is exactly
+what lets the scan start at the true confirmed basis — but the top-of-stack
+element remains REQUIRED in the array for its resolution edge. Any narrowing
+of the dependency set (for example, pruning layers whose write footprint
+provably cannot influence the read path) may drop only NON-top layers.
 
 The array form is a negotiated capability (`pendingReadStacks` in the hello
 flags). Toward a server that does not advertise it, the client MUST send
@@ -306,14 +319,27 @@ commits. (The current implementation rejects rather than holds, which
 preserves this ordering trivially.)
 
 Every element of an array `localSeq` participates in this resolution
-requirement — one unresolved or rejected element rejects the commit — but
-only the highest element carries the staleness precondition: the overlap
-validation of §3.6.1/§3.6.2 runs once per read, based at the highest
-element's resolution seq. Writes landing between the reader's confirmed
-basis and that seq are not scanned through pending reads today (tracked as
-CT-1910, the pending-read basis over-advance — the planned repair validates
-the full interval from the reader's confirmed basis, excluding only the
-reader's own resolved session stack, and supersedes the max-basis rule).
+requirement — one unresolved or rejected element rejects the commit. The
+staleness scan (§3.6.1/§3.6.2) then runs once per read, from a basis chosen
+by the read's shape:
+
+- **True basis (`basisSeq` present).** The scan covers the full interval
+  `(basisSeq, head]` and excludes writes produced by the reader's own
+  session. The exclusion is what makes the true basis sound: by the
+  localSeq-ordered resolution above, every own-session commit accepted in
+  that interval has a lower `localSeq` than the reader and was therefore
+  part of the reader's materialized view. Foreign writes in the interval
+  conflict — including those between the reader's confirmed basis and the
+  top layer's resolution seq, which the legacy basis never scanned. A
+  `basisSeq` greater than the server's current head is a protocol error;
+  values at or below head are trusted, like a confirmed read's `seq`
+  (lying corrupts only the session's own data).
+- **Legacy basis (`basisSeq` absent).** The scan is based at the HIGHEST
+  element's resolution seq. Writes landing between the reader's confirmed
+  basis and that seq are not scanned — the pending-read basis over-advance
+  (CT-1910), retained verbatim for old clients and recorded as an INV-1
+  known deviation in `09-invariants.md`. The deviation retires when clients
+  that omit `basisSeq` do.
 
 ### 3.6.4 Conflict Response
 

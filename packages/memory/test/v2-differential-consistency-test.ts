@@ -232,6 +232,11 @@ const runSchedule = async (seed: number): Promise<ScheduleStats> => {
             id,
             path: toDocumentPath([...readLeaf]),
             localSeq: [...stack],
+            // Half the pending reads declare the reader's true confirmed
+            // basis (the CT-1910 repaired shape, scanned with own-session
+            // exclusion); the rest stay legacy max-dependency so both
+            // admission paths keep differential coverage.
+            ...(chance(rng, 0.5) ? { basisSeq: session.integratedSeq } : {}),
           });
         } else {
           reads.confirmed.push({
@@ -293,6 +298,31 @@ const runSchedule = async (seed: number): Promise<ScheduleStats> => {
               `INV-1 violated: commit at seq ${record.seq} holds a ` +
                 `confirmed read of ${rd.id}@${rd.seq} that overlaps the ` +
                 `accepted write at seq ${other.seq} — ${ctx(STEPS)}`,
+            );
+          }
+        }
+      }
+      // INV-1 (pending reads, CT-1910 repaired shape): a declared basis makes
+      // pending reads post-hoc checkable for the first time — no foreign
+      // accepted write overlapping the path may land in (basisSeq, seq).
+      // Legacy reads (no basisSeq) stay uncheckable here; their deviation is
+      // recorded against INV-1 in 09-invariants.md.
+      for (const rd of record.commit.reads.pending) {
+        if (rd.basisSeq === undefined) continue;
+        for (const other of accepted) {
+          if (other.seq <= rd.basisSeq || other.seq >= record.seq) continue;
+          if (other.sessionId === record.sessionId) continue;
+          const hit = toNaiveOps(other.commit.operations).some((op) =>
+            op.id === rd.id &&
+            (op.kind === "set" ||
+              op.leafPaths.some((leaf) => naivePathsOverlap(leaf, rd.path)))
+          );
+          if (hit) {
+            throw new Error(
+              `INV-1 violated: commit at seq ${record.seq} holds a ` +
+                `pending read of ${rd.id} based at ${rd.basisSeq} that ` +
+                `overlaps the foreign accepted write at seq ${other.seq} — ` +
+                ctx(STEPS),
             );
           }
         }

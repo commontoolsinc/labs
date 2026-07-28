@@ -18,8 +18,8 @@ deep config in a few minutes):
 
 | Config | DepMode | BasisMode | Result |
 | --- | --- | --- | --- |
-| `PendingStacks_Current.cfg` | `fullstack` (shipped #4606) | `maxdep` (shipped) | **ReadCoherence violated** — CT-1910: the pending-read staleness scan starts at the highest dependency's resolution seq, missing a foreign overlapping write that landed between the reader's confirmed basis and that seq. |
-| `PendingStacks_Repaired.cfg` | `fullstack` | `confirmed` (CT-1910 repair) | **All invariants hold** (14.5M distinct states, exhaustive at `MaxTotal = 4`). |
+| `PendingStacks_Current.cfg` | `fullstack` (shipped #4606) | `maxdep` (legacy: pending reads without `basisSeq`) | **ReadCoherence violated** — CT-1910: the pending-read staleness scan starts at the highest dependency's resolution seq, missing a foreign overlapping write that landed between the reader's confirmed basis and that seq. Kept as the regression witness for the legacy shape, which servers still serve. |
+| `PendingStacks_Repaired.cfg` | `fullstack` | `confirmed` (CT-1910 repair — shipped: pending reads declaring `basisSeq`, scanned with own-session exclusion) | **All invariants hold** (14.5M distinct states, exhaustive at `MaxTotal = 4`). |
 | `PendingStacks_Filtered.cfg` | `filtered` (proposed CT-1872 refinement) | `confirmed` | **All invariants hold** (same bound). |
 | `PendingStacks_Filtered5.cfg` | `filtered` | `confirmed` | **All invariants hold** at `MaxTotal = 5` with single-path writes (110.7M distinct states, ~5 min) — deep enough for a foreign write to reject a *middle* pending layer beneath a reader, the case where overlap-filtering actually drops a dependency. |
 

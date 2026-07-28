@@ -15,11 +15,13 @@
 //   - Overlap is exact ancestor/descendant path prefixing; `set`/`delete`
 //     overlap every read of the entity. The engine's matcher may only be
 //     coarser than this, never finer.
-//   - Pending-read staleness is based at the HIGHEST dependency's resolution
-//     seq — the documented current semantics, including the CT-1910
-//     over-advance (see 09-invariants.md INV-1 "known deviations" and the
-//     TLA+ model). When the CT-1910 repair lands, this model must switch to
-//     scanning from the reader's confirmed basis in the same change.
+//   - Pending-read staleness: a read declaring its true confirmed basis
+//     (`basisSeq`, the CT-1910 repair) is scanned over the FULL interval
+//     from that basis, excluding the reader's own session's accepted
+//     commits. A legacy read (no `basisSeq`) is based at the HIGHEST
+//     dependency's resolution seq — the pre-repair semantics whose
+//     over-advance is recorded against INV-1 in 09-invariants.md and kept
+//     here as the reference for legacy traffic.
 //   - Scope and branch dimensions are not modeled; the generator stays on
 //     the default branch and space scope.
 
@@ -94,9 +96,15 @@ const conflictSeq = (
   id: string,
   readPath: readonly string[],
   afterSeq: number,
+  // CT-1910 true-basis scans exclude the reader's own session's accepted
+  // commits: FIFO admission means they were part of its materialized view.
+  excludeSession?: string,
 ): number | null => {
   for (const commit of history.accepted) {
     if (commit.seq <= afterSeq) continue;
+    if (excludeSession !== undefined && commit.sessionId === excludeSession) {
+      continue;
+    }
     for (const op of commit.ops) {
       if (op.id === id && writeOverlapsRead(op, readPath)) return commit.seq;
     }
@@ -138,7 +146,9 @@ export const naiveAdmit = (
       }
       if (basis === undefined || seq > basis) basis = seq;
     }
-    const cs = conflictSeq(history, read.id, read.path, basis!);
+    const cs = read.basisSeq !== undefined
+      ? conflictSeq(history, read.id, read.path, read.basisSeq, sessionId)
+      : conflictSeq(history, read.id, read.path, basis!);
     if (cs !== null) {
       return {
         accepted: false,

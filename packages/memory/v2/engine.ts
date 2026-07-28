@@ -692,6 +692,39 @@ WHERE session_id = :session_id
   AND local_seq = :local_seq
 `;
 
+// True-basis (CT-1910) variants of the conflict scans: identical intervals,
+// but writes produced by the reader's own session are excluded. FIFO
+// admission guarantees every own accepted commit in `(basis, head]` has a
+// lower localSeq than the reader and was therefore part of the reader's
+// materialized view — conflicting with it would be the self-conflict that
+// forced pending reads to over-advance their basis in the first place.
+const SELECT_SET_DELETE_CONFLICT_EXCLUDING_SESSION = `
+SELECT r.seq AS seq
+FROM revision r
+JOIN "commit" c ON c.seq = r.commit_seq
+WHERE r.branch = :branch
+  AND r.id = :id
+  AND r.scope_key = :scope_key
+  AND r.seq > :after_seq
+  AND r.op IN ('set', 'delete')
+  AND c.session_id <> :exclude_session
+ORDER BY r.seq DESC, r.op_index DESC
+LIMIT 1
+`;
+
+const SELECT_PATCH_CONFLICTS_EXCLUDING_SESSION = `
+SELECT r.seq AS seq, r.op_index AS op_index, r.data AS data
+FROM revision r
+JOIN "commit" c ON c.seq = r.commit_seq
+WHERE r.branch = :branch
+  AND r.id = :id
+  AND r.scope_key = :scope_key
+  AND r.seq > :after_seq
+  AND r.op = 'patch'
+  AND c.session_id <> :exclude_session
+ORDER BY r.seq DESC, r.op_index DESC
+`;
+
 const SELECT_COMMIT_REVISIONS = `
 SELECT branch, id, scope_key, seq, op_index, op, data, commit_seq
 FROM revision
@@ -789,11 +822,13 @@ interface PreparedStatements {
   selectLatestSnapshot: PreparedStatement;
   selectNextSeq: PreparedStatement;
   selectPatchConflicts: PreparedStatement;
+  selectPatchConflictsExcludingSession: PreparedStatement;
   selectPatchCount: PreparedStatement;
   selectPatches: PreparedStatement;
   selectPendingResolution: PreparedStatement;
   selectServerSeq: PreparedStatement;
   selectSetDeleteConflict: PreparedStatement;
+  selectSetDeleteConflictExcludingSession: PreparedStatement;
   upsertHead: PreparedStatement;
   updateBranchHead: PreparedStatement;
   deleteBranch: PreparedStatement;
@@ -1185,11 +1220,17 @@ const prepareStatements = (database: Database): PreparedStatements => ({
   selectLatestSnapshot: database.prepare(SELECT_LATEST_SNAPSHOT),
   selectNextSeq: database.prepare(SELECT_NEXT_SEQ),
   selectPatchConflicts: database.prepare(SELECT_PATCH_CONFLICTS),
+  selectPatchConflictsExcludingSession: database.prepare(
+    SELECT_PATCH_CONFLICTS_EXCLUDING_SESSION,
+  ),
   selectPatchCount: database.prepare(SELECT_PATCH_COUNT),
   selectPatches: database.prepare(SELECT_PATCHES),
   selectPendingResolution: database.prepare(SELECT_PENDING_RESOLUTION),
   selectServerSeq: database.prepare(SELECT_SERVER_SEQ),
   selectSetDeleteConflict: database.prepare(SELECT_SET_DELETE_CONFLICT),
+  selectSetDeleteConflictExcludingSession: database.prepare(
+    SELECT_SET_DELETE_CONFLICT_EXCLUDING_SESSION,
+  ),
   upsertHead: database.prepare(UPSERT_HEAD),
   updateBranchHead: database.prepare(UPDATE_BRANCH_HEAD),
   deleteBranch: database.prepare(DELETE_BRANCH),
@@ -5551,6 +5592,35 @@ const validateConfirmedReads = (
   }
 };
 
+/**
+ * Validated `basisSeq` of a pending read — the CT-1910 true-basis shape — or
+ * `undefined` for the legacy shape. In the SERVER's space-log seq space (an
+ * accepted-commit `seq`, NOT the session's localSeq space); see
+ * {@link PendingRead.basisSeq}. A basis ahead of the log claims knowledge
+ * the server never produced. (A basis AT head is legal and yields an empty
+ * scan — the same client-trusted claim a confirmed read at head makes.)
+ */
+const pendingReadBasisSeq = (
+  engine: Engine,
+  read: { id: string; basisSeq?: number },
+): number | undefined => {
+  const { basisSeq } = read;
+  if (basisSeq === undefined) {
+    return undefined;
+  }
+  if (!Number.isInteger(basisSeq) || basisSeq < 0) {
+    throw new ProtocolError(
+      `pending read on ${read.id} names a malformed basisSeq: ${basisSeq}`,
+    );
+  }
+  if (basisSeq > serverSeq(engine)) {
+    throw new ProtocolError(
+      `pending read on ${read.id} claims a basisSeq ahead of the log: ${basisSeq}`,
+    );
+  }
+  return basisSeq;
+};
+
 // Shared normalization/validation for a pending read's dependency set: a
 // non-empty array (or scalar) of integer localSeqs. Malformed shapes are a
 // protocol violation regardless of which validator (ordinary commit or
@@ -5612,15 +5682,33 @@ const resolvePendingReads = (
       }
     }
 
-    const conflictSeq = findConflictSeq(
-      engine,
-      branch,
-      read.id,
-      resolveScopeKey(read.scope, { principal, sessionId }),
-      basis!.seq,
-      read.path,
-      read.nonRecursive ?? false,
-    );
+    // CT-1910 repair: a reader that names its true confirmed basis is
+    // scanned over the FULL interval (basisSeq, head], excluding its own
+    // session's accepted commits — which FIFO admission guarantees were part
+    // of its materialized view. A legacy reader (no basisSeq) keeps the
+    // max-dependency basis, so the over-advance deviation persists for it
+    // alone (docs/specs/memory-v2/09-invariants.md, INV-1).
+    const trueBasis = pendingReadBasisSeq(engine, read);
+    const conflictSeq = trueBasis !== undefined
+      ? findConflictSeq(
+        engine,
+        branch,
+        read.id,
+        resolveScopeKey(read.scope, { principal, sessionId }),
+        trueBasis,
+        read.path,
+        read.nonRecursive ?? false,
+        sessionKey,
+      )
+      : findConflictSeq(
+        engine,
+        branch,
+        read.id,
+        resolveScopeKey(read.scope, { principal, sessionId }),
+        basis!.seq,
+        read.path,
+        read.nonRecursive ?? false,
+      );
     if (conflictSeq !== null) {
       throw new ConflictError(
         `stale pending read: ${read.id} via localSeq ${
@@ -5646,23 +5734,37 @@ const findConflictSeq = (
   // replace/delete changes the container the shape read observed, so it must
   // still conflict. Only Tier-2 (patch) granularity is refined.
   nonRecursive: boolean = false,
+  // True-basis reads (CT-1910): skip writes produced by this commit session
+  // key — the reader's own accepted layers, which its view included.
+  excludeSessionKey?: string,
 ): number | null => {
-  const setOrDeleteConflict = engine.statements.selectSetDeleteConflict.get({
+  const setDeleteStatement = excludeSessionKey === undefined
+    ? engine.statements.selectSetDeleteConflict
+    : engine.statements.selectSetDeleteConflictExcludingSession;
+  const patchStatement = excludeSessionKey === undefined
+    ? engine.statements.selectPatchConflicts
+    : engine.statements.selectPatchConflictsExcludingSession;
+  const exclusionParams = excludeSessionKey === undefined
+    ? {}
+    : { exclude_session: excludeSessionKey };
+  const setOrDeleteConflict = setDeleteStatement.get({
     branch,
     id,
     scope_key: scopeKey,
     after_seq: afterSeq,
+    ...exclusionParams,
   }) as { seq: number } | undefined;
   if (setOrDeleteConflict !== undefined) {
     return setOrDeleteConflict.seq;
   }
 
   for (
-    const conflict of engine.statements.selectPatchConflicts.iter({
+    const conflict of patchStatement.iter({
       branch,
       id,
       scope_key: scopeKey,
       after_seq: afterSeq,
+      ...exclusionParams,
     }) as Iterable<{
       seq: number;
       data: string | null;
@@ -5744,15 +5846,30 @@ const schedulerObservationReadDropReason = (
       }
     }
 
-    const conflictSeq = findConflictSeq(
-      engine,
-      branch,
-      read.id,
-      resolveScopeKey(read.scope, { principal, sessionId }),
-      basis!.seq,
-      read.path,
-      read.nonRecursive ?? false,
-    );
+    // Same CT-1910 basis selection as resolvePendingReads: true basis with
+    // own-session exclusion when declared, legacy max-dependency basis
+    // otherwise.
+    const trueBasis = pendingReadBasisSeq(engine, read);
+    const conflictSeq = trueBasis !== undefined
+      ? findConflictSeq(
+        engine,
+        branch,
+        read.id,
+        resolveScopeKey(read.scope, { principal, sessionId }),
+        trueBasis,
+        read.path,
+        read.nonRecursive ?? false,
+        sessionKey,
+      )
+      : findConflictSeq(
+        engine,
+        branch,
+        read.id,
+        resolveScopeKey(read.scope, { principal, sessionId }),
+        basis!.seq,
+        read.path,
+        read.nonRecursive ?? false,
+      );
     if (conflictSeq !== null) {
       return "stale-pending-read";
     }
