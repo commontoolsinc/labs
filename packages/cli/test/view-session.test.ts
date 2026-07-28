@@ -133,7 +133,10 @@ Deno.test("session: a trailing diff newline is not a padded content row", () => 
   const rows = renderFrame(s.displayDoc(), s.view());
   assertEquals(rows[0].trim(), "done");
   assertEquals(rows[1].trim(), "☙   ❦   ❧");
-  assert(rows.at(-1)!.includes("END"), "the content limit is the diff end");
+  assert(
+    rows.at(-1)!.includes("1-1/1  END"),
+    "the hidden terminator is absent from the status",
+  );
 });
 
 Deno.test("session: edit-mode scrolling keeps the ordinary document limit", () => {

@@ -877,8 +877,16 @@ function renderStatus(
       ? paint(padTo(view.inputLine, view.width), ui.statusBar)
       : padTo(view.inputLine, view.width);
   }
-  const total = doc.lines.length;
-  const rowCount = wrapPlan?.rowCount ?? total;
+  const hasTrailingEmptyDiffRow = view.isDiff === true && !view.cursor &&
+    doc.lines.at(-1)?.text.length === 0;
+  const total = diffContentRowCount(
+    doc.lines.length,
+    hasTrailingEmptyDiffRow,
+  );
+  const rowCount = diffContentRowCount(
+    wrapPlan?.rowCount ?? doc.lines.length,
+    hasTrailingEmptyDiffRow,
+  );
   const lastRow = Math.min(
     Math.max(0, rowCount - 1),
     view.top + view.height - 2,
@@ -898,13 +906,7 @@ function renderStatus(
     : Math.round((view.top / (rowCount - 1)) * 100);
   const endTop = view.cursor || view.isDiff !== true
     ? maxTop(rowCount, view.height)
-    : maxPagerTop(
-      diffContentRowCount(
-        rowCount,
-        doc.lines.at(-1)?.text.length === 0,
-      ),
-      view.height,
-    );
+    : maxPagerTop(rowCount, view.height);
   const atEnd = view.top >= endTop;
 
   // The left of the bar is either a message / selected-node label (plain text)
