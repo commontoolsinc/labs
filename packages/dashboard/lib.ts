@@ -256,6 +256,16 @@ export function durationTag(ms: number): string {
   return `<span style="position:absolute;left:1px;bottom:0;font-size:9px;line-height:1;color:#c7ccd4;pointer-events:none">${escapeHtml(humanSpan(ms))}</span>`;
 }
 
+function scaleValues(
+  vals: number[],
+  scale: { trim?: number; minValues?: number } | undefined,
+): number[] {
+  const count = Math.max(0, Math.floor(scale?.trim ?? 0));
+  const minimum = Math.max(count * 2 + 2, scale?.minValues ?? 0);
+  if (count === 0 || vals.length < minimum) return vals;
+  return [...vals].sort((a, b) => a - b).slice(count, -count);
+}
+
 // A trend line from a numeric series (oldest -> newest). With `highlight`, the
 // trailing `count` points are overdrawn in a second color (e.g. to pick out the
 // most recent runs against a longer trend). The vertical scale is normalized to
@@ -266,13 +276,17 @@ export function durationTag(ms: number): string {
 // fraction 0..1 of the width (for placing several sparklines on one shared axis —
 // e.g. a real time axis); a series that doesn't reach the ends occupies only part
 // of the width. Without it, points are spaced evenly. The line has no label of its
-// own — a tile's `duration` slot draws the span in the corner.
+// own — a tile's `duration` slot draws the span in the corner. `scale.trim`
+// excludes that many values from each end of the sorted scale inputs without
+// removing the points themselves. A series below `scale.minValues`, or too short
+// to leave two scale values, keeps its full range.
 export function sparkline(
   vals: number[],
   color: string,
   highlight?: { count: number; color: string; scaleAll?: boolean },
   fadeFrom?: string,
   xs?: number[],
+  scale?: { trim?: number; minValues?: number },
 ): string {
   if (vals.length < 2) return "";
   const w = 220, h = 26;
@@ -280,7 +294,8 @@ export function sparkline(
   // series in view while still brightening the tail (for series whose recent
   // window can sit far from the historical range, e.g. a near-zero error rate).
   const recent = highlight && !highlight.scaleAll ? vals.slice(-highlight.count) : vals;
-  const lo = Math.min(...recent), hi = Math.max(...recent);
+  const scaled = scaleValues(recent, scale);
+  const lo = Math.min(...scaled), hi = Math.max(...scaled);
   const pad = (hi - lo) * 0.125 || 0.5; // 12.5% each side ≈ +25% range; a floor for a flat series
   const min = lo - pad, rng = (hi + pad) - min;
   // Place each point at its `xs` fraction of the width (shared axis), else evenly.
@@ -330,7 +345,8 @@ export function sparkline(
 // fraction of the chart. `showSinglePoint` draws explicit markers for a
 // one-sample series and for points isolated by those breaks. All overlays are
 // HTML or gradients, so preserveAspectRatio="none" cannot distort them. The
-// span it covers is drawn separately by a tile's `duration` slot.
+// span it covers is drawn separately by a tile's `duration` slot. `opts.scale`
+// has the same trimming behavior as `sparkline`.
 export function multiSparkline(
   series: {
     vals: number[];
@@ -341,7 +357,11 @@ export function multiSparkline(
     maxXGap?: number;
     showSinglePoint?: boolean;
   }[],
-  opts: { fadeFrom?: string; highlight?: { count: number } } = {},
+  opts: {
+    fadeFrom?: string;
+    highlight?: { count: number };
+    scale?: { trim?: number; minValues?: number };
+  } = {},
 ): string {
   const drawable = series.filter((line) =>
     line.vals.length >= 2 ||
@@ -349,7 +369,11 @@ export function multiSparkline(
   );
   const all = drawable.flatMap((line) => line.vals);
   if (!all.length) return "";
-  const w = 220, h = 34, min = Math.min(...all), max = Math.max(...all), rng = (max - min) || 1;
+  const scaled = scaleValues(all, opts.scale);
+  const lo = Math.min(...scaled), hi = Math.max(...scaled);
+  // Match sparkline's centered flat range when trimming leaves two equal values.
+  const pad = scaled === all || lo !== hi ? 0 : 0.5;
+  const w = 220, h = 34, min = lo - pad, max = hi + pad, rng = (max - min) || 1;
   const yv = (v: number) => h - 3 - ((v - min) / rng) * (h - 6);
 
   // Each line fades from `fadeFrom` on the left up to its own color, reaching full

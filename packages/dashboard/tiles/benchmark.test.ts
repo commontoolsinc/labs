@@ -32,7 +32,12 @@ import {
   trendPct,
   trendStatus,
 } from "./benchmark.ts";
-import { CI_HISTORY_MIN_DAYS, ciHistoryBucketMs } from "../ci-job-history.ts";
+import {
+  CI_HISTORY_MIN_DAYS,
+  CI_HISTORY_POINT_TARGET,
+  ciHistoryBucketMs,
+} from "../ci-job-history.ts";
+import { PERFORMANCE_VIEW_STYLES } from "../performance-views.ts";
 
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
@@ -536,6 +541,7 @@ Deno.test("fresh runtime history serves the page and update check without discov
     assertEquals(await check.json(), {
       version: checkIsolated.benchmarkSnapshotVersion(),
       progress: null,
+      lastRequestError: null,
     });
     assertEquals(calls, []);
   } finally {
@@ -787,6 +793,18 @@ Deno.test("runtime history shows live artifact progress and keeps collection run
     );
     assertStringIncludes(
       html,
+      'else if ("lastRequestError" in state) renderIdle(state.lastRequestError || "");',
+    );
+    assertStringIncludes(
+      html,
+      "else if (!collectionFailed) renderIdle();",
+    );
+    assertStringIncludes(
+      html,
+      "else delete fetchProgress.dataset.lastRequestError;",
+    );
+    assertStringIncludes(
+      html,
       "if (!eventStream && !collectionFailed && !transportFailed) renderIdle()",
     );
     assertStringIncludes(html, "transportFailed = true");
@@ -846,6 +864,11 @@ Deno.test("/bench before any data shows an idle progress panel", async () => {
     html,
     'href="/bench?view=gantt&amp;repo=labs&amp;days=45&amp;sort=job&amp;stat=p99">CI run Gantt</a>',
   );
+  assertStringIncludes(
+    html,
+    "charts reduce longer windows to about 200 evenly spaced points",
+  );
+  assertStringIncludes(html, PERFORMANCE_VIEW_STYLES);
   assert(
     !html.includes('class="brow'),
     "no rows are drawn with nothing to draw",
@@ -2324,7 +2347,7 @@ Deno.test("/bench?sort=duration lists the longest displayed benchmark first", as
 
 Deno.test("/bench history windows keep about the same chart point count", () => {
   const now = 45 * DAY;
-  const step = 10 * 60_000;
+  const step = 5 * 60_000;
   const points = Array.from(
     { length: Math.floor(45 * DAY / step) + 1 },
     (_, index) => ({ at: now - index * step }),
@@ -2336,8 +2359,14 @@ Deno.test("/bench history windows keep about the same chart point count", () => 
     ciHistoryBucketMs(CI_HISTORY_MIN_DAYS),
   );
 
-  assert(full.length >= 89 && full.length <= 91);
-  assert(short.length >= 89 && short.length <= 91);
+  assert(
+    full.length >= CI_HISTORY_POINT_TARGET - 1 &&
+      full.length <= CI_HISTORY_POINT_TARGET + 1,
+  );
+  assert(
+    short.length >= CI_HISTORY_POINT_TARGET - 1 &&
+      short.length <= CI_HISTORY_POINT_TARGET + 1,
+  );
 });
 
 Deno.test("representative benchmark CPU prefers coverage, recency, then name", () => {
@@ -2372,7 +2401,7 @@ Deno.test("representative benchmark CPU prefers coverage, recency, then name", (
 
 Deno.test("benchmark collection retains enough runs for the shortest history window", () => {
   const now = 45 * DAY;
-  const step = 10 * 60_000;
+  const step = 5 * 60_000;
   const runs = Array.from(
     { length: Math.floor(45 * DAY / step) + 1 },
     (_, index) => ghRun(30_000 + index, now - index * step),
@@ -2387,7 +2416,10 @@ Deno.test("benchmark collection retains enough runs for the shortest history win
     now,
   );
 
-  assert(short.length >= 89 && short.length <= 91);
+  assert(
+    short.length >= CI_HISTORY_POINT_TARGET - 1 &&
+      short.length <= CI_HISTORY_POINT_TARGET + 1,
+  );
 });
 
 Deno.test("/bench: the measurement selector changes what is plotted", async () => {
@@ -2418,6 +2450,84 @@ Deno.test("/bench: the measurement selector changes what is plotted", async () =
     await page("?sort=nonsense"),
     "<h2>packages/html/render.bench.ts</h2>",
   );
+});
+
+Deno.test("/bench runtime graphs ignore two values at each end when twenty are shown", async () => {
+  const directory = await Deno.makeTempDir({ prefix: "benchmark-scale-" });
+  const previousCacheDirectory = Deno.env.get("DASHBOARD_CACHE_DIR");
+  const values = [
+    102,
+    11,
+    1,
+    26,
+    101,
+    12,
+    2,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+  ];
+  Deno.env.set("DASHBOARD_CACHE_DIR", directory);
+  try {
+    const store = new BenchmarkHistoryStore(
+      `${directory}/fabric-wall-benchmark-history.json`,
+    );
+    await store.load();
+    const cached = values.map((value, index) =>
+      store.set({
+        runId: 120_000 + index,
+        runAttempt: 1,
+        at: BASE - (values.length - 1 - index) * DAY,
+        cpu: TEST_CPU,
+        metrics: new Map([[
+          "packages/a/scale.bench.ts > scale",
+          {
+            min: value,
+            avg: value,
+            max: value,
+            p75: value,
+            p99: value,
+            p995: value,
+            p999: value,
+          },
+        ]]),
+      })
+    );
+    store.markRefreshed(Date.now(), cached);
+    await store.save();
+
+    const isolated = await import(
+      `./benchmark.ts?scale=${crypto.randomUUID()}`
+    );
+    const response = await isolated.benchmarkHistoryResponse(
+      new URL("http://x/bench?view=runtime"),
+      ctx(),
+    );
+    const html = await response.text();
+    const points = html
+      .match(/<polyline points="([^"]+)"/)?.[1]
+      .split(" ")
+      .map((point: string) => Number(point.split(",")[1]));
+
+    assert(points, html);
+    assertEquals(points.filter((point: number) => point < 0).length, 2);
+    assertEquals(points.filter((point: number) => point > 34).length, 2);
+  } finally {
+    if (previousCacheDirectory === undefined) {
+      Deno.env.delete("DASHBOARD_CACHE_DIR");
+    } else Deno.env.set("DASHBOARD_CACHE_DIR", previousCacheDirectory);
+    await Deno.remove(directory, { recursive: true });
+  }
 });
 
 Deno.test("/bench: the history slider selects and clamps the displayed days", async () => {
@@ -3107,13 +3217,37 @@ Deno.test("runtime history reports a recent failed collection without starting a
   const directory = await Deno.makeTempDir({ prefix: "benchmark-failure-" });
   const previousCacheDirectory = Deno.env.get("DASHBOARD_CACHE_DIR");
   const originalFetch = globalThis.fetch;
+  let workflowRequests = 0;
   Deno.env.set("DASHBOARD_CACHE_DIR", directory);
   globalThis.fetch = ((input: RequestInfo | URL) => {
     const url = new URL(input instanceof Request ? input.url : String(input));
     if (url.pathname === "/rate_limit") return Promise.resolve(serve({})(url));
+    workflowRequests++;
     return Promise.resolve(new Response("unavailable", { status: 503 }));
   }) as typeof fetch;
   try {
+    const store = new BenchmarkHistoryStore();
+    await store.load();
+    store.set({
+      runId: 130_001,
+      runAttempt: 1,
+      at: BASE,
+      cpu: TEST_CPU,
+      metrics: new Map([[
+        "packages/a/failure.bench.ts > cached result",
+        {
+          min: 10,
+          avg: 10,
+          max: 10,
+          p75: 10,
+          p99: 10,
+          p995: 10,
+          p999: 10,
+        },
+      ]]),
+    });
+    await store.save();
+
     const isolated = await import(
       `./benchmark.ts?failure=${crypto.randomUUID()}`
     );
@@ -3123,6 +3257,7 @@ Deno.test("runtime history reports a recent failed collection without starting a
       tokenContext,
     );
     const firstHtml = await first.text();
+    assertStringIncludes(firstHtml, "failure.bench.ts");
     const id = firstHtml.match(/runtime-progress\?id=([^"&]+)/)?.[1];
     assert(id);
     assertStringIncludes(
@@ -3132,11 +3267,44 @@ Deno.test("runtime history reports a recent failed collection without starting a
       '"phase":"error"',
     );
 
+    const check = await isolated.benchmarkHistoryCheckResponse(tokenContext);
+    const checkState = await check.json();
+    assertEquals(checkState.progress, null);
+    assertEquals(checkState.lastRequestError, "temporarily unavailable");
+
+    const originalNow = Date.now;
+    Date.now = () => originalNow() + 31 * 60_000;
+    try {
+      const laterCheck = await isolated.benchmarkHistoryCheckResponse(ctx());
+      const laterState = await laterCheck.json();
+      assertEquals(laterState.progress, null);
+      assertEquals(laterState.lastRequestError, "temporarily unavailable");
+    } finally {
+      Date.now = originalNow;
+    }
+
     const second = await isolated.benchmarkHistoryResponse(
       new URL("http://x/bench?view=runtime"),
       tokenContext,
     );
-    assertStringIncludes(await second.text(), "Last collection stopped:");
+    const secondHtml = await second.text();
+    assertStringIncludes(secondHtml, "failure.bench.ts");
+    assertStringIncludes(secondHtml, 'class="fetch-progress error"');
+    assertStringIncludes(
+      secondHtml,
+      'data-last-request-error="temporarily unavailable"',
+    );
+    assertStringIncludes(
+      secondHtml,
+      '<p id="fetch-detail">Last collection stopped: temporarily unavailable</p>',
+    );
+    assertEquals(
+      secondHtml.match(
+        /<p id="fetch-detail">Last collection stopped: temporarily unavailable<\/p>/g,
+      )?.length,
+      1,
+    );
+    assertEquals(workflowRequests, 1);
   } finally {
     globalThis.fetch = originalFetch;
     if (previousCacheDirectory === undefined) {

@@ -70,6 +70,9 @@ import {
 } from "../config.ts";
 import {
   PERFORMANCE_CHECK_MS,
+  PERFORMANCE_HISTORY_SCALE_MIN_VALUES,
+  PERFORMANCE_HISTORY_SCALE_TRIM,
+  PERFORMANCE_VIEW_STYLES,
   performanceViewHref,
   performanceViewNav,
 } from "../performance-views.ts";
@@ -1189,6 +1192,12 @@ function benchmarkRefreshRecentlyFailed(now = Date.now()): boolean {
   );
 }
 
+function benchmarkLastRequestError(): string | null {
+  return benchmarkRefreshFailedAt
+    ? benchmarkRefreshError || "temporarily unavailable"
+    : null;
+}
+
 function benchmarkServerContext(): Ctx {
   return {
     runs: () => Promise.resolve([]),
@@ -1325,10 +1334,7 @@ export async function benchmarkHistoryResponse(
       ? "Set GH_TOKEN to refresh runtime benchmark history."
       : "Set GH_TOKEN to collect runtime benchmark history.";
   }
-  if (token && benchmarkRefreshRecentlyFailed()) {
-    refreshError = `Last collection stopped: ${benchmarkRefreshError}`;
-  }
-  if (token && !refreshError) {
+  if (token && !benchmarkRefreshRecentlyFailed()) {
     const refresh = startBenchmarkRefresh(
       ctx,
       baseline,
@@ -1338,6 +1344,9 @@ export async function benchmarkHistoryResponse(
     if (progress) void refresh.result;
     else await refresh.result;
   }
+  const lastRequestError = progress
+    ? undefined
+    : benchmarkLastRequestError() ?? undefined;
   return new Response(
     benchPage(
       url.searchParams.get("stat") ?? DEFAULT_LABEL,
@@ -1348,6 +1357,7 @@ export async function benchmarkHistoryResponse(
       {
         progress,
         refreshError,
+        lastRequestError,
         fragment: url.searchParams.get("fragment") === "range",
       },
     ),
@@ -1375,8 +1385,9 @@ export async function benchmarkHistoryCheckResponse(
     if (progress) void refresh.result;
     else await refresh.result;
   }
+  const lastRequestError = progress ? null : benchmarkLastRequestError();
   return Response.json(
-    { version: benchmarkSnapshotVersion(), progress },
+    { version: benchmarkSnapshotVersion(), progress, lastRequestError },
     { headers: { "cache-control": "no-store" } },
   );
 }
@@ -1487,6 +1498,7 @@ const dateLabel = (at: number): string =>
 interface BenchmarkPageOptions {
   progress?: BenchmarkFetchProgress;
   refreshError?: string;
+  lastRequestError?: string;
   fragment?: boolean;
 }
 
@@ -1530,6 +1542,11 @@ export function benchPage(
   const progress = options.progress;
   const progressIdle = !progress || progress.phase === "complete" ||
     progress.phase === "error";
+  const lastRequestError = progress?.phase === "error"
+    ? progress.error ?? "unknown error"
+    : !progress
+    ? options.lastRequestError
+    : undefined;
   const progressTitle = progressIdle
     ? "Idle"
     : progress.phase === "discovering"
@@ -1538,10 +1555,8 @@ export function benchPage(
   const progressTotal = progressIdle
     ? "0 outstanding"
     : `${progress.completedRuns} / ${progress.totalRuns || "?"}`;
-  const progressDetail = progress?.phase === "error"
-    ? `Last collection stopped: ${
-      escapeHtml(progress.error ?? "unknown error")
-    }`
+  const progressDetail = lastRequestError
+    ? `Last collection stopped: ${escapeHtml(lastRequestError)}`
     : !progressIdle && progress
     ? `${progress.cachedRuns} cached · ${progress.requestsMade} artifact checks made · ${progress.responsesReceived} responded · ${progress.outstandingRequests} outstanding · ${progress.queuedRuns} queued`
     : "No requests in progress.";
@@ -1550,20 +1565,25 @@ export function benchPage(
       escapeHtml(encodeURIComponent(progress.id))
     }`
     : "";
-  const progressHtml =
-    `<section class="fetch-progress" id="fetch-progress" aria-live="polite" data-check-url="/bench/check?view=runtime" data-snapshot-version="${
-      escapeHtml(version)
-    }" data-refresh-on-complete="${
-      progress && !progressIdle && !snapshot.length ? "1" : "0"
-    }"${
-      progressUrl ? ` data-progress-url="${progressUrl}"` : ""
-    }><div class="fetch-head"><strong id="fetch-title">${progressTitle}</strong><span id="fetch-total">${progressTotal}</span></div><progress id="fetch-bar" max="${
-      progressIdle ? 1 : Math.max(1, progress?.totalRuns ?? 1)
-    }"${
-      !progressIdle && progress && !progress.totalRuns
-        ? ""
-        : ` value="${progressIdle ? 0 : progress?.completedRuns ?? 0}"`
-    } aria-label="Runtime benchmark fetch progress"></progress><p id="fetch-detail">${progressDetail}</p></section>`;
+  const progressHtml = `<section class="fetch-progress${
+    lastRequestError ? " error" : ""
+  }" id="fetch-progress" aria-live="polite" data-check-url="/bench/check?view=runtime" data-snapshot-version="${
+    escapeHtml(version)
+  }" data-refresh-on-complete="${
+    progress && !progressIdle && !snapshot.length ? "1" : "0"
+  }"${
+    lastRequestError
+      ? ` data-last-request-error="${escapeHtml(lastRequestError)}"`
+      : ""
+  }${
+    progressUrl ? ` data-progress-url="${progressUrl}"` : ""
+  }><div class="fetch-head"><strong id="fetch-title">${progressTitle}</strong><span id="fetch-total">${progressTotal}</span></div><progress id="fetch-bar" max="${
+    progressIdle ? 1 : Math.max(1, progress?.totalRuns ?? 1)
+  }"${
+    !progressIdle && progress && !progress.totalRuns
+      ? ""
+      : ` value="${progressIdle ? 0 : progress?.completedRuns ?? 0}"`
+  } aria-label="Runtime benchmark fetch progress"></progress><p id="fetch-detail">${progressDetail}</p></section>`;
   const refreshNotice = options.refreshError && snapshot.length
     ? `<p class="refresh-error">${escapeHtml(options.refreshError)}</p>`
     : "";
@@ -1636,7 +1656,13 @@ export function benchPage(
           maxXGap: CPU_LINE_MAX_X_GAP,
           showSinglePoint: true,
         })),
-        { fadeFrom: SPARK_FADE[status] },
+        {
+          fadeFrom: SPARK_FADE[status],
+          scale: {
+            trim: PERFORMANCE_HISTORY_SCALE_TRIM,
+            minValues: PERFORMANCE_HISTORY_SCALE_MIN_VALUES,
+          },
+        },
       );
       return [{
         key: s.key,
@@ -1779,47 +1805,15 @@ export function benchPage(
     escapeHtml(stat.label)
   }</title>
 <style>
-  body{box-sizing:border-box;width:100%;margin:0;background:#0d0e11;color:#e7e9ee;font-family:-apple-system,Segoe UI,Roboto,sans-serif;padding:18px 20px 26px;max-width:1100px;margin:0 auto}
-  .top{display:flex;align-items:baseline;gap:10px;margin-bottom:14px;flex-wrap:wrap}
-  .top b{font-size:16px;font-weight:600}.top span{font-size:12px;color:#6f757f}
-  a.back{color:#6ea8fe;text-decoration:none;font-size:13px}
-  .views{display:flex;gap:6px;margin:0 0 14px}
-  .views a{font-size:13px;color:#c7ccd4;text-decoration:none;border:1px solid #2f333c;border-radius:6px;padding:4px 10px}
-  .views a.on{background:#6ea8fe;border-color:#6ea8fe;color:#0d0e11}
-  .controls{display:flex;flex-wrap:wrap;align-items:center;gap:6px;background:#16181d;border:1px solid #23262d;border-radius:12px;padding:12px 14px;margin-bottom:8px}
-  .controls .lbl{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#878d97;margin-right:6px}
-  .controls .field{display:flex;align-items:center;gap:7px;font-size:12px;color:#9aa0ab;margin-right:8px}
-  .controls .choice-group{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
-  .controls input[type=range]{width:150px}.controls output{color:#c7ccd4;min-width:46px;font-variant-numeric:tabular-nums}
-  a.stat{font-size:13px;color:#c7ccd4;text-decoration:none;border:1px solid #2f333c;border-radius:6px;padding:3px 9px;font-variant-numeric:tabular-nums}
-  a.stat:hover{border-color:#3a4150}
-  a.stat.on{background:#6ea8fe;border-color:#6ea8fe;color:#0d0e11}
-  .legend{font-size:11px;color:#666c76;margin:0 0 16px}
-  .fetch-progress{background:#16181d;border:1px solid #2f333c;border-radius:10px;padding:10px 12px;margin:0 0 12px}
-  .fetch-progress.error{border-color:rgba(224,168,82,.42)}
-  .fetch-head{display:flex;justify-content:space-between;gap:12px;align-items:baseline;font-size:12px;color:#c7ccd4}
-  .fetch-head strong{font-weight:600}.fetch-head span,#fetch-detail{font-variant-numeric:tabular-nums;color:#878d97}
-  .fetch-progress progress{display:block;width:100%;height:7px;margin:7px 0 6px;accent-color:#6ea8fe}
-  #fetch-detail{font-size:11px;margin:0}
-  .axisrow{display:flex;gap:18px;margin:0 14px 4px}.timeaxis{flex:0 0 42%;display:flex;justify-content:space-between;color:#666c76;font-size:10px}
-  h2{font-size:12px;letter-spacing:.04em;color:#878d97;font-weight:600;margin:20px 0 8px;font-family:ui-monospace,Menlo,monospace}
-  .blist{display:flex;flex-direction:column;gap:7px}
-  .brow{display:flex;align-items:center;gap:18px;background:#16181d;border:1px solid #23262d;border-radius:10px;padding:8px 14px}
-  .brow.good{border-color:rgba(67,197,116,.34);background:rgba(67,197,116,.06)}
-  .brow.warn{border-color:rgba(224,168,82,.42);background:rgba(224,168,82,.07)}
-  .brow.bad{border-color:rgba(226,80,74,.5);background:rgba(226,80,74,.09)}
-  .bmeta{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:2px}
-  .bname{font-size:13px;color:#c7ccd4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .bval{font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;display:flex;align-items:baseline;min-width:0}
+  ${PERFORMANCE_VIEW_STYLES}
+  .bval{display:flex;align-items:baseline;min-width:0}
   .bval .cpu-id{margin-right:7px;align-self:center}
   .bval a.cpu-id{text-decoration:none}
   .bval a.cpu-id:hover{border-color:#6ea8fe;color:#fff}
   .bval a.cpu-id:focus-visible{outline:2px solid #6ea8fe;outline-offset:2px}
-  .btrend{font-size:12px;font-weight:400;color:#9aa0ab;margin-left:8px}
+  .btrend{margin-left:8px}
   .swatch{display:inline-block;width:8px;height:8px;border-radius:2px;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.42)}
   .cpu-id{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--cpu-color,#454b56);border-radius:4px;padding:1px 4px;font-size:9px;line-height:1.2;font-weight:500;color:#c7ccd4;white-space:nowrap}
-  .bspark{flex:0 0 42%;min-width:0;position:relative}
-  .bspark>div,.bspark>svg{margin-top:0!important}
   .cpu-legend{margin-top:22px}.cpu-legend-title{margin:0 0 8px}
   .cpu-keys{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:7px}
   .cpu-key{display:flex;align-items:flex-start;gap:8px;background:#16181d;border:1px solid #23262d;border-radius:8px;padding:8px 10px}
@@ -1827,13 +1821,8 @@ export function benchPage(
   .cpu-key>.swatch,.cpu-key>.cpu-id{margin-top:3px}.cpu-description{min-width:0}
   .cpu-name{display:block;font-size:12px;color:#c7ccd4;overflow-wrap:anywhere}
   .cpu-detail{display:block;font-size:10px;color:#878d97;margin-top:2px}
-  .empty,.refresh-error{color:#9aa0ab;font-size:14px}.refresh-error{color:#e0a852}
-  .note{font-size:11px;color:#666c76;margin-top:22px}
-  .note a{color:#6ea8fe;text-decoration:none}
-  label.chk{font-size:13px;color:#c7ccd4;display:inline-flex;align-items:center;gap:6px;margin-left:auto;cursor:pointer;user-select:none}
   body.hide-green .brow.good{display:none}
   body.hide-green .benchmark-group:not(:has(.brow:not(.good))){display:none}
-  @media(max-width:640px){.timeaxis{flex:1}.brow{align-items:stretch;gap:7px;flex-wrap:wrap}.bspark{flex:1 0 100%}.controls .field,.controls .choice-group{flex:1 1 100%}.controls input[type=range]{flex:1;width:auto}.controls label.chk{margin-left:0}}
 </style></head><body data-snapshot-version="${escapeHtml(version)}">
   <div class="top"><a class="back" href="/">← dashboard</a><b>Performance history</b><span>${
     escapeHtml(REPO)
@@ -1843,7 +1832,7 @@ export function benchPage(
     escapeHtml(stat.label)
   }"><input type="hidden" name="sort" value="${sort}"><label class="field" for="days">window <output id="daysv" for="days">${days} day${
     days === 1 ? "" : "s"
-  }</output><input type="range" id="days" name="days" min="${CI_HISTORY_MIN_DAYS}" max="${CI_HISTORY_DAYS}" step="1" value="${days}"></label><nav class="choice-group" aria-label="Benchmark metric"><span class="lbl">metric</span>${statSel}</nav><nav class="choice-group" aria-label="Sort benchmarks"><span class="lbl">sort</span>${sortSel}</nav><label class="chk"><input type="checkbox" id="hg"> hide green</label></form>
+  }</output><input type="range" id="days" name="days" min="${CI_HISTORY_MIN_DAYS}" max="${CI_HISTORY_DAYS}" step="1" value="${days}"></label><nav class="choice-group" aria-label="Benchmark metric"><span class="lbl">metric</span>${statSel}</nav><nav class="choice-group" aria-label="Sort benchmarks"><span class="lbl">sort</span>${sortSel}</nav><label class="check trailing"><input type="checkbox" id="hg"> hide green</label></form>
   ${rangeContent}
 <script>
   const hg = document.getElementById("hg"), days = document.getElementById("days"), daysv = document.getElementById("daysv"), controls = days.form, KEY = "benchHideGreen", DEFAULT_DAYS = days.value;
@@ -1906,15 +1895,20 @@ export function benchPage(
     rangeRequest?.abort();
     eventStream?.close();
   });
-  const renderIdle = () => {
-    collectionFailed = false;
+  const renderIdle = (lastRequestError = fetchProgress.dataset.lastRequestError || "") => {
+    collectionFailed = Boolean(lastRequestError);
     transportFailed = false;
-    fetchProgress.classList.remove("error");
+    if (lastRequestError) {
+      fetchProgress.dataset.lastRequestError = lastRequestError;
+    } else delete fetchProgress.dataset.lastRequestError;
+    fetchProgress.classList.toggle("error", collectionFailed);
     title.textContent = "Idle";
     total.textContent = "0 outstanding";
     bar.max = 1;
     bar.value = 0;
-    detail.textContent = "No requests in progress.";
+    detail.textContent = lastRequestError
+      ? "Last collection stopped: " + lastRequestError
+      : "No requests in progress.";
   };
   const refreshRangeWhenIdle = () => {
     if (navigating) return;
@@ -1942,6 +1936,9 @@ export function benchPage(
     collectionFailed = state.phase === "error";
     transportFailed = false;
     fetchProgress.classList.remove("error");
+    if (collectionFailed) {
+      fetchProgress.dataset.lastRequestError = state.error || "unknown error";
+    } else delete fetchProgress.dataset.lastRequestError;
     if (state.phase === "discovering") {
       title.textContent = "Finding benchmark runs…";
       total.textContent = "starting";
@@ -1966,7 +1963,8 @@ export function benchPage(
       total.textContent = "0 outstanding";
       bar.max = 1;
       bar.value = 0;
-      detail.textContent = "Last collection stopped: " + (state.error || "unknown error");
+      detail.textContent = "Last collection stopped: " +
+        fetchProgress.dataset.lastRequestError;
       eventStream?.close();
       eventStream = null;
       connectedProgressUrl = "";
@@ -2021,6 +2019,7 @@ export function benchPage(
         connectProgress("/bench/runtime-progress?id=" + encodeURIComponent(state.progress.id));
         renderProgress(state.progress);
       } else if (serverVersionChanged) refreshRangeWhenIdle();
+      else if ("lastRequestError" in state) renderIdle(state.lastRequestError || "");
       else if (!collectionFailed) renderIdle();
     } catch {
       if (!eventStream && !collectionFailed && !transportFailed) renderIdle();

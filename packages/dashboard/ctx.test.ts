@@ -7,6 +7,7 @@ import { CI_RUNS_MAX, CI_RUNS_MAX_AGE_DAYS, CI_WORKFLOW, LOOM_CI_WORKFLOW, LOOM_
 import type { Ctx, Run } from "./types.ts";
 
 function run(over: Partial<Run> = {}): Run {
+  const startedAt = new Date(Date.now() - 3_600_000).toISOString();
   return {
     id: 1,
     status: "completed",
@@ -15,7 +16,8 @@ function run(over: Partial<Run> = {}): Run {
     event: "push",
     head_sha: "sha",
     display_title: "t",
-    run_started_at: new Date(Date.now() - 3_600_000).toISOString(),
+    created_at: startedAt,
+    run_started_at: startedAt,
     updated_at: new Date().toISOString(),
     html_url: "",
     head_commit: { message: "t (#1)" },
