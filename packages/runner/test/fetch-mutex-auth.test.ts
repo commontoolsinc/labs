@@ -97,7 +97,7 @@ describe("fetch-json mutex mechanism: protected request auth", () => {
       undefined,
       tx,
     );
-    runtime.run(
+    const result = runtime.run(
       tx,
       testRecipe,
       { query: "signed request" },
@@ -105,8 +105,8 @@ describe("fetch-json mutex mechanism: protected request auth", () => {
     );
     tx.commit();
 
+    await result.pull();
     await runtime.settled();
-    await runtime.idle();
 
     const call = fetchCalls.find((call) =>
       call.url === "http://mock-test-server.local/api/agent-tools/web-search"
@@ -169,7 +169,7 @@ describe("fetch-json mutex mechanism: protected request auth", () => {
       undefined,
       tx,
     );
-    runtime.run(
+    const result = runtime.run(
       tx,
       testRecipe,
       { query: "replace request" },
@@ -177,8 +177,8 @@ describe("fetch-json mutex mechanism: protected request auth", () => {
     );
     tx.commit();
 
+    await result.pull();
     await runtime.settled();
-    await runtime.idle();
 
     const call = fetchCalls.find((call) =>
       call.url === "http://mock-test-server.local/api/agent-tools/web-search"
@@ -234,7 +234,7 @@ describe("fetch-json mutex mechanism: protected request auth", () => {
       undefined,
       tx,
     );
-    runtime.run(
+    const result = runtime.run(
       tx,
       testRecipe,
       { query: "external request" },
@@ -242,8 +242,8 @@ describe("fetch-json mutex mechanism: protected request auth", () => {
     );
     tx.commit();
 
+    await result.pull();
     await runtime.settled();
-    await runtime.idle();
 
     const call = fetchCalls.find((call) =>
       call.url === "http://external.test/api/agent-tools/web-search"

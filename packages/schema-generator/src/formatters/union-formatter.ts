@@ -279,8 +279,11 @@ export class UnionFormatter implements TypeFormatter {
       const nonBoolValues = values.filter((v) => typeof v !== "boolean");
 
       if (boolValues.length === 2 && nonBoolValues.length === 0) {
-        // Union of true | false becomes regular boolean type
-        return { type: "boolean" };
+        // TypeScript represents boolean as the union true | false. Preserve a
+        // nullable member when collapsing those literals to boolean.
+        return hasNull
+          ? { anyOf: [{ type: "boolean" }, { type: "null" }] }
+          : { type: "boolean" };
       }
 
       // Include null in enum values if present (null can be a runtime value, unlike undefined)

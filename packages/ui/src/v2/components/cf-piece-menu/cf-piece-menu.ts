@@ -1058,8 +1058,7 @@ export class CFPieceMenu extends BaseElement {
         class="backdrop"
         @click="${() => this.close()}"
         @contextmenu="${this._onBackdropContextMenu}"
-      >
-      </div>
+      ></div>
       <div class="menu" role="menu" style="left: ${left}px; top: ${top}px">
         <div class="menu-title">Piece ${this.cell!.id()}</div>
         ${entries.map((entry) =>
