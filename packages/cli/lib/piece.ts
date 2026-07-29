@@ -1333,6 +1333,36 @@ async function tryResolvePieceCallableAt(
   };
 }
 
+/**
+ * Return the forced-stream view used to dispatch a legacy handler only when
+ * the same cell, without that imposed schema, is independently recognizable
+ * as a stream.
+ *
+ * The order is load-bearing: testing the forced view itself is circular,
+ * because Cell.isStream() accepts the `asCell: ["stream"]` marker that this
+ * function adds. That would classify every ordinary result property as a
+ * handler.
+ */
+function forcedStreamCellForHandler(
+  pieceCell: any,
+  callableName: string,
+): any | null {
+  if (
+    typeof pieceCell?.key !== "function" ||
+    !isHandlerCell(pieceCell.key(callableName))
+  ) {
+    return null;
+  }
+
+  return pieceCell.asSchema({
+    type: "object",
+    properties: {
+      [callableName]: { asCell: ["stream"] },
+    },
+    required: [callableName],
+  }).key(callableName);
+}
+
 async function tryResolvePieceHandler(
   piece: any,
   manager: any,
@@ -1344,26 +1374,17 @@ async function tryResolvePieceHandler(
     return null;
   }
 
-  const streamRoot = pieceCell.asSchema({
-    type: "object",
-    properties: {
-      [callableName]: { asCell: ["stream"] },
-    },
-    required: [callableName],
-  });
-  const streamCell = streamRoot.key(callableName);
-  if (!isHandlerCell(streamCell)) {
+  const streamCell = forcedStreamCellForHandler(pieceCell, callableName);
+  if (!streamCell) {
     return null;
   }
 
-  // Dispatch through the cell whose stream-ness this path just proved, not a
-  // second cell built by reading the schema back from links. Both address the
-  // same target — `getResult` is the identity on the piece cell — so they
-  // differ only in schema, and a link-derived schema is exactly what defeated
-  // the ordinary detection paths above. Sending on that cell takes `.set()`'s
-  // non-stream branch (`packages/runner/src/cell.ts:1316`) and fails with
-  // "Transaction required for .set()" instead of queueing the event, so a verb
-  // this path lists is a verb that could not be called.
+  // Dispatch through the forced view, not a second cell built by reading the
+  // schema back from links. Both address the same target — `getResult` is the
+  // identity on the piece cell — but the link-derived cell is exactly what
+  // defeated the ordinary detection paths above. Sending on that cell takes
+  // `.set()`'s non-stream branch (`packages/runner/src/cell.ts:1316`) and fails
+  // with "Transaction required for .set()" instead of queueing the event.
   const rootCell = await piece.result.getCell();
   const linkDerivedCell = rootCell.key(callableName).asSchemaFromLinks();
   return {
@@ -1617,12 +1638,7 @@ export async function listPieceCallables(
     }
     for (const name of rejected) {
       if (listings.has(name)) continue;
-      const streamRoot = pieceCell.asSchema({
-        type: "object",
-        properties: { [name]: { asCell: ["stream"] } },
-        required: [name],
-      });
-      if (!isHandlerCell(streamRoot.key(name))) continue;
+      if (!forcedStreamCellForHandler(pieceCell, name)) continue;
       const callableCell = resultRoot.key(name).asSchemaFromLinks();
       const spec = callableCommandSpec(callableCell, "handler");
       listings.set(name, {
