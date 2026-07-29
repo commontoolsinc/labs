@@ -887,7 +887,10 @@ function schemaAlternatives(
 ): JSONSchema[][] | undefined {
   if (schema.anyOf) {
     const { anyOf, ...base } = schema;
-    return anyOf.map((branch) => [base, branch]);
+    const hasBaseConstraints = Object.keys(base).length > 0;
+    return anyOf.map((branch) =>
+      hasBaseConstraints ? [base, branch] : [branch]
+    );
   }
   if (Array.isArray(schema.type)) {
     return schema.type.map((type) => [{ ...schema, type }]);

@@ -1809,6 +1809,15 @@ storage, hashing, memory, CLI, FUSE, or LLM boundaries.
 Canonical FUSE projection must inspect the original registered callable before
 JavaScript invokes a legacy `toJSON()` hook on it.
 
+Pattern-update baselines that recorded the retired `patternTool` wrapper,
+callable-as-stream handler representation, or pre-normalization `FactoryInput`
+contract remain append-only evidence. The exact affected pre-launch contracts
+are retired in
+`tasks/pattern-compat-retirements.ts` under the same owner-approved wipe
+decision; they are not deleted or treated as compatible with Factory@1.
+Canonical Factory@1 contracts are recorded as new active baselines, and future
+updates remain checked against every active contract.
+
 ## Delivery Order
 
 ### Stage 0: Extract generic pattern-ref binding

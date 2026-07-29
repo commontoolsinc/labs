@@ -1,8 +1,8 @@
 #!/usr/bin/env -S deno run -A
 /**
  * Tier 1 pattern-update gate. Compiles every authored pattern, then proves its
- * argument/result contract can still be applied over every contract recorded
- * for it under `packages/patterns/baselines/`.
+ * argument/result contract can still be applied over every active contract
+ * recorded for it under `packages/patterns/baselines/`.
  *
  * The rule this enforces is the one `cf piece setsrc` enforces
  * (`assertPatternSchemasBackwardCompatible`); the automatic updater applies a
@@ -13,10 +13,9 @@
  *   deno task pattern-compat --update    # record contracts that have no baseline
  *   deno task pattern-compat --only home # restrict to matching paths
  *
- * Baselines are never pruned. They are small, most patterns never change
- * contract, and — decisively — an author-run `--update` that could *remove* a
- * baseline could remove the very one that would have caught the break. `--update`
- * can only add.
+ * Baselines are never pruned. Exact retired contracts remain as evidence and
+ * are named in `pattern-compat-retirements.ts`; every other baseline is active.
+ * `--update` can only add.
  */
 
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
@@ -28,16 +27,20 @@ import {
 } from "./pattern-files.ts";
 import { UNEVALUABLE_PATTERNS } from "./pattern-compat-unevaluable.ts";
 import {
+  type Baseline,
   checkPattern,
+  filterRetiredBaselines,
   type Finding,
   findRetired,
   parseArgs,
   parseShard,
   type PatternContract,
   readBaselines,
+  retirementConfigurationIssues,
   shouldRecord,
   writeBaseline,
 } from "./pattern-compat-lib.ts";
+import { PATTERN_BASELINE_RETIREMENTS } from "./pattern-compat-retirements.ts";
 
 const BASELINES_DIR = `${PATTERNS_DIR}/baselines`;
 
@@ -67,6 +70,22 @@ async function main() {
     : "";
   console.log(
     `Checking update compatibility for ${files.length} patterns${shardLabel}.`,
+  );
+
+  const retirementBaselines = new Map<string, Baseline[]>();
+  for (
+    const pattern of new Set(
+      PATTERN_BASELINE_RETIREMENTS.map((retirement) => retirement.pattern),
+    )
+  ) {
+    retirementBaselines.set(
+      pattern,
+      await readBaselines(BASELINES_DIR, pattern),
+    );
+  }
+  const retirementErrors = retirementConfigurationIssues(
+    PATTERN_BASELINE_RETIREMENTS,
+    retirementBaselines,
   );
 
   const runtime = await createRuntime();
@@ -154,7 +173,11 @@ async function main() {
     .sort();
   for (const key of keys) {
     const current = contracts.get(key);
-    const baselines = await readBaselines(BASELINES_DIR, key);
+    const baselines = filterRetiredBaselines(
+      key,
+      await readBaselines(BASELINES_DIR, key),
+      PATTERN_BASELINE_RETIREMENTS,
+    );
     const checkStarted = performance.now();
     const patternFindings = checkPattern(key, current, baselines);
     if (timingEnabled) {
@@ -267,11 +290,17 @@ async function main() {
     );
   }
 
+  if (retirementErrors.length > 0) {
+    console.error("\nInvalid pattern baseline retirements:");
+    for (const error of retirementErrors) console.error(`  ${error}`);
+  }
+
   if (
-    findings.length > 0 || unexpectedFailures.length > 0 || recovered.length > 0
+    findings.length > 0 || unexpectedFailures.length > 0 ||
+    recovered.length > 0 || retirementErrors.length > 0
   ) Deno.exit(1);
   console.log(
-    `\n${contracts.size} pattern(s) can be updated from every recorded contract.`,
+    `\n${contracts.size} pattern(s) can be updated from every active recorded contract.`,
   );
 }
 
