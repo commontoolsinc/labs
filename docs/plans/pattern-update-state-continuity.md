@@ -80,8 +80,10 @@ Measured on branch `tier2`, not assumed:
 | The same vintage + a candidate differing ONLY by `Default<[]>` commits cleanly, with prior state intact | measured: `{"items":["alpha","beta"],"favorites":[]}` |
 | Tier 1 **does** catch the additive-required class | measured: `assertPatternSchemasBackwardCompatible` throws "result.favorites: newly required result field has no default" |
 | Tier 1 is blind to a storage-key move | measured: result schemas byte-identical, no issue raised, replayed data empty |
-| Every case discriminates — each goes red under a mutation of the thing it claims to test | measured by mutation: dropping `expectedPatternIdentity` reds the rejection case; no-oping the snapshot restore reds three of five; undoing `.for('itemList')` reds the storage-move case |
-| A stranded-data assertion needs its control in the SAME case | measured: with the restore no-oped, the storage-move case alone stayed GREEN — `items === []` is also what an unrestored fixture reads. It now replays the vintage over the same snapshot first |
+| Every case discriminates — each goes red under a mutation of the thing it claims to test | measured by mutation: dropping `expectedPatternIdentity` reds the rejection case; no-oping the snapshot restore reds **four of five** (the fifth takes no snapshot); undoing `.for('itemList')` reds the storage-move case |
+| A stranded-data assertion needs its control in the SAME case | measured: with the restore no-oped, the storage-move case alone stayed GREEN — `items === []` is also what an unrestored fixture reads. It now replays the vintage over the same snapshot first, which is what moved the restore mutation from three reds to four |
+| Tier 1 also catches field REMOVAL, disjoint TYPE change, and a field moved between nesting levels | read off `schema-compatibility.ts` (messages, not line numbers, are the durable anchor): removal → "existing `<role>` field was removed" (rendered: `result.status: existing result field was removed`); disjoint type → "type … is not accepted by the candidate schema"; a nesting move is *seen* as a removal and reports as one. So none of those is a second Tier-2-only class — they are contract changes. The storage-move stays the only stranding class a contract check structurally cannot see |
+| Two roots in ONE space store would collide on a single fixed cause | `getCell` derives the entity id as `createRef({}, cause)` (`runtime.ts`), and that derivation does not include the space. Fixed by keying the cause per pattern (`vintageRoot(…, key)`); see the stage-3 note below |
 
 The CFC-relevance row corrects an assumption this work started with. An earlier
 boundary test recorded that the guard "does not fire on a bare `runtime.setup`"
@@ -161,7 +163,7 @@ Gate: green on `tier2`. **Done.**
 Gate: **met.** `packages/piece/test/state-continuity.test.ts`, 5 steps green,
 whole package suite green.
 
-Two things this stage settled that the plan had wrong or open:
+Things this stage settled that the plan had wrong or open:
 
 - `expectedPatternIdentity` is not a formality. It is what makes `runSynced`
   THROW on a setup-commit rejection instead of logging and continuing. Without
@@ -176,7 +178,22 @@ Two things this stage settled that the plan had wrong or open:
   `StorageManager.close()` tears down only the client side; the server holds a
   SQLite engine per space, a read pool, and a refresh timer, and the temp dir
   gets removed out from under them. Stages 3–4 open a vintage per fixture, so
-  this compounds — `dispose()` closes the server too.
+  this compounds — `dispose()` closes the server too, and the test's `afterEach`
+  now RAISES a teardown failure instead of swallowing it, so the leak that fix
+  closes cannot quietly reopen.
+- The root cause is keyed per pattern, not one global constant. A fixed cause
+  is what keeps a root addressable across captures, but `getCell` derives the
+  entity id from the cause ALONE — the space is not an input — so a single
+  constant would give every root in every fixture the same id. Two patterns
+  captured into one space store would then silently alias: the second
+  materialize stamps its identity over the first's root, nothing errors, and
+  the fixture replays something nobody captured.
+- The capture write is checked. It went in as a bare `edit()` whose
+  `commit()` result was discarded — and `commit()` REPORTS a conflict in its
+  result rather than throwing, so a capture racing the tail of its own
+  materialize could snapshot a space missing the very state the tier replays.
+  Downstream cases would go red, but several layers from the cause. It is now
+  `editWithRetry` with the result asserted.
 
 On `setPattern` versus `PatternUpdater`: the replay drives the updater's path,
 because that is what the field actually runs. The difference is the whole
@@ -195,6 +212,24 @@ automatic updater performs no structural check at all.
       vintage, so a system pattern cannot change without one
 
 Gate: a system-pattern schema change with no vintage fails CI.
+
+Two constraints the stage-2 harness imposes on this layout, both measured:
+
+- **A fixture is bound to the DID it was captured under, and the file does not
+  say which.** The space id lives in the on-disk FILENAME
+  (`resolveSpaceStoreUrl`), which the fixture layout above replaces with
+  `<iso>-<identity>`; inside the store it survives only embedded in link
+  targets (measured: the DID appears in `commit.original` and `revision.data`).
+  `openFileBackedRuntime` restores under `signer.did()` unconditionally, so a
+  vintage captured by any other signer restores "successfully" and reads
+  EMPTY — which is this tier's stranding signal. That is a false positive on
+  the gate, not a red herring. Either every pinned vintage is captured by the
+  fixture signer, or the layout must carry the space id and the harness must
+  take it explicitly. Decide before seeding fixtures, not after.
+- **One root key per pattern.** Roots are addressed by cause and the cause
+  alone determines the entity id, so a fixture holding two patterns needs two
+  keys (`vintageRoot(vintage, schema, key)`). One fixture per pattern, as the
+  layout above has it, needs nothing further.
 
 ### 4. Auto captures and retention
 

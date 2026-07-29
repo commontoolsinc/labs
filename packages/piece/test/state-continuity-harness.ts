@@ -188,6 +188,9 @@ async function seedSpaceStore(
   await Deno.copyFile(snapshotPath, target);
 }
 
+/** The root key a fixture uses when it holds exactly one pattern. */
+export const DEFAULT_VINTAGE_ROOT_KEY = "vintage-root";
+
 /**
  * A stable root cell for a captured space.
  *
@@ -197,16 +200,24 @@ async function seedSpaceStore(
  * re-read by id. (Root creation through `ensureDefaultPattern` bakes
  * `Date.now()` into its cause for the same reason, so a root fixture has to go
  * around that path.)
+ *
+ * `key` is what keeps that determinism from becoming ALIASING. `getCell`
+ * derives the entity id as `createRef({}, cause)` (`runtime.ts`), and that
+ * derivation does not include the space — so a single fixed cause would give
+ * every root in every fixture the same entity id. Within one space store that
+ * is a silent collision: materializing a second pattern would stamp its
+ * identity over the first pattern's root, no error, and the fixture would
+ * replay something nobody captured. One key per pattern keeps roots distinct
+ * while each stays addressable across captures.
  */
-export const VINTAGE_ROOT_CAUSE = { stateContinuity: "vintage-root" } as const;
-
 export function vintageRoot<T>(
   vintage: VintageRuntime,
   schema: unknown,
+  key: string = DEFAULT_VINTAGE_ROOT_KEY,
 ): Cell<T> {
   return vintage.runtime.getCell<T>(
     vintage.space as never,
-    VINTAGE_ROOT_CAUSE,
+    { stateContinuity: key },
     schema as never,
   );
 }
@@ -253,6 +264,13 @@ export interface MaterializeOutcome {
   error?: string;
   /** The root's value after a successful materialize. */
   value?: Record<string, unknown>;
+  /**
+   * The candidate's compiled result schema. Handed back so a caller that needs
+   * to address the root afterwards reads it off the pattern that was actually
+   * materialized, rather than compiling a second time and trusting the two to
+   * agree.
+   */
+  resultSchema: unknown;
 }
 
 /**
@@ -277,6 +295,7 @@ export interface MaterializeOutcome {
 export async function materializeOver(
   vintage: VintageRuntime,
   program: RuntimeProgram,
+  rootKey: string = DEFAULT_VINTAGE_ROOT_KEY,
 ): Promise<MaterializeOutcome> {
   const { runtime } = vintage;
   const pattern = await runtime.patternManager.compilePattern(program, {
@@ -289,6 +308,7 @@ export async function materializeOver(
   const root = vintageRoot<Record<string, unknown>>(
     vintage,
     pattern.resultSchema,
+    rootKey,
   );
   await root.sync();
 
@@ -304,16 +324,20 @@ export async function materializeOver(
     );
   }
 
+  const resultSchema = pattern.resultSchema;
   try {
     await runtime.runSynced(root.withTx(), pattern, undefined, {
       expectedPatternIdentity: ref,
     });
     await runtime.idle();
   } catch (error) {
-    return { error: describeError(error) };
+    return { error: describeError(error), resultSchema };
   }
   await root.pull();
-  return { value: root.get() as Record<string, unknown> | undefined };
+  return {
+    value: root.get() as Record<string, unknown> | undefined,
+    resultSchema,
+  };
 }
 
 export type { RuntimeProgram };

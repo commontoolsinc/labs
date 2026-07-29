@@ -188,11 +188,27 @@ describe("pattern update over captured prior state", () => {
   });
 
   afterEach(async () => {
+    // Tear everything down first, THEN surface what went wrong. A vintage owns
+    // a memory server — SQLite engines, a read pool, a refresh timer — and
+    // `dispose()` failing means those outlived the case. Swallowing that would
+    // hide the very leak `dispose()` exists to close, and leave the next case
+    // to fail on a symptom instead. Every vintage still gets its turn: one
+    // broken teardown must not strand the rest.
+    const teardown: unknown[] = [];
     for (const vintage of open) {
-      await vintage.dispose().catch(() => {});
+      try {
+        await vintage.dispose();
+      } catch (error) {
+        teardown.push(error);
+      }
     }
+    // Temp-dir removal stays best-effort: it is the OS's business, not the
+    // runtime's, and a failure here says nothing about the code under test.
     for (const dir of dirs) {
       await Deno.remove(dir, { recursive: true }).catch(() => {});
+    }
+    if (teardown.length > 0) {
+      throw new AggregateError(teardown, "vintage teardown failed");
     }
   });
 
@@ -210,20 +226,33 @@ describe("pattern update over captured prior state", () => {
     // fixture would look empty and every continuity assertion would fail for a
     // reason that has nothing to do with the pattern being tested.
     const materialized = await materializeOver(vintage, program);
-    expect(materialized.error).toBeUndefined();
+    expect(
+      materialized.error,
+      "capture could not materialize the vintage pattern onto an empty space",
+    ).toBeUndefined();
 
     // Populate: this is the state the new version has to keep reachable.
+    // Address the root through the schema of the pattern that was actually
+    // materialized, so the write cannot land on a shape nobody ran.
     const root = vintageRoot<Record<string, unknown>>(
       vintage,
-      (await vintage.runtime.patternManager.compilePattern(program, {
-        space: vintage.space as never,
-      })).resultSchema,
+      materialized.resultSchema,
     );
-    const write = vintage.runtime.edit();
-    (root.withTx(write).key("items") as { set: (v: string[]) => void }).set(
-      items,
-    );
-    await write.commit();
+    // `editWithRetry`, not a bare `edit()`, and the result is CHECKED: this
+    // write races the tail of the materialize above on the same documents, and
+    // `commit()` REPORTS a conflict in its result rather than throwing. An
+    // unread result buys a snapshot that silently lacks the very state the tier
+    // exists to replay — every downstream case then fails on an empty read,
+    // several layers away from the cause.
+    const { error: writeError } = await vintage.runtime.editWithRetry((tx) => {
+      (root.withTx(tx).key("items") as { set: (v: string[]) => void }).set(
+        items,
+      );
+    });
+    expect(
+      writeError?.message,
+      "capture could not write the vintage's prior state",
+    ).toBeUndefined();
     await vintage.runtime.idle();
 
     const snapshot = `${dir}/vintage.sqlite`;
@@ -245,7 +274,12 @@ describe("pattern update over captured prior state", () => {
 
     const result = await replay(captured, OLD_WITHOUT_FAVORITES);
     expect(result.error).toBeUndefined();
-    expect(result.value?.items).toEqual(["alpha", "beta"]);
+    expect(
+      result.value?.items,
+      "the snapshot did not round-trip: the SAME pattern replayed over the " +
+        "captured space cannot see the state that space was captured holding, " +
+        "so capture, snapshot or restore is broken — not any pattern change",
+    ).toEqual(["alpha", "beta"]);
   });
 
   it("keeps prior state reachable when the new field carries a default", async () => {
@@ -254,8 +288,16 @@ describe("pattern update over captured prior state", () => {
 
     expect(result.error).toBeUndefined();
     // The point of the tier: the data the OLD version wrote survives.
-    expect(result.value?.items).toEqual(["alpha", "beta"]);
-    expect(result.value?.favorites).toEqual([]);
+    expect(
+      result.value?.items,
+      "adding a DEFAULTED field lost the prior version's data — a regression " +
+        "in update continuity, not in this test's fixture (the round-trip " +
+        "case proves the same snapshot reads back under the old pattern)",
+    ).toEqual(["alpha", "beta"]);
+    expect(
+      result.value?.favorites,
+      "the new field did not materialize from its Default<[]>",
+    ).toEqual([]);
   });
 
   it("refuses an additive REQUIRED field with no default over a vintage doc", async () => {
@@ -311,11 +353,22 @@ describe("pattern update over captured prior state", () => {
     // property of the rename.
     const control = await replay(captured, OLD_WITHOUT_FAVORITES);
     expect(control.error).toBeUndefined();
-    expect(control.value?.items).toEqual(["alpha", "beta"]);
+    expect(
+      control.value?.items,
+      "CONTROL failed, so the case below proves nothing: the vintage itself " +
+        "cannot read the captured state, which means the fixture is broken " +
+        "rather than the rename stranding anything",
+    ).toEqual(["alpha", "beta"]);
 
     const result = await replay(captured, RENAMED_STORAGE_KEY);
     expect(result.error).toBeUndefined();
-    expect(result.value?.items).toEqual([]); // …not ["alpha", "beta"].
+    expect(
+      result.value?.items,
+      "moving a field's `.for()` key no longer strands the prior version's " +
+        "data. If the runtime gained key migration this test should be " +
+        "REWRITTEN, not deleted — Tier 2 exists for this class and Tier 1 " +
+        "structurally cannot see it",
+    ).toEqual([]); // …not ["alpha", "beta"].
   });
 
   it("records which classes Tier 1 already covers", async () => {
