@@ -25,9 +25,10 @@ decision changed. Prior art records the llm-dialog builtin as a second in-tree
 precedent for the invocation protocol. The "no third callable kind" decision is
 restated as a deferral rather than a rejection, with the two properties that
 keep a create verb additive later. Discovery records two deferred `cf piece
-get` read-control flags, and the property that makes verb sets structural
-interfaces for free. Rule 6 and the schema-evolution section each gain the
-second reason they are load-bearing.
+get` read-control flags, and the machinery that would make verb sets structural
+interfaces — along with the unsettled question of how a verb is identified,
+which that machinery depends on. Rule 6 and the schema-evolution section each
+gain the second reason they are load-bearing.
 
 ## Goal
 
@@ -245,7 +246,8 @@ Rule 6 is also what keeps a set of verbs an *interface* rather than a
 members may depend on call order is a session type: conformance to it cannot be
 decided from the schema alone, because the schema cannot express "only after
 A". With rule 6 held, conformance is a plain structural question — the subset
-check the repo already runs. See Discovery for what that buys.
+check the repo already runs. See Discovery for what that buys, and for the
+premise it still rests on.
 
 ### Attribution: principal and execution provenance
 
@@ -318,7 +320,8 @@ stays bounded.
 Discovery is the parent's job; the child's own verbs are the child's. A comment
 is addressed to the topic, not routed through the board — **but that depends on
 the CLI dispatching a nested piece's streams, which today fails with
-`Transaction required for .set()`** (`packages/runner/src/cell.ts:1316`; its own
+`Transaction required for .set()`** (the non-stream branch of `Cell.set`,
+`packages/runner/src/cell.ts:1347`; its own
 board topic). Until that lands, board-level routing
 (`addComment {topicFid, body}`) is the documented workaround — pragmatic, not
 the target shape.
@@ -327,27 +330,40 @@ Two client affordances surfaced in review (2026-07-28) and are deferred,
 blocking nothing: `cf piece get` could grow flags that let an agent control
 how much data a read returns when exploring the fabric interactively — a
 `--schema` override reading through a narrower schema (the runtime's
-`asSchema`; the
-CLI already narrows its own internal reads this way, e.g.
+`asSchema`; the CLI already narrows its own internal reads this way, e.g.
 `packages/cli/lib/piece-render.ts:41`), and a limit on the number of records
 returned from a large array. Adjacent CLI work for when board scale demands it,
 recorded here so the deferral is deliberate; neither is an ask on any
 workstream in the implementation plan.
 
-**A set of verbs is already a structural interface, and that is free.** Schemas
-are the type system, so a verb set is a schema fragment and conformance is a
-subset check the repo already computes (`schemaSubsetIssue`). Its variance is
-already correct for the purpose: an implementer must accept at least the
-declared payload and return at most the declared result, which is exactly the
-argument/result direction pair above. Interface conformance and schema
-evolution are the same rule — evolution is conformance to one's past self.
-Nothing needs to be built, so any explicit interface mechanism (nominal
-declaration, discovery *by* interface) is deferred until a concrete need
-appears. The one precondition worth stating, because a future change could
-silently cost it: **verbs must stay in the piece's own schema.** Moving the
-verb list into a separate index cell — a plausible response to the read-size
-pressure this section describes — would end the property without any error
-appearing.
+**A set of verbs wants to be a structural interface, and the machinery for that
+already exists.** Schemas are the type system, so a verb set is a schema
+fragment and conformance is a subset check the repo already computes
+(`schemaSubsetIssue`). Its variance is already correct for the purpose: an
+implementer must accept at least the declared payload and return at most the
+declared result, which is exactly the argument/result direction pair above.
+Interface conformance and schema evolution are the same rule — evolution is
+conformance to one's past self. So no type machinery needs building, and any
+explicit interface mechanism (nominal declaration, discovery *by* interface) is
+deferred until a concrete need appears.
+
+What is **not** yet true is the premise all of that rests on: that a piece's
+verbs can be identified from its schema. Verb-ness has three independent
+encodings — the cell's construction kind, `asCell: ["stream"]` in the schema,
+and a stored `{$stream: true}` value — and `Cell.isStream` accepts any one of
+them (`packages/runner/src/cell.ts:936-958`). A conformance check filtering on
+the
+schema marker therefore misses verbs carried only by the stored one, and those
+exist in practice: the CLI keeps a forced-stream fallback specifically to
+dispatch them. Settling which signal is authoritative is already a prerequisite
+for the implementation plan's C3 (result-schema emission keys off the same
+question), and it is the same prerequisite here. Until it is settled, treat
+structural conformance as available in principle rather than in hand.
+
+One further precondition, cheap to hold and easy to lose: **verbs must stay in
+the piece's own schema.** Moving the verb list into a separate index cell — a
+plausible response to the read-size pressure this section describes — would
+end the property without any error appearing.
 
 ### Composition: the atomic-unit rule
 
@@ -763,11 +779,12 @@ sink rather than a commit. And llm-dialog bounds its caller-side wait with a
 120-second `TOOL_CALL_TIMEOUT` (`:126`), whose sibling `REQUEST_TIMEOUT` drops
 a user's message outright when one is pending (`:3053-3062`) — the fixed-wait
 failure class this document's own live-session evidence names one paragraph
-above. So the precedent is precise: the caller-supplied-id → durable-result-
-cell ergonomics are proven, and the bounded wait wrapped around them is exactly
-what returning an address and letting the client decide whether to wait
-removes. The scheduler receipt remains the right substrate for the reasons Part
-2 gives — the create-only exactly-once collision is what a client retry needs.
+above. So the precedent is precise: the ergonomics of a caller-supplied id
+resolving to a durable result cell are proven, and the bounded wait wrapped
+around them is exactly what returning an address and letting the client decide
+whether to wait removes. The scheduler receipt remains the right substrate for
+the reasons Part 2 gives — the create-only exactly-once collision is what a
+client retry needs.
 
 ## Open questions
 
@@ -824,8 +841,9 @@ removes. The scheduler receipt remains the right substrate for the reasons Part
   statement of why, from the 2026-07-28 pass: a "tool" is not a distinct kind
   of callable at all. Both branches of the runtime's tool path do the same
   thing — send an invocation, get a durable result cell at a caller-supplied
-  id — and the pattern branch merely instantiates first, leaving a running
-  instance behind that nothing collects. So instantiation is *a verb whose
+  id — and the pattern branch merely instantiates first, leaving behind a
+  running instance that this path does not collect. So instantiation is *a verb
+  whose
   result is a child reference*, which rule 5 and the child-reference decision
   already cover; it is out of scope here because its extra machinery (pattern
   resolution through `$patternRef`, the CFC observation flag and frozen request
@@ -834,8 +852,9 @@ removes. The scheduler receipt remains the right substrate for the reasons Part
   now: the result envelope must be able to carry a reference (already true —
   patterns return child references), and the payload model must be able to
   express a *declared but not caller-suppliable* field. The second already
-  exists at the type layer as `FrameworkProvided<T>`
-  (`packages/api/index.ts:2252-2270`, used for the bash tool's `sandboxId`);
+  exists at the type layer as `FrameworkProvided<T>` and
+  `FrameworkProvidedKeys<>` (`packages/api/index.ts:2264-2282`, used for the
+  bash tool's `sandboxId`);
   only the runtime's strip list is hardcoded. Rule 1 should be worded so a
   declared field may be framework-owned rather than caller-supplied.
 - **Failures are returned, not recorded.** The receipt's
