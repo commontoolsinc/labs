@@ -1,9 +1,9 @@
 /**
- * Language selection: `languageForFile` picks a language by extension, uses
- * plain text for unknown named files, and keeps TypeScript for unnamed pipes.
- * `distinctLanguages` dedupes the languages a diff touches, and
- * `diffSemanticsFor` composes the diff view's semantic layer from the languages
- * present, scoped to each one's files.
+ * Language selection: `languageForFile` picks a language by extension and uses
+ * plain text when no filename matches. Transformed compiler output selects
+ * TypeScript through a separate path. `distinctLanguages` dedupes the languages
+ * a diff touches, and `diffSemanticsFor` composes the diff view's semantic layer
+ * from the languages present, scoped to each one's files.
  */
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
@@ -11,6 +11,7 @@ import {
   diffSemanticsFor,
   distinctLanguages,
   languageForFile,
+  languageForTransformedOutput,
   renderedLinesFor,
 } from "../lib/view/languages/language.ts";
 import { typeScriptLanguage } from "../lib/view/languages/typescript/language.ts";
@@ -27,7 +28,7 @@ import {
 import { parseDiff } from "../lib/view/diff.ts";
 import type { Line } from "../lib/view/model.ts";
 
-Deno.test("languageForFile: named files resolve and unnamed input defaults to TypeScript", () => {
+Deno.test("languageForFile: named files resolve and missing names use plain text", () => {
   for (const ts of ["a.ts", "a.tsx", "a.mts", "a.cts", "a.js", "a.jsx"]) {
     assertEquals(languageForFile(ts).id, "typescript", ts);
   }
@@ -37,7 +38,8 @@ Deno.test("languageForFile: named files resolve and unnamed input defaults to Ty
   assertEquals(languageForFile("script.py").id, "python");
   assertEquals(languageForFile("notes.xyz").id, "plain-text");
   assertEquals(languageForFile("LICENSE").id, "plain-text");
-  assertEquals(languageForFile(undefined).id, "typescript");
+  assertEquals(languageForFile(undefined).id, "plain-text");
+  assertEquals(languageForTransformedOutput().id, "typescript");
 });
 
 Deno.test("languageForFile: named JavaScript uses the TypeScript-family parser", () => {

@@ -49,7 +49,7 @@ Deno.test("json: the registry selects JSON for .json and .jsonc", () => {
   // Other registered selections remain unchanged.
   assertEquals(languageForFile("main.ts").id, "typescript");
   assertEquals(languageForFile("notes.md").id, "markdown");
-  assertEquals(languageForFile(undefined).id, "typescript");
+  assertEquals(languageForFile(undefined).id, "plain-text");
 });
 
 Deno.test("json: keys, values, and literals get distinct classes", () => {
