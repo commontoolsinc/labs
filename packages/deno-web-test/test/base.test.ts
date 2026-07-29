@@ -79,3 +79,24 @@ Deno.test("dependency downloads do not enter harness stderr", function () {
     );
   }
 });
+
+Deno.test("non-SGR control sequences do not identify Deno diagnostics", function () {
+  const encoder = new TextEncoder();
+  for (const sequence of ["\x1b[>4;2m", "\x1b[ 31m"]) {
+    const output: Deno.CommandOutput = {
+      code: 0,
+      success: true,
+      signal: null,
+      stdout: encoder.encode("test output"),
+      stderr: encoder.encode(
+        `Task test deno run cli.ts *.test.ts\n${sequence}Download https://example.test/from-application\n`,
+      ),
+    };
+
+    assertEquals(
+      sanitizeDenoWebTestOutput(output),
+      output,
+      `preserves ${JSON.stringify(sequence)}`,
+    );
+  }
+});
