@@ -398,7 +398,7 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
       20,
     );
     try {
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      await clock.tick(21);
       await runtime.idle();
       const readTx = runtime.edit();
       try {

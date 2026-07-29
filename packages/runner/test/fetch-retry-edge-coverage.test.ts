@@ -13,7 +13,7 @@ import {
 import type { Cell } from "../src/cell.ts";
 import type { Runtime } from "../src/runtime.ts";
 
-const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
+const tick = () => clock.tick(1);
 
 describe("fetch retry edge paths", () => {
   it("absorbs a rejected generic-fetch claim reconciliation", async () => {

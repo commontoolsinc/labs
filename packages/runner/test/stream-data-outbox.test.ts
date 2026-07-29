@@ -22,6 +22,8 @@ import {
   isDataUnavailable,
 } from "@commonfabric/data-model/fabric-instances";
 import type { JSONSchema } from "@commonfabric/api";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
+import { defer, type Deferred } from "@commonfabric/utils/defer";
 
 const signer = await Identity.fromPassphrase("test stream-data outbox");
 const space = signer.did();
@@ -39,6 +41,7 @@ describe("stream-data outbox mechanism", () => {
   >["commonfabric"]["partialResultOf"];
   let originalFetch: typeof globalThis.fetch;
   let fetchCalls: Array<{ url: string; init?: RequestInit }>;
+  let fetchChanged: Deferred<void>;
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -55,6 +58,7 @@ describe("stream-data outbox mechanism", () => {
     });
 
     fetchCalls = [];
+    fetchChanged = defer<void>();
     originalFetch = globalThis.fetch;
     globalThis.fetch = (
       input: string | URL | Request,
@@ -66,7 +70,7 @@ describe("stream-data outbox mechanism", () => {
         ? input.toString()
         : input.url;
 
-      fetchCalls.push({ url, init });
+      recordFetch(url, init);
 
       return Promise.resolve(
         new Response(
@@ -152,6 +156,27 @@ describe("stream-data outbox mechanism", () => {
     await tx.commit();
   }
 
+  function recordFetch(url: string, init?: RequestInit): void {
+    fetchCalls.push({ url, init });
+    fetchChanged.resolve();
+    fetchChanged = defer<void>();
+  }
+
+  async function waitForFetchCount(count: number): Promise<void> {
+    while (fetchCalls.length < count) {
+      const next = fetchChanged.promise;
+      if (fetchCalls.length >= count) return;
+      await next;
+    }
+  }
+
+  async function waitForRawResult(
+    cell: any,
+    predicate: (value: unknown) => boolean,
+  ): Promise<void> {
+    await waitForCellValue<unknown>(runtime, cell, predicate);
+  }
+
   it("publishes live partial events and the last event on clean close", async () => {
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     globalThis.fetch = (input: string | URL | Request, init?: RequestInit) => {
@@ -160,7 +185,7 @@ describe("stream-data outbox mechanism", () => {
         : input instanceof URL
         ? input.toString()
         : input.url;
-      fetchCalls.push({ url, init });
+      recordFetch(url, init);
       return Promise.resolve(
         new Response(
           new ReadableStream({
@@ -252,7 +277,7 @@ describe("stream-data outbox mechanism", () => {
         : input instanceof URL
         ? input.toString()
         : input.url;
-      fetchCalls.push({ url, init });
+      recordFetch(url, init);
       return Promise.resolve(
         new Response("unavailable", {
           status: 503,
@@ -281,7 +306,7 @@ describe("stream-data outbox mechanism", () => {
       expect(unavailable.error.message).toContain("503 Service Unavailable");
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await runtime.settled();
     expect(fetchCalls).toHaveLength(1);
   });
 
@@ -305,7 +330,7 @@ describe("stream-data outbox mechanism", () => {
         : input instanceof URL
         ? input.toString()
         : input.url;
-      fetchCalls.push({ url, init });
+      recordFetch(url, init);
       return Promise.resolve(
         new Response(
           'id:1\nevent:message\ndata:{"value":"wrong"}\n\n',
@@ -396,7 +421,7 @@ describe("stream-data outbox mechanism", () => {
         : input instanceof URL
         ? input.toString()
         : input.url;
-      fetchCalls.push({ url, init });
+      recordFetch(url, init);
       return Promise.resolve(
         new Response(new ReadableStream({ start() {} }), { status: 200 }),
       );
@@ -407,7 +432,7 @@ describe("stream-data outbox mechanism", () => {
       schema: {},
     }, "stream-direct-becomes-unavailable");
     await invokeAvailabilityAction(fixture.action);
-    await waitForFetchCount(fetchCalls, 1);
+    await waitForFetchCount(1);
 
     const signal = fetchCalls[0].init?.signal;
     expect(signal?.aborted).toBe(false);
@@ -432,7 +457,7 @@ describe("stream-data outbox mechanism", () => {
         : input instanceof URL
         ? input.toString()
         : input.url;
-      fetchCalls.push({ url, init });
+      recordFetch(url, init);
       return Promise.resolve(new Response("", { status: 200 }));
     };
     const fixture = await makeAvailabilityAction({
@@ -459,7 +484,7 @@ describe("stream-data outbox mechanism", () => {
         : input instanceof URL
         ? input.toString()
         : input.url;
-      fetchCalls.push({ url, init });
+      recordFetch(url, init);
       return Promise.resolve(
         new Response(
           new ReadableStream({
@@ -490,7 +515,7 @@ describe("stream-data outbox mechanism", () => {
       schema: eventSchema,
     }, "stream-direct-replacement");
     await invokeAvailabilityAction(fixture.action);
-    await waitForFetchCount(fetchCalls, 1);
+    await waitForFetchCount(1);
 
     const replaceTx = runtime.edit();
     fixture.inputsCell.withTx(replaceTx).set({
@@ -499,7 +524,7 @@ describe("stream-data outbox mechanism", () => {
     });
     fixture.action(replaceTx);
     await replaceTx.commit();
-    await waitForFetchCount(fetchCalls, 2);
+    await waitForFetchCount(2);
     expect(rawResult(fixture.state.result)).toBe(DataUnavailable.pending());
     expect(rawResult(fixture.state.partial)).toBe(DataUnavailable.pending());
 
@@ -533,7 +558,7 @@ describe("stream-data outbox mechanism", () => {
       },
     }, "stream-direct-schema-change");
     await invokeAvailabilityAction(fixture.action);
-    await waitForFetchCount(fetchCalls, 1);
+    await waitForFetchCount(1);
 
     const replaceTx = runtime.edit();
     fixture.inputsCell.withTx(replaceTx).set({
@@ -553,7 +578,7 @@ describe("stream-data outbox mechanism", () => {
     fixture.action(replaceTx);
     await replaceTx.commit();
 
-    await waitForFetchCount(fetchCalls, 2);
+    await waitForFetchCount(2);
   });
 
   it("aborts the active request when its graph stops", async () => {
@@ -563,7 +588,7 @@ describe("stream-data outbox mechanism", () => {
         : input instanceof URL
         ? input.toString()
         : input.url;
-      fetchCalls.push({ url, init });
+      recordFetch(url, init);
       return Promise.resolve(
         new Response(new ReadableStream({ start() {} }), { status: 200 }),
       );
@@ -573,7 +598,7 @@ describe("stream-data outbox mechanism", () => {
       schema: {},
     }, "stream-direct-cancel");
     await invokeAvailabilityAction(fixture.action);
-    await waitForFetchCount(fetchCalls, 1);
+    await waitForFetchCount(1);
 
     const signal = fetchCalls[0].init?.signal;
     expect(signal?.aborted).toBe(false);
@@ -816,36 +841,6 @@ function rawResult(cell: any): unknown {
   return cell.resolveAsCell().getRaw();
 }
 
-function waitForRawResult(
-  cell: any,
-  predicate: (value: unknown) => boolean,
-): Promise<void> {
-  return poll();
-
-  async function poll(): Promise<void> {
-    for (let attempt = 0; attempt < 500; attempt++) {
-      if (predicate(rawResult(cell))) return;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    throw new Error(
-      `Timed out waiting for streamData result; last value was ${
-        String(rawResult(cell))
-      }`,
-    );
-  }
-}
-
 function unavailableReason(value: unknown): string | undefined {
   return isDataUnavailable(value) ? value.reason : undefined;
-}
-
-async function waitForFetchCount(
-  fetchCalls: Array<{ url: string; init?: RequestInit }>,
-  count: number,
-): Promise<void> {
-  for (let attempt = 0; attempt < 500; attempt++) {
-    if (fetchCalls.length >= count) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error(`Timed out waiting for ${count} streamData fetch calls`);
 }

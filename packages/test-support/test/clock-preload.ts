@@ -202,15 +202,16 @@ function freezeAround(
 
     // Auto-advance: fire the earliest future production timer, jumping the clock
     // to it, so the runtime's reactive waits resolve without real time passing.
-    // The earliest future timer to fire. `onlyProd` restricts to the runtime's
-    // own timers (used by the auto-advance pump, so a test's frozen sleep is
-    // never fired on its own); `tick` passes false, advancing test timers too,
-    // so a test can model a slow async step with `setTimeout` and step through
-    // it explicitly.
+    // The earliest timer at or after the current logical instant. Including
+    // `fireAt === elapsed` is what drains every timer sharing one deadline.
+    // `onlyProd` restricts to the runtime's own timers (used by the
+    // auto-advance pump, so a test's frozen sleep is never fired on its own);
+    // `tick` passes false, advancing test timers too, so a test can model a
+    // slow async step with `setTimeout` and step through it explicitly.
     const nextTimer = (limit: number, onlyProd: boolean): Timer | undefined => {
       let next: Timer | undefined;
       for (const tm of timers.values()) {
-        if (tm.kind === "zero" || tm.fireAt <= elapsed || tm.fireAt > limit) {
+        if (tm.kind === "zero" || tm.fireAt < elapsed || tm.fireAt > limit) {
           continue;
         }
         if (onlyProd && tm.kind !== "prod") continue;

@@ -216,7 +216,7 @@ describe("fetch-program outbox mechanism", () => {
       20,
     );
     try {
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      await clock.tick(21);
       await runtime.idle();
       const readTx = runtime.edit();
       try {
@@ -329,6 +329,12 @@ describe("fetch-program outbox mechanism", () => {
     const secondStarted = Promise.withResolvers<void>();
     const firstResponse = Promise.withResolvers<Response>();
     const secondResponse = Promise.withResolvers<Response>();
+    const trackedWork: Promise<unknown>[] = [];
+    const originalTrackAsyncWork = runtime.trackAsyncWork;
+    runtime.trackAsyncWork = function (promise, owner) {
+      if (owner !== undefined) trackedWork.push(promise);
+      originalTrackAsyncWork.call(this, promise, owner);
+    };
     let calls = 0;
     globalThis.fetch = () => {
       calls++;
@@ -357,6 +363,7 @@ describe("fetch-program outbox mechanism", () => {
     try {
       await result.pull();
       await firstStarted.promise;
+      expect(trackedWork).toHaveLength(1);
 
       urlCell.withTx(tx).setRaw(DataUnavailable.syncing());
       tx.commit();
@@ -371,6 +378,7 @@ describe("fetch-program outbox mechanism", () => {
       tx = runtime.edit();
       await result.pull();
       await secondStarted.promise;
+      expect(trackedWork).toHaveLength(2);
       expect(await rawResultChild(runtime, result)).toBe(
         DataUnavailable.pending(),
       );
@@ -378,7 +386,7 @@ describe("fetch-program outbox mechanism", () => {
       firstResponse.resolve(
         new Response("export const stale = 1;\n", { status: 200 }),
       );
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await trackedWork[0];
       expect(await rawResultChild(runtime, result)).toBe(
         DataUnavailable.pending(),
       );
@@ -395,6 +403,7 @@ describe("fetch-program outbox mechanism", () => {
       expect(program.files[0].contents).toContain("fresh = 2");
       expect(calls).toBe(2);
     } finally {
+      runtime.trackAsyncWork = originalTrackAsyncWork;
       firstResponse.resolve(new Response("export {};\n", { status: 200 }));
       secondResponse.resolve(new Response("export {};\n", { status: 200 }));
     }
