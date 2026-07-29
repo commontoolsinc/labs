@@ -441,22 +441,40 @@ exactly what a migrated-forward database no longer holds.
       (`home.test.tsx` instantiates `Home({})` and drives it with
       `action()`/`assert()`), so the state they produce is real pattern state
       written through real handlers.
-- [ ] Replay by applying today's pattern to EVERY recorded instantiation, and
+- [ ] Replay by applying today's PATTERN to EVERY recorded instantiation, and
       report the count — "updated 0 patterns" must never read as success.
+- [ ] Make the replay path REFUSE a `*.test.tsx` entry, with its own case in
+      `pattern-vintage-run.test.ts`. See the invariant below: a test pattern
+      creates stores and is never an upgrade target, and this is the guard that
+      keeps that from being merely written down.
 - [ ] Capture on identity change, committed — not uploaded as an artifact
       (see the decision above).
 - [ ] Retention, if any, weighed as LOST COVERAGE against working-tree disk —
       not applied as housekeeping, and still structurally unable to reach
       `pinned/`.
 
-**Finding the update targets — the hard part, and a measured dead end.**
+**INVARIANT: a test pattern creates stores. It is never an upgrade target.**
 
-A test-populated store puts the TEST pattern at the top; the pattern under test
-is a nested instance (`Home({})`) with no stable id. Applying today's test
-pattern at the top was tried and **makes the gate weaker**: measured, the
-additive-required break that stage 3 catches (exit 1, naming the field) exits 0,
-because materializing the test pattern never re-runs the CFC schema merge
-against the inner pattern's own stored envelope. Do not take that shortcut.
+The test pattern's whole role is to produce a fresh, populated store for later
+rounds to upgrade. It is a capture-time tool and must never appear on the replay
+side. The upgrade always applies **the pattern**, never the test that exercised
+it.
+
+Enforce this mechanically rather than by comment. The replay path must REFUSE a
+program whose entry resolves to a `*.test.tsx`, and the refusal needs its own
+case in `pattern-vintage-run.test.ts`. Prose is what failed the first time:
+"don't take that shortcut" was already the plan's wording when the shortcut got
+taken anyway, because at the moment of writing the code it looks like the
+obvious way to reach the root.
+
+Why it is wrong, measured rather than argued: a test-populated store puts the
+TEST pattern at the top, with the pattern under test a nested instance
+(`Home({})`) that has no stable id. Applying today's test pattern there **makes
+the gate weaker** — the additive-required break that stage 3 catches (exit 1,
+naming the field) exits 0, because materializing the test pattern never re-runs
+the CFC schema merge against the inner pattern's own stored envelope. The gate
+keeps reporting success while checking nothing, which is this tier's worst
+failure mode and the third time it has appeared in this work.
 
 Three ways to get the targets were compared:
 
