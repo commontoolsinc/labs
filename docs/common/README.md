@@ -43,6 +43,7 @@ on the Common Fabric runtime.
 - [concepts/action.md](concepts/action.md) — handling events with `action()`
 - [concepts/handler.md](concepts/handler.md) — reusable parameterized handlers with `handler()`
 - [concepts/identity.md](concepts/identity.md) — object identity, `equals()`, why `===` fails across cells
+- [concepts/piece-discovery.md](concepts/piece-discovery.md) — the piece registry, searchable collections, link walks, and the limits of orphan-piece discovery
 - [concepts/self-reference.md](concepts/self-reference.md) — self-referential types with `SELF`
 - [concepts/types-and-schemas/writable.md](concepts/types-and-schemas/writable.md) — `Writable<>` and write access in type signatures
 - [concepts/types-and-schemas/default.md](concepts/types-and-schemas/default.md) — `Default<>` for input defaults

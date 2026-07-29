@@ -475,20 +475,20 @@ export const piece = new Command()
   .globalOption("-i,--identity <path:string>", "Path to an identity keyfile.")
   .globalOption("-s,--space <space:string>", "The space name or DID")
   /* piece ls */
-  .command("ls", "List pieces in space.")
+  .command("ls", "List pieces registered in the space.")
   .usage(spaceUsage)
   .example(
     cliText(`cf piece ls ${EX_ID} ${EX_COMP}`),
-    `Display a list of all pieces in "${RAW_EX_COMP.space}".`,
+    `Display the registered pieces in "${RAW_EX_COMP.space}".`,
   )
   .example(
     cliText(`cf piece ls ${EX_ID} ${EX_URL}`),
-    `Display a list of all pieces in "${RAW_EX_COMP.space}".`,
+    `Display the registered pieces in "${RAW_EX_COMP.space}".`,
   )
   .option("--json", "Output machine-readable JSON.")
   .action(listPiecesFromCommand)
   /* piece search */
-  .command("search", "Search readable input and result data in every piece.")
+  .command("search", "Search input and result data in registered pieces.")
   .usage(`${spaceUsage} <query>`)
   .example(
     cliText(`cf piece search ${EX_ID} ${EX_COMP} "meeting notes"`),
@@ -1111,11 +1111,11 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
     );
   })
   /* piece map */
-  .command("map", "Display a visual map of all pieces and their connections")
+  .command("map", "Show registered pieces and the connections between them")
   .usage(spaceUsage)
   .example(
     cliText(`cf piece map ${EX_ID} ${EX_COMP}`),
-    `Display a map of all pieces and connections in "${RAW_EX_COMP.space}".`,
+    `Display registered pieces and connections in "${RAW_EX_COMP.space}".`,
   )
   .example(
     cliText(`cf piece map ${EX_ID} ${EX_COMP} --format dot`),

@@ -1,11 +1,12 @@
 /**
  * Record Backup Pattern - Import/Export for Records
  *
- * Exports all Records in a space to a single JSON file and imports them back.
- * Designed for data survival after server wipes.
+ * Exports registered Records in a space to one JSON file and imports them
+ * back. Records outside the piece registry are not included, so this is not a
+ * complete backup of the space's stored data.
  *
  * Features:
- * - Discovers all Records using wish({ query: "#pieceRegistry" })
+ * - Discovers registered Records using wish({ query: "#pieceRegistry" })
  * - Extracts module data using registry's fieldMapping
  * - Preserves wiki-links in notes as-is
  * - Includes trashed modules in export
@@ -171,7 +172,7 @@ function extractModuleData(
 }
 
 /**
- * Build export data from all Records in the space
+ * Build export data from registered Records in the space.
  */
 const buildExportData = lift(
   (
@@ -623,7 +624,7 @@ const handleFileUpload = handler<
 
 export default pattern<Input, Output>((input) => {
   const { importJson } = input;
-  // Get all pieces in the space
+  // Get registered pieces in the space
   const pieceRegistry = wish<RecordPiece[]>({
     query: "#pieceRegistry",
   }).result!;
