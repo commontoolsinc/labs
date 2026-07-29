@@ -17,6 +17,8 @@ import {
 import {
   buildCapturePropertyAssignments,
   type CaptureTreeNode,
+  findCaptureRootIdentifier,
+  preserveCaptureReferenceOrigins,
 } from "../../utils/capture-tree.ts";
 import {
   createPropertyName,
@@ -611,43 +613,6 @@ function formatPath(path: readonly string[]): string {
   return path.length === 0 ? "<root>" : path.join(".").replaceAll(".[]", "[]");
 }
 
-/**
- * Curry-record expressions are synthesized after binding. Retain the authored
- * root identifier as their original node so later free-variable analysis can
- * recover the real lexical symbol instead of treating the surrounding
- * `__cfHelpers.pattern(...)` call as the only dataflow root.
- */
-function preserveCaptureReferenceOrigins(
-  properties: readonly ts.PropertyAssignment[],
-  captureTree: ReadonlyMap<string, CaptureTreeNode>,
-): void {
-  let index = 0;
-  for (const [rootName, node] of captureTree) {
-    const property = properties[index++];
-    if (!property) continue;
-    const originalRoot = findCaptureRootIdentifier(node);
-    if (!originalRoot) continue;
-
-    const visit = (current: ts.Node): void => {
-      if (
-        ts.isIdentifier(current) && current.text === rootName &&
-        !isPropertyNameIdentifier(current)
-      ) {
-        ts.setOriginalNode(current, originalRoot);
-      }
-      ts.forEachChild(current, visit);
-    };
-    visit(property.initializer);
-  }
-}
-
-function isPropertyNameIdentifier(identifier: ts.Identifier): boolean {
-  const parent = identifier.parent;
-  return !!parent &&
-    ((ts.isPropertyAssignment(parent) && parent.name === identifier) ||
-      (ts.isPropertyAccessExpression(parent) && parent.name === identifier));
-}
-
 function registerOriginalFactoryType(
   original: ts.CallExpression,
   generated: ts.Expression,
@@ -827,34 +792,6 @@ function rewriteRenamedCaptureReferences(
 
   const body = ts.visitNode(callback.body, visit) as ts.ConciseBody;
   return updateCallbackBody(callback, body, context.factory);
-}
-
-function findCaptureRootIdentifier(
-  node: CaptureTreeNode | undefined,
-): ts.Identifier | undefined {
-  if (!node) return undefined;
-  if (node.expression) {
-    let expression = node.expression;
-    while (
-      ts.isPropertyAccessExpression(expression) ||
-      ts.isElementAccessExpression(expression)
-    ) {
-      expression = expression.expression;
-    }
-    if (
-      ts.isCallExpression(expression) &&
-      ts.isPropertyAccessExpression(expression.expression) &&
-      expression.expression.name.text === "key"
-    ) {
-      expression = expression.expression.expression;
-    }
-    if (ts.isIdentifier(expression)) return expression;
-  }
-  for (const child of node.properties.values()) {
-    const root = findCaptureRootIdentifier(child);
-    if (root) return root;
-  }
-  return undefined;
 }
 
 /** True when this builder call appears in the callback subtree of another pattern. */

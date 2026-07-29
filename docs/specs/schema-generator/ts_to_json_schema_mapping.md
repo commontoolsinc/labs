@@ -688,6 +688,15 @@ Invocation compatibility is a ts-transformers concern, not a schema-generator
 filter: the compiler separately requires same kind, equal public schemas, and
 equal FrameworkProvided paths before a union can be called.
 
+When a compiler hint carries input/output TypeNodes plus paired semantic Types,
+`FactoryFormatter` uses the same route-selection rule as ordinary transformer
+schema injection. It generates from the semantic Type unless the TypeNode
+contains an explicit `any` or `unknown` keyword; in that case it generates from
+the node structure because it retains information the checker type cannot.
+Root JSDoc is then restored from the paired semantic Type. This makes a carried
+factory contract's union order, unknown leaves, and annotations byte-for-byte
+consistent with the referenced builder's canonical schema.
+
 `FrameworkProvided` paths are compiler/runtime authority metadata and are not
 emitted inside `asFactory`. First-class factories are also the deliberate
 exception to ObjectFormatter's ordinary callable-property skip. Other callable

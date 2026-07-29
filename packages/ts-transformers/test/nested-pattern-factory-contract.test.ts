@@ -5,7 +5,7 @@ import ts from "typescript";
 
 import { COMMONFABRIC_TYPES } from "./commonfabric-test-types.ts";
 import { callsNamed, literalToValue, parseModule } from "./transformed-ast.ts";
-import { transformSource, validateSource } from "./utils.ts";
+import { transformFiles, transformSource, validateSource } from "./utils.ts";
 
 interface PatternContract {
   kind: "pattern";
@@ -41,6 +41,27 @@ function callContract(call: ts.CallExpression): PatternContract {
     argumentSchema: literalToValue(call.arguments[1]!) as JSONSchema,
     resultSchema: literalToValue(call.arguments[2]!) as JSONSchema,
   };
+}
+
+function assertPatternContractsEqual(
+  actual: PatternContract,
+  expected: PatternContract,
+): void {
+  assertEquals(actual.kind, expected.kind);
+  assert(
+    factorySchemasEqual(actual.argumentSchema, expected.argumentSchema),
+    Deno.inspect({
+      actual: actual.argumentSchema,
+      expected: expected.argumentSchema,
+    }),
+  );
+  assert(
+    factorySchemasEqual(actual.resultSchema, expected.resultSchema),
+    Deno.inspect({
+      actual: actual.resultSchema,
+      expected: expected.resultSchema,
+    }),
+  );
 }
 
 function resultProperties(call: ts.CallExpression): Record<string, unknown> {
@@ -950,6 +971,62 @@ export default pattern(() => {
     propertyContract(resultProperties(rootPatternCall(root)).child),
     callContract(base),
   );
+});
+
+Deno.test("scheduled containers retain imported factory schema annotations", async () => {
+  const output = await transformFiles({
+    "/test.tsx": `
+import { computed, pattern } from "commonfabric";
+import { searchWeb } from "./dependency.tsx";
+
+export default pattern(() => {
+  const baseTools = { searchWeb: { pattern: searchWeb } };
+  const tools = computed(() => ({ ...baseTools }));
+  return { tools };
+});
+`,
+    "/dependency.tsx": `
+import { computed, ifElse, pattern } from "commonfabric";
+
+/** Search the web for information. */
+type SearchQuery = {
+  /** The query to search the web for. */
+  query: string;
+};
+
+export const searchWeb = pattern<SearchQuery>(({ query }) => {
+  const pending = computed(() => query.length > 0);
+  return ifElse(pending, undefined, {
+    cell: query as any,
+    error: query as any,
+  });
+});
+`,
+  }, {
+    types: COMMONFABRIC_TYPES,
+    typeCheck: true,
+  });
+  const dependency = parseModule(output["/dependency.tsx"]!);
+  const test = parseModule(output["/test.tsx"]!);
+  const [scheduled] = callsNamed(test, "lift");
+  assert(scheduled, output["/test.tsx"]);
+
+  const scheduledInputContracts = collectPropertyContracts(
+    literalToValue(scheduled.arguments[1]!),
+  );
+  const scheduledResultContracts = collectPropertyContracts(
+    literalToValue(scheduled.arguments[2]!),
+  );
+  const rootResultContracts = collectPropertyContracts(
+    literalToValue(rootPatternCall(test).arguments[2]!),
+  );
+  assertEquals(scheduledInputContracts.length, 1);
+  assertEquals(scheduledResultContracts.length, 1);
+  assertEquals(rootResultContracts.length, 1);
+  const expected = callContract(rootPatternCall(dependency));
+  assertPatternContractsEqual(scheduledInputContracts[0]!, expected);
+  assertPatternContractsEqual(scheduledResultContracts[0]!, expected);
+  assertPatternContractsEqual(rootResultContracts[0]!, expected);
 });
 
 Deno.test("object-container aliases retain nested exact factory contracts", async () => {

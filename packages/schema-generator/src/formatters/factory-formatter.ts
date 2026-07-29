@@ -21,8 +21,10 @@ export interface FactoryTypeInfo {
 interface HintedFactoryContract {
   readonly kind: FactoryTypeKind;
   readonly inputTypeNode: ts.TypeNode;
+  readonly inputType?: ts.Type;
   readonly inputSchema?: unknown;
   readonly outputTypeNode: ts.TypeNode;
+  readonly outputType?: ts.Type;
   readonly outputSchema?: unknown;
 }
 
@@ -203,8 +205,9 @@ export class FactoryFormatter implements TypeFormatter {
     // rather than borrowing definitions from the containing value schema.
     const inputSchema = hint.inputSchema !== undefined
       ? hint.inputSchema as JSONSchemaMutable
-      : this.schemaGenerator.generateSchemaFromSyntheticTypeNode(
+      : this.schemaGenerator.generateHintedFactoryContractSchema(
         hint.inputTypeNode,
+        hint.inputType,
         context.typeChecker,
         context.typeRegistry,
         context.schemaHints,
@@ -212,8 +215,9 @@ export class FactoryFormatter implements TypeFormatter {
       );
     const outputSchema = hint.outputSchema !== undefined
       ? hint.outputSchema as JSONSchemaMutable
-      : this.schemaGenerator.generateSchemaFromSyntheticTypeNode(
+      : this.schemaGenerator.generateHintedFactoryContractSchema(
         hint.outputTypeNode,
+        hint.outputType,
         context.typeChecker,
         context.typeRegistry,
         context.schemaHints,

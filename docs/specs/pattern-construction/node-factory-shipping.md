@@ -1165,9 +1165,15 @@ has the exact factory leaf. Type-directed recovery carries only the public
 kind and schemas; it never invents `FrameworkProvided` authority.
 For anonymous union, nullable, and optional captures, every trusted factory arm
 receives its own compiler hint while non-factory arms remain in the union. The
-synthetic schema writer formats those hinted members in the semantic union
-order used by ordinary type-based generation, so exact alternatives do not
-reorder merely because a contract crossed a closure boundary.
+schema writer formats each hinted public contract through the same
+semantic-versus-node route that emits the referenced builder's own schema.
+Ordinary contracts use semantic type generation. When the carried TypeNode
+contains an explicit `any` or `unknown` leaf, the contract uses node generation,
+matching the canonical writer's rule that the node structure is then more
+precise than the checker type. Root JSDoc from the paired semantic type is
+reattached in either case. Consequently exact `anyOf` order, annotations, and
+unknown leaves do not change merely because an imported factory crossed a
+closure, object-spread, or scheduled `computed`/`lift` boundary.
 When the enclosing pattern's authored public input schema supplies a complete,
 flat `anyOf` or `oneOf` containing only factory alternatives and its
 factory-kind counts match every trusted Common Fabric factory type arm, those
@@ -1284,6 +1290,10 @@ cycle with a source-located compile diagnostic. It must not emit a bare
 ancestor's `$defs`, or expand until resource exhaustion.
 Normalization also preserves every own schema key (including `__proto__`) in
 prototype-safe maps; browser object accessors cannot erase a contract difference.
+Resolving a local `$ref` with legal sibling annotations also produces a
+prototype-safe map. Equivalent schemas therefore remain equal when one side
+spells a referenced schema with an adjacent `description` or other annotation,
+without weakening comparison of that annotation.
 The resolved trusted artifact is authoritative; wire-carried schema hints never
 grant execution or CFC authority.
 
@@ -1296,7 +1306,12 @@ conditionals; it is not serialized and is never populated from a decoded
 `Factory@1` value. This applies equally to pattern, module/lift, and handler
 factories. Inferred lift/handler contracts are captured after capability
 shrinking so the containing schema equals the schemas actually injected at the
-builder call. If one semantic position can hold multiple exact contracts, its
+builder call. Scheduled container lowering retains authored capture origins,
+follows statically selected object spreads and imported const initializers, and
+propagates the recovered factory contract through the scheduled input schema,
+scheduled result schema, and enclosing pattern result schema. These three
+copies must equal the referenced builder's canonical public contract exactly.
+If one semantic position can hold multiple exact contracts, its
 schema contains ordered alternatives rather than dropping or broadening any
 contract. Scheduled preparation selects exactly one matching `oneOf`/`anyOf`
 factory alternative by kind and normalized public schemas; it never

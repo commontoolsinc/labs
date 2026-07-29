@@ -369,10 +369,16 @@ function mergeResolvedSchemaRef(
     if (!canFlatten) {
       return ["$ref-and-siblings", target, siblings];
     }
-    return Object.fromEntries(
-      [...Object.entries(targetObject), ...Object.entries(siblings)]
-        .sort(([left], [right]) => utf8Compare(left, right)),
-    ) as Readonly<Record<string, NormalizedSchemaValue>>;
+    const merged: Record<string, NormalizedSchemaValue> = Object.create(null);
+    for (
+      const [key, value] of [
+        ...Object.entries(targetObject),
+        ...Object.entries(siblings),
+      ].sort(([left], [right]) => utf8Compare(left, right))
+    ) {
+      merged[key] = value;
+    }
+    return merged;
   }
   // Internal normalization marker for a `$ref` whose sibling assertions
   // cannot be losslessly flattened into the resolved object.

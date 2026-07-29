@@ -976,6 +976,7 @@ export function resolvePatternFactorySchemaContract(
     );
   }
 
+  const returnExpression = getCallbackReturnExpression(callback);
   const originalInputTypeNode = inputTypeNode;
   inputTypeNode = applyCapabilitySummaryToArgument(
     callback,
@@ -994,7 +995,6 @@ export function resolvePatternFactorySchemaContract(
 
   if (inputType) typeRegistry?.set(inputTypeNode, inputType);
   if (outputType) typeRegistry?.set(outputTypeNode, outputType);
-  const returnExpression = getCallbackReturnExpression(callback);
   if (returnExpression) {
     // Contract resolution runs during closure conversion, before the later
     // SchemaInjection traversal reaches the hoisted base pattern. Preserve
@@ -1994,9 +1994,10 @@ function inferLiftFactoryResultType(
   return resultType;
 }
 
-function getCallbackReturnExpression(
-  fn: SchemaCallback,
+export function getCallbackReturnExpression(
+  fn: SchemaCallback | undefined,
 ): ts.Expression | undefined {
+  if (!fn) return undefined;
   if (!fn.body) return undefined;
   if (ts.isExpression(fn.body)) {
     return fn.body;
@@ -2351,27 +2352,48 @@ export function propagateFactoryContractHints(
     ts.isObjectLiteralExpression(structuralExpr) &&
     ts.isTypeLiteralNode(node)
   ) {
-    for (const property of structuralExpr.properties) {
-      if (
-        !ts.isPropertyAssignment(property) &&
-        !ts.isShorthandPropertyAssignment(property)
-      ) continue;
-      const name = propertyNameText(property.name);
+    for (const member of node.members) {
+      if (!ts.isPropertySignature(member) || !member.type) continue;
+      const name = propertyNameText(member.name);
       if (!name) continue;
-      const member = node.members.find((candidate) =>
-        ts.isPropertySignature(candidate) && candidate.type &&
-        propertyNameText(candidate.name) === name
+      const value = selectFactoryContractContainerMember(
+        structuralExpr,
+        name,
+        context.checker,
+        new Set(),
       );
-      if (!member || !ts.isPropertySignature(member) || !member.type) continue;
+      if (!value) continue;
       propagateFactoryContractHints(
-        ts.isPropertyAssignment(property)
-          ? property.initializer
-          : property.name,
+        value,
         member.type,
         context,
       );
     }
     return;
+  }
+
+  if (ts.isCallExpression(structuralExpr)) {
+    const applied = resolveLiftAppliedInputAndCallback(
+      structuralExpr,
+      context.checker,
+      context.sourceFile,
+    );
+    const callKind = detectCallKind(structuralExpr, context.checker);
+    const computedCallback = callKind?.kind === "builder" &&
+        callKind.builderName === "computed"
+      ? resolveFunctionLikeExpression(
+        structuralExpr.arguments[0],
+        context.checker,
+        context.sourceFile,
+      )
+      : undefined;
+    const returnExpression = getCallbackReturnExpression(
+      applied?.callback ?? computedCallback,
+    );
+    if (returnExpression) {
+      propagateFactoryContractHints(returnExpression, node, context);
+      return;
+    }
   }
 
   if (ts.isArrayLiteralExpression(structuralExpr)) {
@@ -2484,7 +2506,9 @@ function resolveFactoryContractValueExpression(
       if (declaration && ts.isBindingElement(declaration)) {
         return resolveFactoryContractBindingElement(declaration, checker, seen);
       }
-      const initializer = getVariableInitializer(current, checker);
+      const initializer = declaration && ts.isVariableDeclaration(declaration)
+        ? declaration.initializer
+        : getVariableInitializer(current, checker);
       return initializer
         ? resolveFactoryContractValueExpression(initializer, checker, seen) ??
           unwrapExpression(initializer)
@@ -2528,6 +2552,9 @@ function factoryContractValueDeclaration(
     ? checker.getShorthandAssignmentValueSymbol(identifier.parent) ??
       checker.getSymbolAtLocation(identifier)
     : checker.getSymbolAtLocation(identifier);
+  if (!symbol) {
+    symbol = checker.getSymbolAtLocation(ts.getOriginalNode(identifier));
+  }
   if (!symbol) return undefined;
   if (symbol.flags & ts.SymbolFlags.Alias) {
     symbol = checker.getAliasedSymbol(symbol);
@@ -2646,16 +2673,37 @@ function collectFactoryContractHints(
   seen: Set<ts.Node>,
 ): readonly FactoryContractHint[] {
   const expr = unwrapExpression(expression);
+  const expressionContext = factoryContractContextForNode(expr, context);
   const source = ts.getOriginalNode(expr);
   if (seen.has(expr) || seen.has(source)) return [];
   seen.add(expr);
   seen.add(source);
   try {
-    const direct = context.lookupSchemaHint(expr)?.factoryContracts;
+    const direct = expressionContext.lookupSchemaHint(expr)?.factoryContracts;
     if (direct?.length) return direct;
 
     if (ts.isCallExpression(expr)) {
-      const callKind = detectCallKind(expr, context.checker);
+      const descriptor = getPatternBuilderCallbackDescriptor(
+        expr,
+        expressionContext.checker,
+      );
+      if (descriptor) {
+        const contract = resolvePatternFactorySchemaContract(
+          expr,
+          descriptor.callback,
+          expressionContext,
+        );
+        if (contract) {
+          recordFactorySchemaContract(
+            expr,
+            expr,
+            contract,
+            expressionContext,
+          );
+          return [contract];
+        }
+      }
+      const callKind = detectCallKind(expr, expressionContext.checker);
       const kind = callKind?.kind === "builder" &&
           callKind.builderName === "lift"
         ? "module"
@@ -2666,14 +2714,19 @@ function collectFactoryContractHints(
         const contract = resolveNonPatternFactorySchemaContract(
           expr,
           kind,
-          context,
+          expressionContext,
         );
         if (
           contract &&
           (contract.inputSchema !== undefined ||
             contract.outputSchema !== undefined)
         ) {
-          recordFactorySchemaContract(expr, expr, contract, context);
+          recordFactorySchemaContract(
+            expr,
+            expr,
+            contract,
+            expressionContext,
+          );
           return [contract];
         }
       }
@@ -2681,27 +2734,35 @@ function collectFactoryContractHints(
 
     const selected = resolveFactoryContractValueExpression(
       expr,
-      context.checker,
+      expressionContext.checker,
       new Set(),
     );
     if (selected && selected !== expr) {
-      return collectFactoryContractHints(selected, context, seen);
+      return collectFactoryContractHints(selected, expressionContext, seen);
     }
 
     const branches = factoryContractConditionalBranches(expr);
     if (branches) {
       return dedupeFactoryContracts([
-        ...collectFactoryContractHints(branches[0], context, seen),
-        ...collectFactoryContractHints(branches[1], context, seen),
+        ...collectFactoryContractHints(
+          branches[0],
+          expressionContext,
+          seen,
+        ),
+        ...collectFactoryContractHints(
+          branches[1],
+          expressionContext,
+          seen,
+        ),
       ]);
     }
 
     const authoredInputContracts = collectAuthoredPatternInputFactoryContracts(
       expr,
-      context,
+      expressionContext,
     );
     if (authoredInputContracts.length > 0) {
-      context.recordSchemaHint(expr, {
+      expressionContext.recordSchemaHint(expr, {
         factoryContracts: authoredInputContracts,
       });
       return authoredInputContracts;
@@ -2709,14 +2770,20 @@ function collectFactoryContractHints(
 
     const type = getTypeAtLocationWithFallback(
       expr,
-      context.checker,
-      context.options.state?.typeRegistry,
+      expressionContext.checker,
+      expressionContext.options.state?.typeRegistry,
     );
-    const detected = type && detectTrustedFactoryType(type, context.checker);
+    const detected = type &&
+      detectTrustedFactoryType(type, expressionContext.checker);
     if (detected) {
-      const contract = factoryContractHintFromTrustedType(detected, context);
+      const contract = factoryContractHintFromTrustedType(
+        detected,
+        expressionContext,
+      );
       if (contract) {
-        context.recordSchemaHint(expr, { factoryContracts: [contract] });
+        expressionContext.recordSchemaHint(expr, {
+          factoryContracts: [contract],
+        });
         return [contract];
       }
     }
@@ -2725,6 +2792,21 @@ function collectFactoryContractHints(
     seen.delete(expr);
     seen.delete(source);
   }
+}
+
+function factoryContractContextForNode(
+  node: ts.Node,
+  context: TransformationContext,
+): TransformationContext {
+  const sourceFile = node.getSourceFile() ?? context.sourceFile;
+  return sourceFile === context.sourceFile
+    ? context
+    : new TransformationContext({
+      program: context.program,
+      sourceFile,
+      tsContext: context.tsContext,
+      options: context.options,
+    });
 }
 
 function collectTrustedFactoryTypeContracts(
@@ -4689,17 +4771,28 @@ function handlePatternSchemaInjection(
   }
 
   const updated = buildCallExpression(inputSchemaExpression, resultSchemaCall);
-  const exactContract = carriedContract ?? resolvePatternFactorySchemaContract(
+  const resolvedContract = resolvePatternFactorySchemaContract(
     node,
     builderFunction,
     context,
-  ) ?? (authoredInputSchema ? undefined : {
-    kind: "pattern" as const,
-    inputTypeNode,
-    ...(inputType && { inputType }),
-    outputTypeNode: resultTypeNode,
-    ...(resultType && { outputType: resultType }),
-  });
+  );
+  const exactContract = carriedContract ?? (resolvedContract
+    ? {
+      ...resolvedContract,
+      inputTypeNode,
+      inputType,
+      outputTypeNode: resultTypeNode,
+      outputType: resultType,
+    }
+    : authoredInputSchema
+    ? undefined
+    : {
+      kind: "pattern" as const,
+      inputTypeNode,
+      ...(inputType && { inputType }),
+      outputTypeNode: resultTypeNode,
+      ...(resultType && { outputType: resultType }),
+    });
   if (exactContract) {
     recordFactorySchemaContract(
       node,

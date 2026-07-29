@@ -1361,6 +1361,38 @@ describe("schema-utils", () => {
       expect(byLegacyDefinitions).toHaveProperty("definitions");
     });
 
+    it("merges matching annotations beside a resolved local ref", () => {
+      const referenced: JSONSchema = {
+        $ref: "#/$defs/SearchQuery",
+        $defs: {
+          SearchQuery: {
+            type: "object",
+            properties: {
+              query: {
+                type: "string",
+                description: "Search phrase.",
+              },
+            },
+            required: ["query"],
+          },
+        },
+        description: "Search the web.",
+      };
+      const inline: JSONSchema = {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "Search phrase.",
+          },
+        },
+        required: ["query"],
+        description: "Search the web.",
+      };
+
+      expect(factorySchemasEqual(referenced, inline)).toBe(true);
+    });
+
     it("normalizes every nested factory schema as its own ref document", () => {
       const referenced: JSONSchemaObj = {
         type: "object",

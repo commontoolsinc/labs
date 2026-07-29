@@ -1010,6 +1010,12 @@ Behavior:
 - preserve/reinfer callback result type
 - skip explicit type args when result type is uninstantiated type parameter
 - register lift-applied call type for downstream inference
+- retain each authored capture root on the synthesized merged-input property,
+  then propagate exact factory-contract hints through both the merged input
+  TypeNode and callback result TypeNode. Static object spreads and imported
+  const initializers are followed in their declaration source-file context, so
+  a factory-valued capture keeps the same contract in the scheduled input,
+  scheduled result, and enclosing pattern result schemas
 - re-analyze the rewritten callback's merged input and, when needed, append one
   scheduler-options object to the inner `lift` call:
   - `materializerWriteInputPaths` is emitted when the first parameter's
@@ -1049,6 +1055,13 @@ contract and maps synthetic alias arms through the checker's emitted type
 representation. Non-factory arms remain in ordinary semantic union order, and
 same-kind mappings that are not unique fail closed rather than guessing from an
 alias name.
+
+Compiler-carried factory contracts use the same schema-generation route as the
+builder schemas they describe: semantic type generation normally, but
+node-structure generation when the contract TypeNode contains an explicit
+`any` or `unknown` leaf. The paired semantic type still supplies root JSDoc.
+This route parity keeps `anyOf` ordering and annotations exact across imported
+factories, object spreads, and scheduled `computed`/`lift` containers.
 
 ### 9.7 Pattern callback lowering
 

@@ -106,6 +106,41 @@ export class SchemaGenerator implements ISchemaGenerator {
   }
 
   /**
+   * Generate one compiler-hinted factory contract document through the same
+   * semantic/node route as ordinary schema injection, while retaining nested
+   * factory hints and restoring root JSDoc from the paired semantic type.
+   */
+  public generateHintedFactoryContractSchema(
+    typeNode: ts.TypeNode,
+    type: ts.Type | undefined,
+    checker: ts.TypeChecker,
+    typeRegistry?: WeakMap<ts.Node, ts.Type>,
+    schemaHints?: WeakMap<ts.Node, SchemaHint>,
+    sourceFile?: ts.SourceFile,
+  ): JSONSchemaMutable {
+    const schema = type && !containsAnyOrUnknownTypeNode(typeNode)
+      ? this.generateSchema(
+        type,
+        checker,
+        typeNode,
+        undefined,
+        schemaHints,
+        sourceFile,
+        typeRegistry,
+      )
+      : this.generateSchemaFromSyntheticTypeNode(
+        typeNode,
+        checker,
+        typeRegistry,
+        schemaHints,
+        sourceFile,
+      );
+    return type
+      ? this.attachRootDescription(schema, type, { typeChecker: checker })
+      : schema;
+  }
+
+  /**
    * Generate one independently comparable factory contract schema. Nested
    * factories reuse this document's cycle state so recursive contracts close
    * over local $defs instead of starting an unbounded series of documents.
@@ -690,7 +725,7 @@ export class SchemaGenerator implements ISchemaGenerator {
   private attachRootDescription(
     schema: JSONSchemaMutable,
     type: ts.Type,
-    context: GenerationContext,
+    context: Pick<GenerationContext, "typeChecker">,
   ): JSONSchemaMutable {
     if (typeof schema !== "object") return schema;
 
@@ -1130,4 +1165,21 @@ export class SchemaGenerator implements ISchemaGenerator {
     if (Object.keys(filtered).length > 0) out.$defs = filtered;
     return out as JSONSchemaMutable;
   }
+}
+
+function containsAnyOrUnknownTypeNode(node: ts.TypeNode): boolean {
+  let found = false;
+  const visit = (current: ts.Node): void => {
+    if (found) return;
+    if (
+      current.kind === ts.SyntaxKind.AnyKeyword ||
+      current.kind === ts.SyntaxKind.UnknownKeyword
+    ) {
+      found = true;
+      return;
+    }
+    ts.forEachChild(current, visit);
+  };
+  visit(node);
+  return found;
 }
