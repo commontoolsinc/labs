@@ -23,7 +23,7 @@ function baseView(over: Partial<ViewState> = {}): ViewState {
     height: 10,
     color: true,
     showLineNumbers: false,
-    wrapLines: false,
+    wrapMode: "off",
     displayMode: "pictures",
     selected: null,
     matches: null,
@@ -90,7 +90,7 @@ Deno.test("cursorScreenPos: maps a wrapped continuation to its screen row", () =
     cursor: { line: 0, col: 7 },
     width: 5,
     height: 4,
-    wrapLines: true,
+    wrapMode: "hard",
   });
   assertEquals(cursorScreenPos(doc, view), { row: 2, col: 4 });
 });
@@ -371,10 +371,12 @@ Deno.test("renderStatus: e / C / # hints appear only where they apply", () => {
   const neither = line({ canEdit: false, hasNonPrintables: false });
   assert(!neither.includes("e Edit"), neither);
   assert(!neither.includes("C Chars"), neither);
-  assert(neither.includes("\\ Wrap"), neither);
+  assert(neither.includes("\\ Hard wrap"), neither);
   assert(neither.includes("# Lines"), neither);
-  const wrapped = line({ wrapLines: true });
-  assert(wrapped.includes("\\ Unwrap"), wrapped);
+  const hardWrapped = line({ wrapMode: "hard" });
+  assert(hardWrapped.includes("\\ Word wrap"), hardWrapped);
+  const wordWrapped = line({ wrapMode: "word" });
+  assert(wordWrapped.includes("\\ Unwrap"), wordWrapped);
 });
 
 Deno.test("renderStatus: a narrow bar drops the lowest-priority hints first", () => {

@@ -20,6 +20,11 @@ markers, tables, rules, and code. The same view is available for Markdown files
 inside a unified diff; diff markers, addition and deletion tints, line
 positions, and hunk expansion remain in place.
 
+Press `\` in the interactive pager to cycle through unwrapped lines, hard
+wrapping, and word wrapping. Hard wrapping fills every screen row before it
+continues. Word wrapping breaks at whitespace and repeats the line's leading
+punctuation and whitespace on each continuation row.
+
 Redirected output keeps the source text verbatim by default and adds ANSI color
 only when the selected color mode permits it. Pass `--rendered` to start in, or
 print, the rendered representation when one is available. Editing from a
