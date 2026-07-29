@@ -7,12 +7,6 @@ Deno.test("smoke test", async function () {
   const stdoutText = decode(stdout);
   const stderrText = decode(stderr);
 
-  // While the test package is pulled out of the workspace
-  // during testing, ensure we use the same version in `success-project`
-  // as the outer workspace so that we don't get terminal spam
-  // from downloading new versions, breaking stdout/stderr
-  // parsers in the tests
-
   assert(success, "test successful");
   assert(/add-sync ... ok/.test(stdoutText), "test output ok");
   assert(/add-async ... ok/.test(stdoutText), "test output ok");
@@ -26,8 +20,9 @@ Deno.test("smoke test", async function () {
   assert(stderrText.split("\n")[1] === "", "stderr has no other messages");
 });
 
-Deno.test("dependency downloads do not enter harness stderr", function () {
+Deno.test("dependency downloads before the harness boundary are removed", function () {
   const encoder = new TextEncoder();
+  const boundary = "deno-web-test:test-boundary";
   for (const colorized of [false, true]) {
     const taskLine = colorized
       ? "\x1b[0m\x1b[32mTask\x1b[0m \x1b[0m\x1b[36mtest\x1b[0m deno run cli.ts *.test.ts\n"
@@ -44,7 +39,8 @@ Deno.test("dependency downloads do not enter harness stderr", function () {
         warning,
     );
     const afterInvalidByte = encoder.encode(
-      "\n" + downloadLine("https://example.test/from-application"),
+      `\n${boundary}\n` +
+        downloadLine("https://example.test/from-application"),
     );
     const stderr = new Uint8Array(
       beforeInvalidByte.length + 1 + afterInvalidByte.length,
@@ -60,17 +56,22 @@ Deno.test("dependency downloads do not enter harness stderr", function () {
       stdout: encoder.encode("test output"),
       stderr,
     };
-
-    const expectedTask = encoder.encode(taskLine + warning);
-    const expectedStderr = new Uint8Array(
-      expectedTask.length + 1 + afterInvalidByte.length,
+    const expectedBeforeInvalidByte = encoder.encode(taskLine + warning);
+    const expectedAfterInvalidByte = encoder.encode(
+      "\n" + downloadLine("https://example.test/from-application"),
     );
-    expectedStderr.set(expectedTask);
-    expectedStderr[expectedTask.length] = 0xff;
-    expectedStderr.set(afterInvalidByte, expectedTask.length + 1);
+    const expectedStderr = new Uint8Array(
+      expectedBeforeInvalidByte.length + 1 + expectedAfterInvalidByte.length,
+    );
+    expectedStderr.set(expectedBeforeInvalidByte);
+    expectedStderr[expectedBeforeInvalidByte.length] = 0xff;
+    expectedStderr.set(
+      expectedAfterInvalidByte,
+      expectedBeforeInvalidByte.length + 1,
+    );
 
     assertEquals(
-      sanitizeDenoWebTestOutput(output),
+      sanitizeDenoWebTestOutput(output, boundary),
       {
         ...output,
         stderr: expectedStderr,
@@ -80,22 +81,29 @@ Deno.test("dependency downloads do not enter harness stderr", function () {
   }
 });
 
-Deno.test("non-SGR control sequences do not identify Deno diagnostics", function () {
+Deno.test("non-SGR control sequences remain before the boundary", function () {
   const encoder = new TextEncoder();
+  const boundary = "deno-web-test:test-boundary";
   for (const sequence of ["\x1b[>4;2m", "\x1b[ 31m"]) {
+    const taskLine = "Task test deno run cli.ts *.test.ts\n";
+    const applicationLine =
+      `${sequence}Download https://example.test/from-application\n`;
     const output: Deno.CommandOutput = {
       code: 0,
       success: true,
       signal: null,
       stdout: encoder.encode("test output"),
       stderr: encoder.encode(
-        `Task test deno run cli.ts *.test.ts\n${sequence}Download https://example.test/from-application\n`,
+        `${taskLine}${applicationLine}${boundary}\n`,
       ),
     };
 
     assertEquals(
-      sanitizeDenoWebTestOutput(output),
-      output,
+      sanitizeDenoWebTestOutput(output, boundary),
+      {
+        ...output,
+        stderr: encoder.encode(taskLine + applicationLine),
+      },
       `preserves ${JSON.stringify(sequence)}`,
     );
   }
@@ -103,6 +111,7 @@ Deno.test("non-SGR control sequences do not identify Deno diagnostics", function
 
 Deno.test("application download lines remain in harness stderr", function () {
   const encoder = new TextEncoder();
+  const boundary = "deno-web-test:test-boundary";
   for (const colorized of [false, true]) {
     const taskLine = colorized
       ? "\x1b[0m\x1b[32mTask\x1b[0m \x1b[0m\x1b[36mtest\x1b[0m deno run cli.ts *.test.ts\n"
@@ -115,12 +124,20 @@ Deno.test("application download lines remain in harness stderr", function () {
       success: true,
       signal: null,
       stdout: encoder.encode("test output"),
-      stderr: encoder.encode(taskLine + applicationLine),
+      stderr: encoder.encode(
+        taskLine +
+          applicationLine.replace("example.test", "registry.npmjs.org") +
+          `${boundary}\n` +
+          applicationLine,
+      ),
     };
 
     assertEquals(
-      sanitizeDenoWebTestOutput(output),
-      output,
+      sanitizeDenoWebTestOutput(output, boundary),
+      {
+        ...output,
+        stderr: encoder.encode(taskLine + applicationLine),
+      },
       colorized ? "colorized application output" : "plain application output",
     );
   }

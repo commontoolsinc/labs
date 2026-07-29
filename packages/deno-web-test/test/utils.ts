@@ -6,7 +6,7 @@ const dirname = import.meta.dirname as string;
 const CLI_PATH = path.join(dirname, "..", "cli.ts");
 const DenoWebTestCache: Map<string, Promise<Deno.CommandOutput>> = new Map();
 const encoder = new TextEncoder();
-const TASK_PREFIX = encoder.encode("Task ");
+const STDERR_BOUNDARY_ENV = "DENO_WEB_TEST_STDERR_BOUNDARY";
 const DOWNLOAD_HTTP_PREFIX = encoder.encode("Download http://");
 const DOWNLOAD_HTTPS_PREFIX = encoder.encode("Download https://");
 
@@ -51,45 +51,73 @@ function startsWithVisibleBytes(
   return true;
 }
 
+function indexOfBytes(
+  value: Uint8Array,
+  target: Uint8Array,
+): number {
+  for (let start = 0; start <= value.length - target.length; start++) {
+    let matches = true;
+    for (let i = 0; i < target.length; i++) {
+      if (value[start + i] !== target[i]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) {
+      return start;
+    }
+  }
+  return -1;
+}
+
 function stripDenoDownloadDiagnostics(
   stderr: Uint8Array<ArrayBuffer>,
+  boundary: Uint8Array,
 ): Uint8Array<ArrayBuffer> {
-  const taskLineEnd = stderr.indexOf(0x0a);
-  if (
-    taskLineEnd === -1 ||
-    !startsWithVisibleBytes(stderr, TASK_PREFIX, 0)
-  ) {
+  const boundaryStart = indexOfBytes(stderr, boundary);
+  if (boundaryStart === -1) {
     return stderr;
   }
 
-  const downloadsStart = taskLineEnd + 1;
-  let downloadsEnd = downloadsStart;
-  while (
-    startsWithVisibleBytes(stderr, DOWNLOAD_HTTP_PREFIX, downloadsEnd) ||
-    startsWithVisibleBytes(stderr, DOWNLOAD_HTTPS_PREFIX, downloadsEnd)
-  ) {
-    const lineEnd = stderr.indexOf(0x0a, downloadsEnd);
-    downloadsEnd = lineEnd === -1 ? stderr.length : lineEnd + 1;
+  const retained: Uint8Array[] = [];
+  let retainedLength = stderr.length - boundary.length;
+  let lineStart = 0;
+  while (lineStart < boundaryStart) {
+    const lineBreak = stderr.indexOf(0x0a, lineStart);
+    const lineEnd = lineBreak === -1 || lineBreak >= boundaryStart
+      ? boundaryStart
+      : lineBreak + 1;
+    if (
+      startsWithVisibleBytes(stderr, DOWNLOAD_HTTP_PREFIX, lineStart) ||
+      startsWithVisibleBytes(stderr, DOWNLOAD_HTTPS_PREFIX, lineStart)
+    ) {
+      retainedLength -= lineEnd - lineStart;
+    } else {
+      retained.push(stderr.subarray(lineStart, lineEnd));
+    }
+    lineStart = lineEnd;
   }
+  retained.push(stderr.subarray(boundaryStart + boundary.length));
 
-  if (downloadsEnd === downloadsStart) {
-    return stderr;
+  const filtered = new Uint8Array(retainedLength);
+  let offset = 0;
+  for (const part of retained) {
+    filtered.set(part, offset);
+    offset += part.length;
   }
-
-  const filtered = new Uint8Array(
-    stderr.length - (downloadsEnd - downloadsStart),
-  );
-  filtered.set(stderr.subarray(0, downloadsStart));
-  filtered.set(stderr.subarray(downloadsEnd), downloadsStart);
   return filtered;
 }
 
 export function sanitizeDenoWebTestOutput(
   output: Deno.CommandOutput,
+  boundary: string,
 ): Deno.CommandOutput {
   return {
     ...output,
-    stderr: stripDenoDownloadDiagnostics(output.stderr),
+    stderr: stripDenoDownloadDiagnostics(
+      output.stderr,
+      encoder.encode(`${boundary}\n`),
+    ),
   };
 }
 
@@ -142,13 +170,19 @@ export const runDenoWebTest = async (
     throw new Error("Failed to run `deno install`");
   }
 
+  const stderrBoundary = `deno-web-test:${crypto.randomUUID()}`;
   const output = new Deno.Command(Deno.execPath(), {
     args: [
       "task",
       "test",
     ],
     cwd: tmpProjectPath,
-  }).output().then(sanitizeDenoWebTestOutput);
+    env: {
+      [STDERR_BOUNDARY_ENV]: stderrBoundary,
+    },
+  }).output().then((output) =>
+    sanitizeDenoWebTestOutput(output, stderrBoundary)
+  );
   DenoWebTestCache.set(projectDir, output);
   return output;
 };
