@@ -59,7 +59,7 @@ resumable.
 | B | measurement | **DONE ×2** — zero after A; **×12 cleared** after the scope fix |
 | C | C1 ruled SURVIVES; C2 negotiates end to end | **DONE** |
 | P2x | the ×12 — diagnosed AND fixed | **DONE** — first never-claimed reduction |
-| **D** | P3 passivity mechanism — client stops standing work | **NEXT** |
+| **D** | P3 passivity mechanism — client stops standing work | **DESIGNED, NOT RATIFIED** — [`wave-d-passivity-mechanism.md`](wave-d-passivity-mechanism.md); Q1 is owner-gated and blocks the build |
 | D | P3 passivity mechanism — the client stops running standing work | blocked on B + C |
 | E | P5 passive delivery + warm spaces | blocked on D |
 | F | P6 acceptance | blocked on E |
