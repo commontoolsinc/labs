@@ -156,22 +156,7 @@ export async function openFileBackedRuntime(
           `no space store for ${space} under ${storeDir} — nothing was written`,
         );
       }
-      if (!destPath.endsWith(GZIP_SUFFIX)) {
-        snapshotSpaceStore(path, destPath);
-        return;
-      }
-      // A `.gz` destination is a COMMITTED fixture. Store stores are mostly
-      // slack — home.tsx is 3.5 MiB across 99 revisions — and compress 15-48x,
-      // so the raw file is what a working tree pays and the compressed one is
-      // what git would have stored anyway. Snapshot to a sibling temp first:
-      // `snapshotSpaceStore` is `VACUUM INTO`, which needs a real file.
-      const staged = `${destPath}.staging`;
-      snapshotSpaceStore(path, staged);
-      try {
-        await gzipFile(staged, destPath);
-      } finally {
-        await Deno.remove(staged).catch(() => {});
-      }
+      snapshotSpaceStore(path, destPath);
     },
     async dispose() {
       await runtime.dispose();
@@ -206,30 +191,7 @@ async function seedSpaceStore(
   await Deno.mkdir(target.slice(0, target.lastIndexOf("/")), {
     recursive: true,
   });
-  if (snapshotPath.endsWith(GZIP_SUFFIX)) {
-    await gunzipFile(snapshotPath, target);
-    return;
-  }
   await Deno.copyFile(snapshotPath, target);
-}
-
-/** Fixtures committed to git are stored compressed; see `snapshot`. */
-export const GZIP_SUFFIX = ".gz";
-
-async function gzipFile(sourcePath: string, destPath: string): Promise<void> {
-  using source = await Deno.open(sourcePath, { read: true });
-  using dest = await Deno.create(destPath);
-  await source.readable
-    .pipeThrough(new CompressionStream("gzip"))
-    .pipeTo(dest.writable);
-}
-
-async function gunzipFile(sourcePath: string, destPath: string): Promise<void> {
-  using source = await Deno.open(sourcePath, { read: true });
-  using dest = await Deno.create(destPath);
-  await source.readable
-    .pipeThrough(new DecompressionStream("gzip"))
-    .pipeTo(dest.writable);
 }
 
 /** The root key a fixture uses when it holds exactly one pattern. */

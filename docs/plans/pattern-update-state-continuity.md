@@ -125,16 +125,20 @@ unbounded migration that destroys the fidelity the fixture exists to buy (see
 
 **Auto captures live in CI artifacts; pinned vintages live in git.** REVISIT
 BEFORE BUILDING STAGE 4 — this was decided on a number that turned out to be
-wrong. The reasoning was "at ~1.5 MB a floor, committing every capture would
-grow the repo without bound". Measured, a capture costs 32-226 KiB compressed,
-which is what git actually stores; both seeded vintages together are 494 KiB.
+wrong, and the corrected number argues the other way harder than first thought.
+The reasoning was "at ~1.5 MB a floor, committing every capture would grow the
+repo without bound". Measured, a SECOND vintage of the same pattern costs
+git essentially NOTHING when stored raw (352 KiB for one, 352 KiB for two —
+see the table above), because near-identical stores delta almost perfectly.
+Repeated captures of the same pattern are the best case for delta compression,
+and repeated captures of the same pattern are exactly what auto captures are.
+
 At that price the artifact machinery (upload, fetch, retention-by-count, a
 pruner that cannot reach `pinned/`) may be solving a problem we do not have,
 and simply committing auto captures under the same append-only discipline
 would be far less machinery. The counter-argument that survives: git keeps
-deleted blobs forever and auto captures churn by design, so churn still costs —
-but the break-even is much further out than assumed. Original reasoning
-follows.
+deleted blobs forever, so churn still costs something — but the break-even is
+much further out than assumed. Original reasoning follows.
 
 At ~1.5 MB a floor, committing every capture would grow the repo without
 bound, and git history keeps deleted blobs forever, so pruning reclaims
@@ -252,12 +256,24 @@ on a file with no default export. A vintage that EXISTS is always replayed;
 the required list only governs what CI insists on. Pinning a profile or other
 long-lived pattern is a deliberate act, and works today.
 
-**Fixtures are gzipped, and the size argument this plan was built on was
-wrong.** Measured: `home.tsx` is 3.50 MiB raw / **226 KiB** gzipped (15x);
-`favorites-manager.tsx` 1.53 MiB / **32 KiB** (48x). A store is mostly slack —
-99 revisions in 3.5 MiB — so the compressed file is what git would have stored
-anyway and the raw one is pure working-tree cost. Both seeded vintages together
-are 494 KiB. See the retention decision below, which the real numbers undercut.
+**Fixtures are stored RAW, and both size arguments this plan reasoned from were
+wrong.** A store is mostly slack — 99 revisions in 3.5 MiB — and gzips 15-48x
+(`home.tsx` 3.50 MiB / 226 KiB; `favorites-manager.tsx` 1.53 MiB / 32 KiB), so
+pre-compressing looks free given git zlib-compresses blobs anyway.
+
+Measured, it is not free: **it defeats git's DELTA compression**, which is the
+mechanism that makes accumulating vintages cheap.
+
+| | git storage, 1 vintage | git storage, 2 independent vintages | working tree |
+| --- | --- | --- | --- |
+| Raw `.sqlite` | 352 KiB | **352 KiB** | 7.0 MiB |
+| Gzipped `.sqlite.gz` | 360 KiB | 380 KiB | 484 KiB |
+
+A second raw vintage costs essentially nothing — git deltas it against the
+first — where two gzip streams delta poorly. Stage 4's whole job is
+accumulating vintages, so the compounding term dominates the one-off. The price
+is working-tree disk (3.5 MiB a fixture rather than 250 KiB), which is transient
+and local where git history is permanent and shared by everyone who clones.
 
 Two constraints the harness imposes, both measured:
 

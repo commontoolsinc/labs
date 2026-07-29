@@ -10,7 +10,7 @@
  *
  * Layout:
  *
- *     packages/patterns/vintages/<pattern key>/pinned/<iso>-<identity>.sqlite.gz
+ *     packages/patterns/vintages/<pattern key>/pinned/<iso>-<identity>.sqlite
  *
  * `<pattern key>` is the pattern's repo path under `packages/patterns/`, so a
  * fixture sits next to nothing and is found by path alone.
@@ -28,9 +28,21 @@
  * cannot be recaptured — the pattern that wrote it no longer exists in runnable
  * form.
  *
- * Fixtures are stored gzipped. A space store is mostly slack (home.tsx is
- * 3.5 MiB across 99 revisions) and compresses 15-48x, so the compressed file is
- * what git would have stored anyway and the raw one is pure working-tree cost.
+ * Fixtures are stored RAW, not gzipped, which is the opposite of what the
+ * obvious reasoning suggests. A store is mostly slack (home.tsx is 3.5 MiB
+ * across 99 revisions) and gzips 15x, so pre-compressing looks free — git
+ * zlib-compresses blobs anyway.
+ *
+ * Measured, it is not free, because it defeats DELTA compression. Two
+ * independent captures of home.tsx cost 352 KiB in git raw and 380 KiB
+ * gzipped — and the second raw vintage is essentially FREE (352 KiB for one,
+ * 352 KiB for two) because git deltas it against the first, where two gzip
+ * streams delta poorly. Accumulating vintages is precisely what stage 4 does,
+ * so the compounding term dominates the one-off.
+ *
+ * The cost is working-tree disk: 3.5 MiB a fixture rather than 250 KiB. That
+ * is transient and local, where git history is permanent and shared by
+ * everyone who clones.
  */
 
 import { PATTERNS_DIR } from "./pattern-files.ts";
@@ -44,7 +56,7 @@ export const PINNED = "pinned";
 /** Vintages captured automatically; retention drops the oldest (stage 4). */
 export const AUTO = "auto";
 
-export const VINTAGE_SUFFIX = ".sqlite.gz";
+export const VINTAGE_SUFFIX = ".sqlite";
 
 export interface VintageRef {
   /** Pattern path relative to `packages/patterns/`, e.g. `system/home.tsx`. */

@@ -107,10 +107,10 @@ describe("vintage paths", () => {
     for (
       const path of [
         `${VINTAGES_DIR}/system/home.tsx/pinned/README.md`,
-        `${VINTAGES_DIR}/system/home.tsx/pinned/no-identity.sqlite.gz`,
-        `${VINTAGES_DIR}/loose.sqlite.gz`,
+        `${VINTAGES_DIR}/system/home.tsx/pinned/no-identity.sqlite`,
+        `${VINTAGES_DIR}/loose.sqlite`,
         "packages/patterns/system/home.tsx",
-        `${VINTAGES_DIR}/system/home.tsx/pinned/-${ID_A}.sqlite.gz`,
+        `${VINTAGES_DIR}/system/home.tsx/pinned/-${ID_A}.sqlite`,
       ]
     ) {
       expect(parseVintagePath(path), `should decline: ${path}`).toBeUndefined();
@@ -193,7 +193,7 @@ describe("collectVintages", () => {
       const dir = `${root}/system/home.tsx/pinned`;
       await Deno.mkdir(dir, { recursive: true });
       await Deno.writeTextFile(
-        `${dir}/2026-07-29T16-33-28.000Z-${ID_A}.sqlite.gz`,
+        `${dir}/2026-07-29T16-33-28.000Z-${ID_A}.sqlite`,
         "",
       );
       await Deno.writeTextFile(`${dir}/README.md`, "not a fixture");
@@ -221,7 +221,7 @@ describe("collectVintages", () => {
 describe("reporting", () => {
   const failure = {
     patternKey: "system/home.tsx",
-    path: "packages/patterns/vintages/system/home.tsx/pinned/x.sqlite.gz",
+    path: "packages/patterns/vintages/system/home.tsx/pinned/x.sqlite",
     detail: "materializing today's source over this vintage was REFUSED",
   };
 
