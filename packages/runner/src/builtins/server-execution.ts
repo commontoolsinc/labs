@@ -128,10 +128,38 @@ export interface ServerBuiltinActionDescriptor {
  *    field for. That asymmetry is the practical reason the effect route was
  *    the only one available, independent of the `actionKind` gate.
  *  - `compileAndRun` mints FOUR documents (`compile.pending|result|error|
- *    errors`), then `runtime.runner.stop` / `runtime.runSynced` a whole
- *    compiled pattern under the result doc and writes from async
- *    `editWithRetry` transactions outside its own run: unbounded, and not even
- *    envelope-shaped.
+ *    errors`) and writes from async `editWithRetry` transactions outside its
+ *    own run.
+ *
+ *    The four-document count is PLUMBING, not a design gap: `mintedDocuments`
+ *    below is already an array. What expresses only one is the mint site —
+ *    `selectorBuiltinResultCause` returns a single cause and
+ *    `selectorMintedResultWrite` (`runner.ts`) a single link — so serving this
+ *    builtin means generalizing those two to a list, nothing deeper.
+ *
+ *    CORRECTED 2026-07-29: this entry used to call that surface "unbounded"
+ *    because `runtime.runSynced` runs a whole compiled pattern under the
+ *    result doc. MEASURED, it is not — the spawned pattern's writes are
+ *    attributed to the SPAWNED pattern's own actions (own action id, own
+ *    inner-module implementation fingerprint, own `pieceId`, own transformer
+ *    certificate, classifying claim-ready), and none of them appears in
+ *    `compileAndRun`'s observation. Its own surface is BOUNDED.
+ *
+ *    What actually blocks it is the async continuation, and the four-document
+ *    mint points the same way `llmDialog` went. Continuation synthesis is
+ *    EFFECT-ONLY: `supportedBuiltinDescriptor` in
+ *    `executor/action-transaction-router.ts` requires a `serverBuiltin`
+ *    descriptor AND `actionKind === "effect"`, so the summary/template a
+ *    computation would need is never populated — every current member of this
+ *    registry writes only inside its own synchronous body. And
+ *    `compileAndRun`'s continuations carry no `sourceAction` at all, because
+ *    that context reaches an async continuation only through the post-commit
+ *    OUTBOX (`enqueuePostCommitEffect`, flushed inside
+ *    `runWithTransactionSourceAction`), which this builtin does not use —
+ *    it fires `compileOrGetPattern(...).then(...)` inline. Minting a
+ *    computation descriptor for it today would claim the in-run writes and
+ *    strand the continuations in a local executor shadow, leaving `pending`
+ *    true forever. Numbers in `compile-and-run-servability.test.ts`.
  *
  * `sqliteDatabase` JOINS them (R5, owner ruling 2026-07-29). Both of A3's
  * objections are closed. The db `owner` now comes from the acting execution

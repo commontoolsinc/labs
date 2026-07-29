@@ -199,11 +199,24 @@ describe("per-builtin computation descriptors (W2.15a)", () => {
     //    summary assembler (which requires `actionKind === "computation"`)
     //    could never fire — see builtin-effect-registry.test.ts.
     //  - compileAndRun: mints FOUR side documents
-    //    (pending/result/error/errors), then `runSynced`s a whole compiled
-    //    pattern under the result doc and writes from async
-    //    `editWithRetry` transactions outside its own run. The provenance-meta
-    //    rule does not reach it: its problem is document COUNT and unbounded
-    //    out-of-run transactions, not the meta siblings of one mint.
+    //    (pending/result/error/errors) and writes from async `editWithRetry`
+    //    transactions outside its own run. The provenance-meta rule does not
+    //    reach it; the count is plumbing (`mintedDocuments` is already an
+    //    array — only `selectorBuiltinResultCause` /
+    //    `selectorMintedResultWrite` are singular), so the out-of-run
+    //    transactions are the whole blocker.
+    //
+    //    CORRECTED 2026-07-29: an earlier revision of this comment called the
+    //    out-of-run surface "unbounded" because `runSynced` runs a whole
+    //    compiled pattern under the result doc. MEASURED, that is wrong — the
+    //    spawned pattern's writes are attributed to the SPAWNED pattern's own
+    //    actions (own action id, own inner-module fingerprint, own pieceId,
+    //    own certificate, and they classify claim-ready), so compileAndRun's
+    //    own surface is BOUNDED. The real blocker is that continuation
+    //    synthesis is EFFECT-ONLY (`supportedBuiltinDescriptor` needs a
+    //    `serverBuiltin` descriptor AND `actionKind === "effect"`) while
+    //    compileAndRun's continuations additionally carry no `sourceAction` at
+    //    all. See `compile-and-run-servability.test.ts` for the numbers.
     for (
       const id of ["llmDialog", "compileAndRun", "navigateTo"]
     ) {

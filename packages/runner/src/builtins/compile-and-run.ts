@@ -254,15 +254,17 @@ export function compileAndRun(
         // inputs from other pieces, we will need to think more about
         // how we pass input into the builtin.
 
+        // No `isHidden` write here. It used to mark the compiled result
+        // hidden so the piece this builtin AUTO-registered stayed out of the
+        // default app's Patterns list; `pieceCreatedCallback` is gone, so
+        // nothing registers the result any more — registering is an
+        // `addPiece` handler's job (docs/common/conventions/adding-pieces.md),
+        // and a pattern that deliberately registers the result wants it
+        // visible. The write was also never observable: `runSynced` replaces
+        // this same document's whole `/value` from its setup transaction one
+        // commit later, and wins deterministically because the call below is
+        // un-awaited. Measured in `compile-and-run-servability.test.ts`.
         runtime.runSynced(result, pattern, input.get());
-        // `isHidden` keeps a compiled result out of the default-app Patterns
-        // list if a pattern chooses to register it. Registering it is NOT this
-        // builtin's job: a piece reaches a piece list through the default
-        // pattern's `addPiece` stream, sent by the pattern that wanted the
-        // piece there (see docs/common/conventions/adding-pieces.md).
-        runtime.editWithRetry((asyncTx) => {
-          result.withTx(asyncTx).key("isHidden").set(true);
-        });
       }
       // TODO(seefeld): Add capturing runtime errors.
     });
