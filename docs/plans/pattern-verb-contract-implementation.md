@@ -229,7 +229,20 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   slot, `Apply` and `IKeyable` assume that — keeps producing `Stream<A,
   void>`, so a projection through the HKT drops a declared result. That is
   acceptable because streams are leaves: patterns do not `key()` into a
-  stream to reach another. Both options need a result parameter threaded
+  stream to reach another.
+  The only thing it forecloses is constructing a result-carrying stream
+  *outside* `action()`/`handler()` — `Stream.for<Event, Result>(cause)` —
+  and nothing does that today. Should it ever be wanted, the cost is bounded and
+  worth writing down rather than rediscovering: `AsStream` has three
+  non-test uses (`api/index.ts`'s `declare const Stream`,
+  `builder/factory.ts`'s `cellConstructorFactory<AsStream>`, and
+  `builder/types.ts`'s `CellTypeConstructor<AsStream>`), and widening is four
+  defaulted edits — `_B` on `HKT` (implementors inherit it, so `AsCell` and
+  the rest need no change), `Apply<F, A, B = void>`, `<T, R = void>` on
+  `CellTypeConstructor`'s `new`/`of`/`for` (`runner/src/cell.ts:3313-3315`),
+  and `AsStream { type: Stream<this["_A"], this["_B"]> }`. Every step carries
+  a default, so it is source-compatible and no call site moves.
+  Both options need a result parameter threaded
   through `Handler`/`HandlerFactory` regardless, since the factory returns
   the stream, so that work is not a differentiator.
 - **ts-transformers:** lowering for value-returning `action` bodies; CTS spec
@@ -245,6 +258,25 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   ignored — design rule 1): emit `additionalProperties: false` for event
   payloads, confirm the runner enforces it at dispatch, and record the rule
   in the mapping spec.
+
+  **A value-less verb wants `{ type: "object", properties: {} }`, not the
+  generic `void` sentinel.** `void` otherwise lowers to
+  `{ asCell: ["opaque"] }` (mapping spec, semantic sentinels), which is a
+  *wrapper* claim — "the result is an opaque cell" — rather than a statement
+  that there is no result, and it would hand readback machinery a cell to
+  resolve. The empty object is right on three counts: it describes the value
+  the runtime actually writes, since a value-less handling's receipt is `{}`;
+  it satisfies rule 3's "a verb that produces nothing says so" instead of
+  leaving the reader to infer it from absence; and leaving
+  `additionalProperties` **undefined** keeps it open, because the compat
+  checker reads `additionalProperties ?? true`
+  (`packages/piece/src/schema-compatibility.ts:467`, `:519`, `:658`). That
+  last point is the trap worth avoiding: emitting `false` here would freeze a
+  verb as value-less forever, since a later result would trip "new result
+  field is rejected by the previous additionalProperties contract" (`:542`).
+  Note this is the opposite choice from verb *inputs* above, and deliberately
+  so — inputs close to make an undeclared field a rejection, results stay open
+  to stay extensible.
 - **Which signal marks a verb — checked, and C3 is not exposed to it.** An
   earlier revision of this bullet warned that "stream/handler properties" is
   not one predicate, because `Cell.isStream` accepts three independent signals
