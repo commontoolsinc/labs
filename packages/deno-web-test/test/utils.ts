@@ -10,18 +10,42 @@ const TASK_PREFIX = encoder.encode("Task ");
 const DOWNLOAD_HTTP_PREFIX = encoder.encode("Download http://");
 const DOWNLOAD_HTTPS_PREFIX = encoder.encode("Download https://");
 
-function startsWithBytes(
+function skipSgrSequences(
+  value: Uint8Array,
+  offset: number,
+): number {
+  let next = offset;
+  while (value[next] === 0x1b && value[next + 1] === 0x5b) {
+    let end = next + 2;
+    while (
+      end < value.length &&
+      (
+        value[end] >= 0x30 && value[end] <= 0x3f ||
+        value[end] >= 0x20 && value[end] <= 0x2f
+      )
+    ) {
+      end++;
+    }
+    if (value[end] !== 0x6d) {
+      break;
+    }
+    next = end + 1;
+  }
+  return next;
+}
+
+function startsWithVisibleBytes(
   value: Uint8Array,
   prefix: Uint8Array,
   offset: number,
 ): boolean {
-  if (offset + prefix.length > value.length) {
-    return false;
-  }
+  let valueIndex = offset;
   for (let i = 0; i < prefix.length; i++) {
-    if (value[offset + i] !== prefix[i]) {
+    valueIndex = skipSgrSequences(value, valueIndex);
+    if (value[valueIndex] !== prefix[i]) {
       return false;
     }
+    valueIndex++;
   }
   return true;
 }
@@ -32,7 +56,7 @@ function stripDenoDownloadDiagnostics(
   const taskLineEnd = stderr.indexOf(0x0a);
   if (
     taskLineEnd === -1 ||
-    !startsWithBytes(stderr, TASK_PREFIX, 0)
+    !startsWithVisibleBytes(stderr, TASK_PREFIX, 0)
   ) {
     return stderr;
   }
@@ -40,8 +64,8 @@ function stripDenoDownloadDiagnostics(
   const downloadsStart = taskLineEnd + 1;
   let downloadsEnd = downloadsStart;
   while (
-    startsWithBytes(stderr, DOWNLOAD_HTTP_PREFIX, downloadsEnd) ||
-    startsWithBytes(stderr, DOWNLOAD_HTTPS_PREFIX, downloadsEnd)
+    startsWithVisibleBytes(stderr, DOWNLOAD_HTTP_PREFIX, downloadsEnd) ||
+    startsWithVisibleBytes(stderr, DOWNLOAD_HTTPS_PREFIX, downloadsEnd)
   ) {
     const lineEnd = stderr.indexOf(0x0a, downloadsEnd);
     downloadsEnd = lineEnd === -1 ? stderr.length : lineEnd + 1;
