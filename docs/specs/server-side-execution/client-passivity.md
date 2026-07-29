@@ -129,9 +129,13 @@ precisely the foundation those need.
    `dynamic-write-outside-static-surface` ×12 surviving BOTH scoped
    ranks, and **R7's `claim-context-mismatch` acceptance criterion
    failing on the flagship product** (5-6 → 2 → 2, expected hard-zero at
-   session rank since C2.10 retired the cause). Sequencing in §5g:
-   diagnose those two residuals FIRST, then client-side negotiation
-   (F5-style gate), then the dial bridge.
+   session rank since C2.10 retired the cause) — now DIAGNOSED in §5g:
+   claim rank and the engine's effective context are computed by two
+   different functions, and only the engine's sees the durable monotonic
+   context floor that an ordinary CLIENT run can pin to `session`. Not a
+   missing lane; an issuance-side floor consult. Sequencing in §5g: fix
+   R7 at issuance, then client-side negotiation (F5-style gate), then
+   the dial bridge.
 4. **P3 passivity mechanism** (per-session subcap, passive-mode
    demand producer, dynamic-reactivation contract, effect-attempt
    journal) — the client stops running standing work. THIS is where
@@ -1278,9 +1282,103 @@ session lanes open and session-rank claims issuing, it is **2, not 0**.
 Opening the lane is evidently not sufficient to route every
 session-context run to it. The probe asserts only that no rank dial
 INCREASES the count and logs the criterion miss; pinning zero would land
-the file red against a pre-existing placement property. **This should be
-diagnosed before the C2 gates are treated as closed.**
+the file red against a pre-existing placement property. Diagnosed
+below.
 
+### R7 diagnosis (2026-07-28): claim rank and effective context are two different functions, and only one sees the durable floor
+
+Instrumented at both fence sites and at
+`resolveSchedulerExecutionContext` (temporary probes, reverted). **Every
+fence in every arm has one shape:**
+
+```
+fence@obs-only  actionId=cf:builtin/map:v1:<instance>
+                claimContextKey="space"
+                resolved="session:<did>:<sessionId>"
+                staticFloor="space"  runtimeFloor="space"
+```
+
+The fencing observation's OWN surfaces are entirely space-scoped. The
+`session` comes from somewhere else. Resolving the floors at the same
+moment:
+
+```
+staticFloor=space  runtimeFloor=space
+globalFloor=user   principalFloor=session   →  effectiveFloor=session
+```
+
+**The causal chain, captured end to end for one action instance:**
+
+1. A **CLIENT** run of `cf:builtin/map:v1:<instance>` observes
+   `staticFloor=user, runtimeFloor=session` — a genuine PerSession read
+   (the product's `roomDraft` / `hostMessageDraft`). It writes
+   `scheduler_context_floor(principalKey) = session`
+   (`engine.ts:7213`). The observation is **unclaimed** — an ordinary
+   client-primary run.
+2. That floor is **durable and monotonic**: `upsertSchedulerContextFloor`
+   only ever narrows, by design (evidence that an action is not shared
+   cannot be un-observed).
+3. Every later run of the same action — including ones whose own static
+   AND runtime surfaces are purely space-scoped — resolves through
+   `effectiveFloor = narrowest(staticFloor, runtimeFloor, globalFloor,
+   principalFloor)` (`engine.ts:7223`) and therefore lands at
+   `session:<p>:<sid>`.
+4. The **executor** classifies its candidate from the CURRENT
+   observation's static + runtime surfaces only. It sees `space`, and
+   emits a space-rank candidate.
+5. The **host** issues the claim at the executor's rank.
+   `#assertExecutionClaimCapabilityEnabled` /
+   `#executionClaimRankEnabled` (`server.ts:2372`/`:2394`) check the
+   dial, the subcapability and the key's shape — **they never consult
+   the floor.** `schedulerContextFloor` is not exported from
+   `engine.ts`; neither `server.ts` nor any runner file reads it.
+6. The claimed run commits, the engine resolves `session:...` ≠ `space`,
+   and the only thing that catches the disagreement is the commit-time
+   fence.
+
+**So the root cause is an asymmetry, not a missing lane.** Claim rank
+and effective context are computed by two different functions over two
+different inputs, and the engine's input includes durable monotonic
+state written by ANY observer — including a plain client run — that the
+claim side structurally cannot see.
+
+**Why C2.10's retirement reasoning does not cover this.** It reads
+"session-context runs now have a lane to route to, so any mismatch is a
+placement defect again". True for a run that LOOKS session-context. This
+run does not: its own surfaces are space-scoped, and it is session-pinned
+only in durable engine state. Opening a lane cannot fix a claim issued at
+the wrong rank; the lane was open and the fence still fired. The
+retirement was sound about the case it named and silent about this one.
+
+**Severity: liveness/efficiency, not correctness.** The fence is doing
+its job — nothing wrong commits, `settlementsFailed` is 0 at every rank,
+and per-user values stayed correct throughout. The cost is that the
+server does the work and then throws it away, the client re-runs, and
+the action never converges to server-primary. It also scales the wrong
+way: the floor is monotonic, so once any client run pins an action, EVERY
+later space-rank claim on it fences, forever.
+
+**Fix options, cheapest first.**
+
+1. **Consult the floor at issuance** (`#assertExecutionClaimCapability
+   Enabled`): decline a claim whose contextKey is broader than the
+   action's durable floor, or issue it at the floor's rank. Turns a
+   commit-time fence that wasted a run into an issuance-time decline that
+   costs nothing. Needs the floor reader exported and one lookup on the
+   issuance path; matches the design's existing "rank enablement gates
+   ISSUANCE and RENEWAL only" shape.
+2. **Feed the floor back to the executor** so its candidate rank matches
+   the engine's resolution. Correct at the source, but needs a new
+   channel and keeps two computations in sync.
+3. **Re-issue at the resolved rank on fence** rather than dropping the
+   attempt. Recovers the wasted run but leaves the disagreement.
+
+Option 1 is the recommendation. The fixture home is
+`packages/memory/test/v2-execution-claim-context-test.ts`, which already
+pins the opposite direction ("user-rank claim on a run resolving space
+fences claim-context-mismatch"); the missing red-first case is **a SPACE
+claim on an action whose durable principal floor a prior unclaimed
+client run narrowed to session**.
 
 ### Recommended sequencing
 
@@ -1289,14 +1387,16 @@ diagnosed before the C2 gates are treated as closed.**
    enable a configuration that is inert at best; per the cohort gate it
    would also make user lanes un-openable in exactly the deployments
    worth measuring.
-2. **Diagnose the two live residuals first — they are cheap and they
-   are what a rollout would trip over.** (a) The R7
-   `claim-context-mismatch` miss above: a named C2 acceptance criterion
-   that does not hold on the flagship product, measurable in ~25s by
-   re-running the live probe. (b) The
-   `dynamic-write-outside-static-surface` ×12 offender, which survives
-   both scoped ranks. Both are single-offender defects with a
-   re-runnable reproduction, so neither needs a rollout to study.
+2. **Fix R7 at issuance — DIAGNOSED above, and it is a small change.**
+   Consult the durable context floor in
+   `#assertExecutionClaimCapabilityEnabled` and decline (or upgrade) a
+   claim broader than the action's floor, with the red-first fixture
+   named at the end of the diagnosis. This is worth doing before any
+   rollout: the floor is monotonic, so every pinned action fences every
+   space-rank claim forever, and the failure mode is silent wasted
+   server work rather than anything a user sees. Still open beside it:
+   the `dynamic-write-outside-static-surface` ×12 offender, which
+   survives both scoped ranks and has not been diagnosed.
 3. **Build the client-side negotiation path** (shell/runner) with an
    F5-style red-first env-bridge gate asserting the subcapability
    negotiates END TO END from the dials alone. This is the one item
