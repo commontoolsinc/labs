@@ -482,18 +482,31 @@ describe("pattern update over captured prior state", () => {
     // merged durable arguments against the new schema transactionally before
     // committing such an update".
     //
-    // Measured here: on the production repair path it does not. The guard is
-    // real — `Runner.validateArgument` → `validateSchemaValue` rejects this
-    // exact pair in isolation — but `applySetupState` only reaches it when the
-    // stored setup differs, and stamping `patternIdentity` before `runSynced`
-    // (which REQUIRES it, see the harness) is what makes the setup look the
-    // same. So the update lands with no refusal and the stored value stops
-    // being readable. The bytes survive; the contract that could reach them
-    // does not.
+    // Measured here: it does not. The update lands with no refusal and the
+    // stored value stops being readable. The bytes survive; the contract that
+    // could reach them does not.
     //
-    // Not measured, and worth knowing before this is read as the whole story:
-    // the `pattern-updater` default-root / `setupNeedsRepair` route is a
-    // different entry into setup and may or may not reach the validator.
+    // The guard itself is real — `Runner.validateArgument` →
+    // `validateSchemaValue` rejects this exact pair in isolation. TWO gates sit
+    // in front of it, and it takes both to explain the miss:
+    //
+    // 1. `applySetupState` re-stages the stored argument only when
+    //    `!sameStoredSetup` (`runner.ts:1410`), and `sameStoredSetup =
+    //    samePattern && !reapplyStoredSetup` (`:1557`). Stamping
+    //    `patternIdentity` before `runSynced` — which is what the roll-forward
+    //    materialize does (`pieces-controller.ts:936`), and what this harness
+    //    mirrors — makes `samePattern` true, so the branch never runs.
+    // 2. Forcing gate 1 open is NOT enough, which is the part worth knowing:
+    //    measured, adding `reapplyStoredSetup: true` still produces no refusal.
+    //    A pattern swap supplies no argument, and the re-stage passes
+    //    `{ unresolvedLinkRaw }` in exactly that case (`:1467`) so a slot whose
+    //    link cannot currently be dereferenced validates as opaque rather than
+    //    as its unreadable materialization. That leniency is deliberate and
+    //    load-bearing (CT-1917), and it is what swallows this too.
+    //
+    // Gate 2 is why the auto-update hot-swap is not a way out either: it hard-
+    // codes `sameStoredSetup = false` (`runner.ts:1911`) but also supplies no
+    // argument, so it lands on the same lenient path.
     const captured = await capture(OLD_OPEN_ARGUMENT, [], { count: "seven" });
 
     // Tier 1 waves the pair through — the premise of the case, so it is

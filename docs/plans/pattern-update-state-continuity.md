@@ -88,7 +88,8 @@ Measured on branch `tier2`, not assumed:
 | Tier 1 is blind to a storage-key move | measured: result schemas byte-identical, no issue raised, replayed data empty |
 | Every case discriminates — each goes red under a mutation of the thing it claims to test | measured by mutation: dropping `expectedPatternIdentity` reds the rejection case; no-oping the snapshot restore reds **five of six** (the sixth takes no snapshot); undoing `.for('itemList')` reds the storage-move case; giving the argument candidate a COMPATIBLE type reds the argument case |
 | A stranded-data assertion needs its control in the SAME case | measured: with the restore no-oped, the storage-move case alone stayed GREEN — `items === []` is also what an unrestored fixture reads. It now replays the vintage over the same snapshot first, and the argument case carries the same control for the same reason |
-| Tier 1 **defers** the open-argument evolution class to a runtime guard that the update path does not reach | measured: over an open argument object, a candidate naming a new optional field of any type is waved through (`schema-compatibility.ts`, "Open objects remain evolvable…"), on the doc comment's promise that "the runner validates the piece's merged durable arguments against the new schema". On the production repair call it does not — the update lands with no refusal and `{count:"seven"}` stops being readable through the new schema. `Runner.validateArgument` → `validateSchemaValue` DOES reject the pair in isolation; `applySetupState` only reaches it when the stored setup differs, and stamping `patternIdentity` before `runSynced` is what makes it look the same |
+| Tier 1 **defers** the open-argument evolution class to a runtime guard that the update path does not reach | measured: over an open argument object, a candidate naming a new optional field of any type is waved through (`schema-compatibility.ts`, "Open objects remain evolvable…"), on the doc comment's promise that "the runner validates the piece's merged durable arguments against the new schema". On the production repair call it does not — the update lands with no refusal and `{count:"seven"}` stops being readable through the new schema. `Runner.validateArgument` → `validateSchemaValue` DOES reject the pair in isolation |
+| The miss takes TWO gates, not one | measured: `applySetupState` re-stages only when `!sameStoredSetup` (`runner.ts:1410`/`:1557`), which stamping `patternIdentity` first defeats — **but forcing that gate open with `reapplyStoredSetup: true` still yields no refusal**. A pattern swap supplies no argument, so the re-stage passes `{ unresolvedLinkRaw }` (`:1467`) and validates link-bearing slots as opaque. That leniency is deliberate (CT-1917) and swallows this too, which is why the auto-update hot-swap — `sameStoredSetup = false` hard-coded at `:1911`, but likewise no supplied argument — is not a way out either |
 | Tier 1 also catches field REMOVAL, disjoint TYPE change, and a field moved between nesting levels | read off `schema-compatibility.ts` (messages, not line numbers, are the durable anchor): removal → "existing `<role>` field was removed" (rendered: `result.status: existing result field was removed`); disjoint type → "type … is not accepted by the candidate schema"; a nesting move is *seen* as a removal and reports as one. So none of those is a second Tier-2-only class — they are contract changes. The storage-move stays the only stranding class a contract check structurally cannot see |
 | Two roots in ONE space store would collide on a single fixed cause | `getCell` derives the entity id as `createRef({}, cause)` (`runtime.ts`), and that derivation does not include the space. Fixed by keying the cause per pattern (`vintageRoot(…, key)`); see the stage-3 note below |
 
@@ -276,9 +277,16 @@ Gate: a memory migration cannot land without replaying pre-migration stores.
   being readable. But Tier 1 waives that class specifically because the runner
   is supposed to validate merged durable arguments, so the honest resolutions
   are to make the validator reachable on this path or to stop waiving it in
-  Tier 1. Pinning it is a description, not an endorsement. Unmeasured, and it
-  decides this: whether the `pattern-updater` default-root / `setupNeedsRepair`
-  route reaches the validator where the repair call does not.
+  Tier 1. Pinning it is a description, not an endorsement.
+
+  What makes this harder than "route the repair through the validator": the
+  second gate is the `{ unresolvedLinkRaw }` leniency every no-supplied-argument
+  swap takes, and that leniency exists for a real reason (CT-1917 — a nested
+  piece whose argument lives in a host doc that has not synced must not fail
+  the swap). So the fix has to separate "this slot is a link I cannot read yet"
+  from "this slot is a plain value of the wrong type", rather than tighten the
+  path wholesale. Whoever picks this up should start there, not at
+  `sameStoredSetup`.
 
 ## References
 
