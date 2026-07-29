@@ -1222,8 +1222,10 @@ export class Runtime {
     await this.patternUpdater.dispose();
 
     // Same contract for the runner's unloadable-pointer roll-forward commits
-    // (CT-1923): settle before their storage sessions close.
-    await this.runner.idlePointerMaintenance();
+    // (CT-1923): settle before their storage sessions close. Commits only —
+    // never the watcher pattern LOADS, which can be held/wedged arbitrarily
+    // long and are lifecycle-epoch-guarded instead.
+    await this.runner.settlePointerCommits();
 
     // Scheduler background work can still be using storage, for example the
     // lifecycle-guarded boot-time persistent-state listing. Let that finish

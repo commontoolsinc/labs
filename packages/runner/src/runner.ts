@@ -844,8 +844,17 @@ export class Runner {
   private allCancels = new Set<Cancel>();
   // In-flight unloadable-pointer roll-forward commits (CT-1923). Deliberately
   // outside the scheduler, like PatternUpdater's checks — dispose() settles
-  // them before the storage sessions they write through close.
-  private pendingPointerMaintenance = new Set<Promise<unknown>>();
+  // them before the storage sessions they write through close. Bounded
+  // local commits only.
+  private pendingPointerCommits = new Set<Promise<unknown>>();
+  // In-flight watcher pattern-load attempts. NEVER awaited by dispose(): a
+  // load can be arbitrarily slow or wedged (network), and the
+  // fire-and-forget design guards post-settle work with lifecycle epochs
+  // instead — awaiting them would let one held load hang teardown (proven
+  // by reload-rehydration-safety's held-hot-swap-load test). Tracked solely
+  // so tests can synchronize deterministically under the frozen-clock
+  // preload, where wall-clock polling cannot observe this work.
+  private pendingWatcherPatternLoads = new Set<Promise<unknown>>();
   private locallyPreparedResults = new Map<
     `${MemorySpace}/${CellScope}/${URI}`,
     string
@@ -2049,9 +2058,9 @@ export class Runner {
                   });
                   // Track so dispose() can settle it before storage teardown
                   // (same contract as PatternUpdater's pending checks).
-                  this.pendingPointerMaintenance.add(rollForward);
+                  this.pendingPointerCommits.add(rollForward);
                   rollForward.finally(() =>
-                    this.pendingPointerMaintenance.delete(rollForward)
+                    this.pendingPointerCommits.delete(rollForward)
                   );
                 }
                 return;
@@ -2071,9 +2080,9 @@ export class Runner {
                 err,
               );
             });
-          this.pendingPointerMaintenance.add(watcherLoad);
+          this.pendingWatcherPatternLoads.add(watcherLoad);
           watcherLoad.finally(() =>
-            this.pendingPointerMaintenance.delete(watcherLoad)
+            this.pendingWatcherPatternLoads.delete(watcherLoad)
           );
         }),
       );
@@ -3617,15 +3626,35 @@ export class Runner {
   }
 
   /**
-   * Settle in-flight watcher pattern loads and pointer roll-forward commits
-   * (see dispose()); loops because a roll-forward is spawned INSIDE its load
-   * chain. Also the deterministic synchronization point for tests — the
-   * runner suite runs under a frozen clock, so wall-clock polling cannot
-   * observe this work.
+   * Settle in-flight pointer roll-forward COMMITS — bounded local work,
+   * awaited by dispose() before the storage sessions they write through
+   * close. Deliberately excludes watcher pattern LOADS: a load can be
+   * arbitrarily slow or wedged, and its post-settle work is already
+   * lifecycle-epoch-guarded.
+   */
+  async settlePointerCommits(): Promise<void> {
+    while (this.pendingPointerCommits.size > 0) {
+      await Promise.allSettled([...this.pendingPointerCommits]);
+    }
+  }
+
+  /**
+   * TESTS ONLY: settle in-flight watcher pattern loads AND any pointer
+   * roll-forward commits they spawn; loops because a roll-forward is
+   * created inside its load chain. The deterministic synchronization point
+   * under the frozen-clock preload, where wall-clock polling cannot observe
+   * this work. Never called from dispose() — a held load would hang
+   * teardown.
    */
   async idlePointerMaintenance(): Promise<void> {
-    while (this.pendingPointerMaintenance.size > 0) {
-      await Promise.allSettled([...this.pendingPointerMaintenance]);
+    while (
+      this.pendingWatcherPatternLoads.size > 0 ||
+      this.pendingPointerCommits.size > 0
+    ) {
+      await Promise.allSettled([
+        ...this.pendingWatcherPatternLoads,
+        ...this.pendingPointerCommits,
+      ]);
     }
   }
 
