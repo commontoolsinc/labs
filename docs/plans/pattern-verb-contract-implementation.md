@@ -198,22 +198,37 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   ignored — design rule 1): emit `additionalProperties: false` for event
   payloads, confirm the runner enforces it at dispatch, and record the rule
   in the mapping spec.
-- **Settle before C3 — which signal marks a verb?** "Stream/handler
-  properties" is not a single predicate today. `isStream()` accepts three
-  independent signals, any one of which suffices: the cell's construction kind,
-  `asCell: ["stream"]` in the schema, and a stored `{$stream: true}` value
-  (`Cell.isStream`, `packages/runner/src/cell.ts:936-958`). If C3 keys emission
-  off the schema marker alone, a verb carrying only the stored marker gets no
-  result schema and rule 3 silently does not apply to it — and the WS-C exit
-  below would not catch that, since it exercises one CTS pattern that does
-  carry the marker.
-  That the signals diverge in practice is not hypothetical: the CLI has two
-  runtime workarounds for handlers whose schema lost the marker
+- **Which signal marks a verb — checked, and C3 is not exposed to it.** An
+  earlier revision of this bullet warned that "stream/handler properties" is
+  not one predicate, because `Cell.isStream` accepts three independent signals
+  — construction kind, `asCell: ["stream"]` in the schema, and a stored
+  `{$stream: true}` value (`packages/runner/src/cell.ts:936-958`) — and that
+  C3 might therefore skip verbs carried only by the stored one. That warning
+  was misdirected. C3 runs in schema-generator, off the **TypeScript checker**:
+  `getWrapperSchemaFromCallable` reads a property's call signatures and asks
+  `getCellWrapperInfo` whether the return type is a `Stream`
+  (`packages/schema-generator/src/formatters/object-formatter.ts:44-67`). The
+  `asCell` marker is that check's *output*, not its input, and the stored
+  `{$stream: true}` value is a runtime artifact schema-generator never sees. A
+  result schema would ride the same type check that already emits the marker,
+  so the two travel together: a property is either recognized as a stream and
+  gets both, or is unrecognized and is skipped from `properties` and `required`
+  entirely (mapping spec, "Functions / callables / constructables"). There is
+  no state where the marker lands and the result schema does not. Verified on
+  `packages/patterns/topics/main.tsx`: `addTopic`, `setMyName`, and
+  `submitTopic` all emit `asCell: ["stream"]` from their `Stream<T>`
+  declarations.
+- **The residual check, which belongs to durable-schema readers rather than to
+  C3:** the bullet above requires the result schema to reach the piece's
+  *durable* schema, and only generation was verified — not persistence. If
+  anything strips `asCell` between generation and storage, every consumer that
+  reads verbs back from a stored schema is affected, this workstream included.
+  The three-signal divergence is real at runtime, which is why the CLI carries
+  two workarounds for handlers whose stored schema lacks the marker
   (`tryResolvePieceHandler`, and the forced-stream probe in
-  `listPieceCallables`, whose comment says so). What is *not* yet established
-  is whether any pattern reaches schema-generator in that state. Determine that
-  first; if it can, C3 needs a predicate that agrees with dispatch, and the
-  exit criterion needs a second fixture that lacks the schema marker.
+  `listPieceCallables`). Worth confirming before anything downstream depends on
+  reading verbs out of a durable schema; the design doc's structural-interface
+  note rests on the same question.
 - ~~**runner:** plain-return projection~~ — **done (C4)**:
   `plainResultReceipts`, default-off, env-reachable
   (`EXPERIMENTAL_PLAIN_RESULT_RECEIPTS`); registry entry in
