@@ -80,6 +80,24 @@ Deno.test("buildView: a virtual filename selects piped source without making it 
   assertEquals(r.editSource.parse(source), r.doc);
 });
 
+Deno.test("buildView: a shebang selects an extensionless source and its editor", () => {
+  const source = "#!/usr/bin/env python3\ndef greet():\n    return 'hello'\n";
+  const piped = buildView(source);
+  const file = buildView(source, "greet");
+
+  for (const view of [piped, file]) {
+    assert(
+      view.doc.lines.flatMap((line) => line.spans).some((span) =>
+        span.cls === "storageKeyword" && span.text === "def"
+      ),
+      "the Python shebang selects Python highlighting",
+    );
+    assertEquals(view.editSource.parse(source), view.doc);
+  }
+  assertEquals(piped.editSource.editable, false);
+  assertEquals(file.editSource.editable, true);
+});
+
 Deno.test("buildView: an explicit language takes priority over a virtual filename", () => {
   const source = "# **Piped heading**\n";
   const r = buildView(source, undefined, undefined, {

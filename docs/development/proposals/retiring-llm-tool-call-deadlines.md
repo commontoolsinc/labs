@@ -4,38 +4,40 @@ _Replacing the wall-clock deadline on LLM tool calls with a quiescence barrier
 scoped to a single pattern run, so a tool call ends because the work finished or
 because it was cancelled — never because a timer fired._
 
-**Status:** proposed · **Updated:** 2026-07-28
+**Status:** phases 1, 2, 3 and 5 landed; phase 4 outstanding · **Updated:**
+2026-07-29
 
 ---
 
 ## Why
 
-`packages/runner/src/builtins/llm-dialog.ts` carries two wall-clock deadlines,
-and they are not the same kind of thing.
+`packages/runner/src/builtins/llm-dialog.ts` carried two wall-clock deadlines,
+and they were not the same kind of thing.
 
-`TOOL_CALL_TIMEOUT` (120 seconds) races every tool call. A tool that has not
-produced a result by then is abandoned, and the model is handed
+`TOOL_CALL_TIMEOUT` (120 seconds) raced every tool call. A tool that had not
+produced a result by then was abandoned, and the model was handed
 `{ type: "error-text", value: "Tool call timed out" }` in place of the tool's
-output. It bounds how long a **local computation** may take, which is a question
-the runtime can answer exactly. This document is about removing it.
+output. It bounded how long a **local computation** may take, which is a
+question the runtime can answer exactly. This document is about removing it, and
+it is now gone.
 
 `REQUEST_TIMEOUT` (5 minutes) bounds how long to keep believing a **different
-replica** is still working on a dialog. That is failure detection, and it cannot
-be made exact — see
+replica** is still working on a dialog. That is failure detection, it cannot be
+made exact, and it stays — see
 [phase 4](#phase-4--narrow-the-message-drop-heuristic-which-cannot-be-removed).
 Do not delete it on the strength of the argument for the first.
 
-`TOOL_CALL_TIMEOUT` is the shape `AGENTS.md` rules out: a bound on how long
+`TOOL_CALL_TIMEOUT` was the shape `AGENTS.md` rules out: a bound on how long
 success may take. By the test in
 [`waiting-in-tests.md`](../waiting-in-tests.md#wall-clock-time-is-not-a-measure-of-progress)
 — "is firing early safe?" — it is not. Firing early discards a real result and
 misreports it to the model as a failure.
 
-It is not there out of carelessness. Before it existed the code was a bare
+It was not there out of carelessness. Before it existed the code was a bare
 `await` on the tool's result cell, and a userland pattern that never writes a
-result hangs that await forever. The deadline stands in for a completion signal
-the runtime cannot currently produce, and for a cancellation path that does not
-reach tool calls. Both are buildable.
+result hangs that await forever. The deadline stood in for a completion signal
+the runtime could not produce, and for a cancellation path that did not reach
+tool calls. Both turned out to be buildable, and the phases below build them.
 
 ## What a tool call is actually waiting for
 
@@ -103,7 +105,7 @@ while a request is genuinely outstanding, which is what
 A scoped barrier built on a registry that did not see this work would inherit the
 same hole, so this comes first.
 
-## Phase 2 — make cancellation reach tool calls
+## Phase 2 — make cancellation reach tool calls (landed)
 
 Ordered before the barrier deliberately: it fixes a live bug on its own, and it
 is what makes removing the deadline safe rather than merely correct.
@@ -113,11 +115,11 @@ false or a newer request supersedes it, and `cancelGeneration` sets `pending`
 false so the effect reaches every replica. That trigger side is event-driven
 already.
 
-The consumption side is narrow. `abortSignal` reaches exactly one consumer, the
-model call; `executeToolCalls` takes no signal at all. **So cancelling a turn
-that is inside a tool call stops nothing.** The tool call runs to its deadline,
-and the `requestId` guard then discards the writeback — the effect is suppressed,
-the work never was.
+The consumption side was narrow. `abortSignal` reached exactly one consumer, the
+model call, and `executeToolCalls` took no signal at all. **So cancelling a turn
+that was inside a tool call stopped nothing.** The tool call ran to its deadline,
+and the `requestId` guard then discarded the writeback — the effect was
+suppressed, the work never was.
 
 Two changes:
 
@@ -128,60 +130,101 @@ Two changes:
   pattern keeps computing and keeps its own model calls in flight.
   `Runner.stop(resultCell)` takes exactly the cell the tool call created.
 
-## Phase 3 — a barrier scoped to one pattern run
+## Phase 3 — a barrier scoped to one pattern run (landed)
 
-**Blocked, and the blocker is not the one this document first assumed.** The
-attribution mechanism works and is cheap. What does not hold is the premise
-underneath it: that the async builtins register their work at all.
+**The blocker was not the one this document first assumed.** The attribution
+mechanism works and is cheap. What did not hold was the premise underneath it:
+that the async builtins registered their work at all.
 
-An instrumented run of the dynamic-schema subagent tests logged every
-`trackAsyncWork` call. Across the whole suite of them the only registrations
-were four commit promises from `finalizeReactiveActionCommit`
-(`scheduler/run.ts`), with no owner. The `generateObject` path registered
-nothing. So a barrier scoped by owner sees an empty set for those runs and
-reports quiescence immediately, and the tool call reads a result cell that
-nothing has written yet. Wired up as described below, it turned a passing
-subagent case red by handing the model an empty tool result.
+An instrumented run that logged every `trackAsyncWork` call while driving the
+dynamic-schema subagent tests recorded four registrations across the whole file,
+all of them commit promises from `finalizeReactiveActionCommit`
+(`scheduler/run.ts`), with no owner. `generateObject` registered nothing. So a
+barrier scoped by owner saw an empty set for those runs and reported quiescence
+immediately, and the tool call read a result cell that nothing had written yet.
+Wired up before that was fixed, it turned a passing subagent case red by handing
+the model an empty tool result.
 
 That failure mode is worse than the deadline it replaces. A deadline that fires
 early reports a failure; a barrier that returns early reports a *success* with
-missing data, and does it silently. So this phase does not land until
-registration coverage is established first:
+missing data, and does it silently.
 
-1. Audit every async builtin path for whether it registers its work, and fix the
-   ones that do not — `generateObject` first, since it is the one the tool-call
-   path runs.
-2. Add a check that fails when an async builtin completes work it never
-   registered, so coverage cannot silently regress. Without it, a builtin added
-   later reintroduces exactly this hole and the barrier starts truncating
-   results again.
-3. Only then scope the registry and switch the tool wait over.
+**What the audit found.** Re-running the instrumentation confirmed the count
+exactly: four commit promises, nothing from `generateObject`. Both of its paths
+built a promise spanning the model call and the writeback and then attached only
+a `.catch()` to it, so neither ever reached the registry. The direct path needed
+more than an added call, because its writeback hangs off a `.then()` on the
+request promise — the chain rather than the request is what spans the operation.
+Every other async builtin already registered: `llm`, `generateText` and
+`llmDialog` register their request chain; `fetch` and `fetchProgram` register
+their claim-and-fetch promise; `navigateTo` registers its callback. Two builtins
+enqueue post-commit effects and deliberately do not register, both for good
+reasons: the sqlite query awaits its RPC and writeback inside the flush, so the
+transaction's own commit promise spans them, and `streamData` is an open-ended
+subscription whose read loop has no completion for a barrier to wait for.
 
-The design below is what to build once that groundwork is in place, and it is
-recorded because the mechanism was proven — it was the inputs that were missing.
+**The tripwire.** `packages/runner/test/async-work-registration.test.ts` guards
+the registry in two halves. Each async builtin runs there with its response held
+open by the mock gate; both barriers must stay open while it is held, and a
+barrier scoped to an unrelated cell must return, so the pair pins that the work
+was registered and that it was attributed to its own run rather than to nobody.
+A source scan in the same file fails when a builtin file grows a post-commit
+side effect without registering async work, so a builtin added later has to
+either register or record in the file's exemption list why it does not have to.
+Both halves were checked against the defect: removing the `generateObject`
+registrations turns the first half red, and dropping the owner turns all four
+cases red.
 
-`trackAsyncWork` gains an owner — the `parentCell` the builtin already has — and
-`Runtime.settledFor(cell)` waits for scheduler quiescence including in-flight
-commits, then for the tracked work owned by that cell, re-checking until both
-hold.
+`trackAsyncWork` gained an owner — the `parentCell` the builtin already has —
+and `Runtime.settledFor(cell)` waits for scheduler quiescence including
+in-flight commits, then for the tracked work owned by that cell, re-checking
+until both hold.
 
-The tool wait then races three event-driven outcomes: the result landing, the run
+The tool wait now races three event-driven outcomes: the result landing, the run
 quiescing, and the turn being cancelled. A pattern that produced nothing resolves
 via the second, with the cell still undefined — a determinate answer rather than
-a guess. `TOOL_CALL_TIMEOUT` has nothing left to do and goes.
+a guess. `TOOL_CALL_TIMEOUT` had nothing left to do and is gone.
 
 `settledFor` uses `idleWithPendingCommits()` rather than plain `idle()`, because
 a child's result writeback travels through a commit and the commit promise
-registered by the scheduler carries no owner.
+registered by the scheduler carries no owner. It also waits for tracked work
+with no owner, which the design as first written did not call for and which
+turns out to be load-bearing. The scheduler registers the commit promise of any
+commit carrying post-commit effects, and that promise is the handoff: it spans
+the outbox flush inside which a builtin registers its own work. Without waiting
+for it, a run-scoped barrier slips through the gap between the commit landing
+and the flush starting, and finds an empty set — the same early return by a
+different route.
+
+It also carries no round cap, where `settled()` does. On a barrier a tool call
+waits on, a cap is a bound on how much work a run may do before the barrier
+reports it finished anyway — the same shape as the deadline being removed, with
+the same failure. Each round awaits real promises, so a run that keeps working
+keeps the barrier open rather than spinning. An unbounded loop needs a way to
+stop, or a race the result wins leaves it re-checking with nobody waiting, so it
+takes an optional signal that the tool call aborts as it leaves the race.
+
+**The mocks could not tell an early return from a correct one.** Every mock in
+the tool-calling tests answers within a microtask, so a child agent finishes
+before its tool call looks at anything, and a tool call that stopped waiting
+immediately would have passed all of them. `generate-object-tools.test.ts` now
+holds a delegate's child answer open across the whole wait and checks that the
+parent's next request carries the child's data rather than an empty result.
+
+**A sharp edge worth knowing, unchanged by this work.** The result-landing
+racer fires on the result cell becoming defined at all. A delegate pattern that
+returns the whole builtin object rather than its `.result` has a cell that is
+defined the instant the request starts, as `{ pending: true }`, so the tool call
+resolves on that placeholder no matter what the barrier does.
 
 **What still hangs, and why that is the right trade.** A userland pattern that
-spins forever with nobody watching leaves its turn pending indefinitely. Today
-that turn is abandoned after two minutes and the model is told the tool failed.
-Removing the deadline trades "we misreport a healthy tool as failed after two
-minutes" for "the turn stays pending until the work finishes or someone cancels."
-The second is truthful, and phase 2 is what makes "someone cancels" a real
-option. It is also more visible, which is a product consequence worth stating
-rather than discovering.
+spins forever with nobody watching now leaves its turn pending indefinitely.
+Before, that turn was abandoned after two minutes and the model was told the
+tool failed. Removing the deadline trades "we misreport a healthy tool as failed
+after two minutes" for "the turn stays pending until the work finishes or
+someone cancels." The second is truthful, and phase 2 is what makes "someone
+cancels" a real option. It is also more visible, which is a product consequence
+worth stating rather than discovering.
 
 ## Phase 4 — narrow the message-drop heuristic, which cannot be removed
 
@@ -207,18 +250,20 @@ That also fixes a live bug: a turn running longer than five minutes without a
 durable write stops refreshing the heartbeat, so today the replica running it
 accepts a new message and starts a second request **against itself**.
 
-## Phase 5 — retire the real-clock exemptions
+## Phase 5 — retire the real-clock exemptions (landed)
 
 With no deadline in the tool call, the three cases in
 `generate-object-tools-dynamic-subagent.test.ts` and
-`llm-dialog-dynamic-subagent.test.ts` have nothing the auto-advance pump can fire
-early. Fold them back into their parent files, drop both entries from
-`REAL_CLOCK_FILES`, and remove the "dynamic-schema subagent shape" section from
-[`waiting-in-tests.md`](../waiting-in-tests.md), leaving the two exemptions that
-are on the list for unrelated reasons.
+`llm-dialog-dynamic-subagent.test.ts` had nothing the auto-advance pump could
+fire early. They are folded back into `generate-object-tools.test.ts` and
+`llm-dialog.test.ts`, both split files are deleted, both entries are gone from
+the runner preload's `realClockFiles`, and the "dynamic-schema subagent shape"
+section is gone from [`waiting-in-tests.md`](../waiting-in-tests.md). Only the
+resume test is left on the list, and it is there for an unrelated reason.
 
 Each case asserts on the delegate's own tool result, so this step proves itself:
-if a deadline still fires, they go red rather than passing quietly.
+all three pass under the fake clock, which they could not do if a deadline were
+still firing.
 
 ## What this does not cover
 

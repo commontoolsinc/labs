@@ -95,10 +95,10 @@ Deno.test("cf view --filename selects piped source by its virtual name", async (
   assertEquals(stdout, ["Title with weight"]);
 });
 
-Deno.test("cf view --language overrides a piped virtual filename", async () => {
+Deno.test("cf view --language aliases override a piped virtual filename", async () => {
   const source = "# Title with **weight**\n";
   const { code, stdout } = await cf(
-    "view --plain --rendered --color never --language markdown --filename notes.txt",
+    "view --plain --rendered --color never --language md --filename notes.txt",
     source,
   );
   assertEquals(code, 0);

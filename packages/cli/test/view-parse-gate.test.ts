@@ -71,7 +71,33 @@ Deno.test("gate 836: leaf identifiers are classified by their parent context", (
   );
   assert(
     classesOf(doc, "toString").has("propertyName"),
-    "`.toString` is a propertyName",
+    "the member call `.toString()` keeps its propertyName classification",
+  );
+  assert(
+    doc.lines.flatMap((line) => line.spans).some((span) =>
+      span.text === "toString" && span.exactDefinitionName === "toString"
+    ),
+    "the member call uses exact-position definition lookup",
+  );
+});
+
+Deno.test("called element keys carry one exact-position lookup marker", () => {
+  const doc = parseDocument(
+    "worker[-1](); worker[+1](); worker[`line one\nline two`]();",
+  );
+  assertEquals(
+    doc.lines.flatMap((line) => line.spans)
+      .filter((span) => span.exactDefinitionName !== undefined)
+      .map((span) => [
+        span.text,
+        span.exactDefinitionName,
+        span.exactDefinitionDisplayName,
+      ]),
+    [
+      ["1", "-1", "-1"],
+      ["1", "+1", "+1"],
+      ["`line one", "line one\nline two", '"line one\\nline two"'],
+    ],
   );
 });
 

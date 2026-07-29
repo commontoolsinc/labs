@@ -104,7 +104,6 @@ export class CFKeybind extends BaseElement {
   override render() {
     // Non-visual helper component
     return html`
-
     `;
   }
 

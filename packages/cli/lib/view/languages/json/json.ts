@@ -25,11 +25,6 @@ import type { Highlighter } from "../language.ts";
 import { cpLen } from "../../ansi.ts";
 import { computeLineStarts, lineIndexOf } from "../../lines.ts";
 
-/** Whether `fileName` names a JSON or JSONC file. */
-export function isJsonPath(fileName: string | undefined): boolean {
-  return fileName !== undefined && /\.jsonc?$/i.test(fileName);
-}
-
 interface Token {
   readonly start: number;
   readonly end: number;

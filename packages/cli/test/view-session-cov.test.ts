@@ -217,7 +217,14 @@ function externalSession(destLine = 1, fileLines = 3): {
     prewarm: () => {},
     fileLines: (p) => p === filePath ? parseDocument(fileText).lines : null,
     definitionOf: () => [
-      { name: "ext", filePath, fileOffset: 0, line: destLine + 1, preview: "" },
+      {
+        name: "ext",
+        filePath,
+        fileOffset: 0,
+        line: destLine + 1,
+        col: 4,
+        preview: "",
+      },
     ],
   };
   const doc = parseDocument(`// transformed: /m.ts\nconst flag = ext();`);
@@ -342,6 +349,10 @@ Deno.test("session: Enter on a 'defined elsewhere' entry, then Esc, returns to t
   assert(
     s.view().overlay!.title.includes("ext.ts"),
     "opened the external file",
+  );
+  assert(
+    s.view().overlay!.title.includes("line 3, column 5"),
+    "shows the exact definition position",
   );
   assert(
     s.view().overlay!.footer.includes("esc back"),

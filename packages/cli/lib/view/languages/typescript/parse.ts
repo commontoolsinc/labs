@@ -142,6 +142,8 @@ interface GlobalSpan {
   end: number;
   cls: TokenClass;
   bracketDepth?: number;
+  exactDefinitionName?: string;
+  exactDefinitionDisplayName?: string;
 }
 
 /** Parse `text` into the document model. */
@@ -303,7 +305,19 @@ export function highlightLineEditLocally(
           text: after,
           spans: before.spans.map((current, index) =>
             index === spanIndex
-              ? { ...current, text: newSpanText }
+              ? {
+                ...current,
+                text: newSpanText,
+                exactDefinitionName: current.exactDefinitionName === undefined
+                  ? undefined
+                  : newSpanText.slice(1, -1),
+                exactDefinitionDisplayName:
+                  current.exactDefinitionName === undefined
+                    ? undefined
+                    : quotedDefinitionDisplayName(
+                      newSpanText.slice(1, -1),
+                    ),
+              }
               : index > spanIndex
               ? { ...current, col: current.col + columnDelta }
               : current
@@ -740,6 +754,12 @@ function spansToLinesRange(
           text: segText,
           cls: span.cls,
           bracketDepth: span.bracketDepth,
+          exactDefinitionName: pos === span.start
+            ? span.exactDefinitionName
+            : undefined,
+          exactDefinitionDisplayName: pos === span.start
+            ? span.exactDefinitionDisplayName
+            : undefined,
         });
         lineCol[idx] += cpLen(segText);
       }
@@ -768,7 +788,9 @@ function lineEq(a: Line, b: Line): boolean {
     const y = b.spans[i];
     if (
       x.col !== y.col || x.text !== y.text || x.cls !== y.cls ||
-      x.bracketDepth !== y.bracketDepth
+      x.bracketDepth !== y.bracketDepth ||
+      x.exactDefinitionName !== y.exactDefinitionName ||
+      x.exactDefinitionDisplayName !== y.exactDefinitionDisplayName
     ) {
       return false;
     }
@@ -868,11 +890,14 @@ function buildGlobalSpans(
       classifyTrivia(text, prevEnd, token.start, spans);
     }
     const cls = classifyToken(token.node, schemaSet);
+    const definitionTarget = callTargetDefinition(token.node);
     spans.push({
       start: token.start,
       end: token.end,
       cls,
       bracketDepth: cls === "bracket" ? bracketDepths.get(token) : undefined,
+      exactDefinitionName: definitionTarget?.name,
+      exactDefinitionDisplayName: definitionTarget?.displayName,
     });
     prevEnd = token.end;
   }
@@ -1017,11 +1042,72 @@ function classifyIdentifier(
   return "identifier";
 }
 
-function isCalleeOfCall(node: ts.Node): boolean {
-  const p = node.parent;
+function isCalleeOfCall(node: ts.Expression): boolean {
+  let expression = node;
+  let p = expression.parent;
+  while (
+    p &&
+    (ts.isParenthesizedExpression(p) || ts.isAsExpression(p) ||
+      ts.isSatisfiesExpression(p) || ts.isNonNullExpression(p) ||
+      ts.isTypeAssertionExpression(p) ||
+      ts.isExpressionWithTypeArguments(p)) &&
+    p.expression === expression
+  ) {
+    expression = p;
+    p = expression.parent;
+  }
   return !!p &&
     (ts.isCallExpression(p) || ts.isNewExpression(p)) &&
-    p.expression === node;
+    p.expression === expression;
+}
+
+function callTargetDefinition(
+  node: ts.Node,
+): { name: string; displayName: string } | undefined {
+  const p = node.parent;
+  if (
+    ts.isPropertyAccessExpression(p) && p.name === node &&
+    isCalleeOfCall(p)
+  ) {
+    const name = (node as ts.Identifier | ts.PrivateIdentifier).text;
+    return { name, displayName: name };
+  }
+  if (
+    ts.isElementAccessExpression(p) && p.argumentExpression === node &&
+    isCalleeOfCall(p) &&
+    (ts.isStringLiteral(node) ||
+      ts.isNoSubstitutionTemplateLiteral(node) ||
+      ts.isNumericLiteral(node))
+  ) {
+    return {
+      name: node.text,
+      displayName: ts.isNumericLiteral(node)
+        ? node.text
+        : quotedDefinitionDisplayName(node.text),
+    };
+  }
+  if (
+    ts.isNumericLiteral(node) && ts.isPrefixUnaryExpression(p) &&
+    p.operand === node &&
+    (p.operator === SK.PlusToken || p.operator === SK.MinusToken)
+  ) {
+    const access = p.parent;
+    if (
+      ts.isElementAccessExpression(access) &&
+      access.argumentExpression === p &&
+      isCalleeOfCall(access)
+    ) {
+      const name = `${p.operator === SK.MinusToken ? "-" : "+"}${node.text}`;
+      return { name, displayName: name };
+    }
+  }
+  return undefined;
+}
+
+function quotedDefinitionDisplayName(text: string): string {
+  return JSON.stringify(text)
+    .replaceAll("\u2028", "\\u2028")
+    .replaceAll("\u2029", "\\u2029");
 }
 
 /** True when `node` sits inside a type annotation/argument (vs an expression). */
@@ -2412,6 +2498,12 @@ function spansToLines(
           text: segText,
           cls: span.cls,
           bracketDepth: span.bracketDepth,
+          exactDefinitionName: pos === span.start
+            ? span.exactDefinitionName
+            : undefined,
+          exactDefinitionDisplayName: pos === span.start
+            ? span.exactDefinitionDisplayName
+            : undefined,
         });
         lineCol[li] += cpLen(segText);
       }

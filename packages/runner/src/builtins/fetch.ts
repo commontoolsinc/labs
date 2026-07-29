@@ -467,8 +467,9 @@ function fetchBuiltin(kind: FetchKind) {
           `${kind.name}-start`,
           () => {
             // Try to claim mutex - returns immediately if another tab is
-            // processing. Tracked as async builtin work so runtime.settled()
-            // waits for the fetch and its writeback; idle() does not, so the
+            // processing. Tracked as async builtin work owned by this run, so
+            // runtime.settled() and runtime.settledFor(parentCell) both wait
+            // for the fetch and its writeback; idle() does not, so the
             // post-commit handler never blocks on network I/O.
             const work = tryClaimMutex(
               runtime,
@@ -535,7 +536,7 @@ function fetchBuiltin(kind: FetchKind) {
                 );
               },
             );
-            runtime.trackAsyncWork(work);
+            runtime.trackAsyncWork(work, parentCell);
           },
         );
       }

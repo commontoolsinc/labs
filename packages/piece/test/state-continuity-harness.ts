@@ -264,6 +264,42 @@ export async function vintageArgumentLink(
   return link;
 }
 
+/**
+ * The pattern identity a captured vintage's root is already stamped with.
+ *
+ * This is a CONTROL, and the replay gate is unsound without one. A fixture
+ * that did not restore — truncated, empty, or seeded where the engine does not
+ * look — presents to the runtime as a fresh empty space, and materializing
+ * today's source onto a fresh empty space succeeds. The replay would then read
+ * green having proved nothing at all, which is the same trap the storage-move
+ * case hits in `state-continuity.test.ts`: emptiness is indistinguishable from
+ * a fixture that was never there.
+ *
+ * `undefined` means no root was captured. A value that disagrees with the
+ * fixture's filename means the name is not provenance but decoration.
+ */
+export async function vintageStoredIdentity(
+  vintage: VintageRuntime,
+  rootKey: string = DEFAULT_VINTAGE_ROOT_KEY,
+): Promise<string | undefined> {
+  const root = vintageRoot<Record<string, unknown>>(
+    vintage,
+    undefined,
+    rootKey,
+  );
+  await root.sync();
+  let stamp: unknown;
+  try {
+    stamp = root.getMetaRaw("patternIdentity");
+  } catch {
+    // An absent doc reads as a throw rather than `undefined`, and for this
+    // question the two are the same answer: nothing was captured here.
+    return undefined;
+  }
+  const identity = (stamp as { identity?: unknown } | undefined)?.identity;
+  return typeof identity === "string" ? identity : undefined;
+}
+
 /** Read a vintage's stored argument under `schema` (`undefined` = raw). */
 export async function readVintageArgument(
   vintage: VintageRuntime,
@@ -326,6 +362,13 @@ export interface MaterializeOutcome {
   resultSchema: unknown;
   /** The candidate's compiled argument schema, for the same reason. */
   argumentSchema: unknown;
+  /**
+   * Identity of the pattern that was materialized — the artifact entry ref's
+   * identity, not a hash of the source text. A fixture is NAMED with this, so
+   * taking it off the compiled artifact is what makes the name provenance
+   * rather than a guess: it records the version that actually wrote the state.
+   */
+  identity: string;
 }
 
 /**
@@ -382,6 +425,7 @@ export async function materializeOver(
   const schemas = {
     resultSchema: pattern.resultSchema,
     argumentSchema: pattern.argumentSchema,
+    identity: ref.identity,
   };
   try {
     await runtime.runSynced(root.withTx(), pattern, undefined, {

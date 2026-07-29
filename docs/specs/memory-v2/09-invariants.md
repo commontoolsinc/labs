@@ -72,14 +72,22 @@ Checked by: the durable-history oracle (any hit is by construction a
 violation); the TLA+ model's `ReadCoherence` invariant; the differential
 harness's replay comparison.
 
-Known deviations: **CT-1910** (pending-read basis over-advance): the
-staleness scan for a pending read is based at the highest dependency's
-resolution seq, so overlapping foreign writes landing between the reader's
-confirmed basis and that seq are not scanned. The planned repair (scan the
-full interval from the reader's confirmed basis, excluding only the reader's
-own resolved session stack) restores INV-1; the TLA+ config
-`PendingStacks_Current.cfg` reproduces the violation and
-`PendingStacks_Repaired.cfg` certifies the repair in the bounded model.
+Known deviations: **CT-1910** (pending-read basis over-advance), repaired
+for readers that declare `basisSeq` and RETAINED for legacy readers that do
+not: a pending read without `basisSeq` is scanned from the highest
+dependency's resolution seq, so overlapping foreign writes landing between
+the reader's confirmed basis and that seq are not scanned. A read declaring
+`basisSeq` is scanned over the full interval from that basis, excluding
+only the session's TRUE PREDECESSOR commits — those with a localSeq below
+the reader's, the accepted layers its view included; an own write admitted
+out of submission order conflicts like a foreign one
+(03-commit-model.md §3.6.3) — the shape current clients always emit. The TLA+ config
+`PendingStacks_Current.cfg` reproduces the legacy-shape violation (kept as a
+regression witness, alongside the legacy-shape engine test in
+`packages/memory/test/v2-pending-read-basis-overadvance.test.ts`) and
+`PendingStacks_Repaired.cfg` certifies the repaired shape in the bounded
+model. The residual deviation retires when clients that omit `basisSeq`
+fall below the support floor.
 
 ### INV-2 — Overlap over-approximation only
 
@@ -107,21 +115,26 @@ naive-accept, where the naive validator implements exact overlap); the
 generator test asserting the runner's array-op discipline
 (`packages/runner/test/memory-v2-native-commit.test.ts`).
 
-### INV-3 — Dependency completeness and top-of-stack basis
+### INV-3 — Dependency completeness and staleness-basis selection
 
 > A commit that reads a document through a pending stack records a dependency
 > set that (a) includes every pending layer whose acceptance or rejection can
 > change the observed value, and (b) includes the document's top-of-stack
-> layer below the reader, which is the staleness basis. Narrowing may drop
-> only non-top layers whose write footprint provably cannot influence the
-> read path.
+> layer below the reader. For a read declaring its true confirmed basis
+> (`basisSeq`), the staleness scan runs from that basis with predecessor-only
+> own-session exclusion; for a legacy read, the top-of-stack layer's
+> resolution is the staleness basis. Narrowing may drop only non-top layers
+> whose write footprint provably cannot influence the read path.
 
 Clause (a) is what makes rejection cascades reach every semantically
 dependent commit (see INV-4); recording fewer layers than the value's true
 contributors is how phantoms are born (CT-1872 1c: the pre-#4606 scalar shape
 named only the top writer of the read path and missed a rejected lower layer
-that also wrote it). Clause (b) is `03-commit-model.md` §3.5: basing the
-staleness scan below the top of stack is unsound, not merely conservative.
+that also wrote it). Clause (b) anchors the cascade at the stack top; for a
+LEGACY read it is also `03-commit-model.md` §3.5's basis rule — basing that
+scan below the top of stack without own-session exclusion is unsound, not
+merely conservative, which is exactly why the `basisSeq` shape pairs its
+lower basis with the exclusion (§3.6.3).
 
 The current full-stack recording (every layer of the document, no overlap
 filtering) over-approximates clause (a) — safe direction, costs false dooms
@@ -135,8 +148,12 @@ Layer: client dependency recording (`packages/runner/src/storage/v2.ts`
 pending-stack bookkeeping); server resolution (`resolvePendingReads`).
 
 Soundness direction: MAY record more layers than semantically necessary;
-MUST NOT drop a layer that overlaps the read path, and MUST NOT drop or
-lower the top-of-stack basis.
+MUST NOT drop a layer that overlaps the read path, and MUST NOT drop the
+top-of-stack layer. A legacy read MUST NOT base its staleness scan below
+the top of stack; a `basisSeq` read scans from its declared basis and MUST
+exclude only true predecessor own-session commits (localSeq below the
+reader's — an own write accepted out of submission order conflicts like a
+foreign write).
 
 Checked by: the TLA+ model (all three recording modes); stacked-commit unit
 tests (`packages/runner/test/memory-v2-stacked-commit.test.ts`).

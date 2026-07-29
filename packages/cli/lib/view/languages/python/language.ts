@@ -6,7 +6,6 @@
 import type { Language } from "../language.ts";
 import {
   createPythonHighlighter,
-  isPythonPath,
   pythonDocument,
   pythonHighlightLines,
 } from "./python.ts";
@@ -14,7 +13,16 @@ import {
 export const pythonLanguage: Language = {
   id: "python",
 
-  matches: (fileName) => isPythonPath(fileName),
+  metadata: {
+    extensions: [".py", ".pyi", ".pyw"],
+    filenames: [],
+    filenamePatterns: [],
+    aliases: ["py"],
+    interpreters: [
+      /^python(?:\d+(?:\.\d+)*)?$/,
+      /^pypy(?:\d+(?:\.\d+)*)?$/,
+    ],
+  },
 
   parseDocument: (text) => pythonDocument(text),
 
