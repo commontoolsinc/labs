@@ -34,6 +34,7 @@ import type { CellScope } from "../builder/types.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
+import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
@@ -710,14 +711,43 @@ export function sqliteQuery(
     // request hash, the call was issued (and survives an abort+retry, unlike an
     // in-memory flag — see fetch.ts). Re-issue otherwise.
     if (result.withTx(tx).get()?.requestHash === hash) return;
-    result.withTx(tx).set({ pending: true, requestHash: hash });
 
     const sql = inputs.sql;
-    tx.enqueuePostCommitEffect({
-      id: `sqliteQuery:${hash}`,
-      idempotencyKey: `sqliteQuery:${hash}`,
-      kind: "sqlite-query",
-      async flush() {
+    const effectId = `sqliteQuery:${hash}`;
+    // CFC sink-request snapshot: what identifies this read AT THE SINK, plus
+    // the value-bearing parts the ceiling check gates on. `db.tables` is the
+    // handle's label SPEC rather than query data — it is already folded into
+    // `hash` above — so it stays out of the snapshot.
+    const requestSnapshot = {
+      db: {
+        id: db.id,
+        ...(db.scope !== undefined ? { scope: db.scope } : {}),
+      },
+      sql,
+      params: (params ?? null) as FabricValue,
+    };
+    // Double-execution gate, consulted BEFORE the dedup marker is written.
+    // `externalSinkDisposition()` is the single place that decides whether
+    // THIS side issues the effect: it pins the transaction's effect authority
+    // to "server" (and answers "suppress") once the source action carries a
+    // server effect claim, and the executor Worker's own policy answers
+    // "suppress" for an unclaimed run. It is idempotent, so the
+    // `enqueueSinkRequestPostCommitEffect` below re-reads the same answer.
+    //
+    // The marker must NOT be written on the suppressed side: every later run
+    // returns early on `requestHash === hash`, so a suppressed run that wrote
+    // it would leave the result permanently `pending` AND wedge the side that
+    // was supposed to issue.
+    if (tx.externalSinkDisposition() === "suppress") return;
+    result.withTx(tx).set({ pending: true, requestHash: hash });
+
+    enqueueSinkRequestPostCommitEffect(
+      tx,
+      "sqliteQuery",
+      effectId,
+      requestSnapshot,
+      "sqlite-query",
+      async () => {
         // Write an error result for THIS request, guarded against a newer query
         // (different inputs -> different hash) that superseded it mid-flight.
         const failQuery = (error: string) =>
@@ -901,7 +931,7 @@ export function sqliteQuery(
           await failQuery(errMsg(error));
         }
       },
-    });
+    );
   };
   return { action };
 }

@@ -118,3 +118,50 @@ Deno.test("P2.0: no builtin source performs network egress without a classificat
     );
   }
 });
+
+/**
+ * A2 (R5 sqliteQuery row): registering the right KIND is necessary but not
+ * sufficient for double-execution prevention. The suppression decision lives
+ * entirely in `ExtendedStorageTransaction.externalSinkDisposition()` — it is
+ * what flips `tx.executionEffectAuthority` to `"server"` and returns
+ * `"suppress"` once the source action carries a server EFFECT claim — and the
+ * ONLY caller of that method is `enqueueSinkRequestPostCommitEffect`
+ * (`src/cfc/sink-request.ts`). A builtin that reaches
+ * `tx.enqueuePostCommitEffect` directly therefore never consults the gate:
+ * the client keeps issuing its external work under the server's claim, and
+ * the executor Worker keeps issuing it with NO claim (the productionServer
+ * preset's `externalSinkDisposition` is exactly the "suppress unless claimed"
+ * policy). It also skips the CFC sink-request policy input + release check.
+ *
+ * So the contract is a file-level one: a builtin source enqueues its
+ * post-commit side effect through `enqueueSinkRequestPostCommitEffect`, or it
+ * is documented here with the reason its effect is not a suppression surface.
+ */
+const DIRECT_POST_COMMIT_EFFECT_ALLOWLIST: Record<string, string> = {
+  // navigateTo's post-commit effect is the LOCAL shell navigation callback
+  // (`runtime.navigateCallback`), not an external sink: there is no second
+  // issuer to double-fire, and the executor Worker installs no navigate
+  // callback at all, so the effect is inert server-side. Its server-side
+  // classification is tracked by register row R5 (W2.15 descriptors), not by
+  // the suppression gate.
+  "navigate-to.ts": "local shell navigation callback, not an external sink",
+};
+
+const DIRECT_POST_COMMIT_EFFECT = /\.enqueuePostCommitEffect\s*\(/;
+
+Deno.test("A2: every builtin post-commit side effect routes through the sink-request suppression gate", async () => {
+  for await (const entry of Deno.readDir(BUILTINS_DIR)) {
+    if (!entry.isFile || !entry.name.endsWith(".ts")) continue;
+    if (entry.name === "index.ts") continue;
+    const source = await Deno.readTextFile(join(BUILTINS_DIR, entry.name));
+    if (!DIRECT_POST_COMMIT_EFFECT.test(source)) continue;
+    if (entry.name in DIRECT_POST_COMMIT_EFFECT_ALLOWLIST) continue;
+    throw new Error(
+      `${entry.name} calls tx.enqueuePostCommitEffect directly, bypassing ` +
+        `externalSinkDisposition() — the only double-execution gate there ` +
+        `is. Route it through enqueueSinkRequestPostCommitEffect ` +
+        `(src/cfc/sink-request.ts), or document here why its effect is not ` +
+        `a suppression surface.`,
+    );
+  }
+});
