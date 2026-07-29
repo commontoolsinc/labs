@@ -189,6 +189,36 @@ Deno.test("verify reports WHAT moved, not merely that something did", async () =
   });
 });
 
+Deno.test("a migration-shaped change is a PASS, not a failure", async () => {
+  // The verdict and the message have to agree. An earlier version reported
+  // "this is the EXPECTED result of a migration" while returning ok=false, so
+  // the CLI exited nonzero — meaning a rehearsal script written from the
+  // documented procedure would treat every successful migration as a failure
+  // and refuse to proceed. Content CHANGING is information; content
+  // DISAPPEARING is the alarm.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const paths = clonePaths(clone, SPACE);
+    // What a migration does: rewrite derived values, add new cells, drop nothing.
+    mutate(paths.workingPath, [
+      ["of:named", {
+        value: "rewritten-by-migration",
+        result: link("of:piece"),
+      }],
+      ["of:brand-new-derived-cell", { value: 1, result: link("of:piece") }],
+    ]);
+
+    const v = await verifyClone(clone);
+    assertEquals(v.diff.removed, 0);
+    assert(!v.fingerprint.match, "the hash necessarily moves");
+    assert(!v.ok, "strict stays strict — something DID change");
+    assert(
+      v.okAfterMigration,
+      "but the migration verdict passes: nothing lost",
+    );
+  });
+});
+
 Deno.test("verify catches a real content change", async () => {
   await withDirs(async ({ source, clone }) => {
     await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
@@ -199,9 +229,16 @@ Deno.test("verify catches a real content change", async () => {
     }]]);
 
     const v = await verifyClone(clone);
-    assert(!v.ok, "authored content moved");
-    assert(!v.fingerprint.match);
+    assert(!v.ok, "the strict verdict catches an accidental clobber");
+    assert(!v.fingerprint.match, "authored content moved");
+    assertEquals(v.diff.changed, 1);
     assert(v.baselineIntact, "the baseline itself is still fine");
+    // Honest limit: a clobber is a CHANGE, so the migration verdict cannot see
+    // it. That is why authored content must be checked separately after a run.
+    assert(
+      v.okAfterMigration,
+      "documented blind spot, asserted so it stays known",
+    );
   });
 });
 
@@ -217,7 +254,10 @@ Deno.test("reset discards the attempt, including WAL companions", async () => {
     mutate(paths.workingPath, [["of:input", {
       value: { title: "CLOBBERED" },
     }]]);
-    assert(!(await verifyClone(clone)).ok, "the attempt landed");
+    assert(
+      !(await verifyClone(clone)).ok,
+      "the attempt landed",
+    );
 
     await resetClone(clone);
 
@@ -231,6 +271,7 @@ Deno.test("reset discards the attempt, including WAL companions", async () => {
     }
     const v = await verifyClone(clone);
     assert(v.ok, "back to baseline");
+    assert(v.fingerprint.match, "and byte-for-byte identical again");
     assertEquals(v.counts.working.commits, v.counts.manifest.commits);
   });
 });

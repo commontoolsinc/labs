@@ -178,6 +178,13 @@ export const space = new Command()
     "verify <dir:string>",
     "Check a clone against its manifest: baseline intact, content unchanged.",
   )
+  .option(
+    "--expect-migration",
+    "A migration was just run, so content is EXPECTED to differ: exit nonzero " +
+      "only on a corrupted baseline or removed entities. Without it, any change " +
+      "at all fails — which is right for checking an untouched clone, and wrong " +
+      "as a rehearsal gate.",
+  )
   .action(async (options, dir) => {
     const result = await verifyClone(dir);
     out(!!options.json, result, () => {
@@ -213,10 +220,18 @@ export const space = new Command()
               "cannot tell you it survived."),
       );
     });
+    // Which verdict applies depends on whether a migration was expected, and
+    // only the caller knows that — a hash cannot tell a rewritten result from a
+    // clobbered one. Default strict (catches an accidental clobber);
+    // --expect-migration gates on removal instead, so a rehearsal script does
+    // not treat every successful migration as a failure.
+    //
     // A failed verification is a RESULT, not a usage error: the report above is
-    // the output a script or an operator reads. Exit nonzero so a rehearsal
-    // script can gate on it, without cliffy appending usage help.
-    if (!result.ok) Deno.exit(1);
+    // what a script or an operator reads, so exit without cliffy's usage help.
+    const passed = options.expectMigration
+      ? result.okAfterMigration
+      : result.ok;
+    if (!passed) Deno.exit(1);
   })
   /* space reset */
   .command(

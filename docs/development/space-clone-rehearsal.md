@@ -69,7 +69,7 @@ deno task cf inspect churn <space> --bucket 60      # confirm a quiet window
 deno task cf piece setsrc … --api-url http://localhost:8010 …
 
 # 5. Judge it.
-deno task cf space verify ~/clones/<name>           # nonzero exit = content moved
+deno task cf space verify ~/clones/<name> --expect-migration   # nonzero = baseline corrupt or entities REMOVED
 deno task cf inspect churn <space> --bucket 60 --since '<when you started>'
 
 # 6. Reset and go again.
@@ -82,6 +82,19 @@ deno task cf space reset ~/clones/<name>
 clone time:
 
 - **`removed 0`** — the signal that matters most. Nothing was destroyed.
+
+**Which verdict the exit code uses is your choice, because the tool cannot
+infer it.** By default `cf space verify` is strict: *any* change exits nonzero,
+which is right for checking a clone nobody has touched and for catching an
+accidental clobber. After a migration, pass `--expect-migration`: results are
+rewritten by design, so it gates on a corrupted baseline or removed entities
+instead, and a two-pass rehearsal can actually be scripted.
+
+Its blind spot is worth stating plainly: `--expect-migration` **cannot see a
+clobber**, because overwriting authored content is a *change*, not a removal —
+and nothing hash-shaped can tell a rewritten result from a destroyed body. That
+is exactly why authored content is checked separately below, and why that check
+is not optional.
 - **`content CHANGED` with `removed 0`** — **the expected result of a
   successful migration.** A schema update rewrites every piece's result value,
   and results are part of the fingerprint, so it cannot match afterwards.

@@ -39,6 +39,16 @@ import {
 
 /** Filenames the layout depends on. */
 const MANIFEST = "clone.json";
+/**
+ * Per-entity baseline hashes, written beside the manifest at clone time.
+ *
+ * `createClone` already fingerprints the pristine snapshot; keeping its
+ * per-entity rows means `verify` diffs against a file instead of re-opening and
+ * re-fingerprinting a multi-gigabyte baseline on every call — measured at 43s
+ * vs 13s on the 1.0 GB Estuary store, on the operation a rehearsal runs most.
+ * Kept out of `clone.json` so that file stays small enough to read by eye.
+ */
+const BASELINE = "baseline-entities.json";
 const MARKER = ".cf-clone";
 const PRISTINE_DIR = "pristine";
 
@@ -84,6 +94,8 @@ export interface CreateCloneOptions {
 export interface ClonePaths {
   dir: string;
   manifestPath: string;
+  /** Per-entity baseline hashes (see {@link BASELINE}). */
+  baselinePath: string;
   pristinePath: string;
   workingPath: string;
 }
@@ -111,6 +123,7 @@ export function clonePaths(dir: string, space: string): ClonePaths {
   return {
     dir,
     manifestPath: `${dir}/${MANIFEST}`,
+    baselinePath: `${dir}/${BASELINE}`,
     pristinePath: `${dir}/${PRISTINE_DIR}/${space}.sqlite`,
     workingPath,
   };
@@ -184,6 +197,10 @@ export async function createClone(
     `${JSON.stringify(manifest, null, 2)}\n`,
   );
   await Deno.writeTextFile(
+    paths.baselinePath,
+    JSON.stringify(fingerprint.perEntity),
+  );
+  await Deno.writeTextFile(
     `${dir}/${MARKER}`,
     `This directory is a CLONE of space ${options.space}, not production.\n` +
       `Taken ${manifest.createdAt} from ${options.source}.\n` +
@@ -214,8 +231,28 @@ export async function resetClone(dir: string): Promise<CloneManifest> {
 }
 
 export interface VerifyResult {
-  /** True when the baseline is intact AND the working copy still matches it. */
+  /**
+   * Strict: the baseline is intact AND nothing moved at all.
+   *
+   * Correct for "is this clone still pristine?", and correct for catching an
+   * accidental clobber. NOT usable as the verdict after a migration: a schema
+   * update rewrites every piece's result value, so this is false after every
+   * successful one.
+   *
+   * Which of those two situations applies is something only the caller knows,
+   * so the tool does not guess — see `okAfterMigration`.
+   */
   ok: boolean;
+  /**
+   * Relaxed: the baseline is intact and nothing was REMOVED.
+   *
+   * The verdict to gate on when a migration was expected. Content *changing* is
+   * then information (results are rewritten by design); content *disappearing*
+   * is the alarm. It cannot distinguish a clobber from a migration — nothing
+   * hash-shaped can — which is why the runbook insists authored content be
+   * checked separately.
+   */
+  okAfterMigration: boolean;
   /** The pristine snapshot still hashes to what the manifest recorded. */
   baselineIntact: boolean;
   /** Working-copy counts, against the manifest's. */
@@ -277,37 +314,56 @@ export async function verifyClone(dir: string): Promise<VerifyResult> {
     space.close();
   }
 
-  // Diff against the pristine baseline so the report can say WHAT moved, not
-  // merely that something did.
-  const baseline = openSpace(paths.pristinePath);
-  let delta;
+  // Diff against the baseline recorded at clone time, so the report can say
+  // WHAT moved rather than merely that something did. Reading the sidecar
+  // avoids re-fingerprinting the pristine snapshot on every verify; a clone
+  // taken before the sidecar existed falls back to computing it.
+  let before: FingerprintReport;
   try {
-    const before = contentFingerprint(baseline);
-    const d = diffFingerprints(before, fingerprint);
-    const kindOf = new Map(fingerprint.perEntity.map((e) => [e.id, e.kind]));
-    const kindWas = new Map(before.perEntity.map((e) => [e.id, e.kind]));
-    const tally = (ids: string[], m: Map<string, string>) => {
-      const out: Record<string, number> = {};
-      for (const id of ids) {
-        const k = m.get(id) ?? "unknown";
-        out[k] = (out[k] ?? 0) + 1;
-      }
-      return out;
+    const rows = JSON.parse(
+      await Deno.readTextFile(paths.baselinePath),
+    ) as FingerprintReport["perEntity"];
+    before = {
+      hash: manifest.fingerprint.hash,
+      entities: rows.length,
+      excludedGenerated: manifest.fingerprint.excludedGenerated,
+      ambiguous: [],
+      unhashable: [],
+      perEntity: rows,
     };
-    delta = {
-      removed: d.removed.length,
-      changed: d.changed.length,
-      added: d.added.length,
-      changedByKind: tally(d.changed, kindOf),
-      removedByKind: tally(d.removed, kindWas),
-    };
-  } finally {
-    baseline.close();
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+    const baseline = openSpace(paths.pristinePath);
+    try {
+      before = contentFingerprint(baseline);
+    } finally {
+      baseline.close();
+    }
   }
+
+  const d = diffFingerprints(before, fingerprint);
+  const kindOf = new Map(fingerprint.perEntity.map((e) => [e.id, e.kind]));
+  const kindWas = new Map(before.perEntity.map((e) => [e.id, e.kind]));
+  const tally = (ids: string[], m: Map<string, string>) => {
+    const out: Record<string, number> = {};
+    for (const id of ids) {
+      const k = m.get(id) ?? "unknown";
+      out[k] = (out[k] ?? 0) + 1;
+    }
+    return out;
+  };
+  const delta = {
+    removed: d.removed.length,
+    changed: d.changed.length,
+    added: d.added.length,
+    changedByKind: tally(d.changed, kindOf),
+    removedByKind: tally(d.removed, kindWas),
+  };
 
   const match = fingerprint.hash === manifest.fingerprint.hash;
   return {
     ok: baselineIntact && match,
+    okAfterMigration: baselineIntact && delta.removed === 0,
     baselineIntact,
     counts: { manifest: manifest.counts, working: counts },
     fingerprint: {
