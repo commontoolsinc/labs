@@ -1,4 +1,3 @@
-import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
 import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
@@ -383,38 +382,6 @@ function sendValueToBindingInner<T>(
 }
 
 /**
- * Whether returning `binding` unchanged is indistinguishable from returning the
- * `Object.fromEntries(Object.entries(binding))` rebuild that
- * {@link unwrapOneLevelAndBindToDoc}'s walk would otherwise produce.
- *
- * That rebuild is NOT an identity operation on every record — it silently
- * drops what `Object.entries()` cannot see and flattens what
- * `Object.fromEntries()` cannot reproduce:
- *
- * - **symbol keys** (`Object.entries()` enumerates string keys only), which
- *   matter here because result values carry symbol-keyed metadata such as
- *   `NAME`;
- * - **non-enumerable own string properties**, likewise invisible to
- *   `Object.entries()`;
- * - **the prototype** — `isRecord()` admits any non-null object, so a class
- *   instance rebuilds into a plain object.
- *
- * Sharing a record with any of those would therefore *preserve* something the
- * rebuild removes, which is a behavior change rather than an optimization. So
- * this reports `true` only for a plain object whose every own property is an
- * enumerable string one.
- *
- * The prototype test is spelled out rather than delegated to `isPlainObject()`,
- * which also admits a null-prototype object — a shape `Object.fromEntries()`
- * never produces, and so one this walk must not hand back unrebuilt.
- */
-function isReproducibleRecord(binding: object): boolean {
-  return Object.getPrototypeOf(binding) === Object.prototype &&
-    Object.getOwnPropertySymbols(binding).length === 0 &&
-    Object.getOwnPropertyNames(binding).length === Object.keys(binding).length;
-}
-
-/**
  * Unwraps one level of aliases, and
  * - binds top-level aliases to passed doc
  *
@@ -448,6 +415,17 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
 ): T {
   const resultCellLink = resultCell.getAsNormalizedFullLink();
 
+  /**
+   * Rebinds one value, returning it unchanged when nothing under it rebound.
+   *
+   * The container branches hand back the original without checking whether a
+   * rebuild would have reproduced it exactly, because it always would:
+   * `binding` is a `FabricExecValue`, whose containers are an index-only array
+   * and a plain string-keyed object. The shapes a rebuild silently alters — a
+   * foreign prototype, a symbol key, a non-enumerable property, an array's
+   * named property — are all outside that declared domain. Validating fabric
+   * membership belongs in `isFabricValue()`, once, not as a re-check here.
+   */
   function convert(
     binding: FabricExecValue,
     targetSchema: JSONSchema | undefined,
@@ -557,18 +535,8 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
         }
         converted[i] = next;
       }
-      if (converted !== undefined) return converted;
-      // Nothing rebound. `isArrayWithOnlyIndexProperties()` is the array
-      // counterpart of `isReproducibleRecord()` below: it rejects every own
-      // property that is not an index — named or symbol-keyed, enumerable or
-      // not — which is exactly what the copy would have dropped.
-      //
-      // Deliberately no prototype test, unlike the record case: a copy
-      // allocates via `ArraySpeciesCreate` and so preserves an `Array`
-      // subclass, where `Object.fromEntries()` flattens one to a plain object.
-      return isArrayWithOnlyIndexProperties(binding)
-        ? binding
-        : binding.slice();
+      // Nothing rebound, so the original is the answer.
+      return converted ?? binding;
     } else if (isRecord(binding)) {
       let changed = false;
       const entries = Object.entries(binding).map(([key, value]) => {
@@ -576,7 +544,7 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
         if (next !== value) changed = true;
         return [key, next] as const;
       });
-      if (!changed && isReproducibleRecord(binding)) {
+      if (!changed) {
         // Nothing under here rebound, and rebuilding would have produced an
         // equal object, so hand back the original. `noteDerivedCopy()` is
         // skipped deliberately: it no-ops when copy and original are the same
