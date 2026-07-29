@@ -51,7 +51,7 @@ was last checked against the code.
 | [`conflictAdmissionMode`](#conflictadmissionmode) | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()` | `off` | William Kelly (#4237) | keep as a tuning dial or remove after re-measurement | implemented, off by default, measured net-negative or neutral |
 | [`syncSchemaTableV2`](#syncschematablev2) | `setSyncSchemaTableConfig()` (negotiated per connection) | on | Ben Follington (#4292) | retire the negotiation once every peer speaks v2 | implemented, on by default |
 | [`serverPrimaryExecutionClaimRank`](#serverprimaryexecutionclaimrank) | `setServerPrimaryExecutionClaimRankConfig()` (host-internal, not negotiated) | `space` (space rank only) | Bernhard Seefeld (server-side execution C1.1b; `session` stage C2.1; `cross-space-read` stage C3.6) | fold into `serverPrimaryExecution` once every context rank graduates | implemented through the `cross-space-read` stage (C3.6), space-only by default |
-| [`serverPrimaryExecutionContextLatticeClaimsV1`](#serverprimaryexecutioncontextlatticeclaimsv1) | `setServerPrimaryExecutionContextLatticeClaimsConfig()` (then negotiated per connection, absent-false) | off | Bernhard Seefeld (server-side execution C1.7) | fold into `serverPrimaryExecution` once the lattice ranks graduate, then retire the negotiation | implemented (user + session delivery), off by default |
+| [`serverPrimaryExecutionContextLatticeClaimsV1`](#serverprimaryexecutioncontextlatticeclaimsv1) | `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS` env (both peers), or `setServerPrimaryExecutionContextLatticeClaimsConfig()`; then negotiated per connection, absent-false | off | Bernhard Seefeld (server-side execution C1.7) | fold into `serverPrimaryExecution` once the lattice ranks graduate, then retire the negotiation | implemented (user + session delivery), off by default |
 | [`serverPrimaryExecutionCrossSpaceClaimsV1`](#serverprimaryexecutioncrossspaceclaimsv1) | `setServerPrimaryExecutionCrossSpaceClaimsConfig()` (then negotiated per connection, absent-false) | off | Bernhard Seefeld (server-side execution C3.6b) | fold into `serverPrimaryExecution` once cross-space reads graduate, then retire the negotiation | implemented (delivery gate + amendment-11 attach fence), off by default |
 | [`cfcRenderCeiling`](#cfcrenderceiling) | `commonfabric.cfcRenderCeiling()` in the browser (localStorage) | off | Bernhard Seefeld (#4550) | graduate once exchange resolution lands | implemented, off by default, dogfood only |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning) | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache` | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts | Ian Hickson | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked | implemented, on by default for FUSE-T, soak-validated |
@@ -79,17 +79,25 @@ The mapping from environment variable to flag is defined once, canonically, as
 and read by `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and
 the background piece service all go through that one mapping, so their wirings
 cannot drift; the shell reads the same variables from its build-time defines.
-Seven flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
+Eight flags are env-reachable (`modernCellRep`, `persistentSchedulerState`,
 `serverPrimaryExecution`, `serverPrimaryExecutionDocSetWatch`,
-`eagerSourceAnnotation`, `systemPatternAutoUpdate`,
-`systemPatternAutoUpdateHome`); `commitPreconditions` and the three rank/
+`serverPrimaryExecutionContextLatticeClaims`, `eagerSourceAnnotation`,
+`systemPatternAutoUpdate`, `systemPatternAutoUpdateHome`);
+`commitPreconditions` and the three rank/
 cross-space candidate dials are deliberately mapped to `null` there, which
-records "not env-reachable" as a decision rather than an omission.
+records "not env-reachable" as a decision rather than an omission. Note the
+distinction the two server-primary subcapability flags draw: a NEGOTIATION
+dial (what this peer advertises in its `hello`) is env-reachable, because a
+peer that cannot advertise makes the whole feature unreachable; a RANK dial
+(which context ranks a host issues, which candidates an executor produces)
+stays programmatic-only.
 
-The two server-primary env NAMES are owned by
+The three server-primary env NAMES are owned by
 [`packages/memory/v2.ts`](../../packages/memory/v2.ts)
 (`SERVER_PRIMARY_EXECUTION_ENV`,
-`SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH_ENV`) and imported into the canonical
+`SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH_ENV`,
+`SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS_ENV`) and imported into the
+canonical
 mapping, because memory servers apply the same variables THEMSELVES at
 construction (`applyServerPrimaryExecutionEnvConfig`, called by toolshed's
 storage route and the standalone server): a server's advertised capabilities
@@ -1109,13 +1117,32 @@ the per-epic implementation notes).
 
 ### `serverPrimaryExecutionContextLatticeClaimsV1`
 
-- **Toggle via.** `setServerPrimaryExecutionContextLatticeClaimsConfig()` in
-  [`packages/memory/v2.ts`](../../packages/memory/v2.ts) — programmatic-only,
-  like the `serverPrimaryExecutionClaimRank` dial it partners with; there is
-  no environment variable. Unlike that host-internal dial, the resulting
-  capability IS negotiated per connection: both peers must advertise the
-  absent-false wire flag, and the connection getter chain layers it above
-  `serverPrimaryExecutionClaimRoutingV1`.
+- **Toggle via.** `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS`
+  (`"true"`/`"false"`; unset = default), or
+  `setServerPrimaryExecutionContextLatticeClaimsConfig()` in
+  [`packages/memory/v2.ts`](../../packages/memory/v2.ts). The capability is
+  negotiated per connection: both peers must advertise the absent-false wire
+  flag, and the connection getter chain layers it above
+  `serverPrimaryExecutionClaimRoutingV1` — so the env var is read on BOTH
+  halves of the handshake, from the one canonical spelling
+  (`SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS_ENV`):
+  - **server:** `applyServerPrimaryExecutionEnvConfig` at construction
+    (toolshed's storage route, the standalone server), which decides what
+    `hello.ok` advertises;
+  - **client:** the `serverPrimaryExecutionContextLatticeClaims`
+    `ExperimentalOptions` flag → `experimentalOptionsFromEnv` (Deno hosts) or
+    the shell's build-time define → the `Runtime` constructor, which installs
+    the realm's ambient dial so this client's own `hello` offers it.
+
+  Unlike the host-internal `serverPrimaryExecutionClaimRank` dial it partners
+  with (still programmatic-only, as are the runner's rank CANDIDATE dials),
+  this one is env-wired because the amendment-11 cohort gate below requires
+  EVERY session of a principal to have negotiated: a browser client with no
+  path to the dial makes user lanes structurally un-openable, and every
+  server-side rank dial beneath them inert. That was the CA4 audit's binding
+  blocker (client-passivity §5g item 5) and is gated end-to-end by
+  `packages/patterns/integration/server-execution-context-lattice-env-bridge-gate.test.ts`,
+  the C1.7 sibling of the F5 env-bridge gate.
 - **Added by.** Bernhard Seefeld, in server-side execution C1.7
   (context-scoped delivery, 2026-07-16).
 - **Purpose.** The context-lattice claim-delivery subcapability

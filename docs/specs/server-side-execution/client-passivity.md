@@ -1581,12 +1581,23 @@ smallest in-transaction write surface is exactly the run that egresses. A
 W2.15a descriptor would classify those runs `claim-ready` and sail them
 through the dynamic write firewall, re-opening CP6 from the other side.
 
-**→ New finding, independent of the descriptor question:** that egress is
-neither brokered nor deniable. `wish` constructs `new
-HttpProgramResolver(url)` with no fetch transport, so the resolver falls
-back to `globalThis.fetch` and the executor Worker's `fetch:
-denyExternalBuiltinFetch` option never sees the call. The executor's
-egress denial has a bypass.
+**→ Secondary finding, RULED by the owner 2026-07-28.** That egress is
+neither brokered nor deniable: `wish` constructs
+`new HttpProgramResolver(url)` with no fetch transport
+(`wish.ts:1235`), the resolver's constructor defaults to
+`globalThis.fetch` (`js-compiler/program.ts:86`), and the executor
+Worker's `fetch: denyExternalBuiltinFetch` Runtime option
+(`executor-worker.ts:1542`) therefore never sees the call.
+
+The destination is not arbitrary — `patternUrl()` is
+`apiUrl + "api/patterns/system/" + options.name` (`wish.ts:1226`) — so
+this is not an exfiltration path.
+
+**Owner ruling:** system-pattern loading is a special case (like default
+patterns) and deliberately does NOT need quota. Server-side these
+patterns are all local on disk, so the eventual fix is to load them from
+disk rather than to broker the HTTP call. Recorded as a known deviation
+from the egress-denial invariant, not as a defect to fix in this arc.
 
 ### Wave B measurement: wave A bought **zero** measurable movement here
 
@@ -1667,16 +1678,52 @@ Two consequences that reorder the plan:
    false positive for a sanctioned class. That needs a handler-commit
    discriminator, and it narrows the firewall, never the pair.
 
-**Tension worth the owner's attention.** The arc's goal is stated as "the
-client never commits any non-handler/non-event-driven changes", but CP1
-already carves out the opposite for the dynamic fail-open class — revoked
-claims, unserved candidates, firewall discards, de-claimed actions — where
-the client's rerun-commit *is* the canonical value, mechanized at
-`storage/v2.ts:6276`. P3 does not make the goal statement literally true;
-it shrinks the exception. Worth deciding whether the arc's target is
-"zero client reactive commits" (which would require eliminating fail-open)
-or "no client reactive commits on the served path" (which is what CP1
-describes and what is actually being built).
+### The client never received authority — and that reframes the goal
+
+Investigated 2026-07-28 after the owner asked what actually triggers the
+CP1 rerun. Two situations were being conflated; they have opposite
+implications and only one of them is CP1.
+
+**The client is the executor by construction.** It was the only executor
+before this arc; server-primary execution is layered on incrementally, so
+the default stayed client-side and a server claim is the mechanism that
+*displaces* it per action. Nothing grants the client authority at the
+start — the docblock on `recordExecutionCandidateClaimReady`
+(`packages/memory/v2/server.ts:2683`) is explicit that a claim-ready
+candidate "never transfers or implies authority." Absent a claim, no
+transfer occurred.
+
+**Situation 1 — claimed, then dropped (this is CP1).** Six trigger sites,
+all in `packages/runner/src/storage/v2.ts`, each passing
+`dirtyProducer: true`, which re-queues the *producing computation*:
+`captured-claim-no-longer-live` (:4212, capture/commit race),
+`source-basis-rejected` (:6102, cascade from another rejected commit),
+`claim-snapshot-replaced` (:6157, reconnect/resync),
+`claim-generation-replaced` (:6199, claim churn), `claim-revoked`
+(:6228), `claim-unserved` (:6280). **Measured in the flagship fixture:
+`settlementsUnserved` = 0 and `claimsRevoked` = 2 in every arm** — so the
+rerun path fires via revocation, and rarely.
+
+**Situation 2 — never claimed.** The ×12
+`dynamic-write-outside-static-surface` (and the ×33
+`non-space-read-scope` in the space arm) are *candidate* diagnostics:
+they never became claims, so no settlement exists and nothing was ever
+dropped. `candidateUnserved*` counters are pre-claim; `settlements*`
+counters exist only for claimed actions.
+
+**For the arc's goal, situation 2 is the worse one.** Situation 1 is a
+transient error path that P3 shrinks. Situation 2 is a set of actions
+that never enter the server-primary regime at all — not an exception to
+passivity but outside it. P3 cannot fix them by suppressing the client,
+because nothing else would run them; suppression would simply break the
+app.
+
+**Consequence for the goal statement.** The target should be "zero client
+reactive commits on the served path," keeping fail-open — but the gating
+metric is the **never-claimed set**, not the fail-open set. That makes
+serving coverage (P2) a hard prerequisite for P3 rather than a parallel
+track, and it is a more demanding bar than the earlier framing implied.
+Wave B measured that wave A moved the never-claimed set not at all.
 
 ## 7. Owner decisions — RESOLVED 2026-07-26 (D1-D7); amended 2026-07-28 (D8-D10)
 
