@@ -7,10 +7,13 @@ readable by the software you choose and by nothing else, with no company
 in the middle that has to be trusted and no account anyone can suspend.
 
 That is not how any of it works, and not because anyone conspired. The
-trust model everything runs on says: hand your data to the software.
-Silos are what that rule produces, every time. Inverting it means new
-software all the way down, which nobody could afford until language
-models made writing software approximately free.
+trust model everything runs on says: hand your data to the software, and
+that rule produces the same thing every time. Forty years of software's
+potential is still locked in silos, guarded by goblins.
+
+Inverting the rule means new software all the way down, which nobody
+could afford until language models made writing software approximately
+free.
 
 So we built a runtime on the opposite rule. The software is untrusted,
 and the policies ride with the data.
