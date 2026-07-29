@@ -31,6 +31,9 @@ a record: archive it to `docs/history/plans/` following the procedure in
   [pattern verb contract](pattern-verb-contract.md).
 - [CFC runner implementation](runner_cfc_implementation.md) defines the
   commit-boundary enforcement workstreams and rollout.
+- [Topics migration rehearsal](topics-migration-rehearsal.md) is the concrete,
+  unexecuted script for `setsrc`-ing the Estuary Topics board against a clone
+  and then live.
 - [`cf space clone` rehearsal](space-clone-rehearsal.md) records the design for
   rehearsal-grade copies of populated spaces. The tooling has shipped (`cf
   space`, `cf inspect churn`); the operating procedure lives in
