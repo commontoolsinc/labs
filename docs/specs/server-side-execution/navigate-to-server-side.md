@@ -8,7 +8,13 @@ serves), [`passivity-arc-orchestration.md`](passivity-arc-orchestration.md)
 [`implementation-plan.md`](implementation-plan.md). Archive to
 `docs/history/` per [`docs/README.md`](../../README.md) when built.
 
-**Status: DRAFTED, NOT RATIFIED** (2026-07-29). §7's owner gates are open.
+**Status: RATIFIED** (2026-07-29). §7's gates 1 and 2 are ruled by the
+owner; 3 and 4 are orchestrator sequencing. The design's core call —
+`navigateTo` splits at a seam, decision server-side and actuation
+client-side, with the server→client message as the seam — is confirmed.
+Build order: §7 gate 4's measurement first (against
+`group-chat-lobby.tsx`, **not** the flagship — see gate 4), then §6
+item 2's rank-containment invariant red-first, then the seam.
 
 **Scope note — RETRACTED 2026-07-29.** An earlier revision of this header
 folded `compileAndRun` into this design on the grounds that both builtins
@@ -681,18 +687,50 @@ Listed so someone can disagree with evidence rather than taste.
 
 ---
 
-## 7. Owner gates
+## 7. Owner gates — RULED 2026-07-29
 
-1. **Amend the interim goal** from "all clients" to "all sessions of
-   the issuing principal" (§4c). Free, strictly better, and it makes
-   the unacceptable outcome structurally impossible rather than merely
-   unintended.
-2. **Rule on §6.5** — is `navigateTo` a pattern effect that must move,
-   or a rendering effect that must not? Everything else depends on it.
-3. **Confirm iteration 2 is a P5 line item, not a navigateTo one**
-   (§3a). If P5 is far out and targeting is wanted sooner, §3b is the
-   fallback and it is scaffolding D11 says we will delete.
-4. **Sequencing:** run gate §5.7 before committing to any of this.
-   The arc has already paid once for building against an instrument
-   that could not see the thing being built (wave B,
-   `passivity-arc-orchestration.md` §6, 2026-07-28).
+**Gate 1 — interim goal: RULED YES.** The interim target is "all
+sessions of the **issuing principal**", not "all clients". Free,
+strictly better, and it makes cross-principal navigation structurally
+impossible rather than merely unintended (§4c).
+
+**Gate 2 — pattern effect or rendering effect: RULED — the split is
+correct.** (This gate previously pointed at a nonexistent "§6.5"; the
+argument is in **§2c**, and the reference is corrected here.) The owner
+confirmed the reframing: `navigateTo` is not one or the other, it is
+**both, split at a seam**. The *decision* to navigate derives from
+pattern state and belongs on the server; the *actuation* is a shell view
+change and is by D11's own definition a client rendering effect. **The
+server→client message is that seam.** So the work is not "move
+navigateTo" — it is split it, and build the seam.
+
+**Gate 3 — iteration 2 is a P5 line item.** Confirmed and sequenced by
+the orchestrator. The blocker for per-client targeting is not addressing
+(already exact on the wire — `#sessionAcceptsClaim` matches principal
+AND session id, never a sibling) but **issuance attribution**: knowing
+which session's press created the node. §3b's fallback is not to be
+built — it is scaffolding D11 says we will delete.
+
+**Gate 4 — measure first, and the fixture is NOT the flagship.**
+Sequenced by the orchestrator, with a correction that matters:
+
+> The falsification measurement (§6 item 7) was written against "the
+> flagship fixture". **`cfc-group-chat-demo` does not use `navigateTo`
+> at all** — verified by grep before running. Instrumenting it would
+> have measured zero demand-slice appearances and invited the reading
+> "the navigateTo node is never demanded", when the truth is only that
+> the fixture never exercises it. **That is the wave-B mistake in a new
+> costume** (`passivity-arc-orchestration.md` §6, 2026-07-28: check the
+> instrument can see the thing before promising a buy), caught this time
+> before the run rather than after.
+
+The correct measurement target is **`packages/patterns/group-chat-lobby.tsx`**,
+which does `return navigateTo(roomInstance)` from inside a handler at
+`:154` — the exact shape D11 describes, and in the flagship's own
+family. Other candidates if a second is wanted: `shopping-list.tsx`,
+`calendar/calendar.tsx`, `compiler.tsx`, `record-backup.tsx`.
+
+**Still owner-facing:** nothing. Gates 1 and 2 are ruled; 3 and 4 are
+orchestrator sequencing. Build order is gate 4's measurement, then §6
+item 2 (the rank-containment invariant, red first — "if it is not red
+first, nothing else in this design is safe"), then the seam.
