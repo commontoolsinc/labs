@@ -4,8 +4,7 @@ _Replacing the wall-clock deadline on LLM tool calls with a quiescence barrier
 scoped to a single pattern run, so a tool call ends because the work finished or
 because it was cancelled — never because a timer fired._
 
-**Status:** phases 1, 2, 3 and 5 landed; phase 4 outstanding · **Updated:**
-2026-07-29
+**Status:** all phases landed · **Updated:** 2026-07-29
 
 ---
 
@@ -226,7 +225,7 @@ someone cancels." The second is truthful, and phase 2 is what makes "someone
 cancels" a real option. It is also more visible, which is a product consequence
 worth stating rather than discovering.
 
-## Phase 4 — narrow the message-drop heuristic, which cannot be removed
+## Phase 4 — narrow the message-drop heuristic, which cannot be removed (landed)
 
 `pending` and `internal` are durable cells and a dialog runs in more than one
 replica. `safelyPerformUpdate` refreshes `internal.lastActivity` on every durable
@@ -240,15 +239,110 @@ An early fire lets a second request start alongside a live one; the `requestId`
 guard then rejects the older turn's writes, so the cost is a wasted model call
 rather than corrupted state.
 
-Narrow it rather than remove it. When *this* replica holds the turn no detection
-is needed — it knows. After phase 1 the turn is a single promise spanning the
-whole conversation, so a flag set when it starts and cleared when it settles
-answers exactly, and the heartbeat is consulted only for a turn belonging to
-another replica.
+The bound stays, and the set of turns it is asked about got smaller. When *this*
+replica holds the turn no detection is needed — it knows. Phase 1 made the turn
+a single promise spanning the whole conversation, and `llmDialog` now keeps the
+request id of the turn it is running in a closure variable,
+`localTurnRequestId`. It is set alongside the `trackAsyncWork` registration and
+cleared in a `finally` on the same promise, so its lifetime is exactly the
+turn's, and `startRequest` is an `async function`, so it cannot throw before the
+`finally` is attached. Setting the variable in the `addMessage` handler instead
+would leak it whenever the post-commit callback returns early and creates no
+promise for the `finally` to hang on — not in the supersede case that check is
+named for, where the next handler has already overwritten the variable with its
+own id, but when the reactive action has set `requestId` to `undefined` because
+`pending` went false in between. A superseded turn can also settle after a newer
+one has claimed the variable, so the clear only fires for the turn that still
+holds it.
 
-That also fixes a live bug: a turn running longer than five minutes without a
-durable write stops refreshing the heartbeat, so today the replica running it
-accepts a new message and starts a second request **against itself**.
+`addMessage` reads the durable `requestId` alongside `pending`. A pending turn
+whose id is the one this replica is running is dropped outright; only a turn with
+some other id reaches the heartbeat read. Comparing against the durable id rather
+than the closure's own `requestId` matters: the reactive action clears
+`requestId` as soon as `pending` goes false, while the local turn is still
+winding down, and the durable id changes exactly when a different turn becomes
+the canonical one.
+
+That fixes the live bug the heuristic had: a turn running longer than five
+minutes without a durable write stops refreshing the heartbeat, so the replica
+running it used to accept a new message and start a second request **against
+itself**. The durable writes bracket a round of tool calls rather than falling
+between them, so the gaps that can reach five minutes are a single model call
+that runs that long, and a round of tool calls, which `executeToolCalls` runs
+one after another before writing their results. With phase 3 landed nothing
+bounds a tool call, so one of those on its own is enough.
+
+`packages/runner/test/llm-dialog-message-drop.test.ts` covers four cases. The
+second is the fix: a turn held open at `setMockResponseGate` while `clock.tick`
+moves logical time past the bound, after which a second message must reach
+neither the conversation nor the model. It counts requests at the mock gate, and
+against the previous code that count is two — the replica racing itself, which
+is the bug stated as an observation. The first is the everyday case the block
+existed for before any of this, a local turn young enough that the heartbeat
+would have caught it too; it passes either way today and is what a later
+refactor of the block would break silently.
+
+The last two hold the heartbeat where it still belongs, by putting `pending`
+back to true with no local turn running: within the bound the message is
+dropped, past it the message is taken. They are not a symmetric pair. The
+within-the-bound case is what proves the `pending` write reaches the dialog's own
+durable cell, since a dialog reading `pending` as false would have taken the
+message; the past-the-bound case rests on that and also guards the `finally`,
+failing if the clear is removed.
+
+**What the local branch gives up: nothing bounds a turn on it.** The old bound
+fired on a local turn whether that turn was healthy and long or genuinely stuck,
+and firing was the automatic repair for the stuck case — it aborted the wedged
+turn and started a fresh one. `startRequest` has waits that can hang with no
+abort coverage: `inputs.pull()` and the pinned-cell pulls at its head, a queue
+held by an earlier item, and the model call's own `fetch` and stream read, which
+carry no read deadline. A turn stuck in one of those now drops messages for as
+long as the tab lives.
+
+Taken deliberately, on two grounds. The repair was a guess, and it fired wrongly
+on exactly the case this phase is about, so keeping it means keeping the bug. And
+the determinate replacement is already present and already works: `pending`
+staying true is what makes `cf-prompt-input` show a stop button in place of send,
+`cancelGeneration` sets `pending` false, and the abort that follows reaches a
+running tool call rather than only the model call — `executeToolCall` races the
+signal and stops the child run. In the shipped chat UI a user
+cannot send into a pending dialog at all — the component blocks submit while
+`pending` holds — so the drop guard is a backstop for programmatic senders and
+for UIs that do not gate on `pending`, not the thing standing between a user and
+their message.
+
+The place a hung network call should be detected is the LLM client, where the
+information is, rather than a message-drop heuristic several layers above it.
+`packages/llm/src/client.ts` passes an abort signal to `fetch` and then reads the
+response stream in a loop with nothing watching for a peer that accepts the
+connection and then stops sending. That is the same shape as the deadlines in
+`fetch-utils.ts` noted below, and it belongs with them.
+
+**Refreshing the heartbeat on a schedule was considered and rejected.** It would
+close the remaining false positive, where a peer running a long turn looks gone
+to everyone else, and would let the bound come down. It needs a repeating timer,
+and it would put durable writes on a fixed interval from every replica running a
+turn. Under the runner's fake clock the cost is concrete rather than stylistic:
+a `setInterval` armed from `src/` is classified as a runtime timer, so the
+auto-advance pump would re-arm and fire it for as long as any dialog turn is
+open, moving logical time in tests that model no elapsed time at all. That is
+what carries the decision — a periodic heartbeat is not a timeout, a retry loop,
+or a sleep, so the rule in `AGENTS.md` does not reach it by name. The remaining
+false positive costs a wasted model call and no corrupted state, which is a
+smaller price.
+
+An event-driven refresh is available and narrower: `startRequest` passes
+`() => {}` as the streaming callback, under a standing `TODO(bf)`, and that
+callback fires on every text delta. Refreshing `lastActivity` from it would keep
+a long *model call* looking alive to peers with no timer at all. It does nothing
+for a long round of tool calls, which produce no deltas, so it narrows the
+remaining false positive rather than closing it, and it is worth taking on its
+own terms rather than as part of this.
+
+The surviving `Date.now()` read carries a comment naming that same fake-clock
+hazard: auto-advance can carry logical time past five minutes in a test that
+never meant to model elapsed time, and the branch it then takes is the one that
+accepts a message into a dialog whose turn is still running.
 
 ## Phase 5 — retire the real-clock exemptions (landed)
 
