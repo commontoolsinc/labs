@@ -36,31 +36,21 @@ import { homeSchema } from "@commonfabric/home-schemas";
 const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
   Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
 
-// System space-root patterns, served as raw TSX by the toolshed patterns route.
-export const HOME_PATTERN_URL = "/api/patterns/system/home.tsx";
-export const DEFAULT_APP_PATTERN_URL = "/api/patterns/system/default-app.tsx";
+// System space-root pattern URLs and their derivation live in
+// ../system-pattern-url.ts (shared with PieceManager's default-root
+// heal-on-load-failure retry); re-exported here for existing importers.
+import {
+  DEFAULT_APP_PATTERN_URL,
+  deriveSystemPatternUrl,
+  HOME_PATTERN_URL,
+} from "../system-pattern-url.ts";
+export { DEFAULT_APP_PATTERN_URL, deriveSystemPatternUrl, HOME_PATTERN_URL };
 
 // Default roots have a stronger update policy than ordinary pieces: an
 // existing root is reconciled before start, while a new root is compiled from
 // the current source immediately before creation. Keep the runner's watcher,
 // but do not schedule its duplicate fire-and-forget source check.
 const DEFAULT_ROOT_RUN_OPTIONS = { schedulePatternUpdate: false } as const;
-
-/**
- * The official system space-root pattern URL for a space type — the home DID
- * gets home.tsx, every other space gets the default app. This derivation only
- * selects the identity to check; it never proves that a sourceless root tracks
- * that URL. Exact equality with the official content identity supplies
- * that proof below.
- */
-export function deriveSystemPatternUrl(
-  space: MemorySpace,
-  runtime: Runtime,
-): string {
-  return space === runtime.userIdentityDID
-    ? HOME_PATTERN_URL
-    : DEFAULT_APP_PATTERN_URL;
-}
 
 // Same logger as manager.ts's timePiecePhase: timing stats record even while
 // the logger is disabled, so controller phases show up in the load summaries
