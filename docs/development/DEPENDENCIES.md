@@ -148,19 +148,19 @@ against it:
 - `tasks/check.sh` (run by `deno task check`, the pre-commit hook, and CI)
   reads the pin for its version warning, and accepts the surrounding range set
   in its `DENO_VERSION_MIN`/`DENO_VERSION_MAX` variables.
-- `Dockerfile.toolshed` repeats the version in its `FROM` lines, which cannot
-  read another file.
+- `Dockerfile.dashboard` and `Dockerfile.toolshed` repeat the version in their
+  `FROM` lines, which cannot read another file.
 
-To bump the toolchain: update the version in `mise.toml` and both `FROM` lines
-in `Dockerfile.toolshed`, and move the `tasks/check.sh` range if the new
-version falls outside it.
+To bump the toolchain: update the version in `mise.toml` and every
+`denoland/deno` `FROM` line in the root deployment Dockerfiles, and move the
+`tasks/check.sh` range if the new version falls outside it.
 
 `deno task check-deno-pins` (also a CI step) catches a bump that misses one of
-those. It checks that every `denoland/deno` tag in `Dockerfile.toolshed` equals
-the pin, that the `tasks/check.sh` range contains the pin, that `check.sh` and
-the `deno-setup` action both still read `mise.toml` rather than a hardcoded
-version, and that the action holds no version literal that disagrees with the
-pin.
+those. It checks that every `denoland/deno` tag in the root deployment
+Dockerfiles equals the pin, that the `tasks/check.sh` range contains the pin,
+that `check.sh` and the `deno-setup` action both still read `mise.toml` rather
+than a hardcoded version, and that the action holds no version literal that
+disagrees with the pin.
 
 ### TypeScript
 
@@ -432,8 +432,8 @@ whichever version resolves and whichever compiler checks them.
 Two things make this class of breakage easy to miss. `deno task check` does not
 cover every package: `cf-harness` is type checked only by its own test task, so
 its type errors surface in a test shard rather than the Check job. And CI pins
-Deno 2.8.1 while `tasks/check.sh` accepts any 2.8.x, so a local check and CI can
-disagree about what type checks.
+Deno 2.9.4 while `tasks/check.sh` accepts any 2.8.x or 2.9.x, so a local check
+and CI can disagree about what type checks.
 
 ### Astral
 

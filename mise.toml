@@ -1,5 +1,5 @@
 [tools]
-deno = "2.8.1"
+deno = "2.9.4"
 
 # Puts this checkout's `bin/cf` on PATH, so `cf` resolves to the worktree you
 # are standing in. Shell completion needs a `cf` on PATH to work at all — see
