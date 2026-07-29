@@ -647,6 +647,33 @@ const strictConstraintDefinitionIssue = (
 interface SchemaDefinitionContext {
   activeByRoot: WeakMap<object, WeakSet<object>>;
   activeRefsByRoot: WeakMap<object, Set<string>>;
+  /**
+   * Definition maps whose bodies this call already walks under a given root.
+   * `resolveCfcSchemaRef()` re-attaches the owning `$defs` object to every
+   * resolved view, so without this the same map is re-walked once per distinct
+   * path that reaches a `$ref` — the definition graph then expands as a tree
+   * instead of a DAG and node visits grow as (definition count)^(ref depth).
+   */
+  walkedDefinitionsByRoot: WeakMap<object, WeakSet<object>>;
+  /**
+   * Schemas that proved out completely under a given root, so a schema reached
+   * again through another path costs a lookup instead of a full re-walk. Only
+   * recorded for subtrees that no recursion guard cut short (see `cuts`).
+   */
+  provenByRoot: WeakMap<object, WeakSet<object>>;
+  /**
+   * How many times a recursion guard returned "no issue" for a subtree it did
+   * not actually walk. A cut result is only sound while the schema that caused
+   * it is still on the stack and will report its own issues, so a subtree whose
+   * count moved must not be memoized as proven.
+   */
+  cuts: number;
+  /**
+   * Every `provenByRoot` record, in the order it was made. A schema proven
+   * while a definition map was merely claimed may have skipped that map on the
+   * strength of the claim, so handing the map back takes those records with it.
+   */
+  provenLog: Array<{ rootKey: object; schema: object }>;
 }
 
 /** Validate the schema language understood by strict Fabric migration checks. */
@@ -667,7 +694,73 @@ export const validateSchemaDefinition = (
   return validateSchemaDefinitionInternal(schema, fullSchema, "$", {
     activeByRoot: new WeakMap(),
     activeRefsByRoot: new WeakMap(),
+    walkedDefinitionsByRoot: new WeakMap(),
+    provenByRoot: new WeakMap(),
+    cuts: 0,
+    provenLog: [],
   });
+};
+
+const DEFINITION_KEYS = ["$defs", "definitions"] as const;
+type DefinitionKey = (typeof DEFINITION_KEYS)[number];
+
+/**
+ * Claim the definition maps this schema walks, so a schema that merely carries
+ * the same map under the same root skips it.
+ *
+ * The claim is taken on entry, before any child is walked, so the map belongs
+ * to the outermost schema that carries it. Refs only accumulate on the way
+ * down, so an in-flight walk always holds a subset of the refs any schema
+ * nested inside it would hold, and therefore cuts no more than that nested
+ * walk would — skipping the nested one loses nothing.
+ *
+ * That reasoning covers the claim only while the walk is in flight. Once it
+ * finishes, `releaseCutDefinitionScope()` hands the map back unless the walk
+ * ran to completion, because a sibling reached later holds different refs.
+ */
+const claimDefinitionScopes = (
+  schema: Exclude<JSONSchema, boolean>,
+  rootKey: object,
+  context: SchemaDefinitionContext,
+): ReadonlySet<DefinitionKey> | undefined => {
+  let claimed: Set<DefinitionKey> | undefined;
+  for (const key of DEFINITION_KEYS) {
+    const definitions = schema[key];
+    if (!isRecord(definitions) || Array.isArray(definitions)) continue;
+    let walked = context.walkedDefinitionsByRoot.get(rootKey);
+    if (walked?.has(definitions)) continue;
+    if (!walked) {
+      walked = new WeakSet();
+      context.walkedDefinitionsByRoot.set(rootKey, walked);
+    }
+    walked.add(definitions);
+    (claimed ??= new Set()).add(key);
+  }
+  return claimed;
+};
+
+/**
+ * Give a definition map back when a recursion guard cut its walk short.
+ *
+ * A cut walk did not check everything below it, so it cannot stand in for a
+ * later walk that holds different refs open — through a sibling `$ref`, a
+ * definition this walk skipped is reachable in full. Only a walk that took no
+ * cut proves the whole map, and only that walk keeps the map for good.
+ */
+const releaseCutDefinitionScope = (
+  rootKey: object,
+  definitions: object,
+  context: SchemaDefinitionContext,
+  logMark: number,
+): void => {
+  context.walkedDefinitionsByRoot.get(rootKey)?.delete(definitions);
+  // Anything memoized while the claim stood may have skipped this map because
+  // of it. The claim is gone, so those proofs go with it.
+  for (let index = context.provenLog.length - 1; index >= logMark; index--) {
+    const record = context.provenLog[index];
+    context.provenByRoot.get(record.rootKey)?.delete(record.schema);
+  }
+  context.provenLog.length = logMark;
 };
 
 const validateSchemaDefinitionInternal = (
@@ -683,13 +776,21 @@ const validateSchemaDefinitionInternal = (
 
   const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
   const rootKey = isRecord(schemaRoot) ? schemaRoot : schema;
+  if (context.provenByRoot.get(rootKey)?.has(schema)) return undefined;
   let active = context.activeByRoot.get(rootKey);
-  if (active?.has(schema)) return undefined;
+  if (active?.has(schema)) {
+    context.cuts++;
+    return undefined;
+  }
   if (!active) {
     active = new WeakSet();
     context.activeByRoot.set(rootKey, active);
   }
   active.add(schema);
+  const cutsOnEntry = context.cuts;
+  const claimedDefinitions = claimDefinitionScopes(schema, rootKey, context);
+  const settledDefinitions = new Set<string>();
+  const provenLogMark = context.provenLog.length;
 
   try {
     if (Object.hasOwn(schema, "$ref")) {
@@ -697,7 +798,10 @@ const validateSchemaDefinitionInternal = (
         return `${path}: schema $ref must be a non-empty string`;
       }
       let activeRefs = context.activeRefsByRoot.get(rootKey);
-      if (activeRefs?.has(schema.$ref)) return undefined;
+      if (activeRefs?.has(schema.$ref)) {
+        context.cuts++;
+        return undefined;
+      }
       if (!activeRefs) {
         activeRefs = new Set();
         context.activeRefsByRoot.set(rootKey, activeRefs);
@@ -920,6 +1024,12 @@ const validateSchemaDefinitionInternal = (
     ) {
       const children = schema[key];
       if (children === undefined) continue;
+      // A definition map reached again under the same root has the same bodies
+      // and resolves them against the same root, so whichever schema claimed it
+      // on entry already covers it.
+      const isDefinitionScope = key === "$defs" || key === "definitions";
+      if (isDefinitionScope && !claimedDefinitions?.has(key)) continue;
+      const cutsBeforeScope = context.cuts;
       for (const [name, child] of Object.entries(children)) {
         const issue = validateSchemaDefinitionInternal(
           child,
@@ -929,11 +1039,35 @@ const validateSchemaDefinitionInternal = (
         );
         if (issue !== undefined) return issue;
       }
+      if (isDefinitionScope) {
+        settledDefinitions.add(key);
+        if (context.cuts !== cutsBeforeScope) {
+          releaseCutDefinitionScope(rootKey, children, context, provenLogMark);
+        }
+      }
     }
 
+    if (context.cuts === cutsOnEntry) {
+      let proven = context.provenByRoot.get(rootKey);
+      if (!proven) {
+        proven = new WeakSet();
+        context.provenByRoot.set(rootKey, proven);
+      }
+      if (!proven.has(schema)) {
+        proven.add(schema);
+        context.provenLog.push({ rootKey, schema });
+      }
+    }
     return undefined;
   } finally {
     active.delete(schema);
+    for (const key of claimedDefinitions ?? []) {
+      if (settledDefinitions.has(key)) continue;
+      const definitions = schema[key];
+      if (isRecord(definitions)) {
+        releaseCutDefinitionScope(rootKey, definitions, context, provenLogMark);
+      }
+    }
   }
 };
 
