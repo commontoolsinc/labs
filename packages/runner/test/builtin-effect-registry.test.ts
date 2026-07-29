@@ -88,11 +88,64 @@ Deno.test("P2.0: every egress-capable builtin is registered as an effect (kind m
         `the CP6 double-egress hole`,
     );
   }
-  // The refuted half of CP6 stays pinned the other way: llmDialog performs
-  // no direct egress and stays a computation until a deliberate decision
-  // flips it (flipping it silently would widen the effect surface without
-  // review).
-  assertEquals(kinds.get("llmDialog"), false, "llmDialog stays a computation");
+  // llmDialog is absent from the REGISTRATION options — and that is all this
+  // assertion can see. Do not read it as "llmDialog is a computation": its
+  // factory returns `isEffect: true`, so its EFFECTIVE kind is effect. The
+  // next test pins that, and the docblock above it explains why the
+  // distinction is load-bearing for W2.15. (This line previously carried a
+  // comment claiming llmDialog "stays a computation"; that claim was false
+  // and it propagated into the arc plan before being caught.)
+  assertEquals(
+    kinds.get("llmDialog"),
+    false,
+    "llmDialog carries no isEffect in its registration options (its factory " +
+      "supplies the effect kind instead — see the next test)",
+  );
+});
+
+/**
+ * Builtins whose EFFECTIVE scheduler kind does not come from `index.ts` at
+ * all: their factory returns a `RawBuiltinResult` carrying `isEffect: true`,
+ * and the runner resolves the kind as `module.isEffect ?? builtinIsEffect`
+ * (runner.ts, "isEffect can come from module options or from the builtin
+ * result"). So `addModuleByRef("<id>", raw(fn))` with no options still
+ * registers an EFFECT node, and `registeredKinds` above — which only reads
+ * the registration source — reports `false` for them.
+ *
+ * Pinned because the gap is load-bearing for the W2.15 descriptor work: a
+ * COMPUTATION descriptor can never serve these nodes.
+ * `serverBuiltinComputationScopeSummary` returns undefined unless
+ * `observation.actionKind === "computation"`, so adding either id to
+ * `SERVER_COMPUTATION_BUILTIN_IDS` would mint a descriptor that never
+ * assembles. If one of these ever stops returning `isEffect: true`, this
+ * test goes red and the descriptor question is genuinely re-opened.
+ */
+const FACTORY_DECLARED_EFFECT_SOURCES: Record<string, string> = {
+  // `return { action, isEffect: true };` at the end of `llmDialog`.
+  "llm-dialog.ts": "llmDialog",
+  // `return { action, isEffect: true, useDeclaredReadsAsDependencies: true };`
+  "navigate-to.ts": "navigateTo",
+};
+
+Deno.test("P2.0: builtins whose factory declares isEffect are effect nodes regardless of the registration source", async () => {
+  const registry = await Deno.readTextFile(join(BUILTINS_DIR, "index.ts"));
+  const kinds = registeredKinds(registry);
+  for (const [file, id] of Object.entries(FACTORY_DECLARED_EFFECT_SOURCES)) {
+    const source = await Deno.readTextFile(join(BUILTINS_DIR, file));
+    assert(
+      /return\s*\{[^}]*isEffect:\s*true/.test(source),
+      `${file} no longer returns isEffect: true from its builtin factory — ` +
+        `${id}'s effective scheduler kind changed, so its exclusion from ` +
+        `SERVER_COMPUTATION_BUILTIN_IDS must be re-decided`,
+    );
+    // The registration source says nothing; the factory is what decides.
+    assertEquals(
+      kinds.get(id),
+      false,
+      `${id} is registered without isEffect in index.ts — if that changed, ` +
+        `simplify this pin rather than carrying two sources of the kind`,
+    );
+  }
 });
 
 Deno.test("P2.0: no builtin source performs network egress without a classification", async () => {

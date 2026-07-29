@@ -1152,7 +1152,8 @@ export function runtimeWriteEmptyComputationScopeSummary(
  * returns `undefined` outside its class), so the order is a stable priority, not
  * a conflict resolution:
  *
- * 1. pure selector descriptor (W2.15a) — `cf:builtin` ifElse/when/unless;
+ * 1. single-output result-minter descriptor (W2.15a) — `cf:builtin`
+ *    ifElse/when/unless/inspectConfLabel;
  * 2. list-builtin materializer descriptor (W2.16) — `cf:builtin`
  *    map/filter/flatMap with an envelope write surface;
  * 3. runtime materializer summary (W2.16) — authored `cf:module` writers that
@@ -1258,11 +1259,12 @@ function claimedCommitAdmissionReads(
 
 /**
  * W2.15a: assemble a claim-ready `completeActionScopeSummary` from a trusted
- * per-builtin COMPUTATION descriptor for the pure structural selectors
- * (ifElse/when/unless), keyed on the exact `impl:cf:builtin/<id>:v1` fingerprint
+ * per-builtin COMPUTATION descriptor for the single-output result minters (the
+ * pure structural selectors plus `inspectConfLabel`), keyed on the exact
+ * `impl:cf:builtin/<id>:v1` fingerprint
  * (W2.11). Mirrors the effect-descriptor path but is fail-closed: the write
  * envelope is EXACTLY the descriptor's declared surface plus the single direct
- * output — observed runtime writes are never folded in — so a selector that
+ * output — observed runtime writes are never folded in — so a member that
  * ever writes outside its declared output de-claims at the firewall. Reads come
  * from the descriptor's registered inputs plus the observed log; C0 admits reads
  * dynamically, so they carry no envelope obligation.

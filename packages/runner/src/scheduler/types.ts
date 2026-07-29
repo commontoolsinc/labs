@@ -42,9 +42,10 @@ export interface TelemetryAnnotations {
   /** Last trusted durable surface adopted for that builtin action. */
   serverBuiltinPreviousScopeSummary?: CompleteActionScopeSummary;
   /**
-   * Trusted per-builtin descriptor for the pure structural selectors
-   * (ifElse/when/unless, W2.15a). Attached only when the canonical registry ref
-   * is a `SERVER_COMPUTATION_BUILTIN_IDS` member.
+   * Trusted per-builtin descriptor for the single-output result minters (the
+   * pure structural selectors plus `inspectConfLabel`, W2.15a). Attached only
+   * when the canonical registry ref is a `SERVER_COMPUTATION_BUILTIN_IDS`
+   * member.
    */
   serverBuiltinComputation?: ServerBuiltinComputationDescriptor;
   /**

@@ -31,20 +31,21 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
 import type { ActionTransactionRouteInput } from "../src/storage/v2.ts";
 
-// W2.15a — per-builtin COMPUTATION descriptors for the pure structural
-// selectors ifElse/when/unless. Mirrors the effect descriptor path: a trusted
-// runner-authored descriptor keyed on the exact `impl:cf:builtin/<id>:v1`
-// fingerprint (W2.11) is assembled into a claim-ready summary. The registry is
-// deliberately exact — map/filter/flatMap/wish have no descriptor and stay
-// incomplete-static-surface.
+// W2.15a — per-builtin COMPUTATION descriptors for the single-output result
+// minters: the pure structural selectors ifElse/when/unless plus
+// `inspectConfLabel` (R5 worklist). Mirrors the effect descriptor path: a
+// trusted runner-authored descriptor keyed on the exact
+// `impl:cf:builtin/<id>:v1` fingerprint (W2.11) is assembled into a claim-ready
+// summary. The registry is deliberately exact — map/filter/flatMap/wish have no
+// descriptor and stay incomplete-static-surface.
 //
-// The selector write surface is TWO documents (W2.15a re-open, FB3): the
-// direct root output spot (which stores a stable link) plus the minted
-// `{ <builtin>: cause }` result document every output-producing run writes
-// the selected branch's reference into. The descriptor folds the minted
-// document in as an exact write (`selectorBuiltinResultCause`), and the
-// fixtures below model that real runtime write set — not the pre-repair
-// single-output shape that never survived the dynamic firewall.
+// The write surface is TWO documents (W2.15a re-open, FB3): the direct root
+// output spot (which stores a stable link) plus the minted
+// `{ <builtin>: cause }` result document every output-producing run writes its
+// result into. The descriptor folds the minted document in as an exact write
+// (`selectorBuiltinResultCause`), and the fixtures below model that real
+// runtime write set — not the pre-repair single-output shape that never
+// survived the dynamic firewall.
 
 const SPACE = "did:key:z6Mk-builtin-computation" as const;
 const RUNTIME_FP = "runner:scheduler:v3";
@@ -146,21 +147,44 @@ function routeInput(
 }
 
 describe("per-builtin computation descriptors (W2.15a)", () => {
-  it("keeps the descriptor registry exact to the pure selectors", () => {
+  it("keeps the descriptor registry exact to the single-output result minters", () => {
     expect([...SERVER_COMPUTATION_BUILTIN_IDS]).toEqual([
       "ifElse",
       "when",
       "unless",
+      "inspectConfLabel",
     ]);
-    for (const id of ["ifElse", "when", "unless"]) {
+    for (const id of ["ifElse", "when", "unless", "inspectConfLabel"]) {
       expect(isServerComputationBuiltinId(id)).toBe(true);
     }
     for (const id of ["map", "filter", "flatMap", "wish", "generateText"]) {
       expect(isServerComputationBuiltinId(id)).toBe(false);
     }
+    // The four ids audited alongside `inspectConfLabel` for the R5 worklist
+    // and REJECTED — each fails the "reads its inputs, writes exactly its
+    // direct output(s)" shape this registry encodes, so the exactness pin
+    // names them rather than leaving their absence to inference:
+    //  - llmDialog / navigateTo: their builtin factories return
+    //    `{ isEffect: true }`, so the scheduler kind is `effect` and the
+    //    summary assembler (which requires `actionKind === "computation"`)
+    //    could never fire — see builtin-effect-registry.test.ts.
+    //  - compileAndRun: mints FOUR side documents
+    //    (pending/result/error/errors), then `runSynced`s a whole compiled
+    //    pattern under the result doc and writes from async
+    //    `editWithRetry` transactions outside its own run.
+    //  - sqliteDatabase: mints its handle through `makeResultCell`, which
+    //    writes the `["result"]`/`["pattern"]` META paths — outside a
+    //    value-root computation envelope (the lift that covers those is
+    //    the MATERIALIZER summary's, FB19/CA6) — and derives the db owner
+    //    from the ambient `trustSnapshotProvider()`, not from its inputs.
+    for (
+      const id of ["llmDialog", "compileAndRun", "sqliteDatabase", "navigateTo"]
+    ) {
+      expect(isServerComputationBuiltinId(id)).toBe(false);
+    }
   });
 
-  for (const id of ["ifElse", "when", "unless"] as const) {
+  for (const id of ["ifElse", "when", "unless", "inspectConfLabel"] as const) {
     it(`assembles a claim-ready summary for ${id} with the v1 fingerprint`, () => {
       const obs = observation(id);
       const summary = serverBuiltinComputationScopeSummary(obs, descriptor(id));
@@ -716,6 +740,185 @@ describe("per-builtin computation descriptors — end to end (W2.15a)", () => {
     expect(attempts.length).toBeGreaterThan(coldAttemptCount);
     // Zero dynamic-write verdicts across the whole run (the router saw every
     // attempt this test judged, plus any non-selector traffic).
+    expect(
+      diagnostics.filter((diagnostic) =>
+        diagnostic.diagnosticCode === "dynamic-write-outside-static-surface"
+      ),
+    ).toEqual([]);
+  });
+
+  // R5 worklist: `inspectConfLabel` joins the registry. Its surface is the
+  // selector shape verified literally against `inspect-conf-label.ts` — it
+  // mints ONE side document keyed `{ inspectConfLabel: cause }` (bare
+  // `runtime.getCell`, not `makeResultCell`, so no `["result"]`/`["pattern"]`
+  // meta writes), `sendResult`s a link to it, and `.set`s the outcome into it.
+  // Nothing else is written; the metadata consultation
+  // (`inspectStoredConfLabel`) is read-only.
+  //
+  // The load-bearing assertion is the FB3 cause agreement: the descriptor's
+  // minted-result write, re-derived by the RUNNER from `builtinCause`, must
+  // name the same document the BUILTIN actually minted. Comparing it against
+  // the link the output spot really holds catches a divergence that a
+  // descriptor-shape-only test would miss.
+  it("inspectConfLabel carries a computation descriptor whose minted write is the document it really mints, and its runs pass the dynamic firewall", async () => {
+    type CapturedAttempt = {
+      readonly input: ActionTransactionRouteInput;
+      readonly observation: SchedulerActionObservation;
+    };
+    const attempts: CapturedAttempt[] = [];
+    const diagnostics: ExecutorCandidateDiagnostic[] = [];
+    const executorRouter = createExecutorActionTransactionRouter({
+      servedSpace: integrationSpace,
+      branch: "",
+      claimForAction: () => undefined,
+      onCandidate: () => {},
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    });
+    storageManager = StorageManager.emulate({
+      as: integrationSigner,
+      actionTransactionRouter(input) {
+        const route = executorRouter(input);
+        const observation = input.commit.schedulerObservation;
+        if (
+          observation !== undefined &&
+          (observation as { transactionKind?: unknown }).transactionKind ===
+            "action-run"
+        ) {
+          attempts.push({
+            input: {
+              ...input,
+              commit: structuredClone(input.commit) as ClientCommit,
+            },
+            observation: structuredClone(
+              observation,
+            ) as SchedulerActionObservation,
+          });
+        }
+        return route;
+      },
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      experimental: {
+        persistentSchedulerState: true,
+        serverPrimaryExecution: true,
+      },
+    });
+
+    const capturedActions: Action[] = [];
+    const sched = runtime.scheduler as unknown as {
+      subscribe: (...args: unknown[]) => unknown;
+    };
+    const originalSubscribe = sched.subscribe.bind(sched);
+    sched.subscribe = (...args: unknown[]) => {
+      capturedActions.push(args[0] as Action);
+      return originalSubscribe(...args);
+    };
+
+    const compiled = await runtime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: [
+          "import { pattern, inspectConfLabel, Default, Writable } from 'commonfabric';",
+          "export default pattern<{ body: Writable<string | Default<'payload'>> }>(",
+          "  ({ body }) => {",
+          "    const label = inspectConfLabel(body, '', {});",
+          "    return { body, label };",
+          "  },",
+          ");",
+        ].join("\n"),
+      }],
+    });
+    const tx = runtime.edit();
+    const body = runtime.getCell<string>(
+      integrationSpace,
+      "inspect-conf-label-body",
+      undefined,
+      tx,
+    );
+    body.set("payload");
+    const resultCell = runtime.getCell<{ label: unknown }>(
+      integrationSpace,
+      "inspect-conf-label-e2e",
+      undefined,
+      tx,
+    );
+    const handle = runtime.run(tx, compiled, { body }, resultCell);
+    await tx.commit();
+    for (let k = 0; k < 4; k++) {
+      await handle.pull();
+      await runtime.idle();
+    }
+    await runtime.settled();
+
+    const node = capturedActions.find((action) =>
+      (action as { module?: { debugName?: string } }).module?.debugName ===
+        "inspectConfLabel"
+    );
+    expect(node).toBeDefined();
+    const attached = (node as { serverBuiltinComputation?: unknown })
+      .serverBuiltinComputation as
+        | ServerBuiltinComputationDescriptor
+        | undefined;
+    expect(attached?.version).toBe(1);
+    expect(attached?.id).toBe("inspectConfLabel");
+    // Not a materializer — the registries stay disjoint.
+    expect(
+      (node as { serverBuiltinMaterializer?: unknown })
+        .serverBuiltinMaterializer,
+    ).toBeUndefined();
+
+    expect(attached!.directOutputs.length).toBe(1);
+    const declaredOutputIds = new Set(
+      attached!.directOutputs.map((output) => output.id),
+    );
+    // The runner actually re-derived a MINT: the declared surface is wider
+    // than the output spot alone.
+    const declaredMintIds = attached!.writes
+      .map((write) => write.id)
+      .filter((id) => !declaredOutputIds.has(id));
+    expect(declaredMintIds.length).toBeGreaterThan(0);
+
+    const matches = attempts.filter(({ observation }) =>
+      observation.implementationFingerprint ===
+        `impl:${builtinImplementationHash("inspectConfLabel")}`
+    );
+    expect(matches.length).toBeGreaterThan(0);
+
+    // FB3 cause agreement against the REAL commits rather than link topology:
+    // every document an output-producing run actually wrote that is not the
+    // direct output spot is the minted result document, and it must be the one
+    // the runner re-derived from `builtinCause`. A cause divergence between
+    // `inspect-conf-label.ts` and `runner.ts` shows up here as an id the
+    // declared surface does not name.
+    const observedMintIds = new Set(
+      matches.flatMap(({ observation }) =>
+        observation.actualChangedWrites
+          .map((address) => address.id)
+          .filter((id) => !declaredOutputIds.has(id))
+      ),
+    );
+    expect(observedMintIds.size).toBeGreaterThan(0);
+    expect(
+      [...observedMintIds].filter((id) => !declaredMintIds.includes(id)),
+    ).toEqual([]);
+
+    // The real acceptance: the runs are claim-ready AND survive the dynamic
+    // firewall (the minted-document write is inside the envelope).
+    for (const attempt of matches) {
+      expect(
+        classifyStaticActionServability(attempt.observation, integrationSpace),
+      ).toEqual({ status: "claim-ready", actionKind: "computation" });
+      expect(
+        dynamicActionTransactionUnservableReason(
+          attempt.input,
+          attempt.observation,
+          { servedSpace: integrationSpace, branch: "" },
+        ),
+      ).toBeUndefined();
+    }
     expect(
       diagnostics.filter((diagnostic) =>
         diagnostic.diagnosticCode === "dynamic-write-outside-static-surface"

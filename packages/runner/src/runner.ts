@@ -5165,10 +5165,11 @@ export class Runner {
     const serverBuiltinRuntimeWrites = (builtinAction as Action & {
       serverBuiltinRuntimeWrites?: NormalizedFullLink[];
     }).serverBuiltinRuntimeWrites ?? [];
-    // W2.15a: the pure structural selectors carry a per-builtin COMPUTATION
-    // descriptor (single direct output, keyed on the same canonical
-    // `moduleRefName` as the identity stamp above). Disjoint from
-    // `serverBuiltinId` (the effect subset), so no action is ever both.
+    // W2.15a: the single-output result minters (the pure structural selectors
+    // plus `inspectConfLabel`) carry a per-builtin COMPUTATION descriptor
+    // (single direct output, keyed on the same canonical `moduleRefName` as the
+    // identity stamp above). Disjoint from `serverBuiltinId` (the effect
+    // subset), so no action is ever both.
     const computationBuiltinId = isServerComputationBuiltinId(moduleRefName)
       ? moduleRefName
       : undefined;

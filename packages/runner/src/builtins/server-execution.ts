@@ -71,19 +71,52 @@ export interface ServerBuiltinActionDescriptor {
 }
 
 /**
- * Pure structural selector builtins whose whole action surface is a single
- * direct root output over their registered inputs (W2.15a). Each reads its
- * condition/branch inputs and writes ONLY the one result cell — verified
+ * Builtins whose whole action surface is a single direct root output over their
+ * registered inputs (W2.15a): each reads its inputs and writes exactly the one
+ * minted result document plus the output spot that links to it. Verified
  * against `if-else.ts`, `when.ts`, `unless.ts` (each `setRawUntyped`s the single
- * result and nothing else). Keep this registry deliberately exact, exactly like
+ * result and nothing else) and `inspect-conf-label.ts` (mints
+ * `{ inspectConfLabel: cause }` with a bare `runtime.getCell`, `sendResult`s a
+ * link to it, `set`s the outcome into it; the metadata consultation
+ * `inspectStoredConfLabel` only READS the target's `["cfc"]` subtree).
+ *
+ * Keep this registry deliberately exact, exactly like
  * `SERVER_EXECUTABLE_BUILTIN_IDS`: map/filter/flatMap carry output-collection
  * envelopes and wish is a resolver, so they are a separately-designed follow-up
- * (W2.15b/W2.16) and must NOT be added here.
+ * (W2.15b/W2.16) and must NOT be added here. Membership is load-bearing beyond
+ * the descriptor: the runner re-derives each member's minted result document
+ * through `selectorBuiltinResultCause`, so an id added here whose builtin keys
+ * its mint on a different cause gets a write surface naming a document it never
+ * writes — and de-claims fail-closed on every run.
+ *
+ * The rest of the R5 worklist was audited against this shape and REJECTED:
+ *  - `llmDialog` and `navigateTo` return `{ isEffect: true }` from their
+ *    builtin factories, so the runner's `module.isEffect ?? builtinIsEffect`
+ *    makes them EFFECT nodes whatever `index.ts` says. A computation
+ *    descriptor cannot serve them —
+ *    `serverBuiltinComputationScopeSummary` requires
+ *    `actionKind === "computation"`, so the descriptor would never assemble.
+ *    (`navigateTo` also enqueues a post-commit `navigateTo` effect through
+ *    `runtime.navigateCallback`; `llmDialog` additionally mints THREE
+ *    documents — result / internal / pinnedCells — and its handlers write
+ *    back into its own `messages` input.)
+ *  - `compileAndRun` mints FOUR documents (`compile.pending|result|error|
+ *    errors`), then `runtime.runner.stop` / `runtime.runSynced` a whole
+ *    compiled pattern under the result doc and writes from async
+ *    `editWithRetry` transactions outside its own run: unbounded, and not even
+ *    envelope-shaped.
+ *  - `sqliteDatabase` mints its handle through `makeResultCell`, which writes
+ *    the `["result"]` and `["pattern"]` META paths — outside a value-root
+ *    computation envelope, since only the MATERIALIZER summary lifts to
+ *    document root (FB19/CA6) — and derives the db `owner` from the ambient
+ *    `runtime.trustSnapshotProvider()`, not from its inputs, so a server-side
+ *    first run would mint the handle owned by the executor's principal.
  */
 export const SERVER_COMPUTATION_BUILTIN_IDS = [
   "ifElse",
   "when",
   "unless",
+  "inspectConfLabel",
 ] as const;
 
 export type ServerComputationBuiltinId =

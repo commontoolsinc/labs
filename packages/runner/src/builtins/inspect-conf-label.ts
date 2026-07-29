@@ -8,7 +8,11 @@ import {
   type InspectConfLabelResult,
   inspectStoredConfLabel,
 } from "../cfc/label-introspection.ts";
-import { resolvedCellScope, scopedCell } from "./scope-policy.ts";
+import {
+  resolvedCellScope,
+  scopedCell,
+  selectorBuiltinResultCause,
+} from "./scope-policy.ts";
 
 // Inv-12 Stage 2 (spec §4.6.4.1; docs/specs/cfc-label-metadata-confidentiality
 // .md §3): `inspectConfLabel` — the ONLY pattern-facing surface for
@@ -72,9 +76,14 @@ export function inspectConfLabel(
       tx,
       inputsWithTx.key("target"),
     );
+    // Through the shared cause helper, not an inline `{ inspectConfLabel:
+    // cause }`: the servability layer re-derives this SAME document at
+    // registration to bound the computation descriptor's write surface
+    // (W2.15a/FB3), and the two sites must agree or every run that writes an
+    // outcome de-claims fail-closed at the dynamic write firewall.
     const baseResult = runtime.getCell<InspectConfLabelResult>(
       parentCell.space,
-      { inspectConfLabel: cause },
+      selectorBuiltinResultCause("inspectConfLabel", cause),
       undefined,
       tx,
     );

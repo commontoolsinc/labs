@@ -80,21 +80,34 @@ export function listBuiltinResultContainerCause(
   return { [builtinKey]: parentEntityId, outputSpot };
 }
 
-/** Canonical registry names of the result-minting pure selector builtins. */
-export type SelectorBuiltinKey = "ifElse" | "when" | "unless";
+/**
+ * Canonical registry names of the single-output result-minting builtins: the
+ * pure selectors, plus `inspectConfLabel` whose surface is the same shape (one
+ * minted side document, written from its inputs, and nothing else). Kept in
+ * lockstep with `SERVER_COMPUTATION_BUILTIN_IDS`: the runner re-derives the
+ * minted document for exactly the ids in that registry, so a registry member
+ * missing here is a type error rather than a silently wrong write surface.
+ */
+export type SelectorBuiltinKey =
+  | "ifElse"
+  | "when"
+  | "unless"
+  | "inspectConfLabel";
 
 /**
- * The `getCell` cause ifElse/when/unless key their minted result document on:
- * the builtin name paired with the per-node registration cause (the
- * `{ inputs, parents, outputSpot }` object the runner hands every raw builtin).
- * The minted result is a side document distinct from the node's direct output
- * spot — the spot only ever stores a link to it, while every output-producing
- * run `setRawUntyped`s the selected branch's reference INTO it. Extracted as
- * the single source of that identity so the servability layer can re-derive
- * the SAME minted document at registration for the selector descriptor's write
- * surface (W2.15a re-open, FB3) — the exact `listBuiltinResultContainerCause`
- * precedent. Both sites MUST agree on this cause or every output-producing
- * selector run de-claims fail-closed at the dynamic write firewall.
+ * The `getCell` cause ifElse/when/unless/inspectConfLabel key their minted
+ * result document on: the builtin name paired with the per-node registration
+ * cause (the `{ inputs, parents, outputSpot }` object the runner hands every raw
+ * builtin). The minted result is a side document distinct from the node's direct
+ * output spot — the spot only ever stores a link to it, while every
+ * output-producing run writes the result INTO it (the selectors
+ * `setRawUntyped` the selected branch's reference; `inspectConfLabel` `set`s
+ * the introspection outcome). Extracted as the single source of that identity
+ * so the servability layer can re-derive the SAME minted document at
+ * registration for the computation descriptor's write surface (W2.15a re-open,
+ * FB3) — the exact `listBuiltinResultContainerCause` precedent. Both sites MUST
+ * agree on this cause or every output-producing run de-claims fail-closed at the
+ * dynamic write firewall.
  */
 export function selectorBuiltinResultCause(
   builtinKey: SelectorBuiltinKey,
