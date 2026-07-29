@@ -353,7 +353,6 @@ export class CFFileInput extends BaseElement {
 
     if (!this.showPreview || currentFiles.length === 0) {
       return html`
-
       `;
     }
 

@@ -14,7 +14,7 @@
 #     --build-arg DASHBOARD_GIT_COMMIT=$(git rev-parse HEAD) \
 #     -t us-central1-docker.pkg.dev/commontools-core/containers/dev-dashboard:$(git rev-parse HEAD) .
 
-FROM --platform=linux/amd64 denoland/deno:2.8.1
+FROM --platform=linux/amd64 denoland/deno:2.9.4
 
 WORKDIR /app
 COPY . .

@@ -48,7 +48,8 @@ export const fabAnimations = css`
 
   /* Pulse animation for notification indicator */
   @keyframes fabPulse {
-    0%, 100% {
+    0%,
+    100% {
       opacity: 1;
       transform: scale(1);
     }
