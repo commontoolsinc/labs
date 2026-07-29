@@ -69,7 +69,8 @@ authoritative statement of these rules.
 
 - **Top-level**: Indicates deletion (remove the stored value)
 - **Object property**: Treated as absent (property is omitted)
-- **Array element**: Converted to `null` during storage
+- **Array element**: Stored as `undefined`, and remains distinguishable from
+  both a hole and a `null`
 
 #### Non-Fabric Types
 

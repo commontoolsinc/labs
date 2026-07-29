@@ -80,8 +80,14 @@ export function isArrayIndexPropertyName(name: string): boolean {
  * Anything that isn't actually an array is rejected, including an array-_like_
  * object and one whose prototype is `Array.prototype`. Such a value can
  * perfectly well name `length` as its final own property, so the key-order
- * reasoning below says nothing about it. This also makes the function total:
- * it answers rather than throwing no matter what it is handed.
+ * reasoning below says nothing about it. Ordinary values are all answered
+ * rather than thrown on, `null`, `undefined`, and primitives included.
+ *
+ * A `Proxy` is the exception, and unavoidably so: it can throw from its own
+ * traps, and such an error propagates rather than being reported as `false`.
+ * A revoked proxy fails the array test itself, and a live one can throw from
+ * `ownKeys()`. Reporting `false` there would mean reading "this is not an
+ * index-only array" into what is actually a failure to find out.
  *
  * **Note:** This function relies on the given array producing `Reflect.ownKeys()`
  * output which agrees with the JavaScript spec with regards to key ordering,

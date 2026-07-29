@@ -26,8 +26,10 @@
 // objects, so for these the empty result is not a guarantee (all confirmed to
 // pass here while `JSON.stringify` alters them):
 //
-//   - A non-enumerable string data property is dropped by JSON but not seen
-//     here (the walk is enumerable-only).
+//   - A non-enumerable string data property on a PLAIN OBJECT is dropped by
+//     JSON but not seen here (that walk is enumerable-only). An array's
+//     properties are read with `Object.getOwnPropertyNames`, so the same
+//     property on an array _is_ reported.
 //   - An accessor-based `toJSON` (a getter) is missed: the own-descriptor check
 //     matches a data property whose value is a function, not an accessor -- and
 //     a plain read could fire the getter, which the check avoids on purpose.
@@ -37,10 +39,10 @@
 //     inherited numeric property masks a hole; this also does not match JSON's
 //     own-vs-inherited element read.
 //
-// A future hardening pass would inspect own property descriptors instead of
-// `Object.keys` / `Object.entries`, reject accessors and non-enumerable data
-// properties, use `Object.hasOwn` for array slots, and reject a nonstandard
-// array prototype or an inherited `toJSON`.
+// A future hardening pass would inspect own property descriptors for plain
+// objects too, instead of `Object.entries`, reject accessors and
+// non-enumerable data properties, use `Object.hasOwn` for array slots, and
+// reject a nonstandard array prototype or an inherited `toJSON`.
 
 import type { JSONValue } from "@commonfabric/api";
 
