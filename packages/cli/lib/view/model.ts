@@ -59,6 +59,10 @@ export interface Span {
   readonly cls: TokenClass;
   /** Nesting depth for `bracket` spans, used for rainbow colouring. */
   readonly bracketDepth?: number;
+  /** Symbol name to resolve only at this position, not by matching span text. */
+  readonly exactDefinitionName?: string;
+  /** Single-line spelling used when displaying an exact definition target. */
+  readonly exactDefinitionDisplayName?: string;
   /** Rich-text modifiers used by rendered document views. */
   readonly bold?: boolean;
   readonly italic?: boolean;

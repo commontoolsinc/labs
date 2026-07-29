@@ -7,6 +7,7 @@ import {
   realWorkspace,
 } from "../lib/view/diffdoc.ts";
 import { createDiffSemantics } from "../lib/view/languages/typescript/semantics.ts";
+import type { Semantics } from "../lib/view/languages/language.ts";
 import { buildPeekCard } from "../lib/view/card.ts";
 import { renderLineColored } from "../lib/view/highlight.ts";
 import { renderFrame, type ViewState } from "../lib/view/render.ts";
@@ -1368,6 +1369,58 @@ Deno.test("card: uses over a diff exclude the removed side", () => {
   } finally {
     Deno.removeSync(root, { recursive: true });
   }
+});
+
+Deno.test("card: removed calls do not consume the definition lookup budget", () => {
+  const removed = Array.from(
+    { length: 40 },
+    () => "-  oldWorker.run(),",
+  ).join("\n");
+  const diff = `diff --git a/m.ts b/m.ts
+--- a/m.ts
++++ b/m.ts
+@@ -1,42 +1,3 @@
+ [
+${removed}
++  liveWorker.stop(),
+ ];
+`;
+  const model = parseDiff(diff)!;
+  const current = "[\n  liveWorker.stop(),\n];\n";
+  const { doc } = buildDiffDocument(diff, model, {
+    resolve: (path) => `/repo/${path}`,
+    read: () => current,
+  });
+  const statement = doc.flatStructure.find((node) =>
+    node.kind === "statement" && node.label === "["
+  )!;
+  const lookedUp: number[] = [];
+  const sem: Semantics = {
+    typeAt: () => null,
+    prewarm: () => {},
+    fileLines: () => null,
+    definitionOf: (offset) => {
+      lookedUp.push(offset);
+      return diff.slice(offset).startsWith("stop")
+        ? [{
+          name: "stop",
+          filePath: "/repo/ext.ts",
+          fileOffset: 0,
+          line: 0,
+          col: 0,
+          preview: "stop(): void",
+        }]
+        : [];
+    },
+  };
+  const card = buildPeekCard(doc, statement, sem);
+  const text = card.info.map((line) => line.text).join("\n");
+  assertEquals(
+    lookedUp.map((offset) => diff.slice(offset).match(/^\w+/)?.[0]).sort(),
+    ["liveWorker", "stop"],
+  );
+  assert(text.includes("  stop  ext.ts:1"), `live call is listed: ${text}`);
+  assert(!text.includes("remaining uses"), `nothing live is deferred: ${text}`);
 });
 
 // --- object-literal properties are navigable in a diff hunk ------------------
