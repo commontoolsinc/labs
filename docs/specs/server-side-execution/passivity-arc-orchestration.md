@@ -190,6 +190,61 @@ fails its 60s `waitForCondition` barrier intermittently under load.
 re-run it before believing it; it deserves its own barrier fix, which is not
 part of this arc.
 
+### 2.4c Second known flaky gate: `iframe-sandbox` — and a trap in diagnosing it
+
+`packages/iframe-sandbox` runs its tests in a real browser
+(`deno-web-test` → `vendor-astral` → Chrome). Under load it fails with
+`RetryError: Retrying exceeded the maxAttempts (5)` caused by
+`TimeoutError` inside `Page.evaluate`. Measured 2026-07-29: **failed
+twice at load 26 and 60, passed at load 86**, then passed in BOTH arms of
+an adjacent A/B at load 32-48. It is load-sensitive, not change-sensitive.
+
+**The trap, which the orchestrator fell into and should not be repeated.**
+`iframe-sandbox` DOES import from `runner`
+(`src/ipc.ts:1`, `type JSONSchema`), so when a runner-only change set is
+in the tree it is entirely plausible that a runner edit broke it. Two
+dirty failures and one clean pass — at a HIGHER load than the failures —
+looked like proof of causation, and it was not. The clean-pass-at-higher-
+load reasoning felt rigorous and was still wrong, because the runs were
+not adjacent.
+
+**§2.5's "compare arms only in adjacent pairs" is the rule that catches
+this.** Run dirty and clean back to back in one load window before
+attributing anything. Doing that here refuted the causation claim
+outright.
+
+### 2.4d `deno task test` can exit 0 on a RED battery
+
+Measured 2026-07-29: the root battery printed `One or more tests failed.`
+/ `Failed packages: - iframe-sandbox` and the harness still reported exit
+code 0. **Never trust the exit code alone.** Grep the captured output for
+`All tests passing!` and for `One or more tests failed`, and count
+`(ok)` lines against the expected package count (37 at the time of
+writing). A red battery reporting success is exactly how a broken change
+reaches a push.
+
+### 2.4e The pre-commit hook also validates the wrong worktree — and MUTATES it
+
+Same root cause as §2.5c's stop hook, but this one **blocks commits**.
+`.claude/scripts/pre-commit.ts` runs fmt/lint/check against
+`$CLAUDE_PROJECT_DIR` — the session's cwd checkout — not the worktree being
+committed to. Measured 2026-07-29: it blocked a commit to this branch over
+the `require-await` error at `executor/executor-worker.ts:1072` **on branch
+`claude/fervent-bhabha-c8678b`**, which `a34c15fd2` fixed here long ago.
+
+Worse: it runs `deno fmt`, not `deno fmt --check`, so it has been **silently
+reformatting that other checkout** — 11 files of pure line-rewrapping churn
+accumulated there this session, which subagents had earlier reported clean.
+
+**Workaround, owner-authorised 2026-07-29:** commit with `--no-verify` and
+say so in the commit message. Verify fmt/lint/check yourself in the correct
+worktree first — `--no-verify` skips a real gate, so replace it, do not
+merely bypass it.
+
+**The real fix is to scope the hook to the worktree being committed to**,
+which also stops it writing to a checkout nobody is working in. Not this
+arc's work, but worth doing: any CI relying on it inherits both defects.
+
 ### 2.4b The fmt/lint gate — measured on BOTH sides, attribution settled
 
 Measured by the orchestrator in detached worktrees with empty `git status`:
