@@ -82,8 +82,9 @@ export function listBuiltinResultContainerCause(
 
 /**
  * Canonical registry names of the single-output result-minting builtins: the
- * pure selectors, plus `inspectConfLabel` whose surface is the same shape (one
- * minted side document, written from its inputs, and nothing else). Kept in
+ * pure selectors, `inspectConfLabel` whose surface is the same shape (one
+ * minted side document, written from its inputs, and nothing else), and `wish`
+ * whose resolved state document is the same shape one level deeper. Kept in
  * lockstep with `SERVER_COMPUTATION_BUILTIN_IDS`: the runner re-derives the
  * minted document for exactly the ids in that registry, so a registry member
  * missing here is a type error rather than a silently wrong write surface.
@@ -92,28 +93,39 @@ export type SelectorBuiltinKey =
   | "ifElse"
   | "when"
   | "unless"
-  | "inspectConfLabel";
+  | "inspectConfLabel"
+  | "wish";
 
 /**
- * The `getCell` cause ifElse/when/unless/inspectConfLabel key their minted
- * result document on: the builtin name paired with the per-node registration
- * cause (the `{ inputs, parents, outputSpot }` object the runner hands every raw
+ * The `getCell` cause each single-output result minter keys its minted result
+ * document on: the builtin name paired with the per-node registration cause
+ * (the `{ inputs, parents, outputSpot }` object the runner hands every raw
  * builtin). The minted result is a side document distinct from the node's direct
  * output spot — the spot only ever stores a link to it, while every
  * output-producing run writes the result INTO it (the selectors
  * `setRawUntyped` the selected branch's reference; `inspectConfLabel` `set`s
- * the introspection outcome). Extracted as the single source of that identity
- * so the servability layer can re-derive the SAME minted document at
- * registration for the computation descriptor's write surface (W2.15a re-open,
- * FB3) — the exact `listBuiltinResultContainerCause` precedent. Both sites MUST
- * agree on this cause or every output-producing run de-claims fail-closed at the
- * dynamic write firewall.
+ * the introspection outcome; `wish` `set`s the resolved `WishState`). Extracted
+ * as the single source of that identity so the servability layer can re-derive
+ * the SAME minted document at registration for the computation descriptor's
+ * write surface (W2.15a re-open, FB3) — the exact
+ * `listBuiltinResultContainerCause` precedent. Both sites MUST agree on this
+ * cause or every output-producing run de-claims fail-closed at the dynamic
+ * write firewall.
+ *
+ * `wish` is the one member whose cause is not the bare `{ <key>: cause }`
+ * shape: it has minted `{ wish: { state: cause } }` since long before this
+ * helper existed, and the entity id is causal, so re-keying it would orphan
+ * every committed wish state document. The nesting is expressed HERE rather
+ * than left inline in `wish.ts` precisely so both sites keep reading it from
+ * one place.
  */
 export function selectorBuiltinResultCause(
   builtinKey: SelectorBuiltinKey,
   cause: unknown,
 ): Record<string, unknown> {
-  return { [builtinKey]: cause };
+  return builtinKey === "wish"
+    ? { wish: { state: cause } }
+    : { [builtinKey]: cause };
 }
 
 export function cellIdentityKey(cell: Cell<any>): {

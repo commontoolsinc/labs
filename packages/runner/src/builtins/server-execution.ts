@@ -19,6 +19,14 @@ export const SERVER_EXECUTABLE_BUILTIN_IDS = [
   "llm",
   "generateText",
   "generateObject",
+  // `llmDialog` dials the same `/api/ai/llm` broker route, through the same
+  // `llmClientOptions`. Its trigger is what makes it server-executable at all:
+  // the dialog turn starts from DOCUMENT state (`result.pending` plus
+  // `internal.requestId`), not from the `addMessage` handler's process, so the
+  // peer that appends a user message need not be the peer that egresses —
+  // which is exactly what "handlers stay client-side, the dialog runs
+  // server-side" requires.
+  "llmDialog",
 ] as const;
 
 export type ServerExecutableBuiltinId =
@@ -80,14 +88,29 @@ export interface ServerBuiltinActionDescriptor {
  * link to it, `set`s the outcome into it; the metadata consultation
  * `inspectStoredConfLabel` only READS the target's `["cfc"]` subtree).
  *
+ * `wish` joins them (R13, owner ruling 2026-07-29). Its measured surface IS
+ * this shape: a resolving run writes exactly the minted
+ * `{ wish: { state: cause } }` state document and the output spot linking to
+ * it; a freeform run writes only the output spot. The reason it was refused a
+ * descriptor before (a69aec5f9) was never the write surface — it was that
+ * `wish` egresses UNBROKERED for its sidecar patterns, so certifying the
+ * narrow surface would let both sides perform that egress. The owner ruled
+ * that acceptable: the egress is an idempotent GET of a system pattern from
+ * our own API (`patternUrl()` in `wish.ts`), so doubling it is harmless, and
+ * D11 makes closing the serving gap the priority. What the descriptor does not
+ * cover stays uncovered and fails closed: the sidecars' own transactions, the
+ * mid-run `runtime.scheduler.subscribe`, and the user-scoped instance a
+ * home-space target lands the state document at (admitted only under a scoped
+ * lane, via the §4 `laneInstanceCovers` relaxation).
+ *
  * Keep this registry deliberately exact, exactly like
  * `SERVER_EXECUTABLE_BUILTIN_IDS`: map/filter/flatMap carry output-collection
- * envelopes and wish is a resolver, so they are a separately-designed follow-up
- * (W2.15b/W2.16) and must NOT be added here. Membership is load-bearing beyond
- * the descriptor: the runner re-derives each member's minted result document
- * through `selectorBuiltinResultCause`, so an id added here whose builtin keys
- * its mint on a different cause gets a write surface naming a document it never
- * writes — and de-claims fail-closed on every run.
+ * envelopes, so they are a separately-designed follow-up (W2.16) and must NOT
+ * be added here. Membership is load-bearing beyond the descriptor: the runner
+ * re-derives each member's minted result document through
+ * `selectorBuiltinResultCause`, so an id added here whose builtin keys its mint
+ * on a different cause gets a write surface naming a document it never writes —
+ * and de-claims fail-closed on every run.
  *
  * The rest of the R5 worklist was audited against this shape and REJECTED:
  *  - `llmDialog` and `navigateTo` return `{ isEffect: true }` from their
@@ -97,26 +120,39 @@ export interface ServerBuiltinActionDescriptor {
  *    `serverBuiltinComputationScopeSummary` requires
  *    `actionKind === "computation"`, so the descriptor would never assemble.
  *    (`navigateTo` also enqueues a post-commit `navigateTo` effect through
- *    `runtime.navigateCallback`; `llmDialog` additionally mints THREE
- *    documents — result / internal / pinnedCells — and its handlers write
- *    back into its own `messages` input.)
+ *    `runtime.navigateCallback`.) `llmDialog` took the EFFECT route instead
+ *    and is now in `SERVER_EXECUTABLE_BUILTIN_IDS`: its four-document write
+ *    surface — the three it mints (result / internal / pinnedCells) plus the
+ *    `messages` transcript it appends model turns back into — rides
+ *    `serverBuiltinRuntimeWrites`, which the computation descriptor has no
+ *    field for. That asymmetry is the practical reason the effect route was
+ *    the only one available, independent of the `actionKind` gate.
  *  - `compileAndRun` mints FOUR documents (`compile.pending|result|error|
  *    errors`), then `runtime.runner.stop` / `runtime.runSynced` a whole
  *    compiled pattern under the result doc and writes from async
  *    `editWithRetry` transactions outside its own run: unbounded, and not even
  *    envelope-shaped.
  *  - `sqliteDatabase` mints its handle through `makeResultCell`, which writes
- *    the `["result"]` and `["pattern"]` META paths — outside a value-root
- *    computation envelope, since only the MATERIALIZER summary lifts to
- *    document root (FB19/CA6) — and derives the db `owner` from the ambient
- *    `runtime.trustSnapshotProvider()`, not from its inputs, so a server-side
- *    first run would mint the handle owned by the executor's principal.
+ *    a document-root `["result"]` META path beside the `["value"]` payload —
+ *    outside a value-root computation envelope, since only the MATERIALIZER
+ *    summary lifts to document root (FB19/CA6), and that lift cannot be
+ *    applied blanket here because the same descriptor declares the direct
+ *    OUTPUT SPOT at link path `[]` too. Measured and pinned in
+ *    `sqlite-database-servability.test.ts`; giving it an envelope needs a
+ *    registry decision (join the materializer family, or grow a
+ *    minted-document envelope field on the computation descriptor) that
+ *    nobody has made. Its OTHER blocker is gone: since the 2026-07-29 owner
+ *    ruling the db `owner` comes from the acting execution lane
+ *    (`actingHandleOwner` in `sqlite-builtins.ts`), not the ambient
+ *    `trustSnapshotProvider()`, so a server-side first run no longer mints
+ *    the handle owned by the executor's lease principal.
  */
 export const SERVER_COMPUTATION_BUILTIN_IDS = [
   "ifElse",
   "when",
   "unless",
   "inspectConfLabel",
+  "wish",
 ] as const;
 
 export type ServerComputationBuiltinId =

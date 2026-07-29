@@ -121,7 +121,11 @@ Deno.test("P2.0: every egress-capable builtin is registered as an effect (kind m
  * test goes red and the descriptor question is genuinely re-opened.
  */
 const FACTORY_DECLARED_EFFECT_SOURCES: Record<string, string> = {
-  // `return { action, isEffect: true };` at the end of `llmDialog`.
+  // `return { action: dialogAction, isEffect: true };` at the end of
+  // `llmDialog`. The regex below cannot see past a nested brace, so the
+  // descriptor plumbing is attached to a named const first rather than inline
+  // in the returned literal — keep it that way, or this pin silently reports
+  // that the kind changed when only the formatting did.
   "llm-dialog.ts": "llmDialog",
   // `return { action, isEffect: true, useDeclaredReadsAsDependencies: true };`
   "navigate-to.ts": "navigateTo",

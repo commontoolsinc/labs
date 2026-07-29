@@ -94,6 +94,7 @@ import { createTrustResolver } from "../cfc/trust.ts";
 import { cfcSchemaToObject, resolveCfcSchemaRefs } from "../cfc/schema-refs.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { llmClientOptions } from "./llm-client-options.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { internalVerifierRead } from "../storage/reactivity-log.ts";
 import type { RawBuiltinResult } from "../module.ts";
@@ -828,6 +829,15 @@ const internalSchema = internSchema(
     type: "object",
     properties: {
       requestId: { type: "string" },
+      /**
+       * The announced turn some peer has taken responsibility for issuing.
+       * `requestId` says a turn EXISTS (written by whichever client's
+       * `addMessage` handler ran); this says one is being RUN, and by exactly
+       * one peer. Only a peer whose external sink is not suppressed ever
+       * writes it, so a passive client cannot claim a turn it will not perform
+       * and strand the server that would have.
+       */
+      issuedRequestId: { type: "string" },
       lastActivity: { type: "number" },
       messageObservations: {
         type: "object",
@@ -2919,7 +2929,19 @@ export function llmDialog(
   let pinnedCells: Cell<PinnedCell[]>;
   let cellScope: CellScope | undefined;
   let requestId: string | undefined = undefined;
+  // The last announced request this PROCESS started. Distinct from `requestId`,
+  // which the abort bookkeeping clears: an id must never be started twice here
+  // even after its run finished, or a `pending` flip would replay it.
+  let startedRequestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
+  // This builtin's real write surface (filled in per run below). Nothing in it
+  // is a registered output cell, so the generically minted
+  // `ServerBuiltinActionDescriptor` (runner.ts) cannot see any of it; without
+  // publishing it here a claimed server run writes outside its declared surface
+  // and de-claims fail-closed. Same splice-in-place idiom as
+  // `llm`/`generateText`/`fetch`: the array identity is captured by the runner
+  // at registration and refreshed per run.
+  const serverBuiltinRuntimeWrites: NormalizedFullLink[] = [];
 
   // This is called when the pattern containing this node is being stopped.
   addCancel(() => {
@@ -3043,61 +3065,24 @@ export function llmDialog(
             >,
           );
 
-          // Set up new request (abort existing ones just in case) by allocating
-          // a new request Id and setting up a new abort controller.
-          abortController?.abort("New request started");
-          abortController = undefined;
+          // ANNOUNCE the turn; do not start it. Everything this handler does is
+          // a document write, so a peer that never saw the event can pick the
+          // turn up from `pending` + `internal.requestId` alone — which is what
+          // lets the dialog run server-side while `addMessage` stays
+          // client-inherent (client-passivity §1 point 1). The reactive action
+          // below is the single issuer, and it is the node the server claims,
+          // so the claim's suppression gate has something to suppress.
           const nextRequestId = crypto.randomUUID();
-          requestId = nextRequestId;
           internal.withTx(tx).set({
             requestId: nextRequestId,
+            // A fresh announcement is unclaimed by construction: the whole
+            // object is replaced, so the previous turn's claim cannot linger
+            // and block this one.
+            issuedRequestId: "",
             lastActivity: Date.now(),
             messageObservations:
               internal.withTx(tx).key("messageObservations").get() ?? {},
           });
-
-          const capturedRequest = materializeDialogRequestSnapshot(
-            runtime,
-            parentCell.space,
-            inputs,
-            pinnedCells,
-            tx,
-          );
-          const requestSnapshot = createFrozenRequestSnapshot({
-            ...capturedRequest.llmParams,
-            resultSchema: capturedRequest.userResultSchema,
-          });
-
-          enqueueSinkRequestPostCommitEffect(
-            tx,
-            "llmDialog",
-            `llmDialog:${nextRequestId}`,
-            requestSnapshot,
-            "llmDialog-start",
-            () => {
-              if (requestId !== nextRequestId) {
-                return;
-              }
-
-              abortController = new AbortController();
-              // Track the dialog turn (LLM call + writeback) as async builtin
-              // work so `runtime.settled()` wait for the result;
-              // `idle()` does not, so the handler never blocks on the LLM call.
-              runtime.trackAsyncWork(startRequest(
-                runtime,
-                parentCell.space,
-                cause,
-                inputs,
-                pending,
-                internal,
-                pinnedCells,
-                result,
-                nextRequestId,
-                abortController.signal,
-                capturedRequest,
-              ));
-            },
-          );
         },
       );
 
@@ -3183,6 +3168,38 @@ export function llmDialog(
 
     sendResult(tx, result);
 
+    // Publish the write surface so a claimed server run does not de-claim.
+    // Re-derived every run because the scope (and therefore the instance
+    // address) is discovered per transaction.
+    //
+    // Three MINTED documents (result / internal / pinnedCells) plus one that is
+    // not minted at all: `messages`. The dialog transcript is llmDialog's input
+    // AND its output — `pushModelMessages` appends the assistant turn and every
+    // tool result back into it, from the async writeback transaction. That
+    // transaction inherits this action as its sourceAction (the outbox flush
+    // runs under `runWithTransactionSourceAction`), so the executor synthesizes
+    // a continuation observation against THIS surface; with `messages` declared
+    // only as a read, `servability.ts`'s per-operation check rejects the
+    // writeback as `dynamic-write-outside-static-surface` and the turn
+    // de-claims — handing the dialog back to a client that would then egress a
+    // second time. The per-message documents the `[ID]` sigil splits off carry
+    // random uuids and cannot be declared; they ride
+    // `sameTransactionMaterializedDocuments` instead, which admits a fresh
+    // document linked from an already-authorized write in the same commit —
+    // and the authorized write it needs is exactly this one.
+    serverBuiltinRuntimeWrites.splice(
+      0,
+      serverBuiltinRuntimeWrites.length,
+      result.getAsNormalizedFullLink(),
+      internal.getAsNormalizedFullLink(),
+      pinnedCells.getAsNormalizedFullLink(),
+      // RESOLVED, not the authored link: the argument binding is an inline
+      // `data:` redirect, and a `data:` id names no document the firewall can
+      // match. `reads` carries the resolved id for the same reason.
+      inputs.key("messages").withTx(tx).resolveAsCell()
+        .getAsNormalizedFullLink(),
+    );
+
     // This will remain the reactive part. It will be called whenever one of the
 
     // read cells change. This is why it's important to do the read before the
@@ -3205,18 +3222,124 @@ export function llmDialog(
     // Runtime already makes this a no-op if there are no changes
     result.withTx(tx).key("flattenedTools").set(flattened);
 
-    if (
-      (!result.withTx(tx).key("pending").get() ||
-        requestId !== internal.withTx(tx).key("requestId").get()) && requestId
-    ) {
+    // Read BOTH unconditionally: this action is the dialog's issuer, so it has
+    // to be reactive to the announcement even when a previous run left
+    // `pending` false. A short-circuiting read here would drop the
+    // `internal.requestId` dependency on exactly the runs that need it.
+    const pendingNow = result.withTx(tx).key("pending").get();
+    const announcedRequestId = internal.withTx(tx).key("requestId").get();
+
+    if ((!pendingNow || requestId !== announcedRequestId) && requestId) {
       // We have a pending request and either something set pending to false or
       // another request started, so we have to abort this one.
       abortController?.abort("Another request started");
       requestId = undefined;
     }
+
+    // An announced turn nobody in this process has started yet. The announcer
+    // is `addMessage`, which runs on whichever peer the user clicked — so this
+    // is the seam that lets a client-side handler drive a server-side dialog.
+    if (
+      pendingNow && announcedRequestId &&
+      announcedRequestId !== startedRequestId
+    ) {
+      // Remember the turn before deciding, and ROLL BACK on a failed commit
+      // (the `markRequestHashPendingCommit` idiom in `llm.ts`): otherwise a
+      // rejected transaction leaves this process believing it handled a turn
+      // that nobody ran.
+      const previousStartedRequestId = startedRequestId;
+      startedRequestId = announcedRequestId;
+      tx.addCommitCallback((_committedTx, commitResult) => {
+        if (commitResult.error && startedRequestId === announcedRequestId) {
+          startedRequestId = previousStartedRequestId;
+        }
+      });
+
+      // Every peer running this piece sees the announcement, so the turn has to
+      // be claimed in the document or two open tabs each issue it — and a
+      // second issuance is not just double spend: `executeToolCalls` runs
+      // before the `safelyPerformUpdate` requestId guard, so both peers would
+      // execute the turn's tool calls for real. The claim is a plain
+      // compare-and-set on `internal`; the loser's commit conflicts on the same
+      // path, re-runs, and stands down.
+      //
+      // Only an UNSUPPRESSED peer claims. Under a server effect claim the
+      // client's disposition is "suppress", so it cannot win the race against
+      // the server that is supposed to run the turn and leave the dialog
+      // stranded. `enqueueSinkRequestPostCommitEffect` consults the same gate
+      // again below; the second consult is idempotent (the disposition is
+      // memoized on the transaction as `executionEffectAuthority`).
+      const suppressed = tx.externalSinkDisposition() === "suppress";
+      if (!suppressed) {
+        if (
+          internal.withTx(tx).key("issuedRequestId").get() ===
+            announcedRequestId
+        ) {
+          return;
+        }
+        internal.withTx(tx).key("issuedRequestId").set(announcedRequestId);
+      }
+
+      requestId = announcedRequestId;
+      abortController?.abort("New request started");
+      abortController = undefined;
+
+      const capturedRequest = materializeDialogRequestSnapshot(
+        runtime,
+        parentCell.space,
+        inputs,
+        pinnedCells,
+        tx,
+      );
+      const requestSnapshot = createFrozenRequestSnapshot({
+        ...capturedRequest.llmParams,
+        resultSchema: capturedRequest.userResultSchema,
+      });
+
+      enqueueSinkRequestPostCommitEffect(
+        tx,
+        "llmDialog",
+        `llmDialog:${announcedRequestId}`,
+        requestSnapshot,
+        "llmDialog-start",
+        () => {
+          if (requestId !== announcedRequestId) {
+            return;
+          }
+
+          abortController = new AbortController();
+          // Track the dialog turn (LLM call + writeback) as async builtin
+          // work so `runtime.settled()` wait for the result;
+          // `idle()` does not, so the run never blocks on the LLM call.
+          runtime.trackAsyncWork(startRequest(
+            runtime,
+            parentCell.space,
+            cause,
+            inputs,
+            result.key("pending"),
+            internal,
+            pinnedCells,
+            result,
+            announcedRequestId,
+            abortController.signal,
+            capturedRequest,
+          ));
+        },
+      );
+    }
   };
 
-  return { action, isEffect: true };
+  const dialogAction = Object.assign(action, {
+    serverBuiltinRuntimeWrites,
+    // Fail-open rerun (CP1) and the claiming executor's first run both call
+    // this. Forget which turn THIS process issued so the rerun re-issues the
+    // announced one; the abort above already stopped any in-flight call.
+    prepareClaimedRerun: () => {
+      startedRequestId = undefined;
+    },
+  });
+
+  return { action: dialogAction, isEffect: true };
 }
 
 async function startRequest(
@@ -3493,15 +3616,18 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
     };
 
   // TODO(bf): sendRequest must be given a callback, even if it does nothing
-  const mappedLlmHost = runtime.mappedHostFor(space);
+  // Server-side this resolves to the `/api/ai/llm` broker route
+  // (`runtime.fetchBuiltin("llmDialog", …)`), the same one `llm` /
+  // `generateText` / `generateObject` use. Hand-rolling the endpoint here would
+  // leave the call on `globalThis.fetch`, which the executor Worker's
+  // `fetch: denyExternalBuiltinFetch` never sees — the R13 `wish` bypass in
+  // miniature.
   const doWork = () =>
     client.sendRequest(
       llmParams,
       () => {},
       abortSignal,
-      mappedLlmHost
-        ? { endpoint: new URL("/api/ai/llm", mappedLlmHost) }
-        : undefined,
+      llmClientOptions(runtime, space, "llmDialog"),
     );
 
   const resultPromise = queueName

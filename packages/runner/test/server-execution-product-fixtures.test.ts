@@ -316,13 +316,18 @@ for (
       // FB29: deterministic zero-verdict pin for the admission-relaxation arc
       // (W2.12–W2.16). The flagship product patterns must emit ZERO R3/R4
       // static verdicts — `untrusted-implementation` / `incomplete-static-
-      // surface` — beyond the recorded W2.15b `wish` deferral: a tightening
-      // of the certificate gate, the capability analysis, or the descriptor
-      // wiring that pushes a flagship computation out of the certified class
-      // turns this red here instead of surviving until the next manual
-      // flag-on measurement. (`non-space-read-scope` and friends are the
-      // scope-lattice gate — session-rank territory owned by C2 — and are
-      // deliberately not pinned here.)
+      // surface`: a tightening of the certificate gate, the capability
+      // analysis, or the descriptor wiring that pushes a flagship computation
+      // out of the certified class turns this red here instead of surviving
+      // until the next manual flag-on measurement. (`non-space-read-scope`
+      // and friends are the scope-lattice gate — session-rank territory owned
+      // by C2 — and are deliberately not pinned here.)
+      //
+      // The `impl:cf:builtin/wish:v1` exemption this pin used to carry is
+      // GONE: the W2.15b deferral was lifted by the 2026-07-29 owner ruling
+      // that accepts wish's sidecar egress, and `wish` now carries a W2.15a
+      // computation descriptor (see wish-resolver-servability.test.ts). A wish
+      // node that regresses to `incomplete-static-surface` must fail here.
       const admissionVerdicts = attempts.flatMap((attempt) => {
         const decision = classifyStaticActionServability(
           attempt.observation,
@@ -337,12 +342,7 @@ for (
           }]
           : [];
       });
-      assertEquals(
-        admissionVerdicts.filter((verdict) =>
-          verdict.fingerprint !== "impl:cf:builtin/wish:v1"
-        ),
-        [],
-      );
+      assertEquals(admissionVerdicts, []);
     } finally {
       await runtime.dispose();
       await storage.close();

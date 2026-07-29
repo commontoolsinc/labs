@@ -37,6 +37,7 @@ const EXPECTED_SERVER_EXECUTABLE_BUILTIN_IDS = [
   "llm",
   "generateText",
   "generateObject",
+  "llmDialog",
 ] as const satisfies readonly ServerExecutableBuiltinId[];
 const action = {};
 const output = {
@@ -382,8 +383,16 @@ Deno.test("server executable builtin registry is exact and excludes ambient capa
   // R5 boundary, re-pinned at C2.8: the scoped-lane egress lift changes
   // WHICH LANES a supported builtin may serve, never WHICH builtins are
   // supported. `llm` joined the registry when it was given the same
-  // `/api/ai/llm` broker route generateText already had (A1); `sqliteQuery`
+  // `/api/ai/llm` broker route generateText already had (A1); `llmDialog`
+  // joined under owner ruling D11 (run pattern effects entirely server-side)
+  // once it too routed through `runtime.fetchBuiltin`; `sqliteQuery`
   // is not fetch-shaped and stays outside until its own broker exists.
+  //
+  // This pin exists to make registry growth DELIBERATE, and it earned that
+  // on 2026-07-29: the `llmDialog` addition landed without updating the
+  // expected list, and the resulting type error was the only signal — the
+  // narrow per-item verify command could not see it. If you are updating
+  // this list, confirm the id genuinely has a broker route first.
   // `fetch`/`generateImage` are ambient capabilities, not builtin ids, and
   // must never resolve here.
   assertEquals(

@@ -5,13 +5,15 @@ import {
   extractTextFromLLMResponse,
   GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
   LLMClient,
-  type LLMClientRequestOptions,
   LLMGenerateObjectRequest,
   type LLMNativeModelToolId,
   LLMRequest,
   LLMResponse,
 } from "@commonfabric/llm";
-import { createInternalLLMBrokerRequestOptions } from "@commonfabric/llm/internal";
+import {
+  llmClientOptions,
+  type LLMServerBuiltinId,
+} from "./llm-client-options.ts";
 import {
   BuiltInGenerateObjectParams,
   BuiltInGenerateTextParams,
@@ -38,7 +40,6 @@ import { type Action } from "../scheduler.ts";
 import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { CellScope } from "../builder/types.ts";
-import { getPatternEnvironment } from "../builder/env.ts";
 import type { NormalizedFullLink } from "../link-utils.ts";
 import { llmToolExecutionHelpers } from "./llm-dialog.ts";
 import { scopedCell } from "./scope-policy.ts";
@@ -64,43 +65,6 @@ const logger = getLogger("llm", {
 });
 
 const client = new LLMClient();
-
-/** The LLM builtins that have a server broker route (R5). */
-type LLMServerBuiltinId = "llm" | "generateText" | "generateObject";
-
-function llmClientOptions(
-  runtime: Runtime,
-  space: MemorySpace,
-  serverBuiltinId?: LLMServerBuiltinId,
-): LLMClientRequestOptions | undefined {
-  const mappedLlmHost = runtime.mappedHostFor(space);
-  if (!runtime.hasServerBuiltinFetch()) {
-    return mappedLlmHost
-      ? { endpoint: new URL("/api/ai/llm", mappedLlmHost) }
-      : undefined;
-  }
-  if (serverBuiltinId === undefined) {
-    throw new Error("unsupported LLM builtin has no server broker route");
-  }
-  const endpoint = new URL(
-    "/api/ai/llm",
-    mappedLlmHost ?? getPatternEnvironment().apiUrl,
-  );
-  return createInternalLLMBrokerRequestOptions({
-    endpoint,
-    fetch: (input, init) => {
-      const target = input instanceof URL
-        ? input
-        : new URL(input instanceof Request ? input.url : input, endpoint);
-      return runtime.fetchBuiltin(
-        serverBuiltinId,
-        `${target.pathname}${target.search}`,
-        target,
-        init,
-      );
-    },
-  });
-}
 
 // TODO(ja): investigate if generateText should be replaced by
 // a fetch builtin with streaming support

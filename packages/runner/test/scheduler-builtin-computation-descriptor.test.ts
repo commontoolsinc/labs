@@ -153,11 +153,20 @@ describe("per-builtin computation descriptors (W2.15a)", () => {
       "when",
       "unless",
       "inspectConfLabel",
+      // R13, owner ruling 2026-07-29: `wish` writes exactly its minted
+      // `{ wish: { state: cause } }` state document plus the output spot, so
+      // it IS this shape. Its earlier exclusion was about the unbrokered
+      // sidecar egress, not the write surface, and that egress is now accepted
+      // as an idempotent GET of our own pattern route — see
+      // wish-resolver-servability.test.ts.
+      "wish",
     ]);
-    for (const id of ["ifElse", "when", "unless", "inspectConfLabel"]) {
+    for (
+      const id of ["ifElse", "when", "unless", "inspectConfLabel", "wish"]
+    ) {
       expect(isServerComputationBuiltinId(id)).toBe(true);
     }
-    for (const id of ["map", "filter", "flatMap", "wish", "generateText"]) {
+    for (const id of ["map", "filter", "flatMap", "generateText"]) {
       expect(isServerComputationBuiltinId(id)).toBe(false);
     }
     // The four ids audited alongside `inspectConfLabel` for the R5 worklist
@@ -173,10 +182,14 @@ describe("per-builtin computation descriptors (W2.15a)", () => {
     //    pattern under the result doc and writes from async
     //    `editWithRetry` transactions outside its own run.
     //  - sqliteDatabase: mints its handle through `makeResultCell`, which
-    //    writes the `["result"]`/`["pattern"]` META paths — outside a
-    //    value-root computation envelope (the lift that covers those is
-    //    the MATERIALIZER summary's, FB19/CA6) — and derives the db owner
-    //    from the ambient `trustSnapshotProvider()`, not from its inputs.
+    //    writes a document-root `["result"]` META path beside `["value"]` —
+    //    outside a value-root computation envelope (the lift that covers it
+    //    is the MATERIALIZER summary's, FB19/CA6, and it cannot be applied
+    //    blanket because the direct output spot is declared at link path
+    //    `[]` too). Measured in `sqlite-database-servability.test.ts`. Its
+    //    owner-derivation blocker is GONE (owner ruling 2026-07-29: the db
+    //    owner now comes from the acting execution lane); only the envelope
+    //    shape is left, and it needs a registry decision.
     for (
       const id of ["llmDialog", "compileAndRun", "sqliteDatabase", "navigateTo"]
     ) {

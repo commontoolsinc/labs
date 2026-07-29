@@ -35,7 +35,7 @@ import {
 } from "../link-utils.ts";
 import { setRunnableName } from "../runner-utils.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
-import { scopedCell } from "./scope-policy.ts";
+import { scopedCell, selectorBuiltinResultCause } from "./scope-policy.ts";
 
 const wishFlowLogger = getLogger("runner.wish-flow", {
   enabled: true,
@@ -1563,9 +1563,14 @@ export function wish(
     outputScope: CellScope,
     schema: unknown,
   ): void {
+    // Through the shared cause helper, not an inline `{ wish: { state:
+    // cause } }`: the servability layer re-derives this SAME document at
+    // registration to bound the W2.15a computation descriptor's write surface
+    // (runner.ts `selectorMintedResultWrite`), and the two sites must agree or
+    // every resolving run de-claims fail-closed at the dynamic write firewall.
     const baseCell = runtime.getCell(
       parentCell.space,
-      { wish: { state: cause } },
+      selectorBuiltinResultCause("wish", cause),
       wishStateSchemaForResult(schema),
       tx,
     );
