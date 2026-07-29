@@ -1,3 +1,7 @@
+*Draft. The argument is settled enough to write down; the wording is
+not, and the claims below are checked against the code as of this
+commit. If one of them stops being true, fix it here.*
+
 Personal computing was supposed to make computers personal. Instead,
 your mail lives on someone else's machine, under someone else's rules.
 We are all renters in our digital lives. The landlords didn't win an
@@ -37,7 +41,8 @@ What already runs, in this repository, today:
   dataflow — run `cf check <pattern> --show-transformed` and it prints
   the exact code the runtime executes, no trust required
 - the flow checking that evaluates those policies, in
-  `packages/runner/` — observe mode today, see 5 below
+  `packages/runner/` — enforcing on explicit boundaries today, with the
+  propagation still behind a flag, see 5 below
 - a hundred-odd running patterns in `packages/patterns/`, counters to
   group chat — enough to show the runtime isn't bent around one use
   case, and nowhere near the number that would matter
@@ -59,14 +64,25 @@ What we hold:
 2. Every line is open source. The runtime proves itself to you before
    your data arrives — you are never trusting our word, you are checking
    the machine's.
-3. Your data leaves with you, whole, policies and all. No one you did
-   not choose can hold it, and no one can hold it hostage.
-4. Software is multiplayer without a landlord. State lives where no
-   participant can lock the others out of it.
-5. The unfinished parts, plainly: the flow checking runs in observe
-   mode today, strict-by-default is the current work, and robustness
-   and performance are not there yet. That is a real gap, and it is
-   ours to close.
+3. Your data leaves with you, whole, policies and all. A copy is not a
+   downgrade — the rules travel with it, so leaving costs you nothing
+   but the leaving.
+4. Software should be multiplayer without a landlord. This is the one
+   we have not built. A space still has a host that enforces access and
+   can revoke a participant mid-session
+   (`#revokeDeauthorizedSessions`, `packages/memory/v2/server.ts`), and
+   there is no delegation yet — `Delegation = never` in
+   `packages/memory/interface.ts`, with a comment saying what it is
+   meant to become. The landlord is smaller than it was. It is not
+   gone.
+5. The other unfinished parts, plainly: the checker refuses a commit
+   that crosses a boundary it was told about, which is the third of
+   four rungs (`enforce-explicit`); the viral part — labels propagating
+   into everything derived from a value — is written but defaults to
+   off, and is rolling out. Strict-by-default is the current work.
+   Robustness and performance are not there yet. The dial table in
+   `docs/specs/cfc-enforcement-matrix.md` lists what each host runs
+   today, rather than what we would like it to.
 
 Here is what "policies ride with the data" means in practice. A program
 that imports your mail gets an access token that could read all of it.
