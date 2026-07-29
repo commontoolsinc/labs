@@ -220,6 +220,30 @@ taken above load ~5.
   `0ad293c2b`, which silently carries C2's `EXPERIMENTAL_OPTIONS.md` work
   under a commit message about something else. Stage explicit paths.
 
+### 2.5c The stop hook validates the WRONG worktree — warn every subagent
+
+Measured across all six subagents in this arc: **every one of them** burned
+significant effort investigating a stop-hook failure it did not cause.
+
+`.claude/scripts/subagent-stop.ts` runs `deno fmt --check` / `deno lint` /
+`deno task check` against **the session's cwd checkout**, not the worktree the
+subagent was assigned. In this arc that is
+`/Users/berni/labs/.claude/worktrees/fervent-bhabha-c8678b` (branch
+`claude/fervent-bhabha-c8678b`, HEAD `81662f0b5`, clean tree) rather than
+`/Users/berni/labs/.agents/worktrees/server-execution-w1-2-shared-pool`. Its
+type errors — `actionId` missing on `watchReactiveActionCommit` in
+`scheduler-cfc-trigger-reads.test.ts` and `scheduler-retries.test.ts` — were
+fixed on the arc branch long ago and persist on that one.
+
+It also runs repo-wide, so mid-wave it additionally catches sibling agents'
+in-flight writes.
+
+**Put this in every subagent prompt:** the stop hook's verdict is not a gate
+for work in `.agents/worktrees/`; check your own changed files individually
+(`deno fmt --check <files>`, `deno lint <files>`, `deno check <files>`) and
+believe that instead. Without the warning each agent spends tokens
+re-deriving it, and one of them may "fix" a file it does not own.
+
 ### 2.6 Comparing action ids across arms
 
 Action ids read `cf:module/<hash>:<lift>:<instance>`; the trailing instance
