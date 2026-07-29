@@ -731,6 +731,56 @@ family. Other candidates if a second is wanted: `shopping-list.tsx`,
 `calendar/calendar.tsx`, `compiler.tsx`, `record-backup.tsx`.
 
 **Still owner-facing:** nothing. Gates 1 and 2 are ruled; 3 and 4 are
-orchestrator sequencing. Build order is gate 4's measurement, then §6
-item 2 (the rank-containment invariant, red first — "if it is not red
-first, nothing else in this design is safe"), then the seam.
+orchestrator sequencing.
+
+---
+
+## 8. Gate 4 RAN, and it fired — read this before building
+
+Run by the orchestrator 2026-07-29. It did not need a fixture; the
+answer is structural and cost a handful of greps.
+
+**Finding: the deferred navigate result root never publishes execution
+demand.**
+
+- `addExecutionDemand` has **exactly one call site** in the entire
+  runner: `packages/runner/src/runner.ts:1286`, inside `start()`, reached
+  only when `doStart` reports `started && attempt.startedRoot !==
+  undefined`.
+- `navigateTo`'s result pattern is **commit-gated**: `deferForNavigate`
+  routes it through `runPatternAfterSuccessfulCommit`
+  (`runner.ts:3637-3646`) → `runWithStartOwnership` (`:1885`, defined
+  `:1998`) → `startWithTx` (`:~2039`). **That path does not call
+  `start()`, so it never reaches `addExecutionDemand`.**
+
+Why that matters: session-rank candidate lanes are exactly "the open
+session lanes whose demand slice covers the piece", returning `[]` when
+none, with no fallback (§1c chain 3). A piece that is never demanded can
+never be claimed at session rank. And `navigateTo` is structurally
+confined to session rank, because `laneAdmitsScope` admits its
+`session`-scoped write only at session lane rank (§1c chain 2, verified).
+
+**So as things stand, `navigateTo` cannot be served at all** — not
+"served to the wrong set of clients", but never claimed. Items 1-6 of §6
+would be building on a node no lane can claim. This is exactly the
+failure gate 4 was written to catch, and it caught it for the price of
+greps rather than a fixture.
+
+**The one thing that could rescue it, and it is now the blocking
+question.** Demand has a closure-growth mechanism — the live probe emits
+`executor cold refresh: demand closure-growth replica:…` — so a demanded
+root may pull in reachable pieces without each publishing its own
+demand. **Open question: does closure growth cover a commit-gated
+deferred root?** If yes, the design proceeds unchanged. If no, demand
+publication for deferred roots is a prerequisite and belongs in the build
+plan ahead of everything else.
+
+This is stated as underived-by-measurement on purpose: the call-site
+count and the code path are verified, the closure-growth behavior is
+not. That distinction matters — this arc has been wrong before by
+deriving confidently from a path it had read but not exercised.
+
+**Revised build order:** settle the closure-growth question first (a
+counter on the lobby pattern, or a reading of the closure-growth
+implementation), then §6 item 2's rank-containment invariant red-first,
+then the seam.
