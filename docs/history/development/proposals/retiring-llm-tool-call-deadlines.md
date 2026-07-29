@@ -371,7 +371,8 @@ still firing.
 `fetch-utils.ts` and `fetch-program.ts` carry their own deadlines. Those raise a
 different question — what to do when a remote peer never answers — and are out
 of scope here. That question is settled separately in [The Fetch Builtins'
-Request Deadlines](../fetch-request-deadlines.md), which finds that neither
+Request Deadlines](../../../development/fetch-request-deadlines.md), which finds
+that neither
 deadline bounds a request at all: each is a lease on a claim held in durable
 state, and it decides when the replica holding that claim is presumed gone.
 Like the heartbeat bound in phase 4, both stay, because nothing reports another
