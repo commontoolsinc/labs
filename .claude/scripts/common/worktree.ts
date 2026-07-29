@@ -152,10 +152,12 @@ export function targetDirArgs(cmd: string): string[] | null {
   const args: string[] = [];
 
   // The last `cd` before the commit wins, as it would in the shell. Require a
-  // command boundary so `--author "cd fred"` cannot masquerade as one.
+  // command boundary so `--author "cd fred"` cannot masquerade as one — but
+  // count `(` and `{` as boundaries too, because `(cd dir && git commit)` is a
+  // real form and missing its `cd` puts us back to judging the wrong tree.
   const cds = [
     ...prefix.matchAll(
-      /(?:^|[;&|]|&&|\|\|)\s*cd\s+("[^"]*"|'[^']*'|[^\s;&|]+)/g,
+      /(?:^|[;&|({])\s*cd\s+("[^"]*"|'[^']*'|[^\s;&|)}]+)/g,
     ),
   ];
   const lastCd = cds.at(-1)?.[1];

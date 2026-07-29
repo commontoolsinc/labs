@@ -105,8 +105,20 @@ async function runDeno(
  */
 export async function checkFiles(
   worktree: string,
-  files: string[],
+  candidates: string[],
 ): Promise<string[]> {
+  // A path that is not there cannot be checked, and pointing deno at one turns
+  // into a reported failure that reads like a real defect. Callers legitimately
+  // arrive with such paths: a subagent's transcript records every file it ever
+  // wrote, including scratch files it went on to delete.
+  const files = candidates.filter((f) => {
+    try {
+      Deno.statSync(`${worktree}/${f}`);
+      return true;
+    } catch {
+      return false;
+    }
+  });
   if (files.length === 0) return [];
   const tsFiles = typeCheckable(files);
 
