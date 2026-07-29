@@ -4,8 +4,10 @@
  * semantic service only when launching the pager, so these call the returned
  * closure directly to exercise both the diff and source semantics paths.
  */
-import { assert, assertEquals } from "@std/assert";
-import { buildView } from "../lib/view/mod.ts";
+import { assert, assertEquals, assertThrows } from "@std/assert";
+import { markdownLanguage } from "../lib/view/languages/markdown/language.ts";
+import { plainTextLanguage } from "../lib/view/languages/plain-text/language.ts";
+import { buildView, ViewError } from "../lib/view/mod.ts";
 
 const SRC = "export const x = 1;\nconst y = x + 1;\n";
 const TRANSFORMED = `// transformed: /app.ts
@@ -58,6 +60,104 @@ Deno.test("buildView: transformed compiler output keeps the TypeScript default",
     r.editSource.parse(TRANSFORMED),
     r.doc,
     "read-only reparsing keeps the selected language",
+  );
+});
+
+Deno.test("buildView: a virtual filename selects piped source without making it editable", () => {
+  const source = 'def greet(name):\n    return f"Hello, {name}"\n';
+  const r = buildView(source, undefined, undefined, {
+    fileName: "scripts/greet.py",
+  });
+
+  assert(
+    r.doc.lines.flatMap((line) => line.spans).some((span) =>
+      span.cls === "storageKeyword"
+    ),
+    "the virtual Python filename selects Python highlighting",
+  );
+  assertEquals(r.editSource.editable, false);
+  assertEquals(r.editSource.path, undefined);
+  assertEquals(r.editSource.parse(source), r.doc);
+});
+
+Deno.test("buildView: a shebang selects an extensionless source and its editor", () => {
+  const source = "#!/usr/bin/env python3\ndef greet():\n    return 'hello'\n";
+  const piped = buildView(source);
+  const file = buildView(source, "greet");
+
+  for (const view of [piped, file]) {
+    assert(
+      view.doc.lines.flatMap((line) => line.spans).some((span) =>
+        span.cls === "storageKeyword" && span.text === "def"
+      ),
+      "the Python shebang selects Python highlighting",
+    );
+    assertEquals(view.editSource.parse(source), view.doc);
+  }
+  assertEquals(piped.editSource.editable, false);
+  assertEquals(file.editSource.editable, true);
+});
+
+Deno.test("buildView: an explicit language takes priority over a virtual filename", () => {
+  const source = "# **Piped heading**\n";
+  const r = buildView(source, undefined, undefined, {
+    language: markdownLanguage,
+    fileName: "notes.txt",
+  });
+
+  assert(
+    r.doc.structure.some((node) =>
+      node.kind === "section" && node.name === "**Piped heading**"
+    ),
+    "the explicit Markdown language overrides the plain-text filename",
+  );
+  assertEquals(
+    r.editSource.render?.(r.doc).lines[0].text,
+    "Piped heading",
+  );
+});
+
+Deno.test("buildView: explicit source selection suppresses automatic detection", () => {
+  const transformed = buildView(TRANSFORMED, undefined, undefined, {
+    language: plainTextLanguage,
+  });
+  assertEquals(transformed.doc.structure, []);
+
+  const filenameDiff = buildView(DIFF, undefined, undefined, {
+    fileName: "piped.py",
+  });
+  assertEquals(filenameDiff.editSource.isDiff, undefined);
+  assert(
+    !filenameDiff.doc.flatStructure.some((node) => node.kind === "hunk"),
+    "the virtual source filename overrides diff content detection",
+  );
+
+  const languageDiff = buildView(DIFF, undefined, undefined, {
+    language: plainTextLanguage,
+  });
+  assertEquals(languageDiff.editSource.isDiff, undefined);
+  assert(
+    !languageDiff.doc.flatStructure.some((node) => node.kind === "hunk"),
+    "the explicit language overrides diff content detection",
+  );
+});
+
+Deno.test("buildView: source selection rejects incompatible direct calls", () => {
+  assertThrows(
+    () =>
+      buildView(SRC, "actual.ts", undefined, {
+        language: plainTextLanguage,
+      }),
+    ViewError,
+    "cannot be used with a file argument",
+  );
+  assertThrows(
+    () =>
+      buildView(SRC, undefined, true, {
+        fileName: "virtual.ts",
+      }),
+    ViewError,
+    "--diff cannot be combined",
   );
 });
 

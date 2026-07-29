@@ -85,6 +85,57 @@ Deno.test("cf view --plain --no-diff is accepted and views a diff as source", as
   assertEquals(code, 0);
 });
 
+Deno.test("cf view --filename selects piped source by its virtual name", async () => {
+  const source = "# Title with **weight**\n";
+  const { code, stdout } = await cf(
+    "view --plain --rendered --color never --filename notes.md",
+    source,
+  );
+  assertEquals(code, 0);
+  assertEquals(stdout, ["Title with weight"]);
+});
+
+Deno.test("cf view --language aliases override a piped virtual filename", async () => {
+  const source = "# Title with **weight**\n";
+  const { code, stdout } = await cf(
+    "view --plain --rendered --color never --language md --filename notes.txt",
+    source,
+  );
+  assertEquals(code, 0);
+  assertEquals(stdout, ["Title with weight"]);
+});
+
+Deno.test("cf view rejects an unknown --language", async () => {
+  const { code, stderr } = await cf("view --plain --language ruby", SRC);
+  assertEquals(code, 1);
+  assert(
+    stderr.join("\n").includes('unknown language "ruby"'),
+    stderr.join("\n"),
+  );
+  assert(stderr.join("\n").includes("python"), stderr.join("\n"));
+});
+
+Deno.test("cf view rejects source selection combined with forced diff mode", async () => {
+  for (
+    const selector of [
+      "--language plain-text",
+      "--filename virtual.ts",
+    ]
+  ) {
+    const { code, stderr } = await cf(
+      `view --plain --diff ${selector}`,
+      DIFF,
+    );
+    assertEquals(code, 1);
+    assert(
+      stderr.join("\n").includes(
+        "--diff cannot be combined with --language or --filename",
+      ),
+      stderr.join("\n"),
+    );
+  }
+});
+
 Deno.test("cf view rejects an invalid --color", async () => {
   const { code, stderr } = await cf("view --plain --color bogus", SRC);
   assertEquals(code, 1);
@@ -108,6 +159,24 @@ Deno.test("cf view reads and prints a file argument", async () => {
     const { code, stdout } = await cf(`view --plain ${file}`);
     assertEquals(code, 0);
     assert(stdout.join("\n").includes("pattern"));
+  } finally {
+    Deno.removeSync(dir, { recursive: true });
+  }
+});
+
+Deno.test("cf view rejects piped-input overrides with a file argument", async () => {
+  const dir = Deno.makeTempDirSync();
+  try {
+    const file = `${dir}/source.txt`;
+    Deno.writeTextFileSync(file, SRC);
+    const { code, stderr } = await cf(
+      `view --plain --language typescript ${file}`,
+    );
+    assertEquals(code, 1);
+    assert(
+      stderr.join("\n").includes("cannot be used with a file argument"),
+      stderr.join("\n"),
+    );
   } finally {
     Deno.removeSync(dir, { recursive: true });
   }

@@ -1249,13 +1249,16 @@ export class Runner {
       ? resultCell.withTx(tx)
       : resultCell.withTx(tx).asSchema(pattern.resultSchema);
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
-    let result = unwrapOneLevelAndBindToDoc<R>(
+    // `Pattern` erases its authored result type to `JSONValue`, so validate
+    // that actual execution value here, then restore its association with
+    // `Cell<R>`.
+    let result = unwrapOneLevelAndBindToDoc(
       this.runtime.cfc,
-      pattern.result as R,
+      pattern.result,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
-    );
+    ) as R;
     const previousResult = writableResultCell.getRaw({
       meta: ignoreReadForScheduling,
     });

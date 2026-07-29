@@ -7,6 +7,7 @@
  */
 
 import type { Option } from "@cliffy/command";
+import { languageNames } from "../view/languages/language.ts";
 import type { AnyCommand, CompletionLine, PreParseGlobal } from "./line.ts";
 import { longName, PRE_PARSE_GLOBALS } from "./line.ts";
 
@@ -21,11 +22,13 @@ export interface Candidate {
  * long name. Kept here rather than inline in the provider table because these
  * are facts about the CLI's accepted vocabulary, not about live data.
  *
- * `log-level` mirrors `lib/log-level.ts`; `color` mirrors `cf view --color`.
+ * `log-level` mirrors `lib/log-level.ts`; `color` mirrors the corresponding
+ * `cf view` option. Language names come from the view language registry.
  */
 const ENUMERATED_OPTION_VALUES: Readonly<Record<string, readonly string[]>> = {
   "log-level": ["debug", "info", "warn", "error", "silent"],
   "color": ["auto", "always", "never"],
+  "language": languageNames(),
   "cfc-mode": ["off", "warn", "enforce"],
 };
 

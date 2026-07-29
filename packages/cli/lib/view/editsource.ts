@@ -198,20 +198,13 @@ export interface EditPolicy {
 }
 
 /** An on-disk file: the document text is the file, edits write straight back. */
-export function fileSource(path: string): EditableSource {
-  // The language is chosen once, from the path, and every edit-time operation
-  // dispatches through it.
-  const language = languageForFile(path);
-  const render = language.renderLines
-    ? {
-      render: (source: Document): Document => {
-        return {
-          ...source,
-          lines: renderedLinesFor(language, source.text, path)!,
-        };
-      },
-    }
-    : {};
+export function fileSource(
+  path: string,
+  language: Language = languageForFile(path),
+): EditableSource {
+  // The language is chosen once, and every edit-time operation dispatches
+  // through it.
+  const render = sourceRenderer(language, path);
   return {
     label: shortName(path),
     editable: true,
@@ -241,12 +234,29 @@ export function readonlySource(
   language: Language = languageForFile(undefined),
   fileName?: string,
 ): EditableSource {
+  const render = sourceRenderer(language, fileName);
   return {
     label: null,
     editable: false,
     reason,
     parse: (text) => language.parseDocument(text, fileName),
+    ...render,
     save: () => reason,
+  };
+}
+
+function sourceRenderer(
+  language: Language,
+  fileName?: string,
+): Partial<Pick<EditableSource, "render">> {
+  if (!language.renderLines) return {};
+  return {
+    render: (source: Document): Document => {
+      return {
+        ...source,
+        lines: renderedLinesFor(language, source.text, fileName)!,
+      };
+    },
   };
 }
 

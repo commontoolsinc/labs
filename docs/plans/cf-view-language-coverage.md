@@ -1,8 +1,11 @@
 # `cf view` language and syntax coverage plan
 
-Status: In progress. Unknown named files and filename-free source use plain
-text, while filename-free transformed compiler output keeps its TypeScript
-default. Python files with recognized extensions now have syntax highlighting.
+Status: In progress. Unknown named files and filename-free source without a
+recognized shebang use plain text, while filename-free transformed compiler
+output keeps its TypeScript default. Piped source can select a language directly
+or through a virtual filename. Declarative metadata can now describe extensions,
+exact names, compound patterns, explicit aliases, and direct interpreter
+shebangs. Python files with recognized extensions now have syntax highlighting.
 The order is provisional because recent activity was measured in six of the 24
 active organization repositories.
 
@@ -85,8 +88,8 @@ relative value. Record the reason in this plan.
 - [x] Add a plain-text language and select it for unknown named files.
 - [x] Preserve the intentional TypeScript default only for transformed
   compiler output that has no filename.
-- [ ] Add `--language` and `--filename` overrides for piped input.
-- [ ] Represent extensions, exact filenames, compound filename patterns,
+- [x] Add `--language` and `--filename` overrides for piped input.
+- [x] Represent extensions, exact filenames, compound filename patterns,
   aliases, and shebang interpreters as language metadata.
 - [ ] Keep content detection only for unambiguous containers such as unified
   diffs.
@@ -123,8 +126,8 @@ notebook selects JSON or line-oriented JSON without broad suffix guesses.
 ## Stage 2: Python
 
 - [x] Highlight `.py`, `.pyi`, and `.pyw` files.
-- [ ] Recognize extensionless programs from direct Python and `uv run`
-  shebangs.
+- [x] Recognize extensionless programs from direct Python shebangs.
+- [ ] Recognize extensionless programs from `uv run` shebangs.
 - [ ] Add class, function, async function, and decorated-definition structure.
 - [ ] Add representative Loom, Specs, Legibility, Raia, and gVisor fixtures.
 

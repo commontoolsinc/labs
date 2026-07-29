@@ -9,6 +9,7 @@ import {
   bashCompletionScript,
   zshCompletionScript,
 } from "../lib/completion/script.ts";
+import { languageNames } from "../lib/view/languages/language.ts";
 import { main } from "../commands/main.ts";
 
 function staticFor(line: string): string[] {
@@ -84,6 +85,10 @@ Deno.test("--log-level=<value> keeps the inline prefix on candidates", async () 
   // The shell replaces the whole token, so a bare `debug` would produce
   // `cf --log-level=debug` -> `cf debug`.
   assertEquals(await completeFor("cf --log-level=de"), ["--log-level=debug"]);
+});
+
+Deno.test("cf view --language completes its accepted names", async () => {
+  assertEquals(await completeFor("cf view --language "), languageNames());
 });
 
 Deno.test("candidates are filtered by the typed prefix", async () => {

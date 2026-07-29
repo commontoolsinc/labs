@@ -413,8 +413,8 @@ export class RuntimeInternals extends EventTarget {
    * about to be displayed. Pass `start: false` for read-only consumers
    * (e.g. listing piece names): the persisted result cell is synced and
    * readable without paying pattern instantiation for every piece
-   * (CT-1623: starting all pieces on reload cost ~10s of dependency
-   * collection, either in the reload wall or on the first interaction).
+   * (starting every registered piece on reload cost about ten seconds of
+   * dependency collection, either during reload or on the first interaction).
    *
    * Cached per (space, id) — a pattern's address. A cache entry created
    * with `start: false` is upgraded (re-fetched with start) when a

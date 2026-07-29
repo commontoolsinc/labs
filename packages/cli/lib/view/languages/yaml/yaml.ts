@@ -8,11 +8,6 @@ import type { Document, Line, Span, TokenClass } from "../../model.ts";
 import { cpLen } from "../../ansi.ts";
 import type { Highlighter } from "../language.ts";
 
-/** Whether `fileName` names a YAML file. */
-export function isYamlPath(fileName: string | undefined): boolean {
-  return fileName !== undefined && /\.ya?ml$/i.test(fileName);
-}
-
 interface QuoteState {
   readonly quote: "'" | '"';
   readonly cls: TokenClass;

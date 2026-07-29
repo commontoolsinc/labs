@@ -99,14 +99,14 @@ Waits split into two groups with different primitives.
   has finished its update cycle. This is the "is the control interactive yet"
   signal.
 - The higher-level wrappers in
-  `packages/patterns/integration/cfc-browser-helpers.ts` — `waitForText`,
-  `waitForSettledText`, `waitForTextAbsent`, `fillCfInput`, `clickCfButton`,
-  `clickNthCfButton`, `clickCfButtonAndWaitForText`, `waitForRuntimeIdle`,
-  `waitForRuntimeSynced` — bundle "settle the view with the control present,
-  act once, wait for the effect" on top of the two primitives above.
-  `clickCfButton` takes the first match and reaches through a host's shadow root
-  for its inner `[data-cf-button]`; `clickNthCfButton` takes the `index`-th
-  match of a selector that already resolves to the buttons themselves.
+  `packages/patterns/integration/cfc-browser-helpers.ts` compose the two
+  primitives above for common waits and interactions. `clickCfButton` and
+  `clickCfButtonsConcurrently` settle and mark the exact rendered targets before
+  clicking them. `clickCfButton` takes the first match and reaches through a
+  host's shadow root for its inner `[data-cf-button]`.
+  `clickNthCfButton` takes the `index`-th match of a selector that already
+  resolves to the buttons themselves. It does not yet have the same settlement
+  guarantee.
 
 To click a control that appears asynchronously, follow the `clickCfButton`
 shape rather than a find-and-click retry loop: a `waitForCondition` predicate
@@ -117,11 +117,11 @@ target to be rendered — laid out, and not `display:none` or `visibility:hidden
 clickable rather than tagged while it has no layout box and then failing to
 click.
 
-Settle the view inside that predicate, on every check, and let the check pass
-only on one the settle preceded. Settling is what makes a rendered control
-interactive, so a settle that ran before the control existed says nothing about
-it: the click lands on an element whose handler is not bound, is silently
-dropped, and the wait for its effect runs to the stuck-condition safety net.
+Resolve the target before settling the view inside that predicate. Let the
+check pass only when the same rendered element remains after the settle. A
+target that appears or is replaced during the settle is checked again after
+the DOM mutation. The next check gives that exact element a complete settle
+before marking it for the click.
 
 Do not reach instead for a check that only watches the DOM. Asking the worker
 whether it is idle queues runnable pull work that nothing else would start, so a
@@ -129,8 +129,9 @@ control that appears only once the page's own pending work runs never arrives
 under a purely passive wait. The settle is both the barrier and the pump, which
 is why it belongs inside the predicate rather than in front of it.
 
-When several controls are clicked as a group, resolve every one of them before
-marking any, so no settle falls between the marks and the clicks.
+When several controls are clicked as a group, prove that every target is stable
+before marking any of them. Mark the targets inside the successful predicate so
+the click addresses the elements that passed the settle check.
 
 `clickCfButton` and `clickCfButtonsConcurrently` work this way.
 `clickTrustedAction`, `submitViaEnter`, and `settleAndClickNoteButton` in
@@ -404,51 +405,24 @@ logical time to zero and drops pending timers: one frozen clock wraps a whole
 `describe`, so a suite whose cases each read absolute coarsened time (the `#now`
 grid tests) calls it from `beforeEach` to start each case from a known instant.
 
-Three files stay on the real clock, listed with their reasons in the runner
-preload's `realClockFiles` list, and they are there for two different kinds of
-reason. One is a resume test whose reload holds each per-element child document
-back by a delay to open the resume window it observes; that delay is a frozen
-test-file timer, and the resuming runtime's pull/idle machinery blocks on the
-deliveries it gates, so the resume deadlocks. That one is an honest exception:
-the clock it needs is the real one, and its own sleeps are the honest way to
-wait. The other two are carried rather than endorsed, and the next section says
-why.
+One file stays on the real clock, listed with its reason in the runner preload's
+`realClockFiles` list. It is a resume test whose reload holds each per-element
+child document back by a delay to open the resume window it observes; that delay
+is a frozen test-file timer, and the resuming runtime's pull/idle machinery
+blocks on the deliveries it gates, so the resume deadlocks. That is an honest
+exception: the clock it needs is the real one, and its own sleeps are the honest
+way to wait.
 
-### The dynamic-schema subagent shape
-
-`generate-object-tools-dynamic-subagent.test.ts` and
-`llm-dialog-dynamic-subagent.test.ts` are on the list for one reason, worth
-spelling out because the same shape will catch the next person who writes it.
-
-Each of their three cases drives a tool call whose delegate runs a child agent,
-and the result schema that child works to is supplied by the model in the tool
-input rather than fixed when the pattern is written. Because the schema arrives
-that way, the child cannot form its own request until the tool input has been
-written into its inputs and the graph has settled. That round trip carries the
-delegate's completion across a macrotask boundary. The pump reads that boundary
-as an idle event loop and jumps logical time to the earliest pending production
-timer, which is the deadline the tool-calling path arms around the wait, so the
-delegate aborts with "Tool call timed out" while its child is still in flight.
-
-Only one of the three ever went red. The other two passed while their delegate
-aborted, because their closing assertions are reached whether the delegate
-returned data or an error. All three now assert on the delegate's own tool
-result, so they go red if they ever run under the fake clock again — through a
-rename, or through the exemption being dropped — rather than going quietly
-green. A tool aborting is not reliably visible in the exit status, so when you
-suspect it, the check is the absence of `Tool ... failed` lines in a run,
-compared against the same file on the real clock.
-
-Teaching the pump to hold time still while zero-delay work is queued does fix
-all three, and it costs more than it buys: the pump cannot tell that deadline
-apart from a backoff window, and other tests need backoff windows to fire during
-exactly this kind of reactive churn. Hold time still and
-`scheduler-commit-backpressure.test.ts` never gets the retries it waits on,
-while the burst in `reactive-stale-basis-strand.test.ts` consumes none of its
-fifteen injected failures rather than all of them.
-
-The real fix is retiring the deadline these cases trip over, which
-[a proposal](proposals/retiring-llm-tool-call-deadlines.md) works through.
+The list used to carry two more, for a reason worth recording because it shows
+what a production deadline costs a test suite. Both held tool-calling cases whose
+delegate runs a child agent against a result schema the model supplies in the
+tool input, so the child could not form its own request until that input had
+settled through the graph, and the round trip carried the delegate's completion
+across a macrotask boundary. The pump read that boundary as an idle event loop
+and jumped logical time to the earliest pending production timer, which was the
+deadline the tool-calling path armed around its wait, and the delegate aborted
+while its child was still in flight. Retiring that deadline retired the
+exemptions with it.
 
 The `test/` versus `src/` classification reads the scheduling frame from a stack
 trace, and that has to keep working after a runtime is running. SES's

@@ -80,9 +80,11 @@ import type {
 } from "./editsource.ts";
 import type { DirEntry, FileGateway } from "./filegateway.ts";
 import {
+  type ActiveWrapMode,
   buildWrapPlan,
   fitViewLayout,
   type WrapDecoration,
+  type WrapMode,
   wrappedRowAt,
   wrappedRowForPosition,
   type WrapPlan,
@@ -201,8 +203,8 @@ export class Session {
   private viewMode: ViewMode = "source";
   private color: boolean;
   private lineNumberMode: LineNumberMode = "off";
-  /** Whether long logical lines continue on later screen rows. */
-  private wrapLines = false;
+  /** How long logical lines continue on later screen rows. */
+  private wrapMode: WrapMode = "off";
   /** How non-printable characters are shown; edit mode forces the first mode. */
   private displayMode: DisplayMode = DISPLAY_MODES[0];
   /** Indices (document order) of the diff files collapsed to a summary line.
@@ -216,6 +218,7 @@ export class Session {
   private wrapPlanCache?: {
     lines: readonly Line[];
     mode: DisplayMode;
+    wrapMode: ActiveWrapMode;
     width: number;
     decorations: string;
     plan: WrapPlan;
@@ -223,6 +226,7 @@ export class Session {
   private baseWrapPlanCache?: {
     lines: readonly Line[];
     mode: DisplayMode;
+    wrapMode: ActiveWrapMode;
     width: number;
     plan: WrapPlan;
   };
@@ -234,6 +238,14 @@ export class Session {
     mode: DisplayMode;
     columns: Map<number, Uint32Array>;
   };
+
+  private get wrapLines(): boolean {
+    return this.wrapMode !== "off";
+  }
+
+  private get activeWrapMode(): ActiveWrapMode {
+    return this.wrapMode === "word" ? "word" : "hard";
+  }
   private maxDisplayWidthCache?: {
     lines: readonly Line[];
     mode: DisplayMode;
@@ -470,12 +482,14 @@ export class Session {
     if (
       this.wrapPlanCache?.lines !== lines ||
       this.wrapPlanCache.mode !== this.displayMode ||
+      this.wrapPlanCache.wrapMode !== this.activeWrapMode ||
       this.wrapPlanCache.width !== width ||
       this.wrapPlanCache.decorations !== this.wrapDecorationKey
     ) {
       this.wrapPlanCache = {
         lines,
         mode: this.displayMode,
+        wrapMode: this.activeWrapMode,
         width,
         decorations: this.wrapDecorationKey,
         plan: buildWrapPlan(
@@ -483,6 +497,7 @@ export class Session {
           this.displayMode,
           width,
           this.wrapDecorations,
+          this.activeWrapMode,
         ),
       };
     }
@@ -496,13 +511,21 @@ export class Session {
     if (
       this.baseWrapPlanCache?.lines !== lines ||
       this.baseWrapPlanCache.mode !== this.displayMode ||
+      this.baseWrapPlanCache.wrapMode !== this.activeWrapMode ||
       this.baseWrapPlanCache.width !== width
     ) {
       this.baseWrapPlanCache = {
         lines,
         mode: this.displayMode,
+        wrapMode: this.activeWrapMode,
         width,
-        plan: buildWrapPlan(lines, this.displayMode, width),
+        plan: buildWrapPlan(
+          lines,
+          this.displayMode,
+          width,
+          new Map(),
+          this.activeWrapMode,
+        ),
       };
     }
     return this.baseWrapPlanCache.plan;
@@ -857,7 +880,7 @@ export class Session {
       color: this.color,
       isDiff: this.source?.isDiff === true,
       showLineNumbers: this.lineNumberMode !== "off",
-      wrapLines: this.wrapLines,
+      wrapMode: this.wrapMode,
       wrapPlan: this.wrapLines ? this.wrapPlan() : null,
       lineNumbers: this.lineNumberMode === "off" ? null : this.gutterNumbers(),
       displayMode: this.displayMode,
@@ -1848,7 +1871,7 @@ export class Session {
         return;
       }
       case "\\":
-        this.toggleLineWrapping();
+        this.cycleLineWrapping();
         return;
       case "#":
         this.cycleLineNumbers();
@@ -1904,10 +1927,14 @@ export class Session {
     this.message = `Non-printables: ${displayModeLabel(this.displayMode)}`;
   }
 
-  /** Toggle line wrapping while keeping the top-left content in view. */
-  private toggleLineWrapping(): void {
+  /** Step through wrapping modes while keeping the top-left content in view. */
+  private cycleLineWrapping(): void {
     const anchor = this.viewportAnchor();
-    this.wrapLines = !this.wrapLines;
+    this.wrapMode = this.wrapMode === "off"
+      ? "hard"
+      : this.wrapMode === "hard"
+      ? "word"
+      : "off";
     this.expansionLayoutCache = undefined;
     if (this.wrapLines) {
       this.left = 0;
@@ -1917,7 +1944,7 @@ export class Session {
       this.left = anchor.displayCol;
       this.clampScroll();
     }
-    this.message = `Line wrapping: ${this.wrapLines ? "on" : "off"}`;
+    this.message = `Line wrapping: ${this.wrapMode}`;
   }
 
   // --- file-fold commands ----------------------------------------------------
@@ -2080,7 +2107,7 @@ export class Session {
     const cursorCol = anchor && displayedLine === this.currentDoc.lines[topDoc]
       ? this.anchorSourceCol(anchor)
       : 0;
-    this.wrapLines = false;
+    this.wrapMode = "off";
     this.cursorOn = true;
     this.selectedIndex = null;
     // Editing relies on every source column mapping to one display column, which
@@ -3568,6 +3595,7 @@ export class Session {
         this.displayMode,
         this.contentWidth(),
         tentative.decorations,
+        this.activeWrapMode,
       );
       const top = this.wrappedTopForAnchor(anchor, plan);
       visible = this.metadataWithVisibleTriangle(visible, plan, top);
@@ -4293,7 +4321,7 @@ export function helpOverlay(): {
     ["View", ""],
     ["  V", "toggle source / rendered view when the language supports it"],
     ["  #", "line numbers: off / input position / file or message line"],
-    ["  \\", "wrap / unwrap long lines"],
+    ["  \\", "line wrapping: off / hard / word"],
     ["  C", "cycle non-printables: pictures / ANSI colour / hidden"],
     ["  ?", "this help   ·   Q  quit"],
   ];

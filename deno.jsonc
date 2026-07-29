@@ -57,6 +57,7 @@
     "test-all": "echo \"Use 'deno task test' instead.\" && exit 1",
     "build-binaries": "./tasks/build-binaries.ts",
     "install-hooks": "./scripts/install-git-hooks.sh",
+    "install-cf": "./scripts/install-cf.sh",
     "initialize-db": "deno run --allow-env --allow-read --allow-write --allow-ffi --allow-net=github.com,release-assets.githubusercontent.com,jsr.io packages/memory/scripts/initialize-db.ts",
     "integration": "./tasks/integration.ts",
     "demo": "./tasks/demo.ts",

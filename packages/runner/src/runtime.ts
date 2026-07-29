@@ -69,6 +69,7 @@ import {
   NormalizedLink,
   parseLink,
 } from "./link-utils.ts";
+import { addressKey } from "./link-types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import {
   buildCfcPolicySnapshot,
@@ -1111,7 +1112,14 @@ export class Runtime {
   // perform AFTER their handler returns, from a post-commit outbox flush: a
   // network / LLM / navigation call or a sqlite RPC, plus any result writeback.
   // `idle()` deliberately does NOT wait for these; `settled()` does.
-  #pendingAsyncWork = new Set<Promise<unknown>>();
+  //
+  // Each entry carries the pattern run it belongs to, as the address key of the
+  // run's result cell — the `parentCell` every raw builtin is handed. Entries
+  // with no owner belong to no single run: the scheduler's commit promises,
+  // which are the barrier that a fire-and-forget builtin's outbox flush has
+  // registered its own work. `settledFor` waits for those as well as the run's
+  // own, because that handoff is how the run's work first becomes visible.
+  #pendingAsyncWork = new Map<Promise<unknown>, string | undefined>();
 
   /**
    * Register an in-flight async builtin operation so `settled()` waits for it
@@ -1121,10 +1129,18 @@ export class Runtime {
    * network/LLM promise. Normalized to always resolve (failures are settled, not
    * thrown) and auto-removed once it settles, so a rejecting promise is safe and
    * never leaks.
+   *
+   * `owner` is the pattern run the work belongs to — the `parentCell` a raw
+   * builtin is given, which is the result cell of the run that instantiated it.
+   * Passing it is what lets `settledFor` wait for one run rather than the whole
+   * runtime. Omit it only for work that belongs to no single run.
    */
-  trackAsyncWork(promise: Promise<unknown>): void {
+  trackAsyncWork(promise: Promise<unknown>, owner?: Cell<any>): void {
     const tracked = promise.then(() => {}, () => {});
-    this.#pendingAsyncWork.add(tracked);
+    const ownerKey = owner === undefined
+      ? undefined
+      : addressKey(owner.getAsNormalizedFullLink());
+    this.#pendingAsyncWork.set(tracked, ownerKey);
     tracked.finally(() => this.#pendingAsyncWork.delete(tracked));
   }
 
@@ -1147,7 +1163,53 @@ export class Runtime {
       await this.scheduler.idleWithPendingCommits();
       await this.storageManager.synced();
       if (this.#pendingAsyncWork.size === 0) return;
-      await Promise.allSettled([...this.#pendingAsyncWork]);
+      await Promise.allSettled([...this.#pendingAsyncWork.keys()]);
+    }
+  }
+
+  /**
+   * Wait until one pattern run has quiesced: the scheduler is idle including
+   * in-flight commits, storage is synced, and no tracked async work belongs
+   * either to `owner` or to nobody. Re-checked until all of those hold at once,
+   * because each can restart the others.
+   *
+   * This is `settled()` narrowed to a single run. The narrowing matters where
+   * `settled()` cannot be used at all: a caller that is itself running inside
+   * tracked work — an LLM tool call, which runs inside its turn's promise —
+   * would wait on the promise it is inside.
+   *
+   * The answer it gives is "this run is doing nothing further", which is what
+   * distinguishes a run that finished having written nothing from one still
+   * working. It is not "the run wrote a result": the caller reads the result
+   * cell afterwards and finds whatever landed, including nothing.
+   *
+   * `idleWithPendingCommits()` rather than plain `idle()`, because a run's
+   * result writeback travels through a commit and a plain idle can resolve
+   * while that commit is still going to the server.
+   *
+   * Unlike `settled()` this carries no round cap. A cap would put a ceiling on
+   * how much work a run may do before the barrier reports it finished anyway,
+   * and a barrier that returns while the run is still working answers the
+   * caller's question wrongly and silently. Each round awaits real promises, so
+   * a run that keeps working keeps the barrier open rather than spinning.
+   *
+   * `signal` stops the loop for a caller that no longer needs the answer —
+   * typically because it raced this against something that resolved first, and
+   * without it an unbounded loop would outlive the caller.
+   */
+  async settledFor(
+    owner: Cell<any>,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const ownerKey = addressKey(owner.getAsNormalizedFullLink());
+    while (!signal?.aborted) {
+      await this.scheduler.idleWithPendingCommits();
+      await this.storageManager.synced();
+      const relevant = [...this.#pendingAsyncWork]
+        .filter(([, key]) => key === undefined || key === ownerKey)
+        .map(([promise]) => promise);
+      if (relevant.length === 0) return;
+      await Promise.allSettled(relevant);
     }
   }
 
