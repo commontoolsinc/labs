@@ -229,4 +229,12 @@ the older resolution is no longer reachable to abort.
 risk survivable: a slow resolution running in this replica still reaches its
 result, a failing request does not erase a result recorded for the same inputs,
 and the staleness branch itself leaves a fresh claim alone while taking over an
-old one.
+old one. It also covers the claim's other transitions — handing it back when the
+pattern stops, a resolution that fails, an empty URL.
+
+One case there is untested, and it is the negative half of the ownership check:
+an entry carrying *another* replica's claim id, which teardown must leave alone.
+Reaching it takes a second replica writing the same durable cache cell, and
+`StorageManager.emulate` gives each runtime its own server, so a runner unit
+test cannot arrange it as things stand. The positive half — an entry this
+replica still holds, which teardown does release — is covered.
