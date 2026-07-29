@@ -194,6 +194,34 @@ describe("cf space", () => {
     });
   });
 
+  it("--expect-migration passes a rewrite and still fails a removal", async () => {
+    // The flag decides verify's EXIT CODE, which is the only machine-readable
+    // signal a rehearsal script has. Without it a successful migration exits
+    // nonzero and the script stops on success; with it, a removal must still
+    // fail or the gate is worthless.
+    await withFixture(async ({ snapshot, clone }) => {
+      await cf(`space clone ${SPACE} --from ${snapshot} --to ${clone}`);
+
+      // What a migration looks like: derived values rewritten, nothing dropped.
+      writeToWorkingCopy(clone, [
+        ["of:named", { value: "rewritten", result: link("of:piece") }],
+      ]);
+      const strict = await cf(`space verify ${clone}`);
+      expect(strict.code).toBe(1); // any change fails the strict default
+      const relaxed = await cf(`space verify ${clone} --expect-migration`);
+      expect(relaxed.code).toBe(0); // ...but is the expected migration outcome
+      expect(text(relaxed.stdout)).toContain("removed    0");
+
+      // A removal must fail even with the flag, or the gate protects nothing.
+      const db = new Database(workingCopy(clone));
+      db.exec(`DELETE FROM revision WHERE id = 'of:named'`);
+      db.close();
+      const removed = await cf(`space verify ${clone} --expect-migration`);
+      expect(removed.code).toBe(1);
+      expect(text(removed.stdout)).toContain("ENTITIES REMOVED");
+    });
+  });
+
   it("requires --from and --to, and says what they are for", async () => {
     await withFixture(async ({ snapshot, clone }) => {
       const noFrom = await cf(`space clone ${SPACE} --to ${clone}`);

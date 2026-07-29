@@ -393,6 +393,35 @@ Deno.test("refuses a non-empty target rather than merging into it", async () => 
   });
 });
 
+Deno.test("the per-kind tally respects scope, not just id", async () => {
+  // One id can hold a shared space value AND per-user overrides that are
+  // genuinely different entities; `diffFingerprints` keys by id AND scope.
+  // Keying the kind lookup by id alone let the last scope win and misclassify
+  // the tally — the precision ("74 pieces vs 73 cells") the diff exists for.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const db = new Database(clonePaths(clone, SPACE).workingPath);
+    const seq = db.prepare(`SELECT max(seq) s FROM "commit"`)
+      .get<{ s: number }>()!.s + 1;
+    db.prepare(
+      `INSERT INTO "commit" (seq, session_id, local_seq, original, resolution)
+       VALUES (?, ?, ?, '{}', '{}')`,
+    ).run(seq, SESSION, seq);
+    // Same id as an existing space-scope cell, in a per-user scope.
+    db.prepare(
+      `INSERT INTO revision (id, scope_key, seq, op_index, op, data, commit_seq)
+       VALUES ('of:named', 'user:did%3Akey%3AzAlice', ?, 0, 'set', ?, ?)`,
+    ).run(seq, JSON.stringify({ value: "per-user override" }), seq);
+    db.close();
+
+    const v = await verifyClone(clone);
+    assertEquals(v.diff.removed, 0);
+    assertEquals(v.diff.added, 1, "the per-user entity is new, not a rewrite");
+    // Classified as its own kind rather than inheriting the space-scope row's.
+    assertEquals(Object.values(v.diff.removedByKind).length, 0);
+  });
+});
+
 Deno.test("a clone taken before the baseline sidecar still verifies", async () => {
   // Backward compatibility: clones made before per-entity baselines were
   // recorded have no sidecar, and must still produce a real diff by
@@ -414,6 +443,30 @@ Deno.test("a clone taken before the baseline sidecar still verifies", async () =
     const dirty = await verifyClone(clone);
     assertEquals(dirty.diff.changed, 1);
     assert(!dirty.ok);
+  });
+});
+
+Deno.test("a corrupted-but-PARSEABLE sidecar is caught by its hash", async () => {
+  // The dangerous case is not unparseable JSON — it is valid JSON with wrong
+  // contents. The sidecar feeds `diff` and therefore `okAfterMigration`, the
+  // verdict a rehearsal gates on, so a silently wrong baseline would produce a
+  // confident wrong answer while `baselineIntact` still reported true.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const path = clonePaths(clone, SPACE).baselinePath;
+    const rows = JSON.parse(await Deno.readTextFile(path)) as {
+      id: string;
+      hash: string | null;
+    }[];
+    // Still valid JSON, still the right shape — one hash quietly altered.
+    rows[0].hash = "fid1:tamperedtamperedtamperedtamperedtamperedta";
+    await Deno.writeTextFile(path, JSON.stringify(rows));
+
+    const error = await assertRejects(() => verifyClone(clone), Error);
+    assert(
+      error.message.includes("does not match the hash recorded"),
+      `expected an integrity failure, got: ${error.message}`,
+    );
   });
 });
 

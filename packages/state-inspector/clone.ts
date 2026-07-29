@@ -63,6 +63,17 @@ export interface CloneManifest {
   createdAt: string;
   /** SHA-256 of the pristine snapshot file. */
   snapshotHash: string;
+  /**
+   * SHA-256 of the per-entity baseline sidecar.
+   *
+   * The sidecar feeds `diff` and therefore `okAfterMigration` — the verdict a
+   * rehearsal script gates on — so it gets the same integrity treatment as the
+   * snapshot. Without this, a corrupted-but-parseable sidecar (two hashes
+   * swapped inside valid JSON) would produce a confident, wrong diff while
+   * `baselineIntact` still reported true. Absent on clones taken before the
+   * sidecar existed, which fall back to recomputing.
+   */
+  baselineHash?: string;
   snapshotBytes: number;
   /** Durable counts at clone time — the cheap half of "did content survive?". */
   counts: {
@@ -200,6 +211,12 @@ export async function createClone(
     paths.baselinePath,
     JSON.stringify(fingerprint.perEntity),
   );
+  // Recorded after the write so the manifest describes what is actually on disk.
+  manifest.baselineHash = await hashFile(paths.baselinePath);
+  await Deno.writeTextFile(
+    paths.manifestPath,
+    `${JSON.stringify(manifest, null, 2)}\n`,
+  );
   await Deno.writeTextFile(
     `${dir}/${MARKER}`,
     `This directory is a CLONE of space ${options.space}, not production.\n` +
@@ -294,8 +311,19 @@ export interface VerifyResult {
  * the working copy still holds the same durable content.
  *
  * A migration rehearsal EXPECTS counts to grow — that is what a migration does.
- * The fingerprint is the signal that matters: generated cells are excluded, so
- * a clean pattern update should leave it unchanged even as commits climb.
+ *
+ * It also expects the content fingerprint to MOVE. Excluding generated cells is
+ * not enough to hold it still: a schema update rewrites every piece's result
+ * value, and results are part of the fingerprint. The first real rehearsal
+ * proved this — 74 pieces and 73 owned cells changed while every authored
+ * title, body, comment and link stayed byte-identical.
+ *
+ * So the hash cannot be the verdict after a migration. `diff` is: entities
+ * `removed` is the alarm, and changes confined to pieces and their derived
+ * cells are the update working. `ok` stays strict for checking an untouched
+ * clone; `okAfterMigration` is the one to gate a rehearsal on. Neither can see
+ * a clobber of authored content, which is why the runbook checks that
+ * separately.
  */
 export async function verifyClone(dir: string): Promise<VerifyResult> {
   const manifest = await readManifest(dir);
@@ -320,6 +348,16 @@ export async function verifyClone(dir: string): Promise<VerifyResult> {
   // taken before the sidecar existed falls back to computing it.
   let before: FingerprintReport;
   try {
+    if (manifest.baselineHash !== undefined) {
+      const actual = await hashFile(paths.baselinePath);
+      if (actual !== manifest.baselineHash) {
+        throw new Error(
+          `${paths.baselinePath} does not match the hash recorded in ` +
+            `${MANIFEST}; the baseline is damaged and its diff would be wrong. ` +
+            `Re-clone rather than trusting this verdict.`,
+        );
+      }
+    }
     const rows = JSON.parse(
       await Deno.readTextFile(paths.baselinePath),
     ) as FingerprintReport["perEntity"];
@@ -342,12 +380,27 @@ export async function verifyClone(dir: string): Promise<VerifyResult> {
   }
 
   const d = diffFingerprints(before, fingerprint);
-  const kindOf = new Map(fingerprint.perEntity.map((e) => [e.id, e.kind]));
-  const kindWas = new Map(before.perEntity.map((e) => [e.id, e.kind]));
-  const tally = (ids: string[], m: Map<string, string>) => {
+  // `diffFingerprints` keys by id AND scope, because one id can hold a shared
+  // space value plus per-user/per-session overrides that are genuinely
+  // different entities. Keying these lookups by id alone would let the last
+  // scope win and misclassify the tally — exactly the precision ("74 pieces vs
+  // 73 cells") the diff exists to provide. `diff` reports bare ids, so a
+  // by-id-only fallback keeps a lookup working when scopes disagree.
+  const kindIndex = (rows: FingerprintReport["perEntity"]) => {
+    const byIdAndScope = new Map<string, string>();
+    const byId = new Map<string, string>();
+    for (const e of rows) {
+      byIdAndScope.set(`${e.id} ${e.scope}`, e.kind);
+      byId.set(e.id, e.kind);
+    }
+    return (id: string) => byIdAndScope.get(id) ?? byId.get(id) ?? "unknown";
+  };
+  const kindOf = kindIndex(fingerprint.perEntity);
+  const kindWas = kindIndex(before.perEntity);
+  const tally = (ids: string[], lookup: (id: string) => string) => {
     const out: Record<string, number> = {};
     for (const id of ids) {
-      const k = m.get(id) ?? "unknown";
+      const k = lookup(id);
       out[k] = (out[k] ?? 0) + 1;
     }
     return out;
