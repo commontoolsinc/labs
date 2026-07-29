@@ -201,12 +201,13 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   `EXPERIMENTAL_OPTIONS.md`, scheduler-v2 §7.6 receipt-content note, both
   flag states tested in `scheduler-event-receipts.test.ts`, including
   same-id redelivery retaining the original result.
-- **C1 design fork, decide first:** `Stream<T>` is a branded-cell interface
-  wired through a one-slot HKT (`AsStream`, `packages/api/index.ts:1239`), so
+- ~~**C1 design fork, decide first:** `Stream<T>` is a branded-cell interface
+  wired through a one-slot HKT (`AsStream`, `packages/api/index.ts:1358`), so
   `Stream<T, R = void>` ripples through the cell-type machinery; the
   alternative is a separate declared-result carrier (e.g.
   `StreamWithResult<T, R> extends Stream<T>`) that only the schema layer
-  interprets. Settle this at the top of the C1 PR.
+  interprets. Settle this at the top of the C1 PR.~~ — settled in #5123; the
+  decision and its measured costs are the **C1 fork — settled** bullet above.
 - **Exit:** a CTS pattern declares a verb returning `AddTopicResult`; the
   result schema appears in the durable schema; under the flag, both plain and
   reactive returns are readable in the receipt cell.
