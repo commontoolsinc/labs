@@ -1,44 +1,6 @@
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import { createRuntime } from "../packages/cli/lib/dev.ts";
-
-const PATTERNS_DIR = "packages/patterns";
-
-const NON_PATTERN_FILES = new Set([
-  "packages/patterns/mod.ts",
-  "packages/patterns/scrabble/scrabble-words.ts",
-]);
-
-const NON_PATTERN_PREFIXES = [
-  "packages/patterns/integration/",
-  "packages/patterns/tools/",
-];
-
-async function collectPatternFiles(dir: string): Promise<string[]> {
-  const files: string[] = [];
-
-  async function walk(current: string) {
-    for await (const entry of Deno.readDir(current)) {
-      const path = `${current}/${entry.name}`;
-      if (entry.isDirectory) {
-        await walk(path);
-        continue;
-      }
-      if (!entry.isFile) continue;
-      if (!isPatternSource(path)) continue;
-      files.push(path);
-    }
-  }
-
-  await walk(dir);
-  return files.sort();
-}
-
-function isPatternSource(path: string): boolean {
-  if (!path.endsWith(".ts") && !path.endsWith(".tsx")) return false;
-  if (NON_PATTERN_FILES.has(path)) return false;
-  if (path.endsWith(".test.ts") || path.endsWith(".test.tsx")) return false;
-  return !NON_PATTERN_PREFIXES.some((prefix) => path.startsWith(prefix));
-}
+import { collectPatternFiles, PATTERNS_DIR } from "./pattern-files.ts";
 
 function formatError(error: unknown): string {
   if (error instanceof Error) return error.message;

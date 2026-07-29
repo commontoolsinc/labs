@@ -8,6 +8,8 @@ import { assert, assertEquals } from "@std/assert";
 import { buildView } from "../lib/view/mod.ts";
 
 const SRC = "export const x = 1;\nconst y = x + 1;\n";
+const TRANSFORMED = `// transformed: /app.ts
+${SRC}`;
 const DIFF = `diff --git a/a.ts b/a.ts
 --- a/a.ts
 +++ b/a.ts
@@ -25,10 +27,69 @@ Deno.test("buildView: a named source file is editable and its semantics closure 
   assertEquals(r.editSource.editable, true, "a named file is editable");
 });
 
-Deno.test("buildView: a pipe with no file is a read-only source", () => {
+Deno.test("buildView: an ordinary pipe with no file is read-only plain text", () => {
   const r = buildView(SRC);
-  r.semantics();
+
+  assertEquals(r.doc.structure, []);
+  assertEquals(
+    r.doc.lines.flatMap((line) => line.spans.map((span) => span.cls)),
+    ["plain", "plain"],
+  );
+  assertEquals(r.semantics(), undefined);
   assertEquals(r.editSource.editable, false);
+});
+
+Deno.test("buildView: transformed compiler output keeps the TypeScript default", () => {
+  const r = buildView(TRANSFORMED);
+
+  assert(
+    r.doc.structure.some((node) => node.kind === "section"),
+    "the transformed module has TypeScript structure",
+  );
+  assert(
+    r.doc.lines.flatMap((line) => line.spans).some((span) =>
+      span.cls === "storageKeyword"
+    ),
+    "the transformed module has TypeScript highlighting",
+  );
+  const semantics = r.semantics();
+  assert(semantics, "transformed output has TypeScript semantics");
+  assertEquals(
+    r.editSource.parse(TRANSFORMED),
+    r.doc,
+    "read-only reparsing keeps the selected language",
+  );
+});
+
+Deno.test("buildView: transformed declarations without bodies retain function structure", () => {
+  const r = buildView(
+    "// transformed: /types.ts\nexport declare function run(): void;\n",
+  );
+  const declaration = r.doc.flatStructure.find((node) => node.name === "run");
+
+  assert(declaration, "the declaration remains in the TypeScript structure");
+  assertEquals(declaration.kind, "function");
+  assertEquals(declaration.children, []);
+  assertEquals(declaration.meta, {
+    kind: "closure",
+    params: [],
+    returns: undefined,
+    signature: "() → void",
+  });
+});
+
+Deno.test("buildView: only an exact first-line transformed header selects TypeScript", () => {
+  for (
+    const text of [
+      "ordinary text",
+      `\n${TRANSFORMED}`,
+      "// transformed:\nexport const x = 1;\n",
+      "// transformed:   \nexport const x = 1;\n",
+      "// Transformed: /app.ts\nexport const x = 1;\n",
+    ]
+  ) {
+    assertEquals(buildView(text).doc.structure, [], JSON.stringify(text));
+  }
 });
 
 Deno.test("buildView: blank input remains a read-only source", () => {
@@ -212,7 +273,7 @@ Deno.test("buildView: forceDiff=false views a real diff as source (--no-diff)", 
 
 Deno.test("buildView: text that only embeds a diff stays source (mostlyDiff is false)", () => {
   // Looks like a diff at the top, but the bulk is ordinary source, so the
-  // diff-share heuristic rejects it and it renders as TypeScript.
+  // diff-share heuristic rejects it and it renders as plain text.
   const embedded = "diff --git a/x b/x\n" +
     Array.from({ length: 40 }, (_, i) => `const v${i} = ${i};`).join("\n") +
     "\n";

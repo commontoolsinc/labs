@@ -4,6 +4,15 @@
 [`pattern-verb-contract.md`](pattern-verb-contract.md) (PR #4968). Keep current
 as work proceeds: check off exit criteria, record scope changes.
 
+**Amended 2026-07-28**, context only — no scope or decision changed: Risks
+names #5059 (`cf piece setsrc --check`) as the candidate preflight for the
+write-storm gate, WS-F gains a read-path guard so `cf piece get` on a verb
+redirects to `cf piece call`, and Non-goals records that constraining
+`cf piece set` is out of scope pending a decision this plan does not make. The
+design doc carries the same pass's larger share: the llm-dialog handler-branch
+precedent, tools restated as deferred rather than rejected, and the
+structural-interface property.
+
 **Amended 2026-07-24** from the first live headless session (a three-topic
 graph, ~24 CLI operations): compact discovery index (A2), closed-world inputs
 (C5), transaction-local acknowledgement as a WS-D exit criterion, phase
@@ -53,6 +62,15 @@ Named so their absence reads as intent, not oversight:
   separate comparison with existing slugs and configured host/space addressing.
 - **Cross-space effect atomicity** — the spec's I11 gap stands; the guarantee
   is same-space, which covers `topics`.
+- **Constraining direct data writes.** `cf piece set` writes a result field
+  directly, past every rule in Part 1 — no declared payload, no atomic unit,
+  no typed rejection. The LLM tool surface has no equivalent (it can only
+  mutate through verbs), so the CLI is the outlier. Whether this stays a
+  sanctioned escape hatch depends on a declarative notion of pattern-managed
+  state that does not exist yet (the `readonly`/opt-in-writability question),
+  and `set` is also an authoring and debugging tool whose non-agent uses this
+  contract does not touch. Until that decision is made, the contract governs
+  verbs and says nothing about `set`.
 - **Batch / session mode** for the CLI — orthogonal call-cost work, linked
   rather than orphaned: even perfect verbs leave a fresh runtime paying boot
   and sync per call (20–80 s per mutation observed live), so this gets its
@@ -114,9 +132,59 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
 
 - **api:** `action` overloads accept a return type (today both overloads type
   the callback `=> void`, `builder/module.ts:606-609`); `Stream<T, R = void>`
-  or equivalent so the result type is visible to the schema layer — the
-  defaulted parameter keeps every existing `Stream<T>` use compiling. A
-  `VerbError { code, message }` type for rule 4's typed rejections.
+  so the result type is visible to the schema layer — the defaulted parameter
+  keeps every existing `Stream<T>` use compiling. A `VerbError { code,
+  message }` type for rule 4's typed rejections.
+- **C1 fork — settled: widen `Stream`, do not add a second carrier.** The
+  alternative was a separate `StreamWithResult<T, R> extends Stream<T>` that
+  only the schema layer interprets, which is tempting because it leaves
+  `Stream<T>` and its one-slot `AsStream` HKT untouched. It loses on one
+  point that outweighs the rest: **a forgotten annotation stays silent.**
+  Because the carrier is a subtype, a verb whose body returns a value but
+  whose declaration still reads `Stream<T>` assigns cleanly, and the result
+  is erased exactly where the schema layer reads it — the same shape of
+  failure as the live board accepting and discarding `agentName`. Widening
+  `Stream` makes that a compile error instead, provided `R` sits in a
+  structural position rather than a phantom one: a purely unused parameter is
+  erased by structural typing (verified — `Stream<string, number>` assigns to
+  `Stream<string>` when `R` appears nowhere), while `R` in a property
+  position discriminates and forces the author to declare what the body
+  returns.
+  Prototyped to measure rather than estimate, following the `CELL_INNER_TYPE`
+  precedent — a `declare const` unique symbol read as a property, which
+  `AnyBrandedCell` already uses for exactly this reason ("without a concrete
+  property mentioning T, T would be a phantom parameter"). The workspace
+  type-checks clean with `Stream` widened: zero errors.
+  **The conditional-type utilities do not need auditing.** An earlier draft of
+  this entry called for widening every `[T] extends [Stream<any>]` guard,
+  on the theory that a result-carrying stream would silently stop matching.
+  It does stop matching — but that does not reach the schema layer, which
+  detects wrappers from the author's annotation by two annotation-rooted
+  paths: the written `ts.TypeNode` name
+  (`schema-generator/src/type-utils.ts:427-437`) and the `[CELL_BRAND]:
+  "stream"` literal on the resolved type
+  (`schema-generator/src/typescript/cell-brand.ts:97-114`), whose
+  `extractWrapperTypeReference` exposes the full `typeArguments` where `R`
+  sits — so detection even survives an alias like
+  `type MyVerb = Stream<E, R>`. The
+  guards shape inference and authoring ergonomics, not schema extraction, and
+  dropping a result there is harmless for every helper that does not care
+  about one. Where a guard genuinely mishandles a returning verb it shows up
+  as a compile error in that pattern, loudly, and only for verbs that opted
+  in — so a single fixture declaring a result catches the class, and guards
+  widen reactively when that fixture proves they must. Removing the default
+  makes the compiler enumerate all 253 `Stream<` sites, which is a useful
+  one-time audit tool but not a prerequisite.
+  What must be threaded is the construction path, not the guards:
+  `Handler`/`HandlerFactory` return the stream, so they carry the result
+  parameter or an author's annotation cannot match what `handler()` produces.
+  `AsStream` — one
+  slot, `Apply` and `IKeyable` assume that — keeps producing `Stream<A,
+  void>`, so a projection through the HKT drops a declared result. That is
+  acceptable because streams are leaves: patterns do not `key()` into a
+  stream to reach another. Both options need a result parameter threaded
+  through `Handler`/`HandlerFactory` regardless, since the factory returns
+  the stream, so that work is not a differentiator.
 - **ts-transformers:** lowering for value-returning `action` bodies; CTS spec
   updates under `docs/specs/ts-transformer/`. (The runtime side already
   consumes returns — `handleJavaScriptHandlerResult` — so this is authoring
@@ -134,10 +202,11 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   properties" is not a single predicate today. `isStream()` accepts three
   independent signals, any one of which suffices: the cell's construction kind,
   `asCell: ["stream"]` in the schema, and a stored `{$stream: true}` value
-  (`packages/runner/src/cell.ts:924-946`). If C3 keys emission off the schema
-  marker alone, a verb carrying only the stored marker gets no result schema
-  and rule 3 silently does not apply to it — and the WS-C exit below would not
-  catch that, since it exercises one CTS pattern that does carry the marker.
+  (`Cell.isStream`, `packages/runner/src/cell.ts:936-958`). If C3 keys emission
+  off the schema marker alone, a verb carrying only the stored marker gets no
+  result schema and rule 3 silently does not apply to it — and the WS-C exit
+  below would not catch that, since it exercises one CTS pattern that does
+  carry the marker.
   That the signals diverge in practice is not hypothetical: the CLI has two
   runtime workarounds for handlers whose schema lost the marker
   (`tryResolvePieceHandler`, and the forced-stream probe in
@@ -151,12 +220,13 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   `EXPERIMENTAL_OPTIONS.md`, scheduler-v2 §7.6 receipt-content note, both
   flag states tested in `scheduler-event-receipts.test.ts`, including
   same-id redelivery retaining the original result.
-- **C1 design fork, decide first:** `Stream<T>` is a branded-cell interface
-  wired through a one-slot HKT (`AsStream`, `packages/api/index.ts:1239`), so
+- ~~**C1 design fork, decide first:** `Stream<T>` is a branded-cell interface
+  wired through a one-slot HKT (`AsStream`, `packages/api/index.ts:1358`), so
   `Stream<T, R = void>` ripples through the cell-type machinery; the
   alternative is a separate declared-result carrier (e.g.
   `StreamWithResult<T, R> extends Stream<T>`) that only the schema layer
-  interprets. Settle this at the top of the C1 PR.
+  interprets. Settle this at the top of the C1 PR.~~ — settled in #5123; the
+  decision and its measured costs are the **C1 fork — settled** bullet above.
 - **Exit:** a CTS pattern declares a verb returning `AddTopicResult`; the
   result schema appears in the durable schema; under the flag, both plain and
   reactive returns are readable in the receipt cell.
@@ -297,6 +367,12 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
   backing identity changes; evaluate a narrower path-selected form if broad
   output is too noisy. Patterns return child references and never manufacture
   their own fid fields for this purpose.
+- **Read-path guard:** `cf piece get` on a path that resolves to a verb returns
+  the stream's serialization rather than redirecting. The llm-dialog `read`
+  tool already rejects this case with the right message — "Path resolves to a
+  handler; use invoke() instead" — and the CLI read path
+  (`packages/cli/lib/piece.ts`, `getCellValue`) has no equivalent check. Cheap,
+  and it saves an agent a wasted turn.
 - `--await` / `--no-wait` and the caller-controlled wait bound — with WS-D.
 - Skill updates ride each surface (`skills/cf`, `skills/topics`): the handle
   lookup and verification read leave the documented workflow when Phase 4
@@ -376,6 +452,13 @@ change that alters them.
   #4956, merged 2026-07-24 — is the candidate fix; confirm before the first
   Phase 1 deploy). Until the gate clears, a "live-board acceptance pass"
   degrades to a scratch board and must say so rather than pass silently.
+  **#5059 (`cf piece setsrc --check`) is the candidate preflight for this
+  gate:** it answers whether a source can be applied to a given piece before
+  attempting it, driving the real rules in dry-run — the schema subset proof,
+  the CFC envelope merge, the retained-link validator — rather than a second
+  copy of them. It does not measure commit rates, so the rehearsal above
+  stands; what it removes is discovering an incompatibility by attempting the
+  swap on the live board.
 - **WS-E's gates may stall it** (OQ1, CFC review, collection unknown, trusted
   ingress mint and propagation): it is last and severable; everything through
   Phase 4 delivers without it, and `topics.agentName` remains the safe interim.

@@ -67,7 +67,6 @@ on the Common Fabric runtime.
 
 - [components/COMPONENTS.md](components/COMPONENTS.md) — index of all `cf-*` components, bindable props, usage narrative
 - [components/forms.md](components/forms.md) — stub; form authoring lives in COMPONENTS.md, internals in `packages/ui/docs/`
-- [components/CELL_CONTEXT.md](components/CELL_CONTEXT.md) — `cf-cell-context` debugging tool
 
 ### conventions/ — system integration
 

@@ -26,10 +26,20 @@ a record: archive it to `docs/history/plans/` following the procedure in
   optional CI adoption and further fixture hardening.
 - [Inverting the physics of trust](inverting-the-physics-of-trust.md) explains
   the runtime's trust model and the work that follows from it.
+- [Pattern update state continuity](pattern-update-state-continuity.md)
+  sequences the replay tier that proves an updated pattern can still read the
+  state its predecessor wrote.
 - [Pattern verb contract implementation](pattern-verb-contract-implementation.md)
   sequences the implementation of the
   [pattern verb contract](pattern-verb-contract.md).
 - [CFC runner implementation](runner_cfc_implementation.md) defines the
   commit-boundary enforcement workstreams and rollout.
-- [`cf space clone` rehearsal](space-clone-rehearsal.md) proposes a
-  rehearsal-grade command for copying populated spaces.
+- [Topics migration rehearsal](topics-migration-rehearsal.md) is the concrete,
+  unexecuted script for `setsrc`-ing the Estuary Topics board against a clone
+  and then live.
+- [`cf space clone` rehearsal](space-clone-rehearsal.md) records the design for
+  rehearsal-grade copies of populated spaces. The tooling has shipped (`cf
+  space`, `cf inspect churn`); the operating procedure lives in
+  [`../development/space-clone-rehearsal.md`](../development/space-clone-rehearsal.md).
+  The plan stays live until the practice has been exercised on a real
+  migration.

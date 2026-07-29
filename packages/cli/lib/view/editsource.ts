@@ -9,7 +9,7 @@
  * editable text back onto the files it touches.
  */
 import type { Document, Line } from "./model.ts";
-import type { Highlighter } from "./languages/language.ts";
+import type { Highlighter, Language } from "./languages/language.ts";
 import { languageForFile, renderedLinesFor } from "./languages/language.ts";
 
 /** How much a revert restores: the cursor's hunk, the cursor's file, the commit
@@ -66,8 +66,8 @@ export interface SaveOptions {
 export interface EditableSource {
   /** A short label for the editable target (the filename), or null. */
   readonly label: string | null;
-  /** True for a diff view (whether or not it is editable), so the pager offers
-   * file folding. Absent/false for a plain file or a non-diff pipe. */
+  /** True for a diff view, whether or not it is editable. Absent or false for a
+   * plain file or a non-diff pipe. */
   readonly isDiff?: boolean;
   /** False when there is no underlying file to edit. `reason` is shown when a
    * cursor move is attempted on a non-editable view. */
@@ -236,12 +236,16 @@ export function fileSource(path: string): EditableSource {
 }
 
 /** A non-file view (a pipe / a diff matching nothing): readable, not editable. */
-export function readonlySource(reason: string): EditableSource {
+export function readonlySource(
+  reason: string,
+  language: Language = languageForFile(undefined),
+  fileName?: string,
+): EditableSource {
   return {
     label: null,
     editable: false,
     reason,
-    parse: (text) => languageForFile(undefined).parseDocument(text),
+    parse: (text) => language.parseDocument(text, fileName),
     save: () => reason,
   };
 }

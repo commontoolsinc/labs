@@ -10,7 +10,7 @@
   metadata on the result cell. The runtime still lacks a persisted view of the
   concrete nodes it instantiated.
 - `instantiateNode` performs alias gymnastics through
-  `unwrapOneLevelAndBindtoDoc` so nested patterns and closures work. A snapshot
+  `unwrapOneLevelAndBindToDoc` so nested patterns and closures work. A snapshot
   that records the resolved nodes makes this machinery obsolete: future runs can
   reconstruct bindings directly from the snapshot.
 - Persisting a snapshot on the result cell lets the runtime answer "what does

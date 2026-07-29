@@ -1,8 +1,15 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { CellHandle, PieceSourceView } from "@commonfabric/runtime-client";
+import { $conn, CellHandle, RequestType } from "@commonfabric/runtime-client";
+import type {
+  CellRef,
+  PieceSourceView,
+  RuntimeClient,
+} from "@commonfabric/runtime-client";
 import {
   CFPieceMenu,
+  formatPieceValue,
+  isStreamHandle,
   openPieceMenu,
   pieceMenuEntries,
 } from "./cf-piece-menu.ts";
@@ -49,6 +56,39 @@ function shows(menu: CFPieceMenu): string {
   return textOf((menu as unknown as { render(): unknown }).render());
 }
 
+function clickTestId(menu: CFPieceMenu, testId: string): unknown {
+  const candidates: Array<{ node: { values: unknown[] }; text: string }> = [];
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child);
+      return;
+    }
+    if (node === null || typeof node !== "object") return;
+    const template = node as {
+      strings?: readonly string[];
+      values?: unknown[];
+    };
+    if (!template.strings || !template.values) return;
+    for (const child of template.values) visit(child);
+    const text = textOf(template);
+    if (
+      text.includes(testId) &&
+      template.values.some((value) => typeof value === "function")
+    ) {
+      candidates.push({ node: template as { values: unknown[] }, text });
+    }
+  };
+  visit((menu as unknown as { render(): unknown }).render());
+  candidates.sort((left, right) => left.text.length - right.text.length);
+  const handler = candidates[0]?.node.values.find(
+    (value) => typeof value === "function",
+  );
+  if (typeof handler !== "function") {
+    throw new Error(`no click handler found for ${testId}`);
+  }
+  return handler();
+}
+
 const SPACE = "did:key:z6Mk-piece-menu" as const;
 
 const SOURCE: PieceSourceView = {
@@ -62,6 +102,7 @@ const SOURCE: PieceSourceView = {
     { name: "/main.tsx", contents: "the main file" },
     { name: "/helper.tsx", contents: "the helper file" },
   ],
+  history: [],
 };
 
 /**
@@ -70,14 +111,33 @@ const SOURCE: PieceSourceView = {
  */
 function pieceCell(
   read: () => Promise<PieceSourceView> = () => Promise.resolve(SOURCE),
-  { aborted = false } = {},
+  {
+    aborted = false,
+    update = () => Promise.resolve({ source: SOURCE }),
+  }: {
+    aborted?: boolean | (() => boolean);
+    update?: (
+      pieceId: string,
+      space: typeof SPACE,
+      action: unknown,
+      options: unknown,
+    ) => Promise<{
+      source: PieceSourceView;
+      compatibilityWarning?: string;
+      confirmationToken?: string;
+      executionWarning?: string;
+    }>;
+  } = {},
 ): CellHandle {
   return {
     id: () => "of:fid1:piece",
     space: () => SPACE,
     runtime: () => ({
       getPieceSource: read,
-      signal: { aborted },
+      updatePieceSource: update,
+      signal: {
+        aborted: typeof aborted === "function" ? aborted() : aborted,
+      },
     }),
   } as unknown as CellHandle;
 }
@@ -101,10 +161,12 @@ function openMenu(cell: CellHandle = pieceCell()): CFPieceMenu {
 }
 
 describe("piece menu entries", () => {
-  it("offers exactly the two read actions, in order", () => {
+  it("offers exactly the four entries, in order", () => {
     expect(pieceMenuEntries().map((entry) => entry.label)).toEqual([
       "View source",
       "Origin and history",
+      "Data",
+      "Actions",
     ]);
   });
 
@@ -112,7 +174,22 @@ describe("piece menu entries", () => {
     expect(pieceMenuEntries().map((entry) => entry.testId)).toEqual([
       "piece-menu-source",
       "piece-menu-origin",
+      "piece-menu-data",
+      "piece-menu-actions",
     ]);
+  });
+
+  it("adds an explicit detach action for a piece with an origin", () => {
+    expect(pieceMenuEntries(true).map((entry) => entry.label)).toEqual([
+      "View source",
+      "Origin and history",
+      "Data",
+      "Actions",
+      "Stop following source",
+    ]);
+    expect(pieceMenuEntries(true).at(-1)?.testId).toBe(
+      "piece-menu-detach-source",
+    );
   });
 });
 
@@ -142,6 +219,16 @@ describe("the menu a right-click opens", () => {
     // Clamped rather than drawn off-screen, wherever the click landed.
     expect(placement).toContain("left: ");
     expect(placement).not.toContain("left: 1000000px");
+  });
+
+  it("shows the detach action after reading a followed piece", async () => {
+    const menu = openMenu();
+    await menu.showPanel("origin");
+    (menu as unknown as { panel: undefined }).panel = undefined;
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("Stop following source");
+    expect(rendered).toContain("piece-menu-detach-source");
   });
 });
 
@@ -199,6 +286,8 @@ describe("the source panel", () => {
     );
     await menu.showPanel("source");
 
+    expect(shows(menu)).toContain("no read");
+    await menu.showPanel("origin");
     expect(shows(menu)).toContain("no read");
   });
 
@@ -263,7 +352,7 @@ describe("the origin and history panel", () => {
     expect(rendered).toContain("/main.tsx");
     expect(rendered).toContain("of:fid1:piece");
     expect(rendered).toContain(SPACE);
-    expect(rendered).toContain("not recorded yet");
+    expect(rendered).toContain("No source changes have been recorded yet");
   });
 
   it("says a piece with no origin is detached", async () => {
@@ -338,6 +427,948 @@ describe("the origin and history panel", () => {
     expect(rendered).toContain(formatTimestamp(displacedAt));
     expect(rendered).toContain("Repository");
     expect(rendered).toContain("https://github.com/example/recipes");
+  });
+
+  it("offers an exact version and its former origin on historical entries", async () => {
+    const detachedAt = Date.UTC(2026, 6, 27, 12, 0, 0);
+    const historical = {
+      ...SOURCE,
+      origin: undefined,
+      currentRevisionId: "detached",
+      history: [
+        {
+          revisionId: "followed",
+          timestamp: detachedAt - 1_000,
+          pattern: SOURCE.pattern!,
+          origin: SOURCE.origin,
+          operation: "baseline" as const,
+        },
+        {
+          revisionId: "detached",
+          timestamp: detachedAt,
+          pattern: SOURCE.pattern!,
+          operation: "detach" as const,
+        },
+      ],
+    };
+    const menu = openMenu(pieceCell(() => Promise.resolve(historical)));
+    await menu.showPanel("origin");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("Stopped following source · Current");
+    expect(rendered).toContain("Use this version");
+    expect(rendered).toContain("Follow this source again");
+    expect(rendered).toContain("piece-source-restore");
+    expect(rendered).toContain("piece-source-follow");
+  });
+
+  it("describes restoring an immutable origin as using a pin", async () => {
+    const historical = {
+      ...SOURCE,
+      origin: undefined,
+      currentRevisionId: "detached",
+      history: [
+        {
+          revisionId: "pinned",
+          timestamp: Date.UTC(2026, 6, 27, 11, 0, 0),
+          pattern: SOURCE.pattern!,
+          origin: {
+            url: "cf:pattern:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            kind: "fabric-pattern" as const,
+          },
+          operation: "baseline" as const,
+        },
+        {
+          revisionId: "detached",
+          timestamp: Date.UTC(2026, 6, 27, 12, 0, 0),
+          pattern: SOURCE.pattern!,
+          operation: "detach" as const,
+        },
+      ],
+    };
+    const menu = openMenu(pieceCell(() => Promise.resolve(historical)));
+    await menu.showPanel("origin");
+
+    expect(shows(menu)).toContain("Use this pinned source again");
+  });
+
+  it("stops following through the piece runtime and refreshes the panel", async () => {
+    const requests: unknown[] = [];
+    const detached: PieceSourceView = {
+      ...SOURCE,
+      origin: undefined,
+      currentRevisionId: "detached",
+      history: [{
+        revisionId: "detached",
+        timestamp: Date.UTC(2026, 6, 27, 12, 0, 0),
+        pattern: SOURCE.pattern!,
+        operation: "detach",
+      }],
+    };
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(SOURCE),
+      {
+        update: (pieceId, space, action, options) => {
+          requests.push({ pieceId, space, action, options });
+          return Promise.resolve({ source: detached });
+        },
+      },
+    ));
+    await menu.showPanel("origin");
+    await menu.changeSource({ kind: "detach" });
+
+    expect(requests).toEqual([{
+      pieceId: "of:fid1:piece",
+      space: SPACE,
+      action: { kind: "detach" },
+      options: {},
+    }]);
+    expect(shows(menu)).toContain("Detached");
+    expect(shows(menu)).toContain("Stopped following source · Current");
+  });
+
+  it("runs detach from both menu affordances", async () => {
+    const requests: unknown[] = [];
+    const detached = { ...SOURCE, origin: undefined };
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(SOURCE),
+      {
+        update: (_pieceId, _space, action) => {
+          requests.push(action);
+          return Promise.resolve({ source: detached });
+        },
+      },
+    ));
+    await menu.showPanel("origin");
+    (menu as unknown as { panel?: undefined }).panel = undefined;
+    await clickTestId(menu, "piece-menu-detach-source");
+
+    menu.open({
+      cell: pieceCell(
+        () => Promise.resolve(SOURCE),
+        {
+          update: (_pieceId, _space, action) => {
+            requests.push(action);
+            return Promise.resolve({ source: detached });
+          },
+        },
+      ),
+      x: 0,
+      y: 0,
+    });
+    await menu.showPanel("origin");
+    await clickTestId(menu, "piece-origin-detach-source");
+
+    expect(requests).toEqual([{ kind: "detach" }, { kind: "detach" }]);
+  });
+
+  it("distinguishes a saved change from a later refresh failure", async () => {
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(SOURCE),
+      {
+        update: () =>
+          Promise.resolve({
+            source: { ...SOURCE, origin: undefined },
+            executionWarning: "result pull failed",
+          }),
+      },
+    ));
+    await menu.showPanel("origin");
+    await menu.changeSource({ kind: "detach" });
+
+    expect(shows(menu)).toContain("The source change was saved");
+    expect(shows(menu)).toContain("result pull failed");
+    expect(shows(menu)).not.toContain("Could not change this piece's source");
+  });
+
+  it("requires a second explicit action for an incompatible source", async () => {
+    const calls: unknown[] = [];
+    const action = { kind: "restore", revisionId: "older" } as const;
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(SOURCE),
+      {
+        update: (_pieceId, _space, requested, options) => {
+          calls.push({ requested, options });
+          return Promise.resolve(
+            (options as { confirmationToken?: string }).confirmationToken
+              ? { source: { ...SOURCE, origin: undefined } }
+              : {
+                source: SOURCE,
+                compatibilityWarning: "result schema narrowed",
+                confirmationToken: "confirm-older",
+              },
+          );
+        },
+      },
+    ));
+    await menu.showPanel("origin");
+    await menu.changeSource(action);
+
+    expect(shows(menu)).toContain("result schema narrowed");
+    expect(shows(menu)).toContain("Use it anyway");
+
+    await menu.changeSource(action, "confirm-older");
+    expect(calls).toEqual([
+      { requested: action, options: {} },
+      {
+        requested: action,
+        options: { confirmationToken: "confirm-older" },
+      },
+    ]);
+    expect(shows(menu)).not.toContain("result schema narrowed");
+  });
+
+  it("reports a runtime warning that omitted its confirmation token", async () => {
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(SOURCE),
+      {
+        update: () =>
+          Promise.resolve({
+            source: SOURCE,
+            compatibilityWarning: "result schema narrowed",
+          }),
+      },
+    ));
+    await menu.showPanel("origin");
+    await menu.changeSource({ kind: "restore", revisionId: "older" });
+
+    expect(shows(menu)).toContain(
+      "the runtime did not provide a compatibility confirmation",
+    );
+    expect(shows(menu)).not.toContain("Use it anyway");
+  });
+
+  it("cancels an incompatibility warning from its visible action", async () => {
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(SOURCE),
+      {
+        update: () =>
+          Promise.resolve({
+            source: SOURCE,
+            compatibilityWarning: "result schema narrowed",
+            confirmationToken: "confirm-older",
+          }),
+      },
+    ));
+    await menu.showPanel("origin");
+    await menu.changeSource({ kind: "restore", revisionId: "older" });
+    expect(shows(menu)).toContain("Use it anyway");
+
+    clickTestId(menu, "piece-source-warning-cancel");
+
+    expect(shows(menu)).not.toContain("Use it anyway");
+    expect(shows(menu)).not.toContain("result schema narrowed");
+  });
+
+  it("discards a consumed confirmation after the confirmed change fails", async () => {
+    const action = { kind: "restore", revisionId: "older" } as const;
+    let nextConfirmation = 1;
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(SOURCE),
+      {
+        update: (_pieceId, _space, _requested, options) => {
+          const confirmation = (options as { confirmationToken?: string })
+            .confirmationToken;
+          if (confirmation !== undefined) {
+            return Promise.reject(
+              new Error(
+                "the piece source changed after compatibility was checked",
+              ),
+            );
+          }
+          return Promise.resolve({
+            source: SOURCE,
+            compatibilityWarning: "result schema narrowed",
+            confirmationToken: `confirm-${nextConfirmation++}`,
+          });
+        },
+      },
+    ));
+    await menu.showPanel("origin");
+    await menu.changeSource(action);
+    expect(shows(menu)).toContain("Use it anyway");
+
+    await menu.changeSource(action, "confirm-1");
+
+    expect(shows(menu)).toContain(
+      "the piece source changed after compatibility was checked",
+    );
+    expect(shows(menu)).not.toContain("Use it anyway");
+    expect(shows(menu)).not.toContain("result schema narrowed");
+
+    await menu.changeSource(action);
+    expect(shows(menu)).toContain("Use it anyway");
+    expect(shows(menu)).toContain("result schema narrowed");
+  });
+
+  it("discards the previous confirmation when a new action fails", async () => {
+    const firstAction = { kind: "restore", revisionId: "older" } as const;
+    const secondAction = { kind: "detach" } as const;
+    let call = 0;
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(SOURCE),
+      {
+        update: () => {
+          if (call++ === 0) {
+            return Promise.resolve({
+              source: SOURCE,
+              compatibilityWarning: "result schema narrowed",
+              confirmationToken: "confirm-older",
+            });
+          }
+          return Promise.reject(new Error("source change failed"));
+        },
+      },
+    ));
+    await menu.showPanel("origin");
+    await menu.changeSource(firstAction);
+    expect(shows(menu)).toContain("Use it anyway");
+
+    await menu.changeSource(secondAction);
+
+    expect(shows(menu)).toContain("source change failed");
+    expect(shows(menu)).not.toContain("Use it anyway");
+    expect(shows(menu)).not.toContain("result schema narrowed");
+  });
+
+  it("discards a confirmation before an aborted confirmed request", async () => {
+    const action = { kind: "restore", revisionId: "older" } as const;
+    let aborted = false;
+    let call = 0;
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(SOURCE),
+      {
+        aborted: () => aborted,
+        update: () => {
+          if (call++ === 0) {
+            return Promise.resolve({
+              source: SOURCE,
+              compatibilityWarning: "result schema narrowed",
+              confirmationToken: "confirm-older",
+            });
+          }
+          aborted = true;
+          return Promise.reject(new DOMException("aborted", "AbortError"));
+        },
+      },
+    ));
+    await menu.showPanel("origin");
+    await menu.changeSource(action);
+    expect(shows(menu)).toContain("Use it anyway");
+
+    await menu.changeSource(action, "confirm-older");
+
+    expect(shows(menu)).not.toContain("Use it anyway");
+    expect(shows(menu)).not.toContain("result schema narrowed");
+    expect(shows(menu)).not.toContain("Could not change this piece's source");
+  });
+
+  it("ignores an action without a piece and while another action is pending", async () => {
+    const unopened = newMenu();
+    await unopened.changeSource({ kind: "detach" });
+
+    let finish!: (value: { source: PieceSourceView }) => void;
+    let updates = 0;
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(SOURCE),
+      {
+        update: () => {
+          updates++;
+          return new Promise((resolve) => {
+            finish = resolve;
+          });
+        },
+      },
+    ));
+    await menu.showPanel("origin");
+    const first = menu.changeSource({ kind: "detach" });
+    await Promise.resolve();
+    await menu.changeSource({ kind: "detach" });
+    expect(updates).toBe(1);
+    finish({ source: { ...SOURCE, origin: undefined } });
+    await first;
+  });
+
+  it("drops a source action response after the menu is reopened", async () => {
+    let finish!: (value: { source: PieceSourceView }) => void;
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(SOURCE),
+      {
+        update: () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      },
+    ));
+    await menu.showPanel("origin");
+    const action = menu.changeSource({ kind: "detach" });
+    await Promise.resolve();
+
+    menu.open({
+      cell: pieceCell(() =>
+        Promise.resolve({ ...SOURCE, name: "Replacement" })
+      ),
+      x: 0,
+      y: 0,
+    });
+    finish({ source: { ...SOURCE, name: "Stale" } });
+    await action;
+    await menu.showPanel("origin");
+
+    expect(shows(menu)).toContain("Replacement");
+    expect(shows(menu)).not.toContain("Stale");
+  });
+});
+
+describe("source history actions", () => {
+  const historySource: PieceSourceView = {
+    ...SOURCE,
+    origin: undefined,
+    currentRevisionId: "current",
+    history: [
+      {
+        revisionId: "older",
+        timestamp: 1,
+        pattern: SOURCE.pattern!,
+        origin: SOURCE.origin,
+        operation: "baseline",
+      },
+      {
+        revisionId: "current",
+        timestamp: 2,
+        pattern: SOURCE.pattern!,
+        operation: "detach",
+      },
+    ],
+  };
+
+  it("runs restore and follow from their history buttons", async () => {
+    const actions: unknown[] = [];
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(historySource),
+      {
+        update: (_pieceId, _space, action) => {
+          actions.push(action);
+          return Promise.resolve({ source: historySource });
+        },
+      },
+    ));
+    await menu.showPanel("origin");
+
+    await clickTestId(menu, "piece-source-restore");
+    await clickTestId(menu, "piece-source-follow");
+
+    expect(actions).toEqual([
+      { kind: "restore", revisionId: "older" },
+      { kind: "follow", revisionId: "older" },
+    ]);
+  });
+
+  it("labels every source-history operation", async () => {
+    const operations = [
+      ["create", "Created from source"],
+      ["edit", "Direct source edit"],
+      ["origin-update", "Source update"],
+      ["revert", "Restored source version"],
+      ["follow", "Followed source"],
+      ["repoint", "Followed earlier source"],
+    ] as const;
+    const menu = openMenu(pieceCell(() =>
+      Promise.resolve({
+        ...historySource,
+        history: operations.map(([operation], index) => ({
+          revisionId: `revision-${index}`,
+          timestamp: index,
+          pattern: SOURCE.pattern!,
+          operation,
+        })),
+      })
+    ));
+    await menu.showPanel("origin");
+
+    const rendered = shows(menu);
+    for (const [, label] of operations) expect(rendered).toContain(label);
+  });
+});
+
+/**
+ * A live-ish piece for the data and actions panels: a real `CellHandle` (the
+ * panels detect streams with `instanceof`) over a fake connection that
+ * records every request it is asked to make.
+ */
+function statefulPiece(
+  {
+    result = {},
+    argument: initialArgument = {} as unknown,
+    argumentRef,
+    getPageFails = false,
+    deferGetPage = false,
+    sendFails = false,
+    pieceSchema = { type: "object" } as Record<string, unknown>,
+  }: {
+    result?: Record<string, unknown>;
+    argument?: unknown;
+    /** When set, the argument read also returns this schema-bearing ref. */
+    argumentRef?: CellRef;
+    getPageFails?: boolean;
+    /** When true, getPage stays pending until `resolveGetPage()` is called. */
+    deferGetPage?: boolean;
+    sendFails?: boolean;
+    pieceSchema?: Record<string, unknown>;
+  } = {},
+) {
+  const requests: Array<Record<string, unknown>> = [];
+  const counters = { subscribes: 0, unsubscribes: 0 };
+  const argument = initialArgument;
+  const conn = {
+    subscribe: () => {
+      counters.subscribes++;
+    },
+    unsubscribe: () => {
+      counters.unsubscribes++;
+      return Promise.resolve();
+    },
+    request: (request: Record<string, unknown>) => {
+      requests.push(request);
+      if (request.type === RequestType.CellGet) {
+        return Promise.resolve(
+          request.includeRef && argumentRef
+            ? { value: argument, cell: argumentRef }
+            : { value: argument },
+        );
+      }
+      if (request.type === RequestType.CellSet) {
+        return Promise.resolve({});
+      }
+      if (request.type === RequestType.CellSend) {
+        return sendFails
+          ? Promise.reject(new Error("handler refused the event"))
+          : Promise.resolve({});
+      }
+      return Promise.reject(new Error(`unexpected request: ${request.type}`));
+    },
+    signal: { aborted: false },
+  };
+  const pendingPages: Array<() => void> = [];
+  const rt = {
+    [$conn]: () => conn,
+    signal: { aborted: false },
+    getPieceSource: () => Promise.resolve(SOURCE),
+    getPage: (..._args: unknown[]) => {
+      if (getPageFails) {
+        return Promise.reject(new Error("no page for this piece"));
+      }
+      if (deferGetPage) {
+        return new Promise((resolve) => {
+          pendingPages.push(() => resolve(page));
+        });
+      }
+      return Promise.resolve(page);
+    },
+  } as unknown as RuntimeClient;
+
+  const pieceRef: CellRef = {
+    id: "of:fid1:piece",
+    space: SPACE,
+    path: [],
+    schema: pieceSchema,
+  } as unknown as CellRef;
+  const cell = new CellHandle(rt, pieceRef, result);
+  const page = { cell: () => cell };
+
+  /** Resolve the oldest still-pending deferred getPage call. */
+  const resolveGetPage = () => pendingPages.shift()?.();
+
+  /** A nested handler stream whose own ref schema carries the stream tag. */
+  const streamHandle = (name: string): CellHandle =>
+    new CellHandle(rt, {
+      id: "of:fid1:piece",
+      space: SPACE,
+      path: [name],
+      schema: { asCell: ["stream"] },
+    } as unknown as CellRef);
+
+  /**
+   * A handler as a schema'd piece read actually delivers one: a handle to the
+   * stream's own doc carrying the handler's EVENT schema, with the stream
+   * declaration living on the piece schema's property instead.
+   */
+  const handlerHandle = (name: string, eventSchema: unknown): CellHandle =>
+    new CellHandle(rt, {
+      id: `of:fid1:handler-${name}`,
+      space: SPACE,
+      path: [],
+      schema: eventSchema,
+    } as unknown as CellRef);
+
+  return {
+    cell,
+    requests,
+    counters,
+    streamHandle,
+    handlerHandle,
+    resolveGetPage,
+    rt,
+  };
+}
+
+describe("the data panel", () => {
+  it("shows the argument and the result", async () => {
+    const piece = statefulPiece({
+      argument: { title: "hello input" },
+      result: {},
+    });
+    // The result carries a plain field, a linked cell, and a stream.
+    await piece.cell.set({
+      count: 3,
+      addItem: piece.streamHandle("addItem"),
+    });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("data");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("Argument");
+    expect(rendered).toContain("hello input");
+    expect(rendered).toContain("Result");
+    expect(rendered).toContain('"count": 3');
+    expect(rendered).toContain("[stream]");
+  });
+
+  it("omits the view keys, which hold VDOM rather than data", async () => {
+    const piece = statefulPiece();
+    await piece.cell.set({ real: "data", $UI: { huge: "vdom" } });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("data");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("real");
+    expect(rendered).not.toContain("vdom");
+  });
+
+  it("reads the piece state once for data and actions", async () => {
+    const piece = statefulPiece({ argument: { a: 1 } });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("data");
+    await menu.showPanel("actions");
+    await menu.showPanel("data");
+
+    const argumentReads = piece.requests.filter(
+      (request) => request.type === RequestType.CellGet,
+    );
+    expect(argumentReads.length).toBe(1);
+  });
+
+  it("reports a data read that failed", async () => {
+    const piece = statefulPiece({ getPageFails: true });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("data");
+
+    expect(shows(menu)).toContain("no page for this piece");
+  });
+});
+
+describe("the actions panel", () => {
+  it("lists the piece's handler streams", async () => {
+    const piece = statefulPiece({ argument: { plain: "value" } });
+    await piece.cell.set({
+      addItem: piece.streamHandle("addItem"),
+      clear: piece.streamHandle("clear"),
+      count: 3,
+    });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("addItem");
+    expect(rendered).toContain("clear");
+    expect(rendered).toContain("piece-action-addItem");
+    // Plain fields are data, not actions.
+    expect(rendered).not.toContain("piece-action-count");
+  });
+
+  it("finds handlers the piece schema declares, and hints their payload", async () => {
+    // The live shape: the handle carries the event schema, the stream
+    // declaration lives on the piece schema's property.
+    const piece = statefulPiece({
+      pieceSchema: {
+        type: "object",
+        properties: {
+          addSpace: { asCell: ["stream"], type: "object" },
+          spaces: { type: "array" },
+        },
+      },
+    });
+    await piece.cell.set({
+      addSpace: piece.handlerHandle("addSpace", {
+        type: "object",
+        properties: { name: { type: "string" } },
+      }),
+      spaces: [],
+    });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("piece-action-addSpace");
+    expect(rendered).toContain("{ name }");
+
+    // The Data panel shows the same key as a stream, not a bare cell link.
+    await menu.showPanel("data");
+    expect(shows(menu)).toContain('"addSpace": "[stream]"');
+  });
+
+  it("does not offer a cell that merely contains a stream", async () => {
+    // asCell ["cell", "stream"] is a CELL wrapping a stream: sending to the
+    // outer cell would overwrite data, so it must not be dispatchable.
+    const piece = statefulPiece({
+      pieceSchema: {
+        type: "object",
+        properties: {
+          wrapped: { asCell: ["cell", "stream"], type: "object" },
+        },
+      },
+    });
+    await piece.cell.set({
+      wrapped: piece.handlerHandle("wrapped", { type: "object" }),
+    });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    expect(shows(menu)).toContain("no handler streams");
+  });
+
+  it("finds handlers the argument schema declares", async () => {
+    // The argument arrives in wire form: sigil links that deserialize back
+    // into handles carrying the handler's event schema, while the stream
+    // declaration lives on the argument schema's property.
+    const piece = statefulPiece({
+      argument: {
+        ping: {
+          "/": {
+            "link@1": {
+              id: "of:fid1:handler-ping",
+              space: SPACE,
+              path: [],
+              schema: { type: "object" },
+            },
+          },
+        },
+      },
+      argumentRef: {
+        id: "of:fid1:argument",
+        space: SPACE,
+        path: [],
+        schema: {
+          type: "object",
+          properties: { ping: { asCell: ["stream"] } },
+        },
+      } as unknown as CellRef,
+    });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("piece-action-ping");
+    expect(rendered).toContain("argument");
+  });
+
+  it("offers a declared stream even when its value is a raw marker", async () => {
+    // A schema-less read can leave `{$stream:true}` in place of a handle;
+    // the parent declaration is the trusted signal, so the action derives
+    // its address from the parent cell instead.
+    const piece = statefulPiece({
+      pieceSchema: {
+        type: "object",
+        properties: { go: { asCell: ["stream"] } },
+      },
+    });
+    await piece.cell.set({ go: { $stream: true } });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    expect(shows(menu)).toContain("piece-action-go");
+
+    const [action] = menu.collectActions();
+    await menu.dispatchAction(action);
+    const sends = piece.requests.filter(
+      (request) => request.type === RequestType.CellSend,
+    );
+    expect(sends.length).toBe(1);
+    expect((sends[0].cell as CellRef).path).toEqual(["go"]);
+  });
+
+  it("never offers a raw marker the schema does not declare", async () => {
+    const piece = statefulPiece();
+    await piece.cell.set({ mystery: { $stream: true } });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    expect(shows(menu)).toContain("no handler streams");
+  });
+
+  it("says so when the piece exposes no handlers", async () => {
+    const piece = statefulPiece({ argument: { a: 1 } });
+    await piece.cell.set({ count: 3 });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    expect(shows(menu)).toContain("no handler streams");
+  });
+
+  it("dispatches an event with the JSON payload entered", async () => {
+    const piece = statefulPiece();
+    await piece.cell.set({ addItem: piece.streamHandle("addItem") });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    (menu as unknown as { payloadText: string }).payloadText =
+      '{ "title": "new item" }';
+    const [action] = menu.collectActions();
+    await menu.dispatchAction(action);
+
+    const sends = piece.requests.filter(
+      (request) => request.type === RequestType.CellSend,
+    );
+    expect(sends.length).toBe(1);
+    expect(sends[0].event).toEqual({ title: "new item" });
+    expect((sends[0].cell as CellRef).path).toEqual(["addItem"]);
+    // "Accepted", not "sent": the worker commits asynchronously after
+    // acknowledging, so the panel only claims what the request proves.
+    expect(shows(menu)).toContain("Event accepted for addItem");
+  });
+
+  it("rejects an unparsable payload without dispatching", async () => {
+    const piece = statefulPiece();
+    await piece.cell.set({ addItem: piece.streamHandle("addItem") });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    (menu as unknown as { payloadText: string }).payloadText = "{not json";
+    const [action] = menu.collectActions();
+    await menu.dispatchAction(action);
+
+    expect(shows(menu)).toContain("not valid JSON");
+    expect(
+      piece.requests.filter((r) => r.type === RequestType.CellSend).length,
+    ).toBe(0);
+  });
+
+  it("reports a dispatch the runtime refused", async () => {
+    const piece = statefulPiece({ sendFails: true });
+    await piece.cell.set({ addItem: piece.streamHandle("addItem") });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    const [action] = menu.collectActions();
+    await menu.dispatchAction(action);
+
+    expect(shows(menu)).toContain("handler refused the event");
+  });
+
+  it("sends once for a rapid double-click", async () => {
+    const piece = statefulPiece();
+    await piece.cell.set({ addItem: piece.streamHandle("addItem") });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    const [action] = menu.collectActions();
+    // Both clicks land before the first request settles.
+    await Promise.all([
+      menu.dispatchAction(action),
+      menu.dispatchAction(action),
+    ]);
+
+    expect(
+      piece.requests.filter((r) => r.type === RequestType.CellSend).length,
+    ).toBe(1);
+  });
+});
+
+describe("piece-state read lifecycle", () => {
+  it("a refresh during a pending read drops the older read entirely", async () => {
+    const piece = statefulPiece({ deferGetPage: true });
+    await piece.cell.set({ value: "current" });
+    const menu = openMenu(piece.cell);
+
+    const first = menu.showPanel("data");
+    menu.refreshData();
+    // The OLDER read resolves after the refresh started a newer one; it must
+    // not install a second subscription or overwrite anything.
+    piece.resolveGetPage();
+    await first;
+    piece.resolveGetPage();
+    await Promise.resolve();
+
+    expect(piece.counters.subscribes).toBe(1);
+    menu.close();
+    expect(piece.counters.unsubscribes).toBe(piece.counters.subscribes);
+  });
+
+  it("a read resolving after disconnect installs nothing", async () => {
+    const piece = statefulPiece({ deferGetPage: true });
+    const menu = openMenu(piece.cell);
+
+    const pending = menu.showPanel("data");
+    menu.disconnectedCallback();
+    piece.resolveGetPage();
+    await pending;
+
+    expect(piece.counters.subscribes).toBe(0);
+  });
+
+  it("balances subscriptions when the menu closes", async () => {
+    const piece = statefulPiece({
+      argumentRef: {
+        id: "of:fid1:argument",
+        space: SPACE,
+        path: [],
+        schema: { type: "object" },
+      } as unknown as CellRef,
+    });
+    await piece.cell.set({ value: 1 });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("data");
+
+    // One subscription per side: result and argument.
+    expect(piece.counters.subscribes).toBe(2);
+    menu.close();
+    expect(piece.counters.unsubscribes).toBe(piece.counters.subscribes);
+  });
+});
+
+describe("formatPieceValue", () => {
+  it("stubs a linked cell instead of printing its sigil form", () => {
+    const piece = statefulPiece();
+    const linked = new CellHandle(piece.rt, {
+      id: "of:fid1:other",
+      space: SPACE,
+      path: ["items", "0"],
+      schema: { type: "object" },
+    } as unknown as CellRef);
+
+    const formatted = formatPieceValue({ item: linked });
+    expect(formatted).toContain('"@cell": "of:fid1:other"');
+    expect(formatted).toContain("items/0");
+  });
+
+  it("caps the depth of a deep value", () => {
+    type Deep = { deeper?: Deep; leaf?: string };
+    let value: Deep = { leaf: "bottom" };
+    for (let i = 0; i < 12; i++) value = { deeper: value };
+
+    const formatted = formatPieceValue(value);
+    expect(formatted).toContain("…");
+    expect(formatted).not.toContain("bottom");
+  });
+});
+
+describe("isStreamHandle", () => {
+  it("recognizes only handles whose schema declares a stream", () => {
+    const piece = statefulPiece();
+    expect(isStreamHandle(piece.streamHandle("go"))).toBe(true);
+    expect(isStreamHandle(piece.cell)).toBe(false);
+    expect(isStreamHandle({ $stream: true })).toBe(false);
+    expect(isStreamHandle("addItem")).toBe(false);
   });
 });
 

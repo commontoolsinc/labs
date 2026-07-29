@@ -5,7 +5,12 @@ import {
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { isPattern, type JSONSchema, type JSONValue } from "./builder/types.ts";
+import {
+  type FabricExecValue,
+  isPattern,
+  type JSONSchema,
+  type JSONValue,
+} from "./builder/types.ts";
 import { noteDerivedCopy } from "./builder/pattern-metadata.ts";
 import { type AnyCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
@@ -380,7 +385,7 @@ function sendValueToBindingInner<T>(
 /**
  * Whether returning `binding` unchanged is indistinguishable from returning the
  * `Object.fromEntries(Object.entries(binding))` rebuild that
- * {@link unwrapOneLevelAndBindtoDoc}'s walk would otherwise produce.
+ * {@link unwrapOneLevelAndBindToDoc}'s walk would otherwise produce.
  *
  * That rebuild is NOT an identity operation on every record — it silently
  * drops what `Object.entries()` cannot see and flattens what
@@ -411,13 +416,24 @@ function isReproducibleRecord(binding: object): boolean {
 
 /**
  * The array counterpart of {@link isReproducibleRecord}. `Array.prototype.map()`
- * copies index properties only, so an array carrying any other own property is
- * not reproduced by the walk's rebuild and must not be shared. Sparse arrays
- * are shareable: `map()` preserves holes, as does handing back the original.
+ * copies index properties only, so an array carrying any other own property —
+ * enumerable or not, string- or symbol-keyed — is not reproduced by the walk's
+ * rebuild and must not be shared.
+ *
+ * The `+ 1` is `length`, an array's one non-enumerable own property, so the
+ * comparison says "no own string properties beyond the enumerable indices".
+ * That holds for a sparse array too, and sparse arrays are shareable: `map()`
+ * preserves holes, as does handing back the original.
+ *
+ * No prototype test, deliberately. `map()` allocates via `ArraySpeciesCreate`,
+ * so it *preserves* an `Array` subclass rather than flattening it — unlike
+ * `Object.fromEntries()`, which is why the record counterpart does check.
  */
 function isReproducibleArray(binding: unknown[]): boolean {
   return isArrayWithOnlyIndexProperties(binding) &&
-    Object.getOwnPropertySymbols(binding).length === 0;
+    Object.getOwnPropertySymbols(binding).length === 0 &&
+    Object.getOwnPropertyNames(binding).length ===
+      Object.keys(binding).length + 1;
 }
 
 /**
@@ -445,7 +461,7 @@ function isReproducibleArray(binding: unknown[]): boolean {
  *   links are annotated with the corresponding target schema.
  * @returns The unwrapped binding.
  */
-export function unwrapOneLevelAndBindtoDoc<T, U>(
+export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
   cfc: ContextualFlowControl,
   binding: T,
   argumentCellLink: NormalizedFullLink | undefined,
@@ -455,9 +471,9 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
   const resultCellLink = resultCell.getAsNormalizedFullLink();
 
   function convert(
-    binding: unknown,
+    binding: FabricExecValue,
     targetSchema: JSONSchema | undefined,
-  ): unknown {
+  ): FabricExecValue {
     if (isAliasBinding(binding)) {
       const { defer: optDefer, ...aliasRest } = { ...binding.$alias };
       const defer = optDefer ?? 0;
@@ -564,9 +580,8 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
         // value, and `resolveOriginal()` already answers with the original.
         return binding;
       }
-      const result: Record<string | symbol, unknown> = Object.fromEntries(
-        entries,
-      );
+      const result: Record<string | symbol, FabricExecValue> = Object
+        .fromEntries(entries);
       // Carry the derivation link (trust + content-addressed entry ref) onto
       // the bound copy so a pattern value re-bound here still resolves its
       // `{ identity, symbol }` and stays trusted.
@@ -631,7 +646,7 @@ export function findAllWriteRedirectCells<T>(
   // `Cell<unknown>`) rather than the original typed base.
   function find(binding: unknown, baseCell: AnyCell<unknown>): void {
     if (isAliasBinding(binding)) {
-      // Callers unwrap bindings (unwrapOneLevelAndBindtoDoc) before walking,
+      // Callers unwrap bindings (unwrapOneLevelAndBindToDoc) before walking,
       // so a surviving `$alias` belongs to a nested level — it just crossed
       // its `defer` boundary, or sits inside an embedded Pattern value —
       // and is not part of this level's read/write surface.

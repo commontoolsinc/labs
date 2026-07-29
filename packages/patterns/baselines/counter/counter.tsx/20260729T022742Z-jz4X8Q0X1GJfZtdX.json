@@ -1,0 +1,48 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "value": {
+        "asCell": [
+          "cell"
+        ],
+        "default": 0,
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "counter/counter.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "decrement": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "increment": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "value": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "value",
+      "increment",
+      "decrement",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

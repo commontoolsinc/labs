@@ -16,22 +16,25 @@ installFakeClock({
   // Test files kept on the real clock for now. These should be converted to use
   // a fake clock. // TODO: convert these tests to a fake clock
   realClockFiles: [
-    // A second (resuming) runtime drives a real loopback memory-client transport
-    // whose connect/mount/sync machinery does not complete under the fake clock:
-    // the resume deadlocks rather than settling.
-    "list-resume-container-defer",
     // The sibling resume test: its reload storage manager holds each per-element
     // child document back by a real delay to open the resume window it observes,
     // and the resuming runtime's pull/idle machinery blocks on those deliveries.
     // Under the fake clock the delay is a frozen test-file timer that pull/idle
     // wait on, so the resume deadlocks; the real clock delivers them as intended.
     "list-resume-preserve",
-    // Drives a nested-subagent generateObject: a delegate tool runs a child
-    // pattern whose result feeds back to the parent through the post-commit
-    // outbox across several cycles. The tool-calling path carries its own
-    // timeout, which auto-advance fires against the subagent's own outbox
-    // progress rather than the wall clock, aborting the delegate ("tool call
-    // timed out") before it can complete. Real time paces the two together.
-    "generate-object-tools",
+    // A generateObject delegate tool runs a child agent against a result schema
+    // the model supplies in the tool input, so the child reaches its own request
+    // only after that input has settled through the graph. The tool-calling path
+    // guards its wait with a deadline, and the pump reads the resulting macrotask
+    // boundary as an idle loop and jumps to that deadline, aborting the delegate
+    // ("Tool call timed out") mid-flight. The pump cannot tell that deadline from
+    // a backoff window, which other tests need it to fire during the same churn.
+    // Retiring that deadline is what lets this file and the next one convert.
+    // Each case asserts on the delegate's own tool result, so dropping an entry
+    // here turns them red rather than quietly green.
+    "generate-object-tools-dynamic-subagent",
+    // The same delegate-tool shape, reached through llmDialog rather than
+    // generateObject.
+    "llm-dialog-dynamic-subagent",
   ],
 });

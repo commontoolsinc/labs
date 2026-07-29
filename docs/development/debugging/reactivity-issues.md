@@ -181,4 +181,3 @@ The same scoping limitation applies to `lift()`. See @common/concepts/reactivity
 
 - @common/concepts/reactivity.md - Reactivity system fundamentals
 - @common/components/COMPONENTS.md - Component binding patterns
-- @common/components/CELL_CONTEXT.md - Debugging cell values

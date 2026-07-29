@@ -3,14 +3,19 @@ import { getLogger } from "@commonfabric/utils/logger";
 import type { Cell } from "./cell.ts";
 import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
+  applyPieceSourceTransition,
   getPatternIdentityRef,
   getPatternRepository,
   getPatternSetupIdentityRef,
   getPatternSource,
-  setPatternSource,
+  getPieceSourceSnapshot,
+  type PieceSourceTransition,
+  type PieceSourceTransitionBaseline,
+  preparePieceSourceTransitionBaseline,
 } from "./runner.ts";
 import type { Pattern } from "./builder/types.ts";
 import type { Runtime } from "./runtime.ts";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 const logger = getLogger("runner.pattern-update", {
   enabled: true,
@@ -161,10 +166,14 @@ export class PatternUpdater {
       const storedSource = getPatternSource(resultCell);
       const storedRepository = getPatternRepository(resultCell);
       const storedSetupRef = getPatternSetupIdentityRef(resultCell);
+      const sourceSnapshot = getPieceSourceSnapshot(resultCell)!;
       if (storedRepository !== undefined) return "current";
 
       let source = storedSource;
       if (source === undefined) {
+        // A lifecycle revision with no active origin is an intentional detach.
+        // Only a history-free legacy piece may have provenance reconstructed.
+        if (sourceSnapshot.revisionId !== null) return "current";
         if (mode.kind === "default-root") {
           source = mode.officialSource;
         }
@@ -185,6 +194,12 @@ export class PatternUpdater {
       const host = runtime.mappedHostFor(space) ?? runtime.apiUrl.href;
       const target = new URL(source, host);
       if (target.origin !== new URL(host).origin) return "current";
+      const baseline = await preparePieceSourceTransitionBaseline(
+        runtime,
+        resultCell,
+        sourceSnapshot,
+        { allowUnavailable: true },
+      );
 
       const stillMatches = (candidate: Cell<unknown>): boolean => {
         const candidateRef = getPatternIdentityRef(candidate);
@@ -208,10 +223,35 @@ export class PatternUpdater {
         return defaultPattern === undefined ||
           !defaultPattern.resolveAsCell().equals(candidate.resolveAsCell());
       };
-      const repairProvenance = async (): Promise<PatternUpdateOutcome> => {
+      const sourceTransition = (
+        operation: PieceSourceTransition["operation"],
+        origin: string,
+        transitionBaseline: PieceSourceTransitionBaseline = baseline,
+      ): PieceSourceTransition => ({
+        revisionId: crypto.randomUUID(),
+        baseline: transitionBaseline,
+        timestamp: Date.now(),
+        operation,
+        origin,
+        expected: sourceSnapshot,
+      });
+      const repairProvenance = async (
+        transitionBaseline: PieceSourceTransitionBaseline = baseline,
+      ): Promise<PatternUpdateOutcome> => {
+        const transition = sourceTransition(
+          storedSource === undefined ? "follow" : "origin-update",
+          source,
+          transitionBaseline,
+        );
         const result = await runtime.editWithRetry((tx) => {
           if (!canWrite(tx)) return false;
-          setPatternSource(resultCell, tx, source);
+          applyPieceSourceTransition(
+            runtime,
+            resultCell,
+            tx,
+            runningRef,
+            transition,
+          );
           return true;
         });
         if (result.error) {
@@ -292,7 +332,10 @@ export class PatternUpdater {
 
       let currentPatternNeedingSetup: Pattern | undefined;
       if (runningTargetIsAdvertised) {
-        if (mode.kind === "instantiated") {
+        if (
+          mode.kind === "instantiated" &&
+          baseline.kind === "retain"
+        ) {
           return storedSource === undefined
             ? await repairProvenance()
             : "current";
@@ -308,9 +351,12 @@ export class PatternUpdater {
           // Continue through the identity-authorized source path below.
         }
         if (currentPattern !== undefined) {
-          if (setupNeedsRepair) {
+          if (setupNeedsRepair && baseline.kind === "retain") {
             currentPatternNeedingSetup = currentPattern;
-          } else {
+          } else if (
+            !setupNeedsRepair &&
+            baseline.kind !== "unavailable"
+          ) {
             return storedSource === undefined
               ? await repairProvenance()
               : "current";
@@ -345,20 +391,57 @@ export class PatternUpdater {
         ]);
         return "current";
       }
+      const transitionBaseline: PieceSourceTransitionBaseline =
+        baseline.kind === "unavailable" &&
+          entryRef.identity === runningRef.identity &&
+          entryRef.symbol === runningRef.symbol
+          ? { kind: "retain", revisionId: crypto.randomUUID() }
+          : baseline;
       if (
         !setupNeedsRepair &&
         entryRef.identity === runningRef.identity &&
         entryRef.symbol === runningRef.symbol
       ) {
-        return storedSource === undefined
-          ? await repairProvenance()
+        return storedSource === undefined ||
+            baseline.kind === "unavailable"
+          ? await repairProvenance(transitionBaseline)
           : "current";
+      }
+
+      if (mode.kind === "instantiated") {
+        const previousPattern = await runtime.patternManager
+          .loadPatternByIdentity(
+            runningRef.identity,
+            runningRef.symbol,
+            space,
+          );
+        if (
+          previousPattern === undefined ||
+          !deepEqual(
+            previousPattern.argumentSchema,
+            pattern.argumentSchema,
+          ) ||
+          !deepEqual(previousPattern.resultSchema, pattern.resultSchema)
+        ) {
+          logger.warn("incompatible-source-update", () => [
+            "automatic source update changed the piece contract",
+            space,
+            runningRef,
+            entryRef,
+          ]);
+          return "current";
+        }
       }
 
       const argumentStillMatches = mode.kind === "default-root"
         ? await runtime.syncStoredSetupArgument(resultCell)
         : undefined;
 
+      const transition = sourceTransition(
+        "origin-update",
+        source,
+        transitionBaseline,
+      );
       const result = await runtime.editWithRetry((tx) => {
         if (!canWrite(tx)) return false;
         const candidate = resultCell.withTx(tx);
@@ -368,7 +451,17 @@ export class PatternUpdater {
         ) {
           return false;
         }
-        if (staleSourcelessRoot) {
+        applyPieceSourceTransition(
+          runtime,
+          resultCell,
+          tx,
+          entryRef,
+          transition,
+        );
+        if (
+          staleSourcelessRoot ||
+          transitionBaseline.kind === "unavailable"
+        ) {
           candidate.setMetaRaw("displacedPattern", {
             identity: runningRef.identity,
             symbol: runningRef.symbol,
@@ -383,7 +476,6 @@ export class PatternUpdater {
         } else {
           candidate.setMetaRaw("patternIdentity", entryRef);
         }
-        setPatternSource(resultCell, tx, source);
         return true;
       });
       if (result.error) {

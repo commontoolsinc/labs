@@ -10,9 +10,12 @@ files. Transformed TypeScript is parsed with the same parser the transformer
 uses, so blocks, closures, schemas, type positions and Common Fabric builders
 (pattern/lift/handler/…) are coloured exactly as the compiler sees them.
 Markdown, JSON, JSONC, YAML and Python files use syntax highlighting selected
-from their names. Named files with unrecognized syntax remain plain text. The
-Markdown language also has a rendered view that formats headings, lists,
-quotes, tables, links, emphasis and code while retaining source line positions.
+from their names. Filename-free compiler output keeps TypeScript highlighting
+when its transformed-module header identifies it. Other unnamed source and
+named files with unrecognized syntax remain plain text. The Markdown language
+also has a rendered view that formats headings, lists, quotes, tables, links,
+emphasis and code while retaining source line positions. Source views remain
+verbatim and add colour only.
 
 Unified diffs are detected automatically: piping 'git diff' in gives added and
 removed lines their tints, full syntax colour, a structure tree of the code

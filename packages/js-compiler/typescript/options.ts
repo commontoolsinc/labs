@@ -28,6 +28,12 @@ export const getCompilerOptions = (): CompilerOptions => {
      */
 
     removeComments: true,
+    // Belt-and-suspenders on authoring paths; the pipeline's explicit checks
+    // (syntactic + program + semantic gates) throw first. Stored-source
+    // compiles override this to false (see compileToModulesSteps): there the
+    // checker deliberately drops authoring-hygiene codes like TS2578, and
+    // TypeScript's own emit veto would re-block exactly what was filtered
+    // (CT-1916).
     noEmitOnError: true,
     // Note: declaration emit is disabled because TypeScript's declaration emit
     // has trouble with unique symbols (CELL_BRAND, CELL_INNER_TYPE) in exported

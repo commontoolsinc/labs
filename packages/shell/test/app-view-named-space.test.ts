@@ -91,4 +91,61 @@ describe("XAppView named-space preparation", () => {
       restore();
     }
   });
+
+  it("loads nothing while the view's space is still being resolved", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const space = "did:key:z6Mk-shell-app-view-second-space" as DID;
+      const names: string[] = [];
+      const root = { id: () => "root" };
+      const view = new XAppView();
+      // RootView hands the view and its space over together, so a view that
+      // names a space RootView has not resolved yet arrives with no space.
+      view.app = {
+        view: { spaceName: "atlas" },
+      } as never;
+      view.space = undefined;
+      view.rt = {
+        signal: new AbortController().signal,
+        resolveSpaceName: (name: string) => {
+          names.push(name);
+          return Promise.resolve(space);
+        },
+        getSpaceRootPattern: () => Promise.resolve(root),
+      } as never;
+
+      view._spaceRootPattern.run();
+      await view._spaceRootPattern.taskComplete;
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+
+      // No space, so no load and nothing to disagree about.
+      expect(view._spaceRootPattern.value).toBeUndefined();
+      expect(names).toEqual([]);
+
+      // Once the name resolves, the pair agrees and the root pattern loads.
+      view.space = space;
+      view._spaceRootPattern.run();
+      await view._spaceRootPattern.taskComplete;
+      expect(view._spaceRootPattern.value).toBe(root);
+      expect(names).toEqual(["atlas"]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("reports a name that resolves to a space other than the one given", async () => {
+    const { prepareNamedSpace } = await import("../src/lib/named-space.ts");
+    const atlas = "did:key:z6Mk-shell-named-space-atlas" as DID;
+    const notebook = "did:key:z6Mk-shell-named-space-notebook" as DID;
+
+    await expect(
+      prepareNamedSpace(
+        { view: { spaceName: "atlas" } } as never,
+        { resolveSpaceName: () => Promise.resolve(atlas) },
+        notebook,
+      ),
+    ).rejects.toThrow("resolved inconsistently");
+  });
 });

@@ -1,7 +1,8 @@
 /**
- * The plain-text language for named files whose syntax `cf view` does not
- * recognize. It must remain last in the language registry because it claims
- * every filename left after the syntax-specific languages.
+ * The plain-text language for input whose syntax `cf view` cannot select from
+ * a filename. It must remain last in the language registry because it claims
+ * every named file left after the syntax-specific languages; the registry also
+ * returns it when no filename exists.
  */
 import type { Language } from "../language.ts";
 import {
