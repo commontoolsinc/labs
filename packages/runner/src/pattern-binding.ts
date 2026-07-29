@@ -4,7 +4,12 @@ import {
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
-import { isPattern, type JSONSchema, type JSONValue } from "./builder/types.ts";
+import {
+  type FabricExecValue,
+  isPattern,
+  type JSONSchema,
+  type JSONValue,
+} from "./builder/types.ts";
 import { noteDerivedCopy } from "./builder/pattern-metadata.ts";
 import { type AnyCell } from "./cell.ts";
 import { resolveLink } from "./link-resolution.ts";
@@ -401,7 +406,7 @@ function sendValueToBindingInner<T>(
  *   links are annotated with the corresponding target schema.
  * @returns The unwrapped binding.
  */
-export function unwrapOneLevelAndBindToDoc<T>(
+export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
   cfc: ContextualFlowControl,
   binding: T,
   argumentCellLink: NormalizedFullLink | undefined,
@@ -411,9 +416,9 @@ export function unwrapOneLevelAndBindToDoc<T>(
   const resultCellLink = resultCell.getAsNormalizedFullLink();
 
   function convert(
-    binding: unknown,
+    binding: FabricExecValue,
     targetSchema: JSONSchema | undefined,
-  ): unknown {
+  ): FabricExecValue {
     if (isAliasBinding(binding)) {
       const { defer: optDefer, ...aliasRest } = { ...binding.$alias };
       const defer = optDefer ?? 0;
@@ -503,12 +508,13 @@ export function unwrapOneLevelAndBindToDoc<T>(
         )
       );
     } else if (isRecord(binding)) {
-      const result: Record<string | symbol, unknown> = Object.fromEntries(
-        Object.entries(binding).map(([key, value]) => [
-          key,
-          convert(value, cfc.getSchemaAtPath(targetSchema, [key])),
-        ]),
-      );
+      const result: Record<string | symbol, FabricExecValue> = Object
+        .fromEntries(
+          Object.entries(binding).map(([key, value]) => [
+            key,
+            convert(value, cfc.getSchemaAtPath(targetSchema, [key])),
+          ]),
+        );
       // Carry the derivation link (trust + content-addressed entry ref) onto
       // the bound copy so a pattern value re-bound here still resolves its
       // `{ identity, symbol }` and stays trusted.
