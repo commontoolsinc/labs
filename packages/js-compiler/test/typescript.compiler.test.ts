@@ -47,6 +47,16 @@ const TESTS: TestDef[] = [
     expectedError: "Expression expected.",
   },
   {
+    // The most permissive mode combination: storedSource turns noEmitOnError
+    // off and noCheck skips semantics — the explicit syntactic gate is the
+    // ONLY thing standing, and it must still stand.
+    name: "Throws: syntax error still fatal under storedSource + noCheck",
+    source: "export const x = ;",
+    storedSource: true,
+    noCheck: true,
+    expectedError: "Expression expected.",
+  },
+  {
     name: "Throws: Invalid import",
     source: "import { foo } from './foo.ts';export default foo()",
     expectedError: "Cannot find module './foo.ts'",
