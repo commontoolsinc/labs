@@ -89,7 +89,6 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
   consoleHandler: { treat: "absent" },
   errorHandlers: { treat: "absent" },
   navigateCallback: { treat: "absent" },
-  pieceCreatedCallback: { treat: "absent" },
   debug: { treat: "absent" },
   telemetry: { treat: "absent" },
   cfcFlowLabels: { treat: "absent" },
@@ -178,7 +177,6 @@ describe("runtimePresets conformance (CT-1814)", () => {
     const consoleHandler = (
       { args }: { args: unknown[] },
     ) => args;
-    const pieceCreatedCallback = () => {};
     const moduleByteCache = {
       get: () => undefined,
       set: () => {},
@@ -257,7 +255,6 @@ describe("runtimePresets conformance (CT-1814)", () => {
         consoleHandler,
         errorHandlers,
         navigateCallback,
-        pieceCreatedCallback,
         onVersionSkew,
       })).toEqual({
         ...minimalOutputs.browserWorker,
@@ -270,7 +267,6 @@ describe("runtimePresets conformance (CT-1814)", () => {
         consoleHandler,
         errorHandlers,
         navigateCallback,
-        pieceCreatedCallback,
         onVersionSkew,
       });
     });

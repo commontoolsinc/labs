@@ -202,7 +202,6 @@ export type ErrorWithContext = Error & {
 
 export type ErrorHandler = (error: ErrorWithContext) => void;
 export type NavigateCallback = (target: Cell<any>) => void | Promise<void>;
-export type PieceCreatedCallback = (piece: Cell<any>) => void;
 
 /**
  * TTL backstop for the system-pattern update caches (toolshed git sha and
@@ -427,7 +426,6 @@ export interface RuntimeOptions {
   onVersionSkew?: VersionSkewHandler;
   patternEnvironment?: PatternEnvironment;
   navigateCallback?: NavigateCallback;
-  pieceCreatedCallback?: PieceCreatedCallback;
   debug?: boolean;
   telemetry?: RuntimeTelemetry;
   /** Optional feature flags for experimental space-model data-layer changes. */
@@ -686,7 +684,6 @@ export class Runtime {
   readonly harness: Engine;
   readonly runner: Runner;
   readonly navigateCallback?: NavigateCallback;
-  readonly pieceCreatedCallback?: PieceCreatedCallback;
   readonly cfc: ContextualFlowControl;
   readonly cfcEnforcementMode: CfcEnforcementMode;
   readonly cfcFlowLabels: CfcFlowLabelsMode;
@@ -1143,7 +1140,6 @@ export class Runtime {
 
     // Set the navigate callback
     this.navigateCallback = options.navigateCallback;
-    this.pieceCreatedCallback = options.pieceCreatedCallback;
 
     // Handle pattern environment configuration. Only set the (process-global)
     // pattern environment when a host explicitly provides one — setting it

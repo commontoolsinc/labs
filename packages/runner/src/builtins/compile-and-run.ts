@@ -255,10 +255,14 @@ export function compileAndRun(
         // how we pass input into the builtin.
 
         runtime.runSynced(result, pattern, input.get());
+        // `isHidden` keeps a compiled result out of the default-app Patterns
+        // list if a pattern chooses to register it. Registering it is NOT this
+        // builtin's job: a piece reaches a piece list through the default
+        // pattern's `addPiece` stream, sent by the pattern that wanted the
+        // piece there (see docs/common/conventions/adding-pieces.md).
         runtime.editWithRetry((asyncTx) => {
           result.withTx(asyncTx).key("isHidden").set(true);
         });
-        runtime.pieceCreatedCallback?.(result);
       }
       // TODO(seefeld): Add capturing runtime errors.
     });

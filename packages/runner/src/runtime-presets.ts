@@ -73,7 +73,6 @@
  * | errorHandlers              | delta (collectors/telemetry), per preset         |
  * | consoleHandler             | delta (productionServer, browserWorker)          |
  * | navigateCallback           | delta (patternTest, remoteClient, browserWorker) |
- * | pieceCreatedCallback       | delta (browserWorker only)                       |
  * | telemetry                  | delta (productionServer, browserWorker)          |
  * | moduleByteCache            | delta (patternTest, remoteClient, unitTest)      |
  * | trustSnapshotProvider      | delta (remoteClient, browserWorker)              |
@@ -107,7 +106,6 @@ import type {
   ExperimentalOptions,
   ModuleByteCache,
   NavigateCallback,
-  PieceCreatedCallback,
   RuntimeOptions,
   VersionSkewHandler,
 } from "./runtime.ts";
@@ -134,7 +132,6 @@ export const RUNTIME_OPTION_KEYS = [
   "errorHandlers",
   "patternEnvironment",
   "navigateCallback",
-  "pieceCreatedCallback",
   "debug",
   "telemetry",
   "experimental",
@@ -364,7 +361,6 @@ export interface BrowserWorkerPresetParams extends CoreParams {
   consoleHandler?: ConsoleHandler;
   errorHandlers?: ErrorHandler[];
   navigateCallback?: NavigateCallback;
-  pieceCreatedCallback?: PieceCreatedCallback;
   /** System-pattern update version-skew signal → shell IPC. */
   onVersionSkew?: VersionSkewHandler;
 }
@@ -497,9 +493,6 @@ export const runtimePresets = {
         : {}),
       ...(params.navigateCallback !== undefined
         ? { navigateCallback: params.navigateCallback }
-        : {}),
-      ...(params.pieceCreatedCallback !== undefined
-        ? { pieceCreatedCallback: params.pieceCreatedCallback }
         : {}),
       ...(params.onVersionSkew !== undefined
         ? { onVersionSkew: params.onVersionSkew }
