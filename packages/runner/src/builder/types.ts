@@ -68,7 +68,7 @@ import type {
   WishFunction,
 } from "@commonfabric/api";
 import type { Schema } from "@commonfabric/api/schema";
-import { toSchema } from "@commonfabric/api";
+import { toSchema, VerbError } from "@commonfabric/api";
 import type { ImplementationIdentity } from "../cfc/types.ts";
 import { AuthSchema, WebhookConfigSchema } from "./schema-lib.ts";
 import {
@@ -105,6 +105,11 @@ export {
   OAuth2TokenSchema,
   WebhookConfigSchema,
 } from "./schema-lib.ts";
+// Re-exported as a VALUE, not a type: a pattern constructs one
+// (`throw new VerbError(...)`), so it has to reach the injected `commonfabric`
+// module the sandbox provides. Type resolution alone would compile and then
+// fail at runtime.
+export { VerbError } from "@commonfabric/api";
 export type {
   AnyCell,
   AnyCellWrapping,
@@ -446,6 +451,10 @@ export interface BuilderFunctionsAndConstants {
   __cf_data: CfDataFunction;
   AuthSchema: typeof AuthSchema;
   WebhookConfigSchema: typeof WebhookConfigSchema;
+
+  // Verb contract rule 4: a verb declines with a stable code by throwing one
+  // of these, so patterns need the constructor itself, not just its type.
+  VerbError: typeof VerbError;
 
   // Render utils
   h: HFunction;

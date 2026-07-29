@@ -1734,9 +1734,18 @@ export type HandlerFactory<T, E, R = void> =
 export class VerbError extends Error {
   constructor(readonly code: string, message: string) {
     super(message);
-    this.name = "VerbError";
   }
 }
+
+// Set on the prototype at definition time rather than assigned per instance.
+// The sandbox hands patterns a hardened `commonfabric`, and hardening freezes
+// each exposed constructor's prototype — after which `this.name = ...` in the
+// constructor throws "Cannot assign to read only property 'name'", because
+// assignment cannot shadow a non-writable inherited property. Writing it here
+// happens at module evaluation, before the freeze, so instances inherit the
+// name and construction still works inside a pattern. `code` needs no such
+// care: it is a fresh own property, not a shadow of a frozen one.
+VerbError.prototype.name = "VerbError";
 
 // JSON types
 
