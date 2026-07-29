@@ -53,6 +53,37 @@ const logger = getLogger("scheduler", {
 });
 const EVENT_COMMIT_TELEMETRY_WRITE_LIMIT = 25;
 
+type EventCommitError = {
+  readonly name?: string;
+  readonly message: string;
+  readonly precondition?: IPreconditionFailedError["precondition"];
+};
+
+function normalizeEventCommitRejection(reason: unknown): EventCommitError {
+  if (reason instanceof Error) {
+    return reason as EventCommitError;
+  }
+  if (reason !== null && typeof reason === "object") {
+    const candidate = reason as Partial<EventCommitError>;
+    const precondition = candidate.precondition === "origin-committed" ||
+        candidate.precondition === "receipt-exists"
+      ? candidate.precondition
+      : undefined;
+    return {
+      ...(typeof candidate.name === "string" ? { name: candidate.name } : {}),
+      message: typeof candidate.message === "string"
+        ? candidate.message
+        : "Storage commit promise rejected",
+      ...(precondition ? { precondition } : {}),
+    };
+  }
+  return new Error(
+    reason
+      ? String(reason)
+      : "Storage commit promise rejected without a reason",
+  );
+}
+
 /**
  * A CFC-enforcement-rejected commit on a give-up disposition is silent data
  * loss of user intent — the UI's write simply never lands (labs#4772 shipped
@@ -1083,55 +1114,61 @@ export async function dispatchQueuedEvent(state: {
     // commit() registers itself with the storage manager's pending-commit
     // barrier, which the client-facing idle (Scheduler.idleWithPendingCommits)
     // waits on without blocking the scheduler loop here.
-    tx.commit().then((result) => {
-      const permanentRejection =
-        result.error && isPermanentRejection(result.error)
-          ? (result.error as IPreconditionFailedError).precondition
-          : undefined;
+    const handleCommitResult = (error: EventCommitError | undefined): void => {
+      const permanentRejection = error && isPermanentRejection(error)
+        ? error.precondition
+        : undefined;
       // Classify the commit outcome. A committed write that represents user
       // intent must converge or fail loudly: a stale-basis rejection backs off
       // and retries within a bounded window rather than being dropped; a
       // permanent or non-stale-basis rejection is not retried; an unconverged
       // write surfaces a terminal error.
       const disposition = classifyCommitDisposition(
-        result.error,
+        error,
         queuedEvent,
         state.backpressure,
       );
 
-      state.runtime.telemetry.submit({
-        type: "scheduler.event.commit",
-        handlerId,
-        handlerInfo: state.getActionTelemetryInfo(handler),
-        readCount: log.reads.length + log.shallowReads.length,
-        writeCount: log.writes.length,
-        changedWriteCount: log.writes.length,
-        writes: telemetryWrites,
-        ...(log.writes.length > EVENT_COMMIT_TELEMETRY_WRITE_LIMIT
-          ? { writesTruncated: true }
-          : {}),
-        ...(result.error ? { error: result.error.message } : {}),
-        ...(permanentRejection !== undefined ? { permanentRejection } : {}),
-        ...(disposition.kind === "backoff"
-          ? {
-            retryAttempt: disposition.attempts,
-            backoffMs: disposition.delayMs,
-          }
-          : {}),
-        ...(disposition.kind === "convergence-failed"
-          ? { retryAttempt: disposition.attempts, terminal: "convergence" }
-          : {}),
-        ...(disposition.kind === "permanent" ? { terminal: "permanent" } : {}),
-        ...(disposition.kind === "terminal" ? { terminal: "rule" } : {}),
-      });
+      let telemetryFailure: { readonly error: unknown } | undefined;
+      try {
+        state.runtime.telemetry.submit({
+          type: "scheduler.event.commit",
+          handlerId,
+          handlerInfo: state.getActionTelemetryInfo(handler),
+          readCount: log.reads.length + log.shallowReads.length,
+          writeCount: log.writes.length,
+          changedWriteCount: log.writes.length,
+          writes: telemetryWrites,
+          ...(log.writes.length > EVENT_COMMIT_TELEMETRY_WRITE_LIMIT
+            ? { writesTruncated: true }
+            : {}),
+          ...(error ? { error: error.message } : {}),
+          ...(permanentRejection !== undefined ? { permanentRejection } : {}),
+          ...(disposition.kind === "backoff"
+            ? {
+              retryAttempt: disposition.attempts,
+              backoffMs: disposition.delayMs,
+            }
+            : {}),
+          ...(disposition.kind === "convergence-failed"
+            ? { retryAttempt: disposition.attempts, terminal: "convergence" }
+            : {}),
+          ...(disposition.kind === "permanent"
+            ? { terminal: "permanent" }
+            : {}),
+          ...(disposition.kind === "terminal" ? { terminal: "rule" } : {}),
+        });
+      } catch (error) {
+        telemetryFailure = { error };
+      }
 
       switch (disposition.kind) {
         case "success":
           runFinalCommitCallback();
-          return;
+          break;
         case "give-up":
           runFinalCommitCallback();
-          reportDroppedCfcRejectedWrite(result.error, handlerId);
+          reportDroppedCfcRejectedWrite(error, handlerId);
           logger.warn(
             "scheduler",
             disposition.reason === "non-retryable"
@@ -1139,9 +1176,9 @@ export async function dispatchQueuedEvent(state: {
                 "that re-running cannot resolve; dropping the write without retry"
               : "Event handler commit failed and the caller opted out of " +
                 "retry (retries: false); dropping the write",
-            { error: result.error, handlerId },
+            { error, handlerId },
           );
-          return;
+          break;
         case "backoff":
           logger.warn(
             "scheduler",
@@ -1155,7 +1192,7 @@ export async function dispatchQueuedEvent(state: {
             disposition.deadline,
             disposition.runAt,
           );
-          return;
+          break;
         case "terminal":
           // A deterministic commit-rule refusal: run the final callback and
           // stop. No retry (would recompute the identical refused write) and no
@@ -1167,9 +1204,9 @@ export async function dispatchQueuedEvent(state: {
             "scheduler",
             "Event handler commit terminally rejected (deterministic refusal); " +
               "not retrying",
-            { error: result.error, handlerId },
+            { error, handlerId },
           );
-          return;
+          break;
         case "permanent":
           runFinalCommitCallback();
           if (permanentRejection === "receipt-exists") {
@@ -1184,9 +1221,9 @@ export async function dispatchQueuedEvent(state: {
           logger.warn(
             "scheduler",
             "Event handler commit permanently rejected; not retrying",
-            { error: result.error, handlerId, permanentRejection },
+            { error, handlerId, permanentRejection },
           );
-          return;
+          break;
         case "convergence-failed": {
           runFinalCommitCallback();
           logger.error(
@@ -1201,17 +1238,24 @@ export async function dispatchQueuedEvent(state: {
               handlerId,
               attempts: disposition.attempts,
               elapsedMs: disposition.elapsedMs,
-              cause: result.error,
+              cause: error,
             }),
             action,
           );
-          return;
+          break;
         }
       }
-    }).catch((error) => {
+      if (telemetryFailure !== undefined) {
+        throw telemetryFailure.error;
+      }
+    };
+    tx.commit().then(
+      ({ error }) => handleCommitResult(error),
+      (reason) => handleCommitResult(normalizeEventCommitRejection(reason)),
+    ).catch((error) => {
       logger.error(
         "schedule-error",
-        "Event handler commit promise rejected:",
+        "Event handler commit result handling failed:",
         error,
       );
     });
