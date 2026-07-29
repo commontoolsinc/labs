@@ -87,16 +87,17 @@ resumable.
 Everything here is a reason some derived computation cannot run on the
 server; closing them all is what makes the claim mechanism unnecessary.
 
-| Blocker | Where | Note |
+| Blocker | Status | Note |
 | --- | --- | --- |
-| `wish` | no descriptor; egresses via `globalThis.fetch` | A4. Owner ruled the system-pattern load a special case — resolve by loading from disk server-side |
-| `compileAndRun` | mints 4 docs, runs a whole pattern, writes from async txs outside its run | A3 refused a descriptor; needs its own design |
-| `sqliteDatabase` | derives `owner` from ambient trust snapshot, not inputs | A3. A server-side first run would mint the handle owned by the executor's principal |
-| `llmDialog`, `navigateTo` | effect nodes at runtime (factory wins over registration) | A3. Per D11 these are *pattern* effects, so they must run server-side |
-| `claim-key-mismatch` ×2, `claim-authority-lost` ×2 | live residual, both scoped arms | the last 4 events after `8e1cb7d99` |
-| `malformed-output-surface` ×1, `non-space-read-scope` ×1 | user arm | undiagnosed |
-| `dynamic-sqlite-operation` | unconditional at `servability.ts:591` | handler-only, so inside the goal per D2-as-amended |
-| `event-handler` | categorically unservable, `servability.ts:352` | client-inherent; P5 switches to sending the EVENT instead of the commit |
+| `wish` | **DONE** `b3304e771` | Owner accepted the egress (idempotent GET of our own API). W2.15a descriptor; classifies claim-ready. A4's pins updated, not deleted |
+| `llmDialog` | **DONE** `b3304e771` | Effect route. Turn starts from DOCUMENT state, so a client handler's append is an ordinary doc change. Four-doc surface (A3 said three — verify, don't trust) |
+| `sqliteDatabase` | **PARTIAL** `adf1e3dfe` | Owner now from the acting lane, via the new read-only `actingExecutionLane`. **Still no descriptor**: `makeResultCell` writes the document-root `["result"]` path, which a computation envelope cannot bound — pinned in `sqlite-database-servability.test.ts`, needs a registry decision |
+| `navigateTo` | **DESIGNED** | [`navigate-to-server-side.md`](navigate-to-server-side.md). Owner gates open. Key finding: a broadcast is structurally UNREACHABLE (session-declared writes serve only at session lane rank), so the interim under-delivers, not over-delivers |
+| `compileAndRun` | **FOLDED INTO navigateTo** | Its blocker is NOT the async writes previously recorded — `llm` is async and now serves, `sqliteQuery` writes post-commit through a gate. It is `pieceCreatedCallback`, a `browserWorker`-only delta in the same runtime-presets row as `navigateCallback`. Same channel, same design |
+| `claim-key-mismatch` ×2, `claim-authority-lost` ×2 | **EXPECTED TO EVAPORATE** | Both are claim-arbitration bookkeeping (`executor/action-transaction-router.ts:476`, `executor/deno-space-executor.ts:781`). Same class as R7, which §2.9 already calls a transition artifact. No referent once the server claims everything |
+| `malformed-output-surface` ×1, `non-space-read-scope` ×1 | **OPEN** | Owner: cross-space reads must be supported. The sibling branch at `deno-space-executor.ts:781` is `foreign-read-access-denied` ("acting principal lacking READ on a read space"), so this is C3.6 territory and partly built |
+| `dynamic-sqlite-operation` | **NOT A BLOCKER** | Handler-only, so inside the goal per D2-as-amended |
+| `event-handler` | **NOT A BLOCKER** | Client-inherent; P5 sends the EVENT instead of the commit |
 
 **Known-open:**
 
@@ -765,3 +766,15 @@ Append one line per landed item: date, item, commit, one-sentence outcome.
   unserved inventory 16 events → 4. **The first measured reduction in the
   never-claimed set.** Lesson: a limitation recorded in a source comment as
   "accepted" had propagated into this plan as permanent, and was neither.
+
+- 2026-07-29 — D11 reorders the arc: claims are scaffolding, close the
+  serving gap first. Wave G opens.
+- 2026-07-29 — navigateTo designed (`5fc2dd0f0`). A broadcast is
+  structurally unreachable; the interim under-delivers. `compileAndRun` folded
+  in — its real blocker was `pieceCreatedCallback`, not the async writes
+  earlier recorded.
+- 2026-07-29 — `adf1e3dfe` sqliteDatabase owner from the acting lane;
+  `b3304e771` wish + llmDialog server-side. **A narrow verify line let a red
+  gate through**: llmDialog's allowlist addition broke the "registry is exact"
+  pin, the agent reported green, and only a sibling agent's broader run caught
+  it. When an item touches a registry, verify the registry's OWN pin too.
