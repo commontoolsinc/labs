@@ -233,8 +233,9 @@ function hasTiming(job: Job): boolean {
 // docs/development/CI_PERFORMANCE.md ("Step phase markers"); keep them in sync.
 // A step whose name carries no known marker lands in "other" and is reported to
 // stderr so a missing marker is easy to spot. In a normal run the only unmarked
-// steps are the ones GitHub injects ("Set up job", "Post …", "Complete job"),
-// which are classified below by name because their wording is not ours to set.
+// steps are the ones the runner injects: "Set up job", "Post …" and "Complete
+// job" from GitHub, plus "Set up runner" and "Complete runner" from Blacksmith.
+// Those are classified below by name because their wording is not ours to set.
 // ---------------------------------------------------------------------------
 
 type Phase = "setup" | "work" | "shutdown" | "other";
@@ -269,6 +270,7 @@ const PHASE_MARKERS: [string, Phase][] = [
   ["🚧", "work"], // guard that fails the build on a banned pattern
   ["🧪", "work"], // run tests
   ["🧩", "work"], // run integration tests
+  ["🔁", "work"], // replay captured fixtures under today's source
   ["🧹", "work"], // lint
   ["🧭", "work"], // check skill facts
   ["📄", "work"], // type-check docs
@@ -296,10 +298,11 @@ function phaseOf(stepName: string): Phase {
   for (const [emoji, phase] of PHASE_MARKERS) {
     if (norm.startsWith(stripVS(emoji))) return phase;
   }
-  // Steps GitHub injects carry no marker; their wording is not ours to set.
+  // Injected steps carry no marker; their wording is not ours to set. GitHub
+  // adds the "job" pair and the "Post …" steps, Blacksmith the "runner" pair.
   if (name.startsWith("Post ")) return "shutdown";
-  if (name === "Set up job") return "setup";
-  if (name === "Complete job") return "shutdown";
+  if (name === "Set up job" || name === "Set up runner") return "setup";
+  if (name === "Complete job" || name === "Complete runner") return "shutdown";
   return "other";
 }
 

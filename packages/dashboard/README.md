@@ -87,10 +87,14 @@ The tab favicon follows the most urgent visible tile. It is red when any tile is
 red, orange when there are no red tiles but at least one orange tile, and green
 otherwise. Gray tiles do not turn the favicon gray. The page uses one URL-backed
 PNG favicon. Scalable source artwork is used only to generate and verify those
-raster assets; it is not part of the runtime dependency graph. The red favicon
-starts sad and becomes a crying face after the dashboard stays red for one
-continuous hour. The server retains the elapsed time across reloads. Returning
-below red resets it once every collector due in the same pass has finished.
+raster assets; it is not part of the runtime dependency graph. The green face is
+a rounded square, the orange warning face is a triangle, and the red faces are
+octagons. The eyes and mouth of the warning face sit ten percent of the canvas
+height below the level the other faces use, which places them in the wide part
+of the triangle instead of near its apex. The red favicon starts sad and
+becomes a crying face after the dashboard stays red for one continuous hour. The
+server retains the elapsed time across reloads. Returning below red resets it
+once every collector due in the same pass has finished.
 
 After changing `favicon-artwork.ts`, regenerate the embedded PNGs and their
 content-based cache version from the dashboard package directory:
