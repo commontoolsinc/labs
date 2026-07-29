@@ -7653,12 +7653,31 @@ export class Server {
         return respondTypedError<SqliteQueryResult>(message.requestId, deny);
       }
     }
+    // C1.4b lane-scoped READ seam, `sqlite.query`'s leg (G1). The cell-db FILE
+    // is picked by `db.scope` resolved against this context (`#cellDbPath`'s
+    // `scopeTag`), so resolving it from the sponsor would make a lease-bound
+    // executor serving alice's lane open the EXECUTOR principal's file. Same
+    // seam, same constant-shape rejection, same ordering as every other read
+    // verb: validated against the LIVE lane grant BEFORE any scope key
+    // resolves. Requests without an acting context — and every non-lease
+    // session — keep today's session-derived context byte-identically.
+    const scopeResolution = this.#actingReadScopeContext(
+      message.space,
+      session,
+      message.actingContext,
+    );
+    if (scopeResolution.error) {
+      return respondTypedError<SqliteQueryResult>(
+        message.requestId,
+        scopeResolution.error,
+      );
+    }
     try {
       // All reads run unattached on a pooled read-only connection (no ATTACH,
       // real read-only, each file its own `main` namespace). The only
       // per-source difference is path resolution: an injected on-disk source's
       // registered path, else the cell-derived path (which the db's scope
-      // qualifies, per the session's principal / id).
+      // qualifies, per the acting lane's — else the session's — principal / id).
       //
       // Capture per-column origin ONLY when the db declares per-column `ifc`
       // (Phase 2) or a per-row label rule (Phase 3 — rule inputs are located
@@ -7689,9 +7708,7 @@ export class Server {
           message.db,
           message.sql,
           message.params,
-          Engine.resolveScopeKey(message.db.scope, {
-            ...this.#scopeContextForSession(message.space, session),
-          }),
+          Engine.resolveScopeKey(message.db.scope, { ...scopeResolution.ok }),
           wantColumns,
         );
       // SQLite reads necessarily await filesystem work. Re-check both the
@@ -13755,6 +13772,7 @@ export const parseClientMessage = (
       requestId: parsed.requestId,
       space: parsed.space,
       sessionId: parsed.sessionId,
+      ...parsedActingContext(parsed),
       db,
       sql: parsed.sql,
       params,

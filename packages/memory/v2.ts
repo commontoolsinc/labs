@@ -1029,6 +1029,12 @@ export interface SqliteQueryRequest {
   requestId: string;
   space: string;
   sessionId: SessionId;
+  /** See {@link GraphQueryRequest.actingContext}. A cell-db's on-disk FILE is
+   * picked by `db.scope` resolved against the request's scope context, so a
+   * lease-bound executor session serving a lane must name it here; absent, the
+   * request keeps the sponsor-mirroring resolution the executor's own replica
+   * depends on. */
+  actingContext?: SchedulerExecutionContextKey;
   db: SqliteDbRef;
   sql: string;
   params?: SqliteParamsWire;

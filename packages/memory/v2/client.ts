@@ -775,11 +775,15 @@ export class SpaceSession {
     return result;
   }
 
-  /** Run a server-side read-only SQLite query against a cell-derived db. */
+  /** Run a server-side read-only SQLite query against a cell-derived db.
+   * Accepts the C1.4b `actingContext` seam (G1): a `user`/`session`-scoped db
+   * resolves its on-disk file from the named lane's identity, not the
+   * lease-bound sponsor's. */
   async sqliteQuery(
     db: SqliteDbRef,
     sql: string,
     params?: SqliteParamsWire,
+    options?: SessionReadOptions,
   ): Promise<SqliteQueryResult> {
     this.#assertOpen();
     return await this.client.request<SqliteQueryResult>({
@@ -787,6 +791,9 @@ export class SpaceSession {
       requestId: crypto.randomUUID(),
       space: this.space,
       sessionId: this.#sessionId,
+      ...(options?.actingContext !== undefined
+        ? { actingContext: options.actingContext }
+        : {}),
       db,
       sql,
       params,
