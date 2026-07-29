@@ -18,8 +18,8 @@ deep config in a few minutes):
 
 | Config | DepMode | BasisMode | Result |
 | --- | --- | --- | --- |
-| `PendingStacks_Current.cfg` | `fullstack` (shipped #4606) | `maxdep` (shipped) | **ReadCoherence violated** — CT-1910: the pending-read staleness scan starts at the highest dependency's resolution seq, missing a foreign overlapping write that landed between the reader's confirmed basis and that seq. |
-| `PendingStacks_Repaired.cfg` | `fullstack` | `confirmed` (CT-1910 repair) | **All invariants hold** (14.5M distinct states, exhaustive at `MaxTotal = 4`). |
+| `PendingStacks_Current.cfg` | `fullstack` (shipped #4606) | `maxdep` (legacy: pending reads without `basisSeq`) | **ReadCoherence violated** — CT-1910: the pending-read staleness scan starts at the highest dependency's resolution seq, missing a foreign overlapping write that landed between the reader's confirmed basis and that seq. Kept as the regression witness for the legacy shape, which servers still serve. |
+| `PendingStacks_Repaired.cfg` | `fullstack` | `confirmed` (CT-1910 repair — shipped: pending reads declaring `basisSeq`, scanned with own-session exclusion) | **All invariants hold** (14.5M distinct states, exhaustive at `MaxTotal = 4`). |
 | `PendingStacks_Filtered.cfg` | `filtered` (proposed CT-1872 refinement) | `confirmed` | **All invariants hold** (same bound). |
 | `PendingStacks_Filtered5.cfg` | `filtered` | `confirmed` | **All invariants hold** at `MaxTotal = 5` with single-path writes (110.7M distinct states, ~5 min) — deep enough for a foreign write to reject a *middle* pending layer beneath a reader, the case where overlap-filtering actually drops a dependency. |
 
@@ -30,6 +30,26 @@ change the basis dial. Conversely, dependency under-recording is the other
 failure axis (INV-3(a): a recording shape that drops a layer overlapping the
 read path re-creates the CT-1872 phantom); the filtered configs certify that
 the proposed narrowing keeps every overlapping layer and stays sound.
+
+**Scope of the certification.** The model checks the ADMISSION CORE under
+two structural assumptions the runtime does not automatically share, so the
+Repaired result certifies the rule, not the whole pipeline:
+
+- **Canonical reads.** `Build` constructs one read per path directly from
+  session state (`cbasis = csn`). The runner's raw-activity → wire
+  compaction layer (`compactCommitReads`) is outside the model; losing a
+  divergent basis there is guarded by a runner unit test (divergent basis
+  overrides survive compaction), not by TLC.
+- **FIFO by construction.** `Process` admits `Min(Unresolved(s))`, so a
+  later same-session commit can never overtake an earlier one in any
+  reachable state. The runner's hold-mode admission CAN reorder sends,
+  which is why the shipped exclusion is predecessor-restricted (own commits
+  with `local_seq` below the reader's) rather than session-wide — a rule
+  that coincides with the model's same-session exclusion in every
+  model-reachable state and stays sound under overtaking. Modeling issued
+  versus admitted commits separately, with FIFO as a checked invariant
+  rather than a structural given, is the natural refinement if this area
+  churns.
 
 ## Running
 

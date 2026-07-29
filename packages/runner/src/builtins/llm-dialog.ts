@@ -126,9 +126,6 @@ const client = new LLMClient();
 // by a requestId match, so only the replica running the turn refreshes it.
 // Nothing distinguishes a crashed replica from a slow one without a bound.
 const REQUEST_TIMEOUT = 1000 * 60 * 5; // 5 minutes
-// Pattern-backed tools can themselves run LLM/tool loops (for example generic
-// sub-agents), so the dialog needs a budget longer than a single model call.
-const TOOL_CALL_TIMEOUT = 1000 * 120; // 120 seconds
 const MAX_SERIALIZE_DEPTH = 100;
 
 /**
@@ -2356,6 +2353,7 @@ function createToolResultMessages(
 }
 
 export const llmDialogTestHelpers = {
+  REQUEST_TIMEOUT,
   getCellSchema,
   parseLLMFriendlyLink,
   traverseAndSerialize,
@@ -2773,12 +2771,16 @@ async function handleInvoke(
     r !== undefined && resolve(r);
   });
 
-  // Ends three ways: the result lands, the turn is cancelled, or the deadline
-  // fires. The deadline is the one that should not be here — it bounds how long
-  // a healthy tool may take, and firing early reports a working tool to the
-  // model as a failure. Removing it needs a signal for "this run finished
-  // without writing anything", which the runtime cannot yet produce; see
-  // docs/development/proposals/retiring-llm-tool-call-deadlines.md.
+  // Ends three ways, each of them an event: the result lands, the run quiesces,
+  // or the turn is cancelled.
+  //
+  // The middle one is what makes the wait above determinate. "The result cell
+  // became defined" conflates two questions — has the run finished, and did it
+  // produce anything — so a run that finishes having written nothing looks the
+  // same as one still working. `settledFor` answers the first question directly
+  // for the run this tool call started, so a tool that produced nothing ends
+  // here with the cell still undefined rather than waiting for a value that is
+  // never coming.
   const aborted = abortSignal
     ? new Promise<void>((resolveAborted) => {
       if (abortSignal.aborted) return resolveAborted();
@@ -2788,21 +2790,16 @@ async function handleInvoke(
     })
     : undefined;
 
-  let timeout;
-  const timeoutPromise = new Promise((_, reject) => {
-    timeout = setTimeout(() => {
-      reject(new Error("Tool call timed out"));
-    }, TOOL_CALL_TIMEOUT);
-  }).then(() => {
-    throw new Error("Tool call timed out");
-  });
-
+  // The barrier keeps re-checking until the run goes quiet, so a race the result
+  // wins would otherwise leave it looping with nobody waiting.
+  const quiescence = new AbortController();
   try {
     await Promise.race(
-      [promise, timeoutPromise, aborted].filter(Boolean),
+      [promise, runtime.settledFor(result, quiescence.signal), aborted]
+        .filter(Boolean),
     );
   } finally {
-    clearTimeout(timeout);
+    quiescence.abort();
     cancel();
   }
 
@@ -3005,6 +3002,12 @@ export function llmDialog(
   let cellScope: CellScope | undefined;
   let requestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
+  // The request id of the turn this replica is running, if any. Set when that
+  // turn's promise is registered with `trackAsyncWork` and cleared when the
+  // promise settles, so it spans the whole conversation the turn drives,
+  // including its tool calls. A turn running here needs no failure detection:
+  // this replica knows it is alive.
+  let localTurnRequestId: string | undefined = undefined;
 
   // This is called when the pattern containing this node is being stopped.
   addCancel(() => {
@@ -3102,16 +3105,45 @@ export function llmDialog(
         // Cast is necessary as .key doesn't yet correctly handle Stream<>
         result.key("addMessage") as unknown as Stream<BuiltInLLMMessage>,
         (tx: IExtendedStorageTransaction, event: BuiltInLLMMessage) => {
-          if (
-            pending.withTx(tx).get() && (
+          if (pending.withTx(tx).get()) {
+            // A message added while a turn is running is dropped. The add
+            // message UI should either be disabled or change the send button
+            // to be a stop button.
+            const activeRequestId = internal.withTx(tx).key("requestId").get();
+            if (
+              localTurnRequestId !== undefined &&
+              localTurnRequestId === activeRequestId
+            ) {
+              // The running turn is this replica's own, so its liveness is not
+              // in question and the heartbeat is not consulted. A turn can run
+              // longer than the heartbeat's staleness bound without a durable
+              // write, and the heartbeat then reads stale for a turn that is
+              // plainly alive. The writes bracket a round of tool calls rather
+              // than falling between them, and nothing bounds a tool call, so a
+              // single one that runs long enough is already such a gap.
+              //
+              // Nothing bounds a turn on this branch. A local turn that never
+              // settles keeps dropping messages until `cancelGeneration` sets
+              // `pending` false, which is the stop button `cf-prompt-input`
+              // shows in place of send for as long as `pending` holds.
+              return;
+            }
+            // The turn belongs to another replica. `lastActivity` is that
+            // replica's heartbeat, refreshed by `safelyPerformUpdate` on every
+            // durable write of the turn, and a stale one is the only sign
+            // available that the tab which started the turn went away.
+            //
+            // This `Date.now()` is a latent hazard under the runner's fake
+            // clock, whose auto-advance can carry logical time past the
+            // five-minute mark in a test that never meant to model elapsed
+            // time. The branch it then takes accepts a message into a dialog
+            // whose turn is still running.
+            if (
               internal.withTx(tx).key("lastActivity").get() >
                 Date.now() - REQUEST_TIMEOUT
-            )
-          ) {
-            // For now, let's drop messages added while request is pending for
-            // less than five minutes. Add message UI should either be disabled
-            // or change the send button to be a stop button.
-            return;
+            ) {
+              return;
+            }
           }
 
           // Before starting request, set pending and append the new message.
@@ -3165,8 +3197,12 @@ export function llmDialog(
               }
 
               abortController = new AbortController();
+              // Set alongside starting the turn and cleared when the turn's
+              // promise settles, so the flag's lifetime is exactly the turn's.
+              localTurnRequestId = nextRequestId;
               // Track the dialog turn (LLM call + writeback) as async builtin
-              // work so `runtime.settled()` wait for the result;
+              // work owned by this run, so `runtime.settled()` and
+              // `runtime.settledFor(parentCell)` both wait for the result;
               // `idle()` does not, so the handler never blocks on the LLM call.
               runtime.trackAsyncWork(
                 startRequest(
@@ -3181,7 +3217,16 @@ export function llmDialog(
                   nextRequestId,
                   abortController.signal,
                   capturedRequest,
-                ),
+                ).finally(() => {
+                  // A superseded turn keeps running until its abort reaches
+                  // every await inside it, so it can settle after a newer turn
+                  // has claimed the flag. Only the turn that still holds the
+                  // flag clears it.
+                  if (localTurnRequestId === nextRequestId) {
+                    localTurnRequestId = undefined;
+                  }
+                }),
+                parentCell,
               );
             },
           );

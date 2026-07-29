@@ -6,6 +6,7 @@
  */
 import { basename, dirname, join } from "@std/path";
 import { type EditableSource, fileSource } from "./editsource.ts";
+import { languageForSource } from "./languages/language.ts";
 
 export interface DirEntry {
   readonly name: string;
@@ -50,7 +51,10 @@ export function realFileGateway(): FileGateway {
     open: (absPath) => {
       try {
         const text = Deno.readTextFileSync(absPath);
-        return { source: fileSource(absPath), text };
+        return {
+          source: fileSource(absPath, languageForSource(absPath, text)),
+          text,
+        };
       } catch {
         return null;
       }

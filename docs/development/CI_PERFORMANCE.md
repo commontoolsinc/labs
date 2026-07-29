@@ -148,6 +148,7 @@ authenticate, and bring test servers and devices up before the real work:
 | 🚧 | guard that fails the build on a banned pattern |
 | 🧪 | run tests |
 | 🧩 | run integration tests |
+| 🔁 | replay captured fixtures under today's source |
 | 🧹 | lint |
 | 🧭 | check skill facts |
 | 📄 | type-check docs |
@@ -179,12 +180,13 @@ before you "correct" a step name back to a more obvious emoji:
 - Downloading logs after a failure is shutdown, so those steps use 📋 rather than
   the 📥 or 📦 download markers.
 
-The steps GitHub injects into every job — `Set up job`, `Post …`, and
-`Complete job` — carry no marker, so the script classifies them by name (setup
-for `Set up job`, shutdown for the other two). Any other step that reaches the
-chart without a recognized marker is counted as "other", drawn in gray, and
-listed on standard error when the script runs, so a missing marker is easy to
-find and fix.
+The steps the runner injects into every job carry no marker, so the script
+classifies them by name. GitHub adds `Set up job`, `Post …`, and `Complete
+job`; the Blacksmith runners add `Set up runner` and `Complete runner`
+alongside them. The two set-up steps count as setup and the rest as shutdown.
+Any other step that reaches the chart without a recognized marker is counted as
+"other", drawn in gray, and listed on standard error when the script runs, so a
+missing marker is easy to find and fix.
 
 ## Root Test Job Shape
 

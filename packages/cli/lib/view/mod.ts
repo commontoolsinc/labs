@@ -6,14 +6,14 @@
  * representation and exits, mirroring how `less`/`bat` behave when their
  * output is redirected.
  * Filename-free compiler output keeps the transformed TypeScript default.
- * Other filename-free source uses plain text unless an explicit language or
- * virtual filename selects another language.
+ * Other source uses filename and shebang metadata unless an explicit language
+ * selects another language.
  */
 import { renderLineColored } from "./highlight.ts";
 import { runPager } from "./pager.ts";
 import type { Document } from "./model.ts";
 import { ViewError } from "./errors.ts";
-import { type DiffModel, looksLikeDiff, parseDiff } from "./diff.ts";
+import { detectDiff, type DiffModel, parseDiff } from "./diff.ts";
 import {
   buildDiffDocument,
   realWorkspace,
@@ -24,9 +24,10 @@ import {
   distinctLanguages,
   type Language,
   languageForFile,
-  languageForId,
+  languageForName,
+  languageForSource,
   languageForTransformedOutput,
-  languageIds,
+  languageNames,
   type Semantics,
 } from "./languages/language.ts";
 import {
@@ -111,11 +112,11 @@ function pipedSelection(options: ViewOptions): SourceSelection {
   if (options.language === undefined) {
     return { fileName: options.filename };
   }
-  const language = languageForId(options.language);
+  const language = languageForName(options.language);
   if (!language) {
     throw new ViewError(
       `cf view: unknown language "${options.language}". Available languages: ${
-        languageIds().join(", ")
+        languageNames().join(", ")
       }`,
     );
   }
@@ -152,10 +153,10 @@ function validateSourceSelection(
  * transformed blob gets the section-based program. Semantics are constructed
  * lazily — only the interactive path needs them.
  *
- * `forceDiff` pins the mode (`--diff` / `--no-diff`); when auto-detecting, a
- * diff is accepted only if a reasonable share of its lines actually parse as
- * diff content — so a source file that merely EMBEDS a diff (in a string, a
- * test fixture) still views as source. Exported for tests.
+ * `forceDiff` pins the mode (`--diff` / `--no-diff`). Automatic detection
+ * accepts raw unified diffs only when the first non-empty line starts a
+ * structurally parseable diff container. Standard Git commit output has its own
+ * complete-header check. Exported for tests.
  *
  * `selection` chooses syntax for piped source. Its virtual filename is
  * advisory and does not make the source editable.
@@ -170,21 +171,24 @@ export function buildView(
   semantics: () => Semantics | undefined;
   editSource: EditableSource;
 } {
-  const commitOutput = looksLikeCommitOutput(text);
   const sourceSelected = selection.language !== undefined ||
     selection.fileName !== undefined;
   validateSourceSelection(file, forceDiff, sourceSelected);
-  const tryDiff = forceDiff ??
-    (!sourceSelected && (looksLikeDiff(text) || commitOutput));
-  const parsedDiff = tryDiff ? parseDiff(text) : null;
+  const detectContent = forceDiff !== false && !sourceSelected;
+  const commitOutput = detectContent && looksLikeCommitOutput(text);
+  const parsedDiff = forceDiff === true || commitOutput
+    ? parseDiff(text)
+    : detectContent
+    ? detectDiff(text)
+    : null;
   const model: DiffModel | null = parsedDiff ??
-    (tryDiff && commitOutput
+    (forceDiff === true || commitOutput
       ? {
         files: [],
         lines: text.split("\n").map(() => ({ kind: "other" as const })),
       }
       : null);
-  if (model && (forceDiff || commitOutput || mostlyDiff(model, text))) {
+  if (model) {
     const ws = realWorkspace(safeCwd());
     // One workspace cache shared by the initial build and every deferred
     // re-parse, so the named files are read and parsed once per session.
@@ -220,14 +224,14 @@ export function buildView(
   const language = selection.language ??
     (transformedOutput
       ? languageForTransformedOutput()
-      : languageForFile(fileName));
+      : languageForSource(fileName, text));
   const doc = language.parseDocument(text, fileName);
   return {
     doc,
     semantics: () =>
       language.createSemantics?.(text, { cwd: safeCwd(), fileName }),
     // A real file is editable; a pipe (transformed output, etc.) is not.
-    editSource: file ? fileSource(file) : readonlySource(
+    editSource: file ? fileSource(file, language) : readonlySource(
       "This view is of a pipe — there is no underlying file to edit.",
       language,
       fileName,
@@ -278,20 +282,6 @@ function looksLikeCommitOutput(text: string): boolean {
     /^Author:\s+.*<[^<>]*>$/.test(line) ||
     /^author .*<[^<>]*> -?\d+ [+-]\d{4}$/.test(line)
   );
-}
-
-/** At least a quarter of the non-empty lines parse as diff content. Headers in
- * `git log -p` output are a minority; an embedded diff in a source file is. */
-function mostlyDiff(model: DiffModel, text: string): boolean {
-  const lines = text.split("\n");
-  let nonEmpty = 0;
-  let diffLines = 0;
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim().length === 0) continue;
-    nonEmpty++;
-    if (model.lines[i]?.kind !== "other") diffLines++;
-  }
-  return nonEmpty > 0 && diffLines / nonEmpty >= 0.25;
 }
 
 function safeCwd(): string {

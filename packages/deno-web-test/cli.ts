@@ -3,6 +3,13 @@ import { Manifest } from "./manifest.ts";
 import { buildTestDir } from "./utils.ts";
 import { Runner } from "./runner.ts";
 
+const stderrBoundary = Deno.env.get("DENO_WEB_TEST_STDERR_BOUNDARY");
+if (stderrBoundary) {
+  Deno.stderr.writeSync(
+    new TextEncoder().encode(`${stderrBoundary}\n`),
+  );
+}
+
 // {*_,*.,}test.{ts, tsx, mts, js, mjs, jsx}
 const manifest = await Manifest.create(Deno.cwd(), [...Deno.args]);
 await buildTestDir(manifest);

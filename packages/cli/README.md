@@ -6,13 +6,20 @@
 files, and unified diffs. Named Markdown, JSON, JSONC, YAML, and Python files
 use their own syntax highlighting. Transformed compiler output piped without a
 filename keeps TypeScript highlighting when its module header identifies it.
-Other filename-free source and named files with unrecognized syntax are shown as
-plain text. For piped source, `--filename` selects syntax as though the input
-had that name, while `--language` selects one of `typescript`, `markdown`,
-`json`, `yaml`, `python`, or `plain-text` directly. Both options keep the pipe
-read-only and suppress unified-diff auto-detection. An explicit language takes
-priority when both options are present. Use `--diff` instead when the pipe is a
-unified diff.
+Python interpreter shebangs select Python for otherwise unrecognized names.
+Node, Deno, and Bun shebangs select the TypeScript and JavaScript language
+family. Other filename-free source and named files with unrecognized syntax are
+shown as plain text. For piped source, `--filename` selects syntax as though the
+input had that name. `--language` selects a language by its stable identifier or
+alias. Both options keep the pipe read-only and suppress unified-diff
+auto-detection. An explicit language takes priority when both options are
+present. Use `--diff` instead when the pipe is a unified diff.
+
+Automatic container detection is limited to structurally identified raw unified
+diffs and standard Git commit output. A raw diff starts at the first nonblank
+line. Recognized shebangs and transformed compiler headers remain explicit
+selectors. JSON-, YAML-, Markdown-, Python-, and other language-shaped source is
+not guessed from its syntax.
 
 Markdown files can switch between the source and a rendered terminal view with
 `V`. The rendered view formats headings, emphasis, links, quotes, lists, task

@@ -474,7 +474,8 @@ export class XSchedulerGraph extends LitElement {
 
     /* Size boost animation for triggered nodes when zoomed out */
     @keyframes node-size-boost {
-      0%, 100% {
+      0%,
+      100% {
         transform: scale(1);
       }
       15% {

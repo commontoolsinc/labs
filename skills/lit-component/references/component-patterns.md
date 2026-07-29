@@ -82,8 +82,7 @@ export class CFSeparator extends BaseElement {
         class="separator ${this.orientation}"
         part="separator"
         role="${this.decorative ? "none" : "separator"}"
-      >
-      </div>
+      ></div>
     `;
   }
 }

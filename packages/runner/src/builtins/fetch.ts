@@ -311,9 +311,11 @@ function fetchBuiltin(kind: FetchKind) {
       const tx = runtime.edit();
 
       try {
-        // If the pending request is ours, set pending to false and clear the requestId.
+        // If the pending request is ours, set pending to false and clear the
+        // requestId. A claim another replica has taken over carries its id,
+        // not ours, and releasing it would strand the request it is running.
         const currentRequestId = internal.withTx(tx).key("requestId").get();
-        if (currentRequestId === myRequestId) {
+        if (myRequestId !== undefined && currentRequestId === myRequestId) {
           pending.withTx(tx).set(false);
           internal.withTx(tx).key("requestId").set("");
         }
@@ -458,17 +460,23 @@ function fetchBuiltin(kind: FetchKind) {
 
       // Start a new fetch if we don't have a result/error and aren't already fetching
       if (!hasValidResult && !hasError && !alreadyFetching) {
-        const newRequestId = inputHash;
+        // The claim id names this replica, so teardown can tell a claim it
+        // still holds from one another replica has taken over. `runtime.id` is
+        // unique per storage manager and so per replica. The outbox id stays
+        // the input hash, which is what makes it an idempotency key for the
+        // same request from anywhere.
+        const newRequestId = `${runtime.id}:${inputHash}`;
         enqueueSinkRequestPostCommitEffect(
           tx,
           kind.name,
-          `${kind.name}:${newRequestId}`,
+          `${kind.name}:${inputHash}`,
           inputsSnapshot,
           `${kind.name}-start`,
           () => {
             // Try to claim mutex - returns immediately if another tab is
-            // processing. Tracked as async builtin work so runtime.settled()
-            // waits for the fetch and its writeback; idle() does not, so the
+            // processing. Tracked as async builtin work owned by this run, so
+            // runtime.settled() and runtime.settledFor(parentCell) both wait
+            // for the fetch and its writeback; idle() does not, so the
             // post-commit handler never blocks on network I/O.
             const work = tryClaimMutex(
               runtime,
@@ -518,7 +526,9 @@ function fetchBuiltin(kind: FetchKind) {
 
                 abortController = new AbortController();
 
-                // We claimed the mutex, start the fetch
+                // We claimed the mutex, start the fetch. `startFetch` compares
+                // against the input hash, not the claim id: any request for
+                // these inputs may write the result.
                 myRequestId = newRequestId;
                 await startFetch(
                   runtime,
@@ -526,7 +536,7 @@ function fetchBuiltin(kind: FetchKind) {
                   snapshotInputs,
                   inputsCell,
                   inputsSnapshot,
-                  newRequestId,
+                  inputHash,
                   pending,
                   result,
                   error,
@@ -535,7 +545,7 @@ function fetchBuiltin(kind: FetchKind) {
                 );
               },
             );
-            runtime.trackAsyncWork(work);
+            runtime.trackAsyncWork(work, parentCell);
           },
         );
       }
@@ -647,8 +657,18 @@ async function startFetch(
         snapshotInputs(inputsCell.withTx(tx)),
       );
 
-      // Always clear pending and result
       pending.withTx(tx).set(false);
+
+      // Taking over a claim that has gone stale can leave two requests for the
+      // same inputs in flight at once. A result already recorded for those
+      // inputs came from the other one, and this failure says nothing about
+      // it, so leave it standing rather than replacing it with this error.
+      if (
+        currentHash === inputHash && result.withTx(tx).get() !== undefined
+      ) {
+        return;
+      }
+
       result.withTx(tx).set(undefined);
 
       // Only write error and inputHash if inputs still match

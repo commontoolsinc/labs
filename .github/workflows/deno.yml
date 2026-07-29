@@ -125,6 +125,35 @@ jobs:
           PATTERN_COMPAT_SHARD: "${{ matrix.shard }}/${{ matrix.total }}"
         run: deno task pattern-compat
 
+  pattern-vintage:
+    name: "Pattern Update State Continuity"
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 20
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v7
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      # Tier 2. pattern-compat proves the CONTRACT still fits; this replays a
+      # real captured DOCUMENT under today's source and fails if today's source
+      # cannot be materialized over it — the additive-required migration
+      # refuses a setup commit that no contract check sees as a failure to
+      # apply. The space roots auto-update onto a root someone is already
+      # using, so a break here bricks a live piece.
+      #
+      # What it does NOT yet catch (measured, and tracked as stage 5 in
+      # docs/plans/pattern-update-state-continuity.md): a MOVED storage key.
+      # The committed vintages hold a freshly set-up root and the replay
+      # compares no values, so `.for('x')` → `.for('y')` replays clean here.
+      # `packages/piece/test/state-continuity.test.ts` covers that class.
+      - name: 🔁 Replay pinned vintages under today's source
+        run: deno task pattern-vintage
+
   baselines-append-only:
     name: "Pattern Baselines Append-Only"
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -1035,6 +1064,7 @@ jobs:
       - check
       - cfcheck
       - pattern-compat
+      - pattern-vintage
       - baselines-append-only
       - test
       - runner-test

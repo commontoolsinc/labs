@@ -105,6 +105,16 @@ Deno.test("highlightLineEditLocally: unchanged text returns the original line", 
   assert(highlightLineEditLocally(before, before.text) === before);
 });
 
+Deno.test("highlightLineEditLocally: editing a called member key refreshes its definition name", () => {
+  const before = createHighlighter('worker["run"]();', "m.ts").lines[0];
+  const after = highlightLineEditLocally(before, 'worker["stop"]();');
+  assert(after, "the quoted-string fast path handles the edit");
+  const key = after.spans.find((span) => span.text === '"stop"');
+  assert(key, "the edited key remains one string span");
+  assertEquals(key.exactDefinitionName, "stop");
+  assertEquals(key.exactDefinitionDisplayName, '"stop"');
+});
+
 // --- safeStartLine walk-back past a multi-line token (lines 459, 460) --------
 
 /** Assert that the incremental highlighter's result for `edited` is identical
@@ -120,8 +130,12 @@ function assertIncrementalMatches(
   for (let i = 0; i < full.length; i++) {
     assertEquals(inc[i].text, full[i].text, `line ${i} text`);
     assertEquals(
-      inc[i].spans.map((s) => `${s.cls}:${s.text}:${s.bracketDepth}`),
-      full[i].spans.map((s) => `${s.cls}:${s.text}:${s.bracketDepth}`),
+      inc[i].spans.map((s) =>
+        `${s.cls}:${s.text}:${s.bracketDepth}:${s.exactDefinitionName}:${s.exactDefinitionDisplayName}`
+      ),
+      full[i].spans.map((s) =>
+        `${s.cls}:${s.text}:${s.bracketDepth}:${s.exactDefinitionName}:${s.exactDefinitionDisplayName}`
+      ),
       `line ${i} spans`,
     );
   }
@@ -132,6 +146,22 @@ Deno.test("createHighlighter: an edit inside a multi-line template matches a ful
   // re-highlights from the statement boundary and matches a full parse.
   const base = "const t = `line one\nline two\nline three`;\nconst x = 1;\n";
   assertIncrementalMatches(base, base.replace("line two", "line TWO"));
+});
+
+Deno.test("createHighlighter: an edited multi-line call key has one lookup marker", () => {
+  const base = "worker[`line one\nline two`]();\nconst x = 1;\n";
+  const hl = createHighlighter(base, "m.ts");
+  const lines = hl.update(base.replace("line two", "line TWO"));
+  assertEquals(
+    lines.flatMap((line) => line.spans)
+      .filter((span) => span.exactDefinitionName !== undefined)
+      .map((span) => [
+        span.text,
+        span.exactDefinitionName,
+        span.exactDefinitionDisplayName,
+      ]),
+    [["`line one", "line one\nline TWO", '"line one\\nline TWO"']],
+  );
 });
 
 Deno.test("createHighlighter: editing a statement whose line opens inside an earlier block comment", () => {

@@ -6,7 +6,6 @@ import { assert, assertEquals, assertStrictEquals } from "@std/assert";
 import { join } from "@std/path";
 import {
   createYamlHighlighter,
-  isYamlPath,
   yamlDocument,
   yamlHighlightLines,
 } from "../lib/view/languages/yaml/yaml.ts";
@@ -32,14 +31,15 @@ function classesOf(lines: readonly Line[], token: string): Set<TokenClass> {
 }
 
 Deno.test("yaml: path matching recognizes yml and yaml", () => {
-  assert(isYamlPath("config.yaml"));
-  assert(isYamlPath("/repo/.github/workflows/check.yml"));
-  assert(isYamlPath("UPPER.YAML"));
-  assert(!isYamlPath("config.json"));
-  assert(!isYamlPath("yaml.ts"));
-  assert(!isYamlPath(undefined));
   assertEquals(languageForFile("config.yaml").id, "yaml");
-  assertEquals(languageForFile("check.yml").id, "yaml");
+  assertEquals(
+    languageForFile("/repo/.github/workflows/check.yml").id,
+    "yaml",
+  );
+  assertEquals(languageForFile("UPPER.YAML").id, "yaml");
+  assertEquals(languageForFile("config.json").id, "json");
+  assertEquals(languageForFile("yaml.ts").id, "typescript");
+  assertEquals(languageForFile(undefined).id, "plain-text");
 });
 
 Deno.test("yaml: keys and scalar types receive distinct classes", () => {

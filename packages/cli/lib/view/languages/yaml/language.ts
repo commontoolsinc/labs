@@ -6,7 +6,6 @@
 import type { Language } from "../language.ts";
 import {
   createYamlHighlighter,
-  isYamlPath,
   yamlDocument,
   yamlHighlightLines,
 } from "./yaml.ts";
@@ -14,7 +13,13 @@ import {
 export const yamlLanguage: Language = {
   id: "yaml",
 
-  matches: (fileName) => isYamlPath(fileName),
+  metadata: {
+    extensions: [".yaml", ".yml"],
+    filenames: [],
+    filenamePatterns: [],
+    aliases: ["yml"],
+    interpreters: [],
+  },
 
   parseDocument: (text) => yamlDocument(text),
 

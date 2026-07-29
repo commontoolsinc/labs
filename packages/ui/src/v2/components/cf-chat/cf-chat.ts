@@ -120,9 +120,9 @@ export class CFChat extends BaseElement {
           var(--cf-spacing-3, 0.75rem)
         )
           var(
-            --cf-theme-spacing-padding-bubble-horizontal,
-            var(--cf-spacing-4, 1rem)
-          );
+          --cf-theme-spacing-padding-bubble-horizontal,
+          var(--cf-spacing-4, 1rem)
+        );
         border-radius: var(
           --cf-theme-border-radius,
           var(--cf-border-radius-lg, 0.5rem)
@@ -159,7 +159,9 @@ export class CFChat extends BaseElement {
       }
 
       @keyframes typingBounce {
-        0%, 80%, 100% {
+        0%,
+        80%,
+        100% {
           opacity: 0.3;
           transform: scale(0.8);
         }

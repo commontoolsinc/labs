@@ -256,7 +256,92 @@ Deno.test("makeHost: a repeated read of the same file is served from the cache",
     const second = host.readFile!(file); // returned from fileCache
     assertEquals(first, "export const dep = 1;\n");
     assertEquals(second, first);
+    assertEquals(host.directoryExists!(dir), true);
+    assertEquals(host.directoryExists!(join(dir, "missing")), false);
   } finally {
     Deno.removeSync(dir, { recursive: true });
+  }
+});
+
+Deno.test("signed numeric definitions reject positions that do not name a supported key", () => {
+  const fileName = "/signed-numeric.ts";
+  const text = `const key = 1;
+const value = { [-1](): void {} };
+value[1];
+value[-key];
+value[!1];
+value[+1e999];
+value[-2];
+value[-1];
+`;
+  const host = _internal.makeHost(
+    [{ name: fileName, start: 0, end: text.length, text }],
+    {},
+    undefined,
+    CWD,
+    CWD,
+  );
+  const service = ts.createLanguageService(host, ts.createDocumentRegistry());
+  try {
+    const program = service.getProgram();
+    assert(program, "the test source produces a TypeScript program");
+    const atArgument = (snippet: string): number => {
+      const start = text.indexOf(snippet);
+      assert(start >= 0, `source contains ${snippet}`);
+      return start + snippet.indexOf("[") + 1;
+    };
+
+    assertEquals(
+      _internal.signedNumericElementDefinitions(
+        program!,
+        "/missing.ts",
+        0,
+      ),
+      [],
+    );
+    assertEquals(
+      _internal.signedNumericElementDefinitions(
+        program!,
+        fileName,
+        text.length,
+      ),
+      [],
+    );
+    assertEquals(
+      _internal.signedNumericElementDefinitions(
+        program!,
+        fileName,
+        text.indexOf("const key"),
+      ),
+      [],
+    );
+    for (
+      const snippet of [
+        "value[1]",
+        "value[-key]",
+        "value[!1]",
+        "value[+1e999]",
+        "value[-2]",
+      ]
+    ) {
+      assertEquals(
+        _internal.signedNumericElementDefinitions(
+          program!,
+          fileName,
+          atArgument(snippet),
+        ),
+        [],
+        `${snippet} has no supported signed numeric definition`,
+      );
+    }
+    const definitions = _internal.signedNumericElementDefinitions(
+      program!,
+      fileName,
+      atArgument("value[-1]"),
+    );
+    assertEquals(definitions.length, 1);
+    assertEquals(definitions[0].name, "-1");
+  } finally {
+    service.dispose();
   }
 });

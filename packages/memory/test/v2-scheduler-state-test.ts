@@ -797,10 +797,13 @@ Deno.test("memory v2 accepts batched no-op scheduler observations", async () => 
 
 // CT-1872 1c parity for observations: an observation's pending read carries
 // the same array dependency set as an ordinary commit read — every element
-// must resolve (else the observation drops), and staleness is based at the
-// HIGHEST element, so a foreign write before the top layer's resolution does
-// not drop it (the same max-basis rule, and the same CT-1908/CT-1910 basis
-// caveat, as resolvePendingReads).
+// must resolve (else the observation drops), and staleness runs from the
+// basis §3.6.3 selects, exactly as in resolvePendingReads. A LEGACY read (no
+// basisSeq) is based at the HIGHEST element, so a foreign write before the
+// top layer's resolution does not drop it — the CT-1910 over-advance,
+// retained for that shape. A read declaring `basisSeq` scans the full
+// interval with predecessor-only own-session exclusion: the same foreign
+// write now drops the observation, while own predecessor layers do not.
 Deno.test("memory v2 scheduler observations resolve array pending reads at the highest layer", async () => {
   const { engine, path } = await createEngine();
   const sessionId = "session:scheduler-array-reads";
@@ -888,6 +891,42 @@ Deno.test("memory v2 scheduler observations resolve array pending reads at the h
               "pattern.tsx:array-read:unresolved",
             ),
           },
+          {
+            // CT-1910 repaired shape: the same read as 101 but declaring its
+            // true basis. The scan now covers (0, head] and reaches the
+            // foreign x = 2 the legacy basis skipped — dropped.
+            localSeq: 103,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:sched-doc",
+                path: toDocumentPath([]),
+                localSeq: [1, 2],
+                basisSeq: 0,
+              }],
+            },
+            schedulerObservation: observationForAction(
+              "pattern.tsx:array-read:true-basis-stale",
+            ),
+          },
+          {
+            // Repaired shape, coherent: basis 2 reflects the foreign write;
+            // the only writes above it are the session's own predecessor
+            // layers (localSeq 1 and 2, both below 104), excluded — kept.
+            localSeq: 104,
+            reads: {
+              confirmed: [],
+              pending: [{
+                id: "entity:sched-doc",
+                path: toDocumentPath([]),
+                localSeq: [1, 2],
+                basisSeq: 2,
+              }],
+            },
+            schedulerObservation: observationForAction(
+              "pattern.tsx:array-read:true-basis-kept",
+            ),
+          },
         ],
       },
     });
@@ -905,6 +944,12 @@ Deno.test("memory v2 scheduler observations resolve array pending reads at the h
           status: "dropped",
           reason: "pending-read-missing",
         },
+        {
+          localSeq: 103,
+          status: "dropped",
+          reason: "stale-pending-read",
+        },
+        { localSeq: 104, status: "kept", reason: undefined },
       ],
     );
   } finally {

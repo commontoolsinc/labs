@@ -55,7 +55,12 @@ export function findReferences(
   const refs: Reference[] = [];
   for (let line = 0; line < doc.lines.length; line++) {
     for (const span of doc.lines[line].spans) {
-      if (span.text !== name || !IDENT_CLASSES.has(span.cls)) continue;
+      if (
+        span.text !== name || !IDENT_CLASSES.has(span.cls) ||
+        span.exactDefinitionName !== undefined
+      ) {
+        continue;
+      }
       // Bound by the node's actual span, including column bounds on the boundary
       // lines, so a sibling occurrence on the same line as (but outside the
       // column range of) the node is not mistaken for one inside it.
@@ -88,7 +93,7 @@ export function findDependencies(
   const seen = new Map<string, Dependency>();
   for (let line = node.startLine; line <= node.endLine; line++) {
     const row = doc.lines[line];
-    if (!row) continue;
+    if (!row || row.bg === "del") continue;
     // Running UTF-16 char offset of each span on this line (spans are gapless).
     let charOffset = lineStarts[line] ?? 0;
     for (const span of row.spans) {
@@ -99,7 +104,12 @@ export function findDependencies(
       // not mistaken for a dependency.
       if (line === node.startLine && span.col < node.startCol) continue;
       if (line === node.endLine && span.col >= node.endCol) continue;
-      if (!IDENT_CLASSES.has(span.cls)) continue;
+      if (
+        !IDENT_CLASSES.has(span.cls) ||
+        span.exactDefinitionName !== undefined
+      ) {
+        continue;
+      }
       const text = span.text;
       if (text === node.name || seen.has(text)) continue;
       const defs = doc.definitions.get(text);
@@ -125,40 +135,81 @@ export function findDependencies(
 /** An identifier occurrence inside a node, by name and char offset. */
 export interface IdentUse {
   readonly name: string;
+  readonly displayName?: string;
   readonly useOffset: number;
+  readonly exactDefinitionOnly?: true;
+}
+
+export interface IdentUseCollection {
+  readonly uses: IdentUse[];
+  readonly total: number;
 }
 
 /**
- * Distinct identifiers used inside `node`, in first-use order, each with the
- * char offset of that first use. Used to resolve cross-file definitions via the
- * semantic service (which the name index cannot see).
+ * Identifier use sites inside `node`, in source order. Ordinary identifier
+ * spellings are deduplicated at their first use. Exact-position uses are
+ * retained individually because equal spellings can resolve to different
+ * definitions. Used to resolve cross-file definitions via the semantic service,
+ * which the name index cannot see.
  */
 export function collectIdentUses(
   doc: Document,
   node: StructureNode,
-  limit = 40,
 ): IdentUse[] {
+  return collectIdentUsesBounded(doc, node, Number.POSITIVE_INFINITY).uses;
+}
+
+/** Collect at most `limit` use sites while counting every eligible site. */
+export function collectIdentUsesBounded(
+  doc: Document,
+  node: StructureNode,
+  limit: number,
+): IdentUseCollection {
   const lineStarts = lineStartOffsets(doc);
   const seen = new Set<string>();
   const out: IdentUse[] = [];
+  let total = 0;
   for (let line = node.startLine; line <= node.endLine; line++) {
     const row = doc.lines[line];
-    if (!row) continue;
+    if (!row || row.bg === "del") continue;
     let charOffset = lineStarts[line] ?? 0;
     for (const span of row.spans) {
       const spanOffset = charOffset;
       charOffset += span.text.length;
       if (line === node.startLine && span.col < node.startCol) continue;
       if (line === node.endLine && span.col >= node.endCol) continue;
-      if (!IDENT_CLASSES.has(span.cls)) continue;
-      const text = span.text;
-      if (text === node.name || seen.has(text)) continue;
-      seen.add(text);
-      out.push({ name: text, useOffset: spanOffset });
-      if (out.length >= limit) return out;
+      if (
+        !IDENT_CLASSES.has(span.cls) &&
+        span.exactDefinitionName === undefined
+      ) {
+        continue;
+      }
+      const text = span.exactDefinitionName ?? span.text;
+      const displayName = span.exactDefinitionDisplayName ?? text;
+      const exactDefinitionOnly = span.exactDefinitionName !== undefined;
+      const dedupeByName = !exactDefinitionOnly;
+      if (
+        spanOffset === node.nameOffset || (dedupeByName && seen.has(text))
+      ) {
+        continue;
+      }
+      if (dedupeByName) seen.add(text);
+      total++;
+      if (out.length < limit) {
+        out.push(
+          exactDefinitionOnly
+            ? {
+              name: text,
+              displayName,
+              useOffset: spanOffset,
+              exactDefinitionOnly: true,
+            }
+            : { name: text, useOffset: spanOffset },
+        );
+      }
     }
   }
-  return out;
+  return { uses: out, total };
 }
 
 /** Char offset where each line begins, derived from the verbatim text. */
