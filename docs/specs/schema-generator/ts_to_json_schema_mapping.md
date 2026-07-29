@@ -452,8 +452,10 @@ Default paths of §7:
   `anyOf` pairs (`test/utils.ts:454-466`).
 - **All-literal unions** → `{ enum: [...] }` with **no `type` key**; `null`
   joins the enum when present; `undefined` never does (it forces the anyOf
-  path); the exact pair `true | false` re-collapses to `{ type: "boolean" }`
-  (`:176-214`). This is also what TS enums hit (§4).
+  path). The pair `true | false` re-collapses to `{ type: "boolean" }`. When
+  that pair is nullable, it emits
+  `{ anyOf: [{ type: "boolean" }, { type: "null" }] }` (`:176-217`). This is
+  also what TS enums hit (§4).
 - **`{ type: "undefined" }` preservation**: undefined members are kept, not
   stripped (`:132-135`).
 - **General case** → `anyOf` with **primitive merging**

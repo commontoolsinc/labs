@@ -144,6 +144,11 @@ If you are developing runtime code, read the following documentation:
   and integration test structure; hub that links the other testing docs
 - `docs/development/waiting-in-tests.md` - Waiting on a real event instead of
   polling: the primitives to use.
+- `docs/development/fetch-request-deadlines.md` - Why the fetch builtins keep a
+  wall-clock bound: it leases a claim held in durable state rather than bounding
+  a request, and it decides when the replica holding that claim is presumed
+  gone. Read it before changing how `fetch.ts` or `fetch-program.ts` decide to
+  start a request
 - `docs/development/CI_PERFORMANCE.md` - When to stop or revisit CI wall-time
   splitting/rebalancing work
 - `docs/development/COVERAGE.md` - The two coverage mechanisms (V8 runtime

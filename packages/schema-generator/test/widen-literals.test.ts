@@ -100,4 +100,14 @@ describe("widenLiterals option", () => {
       type: "boolean",
     });
   });
+
+  it("preserves null when collapsing nullable boolean literals", async () => {
+    const expected = {
+      anyOf: [{ type: "boolean" }, { type: "null" }],
+    };
+    expect(await generate(`type B = boolean | null;`, "B", WIDEN)).toEqual(
+      expected,
+    );
+    expect(await generate(`type B = boolean | null;`, "B")).toEqual(expected);
+  });
 });
