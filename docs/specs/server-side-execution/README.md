@@ -116,9 +116,11 @@ Consequences, all previously measured:
   over exactly this.
 - **Async fragility.** fetch/LLM calls run in whichever tab claimed the cell
   mutex; a closed tab aborts the request
-  (`packages/runner/src/builtins/fetch.ts:312`) and someone else may re-claim
-  after a 5s–5min timeout. Streaming LLM partials live in an in-memory
-  `partial` cell and are lost on disconnect.
+  (`packages/runner/src/builtins/fetch.ts:306`) and someone else may re-claim
+  after a 5s–5min staleness bound
+  ([why that bound stays](../../development/fetch-request-deadlines.md)).
+  Streaming LLM partials live in an in-memory `partial` cell and are lost on
+  disconnect.
 - **Cold start.** A fresh client cannot paint pattern UI until it compiles
   and executes patterns locally (browser cold-compile floor ≈ 525ms for the
   entry-file emit alone, plus dependency collection and first settle).

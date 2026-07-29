@@ -267,7 +267,13 @@ still firing.
 
 ## What this does not cover
 
-`fetch-utils.ts` and `fetch-program.ts` carry their own request deadlines (5 and
-10 seconds). Those bound a network call rather than userland computation, so they
-raise a different question — what to do when a remote peer never answers — and
-are out of scope. A run-scoped barrier is the groundwork; the policy is separate.
+`fetch-utils.ts` and `fetch-program.ts` carry their own deadlines. Those raise a
+different question — what to do when a remote peer never answers — and are out
+of scope here. That question is settled separately in [The Fetch Builtins'
+Request Deadlines](../fetch-request-deadlines.md), which finds that neither
+deadline bounds a request at all: each is a lease on a claim held in durable
+state, and it decides when the replica holding that claim is presumed gone.
+Like the heartbeat bound in phase 4, both stay, because nothing reports another
+replica's presence. What changed there is the same narrowing phase 4 describes:
+a replica no longer applies the bound to work it is running itself, and an early
+fire no longer discards a result that arrived from elsewhere.
