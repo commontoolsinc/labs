@@ -31,6 +31,37 @@ const isSingleFileStore = (store: URL): boolean => {
   return Path.extname(storePath) !== "";
 };
 
+/**
+ * The engine store root a server derives from its configured store location
+ * (`MEMORY_DIR`, or `DB_PATH` in single-file mode).
+ *
+ * Lives here, beside {@link resolveSpaceStoreUrl}, because the two compose into
+ * the on-disk layout and must be read together: this appends `engine-v3`, and
+ * `resolveSpaceStoreUrl` then appends it AGAIN, so the realized directory-mode
+ * path is `<MEMORY_DIR>/engine-v3/engine-v3/<did>.sqlite`. That doubling is
+ * almost certainly unintentional, but every existing store depends on it, so it
+ * cannot be removed without migrating them; `state-inspector/discover.ts` works
+ * around it when hunting for stores.
+ *
+ * Anything that needs to READ or WRITE a store the server will serve must
+ * compose these two functions rather than restating `engine-v3` — a third
+ * spelling of the layout is how a tool ends up writing where nothing looks.
+ */
+export const resolveMemoryEngineStoreRootUrl = (
+  storeUrl: URL,
+  options: { singleFileMode?: boolean } = {},
+): URL => {
+  const storePath = Path.fromFileUrl(storeUrl);
+  const isSingleFile = options.singleFileMode ?? Path.extname(storePath) !== "";
+  const rootPath = isSingleFile
+    ? Path.join(
+      Path.dirname(storePath),
+      `${Path.basename(storePath, Path.extname(storePath))}.engine-v3`,
+    )
+    : Path.join(storePath, "engine-v3");
+  return Path.toFileUrl(`${rootPath}/`);
+};
+
 export const resolveSpaceStoreUrl = (
   store: URL,
   subject: MemorySpace,

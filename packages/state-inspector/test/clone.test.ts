@@ -5,6 +5,11 @@
 
 import { assert, assertEquals, assertRejects } from "@std/assert";
 import { Database } from "@db/sqlite";
+import * as Path from "@std/path";
+import {
+  resolveMemoryEngineStoreRootUrl,
+  resolveSpaceStoreUrl,
+} from "@commonfabric/memory/v2/storage-path";
 
 import {
   clonePaths,
@@ -109,9 +114,20 @@ Deno.test("a clone is servable, recorded, and leaves the source untouched", asyn
     });
 
     const paths = clonePaths(clone, SPACE);
-    // The working copy sits where the memory server resolves a space store, so
-    // pointing MEMORY_DIR at the clone dir serves it under the same DID.
-    assert(paths.workingPath.endsWith(`engine-v3/${SPACE}.sqlite`));
+    // The working copy must sit exactly where a server pointed at this
+    // directory looks — computed here through the SAME resolvers the server
+    // composes, so this cannot drift into agreeing only with itself.
+    assertEquals(
+      paths.workingPath,
+      Path.fromFileUrl(
+        resolveSpaceStoreUrl(
+          resolveMemoryEngineStoreRootUrl(Path.toFileUrl(`${clone}/`), {
+            singleFileMode: false,
+          }),
+          SPACE as never,
+        ),
+      ),
+    );
     assertEquals((await Deno.stat(paths.workingPath)).isFile, true);
     assertEquals((await Deno.stat(paths.pristinePath)).isFile, true);
     assertEquals((await Deno.stat(`${clone}/.cf-clone`)).isFile, true);
