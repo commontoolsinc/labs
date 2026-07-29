@@ -1737,7 +1737,7 @@ gets `.for(<path>, true)` appended (`shouldRetargetReactiveReference`). The
 cause names the property, not the referenced binding:
 
 ```ts
-// Shown inside a pattern body.
+// Shown for illustration only.
 // (test: "re-roots reactive identifier members in pattern results")
 const foo = Writable.of(1, /* schema */).for("foo", true);
 return {
