@@ -353,11 +353,13 @@ encodings — the cell's construction kind, `asCell: ["stream"]` in the schema,
 and a stored `{$stream: true}` value — and `Cell.isStream` accepts any one of
 them (`packages/runner/src/cell.ts:936-958`). A conformance check filtering on
 the schema marker therefore misses verbs carried only by the stored one, and
-those exist in practice: the CLI keeps a forced-stream fallback specifically to
-dispatch them. The same question gates result-schema emission in the
-implementation plan, so settling which signal is authoritative serves both.
-Until it is settled, treat structural conformance as available in principle
-rather than in hand.
+the CLI keeps a forced-stream fallback specifically to dispatch such handlers.
+Note where this does and does not bite: schema *generation* is not exposed to
+it, because schema-generator decides stream-ness from the TypeScript type and
+emits the marker as its own output — the divergence is a property of schemas
+and values already stored. Conformance checking reads exactly those, so it is
+exposed. Until the authoritative signal is settled, treat structural
+conformance as available in principle rather than in hand.
 
 One further precondition, cheap to hold and easy to lose: **verbs must stay in
 the piece's own schema.** Moving the verb list into a separate index cell — a
