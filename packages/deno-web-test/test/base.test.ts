@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "@std/assert";
 import { decode } from "@commonfabric/utils/encoding";
-import { runDenoWebTest, stripDenoDownloadDiagnostics } from "./utils.ts";
+import { runDenoWebTest, sanitizeDenoWebTestOutput } from "./utils.ts";
 
 Deno.test("smoke test", async function () {
   const { success, stdout, stderr } = await runDenoWebTest("success-project");
@@ -27,16 +27,46 @@ Deno.test("smoke test", async function () {
 });
 
 Deno.test("dependency downloads do not enter harness stderr", function () {
-  const stderr = new TextEncoder().encode(
+  const encoder = new TextEncoder();
+  const beforeInvalidByte = encoder.encode(
     "Task test deno run cli.ts *.test.ts\n" +
       "Download https://registry.npmjs.org/esbuild\n" +
-      "Download https://registry.npmjs.org/typescript\n" +
-      "Warning experimentalDecorators is deprecated\n",
+      "Download http://registry.npmjs.org/typescript\n" +
+      "Warning with non-UTF-8 byte: ",
   );
+  const afterInvalidByte = encoder.encode(
+    "\nDownload https://example.test/from-application\n",
+  );
+  const stderr = new Uint8Array(
+    beforeInvalidByte.length + 1 + afterInvalidByte.length,
+  );
+  stderr.set(beforeInvalidByte);
+  stderr[beforeInvalidByte.length] = 0xff;
+  stderr.set(afterInvalidByte, beforeInvalidByte.length + 1);
+
+  const output: Deno.CommandOutput = {
+    code: 0,
+    success: true,
+    signal: null,
+    stdout: encoder.encode("test output"),
+    stderr,
+  };
+
+  const expectedTask = encoder.encode(
+    "Task test deno run cli.ts *.test.ts\nWarning with non-UTF-8 byte: ",
+  );
+  const expectedStderr = new Uint8Array(
+    expectedTask.length + 1 + afterInvalidByte.length,
+  );
+  expectedStderr.set(expectedTask);
+  expectedStderr[expectedTask.length] = 0xff;
+  expectedStderr.set(afterInvalidByte, expectedTask.length + 1);
 
   assertEquals(
-    decode(stripDenoDownloadDiagnostics(stderr)),
-    "Task test deno run cli.ts *.test.ts\n" +
-      "Warning experimentalDecorators is deprecated\n",
+    sanitizeDenoWebTestOutput(output),
+    {
+      ...output,
+      stderr: expectedStderr,
+    },
   );
 });

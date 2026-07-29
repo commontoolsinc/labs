@@ -17,6 +17,12 @@ export function stripDenoDownloadDiagnostics(
   return new TextEncoder().encode(withoutDownloads);
 }
 
+export function sanitizeDenoWebTestOutput(
+  output: Deno.CommandOutput,
+): Deno.CommandOutput {
+  return output;
+}
+
 // Runs deno-web-test in `projectDir` and caches
 // the results for multiple test usages.
 //
