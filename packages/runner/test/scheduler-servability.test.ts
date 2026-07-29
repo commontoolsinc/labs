@@ -611,7 +611,14 @@ describe("§4 output-widening pair servability (C1.9)", () => {
       });
     });
 
-    it("never pairs with a session instance (inadmissible until C2)", () => {
+    it("labels a session instance in the pair by SCOPE, not as malformed", () => {
+      // A session twin is not a USER lane's instance, so the action stays
+      // unservable here — but the DECLARATION is the documented §4 pair
+      // shape, and the truthful cause is the scoped write, exactly as space
+      // rank has reported since the 2026-07-28 relabel. "malformed" hid the
+      // whole session-rank-dial class behind a shape complaint: it is what
+      // the live group-chat user arm reported for its last unexplained
+      // offender (`5rE9…:__cfLift_8`, 2026-07-29 probe).
       const sessionTwin = address("of:output", { scope: "session" });
       expect(classifyStaticActionServability(
         withSummary({
@@ -622,7 +629,7 @@ describe("§4 output-widening pair servability (C1.9)", () => {
         { userContext: true },
       )).toEqual({
         status: "unservable",
-        reason: "malformed-output-surface",
+        reason: "non-space-write-scope",
       });
     });
 
@@ -1642,33 +1649,26 @@ describe("session-lane servability (C2.2)", () => {
       });
     });
 
-    it("keeps the session pair unservable under space and user lanes (regression)", () => {
-      // Space rank: the well-formed pair reports its true cause (scoped
-      // write) since the 2026-07-28 relabel. USER lane: a SESSION twin is
-      // not that lane's instance, so the pair shape itself stays
-      // inadmissible — malformed is still the honest code there.
-      expect(classifyStaticActionServability(
-        withSummary({
-          writes: [broadOutput, sessionTwin],
-          directOutputs: [broadOutput, sessionTwin],
-        }),
-        servedSpace,
-        undefined,
-      )).toEqual({
-        status: "unservable",
-        reason: "non-space-write-scope",
-      });
-      expect(classifyStaticActionServability(
-        withSummary({
-          writes: [broadOutput, sessionTwin],
-          directOutputs: [broadOutput, sessionTwin],
-        }),
-        servedSpace,
-        { userContext: true },
-      )).toEqual({
-        status: "unservable",
-        reason: "malformed-output-surface",
-      });
+    it("keeps the session pair unservable under space and user lanes, labeled by scope", () => {
+      // Both non-session ranks report the same truthful cause: the well-formed
+      // §4 pair is inadmissible because its SESSION write is, not because the
+      // shape is wrong. A USER lane is not special here — that it once said
+      // "malformed" is the 2026-07-28 relabel left half-applied, and it is
+      // what the live group-chat user arm reported as its last unexplained
+      // residual (2026-07-29 probe).
+      for (const lane of [undefined, { userContext: true }] as const) {
+        expect(classifyStaticActionServability(
+          withSummary({
+            writes: [broadOutput, sessionTwin],
+            directOutputs: [broadOutput, sessionTwin],
+          }),
+          servedSpace,
+          lane,
+        )).toEqual({
+          status: "unservable",
+          reason: "non-space-write-scope",
+        });
+      }
     });
 
     it("never pairs across document ids or differing paths at session rank", () => {

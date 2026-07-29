@@ -415,17 +415,30 @@ export function classifyStaticActionServability(
     ) {
       return outputs.find((output) => scopeOf(output) === "space");
     }
-    // At SPACE rank the same §4 pair SHAPE (broad + scoped instance of one
-    // doc/path) is still the documented well-formed declaration of a
-    // scoped-result computation — take the broad instance and let the
-    // scope checks below reject truthfully (`non-space-write-scope`: the
-    // scoped instance rides `writes`). Without this, every scoped UI
-    // derivation reported "malformed-output-surface" and the rank-dial
-    // class was hidden behind a shape complaint (15 distinct group-chat
-    // lifts / 39 live diagnostics, 2026-07-28 taxonomy). Any other
-    // plurality stays malformed.
+    // The same §4 pair SHAPE (broad + scoped instance of one doc/path) is
+    // the documented well-formed declaration of a scoped-result computation
+    // at EVERY rank, including the ranks that cannot admit it — take the
+    // broad instance and let the scope checks below reject truthfully
+    // (`non-space-read-scope` / `non-space-write-scope`: the scoped instance
+    // rides `writes`). Without this, every scoped UI derivation reported
+    // "malformed-output-surface" and the rank-dial class was hidden behind a
+    // shape complaint (15 distinct group-chat lifts / 39 live diagnostics,
+    // 2026-07-28 taxonomy).
+    //
+    // This branch was originally gated `laneRank === "space"`, which left the
+    // relabel half-applied: a SESSION twin is outside a USER lane's chain
+    // ({@link laneInstanceScope}), so the lane collapse above declines it and
+    // a user-rank classification fell straight through to "malformed". That
+    // was the live group-chat user arm's last unexplained residual
+    // (`malformed-output-surface` ×1 on `cf:module/5rE9…:__cfLift_8`,
+    // 2026-07-29 probe) — a session-scoped derivation the C2.5 session dial
+    // already serves, mislabeled as a broken declaration. Relabeling changes
+    // no PLACEMENT: this branch only resolves the shape, and the scope loops
+    // below still reject every instance the lane does not admit.
+    //
+    // Any other plurality stays malformed.
     if (
-      laneRank === "space" && outputs.length === 2 &&
+      outputs.length === 2 &&
       outputs[0]!.space === outputs[1]!.space &&
       outputs[0]!.id === outputs[1]!.id &&
       outputs[0]!.path.length === outputs[1]!.path.length &&

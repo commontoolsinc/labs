@@ -209,6 +209,27 @@ type ArmReport = {
   /** Executor candidate/diagnostic events, histogrammed — the per-arm
    * detail behind the stats object. */
   readonly executorEvents: Record<string, number>;
+  /** Unserved code → the DERIVATIONS that earned it. The server's own
+   * `candidateUnservedOffendersByCode` dedupes by implementation
+   * FINGERPRINT, so it counts offenders but cannot NAME them — which is why
+   * this arm's last two residual entries stayed undiagnosed for a whole
+   * wave. Normalized to the derivation key: each arm builds its own Runtime
+   * and the trailing instance segment is minted per Runtime, so raw ids are
+   * not comparable across arms. */
+  readonly unservedDerivations: Record<string, string[]>;
+};
+
+/**
+ * The DERIVATION identity of an action id, stable across arms — the same
+ * normalization `runner/test/server-execution-group-chat-rank-probe.test.ts`
+ * applies. Action ids read `cf:module/<hash>:<lift>:<instance>`; the module
+ * hash is content-derived, so the first three segments ARE comparable between
+ * arms and between this file and the router-seam probe. Ids without that
+ * shape (builtins) pass through unchanged.
+ */
+const derivationKey = (actionId: string): string => {
+  const parts = actionId.split(":");
+  return parts.length > 3 ? parts.slice(0, 3).join(":") : actionId;
 };
 
 const send = async (
@@ -265,6 +286,7 @@ const runArm = async (rank: RankArm): Promise<ArmReport> => {
   let bob: GateClient | null = null;
   let pool: SharedExecutionPool | null = null;
   const events: string[] = [];
+  const unservedDerivations = new Map<string, Set<string>>();
   try {
     alice = await openProbeClient(server, flags);
     bob = await openProbeClient(server, flags);
@@ -322,6 +344,15 @@ const runArm = async (rank: RankArm): Promise<ArmReport> => {
             diagnostic.claimKey?.contextKey ?? "?"
           }`,
         );
+        const actionId = diagnostic.claimKey?.actionId ??
+          diagnostic.claim?.actionId;
+        if (actionId !== undefined) {
+          const derivations =
+            unservedDerivations.get(diagnostic.diagnosticCode) ??
+              new Set<string>();
+          derivations.add(derivationKey(actionId));
+          unservedDerivations.set(diagnostic.diagnosticCode, derivations);
+        }
       },
     });
     // Keep a handle on the live executor. The pool deliberately does NOT wake
@@ -460,6 +491,12 @@ const runArm = async (rank: RankArm): Promise<ArmReport> => {
         counts[event] = (counts[event] ?? 0) + 1;
         return counts;
       }, {}),
+      unservedDerivations: Object.fromEntries(
+        [...unservedDerivations.entries()].map(([code, derivations]) => [
+          code,
+          [...derivations].sort(),
+        ]),
+      ),
     };
   } finally {
     await pool?.close().catch(() => undefined);
@@ -650,6 +687,11 @@ Deno.test({
             [space, user, session].map((a) =>
               `${a.rank}=${JSON.stringify(offenders(a))}`
             ).join(" ")
+          }\n` +
+          `  unservedDerivations:${
+            [space, user, session].map((a) =>
+              `\n    ${a.rank}=${JSON.stringify(a.unservedDerivations)}`
+            ).join("")
           }\n` +
           `  claimContextMismatchFences: ${
             [space, user, session].map((a) => `${a.rank}=${fences(a)}`).join(
