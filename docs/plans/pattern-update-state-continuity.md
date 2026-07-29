@@ -3,8 +3,12 @@
 Status: In progress. Stages 1–3 are complete and the tier is now a REAL GATE:
 `deno task pattern-vintage` runs on every PR, replaying committed vintages of
 `system/home.tsx` and `system/default-app.tsx` under the source being merged.
-Stage 2 landed as [#5148]. Stages 4–5 (auto captures, migration coverage)
-remain. Tier 1 — the schema gate — merged as [#5144].
+Stage 2 landed as [#5148]. Stages 4–5 remain, and were RESHAPED after review:
+stage 3's fixtures are captured straight off setup and hold no data, so the
+gate currently asserts "the update still applies" rather than "the data
+survives". Stage 4 now covers test-populated vintages (committed to git, not
+CI artifacts — both decisions made) and stage 5 the value comparison they
+enable. Tier 1 — the schema gate — merged as [#5144].
 
 This plan takes the pattern-update regime from "the contract still type-checks"
 to "the new pattern can still read what the old one wrote".
@@ -128,30 +132,28 @@ that is not the state that was captured. Restore is same-DID; re-keying is an
 unbounded migration that destroys the fidelity the fixture exists to buy (see
 [`space-clone-rehearsal.md`](space-clone-rehearsal.md)).
 
-**Auto captures live in CI artifacts; pinned vintages live in git.** REVISIT
-BEFORE BUILDING STAGE 4 — this was decided on a number that turned out to be
-wrong, and the corrected number argues the other way harder than first thought.
-The reasoning was "at ~1.5 MB a floor, committing every capture would grow the
-repo without bound". Measured, a SECOND vintage of the same pattern costs
-git essentially NOTHING when stored raw (232.50 KiB for one, 232.86 KiB for
-two — see the table below), because near-identical stores delta almost
-perfectly.
-Repeated captures of the same pattern are the best case for delta compression,
-and repeated captures of the same pattern are exactly what auto captures are.
+**Every capture lives in git. DECIDED — this reverses the original split.**
+Auto captures were to live in CI artifacts because "at ~1.5 MB a floor,
+committing every capture would grow the repo without bound". That number was
+wrong, and measuring it properly reversed the conclusion.
 
-At that price the artifact machinery (upload, fetch, retention-by-count, a
-pruner that cannot reach `pinned/`) may be solving a problem we do not have,
-and simply committing auto captures under the same append-only discipline
-would be far less machinery. The counter-argument that survives: git keeps
-deleted blobs forever, so churn still costs something — but the break-even is
-much further out than assumed. Original reasoning follows.
+Stored RAW, a capture costs git **~9 KiB per generation** against a 3.5 MiB
+file (see the cross-generation table below), because git's packfile delta
+search runs across the whole repository and adjacent generations of a
+near-identical store delta almost perfectly. A hundred generations of
+`home.tsx` is on the order of a megabyte of history. The artifact machinery —
+upload, fetch, retention-by-count, a pruner that cannot reach `pinned/` —
+existed to avoid a cost that is not there.
 
-At ~1.5 MB a floor, committing every capture would grow the repo without
-bound, and git history keeps deleted blobs forever, so pruning reclaims
-nothing. Auto captures
-exist only to cover what staging is running, churn constantly, and are
-regenerable from the build that produced them — artifact retention covers the
-window. Pinned vintages are irreplaceable and few.
+So: captures are committed, under the same append-only discipline as pinned
+vintages and Tier 1's baselines. That deletes a whole apparatus from stage 4.
+
+What survives the reversal is a DIFFERENT constraint with a different
+threshold, and it should be argued on its own terms rather than inherited:
+**working-tree disk**. Every fixture is 3.5 MiB uncompressed in every checkout,
+where its history cost is ~9 KiB. If a retention rule survives, it bounds
+CHECKOUTS, not history — and it must still be structurally unable to reach a
+pinned vintage.
 
 **The pruner must be structurally unable to reach a pinned vintage.** Not a
 rule, a directory split. A deep vintage cannot be recaptured — the pattern that
@@ -403,33 +405,74 @@ that fails SILENTLY rather than loudly — which for a gate means passing:
   `replayed`, and a system pattern URL that no longer derives a key stops the
   run rather than emptying the requirement.
 
-### 4. Auto captures and retention
+### 4. Test-populated vintages, captured per generation, in git
 
-- [ ] Post-merge job captures when the pattern identity changed, uploads as a CI
-      artifact
-- [ ] Replay job fetches the last few auto captures plus every pinned vintage
-- [ ] Retention by count, not age — no clock in the check
-- [ ] Pruner globs `auto/` only, and cannot address `pinned/`
+The vintages stage 3 seeds are captured straight off setup, so they hold a
+freshly materialized root and **no data**. That is why the gate can only assert
+"the update still applies" — there is nothing in the fixture for a change to
+strand. This stage fixes the fixture rather than the gate.
 
-Gate: a staging deploy always has a capture the replay can use.
+A vintage becomes **a fresh database with that generation's pattern tests
+having run on it**. Not one root database migrated forward: each generation
+captures its own, seeded by the tests as they stood at that version. The
+fixture set is then a series of independent snapshots of what version N's world
+looked like, and the question the gate asks is whether today's source can take
+each of them forward.
 
-### 5. Migration coverage, and the storage-move class
+That the databases are independent is the point, not an implementation detail.
+A single lineage carried forward would have every later generation already
+shaped by every migration that touched it, so the one thing the gate wants to
+test — reading state written by a version that knew nothing about today's — is
+exactly what a migrated-forward database no longer holds.
 
-- [ ] Trigger on memory-engine schema change
-- [ ] Promote the affected auto captures to pinned rather than recapturing
-- [ ] Breadth across shapes rather than depth per pattern
-- [ ] **Capture POPULATED vintages and compare values on replay**, so the gate
-      sees the storage-move class rather than only refusals. Both halves are
-      needed and neither is sufficient: a vintage captured straight off setup
-      has no data to strand, and a replay that only asks "was the commit
-      refused" would not notice if it did. `state-continuity.test.ts` shows the
-      shape — replay the vintage's OWN source first as a control, so an empty
-      read is attributable to the change rather than to a fixture that never
-      restored. Inverting the pinned limit in `tasks/pattern-vintage-run.test.ts`
-      is the acceptance test.
+- [ ] Give `runTestPattern` an injection point for its storage manager. It
+      currently hard-codes `StorageManager.emulate` (`test-runner.ts` ~:988),
+      which runs against `:memory:` — there is no file to snapshot. This is the
+      one blocking change; everything else composes from what exists.
+- [ ] Capture by running a pattern's OWN tests against a file-backed store,
+      then snapshotting. Pattern tests are themselves patterns
+      (`home.test.tsx` instantiates `Home({})` and drives it with
+      `action()`/`assert()`), so the state they produce is real pattern state
+      written through real handlers.
+- [ ] Capture on identity change, in the post-merge job, committed — not
+      uploaded as an artifact (see the decision above).
+- [ ] Retention, if any, argued as a bound on CHECKOUT size rather than
+      history, and still structurally unable to reach `pinned/`.
 
-Gate: a memory migration cannot land without replaying pre-migration stores,
-and a change that strands data fails even when it applies cleanly.
+Gate: a vintage contains data a change can strand, so stage 5's value
+comparison has something to compare.
+
+**Open, and a real fork:** what the replay applies to a test-populated vintage.
+Applying today's TEST pattern validates the whole graph in one step and is
+simplest, but a changed test file then muddies "the pattern failed to upgrade"
+with "the test changed". Applying today's PATTERN to the inner root keeps the
+question clean but requires addressing a cell the test owns. Decide before
+building, not after.
+
+### 5. Value comparison, and migration coverage
+
+With stage 4's fixtures holding real data, the gate can finally ask the
+question it is named for.
+
+- [ ] **Compare VALUES on replay**, not just "was the commit refused". Both
+      halves are needed and neither is sufficient: a vintage with no data has
+      nothing to strand, and a replay that only checks for a refusal would not
+      notice if it did. Inverting the pinned limit in
+      `tasks/pattern-vintage-run.test.ts` — the case that currently asserts a
+      moved `.for()` key goes UNCAUGHT — is the acceptance test.
+- [ ] Replay the vintage's OWN source first as a control, so an empty read is
+      attributable to the change rather than to a fixture that never restored.
+      `state-continuity.test.ts` shows the shape, and stage 3 already learned
+      this the hard way: an unrestored fixture reads exactly like a stranded
+      one.
+- [ ] Trigger on memory-engine schema change; promote the affected captures to
+      pinned rather than recapturing, since a dump regenerated after a
+      migration proves nothing — the pre-migration state is the artifact.
+- [ ] Breadth across shapes rather than depth per pattern, since the selection
+      rule here is a memory change rather than a pattern change.
+
+Gate: a change that strands data fails even when it applies cleanly, and a
+memory migration cannot land without replaying pre-migration stores.
 
 ## Open questions
 
