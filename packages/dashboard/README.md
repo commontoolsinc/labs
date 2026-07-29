@@ -430,16 +430,16 @@ Notes:
   and Blacksmith. Each source is projected from its own recent daily rate. The
   rate uses at least two weeks and reaches into last month early in a month.
   GitHub contributes net Actions spend after discounts and included usage.
-  Blacksmith's current invoice amount supplies its month-to-date total. Daily
-  runner cost and sticky-disk storage cost supply its history and projection.
-  The storage range total is assigned to days in proportion to the reported
-  daily cache footprint. `CI_MONTHLY_BUDGET` overrides provider budgets. A
-  single provider otherwise uses its own configured budget. With both providers,
-  their budgets are added only when both exist. Blacksmith's budget is its
-  monthly spending-alert threshold. A failed configured source turns the tile
-  gray and shows `$???` for that source. The values from responding sources
-  remain as a lower bound. A GitHub classic-plan setup still falls back to
-  minutes when Blacksmith is not configured.
+  Blacksmith's current invoice amount supplies its all-in month-to-date total
+  and current-month projection input. Daily runner cost supplies its history
+  and chart; storage usage is not requested or charted separately.
+  `CI_MONTHLY_BUDGET` overrides provider budgets. A single provider otherwise
+  uses its own configured budget. With both providers, their budgets are added
+  only when both exist. Blacksmith's budget is its monthly spending-alert
+  threshold. A failed configured source turns the tile gray and shows `$???`
+  for that source. The values from responding sources remain as a lower bound.
+  A GitHub classic-plan setup still falls back to minutes when Blacksmith is not
+  configured.
 - **`benchmarks`** trends one **scale-invariant index per CPU** on the
   `benchmarks.yml` runs on main over ~45 days. The job runs `deno bench --json`
   over the runner, cache, and deep-equal benchmarks. It uploads the report as a
