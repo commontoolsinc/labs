@@ -92,7 +92,7 @@ server; closing them all is what makes the claim mechanism unnecessary.
 | `navigateTo` | **DESIGNED** | [`navigate-to-server-side.md`](navigate-to-server-side.md). Owner gates open. Key finding: a broadcast is structurally UNREACHABLE (session-declared writes serve only at session lane rank), so the interim under-delivers, not over-delivers |
 | `compileAndRun` | **SEPARATE, AND THE FIX IS A DELETION** | Owner ruling 2026-07-29: "remove the `manager.add([piece])` part, it doesn't belong in there anymore." So `pieceCreatedCallback` goes away entirely rather than moving server-side — adding a piece to a list is an `addPiece` handler's job (`docs/common/conventions/adding-pieces.md`), not a compile builtin's side effect. `compile-and-run.ts:261` is the ONLY invoker; everything else is plumbing (the `PieceCreatedCallback` type, the Runtime option/field, the `runtime-presets` delta key, the client implementation at `runtime-client/backends/runtime-processor.ts:602`, and four `runtime-presets.test.ts` references). Removing the delta key will move the `runtime-presets.test.ts` keyset golden — expect that, do not paper over it. **Two earlier readings of this row were wrong**: the "unbounded async writes" blocker (`llm` is async and now serves; `sqliteQuery` writes post-commit through a gate), and then folding it into navigateTo because both use a client callback — the callbacks differ in kind, and the owner caught it |
 | `claim-key-mismatch` ×2, `claim-authority-lost` ×2 | **EXPECTED TO EVAPORATE** | Both are claim-arbitration bookkeeping (`executor/action-transaction-router.ts:476`, `executor/deno-space-executor.ts:781`). Same class as R7, which §2.9 already calls a transition artifact. No referent once the server claims everything |
-| `malformed-output-surface` ×1, `non-space-read-scope` ×1 | **OPEN** | Owner: cross-space reads must be supported. The sibling branch at `deno-space-executor.ts:781` is `foreign-read-access-denied` ("acting principal lacking READ on a read space"), so this is C3.6 territory and partly built |
+| `malformed-output-surface` ×1, `non-space-read-scope` ×1 | **CLOSED** `cf09a186b` | **NOT cross-space** — my C3.6 attribution here was wrong, inferred from the sibling code name `foreign-read-access-denied` without checking. Both observations measure `foreignSpaceReads: 0` in a single-space fixture. They survived a wave undiagnosed because `recordExecutionCandidateUnserved` dedupes offenders by implementation fingerprint and cannot NAME them; the probe now records derivation keys. `non-space-read-scope` ×1 is correct behavior (a session-scoped read is admissible only at session lane rank). `malformed-output-surface` ×1 was the `c2cc3891e` relabel left half-applied — a rescue branch gated `laneRank === "space"`, so a SESSION twin outside a user lane's chain fell through to a shape complaint for a rank-admission fact. Label-only fix; user arm goes `{malformed:1, non-space-read:1}` → `{non-space-read:2}`, same total |
 | `dynamic-sqlite-operation` | **NOT A BLOCKER** | Handler-only, so inside the goal per D2-as-amended |
 | `event-handler` | **NOT A BLOCKER** | Client-inherent; P5 sends the EVENT instead of the commit |
 
@@ -787,3 +787,19 @@ Append one line per landed item: date, item, commit, one-sentence outcome.
   gate through**: llmDialog's allowlist addition broke the "registry is exact"
   pin, the agent reported green, and only a sibling agent's broader run caught
   it. When an item touches a registry, verify the registry's OWN pin too.
+- 2026-07-29 — `cf09a186b` the user arm's last residual closed. **NOT
+  cross-space** — that attribution was the orchestrator's, inferred from a
+  neighbouring code name without checking. The real cause was the `c2cc3891e`
+  §4-pair relabel left half-applied at user rank. Lesson: two diagnostics
+  sharing a neighbourhood in the source is not evidence they share a cause.
+- 2026-07-29 — **counters that count but cannot NAME are a diagnosis dead
+  end.** `recordExecutionCandidateUnserved` dedupes offenders by
+  implementation fingerprint, which is why "1 offender" survived a full wave
+  unidentified. The probe now records derivation keys. When adding a
+  candidate-diagnostic counter, record something that identifies the offender.
+- 2026-07-29 — navigateTo gate 4 FIRED before any build:
+  `addExecutionDemand` has one call site (inside `start()`), and the
+  commit-gated deferred navigate root reaches `startWithTx` instead — so its
+  piece is never demanded and can never be claimed at session rank. Open
+  question: does demand closure-growth cover a deferred root? See
+  [`navigate-to-server-side.md`](navigate-to-server-side.md) §8.
