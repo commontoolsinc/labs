@@ -50,7 +50,9 @@ resumable.
 ## 1. State
 
 **Branch:** `codex/server-execution-w1-2-shared-pool` (LABS repo).
-**Last landed:** `4b9f1577d` — wave G's first three rows + this status.
+**Last landed:** `8a761b6b8` — user-arm residual closed; navigateTo ratified
+and its gate 4 fired. **Keep this line current — it is the resume pointer, and
+it has silently rotted twice.**
 
 > **REORDERED 2026-07-29 by owner ruling D11** (client-passivity §6b).
 > The claim mechanism is **transitional scaffolding**, not the end state.
