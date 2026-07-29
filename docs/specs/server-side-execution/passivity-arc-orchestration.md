@@ -50,10 +50,8 @@ resumable.
 ## 1. State
 
 **Branch:** `codex/server-execution-w1-2-shared-pool` (LABS repo).
-**Last landed:** `57e625424` — wave A (A1–A4) + C1 + the branch's lint/fmt debt.
+**Last landed:** `4b9f1577d` — wave G's first three rows + this status.
 
-| Wave | What | Status |
-| --- | --- | --- |
 > **REORDERED 2026-07-29 by owner ruling D11** (client-passivity §6b).
 > The claim mechanism is **transitional scaffolding**, not the end state.
 > The server should end up running every derived computation, at which
@@ -61,17 +59,16 @@ resumable.
 > the highest priority**, and suppression machinery is machinery we will
 > delete — so build as little of it as possible.
 
+| Wave | What | Status |
+| --- | --- | --- |
 | A | R5/R13 effect rows — brokers, descriptors, `wish` | **DONE** |
 | A5 | sqlite lane-scoped read seam (D2 narrowed to reads) | **DONE** — writes stay client-primary |
 | B | measurement | **DONE ×2** — zero after A; **×12 cleared** after the scope fix |
 | C | C1 ruled SURVIVES; C2 negotiates end to end | **DONE** |
 | P2x | the ×12 — diagnosed AND fixed | **DONE** — first never-claimed reduction |
-| **G** | **CLOSE THE SERVING GAP** — every derived computation runs server-side | **NEXT, HIGHEST PRIORITY** |
+| **G** | **CLOSE THE SERVING GAP** — every derived computation runs server-side | **IN PROGRESS, HIGHEST PRIORITY** — see the table below |
 | D | P3 passivity mechanism | **DEFERRED** — designed ([`wave-d-passivity-mechanism.md`](wave-d-passivity-mechanism.md)) but premised on claims persisting; D11 supersedes its Q1/Q2/Q3. Revisit only if G stalls |
-| E/F | passive delivery, acceptance | after G |
-| D | P3 passivity mechanism — the client stops running standing work | blocked on B + C |
-| E | P5 passive delivery + warm spaces | blocked on D |
-| F | P6 acceptance | blocked on E |
+| E/F | P5 passive delivery + warm spaces; P6 acceptance | after G |
 
 **Already landed this arc (for context, do not redo):**
 
@@ -99,28 +96,29 @@ server; closing them all is what makes the claim mechanism unnecessary.
 | `dynamic-sqlite-operation` | **NOT A BLOCKER** | Handler-only, so inside the goal per D2-as-amended |
 | `event-handler` | **NOT A BLOCKER** | Client-inherent; P5 sends the EVENT instead of the commit |
 
-**Known-open:**
+**Known-open (pruned 2026-07-29 — closed items removed, not archived here;
+the Log in §6 is the history):**
 
-- `dynamic-write-outside-static-surface` ×12 (1 offender). **C1 UNBLOCKED
-  THIS** — ruled SURVIVES, so it is not a P3 dependency and is now ordinary
-  P2 serving-coverage work. Start from the certificate-completeness
-  hypothesis in client-passivity §5h, not from a fresh investigation.
-- **CP6's refutation is re-opened, owner-gated.** A3 proved `llmDialog` and
-  `navigateTo` are effect nodes at runtime (§2.7 item 6). Whether `llmDialog`
-  performs *double* egress was never re-measured after the kind changed.
-- **`wish` bypasses the executor's egress denial.** It builds
-  `new HttpProgramResolver(url)` with no fetch transport, so it falls through
-  to `globalThis.fetch` and `fetch: denyExternalBuiltinFetch` never sees the
-  call. Independent of the descriptor question; needs its own decision.
-- The rank dials remain programmatic-only. No deployment can flip them; the
-  browser cannot negotiate `context-lattice-claims-v1` at all. That is wave C2.
-- **A5's scope grew.** A2 established that `sqliteQuery` is NOT blocked on
-  D2, and that the lane-scoped read seam in `packages/memory` (G1) and the
-  descriptor shape (G3) fold INTO A5 rather than preceding it. Compose A5's
-  prompt from client-passivity §5h's A2 paragraph.
-- The arc's goal statement vs CP1 — see the tension flagged at the end of
-  §5h. Owner call: is the target zero client reactive commits, or zero on the
-  served path?
+- **`sqliteDatabase` still has no descriptor.** `makeResultCell` writes the
+  document-root `["result"]` path, which a computation envelope cannot bound.
+  Measured and pinned in
+  `packages/runner/test/sqlite-database-servability.test.ts`. Needs a registry
+  decision nobody has made — **owner-facing**.
+- **`navigateTo` / `compileAndRun`** need the server→client channel designed
+  in [`navigate-to-server-side.md`](navigate-to-server-side.md). Owner gates
+  in its §7 are open.
+- **Cross-space reads must be supported** (owner, 2026-07-29). The live
+  residual `non-space-read-scope` ×1 and `malformed-output-surface` ×1 in the
+  user arm are undiagnosed; the sibling code
+  `foreign-read-access-denied` at `executor/deno-space-executor.ts:781`
+  suggests C3.6 territory that is already partly built.
+- **CP6's refutation is re-opened.** `llmDialog`'s KIND is now known to be
+  effect and it runs server-side as of `b3304e771`; whether it performs
+  *double* egress was never re-measured after the kind changed. Needs a
+  measurement, not a decision.
+- The four residual unserved events (`claim-key-mismatch` ×2,
+  `claim-authority-lost` ×2) are expected to **evaporate with the claim
+  mechanism itself** per D11 — do not build anything to fix them.
 
 ---
 
