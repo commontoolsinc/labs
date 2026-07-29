@@ -41,6 +41,25 @@ Deno.test("buildView: an ordinary pipe with no file is read-only plain text", ()
   assertEquals(r.editSource.editable, false);
 });
 
+Deno.test("buildView: source syntax is not guessed from content", () => {
+  const examples = [
+    ["JSON", '{"value": true}\n'],
+    ["Markdown", "# Heading\n"],
+    ["YAML", "value: true\n"],
+    ["Python", "def greet():\n    pass\n"],
+  ] as const;
+
+  for (const [name, source] of examples) {
+    const classes = buildView(source).doc.lines.flatMap((line) =>
+      line.spans.map((span) => span.cls)
+    );
+    assert(
+      classes.length > 0 && classes.every((className) => className === "plain"),
+      `${name}-shaped unnamed source remains plain text`,
+    );
+  }
+});
+
 Deno.test("buildView: transformed compiler output keeps the TypeScript default", () => {
   const r = buildView(TRANSFORMED);
 
@@ -371,14 +390,39 @@ Deno.test("buildView: forceDiff=false views a real diff as source (--no-diff)", 
   );
 });
 
-Deno.test("buildView: text that only embeds a diff stays source (mostlyDiff is false)", () => {
-  // Looks like a diff at the top, but the bulk is ordinary source, so the
-  // diff-share heuristic rejects it and it renders as plain text.
-  const embedded = "diff --git a/x b/x\n" +
-    Array.from({ length: 40 }, (_, i) => `const v${i} = ${i};`).join("\n") +
-    "\n";
-  const r = buildView(embedded);
+Deno.test("buildView: a source file that embeds a complete diff stays source", () => {
+  const embedded = `const patch = \`
+diff --git a/x.ts b/x.ts
+--- a/x.ts
++++ b/x.ts
+@@ -1 +1 @@
+-old
++new
+\`;
+`;
+  const r = buildView(embedded, "fixture.ts");
   r.semantics();
-  // The first line is not treated as a diff header (no +/- tints across it).
-  assert(r.doc.lines.length > 10);
+  assertEquals(r.editSource.isDiff, undefined);
+  assert(
+    r.doc.flatStructure.some((node) =>
+      node.kind === "variable" && node.name === "patch"
+    ),
+    "the TypeScript source keeps its structure",
+  );
+});
+
+Deno.test("buildView: a git header followed by ordinary source stays source", () => {
+  const source = "diff --git a/x.ts b/x.ts\n" +
+    "const value = 1;\n" +
+    "export { value };\n";
+  const view = buildView(source);
+
+  assertEquals(view.editSource.isDiff, undefined);
+  assertEquals(view.doc.structure, []);
+  assert(
+    view.doc.lines.flatMap((line) => line.spans).every((span) =>
+      span.cls === "plain"
+    ),
+    "the unnamed input remains plain source",
+  );
 });
