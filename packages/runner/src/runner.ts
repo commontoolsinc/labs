@@ -113,6 +113,7 @@ import { runInActionExecution } from "./builder/action-context.ts";
 import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import {
   getArtifactEntryRef,
+  getPatternProgram,
   isTrustedBuilderArtifact,
   resolveOriginal,
 } from "./builder/pattern-metadata.ts";
@@ -1515,6 +1516,17 @@ export class Runner {
       resultCell.withTx(tx).setMetaRaw("patternIdentity", {
         identity: entryRef.identity,
         symbol: entryRef.symbol,
+      });
+      // Same condition as the durable stamp, deliberately: an observer that
+      // saw instantiations the store does not label would report update
+      // targets that cannot be found again, and one that missed a labelled
+      // root would under-report. Keyless patterns have no durable pointer and
+      // so are not update targets at all.
+      this.runtime.onPatternInstantiated?.({
+        identity: entryRef.identity,
+        symbol: entryRef.symbol,
+        main: getPatternProgram(pattern)?.main,
+        cell: resultCell.getAsNormalizedFullLink(),
       });
     }
 

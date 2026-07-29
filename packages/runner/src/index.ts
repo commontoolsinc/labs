@@ -6,6 +6,8 @@ export type {
   ErrorWithContext as RuntimeErrorWithContext,
   ExperimentalOptions, // Space-model feature flags; see ExperimentalOptions in runtime.ts
   RuntimeFetch,
+  PatternInstantiation,
+  PatternInstantiationObserver,
   RuntimeOptions,
   SpaceCellContents,
 } from "./runtime.ts";

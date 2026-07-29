@@ -229,6 +229,75 @@ export function vintageRoot<T>(
 }
 
 /**
+ * Cause of the doc a fixture stores its instantiation manifest under.
+ *
+ * The manifest lives INSIDE the store rather than in a sidecar file. A sidecar
+ * would be a second artifact that can drift from the state it describes and
+ * would need its own append-only discipline; an in-store doc travels in the
+ * same file, is copied atomically with the state, and keeps "restore is a
+ * single `Deno.copyFile`" true. The cost is one doc no pattern wrote —
+ * acceptable for a fixture, and namespaced here so it cannot collide.
+ */
+export const VINTAGE_MANIFEST_CAUSE = {
+  stateContinuity: "vintage-manifest",
+} as const;
+
+/** What a capture recorded about one pattern materialization. */
+export interface VintageManifestEntry {
+  identity: string;
+  symbol: string;
+  /** Entry filename, repo-root-relative (`/packages/patterns/system/home.tsx`). */
+  main?: string;
+  /** Entity id of the result cell the pattern was materialized onto. */
+  cellId: string;
+  space: string;
+}
+
+export interface VintageManifest {
+  entries: VintageManifestEntry[];
+}
+
+/** Write the manifest into the store, so it travels with the state. */
+export async function writeVintageManifest(
+  vintage: VintageRuntime,
+  entries: readonly VintageManifestEntry[],
+): Promise<void> {
+  const cell = vintage.runtime.getCell<VintageManifest>(
+    vintage.space as never,
+    VINTAGE_MANIFEST_CAUSE,
+    undefined as never,
+  );
+  const { error } = await vintage.runtime.editWithRetry((tx) => {
+    cell.withTx(tx).set({ entries: [...entries] } as never);
+  });
+  if (error !== undefined) {
+    throw new Error(`could not write vintage manifest: ${error.message}`);
+  }
+  await vintage.runtime.idle();
+}
+
+/** Read a restored fixture's manifest. `undefined` = none recorded. */
+export async function readVintageManifest(
+  vintage: VintageRuntime,
+): Promise<VintageManifest | undefined> {
+  const cell = vintage.runtime.getCell<VintageManifest>(
+    vintage.space as never,
+    VINTAGE_MANIFEST_CAUSE,
+    undefined as never,
+  );
+  await cell.sync();
+  try {
+    const value = cell.get() as VintageManifest | undefined;
+    if (value === undefined || !Array.isArray(value.entries)) return undefined;
+    return value;
+  } catch {
+    // An absent doc reads as a throw rather than undefined; for this question
+    // the two are the same answer.
+    return undefined;
+  }
+}
+
+/**
  * The link to a root's durable ARGUMENT document.
  *
  * State a pattern RETURNS lives in the cells it owns (`.for('items')`); state
