@@ -352,13 +352,12 @@ verbs can be identified from its schema. Verb-ness has three independent
 encodings — the cell's construction kind, `asCell: ["stream"]` in the schema,
 and a stored `{$stream: true}` value — and `Cell.isStream` accepts any one of
 them (`packages/runner/src/cell.ts:936-958`). A conformance check filtering on
-the
-schema marker therefore misses verbs carried only by the stored one, and those
-exist in practice: the CLI keeps a forced-stream fallback specifically to
-dispatch them. Settling which signal is authoritative is already a prerequisite
-for the implementation plan's C3 (result-schema emission keys off the same
-question), and it is the same prerequisite here. Until it is settled, treat
-structural conformance as available in principle rather than in hand.
+the schema marker therefore misses verbs carried only by the stored one, and
+those exist in practice: the CLI keeps a forced-stream fallback specifically to
+dispatch them. The same question gates result-schema emission in the
+implementation plan, so settling which signal is authoritative serves both.
+Until it is settled, treat structural conformance as available in principle
+rather than in hand.
 
 One further precondition, cheap to hold and easy to lose: **verbs must stay in
 the piece's own schema.** Moving the verb list into a separate index cell — a
