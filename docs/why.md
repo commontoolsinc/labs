@@ -2,109 +2,46 @@
 not, and the claims below are checked against the code as of this
 commit. If one of them stops being true, fix it here.*
 
-Personal computing was supposed to make computers personal. Instead,
-your mail lives on someone else's machine, under someone else's rules.
-We are all renters in our digital lives. The landlords didn't win an
-argument — they got there first, with a trust model somebody improvised
-in the mid-nineties and everyone has been patching around ever since.
-Forty years of software's potential is still locked in silos, guarded
-by goblins.
+We are all renters in our digital lives. Your data should be yours —
+readable by the software you choose and by nothing else, with no company
+in the middle that has to be trusted and no account anyone can suspend.
 
-None of this is villainy. It is arithmetic. These are the physics of
-trust everything runs under — hand your data to the software, and trust
-the software — and silos are what those physics produce, every time.
-Nobody had to conspire. The rule did the work.
+That is not how any of it works, and not because anyone conspired. The
+trust model everything runs on says: hand your data to the software.
+Silos are what that rule produces, every time. Inverting it means new
+software all the way down, which nobody could afford until language
+models made writing software approximately free.
 
-The arrangement is not a law of nature. Inverting it means new software,
-all the way down, which nobody could afford until language models
-started writing software for approximately free. The rewrite that was
-unthinkable is now just work. Arrangements like this one have rarely
-been replaced by anything but working code, so that is what we started
-writing.
+So we built a runtime on the opposite rule. The software is untrusted,
+and the policies ride with the data.
 
-The rule underneath everything you use is: hand over your data, trust
-the software. We built a runtime on the opposite rule. The software is
-untrusted. Safety rides with the data. Every datum carries its own
-policies, the way GPL code carries its license, and anything derived
-from it carries them too. Code that cannot prove it honors those
-policies does not compile. Hold that rule and a stranger's program can
-touch your most private data and provably do only what you allow. That
-is the whole bet, and it is checkable.
+Concretely. A program that imports your mail gets a token that could
+read all of it. In the fabric that token carries four lines: never
+logged, never leaves the verified runtime, only ever sent to the place
+that issued it, and only in the field that place expects. Anything
+computed from it inherits them — the labels join at every commit, so a
+value derived from your mail is still your mail as far as the checker is
+concerned. Code that cannot prove it honors those lines does not
+compile. Any program can hold that token now, including one a model
+wrote thirty seconds ago, because the rules ride with the data instead
+of with the program's good intentions.
 
-The full argument — the physics, the hardware, the objections — is
-written up in [docs/plans/inverting-the-physics-of-trust.md](./plans/inverting-the-physics-of-trust.md).
-This file is the short version: what already runs, and what we hold.
+[How it works](./how.md) is the code: what the compiler emits for an
+ordinary pattern, where the runtime checks the result, and what the
+exits are. [The full argument](./plans/inverting-the-physics-of-trust.md)
+is the physics and the hardware.
 
-What already runs, in this repository, today:
+What runs today: the compiler, the checker — rejecting at explicit
+boundaries, the third of four rungs — a hundred-odd patterns, and
+machines that prove which runtime they are before your data arrives.
+What does not: label propagation defaults to off and is rolling out,
+strict-by-default is the current work, a space still has a host that can
+revoke a participant, and robustness and performance are not there yet.
 
-- a compiler that turns ordinary TypeScript into policy-checkable
-  dataflow — run `cf check <pattern> --show-transformed` and it prints
-  the exact code the runtime executes, no trust required
-- the flow checking that evaluates those policies, in
-  `packages/runner/` — enforcing on explicit boundaries today, with the
-  propagation still behind a flag, see 5 below
-- a hundred-odd running patterns in `packages/patterns/`, counters to
-  group chat — enough to show the runtime isn't bent around one use
-  case, and nowhere near the number that would matter
-
-And on real silicon, a machine you don't own can prove — bit for bit —
-that it runs the open runtime before your data ever reaches it. That
-part runs on the hardware today; the protocol around it is written up
-in the
-[verifiable-execution specification](specs/verifiable-execution/README.md).
-
-The people who came before us settled arguments like this one by
-writing code rather than papers, and we would rather be judged the same
-way. Most of what is here is early. All of it is readable.
-
-What we hold:
-
-1. Identity is a keypair, not an account. There is nothing to suspend,
-   and no one to ask.
-2. Every line is open source. The runtime proves itself to you before
-   your data arrives — you are never trusting our word, you are checking
-   the machine's.
-3. Your data leaves with you, whole, policies and all. A copy is not a
-   downgrade — the rules travel with it, so leaving costs you nothing
-   but the leaving.
-4. Software should be multiplayer without a landlord. This is the one
-   we have not built. A space still has a host that enforces access and
-   can revoke a participant mid-session
-   (`#revokeDeauthorizedSessions`, `packages/memory/v2/server.ts`), and
-   there is no delegation yet — access is granted directly, one
-   participant at a time, through a space's access-control list
-   (`packages/memory/acl.ts`), with no way to pass authority on. The
-   landlord is smaller than it was. It is not gone.
-5. The other unfinished parts, plainly: the checker refuses a commit
-   that crosses a boundary it was told about, which is the third of
-   four rungs (`enforce-explicit`); the viral part — labels propagating
-   into everything derived from a value — is written but defaults to
-   off, and is rolling out. Strict-by-default is the current work.
-   Robustness and performance are not there yet. The dial table in
-   `docs/specs/cfc-enforcement-matrix.md` lists what each host runs
-   today, rather than what we would like it to.
-
-Here is what "policies ride with the data" means in practice. A program
-that imports your mail gets an access token that could read all of it.
-In the fabric that token carries four lines: never logged, never leaves
-the verified runtime, only ever sent to the one place that issued it,
-and only in the one field that place expects. That is the whole list.
-Any program can hold that token now, because the rules ride with the
-data, not with the program's good intentions.
-
-Nothing here needs a token, a chain, or a consensus mechanism. Only that
-trust be checkable by anyone, from evidence.
-
-Clone it. Run a pattern. Write one — it is plain TypeScript, and the
-checker names the exact flow a policy would forbid before anything runs.
-The [tutorial](tutorial/README.md) walks the mechanisms, and
-`packages/patterns/` is where to start.
-
-The aim is not modest. The rule we are trying to replace sits
-underneath everything, and what it has been holding back is most of what
-software could have been. The work is unglamorous: types, a checker, a
-runtime, patterns, and years of it. That is the only kind of work that
-has ever moved a rule like this one, and all of it is open to inspect.
+Nothing here needs a token, a chain, or a consensus mechanism — only
+that trust be checkable by anyone, from evidence. The people this
+matters most for are the ones with the least room to be wrong about who
+is holding their data.
 
 Same-origin was a hotfix. People made it in a hurry, and people can
 replace it. We do not know whether we are the ones who will. We think
