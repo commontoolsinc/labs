@@ -2,10 +2,11 @@
  * The contract every source language plugs into so the `cf view` pager can
  * colour, navigate, edit and (optionally) reason about it, plus selecting the
  * right language for a file. A language is a stateless strategy object: one
- * instance describes each supported syntax, and plain text handles unknown
- * named files. The pager selects the right one for a file ONCE (via {@link
- * languageForFile}) and then dispatches every operation through that object's
- * methods — there is no per-operation branch on the file extension.
+ * instance describes each supported syntax, and plain text handles input that
+ * has no recognized filename. The pager selects the right one for a file ONCE
+ * (via {@link languageForFile}) and then dispatches every operation through
+ * that object's methods — there is no per-operation branch on the file
+ * extension.
  *
  * Per-file mutable state (a warm incremental parse, a language service) is not
  * held on the language; the language is a factory for the small stateful
@@ -213,8 +214,8 @@ export function renderedLinesFor(
 /**
  * Every language the pager knows, most specific first, built on first use.
  * Plain text comes last because it claims every named file left after the
- * syntax-specific languages. An input with no filename is handled by the
- * fallback below.
+ * syntax-specific languages. The fallback below also uses it when no filename
+ * exists.
  *
  * The list is lazy so this module's top level never reads the concrete language
  * singletons: they and this module form an import cycle (a language's semantic
@@ -234,13 +235,18 @@ function allLanguages(): readonly Language[] {
   ];
 }
 
-/** The language for `fileName` — the first that claims it. Plain text claims
- * otherwise unknown named files. TypeScript remains the fallback for an
- * unnamed pipe of transformed compiler output. */
+/** The language for `fileName` — the first that claims it. Plain text handles
+ * unknown named files and input without a filename. */
 export function languageForFile(fileName: string | undefined): Language {
   for (const language of allLanguages()) {
     if (language.matches(fileName)) return language;
   }
+  return plainTextLanguage;
+}
+
+/** The TypeScript default for filename-free `cf check --show-transformed`
+ * output. The caller checks the compiler's module header before selecting it. */
+export function languageForTransformedOutput(): Language {
   return typeScriptLanguage;
 }
 

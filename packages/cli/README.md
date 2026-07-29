@@ -4,17 +4,20 @@
 
 `cf view [file]` is an interactive pager for transformed TypeScript, source
 files, and unified diffs. Named Markdown, JSON, JSONC, YAML, and Python files
-use their own syntax highlighting. A named file with unrecognized syntax is
-shown as plain text. Markdown files can switch between the source and a rendered
-terminal view with `V`. The rendered view formats headings, emphasis, links,
-quotes, lists, task markers, tables, rules, and code. The same view is available
-for Markdown files inside a unified diff; diff markers, addition and deletion
-tints, line positions, and hunk expansion remain in place.
+use their own syntax highlighting. Transformed compiler output piped without a
+filename keeps TypeScript highlighting when its module header identifies it.
+Other filename-free source and named files with unrecognized syntax are shown as
+plain text.
 
-A piped input without a file name remains TypeScript unless it is detected as a
-diff. Redirected output keeps the source text verbatim by default and adds ANSI
-color only when the selected color mode permits it. Pass `--rendered` to start
-in, or print, the rendered representation when one is available. Editing from a
+Markdown files can switch between the source and a rendered terminal view with
+`V`. The rendered view formats headings, emphasis, links, quotes, lists, task
+markers, tables, rules, and code. The same view is available for Markdown files
+inside a unified diff; diff markers, addition and deletion tints, line
+positions, and hunk expansion remain in place.
+
+Redirected output keeps the source text verbatim by default and adds ANSI color
+only when the selected color mode permits it. Pass `--rendered` to start in, or
+print, the rendered representation when one is available. Editing from a
 rendered view returns to source first.
 
 ```bash
@@ -148,6 +151,11 @@ use `cf exec <mounted-file> --help --json` or
 
 The supported output switches are:
 
+- `cf space ... --json` serializes the clone manifest, verify result, or
+  fingerprint. `cf space verify` and `cf space reset` exit nonzero when the
+  clone does not match its baseline, so a rehearsal script can gate on them; the
+  printed report, not usage help, is the output in that case. The procedure
+  these commands serve is `docs/development/space-clone-rehearsal.md`.
 - `cf inspect ... --json` serializes an inspector result. `inspect html` does
   not have a JSON representation, so `html` and `--json` are mutually exclusive.
   `inspect graph --dot` and `--json` are also mutually exclusive.

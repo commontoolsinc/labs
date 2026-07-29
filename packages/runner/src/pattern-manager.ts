@@ -379,6 +379,16 @@ export class PatternManager {
   }
 
   /**
+   * Whether `identity` is a session-synthetic keyless pointer (minted by
+   * {@link ensureKeylessPatternIdentity}) rather than a durable
+   * content-addressed artifact identity. A fresh runtime can never load a
+   * keyless pointer, so such refs must never be written into durable state.
+   */
+  static isKeylessPatternIdentity(identity: string): boolean {
+    return identity.startsWith("keyless:");
+  }
+
+  /**
    * Make a cross-space child piece independently loadable from its own space
    * (CT-1687). A fresh runtime navigating to a `Factory.inSpace(...)` child
    * loads pattern artifacts from the CHILD's space — but the parent bundle's

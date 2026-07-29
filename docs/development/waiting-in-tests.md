@@ -100,13 +100,13 @@ Waits split into two groups with different primitives.
   signal.
 - The higher-level wrappers in
   `packages/patterns/integration/cfc-browser-helpers.ts` — `waitForText`,
-  `waitForTextAbsent`, `fillCfInput`, `clickCfButton`, `clickNthCfButton`,
-  `clickCfButtonAndWaitForText`, `waitForRuntimeIdle`, `waitForRuntimeSynced` —
-  bundle "settle the view, act once, wait for the effect" on top of the two
-  primitives above. `clickCfButton` takes the first match and reaches through a
-  host's shadow root for its inner `[data-cf-button]`; `clickNthCfButton` takes
-  the `index`-th match of a selector that already resolves to the buttons
-  themselves.
+  `waitForSettledText`, `waitForTextAbsent`, `fillCfInput`, `clickCfButton`,
+  `clickNthCfButton`, `clickCfButtonAndWaitForText`, `waitForRuntimeIdle`,
+  `waitForRuntimeSynced` — bundle "settle the view with the control present,
+  act once, wait for the effect" on top of the two primitives above.
+  `clickCfButton` takes the first match and reaches through a host's shadow root
+  for its inner `[data-cf-button]`; `clickNthCfButton` takes the `index`-th
+  match of a selector that already resolves to the buttons themselves.
 
 To click a control that appears asynchronously, follow the `clickCfButton`
 shape rather than a find-and-click retry loop: a `waitForCondition` predicate
@@ -116,6 +116,26 @@ target to be rendered — laid out, and not `display:none` or `visibility:hidden
 — so a control still inside a collapsed menu is skipped until it becomes
 clickable rather than tagged while it has no layout box and then failing to
 click.
+
+Settle the view inside that predicate, on every check, and let the check pass
+only on one the settle preceded. Settling is what makes a rendered control
+interactive, so a settle that ran before the control existed says nothing about
+it: the click lands on an element whose handler is not bound, is silently
+dropped, and the wait for its effect runs to the stuck-condition safety net.
+
+Do not reach instead for a check that only watches the DOM. Asking the worker
+whether it is idle queues runnable pull work that nothing else would start, so a
+control that appears only once the page's own pending work runs never arrives
+under a purely passive wait. The settle is both the barrier and the pump, which
+is why it belongs inside the predicate rather than in front of it.
+
+When several controls are clicked as a group, resolve every one of them before
+marking any, so no settle falls between the marks and the clicks.
+
+`clickCfButton` and `clickCfButtonsConcurrently` work this way.
+`clickTrustedAction`, `submitViaEnter`, and `settleAndClickNoteButton` in
+`packages/patterns/integration/note-button-helpers.ts` still settle before
+resolving their target, and carry the gap described above.
 
 Ask `probe.isRendered` for that check rather than hand-rolling it, and note that
 it is deliberately not `probe.isVisible`, which additionally requires the
@@ -137,6 +157,19 @@ why it belongs in the predicate that tags the control. Whether the control is
 `disabled` is a separate question — a disabled control still takes the click and
 declines it. A test that needs a control enabled before clicking says so with
 `waitForDisabled(page, selector, false)`.
+
+Waiting for a click's effect carries the same requirement, for the same reason.
+Nothing in an integration test holds a UI subscription, so between one check and
+the next nothing drives the page. A rendering the page has to produce for
+itself — a tally recomputed from a vote, a card drawn for a list entry that
+has just arrived — can sit as runnable work no one schedules, one settle away
+from showing it. The wait then runs to the stuck-condition net, and the
+failure reads as "the state never arrived" when it had arrived and was never
+drawn. So `waitForText`, which only watches the DOM, is for text already there
+or that something else is already drawing. When the text is the effect of a
+stimulus, including one delivered to another browser sharing the same piece, use
+`waitForSettledText`, which settles the page on every check. The lunch-poll
+two-browser vote test uses it for all of its cross-browser waits.
 
 **Non-browser and off-page waits** have no page to observe. Resolve a `defer()`
 (from `packages/utils/src/defer.ts`) inside a callback the test already registers
@@ -371,17 +404,51 @@ logical time to zero and drops pending timers: one frozen clock wraps a whole
 `describe`, so a suite whose cases each read absolute coarsened time (the `#now`
 grid tests) calls it from `beforeEach` to start each case from a known instant.
 
-Two files stay on the real clock, listed with their reasons in the runner
-preload's `realClockFiles` list. One is a resume test whose reload holds each
-per-element child document back by a delay to open the resume window it
-observes; that delay is a frozen test-file timer, and the resuming runtime's
-pull/idle machinery blocks on the deliveries it gates, so the resume deadlocks.
-The other is a nested-subagent generateObject that aborts its delegate tool
-because the tool-calling path's own timeout auto-advances against the
-subagent's outbox progress rather than the wall clock, so the delegate reports
-"tool call timed out" before it completes. These are the honest exceptions: the
-clock they need is the real one, and their own sleeps are the honest way to
-wait.
+Three files stay on the real clock, listed with their reasons in the runner
+preload's `realClockFiles` list, and they are there for two different kinds of
+reason. One is a resume test whose reload holds each per-element child document
+back by a delay to open the resume window it observes; that delay is a frozen
+test-file timer, and the resuming runtime's pull/idle machinery blocks on the
+deliveries it gates, so the resume deadlocks. That one is an honest exception:
+the clock it needs is the real one, and its own sleeps are the honest way to
+wait. The other two are carried rather than endorsed, and the next section says
+why.
+
+### The dynamic-schema subagent shape
+
+`generate-object-tools-dynamic-subagent.test.ts` and
+`llm-dialog-dynamic-subagent.test.ts` are on the list for one reason, worth
+spelling out because the same shape will catch the next person who writes it.
+
+Each of their three cases drives a tool call whose delegate runs a child agent,
+and the result schema that child works to is supplied by the model in the tool
+input rather than fixed when the pattern is written. Because the schema arrives
+that way, the child cannot form its own request until the tool input has been
+written into its inputs and the graph has settled. That round trip carries the
+delegate's completion across a macrotask boundary. The pump reads that boundary
+as an idle event loop and jumps logical time to the earliest pending production
+timer, which is the deadline the tool-calling path arms around the wait, so the
+delegate aborts with "Tool call timed out" while its child is still in flight.
+
+Only one of the three ever went red. The other two passed while their delegate
+aborted, because their closing assertions are reached whether the delegate
+returned data or an error. All three now assert on the delegate's own tool
+result, so they go red if they ever run under the fake clock again — through a
+rename, or through the exemption being dropped — rather than going quietly
+green. A tool aborting is not reliably visible in the exit status, so when you
+suspect it, the check is the absence of `Tool ... failed` lines in a run,
+compared against the same file on the real clock.
+
+Teaching the pump to hold time still while zero-delay work is queued does fix
+all three, and it costs more than it buys: the pump cannot tell that deadline
+apart from a backoff window, and other tests need backoff windows to fire during
+exactly this kind of reactive churn. Hold time still and
+`scheduler-commit-backpressure.test.ts` never gets the retries it waits on,
+while the burst in `reactive-stale-basis-strand.test.ts` consumes none of its
+fifteen injected failures rather than all of them.
+
+The real fix is retiring the deadline these cases trip over, which
+[a proposal](proposals/retiring-llm-tool-call-deadlines.md) works through.
 
 The `test/` versus `src/` classification reads the scheduling frame from a stack
 trace, and that has to keep working after a runtime is running. SES's

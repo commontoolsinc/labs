@@ -31,6 +31,27 @@ const textPresent = (
     probe.deepText(element).includes(text)
   );
 
+// Settle the view, then report whether `selector` contains `text`. Reaches the
+// same answer as `textPresent` on a page that is already up to date, and drives
+// one that is not: asking the worker whether it is idle queues runnable pull
+// work that nothing else would start, so a rendering that only the page's own
+// pending work produces arrives on a settling check and not on one that watches
+// the DOM alone.
+const settledTextPresent = async (
+  probe: ProbeApi,
+  selector: string,
+  text: string,
+): Promise<boolean> => {
+  const settle = (globalThis as typeof globalThis & {
+    commonfabric?: { viewSettled?: () => Promise<void> };
+  }).commonfabric?.viewSettled;
+  if (!settle) return false;
+  await settle();
+  return probe.collect(selector).some((element) =>
+    probe.deepText(element).includes(text)
+  );
+};
+
 const textAbsent = (
   probe: ProbeApi,
   selector: string,
@@ -253,6 +274,39 @@ const markForClick = (
   if (!clickTarget.isConnected || !probe.isRendered(clickTarget)) return false;
   probe.addToken(clickTarget, attr, token);
   return true;
+};
+
+// Settle the view, then report whether every selector resolves to a rendered
+// click target, using the same resolution and rendered-ness test as
+// `markForClick`. The resolution is spelled out again because a predicate is
+// serialized into the page and closes over nothing in this module.
+//
+// The settle runs before the check, so a check that passes is a check on a
+// settled view: `viewSettled` returns only when a pass finds nothing pending,
+// so a target that rendered partway through is bound and drained by the time it
+// returns.
+//
+// The settle also drives the page forward. Asking the worker whether it is idle
+// queues runnable pull work that nothing else would start, so a target reached
+// only by the page's own pending work arrives on a settling check and not on
+// one that watches the DOM alone.
+const settledClickTargetsRendered = async (
+  probe: ProbeApi,
+  selectors: readonly string[],
+): Promise<boolean> => {
+  const settle = (globalThis as typeof globalThis & {
+    commonfabric?: { viewSettled?: () => Promise<void> };
+  }).commonfabric?.viewSettled;
+  if (!settle) return false;
+  await settle();
+  return selectors.every((selector) => {
+    const target = probe.collect(selector)[0] as HTMLElement | undefined;
+    if (!target) return false;
+    const clickTarget = (target.shadowRoot?.querySelector("[data-cf-button]") as
+      | HTMLElement
+      | null) ?? target;
+    return clickTarget.isConnected && probe.isRendered(clickTarget);
+  });
 };
 
 // Tag the `index`-th element matching `selector` once it is rendered. Unlike
@@ -505,6 +559,40 @@ export async function waitForText(
   }
 }
 
+/**
+ * Wait for `selector` to contain `text`, settling `page` on each check.
+ *
+ * Reach for this rather than `waitForText` when the text is the effect of a
+ * stimulus — this page's own click, or one delivered to another browser sharing
+ * the piece. `waitForText` only watches the DOM, and an integration test holds
+ * no UI subscription, so nothing drives the page between its checks. A rendering
+ * that the page's own pending work has to produce then never arrives, and the
+ * wait runs to the stuck-condition safety net on a page that was one settle away
+ * from showing it.
+ *
+ * The settle is inside the predicate, so each re-check drives the page and reads
+ * the result of that same drive.
+ */
+export async function waitForSettledText(
+  page: Page,
+  selector: string,
+  text: string,
+) {
+  try {
+    await waitForCondition(page, settledTextPresent, {
+      args: [selector, text],
+    });
+  } catch (cause) {
+    const probe = await readTextProbe(page, selector).catch(() => undefined);
+    throw new Error(
+      `Timed out waiting for "${selector}" to contain "${text}". Last probe: ${
+        toIndentedDebugString(probe)
+      }`,
+      { cause },
+    );
+  }
+}
+
 export async function waitForTextAbsent(
   page: Page,
   selector: string,
@@ -650,25 +738,81 @@ async function clickRenderedCfButton(
   await clickMarked(page, token);
 }
 
+/**
+ * Resolve once `page` has settled with every selector rendered.
+ *
+ * A settle that runs before its target exists says nothing about that target: a
+ * control that appears afterwards is laid out with its handler not yet bound,
+ * the click is delivered to nothing, and the wait for its effect runs to the
+ * stuck-condition safety net.
+ *
+ * Every target is resolved before any of them is marked, so a grouped dispatch
+ * marks all of its targets with no settle in between.
+ */
+async function settleWithClickTargets(
+  page: Page,
+  selectors: readonly string[],
+): Promise<void> {
+  try {
+    await waitForCondition(page, settledClickTargetsRendered, {
+      args: [selectors],
+    });
+  } catch (cause) {
+    // Matches per selector, so the failure names which of a grouped dispatch's
+    // targets never rendered. Each match's `rect` and `visible` report whether
+    // the control was absent or present without a layout box. Every probe reads
+    // the same page, so the body text is reported once rather than once per
+    // selector.
+    const probes = await Promise.all(
+      selectors.map((selector) =>
+        readTextProbe(page, selector).catch(() => undefined)
+      ),
+    );
+    // Indented for readable test-log output
+    throw new Error(
+      `Timed out waiting for ${selectors.join(", ")} to render. Last probe: ${
+        toIndentedDebugString({
+          matches: Object.fromEntries(
+            selectors.map((selector, index) => [
+              selector,
+              probes[index]?.matches,
+            ]),
+          ),
+          bodyText: probes.find((probe) => probe !== undefined)?.bodyText,
+        })
+      }`,
+      { cause },
+    );
+  }
+}
+
 export async function clickCfButton(
   page: Page,
   selector: string,
 ) {
-  await settleView(page);
+  await settleWithClickTargets(page, [selector]);
   await clickRenderedCfButton(page, selector);
   await settleView(page);
 }
 
 /**
- * Settle every target page before dispatch. Mark every target before the first
- * click. Dispatch every click without an intervening view settle. Settle every
- * target page after dispatch.
+ * Settle every target page before dispatch, with all of that page's targets
+ * already rendered. Mark every target before the first click. Dispatch every
+ * click without an intervening view settle. Settle every target page after
+ * dispatch.
  */
 export async function clickCfButtonsConcurrently(
   targets: readonly { page: Page; selector: string }[],
 ): Promise<void> {
   const pages = [...new Set(targets.map(({ page }) => page))];
-  await Promise.all(pages.map((page) => settleView(page)));
+  await Promise.all(pages.map((page) =>
+    settleWithClickTargets(
+      page,
+      targets.filter((target) => target.page === page).map(({ selector }) =>
+        selector
+      ),
+    )
+  ));
 
   const markedByPage = pages.map((page) => ({
     page,

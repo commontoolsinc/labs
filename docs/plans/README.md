@@ -34,5 +34,9 @@ a record: archive it to `docs/history/plans/` following the procedure in
   [pattern verb contract](pattern-verb-contract.md).
 - [CFC runner implementation](runner_cfc_implementation.md) defines the
   commit-boundary enforcement workstreams and rollout.
-- [`cf space clone` rehearsal](space-clone-rehearsal.md) proposes a
-  rehearsal-grade command for copying populated spaces.
+- [`cf space clone` rehearsal](space-clone-rehearsal.md) records the design for
+  rehearsal-grade copies of populated spaces. The tooling has shipped (`cf
+  space`, `cf inspect churn`); the operating procedure lives in
+  [`../development/space-clone-rehearsal.md`](../development/space-clone-rehearsal.md).
+  The plan stays live until the practice has been exercised on a real
+  migration.

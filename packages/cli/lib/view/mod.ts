@@ -2,9 +2,11 @@
  * Entry point for `cf view`. Reads the input (a file argument or piped stdin),
  * parses it once — as a unified diff when it reads as one, otherwise with the
  * language selected from its filename — then either launches the interactive
- * TTY) or prints the selected source/rendered representation and exits,
- * mirroring how `less`/`bat` behave when their output is redirected. An
- * unnamed pipe remains transformed TypeScript.
+ * pager (when stdout is a TTY) or prints the selected source or rendered
+ * representation and exits, mirroring how `less`/`bat` behave when their
+ * output is redirected.
+ * Filename-free compiler output keeps the transformed TypeScript default;
+ * other filename-free source uses plain text.
  */
 import { renderLineColored } from "./highlight.ts";
 import { runPager } from "./pager.ts";
@@ -21,6 +23,7 @@ import {
   diffSemanticsFor,
   distinctLanguages,
   languageForFile,
+  languageForTransformedOutput,
 } from "./languages/language.ts";
 import {
   type EditableSource,
@@ -149,8 +152,12 @@ export function buildView(
       ),
     };
   }
-  const language = languageForFile(file);
-  const doc = language.parseDocument(text, file ?? "transformed.tsx");
+  const transformedOutput = file === undefined &&
+    looksLikeTransformedOutput(text);
+  const language = transformedOutput
+    ? languageForTransformedOutput()
+    : languageForFile(file);
+  const doc = language.parseDocument(text, file);
   return {
     doc,
     semantics: () =>
@@ -158,8 +165,22 @@ export function buildView(
     // A real file is editable; a pipe (transformed output, etc.) is not.
     editSource: file ? fileSource(file) : readonlySource(
       "This view is of a pipe — there is no underlying file to edit.",
+      language,
+      file,
     ),
   };
+}
+
+/** `cf check --show-transformed` starts each output module with this header. */
+function looksLikeTransformedOutput(text: string): boolean {
+  const lineEnd = text.indexOf("\n");
+  const firstLine = (lineEnd < 0 ? text : text.slice(0, lineEnd)).replace(
+    /\r$/,
+    "",
+  );
+  const prefix = "// transformed: ";
+  return firstLine.startsWith(prefix) &&
+    firstLine.slice(prefix.length).trim().length > 0;
 }
 
 /** A standard `git show` or `git log` header. Unlike a diff heuristic, this also

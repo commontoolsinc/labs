@@ -401,7 +401,7 @@ function sendValueToBindingInner<T>(
  *   links are annotated with the corresponding target schema.
  * @returns The unwrapped binding.
  */
-export function unwrapOneLevelAndBindtoDoc<T, U>(
+export function unwrapOneLevelAndBindToDoc<T>(
   cfc: ContextualFlowControl,
   binding: T,
   argumentCellLink: NormalizedFullLink | undefined,
@@ -573,7 +573,7 @@ export function findAllWriteRedirectCells<T>(
   // `Cell<unknown>`) rather than the original typed base.
   function find(binding: unknown, baseCell: AnyCell<unknown>): void {
     if (isAliasBinding(binding)) {
-      // Callers unwrap bindings (unwrapOneLevelAndBindtoDoc) before walking,
+      // Callers unwrap bindings (unwrapOneLevelAndBindToDoc) before walking,
       // so a surviving `$alias` belongs to a nested level — it just crossed
       // its `defer` boundary, or sits inside an embedded Pattern value —
       // and is not part of this level's read/write surface.

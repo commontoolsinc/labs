@@ -1,8 +1,8 @@
 /**
  * The TypeScript (and TSX/JS) language for the pager. It handles named files in
- * that language family. It is also the intentional default for unnamed
- * transformed-pattern output. Highlighting, structure, incremental editing and
- * the semantic layer all live in the neighbouring {@link ./parse.ts} and
+ * that language family. The selection layer also uses it for filename-free
+ * transformed compiler output. Highlighting, structure, incremental editing
+ * and the semantic layer all live in the neighbouring {@link ./parse.ts} and
  * {@link ./semantics.ts}; this module only adapts them to the {@link Language}
  * contract.
  */
@@ -20,8 +20,7 @@ export const typeScriptLanguage: Language = {
   id: "typescript",
 
   // Claims the TypeScript / JavaScript family (`.ts`, `.tsx`, `.mts`, `.cts`,
-  // `.js`, `.jsx`, `.mjs`, `.cjs`). `languageForFile` also selects it for an
-  // unnamed pipe of transformed compiler output.
+  // `.js`, `.jsx`, `.mjs`, `.cjs`).
   matches: (fileName) =>
     fileName !== undefined && /\.[cm]?[jt]sx?$/i.test(fileName),
 

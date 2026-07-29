@@ -1,7 +1,8 @@
 /**
- * Plain-text handling for named files whose syntax `cf view` does not
- * recognize. Direct documents, diffs, and live diff edits must preserve the
- * complete input without TypeScript coloring or structure.
+ * Plain-text handling for files whose syntax `cf view` does not recognize and
+ * filename-free input that is not transformed compiler output. Direct
+ * documents, diffs, and live diff edits must preserve the complete input
+ * without TypeScript coloring or structure.
  */
 import { assertEquals } from "@std/assert";
 import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
@@ -18,10 +19,10 @@ function verbatim(lines: readonly Line[]): string {
     .join("\n");
 }
 
-Deno.test("plain text: unknown named files select plain text while unnamed input stays TypeScript", () => {
+Deno.test("plain text: unknown and unnamed files select plain text", () => {
   assertEquals(languageForFile("LICENSE").id, "plain-text");
   assertEquals(languageForFile("checksums.sha256").id, "plain-text");
-  assertEquals(languageForFile(undefined).id, "typescript");
+  assertEquals(languageForFile(undefined).id, "plain-text");
 });
 
 Deno.test("plain text: direct documents preserve source without structure", () => {
@@ -44,6 +45,18 @@ Deno.test("plain text: direct documents preserve source without structure", () =
   assertEquals(view.semantics(), undefined);
   assertEquals(view.editSource.editable, true);
   assertEquals(view.editSource.parse(text), doc);
+});
+
+Deno.test("plain text: a filename takes priority over a transformed-looking header", () => {
+  const text = "// transformed: /fake.ts\nexport const answer = 42;\n";
+  const view = buildView(text, "compiler-output.txt");
+
+  assertEquals(view.doc.text, text);
+  assertEquals(view.doc.structure, []);
+  assertEquals(
+    view.doc.lines.flatMap((line) => line.spans.map((span) => span.cls)),
+    ["plain", "plain"],
+  );
 });
 
 Deno.test("plain text: live edits remain lossless and plain", () => {

@@ -4,6 +4,15 @@
 [`pattern-verb-contract.md`](pattern-verb-contract.md) (PR #4968). Keep current
 as work proceeds: check off exit criteria, record scope changes.
 
+**Amended 2026-07-28**, context only — no scope or decision changed: Risks
+names #5059 (`cf piece setsrc --check`) as the candidate preflight for the
+write-storm gate, WS-F gains a read-path guard so `cf piece get` on a verb
+redirects to `cf piece call`, and Non-goals records that constraining
+`cf piece set` is out of scope pending a decision this plan does not make. The
+design doc carries the same pass's larger share: the llm-dialog handler-branch
+precedent, tools restated as deferred rather than rejected, and the
+structural-interface property.
+
 **Amended 2026-07-24** from the first live headless session (a three-topic
 graph, ~24 CLI operations): compact discovery index (A2), closed-world inputs
 (C5), transaction-local acknowledgement as a WS-D exit criterion, phase
@@ -53,6 +62,15 @@ Named so their absence reads as intent, not oversight:
   separate comparison with existing slugs and configured host/space addressing.
 - **Cross-space effect atomicity** — the spec's I11 gap stands; the guarantee
   is same-space, which covers `topics`.
+- **Constraining direct data writes.** `cf piece set` writes a result field
+  directly, past every rule in Part 1 — no declared payload, no atomic unit,
+  no typed rejection. The LLM tool surface has no equivalent (it can only
+  mutate through verbs), so the CLI is the outlier. Whether this stays a
+  sanctioned escape hatch depends on a declarative notion of pattern-managed
+  state that does not exist yet (the `readonly`/opt-in-writability question),
+  and `set` is also an authoring and debugging tool whose non-agent uses this
+  contract does not touch. Until that decision is made, the contract governs
+  verbs and says nothing about `set`.
 - **Batch / session mode** for the CLI — orthogonal call-cost work, linked
   rather than orphaned: even perfect verbs leave a fresh runtime paying boot
   and sync per call (20–80 s per mutation observed live), so this gets its
@@ -184,10 +202,11 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   properties" is not a single predicate today. `isStream()` accepts three
   independent signals, any one of which suffices: the cell's construction kind,
   `asCell: ["stream"]` in the schema, and a stored `{$stream: true}` value
-  (`packages/runner/src/cell.ts:924-946`). If C3 keys emission off the schema
-  marker alone, a verb carrying only the stored marker gets no result schema
-  and rule 3 silently does not apply to it — and the WS-C exit below would not
-  catch that, since it exercises one CTS pattern that does carry the marker.
+  (`Cell.isStream`, `packages/runner/src/cell.ts:936-958`). If C3 keys emission
+  off the schema marker alone, a verb carrying only the stored marker gets no
+  result schema and rule 3 silently does not apply to it — and the WS-C exit
+  below would not catch that, since it exercises one CTS pattern that does
+  carry the marker.
   That the signals diverge in practice is not hypothetical: the CLI has two
   runtime workarounds for handlers whose schema lost the marker
   (`tryResolvePieceHandler`, and the forced-stream probe in
@@ -348,6 +367,12 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
   backing identity changes; evaluate a narrower path-selected form if broad
   output is too noisy. Patterns return child references and never manufacture
   their own fid fields for this purpose.
+- **Read-path guard:** `cf piece get` on a path that resolves to a verb returns
+  the stream's serialization rather than redirecting. The llm-dialog `read`
+  tool already rejects this case with the right message — "Path resolves to a
+  handler; use invoke() instead" — and the CLI read path
+  (`packages/cli/lib/piece.ts`, `getCellValue`) has no equivalent check. Cheap,
+  and it saves an agent a wasted turn.
 - `--await` / `--no-wait` and the caller-controlled wait bound — with WS-D.
 - Skill updates ride each surface (`skills/cf`, `skills/topics`): the handle
   lookup and verification read leave the documented workflow when Phase 4
@@ -427,6 +452,13 @@ change that alters them.
   #4956, merged 2026-07-24 — is the candidate fix; confirm before the first
   Phase 1 deploy). Until the gate clears, a "live-board acceptance pass"
   degrades to a scratch board and must say so rather than pass silently.
+  **#5059 (`cf piece setsrc --check`) is the candidate preflight for this
+  gate:** it answers whether a source can be applied to a given piece before
+  attempting it, driving the real rules in dry-run — the schema subset proof,
+  the CFC envelope merge, the retained-link validator — rather than a second
+  copy of them. It does not measure commit rates, so the rehearsal above
+  stands; what it removes is discovering an incompatibility by attempting the
+  swap on the live board.
 - **WS-E's gates may stall it** (OQ1, CFC review, collection unknown, trusted
   ingress mint and propagation): it is last and severable; everything through
   Phase 4 delivers without it, and `topics.agentName` remains the safe interim.
