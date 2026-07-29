@@ -174,13 +174,35 @@ export type PendingRead = {
    * The reader's pending-stack dependency set for this document. An array
    * lists EVERY pending layer the read's materialized view sat on; each
    * element must have resolved to an accepted commit for this commit to be
-   * applicable, and the staleness (conflict) check runs exactly once, based
-   * at the resolution of the HIGHEST element — the document's top-of-stack
-   * layer below the reader, which the array MUST include. A scalar is the
-   * degenerate single-layer form (also what pre-`pendingReadStacks` peers
-   * emit: top-of-stack only, carrying no lower-layer dependencies).
+   * applicable, and the staleness (conflict) check runs exactly once, from
+   * the basis the server selects (03-commit-model.md §3.6.3): the declared
+   * `basisSeq` when present, else the resolution of the HIGHEST element —
+   * the document's top-of-stack layer below the reader, which the array
+   * MUST include. A scalar is the degenerate single-layer form (also what
+   * pre-`pendingReadStacks` peers emit: top-of-stack only, carrying no
+   * lower-layer dependencies).
    */
   localSeq: number | number[];
+  /**
+   * The reader's confirmed basis for THIS document, in the SERVER's
+   * space-log seq space (an accepted-commit `seq`, NOT the session's
+   * localSeq space): the seq of the last accepted write to this document
+   * that the client's confirmed view reflected at build time, or 0 for a
+   * document its subscriptions never covered.
+   *
+   * When present, the staleness scan covers the FULL interval
+   * `(basisSeq, head]`, excluding only the session's own TRUE PREDECESSOR
+   * commits — those with a localSeq below the reader's, the accepted layers
+   * its materialized view included. An own write with a higher localSeq
+   * accepted first (out-of-order submission) conflicts like a foreign
+   * write, so soundness does not depend on wire-order discipline. This is
+   * the CT-1910 repair
+   * (`PendingStacks_Repaired.cfg` certifies it); when absent (a legacy
+   * client), staleness is based at the HIGHEST dependency's resolution seq,
+   * whose known unsoundness is recorded against INV-1 in
+   * docs/specs/memory-v2/09-invariants.md.
+   */
+  basisSeq?: number;
   /** See {@link ConfirmedRead.nonRecursive}. */
   nonRecursive?: boolean;
 };
