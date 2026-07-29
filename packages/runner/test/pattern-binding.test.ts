@@ -556,6 +556,114 @@ describe("pattern-binding", () => {
     });
   });
 
+  describe("unwrapOneLevelAndBindToDoc structure sharing", () => {
+    /** Binds `binding`, with one derived internal cell named `"a"` available. */
+    const bind = <T>(binding: T): T => {
+      const resultCell = runtime.getCell(
+        space,
+        `share ${crypto.randomUUID()}`,
+        undefined,
+        tx,
+      );
+      const argumentCell = runtime.getCell(
+        space,
+        `share arg ${crypto.randomUUID()}`,
+        undefined,
+        tx,
+      );
+      return unwrapOneLevelAndBindToDoc(
+        runtime.cfc,
+        binding as never,
+        argumentCell.getAsNormalizedFullLink(),
+        resultCell,
+        { derivedInternalCells: [{ partialCause: "a" }] },
+      ) as T;
+    };
+    const alias = () => ({ $alias: { partialCause: "a", path: [] } });
+
+    it("returns a binding with nothing to rebind by identity", () => {
+      const binding = { x: 1, deep: { y: ["a", "b"] } };
+      const result = bind(binding);
+      expect(result).toBe(binding);
+      expect(result.deep).toBe(binding.deep);
+      expect(result.deep.y).toBe(binding.deep.y);
+    });
+
+    it("copies only the path to a rebound alias, sharing its siblings", () => {
+      const untouched = { deep: [1, 2, 3] };
+      const binding = { changed: { inner: alias() }, untouched };
+      const result = bind(binding);
+
+      // The root and the branch containing the alias are copies...
+      expect(result).not.toBe(binding);
+      expect(result.changed).not.toBe(binding.changed);
+      // ...while a sibling subtree with nothing to rebind is the same object.
+      expect(result.untouched).toBe(untouched);
+      expect(result.untouched.deep).toBe(untouched.deep);
+    });
+
+    it("shares an array whose elements all convert to themselves", () => {
+      const inner = [1, 2];
+      const binding = { list: [inner, "x"] };
+      const result = bind(binding);
+      expect(result).toBe(binding);
+      expect(result.list[0]).toBe(inner);
+    });
+
+    it("preserves holes when a sibling element rebinds", () => {
+      // deno-lint-ignore no-sparse-arrays
+      const binding = [alias(), , "third"] as unknown[];
+      const result = bind(binding);
+
+      expect(result).not.toBe(binding);
+      expect(result.length).toBe(3);
+      expect(1 in result).toBe(false); // still a hole, not `undefined`
+      expect(result[2]).toBe("third");
+      expect(isAliasBinding(result[0])).toBe(false); // it did rebind
+    });
+
+    it("keeps the length of an array whose trailing elements are holes", () => {
+      const binding = [alias()] as unknown[];
+      binding.length = 4;
+      const result = bind(binding);
+
+      expect(result.length).toBe(4);
+      for (const i of [1, 2, 3]) expect(i in result).toBe(false);
+    });
+
+    it("hands an Array subclass's species the same length `map()` would", () => {
+      // Regression: an earlier lazy copy used `slice(0, i)`, which passes the
+      // PREFIX length to `ArraySpeciesCreate`, where `map()` passes the full
+      // length. Only a custom `Symbol.species` can observe the difference.
+      const lengths: number[] = [];
+      class Spy extends Array {
+        constructor(...args: unknown[]) {
+          lengths.push(args[0] as number);
+          super(...(args as []));
+        }
+      }
+      class Watched extends Array {
+        // `ArrayConstructor` is what the base class declares here, and `Spy`
+        // does not structurally satisfy it (no callable-without-`new` form).
+        // The cast is the point of the fixture: an exotic species is exactly
+        // what is under test.
+        static override get [Symbol.species](): ArrayConstructor {
+          return Spy as unknown as ArrayConstructor;
+        }
+      }
+      // A rebind at the LAST index, so a prefix-sized copy would differ most.
+      const binding = Watched.from(["a", "b", alias()]) as unknown[];
+
+      lengths.length = 0;
+      binding.map((x) => x);
+      const viaMap = [...lengths];
+
+      lengths.length = 0;
+      bind(binding);
+      expect(lengths).toEqual(viaMap);
+    });
+  });
+
   describe("findAllWriteRedirectCells", () => {
     it("should not find non-unwrapped alias binding", () => {
       const testCell = runtime.getCell<{ foo: number }>(
