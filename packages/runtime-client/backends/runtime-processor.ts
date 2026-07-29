@@ -3,7 +3,10 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { JsonEncodingContext } from "@commonfabric/data-model/codec-json";
 import { PieceManager } from "@commonfabric/piece";
-import { PiecesController } from "@commonfabric/piece/ops";
+import {
+  PiecesController,
+  readPieceSourceState,
+} from "@commonfabric/piece/ops";
 import {
   getLogger,
   getLoggerCountsBreakdown,
@@ -106,6 +109,8 @@ import {
   type PageSyncedRequest,
   type PatternCoverageResponse,
   type PatternSourcesResponse,
+  type PieceGetSourceRequest,
+  type PieceSourceResponse,
   type RecreateSpaceRootPatternRequest,
   type RegisterSpaceHostRequest,
   RequestType,
@@ -1289,6 +1294,19 @@ export class RuntimeProcessor {
     await pieceManager.synced();
   }
 
+  async handlePieceGetSource(
+    request: PieceGetSourceRequest,
+  ): Promise<PieceSourceResponse> {
+    const { pieceManager } = this.getSpaceCtx(request.space);
+    // The reader syncs the piece itself, as its first step.
+    const cell = this.runtime.getCellFromEntityId(
+      pieceManager.getSpace(),
+      entityIdFrom(pageIdForRouting(request.pieceId)),
+    );
+    const state = await readPieceSourceState(this.runtime, cell);
+    return { source: { ...state, space: state.space as DID } };
+  }
+
   handleRegisterSpaceHost(
     request: RegisterSpaceHostRequest,
   ): BooleanResponse {
@@ -1598,6 +1616,8 @@ export class RuntimeProcessor {
         return await this.handlePageStop(request);
       case RequestType.PageGetAll:
         return await this.handlePageGetAll(request);
+      case RequestType.PieceGetSource:
+        return await this.handlePieceGetSource(request);
       case RequestType.PageSynced:
         return await this.handlePageSynced(request);
       case RequestType.RuntimeSynced:

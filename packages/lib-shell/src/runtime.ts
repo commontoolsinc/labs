@@ -8,6 +8,7 @@ import {
   FavoritesManager,
   JSONValue,
   PageHandle,
+  type PieceSourceView,
   Program,
   RuntimeClient,
   RuntimeClientEvents,
@@ -360,6 +361,15 @@ export class RuntimeInternals extends EventTarget {
       throw new Error("Could not create piece");
     }
     return page;
+  }
+
+  /**
+   * A piece's source state: the pattern it runs, the origin it tracks, the
+   * history metadata it carries, and its authored source files.
+   */
+  getPieceSource(space: DID, pieceId: string): Promise<PieceSourceView> {
+    this.#check();
+    return this.#client.getPieceSource(pieceId, space);
   }
 
   getPiecesListCell<T>(space: DID): Promise<CellHandle<T[]>> {
