@@ -514,8 +514,8 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
     } else if (Array.isArray(binding)) {
       // Copy lazily: allocate only once a child actually converts to something
       // else, so the shared path allocates nothing. Holes are skipped rather
-      // than visited, exactly as `map()` skips them, and never written to —
-      // assigning at a hole's index would materialize it and desparsify the
+      // than visited, exactly as `map()` skips them, and never assigned to —
+      // writing at a hole's index would materialize it and desparsify the
       // array.
       let converted: FabricExecValue[] | undefined;
       for (let i = 0; i < binding.length; i++) {
@@ -525,14 +525,13 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
           value,
           cfc.getSchemaAtPath(targetSchema, [`${i}`]),
         );
-        if (converted === undefined) {
-          if (next === value) continue;
-          // First change: keep the prefix converted so far (identical to the
-          // original by definition), then grow back to full length so trailing
-          // holes survive.
-          converted = binding.slice(0, i) as FabricExecValue[];
-          converted.length = binding.length;
-        }
+        if (next === value) continue;
+        // First change: copy the whole array, not just the prefix. `slice()`
+        // with no arguments hands the species constructor the same length
+        // `map()` did, so an `Array` subclass with a custom `Symbol.species`
+        // sees what it always saw; and the copy already carries every unchanged
+        // element and every hole, leaving only changed indices to write.
+        converted ??= binding.slice() as FabricExecValue[];
         converted[i] = next;
       }
       // Nothing rebound, so the original is the answer.
