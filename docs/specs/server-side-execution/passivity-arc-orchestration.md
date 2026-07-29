@@ -54,12 +54,12 @@ resumable.
 
 | Wave | What | Status |
 | --- | --- | --- |
-| A | R5/R13 effect rows — brokers, descriptors, `wish` | **DONE** except A5 |
-| B | Post-A measurement re-run | **DONE** — zero movement; see §5h |
-| **A5** | served sqlite-op commit path (D2) | **NEXT** — scope grew, see below |
-| **C2** | client-side lattice-claims negotiation | **NEXT** — C1 ruled, scope settled |
-| **P2x** | the ×12 diagnosis, unblocked by C1 | **NEXT** — hypothesis in hand |
-| D | P3 passivity mechanism | blocked on C2 |
+| A | R5/R13 effect rows — brokers, descriptors, `wish` | **DONE** |
+| A5 | sqlite lane-scoped read seam (D2 narrowed to reads) | **DONE** — writes stay client-primary |
+| B | measurement | **DONE ×2** — zero after A; **×12 cleared** after the scope fix |
+| C | C1 ruled SURVIVES; C2 negotiates end to end | **DONE** |
+| P2x | the ×12 — diagnosed AND fixed | **DONE** — first never-claimed reduction |
+| **D** | P3 passivity mechanism — client stops standing work | **NEXT** |
 | D | P3 passivity mechanism — the client stops running standing work | blocked on B + C |
 | E | P5 passive delivery + warm spaces | blocked on D |
 | F | P6 acceptance | blocked on E |
@@ -692,3 +692,22 @@ Append one line per landed item: date, item, commit, one-sentence outcome.
   four builtins wave A touched. Lesson for future waves: check that the
   measurement instrument can see the thing being built BEFORE promising a
   buy. Full numbers: client-passivity §5h.
+- 2026-07-28 — A5 `57dd8da7f`: sqlite.query joins the acting-context seam. A
+  lease-bound executor was opening the WRONG principal's cell-db (a cell-db is
+  a file, so the scope context is the file selector and nothing downstream
+  catches a bad resolution). Deliberately did NOT register the id — that one
+  line alone would have served a user-scoped query reading the wrong file.
+- 2026-07-28 — C2 `256e73799`: `context-lattice-claims-v1` negotiates end to
+  end from the dials alone. The CA4 binding blocker is gone; a deployment can
+  now flip the rank dials. Retired the harness hatch it stomped.
+- 2026-07-28 — D2 narrowed to reads by owner ruling (`04836c65f`); sqlite
+  writes stay client-primary and that is INSIDE the goal, since every
+  `db.exec` site is in a handler and handlers are client-inherent by §1.
+- 2026-07-28 — **`8e1cb7d99`: the ×12 cleared.** Owner ruled the fail-closed
+  comment stale; scoped auxiliary result-instance LINKS are now accepted
+  (values still rejected — the carve-out held under live measurement).
+  `dynamic-write-outside-static-surface` 12 → absent,
+  `malformed-scope-naming-link` 12 → 0, user candidates 17 → 29, session
+  unserved inventory 16 events → 4. **The first measured reduction in the
+  never-claimed set.** Lesson: a limitation recorded in a source comment as
+  "accepted" had propagated into this plan as permanent, and was neither.

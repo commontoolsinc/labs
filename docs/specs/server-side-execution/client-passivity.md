@@ -1641,6 +1641,60 @@ Two consequences:
    six-commit change is evidence wave A introduced no regression — which
    is the other thing a measurement is for.
 
+### 5h.1 The ×12 cleared — the first measured reduction in the never-claimed set
+
+**Owner ruling 2026-07-28:** the `runner.ts:5183` comment accepting the
+fail-closed behavior was from a previous era. We are moving everything to
+the server faster, scope support exists, and a selector writing a scope
+redirect into a broader-scope result should be **accepted** — as should
+the other legitimate scope situations.
+
+**Why this is safe, in the owner's own terms:** Alice's lane and Bob's
+lane compute the *same* scope shift, so they emit **byte-identical links
+at the identical address** and are convergent writers rather than
+competitors — each following the link to their own scoped instance, with
+different data in each scope. That property is what makes the link form
+admissible.
+
+**The carve-out that survives, and why.** A *value* is not byte-identical
+across principals, so a broad value write from a scoped lane is visible
+to the other principal at the space instance. `broad-lane-value-write`
+therefore keeps rejecting. The engine's rule widened from ONE conforming
+form to TWO, and **both are links**: the self-scoping redirect, or the
+auxiliary result-instance link naming a lane.
+
+**Measured** (orchestrator, quiet box, fresh store, load 19-22, counts
+only):
+
+| | before | after |
+| --- | --- | --- |
+| `dynamic-write-outside-static-surface` (both scoped arms) | 12 | **absent** |
+| session-arm unserved inventory | 16 events | **4** (`claim-key-mismatch` 2, `claim-authority-lost` 2) |
+| `malformed-scope-naming-link` | 12 / 12 / 1 | **0** |
+| user-arm candidates | 17 | **29** (exactly the twelve) |
+| classification `mixed` | 2 | 1 |
+| `broad-lane-value-write` | 3 / 2 / 1 | **3 / 2 / 1 — unchanged** |
+| `claimsIssued` · committed | 24/36/38 · 2/8/15 | unchanged |
+
+Read the last two rows carefully. The carve-out holding under live
+measurement — not merely in unit pins — is the evidence that the
+relaxation did not open the cross-principal leak. And `claimsIssued`
+staying flat is the honest reading of the buy: the offender is now
+**admitted rather than newly claimed**, so the gain shows up as
+rejections eliminated, not as new commits.
+
+**This is the first reduction in the never-claimed set this arc has
+measured** — the metric established above as the real gate for P3. For
+contrast, wave A moved it by exactly zero.
+
+**A note on how this was found.** The limitation had been recorded in a
+source comment as accepted design, and from there it propagated into the
+arc's own planning as permanent. It was neither: it was a defect that
+nobody had re-examined after the rank ladder made it load-bearing.
+`ifElse` is one of the three original `SERVER_COMPUTATION_BUILTIN_IDS`,
+so under any scoped rank every `ifElse` reading scoped data was stranding
+itself and everything downstream of it.
+
 ### C1 ruling: **SURVIVES** — and the question was mis-framed
 
 C1 asked whether a purely speculative client deletes the §4 widening
