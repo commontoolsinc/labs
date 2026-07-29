@@ -125,7 +125,6 @@ export function detectDiff(text: string): DiffModel | null {
   );
   if (!model || !firstFile) return null;
   if (git && firstFile.endLine === firstFile.headerLine) return null;
-  if (plain && firstFile.hunks.length === 0) return null;
   return model;
 }
 

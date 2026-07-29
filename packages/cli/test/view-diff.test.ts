@@ -164,6 +164,16 @@ Deno.test("diff: detection accepts git and plain unified diffs, rejects code", (
     ),
     "a git header followed by source is not a diff",
   );
+  const malformedGit = "diff --git malformed\n" +
+    "index 0000000..1111111 100644\n";
+  assert(
+    !looksLikeDiff(malformedGit),
+    "a malformed git header does not make a container",
+  );
+  assert(
+    !looksLikeDiff(`${malformedGit}${DIFF}`),
+    "a later valid diff does not rescue a malformed first container",
+  );
   const embedded = `const patch = \`
 diff --git a/x.ts b/x.ts
 --- a/x.ts
