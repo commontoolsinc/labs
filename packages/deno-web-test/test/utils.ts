@@ -37,11 +37,17 @@ export const runDenoWebTest = async (
     `deno run --allow-env --allow-read --allow-write --allow-run --allow-net ${CLI_PATH} *.test.ts`;
   await Deno.writeTextFile(manifestPath, JSON.stringify(manifest));
 
-  // Run `deno install` first to not clutter up stderr
-  // with downloading messages in CI.
+  // Populate the cache for the harness and each test entrypoint before the task.
+  const testEntrypoints = [...Deno.readDirSync(tmpProjectPath)]
+    .filter((entry) => entry.isFile && entry.name.endsWith(".test.ts"))
+    .map((entry) => path.join(tmpProjectPath, entry.name))
+    .sort();
   const { success: installSuccess } = await new Deno.Command(Deno.execPath(), {
     args: [
       "install",
+      "--entrypoint",
+      CLI_PATH,
+      ...testEntrypoints,
     ],
     cwd: tmpProjectPath,
   }).output();
