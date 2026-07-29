@@ -1616,12 +1616,12 @@ export type AnyCellWrapping<T> =
 // TODO(seefeld): Subset of internal type, just enough to make it
 // differentiated. But this isn't part of the public API, so we need to find a
 // different way to handle this.
-export interface Pattern {
+export interface Pattern extends FabricExecPlainObject {
   argumentSchema: JSONSchema;
   resultSchema: JSONSchema;
   defaultScope?: CellScope;
 }
-export interface Module {
+export interface Module extends FabricExecPlainObject {
   type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
   defaultScope?: CellScope;
 }
