@@ -1,0 +1,87 @@
+{
+  "pattern": "gideon-tests/proxy-length-repro.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "items": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Item"
+        },
+        "default": [],
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "required": [
+      "items"
+    ],
+    "$defs": {
+      "Item": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "items": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Item"
+        }
+      },
+      "filteredItems": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Item"
+        }
+      },
+      "label": {
+        "type": "string"
+      },
+      "itemCount": {
+        "type": "number"
+      },
+      "addItem": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "$NAME": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "items",
+      "filteredItems",
+      "label",
+      "itemCount",
+      "addItem",
+      "$NAME"
+    ],
+    "$defs": {
+      "Item": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "pattern": "gideon-tests/notebook-nest-bug/main.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "requestCreate": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "requestCreate",
+      "$NAME",
+      "$UI"
+    ]
+  }
+}

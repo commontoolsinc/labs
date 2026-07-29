@@ -1,0 +1,171 @@
+{
+  "pattern": "budget-tracker/data-view.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "expenses": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Expense"
+        }
+      },
+      "budgets": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/CategoryBudget"
+        }
+      }
+    },
+    "required": [
+      "expenses",
+      "budgets"
+    ],
+    "$defs": {
+      "CategoryBudget": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "category",
+          "limit"
+        ]
+      },
+      "Expense": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "category": {
+            "type": "string",
+            "default": "Other"
+          },
+          "date": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "amount",
+          "category",
+          "date"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "#/$defs/JSXElement"
+      },
+      "totalSpent": {
+        "type": "number"
+      },
+      "spentByCategory": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": {
+          "type": "number"
+        }
+      },
+      "budgetStatus": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "category": {
+              "type": "string"
+            },
+            "spent": {
+              "type": "number"
+            },
+            "limit": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "remaining": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "percentUsed": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "category",
+            "spent",
+            "limit",
+            "remaining",
+            "percentUsed"
+          ]
+        }
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI",
+      "totalSpent",
+      "spentByCategory",
+      "budgetStatus"
+    ],
+    "$defs": {
+      "JSXElement": {
+        "anyOf": [
+          {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          {
+            "$ref": "#/$defs/UIRenderable"
+          },
+          {
+            "type": "object",
+            "properties": {}
+          }
+        ]
+      },
+      "UIRenderable": {
+        "type": "object",
+        "properties": {
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          }
+        },
+        "required": [
+          "$UI"
+        ]
+      }
+    }
+  }
+}

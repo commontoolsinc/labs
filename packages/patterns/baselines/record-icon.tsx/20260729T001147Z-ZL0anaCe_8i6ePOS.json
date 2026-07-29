@@ -1,0 +1,29 @@
+{
+  "pattern": "record-icon.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "icon": {
+        "type": "string",
+        "default": "",
+        "description": "Custom emoji/icon"
+      }
+    },
+    "required": [
+      "icon"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "icon": {
+        "type": "string",
+        "default": "",
+        "description": "Custom emoji/icon"
+      }
+    },
+    "required": [
+      "icon"
+    ]
+  }
+}

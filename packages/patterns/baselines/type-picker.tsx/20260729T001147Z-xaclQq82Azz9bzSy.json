@@ -1,0 +1,111 @@
+{
+  "pattern": "type-picker.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "entries": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/SubPieceEntry"
+        },
+        "asCell": [
+          "cell"
+        ]
+      },
+      "trashedEntries": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/TrashedSubPieceEntry"
+        },
+        "asCell": [
+          "cell"
+        ]
+      },
+      "dismissed": {
+        "type": "boolean",
+        "default": false
+      }
+    },
+    "required": [
+      "entries",
+      "trashedEntries"
+    ],
+    "$defs": {
+      "TrashedSubPieceEntry": {
+        "type": "object",
+        "properties": {
+          "trashedAt": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "collapsed": {
+            "type": "boolean"
+          },
+          "piece": {
+            "type": "unknown"
+          },
+          "note": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "trashedAt",
+          "type",
+          "pinned",
+          "piece"
+        ]
+      },
+      "SubPieceEntry": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "collapsed": {
+            "type": "boolean"
+          },
+          "piece": {
+            "type": "unknown"
+          },
+          "note": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "pinned",
+          "piece"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "dismissed": {
+        "type": "boolean",
+        "default": false
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "$UI"
+    ]
+  }
+}

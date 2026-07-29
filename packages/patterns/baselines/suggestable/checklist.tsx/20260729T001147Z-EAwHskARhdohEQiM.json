@@ -1,0 +1,65 @@
+{
+  "pattern": "suggestable/checklist.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "topic": {
+        "type": "string",
+        "default": ""
+      },
+      "context": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "topic": {
+        "type": "string"
+      },
+      "items": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/ChecklistItem"
+        }
+      },
+      "pending": {
+        "type": "boolean"
+      },
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "topic",
+      "items",
+      "pending",
+      "$NAME",
+      "$UI"
+    ],
+    "$defs": {
+      "ChecklistItem": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "done": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "label",
+          "done"
+        ]
+      }
+    }
+  }
+}

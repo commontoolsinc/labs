@@ -1,0 +1,152 @@
+{
+  "pattern": "gideon-tests/test-reactivity-jsx-automatic.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "count": {
+        "type": "number",
+        "default": 0
+      },
+      "user": {
+        "$ref": "#/$defs/User",
+        "default": {
+          "name": "Alice",
+          "age": 30
+        }
+      },
+      "items": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Item"
+        },
+        "default": [
+          {
+            "title": "Item 1"
+          },
+          {
+            "title": "Item 2"
+          },
+          {
+            "title": "Item 3"
+          }
+        ]
+      }
+    },
+    "required": [
+      "count",
+      "user",
+      "items"
+    ],
+    "$defs": {
+      "Item": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "age": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "age"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "#/$defs/JSXElement"
+      },
+      "count": {
+        "type": "number"
+      },
+      "user": {
+        "$ref": "#/$defs/User"
+      },
+      "items": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Item"
+        }
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI",
+      "count",
+      "user",
+      "items"
+    ],
+    "$defs": {
+      "Item": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "age": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "age"
+        ]
+      },
+      "JSXElement": {
+        "anyOf": [
+          {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          {
+            "$ref": "#/$defs/UIRenderable"
+          },
+          {
+            "type": "object",
+            "properties": {}
+          }
+        ]
+      },
+      "UIRenderable": {
+        "type": "object",
+        "properties": {
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          }
+        },
+        "required": [
+          "$UI"
+        ]
+      }
+    }
+  }
+}

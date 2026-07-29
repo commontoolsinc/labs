@@ -1,0 +1,27 @@
+{
+  "pattern": "gideon-tests/test-generateobject-error-handling.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "userInput": {
+        "type": "string",
+        "default": "a self-watering plant pot"
+      }
+    },
+    "required": [
+      "userInput"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "userInput": {
+        "type": "string",
+        "default": "a self-watering plant pot"
+      }
+    },
+    "required": [
+      "userInput"
+    ]
+  }
+}

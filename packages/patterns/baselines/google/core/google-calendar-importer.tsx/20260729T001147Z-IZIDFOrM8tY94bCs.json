@@ -1,0 +1,288 @@
+{
+  "pattern": "google/core/google-calendar-importer.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "settings": {
+        "$ref": "#/$defs/Settings",
+        "default": {
+          "daysBack": 7,
+          "daysForward": 30,
+          "maxResults": 100,
+          "debugMode": false
+        }
+      },
+      "overrideAuth": {
+        "$ref": "#/$defs/Auth",
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "$defs": {
+      "Auth": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "default": ""
+          },
+          "tokenType": {
+            "type": "string",
+            "default": ""
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "expiresIn": {
+            "type": "number",
+            "default": 0
+          },
+          "expiresAt": {
+            "type": "number",
+            "default": 0
+          },
+          "refreshToken": {
+            "type": "string",
+            "default": ""
+          },
+          "user": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "picture": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email",
+              "name",
+              "picture"
+            ],
+            "default": {
+              "email": "",
+              "name": "",
+              "picture": ""
+            }
+          }
+        },
+        "required": [
+          "token",
+          "tokenType",
+          "scope",
+          "expiresIn",
+          "expiresAt",
+          "refreshToken",
+          "user"
+        ]
+      },
+      "Settings": {
+        "type": "object",
+        "properties": {
+          "daysBack": {
+            "type": "number",
+            "default": 7
+          },
+          "daysForward": {
+            "type": "number",
+            "default": 30
+          },
+          "maxResults": {
+            "type": "number",
+            "default": 100
+          },
+          "debugMode": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "daysBack",
+          "daysForward",
+          "maxResults",
+          "debugMode"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "events": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/CalendarEvent"
+        }
+      },
+      "calendars": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Calendar"
+        }
+      },
+      "eventCount": {
+        "type": "number",
+        "description": "Number of events imported"
+      },
+      "summary": {
+        "type": "string",
+        "description": "Summary of container-level events for hierarchical indexing"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "events",
+      "calendars",
+      "eventCount",
+      "summary",
+      "$UI"
+    ],
+    "description": "Google Calendar event importer. #calendarEvents",
+    "tags": [
+      "calendarevents"
+    ],
+    "$defs": {
+      "Calendar": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "primary": {
+            "type": "boolean"
+          },
+          "backgroundColor": {
+            "type": "string"
+          },
+          "foregroundColor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "summary",
+          "description",
+          "primary",
+          "backgroundColor",
+          "foregroundColor"
+        ]
+      },
+      "CalendarEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "start": {
+            "type": "string"
+          },
+          "end": {
+            "type": "string"
+          },
+          "startDateTime": {
+            "type": "string"
+          },
+          "endDateTime": {
+            "type": "string"
+          },
+          "isAllDay": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": "string"
+          },
+          "htmlLink": {
+            "type": "string"
+          },
+          "calendarId": {
+            "type": "string"
+          },
+          "calendarName": {
+            "type": "string"
+          },
+          "attendees": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "email": {
+                  "type": "string"
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "responseStatus": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "email",
+                "displayName",
+                "responseStatus"
+              ]
+            },
+            "default": []
+          },
+          "organizer": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "displayName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email",
+              "displayName"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "summary",
+          "description",
+          "location",
+          "start",
+          "end",
+          "startDateTime",
+          "endDateTime",
+          "isAllDay",
+          "status",
+          "htmlLink",
+          "calendarId",
+          "calendarName",
+          "attendees",
+          "organizer"
+        ]
+      }
+    }
+  }
+}

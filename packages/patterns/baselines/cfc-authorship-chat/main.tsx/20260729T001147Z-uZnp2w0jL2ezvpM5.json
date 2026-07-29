@@ -1,0 +1,33 @@
+{
+  "pattern": "cfc-authorship-chat/main.tsx",
+  "argumentSchema": {
+    "type": "unknown"
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "verifiedAuthor": {
+        "type": "string"
+      },
+      "forgedClaim": {
+        "type": "string"
+      },
+      "unsignedState": {
+        "type": "string"
+      },
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "type": "unknown"
+      }
+    },
+    "required": [
+      "verifiedAuthor",
+      "forgedClaim",
+      "unsignedState",
+      "$NAME",
+      "$UI"
+    ]
+  }
+}

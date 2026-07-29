@@ -1,0 +1,138 @@
+{
+  "pattern": "gideon-tests/test-checkbox-computed.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "items": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Item"
+        },
+        "default": [
+          {
+            "id": "1",
+            "title": "Task A",
+            "done": false,
+            "active": true
+          },
+          {
+            "id": "2",
+            "title": "Task B",
+            "done": true,
+            "active": true
+          },
+          {
+            "id": "3",
+            "title": "Task C",
+            "done": false,
+            "active": false
+          }
+        ]
+      }
+    },
+    "required": [
+      "items"
+    ],
+    "$defs": {
+      "Item": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "done": {
+            "type": "boolean",
+            "default": false
+          },
+          "active": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "done",
+          "active"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "#/$defs/JSXElement"
+      },
+      "items": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Item"
+        }
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI",
+      "items"
+    ],
+    "$defs": {
+      "Item": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "done": {
+            "type": "boolean",
+            "default": false
+          },
+          "active": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "done",
+          "active"
+        ]
+      },
+      "JSXElement": {
+        "anyOf": [
+          {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          {
+            "$ref": "#/$defs/UIRenderable"
+          },
+          {
+            "type": "object",
+            "properties": {}
+          }
+        ]
+      },
+      "UIRenderable": {
+        "type": "object",
+        "properties": {
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          }
+        },
+        "required": [
+          "$UI"
+        ]
+      }
+    }
+  }
+}

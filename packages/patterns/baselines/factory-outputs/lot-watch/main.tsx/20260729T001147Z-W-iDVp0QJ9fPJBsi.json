@@ -1,0 +1,871 @@
+{
+  "pattern": "factory-outputs/lot-watch/main.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "spots": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/ParkingSpot"
+        },
+        "default": [
+          {
+            "spotNumber": "1",
+            "label": "Near entrance"
+          },
+          {
+            "spotNumber": "5",
+            "label": ""
+          },
+          {
+            "spotNumber": "12",
+            "label": "Compact only"
+          },
+          {
+            "spotNumber": "13",
+            "label": ""
+          }
+        ],
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "space"
+          }
+        ]
+      },
+      "sightings": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Sighting"
+        },
+        "default": [],
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "space"
+          }
+        ]
+      },
+      "people": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/PersonWithVehicles"
+        },
+        "default": [],
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "space"
+          }
+        ]
+      },
+      "knownVehicles": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/KnownVehicle"
+        },
+        "default": [],
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "space"
+          }
+        ]
+      },
+      "adminRegistry": {
+        "$ref": "#/$defs/LotWatchAdminRegistryValue",
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "space"
+          }
+        ]
+      },
+      "adminManagerCredential": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LotWatchAdminManagerCredential"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "user"
+          }
+        ]
+      }
+    },
+    "$defs": {
+      "LotWatchAdminManagerCredential": {
+        "type": "object",
+        "properties": {
+          "canManageAdmins": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "required": [
+          "canManageAdmins"
+        ],
+        "ifc": {
+          "addIntegrity": [
+            "lot-watch-admin-manager"
+          ]
+        }
+      },
+      "LotWatchAdminRegistryValue": {
+        "$ref": "#/$defs/LotWatchAdminRegistryStoredValue"
+      },
+      "LotWatchAdminRegistryStoredValue": {
+        "type": "object",
+        "properties": {
+          "admins": {
+            "$ref": "#/$defs/LotWatchAdminList"
+          }
+        }
+      },
+      "LotWatchAdminList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/LotWatchAdminRole"
+        },
+        "ifc": {
+          "requiredIntegrity": [
+            "lot-watch-admin-manager"
+          ]
+        }
+      },
+      "LotWatchAdminRole": {
+        "$ref": "#/$defs/LotWatchAdminRoleAssignment",
+        "ifc": {
+          "addIntegrity": [
+            "lot-watch-admin"
+          ]
+        }
+      },
+      "LotWatchAdminRoleAssignment": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "$ref": "#/$defs/LotWatchAdminSubject"
+          },
+          "displayName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject",
+          "displayName"
+        ]
+      },
+      "LotWatchAdminSubject": {
+        "type": "object",
+        "properties": {
+          "personName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "personName"
+        ]
+      },
+      "KnownVehicle": {
+        "type": "object",
+        "properties": {
+          "plateNumber": {
+            "type": "string"
+          },
+          "plateState": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "category": {
+            "enum": [
+              "guest",
+              "offender"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "org": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "plateNumber",
+          "plateState",
+          "description",
+          "category",
+          "org",
+          "label"
+        ]
+      },
+      "PersonWithVehicles": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "vehicles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "plateId": {
+                  "type": "string"
+                },
+                "plateState": {
+                  "type": "string"
+                },
+                "color": {
+                  "type": "string"
+                },
+                "make": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "plateId",
+                "plateState"
+              ]
+            }
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "Sighting": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "spotNumber": {
+            "type": "string"
+          },
+          "capturedAt": {
+            "type": "number"
+          },
+          "reportedBy": {
+            "type": "string"
+          },
+          "image": {
+            "$ref": "#/$defs/SightingImage"
+          },
+          "description": {
+            "type": "string"
+          },
+          "plateNumber": {
+            "type": "string"
+          },
+          "plateState": {
+            "type": "string"
+          },
+          "extractionPending": {
+            "type": "boolean"
+          },
+          "extractionError": {
+            "type": "string"
+          },
+          "humanCorrected": {
+            "type": "boolean"
+          },
+          "classification": {
+            "$ref": "#/$defs/Classification"
+          },
+          "notes": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "spotNumber",
+          "capturedAt",
+          "reportedBy",
+          "image",
+          "description",
+          "plateNumber",
+          "plateState",
+          "extractionPending",
+          "extractionError",
+          "humanCorrected",
+          "classification",
+          "notes"
+        ]
+      },
+      "Classification": {
+        "enum": [
+          "ours",
+          "guest",
+          "offender",
+          "unknown"
+        ]
+      },
+      "SightingImage": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "name"
+        ]
+      },
+      "ParkingSpot": {
+        "type": "object",
+        "properties": {
+          "spotNumber": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "spotNumber",
+          "label"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "sightings": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Sighting"
+        }
+      },
+      "knownVehicles": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/KnownVehicle"
+        }
+      },
+      "people": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/PersonWithVehicles"
+        }
+      },
+      "captureSighting": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "spotNumber": {
+            "type": "string"
+          },
+          "image": {
+            "$ref": "#/$defs/ImageData"
+          },
+          "description": {
+            "type": "string"
+          },
+          "plateNumber": {
+            "type": "string"
+          },
+          "plateState": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "spotNumber",
+          "image",
+          "description",
+          "plateNumber",
+          "plateState",
+          "notes"
+        ]
+      },
+      "deleteSighting": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "selectTab": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "tab": {
+            "enum": [
+              "capture",
+              "sightings",
+              "report"
+            ]
+          }
+        },
+        "required": [
+          "tab"
+        ]
+      },
+      "setReporterName": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "markVehicle": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "plateNumber": {
+            "type": "string"
+          },
+          "plateState": {
+            "type": "string"
+          },
+          "category": {
+            "enum": [
+              "guest",
+              "offender"
+            ]
+          },
+          "org": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "plateNumber",
+          "plateState",
+          "category",
+          "org"
+        ]
+      },
+      "removeKnownVehicle": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "plateNumber": {
+            "type": "string"
+          },
+          "plateState": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "plateNumber",
+          "plateState"
+        ]
+      },
+      "openAssign": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "cancelAssign": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "assignToPerson": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "openGuest": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "cancelGuest": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "saveGuest": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "enableAdminManager": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "togglePersonAdmin": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "toggleAdminMode": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "sightings",
+      "knownVehicles",
+      "people",
+      "captureSighting",
+      "deleteSighting",
+      "selectTab",
+      "setReporterName",
+      "markVehicle",
+      "removeKnownVehicle",
+      "openAssign",
+      "cancelAssign",
+      "assignToPerson",
+      "openGuest",
+      "cancelGuest",
+      "saveGuest",
+      "enableAdminManager",
+      "togglePersonAdmin",
+      "toggleAdminMode",
+      "$NAME",
+      "$UI"
+    ],
+    "$defs": {
+      "ImageData": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "data": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "number"
+          },
+          "width": {
+            "type": "number"
+          },
+          "height": {
+            "type": "number"
+          },
+          "size": {
+            "type": "number"
+          },
+          "type": {
+            "type": "string"
+          },
+          "exif": {
+            "type": "object",
+            "properties": {
+              "dateTime": {
+                "type": "string"
+              },
+              "make": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "orientation": {
+                "type": "number"
+              },
+              "gpsLatitude": {
+                "type": "number"
+              },
+              "gpsLongitude": {
+                "type": "number"
+              },
+              "gpsAltitude": {
+                "type": "number"
+              },
+              "fNumber": {
+                "type": "number"
+              },
+              "exposureTime": {
+                "type": "string"
+              },
+              "iso": {
+                "type": "number"
+              },
+              "focalLength": {
+                "type": "number"
+              },
+              "pixelXDimension": {
+                "type": "number"
+              },
+              "pixelYDimension": {
+                "type": "number"
+              },
+              "software": {
+                "type": "string"
+              },
+              "raw": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "url",
+          "data",
+          "timestamp",
+          "size",
+          "type"
+        ]
+      },
+      "PersonWithVehicles": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "vehicles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "plateId": {
+                  "type": "string"
+                },
+                "plateState": {
+                  "type": "string"
+                },
+                "color": {
+                  "type": "string"
+                },
+                "make": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "plateId",
+                "plateState"
+              ]
+            }
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "KnownVehicle": {
+        "type": "object",
+        "properties": {
+          "plateNumber": {
+            "type": "string"
+          },
+          "plateState": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "category": {
+            "enum": [
+              "guest",
+              "offender"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "org": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "plateNumber",
+          "plateState",
+          "description",
+          "category",
+          "org",
+          "label"
+        ]
+      },
+      "Sighting": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "spotNumber": {
+            "type": "string"
+          },
+          "capturedAt": {
+            "type": "number"
+          },
+          "reportedBy": {
+            "type": "string"
+          },
+          "image": {
+            "$ref": "#/$defs/SightingImage"
+          },
+          "description": {
+            "type": "string"
+          },
+          "plateNumber": {
+            "type": "string"
+          },
+          "plateState": {
+            "type": "string"
+          },
+          "extractionPending": {
+            "type": "boolean"
+          },
+          "extractionError": {
+            "type": "string"
+          },
+          "humanCorrected": {
+            "type": "boolean"
+          },
+          "classification": {
+            "$ref": "#/$defs/Classification"
+          },
+          "notes": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "spotNumber",
+          "capturedAt",
+          "reportedBy",
+          "image",
+          "description",
+          "plateNumber",
+          "plateState",
+          "extractionPending",
+          "extractionError",
+          "humanCorrected",
+          "classification",
+          "notes"
+        ]
+      },
+      "Classification": {
+        "enum": [
+          "ours",
+          "guest",
+          "offender",
+          "unknown"
+        ]
+      },
+      "SightingImage": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "name"
+        ]
+      }
+    }
+  }
+}

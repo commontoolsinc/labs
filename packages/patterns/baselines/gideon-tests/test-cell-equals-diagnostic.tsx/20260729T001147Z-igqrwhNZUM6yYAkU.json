@@ -1,0 +1,107 @@
+{
+  "pattern": "gideon-tests/test-cell-equals-diagnostic.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "items": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Item"
+        },
+        "default": []
+      },
+      "selectedItem": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Item"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "log": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": []
+      }
+    },
+    "required": [
+      "items",
+      "selectedItem",
+      "log"
+    ],
+    "$defs": {
+      "Item": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "title",
+          "value"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "items": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Item"
+        },
+        "default": []
+      },
+      "selectedItem": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Item"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "log": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": []
+      }
+    },
+    "required": [
+      "items",
+      "selectedItem",
+      "log"
+    ],
+    "$defs": {
+      "Item": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "title",
+          "value"
+        ]
+      }
+    }
+  }
+}

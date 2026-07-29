@@ -1,0 +1,71 @@
+{
+  "pattern": "experimental/folksonomy-demo.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "itemATags": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "description": "Tags for item A (scope: demo-shared)"
+      },
+      "itemBTags": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "description": "Tags for item B (scope: demo-shared - same as A)"
+      },
+      "itemCTags": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "description": "Tags for item C (scope: demo-isolated - different scope)"
+      },
+      "customScope": {
+        "type": "string",
+        "default": "demo-shared",
+        "description": "Custom scope name"
+      }
+    },
+    "required": [
+      "itemATags",
+      "itemBTags",
+      "itemCTags",
+      "customScope"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "itemATags": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "itemBTags": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "itemCTags": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "required": [
+      "itemATags",
+      "itemBTags",
+      "itemCTags"
+    ]
+  }
+}

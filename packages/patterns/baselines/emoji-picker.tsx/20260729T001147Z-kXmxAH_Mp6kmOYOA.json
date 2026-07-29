@@ -1,0 +1,27 @@
+{
+  "pattern": "emoji-picker.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "selectedEmoji": {
+        "type": "string",
+        "default": ""
+      }
+    },
+    "required": [
+      "selectedEmoji"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "selectedEmoji": {
+        "type": "string",
+        "default": ""
+      }
+    },
+    "required": [
+      "selectedEmoji"
+    ]
+  }
+}

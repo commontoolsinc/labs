@@ -1,0 +1,106 @@
+{
+  "pattern": "battleship/multiplayer/repro-minimal.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "data1": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Container"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "asCell": [
+          "cell"
+        ]
+      },
+      "data2": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Container"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "required": [
+      "data1",
+      "data2"
+    ],
+    "description": "Parent uses Writable<T | Default<...>> but child receives Writable<T>.\nThis type mismatch may be related to the bug.",
+    "$defs": {
+      "Container": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Item"
+            }
+          }
+        },
+        "required": [
+          "label",
+          "items"
+        ]
+      },
+      "Item": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "start": {
+            "$ref": "#/$defs/Coordinate"
+          },
+          "hits": {
+            "type": "array",
+            "items": {
+              "type": "boolean"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "start",
+          "hits"
+        ]
+      },
+      "Coordinate": {
+        "type": "object",
+        "properties": {
+          "row": {
+            "type": "number"
+          },
+          "col": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "row",
+          "col"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

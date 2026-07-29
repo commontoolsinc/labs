@@ -1,0 +1,105 @@
+{
+  "pattern": "gideon-tests/test-33-computed-projection-writability.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "source": {
+        "$ref": "#/$defs/Source",
+        "default": {
+          "auth": {
+            "token": "initial-token",
+            "expiresAt": 0,
+            "refreshCount": 0
+          },
+          "name": "Test Source"
+        }
+      }
+    },
+    "required": [
+      "source"
+    ],
+    "$defs": {
+      "Source": {
+        "type": "object",
+        "properties": {
+          "auth": {
+            "$ref": "#/$defs/AuthData"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "auth",
+          "name"
+        ]
+      },
+      "AuthData": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "number"
+          },
+          "refreshCount": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "token",
+          "expiresAt",
+          "refreshCount"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "source": {
+        "$ref": "#/$defs/Source"
+      }
+    },
+    "required": [
+      "source"
+    ],
+    "$defs": {
+      "Source": {
+        "type": "object",
+        "properties": {
+          "auth": {
+            "$ref": "#/$defs/AuthData"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "auth",
+          "name"
+        ]
+      },
+      "AuthData": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "number"
+          },
+          "refreshCount": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "token",
+          "expiresAt",
+          "refreshCount"
+        ]
+      }
+    }
+  }
+}

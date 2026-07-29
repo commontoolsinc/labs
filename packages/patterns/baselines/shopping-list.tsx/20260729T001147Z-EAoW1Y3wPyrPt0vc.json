@@ -1,0 +1,182 @@
+{
+  "pattern": "shopping-list.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "items": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/ShoppingItem"
+        },
+        "default": [],
+        "asCell": [
+          "cell"
+        ]
+      },
+      "storeLayout": {
+        "type": "string",
+        "default": "",
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "required": [
+      "items",
+      "storeLayout"
+    ],
+    "$defs": {
+      "ShoppingItem": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "done": {
+            "type": "boolean",
+            "default": false
+          },
+          "aisleSeed": {
+            "type": "number",
+            "default": 0
+          },
+          "aisleOverride": {
+            "type": "string",
+            "default": ""
+          }
+        },
+        "required": [
+          "title",
+          "done",
+          "aisleSeed",
+          "aisleOverride"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "items": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/ShoppingItem"
+        }
+      },
+      "summary": {
+        "type": "string"
+      },
+      "totalCount": {
+        "type": "number"
+      },
+      "doneCount": {
+        "type": "number"
+      },
+      "remainingCount": {
+        "type": "number"
+      },
+      "storeLayout": {
+        "type": "string"
+      },
+      "addItem": {
+        "asCell": [
+          "stream",
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "detail"
+        ]
+      },
+      "addItemForOmnibot": {
+        "asCell": [
+          "stream",
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "itemText": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "itemText"
+        ]
+      },
+      "addItems": {
+        "asCell": [
+          "stream",
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "itemNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "itemNames"
+        ]
+      }
+    },
+    "required": [
+      "items",
+      "summary",
+      "totalCount",
+      "doneCount",
+      "remainingCount",
+      "storeLayout",
+      "addItem",
+      "addItemForOmnibot",
+      "addItems"
+    ],
+    "description": "Shopping list with AI-powered aisle sorting. #shoppingList",
+    "tags": [
+      "shoppinglist"
+    ],
+    "$defs": {
+      "ShoppingItem": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "done": {
+            "type": "boolean",
+            "default": false
+          },
+          "aisleSeed": {
+            "type": "number",
+            "default": 0
+          },
+          "aisleOverride": {
+            "type": "string",
+            "default": ""
+          }
+        },
+        "required": [
+          "title",
+          "done",
+          "aisleSeed",
+          "aisleOverride"
+        ]
+      }
+    }
+  }
+}

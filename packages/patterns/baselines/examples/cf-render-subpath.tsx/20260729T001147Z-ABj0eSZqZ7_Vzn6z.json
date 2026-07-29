@@ -1,0 +1,65 @@
+{
+  "pattern": "examples/cf-render-subpath.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "default": "Test Pattern"
+      }
+    },
+    "required": [
+      "title"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "#/$defs/JSXElement"
+      },
+      "$TILE_UI": {
+        "$ref": "#/$defs/JSXElement"
+      },
+      "title": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI",
+      "$TILE_UI",
+      "title"
+    ],
+    "$defs": {
+      "JSXElement": {
+        "anyOf": [
+          {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          {
+            "$ref": "#/$defs/UIRenderable"
+          },
+          {
+            "type": "object",
+            "properties": {}
+          }
+        ]
+      },
+      "UIRenderable": {
+        "type": "object",
+        "properties": {
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          }
+        },
+        "required": [
+          "$UI"
+        ]
+      }
+    }
+  }
+}

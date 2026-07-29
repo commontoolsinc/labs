@@ -1,0 +1,219 @@
+{
+  "pattern": "deep-research.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "situation": {
+        "type": "string",
+        "default": "What are the latest developments in AI agents?"
+      },
+      "messages": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/BuiltInLLMMessage"
+        },
+        "default": [],
+        "asCell": [
+          "cell"
+        ]
+      },
+      "context": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+      }
+    },
+    "required": [
+      "situation"
+    ],
+    "$defs": {
+      "BuiltInLLMMessage": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "enum": [
+              "user",
+              "assistant",
+              "system",
+              "tool"
+            ]
+          },
+          "content": {
+            "$ref": "#/$defs/BuiltInLLMContent"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ]
+      },
+      "BuiltInLLMContent": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/BuiltInLLMContentPart"
+            }
+          }
+        ]
+      },
+      "BuiltInLLMContentPart": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BuiltInLLMTextPart"
+          },
+          {
+            "$ref": "#/$defs/BuiltInLLMImagePart"
+          },
+          {
+            "$ref": "#/$defs/BuiltInLLMToolCallPart"
+          },
+          {
+            "$ref": "#/$defs/BuiltInLLMToolResultPart"
+          }
+        ]
+      },
+      "BuiltInLLMToolResultPart": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "tool-result"
+            ]
+          },
+          "toolCallId": {
+            "type": "string"
+          },
+          "toolName": {
+            "type": "string"
+          },
+          "output": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "text"
+                    ]
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "value"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "json"
+                    ]
+                  },
+                  "value": true
+                },
+                "required": [
+                  "type",
+                  "value"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "toolCallId",
+          "toolName",
+          "output"
+        ]
+      },
+      "BuiltInLLMToolCallPart": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "tool-call"
+            ]
+          },
+          "toolCallId": {
+            "type": "string"
+          },
+          "toolName": {
+            "type": "string"
+          },
+          "input": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "type",
+          "toolCallId",
+          "toolName",
+          "input"
+        ]
+      },
+      "BuiltInLLMImagePart": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "image"
+            ]
+          },
+          "image": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "image"
+        ]
+      },
+      "BuiltInLLMTextPart": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "text"
+            ]
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "text"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "result": true,
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "result",
+      "$UI"
+    ]
+  }
+}

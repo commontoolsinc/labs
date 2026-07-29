@@ -1,0 +1,304 @@
+{
+  "pattern": "airtable/core/airtable-auth.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "selectedScopes": {
+        "$ref": "#/$defs/SelectedScopes",
+        "default": {
+          "data.records:read": true,
+          "data.records:write": false,
+          "data.recordComments:read": false,
+          "data.recordComments:write": false,
+          "schema.bases:read": true,
+          "schema.bases:write": false,
+          "webhook:manage": false
+        }
+      },
+      "auth": {
+        "$ref": "#/$defs/AirtableAuth",
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "required": [
+      "selectedScopes",
+      "auth"
+    ],
+    "$defs": {
+      "AirtableAuth": {
+        "type": "object",
+        "properties": {
+          "accessToken": {
+            "type": "string",
+            "default": ""
+          },
+          "tokenType": {
+            "type": "string",
+            "default": ""
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "expiresIn": {
+            "type": "number",
+            "default": 0
+          },
+          "expiresAt": {
+            "type": "number",
+            "default": 0
+          },
+          "refreshToken": {
+            "type": "string",
+            "default": ""
+          },
+          "user": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "picture": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email",
+              "name",
+              "picture"
+            ],
+            "default": {
+              "email": "",
+              "name": "",
+              "picture": ""
+            }
+          }
+        },
+        "required": [
+          "accessToken",
+          "tokenType",
+          "scope",
+          "expiresIn",
+          "expiresAt",
+          "refreshToken",
+          "user"
+        ]
+      },
+      "SelectedScopes": {
+        "type": "object",
+        "properties": {
+          "data.records:read": {
+            "type": "boolean",
+            "default": true
+          },
+          "data.records:write": {
+            "type": "boolean",
+            "default": false
+          },
+          "data.recordComments:read": {
+            "type": "boolean",
+            "default": false
+          },
+          "data.recordComments:write": {
+            "type": "boolean",
+            "default": false
+          },
+          "schema.bases:read": {
+            "type": "boolean",
+            "default": true
+          },
+          "schema.bases:write": {
+            "type": "boolean",
+            "default": false
+          },
+          "webhook:manage": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "data.records:read",
+          "data.records:write",
+          "data.recordComments:read",
+          "data.recordComments:write",
+          "schema.bases:read",
+          "schema.bases:write",
+          "webhook:manage"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "auth": {
+        "$ref": "#/$defs/AirtableAuth"
+      },
+      "scopes": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "selectedScopes": {
+        "$ref": "#/$defs/SelectedScopes"
+      },
+      "userChip": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json",
+        "description": "Compact user display"
+      },
+      "refreshToken": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "description": "Refresh the OAuth token from other pieces"
+      },
+      "bgUpdater": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false,
+        "description": "Background updater for proactive token refresh"
+      },
+      "$TILE_UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json",
+        "description": "Minimal preview for picker display"
+      }
+    },
+    "required": [
+      "auth",
+      "scopes",
+      "selectedScopes",
+      "userChip",
+      "refreshToken",
+      "bgUpdater",
+      "$TILE_UI"
+    ],
+    "description": "Airtable OAuth authentication for Airtable APIs. #airtableAuth",
+    "tags": [
+      "airtableauth"
+    ],
+    "$defs": {
+      "SelectedScopes": {
+        "type": "object",
+        "properties": {
+          "data.records:read": {
+            "type": "boolean",
+            "default": true
+          },
+          "data.records:write": {
+            "type": "boolean",
+            "default": false
+          },
+          "data.recordComments:read": {
+            "type": "boolean",
+            "default": false
+          },
+          "data.recordComments:write": {
+            "type": "boolean",
+            "default": false
+          },
+          "schema.bases:read": {
+            "type": "boolean",
+            "default": true
+          },
+          "schema.bases:write": {
+            "type": "boolean",
+            "default": false
+          },
+          "webhook:manage": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "data.records:read",
+          "data.records:write",
+          "data.recordComments:read",
+          "data.recordComments:write",
+          "schema.bases:read",
+          "schema.bases:write",
+          "webhook:manage"
+        ]
+      },
+      "AirtableAuth": {
+        "type": "object",
+        "properties": {
+          "accessToken": {
+            "type": "string",
+            "default": ""
+          },
+          "tokenType": {
+            "type": "string",
+            "default": ""
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "expiresIn": {
+            "type": "number",
+            "default": 0
+          },
+          "expiresAt": {
+            "type": "number",
+            "default": 0
+          },
+          "refreshToken": {
+            "type": "string",
+            "default": ""
+          },
+          "user": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "picture": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email",
+              "name",
+              "picture"
+            ],
+            "default": {
+              "email": "",
+              "name": "",
+              "picture": ""
+            }
+          }
+        },
+        "required": [
+          "accessToken",
+          "tokenType",
+          "scope",
+          "expiresIn",
+          "expiresAt",
+          "refreshToken",
+          "user"
+        ]
+      }
+    }
+  }
+}

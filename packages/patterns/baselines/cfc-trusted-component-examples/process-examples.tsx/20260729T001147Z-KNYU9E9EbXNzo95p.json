@@ -1,0 +1,57 @@
+{
+  "pattern": "cfc-trusted-component-examples/process-examples.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "#/$defs/JSXElement"
+      },
+      "exampleCount": {
+        "type": "number",
+        "enum": [
+          4
+        ]
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI",
+      "exampleCount"
+    ],
+    "$defs": {
+      "JSXElement": {
+        "anyOf": [
+          {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          {
+            "$ref": "#/$defs/UIRenderable"
+          },
+          {
+            "type": "object",
+            "properties": {}
+          }
+        ]
+      },
+      "UIRenderable": {
+        "type": "object",
+        "properties": {
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          }
+        },
+        "required": [
+          "$UI"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "pattern": "examples/cf-tags.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "tags": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "required": [
+      "tags"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "tags": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": []
+      }
+    },
+    "required": [
+      "tags"
+    ]
+  }
+}

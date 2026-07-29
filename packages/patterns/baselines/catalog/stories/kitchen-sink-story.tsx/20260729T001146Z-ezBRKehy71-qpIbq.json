@@ -1,0 +1,22 @@
+{
+  "pattern": "catalog/stories/kitchen-sink-story.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI"
+    ]
+  }
+}

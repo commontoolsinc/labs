@@ -1,0 +1,136 @@
+{
+  "pattern": "calendar/event-detail.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "default": "",
+        "asCell": [
+          "cell"
+        ]
+      },
+      "date": {
+        "type": "string",
+        "default": "",
+        "asCell": [
+          "cell"
+        ]
+      },
+      "time": {
+        "type": "string",
+        "default": "",
+        "asCell": [
+          "cell"
+        ]
+      },
+      "notes": {
+        "type": "string",
+        "default": "",
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "description": "Input for creating a new event detail piece"
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string"
+      },
+      "date": {
+        "type": "string"
+      },
+      "time": {
+        "type": "string"
+      },
+      "notes": {
+        "type": "string"
+      },
+      "summary": {
+        "type": "string"
+      },
+      "setTitle": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      },
+      "setDate": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "date"
+        ]
+      },
+      "setTime": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "time": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "time"
+        ]
+      },
+      "setNotes": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "notes": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "notes"
+        ]
+      },
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "title",
+      "date",
+      "time",
+      "notes",
+      "summary",
+      "setTitle",
+      "setDate",
+      "setTime",
+      "setNotes",
+      "$NAME",
+      "$UI"
+    ],
+    "description": "Output shape of the event piece - this is what gets stored in calendars\n#event",
+    "tags": [
+      "event"
+    ]
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "pattern": "gideon-tests/test-cross-piece-server.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "counter": {
+        "type": "number",
+        "default": 0
+      },
+      "invocationLog": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": []
+      }
+    },
+    "required": [
+      "counter",
+      "invocationLog"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "counter": {
+        "type": "number"
+      },
+      "invocationLog": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "incrementCounter": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      }
+    },
+    "required": [
+      "counter",
+      "invocationLog",
+      "incrementCounter"
+    ],
+    "description": "A #crossPieceTestServer that exposes a stream for testing cross-piece invocation.",
+    "tags": [
+      "crosspiecetestserver"
+    ]
+  }
+}

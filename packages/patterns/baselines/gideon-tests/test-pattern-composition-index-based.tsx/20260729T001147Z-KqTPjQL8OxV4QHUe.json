@@ -1,0 +1,127 @@
+{
+  "pattern": "gideon-tests/test-pattern-composition-index-based.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "items": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/ShoppingItem"
+        },
+        "default": [
+          {
+            "title": "Milk",
+            "done": false,
+            "category": "Dairy"
+          },
+          {
+            "title": "Bread",
+            "done": false,
+            "category": "Bakery"
+          },
+          {
+            "title": "Cheese",
+            "done": true,
+            "category": "Dairy"
+          }
+        ]
+      }
+    },
+    "required": [
+      "items"
+    ],
+    "$defs": {
+      "ShoppingItem": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "done": {
+            "type": "boolean",
+            "default": false
+          },
+          "category": {
+            "type": "string",
+            "default": "Uncategorized"
+          }
+        },
+        "required": [
+          "title",
+          "done",
+          "category"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "#/$defs/JSXElement"
+      },
+      "items": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/ShoppingItem"
+        }
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI",
+      "items"
+    ],
+    "$defs": {
+      "ShoppingItem": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "done": {
+            "type": "boolean",
+            "default": false
+          },
+          "category": {
+            "type": "string",
+            "default": "Uncategorized"
+          }
+        },
+        "required": [
+          "title",
+          "done",
+          "category"
+        ]
+      },
+      "JSXElement": {
+        "anyOf": [
+          {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          {
+            "$ref": "#/$defs/UIRenderable"
+          },
+          {
+            "type": "object",
+            "properties": {}
+          }
+        ]
+      },
+      "UIRenderable": {
+        "type": "object",
+        "properties": {
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          }
+        },
+        "required": [
+          "$UI"
+        ]
+      }
+    }
+  }
+}

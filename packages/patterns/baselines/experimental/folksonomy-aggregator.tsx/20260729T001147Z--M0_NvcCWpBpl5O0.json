@@ -1,0 +1,127 @@
+{
+  "pattern": "experimental/folksonomy-aggregator.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "events": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/TagEvent"
+        },
+        "default": []
+      }
+    },
+    "required": [
+      "events"
+    ],
+    "$defs": {
+      "TagEvent": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "action": {
+            "enum": [
+              "add",
+              "use",
+              "remove"
+            ]
+          },
+          "timestamp": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "scope",
+          "tag",
+          "action",
+          "timestamp"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "events": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/TagEvent"
+        }
+      },
+      "suggestions": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CommunityTagSuggestion"
+          }
+        }
+      },
+      "postEvent": {
+        "asCell": [
+          "stream"
+        ],
+        "$ref": "#/$defs/TagEvent"
+      }
+    },
+    "required": [
+      "events",
+      "suggestions",
+      "postEvent"
+    ],
+    "description": "A #folksonomyAggregator that collects tag usage events and serves community suggestions.\n\nThe #folksonomyAggregator tag is how folksonomy-tags instances discover this piece via wish().",
+    "tags": [
+      "folksonomyaggregator"
+    ],
+    "$defs": {
+      "CommunityTagSuggestion": {
+        "type": "object",
+        "properties": {
+          "tag": {
+            "type": "string"
+          },
+          "count": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "tag",
+          "count"
+        ]
+      },
+      "TagEvent": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "action": {
+            "enum": [
+              "add",
+              "use",
+              "remove"
+            ]
+          },
+          "timestamp": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "scope",
+          "tag",
+          "action",
+          "timestamp"
+        ]
+      }
+    }
+  }
+}

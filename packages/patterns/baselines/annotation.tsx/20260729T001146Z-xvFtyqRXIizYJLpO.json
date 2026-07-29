@@ -1,0 +1,322 @@
+{
+  "pattern": "annotation.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "content": {
+        "type": "string",
+        "default": "",
+        "asCell": [
+          "cell"
+        ]
+      },
+      "kind": {
+        "$ref": "#/$defs/AnnotationKind",
+        "default": "note",
+        "asCell": [
+          "cell"
+        ]
+      },
+      "status": {
+        "$ref": "#/$defs/AnnotationStatus",
+        "default": "open",
+        "asCell": [
+          "cell"
+        ]
+      },
+      "targetPiece": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MentionablePiece"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "asCell": [
+          "cell"
+        ]
+      },
+      "blockedBy": {
+        "$ref": "#/$defs/AnonymousType_2",
+        "default": [],
+        "asCell": [
+          "cell"
+        ]
+      },
+      "isAnnotation": {
+        "type": "boolean",
+        "default": true
+      },
+      "isHidden": {
+        "type": "boolean",
+        "default": false
+      }
+    },
+    "required": [
+      "content",
+      "kind",
+      "status",
+      "targetPiece",
+      "blockedBy",
+      "isAnnotation",
+      "isHidden"
+    ],
+    "$defs": {
+      "AnonymousType_2": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/AnnotationPiece"
+        }
+      },
+      "AnnotationPiece": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/$defs/AnnotationKind"
+          },
+          "status": {
+            "$ref": "#/$defs/AnnotationStatus"
+          },
+          "targetPiece": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MentionablePiece"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "blockedBy": {
+            "$ref": "#/$defs/AnonymousType_2"
+          },
+          "isAnnotation": {
+            "type": "boolean"
+          },
+          "isHidden": {
+            "type": "boolean"
+          },
+          "mentioned": {
+            "$ref": "#/$defs/AnonymousType_1"
+          },
+          "$NAME": {
+            "type": "string"
+          }
+        }
+      },
+      "AnonymousType_1": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/MentionablePiece"
+        }
+      },
+      "MentionablePiece": {
+        "type": "object",
+        "properties": {
+          "isHidden": {
+            "type": "boolean"
+          },
+          "isMentionable": {
+            "type": "boolean"
+          },
+          "mentioned": {
+            "$ref": "#/$defs/AnonymousType_1"
+          },
+          "backlinks": {
+            "$ref": "#/$defs/AnonymousType_1"
+          },
+          "mentionable": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/AnonymousType_1"
+              },
+              {
+                "type": "object",
+                "properties": {}
+              }
+            ]
+          },
+          "$NAME": {
+            "type": "string"
+          }
+        }
+      },
+      "AnnotationStatus": {
+        "enum": [
+          "open",
+          "in-progress",
+          "resolved",
+          "dismissed"
+        ]
+      },
+      "AnnotationKind": {
+        "enum": [
+          "note",
+          "todo",
+          "wish"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "mentioned": {
+        "$ref": "#/$defs/AnonymousType_1"
+      },
+      "content": {
+        "type": "string"
+      },
+      "kind": {
+        "$ref": "#/$defs/AnnotationKind"
+      },
+      "status": {
+        "$ref": "#/$defs/AnnotationStatus"
+      },
+      "targetPiece": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MentionablePiece"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "blockedBy": {
+        "$ref": "#/$defs/AnonymousType_2"
+      },
+      "isAnnotation": {
+        "type": "boolean"
+      },
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "isHidden": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "mentioned",
+      "content",
+      "kind",
+      "status",
+      "targetPiece",
+      "blockedBy",
+      "isAnnotation",
+      "$NAME",
+      "$UI"
+    ],
+    "description": "An #annotation pointing at an existing cell, optionally blocked by other annotations.",
+    "tags": [
+      "annotation"
+    ],
+    "$defs": {
+      "AnonymousType_2": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/AnnotationPiece"
+        }
+      },
+      "AnnotationPiece": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/$defs/AnnotationKind"
+          },
+          "status": {
+            "$ref": "#/$defs/AnnotationStatus"
+          },
+          "targetPiece": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/MentionablePiece"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "blockedBy": {
+            "$ref": "#/$defs/AnonymousType_2"
+          },
+          "isAnnotation": {
+            "type": "boolean"
+          },
+          "isHidden": {
+            "type": "boolean"
+          },
+          "mentioned": {
+            "$ref": "#/$defs/AnonymousType_1"
+          },
+          "$NAME": {
+            "type": "string"
+          }
+        }
+      },
+      "MentionablePiece": {
+        "type": "object",
+        "properties": {
+          "isHidden": {
+            "type": "boolean"
+          },
+          "isMentionable": {
+            "type": "boolean"
+          },
+          "mentioned": {
+            "$ref": "#/$defs/AnonymousType_1"
+          },
+          "backlinks": {
+            "$ref": "#/$defs/AnonymousType_1"
+          },
+          "mentionable": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/AnonymousType_1"
+              },
+              {
+                "type": "object",
+                "properties": {}
+              }
+            ]
+          },
+          "$NAME": {
+            "type": "string"
+          }
+        }
+      },
+      "AnnotationStatus": {
+        "enum": [
+          "open",
+          "in-progress",
+          "resolved",
+          "dismissed"
+        ]
+      },
+      "AnnotationKind": {
+        "enum": [
+          "note",
+          "todo",
+          "wish"
+        ]
+      },
+      "AnonymousType_1": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/MentionablePiece"
+        }
+      }
+    }
+  }
+}

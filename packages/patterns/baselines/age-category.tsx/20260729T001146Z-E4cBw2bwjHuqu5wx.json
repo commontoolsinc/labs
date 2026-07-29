@@ -1,0 +1,57 @@
+{
+  "pattern": "age-category.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "ageCategory": {
+        "$ref": "#/$defs/AgeCategory",
+        "default": "adult"
+      }
+    },
+    "required": [
+      "ageCategory"
+    ],
+    "$defs": {
+      "AgeCategory": {
+        "enum": [
+          "adult",
+          "child",
+          "senior",
+          "adult-specific",
+          "young-adult",
+          "teenager",
+          "school-age",
+          "toddler",
+          "baby"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "ageCategory": {
+        "$ref": "#/$defs/AgeCategory",
+        "default": "adult"
+      }
+    },
+    "required": [
+      "ageCategory"
+    ],
+    "$defs": {
+      "AgeCategory": {
+        "enum": [
+          "adult",
+          "child",
+          "senior",
+          "adult-specific",
+          "young-adult",
+          "teenager",
+          "school-age",
+          "toddler",
+          "baby"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,311 @@
+{
+  "pattern": "google/extractors/bam-school-dashboard.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "settings": {
+        "$ref": "#/$defs/SchoolSettings",
+        "default": {
+          "childName": "Adeline Komoroske",
+          "schoolName": "Berkeley Arts Magnet",
+          "grade": "Kindergarten",
+          "teacher": "Mr. Zaragoza"
+        }
+      },
+      "dismissedIds": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "asCell": [
+          "cell"
+        ]
+      },
+      "overrideAuth": {
+        "$ref": "#/$defs/Auth",
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "$defs": {
+      "Auth": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "default": ""
+          },
+          "tokenType": {
+            "type": "string",
+            "default": ""
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "expiresIn": {
+            "type": "number",
+            "default": 0
+          },
+          "expiresAt": {
+            "type": "number",
+            "default": 0
+          },
+          "refreshToken": {
+            "type": "string",
+            "default": ""
+          },
+          "user": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "picture": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email",
+              "name",
+              "picture"
+            ],
+            "default": {
+              "email": "",
+              "name": "",
+              "picture": ""
+            }
+          }
+        },
+        "required": [
+          "token",
+          "tokenType",
+          "scope",
+          "expiresIn",
+          "expiresAt",
+          "refreshToken",
+          "user"
+        ]
+      },
+      "SchoolSettings": {
+        "type": "object",
+        "properties": {
+          "childName": {
+            "type": "string",
+            "default": "Adeline Komoroske"
+          },
+          "schoolName": {
+            "type": "string",
+            "default": "Berkeley Arts Magnet"
+          },
+          "grade": {
+            "type": "string",
+            "default": "Kindergarten"
+          },
+          "teacher": {
+            "type": "string",
+            "default": "Mr. Zaragoza"
+          }
+        },
+        "required": [
+          "childName",
+          "schoolName",
+          "grade",
+          "teacher"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "emails": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Email"
+        }
+      },
+      "events": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/SchoolEvent"
+        }
+      },
+      "urgentEvents": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/SchoolEvent"
+        }
+      },
+      "upcomingEvents": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/SchoolEvent"
+        }
+      },
+      "teacherMessages": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/SchoolEvent"
+        }
+      },
+      "$TILE_UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "emails",
+      "events",
+      "urgentEvents",
+      "upcomingEvents",
+      "teacherMessages",
+      "$TILE_UI"
+    ],
+    "description": "BAM School Dashboard - At-a-glance view of school events and announcements. #bamSchool",
+    "tags": [
+      "bamschool"
+    ],
+    "$defs": {
+      "SchoolEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "category": {
+            "$ref": "#/$defs/EventCategory"
+          },
+          "title": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "time": {
+            "type": "string"
+          },
+          "actionRequired": {
+            "type": "string"
+          },
+          "isUrgent": {
+            "type": "boolean"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "sourceType": {
+            "$ref": "#/$defs/SourceType"
+          },
+          "sourceEmail": {
+            "type": "string"
+          },
+          "emailDate": {
+            "type": "string"
+          },
+          "originalSubject": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "category",
+          "title",
+          "isUrgent",
+          "summary",
+          "sourceType",
+          "sourceEmail",
+          "emailDate",
+          "originalSubject"
+        ]
+      },
+      "SourceType": {
+        "enum": [
+          "teacher",
+          "school",
+          "district",
+          "coordinator"
+        ]
+      },
+      "EventCategory": {
+        "enum": [
+          "field_trip",
+          "award",
+          "deadline",
+          "no_school",
+          "event",
+          "announcement",
+          "attendance",
+          "other"
+        ]
+      },
+      "Email": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "labelIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "plainText": {
+            "type": "string"
+          },
+          "htmlContent": {
+            "type": "string"
+          },
+          "markdownContent": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string",
+            "default": ""
+          }
+        },
+        "required": [
+          "id",
+          "threadId",
+          "labelIds",
+          "snippet",
+          "subject",
+          "from",
+          "date",
+          "to",
+          "plainText",
+          "htmlContent",
+          "markdownContent",
+          "summary"
+        ]
+      }
+    }
+  }
+}

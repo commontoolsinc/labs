@@ -1,0 +1,179 @@
+{
+  "pattern": "google/core/experimental/gmail-sender.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "draft": {
+        "$ref": "#/$defs/EmailDraft",
+        "default": {
+          "to": "",
+          "subject": "",
+          "body": "",
+          "cc": "",
+          "bcc": "",
+          "replyToMessageId": "",
+          "replyToThreadId": ""
+        },
+        "description": "Email draft to compose/send"
+      }
+    },
+    "required": [
+      "draft"
+    ],
+    "$defs": {
+      "EmailDraft": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "string",
+            "default": "",
+            "description": "Recipient email address"
+          },
+          "subject": {
+            "type": "string",
+            "default": "",
+            "description": "Email subject line"
+          },
+          "body": {
+            "type": "string",
+            "default": "",
+            "description": "Plain text body"
+          },
+          "cc": {
+            "type": "string",
+            "default": "",
+            "description": "CC recipients (comma-separated)"
+          },
+          "bcc": {
+            "type": "string",
+            "default": "",
+            "description": "BCC recipients (comma-separated)"
+          },
+          "replyToMessageId": {
+            "type": "string",
+            "default": "",
+            "description": "Message ID to reply to (for threading)"
+          },
+          "replyToThreadId": {
+            "type": "string",
+            "default": "",
+            "description": "Thread ID to reply to (for threading)"
+          }
+        },
+        "required": [
+          "to",
+          "subject",
+          "body",
+          "cc",
+          "bcc",
+          "replyToMessageId",
+          "replyToThreadId"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "draft": {
+        "$ref": "#/$defs/EmailDraft"
+      },
+      "result": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SendResult"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "draft",
+      "result",
+      "$UI"
+    ],
+    "description": "Gmail email sender with confirmation dialog. #gmailSender",
+    "tags": [
+      "gmailsender"
+    ],
+    "$defs": {
+      "SendResult": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "messageId": {
+            "type": "string"
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success"
+        ]
+      },
+      "EmailDraft": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "string",
+            "default": "",
+            "description": "Recipient email address"
+          },
+          "subject": {
+            "type": "string",
+            "default": "",
+            "description": "Email subject line"
+          },
+          "body": {
+            "type": "string",
+            "default": "",
+            "description": "Plain text body"
+          },
+          "cc": {
+            "type": "string",
+            "default": "",
+            "description": "CC recipients (comma-separated)"
+          },
+          "bcc": {
+            "type": "string",
+            "default": "",
+            "description": "BCC recipients (comma-separated)"
+          },
+          "replyToMessageId": {
+            "type": "string",
+            "default": "",
+            "description": "Message ID to reply to (for threading)"
+          },
+          "replyToThreadId": {
+            "type": "string",
+            "default": "",
+            "description": "Thread ID to reply to (for threading)"
+          }
+        },
+        "required": [
+          "to",
+          "subject",
+          "body",
+          "cc",
+          "bcc",
+          "replyToMessageId",
+          "replyToThreadId"
+        ]
+      }
+    }
+  }
+}

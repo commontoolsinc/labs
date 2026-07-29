@@ -1,0 +1,90 @@
+{
+  "pattern": "bookmarks.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "bookmarks": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Bookmark"
+        },
+        "default": [],
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "$defs": {
+      "Bookmark": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "default": ""
+          },
+          "description": {
+            "type": "string",
+            "default": ""
+          }
+        },
+        "required": [
+          "url",
+          "title",
+          "description"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "bookmarks": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Bookmark"
+        }
+      },
+      "count": {
+        "type": "number"
+      },
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "bookmarks",
+      "count",
+      "$NAME",
+      "$UI"
+    ],
+    "$defs": {
+      "Bookmark": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "default": ""
+          },
+          "description": {
+            "type": "string",
+            "default": ""
+          }
+        },
+        "required": [
+          "url",
+          "title",
+          "description"
+        ]
+      }
+    }
+  }
+}

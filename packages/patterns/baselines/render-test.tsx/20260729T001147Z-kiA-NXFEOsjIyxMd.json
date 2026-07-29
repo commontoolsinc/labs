@@ -1,0 +1,137 @@
+{
+  "pattern": "render-test.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "default": "Render Test"
+      },
+      "globalCounter": {
+        "type": "number",
+        "default": 0
+      },
+      "items": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Item"
+        },
+        "default": []
+      }
+    },
+    "required": [
+      "title",
+      "globalCounter",
+      "items"
+    ],
+    "$defs": {
+      "Item": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number",
+            "default": 0
+          },
+          "subItems": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/SubItem"
+            },
+            "default": []
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "subItems"
+        ]
+      },
+      "SubItem": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "count": {
+            "type": "number",
+            "default": 0
+          }
+        },
+        "required": [
+          "label",
+          "count"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "default": "Render Test"
+      },
+      "globalCounter": {
+        "type": "number",
+        "default": 0
+      },
+      "items": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Item"
+        },
+        "default": []
+      }
+    },
+    "required": [
+      "title",
+      "globalCounter",
+      "items"
+    ],
+    "$defs": {
+      "Item": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "number",
+            "default": 0
+          },
+          "subItems": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/SubItem"
+            },
+            "default": []
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "subItems"
+        ]
+      },
+      "SubItem": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "count": {
+            "type": "number",
+            "default": 0
+          }
+        },
+        "required": [
+          "label",
+          "count"
+        ]
+      }
+    }
+  }
+}

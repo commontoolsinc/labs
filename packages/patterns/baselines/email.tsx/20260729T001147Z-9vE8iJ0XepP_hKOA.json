@@ -1,0 +1,41 @@
+{
+  "pattern": "email.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "label": {
+        "type": "string",
+        "default": "Personal",
+        "description": "Label for this email (Personal, Work, School, etc.)"
+      },
+      "address": {
+        "type": "string",
+        "default": "",
+        "description": "Email address"
+      }
+    },
+    "required": [
+      "label",
+      "address"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "label": {
+        "type": "string",
+        "default": "Personal",
+        "description": "Label for this email (Personal, Work, School, etc.)"
+      },
+      "address": {
+        "type": "string",
+        "default": "",
+        "description": "Email address"
+      }
+    },
+    "required": [
+      "label",
+      "address"
+    ]
+  }
+}

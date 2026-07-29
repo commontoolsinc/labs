@@ -1,0 +1,191 @@
+{
+  "pattern": "google/extractors/calendar-change-detector.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "overrideAuth": {
+        "$ref": "#/$defs/Auth",
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "$defs": {
+      "Auth": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "default": ""
+          },
+          "tokenType": {
+            "type": "string",
+            "default": ""
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "expiresIn": {
+            "type": "number",
+            "default": 0
+          },
+          "expiresAt": {
+            "type": "number",
+            "default": 0
+          },
+          "refreshToken": {
+            "type": "string",
+            "default": ""
+          },
+          "user": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "picture": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email",
+              "name",
+              "picture"
+            ],
+            "default": {
+              "email": "",
+              "name": "",
+              "picture": ""
+            }
+          }
+        },
+        "required": [
+          "token",
+          "tokenType",
+          "scope",
+          "expiresIn",
+          "expiresAt",
+          "refreshToken",
+          "user"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "changes": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/ScheduleChange"
+        }
+      },
+      "criticalChanges": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/ScheduleChange"
+        }
+      },
+      "urgentChanges": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/ScheduleChange"
+        }
+      },
+      "normalChanges": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/ScheduleChange"
+        }
+      },
+      "hasChanges": {
+        "type": "boolean"
+      },
+      "$TILE_UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "changes",
+      "criticalChanges",
+      "urgentChanges",
+      "normalChanges",
+      "hasChanges",
+      "$TILE_UI"
+    ],
+    "description": "Calendar change detector for tracking schedule changes. #calendarChanges",
+    "tags": [
+      "calendarchanges"
+    ],
+    "$defs": {
+      "ScheduleChange": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "emailId": {
+            "type": "string"
+          },
+          "emailDate": {
+            "type": "string"
+          },
+          "changeType": {
+            "$ref": "#/$defs/ChangeType"
+          },
+          "originalEvent": {
+            "type": "string"
+          },
+          "originalDate": {
+            "type": "string"
+          },
+          "newDate": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "urgency": {
+            "$ref": "#/$defs/Urgency"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "emailId",
+          "emailDate",
+          "changeType",
+          "originalEvent",
+          "source",
+          "urgency",
+          "summary"
+        ]
+      },
+      "Urgency": {
+        "enum": [
+          "critical",
+          "urgent",
+          "normal"
+        ]
+      },
+      "ChangeType": {
+        "enum": [
+          "cancelled",
+          "rescheduled",
+          "delayed",
+          "time_changed",
+          "other"
+        ]
+      }
+    }
+  }
+}

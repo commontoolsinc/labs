@@ -1,0 +1,147 @@
+{
+  "pattern": "location-track.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "locations": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/LocationPoint"
+        },
+        "default": [],
+        "description": "Array of captured location points"
+      },
+      "label": {
+        "type": "string",
+        "default": "",
+        "description": "Optional label for this track (e.g., \"Morning run\", \"Commute\")"
+      }
+    },
+    "required": [
+      "locations",
+      "label"
+    ],
+    "$defs": {
+      "LocationPoint": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique ID for this point"
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Latitude in decimal degrees"
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Longitude in decimal degrees"
+          },
+          "accuracy": {
+            "type": "number",
+            "description": "Accuracy in meters"
+          },
+          "altitude": {
+            "type": "number",
+            "description": "Altitude in meters (if available)"
+          },
+          "altitudeAccuracy": {
+            "type": "number",
+            "description": "Altitude accuracy in meters (if available)"
+          },
+          "heading": {
+            "type": "number",
+            "description": "Heading in degrees 0-360 (if available)"
+          },
+          "speed": {
+            "type": "number",
+            "description": "Speed in m/s (if available)"
+          },
+          "timestamp": {
+            "type": "number",
+            "description": "Unix timestamp in milliseconds"
+          }
+        },
+        "required": [
+          "id",
+          "latitude",
+          "longitude",
+          "accuracy",
+          "timestamp"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "locations": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/LocationPoint"
+        },
+        "default": [],
+        "description": "Array of captured location points"
+      },
+      "label": {
+        "type": "string",
+        "default": "",
+        "description": "Optional label for this track (e.g., \"Morning run\", \"Commute\")"
+      }
+    },
+    "required": [
+      "locations",
+      "label"
+    ],
+    "$defs": {
+      "LocationPoint": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique ID for this point"
+          },
+          "latitude": {
+            "type": "number",
+            "description": "Latitude in decimal degrees"
+          },
+          "longitude": {
+            "type": "number",
+            "description": "Longitude in decimal degrees"
+          },
+          "accuracy": {
+            "type": "number",
+            "description": "Accuracy in meters"
+          },
+          "altitude": {
+            "type": "number",
+            "description": "Altitude in meters (if available)"
+          },
+          "altitudeAccuracy": {
+            "type": "number",
+            "description": "Altitude accuracy in meters (if available)"
+          },
+          "heading": {
+            "type": "number",
+            "description": "Heading in degrees 0-360 (if available)"
+          },
+          "speed": {
+            "type": "number",
+            "description": "Speed in m/s (if available)"
+          },
+          "timestamp": {
+            "type": "number",
+            "description": "Unix timestamp in milliseconds"
+          }
+        },
+        "required": [
+          "id",
+          "latitude",
+          "longitude",
+          "accuracy",
+          "timestamp"
+        ]
+      }
+    }
+  }
+}

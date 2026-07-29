@@ -1,0 +1,247 @@
+{
+  "pattern": "google/extractors/pge-bill-tracker.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "overrideAuth": {
+        "$ref": "#/$defs/Auth",
+        "asCell": [
+          "cell"
+        ]
+      },
+      "manuallyPaid": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "asCell": [
+          "cell"
+        ]
+      },
+      "demoMode": {
+        "type": "boolean",
+        "default": true,
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "$defs": {
+      "Auth": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "default": ""
+          },
+          "tokenType": {
+            "type": "string",
+            "default": ""
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "expiresIn": {
+            "type": "number",
+            "default": 0
+          },
+          "expiresAt": {
+            "type": "number",
+            "default": 0
+          },
+          "refreshToken": {
+            "type": "string",
+            "default": ""
+          },
+          "user": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "picture": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email",
+              "name",
+              "picture"
+            ],
+            "default": {
+              "email": "",
+              "name": "",
+              "picture": ""
+            }
+          }
+        },
+        "required": [
+          "token",
+          "tokenType",
+          "scope",
+          "expiresIn",
+          "expiresAt",
+          "refreshToken",
+          "user"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "bills": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/TrackedBill"
+        }
+      },
+      "unpaidBills": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/TrackedBill"
+        }
+      },
+      "paidBills": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/TrackedBill"
+        }
+      },
+      "totalUnpaid": {
+        "type": "number"
+      },
+      "overdueCount": {
+        "type": "number"
+      },
+      "$TILE_UI": {
+        "$ref": "#/$defs/JSXElement"
+      },
+      "$UI": {
+        "$ref": "#/$defs/JSXElement"
+      }
+    },
+    "required": [
+      "$NAME",
+      "bills",
+      "unpaidBills",
+      "paidBills",
+      "totalUnpaid",
+      "overdueCount",
+      "$TILE_UI",
+      "$UI"
+    ],
+    "$defs": {
+      "JSXElement": {
+        "anyOf": [
+          {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          {
+            "$ref": "#/$defs/UIRenderable"
+          },
+          {
+            "type": "object",
+            "properties": {}
+          }
+        ]
+      },
+      "UIRenderable": {
+        "type": "object",
+        "properties": {
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          }
+        },
+        "required": [
+          "$UI"
+        ]
+      },
+      "TrackedBill": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Unique key for deduplication (identifier|dueDate)"
+          },
+          "identifier": {
+            "type": "string",
+            "description": "Generic identifier (card last 4, account number, etc.)"
+          },
+          "amount": {
+            "type": "number",
+            "description": "Bill amount in dollars"
+          },
+          "dueDate": {
+            "type": "string",
+            "description": "Due date in ISO format"
+          },
+          "status": {
+            "$ref": "#/$defs/BillStatus",
+            "description": "Current status"
+          },
+          "isPaid": {
+            "type": "boolean",
+            "description": "Whether the bill is considered paid"
+          },
+          "paidDate": {
+            "type": "string",
+            "description": "Date the bill was paid (if known)"
+          },
+          "emailDate": {
+            "type": "string",
+            "description": "Date the email was received"
+          },
+          "emailId": {
+            "type": "string",
+            "description": "Gmail message ID"
+          },
+          "isManuallyPaid": {
+            "type": "boolean",
+            "description": "Whether user manually marked as paid"
+          },
+          "isLikelyPaid": {
+            "type": "boolean",
+            "description": "Whether assumed paid due to age (>45 days overdue)"
+          },
+          "daysUntilDue": {
+            "type": "number",
+            "description": "Days until due (negative = overdue)"
+          }
+        },
+        "required": [
+          "key",
+          "identifier",
+          "amount",
+          "dueDate",
+          "status",
+          "isPaid",
+          "emailDate",
+          "emailId",
+          "isManuallyPaid",
+          "isLikelyPaid",
+          "daysUntilDue"
+        ]
+      },
+      "BillStatus": {
+        "enum": [
+          "unpaid",
+          "paid",
+          "overdue",
+          "likely_paid"
+        ]
+      }
+    }
+  }
+}

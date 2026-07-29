@@ -1,0 +1,267 @@
+{
+  "pattern": "google/core/gmail-importer.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "settings": {
+        "$ref": "#/$defs/Settings",
+        "default": {
+          "gmailFilterQuery": "in:INBOX",
+          "limit": 10,
+          "debugMode": false,
+          "autoFetchOnAuth": false,
+          "resolveInlineImages": false
+        }
+      },
+      "overrideAuth": {
+        "$ref": "#/$defs/Auth",
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "required": [
+      "settings"
+    ],
+    "$defs": {
+      "Auth": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "default": ""
+          },
+          "tokenType": {
+            "type": "string",
+            "default": ""
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "expiresIn": {
+            "type": "number",
+            "default": 0
+          },
+          "expiresAt": {
+            "type": "number",
+            "default": 0
+          },
+          "refreshToken": {
+            "type": "string",
+            "default": ""
+          },
+          "user": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "picture": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email",
+              "name",
+              "picture"
+            ],
+            "default": {
+              "email": "",
+              "name": "",
+              "picture": ""
+            }
+          }
+        },
+        "required": [
+          "token",
+          "tokenType",
+          "scope",
+          "expiresIn",
+          "expiresAt",
+          "refreshToken",
+          "user"
+        ]
+      },
+      "Settings": {
+        "type": "object",
+        "properties": {
+          "gmailFilterQuery": {
+            "type": "string",
+            "default": "in:INBOX"
+          },
+          "limit": {
+            "type": "number",
+            "default": 10
+          },
+          "debugMode": {
+            "type": "boolean",
+            "default": false
+          },
+          "autoFetchOnAuth": {
+            "type": "boolean",
+            "default": false
+          },
+          "resolveInlineImages": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "gmailFilterQuery",
+          "limit",
+          "debugMode",
+          "autoFetchOnAuth",
+          "resolveInlineImages"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "emails": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Email"
+        },
+        "description": "Array of imported emails"
+      },
+      "mentionable": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "summary": {
+              "type": "string"
+            },
+            "$NAME": {
+              "type": "string"
+            },
+            "$UI": {
+              "$ref": "https://commonfabric.org/schemas/vnode.json"
+            }
+          },
+          "required": [
+            "summary",
+            "$NAME",
+            "$UI"
+          ]
+        },
+        "description": "Mentionables — email cards with NAME and summary for search indexing"
+      },
+      "emailCount": {
+        "type": "number",
+        "description": "Number of emails imported"
+      },
+      "summary": {
+        "type": "string",
+        "description": "Summary of container-level emails for hierarchical indexing"
+      },
+      "authUI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json",
+        "description": "Auth UI component for managing Google OAuth connection"
+      },
+      "bgUpdater": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "description": "Handler to trigger email fetch from external patterns"
+      },
+      "isReady": {
+        "type": "boolean",
+        "description": "Whether auth is ready (has valid token)"
+      },
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "emails",
+      "mentionable",
+      "emailCount",
+      "summary",
+      "authUI",
+      "bgUpdater",
+      "isReady",
+      "$NAME",
+      "$UI"
+    ],
+    "description": "Gmail email importer for fetching and viewing emails. #gmailEmails",
+    "tags": [
+      "gmailemails"
+    ],
+    "$defs": {
+      "Email": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "labelIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "plainText": {
+            "type": "string"
+          },
+          "htmlContent": {
+            "type": "string"
+          },
+          "markdownContent": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string",
+            "default": ""
+          }
+        },
+        "required": [
+          "id",
+          "threadId",
+          "labelIds",
+          "snippet",
+          "subject",
+          "from",
+          "date",
+          "to",
+          "plainText",
+          "htmlContent",
+          "markdownContent",
+          "summary"
+        ]
+      }
+    }
+  }
+}

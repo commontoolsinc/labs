@@ -1,0 +1,30 @@
+{
+  "pattern": "deprecated/cf-checkbox-handler.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": false,
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "required": [
+      "enabled"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": false
+      }
+    },
+    "required": [
+      "enabled"
+    ]
+  }
+}

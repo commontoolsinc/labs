@@ -1,0 +1,45 @@
+{
+  "pattern": "cfc-exchange-rules/imported-policy.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "message": {
+        "type": "string",
+        "default": "Protected by the defining module's rules"
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "message": {
+        "type": "string",
+        "ifc": {
+          "confidentiality": [
+            {
+              "type": "https://commonfabric.org/cfc/atom/Policy",
+              "policyRefKind": "module",
+              "subject": {
+                "__ctOwningSpace": true
+              },
+              "moduleIdentity": "UsUHkONMerVZwnUOIBrbzrUlhEfaV0SByvpFqW28WLg",
+              "symbol": "directReleaseRules",
+              "policyDigest": "jr6me2Bb11h2h9txejm-Vjp-5-YPtlpKsLaGcjSR4Sk"
+            }
+          ]
+        }
+      },
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "message",
+      "$NAME",
+      "$UI"
+    ]
+  }
+}

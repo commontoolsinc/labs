@@ -1,0 +1,452 @@
+{
+  "pattern": "google/core/gmail-extractor.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "gmailQuery": {
+        "type": "string",
+        "description": "Gmail search query (e.g., \"from:DoNotReply@billpay.pge.com\")"
+      },
+      "extraction": {
+        "type": "object",
+        "properties": {
+          "promptTemplate": {
+            "type": "string",
+            "description": "Prompt template for the LLM extraction.\nSupports placeholders:\n- {{email.subject}} - Email subject line\n- {{email.date}} - Email date\n- {{email.from}} - Sender email\n- {{email.markdownContent}} - Full email content as markdown\n- {{email.snippet}} - Brief preview"
+          },
+          "schema": true
+        },
+        "required": [
+          "promptTemplate",
+          "schema"
+        ],
+        "description": "Optional: Provide to enable built-in LLM analysis.\nOmit entirely for raw emails only (for custom analysis patterns)."
+      },
+      "title": {
+        "type": "string",
+        "default": "Email Items",
+        "description": "Display title for the extractor (shown in UI)"
+      },
+      "resolveInlineImages": {
+        "type": "boolean",
+        "default": false,
+        "description": "Whether to resolve inline images (cid: references) to base64"
+      },
+      "limit": {
+        "type": "number",
+        "default": 100,
+        "description": "Maximum number of emails to fetch"
+      },
+      "overrideAuth": {
+        "$ref": "#/$defs/Auth",
+        "asCell": [
+          "cell"
+        ],
+        "description": "Optional linked auth (overrides wish() default)"
+      }
+    },
+    "required": [
+      "gmailQuery"
+    ],
+    "description": "Input configuration for the GmailExtractor building block.",
+    "$defs": {
+      "Auth": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "default": ""
+          },
+          "tokenType": {
+            "type": "string",
+            "default": ""
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "expiresIn": {
+            "type": "number",
+            "default": 0
+          },
+          "expiresAt": {
+            "type": "number",
+            "default": 0
+          },
+          "refreshToken": {
+            "type": "string",
+            "default": ""
+          },
+          "user": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "picture": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email",
+              "name",
+              "picture"
+            ],
+            "default": {
+              "email": "",
+              "name": "",
+              "picture": ""
+            }
+          }
+        },
+        "required": [
+          "token",
+          "tokenType",
+          "scope",
+          "expiresIn",
+          "expiresAt",
+          "refreshToken",
+          "user"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "emails": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Email"
+        },
+        "description": "Raw emails from Gmail"
+      },
+      "emailCount": {
+        "type": "number",
+        "description": "Count of emails fetched"
+      },
+      "rawAnalyses": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "email": {
+              "$ref": "#/$defs/Email"
+            },
+            "emailId": {
+              "type": "string"
+            },
+            "emailDate": {
+              "type": "string"
+            },
+            "analysis": {
+              "type": "object",
+              "properties": {
+                "pending": {
+                  "type": "boolean"
+                },
+                "result": {
+                  "type": "unknown"
+                },
+                "error": {
+                  "type": "unknown"
+                }
+              }
+            },
+            "result": {
+              "type": "unknown"
+            },
+            "pending": {
+              "type": "boolean"
+            },
+            "error": {
+              "type": "unknown"
+            }
+          },
+          "required": [
+            "email",
+            "emailId",
+            "emailDate",
+            "analysis",
+            "pending",
+            "error"
+          ]
+        },
+        "description": "Analysis results (empty when extraction not provided)"
+      },
+      "pendingCount": {
+        "type": "number",
+        "description": "Count of pending analyses"
+      },
+      "completedCount": {
+        "type": "number",
+        "description": "Count of completed analyses"
+      },
+      "isConnected": {
+        "type": "boolean",
+        "description": "Whether Gmail is connected"
+      },
+      "refresh": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "unknown",
+        "description": "Refresh emails from Gmail"
+      },
+      "addLabels": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "messageId": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "messageId",
+          "labels"
+        ],
+        "description": "Add labels to a message"
+      },
+      "removeLabels": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "messageId": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "messageId",
+          "labels"
+        ],
+        "description": "Remove labels from a message"
+      },
+      "ui": {
+        "type": "object",
+        "properties": {
+          "authStatusUI": {
+            "$ref": "#/$defs/JSXElement"
+          },
+          "connectionStatusUI": {
+            "$ref": "#/$defs/JSXElement"
+          },
+          "analysisProgressUI": {
+            "$ref": "#/$defs/JSXElement"
+          },
+          "previewUI": {
+            "$ref": "#/$defs/JSXElement"
+          }
+        },
+        "required": [
+          "authStatusUI",
+          "connectionStatusUI",
+          "analysisProgressUI",
+          "previewUI"
+        ],
+        "description": "UI bundle (JSX elements)"
+      },
+      "gmailImporter": {
+        "$ref": "#/$defs/Output",
+        "description": "Access to underlying GmailImporter (for advanced use)"
+      }
+    },
+    "required": [
+      "emails",
+      "emailCount",
+      "rawAnalyses",
+      "pendingCount",
+      "completedCount",
+      "isConnected",
+      "refresh",
+      "addLabels",
+      "removeLabels",
+      "ui",
+      "gmailImporter"
+    ],
+    "description": "Output of GmailExtractor.",
+    "$defs": {
+      "Output": {
+        "type": "object",
+        "properties": {
+          "emails": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Email"
+            },
+            "description": "Array of imported emails"
+          },
+          "mentionable": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "summary": {
+                  "type": "string"
+                },
+                "$NAME": {
+                  "type": "string"
+                },
+                "$UI": {
+                  "$ref": "https://commonfabric.org/schemas/vnode.json"
+                }
+              },
+              "required": [
+                "summary",
+                "$NAME",
+                "$UI"
+              ]
+            },
+            "description": "Mentionables — email cards with NAME and summary for search indexing"
+          },
+          "emailCount": {
+            "type": "number",
+            "description": "Number of emails imported"
+          },
+          "summary": {
+            "type": "string",
+            "description": "Summary of container-level emails for hierarchical indexing"
+          },
+          "authUI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json",
+            "description": "Auth UI component for managing Google OAuth connection"
+          },
+          "bgUpdater": {
+            "asCell": [
+              "stream",
+              "opaque"
+            ],
+            "description": "Handler to trigger email fetch from external patterns"
+          },
+          "isReady": {
+            "type": "boolean",
+            "description": "Whether auth is ready (has valid token)"
+          },
+          "$NAME": {
+            "type": "string"
+          },
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          }
+        },
+        "required": [
+          "emails",
+          "mentionable",
+          "emailCount",
+          "summary",
+          "authUI",
+          "bgUpdater",
+          "isReady",
+          "$NAME",
+          "$UI"
+        ]
+      },
+      "JSXElement": {
+        "anyOf": [
+          {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          {
+            "$ref": "#/$defs/UIRenderable"
+          },
+          {
+            "type": "object",
+            "properties": {}
+          }
+        ]
+      },
+      "UIRenderable": {
+        "type": "object",
+        "properties": {
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          }
+        },
+        "required": [
+          "$UI"
+        ]
+      },
+      "Email": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "threadId": {
+            "type": "string"
+          },
+          "labelIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          },
+          "plainText": {
+            "type": "string"
+          },
+          "htmlContent": {
+            "type": "string"
+          },
+          "markdownContent": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string",
+            "default": ""
+          }
+        },
+        "required": [
+          "id",
+          "threadId",
+          "labelIds",
+          "snippet",
+          "subject",
+          "from",
+          "date",
+          "to",
+          "plainText",
+          "htmlContent",
+          "markdownContent",
+          "summary"
+        ]
+      }
+    }
+  }
+}

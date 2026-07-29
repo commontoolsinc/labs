@@ -1,0 +1,209 @@
+{
+  "pattern": "experimental/email-task-engine.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "overrideAuth": {
+        "$ref": "#/$defs/Auth",
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "$defs": {
+      "Auth": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "default": ""
+          },
+          "tokenType": {
+            "type": "string",
+            "default": ""
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "expiresIn": {
+            "type": "number",
+            "default": 0
+          },
+          "expiresAt": {
+            "type": "number",
+            "default": 0
+          },
+          "refreshToken": {
+            "type": "string",
+            "default": ""
+          },
+          "user": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "picture": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email",
+              "name",
+              "picture"
+            ],
+            "default": {
+              "email": "",
+              "name": "",
+              "picture": ""
+            }
+          }
+        },
+        "required": [
+          "token",
+          "tokenType",
+          "scope",
+          "expiresIn",
+          "expiresAt",
+          "refreshToken",
+          "user"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "taskEmails": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/TaskEmail"
+        }
+      },
+      "taskCount": {
+        "type": "number"
+      },
+      "analyses": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/TaskAnalysis"
+        }
+      },
+      "$TILE_UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "taskEmails",
+      "taskCount",
+      "analyses",
+      "$TILE_UI"
+    ],
+    "$defs": {
+      "TaskAnalysis": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "$ref": "#/$defs/TaskEmail"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "undefined"
+              },
+              {
+                "$ref": "#/$defs/SuggestionResult"
+              }
+            ]
+          },
+          "pending": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "unknown"
+          }
+        },
+        "required": [
+          "email",
+          "result",
+          "pending"
+        ]
+      },
+      "SuggestionResult": {
+        "type": "object",
+        "properties": {
+          "actionType": {
+            "enum": [
+              "edit-note",
+              "create-note",
+              "no-action"
+            ]
+          },
+          "noteTitle": {
+            "type": "string"
+          },
+          "addition": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "reasoning": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "actionType",
+          "confidence"
+        ]
+      },
+      "TaskEmail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "markdownContent": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "subject",
+          "snippet",
+          "markdownContent",
+          "date",
+          "from"
+        ]
+      }
+    }
+  }
+}

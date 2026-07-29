@@ -1,0 +1,152 @@
+{
+  "pattern": "profile-group-chat/main.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "messages": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/ChatMessage"
+        },
+        "default": [],
+        "scope": "space",
+        "description": "Shared message log — every user in the space reads & appends to this."
+      },
+      "draft": {
+        "type": "string",
+        "default": "",
+        "scope": "user",
+        "description": "Current viewer's message draft — follows the user, not broadcast."
+      }
+    },
+    "$defs": {
+      "ChatMessage": {
+        "type": "object",
+        "properties": {
+          "authorProfile": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "avatar": {
+                "type": "string"
+              }
+            },
+            "asCell": [
+              "cell"
+            ],
+            "description": "Sender's live profile cell — rendered first-class via cf-profile-badge."
+          },
+          "author": {
+            "type": "string",
+            "description": "Sender's profile name, snapshotted at send time (durable fallback label)."
+          },
+          "avatar": {
+            "type": "string",
+            "description": "Sender's profile avatar (URL or glyph), snapshotted at send time."
+          },
+          "body": {
+            "type": "string"
+          },
+          "sentAt": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "authorProfile",
+          "author",
+          "avatar",
+          "body",
+          "sentAt"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "messages": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/ChatMessage"
+        },
+        "default": [],
+        "scope": "space"
+      },
+      "draft": {
+        "type": "string",
+        "default": "",
+        "scope": "user"
+      },
+      "messageCount": {
+        "type": "number"
+      },
+      "sendMessage": {
+        "asCell": [
+          "stream"
+        ],
+        "$ref": "#/$defs/SendEvent"
+      },
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "messages",
+      "draft",
+      "messageCount",
+      "sendMessage",
+      "$NAME",
+      "$UI"
+    ],
+    "$defs": {
+      "SendEvent": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "ChatMessage": {
+        "type": "object",
+        "properties": {
+          "authorProfile": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "avatar": {
+                "type": "string"
+              }
+            },
+            "description": "Sender's live profile cell — rendered first-class via cf-profile-badge."
+          },
+          "author": {
+            "type": "string",
+            "description": "Sender's profile name, snapshotted at send time (durable fallback label)."
+          },
+          "avatar": {
+            "type": "string",
+            "description": "Sender's profile avatar (URL or glyph), snapshotted at send time."
+          },
+          "body": {
+            "type": "string"
+          },
+          "sentAt": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "authorProfile",
+          "author",
+          "avatar",
+          "body",
+          "sentAt"
+        ]
+      }
+    }
+  }
+}

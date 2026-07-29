@@ -1,0 +1,58 @@
+{
+  "pattern": "cfc-render-policy-demo/main.tsx",
+  "argumentSchema": {
+    "type": "unknown"
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "revealSensitive": {
+        "type": "boolean",
+        "ifc": {
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/cfc-render-policy-demo/main.tsx",
+              "path": [
+                "setRevealSensitive"
+              ],
+              "moduleIdentity": "UVJh2ChHuLkknYrVet0IuWfGvj2u9E2JQ2YkbI-BwAg"
+            }
+          },
+          "uiContract": {
+            "helper": "UiAction",
+            "action": "TrustedRevealHealthData",
+            "trustedPattern": "TrustedHealthDisclosureSurface",
+            "requiredEventIntegrity": [
+              "TrustedHealthDisclosureSurface"
+            ]
+          }
+        }
+      },
+      "reveal": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "unknown"
+      },
+      "conceal": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "unknown"
+      },
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "type": "unknown"
+      }
+    },
+    "required": [
+      "revealSensitive",
+      "reveal",
+      "conceal",
+      "$NAME",
+      "$UI"
+    ]
+  }
+}

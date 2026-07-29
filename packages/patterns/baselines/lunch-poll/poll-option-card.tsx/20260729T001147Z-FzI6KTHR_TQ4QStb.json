@@ -1,0 +1,235 @@
+{
+  "pattern": "lunch-poll/poll-option-card.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "option": {
+        "$ref": "#/$defs/Option",
+        "description": "Option record to render."
+      },
+      "rank": {
+        "type": [
+          "number",
+          "undefined"
+        ],
+        "description": "One-based display rank, or undefined while the parent ranking settles."
+      },
+      "me": {
+        "type": "string",
+        "description": "Resolved current viewer name; required for per-option vote styling."
+      },
+      "isJoined": {
+        "type": "boolean",
+        "description": "Whether the current viewer is allowed to vote."
+      },
+      "isAdmin": {
+        "type": "boolean",
+        "description": "Whether the current viewer owns admin-only actions."
+      },
+      "votes": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Vote"
+        },
+        "description": "Shared vote list used to compute this viewer's selected vote."
+      },
+      "removeConfirmTarget": {
+        "type": [
+          "null",
+          "string",
+          "undefined"
+        ],
+        "asCell": [
+          "cell"
+        ],
+        "description": "Per-session option id awaiting admin remove confirmation."
+      },
+      "castVote": {
+        "$ref": "#/$defs/CastVoteEvent",
+        "asCell": [
+          "stream"
+        ],
+        "description": "Parent-owned stream that toggles or records this viewer's vote."
+      },
+      "removeOption": {
+        "$ref": "#/$defs/RemoveOptionEvent",
+        "asCell": [
+          "stream"
+        ],
+        "description": "Parent-owned admin stream that removes this option after confirmation."
+      },
+      "logVisit": {
+        "$ref": "#/$defs/LogVisitEvent",
+        "asCell": [
+          "stream"
+        ],
+        "description": "Parent-owned admin stream that records this option in visit history."
+      },
+      "setOptionImage": {
+        "$ref": "#/$defs/SetOptionImageEvent",
+        "asCell": [
+          "stream"
+        ],
+        "description": "Parent-owned admin stream persisting this option's generated art."
+      }
+    },
+    "required": [
+      "option",
+      "rank",
+      "me",
+      "isJoined",
+      "isAdmin",
+      "votes",
+      "removeConfirmTarget",
+      "castVote",
+      "removeOption",
+      "logVisit",
+      "setOptionImage"
+    ],
+    "description": "Inputs for one rendered ranked option row.\n\nThe parent owns all durable and shared UI state. This pattern receives one\noption, current viewer/admin facts, shared per-session editor state, and the\nstreams it should emit for mutations. When rendering inside `options.map()`,\npass the resolved `me` value from the parent, not the raw `myName` PerUser\ncell.",
+    "$defs": {
+      "SetOptionImageEvent": {
+        "type": "object",
+        "properties": {
+          "optionId": {
+            "type": "string"
+          },
+          "imageUrl": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "optionId",
+          "imageUrl"
+        ]
+      },
+      "LogVisitEvent": {
+        "type": "object",
+        "properties": {
+          "optionId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "wentAt": {
+            "type": "number"
+          }
+        }
+      },
+      "RemoveOptionEvent": {
+        "type": "object",
+        "properties": {
+          "optionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "optionId"
+        ]
+      },
+      "CastVoteEvent": {
+        "type": "object",
+        "properties": {
+          "optionId": {
+            "type": "string"
+          },
+          "voteType": {
+            "$ref": "#/$defs/VoteColor"
+          }
+        },
+        "required": [
+          "optionId",
+          "voteType"
+        ]
+      },
+      "VoteColor": {
+        "enum": [
+          "green",
+          "yellow",
+          "red"
+        ]
+      },
+      "Vote": {
+        "type": "object",
+        "properties": {
+          "voterName": {
+            "type": "string"
+          },
+          "optionId": {
+            "type": "string"
+          },
+          "voteType": {
+            "$ref": "#/$defs/VoteColor"
+          },
+          "castAt": {
+            "type": "number",
+            "description": "When the vote was cast (ms epoch), stamped by `castVote`. Optional for\nvotes stored before this field existed — those count as not-today, so the\ncurrent-day filter hides them."
+          }
+        },
+        "required": [
+          "voterName",
+          "optionId",
+          "voteType"
+        ]
+      },
+      "Option": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "addedByName": {
+            "type": "string"
+          },
+          "imageUrl": {
+            "type": "string",
+            "description": "Persisted generated-art data URL (`\"\"` until the host's client generates\nand syncs it). Every viewer renders this stored value; generation only\nruns on the host's client for options where it is still empty."
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "addedByName"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "artSyncState": {
+        "$ref": "#/$defs/GeneratedArtFetchState",
+        "description": "Generated-art lifecycle for this row: `\"stored\"` once the option carries a\npersisted image (every viewer), the underlying fetch state while the host's\nclient is generating, and `\"\"` for non-hosts before anything is stored.\nPure read — persistence happens only through the host's explicit keep\naction (→ `setOptionImage`). Optional for the same reason as\n`GeneratedArtOutput.fetchState`: it is fetch-derived on the generating\npath, and a required declaration would gate boundary readers of\nnon-generating rows."
+      },
+      "$NAME": {
+        "type": "string",
+        "description": "Human-readable pattern name, matching the option title."
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json",
+        "description": "Static VNode rendering the complete option row."
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI"
+    ],
+    "description": "Outputs for one rendered ranked option row.\n\nParents normally embed this sub-pattern with JSX.",
+    "$defs": {
+      "GeneratedArtFetchState": {
+        "enum": [
+          "",
+          "stored",
+          "generated",
+          "pending",
+          "error",
+          "requested"
+        ]
+      }
+    }
+  }
+}

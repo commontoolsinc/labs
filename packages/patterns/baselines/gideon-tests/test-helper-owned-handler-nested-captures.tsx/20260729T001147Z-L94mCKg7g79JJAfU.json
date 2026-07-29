@@ -1,0 +1,67 @@
+{
+  "pattern": "gideon-tests/test-helper-owned-handler-nested-captures.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "fileId": {
+        "type": "string",
+        "default": "",
+        "asCell": [
+          "cell"
+        ]
+      },
+      "content": {
+        "type": "string",
+        "default": "",
+        "asCell": [
+          "cell"
+        ]
+      },
+      "savedContent": {
+        "type": "string",
+        "default": "",
+        "asCell": [
+          "cell"
+        ]
+      },
+      "onSaveFile": {
+        "type": "object",
+        "properties": {
+          "fileId": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "fileId",
+          "content"
+        ],
+        "asCell": [
+          "stream"
+        ]
+      }
+    },
+    "required": [
+      "fileId",
+      "content",
+      "savedContent",
+      "onSaveFile"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "trigger": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      }
+    },
+    "required": [
+      "trigger"
+    ]
+  }
+}

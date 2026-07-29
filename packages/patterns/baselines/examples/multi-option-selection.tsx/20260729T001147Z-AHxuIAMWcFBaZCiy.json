@@ -1,0 +1,65 @@
+{
+  "pattern": "examples/multi-option-selection.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "selected": {
+        "type": "string",
+        "default": "opt_1",
+        "asCell": [
+          "cell"
+        ]
+      },
+      "numericChoice": {
+        "type": "number",
+        "default": 1,
+        "asCell": [
+          "cell"
+        ]
+      },
+      "category": {
+        "type": "string",
+        "default": "Other",
+        "asCell": [
+          "cell"
+        ]
+      },
+      "activeTab": {
+        "type": "string",
+        "default": "tab1",
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "required": [
+      "selected",
+      "numericChoice",
+      "category",
+      "activeTab"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "selected": {
+        "type": "string"
+      },
+      "numericChoice": {
+        "type": "number"
+      },
+      "category": {
+        "type": "string"
+      },
+      "activeTab": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "selected",
+      "numericChoice",
+      "category",
+      "activeTab"
+    ]
+  }
+}

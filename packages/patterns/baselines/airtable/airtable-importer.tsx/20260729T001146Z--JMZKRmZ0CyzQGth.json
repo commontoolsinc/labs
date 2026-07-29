@@ -1,0 +1,131 @@
+{
+  "pattern": "airtable/airtable-importer.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "selectedBaseId": {
+        "type": "string",
+        "default": ""
+      },
+      "selectedTableId": {
+        "type": "string",
+        "default": ""
+      }
+    },
+    "required": [
+      "selectedBaseId",
+      "selectedTableId"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "records": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/AirtableRecordData"
+        }
+      },
+      "bases": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/BaseInfo"
+        }
+      },
+      "tables": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/TableInfo"
+        }
+      },
+      "selectedBaseId": {
+        "type": "string"
+      },
+      "selectedTableId": {
+        "type": "string"
+      },
+      "selectedBaseName": {
+        "type": "string"
+      },
+      "selectedTableName": {
+        "type": "string"
+      },
+      "recordCount": {
+        "type": "number"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "records",
+      "bases",
+      "tables",
+      "selectedBaseId",
+      "selectedTableId",
+      "selectedBaseName",
+      "selectedTableName",
+      "recordCount",
+      "$UI"
+    ],
+    "description": "Import records from an Airtable base. #airtableImporter",
+    "tags": [
+      "airtableimporter"
+    ],
+    "$defs": {
+      "TableInfo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "BaseInfo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "AirtableRecordData": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "createdTime": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": {
+              "type": "unknown"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "createdTime",
+          "fields"
+        ]
+      }
+    }
+  }
+}

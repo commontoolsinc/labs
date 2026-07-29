@@ -1,0 +1,271 @@
+{
+  "pattern": "group-chat-lobby.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "chatName": {
+        "type": "string",
+        "default": "Group Chat"
+      },
+      "messages": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Message"
+        },
+        "default": [],
+        "asCell": [
+          "cell"
+        ]
+      },
+      "users": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/User"
+        },
+        "default": [],
+        "asCell": [
+          "cell"
+        ]
+      },
+      "sessionId": {
+        "type": "string",
+        "default": "",
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "required": [
+      "chatName",
+      "messages",
+      "users",
+      "sessionId"
+    ],
+    "description": "Group Chat Lobby Pattern\n\nApple iOS-style lobby where unlimited users can join. Identity comes from\nthe viewer's shared profile (`wish({ query: \"#profile\" })`): the wish's\nbuilt-in UI lets the viewer pick one of their existing profiles or create a\nnew one, and joining snapshots the resolved name/avatar into the shared\nuser roster (see docs/specs/shared-profile-rosters.md).",
+    "tags": [
+      "profile"
+    ],
+    "$defs": {
+      "User": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Display name shown in the room. Unique within this roster (the lobby\ndisambiguates collisions) because messages/reactions key on it."
+          },
+          "joinedAt": {
+            "type": "number"
+          },
+          "avatar": {
+            "type": "string",
+            "description": "Avatar URL or glyph, snapshotted from the joiner's shared profile."
+          },
+          "profile": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "avatar": {
+                "type": "string"
+              }
+            },
+            "asCell": [
+              "cell"
+            ],
+            "description": "Link to the joiner's profile cell — the stable identity key (optional so\nrosters written before the profile migration still load)."
+          }
+        },
+        "required": [
+          "name",
+          "joinedAt"
+        ]
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "number"
+          },
+          "type": {
+            "enum": [
+              "chat",
+              "system",
+              "image"
+            ]
+          },
+          "imageUrl": {
+            "type": "string"
+          },
+          "reactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Reaction"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "author",
+          "content",
+          "timestamp",
+          "type",
+          "reactions"
+        ]
+      },
+      "Reaction": {
+        "type": "object",
+        "properties": {
+          "emoji": {
+            "type": "string"
+          },
+          "userNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "emoji",
+          "userNames"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "chatName": {
+        "type": "string",
+        "default": "Group Chat"
+      },
+      "messages": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Message"
+        },
+        "default": []
+      },
+      "users": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/User"
+        },
+        "default": []
+      },
+      "sessionId": {
+        "type": "string",
+        "default": ""
+      }
+    },
+    "required": [
+      "chatName",
+      "messages",
+      "users",
+      "sessionId"
+    ],
+    "$defs": {
+      "User": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Display name shown in the room. Unique within this roster (the lobby\ndisambiguates collisions) because messages/reactions key on it."
+          },
+          "joinedAt": {
+            "type": "number"
+          },
+          "avatar": {
+            "type": "string",
+            "description": "Avatar URL or glyph, snapshotted from the joiner's shared profile."
+          },
+          "profile": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "avatar": {
+                "type": "string"
+              }
+            },
+            "description": "Link to the joiner's profile cell — the stable identity key (optional so\nrosters written before the profile migration still load)."
+          }
+        },
+        "required": [
+          "name",
+          "joinedAt"
+        ]
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "number"
+          },
+          "type": {
+            "enum": [
+              "chat",
+              "system",
+              "image"
+            ]
+          },
+          "imageUrl": {
+            "type": "string"
+          },
+          "reactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Reaction"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "author",
+          "content",
+          "timestamp",
+          "type",
+          "reactions"
+        ]
+      },
+      "Reaction": {
+        "type": "object",
+        "properties": {
+          "emoji": {
+            "type": "string"
+          },
+          "userNames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "emoji",
+          "userNames"
+        ]
+      }
+    }
+  }
+}

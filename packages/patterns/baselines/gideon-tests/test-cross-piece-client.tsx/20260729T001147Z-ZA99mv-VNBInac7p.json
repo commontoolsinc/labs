@@ -1,0 +1,44 @@
+{
+  "pattern": "gideon-tests/test-cross-piece-client.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "useCfRender": {
+        "type": "boolean",
+        "default": false
+      },
+      "lastInvocationStatus": {
+        "type": "string",
+        "default": "Not invoked yet"
+      },
+      "invocationCount": {
+        "type": "number",
+        "default": 0
+      }
+    },
+    "required": [
+      "useCfRender",
+      "lastInvocationStatus",
+      "invocationCount"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "useCfRender": {
+        "type": "boolean"
+      },
+      "lastInvocationStatus": {
+        "type": "string"
+      },
+      "invocationCount": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "useCfRender",
+      "lastInvocationStatus",
+      "invocationCount"
+    ]
+  }
+}

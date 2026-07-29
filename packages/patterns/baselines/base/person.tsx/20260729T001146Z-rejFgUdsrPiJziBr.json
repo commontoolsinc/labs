@@ -1,0 +1,541 @@
+{
+  "pattern": "base/person.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "person": {
+        "$ref": "#/$defs/Person",
+        "default": {
+          "firstName": "",
+          "lastName": "",
+          "middleName": "",
+          "nickname": "",
+          "prefix": "",
+          "suffix": "",
+          "pronouns": "",
+          "birthday": {
+            "month": 0,
+            "day": 0,
+            "year": 0
+          },
+          "photo": "",
+          "email": "",
+          "phone": "",
+          "notes": "",
+          "tags": [],
+          "addresses": [],
+          "socialProfiles": []
+        },
+        "asCell": [
+          "cell"
+        ]
+      },
+      "sameAs": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/ContactPiece"
+        },
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "required": [
+      "person"
+    ],
+    "$defs": {
+      "ContactPiece": {
+        "type": "object",
+        "properties": {
+          "person": {
+            "$ref": "#/$defs/Person"
+          },
+          "member": {
+            "$ref": "#/$defs/FamilyMember"
+          },
+          "$NAME": {
+            "type": "string"
+          },
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          }
+        },
+        "required": [
+          "$NAME",
+          "$UI"
+        ]
+      },
+      "FamilyMember": {
+        "type": "object",
+        "properties": {
+          "firstName": {
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "relationship": {
+            "type": "string",
+            "default": ""
+          },
+          "birthday": {
+            "type": "string",
+            "default": ""
+          },
+          "dietaryRestrictions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "notes": {
+            "type": "string",
+            "default": ""
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "allergies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "giftIdeas": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "sameAs": {
+            "$ref": "#/$defs/PersonLike",
+            "description": "Optional link to same entity in another context (e.g., work vs personal)"
+          }
+        },
+        "required": [
+          "firstName",
+          "lastName",
+          "relationship",
+          "birthday",
+          "dietaryRestrictions",
+          "notes",
+          "tags",
+          "allergies",
+          "giftIdeas"
+        ]
+      },
+      "PersonLike": {
+        "type": "object",
+        "properties": {
+          "firstName": {
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "sameAs": {
+            "$ref": "#/$defs/PersonLike",
+            "description": "Optional link to same entity in another context (e.g., work vs personal)"
+          }
+        },
+        "required": [
+          "firstName",
+          "lastName"
+        ]
+      },
+      "Person": {
+        "type": "object",
+        "properties": {
+          "firstName": {
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "middleName": {
+            "type": "string",
+            "default": ""
+          },
+          "nickname": {
+            "type": "string",
+            "default": ""
+          },
+          "prefix": {
+            "type": "string",
+            "default": ""
+          },
+          "suffix": {
+            "type": "string",
+            "default": ""
+          },
+          "pronouns": {
+            "type": "string",
+            "default": ""
+          },
+          "birthday": {
+            "$ref": "#/$defs/Birthday",
+            "default": {
+              "month": 0,
+              "day": 0,
+              "year": 0
+            }
+          },
+          "photo": {
+            "type": "string",
+            "default": ""
+          },
+          "email": {
+            "type": "string",
+            "default": ""
+          },
+          "phone": {
+            "type": "string",
+            "default": ""
+          },
+          "notes": {
+            "type": "string",
+            "default": ""
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "addresses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Address"
+            },
+            "default": []
+          },
+          "socialProfiles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/SocialProfile"
+            },
+            "default": []
+          },
+          "sameAs": {
+            "$ref": "#/$defs/PersonLike",
+            "description": "Optional link to same entity in another context (e.g., work vs personal)"
+          }
+        },
+        "required": [
+          "firstName",
+          "lastName",
+          "middleName",
+          "nickname",
+          "prefix",
+          "suffix",
+          "pronouns",
+          "birthday",
+          "photo",
+          "email",
+          "phone",
+          "notes",
+          "tags",
+          "addresses",
+          "socialProfiles"
+        ]
+      },
+      "SocialProfile": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "default": ""
+          },
+          "url": {
+            "type": "string",
+            "default": ""
+          }
+        },
+        "required": [
+          "platform",
+          "url"
+        ]
+      },
+      "Address": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "default": ""
+          },
+          "street": {
+            "type": "string",
+            "default": ""
+          },
+          "city": {
+            "type": "string",
+            "default": ""
+          },
+          "state": {
+            "type": "string",
+            "default": ""
+          },
+          "zip": {
+            "type": "string",
+            "default": ""
+          },
+          "country": {
+            "type": "string",
+            "default": ""
+          }
+        },
+        "required": [
+          "label",
+          "street",
+          "city",
+          "state",
+          "zip",
+          "country"
+        ]
+      },
+      "Birthday": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "number",
+            "default": 0
+          },
+          "day": {
+            "type": "number",
+            "default": 0
+          },
+          "year": {
+            "type": "number",
+            "default": 0
+          }
+        },
+        "required": [
+          "month",
+          "day",
+          "year"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "person": {
+        "$ref": "#/$defs/Person"
+      },
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "person",
+      "$NAME",
+      "$UI"
+    ],
+    "$defs": {
+      "Person": {
+        "type": "object",
+        "properties": {
+          "firstName": {
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "middleName": {
+            "type": "string",
+            "default": ""
+          },
+          "nickname": {
+            "type": "string",
+            "default": ""
+          },
+          "prefix": {
+            "type": "string",
+            "default": ""
+          },
+          "suffix": {
+            "type": "string",
+            "default": ""
+          },
+          "pronouns": {
+            "type": "string",
+            "default": ""
+          },
+          "birthday": {
+            "$ref": "#/$defs/Birthday",
+            "default": {
+              "month": 0,
+              "day": 0,
+              "year": 0
+            }
+          },
+          "photo": {
+            "type": "string",
+            "default": ""
+          },
+          "email": {
+            "type": "string",
+            "default": ""
+          },
+          "phone": {
+            "type": "string",
+            "default": ""
+          },
+          "notes": {
+            "type": "string",
+            "default": ""
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "addresses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Address"
+            },
+            "default": []
+          },
+          "socialProfiles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/SocialProfile"
+            },
+            "default": []
+          },
+          "sameAs": {
+            "$ref": "#/$defs/PersonLike",
+            "description": "Optional link to same entity in another context (e.g., work vs personal)"
+          }
+        },
+        "required": [
+          "firstName",
+          "lastName",
+          "middleName",
+          "nickname",
+          "prefix",
+          "suffix",
+          "pronouns",
+          "birthday",
+          "photo",
+          "email",
+          "phone",
+          "notes",
+          "tags",
+          "addresses",
+          "socialProfiles"
+        ]
+      },
+      "PersonLike": {
+        "type": "object",
+        "properties": {
+          "firstName": {
+            "type": "string"
+          },
+          "lastName": {
+            "type": "string"
+          },
+          "sameAs": {
+            "$ref": "#/$defs/PersonLike",
+            "description": "Optional link to same entity in another context (e.g., work vs personal)"
+          }
+        },
+        "required": [
+          "firstName",
+          "lastName"
+        ]
+      },
+      "SocialProfile": {
+        "type": "object",
+        "properties": {
+          "platform": {
+            "type": "string",
+            "default": ""
+          },
+          "url": {
+            "type": "string",
+            "default": ""
+          }
+        },
+        "required": [
+          "platform",
+          "url"
+        ]
+      },
+      "Address": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "default": ""
+          },
+          "street": {
+            "type": "string",
+            "default": ""
+          },
+          "city": {
+            "type": "string",
+            "default": ""
+          },
+          "state": {
+            "type": "string",
+            "default": ""
+          },
+          "zip": {
+            "type": "string",
+            "default": ""
+          },
+          "country": {
+            "type": "string",
+            "default": ""
+          }
+        },
+        "required": [
+          "label",
+          "street",
+          "city",
+          "state",
+          "zip",
+          "country"
+        ]
+      },
+      "Birthday": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "number",
+            "default": 0
+          },
+          "day": {
+            "type": "number",
+            "default": 0
+          },
+          "year": {
+            "type": "number",
+            "default": 0
+          }
+        },
+        "required": [
+          "month",
+          "day",
+          "year"
+        ]
+      }
+    }
+  }
+}

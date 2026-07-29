@@ -1,0 +1,67 @@
+{
+  "pattern": "system/piece-grid.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "pieces": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "$NAME": {
+              "type": "string"
+            }
+          },
+          "asCell": [
+            "cell"
+          ]
+        }
+      }
+    },
+    "required": [
+      "pieces"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "#/$defs/JSXElement"
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI"
+    ],
+    "$defs": {
+      "JSXElement": {
+        "anyOf": [
+          {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          {
+            "$ref": "#/$defs/UIRenderable"
+          },
+          {
+            "type": "object",
+            "properties": {}
+          }
+        ]
+      },
+      "UIRenderable": {
+        "type": "object",
+        "properties": {
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          }
+        },
+        "required": [
+          "$UI"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "pattern": "examples/write-and-run.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string",
+        "default": "Create a simple counter"
+      }
+    },
+    "required": [
+      "prompt"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "prompt"
+    ]
+  }
+}

@@ -1,0 +1,127 @@
+{
+  "pattern": "contacts/contact-detail.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "contact": {
+        "$ref": "#/$defs/Contact",
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "required": [
+      "contact"
+    ],
+    "$defs": {
+      "Contact": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "default": ""
+          },
+          "phone": {
+            "type": "string",
+            "default": ""
+          },
+          "company": {
+            "type": "string",
+            "default": ""
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "notes": {
+            "type": "string",
+            "default": ""
+          },
+          "createdAt": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "phone",
+          "company",
+          "tags",
+          "notes",
+          "createdAt"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "contact": {
+        "$ref": "#/$defs/Contact"
+      },
+      "summary": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "contact",
+      "summary"
+    ],
+    "description": "#contact #person",
+    "tags": [
+      "contact",
+      "person"
+    ],
+    "$defs": {
+      "Contact": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "default": ""
+          },
+          "phone": {
+            "type": "string",
+            "default": ""
+          },
+          "company": {
+            "type": "string",
+            "default": ""
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "notes": {
+            "type": "string",
+            "default": ""
+          },
+          "createdAt": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "phone",
+          "company",
+          "tags",
+          "notes",
+          "createdAt"
+        ]
+      }
+    }
+  }
+}

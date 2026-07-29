@@ -1,0 +1,100 @@
+{
+  "pattern": "record-backup.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "importJson": {
+        "type": "string",
+        "default": ""
+      }
+    },
+    "required": [
+      "importJson"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "exportedJson": {
+        "type": "string"
+      },
+      "importJson": {
+        "type": "string"
+      },
+      "recordCount": {
+        "type": "number"
+      },
+      "importResult": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ImportResult"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "exportedJson",
+      "importJson",
+      "recordCount",
+      "importResult",
+      "$NAME",
+      "$UI"
+    ],
+    "$defs": {
+      "ImportResult": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "imported": {
+            "type": "number"
+          },
+          "failed": {
+            "type": "number"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/ImportError"
+            }
+          }
+        },
+        "required": [
+          "success",
+          "imported",
+          "failed",
+          "errors"
+        ]
+      },
+      "ImportError": {
+        "type": "object",
+        "properties": {
+          "record": {
+            "type": "string"
+          },
+          "module": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "record",
+          "module",
+          "error"
+        ]
+      }
+    }
+  }
+}

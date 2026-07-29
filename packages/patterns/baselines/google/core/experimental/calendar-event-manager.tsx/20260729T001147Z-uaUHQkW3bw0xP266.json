@@ -1,0 +1,254 @@
+{
+  "pattern": "google/core/experimental/calendar-event-manager.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "draft": {
+        "$ref": "#/$defs/EventDraft",
+        "default": {
+          "summary": "",
+          "start": "",
+          "end": "",
+          "calendarId": "primary",
+          "description": "",
+          "location": "",
+          "attendeesText": ""
+        },
+        "description": "Event draft for creating/editing"
+      },
+      "existingEvent": {
+        "$ref": "#/$defs/ExistingEvent",
+        "default": null,
+        "description": "Existing event for update/delete/rsvp operations"
+      }
+    },
+    "required": [
+      "draft",
+      "existingEvent"
+    ],
+    "$defs": {
+      "ExistingEvent": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Event ID for update/delete/rsvp"
+              },
+              "calendarId": {
+                "type": "string",
+                "description": "Calendar ID"
+              },
+              "summary": {
+                "type": "string",
+                "description": "Event summary for display"
+              }
+            },
+            "required": [
+              "id",
+              "calendarId"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "EventDraft": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "default": "",
+            "description": "Event title/summary"
+          },
+          "start": {
+            "type": "string",
+            "default": "",
+            "description": "Start datetime (ISO or datetime-local format)"
+          },
+          "end": {
+            "type": "string",
+            "default": "",
+            "description": "End datetime (ISO or datetime-local format)"
+          },
+          "calendarId": {
+            "type": "string",
+            "default": "primary",
+            "description": "Calendar ID (primary for main calendar)"
+          },
+          "description": {
+            "type": "string",
+            "default": "",
+            "description": "Event description"
+          },
+          "location": {
+            "type": "string",
+            "default": "",
+            "description": "Event location"
+          },
+          "attendeesText": {
+            "type": "string",
+            "default": "",
+            "description": "Attendee emails (comma-separated)"
+          }
+        },
+        "required": [
+          "summary",
+          "start",
+          "end",
+          "calendarId",
+          "description",
+          "location",
+          "attendeesText"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "draft": {
+        "$ref": "#/$defs/EventDraft"
+      },
+      "existingEvent": {
+        "$ref": "#/$defs/ExistingEvent"
+      },
+      "result": {
+        "$ref": "#/$defs/OperationResult"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "draft",
+      "existingEvent",
+      "result",
+      "$UI"
+    ],
+    "description": "Google Calendar event manager for creating/editing/deleting events. #calendarManager",
+    "tags": [
+      "calendarmanager"
+    ],
+    "$defs": {
+      "OperationResult": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "success": {
+                "type": "boolean"
+              },
+              "operation": {
+                "$ref": "#/$defs/CalendarOperation"
+              },
+              "eventId": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              },
+              "timestamp": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "success",
+              "operation"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "CalendarOperation": {
+        "enum": [
+          "create",
+          "update",
+          "delete",
+          "rsvp"
+        ]
+      },
+      "ExistingEvent": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Event ID for update/delete/rsvp"
+              },
+              "calendarId": {
+                "type": "string",
+                "description": "Calendar ID"
+              },
+              "summary": {
+                "type": "string",
+                "description": "Event summary for display"
+              }
+            },
+            "required": [
+              "id",
+              "calendarId"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "EventDraft": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "default": "",
+            "description": "Event title/summary"
+          },
+          "start": {
+            "type": "string",
+            "default": "",
+            "description": "Start datetime (ISO or datetime-local format)"
+          },
+          "end": {
+            "type": "string",
+            "default": "",
+            "description": "End datetime (ISO or datetime-local format)"
+          },
+          "calendarId": {
+            "type": "string",
+            "default": "primary",
+            "description": "Calendar ID (primary for main calendar)"
+          },
+          "description": {
+            "type": "string",
+            "default": "",
+            "description": "Event description"
+          },
+          "location": {
+            "type": "string",
+            "default": "",
+            "description": "Event location"
+          },
+          "attendeesText": {
+            "type": "string",
+            "default": "",
+            "description": "Attendee emails (comma-separated)"
+          }
+        },
+        "required": [
+          "summary",
+          "start",
+          "end",
+          "calendarId",
+          "description",
+          "location",
+          "attendeesText"
+        ]
+      }
+    }
+  }
+}

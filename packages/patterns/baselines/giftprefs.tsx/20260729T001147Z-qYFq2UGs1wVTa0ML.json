@@ -1,0 +1,105 @@
+{
+  "pattern": "giftprefs.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "giftTier": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/GiftTier"
+          },
+          {
+            "type": "string",
+            "enum": [
+              ""
+            ]
+          }
+        ],
+        "default": "",
+        "description": "Gift giving tier"
+      },
+      "favorites": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "description": "Favorite things (interests, hobbies, brands)"
+      },
+      "avoid": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "description": "Things to avoid (allergies, dislikes)"
+      }
+    },
+    "required": [
+      "giftTier",
+      "favorites",
+      "avoid"
+    ],
+    "$defs": {
+      "GiftTier": {
+        "enum": [
+          "always",
+          "occasions",
+          "reciprocal",
+          "none"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "giftTier": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/GiftTier"
+          },
+          {
+            "type": "string",
+            "enum": [
+              ""
+            ]
+          }
+        ],
+        "default": "",
+        "description": "Gift giving tier"
+      },
+      "favorites": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "description": "Favorite things (interests, hobbies, brands)"
+      },
+      "avoid": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "description": "Things to avoid (allergies, dislikes)"
+      }
+    },
+    "required": [
+      "giftTier",
+      "favorites",
+      "avoid"
+    ],
+    "$defs": {
+      "GiftTier": {
+        "enum": [
+          "always",
+          "occasions",
+          "reciprocal",
+          "none"
+        ]
+      }
+    }
+  }
+}

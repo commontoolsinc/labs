@@ -1,0 +1,312 @@
+{
+  "pattern": "system/omnibox-fab.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "mentionable": {
+        "$ref": "#/$defs/AnonymousType_1",
+        "asCell": [
+          "cell"
+        ]
+      },
+      "extraTools": true,
+      "extraSystemPrompt": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "mentionable",
+      "extraTools",
+      "extraSystemPrompt"
+    ],
+    "$defs": {
+      "AnonymousType_1": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/MentionablePiece"
+        }
+      },
+      "MentionablePiece": {
+        "type": "object",
+        "properties": {
+          "isHidden": {
+            "type": "boolean"
+          },
+          "isMentionable": {
+            "type": "boolean"
+          },
+          "mentioned": {
+            "$ref": "#/$defs/AnonymousType_1"
+          },
+          "backlinks": {
+            "$ref": "#/$defs/AnonymousType_1"
+          },
+          "mentionable": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/AnonymousType_1"
+              },
+              {
+                "type": "object",
+                "properties": {}
+              }
+            ]
+          },
+          "$NAME": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "messages": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/BuiltInLLMMessage"
+        }
+      },
+      "$UI": {
+        "$ref": "#/$defs/JSXElement"
+      },
+      "fabExpanded": {
+        "type": "boolean"
+      },
+      "pinToChat": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "accumulate": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "name",
+          "accumulate"
+        ]
+      }
+    },
+    "required": [
+      "$NAME",
+      "messages",
+      "$UI",
+      "fabExpanded",
+      "pinToChat"
+    ],
+    "$defs": {
+      "JSXElement": {
+        "anyOf": [
+          {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          {
+            "$ref": "#/$defs/UIRenderable"
+          },
+          {
+            "type": "object",
+            "properties": {}
+          }
+        ]
+      },
+      "UIRenderable": {
+        "type": "object",
+        "properties": {
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          }
+        },
+        "required": [
+          "$UI"
+        ]
+      },
+      "BuiltInLLMMessage": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "enum": [
+              "user",
+              "system",
+              "assistant",
+              "tool"
+            ]
+          },
+          "content": {
+            "$ref": "#/$defs/BuiltInLLMContent"
+          }
+        },
+        "required": [
+          "role",
+          "content"
+        ]
+      },
+      "BuiltInLLMContent": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/BuiltInLLMContentPart"
+            }
+          }
+        ]
+      },
+      "BuiltInLLMContentPart": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BuiltInLLMTextPart"
+          },
+          {
+            "$ref": "#/$defs/BuiltInLLMImagePart"
+          },
+          {
+            "$ref": "#/$defs/BuiltInLLMToolCallPart"
+          },
+          {
+            "$ref": "#/$defs/BuiltInLLMToolResultPart"
+          }
+        ]
+      },
+      "BuiltInLLMToolResultPart": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "tool-result"
+            ]
+          },
+          "toolCallId": {
+            "type": "string"
+          },
+          "toolName": {
+            "type": "string"
+          },
+          "output": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "text"
+                    ]
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "type",
+                  "value"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "json"
+                    ]
+                  },
+                  "value": true
+                },
+                "required": [
+                  "type",
+                  "value"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "toolCallId",
+          "toolName",
+          "output"
+        ]
+      },
+      "BuiltInLLMToolCallPart": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "tool-call"
+            ]
+          },
+          "toolCallId": {
+            "type": "string"
+          },
+          "toolName": {
+            "type": "string"
+          },
+          "input": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "type",
+          "toolCallId",
+          "toolName",
+          "input"
+        ]
+      },
+      "BuiltInLLMImagePart": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "image"
+            ]
+          },
+          "image": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "image"
+        ]
+      },
+      "BuiltInLLMTextPart": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "text"
+            ]
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "text"
+        ]
+      }
+    }
+  }
+}

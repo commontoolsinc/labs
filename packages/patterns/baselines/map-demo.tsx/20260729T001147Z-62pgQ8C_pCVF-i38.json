@@ -1,0 +1,311 @@
+{
+  "pattern": "map-demo.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "tripName": {
+        "type": "string",
+        "default": "My Bay Area Trip"
+      },
+      "stops": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/TripStop"
+        },
+        "default": [],
+        "asCell": [
+          "cell"
+        ]
+      },
+      "areasOfInterest": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/AreaOfInterest"
+        },
+        "default": [],
+        "asCell": [
+          "cell"
+        ]
+      },
+      "showRoute": {
+        "type": "boolean",
+        "default": true,
+        "asCell": [
+          "cell"
+        ]
+      },
+      "center": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LatLng"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "asCell": [
+          "cell"
+        ]
+      },
+      "zoom": {
+        "type": "number",
+        "default": 9,
+        "asCell": [
+          "cell"
+        ]
+      },
+      "selectedStopIndex": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "asCell": [
+          "cell"
+        ]
+      },
+      "fitBoundsTrigger": {
+        "type": "number",
+        "default": 0,
+        "asCell": [
+          "cell"
+        ]
+      },
+      "initialized": {
+        "type": "boolean",
+        "default": false,
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "required": [
+      "tripName",
+      "stops",
+      "areasOfInterest",
+      "showRoute",
+      "center",
+      "zoom",
+      "selectedStopIndex",
+      "fitBoundsTrigger",
+      "initialized"
+    ],
+    "$defs": {
+      "LatLng": {
+        "type": "object",
+        "properties": {
+          "lat": {
+            "type": "number"
+          },
+          "lng": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "lat",
+          "lng"
+        ]
+      },
+      "AreaOfInterest": {
+        "type": "object",
+        "properties": {
+          "center": {
+            "$ref": "#/$defs/LatLng"
+          },
+          "radius": {
+            "type": "number"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "default": ""
+          },
+          "color": {
+            "type": "string",
+            "default": "#3b82f6"
+          }
+        },
+        "required": [
+          "center",
+          "radius",
+          "title",
+          "description",
+          "color"
+        ]
+      },
+      "TripStop": {
+        "type": "object",
+        "properties": {
+          "position": {
+            "$ref": "#/$defs/LatLng"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "default": ""
+          },
+          "icon": {
+            "type": "string",
+            "default": "pin"
+          },
+          "draggable": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "position",
+          "title",
+          "description",
+          "icon",
+          "draggable"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "tripName": {
+        "type": "string"
+      },
+      "stops": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/TripStop"
+        }
+      },
+      "areasOfInterest": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/AreaOfInterest"
+        }
+      },
+      "showRoute": {
+        "type": "boolean"
+      },
+      "center": {
+        "$ref": "#/$defs/LatLng"
+      },
+      "zoom": {
+        "type": "number"
+      },
+      "selectedStopIndex": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "fitBoundsTrigger": {
+        "type": "number"
+      },
+      "initialized": {
+        "type": "boolean"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "tripName",
+      "stops",
+      "areasOfInterest",
+      "showRoute",
+      "center",
+      "zoom",
+      "selectedStopIndex",
+      "fitBoundsTrigger",
+      "initialized",
+      "$UI"
+    ],
+    "$defs": {
+      "LatLng": {
+        "type": "object",
+        "properties": {
+          "lat": {
+            "type": "number"
+          },
+          "lng": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "lat",
+          "lng"
+        ]
+      },
+      "AreaOfInterest": {
+        "type": "object",
+        "properties": {
+          "center": {
+            "$ref": "#/$defs/LatLng"
+          },
+          "radius": {
+            "type": "number"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "default": ""
+          },
+          "color": {
+            "type": "string",
+            "default": "#3b82f6"
+          }
+        },
+        "required": [
+          "center",
+          "radius",
+          "title",
+          "description",
+          "color"
+        ]
+      },
+      "TripStop": {
+        "type": "object",
+        "properties": {
+          "position": {
+            "$ref": "#/$defs/LatLng"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "default": ""
+          },
+          "icon": {
+            "type": "string",
+            "default": "pin"
+          },
+          "draggable": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "position",
+          "title",
+          "description",
+          "icon",
+          "draggable"
+        ]
+      }
+    }
+  }
+}

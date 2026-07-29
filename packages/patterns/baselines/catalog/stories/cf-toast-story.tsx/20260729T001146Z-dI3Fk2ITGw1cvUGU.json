@@ -1,0 +1,26 @@
+{
+  "pattern": "catalog/stories/cf-toast-story.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "controls": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "controls",
+      "$NAME",
+      "$UI"
+    ]
+  }
+}

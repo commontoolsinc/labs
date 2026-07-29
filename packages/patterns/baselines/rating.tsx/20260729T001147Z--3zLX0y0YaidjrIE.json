@@ -1,0 +1,46 @@
+{
+  "pattern": "rating.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "rating": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "asCell": [
+          "cell"
+        ],
+        "description": "Rating from 1-5 stars"
+      }
+    },
+    "required": [
+      "rating"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "rating": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "description": "Rating from 1-5 stars"
+      }
+    },
+    "required": [
+      "rating"
+    ]
+  }
+}

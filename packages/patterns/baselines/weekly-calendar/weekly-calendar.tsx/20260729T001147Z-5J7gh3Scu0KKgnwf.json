@@ -1,0 +1,219 @@
+{
+  "pattern": "weekly-calendar/weekly-calendar.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "default": "Weekly Calendar"
+      },
+      "events": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/EventPiece"
+        },
+        "default": [],
+        "asCell": [
+          "cell"
+        ]
+      },
+      "isCalendar": {
+        "type": "boolean",
+        "default": true
+      },
+      "isHidden": {
+        "type": "boolean",
+        "default": false
+      }
+    },
+    "required": [
+      "events"
+    ],
+    "$defs": {
+      "EventPiece": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "startTime": {
+            "type": "string"
+          },
+          "endTime": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "isHidden": {
+            "type": "boolean"
+          },
+          "eventId": {
+            "type": "string"
+          },
+          "$NAME": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string"
+      },
+      "events": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/EventPiece"
+        }
+      },
+      "mentionable": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/EventPiece"
+        }
+      },
+      "eventCount": {
+        "type": "number"
+      },
+      "summary": {
+        "type": "string"
+      },
+      "isCalendar": {
+        "type": "boolean"
+      },
+      "isHidden": {
+        "type": "boolean"
+      },
+      "backlinks": {
+        "$ref": "#/$defs/AnonymousType_1"
+      },
+      "createEvent": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "startTime": {
+            "type": "string"
+          },
+          "endTime": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "date",
+          "startTime",
+          "endTime"
+        ]
+      },
+      "setTitle": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "newTitle": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "newTitle"
+        ]
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "title",
+      "events",
+      "mentionable",
+      "eventCount",
+      "summary",
+      "isCalendar",
+      "isHidden",
+      "backlinks",
+      "createEvent",
+      "setTitle",
+      "$UI"
+    ],
+    "$defs": {
+      "AnonymousType_1": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/MentionablePiece"
+        }
+      },
+      "MentionablePiece": {
+        "type": "object",
+        "properties": {
+          "isHidden": {
+            "type": "boolean"
+          },
+          "mentioned": {
+            "$ref": "#/$defs/AnonymousType_1"
+          },
+          "backlinks": {
+            "$ref": "#/$defs/AnonymousType_1"
+          },
+          "$NAME": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mentioned",
+          "backlinks"
+        ]
+      },
+      "EventPiece": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "startTime": {
+            "type": "string"
+          },
+          "endTime": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "isHidden": {
+            "type": "boolean"
+          },
+          "eventId": {
+            "type": "string"
+          },
+          "$NAME": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

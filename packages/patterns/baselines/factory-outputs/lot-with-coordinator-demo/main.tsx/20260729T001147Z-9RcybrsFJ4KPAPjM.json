@@ -1,0 +1,130 @@
+{
+  "pattern": "factory-outputs/lot-with-coordinator-demo/main.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "people": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Person"
+        }
+      },
+      "spots": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/ParkingSpot"
+        }
+      }
+    },
+    "required": [
+      "people",
+      "spots"
+    ],
+    "$defs": {
+      "ParkingSpot": {
+        "type": "object",
+        "properties": {
+          "spotNumber": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "spotNumber",
+          "label",
+          "notes",
+          "active"
+        ]
+      },
+      "Person": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "commuteMode": {
+            "$ref": "#/$defs/CommuteMode"
+          },
+          "spotPreferences": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "defaultSpot": {
+            "type": "string"
+          },
+          "priorityRank": {
+            "type": "number"
+          },
+          "vehicles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Vehicle"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "commuteMode",
+          "spotPreferences",
+          "defaultSpot",
+          "priorityRank"
+        ]
+      },
+      "Vehicle": {
+        "type": "object",
+        "properties": {
+          "plateId": {
+            "type": "string"
+          },
+          "plateState": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          },
+          "make": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "plateId",
+          "plateState",
+          "color",
+          "make",
+          "model"
+        ]
+      },
+      "CommuteMode": {
+        "enum": [
+          "drive",
+          "transit",
+          "bike",
+          "wfh",
+          "other"
+        ]
+      }
+    }
+  }
+}

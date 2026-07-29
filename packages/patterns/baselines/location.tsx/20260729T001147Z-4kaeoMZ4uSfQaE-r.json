@@ -1,0 +1,53 @@
+{
+  "pattern": "location.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "locationName": {
+        "type": "string",
+        "default": "",
+        "description": "Location name (e.g., venue, landmark)"
+      },
+      "locationAddress": {
+        "type": "string",
+        "default": "",
+        "description": "Full address"
+      },
+      "coordinates": {
+        "type": "string",
+        "default": "",
+        "description": "Coordinates in lat,lng format"
+      }
+    },
+    "required": [
+      "locationName",
+      "locationAddress",
+      "coordinates"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "locationName": {
+        "type": "string",
+        "default": "",
+        "description": "Location name (e.g., venue, landmark)"
+      },
+      "locationAddress": {
+        "type": "string",
+        "default": "",
+        "description": "Full address"
+      },
+      "coordinates": {
+        "type": "string",
+        "default": "",
+        "description": "Coordinates in lat,lng format"
+      }
+    },
+    "required": [
+      "locationName",
+      "locationAddress",
+      "coordinates"
+    ]
+  }
+}

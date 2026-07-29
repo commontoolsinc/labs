@@ -1,0 +1,112 @@
+{
+  "pattern": "self-reference-test.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "label": {
+        "type": "string",
+        "default": "Untitled"
+      },
+      "parent": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Output"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "registry": {
+        "$ref": "#/$defs/AnonymousType_1",
+        "default": [],
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "required": [
+      "label",
+      "parent",
+      "registry"
+    ],
+    "$defs": {
+      "AnonymousType_1": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Output"
+        }
+      },
+      "Output": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "parent": {
+            "$ref": "#/$defs/AnonymousType_2"
+          },
+          "children": {
+            "$ref": "#/$defs/AnonymousType_1"
+          }
+        },
+        "required": [
+          "label",
+          "parent",
+          "children"
+        ]
+      },
+      "AnonymousType_2": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Output"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "$ref": "#/$defs/Output",
+    "$defs": {
+      "Output": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "parent": {
+            "$ref": "#/$defs/AnonymousType_2"
+          },
+          "children": {
+            "$ref": "#/$defs/AnonymousType_1"
+          }
+        },
+        "required": [
+          "label",
+          "parent",
+          "children"
+        ]
+      },
+      "AnonymousType_1": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Output"
+        }
+      },
+      "AnonymousType_2": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Output"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,111 @@
+{
+  "pattern": "relationship.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "relationTypes": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "description": "Relationship types (e.g., friend, family, colleague)"
+      },
+      "closeness": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ClosenessLevel"
+          },
+          {
+            "type": "string",
+            "enum": [
+              ""
+            ]
+          }
+        ],
+        "default": "",
+        "description": "Closeness level"
+      },
+      "howWeMet": {
+        "type": "string",
+        "default": "",
+        "description": "How we met"
+      },
+      "innerCircle": {
+        "type": "boolean",
+        "default": false,
+        "description": "Inner circle member"
+      }
+    },
+    "required": [
+      "relationTypes",
+      "closeness",
+      "howWeMet",
+      "innerCircle"
+    ],
+    "$defs": {
+      "ClosenessLevel": {
+        "enum": [
+          "intimate",
+          "close",
+          "casual",
+          "distant"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "relationTypes": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "description": "Relationship types (e.g., friend, family, colleague)"
+      },
+      "closeness": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ClosenessLevel"
+          },
+          {
+            "type": "string",
+            "enum": [
+              ""
+            ]
+          }
+        ],
+        "default": "",
+        "description": "Closeness level"
+      },
+      "howWeMet": {
+        "type": "string",
+        "default": "",
+        "description": "How we met"
+      },
+      "innerCircle": {
+        "type": "boolean",
+        "default": false,
+        "description": "Inner circle member"
+      }
+    },
+    "required": [
+      "relationTypes",
+      "closeness",
+      "howWeMet",
+      "innerCircle"
+    ],
+    "$defs": {
+      "ClosenessLevel": {
+        "enum": [
+          "intimate",
+          "close",
+          "casual",
+          "distant"
+        ]
+      }
+    }
+  }
+}

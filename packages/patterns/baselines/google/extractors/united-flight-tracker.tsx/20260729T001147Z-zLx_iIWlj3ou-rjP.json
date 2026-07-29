@@ -1,0 +1,271 @@
+{
+  "pattern": "google/extractors/united-flight-tracker.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "overrideAuth": {
+        "$ref": "#/$defs/Auth",
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "$defs": {
+      "Auth": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "default": ""
+          },
+          "tokenType": {
+            "type": "string",
+            "default": ""
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "expiresIn": {
+            "type": "number",
+            "default": 0
+          },
+          "expiresAt": {
+            "type": "number",
+            "default": 0
+          },
+          "refreshToken": {
+            "type": "string",
+            "default": ""
+          },
+          "user": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "picture": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email",
+              "name",
+              "picture"
+            ],
+            "default": {
+              "email": "",
+              "name": "",
+              "picture": ""
+            }
+          }
+        },
+        "required": [
+          "token",
+          "tokenType",
+          "scope",
+          "expiresIn",
+          "expiresAt",
+          "refreshToken",
+          "user"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "emailCount": {
+        "type": "number"
+      },
+      "flights": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/TrackedFlight"
+        }
+      },
+      "upcomingFlights": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/TrackedFlight"
+        }
+      },
+      "checkInAvailable": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/TrackedFlight"
+        }
+      },
+      "activeAlerts": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/TrackedFlight"
+        }
+      },
+      "pastFlights": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/TrackedFlight"
+        }
+      },
+      "trips": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/TrackedTrip"
+        }
+      },
+      "$TILE_UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "emailCount",
+      "flights",
+      "upcomingFlights",
+      "checkInAvailable",
+      "activeAlerts",
+      "pastFlights",
+      "trips",
+      "$TILE_UI"
+    ],
+    "description": "United Airlines flight tracker. #unitedFlights",
+    "tags": [
+      "unitedflights"
+    ],
+    "$defs": {
+      "TrackedTrip": {
+        "type": "object",
+        "properties": {
+          "confirmationNumber": {
+            "type": "string"
+          },
+          "flights": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/TrackedFlight"
+            }
+          },
+          "passengerName": {
+            "type": "string"
+          },
+          "hasUpcomingFlights": {
+            "type": "boolean"
+          },
+          "nextFlight": {
+            "$ref": "#/$defs/TrackedFlight"
+          }
+        },
+        "required": [
+          "confirmationNumber",
+          "flights",
+          "hasUpcomingFlights"
+        ]
+      },
+      "TrackedFlight": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "confirmationNumber": {
+            "type": "string"
+          },
+          "flightNumber": {
+            "type": "string"
+          },
+          "departureCity": {
+            "type": "string"
+          },
+          "departureAirport": {
+            "type": "string"
+          },
+          "arrivalCity": {
+            "type": "string"
+          },
+          "arrivalAirport": {
+            "type": "string"
+          },
+          "departureDate": {
+            "type": "string"
+          },
+          "departureTime": {
+            "type": "string"
+          },
+          "arrivalTime": {
+            "type": "string"
+          },
+          "seat": {
+            "type": "string"
+          },
+          "gate": {
+            "type": "string"
+          },
+          "terminal": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/$defs/FlightStatus"
+          },
+          "delayMinutes": {
+            "type": "number"
+          },
+          "newDepartureTime": {
+            "type": "string"
+          },
+          "checkInAvailable": {
+            "type": "boolean"
+          },
+          "checkInDeadline": {
+            "type": "string"
+          },
+          "isUpcoming": {
+            "type": "boolean"
+          },
+          "daysUntilFlight": {
+            "type": "number"
+          },
+          "passengerName": {
+            "type": "string"
+          },
+          "emailIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "key",
+          "confirmationNumber",
+          "flightNumber",
+          "departureCity",
+          "departureAirport",
+          "arrivalCity",
+          "arrivalAirport",
+          "departureDate",
+          "departureTime",
+          "arrivalTime",
+          "status",
+          "checkInAvailable",
+          "isUpcoming",
+          "daysUntilFlight",
+          "emailIds"
+        ]
+      },
+      "FlightStatus": {
+        "enum": [
+          "scheduled",
+          "delayed",
+          "cancelled",
+          "completed"
+        ]
+      }
+    }
+  }
+}

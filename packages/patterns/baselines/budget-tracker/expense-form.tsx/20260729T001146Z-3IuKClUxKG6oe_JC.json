@@ -1,0 +1,172 @@
+{
+  "pattern": "budget-tracker/expense-form.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "expenses": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Expense"
+        },
+        "asCell": [
+          "cell"
+        ]
+      },
+      "budgets": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/CategoryBudget"
+        },
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "required": [
+      "expenses",
+      "budgets"
+    ],
+    "$defs": {
+      "CategoryBudget": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "category",
+          "limit"
+        ]
+      },
+      "Expense": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "category": {
+            "type": "string",
+            "default": "Other"
+          },
+          "date": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "amount",
+          "category",
+          "date"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "#/$defs/JSXElement"
+      },
+      "addExpense": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "category": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "amount"
+        ]
+      },
+      "setBudget": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "category",
+          "limit"
+        ]
+      },
+      "removeBudget": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "category"
+        ]
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI",
+      "addExpense",
+      "setBudget",
+      "removeBudget"
+    ],
+    "$defs": {
+      "JSXElement": {
+        "anyOf": [
+          {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          {
+            "$ref": "#/$defs/UIRenderable"
+          },
+          {
+            "type": "object",
+            "properties": {}
+          }
+        ]
+      },
+      "UIRenderable": {
+        "type": "object",
+        "properties": {
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          }
+        },
+        "required": [
+          "$UI"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,139 @@
+{
+  "pattern": "system/common-fabric.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "list": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/ListItem"
+        }
+      }
+    },
+    "required": [
+      "list"
+    ],
+    "$defs": {
+      "ListItem": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "tools": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": {
+          "$ref": "#/$defs/BuiltInLLMTool"
+        }
+      },
+      "list": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/ListItem"
+        }
+      }
+    },
+    "required": [
+      "tools",
+      "list"
+    ],
+    "$defs": {
+      "ListItem": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      },
+      "BuiltInLLMTool": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "string"
+              },
+              "pattern": {
+                "$ref": "#/$defs/Pattern"
+              },
+              "handler": {
+                "type": "undefined"
+              },
+              "extraParams": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              },
+              "useResultSchemaForObservation": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "pattern"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "description": {
+                "type": "string"
+              },
+              "handler": {
+                "anyOf": [
+                  {
+                    "asCell": [
+                      "stream"
+                    ]
+                  },
+                  {}
+                ]
+              },
+              "pattern": {
+                "type": "undefined"
+              }
+            },
+            "required": [
+              "handler"
+            ]
+          }
+        ]
+      },
+      "Pattern": {
+        "type": "object",
+        "properties": {
+          "argumentSchema": true,
+          "resultSchema": true,
+          "defaultScope": {
+            "$ref": "#/$defs/CellScope"
+          }
+        },
+        "required": [
+          "argumentSchema",
+          "resultSchema"
+        ]
+      },
+      "CellScope": {
+        "enum": [
+          "space",
+          "user",
+          "session"
+        ]
+      }
+    }
+  }
+}

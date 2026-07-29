@@ -1,0 +1,855 @@
+{
+  "pattern": "system/home.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "favorites": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Favorite"
+        },
+        "default": []
+      },
+      "journal": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/JournalEntry"
+        },
+        "default": []
+      },
+      "spaces": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/SpaceEntry"
+        },
+        "default": []
+      },
+      "defaultAppUrl": {
+        "type": "string",
+        "default": ""
+      },
+      "profiles": {
+        "$ref": "#/$defs/TrustedProfileList",
+        "default": []
+      },
+      "defaultProfile": {
+        "$ref": "#/$defs/TrustedDefaultProfile"
+      },
+      "mru": {
+        "$ref": "#/$defs/TrustedProfileMru",
+        "default": []
+      },
+      "createProfile": {
+        "asCell": [
+          "stream"
+        ],
+        "$ref": "#/$defs/CreateProfileEvent"
+      },
+      "addFavorite": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "piece": {
+            "type": "object",
+            "properties": {
+              "$NAME": {
+                "type": "string"
+              }
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "spaceName": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "piece"
+        ]
+      },
+      "removeFavorite": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "piece": {
+            "type": "unknown"
+          },
+          "id": {
+            "type": "string"
+          }
+        }
+      },
+      "addJournalEntry": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "entry": {
+            "$ref": "#/$defs/JournalEntry"
+          }
+        },
+        "required": [
+          "entry"
+        ]
+      },
+      "addSpace": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "detail"
+        ]
+      },
+      "removeSpace": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "type": "unknown"
+      }
+    },
+    "required": [
+      "favorites",
+      "journal",
+      "spaces",
+      "defaultAppUrl",
+      "profiles",
+      "mru",
+      "createProfile",
+      "addFavorite",
+      "removeFavorite",
+      "addJournalEntry",
+      "addSpace",
+      "removeSpace",
+      "$NAME",
+      "$UI"
+    ],
+    "$defs": {
+      "CreateProfileEvent": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              }
+            }
+          },
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "TrustedProfileMru": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/BackwardsCompatibleProfile",
+          "ifc": {
+            "writeAuthorizedBy": {
+              "__ctWriterIdentityOf": {
+                "file": "/packages/patterns/system/profile-create.tsx",
+                "path": [
+                  "setMruProfile"
+                ],
+                "moduleIdentity": "B_VWt7zYJWHbCSoxTT_h-8CyL5ay5yEPG4WvnlM-Pqk"
+              }
+            },
+            "addIntegrity": [
+              "profile-link"
+            ],
+            "uiContract": {
+              "helper": "UiAction",
+              "action": "SetMruProfile",
+              "trustedPattern": "ProfilePickerSurface",
+              "requiredEventIntegrity": [
+                "ProfilePickerSurface"
+              ]
+            }
+          }
+        },
+        "ifc": {
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/system/profile-create.tsx",
+              "path": [
+                "setMruProfile"
+              ],
+              "moduleIdentity": "B_VWt7zYJWHbCSoxTT_h-8CyL5ay5yEPG4WvnlM-Pqk"
+            }
+          },
+          "addIntegrity": [
+            "profile-link"
+          ]
+        }
+      },
+      "BackwardsCompatibleProfile": {
+        "type": "object",
+        "properties": {
+          "$NAME": {
+            "type": "string"
+          },
+          "$UI": {
+            "type": "unknown"
+          },
+          "name": {
+            "type": "string",
+            "ifc": {
+              "writeAuthorizedBy": {
+                "__ctWriterIdentityOf": {
+                  "file": "/packages/patterns/system/profile-home.tsx",
+                  "path": [
+                    "setName"
+                  ],
+                  "moduleIdentity": "Z_bIu7BuAKEy0ZkS0ORzKAslmhpjvUdaiyP1JVJX55U"
+                }
+              },
+              "ownerPrincipal": {
+                "__ctCurrentPrincipal": true
+              },
+              "addIntegrity": [
+                {
+                  "kind": "represents-principal",
+                  "subject": {
+                    "__ctCurrentPrincipal": true
+                  }
+                }
+              ]
+            }
+          },
+          "avatar": {
+            "type": "string",
+            "ifc": {
+              "writeAuthorizedBy": {
+                "__ctWriterIdentityOf": {
+                  "file": "/packages/patterns/system/profile-home.tsx",
+                  "path": [
+                    "setAvatar"
+                  ],
+                  "moduleIdentity": "Z_bIu7BuAKEy0ZkS0ORzKAslmhpjvUdaiyP1JVJX55U"
+                }
+              },
+              "ownerPrincipal": {
+                "__ctCurrentPrincipal": true
+              },
+              "addIntegrity": [
+                {
+                  "kind": "represents-principal",
+                  "subject": {
+                    "__ctCurrentPrincipal": true
+                  }
+                }
+              ]
+            }
+          },
+          "bio": {
+            "type": "string",
+            "ifc": {
+              "writeAuthorizedBy": {
+                "__ctWriterIdentityOf": {
+                  "file": "/packages/patterns/system/profile-home.tsx",
+                  "path": [
+                    "setBio"
+                  ],
+                  "moduleIdentity": "Z_bIu7BuAKEy0ZkS0ORzKAslmhpjvUdaiyP1JVJX55U"
+                }
+              },
+              "ownerPrincipal": {
+                "__ctCurrentPrincipal": true
+              },
+              "addIntegrity": [
+                {
+                  "kind": "represents-principal",
+                  "subject": {
+                    "__ctCurrentPrincipal": true
+                  }
+                }
+              ]
+            },
+            "default": ""
+          },
+          "externalLinks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/ExternalProfileLink"
+            },
+            "ifc": {
+              "writeAuthorizedBy": {
+                "__ctWriterIdentityOf": {
+                  "file": "/packages/patterns/system/profile-home.tsx",
+                  "path": [
+                    "mutateExternalProfileLinks"
+                  ],
+                  "moduleIdentity": "Z_bIu7BuAKEy0ZkS0ORzKAslmhpjvUdaiyP1JVJX55U"
+                }
+              },
+              "ownerPrincipal": {
+                "__ctCurrentPrincipal": true
+              },
+              "addIntegrity": [
+                {
+                  "kind": "represents-principal",
+                  "subject": {
+                    "__ctCurrentPrincipal": true
+                  }
+                }
+              ]
+            },
+            "default": []
+          },
+          "verifiedIdentities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/VerifiedExternalIdentity"
+            },
+            "ifc": {
+              "writeAuthorizedBy": {
+                "__ctWriterIdentityOf": {
+                  "file": "/packages/patterns/system/profile-home.tsx",
+                  "path": [
+                    "publishVerifiedIdentities"
+                  ],
+                  "moduleIdentity": "Z_bIu7BuAKEy0ZkS0ORzKAslmhpjvUdaiyP1JVJX55U"
+                }
+              },
+              "ownerPrincipal": {
+                "__ctCurrentPrincipal": true
+              },
+              "addIntegrity": [
+                {
+                  "kind": "represents-principal",
+                  "subject": {
+                    "__ctCurrentPrincipal": true
+                  }
+                }
+              ]
+            },
+            "default": []
+          },
+          "elements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/ProfileElement"
+            },
+            "ifc": {
+              "writeAuthorizedBy": {
+                "__ctWriterIdentityOf": {
+                  "file": "/packages/patterns/system/profile-home.tsx",
+                  "path": [
+                    "mutateElements"
+                  ],
+                  "moduleIdentity": "Z_bIu7BuAKEy0ZkS0ORzKAslmhpjvUdaiyP1JVJX55U"
+                }
+              },
+              "ownerPrincipal": {
+                "__ctCurrentPrincipal": true
+              },
+              "addIntegrity": [
+                {
+                  "kind": "represents-principal",
+                  "subject": {
+                    "__ctCurrentPrincipal": true
+                  }
+                }
+              ]
+            }
+          },
+          "setName": {
+            "asCell": [
+              "stream"
+            ],
+            "$ref": "#/$defs/SetProfileNameEvent"
+          },
+          "setAvatar": {
+            "asCell": [
+              "stream"
+            ],
+            "$ref": "#/$defs/SetProfileAvatarEvent"
+          },
+          "addElement": {
+            "asCell": [
+              "stream"
+            ],
+            "$ref": "#/$defs/MutateProfileElementsEvent"
+          },
+          "removeElement": {
+            "asCell": [
+              "stream"
+            ],
+            "$ref": "#/$defs/MutateProfileElementsEvent"
+          },
+          "isEditing": {
+            "type": "boolean",
+            "default": false
+          },
+          "initialNameApplied": {
+            "type": "string"
+          },
+          "setBio": {
+            "asCell": [
+              "stream"
+            ],
+            "$ref": "#/$defs/SetProfileBioEvent"
+          },
+          "addExternalLink": {
+            "asCell": [
+              "stream"
+            ],
+            "$ref": "#/$defs/MutateExternalProfileLinksEvent"
+          },
+          "removeExternalLink": {
+            "asCell": [
+              "stream"
+            ],
+            "$ref": "#/$defs/MutateExternalProfileLinksEvent"
+          },
+          "publishVerifiedIdentities": {
+            "asCell": [
+              "stream"
+            ],
+            "$ref": "#/$defs/MutateVerifiedIdentitiesEvent"
+          },
+          "revokeVerifiedIdentities": {
+            "asCell": [
+              "stream"
+            ],
+            "$ref": "#/$defs/MutateVerifiedIdentitiesEvent"
+          },
+          "addPiece": {
+            "asCell": [
+              "stream"
+            ],
+            "$ref": "#/$defs/MutateProfileElementsEvent"
+          },
+          "toggleEditing": {
+            "asCell": [
+              "stream",
+              "opaque"
+            ]
+          }
+        },
+        "required": [
+          "$NAME",
+          "$UI",
+          "name",
+          "avatar",
+          "bio",
+          "externalLinks",
+          "verifiedIdentities",
+          "elements",
+          "setName",
+          "setAvatar",
+          "addElement",
+          "removeElement",
+          "isEditing",
+          "initialNameApplied"
+        ]
+      },
+      "MutateVerifiedIdentitiesEvent": {
+        "type": "object",
+        "properties": {
+          "identities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/VerifiedExternalIdentity"
+            }
+          }
+        }
+      },
+      "MutateExternalProfileLinksEvent": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
+      "SetProfileBioEvent": {
+        "type": "object",
+        "properties": {
+          "bio": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              }
+            }
+          },
+          "key": {
+            "type": "string"
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "MutateProfileElementsEvent": {
+        "type": "object",
+        "properties": {
+          "catalogId": {
+            "type": "string"
+          },
+          "patternUrl": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "userTags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cell": true,
+          "pieceSpace": {
+            "type": "string"
+          },
+          "pieceId": {
+            "type": "string"
+          }
+        }
+      },
+      "SetProfileAvatarEvent": {
+        "type": "object",
+        "properties": {
+          "avatar": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              }
+            }
+          },
+          "key": {
+            "type": "string"
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "SetProfileNameEvent": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              }
+            }
+          },
+          "key": {
+            "type": "string"
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "ProfileElement": {
+        "type": "object",
+        "properties": {
+          "cell": true,
+          "tag": {
+            "type": "string"
+          },
+          "userTags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "title": {
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "piece",
+              "url",
+              "catalog"
+            ]
+          }
+        },
+        "required": [
+          "cell",
+          "tag",
+          "userTags"
+        ]
+      },
+      "VerifiedExternalIdentity": {
+        "$ref": "#/$defs/ExternalIdentityAssertion",
+        "ifc": {
+          "requiredIntegrity": [
+            "loom-verified-external-identity"
+          ]
+        }
+      },
+      "ExternalIdentityAssertion": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          },
+          "verifiedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "value",
+          "verifiedAt"
+        ]
+      },
+      "ExternalProfileLink": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "url"
+        ]
+      },
+      "TrustedDefaultProfile": {
+        "anyOf": [
+          {
+            "type": "undefined"
+          },
+          {
+            "$ref": "#/$defs/BackwardsCompatibleProfile"
+          }
+        ]
+      },
+      "TrustedProfileList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/TrustedProfileLink"
+        },
+        "ifc": {
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/system/profile-create.tsx",
+              "path": [
+                "submitProfileCreation"
+              ],
+              "moduleIdentity": "B_VWt7zYJWHbCSoxTT_h-8CyL5ay5yEPG4WvnlM-Pqk"
+            }
+          },
+          "addIntegrity": [
+            "profile-link"
+          ]
+        }
+      },
+      "TrustedProfileLink": {
+        "$ref": "#/$defs/BackwardsCompatibleProfile",
+        "ifc": {
+          "writeAuthorizedBy": {
+            "__ctWriterIdentityOf": {
+              "file": "/packages/patterns/system/profile-create.tsx",
+              "path": [
+                "submitProfileCreation"
+              ],
+              "moduleIdentity": "B_VWt7zYJWHbCSoxTT_h-8CyL5ay5yEPG4WvnlM-Pqk"
+            }
+          },
+          "addIntegrity": [
+            "profile-link"
+          ],
+          "uiContract": {
+            "helper": "UiAction",
+            "action": "CreateProfile",
+            "trustedPattern": "ProfileCreateSurface",
+            "requiredEventIntegrity": [
+              "ProfileCreateSurface"
+            ]
+          }
+        }
+      },
+      "SpaceEntry": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "did": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "JournalEntry": {
+        "type": "object",
+        "properties": {
+          "timestamp": {
+            "type": "number"
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "unknown"
+          },
+          "snapshot": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "schemaTag": {
+                "type": "string"
+              },
+              "valueExcerpt": {
+                "type": "string"
+              }
+            }
+          },
+          "narrative": {
+            "type": "string"
+          },
+          "narrativePending": {
+            "type": "boolean"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "space": {
+            "type": "string"
+          }
+        }
+      },
+      "Favorite": {
+        "type": "object",
+        "properties": {
+          "cell": {
+            "type": "object",
+            "properties": {
+              "$NAME": {
+                "type": "string"
+              }
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "userTags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "spaceName": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "cell",
+          "tags",
+          "userTags"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,150 @@
+{
+  "pattern": "image-analysis.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "systemPrompt": {
+        "type": "string"
+      },
+      "model": {
+        "type": "string"
+      }
+    },
+    "description": "Image Chat - Simple image upload with LLM analysis"
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "images": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/ImageData"
+        }
+      },
+      "prompt": {
+        "type": "string"
+      },
+      "response": {
+        "type": [
+          "string",
+          "undefined"
+        ]
+      },
+      "pending": {
+        "anyOf": [
+          {
+            "type": "undefined"
+          },
+          {
+            "type": "boolean"
+          }
+        ]
+      },
+      "ui": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "images",
+      "prompt",
+      "response",
+      "pending",
+      "ui"
+    ],
+    "$defs": {
+      "ImageData": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "data": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "number"
+          },
+          "width": {
+            "type": "number"
+          },
+          "height": {
+            "type": "number"
+          },
+          "size": {
+            "type": "number"
+          },
+          "type": {
+            "type": "string"
+          },
+          "exif": {
+            "type": "object",
+            "properties": {
+              "dateTime": {
+                "type": "string"
+              },
+              "make": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "orientation": {
+                "type": "number"
+              },
+              "gpsLatitude": {
+                "type": "number"
+              },
+              "gpsLongitude": {
+                "type": "number"
+              },
+              "gpsAltitude": {
+                "type": "number"
+              },
+              "fNumber": {
+                "type": "number"
+              },
+              "exposureTime": {
+                "type": "string"
+              },
+              "iso": {
+                "type": "number"
+              },
+              "focalLength": {
+                "type": "number"
+              },
+              "pixelXDimension": {
+                "type": "number"
+              },
+              "pixelYDimension": {
+                "type": "number"
+              },
+              "software": {
+                "type": "string"
+              },
+              "raw": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "url",
+          "data",
+          "timestamp",
+          "size",
+          "type"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,367 @@
+{
+  "pattern": "cozy-poll/main.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "question": {
+        "type": "string",
+        "default": "What should we pick?",
+        "scope": "space"
+      },
+      "options": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Option"
+        },
+        "default": [],
+        "scope": "space"
+      },
+      "votes": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Vote"
+        },
+        "default": [],
+        "scope": "space"
+      },
+      "users": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/User"
+        },
+        "default": [],
+        "scope": "space"
+      },
+      "adminName": {
+        "type": "string",
+        "default": "",
+        "scope": "space"
+      },
+      "myName": {
+        "type": "string",
+        "default": "",
+        "scope": "user"
+      }
+    },
+    "$defs": {
+      "User": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "avatar": {
+            "type": "string",
+            "description": "Avatar URL or glyph, snapshotted from the joiner's shared profile."
+          },
+          "color": {
+            "type": "string"
+          },
+          "joinedAt": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "color",
+          "joinedAt"
+        ]
+      },
+      "Vote": {
+        "type": "object",
+        "properties": {
+          "voterName": {
+            "type": "string"
+          },
+          "optionId": {
+            "type": "string"
+          },
+          "voteType": {
+            "$ref": "#/$defs/VoteColor"
+          }
+        },
+        "required": [
+          "voterName",
+          "optionId",
+          "voteType"
+        ]
+      },
+      "VoteColor": {
+        "enum": [
+          "green",
+          "yellow",
+          "red"
+        ]
+      },
+      "Option": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "addedByName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "addedByName"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "question": {
+        "type": "string"
+      },
+      "options": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Option"
+        }
+      },
+      "votes": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Vote"
+        }
+      },
+      "users": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/User"
+        }
+      },
+      "adminName": {
+        "type": "string"
+      },
+      "myName": {
+        "type": "string"
+      },
+      "userCount": {
+        "type": "number"
+      },
+      "optionCount": {
+        "type": "number"
+      },
+      "voteCount": {
+        "type": "number"
+      },
+      "isJoined": {
+        "type": "boolean"
+      },
+      "isAdmin": {
+        "type": "boolean"
+      },
+      "joinAs": {
+        "asCell": [
+          "stream"
+        ],
+        "$ref": "#/$defs/JoinEvent"
+      },
+      "claimHost": {
+        "asCell": [
+          "stream"
+        ],
+        "$ref": "#/$defs/ClaimHostEvent"
+      },
+      "addOption": {
+        "asCell": [
+          "stream"
+        ],
+        "$ref": "#/$defs/AddOptionEvent"
+      },
+      "removeOption": {
+        "asCell": [
+          "stream"
+        ],
+        "$ref": "#/$defs/RemoveOptionEvent"
+      },
+      "castVote": {
+        "asCell": [
+          "stream"
+        ],
+        "$ref": "#/$defs/CastVoteEvent"
+      },
+      "clearMyVote": {
+        "asCell": [
+          "stream"
+        ],
+        "$ref": "#/$defs/ClearVoteEvent"
+      },
+      "resetVotes": {
+        "asCell": [
+          "stream"
+        ],
+        "$ref": "#/$defs/ResetVotesEvent"
+      },
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "question",
+      "options",
+      "votes",
+      "users",
+      "adminName",
+      "myName",
+      "userCount",
+      "optionCount",
+      "voteCount",
+      "isJoined",
+      "isAdmin",
+      "joinAs",
+      "claimHost",
+      "addOption",
+      "removeOption",
+      "castVote",
+      "clearMyVote",
+      "resetVotes",
+      "$NAME",
+      "$UI"
+    ],
+    "$defs": {
+      "ResetVotesEvent": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "ClearVoteEvent": {
+        "type": "object",
+        "properties": {
+          "optionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "optionId"
+        ]
+      },
+      "CastVoteEvent": {
+        "type": "object",
+        "properties": {
+          "optionId": {
+            "type": "string"
+          },
+          "voteType": {
+            "$ref": "#/$defs/VoteColor"
+          }
+        },
+        "required": [
+          "optionId",
+          "voteType"
+        ]
+      },
+      "VoteColor": {
+        "enum": [
+          "green",
+          "yellow",
+          "red"
+        ]
+      },
+      "RemoveOptionEvent": {
+        "type": "object",
+        "properties": {
+          "optionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "optionId"
+        ]
+      },
+      "AddOptionEvent": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "ClaimHostEvent": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "JoinEvent": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "avatar": {
+            "type": "string",
+            "description": "Avatar URL or glyph, snapshotted from the joiner's shared profile."
+          },
+          "color": {
+            "type": "string"
+          },
+          "joinedAt": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "color",
+          "joinedAt"
+        ]
+      },
+      "Vote": {
+        "type": "object",
+        "properties": {
+          "voterName": {
+            "type": "string"
+          },
+          "optionId": {
+            "type": "string"
+          },
+          "voteType": {
+            "$ref": "#/$defs/VoteColor"
+          }
+        },
+        "required": [
+          "voterName",
+          "optionId",
+          "voteType"
+        ]
+      },
+      "Option": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "addedByName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "addedByName"
+        ]
+      }
+    }
+  }
+}

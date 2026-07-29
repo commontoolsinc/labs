@@ -1,0 +1,43 @@
+{
+  "pattern": "image.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string",
+        "default": ""
+      },
+      "caption": {
+        "type": "string",
+        "default": ""
+      }
+    },
+    "required": [
+      "url",
+      "caption"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "url": {
+        "type": "string"
+      },
+      "caption": {
+        "type": "string"
+      },
+      "$NAME": {
+        "type": "unknown"
+      },
+      "$UI": {
+        "type": "unknown"
+      }
+    },
+    "required": [
+      "url",
+      "caption",
+      "$NAME",
+      "$UI"
+    ]
+  }
+}

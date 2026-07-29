@@ -1,0 +1,281 @@
+{
+  "pattern": "scoped-group-chat/main-with-writable-inputs.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "default": "",
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "user"
+          }
+        ]
+      },
+      "selectedRoom": {
+        "$ref": "#/$defs/SelectedRoom",
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "session"
+          }
+        ]
+      },
+      "conversation": {
+        "$ref": "#/$defs/Conversation",
+        "default": {
+          "rooms": []
+        },
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "space"
+          }
+        ]
+      },
+      "draft": {
+        "type": "string",
+        "default": "",
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "user"
+          }
+        ]
+      },
+      "newRoomName": {
+        "type": "string",
+        "default": "",
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "session"
+          }
+        ]
+      }
+    },
+    "$defs": {
+      "Conversation": {
+        "type": "object",
+        "properties": {
+          "rooms": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Room"
+            },
+            "default": []
+          }
+        },
+        "required": [
+          "rooms"
+        ]
+      },
+      "Room": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/ChatMessage"
+            },
+            "default": []
+          }
+        },
+        "required": [
+          "name",
+          "messages"
+        ]
+      },
+      "ChatMessage": {
+        "type": "object",
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "sentAt": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "author",
+          "body",
+          "sentAt"
+        ]
+      },
+      "SelectedRoom": {
+        "type": "object",
+        "properties": {
+          "room": {
+            "$ref": "#/$defs/Room"
+          }
+        }
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "default": "",
+        "scope": "user"
+      },
+      "selectedRoom": {
+        "$ref": "#/$defs/SelectedRoom",
+        "scope": "session"
+      },
+      "conversation": {
+        "$ref": "#/$defs/Conversation",
+        "default": {
+          "rooms": []
+        },
+        "scope": "space"
+      },
+      "draft": {
+        "type": "string",
+        "default": "",
+        "scope": "user"
+      },
+      "newRoomName": {
+        "type": "string",
+        "default": "",
+        "scope": "session"
+      },
+      "messageCount": {
+        "type": "number"
+      },
+      "roomCount": {
+        "type": "number"
+      },
+      "sendMessage": {
+        "asCell": [
+          "stream"
+        ],
+        "$ref": "#/$defs/SendMessageEvent"
+      },
+      "addRoom": {
+        "asCell": [
+          "stream"
+        ],
+        "$ref": "#/$defs/AddRoomEvent"
+      },
+      "selectRoom": {
+        "asCell": [
+          "stream"
+        ],
+        "$ref": "#/$defs/SelectRoomEvent"
+      },
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "name",
+      "selectedRoom",
+      "conversation",
+      "draft",
+      "newRoomName",
+      "messageCount",
+      "roomCount",
+      "sendMessage",
+      "addRoom",
+      "selectRoom",
+      "$NAME",
+      "$UI"
+    ],
+    "$defs": {
+      "SelectRoomEvent": {
+        "type": "object",
+        "properties": {
+          "room": {
+            "$ref": "#/$defs/Room"
+          }
+        }
+      },
+      "Room": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/ChatMessage"
+            },
+            "default": []
+          }
+        },
+        "required": [
+          "name",
+          "messages"
+        ]
+      },
+      "ChatMessage": {
+        "type": "object",
+        "properties": {
+          "author": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "sentAt": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "author",
+          "body",
+          "sentAt"
+        ]
+      },
+      "AddRoomEvent": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "SendMessageEvent": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "Conversation": {
+        "type": "object",
+        "properties": {
+          "rooms": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Room"
+            },
+            "default": []
+          }
+        },
+        "required": [
+          "rooms"
+        ]
+      },
+      "SelectedRoom": {
+        "type": "object",
+        "properties": {
+          "room": {
+            "$ref": "#/$defs/Room"
+          }
+        }
+      }
+    }
+  }
+}

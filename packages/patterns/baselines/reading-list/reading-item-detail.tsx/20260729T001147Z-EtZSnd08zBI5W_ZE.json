@@ -1,0 +1,243 @@
+{
+  "pattern": "reading-list/reading-item-detail.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string",
+        "default": "",
+        "asCell": [
+          "cell"
+        ]
+      },
+      "author": {
+        "type": "string",
+        "default": "",
+        "asCell": [
+          "cell"
+        ]
+      },
+      "url": {
+        "type": "string",
+        "default": "",
+        "asCell": [
+          "cell"
+        ]
+      },
+      "type": {
+        "$ref": "#/$defs/ItemType",
+        "default": "article",
+        "asCell": [
+          "cell"
+        ]
+      },
+      "status": {
+        "$ref": "#/$defs/ItemStatus",
+        "default": "want",
+        "asCell": [
+          "cell"
+        ]
+      },
+      "rating": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "asCell": [
+          "cell"
+        ]
+      },
+      "notes": {
+        "type": "string",
+        "default": "",
+        "asCell": [
+          "cell"
+        ]
+      },
+      "addedAt": {
+        "type": "number",
+        "default": 0
+      },
+      "finishedAt": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "description": "Input for creating a new reading item detail piece",
+    "$defs": {
+      "ItemStatus": {
+        "enum": [
+          "want",
+          "reading",
+          "finished",
+          "abandoned"
+        ]
+      },
+      "ItemType": {
+        "enum": [
+          "book",
+          "article",
+          "paper",
+          "video"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "title": {
+        "type": "string"
+      },
+      "author": {
+        "type": "string"
+      },
+      "url": {
+        "type": "string"
+      },
+      "type": {
+        "$ref": "#/$defs/ItemType"
+      },
+      "status": {
+        "$ref": "#/$defs/ItemStatus"
+      },
+      "rating": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "notes": {
+        "type": "string"
+      },
+      "summary": {
+        "type": "string"
+      },
+      "addedAt": {
+        "type": "number"
+      },
+      "finishedAt": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "setStatus": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "status": {
+            "$ref": "#/$defs/ItemStatus"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "setRating": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "rating": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "rating"
+        ]
+      },
+      "setNotes": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "notes": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "notes"
+        ]
+      },
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "title",
+      "author",
+      "url",
+      "type",
+      "status",
+      "rating",
+      "notes",
+      "summary",
+      "addedAt",
+      "finishedAt",
+      "setStatus",
+      "setRating",
+      "setNotes",
+      "$NAME",
+      "$UI"
+    ],
+    "description": "Output shape of the reading item piece - this is what gets stored in lists\n#book #article #reading",
+    "tags": [
+      "book",
+      "article",
+      "reading"
+    ],
+    "$defs": {
+      "ItemStatus": {
+        "enum": [
+          "want",
+          "reading",
+          "finished",
+          "abandoned"
+        ]
+      },
+      "ItemType": {
+        "enum": [
+          "book",
+          "article",
+          "paper",
+          "video"
+        ]
+      }
+    }
+  }
+}

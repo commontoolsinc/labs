@@ -1,0 +1,29 @@
+{
+  "pattern": "nickname.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "nickname": {
+        "type": "string",
+        "default": "",
+        "description": "Nickname or alias"
+      }
+    },
+    "required": [
+      "nickname"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "nickname": {
+        "type": "string",
+        "default": "",
+        "description": "Nickname or alias"
+      }
+    },
+    "required": [
+      "nickname"
+    ]
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "pattern": "gideon-tests/test-onclick-ifelse-simple-cell-working.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "count": {
+        "type": "number",
+        "default": 0
+      },
+      "showButton": {
+        "type": "boolean",
+        "default": true
+      }
+    },
+    "required": [
+      "count",
+      "showButton"
+    ]
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "#/$defs/JSXElement"
+      },
+      "count": {
+        "type": "number"
+      },
+      "showButton": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI",
+      "count",
+      "showButton"
+    ],
+    "$defs": {
+      "JSXElement": {
+        "anyOf": [
+          {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          {
+            "$ref": "#/$defs/UIRenderable"
+          },
+          {
+            "type": "object",
+            "properties": {}
+          }
+        ]
+      },
+      "UIRenderable": {
+        "type": "object",
+        "properties": {
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          }
+        },
+        "required": [
+          "$UI"
+        ]
+      }
+    }
+  }
+}

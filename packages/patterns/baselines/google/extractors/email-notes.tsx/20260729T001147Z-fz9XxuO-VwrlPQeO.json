@@ -1,0 +1,62 @@
+{
+  "pattern": "google/extractors/email-notes.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {}
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "notes": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/Note"
+        }
+      },
+      "noteCount": {
+        "type": "number"
+      },
+      "$TILE_UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "notes",
+      "noteCount",
+      "$TILE_UI"
+    ],
+    "description": "Email notes manager for quick notes sent to self. #emailNotes",
+    "tags": [
+      "emailnotes"
+    ],
+    "$defs": {
+      "Note": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "htmlContent": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "snippet": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "content",
+          "htmlContent",
+          "date",
+          "snippet"
+        ]
+      }
+    }
+  }
+}

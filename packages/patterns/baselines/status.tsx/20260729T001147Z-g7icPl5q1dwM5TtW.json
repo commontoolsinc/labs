@@ -1,0 +1,71 @@
+{
+  "pattern": "status.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/StatusValue"
+          },
+          {
+            "type": "string",
+            "enum": [
+              ""
+            ]
+          }
+        ],
+        "default": "",
+        "description": "Project status"
+      }
+    },
+    "required": [
+      "status"
+    ],
+    "$defs": {
+      "StatusValue": {
+        "enum": [
+          "planned",
+          "active",
+          "blocked",
+          "done",
+          "archived"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/StatusValue"
+          },
+          {
+            "type": "string",
+            "enum": [
+              ""
+            ]
+          }
+        ],
+        "default": "",
+        "description": "Project status"
+      }
+    },
+    "required": [
+      "status"
+    ],
+    "$defs": {
+      "StatusValue": {
+        "enum": [
+          "planned",
+          "active",
+          "blocked",
+          "done",
+          "archived"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,272 @@
+{
+  "pattern": "google/extractors/berkeley-library.tsx",
+  "argumentSchema": {
+    "type": "object",
+    "properties": {
+      "overrideAuth": {
+        "$ref": "#/$defs/Auth",
+        "asCell": [
+          "cell"
+        ]
+      },
+      "manuallyReturned": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "asCell": [
+          "cell"
+        ]
+      },
+      "dismissedHolds": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "asCell": [
+          "cell"
+        ]
+      },
+      "selectedItems": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "asCell": [
+          "cell"
+        ]
+      },
+      "dueDateOverrides": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": {
+          "type": "string"
+        },
+        "asCell": [
+          "cell"
+        ]
+      }
+    },
+    "$defs": {
+      "Auth": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "default": ""
+          },
+          "tokenType": {
+            "type": "string",
+            "default": ""
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "expiresIn": {
+            "type": "number",
+            "default": 0
+          },
+          "expiresAt": {
+            "type": "number",
+            "default": 0
+          },
+          "refreshToken": {
+            "type": "string",
+            "default": ""
+          },
+          "user": {
+            "type": "object",
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "picture": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "email",
+              "name",
+              "picture"
+            ],
+            "default": {
+              "email": "",
+              "name": "",
+              "picture": ""
+            }
+          }
+        },
+        "required": [
+          "token",
+          "tokenType",
+          "scope",
+          "expiresIn",
+          "expiresAt",
+          "refreshToken",
+          "user"
+        ]
+      }
+    }
+  },
+  "resultSchema": {
+    "type": "object",
+    "properties": {
+      "trackedItems": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/TrackedItem"
+        }
+      },
+      "holdsReady": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/TrackedItem"
+        }
+      },
+      "overdueCount": {
+        "type": "number"
+      },
+      "checkedOutCount": {
+        "type": "number"
+      },
+      "holdsReadyCount": {
+        "type": "number"
+      },
+      "markAsReturned": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      },
+      "dismissHold": {
+        "asCell": [
+          "stream"
+        ],
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      },
+      "$TILE_UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "trackedItems",
+      "holdsReady",
+      "overdueCount",
+      "checkedOutCount",
+      "holdsReadyCount",
+      "markAsReturned",
+      "dismissHold",
+      "$TILE_UI"
+    ],
+    "description": "Berkeley Public Library book tracker. #berkeleyLibrary",
+    "tags": [
+      "berkeleylibrary"
+    ],
+    "$defs": {
+      "TrackedItem": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "dueDate": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/$defs/ItemStatus"
+          },
+          "itemType": {
+            "$ref": "#/$defs/ItemType"
+          },
+          "renewalsRemaining": {
+            "type": "number"
+          },
+          "fineAmount": {
+            "type": "number"
+          },
+          "urgency": {
+            "$ref": "#/$defs/UrgencyLevel"
+          },
+          "daysUntilDue": {
+            "type": "number"
+          },
+          "emailDate": {
+            "type": "string"
+          },
+          "isManuallyReturned": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "status",
+          "urgency",
+          "daysUntilDue",
+          "emailDate",
+          "isManuallyReturned"
+        ]
+      },
+      "UrgencyLevel": {
+        "enum": [
+          "overdue",
+          "urgent_1day",
+          "warning_3days",
+          "notice_7days",
+          "ok"
+        ]
+      },
+      "ItemType": {
+        "enum": [
+          "other",
+          "book",
+          "audiobook",
+          "dvd",
+          "magazine",
+          "ebook"
+        ]
+      },
+      "ItemStatus": {
+        "enum": [
+          "hold_ready",
+          "checked_out",
+          "overdue",
+          "renewed",
+          "returned"
+        ]
+      }
+    }
+  }
+}
