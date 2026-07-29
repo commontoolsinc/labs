@@ -70,23 +70,68 @@ function clean(line: string): string {
   return line.endsWith("\r") ? line.slice(0, -1) : line;
 }
 
-/**
- * True when the text reads as a unified diff: a `diff --git` header, or a
- * `---` / `+++` pair followed shortly by an `@@` hunk header.
- */
-export function looksLikeDiff(text: string): boolean {
-  const lines = text.split("\n", 400).map(clean);
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].startsWith("diff --git ")) return true;
-    if (
-      lines[i].startsWith("--- ") &&
-      lines[i + 1]?.startsWith("+++ ") &&
-      HUNK_RE.test(lines[i + 2] ?? "")
-    ) {
-      return true;
-    }
+interface ScannedLine {
+  readonly text: string;
+  readonly number: number;
+  readonly nextOffset?: number;
+}
+
+function lineAt(text: string, offset: number, number: number): ScannedLine {
+  const end = text.indexOf("\n", offset);
+  return {
+    text: clean(text.slice(offset, end < 0 ? text.length : end)),
+    number,
+    nextOffset: end < 0 ? undefined : end + 1,
+  };
+}
+
+function firstNonEmptyLine(text: string): ScannedLine | null {
+  let offset = 0;
+  let number = 0;
+  for (;;) {
+    const line = lineAt(text, offset, number);
+    if (line.text.trim().length > 0) return line;
+    if (line.nextOffset === undefined) return null;
+    offset = line.nextOffset;
+    number++;
   }
-  return false;
+}
+
+/**
+ * Detect a raw unified-diff container and return its parsed model. The first
+ * non-empty line must start the container. A Git diff must include classified
+ * metadata or a hunk after its `diff --git` header. A plain unified diff must
+ * start with its `---`, `+++`, and `@@` header sequence.
+ */
+export function detectDiff(text: string): DiffModel | null {
+  const first = firstNonEmptyLine(text);
+  if (!first) return null;
+
+  const git = first.text.startsWith("diff --git ");
+  const second = first.nextOffset === undefined
+    ? undefined
+    : lineAt(text, first.nextOffset, first.number + 1);
+  const third = second?.nextOffset === undefined
+    ? undefined
+    : lineAt(text, second.nextOffset, second.number + 1);
+  const plain = first.text.startsWith("--- ") &&
+    second?.text.startsWith("+++ ") &&
+    HUNK_RE.test(third?.text ?? "");
+  if (!git && !plain) return null;
+
+  const model = parseDiff(text);
+  const firstFile = model?.files.find((file) =>
+    file.headerLine === first.number
+  );
+  if (!model || !firstFile) return null;
+  if (git && firstFile.endLine === firstFile.headerLine) return null;
+  if (plain && firstFile.hunks.length === 0) return null;
+  return model;
+}
+
+/** Whether {@link detectDiff} recognizes the text as a raw unified diff. */
+export function looksLikeDiff(text: string): boolean {
+  return detectDiff(text) !== null;
 }
 
 /** Parse a unified diff. Returns null when no file/hunk structure is found. */

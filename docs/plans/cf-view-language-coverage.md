@@ -6,6 +6,9 @@ output keeps its TypeScript default. Piped source can select a language directly
 or through a virtual filename. Declarative metadata can now describe extensions,
 exact names, compound patterns, explicit aliases, and direct interpreter
 shebangs. Python files with recognized extensions now have syntax highlighting.
+Automatic container detection is limited to structurally identified raw unified
+diffs and standard Git commit output. Recognized shebangs and transformed
+compiler headers remain explicit source selectors.
 The order is provisional because recent activity was measured in six of the 24
 active organization repositories.
 
@@ -91,7 +94,7 @@ relative value. Record the reason in this plan.
 - [x] Add `--language` and `--filename` overrides for piped input.
 - [x] Represent extensions, exact filenames, compound filename patterns,
   aliases, and shebang interpreters as language metadata.
-- [ ] Keep content detection only for unambiguous containers such as unified
+- [x] Keep content detection only for unambiguous containers such as unified
   diffs.
 - [ ] Detect known binary files and NUL-containing input before source
   decoding.

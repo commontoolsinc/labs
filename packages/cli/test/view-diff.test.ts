@@ -145,12 +145,41 @@ Deno.test("diff: detection accepts git and plain unified diffs, rejects code", (
 +c
 `;
   assert(looksLikeDiff(plain), "plain diff -u detected");
+  assert(looksLikeDiff(`\n \t\n${plain}`), "leading blank lines are ignored");
   assert(!looksLikeDiff(SAMPLE), "transformed blob is not a diff");
   assert(!looksLikeDiff("const x = 1;\nconst y = 2;\n"), "code is not a diff");
   assert(
     !looksLikeDiff("--- header ---\nsome prose\nmore prose\n"),
     "a lone --- line is not a diff",
   );
+  assert(
+    !looksLikeDiff("diff --git a/x.ts b/x.ts\n"),
+    "a lone git header is not a diff",
+  );
+  assert(
+    !looksLikeDiff(
+      "diff --git a/x.ts b/x.ts\n" +
+        "const value = 1;\n" +
+        "export { value };\n",
+    ),
+    "a git header followed by source is not a diff",
+  );
+  const embedded = `const patch = \`
+diff --git a/x.ts b/x.ts
+--- a/x.ts
++++ b/x.ts
+@@ -1 +1 @@
+-old
++new
+\`;
+`;
+  assert(!looksLikeDiff(embedded), "a diff inside source is not a container");
+  const rename = `diff --git a/old.ts b/new.ts
+similarity index 100%
+rename from old.ts
+rename to new.ts
+`;
+  assert(looksLikeDiff(rename), "a metadata-only git diff is detected");
 });
 
 // --- parsing -------------------------------------------------------------------
@@ -1111,14 +1140,14 @@ Deno.test("mod: buildView routes diffs to diff mode, sources to source mode", ()
   // Source code routes to source mode.
   const srcView = buildView("const x = 1;\nconst y = 2;\n");
   assert(!srcView.doc.flatStructure.some((n) => n.kind === "hunk"));
-  // A source file that merely EMBEDS a short diff stays in source mode (the
-  // diff-content share is far below the threshold)…
+  // A source file that embeds a short diff stays in source mode.
   const embedded =
     "const patch = `\n--- a/x.ts\n+++ b/x.ts\n@@ -1,1 +1,1 @@\n-old\n+new\n`;\n" +
     Array.from({ length: 40 }, (_, i) => `const filler${i} = ${i};`).join("\n");
-  assert(looksLikeDiff(embedded), "the heuristic alone would misroute");
+  assert(!looksLikeDiff(embedded), "the embedded patch is not a raw diff");
   assert(!buildView(embedded).doc.flatStructure.some((n) => n.kind === "hunk"));
-  // …unless forced; and --no-diff suppresses a real diff.
+  // Forced diff mode accepts the embedded patch. No-diff mode suppresses a
+  // raw diff.
   assert(
     buildView(embedded, undefined, true).doc.flatStructure.some((n) =>
       n.kind === "hunk"
