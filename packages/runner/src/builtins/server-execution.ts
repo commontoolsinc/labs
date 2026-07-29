@@ -12,6 +12,11 @@ export const SERVER_EXECUTABLE_BUILTIN_IDS = [
   "fetchJson",
   "fetchJsonUnchecked",
   "fetchProgram",
+  // The three LLM builtins share one broker route: `executeWithToolsLoop` →
+  // `llmClientOptions` → `runtime.fetchBuiltin(<id>, "/api/ai/llm", …)`. Each
+  // passes its own id so the host egress classifier and the per-builtin
+  // channel keep them distinct.
+  "llm",
   "generateText",
   "generateObject",
 ] as const;

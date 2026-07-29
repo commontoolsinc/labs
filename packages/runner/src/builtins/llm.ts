@@ -65,10 +65,13 @@ const logger = getLogger("llm", {
 
 const client = new LLMClient();
 
+/** The LLM builtins that have a server broker route (R5). */
+type LLMServerBuiltinId = "llm" | "generateText" | "generateObject";
+
 function llmClientOptions(
   runtime: Runtime,
   space: MemorySpace,
-  serverBuiltinId?: "generateText" | "generateObject",
+  serverBuiltinId?: LLMServerBuiltinId,
 ): LLMClientRequestOptions | undefined {
   const mappedLlmHost = runtime.mappedHostFor(space);
   if (!runtime.hasServerBuiltinFetch()) {
@@ -388,7 +391,7 @@ async function executeWithToolsLoop(params: {
   getCurrentRun: () => number;
   thisRun: number;
   onComplete: (llmResult: LLMResponse) => Promise<void>;
-  serverBuiltinId?: "generateText" | "generateObject";
+  serverBuiltinId?: LLMServerBuiltinId;
 }): Promise<void> {
   const {
     llmParams,
@@ -671,8 +674,9 @@ export function llm(
   let cellsInitialized = false;
   let resultCell: Cell<Schema<typeof LLMResultSchema>>;
   let cellScope: CellScope | undefined;
+  const serverBuiltinRuntimeWrites: NormalizedFullLink[] = [];
 
-  return (tx: IExtendedStorageTransaction) => {
+  const action: Action = (tx: IExtendedStorageTransaction) => {
     tx.resetNarrowestReadScope();
     const {
       system,
@@ -714,6 +718,17 @@ export function llm(
       cellsInitialized = true;
       cellScope = outputScope;
     }
+    // The `{ llm: { result: cause } }` document is minted here, not registered
+    // as an output cell, so the generically-minted `ServerBuiltinActionDescriptor`
+    // (runner.ts) cannot see it. Publish it as a runtime write — exactly as
+    // generateText/generateObject do — or a claimed server run writes
+    // `pending`/`result`/`error`/`partial`/`requestHash` outside its declared
+    // surface and de-claims fail-closed at the firewall.
+    serverBuiltinRuntimeWrites.splice(
+      0,
+      serverBuiltinRuntimeWrites.length,
+      resultCell.getAsNormalizedFullLink(),
+    );
 
     const thisRun = ++currentRun;
     const pendingWithLog = resultCell.key("pending").withTx(tx);
@@ -830,6 +845,7 @@ export function llm(
                 space: parentCell.space,
                 getCurrentRun: getRunForCancellation,
                 thisRun,
+                serverBuiltinId: "llm",
                 onComplete: async (llmResult) => {
                   // Skip if a newer request has already superseded this one.
                   if (hash !== previousCallHash) return;
@@ -904,6 +920,12 @@ export function llm(
       },
     );
   };
+  return Object.assign(action, {
+    serverBuiltinRuntimeWrites,
+    prepareClaimedRerun: () => {
+      previousCallHash = undefined;
+    },
+  });
 }
 
 /**

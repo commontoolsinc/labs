@@ -33,6 +33,7 @@ const EXPECTED_SERVER_EXECUTABLE_BUILTIN_IDS = [
   "fetchJson",
   "fetchJsonUnchecked",
   "fetchProgram",
+  "llm",
   "generateText",
   "generateObject",
 ] as const satisfies readonly ServerExecutableBuiltinId[];
@@ -379,13 +380,16 @@ Deno.test("server executable builtin registry is exact and excludes ambient capa
   );
   // R5 boundary, re-pinned at C2.8: the scoped-lane egress lift changes
   // WHICH LANES a supported builtin may serve, never WHICH builtins are
-  // supported — `llm` and `sqliteQuery` stay outside the registry (their
-  // broker implementations are the R5 worklist, owner 2026-07-17).
+  // supported. `llm` joined the registry when it was given the same
+  // `/api/ai/llm` broker route generateText already had (A1); `sqliteQuery`
+  // is not fetch-shaped and stays outside until its own broker exists.
+  // `fetch`/`generateImage` are ambient capabilities, not builtin ids, and
+  // must never resolve here.
   assertEquals(
-    ["fetch", "generateImage", "llm", "sqliteQuery"].map(
+    ["fetch", "generateImage", "sqliteQuery"].map(
       isServerExecutableBuiltinId,
     ),
-    [false, false, false, false],
+    [false, false, false],
   );
 });
 
@@ -1629,7 +1633,8 @@ Deno.test("executor router presents the claimed session §4 pair with the sessio
   };
   const router = sessionLaneRouter(candidates, diagnostics, {
     openLaneKeys: [SESSION_LANE],
-    claimForAction: (_action, lane) => lane === SESSION_LANE ? claim : undefined,
+    claimForAction: (_action, lane) =>
+      lane === SESSION_LANE ? claim : undefined,
   });
 
   const claimed = sessionWideningPairCommit();
@@ -1816,9 +1821,7 @@ Deno.test("C2.8: a session-scoped supported builtin candidates broker-backed at 
     ["fetchText", "fetchText"],
   );
   assertEquals(
-    candidates.every((candidate) =>
-      candidate.claimKey.actionKind === "effect"
-    ),
+    candidates.every((candidate) => candidate.claimKey.actionKind === "effect"),
     true,
   );
 });

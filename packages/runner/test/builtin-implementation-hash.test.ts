@@ -2,6 +2,8 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   builtinImplementationHash,
+  isServerExecutableBuiltinId,
+  SERVER_EXECUTABLE_BUILTIN_IDS,
   serverBuiltinImplementationHash,
 } from "../src/builtins/server-execution.ts";
 
@@ -29,6 +31,28 @@ describe("builtinImplementationHash", () => {
     );
     expect(builtinImplementationHash("fetchText")).not.toBe(
       serverBuiltinImplementationHash("fetchText"),
+    );
+  });
+});
+
+describe("SERVER_EXECUTABLE_BUILTIN_IDS", () => {
+  // A1: `llm` reaches the model through exactly the same `/api/ai/llm` broker
+  // route as `generateText` — same `executeWithToolsLoop`, same
+  // `llmClientOptions`. Membership here is what earns it the `:server-v1`
+  // fingerprint; outside the set it takes the `:v1` identity instead and
+  // rejects as `incomplete-static-surface`.
+  it("includes `llm`, which shares generateText's broker route", () => {
+    expect(SERVER_EXECUTABLE_BUILTIN_IDS).toContain("llm");
+    const id: string = "llm";
+    expect(isServerExecutableBuiltinId(id)).toBe(true);
+    // Guard (not an assertion): narrows `id` for the hash calls below in both
+    // the red and green worlds, so this file type-checks either way.
+    if (!isServerExecutableBuiltinId(id)) return;
+    expect(serverBuiltinImplementationHash(id)).toBe(
+      "cf:builtin/llm:server-v1",
+    );
+    expect(builtinImplementationHash(id)).not.toBe(
+      serverBuiltinImplementationHash(id),
     );
   });
 });

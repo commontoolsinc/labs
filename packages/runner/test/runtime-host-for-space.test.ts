@@ -3,7 +3,10 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { Runtime } from "@commonfabric/runner";
+import type { ServerBuiltinActionDescriptor } from "../src/builtins/server-execution.ts";
+import type { Cell } from "../src/cell.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("runtime-host-for-space");
 const spaceA = signer.did();
@@ -159,4 +162,131 @@ describe("Runtime.fetchBuiltin", () => {
       await runtime.dispose();
     }
   });
+
+  // A1: the `llm` builtin shares `executeWithToolsLoop`/`llmClientOptions`
+  // with `generateText`, so under a server-primary runtime it must dial the
+  // same `/api/ai/llm` broker. Before it was server-executable it passed no
+  // `serverBuiltinId` and `llmClientOptions` threw "unsupported LLM builtin
+  // has no server broker route" — the broker was never dialed and the node
+  // settled into `error`.
+  it("routes the `llm` builtin's model call through the broker", async () => {
+    // Passive observer: capture the runner-minted effect descriptor and the
+    // writes the run actually produced, then let the commit proceed upstream.
+    let descriptor: ServerBuiltinActionDescriptor | undefined;
+    let observedWrites: readonly { id: `${string}:${string}` }[] = [];
+    const storageManager = StorageManager.emulate({
+      as: signer,
+      actionTransactionRouter: (input) => {
+        const annotated = input.sourceAction as
+          | { serverBuiltin?: ServerBuiltinActionDescriptor }
+          | undefined;
+        const observation = input.commit.schedulerObservation as
+          | { implementationFingerprint?: string; actualChangedWrites?: [] }
+          | undefined;
+        if (
+          annotated?.serverBuiltin?.id === "llm" &&
+          observation?.implementationFingerprint ===
+            "impl:cf:builtin/llm:server-v1"
+        ) {
+          descriptor = annotated.serverBuiltin;
+          observedWrites = observation.actualChangedWrites ?? [];
+        }
+        return { disposition: "upstream" };
+      },
+    });
+    const runtime = new Runtime({
+      apiUrl: new URL("http://host-a.test/"),
+      patternEnvironment: { apiUrl: new URL("http://host-a.test/") },
+      storageManager,
+      experimental: { serverPrimaryExecution: true },
+    });
+    const brokered: Array<{ builtinId: string; url: string }> = [];
+    runtime.installServerBuiltinFetch((builtinId, url) => {
+      brokered.push({ builtinId, url });
+      return Promise.resolve(
+        Response.json({ role: "assistant", content: "brokered" }),
+      );
+    });
+    try {
+      const { commonfabric } = createTrustedBuilder(runtime);
+      const testPattern = commonfabric.pattern(() =>
+        commonfabric.llm({
+          messages: [{ role: "user", content: "route me" }],
+        })
+      );
+      const tx = runtime.edit();
+      const resultCell = runtime.getCell(
+        spaceA,
+        "llm-server-broker-route",
+        testPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(tx, testPattern, {}, resultCell);
+      await tx.commit();
+      await runtime.idle();
+      await waitForSettled(result);
+
+      expect(brokered).toEqual([{ builtinId: "llm", url: "/api/ai/llm" }]);
+      expect(result.key("error").get()).toBeUndefined();
+      expect(result.key("pending").get()).toBe(false);
+
+      // Membership in the allowlist alone would mint a descriptor whose write
+      // surface is only the direct output spot: `llm` mints its
+      // `{ llm: { result: cause } }` document lazily inside the run, so the
+      // runner can only learn about it through `serverBuiltinRuntimeWrites`.
+      // Without that plumbing every claimed server run de-claims fail-closed
+      // as dynamic-write-outside-static-surface. Pin the coverage, not just
+      // the array's presence.
+      expect(descriptor).toBeDefined();
+      const declared = new Set([
+        ...(descriptor?.writes ?? []).map((link) => link.id),
+        ...(descriptor?.runtimeWrites ?? []).map((link) => link.id),
+      ]);
+      expect(observedWrites.length).toBeGreaterThan(0);
+      expect(
+        observedWrites.filter((write) => !declared.has(write.id)),
+      ).toEqual([]);
+      // The minted result document is genuinely extra — it is NOT one of the
+      // registered output cells, so this assertion would hold vacuously if
+      // `runtimeWrites` were dropped only because the run wrote nothing new.
+      const directOutputs = new Set(
+        (descriptor?.directOutputs ?? []).map((link) => link.id),
+      );
+      expect(
+        (descriptor?.runtimeWrites ?? []).filter((link) =>
+          !directOutputs.has(link.id)
+        ).length,
+      ).toBe(1);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
 });
+
+/** Resolve once the llm node stops pending with a result or an error. */
+function waitForSettled(
+  cell: Cell<unknown>,
+  timeoutMs = 2000,
+): Promise<void> {
+  let cancel: (() => void) | undefined;
+  let timeout: ReturnType<typeof setTimeout>;
+  return new Promise<void>((resolve, reject) => {
+    timeout = setTimeout(
+      () => reject(new Error("timed out waiting for the llm node to settle")),
+      timeoutMs,
+    );
+    cancel = cell.asSchema({
+      type: "object",
+      properties: { pending: { type: "boolean" }, error: true, result: true },
+      default: {},
+    }).sink(({ pending, error, result } = {}) => {
+      if (pending === false && (error !== undefined || result !== undefined)) {
+        resolve();
+      }
+    });
+  }).finally(() => {
+    clearTimeout(timeout);
+    cancel?.();
+  });
+}
