@@ -259,6 +259,26 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   captureExecutionClaim?(
     action: object | undefined,
   ): ExecutionClaim | undefined;
+  /**
+   * The execution lane a run is ACTING AS right now — the runner-side twin of
+   * the `actingContext` a lane-bound read sends on the wire (C1.4b; see
+   * `SqliteQueryRequest.actingContext`). Resolved exactly like
+   * `Replica.commitLane`: the source action's pinned lane when the executor
+   * can name one (`executionLaneForAction`, fed by the Worker's `laneRunPins`),
+   * else the ambient lane installed by `runWithExecutionLane`. Read-only and
+   * side-effect free — unlike `commitLane` it does not register the lane.
+   *
+   * `"space"` whenever no lane is acting, which is every client run and every
+   * space-rank executor run, so a caller that falls back to its ambient
+   * identity keeps today's behavior byte-identically. Naming a lane only
+   * NARROWS: it says WHICH principal this run serves, which the ambient
+   * `trustSnapshotProvider()` cannot (on the executor that is the lease
+   * sponsor). Optional: managers with no lane machinery leave it undefined.
+   */
+  actingExecutionLane?(
+    space: MemorySpace,
+    sourceAction?: object,
+  ): "space" | `user:${string}` | `session:${string}:${string}`;
   beginClientExecutionEffect?(action: object): void;
   endClientExecutionEffect?(action: object): void;
 

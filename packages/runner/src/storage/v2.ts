@@ -1398,6 +1398,21 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
+   * The lane a run in `space` is acting as right now — see
+   * `IStorageManager.actingExecutionLane`. Read-only: it never opens a
+   * provider (an unopened space has no lane by construction) and never
+   * registers one.
+   */
+  actingExecutionLane(
+    space: MemorySpace,
+    sourceAction?: object,
+  ): SchedulerExecutionContextKey {
+    return this.#providers.get(space)?.replica.actingExecutionLane(
+      sourceAction,
+    ) ?? "space";
+  }
+
+  /**
    * Mount the normal user session, but serialize fresh-space ACL genesis ahead
    * of any replica work when this manager holds the space key. The temporary
    * bootstrap session authenticates as the space identity; the returned
@@ -2698,13 +2713,29 @@ class SpaceReplica implements ISpaceReplica {
   private commitLane(
     source?: IStorageTransaction,
   ): SchedulerExecutionContextKey {
-    const action = source?.sourceAction;
-    const lane =
-      (action === undefined
-        ? undefined
-        : this.#executionLaneForAction?.(action)) ?? this.#actingLane;
+    const lane = this.actingExecutionLane(source?.sourceAction);
     this.registerExecutionLane(lane);
     return lane;
+  }
+
+  /**
+   * The lane a run is ACTING AS, by the same resolution `commitLane` uses —
+   * the source action's pinned lane when the provider can name one, else the
+   * ambient acting lane — but WITHOUT registering it. The read-only half is
+   * what callers outside the commit path need (a builtin asking "which user
+   * am I running for?"); registration is a commit-path obligation and must
+   * not be a side effect of asking.
+   *
+   * Like every lane capture, this must be read synchronously inside the run's
+   * own extent: `runWithExecutionLane` restores the previous ambient lane on
+   * synchronous exit, so a post-await read sees the space lane.
+   */
+  actingExecutionLane(
+    sourceAction?: object,
+  ): SchedulerExecutionContextKey {
+    return (sourceAction === undefined
+      ? undefined
+      : this.#executionLaneForAction?.(sourceAction)) ?? this.#actingLane;
   }
 
   /** Replica document key of `(id, scope)` as seen by the acting lane. */

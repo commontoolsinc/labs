@@ -35,6 +35,7 @@ import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { getTransactionSourceAction } from "../storage/transaction-source-context.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
@@ -46,7 +47,12 @@ import {
   entityRefToString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
-import { columnDeclaresIfc } from "@commonfabric/memory/v2";
+import {
+  columnDeclaresIfc,
+  parseSessionExecutionContextKey,
+  principalOfUserContextKey,
+} from "@commonfabric/memory/v2";
+import type { MemorySpace } from "@commonfabric/memory/interface";
 import { validateRowLabelSpec } from "@commonfabric/memory/sqlite/row-label";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 
@@ -100,6 +106,46 @@ function makeResultCell<T>(
   setPatternCell(cell, parentCell.key("pattern"));
   cell.sync();
   return cell as Cell<T>;
+}
+
+/**
+ * The principal a handle minted by THIS run belongs to (CFC Phase 3 `owner`).
+ *
+ * The db is created on the server, and the server knows which user it is
+ * running for: every scheduler-driven run on the executor executes under its
+ * resolved execution lane as the AMBIENT acting lane (the Worker's
+ * `runtime.scheduler.setActionRunWrapper` → `storage.runWithExecutionLane`,
+ * C1.9c), and that lane's context key names the acting principal. This is the
+ * runner-side twin of the `actingContext` a lane-bound `sqlite.query` sends on
+ * the wire (C1.4b / A5-G1), and it is the only identity available here that is
+ * the USER rather than whoever happens to be executing: on the executor Worker
+ * the ambient `trustSnapshotProvider()` is the LEASE SPONSOR, so an
+ * unqualified server-side first run mints the handle owned by the executor and
+ * hands `dbOwner()` row rules and `{__ctDbOwner}` ceiling placeholders the
+ * wrong principal.
+ *
+ * Strictly additive, exactly like the read seam: naming a lane NARROWS to that
+ * lane's principal; absence (`"space"`, i.e. every client run and every
+ * space-rank executor run) keeps the pre-existing trust-snapshot derivation
+ * byte-identically. Read synchronously — `sqliteDatabase`'s mint is in the
+ * action body's synchronous extent, which is exactly what the run wrapper
+ * covers and where a lane capture is valid.
+ */
+function actingHandleOwner(
+  runtime: Runtime,
+  space: MemorySpace,
+): string | undefined {
+  const lane = runtime.storageManager.actingExecutionLane?.(
+    space,
+    getTransactionSourceAction(),
+  );
+  if (lane !== undefined && lane !== "space") {
+    const session = parseSessionExecutionContextKey(lane);
+    if (session !== undefined) return session.principal;
+    const principal = principalOfUserContextKey(lane);
+    if (principal !== undefined) return principal;
+  }
+  return runtime.trustSnapshotProvider()?.actingPrincipal;
 }
 
 function readDbRef(value: unknown): SqliteDbRef {
@@ -552,7 +598,7 @@ export function sqliteDatabase(
       // fails closed) rather than adopting a later opener.
       const owner = prior !== undefined
         ? prior.owner
-        : runtime.trustSnapshotProvider()?.actingPrincipal;
+        : actingHandleOwner(runtime, parentCell.space);
       // Materialize to plain JSON: the stored handle must be SELF-CONTAINED.
       // A raw `set` of the inputs proxy would capture `tables` as a LINK into
       // this pattern's doc graph — whose rule-term splits no schema-driven
