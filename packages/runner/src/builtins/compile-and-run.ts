@@ -233,12 +233,12 @@ export function compileAndRun(
     const compilePromise = runtime.patternManager
       .compileOrGetPattern(program, parentCell.space)
       .catch(
-        (err) => {
+        async (err) => {
           // Only process this error if the request hasn't been superseded
           if (requestId !== thisRequestId) return;
           if (abortController?.signal.aborted) return;
 
-          runtime.editWithRetry((asyncTx) => {
+          await runtime.editWithRetry((asyncTx) => {
             if (requestId !== thisRequestId) return;
             if (abortController?.signal.aborted) return;
 
@@ -270,18 +270,18 @@ export function compileAndRun(
             }
           });
         },
-      ).finally(() => {
+      ).finally(async () => {
         // Only update pending if this is still the current request
         if (requestId !== thisRequestId) return;
         // Always clear pending state, even if cancelled, to avoid stuck state
 
-        runtime.editWithRetry((asyncTx) => {
+        await runtime.editWithRetry((asyncTx) => {
           if (requestId !== thisRequestId) return;
           pending.withTx(asyncTx).set(false);
         });
       });
 
-    compilePromise.then((pattern) => {
+    const work = compilePromise.then(async (pattern) => {
       // Only run the result if this is still the current request
       if (requestId !== thisRequestId) return;
       if (abortController?.signal.aborted) return;
@@ -291,14 +291,15 @@ export function compileAndRun(
         // inputs from other pieces, we will need to think more about
         // how we pass input into the builtin.
 
-        runtime.runSynced(result, pattern, input.get());
-        runtime.editWithRetry((asyncTx) => {
+        await runtime.runSynced(result, pattern, input.get());
+        await runtime.editWithRetry((asyncTx) => {
           result.withTx(asyncTx).key("isHidden").set(true);
         });
         runtime.pieceCreatedCallback?.(result);
       }
       // TODO(seefeld): Add capturing runtime errors.
     });
+    runtime.trackAsyncWork(work, parentCell);
   };
 }
 

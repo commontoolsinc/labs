@@ -210,7 +210,7 @@ function freezeAround(
     const nextTimer = (limit: number, onlyProd: boolean): Timer | undefined => {
       let next: Timer | undefined;
       for (const tm of timers.values()) {
-        if (tm.kind === "zero" || tm.fireAt > limit) {
+        if (tm.kind === "zero" || tm.fireAt <= elapsed || tm.fireAt > limit) {
           continue;
         }
         if (onlyProd && tm.kind !== "prod") continue;
@@ -231,11 +231,7 @@ function freezeAround(
             "This test likely needs explicit clock.tick(ms) control.",
         );
       }
-      // A timer may be armed during tick()'s final async drain, after the
-      // target time was chosen but while the clock still reports its prior
-      // instant. Such a timer is already due; fire it without moving time
-      // backwards.
-      elapsed = Math.max(elapsed, next.fireAt);
+      elapsed = next.fireAt;
       if (next.interval === undefined) timers.delete(next.id);
       else next.fireAt = elapsed + next.interval;
       next.cb(...next.args);
@@ -258,7 +254,7 @@ function freezeAround(
             await settle();
             const next = nextTimer(target, false);
             if (!next) break;
-            elapsed = Math.max(elapsed, next.fireAt);
+            elapsed = next.fireAt;
             if (next.interval === undefined) timers.delete(next.id);
             else next.fireAt = elapsed + next.interval;
             next.cb(...next.args);

@@ -106,7 +106,7 @@ describe("fetch-json mutex mechanism: protected request auth", () => {
     tx.commit();
 
     await result.pull();
-    await result.pull();
+    await runtime.settled();
 
     const call = fetchCalls.find((call) =>
       call.url === "http://mock-test-server.local/api/agent-tools/web-search"
@@ -178,7 +178,7 @@ describe("fetch-json mutex mechanism: protected request auth", () => {
     tx.commit();
 
     await result.pull();
-    await result.pull();
+    await runtime.settled();
 
     const call = fetchCalls.find((call) =>
       call.url === "http://mock-test-server.local/api/agent-tools/web-search"
@@ -243,7 +243,7 @@ describe("fetch-json mutex mechanism: protected request auth", () => {
     tx.commit();
 
     await result.pull();
-    await result.pull();
+    await runtime.settled();
 
     const call = fetchCalls.find((call) =>
       call.url === "http://external.test/api/agent-tools/web-search"

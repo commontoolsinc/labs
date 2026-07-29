@@ -19,6 +19,7 @@ import {
   enableMockMode,
   LLMClient,
 } from "@commonfabric/llm/client";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { generateObject, generateText, llm } from "../src/builtins/llm.ts";
@@ -217,17 +218,6 @@ describe("LLM availability race coverage", () => {
     return state.key("result").resolveAsCell().getRaw();
   }
 
-  async function waitFor(
-    condition: () => boolean,
-    message: string,
-  ): Promise<void> {
-    for (let attempt = 0; attempt < 500; attempt++) {
-      if (condition()) return;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    throw new Error(`Timeout waiting for ${message}`);
-  }
-
   function schema() {
     return {
       type: "object",
@@ -313,11 +303,12 @@ describe("LLM availability race coverage", () => {
     );
 
     await commitAction(generation.action);
-    await waitFor(
+    await waitForCellValue(
+      runtime,
+      generation.state,
       () =>
         (rawResult(generation.state) as { title?: unknown })?.title ===
           "usable",
-      "disabled CFC structured result",
     );
     expect(rawResult(generation.state)).toEqual({ title: "usable" });
   });
@@ -338,11 +329,12 @@ describe("LLM availability race coverage", () => {
 
     try {
       await commitAction(generation.action);
-      await waitFor(
+      await waitForCellValue(
+        runtime,
+        generation.state,
         () =>
           (rawResult(generation.state) as { title?: unknown })?.title ===
             "seed",
-        "seed tools result",
       );
       expect(calls).toBe(1);
 
@@ -381,9 +373,10 @@ describe("LLM availability race coverage", () => {
     );
 
     await commitAction(generation.action);
-    await waitFor(
+    await waitForCellValue(
+      runtime,
+      generation.state,
       () => (generation.state.key("pending").get() as unknown) === false,
-      "llm provider error",
     );
 
     expect(rawResult(generation.state)).toBeUndefined();
@@ -440,9 +433,10 @@ describe("LLM availability race coverage", () => {
       releaseIdle.resolve();
       runtime.idle = originalIdle;
 
-      await waitFor(
+      await waitForCellValue(
+        runtime,
+        generation.state,
         () => rawResult(generation.state) === "fresh reply",
-        "fresh llm result after stale error",
       );
       expect(generation.state.key("error").get()).toBeUndefined();
     } finally {
@@ -497,9 +491,10 @@ describe("LLM availability race coverage", () => {
 
     try {
       await commitAction(generation.action);
-      await waitFor(
+      await waitForCellValue(
+        runtime,
+        generation.state,
         () => rawResult(generation.state) === "fresh reply",
-        "fresh llm CAS result",
       );
       expect(rawResult(generation.state)).toBe("fresh reply");
     } finally {
@@ -558,9 +553,10 @@ describe("LLM availability race coverage", () => {
       releaseIdle.resolve();
       runtime.idle = originalIdle;
 
-      await waitFor(
+      await waitForCellValue(
+        runtime,
+        generation.state,
         () => rawResult(generation.state) === "fresh text",
-        "fresh text result",
       );
     } finally {
       releaseIdle.resolve();
@@ -622,11 +618,12 @@ describe("LLM availability race coverage", () => {
       releaseIdle.resolve();
       runtime.idle = originalIdle;
 
-      await waitFor(
+      await waitForCellValue(
+        runtime,
+        generation.state,
         () =>
           (rawResult(generation.state) as { title?: unknown })?.title ===
             "fresh",
-        "fresh direct object result",
       );
     } finally {
       releaseIdle.resolve();
@@ -681,11 +678,12 @@ describe("LLM availability race coverage", () => {
 
     try {
       await commitAction(generation.action);
-      await waitFor(
+      await waitForCellValue(
+        runtime,
+        generation.state,
         () =>
           (rawResult(generation.state) as { title?: unknown })?.title ===
             "fresh",
-        "fresh object CAS result",
       );
     } finally {
       runtime.editWithRetry = originalEditWithRetry;
@@ -730,11 +728,12 @@ describe("LLM availability race coverage", () => {
       await nextTx.commit();
       releaseFirst.resolve();
 
-      await waitFor(
+      await waitForCellValue(
+        runtime,
+        generation.state,
         () =>
           (rawResult(generation.state) as { title?: unknown })?.title ===
             "fresh",
-        "fresh queued tools result",
       );
     } finally {
       releaseFirst.resolve();
@@ -789,11 +788,12 @@ describe("LLM availability race coverage", () => {
       releaseIdle.resolve();
       runtime.idle = originalIdle;
 
-      await waitFor(
+      await waitForCellValue(
+        runtime,
+        generation.state,
         () =>
           (rawResult(generation.state) as { title?: unknown })?.title ===
             "fresh",
-        "fresh tools result after idle",
       );
     } finally {
       releaseIdle.resolve();
@@ -842,11 +842,12 @@ describe("LLM availability race coverage", () => {
 
     try {
       await commitAction(generation.action);
-      await waitFor(
+      await waitForCellValue(
+        runtime,
+        generation.state,
         () =>
           (rawResult(generation.state) as { title?: unknown })?.title ===
             "fresh",
-        "fresh tools CAS result",
       );
     } finally {
       runtime.editWithRetry = originalEditWithRetry;
@@ -908,9 +909,10 @@ describe("LLM availability race coverage", () => {
       await partialWriteCommitted.promise;
       releaseFirst.resolve();
 
-      await waitFor(
+      await waitForCellValue(
+        runtime,
+        generation.state,
         () => rawResult(generation.state) === "fresh final",
-        "fresh result after stale partial write",
       );
       expect(generation.state.key("partial").get()).not.toBe("stale partial");
     } finally {

@@ -81,6 +81,7 @@ Deno.test("computed throws error", async () => {
   assertEquals(afterError.poisoned, undefined);
   const healthyOutput = getDerivedInternalCell(resultCell, {
     partialCause: "healthy",
+    kind: "computed",
   }).getRaw();
   assertInstanceOf(healthyOutput, DataUnavailable);
   assertEquals(healthyOutput.reason, "schema-mismatch");

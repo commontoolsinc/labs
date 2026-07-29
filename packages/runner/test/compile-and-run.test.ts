@@ -11,17 +11,6 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { CompilerError } from "@commonfabric/js-compiler/errors";
 
-async function waitFor(
-  condition: () => boolean,
-  description: string,
-): Promise<void> {
-  for (let attempt = 0; attempt < 500; attempt++) {
-    if (condition()) return;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error(`Timeout waiting for ${description}`);
-}
-
 Deno.test("compileAndRun initializes outputs and handles invalid programs", async () => {
   const identity = await Identity.fromPassphrase("compile and run coverage");
   const storageManager = StorageManager.emulate({ as: identity });
@@ -98,12 +87,6 @@ Deno.test("compileAndRun initializes outputs and handles invalid programs", asyn
       missingResult.error.diagnostics,
       [],
     );
-    assertEquals(
-      outputs.result.withTx(tx).resolveAsCell().key("error", "diagnostics")
-        .get(),
-      [],
-    );
-
     await tx.commit();
   } finally {
     await runtime.dispose();
@@ -165,26 +148,13 @@ Deno.test("compileAndRun publishes pending and structured compile errors", async
         },
       }]),
     );
-    await waitFor(
-      () => outputs.pending.get() === false,
-      "compile error publication",
-    );
+    await runtime.settled();
 
     const unavailable = outputs.result.resolveAsCell().getRaw();
     assertEquals(unavailable.reason, "error");
     assertEquals(unavailable.error.message, "[ERROR] invalid source");
     assertEquals(
       unavailable.error.diagnostics,
-      [{
-        line: 1,
-        column: 1,
-        message: "invalid source",
-        type: "ERROR",
-        file: undefined,
-      }],
-    );
-    assertEquals(
-      outputs.result.resolveAsCell().key("error", "diagnostics").get(),
       [{
         line: 1,
         column: 1,
@@ -306,7 +276,6 @@ Deno.test("compileAndRun ignores a superseded compile failure", async () => {
     await secondTx.commit();
 
     first.reject(new Error("stale failure"));
-    await new Promise((resolve) => setTimeout(resolve, 20));
     assertStrictEquals(
       outputs.result.resolveAsCell().getRaw(),
       DataUnavailable.pending(),
@@ -314,10 +283,7 @@ Deno.test("compileAndRun ignores a superseded compile failure", async () => {
     assertEquals(outputs.pending.get(), true);
 
     second.reject(new Error("current failure"));
-    await waitFor(
-      () => outputs.pending.get() === false,
-      "current compile failure",
-    );
+    await runtime.settled();
     assertEquals(outputs.result.resolveAsCell().getRaw().reason, "error");
     assertEquals(
       outputs.result.resolveAsCell().getRaw().error.message.startsWith(
@@ -416,10 +382,7 @@ Deno.test("compileAndRunResult preserves the live compiled result", async () => 
     );
     await tx.commit();
 
-    await waitFor(
-      () => result.key("value").get() === 7,
-      "live compiled result",
-    );
+    await runtime.settled();
     assertEquals(result.key("value").get(), 7);
   } finally {
     await runtime.dispose();

@@ -15,6 +15,7 @@
  * either demonstrate the asymmetry or refute the claim.
  */
 import { Identity } from "@commonfabric/identity";
+import { defer } from "@commonfabric/utils/defer";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { getCellWithStatus } from "../src/cell.ts";
 import type { Cell } from "../src/builder/types.ts";
@@ -125,6 +126,7 @@ describe("input-parked event vs linked-doc settlement", () => {
 
     let handlerRuns = 0;
     const handledEvents: number[] = [];
+    const bothEventsHandled = defer<void>();
     let readinessCalls = 0;
     const statusesSeen: ProbeStatus[] = [];
 
@@ -132,6 +134,7 @@ describe("input-parked event vs linked-doc settlement", () => {
       (_handlerTx: IExtendedStorageTransaction, event: number) => {
         handlerRuns++;
         handledEvents.push(event);
+        if (handledEvents.length === 2) bothEventsHandled.resolve();
       },
       {
         inputReadiness: (
@@ -181,8 +184,7 @@ describe("input-parked event vs linked-doc settlement", () => {
     expect(pendingSyncReleases.length).toBeGreaterThan(0);
     releaseSyncs();
     await storageManager.crossSpaceSettled();
-    await runtime.scheduler.idle();
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await bothEventsHandled.promise;
     await runtime.scheduler.idle();
 
     expect(readinessCalls).toBeGreaterThan(readinessCallsWhileParked);
@@ -195,8 +197,12 @@ describe("input-parked event vs linked-doc settlement", () => {
     tx = runtime.edit();
 
     const statuses: ProbeStatus[] = [];
+    const resettled = defer<void>();
+    let waitingForResettle = false;
     const controlAction: Action = (actionTx) => {
-      statuses.push(readLinkedStatus(inputCell, actionTx));
+      const status = readLinkedStatus(inputCell, actionTx);
+      statuses.push(status);
+      if (waitingForResettle && status !== "syncing") resettled.resolve();
     };
     // Register as an effect: effects are demand roots in the pull scheduler,
     // so both dependency writes and external-settlement wakes re-run them —
@@ -228,6 +234,7 @@ describe("input-parked event vs linked-doc settlement", () => {
 
     expect(statuses).toContain("syncing");
     const runsWhileSyncing = statuses.length;
+    waitingForResettle = true;
 
     // Settlement without a storage write: the executing-action token
     // registered during the run should wake the action so it can observe the
@@ -235,8 +242,7 @@ describe("input-parked event vs linked-doc settlement", () => {
     expect(pendingSyncReleases.length).toBeGreaterThan(0);
     releaseSyncs();
     await storageManager.crossSpaceSettled();
-    await runtime.scheduler.idle();
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await resettled.promise;
     await runtime.scheduler.idle();
 
     expect(statuses.length).toBeGreaterThan(runsWhileSyncing);
