@@ -784,20 +784,18 @@ function composeContent(
     // are placed by their position in this list, not by their source column.
     // Each cell still knows the source column it stands for, which is what the
     // selection and search ranges are stated in.
-    const styleCell = (dc: DisplayCell, synthetic: boolean): Style => {
+    const styleCell = (dc: DisplayCell): Style => {
       if (!color) return EMPTY_STYLE;
-      const hit = !synthetic && lineMatches
-        ? matchStyle(lineMatches, dc.col)
-        : null;
+      const hit = lineMatches ? matchStyle(lineMatches, dc.col) : null;
       if (hit) return hit;
       const base = mergeBg(dc.ansi ?? dc.syntax, rowBg);
-      const inSel = !synthetic && sel !== null &&
+      const inSel = sel !== null &&
         dc.col >= sel.lo && dc.col < sel.hi;
       return inSel ? mergeBg(base, sel.bg) : base;
     };
     for (let d = 0; d < prefixWidth && d < display.length; d++) {
       const dc = display[d];
-      cells[d] = { ch: dc.ch, style: styleCell(dc, true) };
+      cells[d] = { ch: dc.ch, style: styleCell(dc) };
     }
     const end = Math.min(
       display.length,
@@ -807,7 +805,7 @@ function composeContent(
     for (let d = offset; d < end; d++) {
       const idx = prefixWidth + d - offset;
       const dc = display[d];
-      cells[idx] = { ch: dc.ch, style: styleCell(dc, false) };
+      cells[idx] = { ch: dc.ch, style: styleCell(dc) };
     }
   }
 

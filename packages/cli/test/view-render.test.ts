@@ -344,6 +344,36 @@ Deno.test("renderFrame: word-wrapped separators retain search highlighting", () 
   assertEquals(bgColumns(rows[2]), [true, true, false, false]);
 });
 
+Deno.test("renderFrame: repeated prefixes retain search highlighting", () => {
+  const rows = renderFrame(
+    parseDocument("// foo bar baz"),
+    baseView({
+      width: 7,
+      height: 5,
+      wrapMode: "word",
+      matches: [{ line: 0, start: 0, end: 2 }],
+      currentMatch: 0,
+    }),
+  );
+
+  assertEquals(bgColumns(rows[1]).slice(0, 3), [true, true, false]);
+});
+
+Deno.test("renderFrame: repeated prefixes retain selection highlighting", () => {
+  const doc = parseDocument("// foo bar baz");
+  const rows = renderFrame(
+    doc,
+    baseView({
+      width: 8,
+      height: 5,
+      wrapMode: "word",
+      selected: doc.flatStructure[0],
+    }),
+  );
+
+  assertEquals(bgColumns(rows[1]).slice(0, 4), [false, true, true, true]);
+});
+
 Deno.test("renderFrame: word wrapping does not break at a non-breaking space", () => {
   const rows = renderFrame(
     parseDocument("foo\u00a0bar"),
