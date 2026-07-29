@@ -1732,6 +1732,53 @@ Two consequences that reorder the plan:
    false positive for a sanctioned class. That needs a handler-commit
    discriminator, and it narrows the firewall, never the pair.
 
+### 5h.3 Post-wave-G measurement: the residual is ONE builtin, and it is `map`
+
+Measured by the orchestrator at HEAD `31b301dab` in a detached worktree
+(fresh store, load 34-45, counts only). Taken at HEAD rather than in the
+working tree because two subagents were mid-edit — measure what landed,
+not what is in flight.
+
+**Never-claimed set per arm:**
+
+| arm | `unservedByCode` |
+| --- | --- |
+| space | `non-space-read-scope` 33 (19 offenders), `commit-rejected:ExecutionLeaseFenceError` 2, `claim-authority-lost` 2 |
+| user | `non-space-read-scope` 2, `claim-key-mismatch` 2, `claim-authority-lost` 2 |
+| **session** | **`claim-key-mismatch` 2, `claim-authority-lost` 2 — four events total** |
+
+**The `unservedDerivations` instrumentation added with `cf09a186b` changes
+the character of this row completely.** Every residual now has a NAME
+instead of a fingerprint count:
+
+- session arm, all four events → **`cf:builtin/map:v1`**
+- space arm's fence + authority-lost → also `cf:builtin/map:v1`
+- space arm's `non-space-read-scope` offenders → 19 named derivations,
+  including **`cf:builtin/ifElse:v1`** for the first time
+- user arm's `non-space-read-scope` 2 → the two `__cfLift_8` /
+  `__cfLift_16` derivations §5h's cross-space work identified
+
+**This supersedes the plan's earlier claim** that the residual four are
+generic "claim-arbitration bookkeeping [that] evaporates with the claim
+mechanism". They may well evaporate, but they are not abstract: they are
+one materializer builtin failing two specific ways, and that is a
+diagnosable target rather than a thing to wait out. `map` is in
+`SERVER_MATERIALIZER_BUILTIN_IDS`, so unlike wave G's rows it is already
+server-executable — whatever is happening is a claim-lifecycle problem,
+not a coverage gap.
+
+**Wave G's builtin work did not move this fixture, and that is expected
+rather than disappointing.** `wish`, `llmDialog`, `sqliteDatabase` and
+`compileAndRun` are not exercised by group-chat — the same instrument
+limitation wave B recorded (§5h). The user arm's total is unchanged at 6
+events with `malformed-output-surface` relabelled to
+`non-space-read-scope`, exactly as the label-only fix predicted.
+
+**Next measurable target:** `map`'s four events are now the entire
+session-rank gap in this fixture. Diagnosing them is the highest-value
+remaining serving-coverage work, and unlike everything in wave G it needs
+no new fixture — the flagship already produces it every run.
+
 ### 5h.2 The provenance meta-path envelope — the two caveats resolved
 
 Investigated by the orchestrator 2026-07-29 (three delegated attempts died
