@@ -194,6 +194,8 @@ export function valueAsIdentity(
     path?: string[];
     /** Return the resolved document instead of selecting within its value. */
     doc?: boolean;
+    /** Maximum depth retained in annotated output. Defaults to eight. */
+    annotationDepth?: number;
   },
 ): SelectedIdentityValue {
   if (opts.doc && opts.path !== undefined) {
@@ -230,7 +232,9 @@ export function valueAsIdentity(
       resolvedScope: scope,
       resolvedKind: parseScope(scope).kind,
       pathExists: selected.found,
-      value: doc === undefined ? undefined : annotate(selected.value),
+      value: doc === undefined
+        ? undefined
+        : annotate(selected.value, opts.annotationDepth),
       overrides,
       approximation: true,
     };

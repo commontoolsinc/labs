@@ -4,8 +4,10 @@
 // must not swallow the path.
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { expect } from "@std/expect";
 import { Database } from "@db/sqlite";
 import { jsonFromValue } from "@commonfabric/data-model/codecs";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 
 import { main } from "../cli.ts";
 
@@ -31,9 +33,13 @@ CREATE TABLE branch (
 INSERT INTO branch (name, head_seq, status) VALUES ('', 2, 'active');
 `;
 
+const STACK_SAFE_DEPTH = 20_000;
+
 function seed(path: string) {
   const db = new Database(path, { create: true });
   db.exec(SCHEMA);
+  let deep: FabricValue = { leaf: "complete" };
+  for (let depth = 0; depth < 12; depth++) deep = { child: deep };
   const commit = db.prepare(
     `INSERT INTO "commit" (seq, session_id, local_seq, original, resolution)
      VALUES (?, 'session:did:key:zX:u', ?, '{"reads":{"confirmed":[],"pending":[]}}', '{}')`,
@@ -50,6 +56,7 @@ function seed(path: string) {
     jsonFromValue({
       value: {
         n: 1,
+        deep,
         "a/b": "literal slash key",
         a: { b: "nested key" },
         "": "empty key",
@@ -493,6 +500,55 @@ Deno.test("cli: single-space commands dispatch over a seeded DB", async (t) => {
     await t.step("--help exits successfully without a command", () => {
       assertEquals(run(["--help"]).code, 0);
     });
+
+    await t.step(
+      "preserves every nested value with `value-at --full-depth`",
+      () => {
+        const shallow = JSON.parse(
+          run(["value-at", db, "of:a", "--json"]).out,
+        );
+        expect(JSON.stringify(shallow.value.deep)).toContain('"…"');
+        const full = JSON.parse(
+          run(["value-at", db, "of:a", "--full-depth", "--json"]).out,
+        );
+        let nested = full.value.deep;
+        for (let depth = 0; depth < 12; depth++) nested = nested.child;
+        expect(nested).toEqual({ leaf: "complete" });
+      },
+    );
+
+    await t.step(
+      "full-depth output survives deeply nested stored values",
+      () => {
+        const deeplyNested = `${
+          '{"child":'.repeat(STACK_SAFE_DEPTH)
+        }{"leaf":"complete"}${"}".repeat(STACK_SAFE_DEPTH)}`;
+        const writable = new Database(db);
+        try {
+          writable.prepare(
+            `INSERT INTO revision
+               (id, seq, op_index, op, data, commit_seq)
+             VALUES ('of:deep', 1, 0, 'set', ?, 1)`,
+          ).run(`{"value":${deeplyNested}}`);
+        } finally {
+          writable.close();
+        }
+
+        const result = run([
+          "value-at",
+          db,
+          "of:deep",
+          "--full-depth",
+          "--json",
+        ]);
+        expect(result.code).toBe(0);
+        let nested = JSON.parse(result.out).value;
+        for (let depth = 0; depth < STACK_SAFE_DEPTH; depth++) {
+          nested = nested.child;
+        }
+        expect(nested).toEqual({ leaf: "complete" });
+      },
+    );
 
     await t.step("hot + history + commits succeed", () => {
       for (

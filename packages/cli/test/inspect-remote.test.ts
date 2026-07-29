@@ -6,11 +6,13 @@
 
 import { afterAll, afterEach, beforeAll, describe, it } from "@std/testing/bdd";
 import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import { expect } from "@std/expect";
 import { Database } from "@db/sqlite";
 import { ValidationError } from "@cliffy/command";
 import { Identity } from "@commonfabric/identity";
 import { defaultCacheDir } from "@commonfabric/state-inspector";
 import { jsonFromValue } from "@commonfabric/data-model/codecs";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { inspect } from "../commands/inspect.ts";
 
 const DUMP_BASE = "/api/storage/memory/dump";
@@ -55,6 +57,8 @@ async function buildDbBytes(): Promise<Uint8Array> {
   const path = `${dir}/space.sqlite`;
   const db = new Database(path, { create: true });
   db.exec(SCHEMA);
+  let deep: FabricValue = { leaf: "complete" };
+  for (let depth = 0; depth < 12; depth++) deep = { child: deep };
   db.prepare(
     `INSERT INTO "commit" (seq, session_id, local_seq, original, resolution)
      VALUES (1, 'session:did:key:zX:u', 1, '{"reads":{"confirmed":[],"pending":[]}}', '{}')`,
@@ -65,6 +69,7 @@ async function buildDbBytes(): Promise<Uint8Array> {
   ).run(jsonFromValue({
     value: {
       n: 1,
+      deep,
       "a/b": "literal slash key",
       a: { b: "nested keys" },
       "": "empty key",
@@ -82,6 +87,7 @@ async function buildDbBytes(): Promise<Uint8Array> {
   ).run(jsonFromValue({
     value: {
       n: 2,
+      deep,
       "a/b": "identity slash key",
       "": "identity empty key",
       nested: { leaf: "identity nested key" },
@@ -104,6 +110,7 @@ async function buildDbBytes(): Promise<Uint8Array> {
   ).run(jsonFromValue({
     value: {
       n: 1,
+      deep,
       "a/b": "literal slash key changed",
       a: { b: "nested keys changed" },
       "": "empty key changed",
@@ -262,6 +269,54 @@ describe("cf inspect --remote", () => {
     const s = JSON.parse(out);
     assertEquals(s.commits, 2);
     assertEquals(s.entities, 1);
+  });
+
+  it("preserves every nested value with `value-at --full-depth`", async () => {
+    stubFetch();
+    const shallow = JSON.parse(
+      await run([
+        "value-at",
+        DID_A,
+        "of:a",
+        "--remote",
+        BASE,
+        "--json",
+      ]),
+    );
+    expect(JSON.stringify(shallow.value.deep)).toContain('"…"');
+
+    const full = JSON.parse(
+      await run([
+        "value-at",
+        DID_A,
+        "of:a",
+        "--remote",
+        BASE,
+        "--full-depth",
+        "--json",
+      ]),
+    );
+    let nested = full.value.deep;
+    for (let depth = 0; depth < 12; depth++) nested = nested.child;
+    expect(nested).toEqual({ leaf: "complete" });
+
+    const identityView = JSON.parse(
+      await run([
+        "value-at",
+        DID_A,
+        "of:a",
+        "--remote",
+        BASE,
+        "--as",
+        VIEWER_DID,
+        "--full-depth",
+        "--json",
+      ]),
+    );
+    expect(identityView.resolvedKind).toBe("user");
+    nested = identityView.value.deep;
+    for (let depth = 0; depth < 12; depth++) nested = nested.child;
+    expect(nested).toEqual({ leaf: "complete" });
   });
 
   it("value-at applies exact and slash paths to identity views", async () => {

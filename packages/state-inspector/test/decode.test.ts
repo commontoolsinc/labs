@@ -20,6 +20,7 @@ import {
   annotate,
   collectLinks,
   decodedLinkOf,
+  stringifyInspectorJson,
   summarize,
   summarizeLink,
 } from "../decode.ts";
@@ -82,6 +83,39 @@ Deno.test("decode: BigInt is JSON-safe after annotate", () => {
   // the whole thing must JSON.stringify without throwing (the HTML/CLI export path)
   const json = JSON.stringify(annotated);
   assert(json.includes('"$bigint"'), "bigint lowered to a tagged record");
+});
+
+Deno.test("decode: inspector JSON matches ordinary pretty output", () => {
+  const annotated = annotate({
+    text: "value",
+    list: [1, true, null],
+    nested: { leaf: "complete" },
+  });
+  assertEquals(
+    stringifyInspectorJson(annotated),
+    JSON.stringify(annotated, null, 2),
+  );
+});
+
+Deno.test("decode: full-depth output survives deeply nested values", () => {
+  const depth = 20_000;
+  let value: unknown = { leaf: "complete" };
+  for (let index = 0; index < depth; index++) value = { child: value };
+
+  const serialized = stringifyInspectorJson({
+    value: annotate(value, Number.POSITIVE_INFINITY),
+  });
+  let nested = (JSON.parse(serialized) as { value: unknown }).value;
+  for (let index = 0; index < depth; index++) {
+    nested = (nested as { child: unknown }).child;
+  }
+  assertEquals(nested, { leaf: "complete" });
+});
+
+Deno.test("decode: full-depth annotation marks cycles", () => {
+  const value: Record<string, unknown> = {};
+  value.self = value;
+  assertEquals(annotate(value, Number.POSITIVE_INFINITY), { self: "…" });
 });
 
 Deno.test("decode: annotate lowers a `FabricPrimitive` to its debug string", () => {

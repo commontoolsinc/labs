@@ -181,81 +181,319 @@ export function summarizeLink(link: DecodedLink): string {
   return `🔗 ${id}${path}${space}${schema}`;
 }
 
+interface AnnotationVisit {
+  kind: "visit";
+  value: Json;
+  depth: number;
+  target: Record<string, Json>;
+  key: string;
+}
+
+interface AnnotationLeave {
+  kind: "leave";
+  value: object;
+}
+
+type AnnotationFrame = AnnotationVisit | AnnotationLeave;
+
 /**
- * Recursively transform a stored value into an annotated, JSON-printable form:
- * links become `{ $link: … }`, entity refs `{ $ref: … }`, streams `"$stream"`.
- * `maxDepth` guards against deep/cyclic-looking structures.
+ * Transform a stored value into an annotated, JSON-printable form. Links
+ * become `{ $link: … }`, entity refs become `{ $ref: … }`, and streams become
+ * `"$stream"`. `maxDepth` limits how many nested containers are retained.
  */
 export function annotate(v: Json, maxDepth = 8): Json {
-  if (maxDepth < 0) return "…";
+  const root: Record<string, Json> = {};
+  const detectCycles = !Number.isFinite(maxDepth);
+  const ancestors = new WeakSet<object>();
+  const work: AnnotationFrame[] = [{
+    kind: "visit",
+    value: v,
+    depth: maxDepth,
+    target: root,
+    key: "value",
+  }];
 
-  const link = decodedLinkOf(v);
-  if (link) {
-    return {
-      $link: {
-        id: link.id,
-        ...(link.path && link.path.length ? { path: link.path } : {}),
-        ...(link.space ? { space: link.space } : {}),
-        ...(link.scope ? { scope: link.scope } : {}),
-        ...(link.hasSchema ? { schema: true } : {}),
-      },
-    };
-  }
-  if (isStream(v)) return "$stream";
-  const ref = parseEntityRef(v);
-  if (ref !== null) return { $ref: ref };
+  while (work.length > 0) {
+    const frame = work.pop()!;
+    if (frame.kind === "leave") {
+      ancestors.delete(frame.value);
+      continue;
+    }
 
-  // Lower non-JSON-safe Fabric leaves to a stable, printable form so the bundle
-  // (and every JSON.stringify export path that consumes it — HTML, CLI --json)
-  // can't throw on a BigInt, render a Fabric instance as an opaque `{}`, or
-  // SILENTLY DROP a stored `undefined` (which JSON.stringify omits — losing the
-  // present-undefined vs absent-key distinction the data model preserves).
-  if (v === undefined) return { $undefined: true };
-  if (typeof v === "bigint") return { $bigint: v.toString() };
-  if (typeof v === "symbol") return String(v);
-  if (typeof v === "function") return "[function]";
+    const assign = (value: Json) => setOwn(frame.target, frame.key, value);
+    if (frame.depth < 0) {
+      assign("…");
+      continue;
+    }
 
-  if (Array.isArray(v)) {
-    const keys = Object.keys(v);
-    if (
-      keys.length === v.length && keys.every(isArrayIndexPropertyName)
-    ) {
-      return v.map((x) => annotate(x, maxDepth - 1));
+    const link = decodedLinkOf(frame.value);
+    if (link) {
+      assign({
+        $link: {
+          id: link.id,
+          ...(link.path && link.path.length ? { path: link.path } : {}),
+          ...(link.space ? { space: link.space } : {}),
+          ...(link.scope ? { scope: link.scope } : {}),
+          ...(link.hasSchema ? { schema: true } : {}),
+        },
+      });
+      continue;
     }
-    const entries: Record<string, Json> = {};
-    const properties: Record<string, Json> = {};
-    for (const key of keys) {
-      const target = isArrayIndexPropertyName(key) ? entries : properties;
-      setOwn(
-        target,
-        key,
-        annotate(
-          (v as unknown as Record<string, Json>)[key],
-          maxDepth - 1,
-        ),
-      );
+    if (isStream(frame.value)) {
+      assign("$stream");
+      continue;
     }
-    return {
-      $sparseArray: {
-        length: v.length,
-        entries,
-        ...(Object.keys(properties).length > 0 ? { properties } : {}),
-      },
-    };
-  }
-  if (isNameWalkable(v)) {
-    const out: Record<string, Json> = {};
-    for (const [k, val] of Object.entries(v)) {
-      setOwn(out, k, annotate(val, maxDepth - 1));
+    const ref = parseEntityRef(frame.value);
+    if (ref !== null) {
+      assign({ $ref: ref });
+      continue;
     }
-    return out;
+
+    // Lower non-JSON-safe Fabric leaves to a stable, printable form so the
+    // bundle and its JSON output retain every stored value.
+    if (frame.value === undefined) {
+      assign({ $undefined: true });
+      continue;
+    }
+    if (typeof frame.value === "bigint") {
+      assign({ $bigint: frame.value.toString() });
+      continue;
+    }
+    if (typeof frame.value === "symbol") {
+      assign(String(frame.value));
+      continue;
+    }
+    if (typeof frame.value === "function") {
+      assign("[function]");
+      continue;
+    }
+
+    if (Array.isArray(frame.value)) {
+      if (detectCycles && ancestors.has(frame.value)) {
+        assign("…");
+        continue;
+      }
+      if (detectCycles) {
+        ancestors.add(frame.value);
+        work.push({ kind: "leave", value: frame.value });
+      }
+
+      const keys = Object.keys(frame.value);
+      if (
+        keys.length === frame.value.length &&
+        keys.every(isArrayIndexPropertyName)
+      ) {
+        const output = new Array<Json>(frame.value.length);
+        assign(output);
+        const target = output as unknown as Record<string, Json>;
+        for (let index = frame.value.length - 1; index >= 0; index--) {
+          work.push({
+            kind: "visit",
+            value: frame.value[index],
+            depth: frame.depth - 1,
+            target,
+            key: String(index),
+          });
+        }
+        continue;
+      }
+
+      const entries: Record<string, Json> = {};
+      const properties: Record<string, Json> = {};
+      const sparseArray: Record<string, Json> = {};
+      setOwn(sparseArray, "length", frame.value.length);
+      setOwn(sparseArray, "entries", entries);
+      if (keys.some((key) => !isArrayIndexPropertyName(key))) {
+        setOwn(sparseArray, "properties", properties);
+      }
+      assign({ $sparseArray: sparseArray });
+      const source = frame.value as unknown as Record<string, Json>;
+      for (let index = keys.length - 1; index >= 0; index--) {
+        const key = keys[index];
+        work.push({
+          kind: "visit",
+          value: source[key],
+          depth: frame.depth - 1,
+          target: isArrayIndexPropertyName(key) ? entries : properties,
+          key,
+        });
+      }
+      continue;
+    }
+
+    if (isNameWalkable(frame.value)) {
+      if (detectCycles && ancestors.has(frame.value)) {
+        assign("…");
+        continue;
+      }
+      if (detectCycles) {
+        ancestors.add(frame.value);
+        work.push({ kind: "leave", value: frame.value });
+      }
+
+      const output: Record<string, Json> = {};
+      assign(output);
+      const entries = Object.entries(frame.value);
+      for (let index = entries.length - 1; index >= 0; index--) {
+        const [key, value] = entries[index];
+        work.push({
+          kind: "visit",
+          value,
+          depth: frame.depth - 1,
+          target: output,
+          key,
+        });
+      }
+      continue;
+    }
+
+    // A Fabric instance has no enumerable state to walk by property name.
+    if (typeof frame.value === "object" && frame.value !== null) {
+      assign({ $fabric: toCompactDebugString(frame.value) });
+      continue;
+    }
+    assign(frame.value);
   }
-  // A non-plain object (a Fabric instance — bytes/regexp/epoch/hash/…) has no
-  // enumerable own keys; render its canonical debug string instead of `{}`.
-  if (typeof v === "object" && v !== null) {
-    return { $fabric: toCompactDebugString(v) };
+
+  return root.value;
+}
+
+interface JsonValueFrame {
+  kind: "value";
+  value: Json;
+  depth: number;
+}
+
+interface JsonTextFrame {
+  kind: "text";
+  value: string;
+}
+
+interface JsonLeaveFrame {
+  kind: "leave";
+  value: object;
+}
+
+type JsonFrame = JsonValueFrame | JsonTextFrame | JsonLeaveFrame;
+
+const INSPECTOR_JSON_INDENTS = Array.from(
+  { length: 33 },
+  (_, depth) => "  ".repeat(depth),
+);
+
+function inspectorJsonIndent(depth: number): string {
+  return INSPECTOR_JSON_INDENTS[Math.min(depth, 32)];
+}
+
+function omittedJsonObjectValue(value: Json): boolean {
+  return value === undefined || typeof value === "function" ||
+    typeof value === "symbol";
+}
+
+/**
+ * Serialize annotated inspector data without recursive descent. Indentation
+ * stops growing after 32 levels so deeply nested output stays linear in size.
+ */
+export function stringifyInspectorJson(value: Json): string {
+  const output: string[] = [];
+  const ancestors = new WeakSet<object>();
+  const work: JsonFrame[] = [{
+    kind: "value",
+    value,
+    depth: 0,
+  }];
+
+  while (work.length > 0) {
+    const frame = work.pop()!;
+    if (frame.kind === "text") {
+      output.push(frame.value);
+      continue;
+    }
+    if (frame.kind === "leave") {
+      ancestors.delete(frame.value);
+      continue;
+    }
+
+    if (frame.value === null) {
+      output.push("null");
+      continue;
+    }
+    switch (typeof frame.value) {
+      case "string":
+      case "boolean":
+      case "number":
+        output.push(JSON.stringify(frame.value));
+        continue;
+      case "undefined":
+      case "function":
+      case "symbol":
+        output.push("null");
+        continue;
+      case "bigint":
+        throw new TypeError("Inspector JSON contains an unannotated BigInt.");
+    }
+
+    if (ancestors.has(frame.value)) {
+      throw new TypeError("Inspector JSON contains a circular structure.");
+    }
+    ancestors.add(frame.value);
+    work.push({ kind: "leave", value: frame.value });
+
+    if (Array.isArray(frame.value)) {
+      output.push("[");
+      if (frame.value.length === 0) {
+        output.push("]");
+        continue;
+      }
+      work.push({
+        kind: "text",
+        value: `\n${inspectorJsonIndent(frame.depth)}]`,
+      });
+      for (let index = frame.value.length - 1; index >= 0; index--) {
+        work.push({
+          kind: "value",
+          value: frame.value[index],
+          depth: frame.depth + 1,
+        });
+        work.push({
+          kind: "text",
+          value: `${index === 0 ? "\n" : ",\n"}${
+            inspectorJsonIndent(frame.depth + 1)
+          }`,
+        });
+      }
+      continue;
+    }
+
+    const keys = Object.keys(frame.value).filter((key) =>
+      !omittedJsonObjectValue((frame.value as Record<string, Json>)[key])
+    );
+    output.push("{");
+    if (keys.length === 0) {
+      output.push("}");
+      continue;
+    }
+    work.push({
+      kind: "text",
+      value: `\n${inspectorJsonIndent(frame.depth)}}`,
+    });
+    for (let index = keys.length - 1; index >= 0; index--) {
+      const key = keys[index];
+      work.push({
+        kind: "value",
+        value: (frame.value as Record<string, Json>)[key],
+        depth: frame.depth + 1,
+      });
+      work.push({
+        kind: "text",
+        value: `${index === 0 ? "\n" : ",\n"}${
+          inspectorJsonIndent(frame.depth + 1)
+        }${JSON.stringify(key)}: `,
+      });
+    }
   }
-  return v;
+
+  return output.join("");
 }
 
 /** Compact one-line summary of any value, for table cells. */

@@ -9,7 +9,7 @@
 //   inspect hot      <db> [--limit <n>] [--branch <b>]
 //   inspect history  <db> <entity-id> [--scope <s>] [--branch <b>]
 //   inspect value-at <db> <entity-id> [--seq <n>] [--path a/b/c]
-//                    [--path-json '["a/b",""]'] [--doc]
+//                    [--path-json '["a/b",""]'] [--doc] [--full-depth]
 // Multi-space (cross-space convergence):
 //   inspect converge      <entity-id> --spaces a.sqlite,b.sqlite [--path a/b/c]
 //                        [--path-json '["a/b",""]']
@@ -17,7 +17,12 @@
 //   inspect converge-scan --dir <dir> [--limit <n>] [--branch <b>]
 
 import { openSpace } from "./db.ts";
-import { annotate, escapeTerminalText, summarize } from "./decode.ts";
+import {
+  annotate,
+  escapeTerminalText,
+  stringifyInspectorJson,
+  summarize,
+} from "./decode.ts";
 import {
   entityHistory,
   hotEntities,
@@ -40,7 +45,7 @@ interface Args {
 }
 
 /** Flags that never take a value — so `--json <db>` doesn't eat the db arg. */
-const BOOLEAN_FLAGS = new Set(["json", "doc", "help"]);
+const BOOLEAN_FLAGS = new Set(["json", "doc", "full-depth", "help"]);
 
 /** Value-taking flags for which an empty string has defined semantics. */
 const FLAGS_ALLOWING_EMPTY_VALUES = new Set(["branch", "path", "scope"]);
@@ -59,6 +64,7 @@ const COMMAND_FLAGS = new Map<string, ReadonlySet<string>>([
       "scope",
       "branch",
       "doc",
+      "full-depth",
       "json",
     ]),
   ],
@@ -206,8 +212,17 @@ function parsePathFlags(flags: Record<string, string | boolean>): string[] {
   return parsed;
 }
 
-function out(json: boolean, data: unknown, render: () => void) {
-  if (json) console.log(JSON.stringify(data, null, 2));
+type OutputStringifier = (value: unknown) => string | undefined;
+
+const prettyJson: OutputStringifier = (value) => JSON.stringify(value, null, 2);
+
+function out(
+  json: boolean,
+  data: unknown,
+  render: () => void,
+  stringify: OutputStringifier = prettyJson,
+) {
+  if (json) console.log(stringify(data));
   else render();
 }
 
@@ -220,7 +235,7 @@ single-space:
   history  <db> <entity-id> [--scope <s>] [--branch <b>] [--limit <n>] [--json]
   value-at <db> <entity-id> [--seq <n>] [--path a/b/c] [--scope <s>]
                             [--path-json '["a/b",""]'] [--branch <b>]
-                            [--doc] [--json]
+                            [--doc] [--full-depth] [--json]
 
 cross-space convergence:
   converge      <entity-id> (--spaces a,b,… | --dir <dir>) [--path a/b/c]
@@ -563,9 +578,15 @@ export function main(argv: string[]): number {
         );
         const shown = flags.doc === true ? res.document : res.value;
         const pathExists = flags.doc === true ? res.exists : res.pathExists;
+        const fullDepth = flags["full-depth"] === true;
+        const annotated = annotate(
+          shown,
+          fullDepth ? Number.POSITIVE_INFINITY : 8,
+        );
+        const stringify = fullDepth ? stringifyInspectorJson : prettyJson;
         out(
           json,
-          { exists: res.exists, pathExists, value: annotate(shown) },
+          { exists: res.exists, pathExists, value: annotated },
           () => {
             if (!res.exists) {
               console.log("(absent at this seq)");
@@ -575,8 +596,9 @@ export function main(argv: string[]): number {
               console.log("(entity present, but nothing at that path)");
               return;
             }
-            console.log(JSON.stringify(annotate(shown), null, 2));
+            console.log(stringify(annotated));
           },
+          stringify,
         );
         return 0;
       }

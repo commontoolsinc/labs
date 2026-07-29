@@ -119,6 +119,7 @@ deno task cf inspect hot      z6Mkqa41 --limit 10
 deno task cf inspect churn    z6Mkqa41 [--bucket 60] [--since '2026-07-22 10:00:00'] [--top 10]
 deno task cf inspect history  z6Mkqa41 of:fid1:…
 deno task cf inspect value-at z6Mkqa41 of:fid1:… --path value/count [--seq N]
+deno task cf inspect value-at z6Mkqa41 of:fid1:… --full-depth # preserve every nested value
 
 # the entity graph (relationships between pieces/cells/modules)
 deno task cf inspect graph    z6Mkqa41 [--root of:fid1:… --depth 2] [--dot]
