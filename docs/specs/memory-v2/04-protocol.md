@@ -86,10 +86,29 @@ If the server accepts the protocol, it returns:
 }
 ```
 
-The versioned `protocol` identifier is an exact compatibility boundary. If it
-does not match, the recipient closes the WebSocket without sending a handshake
-response. This is reserved for changes where the two versions cannot
-interoperate safely.
+The versioned `protocol` identifier is an explicit compatibility boundary. The
+current implementation accepts only `memory/v2.1`; for every other identifier,
+the recipient closes the WebSocket without sending a handshake response.
+
+Future implementations may accept multiple exact protocol identifiers. An
+accepted identifier means the recipient implements that identifier's complete
+wire contract, either natively or through a compatibility adapter. The client
+still proposes one identifier, `hello.ok` echoes that identifier, and signed
+`session.open.args.protocol` binds the session to it. Accepting multiple
+identifiers is therefore not an implicit downgrade negotiation.
+
+For an identifier outside the accepted set, the failure mode depends on the
+compatibility boundary:
+
+- if the recipient understands enough of that identifier's handshake framing
+  to know that the peer can safely decode a structured response, it may return
+  a typed `UnsupportedProtocol` rejection
+- if the versions cannot safely exchange even that structured response, the
+  recipient closes the connection without one
+
+Removing an identifier from the accepted set is how a breaking change
+establishes the latter, hard boundary. Adding compatibility for a known
+identifier does not weaken the close behavior for unknown or unsafe versions.
 
 Capability flags remain the finer-grained compatibility mechanism. If required
 data-model flags do not match what the server implements, it returns a typed
