@@ -21,12 +21,13 @@ import {
  * Where the line with Tier 1 falls — measured, and pinned by the last case
  * here so neither tier is dropped on a wrong assumption about the other:
  *
- * - Additive REQUIRED field with no default (the estuary brick): caught by
- *   BOTH. Tier 1's `assertPatternSchemasBackwardCompatible` rejects the
- *   contract outright ("newly required result field has no default"); this
- *   tier shows the runtime refusing the setup commit over a real document.
- *   Overlap is the point — Tier 1 is the cheap per-PR gate, and this is what
- *   proves the runtime behavior that gate stands in for.
+ * - Additive REQUIRED field with no default (the estuary brick): already
+ *   covered twice over. Tier 1's `assertPatternSchemasBackwardCompatible`
+ *   rejects the contract ("newly required result field has no default"), and
+ *   `packages/runner/test/cfc-additive-default-preserves-old-doc.test.ts`
+ *   drives the runtime rejection over a legacy root. This tier replays it not
+ *   for the guard but for the PIPELINE: a class with a known-good outcome is
+ *   what makes capture → snapshot → reopen → materialize testable end to end.
  * - Moving where a field is STORED under an identical contract: this tier
  *   only. The two result schemas are byte-identical, so no contract check can
  *   see it, and nothing throws — the data is simply gone. What a pattern
@@ -264,9 +265,16 @@ describe("pattern update over captured prior state", () => {
     // none can be synthesized. The setup commit is refused and the piece is
     // loadable-but-unrunnable — a bricked home.
     //
-    // This is the class Tier 1 structurally cannot see: BOTH contracts are
-    // individually valid and the result schema only GAINS a property, which is
-    // a covariant (compatible) change. Only a document says otherwise.
+    // This class is NOT Tier 2's alone, and the overlap is worth being exact
+    // about. Tier 1 rejects the contract (pinned by the last case here), and
+    // `packages/runner/test/cfc-additive-default-preserves-old-doc.test.ts`
+    // already drives the runtime rejection over a legacy root. What that one
+    // cannot show is the part this tier is built for: its vintage is a doc
+    // hand-written in-process from a schema, where this one was written by a
+    // real prior pattern version, snapshotted to a file, and reopened. So this
+    // case earns its keep as the capture/replay pipeline's end-to-end proof on
+    // a class whose correct outcome is independently known — not as the only
+    // evidence the guard fires.
     const captured = await capture(OLD_WITHOUT_FAVORITES, ["alpha", "beta"]);
     const result = await replay(captured, NEW_REQUIRED_NO_DEFAULT);
 
@@ -293,8 +301,19 @@ describe("pattern update over captured prior state", () => {
     // it just quietly reads a cell nobody ever wrote, and the user's data is
     // gone. Silence is what makes this class worth a gate.
     const captured = await capture(OLD_WITHOUT_FAVORITES, ["alpha", "beta"]);
-    const result = await replay(captured, RENAMED_STORAGE_KEY);
 
+    // The control belongs INSIDE this case, not in the round-trip case above.
+    // `items === []` is also what a fixture that was never restored reads back,
+    // so on its own the assertion below cannot tell "the rename stranded the
+    // data" from "there was no data" — measured: no-op the restore and this
+    // case stays green while every other case here goes red. Replaying the
+    // VINTAGE over the SAME snapshot first is what makes the emptiness a
+    // property of the rename.
+    const control = await replay(captured, OLD_WITHOUT_FAVORITES);
+    expect(control.error).toBeUndefined();
+    expect(control.value?.items).toEqual(["alpha", "beta"]);
+
+    const result = await replay(captured, RENAMED_STORAGE_KEY);
     expect(result.error).toBeUndefined();
     expect(result.value?.items).toEqual([]); // …not ["alpha", "beta"].
   });
@@ -313,10 +332,8 @@ describe("pattern update over captured prior state", () => {
       });
     const previous = await compile(OLD_WITHOUT_FAVORITES);
 
-    // The additive-required class is caught by BOTH tiers. Tier 1 rejects the
-    // contract; Tier 2 shows the runtime refusing the commit over a real doc.
-    // Keeping both is deliberate — Tier 1 is the cheap gate on every PR, and
-    // Tier 2 is what proves the runtime behavior the gate is a proxy for.
+    // The additive-required class is caught by Tier 1 outright, which is why
+    // Tier 2 replays it as a pipeline check rather than as its own coverage.
     let requiredIssue: string | undefined;
     try {
       assertPatternSchemasBackwardCompatible(

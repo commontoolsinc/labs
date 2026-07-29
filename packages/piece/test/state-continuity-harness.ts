@@ -12,10 +12,12 @@
  *
  * The other class this replays, the CFC additive-required migration refusing a
  * setup commit for a required field with no default (the 2026-07-22 estuary
- * brick), IS also caught by Tier 1's schema check. Covering it here is
- * deliberate overlap: Tier 1 rejects the contract, this proves the runtime
- * refuses the commit over a real document — which is the failure the gate
- * exists to prevent, not a proxy for it.
+ * brick), is already covered twice over — by Tier 1's schema check and by
+ * `packages/runner/test/cfc-additive-default-preserves-old-doc.test.ts`, which
+ * drives the same rejection over a legacy root. It is replayed here for the
+ * PIPELINE rather than the guard: proving capture → snapshot → reopen →
+ * materialize end to end needs a class whose correct outcome is already known
+ * independently, or a green run would only be evidence about itself.
  *
  * The state is captured as a **SQLite space store**, not a bespoke JSON dump.
  * A space is one SQLite file, `snapshotSpaceStore` already writes a
@@ -153,6 +155,12 @@ export async function openFileBackedRuntime(
     async dispose() {
       await runtime.dispose();
       await storageManager.close();
+      // The server owns what the file actually is: a SQLite engine per space,
+      // a read pool, and a scheduled refresh timer. `storageManager.close()`
+      // only tears down the client side, so without this every case leaks its
+      // engines and its timer past the case that opened them — and the temp
+      // dir is removed out from under still-open handles.
+      await server.close();
     },
   };
 }

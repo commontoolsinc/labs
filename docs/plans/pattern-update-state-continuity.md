@@ -54,11 +54,13 @@ fields someone remembered to add after each incident.
 **That particular class is caught by Tier 1 too**, and this plan originally
 claimed otherwise. Measured: `assertPatternSchemasBackwardCompatible` rejects an
 additive required result field with no default outright ("result.favorites:
-newly required result field has no default"). Tier 2 still covers it, as
-deliberate overlap rather than redundancy — Tier 1 rejects the *contract*, Tier
-2 shows the *runtime* refusing the commit over a real document, which is the
-failure itself rather than a proxy for it. The tier's unique value is the
-storage-move class above.
+newly required result field has no default"). It is covered a third time by
+`packages/runner/test/cfc-additive-default-preserves-old-doc.test.ts`, which
+drives the same runtime rejection over a legacy root. Tier 2 still replays it,
+but for the *pipeline* rather than the guard: proving capture → snapshot →
+reopen → materialize end to end needs one class whose correct outcome is
+already known independently, or a green run is only evidence about itself. The
+tier's unique coverage is the storage-move class above.
 
 ## What is verified
 
@@ -78,6 +80,8 @@ Measured on branch `tier2`, not assumed:
 | The same vintage + a candidate differing ONLY by `Default<[]>` commits cleanly, with prior state intact | measured: `{"items":["alpha","beta"],"favorites":[]}` |
 | Tier 1 **does** catch the additive-required class | measured: `assertPatternSchemasBackwardCompatible` throws "result.favorites: newly required result field has no default" |
 | Tier 1 is blind to a storage-key move | measured: result schemas byte-identical, no issue raised, replayed data empty |
+| Every case discriminates — each goes red under a mutation of the thing it claims to test | measured by mutation: dropping `expectedPatternIdentity` reds the rejection case; no-oping the snapshot restore reds three of five; undoing `.for('itemList')` reds the storage-move case |
+| A stranded-data assertion needs its control in the SAME case | measured: with the restore no-oped, the storage-move case alone stayed GREEN — `items === []` is also what an unrestored fixture reads. It now replays the vintage over the same snapshot first |
 
 The CFC-relevance row corrects an assumption this work started with. An earlier
 boundary test recorded that the guard "does not fire on a bare `runtime.setup`"
@@ -168,6 +172,11 @@ Two things this stage settled that the plan had wrong or open:
   them by another route hands the replay a root whose keys resolve to documents
   it never wrote — an empty-looking fixture and assertions that fail for a
   reason unrelated to the pattern under test.
+- The vintage owns its memory *server*, not just its storage manager.
+  `StorageManager.close()` tears down only the client side; the server holds a
+  SQLite engine per space, a read pool, and a refresh timer, and the temp dir
+  gets removed out from under them. Stages 3–4 open a vintage per fixture, so
+  this compounds — `dispose()` closes the server too.
 
 On `setPattern` versus `PatternUpdater`: the replay drives the updater's path,
 because that is what the field actually runs. The difference is the whole
