@@ -1779,6 +1779,94 @@ serving coverage (P2) a hard prerequisite for P3 rather than a parallel
 track, and it is a more demanding bar than the earlier framing implied.
 Wave B measured that wave A moved the never-claimed set not at all.
 
+## 6b. D11 — the claim mechanism is scaffolding; close the serving gap first (owner, 2026-07-29)
+
+**This supersedes the wave ordering and re-answers wave D's Q1, Q2 and
+Q3. Read it before building anything from
+[`wave-d-passivity-mechanism.md`](wave-d-passivity-mechanism.md).**
+
+### The ruling
+
+> Change the order. We want to get to the point quickly where we **don't
+> need the claim mechanism**, because the server always claims all
+> derived computations. Keep a reminder to move away from partial
+> ownership as quickly as possible by **closing the gap of what can run
+> on the server as the highest priority**, until everything can run
+> there.
+
+### Why this re-answers Q1 rather than choosing between its options
+
+Q1 asked whether "0× client standing work" means the *claimed set* or
+*all standing work*. **Neither.** Both framings presuppose that
+per-action claim arbitration is the end state. It is not — it is
+transitional scaffolding for the mixed-ownership era. Once every derived
+computation runs server-side, there is nothing to arbitrate: the server
+owns derived computation by default, and the client is not a competing
+executor whose commits must be suppressed.
+
+That inverts the priority the arc has been running on. Serving coverage
+(P2) is not a prerequisite *alongside* the passivity mechanism (P3) —
+**it is the work**. Suppression machinery built to manage a mixed regime
+is machinery to be deleted, so the less of it we build, the better.
+
+### The end state, in the owner's terms
+
+The client reduces to:
+
+1. an initial **pull for the rendered vdom**;
+2. **lazy pattern instantiation on the first handler call** — and if
+   that latency is too high, instantiate earlier or merely preload the
+   code;
+3. **sending only handler commits** back to the server, never any
+   others — and soon not even those, since we switch to sending the
+   **event** instead (P5).
+
+### Effects — Q2 dissolves
+
+The client installs effects **for rendering**. These are client-side by
+definition, known only to the client, and **not part of patterns**. What
+they do is drive `Cell.pull` / `Cell.sink`, which register the client's
+**demand** to the server — which is what kicks off the whole process.
+The server only ever sees that demand, never the effect.
+
+So there is nothing to model. The client-scheduler runs `Cell.sink` /
+`Cell.pull` and is driven by updates arriving from the server. **Any
+other kind of effect, i.e. one expressed in a pattern, runs only on the
+server.** Wave D's Q2 — "must claimed effects stop running client-side"
+— is not a question about pattern effects at all once this distinction
+is drawn.
+
+### The dormant graph — Q3 dissolves too
+
+Wave D established that graph construction is forced at boot by handler
+registration, adoption, and the CP1 rerun target, and concluded that P3
+removes boot execution but not boot construction. Under lazy
+instantiation that conclusion does not survive: a client that
+instantiates the pattern on first handler call does not construct the
+graph at boot **at all**. The forcing paths wave D found are properties
+of the current eager-instantiation design, not of the target design.
+
+### The standing hazard this creates
+
+**A great deal of current infrastructure exists to support partial
+client / partial server ownership, and the code carries wrong
+assumptions that pin it there.** This arc has already found four such
+assertions, each of which read as settled design until checked:
+
+- the `runner.ts:5183` comment recording a scoped write's fail-closed
+  behavior as accepted — it was a defect, and clearing it removed 24
+  unserved events (§5h.1);
+- the `builtin-effect-registry` pin asserting `llmDialog` "stays a
+  computation" while the factory made it an effect (§5h);
+- D2 asking for a sqlite write path whose target population has zero
+  instances, and for row-label re-derivation that already existed (§7 D2);
+- `serverPrimaryExecutionBuiltinPassivityV1`, which is
+  `getServerPrimaryExecutionConfig()` under a name claiming exactly what
+  P3 builds (wave D §13 Q6).
+
+Treat "the code says this is fine" as a hypothesis. The pattern is
+consistent enough to be a standing prior.
+
 ## 7. Owner decisions — RESOLVED 2026-07-26 (D1-D7); amended 2026-07-28 (D8-D10)
 
 Recorded from the owner's "build all of D" directive. Where the panel

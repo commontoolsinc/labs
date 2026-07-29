@@ -54,12 +54,21 @@ resumable.
 
 | Wave | What | Status |
 | --- | --- | --- |
+> **REORDERED 2026-07-29 by owner ruling D11** (client-passivity §6b).
+> The claim mechanism is **transitional scaffolding**, not the end state.
+> The server should end up running every derived computation, at which
+> point there is nothing to arbitrate. **Closing the serving gap is now
+> the highest priority**, and suppression machinery is machinery we will
+> delete — so build as little of it as possible.
+
 | A | R5/R13 effect rows — brokers, descriptors, `wish` | **DONE** |
 | A5 | sqlite lane-scoped read seam (D2 narrowed to reads) | **DONE** — writes stay client-primary |
 | B | measurement | **DONE ×2** — zero after A; **×12 cleared** after the scope fix |
 | C | C1 ruled SURVIVES; C2 negotiates end to end | **DONE** |
 | P2x | the ×12 — diagnosed AND fixed | **DONE** — first never-claimed reduction |
-| **D** | P3 passivity mechanism — client stops standing work | **DESIGNED, NOT RATIFIED** — [`wave-d-passivity-mechanism.md`](wave-d-passivity-mechanism.md); Q1 is owner-gated and blocks the build |
+| **G** | **CLOSE THE SERVING GAP** — every derived computation runs server-side | **NEXT, HIGHEST PRIORITY** |
+| D | P3 passivity mechanism | **DEFERRED** — designed ([`wave-d-passivity-mechanism.md`](wave-d-passivity-mechanism.md)) but premised on claims persisting; D11 supersedes its Q1/Q2/Q3. Revisit only if G stalls |
+| E/F | passive delivery, acceptance | after G |
 | D | P3 passivity mechanism — the client stops running standing work | blocked on B + C |
 | E | P5 passive delivery + warm spaces | blocked on D |
 | F | P6 acceptance | blocked on E |
@@ -73,6 +82,21 @@ resumable.
 - `dbb5fc86c` R7 fix — issuance-side context-floor consult; fences 2 → 0 → 0.
 - `91434cc6d` spec motivations + R5 worklist.
 - `b058731e1` this orchestration plan.
+
+**Wave G — the serving gap, as measured today.** This is the worklist.
+Everything here is a reason some derived computation cannot run on the
+server; closing them all is what makes the claim mechanism unnecessary.
+
+| Blocker | Where | Note |
+| --- | --- | --- |
+| `wish` | no descriptor; egresses via `globalThis.fetch` | A4. Owner ruled the system-pattern load a special case — resolve by loading from disk server-side |
+| `compileAndRun` | mints 4 docs, runs a whole pattern, writes from async txs outside its run | A3 refused a descriptor; needs its own design |
+| `sqliteDatabase` | derives `owner` from ambient trust snapshot, not inputs | A3. A server-side first run would mint the handle owned by the executor's principal |
+| `llmDialog`, `navigateTo` | effect nodes at runtime (factory wins over registration) | A3. Per D11 these are *pattern* effects, so they must run server-side |
+| `claim-key-mismatch` ×2, `claim-authority-lost` ×2 | live residual, both scoped arms | the last 4 events after `8e1cb7d99` |
+| `malformed-output-surface` ×1, `non-space-read-scope` ×1 | user arm | undiagnosed |
+| `dynamic-sqlite-operation` | unconditional at `servability.ts:591` | handler-only, so inside the goal per D2-as-amended |
+| `event-handler` | categorically unservable, `servability.ts:352` | client-inherent; P5 switches to sending the EVENT instead of the commit |
 
 **Known-open:**
 
