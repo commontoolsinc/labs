@@ -149,10 +149,30 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   removed: deleting `CELL_RESULT_TYPE` raises `TS2538`, deleting `action`'s
   overload 2 raises `TS2344`.
 
-  A declared result wants to be an **envelope** — one key with the payload
-  beneath it — because every top-level name a result publishes is permanent
-  (Results and schema evolution, design doc). Pinned as a type assertion
-  rather than left to authoring habit.
+  **Correction — the envelope does not do what this plan and the design doc
+  claimed.** Both said a result nested under one key leaves only that key
+  permanent, "everything beneath it free to narrow". Measured against
+  `assertPatternSchemasBackwardCompatible`, nesting confers no advantage at
+  all: the removed-field check recurses, so a nested removal is rejected on a
+  nested path (`result.topic.title: existing result field was removed`)
+  exactly as a flat one is (`result.title: ...`). Replacing a result's shape
+  is rejected either way, for the same reason.
+
+  What the checker actually enforces, in both shapes:
+
+  | change | verdict |
+  | --- | --- |
+  | remove a named field, any depth | rejected |
+  | add a **required** field, any depth | rejected unless it has a default |
+  | add an **optional** field (or one with a default), any depth | allowed |
+  | narrow a value type, any depth | allowed |
+
+  So the rule to author against is not "nest it" but: **every name a result
+  publishes is permanent regardless of depth, and every later addition must
+  be optional.** Publish as few names as the verb can live with; nesting is a
+  readability choice, not an evolution strategy. "Results may narrow freely"
+  is true of *values* and never of *names* — which is the distinction the
+  original wording blurred.
 
   Verb-shaped type parameters read the same way throughout: **`E`** the event,
   **`R`** the declared result, **`T`** the handler's bound state where there is

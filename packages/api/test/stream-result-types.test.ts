@@ -76,24 +76,27 @@ type _ValueLessPinnedLocally = MustBeTrue<
 >;
 
 // Schema compatibility checks results as candidate ⊆ previous, and "results may
-// narrow freely" governs values, not named fields: removing a named property is
-// rejected outright, so every top-level name a result publishes is permanent.
-// A result nested under one key leaves only that key permanent and everything
-// beneath it free to narrow — which is why a verb's declared result wants to be
-// an envelope rather than the payload spread flat.
+// narrow freely" governs values, never named fields: removing a named property
+// is rejected outright, at ANY depth — a nested removal reports
+// `result.topic.title` just as a flat one reports `result.title`. So nesting
+// does not reduce what a result commits to; every name it publishes is
+// permanent wherever it sits, and later additions must be optional.
+//
+// The two shapes below therefore differ in how many names they commit, not in
+// how evolvable those names are.
 interface AddTopicResult {
   topic: { fid: string; title: string };
 }
 
 type EnvelopedVerb = Stream<AddTopic, AddTopicResult>;
 
-// The permanent surface of the enveloped form is one key.
-type _EnvelopeCommitsOneName = MustBeTrue<
+// The enveloped form commits one top-level name — but `fid` and `title` under
+// it are equally permanent, so this is a smaller surface at the top only.
+type _EnvelopeCommitsOneTopName = MustBeTrue<
   AssertAssignable<keyof ResultOf<EnvelopedVerb>, "topic">
 >;
 
-// Spread flat, every field would be permanent instead. Kept as a contrast so
-// the envelope reads as a decision rather than an accident.
+// Spread flat, the same two names are committed at the top instead of one.
 type FlatVerb = Stream<AddTopic, { fid: string; title: string }>;
 type _FlatCommitsEveryName = MustBeTrue<
   AssertAssignable<keyof ResultOf<FlatVerb>, "fid" | "title">
