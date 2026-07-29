@@ -8,7 +8,7 @@ const DenoWebTestCache: Map<string, Promise<Deno.CommandOutput>> = new Map();
 
 export function stripDenoDownloadDiagnostics(
   stderr: Uint8Array,
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   const text = new TextDecoder().decode(stderr);
   const withoutDownloads = text.replace(
     /^Download https?:\/\/[^\r\n]*(?:\r?\n|$)/gm,
