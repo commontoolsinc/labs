@@ -97,10 +97,10 @@ export function isArrayIndexPropertyName(name: string): boolean {
  * regards to what `Proxy`s actually do), _and_ by making this assumption, this
  * function avoids having to inspect _every_ key.
  *
- * @param array The array to check.
+ * @param array The value to check.
  * @returns `true` if the array has only index properties, `false` otherwise.
  */
-export function isArrayWithOnlyIndexProperties(array: unknown[]): boolean {
+export function isArrayWithOnlyIndexProperties(array: unknown): boolean {
   // `Array.isArray()` sees through a `Proxy` to its target, so a proxied array
   // is still recognized as one here.
   if (!Array.isArray(array)) {

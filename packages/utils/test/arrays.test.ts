@@ -224,7 +224,7 @@ describe("arrays", () => {
       it("rejects an array-like object", () => {
         const arrayLike = { 0: "a", 1: "b", length: 2 };
         expect(
-          isArrayWithOnlyIndexProperties(arrayLike as unknown as unknown[]),
+          isArrayWithOnlyIndexProperties(arrayLike),
         )
           .toBe(false);
       });
@@ -235,35 +235,35 @@ describe("arrays", () => {
         const fake = Object.create(Array.prototype) as Record<string, unknown>;
         fake[0] = "a";
         fake.length = 1;
-        expect(isArrayWithOnlyIndexProperties(fake as unknown as unknown[]))
+        expect(isArrayWithOnlyIndexProperties(fake))
           .toBe(false);
       });
 
       it("rejects a plain object whose last own key is `length`", () => {
         const obj = { a: 1, length: 3 };
-        expect(isArrayWithOnlyIndexProperties(obj as unknown as unknown[]))
+        expect(isArrayWithOnlyIndexProperties(obj))
           .toBe(false);
       });
 
       it("answers rather than throwing for `null` and `undefined`", () => {
-        expect(isArrayWithOnlyIndexProperties(null as unknown as unknown[]))
+        expect(isArrayWithOnlyIndexProperties(null))
           .toBe(false);
         expect(
-          isArrayWithOnlyIndexProperties(undefined as unknown as unknown[]),
+          isArrayWithOnlyIndexProperties(undefined),
         )
           .toBe(false);
       });
 
       it("answers rather than throwing for a primitive", () => {
-        expect(isArrayWithOnlyIndexProperties("abc" as unknown as unknown[]))
+        expect(isArrayWithOnlyIndexProperties("abc"))
           .toBe(false);
-        expect(isArrayWithOnlyIndexProperties(42 as unknown as unknown[]))
+        expect(isArrayWithOnlyIndexProperties(42))
           .toBe(false);
       });
 
       it("rejects a `Uint8Array`", () => {
         const bytes = new Uint8Array([1, 2, 3]);
-        expect(isArrayWithOnlyIndexProperties(bytes as unknown as unknown[]))
+        expect(isArrayWithOnlyIndexProperties(bytes))
           .toBe(false);
       });
     });

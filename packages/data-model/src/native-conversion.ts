@@ -198,7 +198,7 @@ export function shallowFabricFromNativeValue(
       // Arrays may only carry numeric index properties. A named property or a
       // symbol-keyed one has no fabric representation, so reject it outright
       // rather than silently dropping it ("death before confusion").
-      if (!isArrayWithOnlyIndexProperties(value as unknown[])) {
+      if (!isArrayWithOnlyIndexProperties(value)) {
         throw new Error(
           "Cannot store array with non-index properties",
         );
