@@ -2356,6 +2356,7 @@ function createToolResultMessages(
 }
 
 export const llmDialogTestHelpers = {
+  REQUEST_TIMEOUT,
   getCellSchema,
   parseLLMFriendlyLink,
   traverseAndSerialize,
@@ -3005,6 +3006,12 @@ export function llmDialog(
   let cellScope: CellScope | undefined;
   let requestId: string | undefined = undefined;
   let abortController: AbortController | undefined = undefined;
+  // The request id of the turn this replica is running, if any. Set when that
+  // turn's promise is registered with `trackAsyncWork` and cleared when the
+  // promise settles, so it spans the whole conversation the turn drives,
+  // including its tool calls. A turn running here needs no failure detection:
+  // this replica knows it is alive.
+  let localTurnRequestId: string | undefined = undefined;
 
   // This is called when the pattern containing this node is being stopped.
   addCancel(() => {
@@ -3102,16 +3109,47 @@ export function llmDialog(
         // Cast is necessary as .key doesn't yet correctly handle Stream<>
         result.key("addMessage") as unknown as Stream<BuiltInLLMMessage>,
         (tx: IExtendedStorageTransaction, event: BuiltInLLMMessage) => {
-          if (
-            pending.withTx(tx).get() && (
+          if (pending.withTx(tx).get()) {
+            // A message added while a turn is running is dropped. The add
+            // message UI should either be disabled or change the send button
+            // to be a stop button.
+            const activeRequestId = internal.withTx(tx).key("requestId").get();
+            if (
+              localTurnRequestId !== undefined &&
+              localTurnRequestId === activeRequestId
+            ) {
+              // The running turn is this replica's own, so its liveness is not
+              // in question and the heartbeat is not consulted. A turn can run
+              // longer than the heartbeat's staleness bound without a durable
+              // write, and the heartbeat then reads stale for a turn that is
+              // plainly alive. The writes bracket a round of tool calls rather
+              // than falling between them, so the gaps are a single model call
+              // that runs that long, and a round of several tool calls, which
+              // `executeToolCalls` runs one after another before writing their
+              // results.
+              //
+              // Nothing bounds a turn on this branch. A local turn that never
+              // settles keeps dropping messages until `cancelGeneration` sets
+              // `pending` false, which is the stop button `cf-prompt-input`
+              // shows in place of send for as long as `pending` holds.
+              return;
+            }
+            // The turn belongs to another replica. `lastActivity` is that
+            // replica's heartbeat, refreshed by `safelyPerformUpdate` on every
+            // durable write of the turn, and a stale one is the only sign
+            // available that the tab which started the turn went away.
+            //
+            // This `Date.now()` is a latent hazard under the runner's fake
+            // clock, whose auto-advance can carry logical time past the
+            // five-minute mark in a test that never meant to model elapsed
+            // time. The branch it then takes accepts a message into a dialog
+            // whose turn is still running.
+            if (
               internal.withTx(tx).key("lastActivity").get() >
                 Date.now() - REQUEST_TIMEOUT
-            )
-          ) {
-            // For now, let's drop messages added while request is pending for
-            // less than five minutes. Add message UI should either be disabled
-            // or change the send button to be a stop button.
-            return;
+            ) {
+              return;
+            }
           }
 
           // Before starting request, set pending and append the new message.
@@ -3165,6 +3203,9 @@ export function llmDialog(
               }
 
               abortController = new AbortController();
+              // Set alongside starting the turn and cleared when the turn's
+              // promise settles, so the flag's lifetime is exactly the turn's.
+              localTurnRequestId = nextRequestId;
               // Track the dialog turn (LLM call + writeback) as async builtin
               // work so `runtime.settled()` wait for the result;
               // `idle()` does not, so the handler never blocks on the LLM call.
@@ -3181,7 +3222,15 @@ export function llmDialog(
                   nextRequestId,
                   abortController.signal,
                   capturedRequest,
-                ),
+                ).finally(() => {
+                  // A superseded turn keeps running until its abort reaches
+                  // every await inside it, so it can settle after a newer turn
+                  // has claimed the flag. Only the turn that still holds the
+                  // flag clears it.
+                  if (localTurnRequestId === nextRequestId) {
+                    localTurnRequestId = undefined;
+                  }
+                }),
               );
             },
           );
