@@ -20,8 +20,9 @@ function skipSgrSequences(
     while (
       end < value.length &&
       (
-        value[end] >= 0x30 && value[end] <= 0x3f ||
-        value[end] >= 0x20 && value[end] <= 0x2f
+        value[end] >= 0x30 && value[end] <= 0x39 ||
+        value[end] === 0x3a ||
+        value[end] === 0x3b
       )
     ) {
       end++;
