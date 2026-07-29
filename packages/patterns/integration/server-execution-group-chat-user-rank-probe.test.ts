@@ -9,9 +9,18 @@
  * SharedExecutionPool driving a REAL Deno executor Worker, and one real client
  * Runtime per principal over the loopback transport — the C2.9/C2.10 gate
  * topology, which is the only topology where the rank dials can be flipped at
- * all (see the memo's CA4 audit: every dial in the bundle is programmatic-only,
- * and the browser client has no way to negotiate `context-lattice-claims-v1`,
- * so the two-browser leg cannot host this measurement today).
+ * all (see the memo's CA4 audit: the RANK dials in the bundle — memory-side
+ * `serverPrimaryExecutionClaimRank` and the runner-side user/session candidate
+ * dials — are all programmatic-only, so no deployment can reach them).
+ *
+ * UPDATE (C1.7 env bridge): the audit's item-5 blocker is CLOSED. The
+ * `context-lattice-claims-v1` negotiation dial is now env-reachable on both
+ * halves of the handshake
+ * (`EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS`, gated by
+ * `server-execution-context-lattice-env-bridge-gate.test.ts`), so a
+ * browser-shaped client DOES negotiate and the amendment-11 cohort gate no
+ * longer makes user lanes structurally un-openable. The two-browser leg is
+ * still blocked on the rank dials above, which stay a rollout decision.
  *
  * ARMS. Three adjacent arms over one identical workload, the dial bundle as
  * the only difference. Each arm gets its own Server, its own fresh store

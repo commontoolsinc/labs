@@ -55,11 +55,12 @@
  * served over a localhost WebSocket, with the real SharedExecutionPool and
  * a REAL Deno executor Worker attached to the same Server object, session
  * dial + both rank-candidate dials on. Worker-realm clients negotiate the
- * context-lattice-claims subcapability through the harness-local
- * MULTI_RUNTIME_CONTEXT_LATTICE_CLAIMS seam (multi-runtime-worker.ts) —
- * the client-side ambient dial is programmatic-only by design, so the
- * harness realm must set it the same way a gate fixture flips the other
- * session dials.
+ * context-lattice-claims subcapability from
+ * `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS` — a
+ * canonical experimental flag since the C1.7 env bridge, so the worker's own
+ * Runtime installs the client-side ambient dial exactly as a browser build
+ * does from its define. (This replaced the harness-local
+ * MULTI_RUNTIME_CONTEXT_LATTICE_CLAIMS seam, which the bridge retired.)
  *
  * The ≥3-lane latency half of C2.10's split gate (CA11) lives in
  * server-execution-session-lane-latency-gate.test.ts.
@@ -168,7 +169,12 @@ Deno.test("C2.10 R7 retirement: claim-context-mismatch is back in the placement 
 const WORKER_REALM_ENV = {
   EXPERIMENTAL_SERVER_PRIMARY_EXECUTION: "true",
   EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: "true",
-  MULTI_RUNTIME_CONTEXT_LATTICE_CLAIMS: "true",
+  // C1.7 env bridge: the client half of context-lattice-claims-v1 is now a
+  // canonical experimental flag, so the worker realm's Runtime installs the
+  // ambient dial from this env var — the same path a browser build takes
+  // through its build-time define. (Was the harness-local
+  // MULTI_RUNTIME_CONTEXT_LATTICE_CLAIMS hatch, now retired.)
+  EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS: "true",
 } as const;
 
 Deno.test({

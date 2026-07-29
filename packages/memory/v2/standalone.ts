@@ -54,6 +54,34 @@ export class StandaloneMemoryServer {
     return this.#memory.feedStats;
   }
 
+  /**
+   * Read-only C1.7 cohort gauge: how many live sessions of `principal` in
+   * `space` this server tracks, and how many of them negotiated
+   * `context-lattice-claims-v1` on their current attach — the per-session
+   * flag `principalCohortNegotiatesContextLatticeClaims` (the amendment-11
+   * user-lane cohort gate) reduces over.
+   *
+   * Reports the PAIR rather than the gate's own boolean because that boolean
+   * is an `every()` over the cohort and is therefore vacuously true for a
+   * principal with no sessions at all. A gate asserting negotiation must see
+   * `sessions > 0` too, or a mistyped space DID passes for free.
+   *
+   * Observability only, like {@link feedStats}; not a mutation surface.
+   */
+  contextLatticeClaimsCohort(
+    space: string,
+    principal: string,
+  ): { sessions: number; negotiating: number } {
+    const sessions = this.#memory.sessionsForPrincipal(space, principal);
+    return {
+      sessions: sessions.length,
+      negotiating:
+        sessions.filter((session) =>
+          session.serverPrimaryExecutionContextLatticeClaimsV1
+        ).length,
+    };
+  }
+
   static start(
     options: {
       /** Space ACL config, passed through to the memory server. Default:

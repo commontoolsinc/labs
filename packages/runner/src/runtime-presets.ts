@@ -86,6 +86,7 @@
  */
 
 import {
+  SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS_ENV,
   SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH_ENV,
   SERVER_PRIMARY_EXECUTION_ENV,
 } from "@commonfabric/memory/v2";
@@ -213,6 +214,14 @@ export const EXPERIMENTAL_ENV_VARS = {
   // loop below is boolean-valued by construction.
   serverPrimaryExecutionDemandShrinkHoldMs: null,
   serverPrimaryExecutionDocSetWatch: SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH_ENV,
+  // C1.7 NEGOTIATION dial (not a rank dial): the client half of
+  // context-lattice-claims-v1. Env-exposed because the amendment-11 cohort
+  // gate needs EVERY session of a principal to have negotiated before a user
+  // lane may open, so a browser-shaped client with no path to it makes every
+  // server-side rank dial inert (client-passivity §5g item 5). The rank dials
+  // above stay `null`.
+  serverPrimaryExecutionContextLatticeClaims:
+    SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS_ENV,
   eagerSourceAnnotation: "EXPERIMENTAL_EAGER_SOURCE_ANNOTATION",
   // Scheduler-v2 lineage (#4090) is default-on. Keep a programmatic rollback
   // override while the flag exists; no environment exposure is needed.

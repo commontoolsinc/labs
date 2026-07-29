@@ -6,6 +6,9 @@ declare global {
   var $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: string | undefined;
   var $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION: string | undefined;
   var $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH: string | undefined;
+  var $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS:
+    | string
+    | undefined;
   var $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION: string | undefined;
   var $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE: string | undefined;
   var $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME: string | undefined;
@@ -33,6 +36,11 @@ const EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DEFINE =
 const EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH_DEFINE =
   typeof $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH === "string"
     ? $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH
+    : undefined;
+const EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS_DEFINE =
+  typeof $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS ===
+      "string"
+    ? $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS
     : undefined;
 const EXPERIMENTAL_EAGER_SOURCE_ANNOTATION_DEFINE =
   typeof $EXPERIMENTAL_EAGER_SOURCE_ANNOTATION === "string"
@@ -95,6 +103,19 @@ export const EXPERIMENTAL = {
   serverPrimaryExecutionDocSetWatch: flagValue(
     "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH",
     EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH_DEFINE,
+  ),
+  // The browser's own-side half of the C1.7 context-lattice-claims-v1
+  // subcapability: the worker Runtime installs it as its ambient memory
+  // config, so this realm's `hello` OFFERS context-scoped claim delivery and
+  // the server records the session as negotiating. Layered above
+  // serverPrimaryExecution. Without this key a browser build can never
+  // negotiate the subcap whatever the server advertises — and because the
+  // amendment-11 cohort gate needs EVERY session of a principal to have
+  // negotiated, that alone made user lanes un-openable in exactly the
+  // deployments worth measuring (client-passivity §5g item 5).
+  serverPrimaryExecutionContextLatticeClaims: flagValue(
+    "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS",
+    EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS_DEFINE,
   ),
   // Debug `.src` source annotation: ON in development builds (so per-primitive
   // source locations keep working for debugging), OFF in production (it is the

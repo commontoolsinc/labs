@@ -313,6 +313,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
         "modernCellRep",
         "persistentSchedulerState",
         "serverPrimaryExecution",
+        "serverPrimaryExecutionContextLatticeClaims",
         "serverPrimaryExecutionCrossSpaceReadCandidates",
         "serverPrimaryExecutionDemandShrinkHoldMs",
         "serverPrimaryExecutionDocSetWatch",

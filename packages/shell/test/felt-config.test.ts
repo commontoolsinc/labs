@@ -46,6 +46,7 @@ describe("shell felt config", () => {
       EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: "true",
       EXPERIMENTAL_SERVER_PRIMARY_EXECUTION: "true",
       EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH: "true",
+      EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS: "true",
     }, importFreshConfig);
 
     expect(config.esbuild?.define).toMatchObject({
@@ -56,6 +57,12 @@ describe("shell felt config", () => {
       // define the browser build cannot negotiate the subcapability at all
       // (the 2026-07-24 integration finding).
       $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH: "true",
+      // The C1.7 context-lattice-claims subcap's browser own-side dial: same
+      // reason, and with an extra edge — because the amendment-11 cohort gate
+      // requires EVERY session of a principal to have negotiated, one browser
+      // build missing this define makes that principal's user lanes
+      // un-openable fleet-wide (client-passivity §5g item 5).
+      $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS: "true",
     });
     const compileCacheVersion = config.esbuild?.define[
       "globalThis.__cfCompileCacheRuntimeVersion"

@@ -1732,6 +1732,14 @@ export const SERVER_PRIMARY_EXECUTION_ENV =
 export const SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH_ENV =
   "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH";
 
+/** Canonical env name for the C1.7 context-lattice-claims-v1 subcapability
+ * dial; same ownership arrangement as {@link SERVER_PRIMARY_EXECUTION_ENV}.
+ * Read on BOTH halves of the handshake — a server applies it to decide what
+ * it advertises, a client Runtime installs it as the ambient config its
+ * `hello` offers — so the two spellings cannot drift. */
+export const SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS_ENV =
+  "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS";
+
 /** Canonical boolean-env semantics (mirrors the runner's
  * `experimentalOptionsFromEnv`): exactly `"true"`/`"false"` apply; unset
  * leaves the current value; anything else is ignored WITH a warning, never
@@ -1785,6 +1793,16 @@ export function applyServerPrimaryExecutionEnvConfig(
     readEnv,
     SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH_ENV,
     (enabled) => setServerPrimaryExecutionDocSetWatchConfig(enabled),
+  );
+  // C1.7 context-lattice-claims-v1, added by the CA4 audit (client-passivity
+  // §5g item 5): the SAME miswire as the doc-set dial above, one subcapability
+  // over. Without this the advertisement is false in every dial-driven
+  // deployment, so the amendment-11 cohort gate can never admit a user lane
+  // and every claim-rank dial beneath it is inert.
+  applyBooleanEnvFlag(
+    readEnv,
+    SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS_ENV,
+    (enabled) => setServerPrimaryExecutionContextLatticeClaimsConfig(enabled),
   );
 }
 

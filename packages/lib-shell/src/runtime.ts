@@ -35,6 +35,10 @@ export type ExperimentalRuntimeFlags = {
   // above serverPrimaryExecution; threaded to the worker Runtime like the
   // base flag.
   serverPrimaryExecutionDocSetWatch?: boolean;
+  // Browser own-side half of the C1.7 context-lattice-claims-v1
+  // subcapability, layered above serverPrimaryExecution; threaded to the
+  // worker Runtime like the base flag.
+  serverPrimaryExecutionContextLatticeClaims?: boolean;
   eagerSourceAnnotation?: boolean;
   systemPatternAutoUpdate?: boolean;
   systemPatternAutoUpdateHome?: boolean;

@@ -37,6 +37,7 @@ Deno.test({
       $EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE: "true",
       $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION: "true",
       $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH: "true",
+      $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS: "true",
       // Explicit define overrides the environment-derived default (this
       // unpatched module resolves ENVIRONMENT=development, whose default
       // would otherwise be true).
@@ -48,6 +49,7 @@ Deno.test({
       persistentSchedulerState: true,
       serverPrimaryExecution: true,
       serverPrimaryExecutionDocSetWatch: true,
+      serverPrimaryExecutionContextLatticeClaims: true,
       eagerSourceAnnotation: false,
       // Default ON for the non-home root; home stays off.
       systemPatternAutoUpdate: true,
@@ -114,6 +116,52 @@ Deno.test({
       $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH: "1",
     }, importFreshEnvModule);
     expect(invalid.EXPERIMENTAL.serverPrimaryExecutionDocSetWatch)
+      .toBeUndefined();
+  },
+});
+
+Deno.test({
+  // The browser's own-side half of the C1.7 context-lattice-claims-v1 dial.
+  // Same shape as the doc-set-watch pin above, and the same reason it exists:
+  // without this key the browser build can never negotiate the subcapability
+  // whatever the server advertises, and since the amendment-11 cohort gate
+  // requires EVERY session of a principal to have negotiated, a single
+  // non-negotiating browser session makes the principal's user lanes
+  // un-openable (client-passivity §5g item 5, the CA4 audit).
+  name:
+    "shell env exposes the context-lattice-claims flag with exact override semantics",
+  permissions: { read: true },
+  async fn() {
+    const unset = await withPatchedGlobals({
+      $API_URL: "http://shell.test/",
+      $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS: undefined,
+    }, importFreshEnvModule);
+    expect(
+      "serverPrimaryExecutionContextLatticeClaims" in unset.EXPERIMENTAL,
+    ).toBe(true);
+    expect(unset.EXPERIMENTAL.serverPrimaryExecutionContextLatticeClaims)
+      .toBeUndefined();
+
+    const explicitTrue = await withPatchedGlobals({
+      $API_URL: "http://shell.test/",
+      $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS: "true",
+    }, importFreshEnvModule);
+    expect(explicitTrue.EXPERIMENTAL.serverPrimaryExecutionContextLatticeClaims)
+      .toBe(true);
+
+    const explicitFalse = await withPatchedGlobals({
+      $API_URL: "http://shell.test/",
+      $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS: "false",
+    }, importFreshEnvModule);
+    expect(
+      explicitFalse.EXPERIMENTAL.serverPrimaryExecutionContextLatticeClaims,
+    ).toBe(false);
+
+    const invalid = await withPatchedGlobals({
+      $API_URL: "http://shell.test/",
+      $EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS: "1",
+    }, importFreshEnvModule);
+    expect(invalid.EXPERIMENTAL.serverPrimaryExecutionContextLatticeClaims)
       .toBeUndefined();
   },
 });

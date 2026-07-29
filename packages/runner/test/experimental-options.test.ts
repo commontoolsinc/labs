@@ -11,10 +11,12 @@ import {
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   getServerPrimaryExecutionConfig,
+  getServerPrimaryExecutionContextLatticeClaimsConfig,
   getServerPrimaryExecutionDocSetWatchConfig,
   resetCommitPreconditionsConfig,
   resetPersistentSchedulerStateConfig,
   resetServerPrimaryExecutionConfig,
+  resetServerPrimaryExecutionContextLatticeClaimsConfig,
   resetServerPrimaryExecutionDocSetWatchConfig,
 } from "@commonfabric/memory/v2";
 
@@ -32,6 +34,7 @@ describe("ExperimentalOptions", () => {
     resetPersistentSchedulerStateConfig();
     resetServerPrimaryExecutionConfig();
     resetServerPrimaryExecutionDocSetWatchConfig();
+    resetServerPrimaryExecutionContextLatticeClaimsConfig();
   });
 
   describe("Runtime construction", () => {
@@ -54,6 +57,8 @@ describe("ExperimentalOptions", () => {
         serverPrimaryExecution: false,
         // Env-resolved (F4's doc-set watch flag): false with the env unset.
         serverPrimaryExecutionDocSetWatch: false,
+        // Same, for C1.7's context-lattice-claims negotiation flag.
+        serverPrimaryExecutionContextLatticeClaims: false,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
         eagerSourceAnnotation: false,
@@ -79,6 +84,7 @@ describe("ExperimentalOptions", () => {
         commitPreconditions: true,
         serverPrimaryExecution: true,
         serverPrimaryExecutionDocSetWatch: false,
+        serverPrimaryExecutionContextLatticeClaims: false,
         eagerSourceAnnotation: false,
       });
       await runtime.dispose();
@@ -98,6 +104,7 @@ describe("ExperimentalOptions", () => {
         commitPreconditions: true,
         serverPrimaryExecution: false,
         serverPrimaryExecutionDocSetWatch: false,
+        serverPrimaryExecutionContextLatticeClaims: false,
         // Read back from the ambient flag (a test seam that deliberately does
         // NOT reset on dispose — see ExperimentalOptions.eagerSourceAnnotation).
         eagerSourceAnnotation: false,
@@ -214,6 +221,38 @@ describe("ExperimentalOptions", () => {
       await runtime.dispose();
       expect(getServerPrimaryExecutionConfig()).toBe(false);
       expect(getServerPrimaryExecutionDocSetWatchConfig()).toBe(false);
+      await sm.close();
+    });
+
+    // The same leg for C1.7's context-lattice-claims subcapability — the half
+    // a browser had no path to before (client-passivity §5g item 5). THIS
+    // propagation is what makes the realm's memory `hello` offer the subcap,
+    // so the server records the session as negotiating and the amendment-11
+    // cohort gate can admit a user lane. Also pins the layering and that
+    // dispose returns both dials to their defaults.
+    it("constructing Runtime with serverPrimaryExecutionContextLatticeClaims sets global config", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: {
+          serverPrimaryExecution: true,
+          serverPrimaryExecutionContextLatticeClaims: true,
+        },
+      });
+
+      expect(getServerPrimaryExecutionConfig()).toBe(true);
+      expect(getServerPrimaryExecutionContextLatticeClaimsConfig()).toBe(true);
+      expect(
+        runtime.experimental.serverPrimaryExecutionContextLatticeClaims,
+      ).toBe(true);
+      // Layered above the base capability, and independent of the sibling
+      // subcapability dial.
+      expect(getServerPrimaryExecutionDocSetWatchConfig()).toBe(false);
+
+      await runtime.dispose();
+      expect(getServerPrimaryExecutionConfig()).toBe(false);
+      expect(getServerPrimaryExecutionContextLatticeClaimsConfig()).toBe(false);
       await sm.close();
     });
 

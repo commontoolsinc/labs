@@ -23,14 +23,17 @@ import {
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   getServerPrimaryExecutionConfig,
+  getServerPrimaryExecutionContextLatticeClaimsConfig,
   getServerPrimaryExecutionDocSetWatchConfig,
   resetCommitPreconditionsConfig,
   resetPersistentSchedulerStateConfig,
   resetServerPrimaryExecutionConfig,
+  resetServerPrimaryExecutionContextLatticeClaimsConfig,
   resetServerPrimaryExecutionDocSetWatchConfig,
   setCommitPreconditionsConfig,
   setPersistentSchedulerStateConfig,
   setServerPrimaryExecutionConfig,
+  setServerPrimaryExecutionContextLatticeClaimsConfig,
   setServerPrimaryExecutionDocSetWatchConfig,
 } from "@commonfabric/memory/v2";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
@@ -307,6 +310,29 @@ export interface ExperimentalOptions {
    * Registered in docs/development/EXPERIMENTAL_OPTIONS.md.
    */
   serverPrimaryExecutionDocSetWatch?: boolean | undefined;
+  /**
+   * The client half of the C1.7 `context-lattice-claims-v1` subcapability:
+   * whether THIS client offers context-scoped claim delivery in its memory
+   * `hello`. Installed as the realm's ambient memory config by the Runtime
+   * constructor, exactly like {@link serverPrimaryExecutionDocSetWatch}, and
+   * layered above {@link serverPrimaryExecution} — enabling the base flag
+   * alone never turns it on, and the connection getter chain ANDs both peers'
+   * advertisements.
+   *
+   * This is a NEGOTIATION dial, not a rank dial: it says nothing about which
+   * context ranks the host issues (`serverPrimaryExecutionClaimRank`, memory
+   * side) or which candidates this executor produces
+   * ({@link serverPrimaryExecutionUserRankCandidates} and the ladder above
+   * it), all of which stay programmatic-only. It is env-exposed because the
+   * amendment-11 cohort gate requires EVERY session of a principal to have
+   * negotiated before a user lane may open, so a fleet whose clients cannot
+   * negotiate makes every server-side rank dial inert (client-passivity §5g
+   * item 5, the CA4 audit). Default off; a mixed fleet stays valid either way
+   * — the cohort gate fences lanes around non-negotiating sessions rather
+   * than rejecting them. Registered in
+   * docs/development/EXPERIMENTAL_OPTIONS.md.
+   */
+  serverPrimaryExecutionContextLatticeClaims?: boolean | undefined;
   /**
    * Eagerly resolve the per-primitive debug source annotation (`fn.src`) at
    * module evaluation. Debug-only — identity never reads `.src` — and OFF by
@@ -970,6 +996,16 @@ export class Runtime {
     );
     this.experimental.serverPrimaryExecutionDocSetWatch =
       getServerPrimaryExecutionDocSetWatchConfig();
+    // The C1.7 context-lattice-claims-v1 subcapability dial, bridged
+    // symmetrically with the two above: on a server build it decides
+    // advertisement, on a client build it is what this realm's `hello`
+    // OFFERS — the half a browser had no path to before (CA4 audit,
+    // client-passivity §5g item 5).
+    setServerPrimaryExecutionContextLatticeClaimsConfig(
+      this.experimental.serverPrimaryExecutionContextLatticeClaims,
+    );
+    this.experimental.serverPrimaryExecutionContextLatticeClaims =
+      getServerPrimaryExecutionContextLatticeClaimsConfig();
     // Unlike the flags above, only propagate when EXPLICITLY set: the ambient
     // flag is also a test seam (tests toggle `setEagerSourceAnnotation`
     // directly around runtime construction), and an unconditional
@@ -1318,6 +1354,7 @@ export class Runtime {
     resetCommitPreconditionsConfig();
     resetServerPrimaryExecutionConfig();
     resetServerPrimaryExecutionDocSetWatchConfig();
+    resetServerPrimaryExecutionContextLatticeClaimsConfig();
 
     // Clear the current runtime reference
     // Removed setCurrentRuntime call - no longer using singleton pattern

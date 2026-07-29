@@ -26,6 +26,7 @@ import {
   getMemoryProtocolFlags,
   MEMORY_PROTOCOL,
   resetServerPrimaryExecutionConfig,
+  resetServerPrimaryExecutionContextLatticeClaimsConfig,
   resetServerPrimaryExecutionDocSetWatchConfig,
   resetServerPrimaryExecutionGraphRetirementConfig,
   type WireMemoryProtocolFlags,
@@ -35,6 +36,8 @@ import { StandaloneMemoryServer } from "../v2/standalone.ts";
 
 const BASE_ENV = "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION";
 const DOC_SET_WATCH_ENV = "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_DOC_SET_WATCH";
+const CONTEXT_LATTICE_CLAIMS_ENV =
+  "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS";
 
 /** The complete default advertisement (every dial at its built-in default).
  * A committed golden: the safety property of the env bridge is that with the
@@ -76,6 +79,7 @@ async function withEnv<T>(
     }
     resetServerPrimaryExecutionConfig();
     resetServerPrimaryExecutionDocSetWatchConfig();
+    resetServerPrimaryExecutionContextLatticeClaimsConfig();
     resetServerPrimaryExecutionGraphRetirementConfig();
   }
 }
@@ -131,6 +135,7 @@ Deno.test("FW6: a production-constructed standalone server advertises the server
   await withEnv({
     [BASE_ENV]: "true",
     [DOC_SET_WATCH_ENV]: "true",
+    [CONTEXT_LATTICE_CLAIMS_ENV]: undefined,
   }, async () => {
     const server = StandaloneMemoryServer.start();
     try {
@@ -139,10 +144,71 @@ Deno.test("FW6: a production-constructed standalone server advertises the server
       assertEquals(flags.serverPrimaryExecutionClaimRoutingV1, true);
       assertEquals(flags.serverPrimaryExecutionBuiltinPassivityV1, true);
       assertEquals(flags.serverPrimaryExecutionDocSetWatchV1, true);
-      // Subcapabilities with their own (unset) dials stay off: the env bridge
-      // wires exactly the two canonical dials, nothing more.
+      // Subcapabilities with their own (unset) dials stay off: each canonical
+      // dial is wired independently, and no dial implies another.
       assertEquals(flags.serverPrimaryExecutionContextLatticeClaimsV1, false);
       assertEquals(flags.serverPrimaryExecutionCrossSpaceClaimsV1, false);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+// C1.7's half of the same bridge (client-passivity §5g item 5, the CA4
+// audit): before this, `serverPrimaryExecutionContextLatticeClaimsV1` had no
+// env mapping at all, so no deployment could advertise it — and the
+// amendment-11 cohort gate made user lanes un-openable as a result.
+Deno.test("C1.7: the context-lattice-claims subcap advertises from its own env dial", async () => {
+  await withEnv({
+    [BASE_ENV]: "true",
+    [CONTEXT_LATTICE_CLAIMS_ENV]: "true",
+    [DOC_SET_WATCH_ENV]: undefined,
+  }, async () => {
+    const server = StandaloneMemoryServer.start();
+    try {
+      const flags = await advertisedFlagsOverWebSocket(server.url);
+      assertEquals(flags.serverPrimaryExecutionV1, true);
+      assertEquals(flags.serverPrimaryExecutionContextLatticeClaimsV1, true);
+      // Independent of the sibling subcapability dials, both directions.
+      assertEquals(flags.serverPrimaryExecutionDocSetWatchV1, false);
+      assertEquals(flags.serverPrimaryExecutionCrossSpaceClaimsV1, false);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+Deno.test("C1.7: the context-lattice-claims subcap stays layered — base dial alone never advertises it", async () => {
+  await withEnv({
+    [BASE_ENV]: "true",
+    [CONTEXT_LATTICE_CLAIMS_ENV]: undefined,
+  }, async () => {
+    const server = StandaloneMemoryServer.start();
+    try {
+      const flags = await advertisedFlagsOverWebSocket(server.url);
+      assertEquals(flags.serverPrimaryExecutionV1, true);
+      assertEquals(flags.serverPrimaryExecutionContextLatticeClaimsV1, false);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+// The subcapability is layered ABOVE the base capability: its own dial on,
+// the base dial off ⇒ still not advertised (getMemoryProtocolFlags folds the
+// two). Without this leg a deployment could believe the subcap was live from
+// one env var.
+Deno.test("C1.7: the context-lattice-claims dial alone never advertises without the base dial", async () => {
+  await withEnv({
+    [BASE_ENV]: undefined,
+    [CONTEXT_LATTICE_CLAIMS_ENV]: "true",
+  }, async () => {
+    resetServerPrimaryExecutionConfig();
+    const server = StandaloneMemoryServer.start();
+    try {
+      const flags = await advertisedFlagsOverWebSocket(server.url);
+      assertEquals(flags.serverPrimaryExecutionV1, false);
+      assertEquals(flags.serverPrimaryExecutionContextLatticeClaimsV1, false);
     } finally {
       await server.close();
     }
@@ -169,10 +235,12 @@ Deno.test("FW6 discrimination: dials unset ⇒ the advertisement is byte-identic
   await withEnv({
     [BASE_ENV]: undefined,
     [DOC_SET_WATCH_ENV]: undefined,
+    [CONTEXT_LATTICE_CLAIMS_ENV]: undefined,
   }, async () => {
     // Fresh dial state, then the REAL construction with nothing set.
     resetServerPrimaryExecutionConfig();
     resetServerPrimaryExecutionDocSetWatchConfig();
+    resetServerPrimaryExecutionContextLatticeClaimsConfig();
     const server = StandaloneMemoryServer.start();
     try {
       const flags = await advertisedFlagsOverWebSocket(server.url);
@@ -191,12 +259,14 @@ Deno.test("FW6: non-canonical env values are ignored (with a warning), never coe
   await withEnv({
     [BASE_ENV]: "1",
     [DOC_SET_WATCH_ENV]: "yes",
+    [CONTEXT_LATTICE_CLAIMS_ENV]: "on",
   }, async () => {
     const server = StandaloneMemoryServer.start();
     try {
       const flags = await advertisedFlagsOverWebSocket(server.url);
       assert(flags.serverPrimaryExecutionV1 === false);
       assert(flags.serverPrimaryExecutionDocSetWatchV1 === false);
+      assert(flags.serverPrimaryExecutionContextLatticeClaimsV1 === false);
     } finally {
       await server.close();
     }

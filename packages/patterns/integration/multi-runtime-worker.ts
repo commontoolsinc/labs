@@ -14,7 +14,6 @@ import {
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
 import { markRendererTrustedEvent } from "@commonfabric/runner/cfc";
-import { setServerPrimaryExecutionContextLatticeClaimsConfig } from "@commonfabric/memory/v2";
 import { Identity, type KeyPairRaw } from "@commonfabric/identity";
 import {
   initializePiecesController,
@@ -214,18 +213,19 @@ const handlers: Record<
   async init({ rawIdentity, spaceName, apiUrl, diagnostics, wsDelayMs }) {
     const identity = await Identity.deserialize(rawIdentity as KeyPairRaw);
     if (typeof wsDelayMs === "number") installWsDelay(wsDelayMs);
-    // C2.10 session-lane gates: the context-lattice-claims-v1 subcapability's
-    // client-side ambient dial is deliberately programmatic-only (its env
-    // mapping in the canonical EXPERIMENTAL registry is null), so a
-    // worker-realm client cannot offer it in its hello. Session-lane gate
-    // fixtures that self-host a lattice-claims-enabled server set this
-    // HARNESS-LOCAL variable so their worker-realm sessions negotiate the
-    // subcapability and session lanes may open (C2.3's own-session
-    // admission). Only this harness reads it; production wiring stays a
-    // rollout decision.
-    if (Deno.env.get("MULTI_RUNTIME_CONTEXT_LATTICE_CLAIMS") === "true") {
-      setServerPrimaryExecutionContextLatticeClaimsConfig(true);
-    }
+    // NOTE (C1.7 env bridge): the `MULTI_RUNTIME_CONTEXT_LATTICE_CLAIMS`
+    // harness-local hatch that used to live here is RETIRED. The
+    // context-lattice-claims-v1 client dial is now a real
+    // `ExperimentalOptions` flag with a canonical env mapping
+    // (`EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_CONTEXT_LATTICE_CLAIMS`), so the
+    // Runtime `initializePiecesController` constructs installs the ambient
+    // dial itself — the same path a browser build takes through its
+    // build-time define. Fixtures that need their worker-realm sessions to
+    // negotiate the subcapability set that env var, exactly as they already
+    // set `EXPERIMENTAL_SERVER_PRIMARY_EXECUTION`. Keeping the hatch would
+    // now be actively wrong: the Runtime constructor writes this ambient
+    // dial, so a pre-construction `set...(true)` here would be stomped back
+    // to false.
     cc = await initializePiecesController({
       apiUrl: new URL(apiUrl as string),
       identity,

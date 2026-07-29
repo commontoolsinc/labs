@@ -173,6 +173,11 @@ export interface InitializationData {
     // above serverPrimaryExecution); installed as worker-realm ambient
     // config by the Runtime constructor.
     serverPrimaryExecutionDocSetWatch?: boolean;
+    // Browser own-side half of the C1.7 context-lattice-claims-v1
+    // subcapability (layered above serverPrimaryExecution); installed as
+    // worker-realm ambient config by the Runtime constructor, which is what
+    // makes this realm's memory `hello` offer context-scoped claim delivery.
+    serverPrimaryExecutionContextLatticeClaims?: boolean;
     eagerSourceAnnotation?: boolean;
     // Roll a space's system root pattern forward in place when its toolshed
     // serves a newer identity. Default off; home held behind the second flag.
