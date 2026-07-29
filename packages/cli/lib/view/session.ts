@@ -1329,7 +1329,9 @@ export class Session {
     // workspace prefix and drop the identifying part.
     const name = target.filePath!.split(/[\\/]/).pop() ?? target.filePath!;
     this.overlay = {
-      title: `${name}  ·  line ${target.destLine + 1}`,
+      title: `${name}  ·  line ${target.destLine + 1}, column ${
+        target.destCol + 1
+      }`,
       info: lines,
       mode: "info",
       targets: [],

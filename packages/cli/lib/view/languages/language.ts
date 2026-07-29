@@ -48,6 +48,8 @@ export interface DefTarget {
   readonly fileOffset?: number;
   /** 0-based line of the definition (document line in-document, file otherwise). */
   readonly line: number;
+  /** 0-based display column of the definition. */
+  readonly col?: number;
   /** A trimmed one-line preview of the definition site. */
   readonly preview: string;
 }

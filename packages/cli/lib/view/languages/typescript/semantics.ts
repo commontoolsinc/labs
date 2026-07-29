@@ -29,6 +29,7 @@ import type {
   SemanticsOptions as Options,
 } from "../language.ts";
 import { languageForFile } from "../language.ts";
+import { cpLen } from "../../ansi.ts";
 
 interface SectionFile {
   /** Virtual file name (the section header path, or `fileName`). */
@@ -101,18 +102,23 @@ export function createSemantics(
       if (cached) return cached;
       let out: DefTarget[] = [];
       try {
-        if (build() && service) {
+        const program = build();
+        if (program && service) {
           const section = sectionAt(offset);
           if (section) {
             const local = offset - section.start;
-            const defs = service.getDefinitionAtPosition(section.name, local) ??
-              [];
+            const defs = definitionsAtPosition(
+              service,
+              program,
+              section.name,
+              local,
+            );
             for (const d of defs) {
               const sec = sectionByVfile.get(d.fileName);
               if (sec) {
                 const blobOffset = sec.start + d.textSpan.start;
-                const { line, preview } = lineAndPreview(text, blobOffset);
-                out.push({ name: d.name, blobOffset, line, preview });
+                const { line, col, preview } = lineAndPreview(text, blobOffset);
+                out.push({ name: d.name, blobOffset, line, col, preview });
               } else {
                 // A real file. Skip libs / anything outside the workspace —
                 // jumping into lib.d.ts for `Set` is noise, not a definition.
@@ -124,6 +130,7 @@ export function createSemantics(
                   filePath: d.fileName,
                   fileOffset: d.textSpan.start,
                   line: at.line,
+                  col: at.col,
                   preview: at.preview,
                 });
               }
@@ -194,18 +201,29 @@ export function createDiffSemantics(
       if (cached) return cached;
       let out: DefTarget[] = [];
       try {
-        if (build() && service) {
+        const program = build();
+        if (program && service) {
           const at = maps.toFile(offset);
           if (at) {
-            const defs = service.getDefinitionAtPosition(at.path, at.offset) ??
-              [];
+            const defs = definitionsAtPosition(
+              service,
+              program,
+              at.path,
+              at.offset,
+            );
             for (const d of defs) {
               // A definition on a line the diff shows maps back into the diff;
               // anything else within the workspace opens as an external file.
               const inDiff = maps.fromFile(d.fileName, d.textSpan.start);
               if (inDiff !== null) {
-                const { line, preview } = lineAndPreview(diffText, inDiff);
-                out.push({ name: d.name, blobOffset: inDiff, line, preview });
+                const { line, col, preview } = lineAndPreview(diffText, inDiff);
+                out.push({
+                  name: d.name,
+                  blobOffset: inDiff,
+                  line,
+                  col,
+                  preview,
+                });
                 continue;
               }
               const content = readReal(d.fileName);
@@ -216,6 +234,7 @@ export function createDiffSemantics(
                 filePath: d.fileName,
                 fileOffset: d.textSpan.start,
                 line: atDef.line,
+                col: atDef.col,
                 preview: atDef.preview,
               });
             }
@@ -237,6 +256,77 @@ export function createDiffSemantics(
       }
     },
   };
+}
+
+interface DefinitionSite {
+  readonly name: string;
+  readonly fileName: string;
+  readonly textSpan: ts.TextSpan;
+}
+
+function definitionsAtPosition(
+  service: ts.LanguageService,
+  program: ts.Program,
+  fileName: string,
+  offset: number,
+): readonly DefinitionSite[] {
+  const direct = service.getDefinitionAtPosition(fileName, offset) ?? [];
+  if (direct.length > 0) return direct;
+  return signedNumericElementDefinitions(program, fileName, offset);
+}
+
+/** Resolve signed numeric element keys through the receiver's property symbol. */
+function signedNumericElementDefinitions(
+  program: ts.Program,
+  fileName: string,
+  offset: number,
+): DefinitionSite[] {
+  const source = program.getSourceFile(fileName);
+  if (!source) return [];
+  let current: ts.Node | undefined = deepestNodeAt(source, offset);
+  while (current && !ts.isElementAccessExpression(current)) {
+    current = current.parent;
+  }
+  if (!current) return [];
+  const argument = current.argumentExpression;
+  if (
+    !argument || !ts.isPrefixUnaryExpression(argument) ||
+    !ts.isNumericLiteral(argument.operand) ||
+    (argument.operator !== ts.SyntaxKind.PlusToken &&
+      argument.operator !== ts.SyntaxKind.MinusToken)
+  ) {
+    return [];
+  }
+  const magnitude = Number(argument.operand.text);
+  if (!Number.isFinite(magnitude)) return [];
+  const value = argument.operator === ts.SyntaxKind.MinusToken
+    ? -magnitude
+    : magnitude;
+  const checker = program.getTypeChecker();
+  const receiver = checker.getNonNullableType(
+    checker.getTypeAtLocation(current.expression),
+  );
+  const symbol = checker.getPropertyOfType(receiver, String(value));
+  if (!symbol) return [];
+  return (symbol.declarations ?? []).map((declaration) => ({
+    name: symbol.getName(),
+    fileName: declaration.getSourceFile().fileName,
+    textSpan: {
+      start: declaration.getStart(),
+      length: declaration.getWidth(),
+    },
+  }));
+}
+
+function deepestNodeAt(source: ts.SourceFile, offset: number): ts.Node {
+  let found: ts.Node = source;
+  const visit = (node: ts.Node): void => {
+    if (offset < node.getFullStart() || offset >= node.getEnd()) return;
+    found = node;
+    node.forEachChild(visit);
+  };
+  visit(source);
+  return found;
 }
 
 /** The cleaned type string of the node at `local` in `fileName`, or null. */
@@ -266,7 +356,7 @@ function typeStringAt(
 function lineAndPreview(
   content: string,
   offset: number,
-): { line: number; preview: string } {
+): { line: number; col: number; preview: string } {
   const clamped = Math.max(0, Math.min(offset, content.length));
   let line = 0;
   for (let i = 0; i < clamped; i++) if (content[i] === "\n") line++;
@@ -276,6 +366,7 @@ function lineAndPreview(
   const preview = content.slice(start, end).trim();
   return {
     line,
+    col: cpLen(content.slice(start, clamped)),
     preview: preview.length > 72 ? `${preview.slice(0, 71)}…` : preview,
   };
 }

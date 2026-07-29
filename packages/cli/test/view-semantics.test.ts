@@ -504,6 +504,313 @@ const flag = ext();`;
   }
 });
 
+Deno.test("card: an external method called by a statement is defined elsewhere", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(
+      join(root, "deno.json"),
+      JSON.stringify({ imports: { ext: "./ext.ts" } }),
+    );
+    Deno.writeTextFileSync(
+      join(root, "ext.ts"),
+      `export class Worker {
+  run(): void {}
+}
+export const worker = new Worker();
+`,
+    );
+    for (
+      const [call, displayName] of [
+        ["worker.run()", "run"],
+        ["(worker.run)()", "run"],
+        ["worker.run!()", "run"],
+        ["(worker.run as () => void)()", "run"],
+        ["(worker.run<string>)()", "run"],
+        ['worker["run"]()', '"run"'],
+        ["worker[`run`]()", '"run"'],
+      ]
+    ) {
+      const blob = `// transformed: /main.ts
+import { worker } from "ext";
+${call};`;
+      const doc = parseDocument(blob);
+      const statement = doc.flatStructure.find((node) =>
+        node.kind === "statement" && node.startLine === 2
+      )!;
+      const sem = createSemantics(blob, { cwd: root })!;
+      const card = buildPeekCard(doc, statement, sem);
+      const text = card.info
+        .map((line) => line.text)
+        .join("\n");
+      assert(
+        text.includes(`  ${displayName}  ext.ts:2`),
+        `${call} lists its called method as defined elsewhere: ${text}`,
+      );
+      assert(
+        card.targets.some((target) =>
+          target.filePath?.endsWith("ext.ts") &&
+          target.destLine === 1 &&
+          target.destCol === 2
+        ),
+        `${call} has a jump target at its external declaration`,
+      );
+    }
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("card: literal call keys have safe one-line display names", () => {
+  const blob = `// transformed: /main.ts
+const worker = {
+  [""](): void {},
+  [\`line one
+line two\`](): void {},
+  ["\\u2028"](): void {},
+  ["\\u2029"](): void {},
+};
+[worker[""](), worker[\`line one
+line two\`](), worker["\\u2028"](), worker["\\u2029"]()];
+`;
+  const doc = parseDocument(blob);
+  const statement = doc.flatStructure.find((node) =>
+    node.kind === "statement" && node.label.startsWith("[worker")
+  )!;
+  const sem = createSemantics(blob, { cwd: CWD })!;
+  const card = buildPeekCard(doc, statement, sem);
+  const text = card.info.map((line) => line.text).join("\n");
+  assert(text.includes('  ""  method'), `empty key is quoted: ${text}`);
+  assert(
+    text.includes('  "line one\\nline two"  method'),
+    `multiline key is escaped: ${text}`,
+  );
+  assert(
+    text.includes('  "\\u2028"  method'),
+    `line separator is escaped: ${text}`,
+  );
+  assert(
+    text.includes('  "\\u2029"  method'),
+    `paragraph separator is escaped: ${text}`,
+  );
+  for (const line of card.info) {
+    assert(!line.text.includes("\n"), "card model lines remain single-line");
+    assert(
+      !/[\u2028\u2029]/u.test(line.text),
+      "card model lines contain no Unicode line separators",
+    );
+    assertEquals(line.spans.map((span) => span.text).join(""), line.text);
+  }
+});
+
+Deno.test("card: signed numeric method calls are defined elsewhere", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(
+      join(root, "deno.json"),
+      JSON.stringify({ imports: { ext: "./ext.ts" } }),
+    );
+    Deno.writeTextFileSync(
+      join(root, "ext.ts"),
+      `export const numbered = {
+  [-1](): void {},
+  [+1](): void {},
+};
+`,
+    );
+    const blob = `// transformed: /main.ts
+import { numbered } from "ext";
+[numbered[-1](), numbered[+1]()];`;
+    const doc = parseDocument(blob);
+    const statement = doc.flatStructure.find((node) =>
+      node.kind === "statement" && node.startLine === 2
+    )!;
+    const sem = createSemantics(blob, { cwd: root })!;
+    const card = buildPeekCard(doc, statement, sem);
+    const text = card.info.map((line) => line.text).join("\n");
+    assert(text.includes("  -1  ext.ts:2"), `negative key is listed: ${text}`);
+    assert(text.includes("  +1  ext.ts:3"), `positive key is listed: ${text}`);
+    assertEquals(
+      card.targets
+        .filter((target) =>
+          target.filePath?.endsWith("ext.ts") &&
+          /^[ ]+[+-]1[ ]+/.test(card.info[target.cardLine]?.text ?? "")
+        )
+        .map((target) => [target.destLine, target.destCol]),
+      [[1, 2], [2, 2]],
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("card: equal method names keep distinct external jump targets", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    Deno.writeTextFileSync(
+      join(root, "deno.json"),
+      JSON.stringify({ imports: { ext: "./ext.ts" } }),
+    );
+    Deno.writeTextFileSync(
+      join(root, "ext.ts"),
+      "export const first = { run(): void {} }; " +
+        "export const second = { run(): void {} };\n",
+    );
+    const calls = [
+      ...Array.from({ length: 40 }, () => "first.run()"),
+      "second.run()",
+    ].join(", ");
+    const blob = `// transformed: /main.ts
+import { first, second } from "ext";
+${calls};`;
+    const doc = parseDocument(blob);
+    const statement = doc.flatStructure.find((node) =>
+      node.kind === "statement" && node.startLine === 2
+    )!;
+    const sem = createSemantics(blob, { cwd: root })!;
+    const card = buildPeekCard(doc, statement, sem, true);
+    assertEquals(
+      card.info
+        .filter((line) => line.text.startsWith("  run  "))
+        .map((line) => line.text),
+      ["  run  ext.ts:1", "  run  ext.ts:1"],
+    );
+    const runTargets = card.targets.filter((target) =>
+      target.filePath?.endsWith("ext.ts") &&
+      card.info[target.cardLine]?.text.startsWith("  run  ")
+    );
+    assertEquals(runTargets.length, 2);
+    assertEquals(runTargets.map((target) => target.destLine), [0, 0]);
+    assertEquals(
+      new Set(runTargets.map((target) => target.destCol)).size,
+      2,
+      "same-line method declarations retain distinct destination columns",
+    );
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("card: collapsed definition lookup is bounded and expandable", () => {
+  const calls = Array.from({ length: 1_000 }, () => "worker.run()").join(", ");
+  const blob = `// transformed: /main.ts
+${calls};`;
+  const doc = parseDocument(blob);
+  const statement = doc.flatStructure.find((node) =>
+    node.kind === "statement" && node.startLine === 1
+  )!;
+  let definitionCalls = 0;
+  const sem: Semantics = {
+    typeAt: () => null,
+    prewarm: () => {},
+    fileLines: () => null,
+    definitionOf: () => {
+      definitionCalls++;
+      return [{
+        name: "run",
+        filePath: "/workspace/ext.ts",
+        fileOffset: 0,
+        line: 0,
+        col: 0,
+        preview: "",
+      }];
+    },
+  };
+  const card = buildPeekCard(doc, statement, sem);
+  assertEquals(
+    definitionCalls,
+    40,
+    "the collapsed card resolves only its bounded prefix",
+  );
+  assert(
+    card.info.some((line) => line.text.includes("961 remaining uses")),
+    "the card says how much definition lookup remains",
+  );
+  assert(
+    card.targets.some((target) => target.expand),
+    "the remaining lookup can be expanded",
+  );
+});
+
+Deno.test("card: a called in-document method is a dependency jump", () => {
+  const blob = `// transformed: /main.ts
+const worker = { render(): void {} };
+worker.render();`;
+  const doc = parseDocument(blob);
+  const call = doc.flatStructure.find((node) =>
+    node.kind === "builder" && node.startLine === 2
+  )!;
+  const method = doc.flatStructure.find((node) =>
+    node.kind === "method" && node.label.includes("render")
+  )!;
+  const sem = createSemantics(blob, { cwd: CWD })!;
+  const card = buildPeekCard(doc, call, sem);
+  const text = card.info.map((line) => line.text).join("\n");
+  assert(
+    text.includes("  render  method  line 2"),
+    `called method is listed as a dependency: ${text}`,
+  );
+  assert(
+    card.targets.some((target) =>
+      target.defOffset === method.startOffset && target.destLine === 1
+    ),
+    "called method has an in-document jump target",
+  );
+});
+
+Deno.test("card: local function properties retain distinct exact destinations", () => {
+  const definitionLine =
+    "const worker = { first: { run: () => 1 }, second: { run: () => 2 } };";
+  const blob = `// transformed: /main.ts
+${definitionLine}
+[worker.first.run(), worker.second.run()];`;
+  const doc = parseDocument(blob);
+  const statement = doc.flatStructure.find((node) =>
+    node.kind === "statement" && node.startLine === 2
+  )!;
+  const sem = createSemantics(blob, { cwd: CWD })!;
+  const card = buildPeekCard(doc, statement, sem);
+  const runTargets = card.targets.filter((target) =>
+    card.info[target.cardLine]?.text.startsWith("  run  ")
+  );
+  assertEquals(runTargets.length, 2);
+  assertEquals(runTargets.map((target) => target.destLine), [1, 1]);
+  assertEquals(
+    runTargets.map((target) => target.destCol).sort((a, b) => a - b),
+    [definitionLine.indexOf("run"), definitionLine.lastIndexOf("run")],
+  );
+});
+
+Deno.test("card: exact and name-index dependencies stay in source order", () => {
+  const declarations = Array.from(
+    { length: 10 },
+    (_, index) => `const d${index} = ${index};`,
+  ).join("\n");
+  const blob = `// transformed: /main.ts
+const worker = { run(..._values: number[]): void {} };
+${declarations}
+worker.run(d0, d1, d2, d3, d4, d5, d6, d7, d8, d9);`;
+  const doc = parseDocument(blob);
+  const statement = doc.flatStructure.find((node) =>
+    node.kind === "statement" && node.startLine === 12
+  )!;
+  const sem = createSemantics(blob, { cwd: CWD })!;
+  const card = buildPeekCard(doc, statement, sem);
+  const runLine = card.info.findIndex((line) =>
+    line.text.startsWith("  run  ")
+  );
+  const firstArgumentLine = card.info.findIndex((line) =>
+    line.text.startsWith("  d0  ")
+  );
+  assert(
+    runLine >= 0,
+    "the called method fits in the collapsed dependency list",
+  );
+  assert(
+    runLine < firstArgumentLine,
+    "the called method precedes the arguments that follow it in source",
+  );
+});
+
 Deno.test("card: a dependency jumps to the exact binding across a name collision", () => {
   // `helper` is declared in two sections; /main imports it from /b.ts.
   const blob = `// transformed: /a.ts
