@@ -647,6 +647,27 @@ const strictConstraintDefinitionIssue = (
 interface SchemaDefinitionContext {
   activeByRoot: WeakMap<object, WeakSet<object>>;
   activeRefsByRoot: WeakMap<object, Set<string>>;
+  /**
+   * Definition maps whose bodies this call already walks under a given root.
+   * `resolveCfcSchemaRef()` re-attaches the owning `$defs` object to every
+   * resolved view, so without this the same map is re-walked once per distinct
+   * path that reaches a `$ref` — the definition graph then expands as a tree
+   * instead of a DAG and node visits grow as (definition count)^(ref depth).
+   */
+  walkedDefinitionsByRoot: WeakMap<object, WeakSet<object>>;
+  /**
+   * Schemas that proved out completely under a given root, so a schema reached
+   * again through another path costs a lookup instead of a full re-walk. Only
+   * recorded for subtrees that no recursion guard cut short (see `cuts`).
+   */
+  provenByRoot: WeakMap<object, WeakSet<object>>;
+  /**
+   * How many times a recursion guard returned "no issue" for a subtree it did
+   * not actually walk. A cut result is only sound while the schema that caused
+   * it is still on the stack and will report its own issues, so a subtree whose
+   * count moved must not be memoized as proven.
+   */
+  cuts: number;
 }
 
 /** Validate the schema language understood by strict Fabric migration checks. */
@@ -667,7 +688,44 @@ export const validateSchemaDefinition = (
   return validateSchemaDefinitionInternal(schema, fullSchema, "$", {
     activeByRoot: new WeakMap(),
     activeRefsByRoot: new WeakMap(),
+    walkedDefinitionsByRoot: new WeakMap(),
+    provenByRoot: new WeakMap(),
+    cuts: 0,
   });
+};
+
+const DEFINITION_KEYS = ["$defs", "definitions"] as const;
+
+/**
+ * Claim the definition maps this schema walks, so a schema that merely carries
+ * the same map under the same root skips it.
+ *
+ * The claim is taken on entry, before any child is walked, so the map belongs
+ * to the outermost schema that carries it. That schema walks it later from its
+ * own keyword loop, where no ref expansion is in flight — a nested carrier
+ * claiming first would instead walk the definitions from inside a `$ref` that
+ * the recursion guard is holding open, and bodies reached through that ref
+ * would be cut short.
+ */
+const claimDefinitionScopes = (
+  schema: Exclude<JSONSchema, boolean>,
+  rootKey: object,
+  context: SchemaDefinitionContext,
+): ReadonlySet<string> => {
+  const claimed = new Set<string>();
+  for (const key of DEFINITION_KEYS) {
+    const definitions = schema[key];
+    if (!isRecord(definitions) || Array.isArray(definitions)) continue;
+    let walked = context.walkedDefinitionsByRoot.get(rootKey);
+    if (walked?.has(definitions)) continue;
+    if (!walked) {
+      walked = new WeakSet();
+      context.walkedDefinitionsByRoot.set(rootKey, walked);
+    }
+    walked.add(definitions);
+    claimed.add(key);
+  }
+  return claimed;
 };
 
 const validateSchemaDefinitionInternal = (
@@ -683,13 +741,19 @@ const validateSchemaDefinitionInternal = (
 
   const schemaRoot = cfcSchemaChildRoot(schema, fullSchema);
   const rootKey = isRecord(schemaRoot) ? schemaRoot : schema;
+  if (context.provenByRoot.get(rootKey)?.has(schema)) return undefined;
   let active = context.activeByRoot.get(rootKey);
-  if (active?.has(schema)) return undefined;
+  if (active?.has(schema)) {
+    context.cuts++;
+    return undefined;
+  }
   if (!active) {
     active = new WeakSet();
     context.activeByRoot.set(rootKey, active);
   }
   active.add(schema);
+  const cutsOnEntry = context.cuts;
+  const claimedDefinitions = claimDefinitionScopes(schema, rootKey, context);
 
   try {
     if (Object.hasOwn(schema, "$ref")) {
@@ -697,7 +761,10 @@ const validateSchemaDefinitionInternal = (
         return `${path}: schema $ref must be a non-empty string`;
       }
       let activeRefs = context.activeRefsByRoot.get(rootKey);
-      if (activeRefs?.has(schema.$ref)) return undefined;
+      if (activeRefs?.has(schema.$ref)) {
+        context.cuts++;
+        return undefined;
+      }
       if (!activeRefs) {
         activeRefs = new Set();
         context.activeRefsByRoot.set(rootKey, activeRefs);
@@ -920,6 +987,15 @@ const validateSchemaDefinitionInternal = (
     ) {
       const children = schema[key];
       if (children === undefined) continue;
+      // A definition map reached again under the same root has the same bodies
+      // and resolves them against the same root, so whichever schema claimed it
+      // on entry already covers it.
+      if (
+        (key === "$defs" || key === "definitions") &&
+        !claimedDefinitions.has(key)
+      ) {
+        continue;
+      }
       for (const [name, child] of Object.entries(children)) {
         const issue = validateSchemaDefinitionInternal(
           child,
@@ -931,6 +1007,14 @@ const validateSchemaDefinitionInternal = (
       }
     }
 
+    if (context.cuts === cutsOnEntry) {
+      let proven = context.provenByRoot.get(rootKey);
+      if (!proven) {
+        proven = new WeakSet();
+        context.provenByRoot.set(rootKey, proven);
+      }
+      proven.add(schema);
+    }
     return undefined;
   } finally {
     active.delete(schema);

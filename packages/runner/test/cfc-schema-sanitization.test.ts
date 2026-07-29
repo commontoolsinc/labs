@@ -493,6 +493,74 @@ describe("cfc schema sanitization", () => {
       .toContain("value does not match type string");
   });
 
+  it("walks a shared definition map once, not once per ref path", () => {
+    // resolveCfcSchemaRef() hands every resolved view the owning `$defs`
+    // object. Walking those bodies again at each view expands the definition
+    // graph as a tree rather than a DAG, so node visits grow as
+    // (definition count)^(ref depth) — the shape that made
+    // packages/patterns/lobby/main.tsx take over a minute to validate.
+    // Counting reads of one definition body keeps the bound on the work
+    // itself rather than on the clock.
+    const depth = 8;
+    const definitions: Record<string, JSONSchema> = {};
+    for (let index = 0; index < depth; index++) {
+      definitions[`D${index}`] = index === depth - 1 ? { type: "string" } : {
+        type: "object",
+        properties: {
+          a: { $ref: `#/$defs/D${index + 1}` },
+          b: { $ref: `#/$defs/D${index + 1}` },
+        },
+      };
+    }
+    const countedBody = definitions.D4;
+    let reads = 0;
+    Object.defineProperty(definitions, "D4", {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        reads++;
+        return countedBody;
+      },
+    });
+    const schema: JSONSchema = {
+      type: "object",
+      properties: { root: { $ref: "#/$defs/D0" } },
+      $defs: definitions,
+    };
+
+    expect(validateSchemaDefinition(schema)).toBeUndefined();
+    // 463911 reads before the definition map was claimed once per root; the
+    // bound this asserts does not grow with `depth`.
+    expect(reads).toBeLessThan(100);
+  });
+
+  it("reports definition bodies a recursive ref would cut short", () => {
+    // The definition map belongs to the schema that carries it outermost, so
+    // its bodies are walked with no ref expansion in flight. Claiming it from
+    // a resolved view instead would reach `child` through the very `$ref` the
+    // recursion guard is holding open, and its own keywords would go unchecked.
+    const schema: JSONSchema = {
+      type: "object",
+      properties: { node: { $ref: "#/$defs/Node" } },
+      $defs: {
+        Node: {
+          type: "object",
+          properties: {
+            child: {
+              $ref: "#/$defs/Node",
+              type: "bogus",
+            } as unknown as JSONSchema,
+            name: { type: "string" },
+          },
+        },
+      },
+    };
+
+    expect(validateSchemaDefinition(schema)).toContain(
+      "unsupported schema type bogus",
+    );
+  });
+
   it("rejects sparse schema keyword arrays without rejecting sparse values", () => {
     const sparseType = [, "number"];
     const sparseRequired = [, "value"];
