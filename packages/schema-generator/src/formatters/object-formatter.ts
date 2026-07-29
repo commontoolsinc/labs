@@ -179,6 +179,26 @@ function shouldSkipInternalProperty(
 }
 
 /**
+ * `FabricExecPlainObject` is used as a compile-time constraint on internal
+ * execution graph types. Its inherited index signature does not describe
+ * authored data accepted by a pattern, so it must not become a JSON Schema
+ * `additionalProperties` declaration.
+ */
+function hasFabricExecPlainObjectBase(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
+  if ((type.flags & ts.TypeFlags.Object) === 0) return false;
+
+  const objectType = type as ts.ObjectType;
+  if ((objectType.objectFlags & ts.ObjectFlags.Interface) === 0) return false;
+
+  return (checker.getBaseTypes(type as ts.InterfaceType) ?? []).some((base) =>
+    base.getSymbol()?.getName() === "FabricExecPlainObject"
+  );
+}
+
+/**
  * Formatter for object types (interfaces, type literals, etc.)
  */
 export class ObjectFormatter implements TypeFormatter {
@@ -334,7 +354,9 @@ export class ObjectFormatter implements TypeFormatter {
     // Handle string/number index signatures → additionalProperties with description
     const stringIndex = checker.getIndexTypeOfType(type, ts.IndexKind.String);
     const numberIndex = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
-    const chosenIndex = stringIndex ?? numberIndex;
+    const chosenIndex = hasFabricExecPlainObjectBase(type, checker)
+      ? undefined
+      : stringIndex ?? numberIndex;
     if (chosenIndex) {
       const apSchema = this.schemaGenerator.formatChildType(
         chosenIndex,
