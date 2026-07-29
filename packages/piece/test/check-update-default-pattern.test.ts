@@ -821,6 +821,107 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(getPatternIdentityRef(updated.getCell())?.symbol).toBe("default");
   });
 
+  // The boot path (ensureDefaultPattern) reconciles an unloadable root before
+  // start — but registry listings, `cf piece ls`, FUSE, and the shell's list
+  // cells all resolve the root through PieceManager.getDefaultPattern instead,
+  // which used to inherit NO heal: the load failure propagated and every
+  // listing died with the root (2026-07-29 vendor gate, the cf-cell-context
+  // type retirement). The manager choke point must run the same awaited
+  // updater check and retry once.
+  it("heals an unloadable stale root on the REGISTRY path (not just boot)", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+
+    // A root left behind by an older runtime: well-formed identity, but its
+    // source closure was never persisted, so any start of it fails.
+    const staleIdentity = await identityForSource(
+      patternSource("unloadable-registry-path-root"),
+    );
+    await manager.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: staleIdentity,
+        symbol: "default",
+      });
+    });
+    expect(error).toBeUndefined();
+
+    stub.setSource(SOURCE_V2);
+
+    // Straight to the registry — never through ensureDefaultPattern.
+    const registry = await manager.getPieceRegistry();
+    await runtime.idle();
+
+    expect(registry).toBeDefined();
+    const healed = (await manager.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(healed)?.identity).toBe(
+      await identityForSource(SOURCE_V2),
+    );
+    expect(getPatternIdentityRef(healed)?.symbol).toBe("default");
+  });
+
+  it("surfaces the ORIGINAL start failure when the post-heal retry fails", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    const staleIdentity = await identityForSource(
+      patternSource("unloadable-registry-path-root-retry-fails"),
+    );
+    await manager.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: staleIdentity,
+        symbol: "default",
+      });
+    });
+    expect(error).toBeUndefined();
+    stub.setSource(SOURCE_V2);
+
+    // Inject a failure into the post-heal sequence: runtime.idle() is only
+    // awaited there on this path. The caller must still see the ORIGINAL
+    // "Could not load pattern" failure, not the injected secondary one.
+    const originalIdle = runtime.idle.bind(runtime);
+    let injected = false;
+    runtime.idle = () => {
+      if (!injected) {
+        injected = true;
+        return Promise.reject(new Error("secondary retry failure"));
+      }
+      return originalIdle();
+    };
+    try {
+      await expect(manager.getPieceRegistry()).rejects.toThrow(
+        "Could not load pattern",
+      );
+      expect(injected).toBe(true);
+    } finally {
+      runtime.idle = originalIdle;
+    }
+  });
+
+  it("registry path still fails loudly when the flag is OFF", async () => {
+    await setup({});
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    const staleIdentity = await identityForSource(
+      patternSource("unloadable-registry-path-root-no-flag"),
+    );
+    await manager.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: staleIdentity,
+        symbol: "default",
+      });
+    });
+    expect(error).toBeUndefined();
+    stub.setSource(SOURCE_V2);
+
+    await expect(manager.getPieceRegistry()).rejects.toThrow(
+      "Could not load pattern",
+    );
+  });
+
   it("repairs persisted artifacts when the served identity is unchanged", async () => {
     await setup({ systemPatternAutoUpdate: true });
     const piece = await controller.ensureDefaultPattern();
