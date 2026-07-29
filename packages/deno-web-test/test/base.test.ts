@@ -28,45 +28,54 @@ Deno.test("smoke test", async function () {
 
 Deno.test("dependency downloads do not enter harness stderr", function () {
   const encoder = new TextEncoder();
-  const beforeInvalidByte = encoder.encode(
-    "Task test deno run cli.ts *.test.ts\n" +
-      "Download https://registry.npmjs.org/esbuild\n" +
-      "Download http://registry.npmjs.org/typescript\n" +
-      "Warning with non-UTF-8 byte: ",
-  );
-  const afterInvalidByte = encoder.encode(
-    "\nDownload https://example.test/from-application\n",
-  );
-  const stderr = new Uint8Array(
-    beforeInvalidByte.length + 1 + afterInvalidByte.length,
-  );
-  stderr.set(beforeInvalidByte);
-  stderr[beforeInvalidByte.length] = 0xff;
-  stderr.set(afterInvalidByte, beforeInvalidByte.length + 1);
+  for (const colorized of [false, true]) {
+    const taskLine = colorized
+      ? "\x1b[0m\x1b[32mTask\x1b[0m \x1b[0m\x1b[36mtest\x1b[0m deno run cli.ts *.test.ts\n"
+      : "Task test deno run cli.ts *.test.ts\n";
+    const downloadLine = (url: string) =>
+      colorized
+        ? `\x1b[0m\x1b[32mDownload\x1b[0m ${url}\n`
+        : `Download ${url}\n`;
+    const warning = "Warning with non-UTF-8 byte: ";
+    const beforeInvalidByte = encoder.encode(
+      taskLine +
+        downloadLine("https://registry.npmjs.org/esbuild") +
+        downloadLine("http://registry.npmjs.org/typescript") +
+        warning,
+    );
+    const afterInvalidByte = encoder.encode(
+      "\n" + downloadLine("https://example.test/from-application"),
+    );
+    const stderr = new Uint8Array(
+      beforeInvalidByte.length + 1 + afterInvalidByte.length,
+    );
+    stderr.set(beforeInvalidByte);
+    stderr[beforeInvalidByte.length] = 0xff;
+    stderr.set(afterInvalidByte, beforeInvalidByte.length + 1);
 
-  const output: Deno.CommandOutput = {
-    code: 0,
-    success: true,
-    signal: null,
-    stdout: encoder.encode("test output"),
-    stderr,
-  };
+    const output: Deno.CommandOutput = {
+      code: 0,
+      success: true,
+      signal: null,
+      stdout: encoder.encode("test output"),
+      stderr,
+    };
 
-  const expectedTask = encoder.encode(
-    "Task test deno run cli.ts *.test.ts\nWarning with non-UTF-8 byte: ",
-  );
-  const expectedStderr = new Uint8Array(
-    expectedTask.length + 1 + afterInvalidByte.length,
-  );
-  expectedStderr.set(expectedTask);
-  expectedStderr[expectedTask.length] = 0xff;
-  expectedStderr.set(afterInvalidByte, expectedTask.length + 1);
+    const expectedTask = encoder.encode(taskLine + warning);
+    const expectedStderr = new Uint8Array(
+      expectedTask.length + 1 + afterInvalidByte.length,
+    );
+    expectedStderr.set(expectedTask);
+    expectedStderr[expectedTask.length] = 0xff;
+    expectedStderr.set(afterInvalidByte, expectedTask.length + 1);
 
-  assertEquals(
-    sanitizeDenoWebTestOutput(output),
-    {
-      ...output,
-      stderr: expectedStderr,
-    },
-  );
+    assertEquals(
+      sanitizeDenoWebTestOutput(output),
+      {
+        ...output,
+        stderr: expectedStderr,
+      },
+      colorized ? "colorized diagnostics" : "plain diagnostics",
+    );
+  }
 });
