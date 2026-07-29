@@ -42,6 +42,7 @@ export {
   isFabricCompatible,
   nativeFromFabricValue,
   shallowCleanArray,
+  shallowCleanPlainObject,
   shallowFabricFromNativeValue,
 } from "./native-conversion.ts";
 
