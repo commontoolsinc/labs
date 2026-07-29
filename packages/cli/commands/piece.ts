@@ -1,5 +1,6 @@
 import { Table } from "@cliffy/table";
 import { Command, ValidationError } from "@cliffy/command";
+import { VerbInputValidationError } from "../lib/callable.ts";
 import {
   applyPieceInput,
   type EntryConfig,
@@ -207,6 +208,26 @@ export function pieceLinkDataErrorReport(
     message: error.message,
     hint: cliText(
       `TIP: Run 'cf piece inspect --piece ${opts.sourcePieceId} ...' and '--piece ${opts.targetPieceId} ...' to see the fields each piece actually has.`,
+    ),
+  };
+}
+
+/**
+ * Build the stderr report for a `piece call` payload rejection. Returns null
+ * when the error is not a VerbInputValidationError (the caller should
+ * rethrow). The flags parsed fine and the piece resolved — the values simply
+ * do not fit the verb — so it reports like the other data errors rather than
+ * as a usage failure, and points at the listing that shows the shape it wanted.
+ */
+export function verbInputErrorReport(
+  error: unknown,
+  opts: { piece: string },
+): { message: string; hint: string } | null {
+  if (!(error instanceof VerbInputValidationError)) return null;
+  return {
+    message: error.message,
+    hint: cliText(
+      `TIP: Run 'cf piece verbs --piece ${opts.piece} --json' to see each verb's expected input.`,
     ),
   };
 }
@@ -1207,7 +1228,13 @@ after --. Handlers interpret piped input when no input argument is present.`,
             (next) => phase = next,
           ),
         },
-      );
+      ).catch((error) => {
+        const report = verbInputErrorReport(error, {
+          piece: pieceConfig.piece ?? "<piece>",
+        });
+        if (report) exitWithDataError(report);
+        throw error;
+      });
       if (result.helpText) {
         render(result.helpText);
         return;

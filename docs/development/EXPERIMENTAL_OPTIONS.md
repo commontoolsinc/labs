@@ -182,9 +182,12 @@ propagate](#how-flags-propagate).
 - **Current default and planned end state.** On by default as part of
   scheduler-v2 speculation lineage and receipt enforcement. An explicit
   programmatic `false` remains a rollback override; under that override,
-  single-use grants fail closed rather than silently becoming multi-use. The
-  planned end state is to remove the rollback flag and make the behavior
-  unconditional.
+  single-use grants fail closed rather than silently becoming multi-use, and
+  no handling publishes a receipt address on its transaction
+  (`tx.handlingReceiptLink` stays absent) — nothing creates or create-only
+  marks that cell while the flag is off, so an address would name a witness
+  that does not exist. The planned end state is to remove the rollback flag
+  and make the behavior unconditional.
 - **Status on 2026-07-10.** Implemented for lineage commits and event-result
   receipts, single-use grant consumption, and the memory protocol; on by
   default, with explicit programmatic opt-out retained temporarily.

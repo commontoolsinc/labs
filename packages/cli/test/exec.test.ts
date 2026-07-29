@@ -2333,7 +2333,7 @@ describe("mounted callable resolution and execution", () => {
     ]);
   });
 
-  it("passes implicit piped JSON through for mounted object handlers without CLI shape enforcement", async () => {
+  it("refuses implicit piped JSON that cannot satisfy a mounted object handler", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
       relativePath: "home/pieces/notes-2/result/add.handler",
@@ -2353,25 +2353,21 @@ describe("mounted callable resolution and execution", () => {
 
     await writeLiveMountState(stateDir, mountpoint);
 
-    await executeMountedCallableFile(
-      filePath,
-      [],
-      {
-        stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
-        loadPiece: () => Promise.resolve(harness.piece),
-        isStdinTerminal: () => false,
-        readTextInput: () => Promise.resolve('["not-an-object"]'),
-      },
-    );
+    await expect(
+      executeMountedCallableFile(
+        filePath,
+        [],
+        {
+          stateDir,
+          loadManager: () => Promise.resolve(harness.manager),
+          loadPiece: () => Promise.resolve(harness.piece),
+          isStdinTerminal: () => false,
+          readTextInput: () => Promise.resolve('["not-an-object"]'),
+        },
+      ),
+    ).rejects.toThrow(/Invalid input for "add"/);
 
-    expect(harness.tracker.handlerWrites).toEqual([
-      {
-        cellProp: "result",
-        path: ["add"],
-        value: ["not-an-object"],
-      },
-    ]);
+    expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
   it("passes stdin --json through unchanged for mounted tools", async () => {
@@ -2499,7 +2495,7 @@ describe("mounted callable resolution and execution", () => {
     });
   });
 
-  it("parses stdin JSON for --json without enforcing the linked schema in the CLI", async () => {
+  it("refuses stdin --json that cannot satisfy the linked handler schema", async () => {
     const mountpoint = join(tmpDir, "mount");
     const filePath = await createMountedFile(mountpoint, {
       relativePath: "home/pieces/notes-2/result/add.handler",
@@ -2519,24 +2515,23 @@ describe("mounted callable resolution and execution", () => {
 
     await writeLiveMountState(stateDir, mountpoint);
 
-    await executeMountedCallableFile(
-      filePath,
-      ["--json"],
-      {
-        stateDir,
-        loadManager: () => Promise.resolve(harness.manager),
-        loadPiece: () => Promise.resolve(harness.piece),
-        readJsonInput: () => Promise.resolve(["not-an-object"]),
-      },
-    );
+    // stdin is still parsed as JSON verbatim — the CLI does not reshape it.
+    // What changed is that a payload the verb cannot accept stops here rather
+    // than dispatching and settling as if it had worked.
+    await expect(
+      executeMountedCallableFile(
+        filePath,
+        ["--json"],
+        {
+          stateDir,
+          loadManager: () => Promise.resolve(harness.manager),
+          loadPiece: () => Promise.resolve(harness.piece),
+          readJsonInput: () => Promise.resolve(["not-an-object"]),
+        },
+      ),
+    ).rejects.toThrow(/Invalid input for "add"/);
 
-    expect(harness.tracker.handlerWrites).toEqual([
-      {
-        cellProp: "result",
-        path: ["add"],
-        value: ["not-an-object"],
-      },
-    ]);
+    expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
   it("returns machine-readable schema details for --help --json", async () => {
