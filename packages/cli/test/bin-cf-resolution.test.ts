@@ -100,6 +100,33 @@ Deno.test("a vendoring host resolves to its vendored labs", async () => {
   });
 });
 
+Deno.test("a vendoring host is found from any depth below it", async () => {
+  // The realistic shape: working somewhere deep inside a loom instance, with
+  // its labs several levels up. `vendor/labs` is tested at every ancestor, not
+  // just the immediate parent.
+  await withTempDir(async (dir) => {
+    const host = join(dir, "loominstance");
+    await makeCheckout(join(host, "vendor", "labs"));
+    const deep = join(host, "foo", "bar", "baz");
+    await Deno.mkdir(deep, { recursive: true });
+
+    const { code, out } = await resolveFrom(deep);
+    assertEquals(code, 0);
+    assertEquals(out, join(host, "vendor", "labs"));
+  });
+});
+
+Deno.test("a vendoring host is found from the host root itself", async () => {
+  await withTempDir(async (dir) => {
+    const host = join(dir, "loominstance");
+    await makeCheckout(join(host, "vendor", "labs"));
+
+    const { code, out } = await resolveFrom(host);
+    assertEquals(code, 0);
+    assertEquals(out, join(host, "vendor", "labs"));
+  });
+});
+
 Deno.test("inside the vendored labs, that checkout wins over its host", async () => {
   // The nearer checkout is the answer; walking up to the host and re-deriving
   // `vendor/labs` would reach the same place here, but must not be relied on.
