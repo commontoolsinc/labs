@@ -202,10 +202,11 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   properties" is not a single predicate today. `isStream()` accepts three
   independent signals, any one of which suffices: the cell's construction kind,
   `asCell: ["stream"]` in the schema, and a stored `{$stream: true}` value
-  (`packages/runner/src/cell.ts:924-946`). If C3 keys emission off the schema
-  marker alone, a verb carrying only the stored marker gets no result schema
-  and rule 3 silently does not apply to it — and the WS-C exit below would not
-  catch that, since it exercises one CTS pattern that does carry the marker.
+  (`Cell.isStream`, `packages/runner/src/cell.ts:936-958`). If C3 keys emission
+  off the schema marker alone, a verb carrying only the stored marker gets no
+  result schema and rule 3 silently does not apply to it — and the WS-C exit
+  below would not catch that, since it exercises one CTS pattern that does
+  carry the marker.
   That the signals diverge in practice is not hypothetical: the CLI has two
   runtime workarounds for handlers whose schema lost the marker
   (`tryResolvePieceHandler`, and the forced-stream probe in

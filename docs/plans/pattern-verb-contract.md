@@ -604,7 +604,7 @@ Every top-level name published is permanent; a value nested under one key
 leaves only that key permanent and everything beneath it free to narrow. The
 llm-dialog tool path already returns exactly this shape from both of its
 branches — an `@resultLocation` link, the value, and its schema together
-(`packages/runner/src/builtins/llm-dialog.ts:2789-2797` and `:2818-2826`).
+(`packages/runner/src/builtins/llm-dialog.ts:2841-2847` and `:2869-2875`).
 
 ### Authoring
 
@@ -769,14 +769,15 @@ miniature. Its **handler** path mints a result cell at a *caller-supplied* id
 (`toolCall.id`), hands that cell to the handler as `result` — the code's own
 comment reads "doesn't HAVE to be used, but can be" — and resolves off the
 commit callback: `handler.withTx(tx).send({...input, result}, (completedTx) =>
-…)` (`packages/runner/src/builtins/llm-dialog.ts:2730-2735`). That is this
-design's shape, already in production. Two qualifications keep the citation
-honest. It is specifically the handler branch that is the precedent; the
-sibling `runtime.run(tx, pattern, invocationArgs, result)` branch (`:2728`) is
-the tool-as-bound-sub-pattern path this document defers, and it resolves off a
-sink rather than a commit. And llm-dialog bounds its caller-side wait with a
-120-second `TOOL_CALL_TIMEOUT` (`:126`), whose sibling `REQUEST_TIMEOUT` drops
-a user's message outright when one is pending (`:3053-3062`) — the fixed-wait
+…)` (`handleInvoke`, `packages/runner/src/builtins/llm-dialog.ts:2756-2761`).
+That is this design's shape, already in production. Two qualifications keep the
+citation honest. It is specifically the handler branch that is the precedent;
+the sibling `runtime.run(tx, pattern, invocationArgs, result)` branch (`:2754`)
+is the tool-as-bound-sub-pattern path this document defers, and it resolves off
+a sink rather than a commit. And llm-dialog bounds its caller-side wait with a
+120-second `TOOL_CALL_TIMEOUT` (`:131`), whose sibling `REQUEST_TIMEOUT` drops
+a user's message outright when one is pending (the `addMessage` guard,
+`:3105-3111`) — the fixed-wait
 failure class this document's own live-session evidence names one paragraph
 above. So the precedent is precise: the ergonomics of a caller-supplied id
 resolving to a durable result cell are proven, and the bounded wait wrapped
