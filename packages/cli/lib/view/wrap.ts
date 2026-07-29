@@ -628,7 +628,7 @@ function wordWrapDiffersFromHard(
     return false;
   };
 
-  if (prepareRow()) return true;
+  prepareRow();
   let displayCol = 0;
   let differs = false;
   visitDisplayCellSources(text, mode, (start, end) => {

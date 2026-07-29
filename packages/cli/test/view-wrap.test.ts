@@ -160,6 +160,23 @@ Deno.test("word wrap plan: tabs and ASCII symbols belong to the prefix", () => {
   assertEquals(wrappedRowAt(plan, 1)?.offset, 9);
 });
 
+Deno.test("word wrap plan: punctuation can touch the first word", () => {
+  const doc = parseDocument("#abcdefgh");
+  const plan = buildWrapPlan(
+    doc.lines,
+    "pictures",
+    4,
+    new Map(),
+    "word",
+  );
+
+  assertEquals(
+    Array.from(plan.wordRows?.[0]?.offsets ?? []),
+    [0, 3, 5],
+  );
+  assertEquals(wrappedRowAt(plan, 1)?.prefixWidth, 1);
+});
+
 Deno.test("word wrap plan: punctuation-only text breaks at whitespace", () => {
   const punctuation = buildWrapPlan(
     parseDocument("### ###").lines,
