@@ -426,22 +426,77 @@ test — reading state written by a version that knew nothing about today's — 
 exactly what a migrated-forward database no longer holds.
 
 - [ ] Give `runTestPattern` an injection point for its storage manager. It
-      currently hard-codes `StorageManager.emulate` (`test-runner.ts` ~:988),
-      which runs against `:memory:` — there is no file to snapshot. This is the
-      one blocking change; everything else composes from what exists.
+      hard-codes `StorageManager.emulate` (`test-runner.ts` ~:988), which runs
+      against `:memory:` — there is no file to snapshot.
+- [ ] Let the caller pin the test's result cause. The runner causes it
+      `test-pattern-result-${Date.now()}`, which is fine for a store that is
+      thrown away and fatal for one that is kept: an id that differs every run
+      cannot be addressed again.
+- [ ] **Record every pattern instantiation and its result cell**, via a runtime
+      hook, and persist the log INSIDE the store under a reserved cause. See
+      "finding the update targets" below — this is the part that was tried the
+      obvious way first and failed.
 - [ ] Capture by running a pattern's OWN tests against a file-backed store,
       then snapshotting. Pattern tests are themselves patterns
       (`home.test.tsx` instantiates `Home({})` and drives it with
       `action()`/`assert()`), so the state they produce is real pattern state
       written through real handlers.
+- [ ] Replay by applying today's pattern to EVERY recorded instantiation, and
+      report the count — "updated 0 patterns" must never read as success.
 - [ ] Capture on identity change, committed — not uploaded as an artifact
       (see the decision above).
-- [ ] Replay the current pattern against EVERY prior vintage, not just the
-      newest. Shard when the corpus makes it slow; `pattern-compat`'s 4-way
-      split is the precedent.
 - [ ] Retention, if any, weighed as LOST COVERAGE against working-tree disk —
       not applied as housekeeping, and still structurally unable to reach
       `pinned/`.
+
+**Finding the update targets — the hard part, and a measured dead end.**
+
+A test-populated store puts the TEST pattern at the top; the pattern under test
+is a nested instance (`Home({})`) with no stable id. Applying today's test
+pattern at the top was tried and **makes the gate weaker**: measured, the
+additive-required break that stage 3 catches (exit 1, naming the field) exits 0,
+because materializing the test pattern never re-runs the CFC schema merge
+against the inner pattern's own stored envelope. Do not take that shortcut.
+
+Three ways to get the targets were compared:
+
+1. *Tests declare them* — every test returns its instantiated patterns as
+   update targets. Rejected: churn across every test plus the test-authoring
+   skill, and its failure mode is SILENT. A test that forgets to declare
+   reduces coverage invisibly, which is the exact shape that has bitten this
+   work twice.
+2. *Scan the restored store.* `setupInternal` already stamps `patternIdentity`
+   on the result cell of every instantiated pattern that has an entry ref
+   (`runner.ts:1512`), and `run()` routes through it (`:2739`) — so pattern
+   roots are self-labelling and no graph traversal is needed. But there is **no
+   sanctioned way to enumerate them**: the `_` wildcard selector survives only
+   as an optional field in `Select<>` and two comments in
+   `memory/interface.ts`, with no implementation anywhere; and
+   `SpaceSession.sqliteQuery` reaches a CELL-derived db (the sqlite-builtin
+   feature), not the space store's own tables. Enumerating means reading `head`
+   directly AND decoding the metadata encoding.
+3. *Runtime hook* — record instantiations as they happen. **Chosen.** The
+   absence of an enumeration API is what decides it: the hook buys access, not
+   merely a second copy of what the store already knows.
+
+The log is persisted **inside the store** under a reserved cause rather than as
+a sidecar file. A sidecar would be a second artifact that can drift from the
+state it describes and would need its own append-only discipline; an in-store
+doc travels in the same file, is copied atomically with the state, and keeps
+"restore is a single `Deno.copyFile`" true. The cost is one doc in the fixture
+that no pattern wrote — acceptable for a fixture, provided it is namespaced so
+it can never collide with pattern state.
+
+Record ALL invocations and try updating all of them. That turns a selection
+problem into a coverage bonus: a nested pattern's migration gets validated too,
+which is coverage it would otherwise never have, since nested patterns have no
+vintages of their own. An instantiation that legitimately cannot be updated
+fails CLOSED and is reported as a finding rather than skipped.
+
+Option 2 stays the documented fallback for a fixture captured before the hook
+existed. Theoretical today — the two committed vintages are recapturable — but a
+deep vintage from before the hook would not be, which is worth writing down now
+rather than discovering later.
 
 Gate: a vintage contains data a change can strand, so stage 5's value
 comparison has something to compare, and every change is checked against every
