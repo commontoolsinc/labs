@@ -4,15 +4,19 @@
 // staleness bound decides when a claim left by another replica is treated as
 // abandoned, because nothing reports whether that replica is still there.
 //
-// These cases pin the two properties that keep an early takeover survivable.
-// Both are about the request that is *not* the stale one: it must still reach
-// its result.
+// Two of these cases pin what keeps an early takeover survivable. Both are
+// about the request that is *not* the stale one: it must still reach its
+// result.
 //
 //   - a resolution running in this replica is never judged by the clock, so a
 //     slow one is neither restarted underneath itself nor left with nowhere to
 //     write when it finishes;
 //   - a failing request never erases a result another request already recorded
 //     for the same inputs.
+//
+// The rest cover the claim's other transitions: handing it back when the
+// pattern stops, the staleness branch that decides a takeover, a resolution
+// that fails, and an empty URL.
 //
 // docs/development/fetch-request-deadlines.md carries the reasoning.
 
@@ -92,6 +96,127 @@ describe("fetch builtins: taking over a claim", () => {
     await tx.commit();
     await runtime?.dispose();
     await storageManager?.close();
+  });
+
+  it("releases the entry it claimed when the pattern is stopped", async () => {
+    const slowUrl = "http://mock-test-server.local/stopped-program.ts";
+
+    const heldRequests: Deferred<Response>[] = [];
+    const firstRequest = deferred<void>();
+    globalThis.fetch = () => {
+      const held = deferred<Response>();
+      heldRequests.push(held);
+      firstRequest.resolve();
+      return held.promise;
+    };
+
+    const fetchProgram = byRef("fetchProgram");
+    const testPattern = pattern<{ url: string }>(
+      ({ url }) => fetchProgram({ url }),
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "program-stop-result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, testPattern, { url: slowUrl }, resultCell);
+    tx.commit();
+
+    await result.pull();
+    await firstRequest.promise;
+    await clock.settle();
+    expect(heldRequests.length).toBe(1);
+
+    // Stopping the pattern hands the claim back, so the entry is available
+    // again rather than left standing by a replica that has gone.
+    runtime.runner.stop(resultCell);
+    await clock.settle();
+
+    // Running again is how that shows: a released entry is claimable, so a
+    // second resolution starts. A claim still standing would be left alone.
+    const restartTx = runtime.edit();
+    const restarted = runtime.run(
+      restartTx,
+      testPattern,
+      { url: slowUrl },
+      resultCell,
+    );
+    restartTx.commit();
+    await restarted.pull();
+    await clock.settle();
+
+    expect(heldRequests.length).toBe(2);
+
+    for (const held of heldRequests) held.resolve(moduleResponse());
+    await runtime.settled();
+  });
+
+  it("surfaces a program that fails to resolve as an error", async () => {
+    const missingUrl = "http://mock-test-server.local/missing-program.ts";
+
+    globalThis.fetch = () =>
+      Promise.resolve(
+        new Response("not found", { status: 404, statusText: "Not Found" }),
+      );
+
+    const fetchProgram = byRef("fetchProgram");
+    const testPattern = pattern<{ url: string }>(
+      ({ url }) => fetchProgram({ url }),
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "program-error-result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(
+      tx,
+      testPattern,
+      { url: missingUrl },
+      resultCell,
+    );
+    tx.commit();
+
+    await result.pull();
+    await runtime.settled();
+    await result.pull();
+
+    expect(result.key("error").get()).toContain("404");
+    expect(result.key("result").get()).toBeUndefined();
+    expect(result.key("pending").get()).toBe(false);
+  });
+
+  it("clears its outputs when the program URL is empty", async () => {
+    let requests = 0;
+    globalThis.fetch = () => {
+      requests++;
+      return Promise.resolve(moduleResponse());
+    };
+
+    const fetchProgram = byRef("fetchProgram");
+    const testPattern = pattern<{ url: string }>(
+      ({ url }) => fetchProgram({ url }),
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "program-empty-url-result",
+      undefined,
+      tx,
+    );
+    const result = runtime.run(tx, testPattern, { url: "" }, resultCell);
+    tx.commit();
+
+    await result.pull();
+    await runtime.settled();
+
+    expect(requests).toBe(0);
+    expect(result.key("pending").get()).toBe(false);
+    expect(result.key("result").get()).toBeUndefined();
+    expect(result.key("error").get()).toBeUndefined();
   });
 
   it("publishes a slow program resolution that outlives the staleness bound", async () => {
