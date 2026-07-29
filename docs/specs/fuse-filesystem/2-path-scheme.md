@@ -295,24 +295,24 @@ entities/
 ```
 
 The directory contains every live entity in the space scope, including
-entities that are not present in `allPieces`. Connecting the space requests no
-identifiers. Opening a fresh `entities/` directory handle requests stable,
-bounded pages of identifiers from memory. Continuation reads for that handle
-reuse its prepared virtual entries rather than repeating those requests. The
-identifiers are not retained as permanent filesystem-tree nodes.
+entities that are not present in the piece registry. Connecting the space
+requests no identifiers. Opening a fresh `entities/` directory handle requests
+stable, bounded pages of identifiers from memory. Continuation reads for that
+handle reuse its prepared virtual entries rather than repeating those requests.
+The identifiers are not retained as permanent filesystem-tree nodes.
 
 Looking up one exact identifier checks its liveness without listing the space.
 Opening that entity directory returns no projected child names and loads no
 value. Directly looking up a named child such as `result.json` or
 `result/title` loads that entity and builds the named projection.
 
-Mounting does not read the space root, its default pattern, or `allPieces`.
+Mounting does not read the space root, its default pattern, or piece registry.
 The named projections under `pieces/` are built when that directory is first
 accessed. This keeps every entity value out of the mount and `entities/`
 listing path, including values for the space root and entities that also appear
-in `allPieces`. When the memory server does not support identifier listing,
-`entities/` remains empty. Opening `pieces/` does not turn it into an
-`allPieces`-only enumeration.
+in the piece registry. When the memory server does not support identifier
+listing, opening `entities/` fails and the directory cannot be enumerated.
+Opening `pieces/` does not turn `entities/` into a registry-only enumeration.
 
 The hydration boundary is safe for recursive tools: a crawler can list and
 open every entity directory without requesting entity values because those

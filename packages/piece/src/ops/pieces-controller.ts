@@ -184,6 +184,7 @@ export class PiecesController<T = unknown> {
     return new PieceController(this.#manager, cell);
   }
 
+  /** Return the piece registry, not every stored piece root. */
   async getRegisteredPieces() {
     this.disposeCheck();
     const piecesCell = await this.#manager.getPieceRegistry();

@@ -80,7 +80,7 @@ parent link.
 
 Mount connection creates only the space's fixed synthetic files and
 directories. It does not request identifiers, the space root, the default
-pattern, `allPieces`, or any entity value. Its storage and inode cost is
+pattern, the piece registry, or any entity value. Its storage and inode cost is
 independent of the number of live entities.
 
 ## Hydration Boundary
@@ -346,7 +346,7 @@ must report entity, input, and result request counts explicitly.
 An older Memory v2 server may omit `entityIdListing`, `entityIdPagination`, or
 `entityIdLookup`; each omission parses as `false`. The client does not send an
 unknown request. Connecting the space never falls back to reading the space
-root, default pattern, or `allPieces`.
+root, default pattern, or piece registry.
 
 FUSE enumeration requires both identifier listing and pagination. Opening
 `entities/` fails when either capability is absent. It does not accept one
@@ -360,11 +360,12 @@ Connection health does not depend on these optional capabilities. A healthy
 older server can reconnect even though a later attempt to enumerate
 `entities/` will report that pagination is unsupported.
 
-If the caller later opens `pieces/`, the legacy `allPieces` projection is
-materialized. Its known controllers can support exact entity access, but they
-do not change the `entities/` enumeration. Compatibility remains explicit and
-fail closed; absence of a capability never triggers a hidden space-wide value
-scan.
+If the caller later opens `pieces/`, the piece-registry projection is
+materialized. An eligible legacy default root can still supply its retired
+`allPieces` registry. The resulting known controllers can support exact entity
+access, but they do not change the `entities/` enumeration. Compatibility
+remains explicit and fail closed; absence of a capability never triggers a
+hidden space-wide value scan.
 
 ---
 
