@@ -656,7 +656,12 @@ the per-epic implementation notes).
 >   verdicts. Added on CT-1872 (PR #4606). Path to removal: retire
 >   the scalarization fallback once every server in the fleet advertises the
 >   capability; the flag itself then reads as permanent documentation of the
->   wire shape, and the successor design is tracked as CT-1910.
+>   wire shape. (The CT-1910 basis repair — `basisSeq` on pending reads,
+>   scanned with own-session exclusion — landed WITHOUT a capability of its
+>   own: servers ignore unknown read fields, so clients attach it
+>   unconditionally and older servers keep the legacy max-dependency basis.
+>   CT-1910's remaining scope, server-inferred dependencies, stays a
+>   follow-on protocol step.)
 > - **`entityIdListing`** is a build-inherent capability, hardwired to `true`.
 >   It advertises that the memory server can list live space-scoped entity
 >   identifiers without returning stored values. Older servers omit it, which
