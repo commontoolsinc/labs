@@ -78,6 +78,16 @@ export class CaptureCollector {
     const captures = new Set<ts.Expression>();
 
     const visit = (node: ts.Node) => {
+      // Types are erased and cannot contribute runtime closure state. In
+      // particular, a parameter declared inside a function type such as
+      // `{ send: (event: Event) => void }` may resolve to the DOM `event`
+      // global when inspected as a value identifier. Descending into that
+      // TypeNode would therefore manufacture a required `event` capture whose
+      // applied value is undefined.
+      if (ts.isTypeNode(node)) {
+        return;
+      }
+
       // For nested functions, recursively collect their captures too
       // Even though they have their own scope for parameters, they still
       // close over variables from outer scopes, and we need to know about

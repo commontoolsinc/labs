@@ -934,6 +934,10 @@ Capture analysis:
 - captures identifiers/property chains declared outside callback scope
 - excludes imports, module-scoped declarations, function declarations, type
   parameters, JSX tag names, property keys
+- never descends into TypeScript type nodes: erased identifiers — including
+  function-type parameter names inside assertions and annotations — are not
+  runtime closure values and must not appear in capture schemas or applied
+  capture objects
 - captures nested callback closures with filtering for outer locals/params
 - builds hierarchical capture trees by root path
 
