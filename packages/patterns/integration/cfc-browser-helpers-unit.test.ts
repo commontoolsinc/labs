@@ -31,6 +31,8 @@ Deno.test("markForClick skips a stale disabled match", () => {
   const probe = {
     collect: () => [staleHost, activeHost],
     isRendered: () => true,
+    addToken: (element: FakeElement, attr: string, token: string) =>
+      element.setAttribute(attr, token),
   } as unknown as ProbeApi;
 
   assertEquals(
