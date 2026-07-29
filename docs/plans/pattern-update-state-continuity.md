@@ -226,17 +226,21 @@ Gate: a system-pattern schema change with no vintage fails CI.
 
 Two constraints the stage-2 harness imposes on this layout, both measured:
 
-- **A fixture is bound to the DID it was captured under, and the file does not
-  say which.** The space id lives in the on-disk FILENAME
-  (`resolveSpaceStoreUrl`), which the fixture layout above replaces with
-  `<iso>-<identity>`; inside the store it survives only embedded in link
-  targets (measured: the DID appears in `commit.original` and `revision.data`).
-  `openFileBackedRuntime` restores under `signer.did()` unconditionally, so a
-  vintage captured by any other signer restores "successfully" and reads
-  EMPTY — which is this tier's stranding signal. That is a false positive on
-  the gate, not a red herring. Either every pinned vintage is captured by the
-  fixture signer, or the layout must carry the space id and the harness must
-  take it explicitly. Decide before seeding fixtures, not after.
+- **A cross-DID restore is fine — corrected.** An earlier revision of this plan
+  claimed a vintage captured under one DID and restored under another reads
+  EMPTY, which would be a false positive on the gate (emptiness is this tier's
+  stranding signal). **It does not reproduce.** Measured: capture under signer
+  A, restore under signer B, replay reads `["alpha","beta"]` with no error,
+  identical to the same-DID replay. The capturing DID *is* embedded in the
+  store — 16 occurrences in a 1.5 MiB snapshot — but it is not load-bearing for
+  the read path, because a root is addressed by cause alone and the space is
+  whichever file the server opens.
+
+  What is still untested: a label that lowers `CurrentPrincipal` names the
+  capturing space, so a vintage carrying owner-scoped CFC labels may behave
+  differently under a different DID. The probe used a literal `subject`. Worth
+  measuring if a pinned vintage ever carries such a label — but it is not the
+  general blocker this section previously claimed, and it does not gate seeding.
 - **One root key per pattern.** Roots are addressed by cause and the cause
   alone determines the entity id, so a fixture holding two patterns needs two
   keys (`vintageRoot(vintage, schema, key)`). One fixture per pattern, as the
