@@ -123,8 +123,18 @@ fi
 # entry and the reason go to stderr, matching the CLI's output conventions, so
 # stdout stays a bare path a script can consume.
 if [ "${1:-}" = "which" ]; then
+  entry="${root}/packages/cli/mod.ts"
   printf '%s\n' "${root}"
-  echo "cf: entry ${root}/packages/cli/mod.ts" >&2
+  # The checkout test above only proves launcher.ts is there. The entry the
+  # launcher then runs is a separate file, and reporting a path without
+  # checking it would make `which` assert something it has not verified —
+  # the one thing a diagnostic command must not do.
+  if [ ! -f "${entry}" ]; then
+    echo "cf: entry ${entry} does not exist — this checkout is incomplete" >&2
+    echo "cf: selected by ${reason}" >&2
+    exit 1
+  fi
+  echo "cf: entry ${entry}" >&2
   echo "cf: selected by ${reason}" >&2
   exit 0
 fi

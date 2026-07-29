@@ -33,12 +33,20 @@ const here = new URL("../..", import.meta.url).pathname.replace(/\\/$/, "");
 console.log(here);
 `;
 
-async function makeCheckout(root: string): Promise<void> {
+async function makeCheckout(
+  root: string,
+  { withEntry = false }: { withEntry?: boolean } = {},
+): Promise<void> {
   await Deno.mkdir(join(root, "packages", "cli"), { recursive: true });
   await Deno.writeTextFile(
     join(root, "packages", "cli", "launcher.ts"),
     STUB_LAUNCHER,
   );
+  // Only `which` inspects the entry; the launcher stub stands in for it
+  // everywhere else, so it is opt-in to keep the other cases minimal.
+  if (withEntry) {
+    await Deno.writeTextFile(join(root, "packages", "cli", "mod.ts"), "");
+  }
 }
 
 /** Run `bin/cf` from `cwd` and return what the selected launcher printed. */
@@ -189,7 +197,7 @@ Deno.test("`which` reports the CLI that would run, on stdout alone", async () =>
   // question. stdout stays a bare path so a script can consume it.
   await withTempDir(async (dir) => {
     const labs = join(dir, "labs");
-    await makeCheckout(labs);
+    await makeCheckout(labs, { withEntry: true });
     const deep = join(labs, "packages");
     await Deno.mkdir(deep, { recursive: true });
 
@@ -203,12 +211,29 @@ Deno.test("`which` reports the CLI that would run, on stdout alone", async () =>
   });
 });
 
+Deno.test("`which` reports an entry that is not there", async () => {
+  // The checkout test only proves launcher.ts exists; the entry is a separate
+  // file. A diagnostic that names a path it never checked is worse than one
+  // that admits it cannot find it.
+  await withTempDir(async (dir) => {
+    const labs = join(dir, "labs");
+    await makeCheckout(labs); // writes launcher.ts, not mod.ts
+
+    const { code, out, err } = await resolveFrom(labs, {}, ["which"]);
+    assertEquals(code, 1);
+    // The checkout still resolved, so it is still the answer to report.
+    assertEquals(out, labs);
+    assertStringIncludes(err, "does not exist");
+    assertStringIncludes(err, join(labs, "packages", "cli", "mod.ts"));
+  });
+});
+
 Deno.test("`which` names CF_LABS_ROOT as the reason when it applies", async () => {
   await withTempDir(async (dir) => {
     const here = join(dir, "here");
     const elsewhere = join(dir, "elsewhere");
     await makeCheckout(here);
-    await makeCheckout(elsewhere);
+    await makeCheckout(elsewhere, { withEntry: true });
 
     const { code, out, err } = await resolveFrom(here, {
       CF_LABS_ROOT: elsewhere,
