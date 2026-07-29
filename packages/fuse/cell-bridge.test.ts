@@ -1780,7 +1780,7 @@ Deno.test("FUSE callback traversal of mounted /entities transfers only identifie
   }
 });
 
-Deno.test("CellBridge materializes allPieces when /pieces is first read", async () => {
+Deno.test("CellBridge materializes the piece registry when /pieces is first read", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/cf-exec");
   const piece = {

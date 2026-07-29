@@ -410,17 +410,39 @@ describe("cli piece parsing", () => {
     expect(code).toBe(0);
   });
 
-  it("shows search as a space-scoped command with JSON output", async () => {
+  it("shows search as a registered-piece command with JSON output", async () => {
     const { code, stdout, stderr } = await cf("piece search --help");
     checkStderr(stderr);
     const output = stripAnsi(stdout.join("\n"));
     expect(output).toContain(
-      "Search readable input and result data in every piece.",
+      "Search readable input and result data in registered pieces.",
     );
     expect(output).toContain("<query>");
     expect(output).toContain("--space <space>");
     expect(output).toContain("--json");
     expect(code).toBe(0);
+  });
+
+  it("describes listing and mapping as registry-backed", async () => {
+    const commands = [
+      {
+        args: "piece ls --help",
+        description: "List pieces registered in the space.",
+      },
+      {
+        args: "piece map --help",
+        description:
+          "Display registered pieces and the connections between them",
+      },
+    ];
+    for (const command of commands) {
+      const { code, stdout, stderr } = await cf(command.args);
+      checkStderr(stderr);
+      const output = stripAnsi(stdout.join("\n"));
+      expect(output).toContain(command.description);
+      expect(output).not.toContain("all pieces");
+      expect(code).toBe(0);
+    }
   });
 
   it("documents the piece registry in link help", async () => {

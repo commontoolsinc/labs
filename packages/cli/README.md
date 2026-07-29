@@ -28,12 +28,31 @@ git diff upstream/main | cf view
 cf view --rendered README.md
 ```
 
+## Piece discovery
+
+`cf piece ls` lists the pieces in the selected space's piece registry. It reads
+the default pattern and starts each registered piece to obtain its name and
+pattern metadata. It does not enumerate every stored piece root.
+
+`cf piece search` also starts from the registry. It searches readable input and
+result data, but returns registered pieces only. `cf piece map` likewise shows
+connections among registered pieces rather than walking the complete stored
+graph.
+
+A piece outside the registry can be found only through a searchable collection
+that deliberately publishes it, by following links from a known piece, or by
+using an exact piece address, including its scope, that is already known. A
+piece with none of those paths is an orphan and cannot be discovered through the
+piece commands. See
+[Finding Pieces](../../docs/common/concepts/piece-discovery.md) for the complete
+boundary.
+
 ## Piece data search
 
-`cf piece search <query>` reads every piece in the selected space and returns
-the pieces whose input or result data contains the query. Matching uses full
-Unicode case folding and canonical normalization over nested object keys and
-scalar values. Canonically equivalent text matches, and a match cannot stop
+`cf piece search <query>` reads every registered piece in the selected space and
+returns the pieces whose input or result data contains the query. Matching uses
+full Unicode case folding and canonical normalization over nested object keys
+and scalar values. Canonically equivalent text matches, and a match cannot stop
 partway through one character's multi-letter fold. Readable nested cell values
 are included when they belong to the piece being searched. A cell owned by
 another piece is searched only with that owner, not with every piece that links

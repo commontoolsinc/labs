@@ -322,9 +322,10 @@ export class PieceManager {
   }
 
   /**
-   * Get the cell containing the list of all pieces in this space.
-   * Reads the default pattern's pieceRegistry export. An eligible legacy
-   * system root is read through its retired registry export.
+   * Get the cell containing the registered pieces in this space.
+   * This is the discovery root, not a list of every stored piece root. Reads
+   * the default pattern's pieceRegistry export. An eligible legacy system root
+   * is read through its retired registry export.
    */
   async getPieceRegistry(): Promise<Cell<Cell<unknown>[]>> {
     const defaultPattern = await this.getDefaultPattern(true);
@@ -491,13 +492,13 @@ export class PieceManager {
   }
 
   /**
-   * Find all pieces that the given piece reads data from via sigil links.
-   * This identifies dependencies that the piece has on other pieces.
+   * Find registered pieces that the given piece reads from via sigil links.
+   * Unregistered targets are not returned.
    * @param piece The piece to check
-   * @returns Array of pieces that are read from
+   * @returns Array of registered pieces that are read from
    */
   async getReadingFrom(piece: Cell<unknown>): Promise<Cell<unknown>[]> {
-    // Get all pieces that might be referenced
+    // Get registered pieces that might be referenced
     const piecesCell = await this.getPieceRegistry();
     const registeredPieces = piecesCell.get();
     const result: Cell<unknown>[] = [];
@@ -648,13 +649,13 @@ export class PieceManager {
   }
 
   /**
-   * Find all pieces that read data from the given piece via sigil links.
-   * This identifies which pieces depend on this piece.
+   * Find registered pieces that read from the given piece via sigil links.
+   * Unregistered readers are not returned.
    * @param piece The piece to check
-   * @returns Array of pieces that read from this piece
+   * @returns Array of registered pieces that read from this piece
    */
   async getReadByPieces(piece: Cell<unknown>): Promise<Cell<unknown>[]> {
-    // Get all pieces to check
+    // Get registered pieces to check
     const piecesCell = await this.getPieceRegistry();
     const registeredPieces = piecesCell.get();
     const result: Cell<unknown>[] = [];
@@ -1212,16 +1213,16 @@ async function getCellByIdOrPiece(
         options?.targetScope,
       );
 
-      // Check if this cell is actually a piece by looking at the pieces list
+      // Check whether this cell is registered as a piece.
       const piecesCell = await manager.getPieceRegistry();
       const pieces = piecesCell.get();
-      const isActuallyPiece = pieces.some((piece: Cell<unknown>) => {
+      const isRegisteredPiece = pieces.some((piece: Cell<unknown>) => {
         const id = pieceId(piece);
-        // If we can't get the piece ID, it's not a valid piece
+        // An entry without a piece ID cannot establish registration.
         if (!id) return false;
         return id === cellId;
       });
-      return { cell, isPiece: isActuallyPiece };
+      return { cell, isPiece: isRegisteredPiece };
     } catch (_) {
       throw new Error(`${label} "${cellId}" not found as piece or cell`);
     }

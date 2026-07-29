@@ -360,7 +360,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   /**
    * Get the pieces list cell.
-   * Subscribe to this cell to get reactive updates of all pieces in the space.
+   * Subscribe to this cell to get reactive updates of registered pieces in the
+   * space. This is not a storage-wide piece listing.
    */
   async getPiecesListCell<T>(space: DID): Promise<CellHandle<T[]>> {
     const response = await this.#conn.request<RequestType.PageGetAll>({
