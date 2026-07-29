@@ -110,6 +110,52 @@ Deno.test("installs a copy, independent of its source", async () => {
   });
 });
 
+Deno.test("copies this checkout's script, but defaults to the primary", async () => {
+  // Two separate questions. The script is the one whose task you invoked —
+  // including changes not yet on main. The baked default is the primary, so it
+  // survives removing the worktree you installed from.
+  await withTempDir(async (dir) => {
+    const primary = join(dir, "labs");
+    const target = join(dir, "target");
+    await makeCheckout(
+      primary,
+      '#!/bin/sh\nDEFAULT_LABS_ROOT=""\necho primary-version\n',
+    );
+    await Deno.mkdir(join(primary, "packages", "cli"), { recursive: true });
+    await Deno.writeTextFile(
+      join(primary, "packages", "cli", "launcher.ts"),
+      "",
+    );
+    await Deno.mkdir(target);
+
+    // A real worktree of that repo, carrying a different bin/cf.
+    const worktree = join(dir, "wt");
+    await new Deno.Command("git", {
+      args: ["commit", "-qm", "init", "--allow-empty"],
+      cwd: primary,
+      stdout: "null",
+      stderr: "null",
+    }).output();
+    await new Deno.Command("git", {
+      args: ["worktree", "add", "-q", "--detach", worktree],
+      cwd: primary,
+      stdout: "null",
+      stderr: "null",
+    }).output();
+    await Deno.mkdir(join(worktree, "bin"), { recursive: true });
+    await Deno.writeTextFile(
+      join(worktree, "bin", "cf"),
+      '#!/bin/sh\nDEFAULT_LABS_ROOT=""\necho worktree-version\n',
+    );
+
+    assertEquals((await runInstaller(worktree, ["--dir", target])).code, 0);
+
+    const installed = await Deno.readTextFile(join(target, "cf"));
+    assertStringIncludes(installed, "worktree-version");
+    assertStringIncludes(installed, `DEFAULT_LABS_ROOT="${primary}"`);
+  });
+});
+
 Deno.test("bakes the checkout default into the copy", async () => {
   await withTempDir(async (dir) => {
     const checkout = join(dir, "labs");

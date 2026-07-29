@@ -195,8 +195,10 @@ Deno.test("`which` reports the CLI that would run, on stdout alone", async () =>
 
     const { code, out, err } = await resolveFrom(deep, {}, ["which"]);
     assertEquals(code, 0);
-    assertEquals(out, join(labs, "packages", "cli", "mod.ts"));
-    assertStringIncludes(err, labs);
+    // stdout is the checkout: the part that varies, and a bare path scripts
+    // can consume. The entry file is constant and belongs on stderr.
+    assertEquals(out, labs);
+    assertStringIncludes(err, join(labs, "packages", "cli", "mod.ts"));
     assertStringIncludes(err, "nearest checkout");
   });
 });
@@ -212,7 +214,7 @@ Deno.test("`which` names CF_LABS_ROOT as the reason when it applies", async () =
       CF_LABS_ROOT: elsewhere,
     }, ["which"]);
     assertEquals(code, 0);
-    assertEquals(out, join(elsewhere, "packages", "cli", "mod.ts"));
+    assertEquals(out, elsewhere);
     assertStringIncludes(err, "CF_LABS_ROOT");
   });
 });

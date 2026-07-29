@@ -63,24 +63,27 @@ done
 
 repo_root="$(git rev-parse --show-toplevel)"
 
-# The primary checkout, so the link survives `git worktree remove`. The common
-# dir is <primary>/.git for a normal clone; a path that does not contain bin/cf
-# (a bare repo, say) is not usable, so fall back to this checkout.
-common_dir="$(cd "$(git rev-parse --git-common-dir)" && pwd -P)"
-primary="$(dirname "${common_dir}")"
-fell_back=0
-if [ ! -f "${primary}/bin/cf" ]; then
-  # A bare primary, or one too old to have bin/cf. Linking this checkout still
-  # works, but it is worth saying so: if it is a worktree, removing it later
-  # breaks the link.
-  fell_back=1
-  primary="${repo_root}"
-fi
-source_path="${primary}/bin/cf"
-
+# Two separate questions, deliberately not conflated.
+#
+# WHICH SCRIPT to copy: this checkout's, always. You invoked this checkout's
+# task, so this is the version you meant — including one carrying changes that
+# have not landed on main yet.
+source_path="${repo_root}/bin/cf"
 if [ ! -f "${source_path}" ]; then
   echo "install-cf: ${source_path} not found." >&2
   exit 1
+fi
+
+# WHICH DEFAULT to bake in for when you are outside every checkout: the primary
+# checkout, so it survives `git worktree remove`. The common dir is
+# <primary>/.git for a normal clone. A primary that is not a usable checkout (a
+# bare repo, say) leaves this one, which is worth saying out loud.
+common_dir="$(cd "$(git rev-parse --git-common-dir)" && pwd -P)"
+primary="$(dirname "${common_dir}")"
+fell_back=0
+if [ ! -f "${primary}/packages/cli/launcher.ts" ]; then
+  fell_back=1
+  primary="${repo_root}"
 fi
 
 on_path() {

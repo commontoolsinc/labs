@@ -118,11 +118,13 @@ fi
 # so handing it to that CLI would beg it. Only as the first argument, so it
 # cannot swallow a `which` meant as a value for some other command.
 #
-# The path goes to stdout alone so it is usable in a script; how it was chosen
-# goes to stderr, matching the CLI's own output conventions.
+# stdout is the checkout, because that is the part that varies and what the
+# question is really about — the entry inside it is always the same file. The
+# entry and the reason go to stderr, matching the CLI's output conventions, so
+# stdout stays a bare path a script can consume.
 if [ "${1:-}" = "which" ]; then
-  printf '%s\n' "${root}/packages/cli/mod.ts"
-  echo "cf: ${root}" >&2
+  printf '%s\n' "${root}"
+  echo "cf: entry ${root}/packages/cli/mod.ts" >&2
   echo "cf: selected by ${reason}" >&2
   exit 0
 fi

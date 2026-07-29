@@ -247,6 +247,11 @@ the lookup below travels with the script: no particular checkout has to survive
 for the install to keep working. Re-run it to upgrade. It never edits your shell
 rc; it prints the completion line for you to add.
 
+It copies **this** checkout's `bin/cf` — the one whose task you invoked, which
+may carry changes not yet on `main` — while baking the **primary** checkout in
+as the outside-a-checkout default, so removing the worktree you installed from
+does not strand it.
+
 ### Which checkout runs
 
 Several checkouts coexisting is normal — worktrees, and a vendored labs inside
@@ -276,9 +281,18 @@ the reason on stderr, and is handled by the wrapper rather than forwarded, since
 asking the CLI which CLI would run begs the question:
 
 ```bash
-cf which              # /path/to/checkout/packages/cli/mod.ts
-cf which 2>/dev/null  # just the path, for scripts
+$ cf which
+/path/to/checkout                                  # stdout
+cf: entry /path/to/checkout/packages/cli/mod.ts    # stderr
+cf: selected by nearest checkout above the current directory
+
+$ cf which 2>/dev/null    # just the checkout, for scripts
 ```
+
+stdout is the checkout because that is the part that varies; the entry inside it
+is always `packages/cli/mod.ts`, which _is_ the CLI (it ends in
+`if (import.meta.main)` and nothing outside `packages/cli/` imports it as a
+library).
 
 Rule 2 is what mise already does for its route (`_.path` resolves relative to
 the `mise.toml` declaring it), so both install routes agree on which checkout
