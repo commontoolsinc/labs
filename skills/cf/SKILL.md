@@ -120,20 +120,21 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 
 ## Quick Command Reference
 
-| Operation         | Command                                                                                              |
-| ----------------- | ---------------------------------------------------------------------------------------------------- |
-| Type check        | `deno task cf check pattern.tsx --no-run`                                                            |
-| Deploy new        | `deno task cf piece new pattern.tsx --root . --repository REPO -i key -a url -s space`               |
-| Update existing   | `deno task cf piece setsrc pattern.tsx --root . --repository REPO --piece ID -i key -a url -s space` |
-| Inspect state     | `deno task cf piece inspect --piece ID ...`                                                          |
-| Get field         | `deno task cf piece get --piece ID fieldPath ...`                                                    |
-| Step + get        | `deno task cf piece get --piece ID fieldPath --step ...`                                             |
-| Set field         | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`                                  |
-| Call handler      | `deno task cf piece call --piece ID handlerName ...`                                                 |
-| List verbs        | `deno task cf piece verbs --piece ID --json ...`                                                     |
-| Trigger recompute | `deno task cf piece step --piece ID ...`                                                             |
-| List pieces       | `deno task cf piece ls -i key -a url -s space`                                                       |
-| Visualize         | `deno task cf piece map ...`                                                                         |
+| Operation          | Command                                                                                              |
+| ------------------ | ---------------------------------------------------------------------------------------------------- |
+| Type check         | `deno task cf check pattern.tsx --no-run`                                                            |
+| Deploy new         | `deno task cf piece new pattern.tsx --root . --repository REPO -i key -a url -s space`               |
+| Update existing    | `deno task cf piece setsrc pattern.tsx --root . --repository REPO --piece ID -i key -a url -s space` |
+| Inspect state      | `deno task cf piece inspect --piece ID ...`                                                          |
+| Get field          | `deno task cf piece get --piece ID fieldPath ...`                                                    |
+| Step + get         | `deno task cf piece get --piece ID fieldPath --step ...`                                             |
+| Set field          | `echo '{"data":...}' \| deno task cf piece set --piece ID path ...`                                  |
+| Call handler       | `deno task cf piece call --piece ID handlerName ...`                                                 |
+| List verbs         | `deno task cf piece verbs --piece ID --json ...`                                                     |
+| Trigger recompute  | `deno task cf piece step --piece ID ...`                                                             |
+| List pieces        | `deno task cf piece ls -i key -a url -s space`                                                       |
+| Visualize          | `deno task cf piece map ...`                                                                         |
+| Rehearse an update | `deno task cf space clone <did> --from <snapshot> --to <dir>` (then `verify` / `reset`)              |
 
 ## Check Command Flags
 
