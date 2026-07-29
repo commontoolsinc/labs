@@ -7,7 +7,6 @@ import {
   getPatternIdentityRef,
   getPieceSourceSnapshot,
   type JSONSchema,
-  type MemorySpace,
   type ModuleByteCache,
   type PatternCoverageCollector,
   type PatternUpdateOutcome,
