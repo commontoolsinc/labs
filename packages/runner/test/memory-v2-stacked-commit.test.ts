@@ -2041,7 +2041,12 @@ Deno.test("memory v2 stacked commits: divergent basis overrides survive pending-
     assertEquals(reads.confirmed, []);
     assertEquals(
       reads.pending
-        .map((read) => ({ localSeq: read.localSeq, basisSeq: read.basisSeq }))
+        // `basisSeq` is optional on the wire type; the client always emits
+        // it, so absence would itself be a failure — surface it as -1.
+        .map((read) => ({
+          localSeq: read.localSeq,
+          basisSeq: read.basisSeq ?? -1,
+        }))
         .toSorted((left, right) => left.basisSeq - right.basisSeq),
       [
         { localSeq: c2.localSeq, basisSeq: 0 },

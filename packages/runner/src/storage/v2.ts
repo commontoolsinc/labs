@@ -3456,8 +3456,10 @@ class SpaceReplica implements ISpaceReplica {
       // just the nearest one: name them ALL (ascending; the last element is
       // the doc's top-of-stack below this commit) so a dropped deeper layer
       // still dooms this commit (server: pending-dependency resolution;
-      // client: cascade). Staleness is based at the highest element only —
-      // a staleness basis on a lower layer would false-conflict with the
+      // client: cascade). Servers that honor `basisSeq` scan staleness from
+      // it with predecessor-only own-session exclusion (CT-1910); legacy
+      // servers base staleness at the highest element only — a lower-layer
+      // basis WITHOUT that exclusion would false-conflict with the
       // session's own later stacked writes (CT-1872 1c).
       const layers = [
         ...new Set(

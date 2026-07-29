@@ -77,9 +77,11 @@ for readers that declare `basisSeq` and RETAINED for legacy readers that do
 not: a pending read without `basisSeq` is scanned from the highest
 dependency's resolution seq, so overlapping foreign writes landing between
 the reader's confirmed basis and that seq are not scanned. A read declaring
-`basisSeq` is scanned over the full interval from that basis, excluding the
-reader's own session's accepted commits (03-commit-model.md §3.6.3) — the
-shape current clients always emit. The TLA+ config
+`basisSeq` is scanned over the full interval from that basis, excluding
+only the session's TRUE PREDECESSOR commits — those with a localSeq below
+the reader's, the accepted layers its view included; an own write admitted
+out of submission order conflicts like a foreign one
+(03-commit-model.md §3.6.3) — the shape current clients always emit. The TLA+ config
 `PendingStacks_Current.cfg` reproduces the legacy-shape violation (kept as a
 regression witness, alongside the legacy-shape engine test in
 `packages/memory/test/v2-pending-read-basis-overadvance.test.ts`) and
