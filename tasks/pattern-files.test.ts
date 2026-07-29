@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { fromFileUrl } from "@std/path/from-file-url";
 import {
   collectPatternFiles,
   isPatternSource,
@@ -57,15 +58,36 @@ describe("patternKey", () => {
 });
 
 describe("collectPatternFiles", () => {
+  // `PATTERNS_DIR` is repo-root-relative, which is right for the task (always
+  // run via `deno task` from the root) but wrong for a test: the workspace
+  // runner invokes tests from the package directory. Resolve from this file
+  // instead so the test does not depend on the working directory.
+  const patternsDir = fromFileUrl(
+    new URL("../packages/patterns", import.meta.url),
+  );
+
   it("returns a sorted set of real pattern sources and no baselines", async () => {
-    const files = await collectPatternFiles(PATTERNS_DIR);
+    const files = await collectPatternFiles(patternsDir);
 
     expect(files.length).toBeGreaterThan(100);
     expect([...files].sort()).toEqual(files);
-    expect(files.includes(`${PATTERNS_DIR}/system/home.tsx`)).toBe(true);
+    expect(files.includes(`${patternsDir}/system/home.tsx`)).toBe(true);
     expect(files.some((f) => f.includes("/baselines/"))).toBe(false);
     expect(files.some((f) => f.endsWith(".test.tsx"))).toBe(false);
-    expect(files.some((f) => f.startsWith(`${PATTERNS_DIR}/integration/`)))
+    expect(files.some((f) => f.startsWith(`${patternsDir}/integration/`)))
       .toBe(false);
+  });
+
+  it("excludes by path relative to the root it was given, not the repo root", () => {
+    // Exclusions anchored to `packages/patterns/...` would silently stop
+    // matching the moment a caller passed an absolute directory.
+    const abs = "/tmp/somewhere/patterns";
+    expect(isPatternSource(`${abs}/integration/foo.ts`, abs)).toBe(false);
+    expect(isPatternSource(`${abs}/mod.ts`, abs)).toBe(false);
+    expect(isPatternSource(`${abs}/system/home.tsx`, abs)).toBe(true);
+  });
+
+  it("is repo-root-relative by default, which is what the task relies on", () => {
+    expect(PATTERNS_DIR).toBe("packages/patterns");
   });
 });

@@ -9,11 +9,13 @@ import {
   contractHash,
   decodeBaseline,
   encodeBaseline,
+  type Finding,
   findRetired,
   parseArgs,
   parseShard,
   type PatternContract,
   readBaselines,
+  shouldRecord,
   writeBaseline,
 } from "./pattern-compat-lib.ts";
 
@@ -103,9 +105,13 @@ describe("checkPattern", () => {
     } as unknown as JSONSchema);
     const findings = checkPattern("system/home.tsx", current, []);
 
-    const invalid = findings.filter((f) => f.kind === "incompatible");
+    const invalid = findings.filter((f) => f.kind === "invalid-schema");
     expect(invalid.length).toBe(1);
-    expect(invalid[0]).toMatchObject({ baseline: "(current)" });
+    expect(invalid[0]).toMatchObject({
+      kind: "invalid-schema",
+      pattern: "system/home.tsx",
+      role: "result",
+    });
   });
 
   it("reports a retired pattern whose baselines outlive its source", () => {
@@ -363,5 +369,44 @@ describe("baseline store", () => {
       );
       expect(labels[0].startsWith("20260101")).toBe(true);
     });
+  });
+});
+
+describe("shouldRecord", () => {
+  const missing = (): Finding => ({
+    kind: "missing-baseline",
+    pattern: "a.tsx",
+    hash: "h",
+  });
+
+  it("records a clean new contract", () => {
+    expect(shouldRecord([missing()])).toBe(true);
+  });
+
+  it("records nothing when there is nothing new to record", () => {
+    expect(shouldRecord([])).toBe(false);
+  });
+
+  it("refuses a contract that is invalid on its own terms", () => {
+    // Validity is only checked for an UNrecorded contract, so recording an
+    // invalid one would silence the finding permanently.
+    expect(shouldRecord([missing(), {
+      kind: "invalid-schema",
+      pattern: "a.tsx",
+      role: "result",
+      detail: "bad",
+    }])).toBe(false);
+  });
+
+  it("refuses a contract that cannot be applied over a deployed one", () => {
+    // An incompatible contract cannot merge, so it is never deployed. Recording
+    // it would force every future contract to prove itself against a version
+    // that only ever existed in a failed run — in a store that is never pruned.
+    expect(shouldRecord([missing(), {
+      kind: "incompatible",
+      pattern: "a.tsx",
+      baseline: "v1",
+      detail: "result.x removed",
+    }])).toBe(false);
   });
 });

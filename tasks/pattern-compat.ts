@@ -26,6 +26,7 @@ import {
   patternKey,
   PATTERNS_DIR,
 } from "./pattern-files.ts";
+import { UNEVALUABLE_PATTERNS } from "./pattern-compat-unevaluable.ts";
 import {
   checkPattern,
   type Finding,
@@ -34,6 +35,7 @@ import {
   parseShard,
   type PatternContract,
   readBaselines,
+  shouldRecord,
   writeBaseline,
 } from "./pattern-compat-lib.ts";
 
@@ -163,16 +165,7 @@ async function main() {
     }
 
     if (update && current !== undefined) {
-      const missing = patternFindings.some((f) =>
-        f.kind === "missing-baseline"
-      );
-      // Never record an invalid contract. Schema validity is only checked for
-      // an UNrecorded contract (see `checkPattern`), so recording one would
-      // silence the finding permanently. The finding still fails this run.
-      const invalid = patternFindings.some((f) =>
-        f.kind === "incompatible" && f.baseline === "(current)"
-      );
-      if (missing && !invalid) {
+      if (shouldRecord(patternFindings)) {
         const name = await writeBaseline(
           BASELINES_DIR,
           key,
@@ -205,12 +198,23 @@ async function main() {
         `(${evaluationErrors.length} from an evaluation error).`,
     );
   }
-  // Listed, never fatal on their own: a module that cannot be evaluated has no
-  // contract to check and no piece pinned to it. If one ever DID have a
-  // contract, its baselines turn this into a `retired` finding above.
+  // An evaluation error is a pattern the gate CANNOT protect: no contract means
+  // no baseline means no check, forever. Allowlisted ones are known debt; a new
+  // one fails the run, so the list can only shrink.
+  const unexpectedFailures = evaluationErrors.filter(
+    (failure) => !UNEVALUABLE_PATTERNS.has(failure.pattern),
+  );
   for (const failure of evaluationErrors) {
-    console.log(`  ${failure.pattern}: ${failure.error.split("\n")[0]}`);
+    const known = UNEVALUABLE_PATTERNS.has(failure.pattern) ? "known" : "NEW";
+    console.log(
+      `  [${known}] ${failure.pattern}: ${failure.error.split("\n")[0]}`,
+    );
   }
+  // A listed pattern that evaluates again must leave the list, or its exemption
+  // outlives the breakage it was granted for.
+  const recovered = files
+    .map((file) => patternKey(file))
+    .filter((key) => UNEVALUABLE_PATTERNS.has(key) && contracts.has(key));
 
   if (findings.length > 0) {
     console.error("\nPattern update compatibility failures:");
@@ -224,6 +228,11 @@ async function main() {
         console.error(
           `\n${finding.pattern}\n  cannot be applied over baseline ` +
             `${finding.baseline}:\n${finding.detail}`,
+        );
+      } else if (finding.kind === "invalid-schema") {
+        console.error(
+          `\n${finding.pattern}\n  ${finding.role} schema is not valid on its ` +
+            `own terms: ${finding.detail}`,
         );
       } else {
         console.error(
@@ -240,7 +249,27 @@ async function main() {
     }
   }
 
-  if (findings.length > 0) Deno.exit(1);
+  if (unexpectedFailures.length > 0) {
+    console.error(
+      `\n${unexpectedFailures.length} pattern(s) newly fail to evaluate. A ` +
+        `pattern that cannot evaluate gets no baseline and is exempt from this ` +
+        `gate forever — fix it, or add it to ` +
+        `tasks/pattern-compat-unevaluable.ts with the reason.`,
+    );
+  }
+  if (recovered.length > 0) {
+    console.error(
+      `\n${recovered.length} pattern(s) listed in ` +
+        `tasks/pattern-compat-unevaluable.ts now evaluate: ` +
+        `${
+          recovered.join(", ")
+        }. Remove them from that list so they are gated.`,
+    );
+  }
+
+  if (
+    findings.length > 0 || unexpectedFailures.length > 0 || recovered.length > 0
+  ) Deno.exit(1);
   console.log(
     `\n${contracts.size} pattern(s) can be updated from every recorded contract.`,
   );

@@ -57,6 +57,8 @@ export type Finding =
     baseline: string;
     detail: string;
   }
+  /** The current contract is not a well-formed schema on its own terms. */
+  | { kind: "invalid-schema"; pattern: string; role: string; detail: string }
   /** Baselines outlived their source: pieces tracking this path are pinned. */
   | { kind: "retired"; pattern: string; baselines: string[] };
 
@@ -232,12 +234,7 @@ export function checkPattern(
     ) {
       const issue = validateSchemaDefinition(schema);
       if (issue !== undefined) {
-        findings.push({
-          kind: "incompatible",
-          pattern,
-          baseline: "(current)",
-          detail: `${role} schema is invalid: ${issue}`,
-        });
+        findings.push({ kind: "invalid-schema", pattern, role, detail: issue });
       }
     }
   }
@@ -376,4 +373,23 @@ export async function writeBaseline(
   const stored: StoredBaseline = { pattern: key, ...contract };
   await Deno.writeTextFile(`${dir}/${name}`, encodeBaseline(stored));
   return name;
+}
+
+/**
+ * Whether `--update` may record this contract as a new baseline.
+ *
+ * Only a contract whose *sole* finding is "not recorded" qualifies. A baseline
+ * is documented as "a contract that is, or was, deployed", and the store is by
+ * design never pruned — so recording anything else permanently constrains every
+ * future contract against a version that never shipped and never could.
+ *
+ * The incompatible case is the one that matters. An incompatible contract
+ * cannot merge, so it is never deployed; recording it would mean a later,
+ * corrected contract has to prove itself against a version that only ever
+ * existed in a failed run, with no way to remove it. Suppressing the repeat
+ * "not recorded" noise is not worth that — and the run still fails either way,
+ * so `--update` still never clears a finding.
+ */
+export function shouldRecord(findings: readonly Finding[]): boolean {
+  return findings.length === 1 && findings[0].kind === "missing-baseline";
 }
