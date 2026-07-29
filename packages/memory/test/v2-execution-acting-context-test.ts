@@ -1084,3 +1084,119 @@ Deno.test("acting-principal WRITE loss drains the lane before a later commit (cl
     await server.close();
   }
 });
+
+// ---------------------------------------------------------------------------
+// R7 issuance-side floor consult. The engine's `claim-context-mismatch` fence
+// is a COMMIT-time backstop: by the time it fires the executor has already run
+// the action and the work is discarded. Because the durable context floor is
+// monotonic and the executor cannot see it, that discard repeats forever for
+// the affected action. The host must therefore refuse such a claim at
+// ISSUANCE, before any run happens.
+//
+// Red-first against the diagnosed production shape (client-passivity §5g):
+// an ordinary UNCLAIMED client run reads user-scoped state and narrows the
+// action's global floor; the executor, seeing only its own all-space surfaces,
+// proposes a SPACE claim; issuance must decline it.
+// ---------------------------------------------------------------------------
+
+Deno.test("R7: the host declines a claim broader than the action's durable context floor", async () => {
+  const server = createActingServer("memory-v2-acting-context-r7-floor");
+  rankDial.resetServerPrimaryExecutionClaimRankConfig();
+  const bobClient = await connectActingClient(server);
+  const bobSession = await mountAs(bobClient, SPONSOR);
+  // An ORDINARY client session — never bound to the executor lease. The whole
+  // point of the diagnosis is that a plain client run pins the floor, so the
+  // narrowing commit must not come from the executor's provider session (a
+  // bound session's observations are required to carry a claim).
+  const aliceClient = await connectActingClient(server);
+  const aliceSession = await mountAs(aliceClient, LANE_PRINCIPAL);
+  let unbind = () => {};
+  try {
+    await bobSession.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: "of:acting-server-seed",
+        value: { value: "seed" },
+      }],
+    });
+    await bobSession.setExecutionDemand("", ["space:piece:acting"]);
+    const lease = await server.acquireExecutionLease(SERVER_SPACE, "");
+    assertExists(lease);
+    unbind = server.bindExecutionSession(
+      SERVER_SPACE,
+      bobSession.sessionId,
+      lease,
+    );
+
+    const spaceClaimKey = serverLaneClaimKey(
+      "space" as SchedulerExecutionContextKey,
+    );
+
+    // CONTROL: with no floor observed, the identical space claim issues. This
+    // is what pins the floor — not some unrelated precondition — as the thing
+    // the decline below turns on.
+    const admitted = await server.setExecutionClaim(lease, spaceClaimKey);
+    assertEquals(admitted.contextKey, "space");
+    assertEquals(server.revokeExecutionClaim(admitted), true);
+
+    // The client run that narrows the floor: UNCLAIMED, and user-scoped only
+    // in its READ surface — exactly the group-chat shape.
+    const userRead = serverAddress("user", "of:acting-server-r7-input");
+    await aliceSession.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: {
+        version: 2,
+        ownerSpace: SERVER_SPACE,
+        branch: "",
+        pieceId: spaceClaimKey.pieceId,
+        processGeneration: 1,
+        actionId: spaceClaimKey.actionId,
+        actionKind: "computation",
+        implementationFingerprint: spaceClaimKey.implementationFingerprint,
+        runtimeFingerprint: spaceClaimKey.runtimeFingerprint,
+        observedAtSeq: 0,
+        transactionKind: "action-run",
+        reads: [userRead],
+        shallowReads: [],
+        actualChangedWrites: [],
+        currentKnownWrites: [],
+        materializerWriteEnvelopes: [],
+        completeActionScopeSummary: {
+          version: 1,
+          complete: true,
+          implementationFingerprint: spaceClaimKey.implementationFingerprint,
+          runtimeFingerprint: spaceClaimKey.runtimeFingerprint,
+          piece: {
+            space: SERVER_SPACE,
+            scope: "space",
+            id: spaceClaimKey.pieceId.slice("space:".length),
+            path: [],
+          },
+          reads: [userRead],
+          writes: [],
+          materializerWriteEnvelopes: [],
+          directOutputs: [],
+        },
+        status: "success",
+      } satisfies SchedulerActionObservation,
+    });
+
+    // The claim the executor would now propose — its own surfaces are all
+    // space, so it still says "space" — must be refused before any run.
+    await assertRejects(
+      () => server.setExecutionClaim(lease, spaceClaimKey),
+      Error,
+      "broader than the action's durable context floor",
+    );
+  } finally {
+    unbind();
+    rankDial.resetServerPrimaryExecutionClaimRankConfig();
+    await aliceClient.close();
+    await bobClient.close();
+    await server.close();
+  }
+});

@@ -129,13 +129,15 @@ precisely the foundation those need.
    `dynamic-write-outside-static-surface` ×12 surviving BOTH scoped
    ranks, and **R7's `claim-context-mismatch` acceptance criterion
    failing on the flagship product** (5-6 → 2 → 2, expected hard-zero at
-   session rank since C2.10 retired the cause) — now DIAGNOSED in §5g:
-   claim rank and the engine's effective context are computed by two
-   different functions, and only the engine's sees the durable monotonic
-   context floor that an ordinary CLIENT run can pin to `session`. Not a
-   missing lane; an issuance-side floor consult. Sequencing in §5g: fix
-   R7 at issuance, then client-side negotiation (F5-style gate), then
-   the dial bridge.
+   session rank since C2.10 retired the cause) — DIAGNOSED and FIXED in
+   §5g. Claim rank and the engine's effective context were computed by
+   two different functions, and only the engine's saw the durable
+   monotonic context floor that an ordinary CLIENT run can pin to
+   `session`; the host now consults that floor at ISSUANCE and declines a
+   claim broader than it, turning a burned run into a free refusal.
+   Ladder now **2 → 0 → 0** (hard-zero at both scoped ranks, pinned).
+   Sequencing in §5g: `dynamic-write-outside-static-surface` next, then
+   client-side negotiation (F5-style gate), then the dial bridge.
 4. **P3 passivity mechanism** (per-session subcap, passive-mode
    demand producer, dynamic-reactivation contract, effect-attempt
    journal) — the client stops running standing work. THIS is where
@@ -1278,12 +1280,14 @@ across runs; the scoped arms reproduced exactly). C2.10 RETIRED that cause from
 reasoning that "session-context runs now have a lane to route to, so any
 mismatch is a placement defect again", making its return to hard-zero a
 named C2 acceptance criterion. Measured against real group-chat with
-session lanes open and session-rank claims issuing, it is **2, not 0**.
-Opening the lane is evidently not sufficient to route every
-session-context run to it. The probe asserts only that no rank dial
-INCREASES the count and logs the criterion miss; pinning zero would land
-the file red against a pre-existing placement property. Diagnosed
-below.
+session lanes open and session-rank claims issuing, it was **2, not 0**.
+Opening the lane is not sufficient to route every session-context run to
+it. **Diagnosed and FIXED the same day — see the two sections below.**
+Post-fix the ladder reads **2 → 0 → 0**: hard-zero at both scoped ranks,
+and the probe now PINS that. The space arm keeps a couple, which is the
+one case an issuance-time check cannot see (a floor narrowed between
+issuance and commit) and exactly what the engine fence remains the
+backstop for.
 
 ### R7 diagnosis (2026-07-28): claim rank and effective context are two different functions, and only one sees the durable floor
 
@@ -1373,12 +1377,58 @@ later space-rank claim on it fences, forever.
 3. **Re-issue at the resolved rank on fence** rather than dropping the
    attempt. Recovers the wasted run but leaves the disagreement.
 
-Option 1 is the recommendation. The fixture home is
-`packages/memory/test/v2-execution-claim-context-test.ts`, which already
-pins the opposite direction ("user-rank claim on a run resolving space
-fences claim-context-mismatch"); the missing red-first case is **a SPACE
-claim on an action whose durable principal floor a prior unclaimed
-client run narrowed to session**.
+### R7 fix (2026-07-28): the issuance-side floor consult
+
+Option 1 landed. `schedulerClaimContextFloor` (engine) reports the
+narrowest durable floor an action IDENTITY carries — the global row plus,
+when the claim names a principal, that principal's row — and
+`#assertExecutionClaimContextFloorAdmits` (server) declines any claim
+whose contextKey is BROADER than it, before the engine is asked to do
+anything. A wasted run becomes a free refusal.
+
+Deliberately coarser than the engine's own `schedulerContextFloor`: an
+`ActionClaimKey` carries no `processGeneration` and no `ownerSpace`, so
+the consult matches on the fingerprinted action identity across both. It
+can therefore only ever over-report narrowness, and over-reporting is
+SAFE here — the response is to decline, which lands exactly the
+client-primary behavior that would have happened anyway. Under-reporting
+would silently reinstate the burned run. Matching fingerprints are what
+make it sound rather than merely safe: same code, same scope shape.
+
+Red-first, both directions:
+
+- `v2-execution-claim-context-test.ts` — the MECHANISM at the engine: an
+  unclaimed client run narrows the floor, and a later space-rank claim on
+  an all-space run fences `claim-context-mismatch`. Plus a consult unit
+  pinning that it reads the global row, and that it does NOT leak across
+  action ids or fingerprints.
+- `v2-execution-acting-context-test.ts` — the DECLINE at the host, with a
+  control: the identical space claim issues while no floor is observed,
+  then an ordinary UNBOUND client session narrows it, and the same claim
+  is refused. Verified red (`Expected function to reject`) with the
+  consult disabled.
+
+Measured on the live product (three-arm probe, adjacent arms):
+
+| | space | user | session |
+| --- | --- | --- | --- |
+| `claim-context-mismatch` fences | 5-6 → **2** | 2 → **0** | 2 → **0** |
+| `commit-rejected:ExecutionLeaseFenceError` | 5 → **2** | 2 → **0** | 2 → **0** |
+| `claim-authority-lost` (the free decline) | 0 → 2 | 0 → 2 | 0 → 2 |
+| `settlementsCommitted` | 2 | 8 | 9 → **15** |
+
+The wasted-run diagnostic converts one-for-one into the free-decline
+diagnostic, which is precisely the intended trade. The session arm also
+committed more settlements, which is what stopping the burn buys back.
+
+**What this does NOT fix, on purpose.** The executor still proposes the
+wrong rank — it just gets refused cheaply now instead of after a run. It
+will re-propose on the next invalidation and be refused again. The
+durable fix is feeding the floor back to the executor so the two
+computations agree at the source (option 2), which needs a new channel
+and is not on the critical path for the rollout. The engine fence stays
+as the backstop for the issuance→commit race, which is what the space
+arm's residual 2 are.
 
 ### Recommended sequencing
 
@@ -1387,16 +1437,10 @@ client run narrowed to session**.
    enable a configuration that is inert at best; per the cohort gate it
    would also make user lanes un-openable in exactly the deployments
    worth measuring.
-2. **Fix R7 at issuance — DIAGNOSED above, and it is a small change.**
-   Consult the durable context floor in
-   `#assertExecutionClaimCapabilityEnabled` and decline (or upgrade) a
-   claim broader than the action's floor, with the red-first fixture
-   named at the end of the diagnosis. This is worth doing before any
-   rollout: the floor is monotonic, so every pinned action fences every
-   space-rank claim forever, and the failure mode is silent wasted
-   server work rather than anything a user sees. Still open beside it:
-   the `dynamic-write-outside-static-surface` ×12 offender, which
-   survives both scoped ranks and has not been diagnosed.
+2. **R7 — DONE (see the fix section above); the
+   `dynamic-write-outside-static-surface` ×12 offender is what remains
+   undiagnosed at this layer.** It survives both scoped ranks and is the
+   last live unserved class the rank dials do not explain.
 3. **Build the client-side negotiation path** (shell/runner) with an
    F5-style red-first env-bridge gate asserting the subcapability
    negotiates END TO END from the dials alone. This is the one item
@@ -1430,6 +1474,13 @@ expected. Every inventory and claim count above reproduced identically
 across three runs, including one under `--trace-leaks` (the shape CI
 uses for the integration suite, and the reason the probe runs inside
 `withExecutorTeardownBarrier` per FW7).
+
+Unrelated flake found while re-running the gate suite:
+`server-execution-cross-space-gate.test.ts` fails its 60s
+`waitForCondition` barrier intermittently under load — measured **3/6
+failures at clean HEAD** with no local changes applied, and 0/6 across
+two quiet 3-run A/B halves. It is load-sensitive and pre-existing, not
+caused by anything here; worth its own barrier/timeout fix.
 
 ## 7. Owner decisions — RESOLVED 2026-07-26
 

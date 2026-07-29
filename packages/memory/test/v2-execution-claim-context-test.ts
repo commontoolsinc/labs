@@ -606,3 +606,94 @@ Deno.test("with-operations context mismatch fences claim-context-mismatch", asyn
     await Deno.remove(directory, { recursive: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// R7: the OTHER direction — a claim BROADER than the action's durable floor.
+//
+// Every pin above covers a claim NARROWER than the run resolves (a user-rank
+// claim on a space-resolving run). The direction that actually fires in
+// production is the reverse, and it is the one the C2.10 R7 retirement did
+// not cover: an ordinary UNCLAIMED client run reads PerUser/PerSession state
+// and durably narrows the action's context floor; the floor is monotonic, so
+// every later run of that action resolves at the narrowed rank even when its
+// OWN surfaces are entirely space-scoped; and the executor — which classifies
+// its candidate from the current observation's surfaces alone and cannot see
+// the floor — keeps proposing a space-rank claim that can never match.
+//
+// Measured on the real group-chat product: a `cf:builtin/map:v1` action
+// fenced on every space-rank claim, with staticFloor=space, runtimeFloor=
+// space, globalFloor=user, principalFloor=session (client-passivity §5g,
+// "R7 diagnosis").
+// ---------------------------------------------------------------------------
+
+Deno.test("R7 mechanism: a prior UNCLAIMED client run narrows the floor, and a later space-rank claim on an all-space run fences claim-context-mismatch", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    // The client run that pins the floor. Nothing about it is claimed.
+    narrowFloorToUser(engine);
+    const lease = acquire(engine, nowMs);
+    // A SPACE claim — exactly what the executor proposes for a run whose own
+    // surfaces are all-space, because that is all it can see.
+    const claim = claimFor(
+      lease,
+      "space" as SchedulerExecutionContextKey,
+    );
+    const error = assertThrows(
+      () => applyClaimedObservationOnly(engine, lease, claim, nowMs + 1),
+      Engine.ExecutionLeaseFenceError,
+    );
+    assertEquals(error.fenceCause, "claim-context-mismatch");
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("R7: the issuance-side floor consult reports the narrowed floor for the action identity a claim key names", async () => {
+  const { directory, engine } = await openTempEngine();
+  try {
+    const claimKey = {
+      branch: "" as const,
+      pieceId: PIECE_ID,
+      actionId: ACTION_ID,
+      implementationFingerprint: IMPLEMENTATION_FINGERPRINT,
+      runtimeFingerprint: RUNTIME_FINGERPRINT,
+    };
+    // Nothing observed yet: no floor, so issuance must not decline anything.
+    assertEquals(
+      Engine.schedulerClaimContextFloor(engine, claimKey, undefined),
+      "space",
+    );
+    narrowFloorToUser(engine);
+    // The GLOBAL row is principal-independent, so a space-rank claim (which
+    // names no principal) sees it — this is the row that makes the measured
+    // group-chat case decidable at issuance.
+    assertEquals(
+      Engine.schedulerClaimContextFloor(engine, claimKey, undefined),
+      "user",
+    );
+    // A different action identity is unaffected: the consult must not leak
+    // one action's floor onto another's claim.
+    assertEquals(
+      Engine.schedulerClaimContextFloor(
+        engine,
+        { ...claimKey, actionId: "action:unrelated" },
+        undefined,
+      ),
+      "space",
+    );
+    // Nor across a fingerprint change — different code, different shape.
+    assertEquals(
+      Engine.schedulerClaimContextFloor(
+        engine,
+        { ...claimKey, implementationFingerprint: "impl:other" },
+        undefined,
+      ),
+      "space",
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});

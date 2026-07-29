@@ -582,44 +582,41 @@ Deno.test({
           `session=${readScope(session)}`,
       );
 
-      // THE RESIDUAL, live: `claim-context-mismatch` lease fences.
+      // R7's acceptance criterion — `claim-context-mismatch` hard-zero, the
+      // cause C2.10 retired from TOLERATED_LEASE_FENCE_CAUSES (see
+      // server-execution-measurement.ts).
       //
-      // R7 was RETIRED by C2.10 (see TOLERATED_LEASE_FENCE_CAUSES in
-      // server-execution-measurement.ts): "session-context runs now have a
-      // lane to route to, so any mismatch is a placement defect again", and
-      // its return to hard-zero is a NAMED C2 acceptance criterion. This
-      // probe MEASURED that criterion against the real group-chat product
-      // and it does NOT hold: the cause falls 5 → 2 up the ladder but does
-      // not reach zero even with session lanes open and session-rank claims
-      // issuing. Opening the lane is evidently not sufficient to route every
-      // session-context run to it for this product.
+      // This probe originally MEASURED that criterion failing on the real
+      // product (5-6 → 2 → 2 up the ladder). The diagnosis and fix are in
+      // client-passivity §5g: an unclaimed CLIENT run durably narrows the
+      // action's monotonic context floor; the executor, which classifies from
+      // the current observation's surfaces alone, keeps proposing a broader
+      // rank; and nothing consulted the floor until commit time. The host now
+      // declines such a claim at ISSUANCE
+      // (`#assertExecutionClaimContextFloorAdmits`).
       //
-      // Asserted here: the ladder never makes it WORSE (a rank dial that
-      // increased mismatches would be routing regressions). The absolute
-      // non-zero is reported to §5g rather than asserted, because it is a
-      // pre-existing product/placement property this probe discovered, not
-      // something the file's own subject introduces — pinning zero here would
-      // land this file red and blame the wrong change.
+      // Pinned at the SCOPED ranks, where a lane exists and the criterion
+      // applies. The `space` arm is NOT pinned to zero: with no lane at all
+      // it can still fence on the one case issuance cannot see — a floor
+      // narrowed between issuance and commit — which is exactly what the
+      // engine fence remains the backstop for.
       const fences = (arm: ArmReport) =>
         ((arm.stats.leaseFenceRejectCauses ?? {}) as Record<string, number>)[
           "claim-context-mismatch"
         ] ?? 0;
       assertEquals(
-        fences(user) <= fences(space) && fences(session) <= fences(user),
-        true,
-        `claim-context-mismatch fences grew up the ladder: ` +
+        [fences(user), fences(session)],
+        [0, 0],
+        `R7: claim-context-mismatch is not hard-zero at the scoped ranks — ` +
           `space=${fences(space)} user=${fences(user)} ` +
           `session=${fences(session)}`,
       );
-      if (fences(session) > 0) {
-        console.log(
-          `group-chat rank probe: R7 ACCEPTANCE CRITERION NOT MET — ` +
-            `claim-context-mismatch is ${fences(session)} at session rank ` +
-            `(retired from the tolerated set by C2.10; expected hard-zero). ` +
-            `Ladder: space=${fences(space)} user=${fences(user)} ` +
-            `session=${fences(session)}`,
-        );
-      }
+      assertEquals(
+        fences(space) <= 2,
+        true,
+        `the space arm fenced more than the issuance→commit race explains: ` +
+          `${fences(space)}`,
+      );
 
       console.log(
         `group-chat rank probe LADDER\n` +

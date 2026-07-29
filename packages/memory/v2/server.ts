@@ -2376,6 +2376,71 @@ export class Server {
     }
   }
 
+  /**
+   * R7 issuance-side floor consult: refuse a claim whose contextKey is
+   * BROADER than the action's durable context floor.
+   *
+   * The engine resolves a run's effective context as
+   * `narrowest(staticFloor, runtimeFloor, globalFloor, principalFloor)` and
+   * fences `claim-context-mismatch` when that disagrees with the claim. The
+   * last two floors are durable and MONOTONIC, and any observer writes them
+   * — including an ordinary unclaimed CLIENT run that read PerUser or
+   * PerSession state. The executor classifies its candidate from the CURRENT
+   * observation's surfaces alone and cannot see them, so without this check
+   * it keeps proposing a rank the engine will never resolve to: every
+   * claimed attempt burns a full run and is then fenced at commit, forever,
+   * because the floor never widens (measured on group-chat: a
+   * `cf:builtin/map:v1` action fencing every space-rank claim; see
+   * client-passivity §5g "R7 diagnosis").
+   *
+   * Declining here turns that wasted run into a free refusal. It is NOT a
+   * correctness fix — the engine fence already prevented anything wrong from
+   * committing, and it stays as the backstop for the race this cannot see (a
+   * floor narrowed between issuance and commit; the measured space arm still
+   * shows a couple). What it fixes is liveness: the action falls back to
+   * client-primary immediately instead of after a discarded server run.
+   *
+   * Rank comparison only. A claim NARROWER than the floor is left alone —
+   * that direction is the engine's existing `claim-context-mismatch`
+   * territory (a user-rank claim on a space-resolving run) and is not this
+   * check's business.
+   */
+  #assertExecutionClaimContextFloorAdmits(
+    engine: Engine.Engine,
+    claim: ExecutionClaimInput,
+  ): void {
+    const principal = Engine.principalOfUserContextKey(claim.contextKey) ??
+      Engine.parseSessionExecutionContextKey(claim.contextKey)?.principal;
+    const floor = Engine.schedulerClaimContextFloor(
+      engine,
+      {
+        branch: claim.branch,
+        pieceId: claim.pieceId,
+        actionId: claim.actionId,
+        implementationFingerprint: claim.implementationFingerprint,
+        runtimeFingerprint: claim.runtimeFingerprint,
+      },
+      principal === undefined
+        ? undefined
+        : Engine.resolveScopeKey("user", { principal }),
+    );
+    const claimScope: Engine.SchedulerContextScope =
+      Engine.parseSessionExecutionContextKey(claim.contextKey) !== undefined
+        ? "session"
+        : principal !== undefined
+        ? "user"
+        : "space";
+    if (
+      Engine.schedulerContextRank(floor) >
+        Engine.schedulerContextRank(claimScope)
+    ) {
+      throw new ExecutionLeaseAuthorityError(
+        `execution claim context ${claimScope} is broader than the action's ` +
+          `durable context floor ${floor}`,
+      );
+    }
+  }
+
   /** Issuance-side rank dial (context-lattice §6): the host issues claims
    * only up to the enabled context rank, a LADDER — the `session` stage
    * admits user rank too. Space is always issuable; scoped ranks require
@@ -6140,6 +6205,7 @@ export class Server {
     // lifecycle may begin draining/replacing this slot while the open awaits.
     // Re-sample and re-read every host/durable authority input afterwards.
     this.#assertExecutionClaimCapabilityEnabled(claimInput);
+    this.#assertExecutionClaimContextFloorAdmits(engine, claimInput);
     assertLaneGrantCurrent();
     const claimNow = this.#executionNowMs();
     if (
@@ -9310,7 +9376,11 @@ export class Server {
     // protocol's F2-floor regression signal ("graph.query still at its F2
     // floor, not regressed by demand pulls").
     if (trigger !== undefined) {
-      this.#recordFeedTraversal(`graph.query.${trigger}`, result.stats, elapsedMs);
+      this.#recordFeedTraversal(
+        `graph.query.${trigger}`,
+        result.stats,
+        elapsedMs,
+      );
     }
     recordSlowQueryDuration("graph.query", space, startedAt, {
       roots: query.roots.length,

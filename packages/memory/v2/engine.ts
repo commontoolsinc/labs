@@ -6115,9 +6115,9 @@ function resolveSchedulerAddress(
   };
 }
 
-type SchedulerContextScope = "space" | "user" | "session";
+export type SchedulerContextScope = "space" | "user" | "session";
 
-const schedulerContextRank = (scope: SchedulerContextScope): number =>
+export const schedulerContextRank = (scope: SchedulerContextScope): number =>
   scope === "space" ? 0 : scope === "user" ? 1 : 2;
 
 const narrowerSchedulerContext = (
@@ -6953,6 +6953,73 @@ function schedulerContextFloor(
     principal_key: principalKey,
   }) as { floor_scope: SchedulerContextScope } | undefined;
   return row?.floor_scope ?? "space";
+}
+
+/**
+ * ISSUANCE-side floor consult (R7): the narrowest durable context floor this
+ * action IDENTITY carries, for the global row and — when the caller names one
+ * — one principal's row.
+ *
+ * WHY THIS EXISTS. The engine resolves a run's effective context as
+ * `narrowest(staticFloor, runtimeFloor, globalFloor, principalFloor)` and
+ * fences `claim-context-mismatch` when that disagrees with the claim's
+ * contextKey. The floors are DURABLE and MONOTONIC and can be written by any
+ * observer — including an ordinary unclaimed CLIENT run that happened to read
+ * PerUser/PerSession state. The executor classifies its candidate from the
+ * CURRENT observation's surfaces alone, so it can keep proposing a rank the
+ * engine will never resolve to, and every claimed attempt then burns a full
+ * run before the commit-time fence rejects it — permanently, since the floor
+ * never widens. Measured on the group-chat product: the same
+ * `cf:builtin/map:v1` action fenced on every space-rank claim, run after run
+ * (client-passivity §5g, "R7 diagnosis"). This reader lets the host decline
+ * such a claim at ISSUANCE, before any work is done.
+ *
+ * DELIBERATELY COARSER THAN {@link schedulerContextFloor}: a claim key
+ * (`ActionClaimKey`) carries no `processGeneration` and no `ownerSpace`, so
+ * this matches on the fingerprinted action identity and takes the narrowest
+ * row across both. That can only ever over-report narrowness, and
+ * over-reporting is SAFE here — the caller's response is to decline the
+ * claim, which falls back to exactly the client-primary behavior that would
+ * have happened anyway. Under-reporting would silently reinstate the burned
+ * run. The fingerprints are what make it sound rather than merely safe:
+ * identical implementation + runtime fingerprints are the same code, so a
+ * floor observed for one process generation describes the same scope shape.
+ */
+export function schedulerClaimContextFloor(
+  engine: Engine,
+  key: {
+    branch: BranchName;
+    pieceId: string;
+    actionId: string;
+    implementationFingerprint: string;
+    runtimeFingerprint: string;
+  },
+  principalKey?: string,
+): SchedulerContextScope {
+  const rows = engine.database.prepare(`
+    SELECT floor_scope
+    FROM scheduler_context_floor
+    WHERE branch = :branch
+      AND piece_id = :piece_id
+      AND action_id = :action_id
+      AND implementation_fingerprint = :implementation_fingerprint
+      AND runtime_fingerprint = :runtime_fingerprint
+      AND (principal_key = '' OR principal_key = :principal_key)
+  `).all({
+    branch: key.branch,
+    piece_id: key.pieceId,
+    action_id: key.actionId,
+    implementation_fingerprint: key.implementationFingerprint,
+    runtime_fingerprint: key.runtimeFingerprint,
+    // No principal named (a space-rank claim has none): the `principal_key =
+    // ''` disjunct still selects the global row, and this sentinel matches no
+    // per-principal row (principal keys are canonical `user:<did>`).
+    principal_key: principalKey ?? " none",
+  }) as { floor_scope: SchedulerContextScope }[];
+  return rows.reduce<SchedulerContextScope>(
+    (narrowest, row) => narrowerSchedulerContext(narrowest, row.floor_scope),
+    "space",
+  );
 }
 
 function upsertSchedulerContextFloor(
