@@ -5,22 +5,67 @@ import { parse as parseJsonc } from "@std/jsonc";
 const dirname = import.meta.dirname as string;
 const CLI_PATH = path.join(dirname, "..", "cli.ts");
 const DenoWebTestCache: Map<string, Promise<Deno.CommandOutput>> = new Map();
+const encoder = new TextEncoder();
+const TASK_PREFIX = encoder.encode("Task ");
+const DOWNLOAD_HTTP_PREFIX = encoder.encode("Download http://");
+const DOWNLOAD_HTTPS_PREFIX = encoder.encode("Download https://");
 
-export function stripDenoDownloadDiagnostics(
-  stderr: Uint8Array,
+function startsWithBytes(
+  value: Uint8Array,
+  prefix: Uint8Array,
+  offset: number,
+): boolean {
+  if (offset + prefix.length > value.length) {
+    return false;
+  }
+  for (let i = 0; i < prefix.length; i++) {
+    if (value[offset + i] !== prefix[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function stripDenoDownloadDiagnostics(
+  stderr: Uint8Array<ArrayBuffer>,
 ): Uint8Array<ArrayBuffer> {
-  const text = new TextDecoder().decode(stderr);
-  const withoutDownloads = text.replace(
-    /^Download https?:\/\/[^\r\n]*(?:\r?\n|$)/gm,
-    "",
+  const taskLineEnd = stderr.indexOf(0x0a);
+  if (
+    taskLineEnd === -1 ||
+    !startsWithBytes(stderr, TASK_PREFIX, 0)
+  ) {
+    return stderr;
+  }
+
+  const downloadsStart = taskLineEnd + 1;
+  let downloadsEnd = downloadsStart;
+  while (
+    startsWithBytes(stderr, DOWNLOAD_HTTP_PREFIX, downloadsEnd) ||
+    startsWithBytes(stderr, DOWNLOAD_HTTPS_PREFIX, downloadsEnd)
+  ) {
+    const lineEnd = stderr.indexOf(0x0a, downloadsEnd);
+    downloadsEnd = lineEnd === -1 ? stderr.length : lineEnd + 1;
+  }
+
+  if (downloadsEnd === downloadsStart) {
+    return stderr;
+  }
+
+  const filtered = new Uint8Array(
+    stderr.length - (downloadsEnd - downloadsStart),
   );
-  return new TextEncoder().encode(withoutDownloads);
+  filtered.set(stderr.subarray(0, downloadsStart));
+  filtered.set(stderr.subarray(downloadsEnd), downloadsStart);
+  return filtered;
 }
 
 export function sanitizeDenoWebTestOutput(
   output: Deno.CommandOutput,
 ): Deno.CommandOutput {
-  return output;
+  return {
+    ...output,
+    stderr: stripDenoDownloadDiagnostics(output.stderr),
+  };
 }
 
 // Runs deno-web-test in `projectDir` and caches
@@ -78,10 +123,7 @@ export const runDenoWebTest = async (
       "test",
     ],
     cwd: tmpProjectPath,
-  }).output().then((result) => ({
-    ...result,
-    stderr: stripDenoDownloadDiagnostics(result.stderr),
-  }));
+  }).output().then(sanitizeDenoWebTestOutput);
   DenoWebTestCache.set(projectDir, output);
   return output;
 };
