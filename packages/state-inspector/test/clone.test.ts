@@ -393,6 +393,66 @@ Deno.test("refuses a non-empty target rather than merging into it", async () => 
   });
 });
 
+Deno.test("a clone taken before the baseline sidecar still verifies", async () => {
+  // Backward compatibility: clones made before per-entity baselines were
+  // recorded have no sidecar, and must still produce a real diff by
+  // recomputing from the pristine snapshot rather than silently comparing
+  // against nothing — which would report every entity as "added" and pass.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    await Deno.remove(clonePaths(clone, SPACE).baselinePath);
+
+    const clean = await verifyClone(clone);
+    assertEquals(clean.diff.added, 0, "not 'everything is new'");
+    assertEquals(clean.diff.changed, 0);
+    assert(clean.ok);
+
+    // And it still detects a real change without the sidecar.
+    mutate(clonePaths(clone, SPACE).workingPath, [
+      ["of:input", { value: { title: "CLOBBERED" } }],
+    ]);
+    const dirty = await verifyClone(clone);
+    assertEquals(dirty.diff.changed, 1);
+    assert(!dirty.ok);
+  });
+});
+
+Deno.test("a corrupt baseline sidecar fails loudly rather than recomputing", async () => {
+  // Absent is ordinary — an older clone simply has no sidecar. UNREADABLE is
+  // not: silently falling back to recomputation would produce a correct-looking
+  // verdict while hiding that the clone directory is damaged, and verify's job
+  // is to report damage, not paper over it.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    await Deno.writeTextFile(
+      clonePaths(clone, SPACE).baselinePath,
+      "{ this is not json",
+    );
+    await assertRejects(() => verifyClone(clone), Error);
+  });
+});
+
+Deno.test("an IO error while clearing the working set is surfaced", async () => {
+  // reset probes for `-wal`/`-shm` companions; only "absent" is an ordinary
+  // answer. A component that is not a directory yields NotADirectory, which
+  // must propagate rather than be read as "nothing there" — treating it as
+  // absent would skip a file it failed to delete and call the clone pristine.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const working = clonePaths(clone, SPACE).workingPath;
+    // Replace the directory holding the working copy with a regular file.
+    const dir = working.replace(/\/[^/]*$/, "");
+    await Deno.remove(dir, { recursive: true });
+    await Deno.writeTextFile(dir, "not a directory");
+
+    const error = await assertRejects(() => resetClone(clone), Error);
+    assert(
+      error instanceof Deno.errors.NotADirectory,
+      `expected the real IO error, got ${error.constructor.name}`,
+    );
+  });
+});
+
 Deno.test("a directory without a manifest is not a clone", async () => {
   await withDirs(async ({ root }) => {
     await assertRejects(

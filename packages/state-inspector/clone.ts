@@ -480,9 +480,11 @@ function assertSafeTarget(
       `refusing to clone into the snapshot's own directory (${sourceDir}).`,
     );
   }
+  // Blank entries are dropped by the caller before canonicalization (a blank
+  // would resolve to the working directory and forbid everything under it), so
+  // there is no empty-string case to re-check here.
   for (const raw of forbiddenDirs) {
     const forbidden = raw.replace(/\/+$/, "");
-    if (forbidden === "") continue;
     if (isWithin(dir, forbidden) || isWithin(forbidden, dir)) {
       throw new Error(
         `refusing to write a clone into ${dir}: it overlaps the live store ` +
