@@ -233,6 +233,7 @@ Deno.test("availability provenance and observations cover retained and invalid f
       );
       const projected = resultOf(fetched);
       const nestedProjected = resultOf(projected);
+      const projectedPlain = resultOf({ name: "plain" });
       const emptyProjection = resultOf();
       const ordinaryCall = ordinary(fetched);
       const ordinaryResultProperty = ordinary(fetched).result;
@@ -342,6 +343,13 @@ Deno.test("availability provenance and observations cover retained and invalid f
           context,
         )?.kind,
         "result-projection",
+      );
+      assertEquals(
+        resolveAvailabilityValueProvenance(
+          initializer(sourceFile, "projectedPlain"),
+          context,
+        )?.source.getText(sourceFile),
+        '{ name: "plain" }',
       );
       assertEquals(
         resolveAvailabilityValueProvenance(

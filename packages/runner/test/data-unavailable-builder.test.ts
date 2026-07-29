@@ -44,6 +44,16 @@ describe("data-unavailability builder helpers", () => {
     expect(commonfabric.resultOf("ready")).toBe("ready");
   });
 
+  it("rejects values without an associated streaming partial result", () => {
+    const message =
+      "partialResultOf() requires a request returned by a streaming built-in";
+
+    expect(() => commonfabric.partialResultOf("not-a-request" as never))
+      .toThrow(message);
+    expect(() => commonfabric.partialResultOf({} as never))
+      .toThrow(message);
+  });
+
   it("projects direct async results without adding projection nodes", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
