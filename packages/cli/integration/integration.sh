@@ -683,6 +683,37 @@ run_piece_call_retry() {
     error "The settled invocation's outcome should stand, got lastMessage: $LAST"
   fi
 
+  # --- 5. A payload the verb cannot accept is refused, id intact. ----------
+  # The schema rejection happens before dispatch, so the id is never spent.
+  # That is the whole point: an agent that typos a field and retries under
+  # the same idempotency key must get its corrected call executed, not
+  # deduplicated against a handling that ran with no event.
+  RETRY_PIECE_5=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
+  INVOCATION_5=$(new_invocation_id)
+  set +e
+  BAD_PAYLOAD=$(cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_5" --invocation "$INVOCATION_5" \
+    recordMessage -- --json '{"mesage":"typo"}' 2>&1)
+  BAD_STATUS=$?
+  set -e
+  if [ "$BAD_STATUS" -eq 0 ]; then
+    error "A payload failing the verb's schema should fail, got: $BAD_PAYLOAD"
+  fi
+  case "$BAD_PAYLOAD" in
+    *'Invalid input for "recordMessage"'*) ;;
+    *) error "A schema rejection should name the verb, got: $BAD_PAYLOAD" ;;
+  esac
+  assert_message_count "$RETRY_PIECE_5" 0 \
+    "A refused payload must not record a message"
+
+  cf piece call $SPACE_ARGS --piece "$RETRY_PIECE_5" --invocation "$INVOCATION_5" \
+    recordMessage -- --message "corrected" > /dev/null
+  assert_message_count "$RETRY_PIECE_5" 1 \
+    "A refused call never spent its id, so the corrected retry should record one"
+  LAST_5=$(cf piece get $SPACE_ARGS --piece "$RETRY_PIECE_5" lastMessage)
+  if [ "$LAST_5" != '"corrected"' ]; then
+    error "The corrected retry's payload should stand, got lastMessage: $LAST_5"
+  fi
+
   echo "Successfully ran CLI piece call retry integration tests for ${API_URL}."
 }
 
