@@ -8,7 +8,7 @@
 #
 # Two ways to pick this up, neither of which needs the binary built:
 #   - mise users get it automatically (`_.path` in mise.toml)
-#   - everyone else: ln -s "$PWD/bin/cf" ~/.local/bin/cf
+#   - everyone else: deno task install-cf
 #
 # Runs from source, so it never goes stale against the checkout. `dist/cf` is
 # deliberately not used here — see "Why not dist/cf" in packages/cli/README.md.

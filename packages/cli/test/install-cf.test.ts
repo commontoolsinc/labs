@@ -289,6 +289,39 @@ Deno.test("dry run changes nothing", async () => {
   });
 });
 
+Deno.test("a dry run predicts a failing real run", async () => {
+  // A dry run that reports success where the real run would fail is worse than
+  // no dry run: it is the wrong answer, delivered confidently.
+  await withTempDir(async (dir) => {
+    const checkout = join(dir, "labs");
+    await makeCheckout(checkout);
+
+    const { code, err } = await runInstaller(checkout, [
+      "--dir",
+      join(dir, "does-not-exist"),
+      "--dry-run",
+    ]);
+    assertEquals(code, 1);
+    assertStringIncludes(err, "does not exist");
+  });
+});
+
+Deno.test("warns when an explicit --dir is not on PATH", async () => {
+  // Auto-detection only picks directories on PATH. An explicit --dir is
+  // honoured, but installing somewhere unreachable is the exact silent failure
+  // this whole area exists to prevent, so it is said out loud.
+  await withTempDir(async (dir) => {
+    const checkout = join(dir, "labs");
+    const target = join(dir, "target");
+    await makeCheckout(checkout);
+    await Deno.mkdir(target);
+
+    const { code, err } = await runInstaller(checkout, ["--dir", target]);
+    assertEquals(code, 0);
+    assertStringIncludes(err, "not on your PATH");
+  });
+});
+
 Deno.test("a missing target directory is an error, not a silent success", async () => {
   await withTempDir(async (dir) => {
     const checkout = join(dir, "labs");

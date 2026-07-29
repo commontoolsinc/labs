@@ -124,14 +124,25 @@ fi
 
 install_path="${target_dir}/cf"
 
-if [ "${dry_run}" -eq 1 ]; then
-  echo "install-cf: would install ${install_path} (default checkout: ${primary})"
-  exit 0
-fi
-
+# Checked before the dry-run exit, so a dry run predicts the real run rather
+# than reporting a success the real run would not deliver.
 if [ ! -d "${target_dir}" ]; then
   echo "install-cf: ${target_dir} does not exist." >&2
   exit 1
+fi
+
+# Auto-detection only ever picks a directory already on PATH; an explicit --dir
+# can point anywhere, and installing somewhere unreachable is precisely the
+# silent failure this exists to prevent. Explicit intent is honoured, but not
+# quietly.
+if ! on_path "${target_dir}"; then
+  echo "install-cf: warning: ${target_dir} is not on your PATH," >&2
+  echo "            so \`cf\` will not be runnable by name from it." >&2
+fi
+
+if [ "${dry_run}" -eq 1 ]; then
+  echo "install-cf: would install ${install_path} (default checkout: ${primary})"
+  exit 0
 fi
 
 # Replace only something this script wrote. A file someone put there by hand is
