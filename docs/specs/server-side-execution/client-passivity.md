@@ -1745,6 +1745,42 @@ that consumes them starts building.
    shows is structurally absent (dynamic sqlite ops ride arbitrary
    callers' commits) — a ruling without detectability recreates the
    claim-then-nobody-computes hazard under suppression.
+
+   **AMENDED 2026-07-28 (owner) — D2 NARROWS TO READS.** Build the
+   lane-scoped *read* seam; keep folded sqlite **writes** client-primary.
+   **This is not an exception to the arc's goal**: every `db.exec` call
+   site is inside a `handler(...)`, and handler/event-driven writes are
+   client-inherent by §1 point 1. Client-primary sqlite writes are
+   therefore *within* the goal, not carved out of it.
+
+   Evidence that produced the amendment (A5, verified):
+
+   - **The write half is fail-open as D2's text authorizes it.** A
+     `sqlite` op has no entity id and no address, so it has no
+     representation in `CompleteActionScopeSummary`. The engine's
+     claimed-action firewall (`packages/memory/v2/engine.ts:6615`)
+     validates every op twice — lane scope AND coverage by
+     `actualChangedWrites` — and only the first bound can be expressed
+     for a sqlite op. Admitting on scope alone would let a claimed action
+     commit arbitrary SQL into any same-scope cell-db while its entity
+     writes stayed strictly bounded: a widening of the claim contract,
+     not a narrowing. A fail-closed bound is available but needs a
+     `(db id, db scope, table)` certificate dimension mirrored in both
+     firewalls, which D2's text does not authorize.
+   - **CP21's premise is stale for the write path.** `db.exec` requires a
+     transaction and is documented handler-only
+     (`packages/runner/src/cell.ts:1116-1124`); every call site in the
+     repo is inside a handler; and `packages/runner/src/scheduler/servability.ts:349`
+     makes `actionKind === "event-handler"` categorically unservable
+     (verified). So D2's target population — a *claimed computation or
+     effect* whose commit folds a sqlite op — is structurally possible
+     but has **zero in-repo instances**, and §5f's live inventory shows
+     no sqlite class at all.
+
+   The row-label re-derivation half of D2 turns out to be **already built
+   and already unconditional** (`packages/runner/src/builtins/sqlite/commit-eval.ts`).
+   Reopen this decision if a claimed non-handler sqlite write ever
+   appears in a measured inventory.
 3. **D3 — session-rank boot seed: PUSH-THEN-CATCH-UP** (rehydrated
    durable rows pushed immediately, settled stale-tolerantly via
    catch-up). Rationale: holding boot for lane catch-up serializes the

@@ -163,14 +163,19 @@ Measured by the orchestrator in detached worktrees with empty `git status`:
 | main `aac9bd3dc` | 26 unformatted / 2128 files | **clean** |
 | branch `b058731e1` | 22 unformatted / 3735 files | **1 problem** |
 
-**The lint error is ARC DEBT, not repo debt.** main is lint-clean;
-`require-await` at `packages/runner/src/executor/executor-worker.ts:1071`
-arrived on this branch (the file has 51 branch-only commits; the error came in
-with `d28092a64`). It therefore blocks §5's A→B "full battery green" gate and
-the arc has to fix it. The `async` keyword is load-bearing — `enqueue<T>`
-requires `() => Promise<T>` — so the fix is a `// deno-lint-ignore
-require-await` carrying a reason, matching the precedent at
-`packages/fuse/cell-bridge.ts:3110`, NOT deleting the keyword.
+**The lint error was ARC DEBT, and is now FIXED** (`a34c15fd2`). main is
+lint-clean; `require-await` at
+`packages/runner/src/executor/executor-worker.ts:1071` arrived on this branch
+with `d28092a64`. The `async` keyword is load-bearing — `enqueue<T>` requires
+`() => Promise<T>` — so the fix was a `// deno-lint-ignore require-await`
+carrying a reason, NOT deleting the keyword. Note the directive must sit on
+the line IMMEDIATELY before the code: a multi-line explanation above it breaks
+the suppression and adds an unused-directive error, taking the count 1 → 2.
+
+Both gates are green on this branch as of `57e625424`. **A new fmt/lint
+failure is now yours** — but re-check your own files individually before
+believing the stop hook, which runs repo-wide and can transiently catch
+another agent's in-flight write.
 
 **The fmt drift is on both sides and they are different sets.** All 22 on the
 branch are in branch-modified files, so the arc introduced those; main
@@ -201,6 +206,19 @@ invocation; engagement counters on every number or it reads "not engaged".
 **Load matters.** This box has run at load 18–34 during this arc. Counts and
 set relations are load-insensitive; latencies are not. Do not quote a latency
 taken above load ~5.
+
+### 2.5b Two traps that silently return the wrong answer
+
+- **`grep` treats `packages/memory/v2/engine.ts` as BINARY** and prints
+  nothing rather than erroring. Plain `grep -c sqlite engine.ts` returns
+  empty; `grep -ac` returns 18. Use `grep -a` on that file or you will
+  conclude, wrongly, that the biggest file in the memory layer has no
+  handling for whatever you searched. (Found by A5, reproduced by the
+  orchestrator.)
+- **`git add docs/` is too broad while agents are running.** It sweeps
+  concurrent agents' doc edits into an unrelated commit — this happened to
+  `0ad293c2b`, which silently carries C2's `EXPERIMENTAL_OPTIONS.md` work
+  under a commit message about something else. Stage explicit paths.
 
 ### 2.6 Comparing action ids across arms
 
