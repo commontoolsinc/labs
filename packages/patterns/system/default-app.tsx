@@ -309,9 +309,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                       {recentPieces.map((piece: any) => (
                         <tr>
                           <td>
-                            <cf-cell-context $cell={piece}>
-                              <cf-render variant="chip" $cell={piece} />
-                            </cf-cell-context>
+                            <cf-render variant="chip" $cell={piece} />
                           </td>
                         </tr>
                       ))}
@@ -339,9 +337,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
 
                     const link = (
                       <cf-drag-source $cell={piece} type="note">
-                        <cf-cell-context $cell={piece}>
-                          <cf-render variant="chip" $cell={piece} />
-                        </cf-cell-context>
+                        <cf-render variant="chip" $cell={piece} />
                       </cf-drag-source>
                     );
 

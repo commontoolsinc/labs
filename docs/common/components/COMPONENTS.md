@@ -108,7 +108,6 @@ cell means none confirmed — check the component source before assuming.
 | `cf-calendar` | Month-grid mini calendar | `$value`, `$markedDates` |
 | `cf-canvas` | Fixed-size canvas surface emitting `cf-canvas-click` with x/y | |
 | `cf-card` | Content container with header/content/footer (built-in 1rem padding) | |
-| `cf-cell-context` | Associates a page region with a cell for inspection (see [CELL_CONTEXT.md](CELL_CONTEXT.md)) | `$cell` |
 | `cf-cell-link` | Renders a link or cell as a clickable, draggable pill | |
 | `cf-cfc-authorship` | Shows trusted authorship state for CFC-labeled content | `$value`, `$author` |
 | `cf-cfc-label` | Renders the CFC label of a bound cell value | `$value` |
@@ -451,6 +450,17 @@ Historical entries can restore their retained source version or resume
 following their earlier origin. The menu warns before applying a structurally
 incompatible historical source. Its confirmation remains bound to the exact
 candidate that produced the warning.
+
+**Data** shows the piece's argument and result values (both stay live while
+the menu is open; linked cells appear as `{"@cell": …}` stubs), and
+**Actions** lists the handler streams the piece's declared argument and
+result schemas carry and dispatches an event to one, with an optional JSON
+payload. A handler only appears if the stream is declared in the pattern's
+output (or argument) type — the schema'd read is closed-world, so a handler
+returned at runtime behind an index signature is invisible to it. Dispatches
+from the menu are accepted-for-delivery acknowledgements (the commit is
+asynchronous) and are not renderer-trusted, so a handler gated on UI
+provenance will refuse them.
 
 The menu comes with `cf-render`. Importing the component registers it. It mounts
 itself on `document.body` so a piece's clipping or a tile's scaling cannot reach

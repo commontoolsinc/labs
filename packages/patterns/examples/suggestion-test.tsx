@@ -31,14 +31,10 @@ export default pattern<{ title: string | Default<"Suggestion Tester"> }>(
         <div>
           <h1>Suggestion Tester</h1>
           <h2>Counter</h2>
-          <cf-cell-context $cell={suggestion} label="Counter Suggestion">
-            {suggestion}
-          </cf-cell-context>
+          {suggestion}
 
           <h2>Note</h2>
-          <cf-cell-context $cell={suggestion2} label="Note Suggestion">
-            {suggestion2}
-          </cf-cell-context>
+          {suggestion2}
           <hr />
 
           <Summary

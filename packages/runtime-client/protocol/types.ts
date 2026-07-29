@@ -238,6 +238,12 @@ export interface CellGetRequest extends BaseRequest {
   // so a caller that needs both pays one round-trip instead of a separate
   // CellGetCfcLabel request.
   includeCfcLabel?: boolean;
+  // Opt in to having the read cell's own schema-bearing ref returned. Useful
+  // when `meta` names a link field (pattern/argument/result): the resolved
+  // cell's ref lets the caller subscribe to it or read it again directly,
+  // and its schema carries the declarations (e.g. stream fields) that the
+  // value alone does not.
+  includeRef?: boolean;
 }
 
 export interface CellSetRequest extends BaseRequest {
@@ -891,6 +897,9 @@ export interface CellGetResponse extends JSONValueResponse {
   // Present only when the request set `includeCfcLabel`. `undefined` is a valid
   // value (the cell carries no label); the field is omitted when not requested.
   cfcLabel?: CfcLabelView | undefined;
+  // Present only when the request set `includeRef` and the read resolved to a
+  // cell (a raw-metadata read has no cell to reference).
+  cell?: CellRef;
 }
 
 export interface CellResponse {
