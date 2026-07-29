@@ -701,18 +701,21 @@ const DEFINITION_KEYS = ["$defs", "definitions"] as const;
  * the same map under the same root skips it.
  *
  * The claim is taken on entry, before any child is walked, so the map belongs
- * to the outermost schema that carries it. That schema walks it later from its
- * own keyword loop, where no ref expansion is in flight — a nested carrier
- * claiming first would instead walk the definitions from inside a `$ref` that
- * the recursion guard is holding open, and bodies reached through that ref
- * would be cut short.
+ * to the outermost schema that carries it. Refs only accumulate on the way
+ * down, so an in-flight walk always holds a subset of the refs any schema
+ * nested inside it would hold, and therefore cuts no more than that nested
+ * walk would — skipping the nested one loses nothing.
+ *
+ * That reasoning covers the claim only while the walk is in flight. Once it
+ * finishes, `releaseCutDefinitionScope()` hands the map back unless the walk
+ * ran to completion, because a sibling reached later holds different refs.
  */
 const claimDefinitionScopes = (
   schema: Exclude<JSONSchema, boolean>,
   rootKey: object,
   context: SchemaDefinitionContext,
-): ReadonlySet<string> => {
-  const claimed = new Set<string>();
+): ReadonlySet<string> | undefined => {
+  let claimed: Set<string> | undefined;
   for (const key of DEFINITION_KEYS) {
     const definitions = schema[key];
     if (!isRecord(definitions) || Array.isArray(definitions)) continue;
@@ -723,9 +726,25 @@ const claimDefinitionScopes = (
       context.walkedDefinitionsByRoot.set(rootKey, walked);
     }
     walked.add(definitions);
-    claimed.add(key);
+    (claimed ??= new Set()).add(key);
   }
   return claimed;
+};
+
+/**
+ * Give a definition map back when a recursion guard cut its walk short.
+ *
+ * A cut walk did not check everything below it, so it cannot stand in for a
+ * later walk that holds different refs open — through a sibling `$ref`, a
+ * definition this walk skipped is reachable in full. Only a walk that took no
+ * cut proves the whole map, and only that walk keeps the map for good.
+ */
+const releaseCutDefinitionScope = (
+  rootKey: object,
+  definitions: object,
+  context: SchemaDefinitionContext,
+): void => {
+  context.walkedDefinitionsByRoot.get(rootKey)?.delete(definitions);
 };
 
 const validateSchemaDefinitionInternal = (
@@ -990,12 +1009,9 @@ const validateSchemaDefinitionInternal = (
       // A definition map reached again under the same root has the same bodies
       // and resolves them against the same root, so whichever schema claimed it
       // on entry already covers it.
-      if (
-        (key === "$defs" || key === "definitions") &&
-        !claimedDefinitions.has(key)
-      ) {
-        continue;
-      }
+      const isDefinitionScope = key === "$defs" || key === "definitions";
+      if (isDefinitionScope && !claimedDefinitions?.has(key)) continue;
+      const cutsBeforeScope = context.cuts;
       for (const [name, child] of Object.entries(children)) {
         const issue = validateSchemaDefinitionInternal(
           child,
@@ -1004,6 +1020,9 @@ const validateSchemaDefinitionInternal = (
           context,
         );
         if (issue !== undefined) return issue;
+      }
+      if (isDefinitionScope && context.cuts !== cutsBeforeScope) {
+        releaseCutDefinitionScope(rootKey, children, context);
       }
     }
 

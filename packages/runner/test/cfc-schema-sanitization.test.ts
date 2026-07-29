@@ -561,6 +561,42 @@ describe("cfc schema sanitization", () => {
     );
   });
 
+  it("re-walks a definition map a cut walk claimed, entering from a fragment", () => {
+    // The regression this pins is entry-point-specific: `assertSchemaSubset`
+    // validates a FRAGMENT against a root, and the fragment carries no `$defs`
+    // of its own, so the first resolved ref view is what claims the root's map.
+    //
+    // Here the fragment visits `A` then `B`. `A` references itself from a node
+    // with an invalid sibling keyword, so the recursion guard cuts that walk
+    // before the keyword is checked. `B` re-enters the map afterwards, when `A`
+    // is no longer active — but only if the cut walk gave the map back.
+    //
+    // Claiming the map permanently made this ACCEPT an invalid schema. The
+    // whole-schema entry point never showed it: there the outermost carrier
+    // walks the map with no ref in flight, so nothing is cut.
+    const root: JSONSchema = {
+      type: "object",
+      $defs: {
+        A: {
+          type: "object",
+          properties: {
+            self: { $ref: "#/$defs/A", type: "bogus" } as unknown as JSONSchema,
+          },
+        },
+        B: { type: "object", properties: { v: { $ref: "#/$defs/C" } } },
+        C: { type: "string" },
+      },
+    };
+    const fragment: JSONSchema = {
+      type: "object",
+      properties: { a: { $ref: "#/$defs/A" }, b: { $ref: "#/$defs/B" } },
+    };
+
+    expect(validateSchemaDefinition(fragment, root)).toContain(
+      "unsupported schema type bogus",
+    );
+  });
+
   it("rejects sparse schema keyword arrays without rejecting sparse values", () => {
     const sparseType = [, "number"];
     const sparseRequired = [, "value"];
