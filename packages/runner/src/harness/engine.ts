@@ -821,6 +821,10 @@ export class Engine extends EventTarget implements Harness {
     const emitted = compiler.compileToModules(resolvedForCompile, {
       runtimeModules: Engine.runtimeModuleNames(),
       specifierAliases,
+      // These bytes are durable stored source nobody can re-author;
+      // authoring-hygiene diagnostics (a now-unused @ts-expect-error) must
+      // not brick the reload (CT-1916).
+      storedSource: true,
       beforeTransformers: (program) => {
         const pipeline = new (compilerStack()
           .CommonFabricTransformerPipeline)({
