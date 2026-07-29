@@ -766,21 +766,65 @@ would be building on a node no lane can claim. This is exactly the
 failure gate 4 was written to catch, and it caught it for the price of
 greps rather than a fixture.
 
-**The one thing that could rescue it, and it is now the blocking
-question.** Demand has a closure-growth mechanism — the live probe emits
-`executor cold refresh: demand closure-growth replica:…` — so a demanded
-root may pull in reachable pieces without each publishing its own
-demand. **Open question: does closure growth cover a commit-gated
-deferred root?** If yes, the design proceeds unchanged. If no, demand
-publication for deferred roots is a prerequisite and belongs in the build
-plan ahead of everything else.
+### 8b. The closure-growth question: ANSWERED **NO** — and the question was built on a misreading
 
-This is stated as underived-by-measurement on purpose: the call-site
-count and the code path are verified, the closure-growth behavior is
-not. That distinction matters — this arc has been wrong before by
-deriving confidently from a path it had read but not exercised.
+An earlier revision of §8 offered closure growth as the one thing that
+could rescue the design, citing the live probe's
+`executor cold refresh: demand closure-growth replica:…`. **That was the
+orchestrator misreading a log line from a different subsystem**, and it
+is worth recording as such because it looked like a real lead.
 
-**Revised build order:** settle the closure-growth question first (a
-counter on the lobby pattern, or a reading of the closure-growth
-implementation), then §6 item 2's rank-containment invariant red-first,
-then the seam.
+That string is emitted by `packages/runner/src/storage/v2-host-provider.ts:1966-1972`,
+where `trigger` is a `GraphQueryTrigger` and `"demand"` means "new data
+demanded (first-demand cold pull, new-doc closure growth)" — the
+accounting for a **storage replica's document-set watch**
+(`storage/v2-watch.ts:87` supplies the `replica:…` watchId). It has
+nothing to do with `ExecutionDemandSnapshot`. Verified: `closure-growth`
+appears only under `packages/runner/src/storage/`, and **nowhere in
+`packages/runner/src/executor/` or `packages/runner/src/scheduler/`**.
+**There is no closure-growth mechanism in the execution-demand plane at
+all.**
+
+**The demand plane is 1:1 end to end**, with no roll-up anywhere:
+publish (`runner.ts:1286`) → host store (`memory/v2/server.ts:4016`) →
+pool union (`shared-execution-pool.ts:390-392`) → session slice
+(`:1085-1107`) → Worker (`executor-worker.ts:1143-1161`) →
+`schedulerPieces` as a 1:1 `.map()` (`:555-561`) → `has(pieceId)`
+(`:1275`) → `candidateLaneKeys` returns `[]` at session rank
+(`executor/action-transaction-router.ts:703-719`). Nested pieces get
+their own `pieceId` (`runner.ts:2284`), so identity never rolls up to the
+demanded root.
+
+**And it is worse than "no lane covers the piece."** The executor cannot
+publish demand at all — `executor-worker.ts:1378-1385` omits
+`supportsExecutionDemand`, which defaults `false`
+(`v2-host-provider.ts:2440`), so `addExecutionDemand` early-returns
+(`runner.ts:2201`, verified). The executor never instantiates the piece,
+so there is no action, no observation, no candidate, no template.
+
+**Confirmed empirically, not only by reading** —
+`packages/runner/test/navigate-demand-closure-probe.test.ts` measured
+`startedRoots: 3, demandedEver: 1, demandPublications: 1,
+startedButNeverDemanded: 2, navigatedTargetDemanded: false`, with a
+positive leg (the lobby root IS published) proving the instrument is not
+blind. Reproduced at loads 69 and 44.
+
+**Minimal change:** publish demand on the success branch of the two
+commit-gated deferred-root seams — `runner.ts:1832-1844`
+(`startAfterSuccessfulCommit`, `resultLink` at `:1804`) and
+`runner.ts:1902-1913` (`runPatternAfterSuccessfulCommit`, `resultLink` at
+`:1871`) — and **not** `startWithTx`, which is also the child path.
+Removal is already symmetric (`stop()` → `removeExecutionDemand`,
+`runner.ts:2770`), it is already dial-gated, and the deferred root is
+already durable on the handler's commit (`runner.ts:3767-3778`).
+
+**A design consequence that improves on gate 1.** Only the ISSUING
+runtime publishes that demand, so §4c's accepted interim regression does
+not arise at all — it collapses to "the issuing session only", which is
+stricter than the "all sessions of the issuing principal" the owner
+approved. Nothing extra is needed to get it. Consequently §5.6's
+two-sessions-both-navigate test is unreachable without a synthetic second
+publisher and should be rewritten rather than made to pass.
+
+**Revised build order:** the demand publication above, then §6 item 2's
+rank-containment invariant red-first, then the seam.
