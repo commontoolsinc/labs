@@ -129,10 +129,6 @@ describe("CFC browser helpers", () => {
       let settleCalls = 0;
       let clickedAtSettle = 0;
       let bound = false;
-      // The shell binds a control's handler when the vdom batch that rendered
-      // it is applied, which is one of the things a view settle waits for. So
-      // the handler here is bound by the first settle that runs with the
-      // control present, and a click delivered before that reaches nothing.
       const bind = () => {
         const button = root.querySelector("#late-vote-button");
         if (!button || bound) return;
@@ -146,23 +142,17 @@ describe("CFC browser helpers", () => {
       }).commonfabric = {
         viewSettled: () => {
           settleCalls++;
+          if (!root.querySelector("#late-vote-button")) {
+            const button = document.createElement("button");
+            button.id = "late-vote-button";
+            button.textContent = "Veto";
+            root.append(button);
+            return Promise.resolve();
+          }
           bind();
           return Promise.resolve();
         },
       };
-
-      // The control arrives after the helper has started, the way an option
-      // card added by one browser reaches another. The delay states when the
-      // arrival happens rather than how long to wait for it: the helper's wait
-      // ends on the arrival, and only the five-minute stuck-condition net
-      // bounds it. What the delay has to outlast is one settle on the ordering
-      // this test guards against, which is a single protocol round trip.
-      setTimeout(() => {
-        const button = document.createElement("button");
-        button.id = "late-vote-button";
-        button.textContent = "Veto";
-        root.append(button);
-      }, 250);
 
       (globalThis as typeof globalThis & {
         __lateClickResult: () => {
@@ -187,7 +177,72 @@ describe("CFC browser helpers", () => {
       "the click reached no handler: the view never settled with the target " +
         "present before the click was dispatched",
     );
-    // One settle found no control, one found it, and one followed the click.
+    // One settle renders the control, one binds it, and one follows the click.
+    assertEquals(result.settleCalls, 3);
+  });
+
+  it("settles the same rendered control that it clicks", async () => {
+    await page.evaluate(() => {
+      const host = document.createElement("div");
+      const root = host.attachShadow({ mode: "open" });
+      const createButton = () => {
+        const button = document.createElement("button");
+        button.id = "replaced-join-button";
+        button.textContent = "Join";
+        return button;
+      };
+      root.append(createButton());
+      document.body.append(host);
+
+      let settleCalls = 0;
+      let clicks = 0;
+      let boundButton: HTMLButtonElement | undefined;
+      (globalThis as typeof globalThis & {
+        commonfabric: { viewSettled: () => Promise<void> };
+        __replacedClickResult: () => {
+          settleCalls: number;
+          clicks: number;
+        };
+      }).commonfabric = {
+        viewSettled: () => {
+          settleCalls++;
+          if (settleCalls === 1) {
+            root.replaceChildren(createButton());
+          } else {
+            const button = root.querySelector<HTMLButtonElement>(
+              "#replaced-join-button",
+            );
+            if (button && button !== boundButton) {
+              boundButton = button;
+              button.addEventListener("click", () => clicks++);
+            }
+          }
+          return Promise.resolve();
+        },
+      };
+      (globalThis as typeof globalThis & {
+        __replacedClickResult: () => {
+          settleCalls: number;
+          clicks: number;
+        };
+      }).__replacedClickResult = () => ({ settleCalls, clicks });
+    });
+
+    await clickCfButton(page, "#replaced-join-button");
+
+    const result = await page.evaluate(() =>
+      (globalThis as typeof globalThis & {
+        __replacedClickResult: () => {
+          settleCalls: number;
+          clicks: number;
+        };
+      }).__replacedClickResult()
+    );
+    assertEquals(
+      result.clicks,
+      1,
+      "the click reached the replacement before its handler was bound",
+    );
     assertEquals(result.settleCalls, 3);
   });
 
