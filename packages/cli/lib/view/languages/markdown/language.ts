@@ -11,7 +11,6 @@ import type { HunkStructureContext, Language } from "../language.ts";
 import {
   createMarkdownHighlighter,
   highlightMarkdownLines,
-  isMarkdownPath,
   markdownDocument,
   markdownHeadingNodes,
   renderMarkdownLines,
@@ -20,7 +19,13 @@ import {
 export const markdownLanguage: Language = {
   id: "markdown",
 
-  matches: (fileName) => isMarkdownPath(fileName),
+  metadata: {
+    extensions: [".md", ".markdown", ".mdown", ".mkd", ".mdx"],
+    filenames: [],
+    filenamePatterns: [],
+    aliases: ["md"],
+    interpreters: [],
+  },
 
   parseDocument: (text) => markdownDocument(text),
 

@@ -24,12 +24,6 @@ import { computeLineStarts, lineIndexOf } from "../../lines.ts";
 import { Lexer } from "marked";
 import { decodeHTMLStrict as decodeEntities } from "entities";
 
-/** Whether `fileName` names a Markdown file. */
-export function isMarkdownPath(fileName: string | undefined): boolean {
-  return fileName !== undefined &&
-    /\.(md|markdown|mdown|mkd|mdx)$/i.test(fileName);
-}
-
 /** Colour Markdown text into rendered lines. */
 export function highlightMarkdownLines(text: string): Line[] {
   const raw = text.split("\n");

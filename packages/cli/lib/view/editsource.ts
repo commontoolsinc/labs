@@ -198,10 +198,12 @@ export interface EditPolicy {
 }
 
 /** An on-disk file: the document text is the file, edits write straight back. */
-export function fileSource(path: string): EditableSource {
-  // The language is chosen once, from the path, and every edit-time operation
-  // dispatches through it.
-  const language = languageForFile(path);
+export function fileSource(
+  path: string,
+  language: Language = languageForFile(path),
+): EditableSource {
+  // The language is chosen once, and every edit-time operation dispatches
+  // through it.
   const render = sourceRenderer(language, path);
   return {
     label: shortName(path),

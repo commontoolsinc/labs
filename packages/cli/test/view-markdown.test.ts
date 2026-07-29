@@ -7,7 +7,6 @@ import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import {
   highlightMarkdownLines,
-  isMarkdownPath,
   markdownDocument,
 } from "../lib/view/languages/markdown/markdown.ts";
 import { languageForFile } from "../lib/view/languages/language.ts";
@@ -16,13 +15,13 @@ import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { createDiffHighlighter } from "../lib/view/diffedit.ts";
 import { spanStyle } from "../lib/view/highlight.ts";
 
-Deno.test("markdown: isMarkdownPath recognises markdown extensions", () => {
-  assert(isMarkdownPath("README.md"));
-  assert(isMarkdownPath("/a/b/AGENTS.markdown"));
-  assert(isMarkdownPath("notes.MD"));
-  assert(!isMarkdownPath("foo.ts"));
-  assert(!isMarkdownPath("foo.tsx"));
-  assert(!isMarkdownPath(undefined));
+Deno.test("markdown: language metadata recognises markdown extensions", () => {
+  assertEquals(languageForFile("README.md").id, "markdown");
+  assertEquals(languageForFile("/a/b/AGENTS.markdown").id, "markdown");
+  assertEquals(languageForFile("notes.MD").id, "markdown");
+  assertEquals(languageForFile("foo.ts").id, "typescript");
+  assertEquals(languageForFile("foo.tsx").id, "typescript");
+  assertEquals(languageForFile(undefined).id, "plain-text");
 });
 
 Deno.test("markdown: headings, code, lists, quotes and prose get distinct, non-TS colours", () => {
