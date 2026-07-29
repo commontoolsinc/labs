@@ -87,6 +87,27 @@ Deno.test("an absent PATH resolves nothing rather than throwing", () => {
   }));
 });
 
+Deno.test("the real filesystem probe is the one that ships", async () => {
+  // Every other case injects a probe, which leaves the default one — the code
+  // that actually runs in production — unexercised. This drives it against a
+  // real directory: a hit, a miss (its catch path), and a file the shell would
+  // refuse to run.
+  const dir = await Deno.makeTempDir({ prefix: "cf-probe-" });
+  try {
+    const executable = `${dir}/cf`;
+    await Deno.writeTextFile(executable, "#!/bin/sh\n");
+    await Deno.chmod(executable, 0o755);
+
+    assert(resolvesOnPath("cf", { path: dir }));
+    assertFalse(resolvesOnPath("not-there", { path: dir }));
+
+    await Deno.chmod(executable, 0o644);
+    assertFalse(resolvesOnPath("cf", { path: dir }));
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("the warning names the failure and both installs", () => {
   const warning = missingCommandWarning("cf");
   assertStringIncludes(warning, "not on your PATH");

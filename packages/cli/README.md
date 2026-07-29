@@ -256,16 +256,75 @@ itself, and local runs of those same scripts set `CF_CLI_INTEGRATION_USE_LOCAL`
 to force the source CLI.)
 
 `bin/cf` is the install. It runs from source, so it never goes stale against the
-checkout, and it resolves the repo from its own location, so a symlink works:
+checkout:
 
 ```bash
-# mise users: nothing to do. mise.toml puts this checkout's bin/ on PATH, so
-# `cf` follows the worktree you are standing in.
+# mise users: nothing to do. mise.toml puts this checkout's bin/ on PATH.
 mise trust    # only if this checkout has not been trusted yet
 
 # everyone else (mise is recommended in README.md but not required):
-ln -s "$PWD/bin/cf" ~/.local/bin/cf
+deno task install-cf              # --dry-run to see what it would do
 ```
+
+`install-cf` copies `bin/cf` to a directory already on your PATH — refusing to
+guess if there isn't one, since installing somewhere unreachable would reproduce
+the silent failure this exists to prevent. A copy rather than a link, because
+the lookup below travels with the script: no particular checkout has to survive
+for the install to keep working. Re-run it to upgrade. It never edits your shell
+rc; it prints the completion line for you to add.
+
+It copies **this** checkout's `bin/cf` — the one whose task you invoked, which
+may carry changes not yet on `main` — while baking the **primary** checkout in
+as the outside-a-checkout default, so removing the worktree you installed from
+does not strand it.
+
+### Which checkout runs
+
+Several checkouts coexisting is normal — worktrees, and a vendored labs inside
+another repo (a supported, tested layout: see `test/launcher.test.ts`). So the
+symlink above does **not** pin `cf` to the checkout you installed it from. It
+selects, in order:
+
+1. **`$CF_LABS_ROOT`**, when set — the explicit override for when your cwd
+   cannot say what you mean, such as working on a pattern under `/tmp`. A value
+   that is not a checkout is an error, not a quiet fall-through. It chooses
+   which CLI runs; it does not change your working directory.
+2. **The nearest checkout walking up from `$PWD`.** A directory is tested as a
+   checkout before it is tested as a host vendoring one at `vendor/labs`, so
+   standing inside `<host>/vendor/labs` selects that labs rather than
+   re-deriving it from the host.
+3. **A default fixed at install time**, then **the checkout the script itself
+   lives in** — for when you are not standing in one at all. An installed copy
+   carries the default (`install-cf` points it at the primary checkout, since
+   worktrees are removed routinely); the in-repo file and any symlink to it fall
+   through to their own checkout. Both are ignored unless they are still real
+   checkouts, so a stale default cannot silently send you somewhere that no
+   longer exists. With none of them usable, `cf` says so and exits 2 rather than
+   guessing.
+
+`cf which` answers "which one would run?" — it prints the CLI path on stdout and
+the reason on stderr, and is handled by the wrapper rather than forwarded, since
+asking the CLI which CLI would run begs the question:
+
+```bash
+$ cf which
+/path/to/checkout                                  # stdout
+cf: entry /path/to/checkout/packages/cli/mod.ts    # stderr
+cf: selected by nearest checkout above the current directory
+
+$ cf which 2>/dev/null    # just the checkout, for scripts
+```
+
+stdout is the checkout because that is the part that varies; the entry inside it
+is always `packages/cli/mod.ts`, which _is_ the CLI (it ends in
+`if (import.meta.main)` and nothing outside `packages/cli/` imports it as a
+library).
+
+Rule 2 is what mise already does for its route (`_.path` resolves relative to
+the `mise.toml` declaring it), so both install routes agree on which checkout
+you get. The consequence worth knowing: `cf` inside checkout B runs B's code
+even though you installed the link from A. That is the point, but it means a
+stack trace is the quickest way to confirm which checkout answered.
 
 ### Why not `dist/cf`
 
