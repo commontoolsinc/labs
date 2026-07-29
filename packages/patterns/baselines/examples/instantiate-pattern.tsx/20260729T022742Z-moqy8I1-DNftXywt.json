@@ -1,0 +1,31 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "pieceRegistry": {
+        "default": [],
+        "items": {
+          "type": "unknown"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "pieceRegistry"
+    ],
+    "type": "object"
+  },
+  "pattern": "examples/instantiate-pattern.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": true
+    },
+    "required": [
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

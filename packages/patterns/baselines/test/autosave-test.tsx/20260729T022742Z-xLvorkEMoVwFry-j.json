@@ -1,0 +1,42 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "counter": {
+        "default": 0,
+        "type": "number"
+      },
+      "data": {
+        "default": "Initial test data",
+        "type": "string"
+      }
+    },
+    "required": [
+      "data",
+      "counter"
+    ],
+    "type": "object"
+  },
+  "pattern": "test/autosave-test.tsx",
+  "resultSchema": {
+    "properties": {
+      "counter": {
+        "type": "number"
+      },
+      "data": {
+        "type": "string"
+      },
+      "updateData": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      }
+    },
+    "required": [
+      "data",
+      "counter",
+      "updateData"
+    ],
+    "type": "object"
+  }
+}

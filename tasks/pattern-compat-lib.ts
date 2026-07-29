@@ -22,6 +22,12 @@
 import { type JSONSchema, type Pattern } from "@commonfabric/runner";
 import { validateSchemaDefinition } from "@commonfabric/runner/cfc";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import {
+  JsonEncodingContext,
+  jsonFromValue,
+  valueFromJson,
+} from "@commonfabric/data-model/codec-json";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { assertPatternSchemasBackwardCompatible } from "../packages/piece/src/schema-compatibility.ts";
 
 /**
@@ -72,6 +78,96 @@ export function contractHash(contract: PatternContract): string {
     argumentSchema: contract.argumentSchema,
     resultSchema: contract.resultSchema,
   }).slice(0, HASH_LENGTH);
+}
+
+/** Parsed command line. `only` restricts to paths containing any of its terms. */
+export interface CliOptions {
+  update: boolean;
+  only: string[];
+}
+
+export function parseArgs(argv: readonly string[]): CliOptions {
+  const only: string[] = [];
+  let update = false;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "--update") update = true;
+    else if (argv[i] === "--only") only.push(argv[++i] ?? "");
+    else if (argv[i].startsWith("--only=")) only.push(argv[i].slice(7));
+    else throw new Error(`Unknown argument: ${argv[i]}`);
+  }
+  return { update, only: only.filter((value) => value.length > 0) };
+}
+
+/**
+ * CI fan-out, mirroring cfcheck's `CFCHECK_SHARD`: `"i/n"`, 1-based. Compiling
+ * a pattern is single-threaded CPU work, so more cores means more processes.
+ */
+export function parseShard(raw: string | undefined): {
+  index: number;
+  count: number;
+} {
+  if (!raw) return { index: 0, count: 1 };
+  const match = raw.match(/^(\d+)\/(\d+)$/);
+  if (!match) throw new Error(`Invalid shard "${raw}"; expected "i/n".`);
+  const index = Number(match[1]) - 1;
+  const count = Number(match[2]);
+  if (count < 1 || index < 0 || index >= count) {
+    throw new Error(`Shard "${raw}" out of range.`);
+  }
+  return { index, count };
+}
+
+/**
+ * A baseline's filename. The timestamp is human metadata — when this contract
+ * was recorded — and sorts chronologically because ISO basic format does. The
+ * authoritative hash is always recomputed from the file's CONTENTS, so a
+ * renamed or mislabelled file cannot misreport what it holds.
+ */
+export function baselineFileName(recordedAt: Date, hash: string): string {
+  const stamp = recordedAt.toISOString().replace(/[-:]/g, "").replace(
+    /\.\d+Z$/,
+    "Z",
+  );
+  return `${stamp}-${hash}.json`;
+}
+
+/** What a baseline file holds. `pattern` is for readability of a lone file. */
+export interface StoredBaseline extends PatternContract {
+  pattern: string;
+}
+
+/**
+ * Baselines are encoded with the Fabric JSON codec, not `JSON.stringify`.
+ *
+ * The schema generator is free to produce values plain JSON cannot represent,
+ * and `JSON.stringify` mostly does not refuse them — it substitutes quietly,
+ * rendering `-0` as `0` and `NaN` and the infinities as `null` (a bigint is the
+ * exception that throws). A baseline that silently flattens a value agrees with
+ * buggy output instead of catching it, and worse here, it would never match the
+ * contract it was recorded from — the gate would report a missing baseline
+ * forever. `packages/schema-generator/test/fixtures-runner.test.ts` documents
+ * this same hazard for its goldens and solves it the same way.
+ *
+ * The encoding's prefix tag identifies it on the wire but is not part of the
+ * JSON, so it cannot survive pretty-printing; taking it off and putting it back
+ * goes through the codec's own helpers. Pretty-printing matters because these
+ * files are read in review. Key order needs no help — a conforming encoder
+ * emits plain-object keys in canonical order.
+ */
+export function encodeBaseline(stored: StoredBaseline): string {
+  const body = JSON.parse(
+    JsonEncodingContext.unwrapEncodedValueForTesting(
+      jsonFromValue(stored as unknown as FabricValue),
+    ),
+  );
+  return `${JSON.stringify(body, null, 2)}\n`;
+}
+
+/** Inverse of {@link encodeBaseline}. */
+export function decodeBaseline(text: string): StoredBaseline {
+  return valueFromJson(
+    JsonEncodingContext.wrapEncodedValueForTesting(text.trim()),
+  ) as unknown as StoredBaseline;
 }
 
 /**

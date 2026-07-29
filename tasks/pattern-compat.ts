@@ -28,47 +28,24 @@ import {
 } from "./pattern-files.ts";
 import {
   type Baseline,
+  baselineFileName,
   checkPattern,
   contractHash,
+  decodeBaseline,
+  encodeBaseline,
   type Finding,
+  parseArgs,
+  parseShard,
   type PatternContract,
+  type StoredBaseline,
 } from "./pattern-compat-lib.ts";
 
 const BASELINES_DIR = `${PATTERNS_DIR}/baselines`;
 
-interface StoredBaseline extends PatternContract {
-  /** The pattern this contract belongs to, for readability of a lone file. */
-  pattern: string;
-}
-
-function parseArgs(argv: string[]) {
-  const only: string[] = [];
-  let update = false;
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--update") update = true;
-    else if (argv[i] === "--only") only.push(argv[++i] ?? "");
-    else if (argv[i].startsWith("--only=")) only.push(argv[i].slice(7));
-    else {
-      console.error(`Unknown argument: ${argv[i]}`);
-      Deno.exit(2);
-    }
-  }
-  return { update, only: only.filter((value) => value.length > 0) };
-}
-
 const formatError = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-/** A filesystem- and sort-friendly stamp: `20260728T154500Z`. */
-const stamp = (): string =>
-  new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
-
-/**
- * Read every recorded contract for a pattern. The filename is human metadata
- * only (when it was recorded, and a hash prefix for readability) — the
- * authoritative hash is recomputed from the file's contents, so a renamed or
- * mislabelled file cannot misreport what it holds.
- */
+/** Read every recorded contract for a pattern. */
 async function readBaselines(key: string): Promise<Baseline[]> {
   const dir = `${BASELINES_DIR}/${key}`;
   const baselines: Baseline[] = [];
@@ -81,9 +58,11 @@ async function readBaselines(key: string): Promise<Baseline[]> {
   }
   for (const entry of entries) {
     if (!entry.isFile || !entry.name.endsWith(".json")) continue;
-    const stored = JSON.parse(
-      await Deno.readTextFile(`${dir}/${entry.name}`),
-    ) as StoredBaseline;
+    const stored = decodeBaseline(
+      await Deno.readTextFile(
+        `${dir}/${entry.name}`,
+      ),
+    );
     baselines.push({
       label: entry.name.replace(/\.json$/, ""),
       contract: {
@@ -93,30 +72,6 @@ async function readBaselines(key: string): Promise<Baseline[]> {
     });
   }
   return baselines.sort((a, b) => a.label.localeCompare(b.label));
-}
-
-/**
- * Optional CI fan-out, mirroring cfcheck's `CFCHECK_SHARD`: `"i/n"`, 1-based.
- * Compiling a pattern is single-threaded CPU work, so more cores means more
- * processes.
- */
-function parseShard(): { index: number; count: number } {
-  const raw = Deno.env.get("PATTERN_COMPAT_SHARD");
-  if (!raw) return { index: 0, count: 1 };
-  const match = raw.match(/^(\d+)\/(\d+)$/);
-  if (!match) {
-    console.error(
-      `Invalid PATTERN_COMPAT_SHARD "${raw}"; expected "i/n" (1-based).`,
-    );
-    Deno.exit(2);
-  }
-  const index = Number(match[1]) - 1;
-  const count = Number(match[2]);
-  if (count < 1 || index < 0 || index >= count) {
-    console.error(`PATTERN_COMPAT_SHARD "${raw}" out of range.`);
-    Deno.exit(2);
-  }
-  return { index, count };
 }
 
 /** Every pattern key that has a baseline directory, including retired ones. */
@@ -168,8 +123,16 @@ async function findRetired(): Promise<Finding[]> {
 }
 
 async function main() {
-  const { update, only } = parseArgs(Deno.args);
-  const shard = parseShard();
+  let update: boolean;
+  let only: string[];
+  let shard: { index: number; count: number };
+  try {
+    ({ update, only } = parseArgs(Deno.args));
+    shard = parseShard(Deno.env.get("PATTERN_COMPAT_SHARD"));
+  } catch (error) {
+    console.error(formatError(error));
+    Deno.exit(2);
+  }
 
   const allFiles = await collectPatternFiles();
   const selected = only.length === 0
@@ -292,12 +255,9 @@ async function main() {
       if (missing && !invalid) {
         const dir = `${BASELINES_DIR}/${key}`;
         await Deno.mkdir(dir, { recursive: true });
-        const name = `${stamp()}-${contractHash(current)}.json`;
+        const name = baselineFileName(new Date(), contractHash(current));
         const stored: StoredBaseline = { pattern: key, ...current };
-        await Deno.writeTextFile(
-          `${dir}/${name}`,
-          `${JSON.stringify(stored, null, 2)}\n`,
-        );
+        await Deno.writeTextFile(`${dir}/${name}`, encodeBaseline(stored));
         recorded.push(`${key}/${name}`);
       }
       // A recorded contract still has to survive the incompatibility check

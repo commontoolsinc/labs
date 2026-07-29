@@ -3,8 +3,13 @@ import { expect } from "@std/expect";
 import { type JSONSchema } from "@commonfabric/runner";
 import {
   type Baseline,
+  baselineFileName,
   checkPattern,
   contractHash,
+  decodeBaseline,
+  encodeBaseline,
+  parseArgs,
+  parseShard,
   type PatternContract,
 } from "./pattern-compat-lib.ts";
 
@@ -134,5 +139,99 @@ describe("contractHash", () => {
     }, RESULT_WITH_TITLE);
 
     expect(contractHash(a)).not.toBe(contractHash(b));
+  });
+});
+
+describe("parseArgs", () => {
+  it("defaults to a plain check over everything", () => {
+    expect(parseArgs([])).toEqual({ update: false, only: [] });
+  });
+
+  it("accepts --only in both spellings and collects repeats", () => {
+    expect(parseArgs(["--only", "home", "--only=system/"])).toEqual({
+      update: false,
+      only: ["home", "system/"],
+    });
+  });
+
+  it("rejects an unknown argument rather than silently checking everything", () => {
+    expect(() => parseArgs(["--updat"])).toThrow(/Unknown argument/);
+  });
+});
+
+describe("parseShard", () => {
+  it("treats an absent shard as the whole set", () => {
+    expect(parseShard(undefined)).toEqual({ index: 0, count: 1 });
+  });
+
+  it("parses 1-based i/n into a 0-based index", () => {
+    expect(parseShard("3/4")).toEqual({ index: 2, count: 4 });
+  });
+
+  it("rejects a malformed or out-of-range shard", () => {
+    expect(() => parseShard("3")).toThrow(/expected/);
+    expect(() => parseShard("5/4")).toThrow(/out of range/);
+    expect(() => parseShard("0/4")).toThrow(/out of range/);
+  });
+});
+
+describe("baselineFileName", () => {
+  it("stamps a sortable basic-format UTC time next to the hash", () => {
+    const name = baselineFileName(
+      new Date("2026-07-28T15:45:00.123Z"),
+      "abc123",
+    );
+    expect(name).toBe("20260728T154500Z-abc123.json");
+  });
+
+  it("sorts chronologically as plain text", () => {
+    const older = baselineFileName(new Date("2026-07-28T15:45:00Z"), "zzz");
+    const newer = baselineFileName(new Date("2026-12-01T00:00:00Z"), "aaa");
+    expect([newer, older].sort()).toEqual([older, newer]);
+  });
+});
+
+describe("baseline encoding", () => {
+  const stored = {
+    pattern: "system/home.tsx",
+    argumentSchema: EMPTY_ARGUMENT,
+    resultSchema: RESULT_WITH_TITLE,
+  };
+
+  it("round-trips an ordinary contract", () => {
+    expect(decodeBaseline(encodeBaseline(stored))).toEqual(stored);
+  });
+
+  it("is pretty-printed, because these files are read in review", () => {
+    expect(encodeBaseline(stored)).toContain("\n  ");
+    expect(encodeBaseline(stored).endsWith("\n")).toBe(true);
+  });
+
+  it("preserves values JSON.stringify would silently flatten", () => {
+    // JSON.stringify renders -0 as 0 and the non-finites as null. A baseline
+    // that flattened them could never match the contract it was recorded from,
+    // so the gate would report a missing baseline forever.
+    const hostile = {
+      pattern: "x.tsx",
+      argumentSchema: {
+        type: "object",
+        properties: {
+          negZero: { type: "number", default: -0 },
+          notANumber: { type: "number", default: NaN },
+          infinite: { type: "number", default: Infinity },
+        },
+      },
+      resultSchema: RESULT_WITH_TITLE,
+    } as unknown as typeof stored;
+
+    const properties = (decodeBaseline(encodeBaseline(hostile))
+      .argumentSchema as Record<
+        string,
+        Record<string, Record<string, unknown>>
+      >)
+      .properties;
+    expect(Object.is(properties.negZero.default, -0)).toBe(true);
+    expect(Number.isNaN(properties.notANumber.default)).toBe(true);
+    expect(properties.infinite.default).toBe(Infinity);
   });
 });
