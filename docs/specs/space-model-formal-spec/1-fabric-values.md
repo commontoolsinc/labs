@@ -385,8 +385,10 @@ stored value contains only the essential native data (entries, items,
 epoch value, bytes respectively). Extra enumerable properties on the source
 native object cause **rejection** — the conversion function throws. This follows
 the principle "Death before confusion!" (Mark Miller): it is better to fail
-loudly than to silently lose data. This matches the treatment of arrays, where
-extra non-index properties also cause rejection (Section 1.5). Unlike `Error`,
+loudly than to silently lose data. This is in the same spirit as the treatment
+of arrays, where extra non-index properties also cause rejection (Section 1.5)
+— though the array rule is stricter still, rejecting non-enumerable and
+symbol-keyed properties as well. Unlike `Error`,
 these native types have no established convention for custom properties.
 
 #### 1.4.2 `FabricError`

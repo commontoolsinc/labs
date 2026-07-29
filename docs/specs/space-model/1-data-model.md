@@ -43,11 +43,15 @@ All IEEE 754 binary64 values are accepted, including `-0`, `NaN`,
 
 #### Arrays
 
-- Must be dense (no holes)
-- Must not contain `undefined` elements
-- Sparse arrays are densified during conversion (`undefined` → `null`)
-- Non-index keys (named properties, and symbol keys) cause rejection as
-  non-fabric
+- May be dense or sparse; holes are preserved, and are distinct from an
+  explicitly-stored `undefined`
+- Elements may be `undefined`, that being a first-class fabric value
+- Non-index keys cause rejection as non-fabric, `length` aside: named
+  (string-keyed) and symbol-keyed properties alike, whether or not they are
+  enumerable
+
+See `space-model-formal-spec/1-fabric-values.md` Section 1.5 for the
+authoritative statement of these rules.
 
 #### Objects
 
