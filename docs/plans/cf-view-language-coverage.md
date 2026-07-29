@@ -2,7 +2,8 @@
 
 Status: In progress. Unknown named files and filename-free source use plain
 text, while filename-free transformed compiler output keeps its TypeScript
-default. Python files with recognized extensions now have syntax highlighting.
+default. Piped source can select a language directly or through a virtual
+filename. Python files with recognized extensions now have syntax highlighting.
 The order is provisional because recent activity was measured in six of the 24
 active organization repositories.
 
@@ -85,7 +86,7 @@ relative value. Record the reason in this plan.
 - [x] Add a plain-text language and select it for unknown named files.
 - [x] Preserve the intentional TypeScript default only for transformed
   compiler output that has no filename.
-- [ ] Add `--language` and `--filename` overrides for piped input.
+- [x] Add `--language` and `--filename` overrides for piped input.
 - [ ] Represent extensions, exact filenames, compound filename patterns,
   aliases, and shebang interpreters as language metadata.
 - [ ] Keep content detection only for unambiguous containers such as unified

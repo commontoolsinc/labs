@@ -11,7 +11,9 @@ import {
   diffSemanticsFor,
   distinctLanguages,
   languageForFile,
+  languageForId,
   languageForTransformedOutput,
+  languageIds,
   renderedLinesFor,
 } from "../lib/view/languages/language.ts";
 import { typeScriptLanguage } from "../lib/view/languages/typescript/language.ts";
@@ -47,6 +49,25 @@ Deno.test("languageForFile: named JavaScript uses the TypeScript-family parser",
   const doc = languageForFile("answer.js").parseDocument(source, "answer.js");
   assertEquals(doc.text, source);
   assert(doc.lines[0].spans.some((span) => span.cls === "storageKeyword"));
+});
+
+Deno.test("languageForId: stable identifiers resolve explicit overrides", () => {
+  assertEquals(languageForId("typescript"), typeScriptLanguage);
+  assertEquals(languageForId("markdown"), markdownLanguage);
+  assertEquals(languageForId("json"), jsonLanguage);
+  assertEquals(languageForId("yaml"), yamlLanguage);
+  assertEquals(languageForId("python"), pythonLanguage);
+  assertEquals(languageForId("plain-text"), plainTextLanguage);
+  assertEquals(languageForId("TypeScript"), undefined);
+  assertEquals(languageForId("ruby"), undefined);
+  assertEquals(languageIds(), [
+    "typescript",
+    "markdown",
+    "json",
+    "yaml",
+    "python",
+    "plain-text",
+  ]);
 });
 
 Deno.test("distinctLanguages: dedupes in first-seen order", () => {
