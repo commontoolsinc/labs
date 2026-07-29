@@ -1164,7 +1164,7 @@ Deno.test("session preserves wrapping while changing Markdown views", () => {
   );
 
   press(session, "\\", "v");
-  assert(session.view().wrapLines);
+  assertEquals(session.view().wrapMode, "hard");
   assertEquals(session.view().viewMode, "rendered");
 
   press(session, "e");

@@ -48,7 +48,9 @@ subscribes lazily:
 1. Connecting a space creates only its fixed synthetic tree. Identifier
    discovery begins when an `entities/` directory handle is read.
 2. Opening `pieces/` for the first time materializes and subscribes to
-   `allPieces`; a mount that only uses `entities/` does not load it.
+   the piece registry. An eligible legacy default root supplies its retired
+   `allPieces` registry. A mount that only uses `entities/` does not load either
+   registry.
 3. Opening an exact entity directory remains identifier-only. Direct lookup of
    a named projected child loads that entity. Named projections under
    `pieces/` subscribe to their projected input and result cells.

@@ -23,12 +23,53 @@ open decisions named rather than assumed.
 | --- | --- |
 | Space | `topics-dev-476ea34f` = `did:key:z6MkjcdxtxTiUWkPkPffhs8ENkCcJjuRCQPpJFb2xyzwHqEk` |
 | Board piece | `fid1:jtdD-DSmuGrLGSt_6sJ3DS_7jmerrkKTEnW3fZV9e34` |
-| Children | 73 topic pieces, each its own piece |
+| Children | 73 topic pieces, each its own piece, across **two** deployed generations |
 | Store size | ~1.0 GB, ~200k commits |
 
 The space DID is not recoverable from the store — it has no ACL doc — so it
 must be supplied explicitly. Passing the wrong one produces a clone that serves
 an empty space rather than an error.
+
+## What is being upgraded from
+
+Read out of the 2026-07-22 snapshot rather than assumed. The 73 topics are
+**not** on one version:
+
+| | pieces | pattern identity |
+| --- | ---: | --- |
+| topic generation A | 39 | `PB0GumS5vkDPyKAWciwh-4UtypoJwKFUXcDj3SsspHY` |
+| topic generation B | 34 | `-85Wmyd9iwUjbpwnTYR2YolxkMUHup9WHY6YsRUDA1E` |
+| board | 1 | `WpIRvAWL_WW45Q89ekZAlHWLObhQ16NDmQzvv_q2aI8` |
+
+Both topic generations are legacy — `createdByName` present, no
+`rejectMutation`, no body-at-create — and differ only slightly (681 vs 686
+authored lines of `topic.tsx`). The board's `main.tsx` mentions
+`AddTopicEvent.body` but not `rejectMutation`, so it predates #4991 as well.
+
+(The space holds 319 pieces across 150 pattern identities in total; only these
+74 are in scope.)
+
+**This is the condition that makes the rehearsal mandatory**, not incidental:
+"more than one pattern generation is live in the space" is a trigger in the
+generic runbook, and multiple live generations is what the incident record ties
+to cross-version write storms. The run is therefore *two* legacy→current
+transitions, and #4997's dangling-author and recursive-crossref fixes have to
+hold for both.
+
+Reproduce the grouping at any time with:
+
+```bash
+deno task cf inspect piece <space> <topic-fid>   # per piece
+```
+
+or read `patternIdentity` from each topic document directly — the board's
+`topics` input holds wrapper cells, so follow each wrapper's `result` link one
+hop to reach the piece that carries `patternIdentity`.
+
+**Upgrading to:** `packages/patterns/topics/{topic,main}.tsx` at current `main`
+(#4997's legacy-safety fixes plus #4991's body-at-create and thrown
+rejections). The target identity is computed at `setsrc` time and does not need
+to be known in advance — the acceptance check below is the better test.
 
 ## Gate 0 — prerequisites
 
@@ -59,8 +100,9 @@ a sustained plateau rather than a burst.
    sequence in a scratch space, which tests the transition in isolation but not
    against real data. **(a) is what #4997's rehearsal did** and what the tooling
    is built for. Confirm this reading before running.
-2. **Which pattern revision** to `setsrc` — the phase currently landing, or
-   latest `main`. Phase-scoped is what "continuous dogfood" implies.
+2. ~~**Which pattern revision** to `setsrc`.~~ **Resolved 2026-07-29: latest
+   `main`.** It is the transition that will actually happen, and #4997's
+   legacy-safety fixes are what make the legacy→current jump survivable.
 3. **Whether one clean pass is enough.** The generic runbook asks for two
    consecutive clean passes; a 1.0 GB clone makes each attempt ~15 s of clone
    plus the migration itself. Cheap enough to keep the bar at two.
@@ -85,6 +127,10 @@ The order is not stylistic. The board's result recomputation is what storms,
 and a board pointing at half-migrated children is the "Topics (0)" failure from
 the 2026-07-10 outage: old-generation results lacking new fields make the whole
 array read empty, silently.
+
+Do generation A's 39 first, then generation B's 34, then the board. Keeping
+the two transitions separable means that if one storms you know which;
+interleaving them blurs that signal for no benefit.
 
 ```bash
 # each of the 73 topics, one at a time, against the CLONE's api-url
@@ -121,7 +167,12 @@ Then the acceptance items from the implementation plan's live checklist, which
 - an undeclared field fails with a nonzero exit;
 - the deployed verb schema matches the skill driving it (`cf piece verbs`);
 - churn returns to baseline **and stays there** — a storm is a steady state,
-  not a spike.
+  not a spike;
+- **the 73 topics report exactly ONE pattern identity afterwards**, not two.
+  This is the cheapest proof the migration converged rather than half-landing,
+  and neither `cf space verify` nor the content fingerprint would catch a
+  half-migration on its own: leaving generation B behind changes no authored
+  content, so the fingerprint is unmoved and the counts merely grow.
 
 `cf space verify` reporting `content unchanged` while commit counts grow is the
 expected result: a migration writes, and generated cells are excluded from the

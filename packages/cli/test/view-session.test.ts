@@ -8,6 +8,7 @@ import type { CardTarget } from "../lib/view/card.ts";
 import type { EditableSource } from "../lib/view/editsource.ts";
 import type { Key } from "../lib/view/keys.ts";
 import type { Semantics } from "../lib/view/languages/language.ts";
+import { wrappedRowAt } from "../lib/view/wrap.ts";
 
 function makeSession() {
   const doc = parseDocument(SAMPLE);
@@ -264,7 +265,7 @@ Deno.test("session: leaving edit mode keeps the former cursor column visible", (
   assertEquals(renderFrame(s.displayDoc(), s.view())[0], "abcde  ");
 });
 
-Deno.test("session: backslash toggles wrapping and continuation-row scrolling", () => {
+Deno.test("session: backslash cycles wrapping and keeps its content anchor", () => {
   const doc = parseDocument("abcdefghijkl\nsecond");
   const s = new Session(
     doc,
@@ -272,10 +273,10 @@ Deno.test("session: backslash toggles wrapping and continuation-row scrolling", 
     { width: 4, height: 3 },
   );
   press(s, "l", "\\");
-  assert(s.view().wrapLines, "wrapping is on");
+  assertEquals(s.view().wrapMode, "hard");
   assertEquals(s.view().left, 0, "wrapping resets horizontal panning");
   assertEquals(s.view().top, 2, "wrapping keeps the panned content in view");
-  assertEquals(s.view().message, "Line wrapping: on");
+  assertEquals(s.view().message, "Line wrapping: hard");
 
   press(s, "k");
   assertEquals(s.view().top, 1, "k moves to the previous wrapped row");
@@ -283,10 +284,49 @@ Deno.test("session: backslash toggles wrapping and continuation-row scrolling", 
   assertEquals(s.view().left, 0, "wrapped content does not pan");
 
   press(s, "\\");
-  assert(!s.view().wrapLines, "wrapping is off");
+  assertEquals(s.view().wrapMode, "word");
+  assertEquals(s.view().top, 1, "word wrapping keeps the same source content");
+  assertEquals(s.view().message, "Line wrapping: word");
+
+  press(s, "\\");
+  assertEquals(s.view().wrapMode, "off");
   assertEquals(s.view().top, 0, "the same logical line remains at the top");
   assertEquals(s.view().left, 3, "unwrapping keeps the continuation visible");
   assertEquals(s.view().message, "Line wrapping: off");
+});
+
+Deno.test("session: word wrapping repeats punctuation and whitespace prefixes", () => {
+  const s = new Session(
+    parseDocument("  #  foo bar"),
+    { color: false, showLineNumbers: false },
+    { width: 11, height: 4 },
+  );
+
+  press(s, "\\", "\\");
+
+  assertEquals(s.view().wrapMode, "word");
+  const rows = renderFrame(s.displayDoc(), s.view());
+  assertEquals(rows[0], "  #  foo  \\");
+  assertEquals(rows[1], "  #  bar   ");
+});
+
+Deno.test("session: word wrapping restores the visible source at a word", () => {
+  const s = new Session(
+    parseDocument("alpha beta gamma delta\nnext"),
+    { color: false, showLineNumbers: false },
+    { width: 10, height: 3 },
+  );
+
+  press(s, "\\", "j", "\\");
+
+  const view = s.view();
+  assertEquals(view.wrapMode, "word");
+  assertEquals(
+    wrappedRowAt(view.wrapPlan!, view.top)?.offset,
+    6,
+    "the hard-wrap anchor remains on the row that starts with beta",
+  );
+  assert(renderFrame(s.displayDoc(), view)[0].startsWith("beta "));
 });
 
 Deno.test("session: resizing a wrapped view keeps its top content in view", () => {
@@ -1004,7 +1044,10 @@ Deno.test("session: the help overlay documents file folding and scrolling", () =
   assert(/hide\s*\/\s*show/.test(text), "documents hide/show");
   assert(text.includes("hide all files"), "documents hide all");
   assert(text.includes("hide test"), "documents hiding test files");
-  assert(text.includes("wrap / unwrap long lines"), "documents line wrapping");
+  assert(
+    text.includes("line wrapping: off / hard / word"),
+    "documents line wrapping",
+  );
   assert(
     ov.lines.some((line) =>
       line.text.includes("^L") &&

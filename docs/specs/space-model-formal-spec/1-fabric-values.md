@@ -385,8 +385,10 @@ stored value contains only the essential native data (entries, items,
 epoch value, bytes respectively). Extra enumerable properties on the source
 native object cause **rejection** — the conversion function throws. This follows
 the principle "Death before confusion!" (Mark Miller): it is better to fail
-loudly than to silently lose data. This matches the treatment of arrays, where
-extra non-index properties also cause rejection (Section 1.5). Unlike `Error`,
+loudly than to silently lose data. This is in the same spirit as the treatment
+of arrays, where extra non-index properties also cause rejection (Section 1.5)
+— though the array rule is stricter still, rejecting non-enumerable and
+symbol-keyed properties as well. Unlike `Error`,
 these native types have no established convention for custom properties.
 
 #### 1.4.2 `FabricError`
@@ -1185,7 +1187,8 @@ Section 4.5.
 - Sparse arrays (arrays with holes) are supported; holes are distinct from
   `undefined` and are represented using run-length encoding in serialized forms
   (see below and Section 3 of `3-json-encoding.md` for the specific JSON encoding)
-- Non-index keys (named properties on arrays) cause rejection
+- Non-index keys cause rejection, `length` aside: named (string-keyed) and
+  symbol-keyed properties alike, whether or not they are enumerable
 
 > **Holes vs. `undefined`.** A hole (sparse slot) is distinct from an
 > explicitly-set `undefined` element. Given `const a = [1, , 3]`, index `1` is

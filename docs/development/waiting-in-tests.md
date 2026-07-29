@@ -99,14 +99,14 @@ Waits split into two groups with different primitives.
   has finished its update cycle. This is the "is the control interactive yet"
   signal.
 - The higher-level wrappers in
-  `packages/patterns/integration/cfc-browser-helpers.ts` — `waitForText`,
-  `waitForSettledText`, `waitForTextAbsent`, `fillCfInput`, `clickCfButton`,
-  `clickNthCfButton`, `clickCfButtonAndWaitForText`, `waitForRuntimeIdle`,
-  `waitForRuntimeSynced` — bundle "settle the view with the control present,
-  act once, wait for the effect" on top of the two primitives above.
-  `clickCfButton` takes the first match and reaches through a host's shadow root
-  for its inner `[data-cf-button]`; `clickNthCfButton` takes the `index`-th
-  match of a selector that already resolves to the buttons themselves.
+  `packages/patterns/integration/cfc-browser-helpers.ts` compose the two
+  primitives above for common waits and interactions. `clickCfButton` and
+  `clickCfButtonsConcurrently` settle and mark the exact rendered targets before
+  clicking them. `clickCfButton` takes the first match and reaches through a
+  host's shadow root for its inner `[data-cf-button]`.
+  `clickNthCfButton` takes the `index`-th match of a selector that already
+  resolves to the buttons themselves. It does not yet have the same settlement
+  guarantee.
 
 To click a control that appears asynchronously, follow the `clickCfButton`
 shape rather than a find-and-click retry loop: a `waitForCondition` predicate
@@ -117,11 +117,11 @@ target to be rendered — laid out, and not `display:none` or `visibility:hidden
 clickable rather than tagged while it has no layout box and then failing to
 click.
 
-Settle the view inside that predicate, on every check, and let the check pass
-only on one the settle preceded. Settling is what makes a rendered control
-interactive, so a settle that ran before the control existed says nothing about
-it: the click lands on an element whose handler is not bound, is silently
-dropped, and the wait for its effect runs to the stuck-condition safety net.
+Resolve the target before settling the view inside that predicate. Let the
+check pass only when the same rendered element remains after the settle. A
+target that appears or is replaced during the settle is checked again after
+the DOM mutation. The next check gives that exact element a complete settle
+before marking it for the click.
 
 Do not reach instead for a check that only watches the DOM. Asking the worker
 whether it is idle queues runnable pull work that nothing else would start, so a
@@ -129,8 +129,9 @@ control that appears only once the page's own pending work runs never arrives
 under a purely passive wait. The settle is both the barrier and the pump, which
 is why it belongs inside the predicate rather than in front of it.
 
-When several controls are clicked as a group, resolve every one of them before
-marking any, so no settle falls between the marks and the clicks.
+When several controls are clicked as a group, prove that every target is stable
+before marking any of them. Mark the targets inside the successful predicate so
+the click addresses the elements that passed the settle check.
 
 `clickCfButton` and `clickCfButtonsConcurrently` work this way.
 `clickTrustedAction`, `submitViaEnter`, and `settleAndClickNoteButton` in
