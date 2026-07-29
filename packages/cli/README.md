@@ -77,10 +77,19 @@ standard error and continues searching that piece and the rest of the space.
 
 ## Built Binary
 
-`deno task build-binaries --cli-only` compiles the CLI to `dist/cf` — fully
-cwd-independent with no Deno startup noise, the recommended entry point for
-agents and scripts. Rebuild after every `git pull`: a stale binary rejects newer
-flags and can hit wire-protocol skew against an updated server.
+`deno task build-binaries cf` compiles the CLI to `dist/cf` — fully
+cwd-independent, with no Deno startup noise and roughly half the per-invocation
+cost. (`--cli-only` is a legacy alias for the same thing.)
+
+It exists for CI, which downloads it in `cli-integration-test` (on
+`$GITHUB_PATH`) and `pattern-unit-test` (as `CF_BINARY`). A CI run never edits
+the source the binary was built from, so it cannot go stale mid-run.
+
+That does not hold for a working tree you are editing, and there is no
+invalidation story to catch it — see "Why not `dist/cf`" under Installing `cf`
+on PATH. Use `bin/cf` or `deno task cf` locally. If you do build it, rebuild
+after every `git pull`: a stale binary rejects newer flags and can hit
+wire-protocol skew against an updated server.
 
 ## Launcher Contract
 
@@ -195,9 +204,60 @@ launchers use them. Shell completion is the exception: it drops commands whose
 description opens with `Internal:`, because those are spawned by `cf fuse` and
 never typed at a prompt.
 
+## Installing `cf` on PATH
+
+Interactively, the CLI has always been invoked as `deno task cf`. Shell
+completion is the first thing that needs a `cf` on PATH on a developer machine:
+the function it installs calls `cf completion complete` by name on every Tab, so
+**completion does nothing at all without one** — including for
+`deno task cf <TAB>`, which the same function services. Because a failing
+completion is swallowed by design (it must never paste text into the command
+line), a missing `cf` shows up as "completion doesn't work", not as an error.
+`cf completion bash|zsh` therefore warns on stderr when it cannot find itself on
+PATH.
+
+(CI does resolve `cf` by name — `integration/integration.sh` runs `command cf`
+against a binary the workflow puts on `$GITHUB_PATH` — but it builds that PATH
+itself, and local runs of those same scripts set `CF_CLI_INTEGRATION_USE_LOCAL`
+to force the source CLI.)
+
+`bin/cf` is the install. It runs from source, so it never goes stale against the
+checkout, and it resolves the repo from its own location, so a symlink works:
+
+```bash
+# mise users: nothing to do. mise.toml puts this checkout's bin/ on PATH, so
+# `cf` follows the worktree you are standing in.
+mise trust    # only if this checkout has not been trusted yet
+
+# everyone else (mise is recommended in README.md but not required):
+ln -s "$PWD/bin/cf" ~/.local/bin/cf
+```
+
+### Why not `dist/cf`
+
+The compiled binary is roughly twice as fast per invocation (~0.33s versus
+~0.6s), which is tempting when every Tab press is a full CLI invocation. **Do
+not put `dist` on your PATH anyway.** There is no invalidation story for it:
+`tasks/build-binaries.ts` has no up-to-date check, nothing compares the binary
+against its sources, and the whole mechanism is the "rebuild after every
+`git pull`" instruction in the Built Binary section above. A stale `dist/cf`
+rejects newer flags and can hit wire-protocol skew against an updated server —
+see "FUSE mount wrapper mismatch" in `skills/cf/SKILL.md` for an instance of
+this actually biting.
+
+Nor is mtime a usable substitute: `revertWorkspace` restores `deno.jsonc` and
+the compile-cache version module _after_ the binary is written, so `dist/cf` is
+older than its own inputs the moment the build finishes.
+
+CI is a different case and legitimately uses the binary — a workflow run never
+mutates the source it was built from. `cli-integration-test` puts it on
+`$GITHUB_PATH` and `pattern-unit-test` passes it as `CF_BINARY`. That reasoning
+does not transfer to a working tree you are actively editing.
+
 ## Shell completion
 
-`cf completion <shell>` prints a completion script for bash or zsh.
+`cf completion <shell>` prints a completion script for bash or zsh. It requires
+`cf` on PATH — see "Installing `cf` on PATH" above.
 
 ```bash
 # zsh — eager form, in ~/.zshrc after compinit. Required for the `deno` binding
