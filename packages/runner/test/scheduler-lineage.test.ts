@@ -52,8 +52,9 @@ function createOriginTx(
       }
       return { status, journal: {} };
     },
-    addCommitCallback(callback: CommitCallback): void {
+    addCommitCallback(callback: CommitCallback): boolean {
       callbacks.push(callback);
+      return true;
     },
     settle(result: Result<Unit, CommitError>): void {
       status = result.error ? "error" : "done";

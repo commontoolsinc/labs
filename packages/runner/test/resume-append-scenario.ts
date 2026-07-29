@@ -232,15 +232,14 @@ export async function runResumeAppendScenario(
       // Wait for the edge that the coordinator has reconciled the resume batch:
       // its first read of the per-element result cells causes their documents to
       // be requested, and the gate holds the first one. Only after that reconcile
-      // is the resume-await flag cleared, so an element appended now follows the
-      // steady-state path — appending earlier would fold it into the resume
-      // batch instead.
+      // is the resume-await flag cleared. An element appended now follows the
+      // steady-state path; appending earlier would fold it into the resume batch.
       await gate.firstHeld;
       expect(gate.heldCount).toBeGreaterThan(0);
 
-      // Update the input list while the per-element results are held. The
-      // coordinator's reconcile reads the still-stale sibling result cells, so
-      // its commit is rejected as stale and its inline writes are reverted.
+      // Append while the per-element results are held. The coordinator's
+      // reconcile reads the still-stale sibling result cells, so its commit is
+      // rejected as stale and the input update's inline write is reverted.
       const tx1 = rt2.edit();
       const cur = (rc2.key("items").get() ?? []) as unknown[];
       const nextItems = scenario.updateItems?.(cur) ??
@@ -257,14 +256,13 @@ export async function runResumeAppendScenario(
       // input update reconciled.
       heldCount = gate.heldCount;
 
-      // Release the held documents. The space catches up and the stale write is
-      // dropped. The element run is marked as needing its setup again, so the
-      // next reconcile issues it against state that has caught up.
+      // Release the held documents. The space catches up, the stale write is
+      // dropped. The list child guard clears the rejected local state, and the
+      // scheduler run rebuilds it in a fresh transaction.
       gate.release();
 
       // Converge: pull() awaits the scheduler work that is now unblocked and
-      // re-reads to quiescence; settled() then flushes the reconcile that the
-      // re-issued setup triggers. Both converge internally, so no loop here.
+      // re-reads to quiescence. settled() then flushes the resulting reconcile.
       await rc2.pull();
       await rt2.settled();
     } finally {

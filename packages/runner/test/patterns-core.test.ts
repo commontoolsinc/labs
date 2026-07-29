@@ -340,7 +340,6 @@ describe("Pattern Runner - Core", () => {
     // stopping it leaves nothing of the list behind.
     expect(runtime.runner.cancels.size).toBe(before);
   });
-
   it("keeps a directly started map element running after removal", async () => {
     const inspectArray = pattern<{ values: number[] }>(({ values }) => ({
       values,

@@ -37,19 +37,15 @@ import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { exposedResultCell, scopedCell } from "./scope-policy.ts";
 import { resolveLink } from "../link-resolution.ts";
 import { listElementLink } from "./list-element-link.ts";
-import {
-  listElementKeys,
-  releaseRemovedElements,
-} from "./list-element-keys.ts";
+import { listElementKeys } from "./list-element-keys.ts";
 import {
   linkResolutionProbe,
   machineryRead,
 } from "../storage/reactivity-log.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
-import {
-  type ElementRun,
-  trackListSetupRollback,
-} from "./list-element-rollback.ts";
+import { createElementRunCommitGuard } from "./element-run-commit-guard.ts";
+import { isRetryImmediately } from "../scheduler/retry-immediately.ts";
+import { createInitialRunGate } from "../scheduler/initial-run-gate.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 
 const logger = getLogger("runner.map", { enabled: true, level: "warn" });
@@ -98,16 +94,20 @@ export function map(
   // Identity-based tracking: maps element address key → { resultCell, lastIndex }
   // for reuse across position changes. We pass list[i] directly each time, so
   // there's no need to store the element cell separately.
-  const elementRuns = new Map<string, ElementRun>();
-
-  // Cleared when the coordinator is torn down, so the asynchronous resume work
-  // below stops writing to a container nothing owns any more. The same teardown
-  // releases the children the coordinator still holds; the ones whose elements
-  // left the list were released when they left.
+  // TODO(@ianh): Add bounded suspension for inactive identity-keyed runs so a
+  // caller can reuse recent results without keeping their child runs active.
+  const elementRuns = new Map<
+    string,
+    { resultCell: Cell<any>; lastIndex: number }
+  >();
   let active = true;
+  const childCommitGuard = createElementRunCommitGuard({
+    runtime,
+    elementRuns,
+  });
   addCancel(() => {
     active = false;
-    releaseRemovedElements(runtime, elementRuns, new Set());
+    childCommitGuard.cancel();
   });
 
   // Only the initial (resume) reconcile should defer its per-element sub-pattern
@@ -129,9 +129,11 @@ export function map(
   const awaitInputThenSettle = (inputListCell: Cell<any>): void => {
     runtime.storageManager.trackUntilSettled(
       inputListCell.sync()
-        .then(() =>
-          !active ? undefined : runtime.editWithRetry((settleTx) => {
-            if (!active || !result) return;
+        .then(() => {
+          if (!active) return;
+          return runtime.editWithRetry((settleTx) => {
+            if (!active) return;
+            if (!result) return;
             const raw = inputsCell.key("list").withTx(settleTx).resolveAsCell()
               .withTx(settleTx).getRaw();
             if (raw === undefined || (Array.isArray(raw) && raw.length === 0)) {
@@ -144,23 +146,30 @@ export function map(
               );
             }
           }).then(({ error }) => {
+            if (!active) return;
             if (error) {
               logger.warn("resume-input", "settling the resumed input failed", {
                 error,
               });
             }
-          })
-        )
-        .catch((error) =>
-          logger.warn("resume-input", "the resumed input list sync rejected", {
-            error,
-          })
-        ),
+          });
+        })
+        .catch((error) => {
+          if (active) {
+            logger.warn(
+              "resume-input",
+              "the resumed input list sync rejected",
+              { error },
+            );
+          }
+        }),
     );
   };
 
-  const reconcile: Action = (tx: IExtendedStorageTransaction) => {
-    const rollback = trackListSetupRollback(tx, runtime, elementRuns);
+  const reconcileImpl = (
+    tx: IExtendedStorageTransaction,
+    ownsChildChanges: boolean,
+  ) => {
     // Captured before the loop consumes it: this reconcile's element runs use
     // the current value; the flag is cleared only once a non-empty resume batch
     // has been processed (below), so a transient empty first reconcile doesn't
@@ -210,10 +219,6 @@ export function map(
     const argumentUsage = inferListOpArgumentUsage(opPattern);
 
     if (!result || result.getAsNormalizedFullLink().scope !== listScope) {
-      const previousResult = result;
-      rollback.resultReplaced(() => {
-        result = previousResult;
-      });
       const resultSchema = listResultSchema(opPattern.resultSchema);
       // CT-1623: identify the result container by the reserved output spot —
       // the fully-resolved write-redirect target the runner supplies as the
@@ -235,15 +240,18 @@ export function map(
         tx,
       );
       const boundResult = scopedCell(runtime, tx, baseResult, listScope);
-      setResultCell(boundResult, parentCell);
-      // Link the new result cells to the pattern cell too
-      setPatternCell(boundResult, parentCell.key("pattern"));
-      sendResult(tx, boundResult);
       // The container outlives this reconcile's transaction; a cell bound to
       // it would pin the settled transaction and its journal for the life of
       // the coordinator. Rebind per use instead.
       result = boundResult.withTx();
     }
+    // Each reconcile owns a complete publication. This keeps an overlapping
+    // commit independent from an earlier transaction that first chose the
+    // same deterministic container and later failed.
+    const resultForTx = result.withTx(tx);
+    setResultCell(resultForTx, parentCell);
+    setPatternCell(resultForTx, parentCell.key("pattern"));
+    sendResult(tx, resultForTx);
     // The coordinator's view of the result container is links-only
     // (RESULT_PRESENCE_SCHEMA): get() probes presence and set() diffs
     // prior slots as links, never materializing element contents. A
@@ -259,6 +267,21 @@ export function map(
       ...(argumentUsage.usesArray ? { array: listCell } : {}),
       ...(argumentUsage.usesParams ? { params: inputsCell.key("params") } : {}),
     });
+    const runElement = (
+      element: Cell<any>,
+      index: number,
+      resultCell: Cell<any>,
+    ) =>
+      runtime.runner.run(
+        tx,
+        opPattern,
+        createRunInput(element, index),
+        resultCell,
+        {
+          doNotUpdateOnPatternChange: true,
+          awaitSyncBeforeInitialRun: elementAwaitSync,
+        },
+      );
 
     // If the result's value is undefined, set it to the empty array.
     // Container reads run under the link-resolution-probe scope: the
@@ -294,12 +317,14 @@ export function map(
       // container was never persisted — so nothing will ever stream in to
       // re-trigger — seed [] once the pull settles, so the coordinator is not
       // left wedged waiting for a value that will never arrive.
-      const seedIfStillAbsent = () =>
-        !active ? Promise.resolve() : runtime.editWithRetry((seedTx) => {
+      const seedIfStillAbsent = () => {
+        if (!active) return Promise.resolve();
+        return runtime.editWithRetry((seedTx) => {
           if (!active) return;
           const container = result!.withTx(seedTx);
           if (container.getRaw() === undefined) container.set([]);
         }).then(({ error }) => {
+          if (!active) return;
           if (error) {
             logger.warn(
               "resume-seed",
@@ -308,6 +333,7 @@ export function map(
             );
           }
         });
+      };
       // Run on either outcome (resolve or reject); the seed recovers from the
       // pull's own rejection, so log it rather than dropping it silently.
       pending.finally(seedIfStillAbsent).catch((error) => {
@@ -348,7 +374,9 @@ export function map(
     // distinguish empty inputs from undefined inputs?
     if (list === undefined) {
       probeScoped(() => resultWithLog.set([]));
-      releaseRemovedElements(runtime, elementRuns, new Set());
+      for (const [elementKey, entry] of elementRuns) {
+        childCommitGuard.trackRemoval(tx, elementKey, entry.resultCell);
+      }
       return;
     }
 
@@ -362,12 +390,7 @@ export function map(
     // The whole current key set has to exist before any element is touched:
     // it is what says which children the list has stopped holding.
     const elementKeys = listElementKeys(list);
-    releaseRemovedElements(
-      runtime,
-      elementRuns,
-      new Set(elementKeys.values()),
-    );
-
+    const currentElementKeys = new Set(elementKeys.values());
     const newArrayValue = new Array<any>(list.length);
     for (let i = 0; i < list.length; i++) {
       // Skip sparse holes — don't create pattern runs for them
@@ -377,27 +400,25 @@ export function map(
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
-        const previousIndex = existing.lastIndex;
         if (
-          existing.needsSetup ||
-          (argumentUsage.usesIndex && existing.lastIndex !== i)
-        ) {
-          runtime.runner.run(
-            tx,
-            opPattern,
-            createRunInput(list[i], i),
+          ownsChildChanges && childCommitGuard.needsPresentSetup(
+            elementKey,
             existing.resultCell,
-            {
-              doNotUpdateOnPatternChange: true,
-              awaitSyncBeforeInitialRun: elementAwaitSync,
-            },
-          );
-          rollback.setupIssued(existing);
+            i,
+            argumentUsage.usesIndex,
+          )
+        ) {
+          runElement(list[i], i, existing.resultCell);
         }
-        existing.lastIndex = i;
-        if (previousIndex !== i) rollback.indexChanged(existing, previousIndex);
+        childCommitGuard.trackPresent(
+          tx,
+          elementKey,
+          existing.resultCell,
+          i,
+        );
         newArrayValue[i] = exposedResultCell(runtime, tx, existing.resultCell);
       } else {
+        if (!ownsChildChanges) continue;
         const boundResultCell = runtime.getCell(
           parentCell.space,
           { map: result, elementKey },
@@ -409,7 +430,8 @@ export function map(
         // long as the coordinator. A cell bound to the transaction would pin
         // the settled transaction, its journal, and everything it read.
         const resultCell = boundResultCell.withTx();
-        runtime.runner.run(
+        const initialRunGate = createInitialRunGate();
+        const childRun = runtime.runner.runChild(
           tx,
           opPattern,
           createRunInput(list[i], i),
@@ -417,19 +439,40 @@ export function map(
           {
             doNotUpdateOnPatternChange: true,
             awaitSyncBeforeInitialRun: elementAwaitSync,
+            initialRunGate: initialRunGate.gate,
           },
         );
         // Link these individual cells to the top cell
         setResultCell(boundResultCell, parentCell);
         // Link the new result cells to the pattern cell too
         setPatternCell(boundResultCell, parentCell.key("pattern"));
-        const entry = { resultCell, lastIndex: i, needsSetup: false };
-        elementRuns.set(elementKey, entry);
-        rollback.created(elementKey, entry);
+        elementRuns.set(elementKey, { resultCell, lastIndex: i });
+        childCommitGuard.trackPresent(tx, elementKey, resultCell, i, {
+          created: true,
+          release: childRun.release,
+          initialRunGate,
+        });
         newArrayValue[i] = exposedResultCell(runtime, tx, resultCell);
       }
     }
     probeScoped(() => resultWithLog.set(newArrayValue));
+    for (const [elementKey, entry] of elementRuns) {
+      if (currentElementKeys.has(elementKey)) continue;
+      childCommitGuard.trackRemoval(tx, elementKey, entry.resultCell);
+    }
+  };
+
+  const reconcile: Action = (tx: IExtendedStorageTransaction) => {
+    if (!active) return;
+    const ownsChildChanges = childCommitGuard.begin(tx);
+    try {
+      return reconcileImpl(tx, ownsChildChanges);
+    } catch (error) {
+      // RetryImmediately aborts without committing, so its commit callbacks do
+      // not run. Remove this attempt before the scheduler starts its retry.
+      if (isRetryImmediately(error)) childCommitGuard.abort(tx);
+      throw error;
+    }
   };
 
   // Child-starting coordinator: never rehydrates clean on resume — the

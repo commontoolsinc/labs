@@ -194,16 +194,13 @@ describe("transactional setup ownership", () => {
     const stopReading = result.key("mapped").sink(() => {});
     await runtime.scheduler.idleWithPendingCommits();
 
-    const originalRun = runtime.runner.run;
+    const originalRunChild = runtime.runner.runChild;
     let firstSetupAborted = false;
     let childSetups = 0;
-    runtime.runner.run = ((...args: Parameters<typeof originalRun>) => {
-      const run = Reflect.apply(originalRun, runtime.runner, args);
-      const options = args[4] as
-        | { doNotUpdateOnPatternChange?: boolean }
-        | undefined;
-      if (options?.doNotUpdateOnPatternChange !== true) return run;
-
+    runtime.runner.runChild = ((
+      ...args: Parameters<typeof originalRunChild>
+    ) => {
+      const run = Reflect.apply(originalRunChild, runtime.runner, args);
       childSetups++;
       if (childSetups === 1) {
         const childTx = args[0];
@@ -219,7 +216,7 @@ describe("transactional setup ownership", () => {
         }) as typeof childTx.commit;
       }
       return run;
-    }) as typeof runtime.runner.run;
+    }) as typeof runtime.runner.runChild;
 
     try {
       const updateTx = runtime.edit();
@@ -230,7 +227,7 @@ describe("transactional setup ownership", () => {
       expect(firstSetupAborted).toBe(true);
       expect(await result.key("mapped").pull()).toEqual([2]);
     } finally {
-      runtime.runner.run = originalRun;
+      runtime.runner.runChild = originalRunChild;
       stopReading();
     }
   });

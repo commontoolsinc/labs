@@ -1412,13 +1412,15 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * If a callback throws, the error is logged but doesn't affect other callbacks.
    *
    * @param callback - Function to call when the transaction settles
+   * @returns Whether the transaction accepted the callback. Comparison
+   *   transactions return `false` because they deliberately discard callbacks.
    */
   addCommitCallback(
     callback: (
       tx: IExtendedStorageTransaction,
       result: Result<Unit, CommitError>,
     ) => void,
-  ): void;
+  ): boolean;
 
   /**
    * Add a callback that fires when the commit's fate is sealed — the

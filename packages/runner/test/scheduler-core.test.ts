@@ -25,6 +25,7 @@ import type {
 import { getDirectTransactionReactivityLog } from "../src/storage/transaction-inspection.ts";
 import { PASS_RUN_BUDGET } from "../src/scheduler/constants.ts";
 import { createInitialRunGate } from "../src/scheduler/initial-run-gate.ts";
+import { createRegisteredActionRearm } from "../src/builtins/resume-republish.ts";
 
 // Seed stored CFC metadata via an ungated path-[] full-document write (the
 // shape hydration delivers it), reading the current doc first so the value
@@ -345,6 +346,23 @@ describe("scheduler", () => {
     gate.release();
     await runtime.scheduler.idle();
     expect(childRuns).toBe(1);
+  });
+
+  it("re-arms a raw builtin through its registered wrapper", async () => {
+    const actionRearm = createRegisteredActionRearm(runtime);
+    let wrapperRuns = 0;
+    const wrapper: Action = () => {
+      wrapperRuns++;
+    };
+
+    runtime.scheduler.subscribe(wrapper, { isEffect: true });
+    actionRearm.onActionRegistered(wrapper);
+    await runtime.scheduler.idle();
+    expect(wrapperRuns).toBe(1);
+
+    actionRearm.rearm();
+    await runtime.scheduler.idle();
+    expect(wrapperRuns).toBe(2);
   });
 
   it("releases every initial-run callback when one callback throws", () => {

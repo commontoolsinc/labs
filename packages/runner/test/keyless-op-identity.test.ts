@@ -186,7 +186,7 @@ describe("keyless op identity (CT-1812)", () => {
     const commit = await tx.commit();
     expect(commit.error).toBeUndefined();
     const cancel = result.sink(() => {});
-    await runtime.idle();
+    await result.pull();
 
     // The CT-1811/CT-1812 shape works ref-lessly: every grandchild
     // derived-internal output materialized (2, 4, 6 all present). Before the

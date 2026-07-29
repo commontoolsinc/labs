@@ -1,6 +1,4 @@
 import type { Cell } from "../cell.ts";
-import type { Runtime } from "../runtime.ts";
-import type { ElementRun } from "./list-element-rollback.ts";
 import { cellIdentityKey } from "./scope-policy.ts";
 
 /**
@@ -22,43 +20,4 @@ export function listElementKeys(list: Cell<any>[]): Map<number, string> {
     keys.set(i, JSON.stringify([...linkKey, occurrence]));
   }
   return keys;
-}
-
-/**
- * Drop the element runs whose elements the list no longer holds, releasing the
- * child each one launched.
- *
- * It is a release rather than a stop, so an element result that something
- * opened in its own right keeps running; `docs/specs/runner-child-run-ownership.md`
- * defines the two authorities. A reconcile whose transaction does not become
- * durable has released children for a removal that never landed. The next
- * reconcile reads a list that still holds those elements and sets them up
- * again, on the same deterministic result cells, so their values return.
- *
- * An entry is dropped only once its child is released, so a release that
- * throws leaves the entry for the retry and for the coordinator's teardown to
- * find. Every other child is released either way, and the failures are raised
- * together at the end: one child whose cleanup throws must not keep its
- * siblings running. Passing an empty set releases every child, which is what
- * teardown and an input that went undefined both want.
- */
-export function releaseRemovedElements(
-  runtime: Runtime,
-  elementRuns: Map<string, ElementRun>,
-  currentKeys: ReadonlySet<string>,
-): void {
-  const errors: unknown[] = [];
-  for (const [elementKey, entry] of [...elementRuns]) {
-    if (currentKeys.has(elementKey)) continue;
-    try {
-      runtime.runner.releaseChild(entry.resultCell, undefined);
-      elementRuns.delete(elementKey);
-    } catch (error) {
-      errors.push(error);
-    }
-  }
-  if (errors.length === 1) throw errors[0];
-  if (errors.length > 1) {
-    throw new AggregateError(errors, "Multiple list child releases failed");
-  }
 }

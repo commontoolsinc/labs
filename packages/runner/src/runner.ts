@@ -813,6 +813,12 @@ type RunResult<R> = {
   cancelDeferredStart?: Cancel;
 };
 
+export type ChildRun<R> = {
+  resultCell: Cell<R>;
+  /** True when this invocation's start registration was stopped. */
+  release: () => boolean;
+};
+
 type DeferredStartResult<R> = {
   resultCell: Cell<R>;
   cancelDeferredStart?: Cancel;
@@ -3431,6 +3437,54 @@ export class Runner {
       resultCell,
       options,
     ).resultCell;
+  }
+
+  /**
+   * Run a child pattern and return a release function for this invocation's
+   * start registration.
+   */
+  runChild<T, R = any>(
+    providedTx: IExtendedStorageTransaction,
+    patternOrModule: Pattern | Module | undefined,
+    argument: T,
+    resultCell: Cell<R>,
+    options: RunnerRunOptions = {},
+  ): ChildRun<R> {
+    const run = this.runWithStartOwnership(
+      providedTx,
+      patternOrModule,
+      argument,
+      resultCell,
+      options,
+    );
+    const key = this.getDocKey(resultCell);
+    let released = false;
+    let stopped = false;
+    return {
+      resultCell: run.resultCell,
+      release: () => {
+        if (released) return stopped;
+        try {
+          if (run.cancelDeferredStart) {
+            run.cancelDeferredStart();
+            return true;
+          }
+          if (
+            run.installedCancel === undefined ||
+            this.cancels.get(key) !== run.installedCancel
+          ) {
+            return false;
+          }
+          this.releaseChild(resultCell, run.installedCancel);
+          return this.cancels.get(key) !== run.installedCancel;
+        } finally {
+          released = true;
+          stopped = run.cancelDeferredStart !== undefined ||
+            (run.installedCancel !== undefined &&
+              this.cancels.get(key) !== run.installedCancel);
+        }
+      },
+    };
   }
 
   /**

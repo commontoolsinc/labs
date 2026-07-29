@@ -2,14 +2,40 @@ import type { Cell } from "../cell.ts";
 import type { Runtime } from "../runtime.ts";
 import type { Logger } from "@commonfabric/utils/logger";
 import type { JSONSchema } from "../builder/types.ts";
-import type { ElementRun } from "./list-element-rollback.ts";
+import type { IExtendedStorageTransaction } from "../storage/interface.ts";
+import type { Action } from "../scheduler/types.ts";
 import { cellIdentityKey } from "./scope-policy.ts";
 import {
   linkResolutionProbe,
   machineryRead,
 } from "../storage/reactivity-log.ts";
 
-type ElementRuns = Map<string, ElementRun>;
+type ElementRuns = Map<
+  string,
+  { resultCell: Cell<any>; lastIndex: number }
+>;
+
+export interface RegisteredActionRearm {
+  rearm(): void;
+  onActionRegistered(action: Action): void;
+}
+
+/** Store the scheduler's registered action and use it for later reruns. */
+export function createRegisteredActionRearm(
+  runtime: Runtime,
+): RegisteredActionRearm {
+  let registeredAction: Action | undefined;
+  return {
+    rearm() {
+      if (registeredAction) {
+        runtime.scheduler.invalidateAction(registeredAction);
+      }
+    },
+    onActionRegistered(action) {
+      registeredAction = action;
+    },
+  };
+}
 
 /**
  * Decide what one element contributes to the rebuilt aggregate. `value` is the
@@ -27,13 +53,13 @@ export type ElementContribution = (
 
 export interface ResumeRepublisher {
   /**
-   * Whether this coordinator is still waiting for the given element result
-   * document. A reconcile does not write an element's setup while its result
-   * is in that state: the document has not caught up, so the transaction
-   * carrying the setup is rejected as stale, and the retry that follows reads
-   * the same document and is rejected the same way.
+   * Record reads of current element-result cells whose sync has not settled.
+   * Returns true when the caller should leave the aggregate unchanged.
    */
-  awaitingResult(cell: Cell<any>): boolean;
+  readPendingSyncs(
+    tx: IExtendedStorageTransaction,
+    currentElementKeys: ReadonlySet<string>,
+  ): boolean;
 
   /**
    * Hold the durable aggregate while the given still-pending element result
@@ -62,19 +88,12 @@ export interface ResumeRepublisherOptions {
   resultSchema: JSONSchema;
   elementRuns: ElementRuns;
   contribute: ElementContribution;
+  /** Re-runs the coordinator after a republish finds an element with no run. */
+  rearmReconcile: () => void;
   /** The aggregate's noun for logs, e.g. "filtered list" / "flatMap result". */
   aggregateNoun: string;
   /** The per-element noun for logs, e.g. "predicate" / "result". */
   elementNoun: string;
-  /**
-   * Re-arm the coordinator's reconcile. Only a reconcile can issue an owed
-   * element setup (`needsSetup`), and it declines to while that element's
-   * result is being awaited. A republish chain that ends by confirming the
-   * document ABSENT writes nothing the reconcile journals — this callback is
-   * the only remaining trigger, so without it the owed setup would never be
-   * issued and the element would stay out of the aggregate.
-   */
-  rearmReconcile: () => void;
 }
 
 /**
@@ -109,44 +128,64 @@ export function createResumeRepublisher(
     resultSchema,
     elementRuns,
     contribute,
+    rearmReconcile,
     aggregateNoun,
     elementNoun,
-    rearmReconcile,
   } = opts;
+  const pendingSyncs = new Map<
+    string,
+    { cell: Cell<any>; promise: Promise<Cell<any>> }
+  >();
 
-  // The element results this coordinator is waiting on, by document id. An
-  // entry lasts exactly as long as the sync it holds.
-  const waiting = new Map<string, Promise<unknown>>();
-
-  // Wait for one element result document, sharing a wait already in progress
-  // for it. Re-syncing a document the coordinator is already waiting on would
-  // leave two entries racing to clear one id.
-  const waitFor = (cell: Cell<any>): Promise<unknown> => {
+  const pendingSync = (cell: Cell<any>): Promise<Cell<any>> => {
     const id = cell.getAsNormalizedFullLink().id;
-    const inFlight = waiting.get(id);
-    if (inFlight) return inFlight;
-    const sync = cell.sync().finally(() => {
-      if (waiting.get(id) === sync) waiting.delete(id);
+    const existing = pendingSyncs.get(id);
+    if (existing) return existing.promise;
+
+    const promise = cell.sync().finally(() => {
+      if (pendingSyncs.get(id)?.promise === promise) pendingSyncs.delete(id);
     });
-    waiting.set(id, sync);
-    return sync;
+    pendingSyncs.set(id, { cell, promise });
+    return promise;
   };
 
-  const awaitingResult = (cell: Cell<any>): boolean =>
-    waiting.has(cell.getAsNormalizedFullLink().id);
+  const readPendingSyncs = (
+    tx: IExtendedStorageTransaction,
+    currentElementKeys: ReadonlySet<string>,
+  ): boolean => {
+    const currentIds = new Set<string>(
+      [...currentElementKeys]
+        .map((elementKey) => elementRuns.get(elementKey)?.resultCell)
+        .filter((cell): cell is Cell<any> => cell !== undefined)
+        .map((cell) => cell.getAsNormalizedFullLink().id),
+    );
+    let pending = false;
+    for (const [id, { cell }] of pendingSyncs) {
+      if (!currentIds.has(id)) continue;
+      cell.withTx(tx).get();
+      pending = true;
+    }
+    return pending;
+  };
 
-  const republishFromConfirmed = (awaited: Set<string>): Promise<void> =>
-    runtime.editWithRetry((tx): Cell<any>[] => {
-      const result = isActive() ? getResult() : undefined;
-      if (!result) return [];
+  const republishFromConfirmed = (awaited: Set<string>): Promise<void> => {
+    if (!isActive()) return Promise.resolve();
+    return runtime.editWithRetry((tx): {
+      pending: Cell<any>[];
+      missingRun: boolean;
+    } => {
+      if (!isActive()) return { pending: [], missingRun: false };
+      const result = getResult();
+      if (!result) return { pending: [], missingRun: false };
       const inputs = inputsCell.asSchema(inputSchema).withTx(tx).get() as {
         list?: unknown;
       };
       const list = inputs?.list;
-      if (!Array.isArray(list)) return [];
+      if (!Array.isArray(list)) return { pending: [], missingRun: false };
       const keyCounts = new Map<string, number>();
       const out: any[] = [];
       const stillPending: Cell<any>[] = [];
+      let missingRun = false;
       for (let i = 0; i < list.length; i++) {
         if (!(i in list)) continue;
         const { dedupKey, linkKey } = cellIdentityKey(list[i]);
@@ -154,7 +193,10 @@ export function createResumeRepublisher(
         keyCounts.set(dedupKey, occurrence + 1);
         const elementKey = JSON.stringify([...linkKey, occurrence]);
         const entry = elementRuns.get(elementKey);
-        if (!entry) continue;
+        if (!entry) {
+          missingRun = true;
+          continue;
+        }
         const value = entry.resultCell.withTx(tx).get();
         if (
           contribute(value, list[i], out) === "pending" &&
@@ -163,7 +205,9 @@ export function createResumeRepublisher(
           stillPending.push(entry.resultCell);
         }
       }
-      if (stillPending.length > 0) return stillPending;
+      if (stillPending.length > 0) {
+        return { pending: stillPending, missingRun };
+      }
       // The element reads above are real content reads (the aggregate genuinely
       // depends on them, so they taint J). The container write only diffs prior
       // slots for identity, so it runs under the link-resolution probe (S16) to
@@ -172,8 +216,9 @@ export function createResumeRepublisher(
         { ...linkResolutionProbe, ...machineryRead },
         () => result.asSchema(resultSchema).withTx(tx).set(out),
       );
-      return [];
+      return { pending: [], missingRun };
     }).then(({ ok, error }) => {
+      if (!isActive()) return;
       if (error) {
         logger.warn(
           "resume-republish",
@@ -182,26 +227,15 @@ export function createResumeRepublisher(
         );
         return;
       }
-      if (ok && ok.length > 0) {
-        awaitPendingThenRepublish(ok, awaited);
+      if (ok && ok.pending.length > 0) {
+        awaitPendingThenRepublish(ok.pending, awaited);
         return;
       }
-      // The chain has settled, but an element may still owe its setup: a
-      // reconcile declines to issue one while that element's result is being
-      // awaited, and this chain's confirmations may have written nothing the
-      // reconcile journals (a document confirmed absent republishes an
-      // unchanged aggregate). The waits are over now, so a reconcile CAN
-      // issue it — re-arm one, or the element stays out of the aggregate
-      // with no trigger left.
-      if (isActive()) {
-        for (const entry of elementRuns.values()) {
-          if (entry.needsSetup) {
-            rearmReconcile();
-            break;
-          }
-        }
+      if (ok?.missingRun) {
+        rearmReconcile();
       }
     });
+  };
 
   // Hold the durable aggregate while the still-pending elements confirm their
   // docs, then republish. Each element's sync resolves whether its value arrives
@@ -217,17 +251,19 @@ export function createResumeRepublisher(
     if (!isActive()) return;
     for (const c of cells) awaited.add(c.getAsNormalizedFullLink().id);
     runtime.storageManager.trackUntilSettled(
-      Promise.all(cells.map(waitFor))
-        .then(() => republishFromConfirmed(awaited))
-        .catch((error) =>
-          logger.warn(
-            "resume-republish",
-            `a pending ${elementNoun} sync rejected`,
-            { error },
-          )
-        ),
+      Promise.all(cells.map(pendingSync))
+        .then(() => isActive() ? republishFromConfirmed(awaited) : undefined)
+        .catch((error) => {
+          if (isActive()) {
+            logger.warn(
+              "resume-republish",
+              `a pending ${elementNoun} sync rejected`,
+              { error },
+            );
+          }
+        }),
     );
   };
 
-  return { awaitingResult, awaitPendingThenRepublish };
+  return { readPendingSyncs, awaitPendingThenRepublish };
 }

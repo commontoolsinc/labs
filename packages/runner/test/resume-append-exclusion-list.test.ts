@@ -16,16 +16,15 @@ import {
 // `["element", ...]` link path the shared gate matches, so the window is held
 // deterministically (no timers). flatMap pushes the per-element result VALUE into
 // its aggregate, so a value lost to a reverted resume reconcile freezes the
-// appended element out unless the element run is set up again. Marking a
-// reverted setup as owed is what makes the next reconcile issue it.
+// appended element out. The child transaction guard in flatmap.ts releases
+// state from the rejected transaction so the scheduler run can rebuild it.
 //
-// map is deliberately not covered here. Its aggregate holds element-cell
-// REFERENCES that resolve through the projection rather than copied values —
-// which is exactly why a reverted per-element write does not freeze it (the same
-// reason map does not use the resume-republish machinery) and why it is immune to
-// this bug. That reference-shaped output is also why it cannot run under this
-// gate: resolving the container reads through to the per-element result cells, so
-// startup itself would block on the held documents.
+// map is not covered by this transport gate. Its aggregate holds element-cell
+// references, and resolving that container reads the held per-element result
+// cells. Startup would therefore block before the test could open the append
+// window. Map's commit handling is covered by the shared list tests and by a
+// cold deployment test whose session-scoped projection exercises this
+// transaction failure path.
 
 const signer = await Identity.fromPassphrase("append during resume repro list");
 const space = signer.did();

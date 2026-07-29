@@ -8,7 +8,6 @@ import {
   createResumeRepublisher,
   type ElementContribution,
 } from "../src/builtins/resume-republish.ts";
-import type { ElementRun } from "../src/builtins/list-element-rollback.ts";
 import { flatMapContribution } from "../src/builtins/flatmap.ts";
 
 // Focused coverage for the shared resume-republish machinery
@@ -41,11 +40,14 @@ interface FakeLink {
   scope: string;
 }
 
+type ElementRun = { resultCell: Cell<any>; lastIndex: number };
+
 // A minimal cell stand-in. `value` is what get() returns; `syncResult` is the
 // promise its sync() hands back. Only the methods the republisher calls are
 // implemented.
 class FakeCell {
   setValues: unknown[] = [];
+  gets = 0;
   constructor(
     readonly id: string,
     public value: unknown,
@@ -62,6 +64,7 @@ class FakeCell {
     return this;
   }
   get(): unknown {
+    this.gets++;
     return this.value;
   }
   set(v: unknown): void {
@@ -148,11 +151,13 @@ function makeRepublisher(opts: {
   elementRuns: Map<string, ElementRun>;
   runtime: Runtime;
   contribute?: ElementContribution;
+  isActive?: () => boolean;
+  rearmReconcile?: () => void;
 }) {
   return createResumeRepublisher({
     runtime: opts.runtime,
     logger,
-    isActive: () => true,
+    isActive: opts.isActive ?? (() => true),
     getResult: () => opts.result as unknown as Cell<any[]> | undefined,
     inputsCell: new FakeInputsCell(opts.inputsList) as unknown as Cell<any>,
     inputSchema: SCHEMA,
@@ -161,10 +166,7 @@ function makeRepublisher(opts: {
     contribute: opts.contribute ?? filterContribution,
     aggregateNoun: "filtered list",
     elementNoun: "predicate",
-    // The owed-setup re-arm path is pinned by the integration suites
-    // (resume-append-exclusion*); these unit cases exercise the republish
-    // fold only.
-    rearmReconcile: () => {},
+    rearmReconcile: opts.rearmReconcile ?? (() => {}),
   });
 }
 
@@ -187,65 +189,79 @@ function runsFor(
     runs.set(elementKey, {
       resultCell: resultCells[i] as unknown as Cell<any>,
       lastIndex: i,
-      needsSetup: false,
     });
   }
   return runs;
 }
 
 describe("resume-republish unit", () => {
-  it("reports an element result as awaited only while its sync runs", async () => {
-    const inputs = [new FakeCell("e0", null)];
-    let arrive = () => {};
-    const held = new Promise<void>((resolve) => {
-      arrive = resolve;
+  it("waits only for pending results whose elements remain present", async () => {
+    const inputs = [new FakeCell("e0", null), new FakeCell("e1", null)];
+    const firstSync = Promise.withResolvers<void>();
+    const secondSync = Promise.withResolvers<void>();
+    const results = [
+      new FakeCell("r0", true, () => firstSync.promise),
+      new FakeCell("r1", true, () => secondSync.promise),
+    ];
+    const result = new FakeCell("container", inputs);
+    const { runtime, tracked } = makeRuntime();
+    const elementRuns = runsFor(inputs, results);
+    const [firstKey] = elementRuns.keys();
+    const rr = makeRepublisher({
+      result,
+      inputsList: inputs,
+      elementRuns,
+      runtime,
     });
-    const r0 = new FakeCell("r0", undefined, () => held);
-    const other = new FakeCell("r1", undefined);
+
+    rr.awaitPendingThenRepublish(results as unknown as Cell<any>[]);
+
+    expect(
+      rr.readPendingSyncs(
+        {} as Parameters<typeof rr.readPendingSyncs>[0],
+        new Set([firstKey]),
+      ),
+    ).toBe(true);
+    expect(results[0].gets).toBe(1);
+    expect(results[1].gets).toBe(0);
+    expect(
+      rr.readPendingSyncs(
+        {} as Parameters<typeof rr.readPendingSyncs>[0],
+        new Set(),
+      ),
+    ).toBe(false);
+
+    firstSync.resolve();
+    secondSync.resolve();
+    await drain(tracked);
+  });
+
+  it("syncs an element once while a wait for it is already running", async () => {
+    const inputs = [new FakeCell("e0", null)];
+    const sync = Promise.withResolvers<void>();
+    let syncs = 0;
+    const resultCell = new FakeCell("r0", undefined, () => {
+      syncs++;
+      return sync.promise;
+    });
     const { runtime, tracked } = makeRuntime();
     const rr = makeRepublisher({
       result: new FakeCell("container", [0]),
       inputsList: inputs,
-      elementRuns: runsFor(inputs, [r0]),
+      elementRuns: runsFor(inputs, [resultCell]),
       runtime,
     });
 
-    expect(rr.awaitingResult(r0 as unknown as Cell<any>)).toBe(false);
+    rr.awaitPendingThenRepublish([resultCell] as unknown as Cell<any>[]);
+    rr.awaitPendingThenRepublish([resultCell] as unknown as Cell<any>[]);
 
-    rr.awaitPendingThenRepublish([r0] as unknown as Cell<any>[]);
-
-    expect(rr.awaitingResult(r0 as unknown as Cell<any>)).toBe(true);
-    // Only the awaited document counts; a sibling nobody is waiting for is
-    // free to have its setup written.
-    expect(rr.awaitingResult(other as unknown as Cell<any>)).toBe(false);
-
-    arrive();
+    expect(syncs).toBe(1);
+    sync.resolve();
     await drain(tracked);
 
-    expect(rr.awaitingResult(r0 as unknown as Cell<any>)).toBe(false);
-  });
-
-  it("syncs an element once while a wait for it is already running", () => {
-    const inputs = [new FakeCell("e0", null)];
-    let syncs = 0;
-    const r0 = new FakeCell("r0", undefined, () => {
-      syncs++;
-      return new Promise<void>(() => {});
-    });
-    const { runtime } = makeRuntime();
-    const rr = makeRepublisher({
-      result: new FakeCell("container", [0]),
-      inputsList: inputs,
-      elementRuns: runsFor(inputs, [r0]),
-      runtime,
-    });
-
-    rr.awaitPendingThenRepublish([r0] as unknown as Cell<any>[]);
-    rr.awaitPendingThenRepublish([r0] as unknown as Cell<any>[]);
-
-    // Two waits racing to clear one document id would let the first to settle
-    // drop a record the second still needs.
-    expect(syncs).toBe(1);
+    rr.awaitPendingThenRepublish([resultCell] as unknown as Cell<any>[]);
+    expect(syncs).toBe(2);
+    await drain(tracked);
   });
 
   it("rebuilds the aggregate from confirmed per-element results", async () => {
@@ -341,30 +357,33 @@ describe("resume-republish unit", () => {
     expect(result.setValues.length).toBe(0);
   });
 
-  it("steps over a sparse hole and a list entry with no element run", async () => {
+  it("re-arms when an appended element has no run after confirmation", async () => {
     // index 1 is a hole; index 2 is present in the list but has no entry in
-    // elementRuns (its run has not been created), exercising both continues.
+    // elementRuns because its reconcile returned while element 0 was syncing.
+    // Element 0 has now confirmed undefined, so no value-change notification
+    // remains to wake the coordinator.
     const inputs: FakeCell[] = [];
     inputs[0] = new FakeCell("e0", null);
     inputs[2] = new FakeCell("e2", null);
     const result = new FakeCell("container", [0]);
-    const r0 = new FakeCell("r0", true);
+    const r0 = new FakeCell("r0", undefined);
     // elementRuns holds only element 0; element 2 is intentionally absent.
     const runs = runsFor([inputs[0]], [r0]);
     const { runtime, tracked } = makeRuntime();
+    let rearms = 0;
     const rr = makeRepublisher({
       result,
       inputsList: inputs,
       elementRuns: runs,
       runtime,
+      rearmReconcile: () => rearms++,
     });
 
     rr.awaitPendingThenRepublish([r0] as unknown as Cell<any>[]);
     await drain(tracked);
 
-    // Only element 0 is rebuilt; the hole and the entry-less index contribute
-    // nothing.
-    expect(result.setValues.at(-1)).toEqual([inputs[0]]);
+    expect(result.setValues.at(-1)).toEqual([]);
+    expect(rearms).toBe(1);
   });
 
   it("logs and stops when the republish commit fails", async () => {
@@ -406,6 +425,29 @@ describe("resume-republish unit", () => {
     await drain(tracked);
     // The rejected sync skips the rebuild entirely; the container is untouched.
     expect(result.setValues.length).toBe(0);
+  });
+
+  it("does not publish after its owner is canceled", async () => {
+    const inputs = [new FakeCell("e0", null)];
+    const pending = Promise.withResolvers<void>();
+    const predicate = new FakeCell("r0", true, () => pending.promise);
+    const result = new FakeCell("container", [inputs[0]]);
+    const { runtime, tracked } = makeRuntime();
+    let active = true;
+    const rr = makeRepublisher({
+      result,
+      inputsList: inputs,
+      elementRuns: runsFor(inputs, [predicate]),
+      runtime,
+      isActive: () => active,
+    });
+
+    rr.awaitPendingThenRepublish([predicate] as unknown as Cell<any>[]);
+    active = false;
+    pending.resolve();
+    await drain(tracked);
+
+    expect(result.setValues).toEqual([]);
   });
 });
 

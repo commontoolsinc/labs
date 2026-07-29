@@ -2093,9 +2093,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       tx: IExtendedStorageTransaction,
       result: Result<Unit, CommitError>,
     ) => void,
-  ): void {
+  ): boolean {
     this.assertWritable("addCommitCallback()");
     this.commitCallbacks.add(callback);
+    return true;
   }
 
   addVerdictCallback(
@@ -2508,8 +2509,8 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
       tx: IExtendedStorageTransaction,
       result: Result<Unit, CommitError>,
     ) => void,
-  ): void {
-    if (this.options.discardSettleCallbacks === true) return;
+  ): boolean {
+    if (this.options.discardSettleCallbacks === true) return false;
     return this.wrapped.addCommitCallback(callback);
   }
 

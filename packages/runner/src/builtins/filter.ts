@@ -37,15 +37,14 @@ import {
   scopedCell,
 } from "./scope-policy.ts";
 import { resolveOpPattern } from "./op-pattern-ref.ts";
+import { listElementKeys } from "./list-element-keys.ts";
 import {
-  type ElementRun,
-  trackListSetupRollback,
-} from "./list-element-rollback.ts";
-import {
-  listElementKeys,
-  releaseRemovedElements,
-} from "./list-element-keys.ts";
-import { createResumeRepublisher } from "./resume-republish.ts";
+  createRegisteredActionRearm,
+  createResumeRepublisher,
+} from "./resume-republish.ts";
+import { createElementRunCommitGuard } from "./element-run-commit-guard.ts";
+import { isRetryImmediately } from "../scheduler/retry-immediately.ts";
+import { createInitialRunGate } from "../scheduler/initial-run-gate.ts";
 import {
   linkResolutionProbe,
   machineryRead,
@@ -92,16 +91,18 @@ export function filter(
 
   // Identity-based tracking: maps element address key → element run.
   // resultCell holds the predicate boolean for this element.
-  const elementRuns = new Map<string, ElementRun>();
-
-  // Cleared when the coordinator is torn down, so the asynchronous resume work
-  // below stops writing to a result container nothing owns any more. The same
-  // teardown releases the children the coordinator still holds; the ones whose
-  // elements left the list were released when they left.
+  const elementRuns = new Map<
+    string,
+    { resultCell: Cell<any>; lastIndex: number }
+  >();
   let active = true;
+  const childCommitGuard = createElementRunCommitGuard({
+    runtime,
+    elementRuns,
+  });
   addCancel(() => {
     active = false;
-    releaseRemovedElements(runtime, elementRuns, new Set());
+    childCommitGuard.cancel();
   });
 
   // Only the initial (resume) reconcile defers its per-element sub-pattern runs
@@ -113,13 +114,9 @@ export function filter(
   // input element when its predicate settled truthy, exclude it when the
   // predicate settled a defined falsy value, and treat an undefined predicate as
   // still streaming in. See resume-republish.ts for the convergence machinery.
-  // The Action the runner registered for this coordinator (a wrapper around
-  // `reconcile`) — the identity the scheduler is keyed by, so the one a
-  // re-arm must name.
-  let registeredAction: Action | undefined;
-
-  const { awaitingResult, awaitPendingThenRepublish } = createResumeRepublisher(
-    {
+  const actionRearm = createRegisteredActionRearm(runtime);
+  const { readPendingSyncs, awaitPendingThenRepublish } =
+    createResumeRepublisher({
       runtime,
       logger,
       isActive: () => active,
@@ -130,17 +127,12 @@ export function filter(
       elementRuns,
       aggregateNoun: "filtered list",
       elementNoun: "predicate",
+      rearmReconcile: actionRearm.rearm,
       contribute: (included, inputElement, out) => {
         if (included) out.push(inputElement);
         else if (included === undefined) return "pending";
       },
-      rearmReconcile: () => {
-        if (registeredAction) {
-          runtime.scheduler.invalidateAction(registeredAction);
-        }
-      },
-    },
-  );
+    });
 
   // Hold the durable list while the input list itself confirms. On a resume
   // reconcile the input can be undefined or a transient empty default standing in
@@ -153,9 +145,11 @@ export function filter(
   ): void => {
     runtime.storageManager.trackUntilSettled(
       inputListCell.sync()
-        .then(() =>
-          !active ? undefined : runtime.editWithRetry((settleTx) => {
-            if (!active || !result) return;
+        .then(() => {
+          if (!active) return;
+          return runtime.editWithRetry((settleTx) => {
+            if (!active) return;
+            if (!result) return;
             const { list } = inputsCell.asSchema(FILTER_INPUT_SCHEMA)
               .withTx(settleTx).get();
             if (
@@ -169,23 +163,30 @@ export function filter(
               );
             }
           }).then(({ error }) => {
+            if (!active) return;
             if (error) {
               logger.warn("resume-input", "settling the resumed input failed", {
                 error,
               });
             }
-          })
-        )
-        .catch((error) =>
-          logger.warn("resume-input", "the resumed input list sync rejected", {
-            error,
-          })
-        ),
+          });
+        })
+        .catch((error) => {
+          if (active) {
+            logger.warn(
+              "resume-input",
+              "the resumed input list sync rejected",
+              { error },
+            );
+          }
+        }),
     );
   };
 
-  const reconcile: Action = (tx: IExtendedStorageTransaction) => {
-    const rollback = trackListSetupRollback(tx, runtime, elementRuns);
+  const reconcileImpl = (
+    tx: IExtendedStorageTransaction,
+    ownsChildChanges: boolean,
+  ) => {
     const elementAwaitSync = resumeBatchAwaitSync;
     // Identity-only list materialization (mirrors map.ts:163-188): read `op`
     // through the schema, but build element cells from the raw slot links
@@ -224,10 +225,6 @@ export function filter(
     ]);
 
     if (!result || result.getAsNormalizedFullLink().scope !== outputScope) {
-      const previousResult = result;
-      rollback.resultReplaced(() => {
-        result = previousResult;
-      });
       const resultSchema = listResultSchema();
       // CT-1623: identify the result container by the reserved output spot
       // (stable, program-independent). See map.ts for rationale.
@@ -244,16 +241,17 @@ export function filter(
         tx,
       );
       const boundResult = scopedCell(runtime, tx, baseResult, outputScope);
-      // Link this cell to the parent cell
-      setResultCell(boundResult, parentCell);
-      // Link the new result cells to the pattern cell too
-      setPatternCell(boundResult, parentCell.key("pattern"));
-      sendResult(tx, boundResult);
-      // The container outlives this reconcile's transaction; a cell bound to
-      // it would pin the settled transaction and its journal for the life of
-      // the coordinator. Rebind per use instead.
+      // The container outlives this reconcile's transaction. Keep only an
+      // unbound cell in coordinator state.
       result = boundResult.withTx();
     }
+    // Each reconcile owns a complete publication. This keeps an overlapping
+    // commit independent from an earlier transaction that first chose the
+    // same deterministic container and later failed.
+    const resultForTx = result.withTx(tx);
+    setResultCell(resultForTx, parentCell);
+    setPatternCell(resultForTx, parentCell.key("pattern"));
+    sendResult(tx, resultForTx);
     // The coordinator's view of the result container is links-only
     // (RESULT_PRESENCE_SCHEMA): get() probes presence and set() diffs
     // prior slots as links, never materializing element contents. A
@@ -291,6 +289,21 @@ export function filter(
       ...(argumentUsage.usesArray ? { array: inputsCell.key("list") } : {}),
       ...(argumentUsage.usesParams ? { params: inputsCell.key("params") } : {}),
     });
+    const runElement = (
+      element: Cell<any>,
+      index: number,
+      resultCell: Cell<any>,
+    ) =>
+      runtime.runner.run(
+        tx,
+        opPattern,
+        createRunInput(element, index),
+        resultCell,
+        {
+          doNotUpdateOnPatternChange: true,
+          awaitSyncBeforeInitialRun: elementAwaitSync,
+        },
+      );
 
     // Resume against confirmed state, not the not-yet-loaded value: on the
     // resume reconcile an undefined container is its durable value still
@@ -309,12 +322,14 @@ export function filter(
       // container was never persisted — so nothing will ever stream in to
       // re-trigger — seed [] once the pull settles, so the coordinator is not
       // left wedged waiting for a value that never arrives.
-      const seedIfStillAbsent = () =>
-        !active ? Promise.resolve() : runtime.editWithRetry((seedTx) => {
+      const seedIfStillAbsent = () => {
+        if (!active) return Promise.resolve();
+        return runtime.editWithRetry((seedTx) => {
           if (!active) return;
           const container = result!.withTx(seedTx);
           if (container.getRaw() === undefined) container.set([]);
         }).then(({ error }) => {
+          if (!active) return;
           if (error) {
             logger.warn(
               "resume-seed",
@@ -323,6 +338,7 @@ export function filter(
             );
           }
         });
+      };
       // Run on either outcome (resolve or reject); the seed recovers from the
       // pull's own rejection, so log it rather than dropping it silently.
       pending.finally(seedIfStillAbsent).catch((error) => {
@@ -362,7 +378,9 @@ export function filter(
     }
     if (list === undefined) {
       probeScoped(() => resultWithLog.set([]));
-      releaseRemovedElements(runtime, elementRuns, new Set());
+      for (const [elementKey, entry] of elementRuns) {
+        childCommitGuard.trackRemoval(tx, elementKey, entry.resultCell);
+      }
       return;
     }
 
@@ -370,26 +388,22 @@ export function filter(
       throw new Error("filter currently only supports arrays");
     }
 
-    // The whole current key set has to exist before any element is touched:
-    // it is what says which predicates the list has stopped holding. A
-    // released predicate's result never arrives, so releasing it also keeps it
-    // out of the hold below.
     const elementKeys = listElementKeys(list);
-    releaseRemovedElements(
-      runtime,
-      elementRuns,
-      new Set(elementKeys.values()),
-    );
+    const currentElementKeys = new Set(elementKeys.values());
+    for (const [elementKey, entry] of elementRuns) {
+      if (currentElementKeys.has(elementKey)) continue;
+      childCommitGuard.trackRemoval(tx, elementKey, entry.resultCell);
+    }
+
+    // Hold aggregate and present-child setup while the resume pass confirms
+    // current element results. These reads keep the coordinator subscribed to
+    // the pending documents.
+    if (readPendingSyncs(tx, currentElementKeys)) return;
 
     if (list.length > 0) resumeBatchAwaitSync = false;
 
     const newArrayValue: any[] = [];
-    // Every predicate the resume pass attaches, whatever it currently reads.
-    // The values read here are local: a child that ran in this session has
-    // written one, and the document behind it may still be catching up. Waiting
-    // on the batch is what tells the reconciles that follow which documents
-    // cannot yet carry a write.
-    const resumeCells: Cell<any>[] = [];
+    const resumeSyncCells: Cell<any>[] = [];
     // Collected when an element is excluded only because its predicate result is
     // still streaming in (reads undefined). Their docs are awaited below so the
     // list can be republished once they confirm — distinct from a predicate that
@@ -403,45 +417,35 @@ export function filter(
 
       if (elementRuns.has(elementKey)) {
         const existing = elementRuns.get(elementKey)!;
-        const previousIndex = existing.lastIndex;
         if (
-          existing.needsSetup ||
-          (argumentUsage.usesIndex && existing.lastIndex !== i)
+          ownsChildChanges && childCommitGuard.needsPresentSetup(
+            elementKey,
+            existing.resultCell,
+            i,
+            argumentUsage.usesIndex,
+          )
         ) {
-          if (awaitingResult(existing.resultCell)) {
-            // This predicate's document has not caught up, so setup written
-            // now cannot land: the commit is rejected as stale and the retry
-            // reads the same document again. Owe the setup until the wait ends.
-            existing.needsSetup = true;
-          } else {
-            runtime.runner.run(
-              tx,
-              opPattern,
-              createRunInput(list[i], i),
-              existing.resultCell,
-              {
-                doNotUpdateOnPatternChange: true,
-                awaitSyncBeforeInitialRun: elementAwaitSync,
-              },
-            );
-            rollback.setupIssued(existing);
-          }
+          runElement(list[i], i, existing.resultCell);
         }
-        existing.lastIndex = i;
-        if (previousIndex !== i) rollback.indexChanged(existing, previousIndex);
+        childCommitGuard.trackPresent(
+          tx,
+          elementKey,
+          existing.resultCell,
+          i,
+        );
       } else {
+        if (!ownsChildChanges) continue;
         const boundResultCell = runtime.getCell(
           parentCell.space,
           { filter: result, elementKey },
           undefined,
           tx,
         );
-        // The stored cell outlives this reconcile's transaction: it lives in
-        // `elementRuns` and in the cancel closure below, both of which last as
-        // long as the coordinator. A cell bound to the transaction would pin
-        // the settled transaction, its journal, and everything it read.
+        // The stored cell outlives this reconcile's transaction. Keep only an
+        // unbound cell in the coordinator and its cleanup closure.
         const resultCell = boundResultCell.withTx();
-        runtime.runner.run(
+        const initialRunGate = createInitialRunGate();
+        const childRun = runtime.runner.runChild(
           tx,
           opPattern,
           createRunInput(list[i], i),
@@ -449,6 +453,7 @@ export function filter(
           {
             doNotUpdateOnPatternChange: true,
             awaitSyncBeforeInitialRun: elementAwaitSync,
+            initialRunGate: initialRunGate.gate,
           },
         );
         // Link these individual cells to the top cell
@@ -456,15 +461,19 @@ export function filter(
         // Link the new result cells to the pattern cell too
         setPatternCell(boundResultCell, parentCell.key("pattern"));
 
-        const entry = { resultCell, lastIndex: i, needsSetup: false };
-        elementRuns.set(elementKey, entry);
-        rollback.created(elementKey, entry);
+        elementRuns.set(elementKey, { resultCell, lastIndex: i });
+
+        childCommitGuard.trackPresent(tx, elementKey, resultCell, i, {
+          created: true,
+          release: childRun.release,
+          initialRunGate,
+        });
       }
 
       // Read predicate result — creates subscription for reactivity.
       // Truthy/falsy coercion, not strict boolean.
       const childCell = elementRuns.get(elementKey)!.resultCell;
-      if (elementAwaitSync) resumeCells.push(childCell);
+      if (elementAwaitSync) resumeSyncCells.push(childCell);
       const included = childCell.withTx(tx).get();
       if (included) {
         newArrayValue.push(list[i]); // Original element cell reference
@@ -473,23 +482,21 @@ export function filter(
       }
     }
 
-    // Wait for the whole resume batch before the aggregate moves. Its
-    // documents are the ones still catching up, and republishing from them once
-    // they confirm is what keeps a partial view out of the durable container.
-    if (resumeCells.length > 0) {
-      awaitPendingThenRepublish(resumeCells);
+    // Confirm every predicate document attached by the resume pass before a
+    // later reconcile changes child setup or the aggregate.
+    if (resumeSyncCells.length > 0) {
+      awaitPendingThenRepublish(resumeSyncCells);
       return;
     }
 
-    // A predicate attached after the resume pass whose result is still
-    // streaming in reads undefined and would exclude its element, shrinking
-    // the aggregate below the durable value the container already holds.
-    // Republishing that shrink is the reload flicker — a populated list blinks
-    // to empty and refills. Hold the durable value and wait for the pending
-    // predicates to confirm their docs, then republish against the confirmed
-    // values. A predicate whose value arrived is included; one confirmed
-    // undefined is excluded — so a genuine shrink still converges instead of
-    // freezing.
+    // Resume preservation: a predicate whose result is still streaming in reads
+    // undefined and would exclude its element, shrinking the aggregate below the
+    // durable value the container already holds. Republishing that shrink is the
+    // reload flicker — a populated list blinks to empty and refills. Hold the
+    // durable value and wait for the pending predicates to confirm their docs,
+    // then republish against the confirmed values. A predicate whose value
+    // arrived is included; one confirmed undefined is excluded — so a genuine
+    // shrink still converges instead of freezing.
     if (
       priorLen > 0 && newArrayValue.length < priorLen && pendingCells.length > 0
     ) {
@@ -499,6 +506,18 @@ export function filter(
     probeScoped(() => resultWithLog.set(newArrayValue));
   };
 
+  const reconcile: Action = (tx: IExtendedStorageTransaction) => {
+    if (!active) return;
+    const ownsChildChanges = childCommitGuard.begin(tx);
+    try {
+      return reconcileImpl(tx, ownsChildChanges);
+    } catch (error) {
+      // RetryImmediately aborts without committing, so its commit callbacks do
+      // not run. Remove this attempt before the scheduler starts its retry.
+      if (isRetryImmediately(error)) childCommitGuard.abort(tx);
+      throw error;
+    }
+  };
   // Child-starting coordinator: never rehydrates clean on resume — the
   // reconcile must run to re-attach the per-element children (which then
   // rehydrate their own persisted state). See
@@ -506,8 +525,6 @@ export function filter(
   return {
     action: reconcile,
     resumeMode: "always-run",
-    onActionRegistered: (action) => {
-      registeredAction = action;
-    },
+    onActionRegistered: actionRearm.onActionRegistered,
   };
 }
