@@ -4,12 +4,17 @@ import {
   type Default,
   equals,
   handler,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   llmDialog,
   NAME,
+  observeAvailability,
   pattern,
   patternTool,
+  resultOf,
   Stream,
-  toSchema,
   UI,
   wish,
   Writable,
@@ -173,9 +178,16 @@ const listPiecesPattern = pattern<
 // --- Main pattern ---
 
 const KnowledgeGraph = pattern<Input>(() => {
-  const mentionable = wish<Writable<MentionablePiece>[] | Default<[]>>({
+  const mentionableWish = wish<Writable<MentionablePiece>[] | Default<[]>>({
     query: "#mentionable",
-  }).result;
+  });
+  const mentionable = computed(() => {
+    const result = mentionableWish.result;
+    return isPending(result) || hasError(result) ||
+        isSyncing(result) || hasSchemaMismatch(result)
+      ? []
+      : resultOf(result);
+  });
 
   const baseEdges = computed(() => {
     const result: GraphEdge[] = [];
@@ -201,13 +213,23 @@ const KnowledgeGraph = pattern<Input>(() => {
   });
 
   // Wish for summary index data
-  const { entries: summaryEntries } = wish<
+  const summaryWish = wish<
     {
       entries: Array<
         { piece: Writable<MentionablePiece>; summary: string; name: string }
       >;
     }
-  >({ query: "#summaryIndex" }).result!;
+  >({ query: "#summaryIndex" });
+  const observedSummaryEntries = observeAvailability(
+    resultOf(summaryWish.result).entries,
+  );
+  const summaryEntries = computed(() => {
+    const result = observedSummaryEntries;
+    return isPending(result) || hasError(result) ||
+        isSyncing(result) || hasSchemaMismatch(result)
+      ? []
+      : resultOf(result);
+  });
 
   // LLM agent state
   const messages = new Writable<BuiltInLLMMessage[]>([]);
@@ -249,7 +271,7 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
 
   const allEdgesFromBase = baseEdges;
 
-  // LLM dialog with resultSchema — agent produces structured annotations
+  // Typed LLM dialog — the transformer injects the presentResult schema.
   const dialogOptions = {
     system: agentSystemPrompt,
     messages,
@@ -260,11 +282,16 @@ Use exact piece names from the piece list above for fromName/toName/pieceNames.`
       }),
     },
     builtinTools: false,
-    resultSchema: toSchema<GraphAnnotations>(),
   };
-  const { addMessage, pending, result: annotations } = llmDialog(
-    dialogOptions,
-  );
+  const dialog = llmDialog<GraphAnnotations>(dialogOptions);
+  const { addMessage, pending } = dialog;
+  const annotations = computed(() => {
+    const result = dialog.result;
+    return isPending(result) || hasError(result) ||
+        isSyncing(result) || hasSchemaMismatch(result)
+      ? undefined
+      : resultOf(result);
+  });
 
   // Resolve annotations into actual GraphEdges by looking up piece refs by name
   const agentEdges = computed(() => {

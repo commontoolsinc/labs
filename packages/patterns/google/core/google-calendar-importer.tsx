@@ -6,6 +6,7 @@ import {
   NAME,
   pattern,
   patternTool,
+  resultOf,
   str,
   UI,
   type VNode,
@@ -597,11 +598,11 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
     // Reactive clock for relative "upcoming" filters; ticks each minute so the
     // displayed event list refreshes as events move into the past.
     const nowCell = wish<number>({ query: "#now/60" });
+    const nowCellValue = resultOf(nowCell.result);
 
     // Computed values for pagination
     const upcomingEvents = computed(() => {
-      if (nowCell.result == null) return [];
-      const now = new Date(nowCell.result);
+      const now = new Date(nowCellValue);
       return [...events.get()]
         .filter((e) => new Date(e.startDateTime || e.start) >= now)
         .sort((a, b) =>
@@ -621,9 +622,8 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
 
     // Paginated events for display - use computed with events Cell directly
     const _paginatedEvents = computed(() => {
-      if (nowCell.result == null) return [];
       const allEvents = events.get() || [];
-      const now = new Date(nowCell.result);
+      const now = new Date(nowCellValue);
       const upcoming = [...allEvents]
         .filter((e: CalendarEvent) =>
           new Date(e.startDateTime || e.start) >= now
@@ -1011,14 +1011,20 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
       ),
       getUpcomingEvents: patternTool(
         pattern(
-          ({ count, events }: { count: number; events: CalendarEvent[] }) => {
-            const nowCell = wish<number>({ query: "#now/60" });
+          (
+            { count, events, now }: {
+              count: number;
+              events: CalendarEvent[];
+              now: number;
+            },
+          ) => {
             return computed(() => {
               if (!events || events.length === 0) return "No events";
-              if (nowCell.result == null) return "No events";
-              const now = new Date(nowCell.result);
+              const currentTime = new Date(now);
               const upcoming = events
-                .filter((e) => new Date(e.startDateTime || e.start) >= now)
+                .filter((e) =>
+                  new Date(e.startDateTime || e.start) >= currentTime
+                )
                 .slice(0, count || 5);
               return upcoming.map((event) =>
                 `${
@@ -1034,15 +1040,13 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
             });
           },
         ),
-        { events },
+        { events, now: nowCellValue },
       ),
       getTodaysEvents: patternTool(
-        pattern(({ events }: { events: CalendarEvent[] }) => {
-          const nowCell = wish<number>({ query: "#now/60" });
+        pattern(({ events, now }: { events: CalendarEvent[]; now: number }) => {
           return computed(() => {
             if (!events || events.length === 0) return "No events";
-            if (nowCell.result == null) return "No events";
-            const today = new Date(nowCell.result).toISOString().split("T")[0];
+            const today = new Date(now).toISOString().split("T")[0];
             const todayEvents = events.filter((e) =>
               e.start === today ||
               (e.startDateTime && e.startDateTime.startsWith(today))
@@ -1059,7 +1063,7 @@ const GoogleCalendarImporter = pattern<GoogleCalendarImporterInput, Output>(
             ).join("\n");
           });
         }),
-        { events },
+        { events, now: nowCellValue },
       ),
     };
   },

@@ -7,6 +7,14 @@ import {
   linkResolutionProbe,
   machineryRead,
 } from "../storage/reactivity-log.ts";
+import {
+  type DataUnavailableVariant,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
+import {
+  preferDataUnavailable,
+  readAvailabilityAwareCell,
+} from "../data-unavailability.ts";
 
 type ElementRuns = Map<
   string,
@@ -25,7 +33,7 @@ export type ElementContribution = (
   value: unknown,
   inputElement: unknown,
   out: any[],
-) => "pending" | void;
+) => "pending" | DataUnavailableVariant | void;
 
 export interface ResumeRepublisher {
   /**
@@ -102,6 +110,7 @@ export function createResumeRepublisher(
       const keyCounts = new Map<string, number>();
       const out: any[] = [];
       const stillPending: Cell<any>[] = [];
+      let unavailable: DataUnavailableVariant | undefined;
       for (let i = 0; i < list.length; i++) {
         if (!(i in list)) continue;
         const { dedupKey, linkKey } = cellIdentityKey(list[i]);
@@ -110,15 +119,23 @@ export function createResumeRepublisher(
         const elementKey = JSON.stringify([...linkKey, occurrence]);
         const entry = elementRuns.get(elementKey);
         if (!entry) continue;
-        const value = entry.resultCell.withTx(tx).get();
+        const value = readAvailabilityAwareCell(tx, entry.resultCell);
+        const contribution = contribute(value, list[i], out);
+        if (isDataUnavailable(contribution)) {
+          unavailable = preferDataUnavailable(unavailable, contribution);
+        }
         if (
-          contribute(value, list[i], out) === "pending" &&
+          contribution === "pending" &&
           !awaited.has(entry.resultCell.getAsNormalizedFullLink().id)
         ) {
           stillPending.push(entry.resultCell);
         }
       }
       if (stillPending.length > 0) return stillPending;
+      if (unavailable !== undefined) {
+        result.withTx(tx).setRawUntyped(unavailable, true);
+        return [];
+      }
       // The element reads above are real content reads (the aggregate genuinely
       // depends on them, so they taint J). The container write only diffs prior
       // slots for identity, so it runs under the link-resolution probe (S16) to

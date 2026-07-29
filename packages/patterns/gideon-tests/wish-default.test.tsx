@@ -12,6 +12,7 @@ import {
   computed,
   NAME,
   pattern,
+  resultOf,
   wish,
   Writable,
 } from "commonfabric";
@@ -21,9 +22,12 @@ interface MinimalPiece {
 }
 
 export default pattern(() => {
-  const pieceRegistry = wish<Writable<MinimalPiece[]>>({
+  // This is the core thing being tested: #pieceRegistry should resolve as a
+  // writable array.
+  const pieceRegistryWish = wish<Writable<MinimalPiece[]>>({
     query: "#pieceRegistry",
-  }).result!;
+  });
+  const pieceRegistry = resultOf(pieceRegistryWish.result);
 
   // Track state for assertions
   const initialLength = computed(() => pieceRegistry?.get?.()?.length ?? -1);

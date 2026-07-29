@@ -3,8 +3,10 @@ import {
   Default,
   generateText,
   ifElse,
+  isPending,
   NAME,
   pattern,
+  resultOf,
   UI,
   type VNode,
 } from "commonfabric";
@@ -38,12 +40,13 @@ const SvgDiagram = pattern<SvgDiagramInput, SvgDiagramOutput>(
       return `Create a clear SVG diagram illustrating: ${t}`;
     });
 
-    const response = generateText({
+    const responseRequest = generateText({
       system:
         "You create clear, well-structured SVG diagrams. Output a single <svg> element with an appropriate viewBox. Use shapes (rect, circle, ellipse), paths, lines, text, and arrows to illustrate concepts. Use readable fonts and clear colors. Output ONLY the SVG element with no surrounding explanation or markdown.",
       prompt,
       context,
     });
+    const response = resultOf(responseRequest);
 
     return {
       [NAME]: computed(() => (topic ? `SVG Diagram: ${topic}` : "SVG Diagram")),
@@ -57,18 +60,18 @@ const SvgDiagram = pattern<SvgDiagramInput, SvgDiagramOutput>(
 
           <cf-vstack gap="3" style="padding: 1.5rem;">
             {ifElse(
-              response.pending,
+              isPending(responseRequest),
               <div style="color: var(--cf-theme-color-text-secondary);">
                 <cf-loader show-elapsed /> Generating diagram...
               </div>,
-              <cf-svg content={response.result} />,
+              <cf-svg content={response} />,
             )}
           </cf-vstack>
         </cf-screen>
       ),
       topic,
-      diagram: computed(() => response.result || ""),
-      pending: response.pending,
+      diagram: computed(() => response || ""),
+      pending: isPending(responseRequest),
     };
   },
 );

@@ -182,7 +182,7 @@ describe("async builtin work registration", () => {
 
     await expectBarriersSpanTheCall(
       run,
-      () => run.withTx().key("result").get(),
+      () => run.withTx().get(),
       { ok: true },
     );
   });
@@ -229,7 +229,7 @@ describe("async builtin work registration", () => {
 
     await expectBarriersSpanTheCall(
       run,
-      () => run.withTx().key("result").get(),
+      () => run.withTx().get(),
       { ok: true },
     );
   });
@@ -259,7 +259,7 @@ describe("async builtin work registration", () => {
 
     await expectBarriersSpanTheCall(
       run,
-      () => run.withTx().key("result").get(),
+      () => run.withTx().get(),
       "generated",
     );
   });

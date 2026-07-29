@@ -64,10 +64,16 @@ import {
   computed,
   Default,
   handler,
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
   NAME,
+  observeAvailability,
   pattern,
   type PerSpace,
   type PerUser,
+  resultOf,
   Stream,
   UI,
   type VNode,
@@ -932,8 +938,8 @@ export interface CozyPollOutput {
   userCount: number;
   optionCount: number;
   voteCount: number;
-  // The current local day ("YYYY-MM-DD") that votes are filtered to; ""
-  // until the `#now/300` wish resolves.
+  // The current local day ("YYYY-MM-DD") that votes are filtered to;
+  // unavailable until the `#now/300` wish resolves.
   todayDate: string;
   // Votes cast on the current day — the only votes the UI shows and tallies.
   todaysVotes: readonly Vote[];
@@ -1002,12 +1008,9 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // durably captures the piece's FIRST-EVER load time and never advances
     // again, which would freeze the current-day filter (and every new
     // `castAt`) at the poll's birth day. The body cannot read the ambient
-    // clock, so `nowTick` reads null until the wish resolves — and forever on
-    // pre-#4740 runtimes, which lack `#now` — and every downstream read
-    // guards that window (an empty vote view, a placeholder date, and vote /
-    // visit handlers that no-op).
+    // clock, so `nowTick` remains unavailable until the wish resolves.
     const nowTickWish = wish<number>({ query: "#now/300" });
-    const nowTick = computed(() => nowTickWish.result ?? null);
+    const nowTick = resultOf(nowTickWish.result);
     // Two-step confirmation for destructive actions. Stores the optionId
     // pending remove-confirm (null or undefined = nothing pending). Same idiom as
     // parking-coordinator's `removePersonConfirmTarget`.
@@ -1027,20 +1030,47 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const profileWish = wish<LunchProfile>({ query: "#profile" });
     const profileNameWish = wish<string>({ query: "#profileName" });
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
-    // Bind the badge/identity to the wish result DIRECTLY (the demo idiom). Do
-    // NOT reintroduce a `profile ?? …` injection override: an unset optional
-    // cell input is a truthy proxy at pattern-build time, so `??` returns that
-    // broken proxy instead of the real result and every badge falls back to
-    // "Unknown profile". Profile-backed rendering is verified at the browser
-    // tier (the scrabble/battleship precedent), not via a pattern-body cell
-    // injection.
-    const viewerProfileCell = profileWish.result;
-    const viewerProfileName = computed(() =>
-      trimmedName(profileNameWish.result ?? "")
-    );
-    const viewerProfileAvatar = computed(() =>
-      (profileAvatarWish.result ?? "").trim()
-    );
+    const observedProfileSetupUI = observeAvailability(profileWish[UI]);
+    const viewerProfileSetupUI = computed(() => {
+      if (
+        hasError(observedProfileSetupUI) ||
+        isPending(observedProfileSetupUI) ||
+        isSyncing(observedProfileSetupUI) ||
+        hasSchemaMismatch(observedProfileSetupUI)
+      ) return <></>;
+      return observedProfileSetupUI;
+    });
+    // Bind the badge/identity to the typed wish results after resolving
+    // availability inside computed boundaries. Do NOT reintroduce a
+    // `profile ?? …` injection override: an unset optional cell input is a
+    // truthy proxy at pattern-build time, so `??` returns that broken proxy
+    // instead of the real result and every badge falls back to "Unknown
+    // profile". Profile-backed rendering is verified at the browser tier (the
+    // scrabble/battleship precedent), not via a pattern-body cell injection.
+    const viewerProfileCell = computed(() => {
+      const state = profileWish.result;
+      if (
+        hasError(state) || isPending(state) || isSyncing(state) ||
+        hasSchemaMismatch(state)
+      ) return undefined;
+      return resultOf(state);
+    });
+    const viewerProfileName = computed(() => {
+      const state = profileNameWish.result;
+      if (
+        hasError(state) || isPending(state) || isSyncing(state) ||
+        hasSchemaMismatch(state)
+      ) return "";
+      return resultOf(state);
+    });
+    const viewerProfileAvatar = computed(() => {
+      const state = profileAvatarWish.result;
+      if (
+        hasError(state) || isPending(state) || isSyncing(state) ||
+        hasSchemaMismatch(state)
+      ) return "";
+      return resultOf(state);
+    });
     // This pattern renders identity only from the STORED directory entries, so
     // a later profile switch cannot orphan the joined identity.
     const participantIdentity = ParticipantIdentityCard({
@@ -1051,7 +1081,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       profile: viewerProfileCell,
       profileName: viewerProfileName,
       profileAvatar: viewerProfileAvatar,
-      profileSetupUI: profileWish[UI],
+      profileSetupUI: viewerProfileSetupUI,
     });
     const boundAddOption = addOption({
       options,
@@ -1096,12 +1126,10 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // Current-day filter: the UI only shows votes cast on the current day
     // (local calendar), per the shared tick. Derived at top level so every
     // remote voter's vote entity resolves (same reason `ranked` is computed
-    // here, not per-option — see the swatch comment below). While `#now/300`
-    // is still resolving the day key reads "" and the current-day vote set is
-    // empty.
-    const todayKey = computed(() => (nowTick ? dayKeyOf(nowTick) : ""));
+    // here, not per-option — see the swatch comment below). Both derived
+    // values remain unavailable while `#now/300` is resolving.
+    const todayKey = computed(() => dayKeyOf(nowTick));
     const todaysVotes = computed(() => {
-      if (!nowTick) return EMPTY_VOTES;
       const key = dayKeyOf(nowTick);
       return votes.filter((v) =>
         typeof v.castAt === "number" && dayKeyOf(v.castAt) === key
@@ -1215,7 +1243,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                     const u = userCount ?? 0;
                     const o = optionCount ?? 0;
                     const v = todayVoteCount ?? 0;
-                    const todayLabel = nowTick ? dayLabelOf(nowTick) : "…";
+                    const todayLabel = dayLabelOf(nowTick);
                     const admin = trimmedName(adminName);
                     const viewer = me;
                     const amAdmin = isAdmin;

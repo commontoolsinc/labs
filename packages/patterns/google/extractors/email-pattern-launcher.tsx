@@ -18,13 +18,14 @@
  * 3. Link: cf piece link google-auth/auth email-pattern-launcher/overrideAuth
  */
 import {
-  //compileAndRun,
   computed,
   fetchJson,
-  //fetchProgram,
+  hasError,
+  isPending,
   NAME,
   navigateTo,
   pattern,
+  resultOf,
   TILE_UI,
   toIndentedDebugString,
   UI,
@@ -146,9 +147,11 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
     url: "/api/patterns/google/extractors/email-pattern-registry.json",
   });
 
-  const registry = computed<RegistryEntry[]>(() => registryFetch.result || []);
-  const registryError = computed(() => registryFetch.error);
-  const registryLoading = computed(() => registryFetch.pending);
+  const registry = resultOf(registryFetch);
+  const registryError = computed(() =>
+    hasError(registryFetch) ? registryFetch.error.message : undefined
+  );
+  const registryLoading = computed(() => isPending(registryFetch));
 
   // ==========================================================================
   // BUILD GMAIL QUERY AND FETCH EMAILS
@@ -231,28 +234,6 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
 
   // Launch each matched pattern - use .map() for reactive pattern instantiation
   const launchedPatterns = patternMatches.map((matchInfo) => {
-    /*
-    const url = computed(() => `/api/patterns/${matchInfo.patternUri}`);
-
-    // Fetch the pattern program
-    const programFetch = fetchProgram({ url });
-
-    // Use computed to safely handle when program is undefined/pending
-    // Filter out undefined elements to handle race condition where array proxy
-    // pre-allocates with undefined before populating elements
-    const compileParams = computed(() => ({
-      // Note: Type predicate removed - doesn't work with OpaqueCell types after transformation
-      files: (programFetch.result?.files ?? []).filter(
-        (f) => f !== undefined && f !== null && typeof f.name === "string",
-      ),
-      main: programFetch.result?.main ?? "",
-      input: { overrideAuth },
-    }));
-
-    // Compile and run the pattern
-    const compiled = compileAndRun(compileParams);
-    */
-
     const result = computed<Record<string, unknown> | null>(() => {
       const child = patterns[matchInfo.patternUri]?.({ overrideAuth });
       if (!child) return null;
@@ -267,13 +248,10 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
       patternUri: matchInfo.patternUri,
       entry: matchInfo.entry,
       matchedEmails: matchInfo.matchedEmails,
-      pending: false, /*computed(
-        () => programFetch.pending || compiled.pending,
-      ),*/
+      // Registry-backed child factories instantiate synchronously. The only
+      // asynchronous state in this pattern is the registry fetch above.
+      pending: false,
       error: null,
-      /* error: computed(
-        () => programFetch.error || compiled.error,
-      ),*/
       result,
     } satisfies LaunchedPatternInfo;
   });

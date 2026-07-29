@@ -1,4 +1,4 @@
-import { fetchJson, lift, NAME, pattern, UI } from "commonfabric";
+import { fetchJson, lift, NAME, pattern, resultOf, UI } from "commonfabric";
 
 /**
  * Fetch the Cheeseboard pizza schedule via Toolshed's web-read endpoint and
@@ -77,14 +77,14 @@ type WebReadResult = {
 */
 const createPizzaListCell = lift<{ result: WebReadResult }, CheeseboardEntry[]>(
   ({ result }) => {
-    return extractPizzas(result?.content ?? "");
+    return extractPizzas(result.content);
   },
 );
 
 export default pattern(() => {
   const cheeseBoardUrl =
     "https://cheeseboardcollective.coop/home/pizza/pizza-schedule/";
-  const { result } = fetchJson<WebReadResult>({
+  const request = fetchJson<WebReadResult>({
     url: "/api/agent-tools/web-read",
     options: {
       method: "POST",
@@ -97,6 +97,7 @@ export default pattern(() => {
       },
     },
   });
+  const result = resultOf(request);
 
   const pizzaList = createPizzaListCell({ result });
 

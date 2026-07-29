@@ -903,6 +903,10 @@ describe("computed cell kinds", () => {
         "generateText",
         "navigateTo",
         "wish",
+        "latestComplete",
+        "streamDataResult",
+        "compileAndRunResult",
+        "sqliteQueryResult",
         "sqliteQuery",
         "inspectConfLabel",
       ]);

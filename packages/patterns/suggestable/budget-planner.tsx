@@ -3,8 +3,10 @@ import {
   Default,
   generateObject,
   ifElse,
+  isPending,
   NAME,
   pattern,
+  resultOf,
   UI,
   type VNode,
 } from "commonfabric";
@@ -46,7 +48,7 @@ const BudgetPlanner = pattern<BudgetInput, BudgetOutput>(
       return `Create a budget breakdown for: ${t}. Suggest 4-8 spending categories with dollar amounts that sum to exactly $${maxAmount}.`;
     });
 
-    const response = generateObject<{ items: BudgetItem[] }>({
+    const responseRequest = generateObject<{ items: BudgetItem[] }>({
       system:
         "You create practical budget breakdowns. Each item should have a descriptive name and a reasonable dollar amount. Keep categories specific and actionable. Amounts should be whole numbers.",
       prompt,
@@ -70,8 +72,9 @@ const BudgetPlanner = pattern<BudgetInput, BudgetOutput>(
       },
       model: "anthropic:claude-haiku-4-5",
     });
+    const response = resultOf(responseRequest);
 
-    const items = computed(() => response.result?.items || []);
+    const items = computed(() => response.items || []);
 
     const total = computed(() => {
       let sum = 0;
@@ -98,7 +101,7 @@ const BudgetPlanner = pattern<BudgetInput, BudgetOutput>(
 
           <cf-vstack gap="3" style="padding: 1.5rem;">
             {ifElse(
-              response.pending,
+              isPending(responseRequest),
               <div style="color: var(--cf-theme-color-text-secondary);">
                 <cf-loader show-elapsed /> Generating budget...
               </div>,
@@ -169,7 +172,7 @@ const BudgetPlanner = pattern<BudgetInput, BudgetOutput>(
       items,
       total,
       remaining,
-      pending: response.pending,
+      pending: isPending(responseRequest),
     };
   },
 );

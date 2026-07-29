@@ -14,12 +14,14 @@ import {
   computed,
   Default,
   handler,
+  hasError,
   ifElse,
   NAME,
   pattern,
   type PerSession,
   type PerSpace,
   type PerUser,
+  resultOf,
   Stream,
   UI,
   wish,
@@ -1185,12 +1187,15 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
     });
     const profileNameWish = wish<string>({ query: "#profileName" });
     const profileAvatarWish = wish<string>({ query: "#profileAvatar" });
+    const profile = resultOf(profileWish.result);
 
-    const profileName = computed(() => profileNameWish.result ?? "");
-    const profileAvatar = computed(() => profileAvatarWish.result ?? "");
-    const hasProfile = computed(() =>
-      (profileNameWish.result ?? "").trim() !== ""
-    );
+    const profileName = hasError(profileNameWish.result)
+      ? ""
+      : resultOf(profileNameWish.result);
+    const profileAvatar = hasError(profileAvatarWish.result)
+      ? ""
+      : resultOf(profileAvatarWish.result);
+    const hasProfile = computed(() => profileName.trim() !== "");
     // The button is the JOIN action; the adjacent `#profile` wish UI is the
     // create/pick surface. Label it as such (a disabled "Join" until the viewer
     // has a profile) rather than mislabeling the button "Create a profile…".
@@ -1211,7 +1216,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
     const joinGame = joinGameHandler({
       name: profileName,
       avatar: profileAvatar,
-      profile: profileWish.result,
+      profile,
       myName,
       rack,
       placed,
@@ -1298,7 +1303,7 @@ const ScrabbleGame = pattern<GameInput, GameOutput>(
                     {/* The viewer's own identity, first-class (CT-1761). */}
                     <cf-profile-badge
                       variant="chip"
-                      $profile={profileWish.result}
+                      $profile={profile}
                     />
                   </cf-hstack>
                 )

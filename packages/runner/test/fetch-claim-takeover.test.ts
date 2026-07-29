@@ -22,6 +22,10 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import {
+  DataUnavailable,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
@@ -184,12 +188,15 @@ describe("fetch builtins: taking over a claim", () => {
     await runtime.settled();
     await result.pull();
 
-    expect(result.key("error").get()).toContain("404");
-    expect(result.key("result").get()).toBeUndefined();
+    const unavailable = result.key("result").get();
+    expect(isDataUnavailable(unavailable)).toBe(true);
+    expect(
+      isDataUnavailable(unavailable) ? unavailable.error?.message : undefined,
+    ).toContain("404");
     expect(result.key("pending").get()).toBe(false);
   });
 
-  it("clears its outputs when the program URL is empty", async () => {
+  it("publishes schema mismatch when the program URL is empty", async () => {
     let requests = 0;
     globalThis.fetch = () => {
       requests++;
@@ -215,7 +222,9 @@ describe("fetch builtins: taking over a claim", () => {
 
     expect(requests).toBe(0);
     expect(result.key("pending").get()).toBe(false);
-    expect(result.key("result").get()).toBeUndefined();
+    expect(result.key("result").get()).toBe(
+      DataUnavailable.schemaMismatch(),
+    );
     expect(result.key("error").get()).toBeUndefined();
   });
 

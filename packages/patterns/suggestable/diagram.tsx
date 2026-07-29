@@ -3,8 +3,10 @@ import {
   Default,
   generateText,
   ifElse,
+  isPending,
   NAME,
   pattern,
+  resultOf,
   UI,
   type VNode,
 } from "commonfabric";
@@ -37,12 +39,13 @@ const Diagram = pattern<DiagramInput, DiagramOutput>(({ topic, context }) => {
     return `Create a clear ASCII diagram illustrating: ${t}`;
   });
 
-  const response = generateText({
+  const responseRequest = generateText({
     system:
       "You create clear, well-structured ASCII diagrams using box-drawing characters, arrows, and text art. Use ┌─┐│└─┘ for boxes, ──▶ for arrows, and keep diagrams compact but readable. Output ONLY the diagram with no surrounding explanation.",
     prompt,
     context,
   });
+  const response = resultOf(responseRequest);
 
   return {
     [NAME]: computed(() => (topic ? `Diagram: ${topic}` : "Diagram")),
@@ -56,20 +59,20 @@ const Diagram = pattern<DiagramInput, DiagramOutput>(({ topic, context }) => {
 
         <cf-vstack gap="3" style="padding: 1.5rem;">
           {ifElse(
-            response.pending,
+            isPending(responseRequest),
             <div style="color: var(--cf-theme-color-text-secondary);">
               <cf-loader show-elapsed /> Generating diagram...
             </div>,
             <pre style="font-family: monospace; font-size: 0.85rem; line-height: 1.4; overflow-x: auto; white-space: pre; background: var(--cf-theme-color-surface, #f5f5f5); padding: 1rem; border-radius: 0.5rem;">
-              {response.result}
+              {response}
             </pre>,
           )}
         </cf-vstack>
       </cf-screen>
     ),
     topic,
-    diagram: computed(() => response.result || ""),
-    pending: response.pending,
+    diagram: computed(() => response || ""),
+    pending: isPending(responseRequest),
   };
 });
 

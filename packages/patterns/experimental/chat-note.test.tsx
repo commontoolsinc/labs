@@ -1,4 +1,12 @@
-import { action, assert, pattern, UI, wish, Writable } from "commonfabric";
+import {
+  action,
+  assert,
+  pattern,
+  resultOf,
+  UI,
+  wish,
+  Writable,
+} from "commonfabric";
 import { findNode, propsOf } from "../test/vnode-helpers.ts";
 import ChatNote from "./chat-note.tsx";
 
@@ -22,9 +30,10 @@ const backlinkStreamOf = (subject: { [UI]: unknown }): BacklinkStream => {
 };
 
 export default pattern(() => {
-  const pieceRegistry = wish<Writable<Array<{ title?: string }>>>({
+  const pieceRegistryWish = wish<Writable<Array<{ title?: string }>>>({
     query: "#pieceRegistry",
-  }).result!;
+  });
+  const pieceRegistry = resultOf(pieceRegistryWish.result);
   const subject = ChatNote({
     title: "Subject",
     content: "",

@@ -499,6 +499,7 @@ describe("plain-schema array traversal", () => {
       expect(sourceSpace).toBe(space);
       expect(link.path).toEqual([]);
       missingTargetKicks.push(link.id);
+      return "pending";
     };
     let value: readonly Record<string, never>[] | undefined;
     try {
@@ -562,6 +563,7 @@ describe("plain-schema array traversal", () => {
       expect(sourceSpace).toBe(space);
       expect(link.path).toEqual([]);
       missingTargetKicks.push(link.id);
+      return "pending";
     };
     let value: readonly { label: string }[] | undefined;
     try {

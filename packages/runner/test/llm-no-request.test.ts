@@ -3,8 +3,9 @@
  *
  * A builtin that is handed nothing to send — `llm` with an empty message list,
  * `generateText`/`generateObject` with an empty prompt and no messages — must
- * not call the client. It settles the result cell instead: `pending` false,
- * `result` and `error` cleared. The smoke and outbox suites always supply a
+ * not call the client. Legacy `llm` settles its state wrapper; direct
+ * `generateText`/`generateObject` publish schema-mismatch because an empty
+ * request cannot produce a value. The smoke and outbox suites always supply a
  * prompt, so this branch had no coverage.
  *
  * Each test spies the client method the builtin would call and asserts it never
@@ -22,6 +23,7 @@ import {
   resetMockMode,
 } from "@commonfabric/llm/client";
 import { LLMClient } from "@commonfabric/llm";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { waitForLlmSettled } from "./support/llm-result.ts";
 import { Runtime } from "../src/runtime.ts";
@@ -106,11 +108,10 @@ describe("LLM builtin no-request paths", () => {
       const result = runtime.run(tx, testPattern, {}, resultCell);
       tx.commit();
 
-      const settled = await waitForLlmSettled(runtime, result);
+      await runtime.settledFor(result);
 
       expect(calls).toBe(0);
-      expect(settled.pending).toBe(false);
-      expect(result.key("result").get()).toBeUndefined();
+      expect(result.get()).toBe(DataUnavailable.schemaMismatch());
     } finally {
       LLMClient.prototype.sendRequest = original;
     }
@@ -140,11 +141,10 @@ describe("LLM builtin no-request paths", () => {
       const result = runtime.run(tx, testPattern, {}, resultCell);
       tx.commit();
 
-      const settled = await waitForLlmSettled(runtime, result);
+      await runtime.settledFor(result);
 
       expect(calls).toBe(0);
-      expect(settled.pending).toBe(false);
-      expect(result.key("result").get()).toBeUndefined();
+      expect(result.get()).toBe(DataUnavailable.schemaMismatch());
     } finally {
       LLMClient.prototype.generateObject = original;
     }

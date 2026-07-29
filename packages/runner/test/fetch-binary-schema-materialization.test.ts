@@ -9,14 +9,14 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 /**
  * Regression for CT-1836: a lift consuming a `fetchBinary` result was
  * permanently gated because schema-query materialization DROPPED the
- * `FabricBytes`-bearing `result` field.
+ * `FabricBytes`-bearing fetch result.
  *
  * Mechanism: `SchemaObjectTraverser`'s value dispatch had no
  * `FabricSpecialObject` arm, so a `FabricBytes` fell into the record branch
  * and was decomposed by `Object.entries` over its (empty) own props. That
  * failed the schema-generator's structural object schema for
- * `FetchBinaryResult.bytes`, the traversal dropped the containing `result`
- * field entirely (`required` unmet), the consumer's argument stayed invalid,
+ * `FetchBinaryResult.bytes`, the traversal dropped the containing value
+ * (`required` unmet), the consumer's argument stayed invalid,
  * and its body never ran — freezing every downstream consumer, at any
  * nesting depth. (`fetchJson` consumers were unaffected: plain JSON values.)
  * The collateral: the consumers' crippled read logs also never registered
@@ -28,7 +28,7 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
  *
  * This test runs the WHOLE chain — mocked binary fetch (via the injectable
  * `RuntimeOptions.fetch`, CT-1768) → `FabricBytes` result → consumer lifts
- * reading `result.mediaType` and re-encoding `result.bytes` — and asserts
+ * reading `mediaType` and re-encoding `bytes` — and asserts
  * the consumers actually materialize. Fails without the traverse fix (both
  * outputs stay empty forever); passes with it.
  */
@@ -50,13 +50,14 @@ const PROGRAM: RuntimeProgram = {
     {
       name: "/main.tsx",
       contents: [
-        "import { computed, fetchBinary, pattern } from 'commonfabric';",
+        "import { computed, fetchBinary, pattern, type FetchBinaryResult } from 'commonfabric';",
         "export default pattern(() => {",
         "  const art = fetchBinary({ url: 'https://mock.test/img' });",
-        "  const mediaType = computed(() => art.result?.mediaType ?? '');",
+        "  const readyArt = art as FetchBinaryResult;",
+        "  const mediaType = computed(() => readyArt.mediaType ?? '');",
         "  const dataUrl = computed(() => {",
-        "    const bytes = art.result?.bytes;",
-        "    const mt = art.result?.mediaType;",
+        "    const bytes = readyArt.bytes;",
+        "    const mt = readyArt.mediaType;",
         "    if (!bytes || !mt) return '';",
         "    const raw = bytes.slice();",
         "    let binary = '';",

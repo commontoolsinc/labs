@@ -1,4 +1,12 @@
-import { action, assert, pattern, UI, wish, Writable } from "commonfabric";
+import {
+  action,
+  assert,
+  pattern,
+  resultOf,
+  UI,
+  wish,
+  Writable,
+} from "commonfabric";
 import { findElementByText, hasText, propsOf } from "./test/vnode-helpers.ts";
 import RecordBackup, { type RecordPiece } from "./record-backup.tsx";
 
@@ -53,13 +61,15 @@ const clickImport = (backup: WithUI) => {
 
 export default pattern(() => {
   const importJson = new Writable(BACKUP_JSON);
-  const pieceRegistry = wish<Writable<RecordPiece[]>>({
+  const pieceRegistryRequest = wish<Writable<RecordPiece[]>>({
     query: "#pieceRegistry",
-  }).result!;
-  const registrationCount = wish<Writable<number>>({
+  });
+  const pieceRegistry = resultOf(pieceRegistryRequest.result);
+  const registrationCountRequest = wish<Writable<number>>({
     query: "#default",
     path: ["testPieceRegistrationCount"],
-  }).result!;
+  });
+  const registrationCount = resultOf(registrationCountRequest.result);
   const backup = RecordBackup({ importJson });
 
   const action_import = action(() => clickImport(backup));

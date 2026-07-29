@@ -12,6 +12,7 @@ import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
   type CellScope,
   type DerivedInternalCellDescriptor,
+  type FactoryCallInput,
   type FactoryInput,
   type Frame,
   type ICell,
@@ -582,7 +583,7 @@ function factoryFromPattern<T, R>(
     defaultSpace?: string | unknown,
   ): PatternFactory<T, R> => {
     const factory = Object.assign(
-      (inputs: FactoryInput<T>): Reactive<R> => {
+      (inputs: FactoryCallInput<T>): Reactive<R> => {
         const module: Module & toJSON = {
           type: "pattern",
           implementation: factory,

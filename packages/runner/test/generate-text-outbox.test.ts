@@ -27,6 +27,7 @@ import {
   llm as rawLlm,
 } from "../src/builtins/llm.ts";
 import { createCell } from "../src/cell.ts";
+import { generateTextState } from "../src/builder/built-in.ts";
 
 const signer = await Identity.fromPassphrase("test generate-text outbox");
 const space = signer.did();
@@ -38,9 +39,7 @@ describe("generateText outbox mechanism", () => {
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
-  let generateText: ReturnType<
-    typeof createBuilder
-  >["commonfabric"]["generateText"];
+  let generateText: typeof generateTextState;
 
   beforeEach(() => {
     clearMockResponses();
@@ -52,7 +51,8 @@ describe("generateText outbox mechanism", () => {
     tx = runtime.edit();
 
     const { commonfabric } = createTrustedBuilder(runtime);
-    ({ pattern, generateText } = commonfabric);
+    ({ pattern } = commonfabric);
+    generateText = generateTextState;
   });
 
   afterEach(async () => {

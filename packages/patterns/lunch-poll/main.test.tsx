@@ -11,7 +11,15 @@
  * are covered by multi-user.test.tsx.
  */
 
-import { action, assert, computed, pattern, UI, wish } from "commonfabric";
+import {
+  action,
+  assert,
+  computed,
+  pattern,
+  resultOf,
+  UI,
+  wish,
+} from "commonfabric";
 import {
   findNode,
   hasExactText,
@@ -151,20 +159,16 @@ export default pattern(() => {
   // cannot read the ambient clock; the bare one-shot `#now` would freeze at
   // first capture, which is exactly what the poll must not do): "yesterday"
   // for the seeded stale vote, and the day key the pattern is expected to
-  // filter to. Both read as unresolved (undefined / "") until the wish
-  // resolves; the dependent assertions guard that window and the harness
-  // re-evaluates them once the wish lands.
+  // filter to. Both remain unavailable until the wish resolves, then the
+  // harness re-evaluates their dependents.
   const nowCell = wish<number>({ query: "#now/300" });
-  const staleCastAt = computed(() =>
-    nowCell.result == null ? undefined : nowCell.result - 86_400_000
-  );
-  const todayKey = computed(() =>
-    nowCell.result == null ? "" : dayKeyOf(nowCell.result)
-  );
+  const nowCellValue = resultOf(nowCell.result);
+  const staleCastAt = computed(() => nowCellValue - 86_400_000);
+  const todayKey = computed(() => dayKeyOf(nowCellValue));
 
   // A vote cast "yesterday" — stored, but hidden by the current-day filter.
-  // `castAt` resolves with the wish; until then it reads undefined, which
-  // the filter also treats as not-today.
+  // `castAt` resolves with the wish, so the seeded vote is withheld until its
+  // timestamp is available.
   const STALE_VOTE: Vote = {
     voterName: "Stan",
     optionId: "opt-seeded",
@@ -181,7 +185,7 @@ export default pattern(() => {
 
   // Participant names with shared prefixes use distinct current-day vote labels.
   // Each label preserves complete displayed characters.
-  const collidingCastAt = computed(() => nowCell.result ?? undefined);
+  const collidingCastAt = computed(() => nowCellValue);
   const initialsPoll = CozyPoll({
     options: [COLLIDING_INITIAL_OPTION],
     users: COLLIDING_INITIAL_USERS,
@@ -533,8 +537,8 @@ export default pattern(() => {
   // === Current-day vote filter ===
 
   // The header renders the current date, and `todayDate` exposes the local
-  // day key the votes are filtered to. The `todayKey !== ""` guard holds the
-  // assertion false until this pattern's `#now` wish resolves.
+  // day key the votes are filtered to. The assertion remains unavailable until
+  // this pattern's `#now/300` wish resolves.
   const assert_today_header_renders = assert(() =>
     todayKey !== "" &&
     findNodeByProp(poll[UI], "data-poll-today", true) !== undefined &&

@@ -3,7 +3,7 @@ import type {
   AssertRawPart,
   AssertRecord,
   CellScope,
-  FactoryInput,
+  FactoryCallInput,
   Frame,
   Handler,
   HandlerFactory,
@@ -18,6 +18,7 @@ import type {
   Stream,
   StripCell,
   toJSON,
+  UnavailableInputPolicy,
 } from "./types.ts";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { reactive, stream } from "./reactive.ts";
@@ -140,7 +141,7 @@ export function createNodeFactory<T = any, R = any>(
     module.argumentSchema,
     module.resultSchema,
   );
-  const factory = Object.assign((inputs: FactoryInput<T>): Reactive<R> => {
+  const factory = Object.assign((inputs: FactoryCallInput<T>): Reactive<R> => {
     const outputs = reactive<R>(undefined, module.resultSchema);
     const node: NodeRef = { module, inputs, outputs, frame: getTopFrame() };
 
@@ -361,7 +362,13 @@ export function lift<T, R>(
   const resolvedResultSchema = resultSchema as JSONSchema | undefined;
 
   return createNodeFactory({
-    type: "javascript",
+    // A distinct serialized kind makes policy-bearing computations fail closed
+    // on runtimes which predate unavailable-input policy. Those runtimes reach
+    // their existing unknown-module branch instead of executing this callback
+    // as ordinary JavaScript while silently ignoring the policy.
+    type: options?.unavailableInputPolicy === undefined
+      ? "javascript"
+      : "javascript-availability",
     implementation: resolvedImplementation,
     ...(resolvedArgumentSchema !== undefined
       ? { argumentSchema: resolvedArgumentSchema }
@@ -372,6 +379,9 @@ export function lift<T, R>(
     ...(options?.materializerWriteInputPaths
       ? { materializerWriteInputPaths: options.materializerWriteInputPaths }
       : {}),
+    ...(options?.unavailableInputPolicy
+      ? { unavailableInputPolicy: options.unavailableInputPolicy }
+      : {}),
     ...(options?.completeSchedulerScopeSummary
       ? { completeSchedulerScopeSummary: true as const }
       : {}),
@@ -380,6 +390,7 @@ export function lift<T, R>(
 
 interface DeriveSchedulerOptions {
   materializerWriteInputPaths?: readonly (readonly string[])[];
+  readonly unavailableInputPolicy?: UnavailableInputPolicy;
   completeSchedulerScopeSummary?: true;
 }
 
@@ -429,22 +440,22 @@ function handlerInternal<E, T>(
   );
 
   const module: Handler<T, E> & toJSON & {
-    bind: (inputs: FactoryInput<StripCell<T>>) => Stream<E>;
+    bind: (inputs: FactoryCallInput<StripCell<T>>) => Stream<E>;
   } = {
     type: "javascript",
     implementation: handler,
     wrapper: "handler",
-    with: (inputs: FactoryInput<StripCell<T>>) => factory(inputs),
+    with: (inputs: FactoryCallInput<StripCell<T>>) => factory(inputs),
     // Overriding the default `bind` method on functions. The wrapper will bind
     // the actual inputs, so they'll be available as `this`
-    bind: (inputs: FactoryInput<StripCell<T>>) => factory(inputs),
+    bind: (inputs: FactoryCallInput<StripCell<T>>) => factory(inputs),
     toJSON: () => moduleToJSON(module),
     ...(schema !== undefined && { argumentSchema: schema }),
     ...(writableProxy && { writableProxy: true }),
   };
 
   const factory = Object.assign(
-    (props: FactoryInput<StripCell<T>>): Stream<E> => {
+    (props: FactoryCallInput<StripCell<T>>): Stream<E> => {
       // If the event schema is false, we actually set it to true here, since
       // otherwise we won't think it needs to be handled. Ditto for state.
       // TODO(@ubik2): I should be able to remove this workaround, but the stream

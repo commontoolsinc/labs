@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { expect } from "@std/expect";
 import type { BuiltInLLMMessage, BuiltInLLMToolCallPart } from "commonfabric";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import {
   llmDialogTestHelpers,
   llmToolExecutionHelpers,
@@ -31,6 +32,7 @@ const {
   serializeForLLMObservation,
   traverseAndCellify,
   toolAllowsObservedConfidentiality,
+  classifyToolResult,
 } = llmDialogTestHelpers;
 
 function makeDocumentationCell(params: {
@@ -67,6 +69,24 @@ function makeDocumentationCell(params: {
   }
   return cell;
 }
+
+Deno.test("classifyToolResult rejects terminal unavailable child results", () => {
+  const failed = classifyToolResult(
+    DataUnavailable.error(new Error("child generation failed")),
+    {},
+  );
+  assertEquals(failed.status, "error");
+  if (failed.status !== "error") throw new Error("expected tool error");
+  assertEquals(failed.error.message, "child generation failed");
+
+  const mismatch = classifyToolResult(
+    DataUnavailable.schemaMismatch(),
+    {},
+  );
+  assertEquals(mismatch.status, "error");
+  const pending = classifyToolResult(DataUnavailable.pending(), {});
+  assertEquals(pending.status, "wait");
+});
 
 Deno.test("parseTargetString recognizes handle format", () => {
   const parsed = parseLLMFriendlyLink(

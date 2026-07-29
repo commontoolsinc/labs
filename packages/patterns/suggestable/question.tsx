@@ -4,8 +4,10 @@ import {
   generateObject,
   handler,
   ifElse,
+  isPending,
   NAME,
   pattern,
+  resultOf,
   UI,
   type VNode,
   Writable,
@@ -51,7 +53,7 @@ const Question = pattern<QuestionInput, QuestionOutput>(
       return `Generate a single, thoughtful clarifying question about: ${t}. Include 2-4 multiple choice options if appropriate, or leave options empty for a free-text answer.`;
     });
 
-    const response = generateObject<{
+    const responseRequest = generateObject<{
       question: string;
       options: string[];
     }>({
@@ -72,6 +74,7 @@ const Question = pattern<QuestionInput, QuestionOutput>(
       },
       model: "anthropic:claude-haiku-4-5",
     });
+    const response = resultOf(responseRequest);
 
     const answer = new Writable("");
 
@@ -87,16 +90,16 @@ const Question = pattern<QuestionInput, QuestionOutput>(
 
           <cf-vstack gap="3" style="padding: 1.5rem;">
             {ifElse(
-              response.pending,
+              isPending(responseRequest),
               <div style="color: var(--cf-theme-color-text-secondary);">
                 <cf-loader show-elapsed /> Generating question...
               </div>,
               <cf-question
                 question={computed(
-                  () => response.result?.question || "",
+                  () => response.question || "",
                 )}
                 options={computed(
-                  () => response.result?.options || [],
+                  () => response.options || [],
                 )}
                 oncf-answer={onAnswer({ answer })}
               />,
@@ -105,10 +108,10 @@ const Question = pattern<QuestionInput, QuestionOutput>(
         </cf-screen>
       ),
       topic,
-      question: computed(() => response.result?.question || ""),
-      options: computed(() => response.result?.options || []),
+      question: computed(() => response.question || ""),
+      options: computed(() => response.options || []),
       answer,
-      pending: response.pending,
+      pending: isPending(responseRequest),
     };
   },
 );

@@ -306,7 +306,8 @@ When you're viewing a record (e.g., a Contact named "John Smith"), the system ca
 // Shown inside a pattern body.
 // packages/runner/src/builtins/compile-and-run.ts
 // Takes: { files: [{name, contents}], main, input }
-// Returns: { result, error, errors, pending }
+// Returns the running piece directly, or an availability state. Compile
+// failures carry structured diagnostics on the error.
 
 // 1. LLM generates forked pattern source
 const forkedPattern = {
@@ -486,7 +487,7 @@ System:
 **Using `compileAndRun` for dynamic pattern compilation:**
 
 ```typescript
-// Shown at module scope.
+// Shown inside a pattern body.
 // The LLM generates the forked pattern source
 const forkedSource = `
   export interface Contractor extends PersonLike {
@@ -498,13 +499,16 @@ const forkedSource = `
 `;
 
 // compileAndRun compiles and instantiates it
-const result = compileAndRun({
+const compilation = compileAndRun({
   files: [{ name: "contractor.tsx", contents: forkedSource }],
   main: "contractor.tsx",
   input: { name: "John Smith", email: "john@example.com" }  // existing data
 });
 
-// result.result is the running piece - replaces the original record
+// The node waits while compilation is unavailable. Guard `compilation` when
+// the UI needs pending/error states.
+const runningPiece = resultOf(compilation);
+// `runningPiece` replaces the original record.
 ```
 
 ### Each Forked Pattern:

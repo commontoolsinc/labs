@@ -1,4 +1,5 @@
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import type { Cell } from "../../src/cell.ts";
 import type { Runtime } from "../../src/runtime.ts";
 
@@ -22,14 +23,13 @@ export interface LlmResultState<T = unknown> {
  * scheduler drains work the cell has nothing to do with, which puts the read
  * back at an arbitrary moment and gives up everything below.
  *
- * The builtins set `pending` to true in the action that issues a request and
- * back to false in the writeback that lands the response or the error, so
- * `pending === false` marks the settled state. Reading at quiescence is what
- * keeps that predicate honest. The states a bare `pending === false` would
- * otherwise accept exist only before the builtin's action has run: the result
- * schema declares `pending` with a default of false, and a second request
- * leaves the first request's settled value in place until the action resets it.
- * `runtime.idle()` runs that action.
+ * Legacy state-returning builtins set `pending` to true in the action that
+ * issues a request and back to false in the writeback that lands the response
+ * or the error, so `pending === false` marks their settled state. Direct
+ * generation APIs omit that wrapper: their `result` starts as a pending
+ * DataUnavailable marker and settles to either a usable value or a terminal
+ * unavailable reason. Reading at quiescence is what keeps both predicates
+ * honest. `runtime.idle()` runs the action before the predicate is tested.
  *
  * Settled does not mean the model answered. A builtin handed neither a prompt
  * nor messages writes `pending` false with no `result` and no `error`, and this
@@ -48,6 +48,14 @@ export function waitForLlmSettled<T = unknown>(
   return waitForCellValue<LlmResultState<T>>(
     runtime,
     cell,
-    (value) => value?.pending === false,
+    (value) => {
+      if (value?.pending === false) return true;
+      if (value?.pending !== undefined || value?.result === undefined) {
+        return false;
+      }
+      return !isDataUnavailable(value.result) ||
+        value.result.reason === "error" ||
+        value.result.reason === "schema-mismatch";
+    },
   );
 }

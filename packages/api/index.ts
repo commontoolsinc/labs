@@ -74,6 +74,107 @@ export declare const FabricInstance:
   & FabricInstanceConstructor
   & (abstract new (...args: any) => FabricInstance);
 
+/** Reasons why a runtime value is not currently usable by a computation. */
+export type DataUnavailableReason =
+  | "pending"
+  | "error"
+  | "syncing"
+  | "schema-mismatch";
+
+/**
+ * Pattern-visible surface of a runtime-owned unavailable-data marker.
+ *
+ * There is intentionally no public constructor. Plain objects with the same
+ * fields are ordinary authored data and are rejected by the guard helpers.
+ */
+export interface DataUnavailable extends FabricInstance {
+  readonly reason: DataUnavailableReason;
+  readonly pending?: true | undefined;
+  readonly error?: FabricError | undefined;
+  readonly syncing?: true | undefined;
+  readonly schemaMismatch?: true | undefined;
+}
+
+/** A pending unavailable value. */
+export type IsPending = DataUnavailable & {
+  readonly reason: "pending";
+  readonly pending: true;
+};
+
+/** An unavailable value carrying a producer error. */
+export type HasError = DataUnavailable & {
+  readonly reason: "error";
+  readonly error: FabricError;
+};
+
+/** An unavailable value whose storage coverage is still synchronizing. */
+export type IsSyncing = DataUnavailable & {
+  readonly reason: "syncing";
+  readonly syncing: true;
+};
+
+/** An unavailable value which failed its declared schema. */
+export type HasSchemaMismatch = DataUnavailable & {
+  readonly reason: "schema-mismatch";
+  readonly schemaMismatch: true;
+};
+
+/** All concrete unavailable variants. */
+export type DataUnavailableVariant =
+  | IsPending
+  | HasError
+  | IsSyncing
+  | HasSchemaMismatch;
+
+/**
+ * A single-result asynchronous value before availability has been filtered.
+ *
+ * Use the availability guards to inspect control states and `resultOf()` to
+ * obtain the usable `T` view. There is no runtime wrapper around this union.
+ */
+export type AsyncResult<T> = T | DataUnavailableVariant;
+
+/**
+ * Type-only association between a direct stream result and its partial view.
+ * The runtime association is local to the direct producer call; composed
+ * patterns must export the projected partial as a separate field.
+ */
+export declare const PARTIAL_RESULT: unique symbol;
+export interface PartialResultSource<Final, Partial> {
+  readonly [PARTIAL_RESULT]: {
+    readonly final: Final;
+    readonly partial: Partial;
+  };
+}
+
+/** A direct async result which has an associated intermediate-value channel. */
+export type AsyncStreamResult<Final, Partial> =
+  & AsyncResult<Final>
+  & PartialResultSource<Final, Partial>;
+
+/** Removes unavailable control variants and type-only stream metadata. */
+export type AvailableResult<R> = R extends PartialResultSource<infer Final, any>
+  ? Final
+  : Exclude<R, DataUnavailableVariant>;
+
+/** Selects unavailable variants by their reason discriminator. */
+export type DataUnavailableFor<K extends DataUnavailableReason> = Extract<
+  DataUnavailableVariant,
+  { readonly reason: K }
+>;
+
+/**
+ * Exact argument-relative path at which a computation may observe selected
+ * unavailable-data reasons.
+ */
+export type UnavailableInputPolicyEntry = Readonly<{
+  path: readonly string[];
+  reasons: readonly DataUnavailableReason[];
+}>;
+
+/** Ordered exact-path unavailable-data observation policy for one module. */
+export type UnavailableInputPolicy = readonly UnavailableInputPolicyEntry[];
+
 /** Abstract base class for fabric primitive types. */
 export interface FabricPrimitive extends FabricSpecialObject {}
 
@@ -1565,6 +1666,34 @@ export type FactoryInput<T> =
     : T);
 
 /**
+ * Input accepted at a factory invocation boundary. Unlike helpers that accept
+ * ordinary FactoryInput values, a downstream factory can receive propagated
+ * unavailable values at any depth and suspends until those inputs are usable.
+ */
+export type FactoryCallInput<T> =
+  | FactoryInput<T>
+  | DataUnavailable
+  | (T extends Array<infer U> ? Array<FactoryCallInput<U>>
+    : T extends ReadonlyArray<infer U> ? ReadonlyArray<FactoryCallInput<U>>
+    : T extends object ? { [K in keyof T]: FactoryCallInput<T[K]> }
+    : T);
+
+/**
+ * Recursively removes unavailable control values and unwraps reactive cell
+ * inputs to the complete value shape retained by `latestComplete()`.
+ */
+export type LatestCompleteValue<T> = T extends DataUnavailable ? never
+  : T extends AnyBrandedCell<infer U> ? LatestCompleteValue<U>
+  : T extends readonly unknown[] ? {
+      [K in keyof T]: LatestCompleteValue<T[K]>;
+    }
+  : T extends FabricInstance ? T
+  // deno-lint-ignore ban-types
+  : T extends Function ? T
+  : T extends object ? { [K in keyof T]: LatestCompleteValue<T[K]> }
+  : T;
+
+/**
  * Matches any non-opaque Cell type (Cell, Stream, ComparableCell, etc.) that may be
  * wrapped in any number of Reactive layers. Excludes OpaqueCell and AnyCell (since OpaqueCell extends AnyCell).
  */
@@ -1622,8 +1751,16 @@ export interface Pattern extends FabricExecPlainObject {
   defaultScope?: CellScope;
 }
 export interface Module extends FabricExecPlainObject {
-  type: "ref" | "javascript" | "pattern" | "raw" | "isolated" | "passthrough";
+  type:
+    | "ref"
+    | "javascript"
+    | "javascript-availability"
+    | "pattern"
+    | "raw"
+    | "isolated"
+    | "passthrough";
   defaultScope?: CellScope;
+  readonly unavailableInputPolicy?: UnavailableInputPolicy;
 }
 
 export type toJSON = {
@@ -1631,11 +1768,11 @@ export type toJSON = {
 };
 
 export type Handler<T = any, R = any> = Module & {
-  with: (inputs: FactoryInput<StripCell<T>>) => Stream<R>;
+  with: (inputs: FactoryCallInput<StripCell<T>>) => Stream<R>;
 };
 
 export type NodeFactory<T, R> =
-  & ((inputs: FactoryInput<T>) => Reactive<R>)
+  & ((inputs: FactoryCallInput<T>) => Reactive<R>)
   & (Module | Handler | Pattern)
   & toJSON
   & {
@@ -1643,7 +1780,7 @@ export type NodeFactory<T, R> =
   };
 
 export type PatternFactory<T, R> =
-  & ((inputs: FactoryInput<T>) => Reactive<R>)
+  & ((inputs: FactoryCallInput<T>) => Reactive<R>)
   & Pattern
   & toJSON
   & {
@@ -1652,7 +1789,7 @@ export type PatternFactory<T, R> =
   };
 
 export type ModuleFactory<T, R> =
-  & ((inputs: FactoryInput<T>) => Reactive<R>)
+  & ((inputs: FactoryCallInput<T>) => Reactive<R>)
   & Module
   & toJSON
   & {
@@ -1660,7 +1797,7 @@ export type ModuleFactory<T, R> =
   };
 
 export type HandlerFactory<T, R> =
-  & ((inputs: FactoryInput<StripCell<T>>) => Stream<R>)
+  & ((inputs: FactoryCallInput<StripCell<T>>) => Stream<R>)
   & Handler<T, R>
   & toJSON;
 
@@ -1739,7 +1876,7 @@ export type JSONSchemaObj = {
   // Subschema for array
   readonly prefixItems?: readonly (JSONSchema)[]; // not always validated
   readonly items?: JSONSchema;
-  readonly contains?: JSONSchema; // not validated
+  readonly contains?: JSONSchema; // contains/minContains/maxContains not validated
   // Subschema for object
   readonly properties?: Readonly<Record<string, JSONSchema>>;
   readonly patternProperties?: Readonly<Record<string, JSONSchema>>; // not validated
@@ -1756,21 +1893,21 @@ export type JSONSchemaObj = {
   readonly exclusiveMaximum?: number;
   readonly minimum?: number;
   readonly exclusiveMinimum?: number;
-  // Validation for string - none applied
+  // Validation for string
   readonly maxLength?: number;
   readonly minLength?: number;
   readonly pattern?: string;
-  // Validation for array  - none applied
+  // Validation for array
   readonly maxItems?: number;
   readonly minItems?: number;
   readonly uniqueItems?: boolean;
-  readonly maxContains?: number;
-  readonly minContains?: number;
+  readonly maxContains?: number; // not validated
+  readonly minContains?: number; // not validated
   // Validation for object
-  readonly maxProperties?: number; // not validated
-  readonly minProperties?: number; // not validated
+  readonly maxProperties?: number;
+  readonly minProperties?: number;
   readonly required?: readonly string[];
-  readonly dependentRequired?: Readonly<Record<string, readonly string[]>>; // not validated
+  readonly dependentRequired?: Readonly<Record<string, readonly string[]>>;
 
   // Format annotations
   readonly format?: string; // not validated
@@ -2048,6 +2185,8 @@ export interface BuiltInLLMParams {
    * When provided, injects a `presentResult` built-in tool that the LLM can call
    * to present a structured result matching this schema. The result is stored on the
    * dialog state's `result` field. Can be called multiple times (overwrites previous).
+   * Pattern code should normally use `llmDialog<T>()`; the transformer injects
+   * this schema from `T`.
    */
   resultSchema?: JSONSchema;
   /**
@@ -2066,13 +2205,13 @@ export interface BuiltInLLMState {
   groundingSources?: readonly BuiltInLLMGroundingSource[];
 }
 
-export interface BuiltInLLMGenerateObjectState<T> {
+/** Persisted internal state for structured generation. */
+export interface BuiltInGenerateObjectStreamState<T> {
   pending: boolean;
-  result?: T;
+  result: AsyncResult<T>;
   messages?: BuiltInLLMMessage[];
   partial?: string;
   error?: string;
-  cancelGeneration: Stream<void>;
   // NOTE: `generateObject` accepts `search`/`nativeModelToolIds` (grounding can
   // improve the structured result), but does NOT surface `groundingSources` —
   // its JSON-mode path returns only the object, not the grounded response. Use
@@ -2081,7 +2220,6 @@ export interface BuiltInLLMGenerateObjectState<T> {
 
 export interface BuiltInLLMDialogState {
   pending: boolean;
-  result?: any;
   error?: string;
   cancelGeneration: Stream<void>;
   addMessage: Stream<BuiltInLLMMessage>;
@@ -2089,6 +2227,10 @@ export interface BuiltInLLMDialogState {
   unpinAllCells: Stream<void>;
   flattenedTools: Record<string, any>;
   pinnedCells: Array<{ path: string; name: string }>;
+}
+
+export interface BuiltInLLMDialogResultState<T> extends BuiltInLLMDialogState {
+  result: AsyncResult<T>;
 }
 
 export type BuiltInGenerateObjectParams =
@@ -2108,8 +2250,8 @@ export type BuiltInGenerateObjectParams =
     /**
      * Enable Google Search grounding (shorthand for the `google_search`
      * native model tool). Real, current web results inform the answer, and
-     * the source URLs are surfaced on the result state's `groundingSources`
-     * (generateText / llm only — generateObject does not surface them).
+     * source URLs are available from the legacy `llm` state; direct generation
+     * does not currently expose them.
      */
     search?: boolean;
     /**
@@ -2135,8 +2277,8 @@ export type BuiltInGenerateObjectParams =
     /**
      * Enable Google Search grounding (shorthand for the `google_search`
      * native model tool). Real, current web results inform the answer, and
-     * the source URLs are surfaced on the result state's `groundingSources`
-     * (generateText / llm only — generateObject does not surface them).
+     * source URLs are available from the legacy `llm` state; direct generation
+     * does not currently expose them.
      */
     search?: boolean;
     /**
@@ -2159,8 +2301,8 @@ export type BuiltInGenerateTextParams =
     /**
      * Enable Google Search grounding (shorthand for the `google_search`
      * native model tool). Real, current web results inform the answer, and
-     * the source URLs are surfaced on the result state's `groundingSources`
-     * (generateText / llm only — generateObject does not surface them).
+     * source URLs are available from the legacy `llm` state; direct generation
+     * does not currently expose them.
      */
     search?: boolean;
     /**
@@ -2181,8 +2323,8 @@ export type BuiltInGenerateTextParams =
     /**
      * Enable Google Search grounding (shorthand for the `google_search`
      * native model tool). Real, current web results inform the answer, and
-     * the source URLs are surfaced on the result state's `groundingSources`
-     * (generateText / llm only — generateObject does not surface them).
+     * source URLs are available from the legacy `llm` state; direct generation
+     * does not currently expose them.
      */
     search?: boolean;
     /**
@@ -2193,12 +2335,12 @@ export type BuiltInGenerateTextParams =
     queue?: string;
   };
 
-export interface BuiltInGenerateTextState {
+/** Persisted internal state for text generation. */
+export interface BuiltInGenerateTextStreamState {
   pending: boolean;
-  result?: string;
+  result: AsyncResult<string>;
   error?: string;
   partial?: string;
-  requestHash?: string;
   /** Web sources from native search grounding, when `search`/`google_search` was requested. */
   groundingSources?: readonly BuiltInLLMGroundingSource[];
 }
@@ -2209,17 +2351,44 @@ export interface BuiltInCompileAndRunParams<T> {
   input?: T;
 }
 
+export interface CompileDiagnostic {
+  line: number;
+  column: number;
+  message: string;
+  type: string;
+  file?: string;
+}
+
+/** Compilation or execution failure with structured compiler diagnostics. */
+export interface CompileError extends Error {
+  readonly diagnostics: readonly CompileDiagnostic[];
+}
+
+export type CompileHasError = HasError & {
+  readonly error: CompileError;
+};
+
+/** Type-only association preserving the usable value behind CompileResult. */
+export declare const COMPILE_RESULT: unique symbol;
+export interface CompileResultSource<T> {
+  readonly [COMPILE_RESULT]: T;
+}
+
+/** Availability-aware result of compiling and running a pattern. */
+export type CompileResult<T> =
+  & (
+    | T
+    | Exclude<DataUnavailableVariant, HasError>
+    | CompileHasError
+  )
+  & CompileResultSource<T>;
+
+/** @internal Legacy raw operation state retained for persisted graphs. */
 export interface BuiltInCompileAndRunState<T> {
   pending: boolean;
-  result?: T;
+  result?: CompileResult<T>;
   error?: any;
-  errors?: Array<{
-    line: number;
-    column: number;
-    message: string;
-    type: string;
-    file?: string;
-  }>;
+  errors?: CompileDiagnostic[];
 }
 
 // Function type definitions
@@ -2495,22 +2664,48 @@ export type UnlessFunction = <T = any, U = any>(
   fallback: FactoryInput<U>,
 ) => Reactive<T | U>;
 
-/** @deprecated Use generateText() or generateObject() instead */
+/**
+ * @deprecated Use `generateTextStream()`, `generateObjectStream<T>()`, or
+ * `llmDialog<T>()`. Retained for source and persisted-graph compatibility.
+ */
 export type LLMFunction = (
   params: FactoryInput<BuiltInLLMParams>,
 ) => Reactive<BuiltInLLMState>;
 
-export type LLMDialogFunction = (
-  params: FactoryInput<BuiltInLLMParams>,
-) => Reactive<BuiltInLLMDialogState>;
+type BuiltInLLMDialogParamsWithoutResult =
+  & Omit<
+    BuiltInLLMParams,
+    "resultSchema"
+  >
+  & { resultSchema?: never };
+
+export interface LLMDialogFunction {
+  (
+    params: FactoryInput<BuiltInLLMDialogParamsWithoutResult>,
+  ): Reactive<BuiltInLLMDialogState>;
+
+  <T>(
+    params: FactoryInput<BuiltInLLMParams>,
+  ): Reactive<BuiltInLLMDialogResultState<T>>;
+}
 
 export type GenerateObjectFunction = <T = any>(
   params: FactoryInput<BuiltInGenerateObjectParams>,
-) => Reactive<BuiltInLLMGenerateObjectState<T>>;
+) => Reactive<AsyncResult<T>>;
+
+/** Advanced structured-generation API with partial and message state. */
+export type GenerateObjectStreamFunction = <T = any>(
+  params: FactoryInput<BuiltInGenerateObjectParams>,
+) => Reactive<AsyncStreamResult<T, string>>;
 
 export type GenerateTextFunction = (
   params: FactoryInput<BuiltInGenerateTextParams>,
-) => Reactive<BuiltInGenerateTextState>;
+) => Reactive<AsyncResult<string>>;
+
+/** Advanced text-generation API with partial and grounding state. */
+export type GenerateTextStreamFunction = (
+  params: FactoryInput<BuiltInGenerateTextParams>,
+) => Reactive<AsyncStreamResult<string, string>>;
 
 export type FetchOptions = {
   body?: JSONValue;
@@ -2535,31 +2730,25 @@ export type FetchBinaryResult = {
 };
 
 /**
- * Fetch a URL and expose the response body as binary data.
- *
- * `result` holds the body as `{ bytes, mediaType }` where `bytes` is a
- * `FabricBytes` byte buffer. `pending` is true while the request is in
- * flight; failures land on `error`.
+ * Fetch a URL and return the response body as binary data. The computation
+ * waits while data is unavailable unless availability is explicitly observed.
  */
 export type FetchBinaryFunction = (
   params: FactoryInput<{
     url: string;
     options?: FetchOptions;
   }>,
-) => Reactive<{ pending: boolean; result: FetchBinaryResult; error?: any }>;
+) => Reactive<AsyncResult<FetchBinaryResult>>;
 
 /**
- * Fetch a URL and expose the response body as text.
- *
- * `result` holds the body decoded as UTF-8. `pending` is true while the
- * request is in flight; failures land on `error`.
+ * Fetch a URL and return the response body decoded as UTF-8.
  */
 export type FetchTextFunction = (
   params: FactoryInput<{
     url: string;
     options?: FetchOptions;
   }>,
-) => Reactive<{ pending: boolean; result: string; error?: any }>;
+) => Reactive<AsyncResult<string>>;
 
 /**
  * Fetch a URL and expose the response body as parsed JSON.
@@ -2568,8 +2757,8 @@ export type FetchTextFunction = (
  * fetchJson without one is a compile error — use fetchJsonUnchecked for JSON
  * whose shape isn't declared as a type. The compiler derives a JSON schema
  * from `T` and injects it as the `schema` parameter; the response is verified
- * against that schema at fetch time, and a verification failure lands on
- * `error` with `result` left undefined. Verification follows standard JSON
+ * against that schema at fetch time. A verification failure becomes an
+ * explicit schema-mismatch availability state. Verification follows standard JSON
  * Schema semantics: object properties not named in the schema are allowed
  * unless the schema declares `additionalProperties` itself. A schema passed
  * explicitly takes precedence over the derived one.
@@ -2581,7 +2770,7 @@ export type FetchJsonFunction = <T>(
     options?: FetchOptions;
     result?: T;
   }>,
-) => Reactive<{ pending: boolean; result: T; error?: any }>;
+) => Reactive<AsyncResult<T>>;
 
 /**
  * Fetch a URL and expose the response body as parsed JSON, without any
@@ -2596,30 +2785,29 @@ export type FetchJsonUncheckedFunction = (
     url: string;
     options?: FetchOptions;
   }>,
-) => Reactive<{ pending: boolean; result: any; error?: any }>;
+) => Reactive<AsyncResult<any>>;
+
+export type FetchProgramResult = {
+  files: Array<{ name: string; contents: string }>;
+  main: string;
+};
 
 export type FetchProgramFunction = (
   params: FactoryInput<{ url: string }>,
-) => Reactive<{
-  pending: boolean;
-  result: {
-    files: Array<{ name: string; contents: string }>;
-    main: string;
-  } | undefined;
-  error?: any;
-}>;
+) => Reactive<AsyncResult<FetchProgramResult>>;
 
 export type StreamDataFunction = <T>(
   params: FactoryInput<{
     url: string;
+    schema?: JSONSchema;
     options?: FetchOptions;
     result?: T;
   }>,
-) => Reactive<{ pending: boolean; result: T; error?: any }>;
+) => Reactive<AsyncStreamResult<T, T>>;
 
 export type CompileAndRunFunction = <T = any, S = any>(
   params: FactoryInput<BuiltInCompileAndRunParams<T>>,
-) => Reactive<BuiltInCompileAndRunState<S>>;
+) => Reactive<CompileResult<S>>;
 
 // --- SQLite builtins (docs/specs/sqlite-builtin) ---
 
@@ -2633,7 +2821,7 @@ export type SqliteDatabase = { readonly [__sqliteDb]: true };
 
 /** Imperative write on a SqliteDb handle: records a SQLite write onto the
  *  current transaction so it commits atomically with surrounding cell writes
- *  (see docs/specs/sqlite-builtin/plans/sqlitedb-cell-type-exploration.md). */
+ *  (see docs/specs/sqlite-builtin/04-server-execution-and-transactions.md). */
 export interface ISqliteExecutable {
   exec(
     sql: string,
@@ -2659,9 +2847,7 @@ export interface ISqliteQueryable {
        *  count of withheld rows is reported as `withheld`. */
       readClearance?: boolean;
     },
-  ): Reactive<
-    { pending: boolean; result?: Row[]; error?: any; withheld?: number }
-  >;
+  ): Reactive<AsyncResult<SqliteQueryResult<Row>>>;
 }
 
 /**
@@ -2724,11 +2910,17 @@ export type SqliteQueryParams = {
    *  of withheld rows is reported back as `withheld`. */
   readClearance?: boolean;
 };
+
+/** Atomic successful value of a SQLite query. */
+export type SqliteQueryResult<Row> = {
+  rows: Row[];
+  /** Rows hidden by declared read clearance; absent when clearance is unused. */
+  withheld?: number;
+};
+
 export type SqliteQueryFunction = <Row = Record<string, unknown>>(
   params: FactoryInput<SqliteQueryParams>,
-) => Reactive<
-  { pending: boolean; result?: Row[]; error?: any; withheld?: number }
->;
+) => Reactive<AsyncResult<SqliteQueryResult<Row>>>;
 
 // Writes are the imperative SqliteDb.exec method (see ISqliteExecutable), which
 // folds a `sqlite` op into the caller's commit (atomic with cell writes). There
@@ -2820,10 +3012,9 @@ export type WishParams = {
 };
 
 export type WishState<T> = {
-  // A failed wish should have result of undefined and candidates of []
-  result: T | undefined;
+  /** The current selection, or its availability state while resolving. */
+  result: AsyncResult<T>;
   candidates: T[];
-  error?: any;
   [UI]?: VNode;
 };
 
@@ -3121,6 +3312,76 @@ export interface PatternEnvironment {
 }
 
 export type GetPatternEnvironmentFunction = () => PatternEnvironment;
+export type NonPrivateRandomFunction = () => number;
+export type SafeDateNowFunction = () => number;
+export type IsPendingFunction = (value: unknown) => value is IsPending;
+/**
+ * Preserve a producer's specialized error variant when its input union exposes
+ * one. The conditional rest tuple disables that overload for ordinary values,
+ * which continue to narrow to the generic runtime-owned error marker.
+ */
+export interface HasErrorFunction {
+  <T>(
+    value: T,
+    ...narrowable: [Extract<T, HasError>] extends [never] ? [never] : []
+  ): value is Extract<T, HasError>;
+  (value: unknown): value is HasError;
+}
+export type IsSyncingFunction = (value: unknown) => value is IsSyncing;
+export type HasSchemaMismatchFunction = (
+  value: unknown,
+) => value is HasSchemaMismatch;
+
+/**
+ * Compatibility cast for a statically plain reactive value which may carry a
+ * propagated unavailable marker from an inaccessible upstream request. It is
+ * a runtime identity which opts a later computation boundary into observing
+ * selected unavailable reasons.
+ *
+ * Do not use this on a direct fetch or generation result. Those APIs already
+ * expose `AsyncResult<T>`; retain and guard the original request instead. If
+ * the upstream boundary is under your control, prefer exposing an honest
+ * availability union there.
+ */
+export interface ObserveAvailabilityFunction {
+  <T>(value: T): T | DataUnavailableVariant;
+  <T, K extends DataUnavailableReason>(
+    value: T,
+    ...reasons: K[]
+  ): T | DataUnavailableFor<K>;
+}
+
+/**
+ * Returns the usable view of an asynchronous result without creating a node.
+ * The runner filters unavailable variants at the next computation boundary.
+ */
+export interface ResultOfFunction {
+  <Final, Partial>(
+    result: Reactive<AsyncStreamResult<Final, Partial>>,
+  ): Reactive<Final>;
+  <T>(result: Reactive<CompileResult<T>>): Reactive<T>;
+  <T>(result: Reactive<AsyncResult<T>>): Reactive<T>;
+  <R>(result: R): Reactive<AvailableResult<R>>;
+}
+
+/**
+ * Returns the usable intermediate value associated with a streaming call.
+ * Availability remains observable on the original streaming request.
+ * Call it in the producer's pattern body with the direct result or a stable
+ * const alias, before capturing the projected value in a reactive callback;
+ * partial-channel associations do not cross callback or subpattern boundaries.
+ */
+export type PartialResultOfFunction = <Final, Partial>(
+  result: PartialResultSource<Final, Partial>,
+) => Reactive<Partial>;
+
+/**
+ * Retains the last recursively complete snapshot of one value or value graph.
+ * Before the first complete snapshot, the result is pending at runtime.
+ */
+export type LatestCompleteFunction = <T>(
+  input: FactoryInput<T>,
+) => Reactive<LatestCompleteValue<T>>;
 export type ToCompactDebugStringFunction = (
   value: unknown,
   maxLength?: number,
@@ -3178,11 +3439,16 @@ export declare const ifElse: IfElseFunction;
 export declare const when: WhenFunction;
 export declare const unless: UnlessFunction;
 export declare const uiVariant: UIVariantFunction;
-/** @deprecated Use generateText() or generateObject() instead */
+/**
+ * @deprecated Use `generateTextStream()`, `generateObjectStream<T>()`, or
+ * `llmDialog<T>()`. Retained for source and persisted-graph compatibility.
+ */
 export declare const llm: LLMFunction;
 export declare const llmDialog: LLMDialogFunction;
 export declare const generateObject: GenerateObjectFunction;
 export declare const generateText: GenerateTextFunction;
+export declare const generateObjectStream: GenerateObjectStreamFunction;
+export declare const generateTextStream: GenerateTextStreamFunction;
 export declare const fetchBinary: FetchBinaryFunction;
 export declare const fetchText: FetchTextFunction;
 export declare const fetchJson: FetchJsonFunction;
@@ -3219,6 +3485,16 @@ export function getPatternEnvironment(): PatternEnvironment {
     : new URL("http://localhost:8000");
   return Object.freeze({ apiUrl });
 }
+export declare const nonPrivateRandom: NonPrivateRandomFunction;
+export declare const safeDateNow: SafeDateNowFunction;
+export declare const isPending: IsPendingFunction;
+export declare const hasError: HasErrorFunction;
+export declare const isSyncing: IsSyncingFunction;
+export declare const hasSchemaMismatch: HasSchemaMismatchFunction;
+export declare const observeAvailability: ObserveAvailabilityFunction;
+export declare const resultOf: ResultOfFunction;
+export declare const partialResultOf: PartialResultOfFunction;
+export declare const latestComplete: LatestCompleteFunction;
 export declare const toCompactDebugString: ToCompactDebugStringFunction;
 export declare const toIndentedDebugString: ToIndentedDebugStringFunction;
 

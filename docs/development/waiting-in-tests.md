@@ -381,10 +381,11 @@ using the immediate stack frame:
 
 - A timer scheduled from `src/` — the runtime's own — **auto-advances**: when
   the event loop would otherwise go idle, logical time jumps to the earliest
-  pending one and fires it, in fire order, with `Date.now` and `performance.now`
-  moving in lockstep. So a throttle window or a backoff retry elapses instantly
-  and deterministically, and the reactive waits above resolve on their own, with
-  no real time passing.
+  pending one and fires it, in fire order, with every timer due at that same
+  logical instant firing before time advances again. `Date.now` and
+  `performance.now` move in lockstep. So concurrent throttle windows or backoff
+  retries elapse instantly and deterministically, and the reactive waits above
+  resolve on their own, with no real time passing.
 - A timer scheduled from a `test/` file — a wall-clock sleep — **freezes**, so a
   test that waits on one still deadlocks and the sanitizer reports it. Delete
   the sleep and wait on `runtime.idle()`/`cell.pull()`/`runtime.settled()`,

@@ -38,6 +38,15 @@ import {
   lift,
 } from "./module.ts";
 import {
+  hasError,
+  hasSchemaMismatch,
+  isPending,
+  isSyncing,
+  observeAvailability,
+  partialResultOf,
+  resultOf,
+} from "./data-unavailable.ts";
+import {
   compileAndRun,
   fetchBinary,
   fetchJson,
@@ -45,9 +54,12 @@ import {
   fetchProgram,
   fetchText,
   generateObject,
+  generateObjectStream,
   generateText,
+  generateTextStream,
   ifElse,
   inspectConfLabel,
+  latestComplete,
   llm,
   llmDialog,
   navigateTo,
@@ -198,6 +210,16 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     assertCapture,
     assertRenderParts,
 
+    // Pure unavailable-data observation helpers
+    isPending,
+    hasError,
+    isSyncing,
+    hasSchemaMismatch,
+    observeAvailability,
+    partialResultOf,
+    resultOf,
+    latestComplete,
+
     // Built-in modules
     str: trustedStr,
     ifElse,
@@ -207,7 +229,9 @@ export const createBuilder = (options: CreateBuilderOptions = {}): {
     llm,
     llmDialog,
     generateObject,
+    generateObjectStream,
     generateText,
+    generateTextStream,
     fetchBinary,
     fetchText,
     fetchJson,

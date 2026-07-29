@@ -15,6 +15,7 @@ import {
   FabricSpecialObject,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 // TODO(@ubik2): Ideally this would import from "@commonfabric/utils/types",
@@ -3454,7 +3455,12 @@ export class SchemaObjectTraverser<V extends FabricValue>
       );
       return { ok: this.objectCreator.createObject(newLink, doc.value) };
     }
-    if (doc.value === undefined) {
+    if (isDataUnavailable(doc.value)) {
+      // Availability markers are control-flow leaves, not user containers.
+      // They must survive projection through any declared result schema so
+      // consumers can propagate or inspect the exact unavailable reason.
+      return { ok: doc.value };
+    } else if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
       const defaultValue = this.applyDefault(doc, resolved);
@@ -3655,6 +3661,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     reads: PlainSchemaReads,
   ): TraverseResult<FabricValue> | undefined {
     if (isSigilLink(doc.value)) return undefined;
+    if (isDataUnavailable(doc.value)) return { ok: doc.value };
 
     if (plan.kind === "primitive") {
       return getPlainJsonType(doc.value) === plan.type

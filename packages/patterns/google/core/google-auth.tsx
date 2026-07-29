@@ -5,6 +5,7 @@ import {
   handler,
   NAME,
   pattern,
+  resultOf,
   Stream,
   TILE_UI,
   UI,
@@ -424,17 +425,16 @@ export default pattern<Input, Output>(
     // Reactive #now (ticks each minute) for live expiry tracking, replacing the
     // ambient clock read at pattern body.
     const nowCell = wish<number>({ query: "#now/60" });
+    const nowCellValue = resultOf(nowCell.result);
 
     const isTokenExpired = computed(() => {
       if (!authValue?.token || !authValue?.expiresAt) return false;
-      const nowMs = nowCell.result;
-      if (nowMs == null) return false;
+      const nowMs = nowCellValue;
       return authValue.expiresAt < nowMs;
     });
 
     const tokenExpiryDisplay = computed(() => {
-      const nowMs = nowCell.result;
-      if (nowMs == null) return "";
+      const nowMs = nowCellValue;
       return formatTokenExpiry(authValue?.expiresAt || 0, nowMs);
     });
 
@@ -518,7 +518,7 @@ export default pattern<Input, Output>(
         drive: selectedScopes.drive,
         docs: selectedScopes.docs,
         contacts: selectedScopes.contacts,
-      }, nowCell.result)
+      }, nowCellValue)
     );
 
     const loggedIn = computed(() => !!authValue?.user?.email);

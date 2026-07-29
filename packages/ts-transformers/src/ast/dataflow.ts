@@ -9,12 +9,15 @@ import {
 import { isFunctionLikeExpression } from "./function-predicates.ts";
 import { symbolDeclaresCommonFabricDefault } from "../core/common-fabric-symbols.ts";
 import { isBrandedCellType } from "../transformers/cell-type.ts";
-import { isSafeIdentifierText } from "../utils/identifiers.ts";
 import {
   detectCallKind,
   isReactiveValueExpression,
   isReactiveValueSymbol,
 } from "./call-kind.ts";
+import {
+  getStableConstAliasInitializer as resolveStableConstAliasInitializer,
+  getStaticPropertyNameText,
+} from "./stable-const-alias.ts";
 import { classifyOpaquePathTerminalCall } from "../transformers/opaque-roots.ts";
 
 export interface DataFlowScopeParameter {
@@ -177,10 +180,6 @@ export function createDataFlowAnalyzer(
 
   const isSynthetic = (node: ts.Node): boolean => !node.getSourceFile();
 
-  type StaticBindingAccessSegment =
-    | { readonly kind: "property"; readonly text: string }
-    | { readonly kind: "index"; readonly text: string };
-
   const tryGetSymbol = (node: ts.Node): ts.Symbol | undefined => {
     try {
       return checker.getSymbolAtLocation(node) ?? undefined;
@@ -197,190 +196,17 @@ export function createDataFlowAnalyzer(
     }
   };
 
-  const isConstVariableDeclaration = (
-    declaration: ts.VariableDeclaration,
-  ): boolean => {
-    const declarationList = declaration.parent;
-    return !!(
-      declarationList &&
-      ts.isVariableDeclarationList(declarationList) &&
-      (declarationList.flags & ts.NodeFlags.Const) !== 0
-    );
-  };
-
-  const getEnclosingConstVariableDeclaration = (
-    node: ts.Node | undefined,
-  ): ts.VariableDeclaration | undefined => {
-    let current = node;
-    while (current) {
-      if (ts.isVariableDeclaration(current)) {
-        return isConstVariableDeclaration(current) ? current : undefined;
-      }
-      current = current.parent;
-    }
-    return undefined;
-  };
-
-  const getObjectBindingAccessSegment = (
-    element: ts.BindingElement,
-  ): StaticBindingAccessSegment | undefined => {
-    if (!element.propertyName) {
-      if (ts.isIdentifier(element.name)) {
-        return { kind: "property", text: element.name.text };
-      }
-      return undefined;
-    }
-
-    if (ts.isIdentifier(element.propertyName)) {
-      return { kind: "property", text: element.propertyName.text };
-    }
-
-    const propertyNameText = getStaticPropertyNameText(element.propertyName);
-    if (propertyNameText !== undefined) {
-      return { kind: "property", text: propertyNameText };
-    }
-
-    return undefined;
-  };
-
-  const getStaticPropertyNameText = (
-    name: ts.PropertyName,
-  ): string | undefined => {
-    if (ts.isIdentifier(name)) {
-      return name.text;
-    }
-
-    if (
-      ts.isStringLiteral(name) ||
-      ts.isNumericLiteral(name) ||
-      ts.isNoSubstitutionTemplateLiteral(name)
-    ) {
-      return name.text;
-    }
-
-    return undefined;
-  };
-
-  const getBindingElementStaticAccessPath = (
-    element: ts.BindingElement,
-  ): readonly StaticBindingAccessSegment[] | undefined => {
-    const path: StaticBindingAccessSegment[] = [];
-    let current: ts.BindingElement | undefined = element;
-
-    while (current) {
-      if (current.dotDotDotToken || current.initializer) {
-        return undefined;
-      }
-
-      const parentPattern: ts.Node = current.parent;
-      if (ts.isObjectBindingPattern(parentPattern)) {
-        const segment = getObjectBindingAccessSegment(current);
-        if (!segment) {
-          return undefined;
-        }
-        path.unshift(segment);
-      } else if (ts.isArrayBindingPattern(parentPattern)) {
-        const index = parentPattern.elements.indexOf(current);
-        if (index < 0) {
-          return undefined;
-        }
-        path.unshift({ kind: "index", text: String(index) });
-      } else {
-        return undefined;
-      }
-
-      const owner: ts.Node = parentPattern.parent;
-      if (ts.isVariableDeclaration(owner)) {
-        return path;
-      }
-      if (ts.isBindingElement(owner)) {
-        current = owner;
-        continue;
-      }
-      return undefined;
-    }
-
-    return undefined;
-  };
-
-  const createStaticBindingAccessExpression = (
-    root: ts.Expression,
-    path: readonly StaticBindingAccessSegment[],
-  ): ts.Expression => {
-    let current = unwrapStructuralDataFlowExpression(root);
-
-    for (const segment of path) {
-      if (segment.kind === "index") {
-        current = ts.factory.createElementAccessExpression(
-          current,
-          ts.factory.createNumericLiteral(segment.text),
-        );
-        continue;
-      }
-
-      current = isSafeIdentifierText(segment.text)
-        ? ts.factory.createPropertyAccessExpression(
-          current,
-          ts.factory.createIdentifier(segment.text),
-        )
-        : /^\d+$/.test(segment.text)
-        ? ts.factory.createElementAccessExpression(
-          current,
-          ts.factory.createNumericLiteral(segment.text),
-        )
-        : ts.factory.createElementAccessExpression(
-          current,
-          ts.factory.createStringLiteral(segment.text),
-        );
-    }
-
-    return current;
-  };
-
   const getStableConstAliasInitializer = (
     symbol: ts.Symbol | undefined,
   ): ts.Expression | undefined => {
     if (!symbol || resolvingConstAliases.has(symbol)) {
       return undefined;
     }
-
-    const declaration = symbol.valueDeclaration;
-    if (!declaration) {
-      return undefined;
-    }
-
-    if (
-      ts.isVariableDeclaration(declaration) &&
-      ts.isIdentifier(declaration.name) &&
-      declaration.initializer &&
-      isConstVariableDeclaration(declaration)
-    ) {
-      return declaration.initializer;
-    }
-
-    if (
-      ts.isBindingElement(declaration) &&
-      ts.isIdentifier(declaration.name)
-    ) {
-      const variableDeclaration = getEnclosingConstVariableDeclaration(
-        declaration,
-      );
-      if (!variableDeclaration?.initializer) {
-        return undefined;
-      }
-
-      const path = getBindingElementStaticAccessPath(declaration);
-      if (!path) {
-        return undefined;
-      }
-
-      return createStaticBindingAccessExpression(
-        variableDeclaration.initializer,
-        path,
-      );
-    }
-
-    return undefined;
+    return resolveStableConstAliasInitializer(
+      symbol,
+      ts.factory,
+      unwrapStructuralDataFlowExpression,
+    );
   };
 
   const getStableConstAggregateInitializer = (
@@ -542,6 +368,22 @@ export function createDataFlowAnalyzer(
   ): InternalAnalysis => {
     // Builder calls (like pattern) don't need lift-applied wrapping
     if (callKind?.kind === "builder") {
+      return {
+        ...merged,
+        requiresRewrite: false,
+        rewriteHint,
+      };
+    }
+
+    // Availability aliases are runtime identities. In pattern context they
+    // preserve the underlying reactive proxy directly rather than synthesizing
+    // a computation node. observeAvailability attaches policy provenance;
+    // resultOf and partialResultOf expose usable views and attach no policy.
+    if (
+      callKind?.kind === "availability-observer" ||
+      callKind?.kind === "availability-result" ||
+      callKind?.kind === "partial-result"
+    ) {
       return {
         ...merged,
         requiresRewrite: false,

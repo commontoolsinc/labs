@@ -27,9 +27,12 @@ import {
   computed,
   generateText,
   handler,
+  hasError,
   ifElse,
   type ImageData,
+  isPending,
   pattern,
+  resultOf,
   Writable,
 } from "commonfabric";
 
@@ -197,7 +200,7 @@ const handleCommitPreview = handler<
     previewFileName: Writable<string | null>;
     uploadedImage: Writable<ImageData[]>;
     // deno-lint-ignore no-explicit-any
-    ocrResult: any; // The ocr.result reactive value
+    ocrResult: any; // The success-only OCR result alias
   }
 >(
   (
@@ -348,11 +351,12 @@ export const SmartTextInput = pattern<
   });
 
   // OCR using generateText with vision model
-  const ocr = generateText({
+  const ocrRequest = generateText({
     system: OCR_SYSTEM_PROMPT,
     prompt: ocrPrompt as any,
     model: "anthropic:claude-sonnet-4-5",
   });
+  const ocrResult = resultOf(ocrRequest);
 
   // ===== Computed State =====
   // Use computed() for reactive transformations (not derive() with side effects)
@@ -368,8 +372,7 @@ export const SmartTextInput = pattern<
     const source = hasImages ? "image" : manualSource;
 
     const filePreview = previewText.get();
-    const ocrResult = ocr.result;
-    const ocrPending = ocr.pending;
+    const ocrPending = isPending(ocrRequest);
     const image = images[0] ?? null;
 
     // If we have a file upload preview, use it
@@ -392,8 +395,7 @@ export const SmartTextInput = pattern<
     const source = hasImages ? "image" : manualSource;
 
     const filePreview = previewText.get();
-    const ocrResult = ocr.result;
-    const ocrPending = ocr.pending;
+    const ocrPending = isPending(ocrRequest);
     const image = images[0] ?? null;
 
     if (source === "file" && filePreview) {
@@ -405,22 +407,21 @@ export const SmartTextInput = pattern<
     return false;
   });
 
-  const isPending = computed(() => {
-    const pending = ocr.pending;
+  const ocrPending = computed(() => {
+    const pending = isPending(ocrRequest);
     const image = imageArray.get()[0] ?? null;
     return Boolean(pending && image);
   });
 
   // Only show error if there's an uploaded image (to avoid showing error for empty prompt)
-  const hasError = computed(() => {
-    const err = ocr.error;
+  const ocrHasError = computed(() => {
+    const err = hasError(ocrRequest);
     const image = imageArray.get()[0] ?? null;
     return Boolean(err && image);
   });
 
   const errorMessage = computed(() => {
-    const err = ocr.error;
-    return err ? String(err) : null;
+    return hasError(ocrRequest) ? ocrRequest.error.message : null;
   });
 
   // ===== UI Components =====
@@ -487,7 +488,7 @@ export const SmartTextInput = pattern<
     <div>
       {/* Loading state */}
       {ifElse(
-        isPending,
+        ocrPending,
         <div
           style={{
             marginTop: "12px",
@@ -548,7 +549,7 @@ export const SmartTextInput = pattern<
 
       {/* OCR error state */}
       {ifElse(
-        hasError,
+        ocrHasError,
         <div
           style={{
             marginTop: "12px",
@@ -665,7 +666,7 @@ export const SmartTextInput = pattern<
                 previewSource,
                 previewFileName,
                 uploadedImage: imageArray,
-                ocrResult: ocr.result,
+                ocrResult,
               })}
               style={{
                 padding: "6px 12px",
@@ -699,7 +700,7 @@ export const SmartTextInput = pattern<
 
   return {
     value: $value,
-    pending: isPending,
+    pending: ocrPending,
     error: errorMessage,
     ui: {
       complete,

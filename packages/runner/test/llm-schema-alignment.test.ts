@@ -13,6 +13,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type {
   BuiltInGenerateObjectParams,
@@ -358,6 +359,32 @@ describe("LLM schema alignment", () => {
   });
 
   describe("result schemas", () => {
+    it("materializes generateText unavailable results", () => {
+      const marker = DataUnavailable.pending();
+      const value = materialize<any>(
+        runtime,
+        tx,
+        label(),
+        { pending: true, result: marker },
+        GenerateTextResultSchema,
+      );
+
+      expect(value.result).toBe(marker);
+    });
+
+    it("materializes generateObject unavailable results", () => {
+      const marker = DataUnavailable.schemaMismatch();
+      const value = materialize<any>(
+        runtime,
+        tx,
+        label(),
+        { pending: false, result: marker },
+        GenerateObjectResultSchema,
+      );
+
+      expect(value.result).toBe(marker);
+    });
+
     it("materializes llm string errors", () => {
       const value = materialize<any>(
         runtime,
@@ -374,33 +401,67 @@ describe("LLM schema alignment", () => {
     });
 
     it("materializes generateText string errors", () => {
+      const marker = DataUnavailable.error(new Error("rate limited"));
       const value = materialize<any>(
         runtime,
         tx,
         label(),
         {
           pending: false,
+          result: marker,
           error: "rate limited",
         },
         GenerateTextResultSchema,
       );
 
       expect(value.error).toBe("rate limited");
+      expect(value.result).toBe(marker);
     });
 
     it("materializes generateObject string errors", () => {
+      const marker = DataUnavailable.error(
+        new Error("invalid structured output"),
+      );
       const value = materialize<any>(
         runtime,
         tx,
         label(),
         {
           pending: false,
+          result: marker,
           error: "invalid structured output",
         },
         GenerateObjectResultSchema,
       );
 
       expect(value.error).toBe("invalid structured output");
+      expect(value.result).toBe(marker);
+    });
+
+    it("materializes legacy generateText state without result", () => {
+      const value = materialize<any>(
+        runtime,
+        tx,
+        label(),
+        { pending: false, error: "legacy text failure" },
+        GenerateTextResultSchema,
+      );
+
+      expect(value.error).toBe("legacy text failure");
+      expect(value.result).toBeUndefined();
+    });
+
+    it("materializes legacy generateObject state without result", () => {
+      const value = materialize<any>(
+        runtime,
+        tx,
+        label(),
+        { pending: false, error: "legacy object failure" },
+        GenerateObjectResultSchema,
+      );
+
+      expect(value.error).toBe("legacy object failure");
+      expect(value.result).toBeUndefined();
     });
   });
 

@@ -2,6 +2,7 @@ import ts from "typescript";
 import type { TransformationContext } from "../../core/mod.ts";
 import type { CaptureTreeNode } from "../../utils/capture-tree.ts";
 import {
+  applyAvailabilityOverridesToTypeNode,
   buildCaptureTypeElements,
   buildTypeElementsFromCaptureTree,
   createRegisteredTypeLiteral,
@@ -14,6 +15,9 @@ import {
   tryExplicitParameterType,
 } from "../../ast/type-inference.ts";
 import { isOptionalMemberSymbol } from "../../ast/mod.ts";
+import {
+  type AvailabilityCaptureOverride,
+} from "../../availability/captures.ts";
 
 export class SchemaFactory {
   constructor(
@@ -163,6 +167,7 @@ export class SchemaFactory {
     captureTree: Map<string, CaptureTreeNode>,
     captureNameMap: Map<string, string>,
     hadZeroParameters: boolean,
+    availabilityOverrides?: ReadonlyMap<string, AvailabilityCaptureOverride>,
   ): ts.TypeNode {
     const { factory } = this.context;
 
@@ -172,7 +177,25 @@ export class SchemaFactory {
     // Add type element for original input UNLESS callback had zero parameters
     if (!hadZeroParameters) {
       // Add type element for original input using the helper function
-      const inputTypeNode = expressionToTypeNode(originalInput, this.context);
+      const inputAvailabilityOverrides = availabilityOverrides
+        ? [...availabilityOverrides.values()]
+          .filter((override) => override.path[0] === originalInputParamName)
+          .map((override) => ({
+            ...override,
+            path: override.path.slice(1),
+          }))
+        : [];
+      let inputTypeNode = expressionToTypeNode(
+        originalInput,
+        this.context,
+      );
+      if (inputAvailabilityOverrides.length > 0) {
+        inputTypeNode = applyAvailabilityOverridesToTypeNode(
+          inputTypeNode,
+          inputAvailabilityOverrides,
+          this.context,
+        );
+      }
 
       // Check if the original input is an optional property access (e.g., config.multiplier where multiplier?: number)
       let questionToken: ts.QuestionToken | undefined = undefined;
@@ -197,6 +220,7 @@ export class SchemaFactory {
       captureTree,
       this.context,
       captureNameMap,
+      availabilityOverrides,
     );
     typeElements.push(...captureTypeElements);
 

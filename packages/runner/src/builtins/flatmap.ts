@@ -47,6 +47,15 @@ import {
 import { resolveLink } from "../link-resolution.ts";
 import { listElementLink } from "./list-element-link.ts";
 import { getLogger } from "@commonfabric/utils/logger";
+import {
+  type DataUnavailableVariant,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
+import {
+  preferDataUnavailable,
+  readAvailabilityAwareCell,
+} from "../data-unavailability.ts";
+import { shouldAwaitResumedListInput } from "./list-resume-state.ts";
 
 const logger = getLogger("runner.flatmap", { enabled: true, level: "warn" });
 
@@ -125,6 +134,7 @@ export function flatMap(
     aggregateNoun: "flatMap result",
     elementNoun: "result",
     contribute: (elemResult, _inputElement, out) => {
+      if (isDataUnavailable(elemResult)) return elemResult;
       if (Array.isArray(elemResult)) elemResult.forEach((v) => out.push(v));
       else if (elemResult !== undefined) out.push(elemResult);
       else return "pending";
@@ -239,6 +249,16 @@ export function flatMap(
     // every element's taint into the coordinator's per-tx join.
     const resultWithLog = result.asSchema(RESULT_PRESENCE_SCHEMA)
       .withTx(tx);
+
+    if (isDataUnavailable(rawList)) {
+      resultWithLog.setRawUntyped(rawList, true);
+      for (const entry of elementRuns.values()) {
+        runtime.runner.stop(entry.resultCell);
+      }
+      elementRuns.clear();
+      return;
+    }
+
     // (S16) Declare the result container so prepare re-derives its `structure`
     // label (membership/order/multiplicity, §8.5.6.1) from this tx's J — the
     // selection criteria the coordinator read (op results) — EVERY reconcile,
@@ -258,6 +278,7 @@ export function flatMap(
         { ...linkResolutionProbe, ...machineryRead },
         fn,
       );
+    const rawResult = probeScoped(() => result!.getRaw());
     const createRunInput = (element: Cell<any>, index: number) => ({
       ...(argumentUsage.usesElement ? { element } : {}),
       ...(argumentUsage.usesIndex ? { index } : {}),
@@ -274,6 +295,7 @@ export function flatMap(
     // no-ops against the durable value.
     if (
       elementAwaitSync &&
+      !isDataUnavailable(rawResult) &&
       probeScoped(() => resultWithLog.get()) === undefined
     ) {
       const pending = result.sync();
@@ -318,8 +340,12 @@ export function flatMap(
     // empty input clears the result. Outside resume the flag is clear, so a list
     // set undefined at runtime still runs the cleanup below.
     if (
-      elementAwaitSync && priorLen > 0 &&
-      (list === undefined || (Array.isArray(list) && list.length === 0))
+      shouldAwaitResumedListInput(
+        elementAwaitSync,
+        rawResult,
+        list,
+        priorLen,
+      )
     ) {
       awaitInputThenSettle(inputsCell.key("list").withTx(tx).resolveAsCell());
       return;
@@ -354,6 +380,7 @@ export function flatMap(
     // list can be republished once they confirm — distinct from an op that has
     // settled undefined (a real skip), which converges immediately.
     const pendingCells: Cell<any>[] = [];
+    let unavailable: DataUnavailableVariant | undefined;
     for (let i = 0; i < list.length; i++) {
       // Skip sparse holes — don't create pattern runs for them
       if (!(i in list)) continue;
@@ -419,8 +446,10 @@ export function flatMap(
       // directly. undefined is skipped (two-pass convergence: new elements
       // have undefined result cells on the first pass before the pattern runs).
       const childCell = elementRuns.get(elementKey)!.resultCell;
-      const elemResult = childCell.withTx(tx).get();
-      if (Array.isArray(elemResult)) {
+      const elemResult = readAvailabilityAwareCell(tx, childCell);
+      if (isDataUnavailable(elemResult)) {
+        unavailable = preferDataUnavailable(unavailable, elemResult);
+      } else if (Array.isArray(elemResult)) {
         // forEach skips holes in sub-arrays (sparse-safe)
         elemResult.forEach((v) => {
           newArrayValue.push(v);
@@ -430,6 +459,11 @@ export function flatMap(
       } else {
         pendingCells.push(childCell);
       }
+    }
+
+    if (unavailable !== undefined) {
+      resultWithLog.setRawUntyped(unavailable, true);
+      return;
     }
 
     // Resume preservation: an element whose result is still streaming in reads

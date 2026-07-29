@@ -21,6 +21,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  resultOf,
   type Stream,
   UI,
   type VNode,
@@ -625,19 +626,25 @@ const handleFileUpload = handler<
 export default pattern<Input, Output>((input) => {
   const { importJson } = input;
   // Get registered pieces in the space
-  const pieceRegistry = wish<RecordPiece[]>({
+  const pieceRegistryWish = wish<RecordPiece[]>({
     query: "#pieceRegistry",
-  }).result!;
-  const addPiece = wish<Stream<{ piece: Writable<RecordPiece> }>>({
+  });
+  const pieceRegistry = resultOf(pieceRegistryWish.result);
+  const addPieceWish = wish<Stream<{ piece: Writable<RecordPiece> }>>({
     query: "#default",
     path: ["addPiece"],
-  }).result!;
+  });
+  const addPiece = resultOf(addPieceWish.result);
 
   // Current time, sourced from the reactive #now cell (coarsened to 1s).
   const nowCell = wish<number>({ query: "#now" });
+  const nowCellValue = resultOf(nowCell.result);
 
   // Build export data
-  const exportData = buildExportData({ pieceRegistry, now: nowCell.result });
+  const exportData = buildExportData({
+    pieceRegistry,
+    now: nowCellValue,
+  });
   const exportedJson = formatExportJson({ exportData });
   const recordCount = countRecords({ exportData });
 
@@ -693,9 +700,7 @@ export default pattern<Input, Output>((input) => {
                   $data={exportedJson}
                   filename={computed(() =>
                     `record-backup-${
-                      nowCell.result == null
-                        ? ""
-                        : new Date(nowCell.result).toISOString().slice(0, 10)
+                      new Date(nowCellValue).toISOString().slice(0, 10)
                     }.json`
                   )}
                   mimeType="application/json"

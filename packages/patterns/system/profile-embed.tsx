@@ -1,9 +1,11 @@
 import {
   computed,
   handler,
+  hasError,
   ifElse,
   NAME,
   pattern,
+  resultOf,
   Stream,
   UI,
   wish,
@@ -132,10 +134,11 @@ export type ProfileEmbedOutput = {
 };
 
 export default pattern<ProfileEmbedInput, ProfileEmbedOutput>(() => {
-  // Resolve the viewer's own profile. `result` is undefined at zero profiles or
-  // while resolution is pending; `[UI]` is the wish's fallback surface (the
-  // trusted create surface when empty). We render `result ?? fallback`.
+  // Resolve the viewer's own profile. `[UI]` is the trusted create surface on
+  // a completed missing-profile error; pending rendering is handled by the
+  // renderer's normal continuity behavior.
   const profileWish = wish<ProfileResult>({ query: "#profile" });
+  const profile = resultOf(profileWish.result);
 
   // Transient local drafts backing the amend inputs. Not a second source of
   // truth — seeded from the live values on entering edit mode, cleared/written
@@ -146,22 +149,20 @@ export default pattern<ProfileEmbedInput, ProfileEmbedOutput>(() => {
   // View toggle: presentation by default, amend form when the owner opts in.
   const editing = new Writable<boolean>(false).for("editing");
 
-  const hasProfile = computed(() => profileWish.result !== undefined);
+  const hasProfile = computed(() => !hasError(profileWish.result));
   const isEditing = computed(() => editing.get() === true);
   const showEditForm = computed(() =>
-    profileWish.result !== undefined && editing.get() === true
+    !hasError(profileWish.result) && editing.get() === true
   );
   const showPresentation = computed(() =>
-    profileWish.result !== undefined && editing.get() !== true
+    !hasError(profileWish.result) && editing.get() !== true
   );
 
-  const bio = computed(() => trimmed(profileWish.result?.bio as string));
-  const hasBio = computed(() =>
-    trimmed(profileWish.result?.bio as string).length > 0
-  );
+  const bio = computed(() => trimmed(profile.bio as string));
+  const hasBio = computed(() => trimmed(profile.bio as string).length > 0);
 
   const displayName = computed(() => {
-    const name = trimmed(profileWish.result?.name as string);
+    const name = trimmed(profile.name as string);
     return name.length > 0 ? name : "Profile";
   });
 
@@ -194,7 +195,7 @@ export default pattern<ProfileEmbedInput, ProfileEmbedOutput>(() => {
               <cf-profile-badge
                 id="profile-embed-badge"
                 variant="hero"
-                $profile={profileWish.result}
+                $profile={profile}
                 size="xl"
                 noNavigate
               />
@@ -223,9 +224,9 @@ export default pattern<ProfileEmbedInput, ProfileEmbedOutput>(() => {
                     nameDraft,
                     avatarDraft,
                     bioDraft,
-                    currentName: profileWish.result?.name,
-                    currentAvatar: profileWish.result?.avatar,
-                    currentBio: profileWish.result?.bio,
+                    currentName: profile.name,
+                    currentAvatar: profile.avatar,
+                    currentBio: profile.bio,
                   })}
                 >
                   Edit profile
@@ -250,7 +251,7 @@ export default pattern<ProfileEmbedInput, ProfileEmbedOutput>(() => {
                     size="sm"
                     onClick={saveName({
                       draft: nameDraft,
-                      setName: profileWish.result?.setName,
+                      setName: profile.setName,
                     })}
                   >
                     Save name
@@ -269,7 +270,7 @@ export default pattern<ProfileEmbedInput, ProfileEmbedOutput>(() => {
                     size="sm"
                     onClick={saveAvatar({
                       draft: avatarDraft,
-                      setAvatar: profileWish.result?.setAvatar,
+                      setAvatar: profile.setAvatar,
                     })}
                   >
                     Save avatar
@@ -289,7 +290,7 @@ export default pattern<ProfileEmbedInput, ProfileEmbedOutput>(() => {
                     size="sm"
                     onClick={saveBio({
                       draft: bioDraft,
-                      setBio: profileWish.result?.setBio,
+                      setBio: profile.setBio,
                     })}
                   >
                     Save bio

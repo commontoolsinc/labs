@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { CFCodeEditor, MimeType } from "./index.ts";
 
 describe("CFCodeEditor", () => {
@@ -53,6 +54,26 @@ describe("CFCodeEditor", () => {
 
     expect(element.autofocus).toBe(true);
     expect(element.cursorPosition).toBe("end");
+  });
+
+  it("treats an unavailable mentionable list as empty while resolving IDs", async () => {
+    let mentionedUpdates = 0;
+    const mentionable = {
+      get: () => DataUnavailable.pending(),
+    };
+    const fakeThis = {
+      mentionable,
+      _resolvedPieceIds: new Map<number, string>(),
+      _updateMentionedFromContent: () => mentionedUpdates++,
+    };
+    const resolvePieceIds = (CFCodeEditor.prototype as unknown as {
+      _resolvePieceIds(this: unknown): Promise<void>;
+    })._resolvePieceIds;
+
+    await resolvePieceIds.call(fakeThis);
+
+    expect(fakeThis._resolvedPieceIds.size).toBe(0);
+    expect(mentionedUpdates).toBe(1);
   });
 
   it("should focus the editor when autofocus becomes true", () => {

@@ -34,37 +34,11 @@ export default function TestWishAndGenerateObjectContextual() {
     }, {
         type: "object",
         properties: {
-            result: {
-                anyOf: [{
-                        type: "undefined"
-                    }, {
-                        type: "object",
-                        properties: {
-                            title: {
-                                type: "string"
-                            }
-                        },
-                        required: ["title"]
-                    }]
-            },
-            candidates: {
-                type: "array",
-                items: {
-                    type: "object",
-                    properties: {
-                        title: {
-                            type: "string"
-                        }
-                    },
-                    required: ["title"]
-                }
-            },
-            error: true,
-            $UI: {
-                $ref: "https://commonfabric.org/schemas/vnode.json"
+            title: {
+                type: "string"
             }
         },
-        required: ["result", "candidates"]
+        required: ["title"]
     } as const satisfies __cfHelpers.JSONSchema).for("contextualWish", true);
     const explicitObject = generateObject<{
         title: string;

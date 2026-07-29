@@ -1,5 +1,6 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
+import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { isRecord } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getTopFrame } from "./builder/pattern.ts";
@@ -199,14 +200,17 @@ export function createQueryResultProxy<T>(
   // directly, exactly as for JS primitives above; wrapping one in a live proxy
   // serves no purpose and would leak that proxy into any consumer that
   // deep-clones or freezes the surrounding value (e.g. schema interning).
-  if (!isRecord(value) || value instanceof FabricPrimitive) {
+  if (
+    !isRecord(value) || value instanceof FabricPrimitive ||
+    isDataUnavailable(value)
+  ) {
     // The SHAPE_READ above tracks only the container's shape, but a
     // FabricPrimitive is an atomic VALUE the consumer materializes here (handed
     // back directly, like a JS primitive), not a container whose shape it
     // inspects. Register a recursive value read so an in-place change to the
     // primitive (e.g. a FabricBytes updated to different bytes) re-triggers
     // consumers — a nonRecursive read is compared shape-only and would miss it.
-    if (value instanceof FabricPrimitive) {
+    if (value instanceof FabricPrimitive || isDataUnavailable(value)) {
       readTx.readValueOrThrow(link);
     }
     return value;
@@ -760,7 +764,7 @@ export function snapshotQueryResult<T>(value: T): T {
   const snapshot = (current: unknown): unknown => {
     if (
       current === null || typeof current !== "object" ||
-      current instanceof FabricPrimitive
+      current instanceof FabricPrimitive || isDataUnavailable(current)
     ) return current;
     const existing = seen.get(current);
     if (existing !== undefined) return existing;

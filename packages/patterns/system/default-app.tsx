@@ -61,18 +61,7 @@ const removePiece = handler<
     pieceRegistry: Writable<MinimalPiece[]>;
   }
 >((_, state) => {
-  const registeredPieces = state.pieceRegistry.get();
-  const index = registeredPieces.findIndex(
-    (c: any) => c && state.piece.equals(c),
-  );
-
-  if (index !== -1) {
-    const pieceListCopy = [...registeredPieces];
-    console.log("pieceListCopy before", pieceListCopy.length);
-    pieceListCopy.splice(index, 1);
-    console.log("pieceListCopy after", pieceListCopy.length);
-    state.pieceRegistry.set(pieceListCopy);
-  }
+  state.pieceRegistry.remove(state.piece);
 });
 
 // Handler for dropping a note onto a notebook row
@@ -178,16 +167,21 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
 
   // Filter out hidden pieces and pieces without resolved NAME
   // (prevents transient hash-only pills during reactive updates)
-  // NOTE: Use truthy check, not === true, because piece.isHidden is a proxy object
-  const visiblePieces = computed(() =>
-    pieceRegistry.get().filter((piece) => {
-      if (!piece) return false;
-      if (piece.isHidden) return false;
-      const name = piece?.[NAME];
-      return typeof name === "string" && name.length > 0;
-    })
-  );
+  const visiblePieces = computed(() => {
+    const pieces: Writable<MentionablePiece>[] = [];
+    const length = pieceRegistry.key("length").get();
+    for (let index = 0; index < length; index++) {
+      const piece = pieceRegistry.key(index);
+      const isHidden = piece.key("isHidden").get();
+      const name = piece.key(NAME).get();
+      if (!isHidden && typeof name === "string" && name.length > 0) {
+        pieces.push(piece);
+      }
+    }
+    return pieces;
+  });
 
+  // Preserve the established argument link for this long-lived sub-pattern.
   const index = BacklinksIndex({ pieceRegistry });
   const summaryIdx = SummaryIndex({});
 
@@ -329,7 +323,7 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
                 <tbody>
                   {visiblePieces.map((piece) => {
                     const isNotebook = computed(() => {
-                      const name = piece?.[NAME];
+                      const name = piece.key(NAME).get();
                       const result = typeof name === "string" &&
                         name.startsWith("📓");
                       return result;

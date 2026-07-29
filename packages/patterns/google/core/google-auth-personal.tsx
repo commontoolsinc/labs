@@ -14,6 +14,7 @@ import {
   ifElse,
   NAME,
   pattern,
+  resultOf,
   TILE_UI,
   UI,
   type VNode,
@@ -58,6 +59,7 @@ export default pattern<Input, Output>(({ auth, selectedScopes }) => {
 
   // Reactive #now passed into the preview helper (snapshot for the picker chip).
   const nowCell = wish<number>({ query: "#now/60" });
+  const nowCellValue = resultOf(nowCell.result);
 
   // Enhanced preview with PERSONAL badge using shared helper
   // Build scopes record manually (same pattern as google-auth.tsx to avoid type casting)
@@ -74,7 +76,7 @@ export default pattern<Input, Output>(({ auth, selectedScopes }) => {
         docs: selectedScopes.docs,
         contacts: selectedScopes.contacts,
       },
-      nowCell.result,
+      nowCellValue,
       { text: "PERSONAL", color: "#3b82f6" },
     )
   );

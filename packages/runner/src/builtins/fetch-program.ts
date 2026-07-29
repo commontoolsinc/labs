@@ -4,13 +4,32 @@ import type { Runtime } from "../runtime.ts";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { CellScope } from "../builder/types.ts";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
+import {
+  CODEC,
+  CODEC_TYPE_TAGS,
+  EmptyReconstructionContext,
+} from "@commonfabric/data-model/codec-common";
+import type {
+  FabricPlainObject,
+  FabricValue,
+} from "@commonfabric/data-model/interface";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { ensureCompilerStack } from "../harness/deferred-compiler-stack.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
-import { computeInputHashFromValue } from "./fetch-utils.ts";
+import {
+  computeInputHashFromValue,
+  liveFetchInputsMatch,
+  selectUnavailableFetchInput,
+  writeUnavailableFetchResult,
+} from "./fetch-utils.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import { scopedCell } from "./scope-policy.ts";
+import {
+  DataUnavailable,
+  FabricError,
+  isDataUnavailable,
+} from "@commonfabric/data-model/fabric-instances";
 
 /**
  * How long a `fetching` cache entry left by another replica is believed before
@@ -37,17 +56,52 @@ import { scopedCell } from "./scope-policy.ts";
  */
 const PROGRAM_CLAIM_STALE_AFTER = 1000 * 10;
 
-export interface ProgramResult {
-  files: Array<{ name: string; contents: string }>;
+export interface ProgramFile extends FabricPlainObject {
+  name: string;
+  contents: string;
+}
+
+export interface ProgramResult extends FabricPlainObject {
+  files: ProgramFile[];
   main: string;
 }
+
+type FetchErrorState = Record<string, FabricValue> & {
+  type: string;
+  name: string | null;
+  message: string;
+  stack?: string;
+  cause?: FabricValue;
+};
 
 // State machine for fetch lifecycle
 type FetchState =
   | { type: "idle" }
   | { type: "fetching"; requestId: string; startTime: number }
   | { type: "success"; data: ProgramResult }
-  | { type: "error"; message: string };
+  | {
+    type: "error";
+    error: FetchErrorState;
+  };
+
+function encodeFetchError(error: FabricError): FetchErrorState {
+  return FabricError[CODEC].encode(error) as FetchErrorState;
+}
+
+function decodeFetchError(state: FetchErrorState): FabricError {
+  const decoded = FabricError[CODEC].decode(
+    CODEC_TYPE_TAGS.Error,
+    state,
+    new EmptyReconstructionContext(
+      true,
+      "fetchProgram durable error cache",
+    ),
+  );
+  if (!(decoded instanceof FabricError)) {
+    throw new TypeError("Invalid FabricError in fetchProgram cache");
+  }
+  return decoded;
+}
 
 // Single source of truth for fetch status
 interface FetchCacheEntry {
@@ -70,6 +124,22 @@ function snapshotFetchProgramInputs(
   const snapshot = cell.asSchema(fetchProgramInputSchema).get() ??
     ({} as { url?: string });
   return createFrozenRequestSnapshot({ url: snapshot.url });
+}
+
+function fetchProgramInputsMatchInTx(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  inputsCell: Cell<{ url: string; result?: ProgramResult }>,
+  expectedInputHash: string,
+): boolean {
+  const unavailable = selectUnavailableFetchInput(
+    inputsCell.withTx(tx).getRaw(),
+    { runtime, tx, base: inputsCell },
+  );
+  return unavailable === undefined &&
+    computeInputHashFromValue(
+        snapshotFetchProgramInputs(inputsCell.withTx(tx)),
+      ) === expectedInputHash;
 }
 
 // Full schema for cache structure to ensure proper validation when reading back
@@ -122,8 +192,22 @@ const cacheSchema = internSchema(
               type: "object",
               properties: {
                 type: { const: "error" },
-                message: { type: "string" },
+                error: {
+                  type: "object",
+                  properties: {
+                    type: { type: "string" },
+                    name: {
+                      anyOf: [{ type: "string" }, { type: "null" }],
+                    },
+                    message: { type: "string" },
+                    stack: { type: "string" },
+                    cause: true,
+                  },
+                  required: ["type", "name", "message"],
+                  additionalProperties: true,
+                },
               },
+              required: ["type", "error"],
             },
           ],
         },
@@ -135,11 +219,12 @@ const cacheSchema = internSchema(
 /**
  * Fetch and resolve a program from a URL.
  *
- * Returns the resolved program as `result` with structure { files, main }.
- * `pending` is true while resolution is in progress.
+ * The internal node retains pending/error sibling cells while the builder
+ * projects its result child. That child is the resolved `{ files, main }`
+ * program when usable and a DataUnavailable marker otherwise.
  *
  * @param url - A cell containing the URL to fetch the program from.
- * @returns { pending: boolean, result: ProgramResult, error: any } - As individual cells.
+ * @returns Internal compatibility state whose result child is public.
  */
 export function fetchProgram(
   inputsCell: Cell<{ url: string; result?: ProgramResult }>,
@@ -151,22 +236,50 @@ export function fetchProgram(
 ): Action {
   let cellsInitialized = false;
   let pending: Cell<boolean>;
-  let result: Cell<ProgramResult | undefined>;
+  let result: Cell<ProgramResult | DataUnavailable>;
   let error: Cell<any | undefined>;
   let cache: Cell<Record<string, FetchCacheEntry>>;
   let cellScope: CellScope | undefined;
-  let abortController: AbortController | undefined = undefined;
   // Input hash to the claim id this replica wrote for it, for every resolution
   // running here right now. The claim id carries `runtime.id`, which is unique
   // per storage manager and so per replica; the entry's `requestId` used to be
   // the input hash, which every replica resolving the same URL writes
   // identically, so no replica could tell its own claim from anyone else's.
-  const inFlight = new Map<string, string>();
+  const inFlight = new Map<
+    string,
+    { requestId: string; controller: AbortController }
+  >();
+
+  const releaseOwnedRequests = (
+    tx: IExtendedStorageTransaction,
+    reason: string,
+  ): void => {
+    const currentCache = cache.withTx(tx).get();
+    const updates: Record<string, FetchCacheEntry> = {};
+    for (const [hash, owned] of inFlight) {
+      owned.controller.abort(reason);
+      const entry = currentCache[hash];
+      if (
+        entry?.state.type === "fetching" &&
+        entry.state.requestId === owned.requestId
+      ) {
+        updates[hash] = {
+          inputHash: hash,
+          state: { type: "idle" },
+        };
+      }
+    }
+    if (Object.keys(updates).length > 0) {
+      cache.withTx(tx).update(updates);
+    }
+    inFlight.clear();
+  };
 
   // This is called when the pattern containing this node is being stopped.
   addCancel(() => {
-    // Abort the request if it's still pending.
-    abortController?.abort("Pattern stopped");
+    for (const { controller } of inFlight.values()) {
+      controller.abort("Pattern stopped");
+    }
 
     // Only try to update state if cells were initialized
     if (!cellsInitialized || inFlight.size === 0) return;
@@ -184,7 +297,7 @@ export function fetchProgram(
       for (const [hash, entry] of Object.entries(currentCache)) {
         if (
           entry.state.type === "fetching" &&
-          entry.state.requestId === inFlight.get(hash)
+          entry.state.requestId === inFlight.get(hash)?.requestId
         ) {
           updates[hash] = {
             inputHash: hash,
@@ -199,6 +312,7 @@ export function fetchProgram(
 
       runtime.prepareTxForCommit(tx);
       tx.commit();
+      inFlight.clear();
     } catch (_) {
       // Ignore errors during cleanup - the runtime might be shutting down
       tx.abort();
@@ -207,10 +321,19 @@ export function fetchProgram(
 
   return (tx: IExtendedStorageTransaction) => {
     tx.resetNarrowestReadScope();
-    const requestSnapshot = snapshotFetchProgramInputs(inputsCell.withTx(tx));
+    const unavailableInput = selectUnavailableFetchInput(
+      inputsCell.withTx(tx).getRaw(),
+      { runtime, tx, base: inputsCell },
+    );
+    const requestSnapshot = unavailableInput === undefined
+      ? snapshotFetchProgramInputs(inputsCell.withTx(tx))
+      : undefined;
     const outputScope = tx.getNarrowestReadScope();
 
     if (!cellsInitialized || cellScope !== outputScope) {
+      if (cellsInitialized) {
+        releaseOwnedRequests(tx, "Output scope changed");
+      }
       const basePending = runtime.getCell<boolean>(
         parentCell.space,
         { fetchProgram: { pending: cause } },
@@ -219,7 +342,7 @@ export function fetchProgram(
       );
       pending = scopedCell(runtime, tx, basePending, outputScope);
 
-      const baseResult = runtime.getCell<ProgramResult | undefined>(
+      const baseResult = runtime.getCell<ProgramResult | DataUnavailable>(
         parentCell.space,
         {
           fetchProgram: { result: cause },
@@ -270,23 +393,31 @@ export function fetchProgram(
       error.sync();
       cache.sync();
 
-      // The cells above are re-minted when the scope changes, so a resolution
-      // started under the old scope writes into the old scope's cache and says
-      // nothing about the new one. Forget those claims; their `finally` sees a
-      // claim id that is no longer recorded and leaves the map alone.
-      inFlight.clear();
-
       cellsInitialized = true;
       cellScope = outputScope;
     }
 
-    const { url } = requestSnapshot;
+    if (unavailableInput !== undefined) {
+      releaseOwnedRequests(tx, "Inputs unavailable");
+      writeUnavailableFetchResult(
+        tx,
+        pending,
+        result,
+        error,
+        unavailableInput,
+      );
+      sendResult(tx, { pending, result, error });
+      return;
+    }
+
+    const { url } = requestSnapshot!;
     const inputHash = computeInputHashFromValue(requestSnapshot);
 
     if (!url) {
-      // When URL is empty, clear outputs
+      releaseOwnedRequests(tx, "URL unavailable");
+      // An authored empty URL is locally complete but invalid.
       pending.withTx(tx).set(false);
-      result.withTx(tx).set(undefined);
+      result.withTx(tx).setRaw(DataUnavailable.schemaMismatch());
       error.withTx(tx).set(undefined);
       sendResult(tx, { pending, result, error });
       return;
@@ -313,10 +444,11 @@ export function fetchProgram(
       // outbox id stays the input hash, which is what makes it an idempotency
       // key for the same request from anywhere.
       const requestId = `${runtime.id}:${inputHash}`;
+      const startTime = Date.now();
       cache.withTx(tx).update({
         [inputHash]: {
           inputHash,
-          state: { type: "fetching", requestId, startTime: Date.now() },
+          state: { type: "fetching", requestId, startTime },
         },
       });
 
@@ -333,22 +465,51 @@ export function fetchProgram(
           // for the program resolve + writeback; `idle()` does not.
           // Recorded in `inFlight` here rather than above, because a
           // transaction that never commits never reaches this callback.
-          inFlight.set(inputHash, requestId);
-          abortController = new AbortController();
-          runtime.trackAsyncWork(
-            startFetch(
+          const controller = new AbortController();
+          inFlight.set(inputHash, { requestId, controller });
+          const work = (async () => {
+            if (
+              !liveFetchInputsMatch(
+                runtime,
+                inputsCell,
+                snapshotFetchProgramInputs,
+                inputHash,
+              ) ||
+              !liveFetchProgramClaimMatches(
+                runtime,
+                cache,
+                inputHash,
+                requestId,
+                startTime,
+              )
+            ) {
+              controller.abort("Inputs changed before fetch started");
+              await resetFetchProgramClaim(
+                runtime,
+                cache,
+                inputHash,
+                requestId,
+                startTime,
+              );
+              return;
+            }
+            await startFetch(
               runtime,
               cache,
+              inputsCell,
+              pending,
+              result,
+              error,
               inputHash,
               url,
-              abortController.signal,
-            ).finally(() => {
-              if (inFlight.get(inputHash) === requestId) {
-                inFlight.delete(inputHash);
-              }
-            }),
-            parentCell,
-          );
+              controller.signal,
+            );
+          })().finally(() => {
+            if (inFlight.get(inputHash)?.requestId === requestId) {
+              inFlight.delete(inputHash);
+            }
+          });
+          runtime.trackAsyncWork(work, parentCell);
         },
       );
     }
@@ -358,13 +519,43 @@ export function fetchProgram(
     const currentState = currentEntries[inputHash]?.state ?? {
       type: "idle",
     };
-    pending.withTx(tx).set(currentState.type === "fetching");
-    result.withTx(tx).set(
-      currentState.type === "success" ? currentState.data : undefined,
-    );
-    error.withTx(tx).set(
-      currentState.type === "error" ? currentState.message : undefined,
-    );
+    switch (currentState.type) {
+      case "success":
+        pending.withTx(tx).set(false);
+        result.withTx(tx).setRaw(currentState.data);
+        error.withTx(tx).set(undefined);
+        break;
+      case "error": {
+        const currentResult = result.withTx(tx).getRaw();
+        const rawCachedState = cache.withTx(tx).getRaw()?.[inputHash]?.state;
+        if (rawCachedState?.type !== "error") {
+          throw new TypeError("Missing raw fetchProgram error cache state");
+        }
+        const unavailable = isDataUnavailable(currentResult) &&
+            currentResult.reason === "error"
+          ? currentResult
+          : DataUnavailable.error(decodeFetchError(rawCachedState.error));
+        writeUnavailableFetchResult(
+          tx,
+          pending,
+          result,
+          error,
+          unavailable,
+          unavailable.error,
+        );
+        break;
+      }
+      case "idle":
+      case "fetching":
+        writeUnavailableFetchResult(
+          tx,
+          pending,
+          result,
+          error,
+          DataUnavailable.pending(),
+        );
+        break;
+    }
 
     sendResult(tx, { pending, result, error });
   };
@@ -386,6 +577,10 @@ export function fetchProgram(
 async function startFetch(
   runtime: Runtime,
   cache: Cell<Record<string, FetchCacheEntry>>,
+  inputsCell: Cell<{ url: string; result?: ProgramResult }>,
+  pending: Cell<boolean>,
+  result: Cell<ProgramResult | DataUnavailable>,
+  error: Cell<any | undefined>,
   inputHash: string,
   url: string,
   abortSignal: AbortSignal,
@@ -396,6 +591,7 @@ async function startFetch(
 
     // Program resolution parses; load the deferred compiler stack first.
     const { resolveProgram, ts } = await ensureCompilerStack();
+    if (abortSignal.aborted) return;
 
     // Resolve the program with all dependencies
     const program = await resolveProgram(resolver, {
@@ -408,6 +604,7 @@ async function startFetch(
     if (abortSignal.aborted) return;
 
     await runtime.idle();
+    if (abortSignal.aborted) return;
 
     // Only write into an entry that is still marked `fetching`.
     await runtime.editWithRetry((tx) => {
@@ -419,7 +616,12 @@ async function startFetch(
             inputHash,
             state: {
               type: "success",
-              data: { files: program.files, main: program.main },
+              data: {
+                files: program.files.map(
+                  ({ name, contents }): ProgramFile => ({ name, contents }),
+                ),
+                main: program.main,
+              },
             },
           },
         });
@@ -430,6 +632,11 @@ async function startFetch(
     if (abortSignal.aborted) return;
 
     await runtime.idle();
+    if (abortSignal.aborted) return;
+
+    const nativeError = err instanceof Error ? err : new Error(String(err));
+    const unavailable = DataUnavailable.error(nativeError);
+    const fabricError = unavailable.error;
 
     // Only write into an entry that is still marked `fetching`.
     await runtime.editWithRetry((tx) => {
@@ -441,11 +648,70 @@ async function startFetch(
             inputHash,
             state: {
               type: "error",
-              message: err instanceof Error ? err.message : String(err),
+              error: encodeFetchError(fabricError),
             },
           },
         });
+        if (
+          fetchProgramInputsMatchInTx(
+            runtime,
+            tx,
+            inputsCell,
+            inputHash,
+          )
+        ) {
+          writeUnavailableFetchResult(
+            tx,
+            pending,
+            result,
+            error,
+            unavailable,
+            nativeError,
+          );
+        }
       }
     });
+  }
+}
+
+async function resetFetchProgramClaim(
+  runtime: Runtime,
+  cache: Cell<Record<string, FetchCacheEntry>>,
+  inputHash: string,
+  requestId: string,
+  startTime: number,
+): Promise<void> {
+  await runtime.editWithRetry((tx) => {
+    const entry = cache.withTx(tx).getRaw()?.[inputHash];
+    if (
+      entry?.state.type === "fetching" &&
+      entry.state.requestId === requestId &&
+      entry.state.startTime === startTime
+    ) {
+      cache.withTx(tx).update({
+        [inputHash]: {
+          inputHash,
+          state: { type: "idle" },
+        },
+      });
+    }
+  });
+}
+
+function liveFetchProgramClaimMatches(
+  runtime: Runtime,
+  cache: Cell<Record<string, FetchCacheEntry>>,
+  inputHash: string,
+  requestId: string,
+  startTime: number,
+): boolean {
+  const tx = runtime.edit();
+  try {
+    const entry = cache.withTx(tx).get()[inputHash];
+    return entry?.state.type === "fetching" &&
+      entry.state.requestId === requestId &&
+      entry.state.startTime === startTime;
+  } finally {
+    tx.abort();
   }
 }

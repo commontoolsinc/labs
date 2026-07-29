@@ -14,6 +14,11 @@ import { CellHandle, cellRefToKey } from "@commonfabric/runtime-client";
 import { setPropDefault, type SetPropHandler } from "../render-utils.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { provideElementSpace } from "./space-context.ts";
+import {
+  applyPendingRenderAuthoredAttributeUpdate,
+  PENDING_RENDER_ATTRIBUTE,
+  setPendingRenderState,
+} from "../pending-render.ts";
 
 const logger = getLogger("vdom-applicator", { enabled: false, level: "debug" });
 
@@ -321,25 +326,43 @@ export class DomApplicator {
     const node = this.nodes.get(nodeId);
     if (!isElementNode(node)) return;
 
-    // Use the configured property setter (defaults to setPropDefault)
-    this.setPropHandler(node, key, value);
+    if (key === PENDING_RENDER_ATTRIBUTE) {
+      setPendingRenderState(node, value === true);
+      return;
+    }
+
+    // Use the configured property setter (defaults to setPropDefault). Pending
+    // rendering temporarily owns inert and aria-busy, but authored updates to
+    // those attributes must still become the values restored on resume.
+    applyPendingRenderAuthoredAttributeUpdate(
+      node,
+      key,
+      () => this.setPropHandler(node, key, value),
+    );
   }
 
   private removeProp(nodeId: number, key: string): void {
     const node = this.nodes.get(nodeId);
     if (!isElementNode(node)) return;
 
-    if (key.startsWith("on") && key.length > 2) {
-      this.removeEvent(nodeId, key.slice(2).toLowerCase());
-    } else if (key.startsWith("$") && key.length > 1) {
-      (node as any)[key.slice(1)] = undefined;
-    } else if (key.startsWith("data-")) {
-      node.removeAttribute(key);
-    } else if (key === "style") {
-      node.removeAttribute("style");
-    } else {
-      (node as any)[key] = undefined;
+    if (key === PENDING_RENDER_ATTRIBUTE) {
+      setPendingRenderState(node, false);
+      return;
     }
+
+    applyPendingRenderAuthoredAttributeUpdate(node, key, () => {
+      if (key.startsWith("on") && key.length > 2) {
+        this.removeEvent(nodeId, key.slice(2).toLowerCase());
+      } else if (key.startsWith("$") && key.length > 1) {
+        (node as any)[key.slice(1)] = undefined;
+      } else if (key.startsWith("data-") || key.startsWith("aria-")) {
+        node.removeAttribute(key);
+      } else if (key === "style") {
+        node.removeAttribute("style");
+      } else {
+        (node as any)[key] = undefined;
+      }
+    });
   }
 
   private setEvent(nodeId: number, eventType: string, handlerId: number): void {

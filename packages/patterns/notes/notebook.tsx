@@ -7,6 +7,7 @@ import {
   NAME,
   navigateTo,
   pattern,
+  resultOf,
   SELF,
   Stream,
   UI,
@@ -551,10 +552,11 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
     const notebooks = notebookWish.candidates;
 
     // The registry is writable for creating notes and notebooks.
-    const pieceRegistry = wish<Writable<NotePiece[]>>({
+    const pieceRegistryWish = wish<Writable<NotePiece[]>>({
       query: "#pieceRegistry",
       headless: true,
-    }).result!;
+    });
+    const pieceRegistry = resultOf(pieceRegistryWish.result);
 
     // Use computed() for proper reactive tracking of notes.length
     const noteCount = computed(() => notes.get().length);

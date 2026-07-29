@@ -4,7 +4,15 @@
  * A composable pattern that can be used standalone or embedded in containers
  * like Record. Tracks birthday with separate month, day, and year fields.
  */
-import { computed, type Default, NAME, pattern, UI, wish } from "commonfabric";
+import {
+  computed,
+  type Default,
+  NAME,
+  pattern,
+  resultOf,
+  UI,
+  wish,
+} from "commonfabric";
 import type { ModuleMetadata } from "./container-protocol.ts";
 
 // ===== Self-Describing Metadata =====
@@ -81,12 +89,12 @@ export const BirthdayModule = pattern<BirthdayModuleInput, BirthdayModuleInput>(
   ({ birthMonth, birthDay, birthYear }) => {
     // Year options derive from the reactive #now clock (one-shot, coarsened to
     // 1s) instead of reading the wall clock at module-evaluation time. The list
-    // is empty for the brief window before #now resolves; the field accepts
-    // custom input meanwhile.
+    // remains unavailable for the brief window before #now resolves.
     const nowCell = wish<number>({ query: "#now" });
+    const nowCellValue = resultOf(nowCell.result);
     const yearItems = computed(() => {
-      const nowMs = nowCell.result;
-      return nowMs == null ? [] : generateYearItems(nowMs);
+      const nowMs = nowCellValue;
+      return generateYearItems(nowMs);
     });
 
     // Compute display text for NAME

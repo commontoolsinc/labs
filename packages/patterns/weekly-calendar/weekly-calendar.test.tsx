@@ -1,4 +1,11 @@
-import { action, assert, pattern, wish, Writable } from "commonfabric";
+import {
+  action,
+  assert,
+  pattern,
+  resultOf,
+  wish,
+  Writable,
+} from "commonfabric";
 import {
   createEventAndContinue,
   createEventHandler,
@@ -8,9 +15,10 @@ import {
 
 export default pattern(() => {
   const events = new Writable<EventPiece[]>([]);
-  const pieceRegistry = wish<Writable<EventPiece[]>>({
+  const pieceRegistryRequest = wish<Writable<EventPiece[]>>({
     query: "#pieceRegistry",
-  }).result!;
+  });
+  const pieceRegistry = resultOf(pieceRegistryRequest.result);
   const newEventTitle = new Writable("Modal Event");
   const newEventDate = new Writable("2026-07-22");
   const newEventStartTime = new Writable("09:00");

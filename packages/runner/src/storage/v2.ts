@@ -84,6 +84,7 @@ import type {
   PushError,
   Result,
   State,
+  StorageConnectionState,
   StorageNotification,
   StorageTransactionRejected,
   Unit,
@@ -841,6 +842,11 @@ export class StorageManager implements IStorageManager {
   #sessionId: string;
   #settings: IRemoteStorageProviderSettings;
   #providers = new Map<MemorySpace, Provider>();
+  #connectionStates = new Map<MemorySpace, StorageConnectionState>();
+  #connectionStateSubscribers = new Map<
+    MemorySpace,
+    Set<(state: StorageConnectionState) => void>
+  >();
   #subscription = SubscriptionManager.create();
   #crossSpacePromises = new Set<Promise<void>>();
   // Docs already offered a link-target pull via shouldPullDoc. One entry per
@@ -975,10 +981,71 @@ export class StorageManager implements IStorageManager {
               sessionId: this.#sessionId,
             }),
         getTelemetry: () => this.#telemetry,
+        onConnectionState: (state) =>
+          this.#publishConnectionState(space, state),
       });
       this.#providers.set(space, provider);
     }
     return provider;
+  }
+
+  subscribeConnectionState(
+    space: MemorySpace,
+    callback: (state: StorageConnectionState) => void,
+  ): Cancel {
+    let subscribers = this.#connectionStateSubscribers.get(space);
+    if (subscribers === undefined) {
+      subscribers = new Set();
+      this.#connectionStateSubscribers.set(space, subscribers);
+    }
+    subscribers.add(callback);
+    this.#notifyConnectionStateSubscriber(
+      callback,
+      this.#connectionStates.get(space) ?? { status: "idle", epoch: 0 },
+    );
+    return () => {
+      const current = this.#connectionStateSubscribers.get(space);
+      current?.delete(callback);
+      if (current?.size === 0) {
+        this.#connectionStateSubscribers.delete(space);
+      }
+    };
+  }
+
+  #publishConnectionState(
+    space: MemorySpace,
+    state: StorageConnectionState,
+  ): void {
+    const previous = this.#connectionStates.get(space);
+    // `closed` is terminal for this provider lifecycle. Teardown closes the
+    // transport after publishing it, and that close can synchronously report a
+    // disconnect through the still-installed session listener. Do not let the
+    // late transport notification regress the public lifecycle.
+    if (previous?.status === "closed") {
+      return;
+    }
+    if (
+      previous?.status === state.status && previous.epoch === state.epoch
+    ) {
+      return;
+    }
+    this.#connectionStates.set(space, state);
+    for (
+      const callback of [...this.#connectionStateSubscribers.get(space) ?? []]
+    ) {
+      this.#notifyConnectionStateSubscriber(callback, state);
+    }
+  }
+
+  #notifyConnectionStateSubscriber(
+    callback: (state: StorageConnectionState) => void,
+    state: StorageConnectionState,
+  ): void {
+    try {
+      callback(state);
+    } catch (error) {
+      console.error("storage connection-state subscriber threw:", error);
+    }
   }
 
   /**
@@ -1104,10 +1171,19 @@ export class StorageManager implements IStorageManager {
     if (this.#providers.size === 0) {
       return;
     }
+    const cause = new Error("storage manager closed");
+    for (const space of this.#providers.keys()) {
+      this.#publishConnectionState(space, {
+        status: "closed",
+        epoch: this.#connectionStates.get(space)?.epoch ?? 0,
+        cause,
+      });
+    }
     await Promise.all(
       [...this.#providers.values()].map((provider) => provider.destroy()),
     );
     this.#providers.clear();
+    this.#connectionStates.clear();
     this.#sessionId = crypto.randomUUID();
   }
 
@@ -1115,10 +1191,19 @@ export class StorageManager implements IStorageManager {
     if (this.#providers.size === 0) {
       return;
     }
+    const cause = new Error("storage manager closed");
+    for (const space of this.#providers.keys()) {
+      this.#publishConnectionState(space, {
+        status: "closed",
+        epoch: this.#connectionStates.get(space)?.epoch ?? 0,
+        cause,
+      });
+    }
     await Promise.all(
       [...this.#providers.values()].map((provider) => provider.destroyNow()),
     );
     this.#providers.clear();
+    this.#connectionStates.clear();
     this.#sessionId = crypto.randomUUID();
   }
 
@@ -1617,6 +1702,7 @@ type ProviderOptions = {
   }>;
   /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
   getTelemetry?: () => TelemetrySink | undefined;
+  onConnectionState?: (state: StorageConnectionState) => void;
 };
 
 /**
@@ -1844,6 +1930,7 @@ class SpaceReplica implements ISpaceReplica {
   /** The client of the last RESOLVED session handle — for synchronous
    *  capability reads (`sqliteServerCommitRowLabelEval`). */
   #sessionClient?: MemoryV2Client.Client;
+  #cancelConnectionState?: Cancel;
   /** The session of the last RESOLVED handle — read synchronously so
    *  `authorizationError()` can observe a denial that terminated the session
    *  during reconnect, which closes its watch view without a fresh watch result
@@ -1896,6 +1983,7 @@ class SpaceReplica implements ISpaceReplica {
   #nextLocalSeq = 1;
   #closed = false;
   #getTelemetry: () => TelemetrySink | undefined;
+  #onConnectionState?: (state: StorageConnectionState) => void;
   #caughtUpLocalSeq = 0;
   #caughtUpLocalSeqWaiters: {
     localSeq: number;
@@ -1928,6 +2016,7 @@ class SpaceReplica implements ISpaceReplica {
     this.#subscription = options.subscription;
     this.#createSession = options.createSession;
     this.#getTelemetry = options.getTelemetry ?? (() => undefined);
+    this.#onConnectionState = options.onConnectionState;
     this.#settings = options.settings;
   }
 
@@ -2225,7 +2314,12 @@ class SpaceReplica implements ISpaceReplica {
         // refreshes) with a ConnectionError and closes the session's watch
         // view — the generic drain for any open watch, not just the two views
         // tracked above.
-        await resolved.client.close();
+        try {
+          await resolved.client.close();
+        } finally {
+          this.#cancelConnectionState?.();
+          this.#cancelConnectionState = undefined;
+        }
       }
     }
     // With the client closed, every in-flight commit and read/watch pull has
@@ -2309,7 +2403,14 @@ class SpaceReplica implements ISpaceReplica {
     const sessionHandle = this.#sessionHandle;
     this.#sessionHandle = undefined;
     if (sessionHandle) {
-      sessionHandle.then(({ client }) => client.close()).catch(() => {
+      sessionHandle.then(async ({ client }) => {
+        try {
+          await client.close();
+        } finally {
+          this.#cancelConnectionState?.();
+          this.#cancelConnectionState = undefined;
+        }
+      }).catch(() => {
         // The session never opened cleanly; there is nothing to close.
       });
     }
@@ -2561,6 +2662,9 @@ class SpaceReplica implements ISpaceReplica {
   ): Promise<Result<Unit, PullError>> {
     try {
       const { session } = await this.sessionHandle();
+      if (this.#closed) {
+        return { error: toConnectionError(new Error("memory replica closed")) };
+      }
       // Per-session (no global): mirror the storage setting onto the session so
       // its watch-mutation family (set + add) uses the ordered-issue concurrent
       // path. Idempotent; cheap to re-assert each refresh. Optional-chained so
@@ -4156,8 +4260,29 @@ class SpaceReplica implements ISpaceReplica {
       // first mount before it can commit.
       const handle = Promise.resolve().then(() => this.#createSession()).then(
         (resolved) => {
+          // Teardown can overtake a lazy session factory. The resolved client
+          // still flows to close()/closeNow() below, but it must never publish
+          // ready or install watches after this replica declared itself closed.
+          if (this.#closed) return resolved;
           this.#sessionClient = resolved.client;
           this.#sessionSession = resolved.session;
+          const subscribeConnectionState = (
+            resolved.session as MemoryV2Client.SpaceSession & {
+              subscribeConnectionState?:
+                MemoryV2Client.SpaceSession["subscribeConnectionState"];
+            }
+          ).subscribeConnectionState;
+          if (typeof subscribeConnectionState === "function") {
+            this.#cancelConnectionState = subscribeConnectionState.call(
+              resolved.session,
+              (state) => this.#onConnectionState?.(state),
+            );
+          } else {
+            // Lightweight/test session factories may implement only the RPCs
+            // they exercise and have no reconnect lifecycle. Creation itself
+            // is their ready boundary.
+            this.#onConnectionState?.({ status: "ready", epoch: 1 });
+          }
           return resolved;
         },
       ).catch((error) => {

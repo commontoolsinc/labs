@@ -3,8 +3,10 @@ import {
   Default,
   generateObject,
   ifElse,
+  isPending,
   NAME,
   pattern,
+  resultOf,
   UI,
   type VNode,
 } from "commonfabric";
@@ -42,7 +44,7 @@ const Checklist = pattern<ChecklistInput, ChecklistOutput>(
       return `Generate a checklist of actionable steps for: ${t}`;
     });
 
-    const response = generateObject<{ items: ChecklistItem[] }>({
+    const responseRequest = generateObject<{ items: ChecklistItem[] }>({
       system:
         "You generate concise, actionable checklists. Each item should be a clear, specific step. Keep it to 5-10 items unless the task clearly requires more.",
       prompt,
@@ -66,10 +68,11 @@ const Checklist = pattern<ChecklistInput, ChecklistOutput>(
       },
       model: "anthropic:claude-haiku-4-5",
     });
+    const response = resultOf(responseRequest);
 
     // Seed items from LLM result when it arrives
     const items = computed(() => {
-      return response.result?.items || [];
+      return response.items || [];
     });
 
     return {
@@ -84,7 +87,7 @@ const Checklist = pattern<ChecklistInput, ChecklistOutput>(
 
           <cf-vstack gap="2" style="padding: 1.5rem;">
             {ifElse(
-              response.pending,
+              isPending(responseRequest),
               <div style="color: var(--cf-theme-color-text-secondary);">
                 <cf-loader show-elapsed /> Generating checklist...
               </div>,
@@ -101,7 +104,7 @@ const Checklist = pattern<ChecklistInput, ChecklistOutput>(
       ),
       topic,
       items,
-      pending: response.pending,
+      pending: isPending(responseRequest),
     };
   },
 );

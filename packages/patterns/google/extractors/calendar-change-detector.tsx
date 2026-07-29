@@ -22,6 +22,7 @@ import {
   NAME,
   pattern,
   type PatternFactory,
+  resultOf,
   TILE_UI,
   UI,
   wish,
@@ -301,6 +302,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   // Reactive current time, ticking once a minute so the relative 7-day window
   // and urgency classification roll over as the day advances.
   const nowCell = wish<number>({ query: "#now/60" });
+  const nowCellValue = resultOf(nowCell.result);
 
   // ==========================================================================
   // SCHEDULE CHANGE TRACKING
@@ -310,12 +312,8 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   const changes = computed(() => {
     const changeList: ScheduleChange[] = [];
 
-    // Until #now resolves, report no changes rather than computing the date
-    // window against the Unix epoch.
-    if (nowCell.result == null) return changeList;
-
     // Create a single reference date for ALL calculations
-    const today = new Date(nowCell.result);
+    const today = new Date(nowCellValue);
     today.setHours(0, 0, 0, 0);
 
     // Seven days from now

@@ -1,4 +1,5 @@
 import type { FabricClassWithCodec } from "@/codec-common/interface.ts";
+import { DataUnavailable } from "./DataUnavailable.ts";
 import { FabricError } from "./FabricError.ts";
 import { FabricLink } from "./FabricLink.ts";
 import { FabricMap } from "./FabricMap.ts";
@@ -11,6 +12,22 @@ export { ExplicitTagValue } from "./ExplicitTagValue.ts";
 export { ProblematicValue } from "./ProblematicValue.ts";
 export { UnknownValue } from "./UnknownValue.ts";
 export { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
+export {
+  DataUnavailable,
+  type DataUnavailableFor,
+  type DataUnavailableReason,
+  type DataUnavailableState,
+  type DataUnavailableVariant,
+  type HasError,
+  hasError,
+  type HasSchemaMismatch,
+  hasSchemaMismatch,
+  isDataUnavailable,
+  type IsPending,
+  isPending,
+  type IsSyncing,
+  isSyncing,
+} from "./DataUnavailable.ts";
 export { FabricError, type FabricErrorState } from "./FabricError.ts";
 export { FabricLink } from "./FabricLink.ts";
 export { FabricMap } from "./FabricMap.ts";
@@ -34,6 +51,7 @@ export function codecClasses(): readonly FabricClassWithCodec[] {
 }
 
 const CODEC_CLASSES: readonly FabricClassWithCodec[] = Object.freeze([
+  DataUnavailable,
   FabricError,
   FabricLink,
   FabricMap,

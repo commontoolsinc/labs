@@ -15,6 +15,7 @@ import {
   assert,
   NAME,
   pattern,
+  resultOf,
   UI,
   wish,
   Writable,
@@ -38,9 +39,10 @@ const backlinkStreamOf = (subject: { [UI]: unknown }): BacklinkStream => {
 };
 
 export default pattern(() => {
-  const pieceRegistry = wish<Writable<Array<{ title?: string }>>>({
+  const pieceRegistryRequest = wish<Writable<Array<{ title?: string }>>>({
     query: "#pieceRegistry",
-  }).result!;
+  });
+  const pieceRegistry = resultOf(pieceRegistryRequest.result);
   const note = Note({
     title: "Test Note",
     content: "Line one\nLine two\nLine three",

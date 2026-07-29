@@ -5,6 +5,7 @@ import { EmulatedStorageManager } from "./v2-emulate.ts";
 export { EmulatedStorageManager } from "./v2-emulate.ts";
 export { EmulatedStorageManager as StorageManagerEmulator } from "./v2-emulate.ts";
 export { SelectorTracker } from "./selector-tracker.ts";
+export type { StorageConnectionState } from "./interface.ts";
 export {
   defaultSettings,
   type Options,
