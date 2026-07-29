@@ -15,9 +15,9 @@
  * that split. The second is the one that used to be wrong: a turn making no
  * durable writes for longer than the bound had the replica running it declare
  * the turn dead and start a second request against itself. A single model call
- * that runs that long produces such a turn, and so does a round of several
- * tool calls, which run one after another and write their results only once
- * they have all returned.
+ * that runs that long produces such a turn. So does a tool call, which nothing
+ * bounds, and so does a round of several, which run one after another and write
+ * their results only once they have all returned.
  *
  * The two peer cases put `pending` back to true with no turn running locally.
  * That the write reaches the dialog's own durable cell is what the
