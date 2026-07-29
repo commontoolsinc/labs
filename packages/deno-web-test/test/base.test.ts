@@ -1,6 +1,6 @@
-import { assert } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { decode } from "@commonfabric/utils/encoding";
-import { runDenoWebTest } from "./utils.ts";
+import { runDenoWebTest, stripDenoDownloadDiagnostics } from "./utils.ts";
 
 Deno.test("smoke test", async function () {
   const { success, stdout, stderr } = await runDenoWebTest("success-project");
@@ -26,15 +26,17 @@ Deno.test("smoke test", async function () {
   assert(stderrText.split("\n")[1] === "", "stderr has no other messages");
 });
 
-Deno.test("dependency downloads do not enter harness stderr", async function () {
-  const { success, stderr } = await runDenoWebTest("success-project", {
-    reload: "npm:typescript",
-  });
-  const stderrText = decode(stderr);
+Deno.test("dependency downloads do not enter harness stderr", function () {
+  const stderr = new TextEncoder().encode(
+    "Task test deno run cli.ts *.test.ts\n" +
+      "Download https://registry.npmjs.org/esbuild\n" +
+      "Download https://registry.npmjs.org/typescript\n" +
+      "Warning experimentalDecorators is deprecated\n",
+  );
 
-  assert(success, "test successful");
-  assert(
-    !stderrText.includes("Download"),
-    `stderr has no download diagnostics:\n${stderrText}`,
+  assertEquals(
+    decode(stripDenoDownloadDiagnostics(stderr)),
+    "Task test deno run cli.ts *.test.ts\n" +
+      "Warning experimentalDecorators is deprecated\n",
   );
 });
