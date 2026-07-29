@@ -1588,6 +1588,48 @@ back to `globalThis.fetch` and the executor Worker's `fetch:
 denyExternalBuiltinFetch` option never sees the call. The executor's
 egress denial has a bypass.
 
+### Wave B measurement: wave A bought **zero** measurable movement here
+
+Run by the orchestrator on a quiet box (no agents in flight, fresh store,
+no offset-750 servers, no leftover browsers; load 24-28, so counts only —
+no latency is quoted).
+
+| | baseline (post-R7, pre-A) | post-wave-A |
+| --- | --- | --- |
+| `claimsIssued` space/user/session | 24 / 36 / 38 | 24 / 36 / 38 |
+| attempts/conflicts/committed, space | 39/8/2 | 39/8/2 |
+| … user | 80/22/8 | 80/22/8 |
+| … session | 82/17/15 | **81**/17/15 |
+| `claimContextMismatchFences` | 2 / 0 / 0 | 2 / 0 / 0 |
+| `dynamic-write-outside-static-surface` | 12 (1 offender) | 12 (1 offender) |
+
+The classification probe likewise reproduced exactly: `promoted=16
+stillStranded=2 appeared=0 regressed=0 mixed=2`. The one delta — session
+attempts 82 → 81 — sits inside the contention-timing band this document
+already records (78-87).
+
+**This is a negative result and it is worth stating as one.** The plan
+predicted "expect the effect rows to move `broker-required` classes."
+That prediction was wrong, for a reason visible only after the fact: the
+group-chat fixture does not exercise `llm`, `sqliteQuery`,
+`inspectConfLabel` or `wish` at all, so there were no such classes here to
+move. Wave A's rows are real correctness work — a bypassed
+double-execution gate, a mis-typed builtin kind, an unbrokered egress —
+but none of them is on this fixture's critical path.
+
+Two consequences:
+
+1. **The flagship measurement instrument does not cover the R5/R13
+   worklist.** Crossing-weighted priority (CP10) ranks those rows by
+   where they strand downstream work, but this probe cannot see that
+   ranking pay off. Before more effect-row work is scheduled on the
+   promise of a measurable buy, either the fixture has to exercise the
+   builtins in question or the buy has to be measured somewhere else
+   (`server-execution-product-fixtures` is the candidate).
+2. **The run is still worth having**, because identical counters across a
+   six-commit change is evidence wave A introduced no regression — which
+   is the other thing a measurement is for.
+
 ### C1 ruling: **SURVIVES** — and the question was mis-framed
 
 C1 asked whether a purely speculative client deletes the §4 widening

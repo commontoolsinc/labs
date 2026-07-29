@@ -55,9 +55,11 @@ resumable.
 | Wave | What | Status |
 | --- | --- | --- |
 | A | R5/R13 effect rows — brokers, descriptors, `wish` | **DONE** except A5 |
+| B | Post-A measurement re-run | **DONE** — zero movement; see §5h |
 | **A5** | served sqlite-op commit path (D2) | **NEXT** — scope grew, see below |
-| **B** | Post-A measurement re-run | **READY** — can run in parallel with A5 |
-| C | P3 preconditions | C1 **DONE** (ruled SURVIVES); C2 next after A5/B |
+| **C2** | client-side lattice-claims negotiation | **NEXT** — C1 ruled, scope settled |
+| **P2x** | the ×12 diagnosis, unblocked by C1 | **NEXT** — hypothesis in hand |
+| D | P3 passivity mechanism | blocked on C2 |
 | D | P3 passivity mechanism — the client stops running standing work | blocked on B + C |
 | E | P5 passive delivery + warm spaces | blocked on D |
 | F | P6 acceptance | blocked on E |
@@ -666,3 +668,9 @@ Append one line per landed item: date, item, commit, one-sentence outcome.
   A→B gate's lint and format halves now met.
 - 2026-07-28 — C1 ruled **SURVIVES**; the ×12 is unblocked as P2 work and the
   question's framing was wrong at the source. Full ruling: client-passivity §5h.
+- 2026-07-28 — wave B measured: **zero movement**, every counter reproducing
+  the pre-A baseline. The plan's own prediction ("expect the effect rows to
+  move broker-required classes") was WRONG — group-chat exercises none of the
+  four builtins wave A touched. Lesson for future waves: check that the
+  measurement instrument can see the thing being built BEFORE promising a
+  buy. Full numbers: client-passivity §5h.
