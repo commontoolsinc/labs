@@ -596,7 +596,7 @@ describe("native-conversion", () => {
         const arr = [1, 2, 3] as unknown[] & { foo?: string };
         arr.foo = "bar";
         expect(() => shallowFabricFromNativeValue(arr)).toThrow(
-          "Cannot store array with enumerable named properties",
+          "Cannot store array with non-index properties",
         );
       });
     });
@@ -1489,12 +1489,12 @@ describe("native-conversion", () => {
       });
     });
 
-    describe("throws for arrays with enumerable named properties", () => {
+    describe("throws for arrays with non-index properties", () => {
       it("throws for a top-level array with named properties", () => {
         const arr = [1, 2, 3] as unknown[] & { foo?: string };
         arr.foo = "bar";
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Cannot store array with enumerable named properties",
+          "Cannot store array with non-index properties",
         );
       });
 
@@ -1502,7 +1502,7 @@ describe("native-conversion", () => {
         const arr = [1, 2] as unknown[] & { extra?: number };
         arr.extra = 42;
         expect(() => fabricFromNativeValue({ data: arr })).toThrow(
-          "Cannot store array with enumerable named properties",
+          "Cannot store array with non-index properties",
         );
       });
 
@@ -1512,7 +1512,7 @@ describe("native-conversion", () => {
         sparse[2] = 3;
         sparse.name = "test";
         expect(() => fabricFromNativeValue(sparse)).toThrow(
-          "Cannot store array with enumerable named properties",
+          "Cannot store array with non-index properties",
         );
       });
 
@@ -1523,7 +1523,23 @@ describe("native-conversion", () => {
         arr.foo = "bar";
         Object.freeze(arr);
         expect(() => fabricFromNativeValue(arr)).toThrow(
-          "Cannot store array with enumerable named properties",
+          "Cannot store array with non-index properties",
+        );
+      });
+
+      it("throws for a top-level array with a symbol-keyed property", () => {
+        const arr = [1, 2, 3];
+        (arr as unknown as Record<symbol, unknown>)[Symbol("foo")] = "bar";
+        expect(() => fabricFromNativeValue(arr)).toThrow(
+          "Cannot store array with non-index properties",
+        );
+      });
+
+      it("throws for a nested array with a symbol-keyed property", () => {
+        const arr = [1, 2];
+        (arr as unknown as Record<symbol, unknown>)[Symbol.for("extra")] = 42;
+        expect(() => fabricFromNativeValue({ data: arr })).toThrow(
+          "Cannot store array with non-index properties",
         );
       });
     });

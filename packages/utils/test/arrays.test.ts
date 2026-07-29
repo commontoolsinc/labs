@@ -138,6 +138,45 @@ describe("arrays", () => {
       expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
     });
 
+    it("returns `false` for an array with an enumerable symbol-keyed property", () => {
+      const arr = [1, 2, 3];
+      (arr as unknown as Record<symbol, unknown>)[Symbol("foo")] = "bar";
+      expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
+    });
+
+    it("returns `false` for an array with a non-enumerable symbol-keyed property", () => {
+      // A symbol key is not expressible as a property name at all, so unlike a
+      // non-enumerable string key it is rejected.
+      const arr = [1, 2, 3];
+      Object.defineProperty(arr, Symbol("foo"), {
+        value: "bar",
+        enumerable: false,
+      });
+      expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
+    });
+
+    it("returns `false` for an array with a registered symbol-keyed property", () => {
+      // Registry-interned symbols are portable across realms -- and so are
+      // valid fabric *values* -- but they are still not property *names*.
+      const arr = [1, 2, 3];
+      (arr as unknown as Record<symbol, unknown>)[Symbol.for("foo")] = "bar";
+      expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
+    });
+
+    it("returns `false` for an array with a well-known symbol-keyed property", () => {
+      const arr = [1, 2, 3];
+      (arr as unknown as Record<symbol, unknown>)[Symbol.toStringTag] = "Nope";
+      expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
+    });
+
+    it("returns `true` for an array with a non-enumerable string-keyed property", () => {
+      // Non-enumerable string keys are out of scope: every array has one
+      // (`length`), and they are conventionally implementation detail.
+      const arr = [1, 2, 3];
+      Object.defineProperty(arr, "foo", { value: "bar", enumerable: false });
+      expect(isArrayWithOnlyIndexProperties(arr)).toBe(true);
+    });
+
     describe("returns `false` for non-canonical index-shaped named keys", () => {
       // These keys are named properties, not array indices, but each has a
       // `Number(key)` that is an in-range non-negative integer -- so a naive

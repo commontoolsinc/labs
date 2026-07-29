@@ -117,6 +117,12 @@ describe("type-check", () => {
         expect(isFabricValueLayer(arr)).toBe(false);
       });
 
+      it("returns `false` for an array with a symbol-keyed property", () => {
+        const arr = [1, 2, 3];
+        (arr as unknown as Record<symbol, unknown>)[Symbol("foo")] = "bar";
+        expect(isFabricValueLayer(arr)).toBe(false);
+      });
+
       it("returns `false` for a sparse array with extra named properties", () => {
         // Length 3, hole at index 1, plus a named property "foo": still
         // `false` because the named property isn't a valid array index.
@@ -289,6 +295,18 @@ describe("type-check", () => {
       it("returns `false` for a named-property array nested in the graph", () => {
         const arr = [1, 2] as unknown[] & { extra?: number };
         arr.extra = 42;
+        expect(isFabricValue({ data: arr })).toBe(false);
+      });
+
+      it("returns `false` for an array with a symbol-keyed property", () => {
+        const arr = [1, 2, 3];
+        (arr as unknown as Record<symbol, unknown>)[Symbol("foo")] = "bar";
+        expect(isFabricValue(arr)).toBe(false);
+      });
+
+      it("returns `false` for a symbol-keyed-property array nested in the graph", () => {
+        const arr = [1, 2];
+        (arr as unknown as Record<symbol, unknown>)[Symbol.for("extra")] = 42;
         expect(isFabricValue({ data: arr })).toBe(false);
       });
 

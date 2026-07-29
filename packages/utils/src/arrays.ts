@@ -71,9 +71,15 @@ export function isArrayIndexPropertyName(name: string): boolean {
 }
 
 /**
- * Indicates whether all of the given array's enumerable own properties are
- * numeric indices (that is, it has no named properties). Returns `true` for
- * sparse arrays.
+ * Indicates whether all of the given array's own properties are array indices,
+ * that is, it has neither enumerable named (string-keyed) properties nor
+ * symbol-keyed properties. Returns `true` for sparse arrays.
+ *
+ * Symbol-keyed properties are rejected regardless of enumerability, because a
+ * symbol key is not expressible as a property name at all. Non-enumerable
+ * _string_-keyed properties are not considered, both because every array
+ * necessarily has one (`length`) and because such properties are conventionally
+ * implementation detail rather than content.
  *
  * **Note:** This function relies on `Object.keys()` on arrays producing output
  * which agrees with the JavaScript spec with regards to the ordering of index
@@ -88,17 +94,24 @@ export function isArrayIndexPropertyName(name: string): boolean {
  * assumpion, this function avoids having to iterate over _all_ keys.
  *
  * @param array The array to check.
- * @returns `true` if the array has only numeric properties, `false` otherwise.
+ * @returns `true` if the array has only index properties, `false` otherwise.
  */
 export function isArrayWithOnlyIndexProperties(array: unknown[]): boolean {
   const keys = Object.keys(array);
 
   // `Object.keys()` on an (ordinary) array yields all array-index keys first,
   // followed by any non-index keys. So if an array has _any_ non-index keys,
-  // then _one_ of them is always the final key. This means the array is
-  // index-only exactly when it has no keys or its last key is an index. (But
-  // see the doc comment above for potential `Proxy` troubles that this
-  // implementation _intentionally_ does not try to handle.)
+  // then _one_ of them is always the final key. This means the array's named
+  // properties are index-only exactly when it has no keys or its last key is an
+  // index. (But see the doc comment above for potential `Proxy` troubles that
+  // this implementation _intentionally_ does not try to handle.)
   const lastKey = keys.at(-1);
-  return lastKey === undefined || isArrayIndexPropertyName(lastKey);
+  if (!((lastKey === undefined) || isArrayIndexPropertyName(lastKey))) {
+    return false;
+  }
+
+  // `Object.keys()` doesn't report symbol keys at all, so they have to be asked
+  // about separately. A named-property rejection above short-circuits ahead of
+  // this, so such an array never pays for the symbol scan.
+  return Object.getOwnPropertySymbols(array).length === 0;
 }

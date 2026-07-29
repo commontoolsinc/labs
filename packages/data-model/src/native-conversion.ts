@@ -142,11 +142,12 @@ export function shallowFabricFromNativeValue(
 
     case NATIVE_TAGS.Array: {
       // Arrays may only carry numeric index properties. An enumerable named
-      // property has no fabric representation, so reject it outright rather
-      // than silently dropping it ("death before confusion").
+      // property or a symbol-keyed one has no fabric representation, so reject
+      // it outright rather than silently dropping it ("death before
+      // confusion").
       if (!isArrayWithOnlyIndexProperties(value as unknown[])) {
         throw new Error(
-          "Cannot store array with enumerable named properties",
+          "Cannot store array with non-index properties",
         );
       }
       // Delegate frozenness handling to `cloneHelper()`.
@@ -530,7 +531,7 @@ function isFabricCompatibleInternal(
       seen.add(value);
 
       if (Array.isArray(value)) {
-        // Check array structure (no named properties).
+        // Check array structure (no non-index properties).
         if (!isArrayWithOnlyIndexProperties(value)) {
           seen.delete(value);
           return false;

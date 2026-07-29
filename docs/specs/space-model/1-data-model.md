@@ -46,7 +46,8 @@ All IEEE 754 binary64 values are accepted, including `-0`, `NaN`,
 - Must be dense (no holes)
 - Must not contain `undefined` elements
 - Sparse arrays are densified during conversion (`undefined` → `null`)
-- Non-index keys (named properties) cause rejection as non-fabric
+- Non-index keys (named properties, and symbol keys) cause rejection as
+  non-fabric
 
 #### Objects
 
