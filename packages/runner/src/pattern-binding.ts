@@ -415,28 +415,6 @@ function isReproducibleRecord(binding: object): boolean {
 }
 
 /**
- * The array counterpart of {@link isReproducibleRecord}. `Array.prototype.map()`
- * copies index properties only, so an array carrying any other own property —
- * enumerable or not, string- or symbol-keyed — is not reproduced by the walk's
- * rebuild and must not be shared.
- *
- * The `+ 1` is `length`, an array's one non-enumerable own property, so the
- * comparison says "no own string properties beyond the enumerable indices".
- * That holds for a sparse array too, and sparse arrays are shareable: `map()`
- * preserves holes, as does handing back the original.
- *
- * No prototype test, deliberately. `map()` allocates via `ArraySpeciesCreate`,
- * so it *preserves* an `Array` subclass rather than flattening it — unlike
- * `Object.fromEntries()`, which is why the record counterpart does check.
- */
-function isReproducibleArray(binding: unknown[]): boolean {
-  return isArrayWithOnlyIndexProperties(binding) &&
-    Object.getOwnPropertySymbols(binding).length === 0 &&
-    Object.getOwnPropertyNames(binding).length ===
-      Object.keys(binding).length + 1;
-}
-
-/**
  * Unwraps one level of aliases, and
  * - binds top-level aliases to passed doc
  *
@@ -556,16 +534,41 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
         );
       }
     } else if (Array.isArray(binding)) {
-      let changed = false;
-      const converted = binding.map((value, index) => {
+      // Copy lazily: allocate only once a child actually converts to something
+      // else, so the shared path allocates nothing. Holes are skipped rather
+      // than visited, exactly as `map()` skips them, and never written to —
+      // assigning at a hole's index would materialize it and desparsify the
+      // array.
+      let converted: FabricExecValue[] | undefined;
+      for (let i = 0; i < binding.length; i++) {
+        if (!(i in binding)) continue;
+        const value = binding[i] as FabricExecValue;
         const next = convert(
           value,
-          cfc.getSchemaAtPath(targetSchema, [String(index)]),
+          cfc.getSchemaAtPath(targetSchema, [`${i}`]),
         );
-        if (next !== value) changed = true;
-        return next;
-      });
-      return (!changed && isReproducibleArray(binding)) ? binding : converted;
+        if (converted === undefined) {
+          if (next === value) continue;
+          // First change: keep the prefix converted so far (identical to the
+          // original by definition), then grow back to full length so trailing
+          // holes survive.
+          converted = binding.slice(0, i) as FabricExecValue[];
+          converted.length = binding.length;
+        }
+        converted[i] = next;
+      }
+      if (converted !== undefined) return converted;
+      // Nothing rebound. `isArrayWithOnlyIndexProperties()` is the array
+      // counterpart of `isReproducibleRecord()` below: it rejects every own
+      // property that is not an index — named or symbol-keyed, enumerable or
+      // not — which is exactly what the copy would have dropped.
+      //
+      // Deliberately no prototype test, unlike the record case: a copy
+      // allocates via `ArraySpeciesCreate` and so preserves an `Array`
+      // subclass, where `Object.fromEntries()` flattens one to a plain object.
+      return isArrayWithOnlyIndexProperties(binding)
+        ? binding
+        : binding.slice();
     } else if (isRecord(binding)) {
       let changed = false;
       const entries = Object.entries(binding).map(([key, value]) => {
