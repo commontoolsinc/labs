@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import { collectVintages } from "./pattern-vintage-lib.ts";
+import { collectVintages, PINNED } from "./pattern-vintage-lib.ts";
 import {
   captureMissing,
   type GateRoots,
@@ -166,6 +166,29 @@ describe("the vintage gate, end to end", () => {
     const { failures } = await replayAll(roots);
 
     expect(failures).toEqual([]);
+  });
+
+  it("FAILS a fixture that did not restore, rather than reading it clean", async () => {
+    // The worst available green. An empty store presents to the runtime as a
+    // fresh space; today's source materializes onto a fresh space perfectly
+    // well; the root then reads as something. Every check the replay makes
+    // passes, the pattern counts as covered, and NOTHING was replayed.
+    //
+    // Measured that it is the real behaviour and not a worry: with the
+    // identity control removed, this case goes green while the rest of the
+    // file stays green too — no other assertion here can see it.
+    const dir = `${roots.vintagesRoot}/${KEY}/${PINNED}`;
+    await Deno.mkdir(dir, { recursive: true });
+    await Deno.writeFile(
+      `${dir}/2026-07-29T12-00-00.000Z-neverwritten.sqlite`,
+      new Uint8Array(),
+    );
+
+    const { replayed, failures } = await replayAll(roots);
+
+    expect(replayed).toBe(1);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].detail).toContain("did not restore");
   });
 
   it("does NOT catch a moved storage key — the gap, pinned", async () => {

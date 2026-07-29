@@ -28,6 +28,7 @@ import {
 import {
   materializeOver,
   openFileBackedRuntime,
+  vintageStoredIdentity,
 } from "../packages/piece/test/state-continuity-harness.ts";
 
 export interface GateRoots {
@@ -79,6 +80,21 @@ export async function replayVintage(
     path: relativeToRepo(vintage.path, roots.repoRoot),
   };
   return await withRuntime(roots, vintage.path, async (runtimeVintage) => {
+    // The control, before anything is applied. A fixture that did not restore
+    // presents as a fresh empty space, and today's source materializes onto a
+    // fresh empty space just fine — so without this, "green" and "the fixture
+    // was never there" are the same reading. Checking it against the identity
+    // in the FILENAME does double duty: it also proves that name is provenance
+    // rather than decoration.
+    const stored = await vintageStoredIdentity(runtimeVintage);
+    if (stored !== vintage.identity) {
+      return {
+        ...where,
+        detail: stored === undefined
+          ? "this fixture holds no captured root — it did not restore, so replaying it would prove nothing"
+          : `this fixture's root was written by ${stored}, but its name records ${vintage.identity}`,
+      };
+    }
     let program;
     try {
       program = await runtimeVintage.runtime.harness.resolve(
