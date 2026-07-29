@@ -22,10 +22,13 @@ The Markdown language also has a rendered view that formats headings, lists,
 quotes, tables, links, emphasis and code while retaining source line positions.
 Source views remain verbatim and add colour only.
 
-Unified diffs are detected automatically: piping 'git diff' in gives added and
-removed lines their tints, full syntax colour, a structure tree of the code
-each hunk touches, and the semantic features (inferred types, go-to-definition)
-answered against the CURRENT state of the workspace files the diff names.
+Raw unified diffs are detected automatically when their structural header is
+the first nonblank line. Standard Git commit output is detected from its complete
+header. Other source content is not used to guess a language. Piping 'git diff'
+in gives added and removed lines their tints, full syntax colour, a structure
+tree of the code each hunk touches, and the semantic features (inferred types,
+go-to-definition) answered against the CURRENT state of the workspace files the
+diff names.
 
 COMMON USAGE:
   cf check ./pattern.tsx --show-transformed --no-run | cf view
