@@ -90,8 +90,15 @@ const _wrongRoomBinding: MustBeTrue<
   AssertNotAssignable<WrongRoomBinding, FactoryInput<StripCell<RoomInput>>>
 > = true;
 
-const _unavailableInput: MustBeTrue<
-  AssertAssignable<DataUnavailableVariant, FactoryInput<string>>
+type UnavailableRoomBinding = {
+  player1: DataUnavailableVariant;
+};
+
+const _unavailableFactoryInput: MustBeTrue<
+  AssertAssignable<
+    UnavailableRoomBinding,
+    Parameters<PatternFactory<StripCell<RoomInput>, unknown>>[0]
+  >
 > = true;
 
 type SchemaPatternOverloadAcceptsFactoryInput = PatternFunction extends {
@@ -132,7 +139,7 @@ Deno.test("FactoryInput accepts reactive cell handles in factory bindings", asyn
       _handlerFactory,
       _patternFactory,
       _wrongRoomBinding,
-      _unavailableInput,
+      _unavailableFactoryInput,
       _schemaPatternOverload,
       _schemaWishOverload,
     ],

@@ -3,7 +3,7 @@ import type {
   AssertRawPart,
   AssertRecord,
   CellScope,
-  FactoryInput,
+  FactoryCallInput,
   Frame,
   Handler,
   HandlerFactory,
@@ -141,7 +141,7 @@ export function createNodeFactory<T = any, R = any>(
     module.argumentSchema,
     module.resultSchema,
   );
-  const factory = Object.assign((inputs: FactoryInput<T>): Reactive<R> => {
+  const factory = Object.assign((inputs: FactoryCallInput<T>): Reactive<R> => {
     const outputs = reactive<R>(undefined, module.resultSchema);
     const node: NodeRef = { module, inputs, outputs, frame: getTopFrame() };
 
@@ -440,22 +440,22 @@ function handlerInternal<E, T>(
   );
 
   const module: Handler<T, E> & toJSON & {
-    bind: (inputs: FactoryInput<StripCell<T>>) => Stream<E>;
+    bind: (inputs: FactoryCallInput<StripCell<T>>) => Stream<E>;
   } = {
     type: "javascript",
     implementation: handler,
     wrapper: "handler",
-    with: (inputs: FactoryInput<StripCell<T>>) => factory(inputs),
+    with: (inputs: FactoryCallInput<StripCell<T>>) => factory(inputs),
     // Overriding the default `bind` method on functions. The wrapper will bind
     // the actual inputs, so they'll be available as `this`
-    bind: (inputs: FactoryInput<StripCell<T>>) => factory(inputs),
+    bind: (inputs: FactoryCallInput<StripCell<T>>) => factory(inputs),
     toJSON: () => moduleToJSON(module),
     ...(schema !== undefined && { argumentSchema: schema }),
     ...(writableProxy && { writableProxy: true }),
   };
 
   const factory = Object.assign(
-    (props: FactoryInput<StripCell<T>>): Stream<E> => {
+    (props: FactoryCallInput<StripCell<T>>): Stream<E> => {
       // If the event schema is false, we actually set it to true here, since
       // otherwise we won't think it needs to be handled. Ditto for state.
       // TODO(@ubik2): I should be able to remove this workaround, but the stream

@@ -1645,9 +1645,6 @@ type StripCellInner<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - i
  */
 export type FactoryInput<T> =
   | T
-  // Unavailable values propagate through factory boundaries and suspend the
-  // downstream computation until a usable value arrives.
-  | DataUnavailable
   // We have to list them explicitly so Typescript can unwrap them. Doesn't seem
   // to work if we just say AnyBrandedCell<T>
   | AnyCell<T>
@@ -1666,6 +1663,19 @@ export type FactoryInput<T> =
   | (T extends Array<infer U> ? Array<FactoryInput<U>>
     : T extends ReadonlyArray<infer U> ? ReadonlyArray<FactoryInput<U>>
     : T extends object ? { [K in keyof T]: FactoryInput<T[K]> }
+    : T);
+
+/**
+ * Input accepted at a factory invocation boundary. Unlike helpers that accept
+ * ordinary FactoryInput values, a downstream factory can receive propagated
+ * unavailable values at any depth and suspends until those inputs are usable.
+ */
+export type FactoryCallInput<T> =
+  | FactoryInput<T>
+  | DataUnavailable
+  | (T extends Array<infer U> ? Array<FactoryCallInput<U>>
+    : T extends ReadonlyArray<infer U> ? ReadonlyArray<FactoryCallInput<U>>
+    : T extends object ? { [K in keyof T]: FactoryCallInput<T[K]> }
     : T);
 
 /**
@@ -1758,11 +1768,11 @@ export type toJSON = {
 };
 
 export type Handler<T = any, R = any> = Module & {
-  with: (inputs: FactoryInput<StripCell<T>>) => Stream<R>;
+  with: (inputs: FactoryCallInput<StripCell<T>>) => Stream<R>;
 };
 
 export type NodeFactory<T, R> =
-  & ((inputs: FactoryInput<T>) => Reactive<R>)
+  & ((inputs: FactoryCallInput<T>) => Reactive<R>)
   & (Module | Handler | Pattern)
   & toJSON
   & {
@@ -1770,7 +1780,7 @@ export type NodeFactory<T, R> =
   };
 
 export type PatternFactory<T, R> =
-  & ((inputs: FactoryInput<T>) => Reactive<R>)
+  & ((inputs: FactoryCallInput<T>) => Reactive<R>)
   & Pattern
   & toJSON
   & {
@@ -1779,7 +1789,7 @@ export type PatternFactory<T, R> =
   };
 
 export type ModuleFactory<T, R> =
-  & ((inputs: FactoryInput<T>) => Reactive<R>)
+  & ((inputs: FactoryCallInput<T>) => Reactive<R>)
   & Module
   & toJSON
   & {
@@ -1787,7 +1797,7 @@ export type ModuleFactory<T, R> =
   };
 
 export type HandlerFactory<T, R> =
-  & ((inputs: FactoryInput<StripCell<T>>) => Stream<R>)
+  & ((inputs: FactoryCallInput<StripCell<T>>) => Stream<R>)
   & Handler<T, R>
   & toJSON;
 
@@ -2358,11 +2368,20 @@ export type CompileHasError = HasError & {
   readonly error: CompileError;
 };
 
+/** Type-only association preserving the usable value behind CompileResult. */
+export declare const COMPILE_RESULT: unique symbol;
+export interface CompileResultSource<T> {
+  readonly [COMPILE_RESULT]: T;
+}
+
 /** Availability-aware result of compiling and running a pattern. */
 export type CompileResult<T> =
-  | T
-  | Exclude<DataUnavailableVariant, HasError>
-  | CompileHasError;
+  & (
+    | T
+    | Exclude<DataUnavailableVariant, HasError>
+    | CompileHasError
+  )
+  & CompileResultSource<T>;
 
 /** @internal Legacy raw operation state retained for persisted graphs. */
 export interface BuiltInCompileAndRunState<T> {
@@ -3340,6 +3359,7 @@ export interface ResultOfFunction {
   <Final, Partial>(
     result: Reactive<AsyncStreamResult<Final, Partial>>,
   ): Reactive<Final>;
+  <T>(result: Reactive<CompileResult<T>>): Reactive<T>;
   <T>(result: Reactive<AsyncResult<T>>): Reactive<T>;
   <R>(result: R): Reactive<AvailableResult<R>>;
 }
