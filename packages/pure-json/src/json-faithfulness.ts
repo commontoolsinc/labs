@@ -134,9 +134,16 @@ function walk(
 
     if (Array.isArray(obj)) {
       // JSON serializes an array's indices only; any other own property is
-      // dropped. `Object.keys` yields the present indices plus those extras.
-      for (const key of Object.keys(obj)) {
-        if (!isArrayIndexPropertyName(key)) {
+      // dropped, whether or not it is enumerable -- hence own property *names*
+      // rather than `Object.keys`. `length` is the one non-index name every
+      // array carries, and JSON encodes it structurally rather than dropping
+      // it, so it is not an offender.
+      //
+      // A hole is a separate matter, reported by the element loop below: JSON
+      // cannot carry one, while a fabric value can. The two checks disagree
+      // there on purpose.
+      for (const key of Object.getOwnPropertyNames(obj)) {
+        if ((key !== "length") && !isArrayIndexPropertyName(key)) {
           out.push({
             pointer: pointerChild(pointer, key),
             reason: "non-index array property (dropped)",
