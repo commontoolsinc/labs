@@ -132,6 +132,14 @@ deno task cf inspect html     z6Mkqa41 --out /tmp/space.html [--app-url https://
 # cross-space convergence (--all discovered, or --spaces a,b, or --dir)
 deno task cf inspect converge      of:fid1:… --all --path value
 deno task cf inspect converge-scan --all --json
+
+# rehearsal clones — `cf space` WRITES, so it sits outside inspect's read-only
+# contract, but clone.ts + fingerprint.ts live in this package. The operating
+# procedure is docs/development/space-clone-rehearsal.md.
+deno task cf space clone  <did> --from <snapshot|url> --to <dir>
+deno task cf space verify <dir>                 # nonzero exit when content moved
+deno task cf space reset  <dir>
+deno task cf space fingerprint <space> [--per-entity] [--include-generated]
 ```
 
 ### Remote (`--remote`) — inspect a staging/server without SSH
