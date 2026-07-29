@@ -14,8 +14,8 @@ import {
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
 import type {
-  FabricPlainObject,
   FabricValue,
+  MutableFabricPlainObjectLayer,
 } from "@commonfabric/data-model/fabric-value";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import type { JSONSchema } from "@commonfabric/api";
@@ -184,7 +184,7 @@ Deno.test("sync schema table reports each repeated schema once", () => {
 Deno.test("sync schema table preserves own __proto__ fields", () => {
   const value = JSON.parse(
     '{"__proto__":{"safe":true}}',
-  ) as FabricPlainObject;
+  ) as MutableFabricPlainObjectLayer;
   value.ref = linkRefFrom({
     id: "of:target",
     path: [],

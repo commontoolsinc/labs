@@ -281,6 +281,18 @@ export type BeforeTransformersResult =
 export interface TypeScriptCompilerOptions {
   // Skip type checking.
   noCheck?: boolean;
+  /**
+   * The program is DURABLE STORED pattern source being reloaded — bytes
+   * nobody can re-author, recompiled by a toolchain newer than the one that
+   * accepted them. Diagnostics that only signal authoring hygiene (currently
+   * TS2578, "Unused '@ts-expect-error' directive" — a suppression obsoleted
+   * by a platform type improvement) are non-fatal in this mode, so a types
+   * bump cannot retroactively brick a stored pattern (CT-1916, 2026-07-28
+   * estuary). Authoring paths (cf check, deploy, the corpus check) leave
+   * this off and stay strict: there the author is present and can fix the
+   * directive.
+   */
+  storedSource?: boolean;
   // Optional mapping of runtime module name e.g. `"@commonfabric/framework"`,
   // and its corresponding type definitions.
   runtimeModules?: string[];
@@ -390,6 +402,7 @@ export class TypeScriptCompiler {
     inputOptions: TypeScriptCompilerOptions,
   ): Generator<void, Map<string, CompiledTypeScriptModule>, void> {
     const noCheck = inputOptions.noCheck ?? false;
+    const storedSource = inputOptions.storedSource ?? false;
     const runtimeModules = inputOptions.runtimeModules ?? [];
 
     validateSource(program);
@@ -400,6 +413,10 @@ export class TypeScriptCompiler {
     // to type-check authored code, so skip checking the declaration libs
     // themselves.
     tsOptions.skipLibCheck = true;
+    // Stored-source reloads drop authoring-hygiene codes (TS2578) at the
+    // checker; TypeScript's own emit veto would re-block exactly what was
+    // filtered, so the explicit gates below are the only gates in this mode.
+    if (storedSource) tsOptions.noEmitOnError = false;
 
     const host = new TypeScriptHost(
       program,
@@ -414,7 +431,21 @@ export class TypeScriptCompiler {
 
     const checker = new Checker(tsProgram, {
       messageTransformer: inputOptions.diagnosticMessageTransformer,
+      storedSource,
     });
+    // Parse and program-level errors are fatal unconditionally — `noCheck`
+    // skips type-checking, never parsing, and stored-source mode filters
+    // only semantic hygiene codes. On stored-source compiles this gate
+    // replaces TypeScript's own `noEmitOnError` veto: without it, malformed
+    // source would EMIT malformed JavaScript.
+    {
+      const errors = checker.collectProgramErrors();
+      for (const sourceFile of checker.checkableSources()) {
+        errors.push(...checker.collectSyntacticErrors(sourceFile));
+      }
+      checker.throwIfErrors(errors);
+      yield;
+    }
     if (!noCheck) {
       const errors = [];
       for (const sourceFile of checker.checkableSources()) {
@@ -571,8 +602,17 @@ export class TypeScriptCompiler {
       }
     };
 
+    // Program-level (options + global) diagnostics first — with noEmitOnError
+    // off these no longer surface through emit, so omitting them here would
+    // return `diagnostics: []` for a program the throwing path refuses.
+    for (const d of tsProgram.getOptionsDiagnostics()) pushTs(d);
+    for (const d of tsProgram.getGlobalDiagnostics()) pushTs(d);
+
     // Type + declaration diagnostics for authored files only (skipLibCheck
-    // already excludes the declaration libs).
+    // already excludes the declaration libs). The corpus check is an
+    // AUTHORING surface, so no stored-source tolerance applies here: a
+    // stale ts-expect-error directive in the repo corpus is reported for
+    // the author to remove.
     for (const sourceFile of tsProgram.getSourceFiles()) {
       if (!authored.has(sourceFile.fileName)) continue;
       for (const d of tsProgram.getSemanticDiagnostics(sourceFile)) pushTs(d);

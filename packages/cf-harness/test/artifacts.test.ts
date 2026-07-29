@@ -1,4 +1,8 @@
 import { assert, assertEquals, assertThrows } from "@std/assert";
+import {
+  chatViewOfRequest,
+  responsesBodyFromChatFixture,
+} from "./support/responses-fixture.ts";
 import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
@@ -422,7 +426,7 @@ Deno.test({
           const body = JSON.parse(String(init?.body)) as {
             messages: Array<{ role: string }>;
           };
-          const payload = body.messages.some((message) =>
+          const payload = chatViewOfRequest(body).messages.some((message) =>
               message.role === "tool"
             )
             ? {
@@ -452,7 +456,10 @@ Deno.test({
               }],
             };
           return Promise.resolve(
-            new Response(JSON.stringify(payload), { status: 200 }),
+            new Response(
+              JSON.stringify(responsesBodyFromChatFixture(payload, init?.body)),
+              { status: 200 },
+            ),
           );
         },
       });
@@ -813,12 +820,13 @@ Deno.test({
           const body = JSON.parse(String(init?.body)) as {
             messages: Array<{ role: string; content?: string }>;
           };
-          const hasToolResponse = body.messages.some((message) =>
-            message.role === "tool"
-          );
-          const toolResponseCount = body.messages.filter((message) =>
-            message.role === "tool"
-          ).length;
+          const hasToolResponse = chatViewOfRequest(body).messages.some((
+            message,
+          ) => message.role === "tool");
+          const toolResponseCount =
+            chatViewOfRequest(body).messages.filter((message) =>
+              message.role === "tool"
+            ).length;
           const payload = !hasToolResponse
             ? {
               choices: [{
@@ -869,7 +877,10 @@ Deno.test({
               }],
             };
           return Promise.resolve(
-            new Response(JSON.stringify(payload), { status: 200 }),
+            new Response(
+              JSON.stringify(responsesBodyFromChatFixture(payload, init?.body)),
+              { status: 200 },
+            ),
           );
         },
       });
@@ -1082,7 +1093,10 @@ Deno.test({
                 },
               }],
             };
-          return new Response(JSON.stringify(payload), { status: 200 });
+          return new Response(
+            JSON.stringify(responsesBodyFromChatFixture(payload, init?.body)),
+            { status: 200 },
+          );
         },
       });
 
@@ -1286,7 +1300,7 @@ Deno.test({
           model: "gpt-5.4",
           cfcEnforcementMode: "enforce-explicit",
         }),
-        fetchFn: () => {
+        fetchFn: (_input, init) => {
           requestCount += 1;
           const payload = requestCount === 1
             ? {
@@ -1348,7 +1362,10 @@ Deno.test({
               }],
             };
           return Promise.resolve(
-            new Response(JSON.stringify(payload), { status: 200 }),
+            new Response(
+              JSON.stringify(responsesBodyFromChatFixture(payload, init?.body)),
+              { status: 200 },
+            ),
           );
         },
       });
@@ -1523,7 +1540,7 @@ Deno.test({
           const body = JSON.parse(String(init?.body)) as {
             messages: Array<{ role: string }>;
           };
-          const payload = body.messages.some((message) =>
+          const payload = chatViewOfRequest(body).messages.some((message) =>
               message.role === "tool"
             )
             ? {
@@ -1556,7 +1573,10 @@ Deno.test({
               }],
             };
           return Promise.resolve(
-            new Response(JSON.stringify(payload), { status: 200 }),
+            new Response(
+              JSON.stringify(responsesBodyFromChatFixture(payload, init?.body)),
+              { status: 200 },
+            ),
           );
         },
       });
@@ -1705,7 +1725,7 @@ Deno.test({
           const body = JSON.parse(String(init?.body)) as {
             messages: Array<{ role: string }>;
           };
-          const payload = body.messages.some((message) =>
+          const payload = chatViewOfRequest(body).messages.some((message) =>
               message.role === "tool"
             )
             ? {
@@ -1737,7 +1757,10 @@ Deno.test({
               }],
             };
           return Promise.resolve(
-            new Response(JSON.stringify(payload), { status: 200 }),
+            new Response(
+              JSON.stringify(responsesBodyFromChatFixture(payload, init?.body)),
+              { status: 200 },
+            ),
           );
         },
       });

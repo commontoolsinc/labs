@@ -1,8 +1,12 @@
 import { assertEquals, assertStrictEquals, assertThrows } from "@std/assert";
 import type { MemorySpace } from "@commonfabric/runner";
-import { throwOnSpaceAuthorizationError } from "../lib/utils.ts";
+import { absPath, throwOnSpaceAuthorizationError } from "../lib/utils.ts";
 
 const SPACE = "did:key:z6Mk-cli-utils-authz-space" as MemorySpace;
+
+Deno.test("absPath resolves a relative path against the supplied directory", () => {
+  assertEquals(absPath("nested/file.ts", "/work"), "/work/nested/file.ts");
+});
 
 Deno.test("throwOnSpaceAuthorizationError rethrows the recorded denial", () => {
   const denial = Object.assign(new Error("Principal lacks READ on space"), {

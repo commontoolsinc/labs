@@ -4,6 +4,12 @@ To add a new piece to the space's piece registry, use the `addPiece` handler
 exported by the default app pattern. **Never** push to `pieceRegistry`
 directly.
 
+Registration is the root of the supported piece-discovery APIs. An
+unregistered piece must be published through a searchable collection or remain
+reachable by following links from a known piece. An orphan piece does not
+appear in the ordinary piece listings or searches. See
+[Finding Pieces](../concepts/piece-discovery.md).
+
 ## Why
 
 - **Type safety** — no `as any` casts needed

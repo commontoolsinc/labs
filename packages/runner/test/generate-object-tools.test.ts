@@ -1,3 +1,4 @@
+/// <reference path="./clock.d.ts" />
 /**
  * Integration tests for generateObject with tool calling support.
  *
@@ -22,6 +23,7 @@ import {
   clearMockResponses,
   enableMockMode,
   loadConversationFixture,
+  setMockResponseGate,
 } from "@commonfabric/llm/client";
 import type { BuiltInLLMMessage, BuiltInLLMTool } from "@commonfabric/api";
 import type { Cell, FactoryInput, JSONSchema } from "../src/builder/types.ts";
@@ -57,12 +59,15 @@ describe("generateObject with tools", () => {
   let pattern: ReturnType<typeof createBuilder>["commonfabric"]["pattern"];
   let handler: ReturnType<typeof createBuilder>["commonfabric"]["handler"];
   let str: ReturnType<typeof createBuilder>["commonfabric"]["str"];
-  let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
   let Cell: ReturnType<typeof createBuilder>["commonfabric"]["Cell"];
   let patternTool: ReturnType<
     typeof createBuilder
   >["commonfabric"]["patternTool"];
   let generateObject: typeof generateObjectState;
+  let registeredGenerateObject: ReturnType<
+    typeof createBuilder
+  >["commonfabric"]["generateObject"];
+  let lift: ReturnType<typeof createBuilder>["commonfabric"]["lift"];
   let dummyPattern: any;
 
   beforeEach(() => {
@@ -77,6 +82,7 @@ describe("generateObject with tools", () => {
     const { commonfabric } = createTrustedBuilder(runtime);
     ({
       pattern,
+      generateObject: registeredGenerateObject,
       handler,
       Cell,
       lift,
@@ -1552,232 +1558,6 @@ describe("generateObject with tools", () => {
     expect(result.key("result").get()).toEqual({ ok: true });
   });
 
-  it("should allow a userland subagent to use a call-provided result schema", async () => {
-    const parentResultSchema: JSONSchema = {
-      type: "object",
-      properties: {
-        ok: { type: "boolean" },
-      },
-      required: ["ok"],
-    };
-    const dynamicChildSchema: JSONSchema = {
-      type: "object",
-      properties: {
-        approved: { type: "boolean" },
-        summary: { type: "string" },
-      },
-      required: ["approved", "summary"],
-      additionalProperties: false,
-    };
-    const testPrompt = "test-dynamic-subagent-result-schema";
-    const childPrompt = "delegate-read-briefing";
-    let capturedChildPresentResultSchema: JSONSchema | undefined;
-    let unexpectedRequestSummary = "";
-
-    addMockResponse(
-      (req) =>
-        req.messages.length === 1 &&
-        req.tools?.["delegate"] !== undefined &&
-        req.tools?.["presentResult"] !== undefined &&
-        req.messages.some((message) =>
-          typeof message.content === "string" &&
-          message.content.includes(testPrompt)
-        ),
-      {
-        role: "assistant",
-        content: [{
-          type: "tool-call",
-          toolCallId: "call_delegate_dynamic_schema",
-          toolName: "delegate",
-          input: {
-            prompt: childPrompt,
-            resultSchema: dynamicChildSchema,
-          },
-        }],
-        id: "mock-parent-dynamic-subagent-1",
-      },
-    );
-
-    addMockResponse(
-      (req) => {
-        const combined = req.messages.map((message) =>
-          typeof message.content === "string" ? message.content : ""
-        ).join("\n");
-        const matches = combined.includes(childPrompt) &&
-          req.tools?.["helperTool"] !== undefined &&
-          req.tools?.["presentResult"] !== undefined;
-        if (matches) {
-          capturedChildPresentResultSchema = req.tools?.["presentResult"]
-            ?.inputSchema;
-        }
-        return matches;
-      },
-      {
-        role: "assistant",
-        content: [{
-          type: "tool-call",
-          toolCallId: "call_child_present_result_dynamic_schema",
-          toolName: "presentResult",
-          input: {
-            approved: false,
-            summary: "The project is not approved yet.",
-          },
-        }],
-        id: "mock-child-dynamic-subagent",
-      },
-    );
-
-    addMockResponse(
-      (req) =>
-        req.messages.length === 3 &&
-        req.tools?.["delegate"] !== undefined &&
-        req.tools?.["presentResult"] !== undefined,
-      {
-        role: "assistant",
-        content: [{
-          type: "tool-call",
-          toolCallId: "call_parent_present_result_dynamic_schema",
-          toolName: "presentResult",
-          input: {
-            ok: true,
-          },
-        }],
-        id: "mock-parent-dynamic-subagent-2",
-      },
-    );
-
-    addMockResponse(
-      (req) => {
-        unexpectedRequestSummary = JSON.stringify({
-          messageCount: req.messages.length,
-          tools: Object.keys(req.tools ?? {}),
-          messages: req.messages.map((message) =>
-            typeof message.content === "string" ? message.content : ""
-          ),
-        });
-        return true;
-      },
-      {
-        role: "assistant",
-        content: [{
-          type: "tool-call",
-          toolCallId: "call_unexpected_dynamic_subagent",
-          toolName: "presentResult",
-          input: {
-            ok: false,
-          },
-        }],
-        id: "mock-unexpected-dynamic-subagent",
-      },
-    );
-
-    const childHelperTool = pattern<Record<string, never>, { ok: boolean }>(
-      () => ({ ok: true }),
-      {
-        type: "object",
-        additionalProperties: false,
-      },
-      {
-        type: "object",
-        properties: {
-          ok: { type: "boolean" },
-        },
-        required: ["ok"],
-      },
-    );
-
-    const parseResultSchema = lift(
-      ({ resultSchema }) => {
-        if (typeof resultSchema === "string") {
-          return JSON.parse(resultSchema);
-        }
-        return resultSchema;
-      },
-      {
-        type: "object",
-        properties: {
-          resultSchema: {
-            anyOf: [
-              { type: "object", additionalProperties: true },
-              { type: "boolean" },
-              { type: "string" },
-            ],
-          },
-        },
-        required: ["resultSchema"],
-        additionalProperties: false,
-      },
-      true,
-    );
-
-    const subAgentPattern = pattern<any, any>(
-      ({ prompt, resultSchema }) => {
-        const parsedResultSchema = parseResultSchema({ resultSchema });
-        return generateObject({
-          prompt,
-          schema: parsedResultSchema,
-          tools: {
-            helperTool: patternTool(
-              childHelperTool,
-            ) as unknown as BuiltInLLMTool,
-          },
-        } as any).result;
-      },
-      {
-        type: "object",
-        properties: {
-          prompt: { type: "string" },
-          resultSchema: {
-            anyOf: [
-              { type: "object", additionalProperties: true },
-              { type: "boolean" },
-              { type: "string" },
-            ],
-          },
-        },
-        required: ["prompt", "resultSchema"],
-        additionalProperties: false,
-      },
-      true,
-    );
-
-    const testPattern = pattern<Record<string, never>>(
-      () => {
-        return generateObject({
-          prompt: testPrompt,
-          schema: parentResultSchema,
-          tools: {
-            delegate: {
-              description:
-                "Run a child agent and require it to return data matching resultSchema.",
-              ...(patternTool(subAgentPattern) as unknown as BuiltInLLMTool),
-            },
-          },
-        });
-      },
-    );
-
-    const resultCell = runtime.getCell(
-      space,
-      "generateObject-dynamic-subagent-result-schema-test",
-      testPattern.resultSchema,
-      tx,
-    );
-
-    const result = runtime.run(tx, testPattern, {}, resultCell);
-    tx.commit();
-
-    await waitForLlmSettled(runtime, result);
-
-    expect(unexpectedRequestSummary).toBe("");
-    expect(capturedChildPresentResultSchema).toMatchObject({
-      type: "object",
-      properties: dynamicChildSchema.properties,
-      required: dynamicChildSchema.required,
-    });
-    expect(result.key("result").get()).toEqual({ ok: true });
-  });
-
   it("should redact high-conf context docs in the tool-calling generateObject path", async () => {
     const resultSchema: JSONSchema = {
       type: "object",
@@ -2060,6 +1840,239 @@ describe("generateObject with tools", () => {
       await storageManager.close();
     }
   });
+  it("should allow a userland subagent to use a call-provided result schema", async () => {
+    const parentResultSchema: JSONSchema = {
+      type: "object",
+      properties: {
+        ok: { type: "boolean" },
+      },
+      required: ["ok"],
+    };
+    const dynamicChildSchema: JSONSchema = {
+      type: "object",
+      properties: {
+        approved: { type: "boolean" },
+        summary: { type: "string" },
+      },
+      required: ["approved", "summary"],
+      additionalProperties: false,
+    };
+    const testPrompt = "test-dynamic-subagent-result-schema";
+    const childPrompt = "delegate-read-briefing";
+    let capturedChildPresentResultSchema: JSONSchema | undefined;
+    let capturedDelegateOutput: unknown;
+    let unexpectedRequestSummary = "";
+
+    addMockResponse(
+      (req) =>
+        req.messages.length === 1 &&
+        req.tools?.["delegate"] !== undefined &&
+        req.tools?.["presentResult"] !== undefined &&
+        req.messages.some((message) =>
+          typeof message.content === "string" &&
+          message.content.includes(testPrompt)
+        ),
+      {
+        role: "assistant",
+        content: [{
+          type: "tool-call",
+          toolCallId: "call_delegate_dynamic_schema",
+          toolName: "delegate",
+          input: {
+            prompt: childPrompt,
+            resultSchema: dynamicChildSchema,
+          },
+        }],
+        id: "mock-parent-dynamic-subagent-1",
+      },
+    );
+
+    addMockResponse(
+      (req) => {
+        const combined = req.messages.map((message) =>
+          typeof message.content === "string" ? message.content : ""
+        ).join("\n");
+        const matches = combined.includes(childPrompt) &&
+          req.tools?.["helperTool"] !== undefined &&
+          req.tools?.["presentResult"] !== undefined;
+        if (matches) {
+          capturedChildPresentResultSchema = req.tools?.["presentResult"]
+            ?.inputSchema;
+        }
+        return matches;
+      },
+      {
+        role: "assistant",
+        content: [{
+          type: "tool-call",
+          toolCallId: "call_child_present_result_dynamic_schema",
+          toolName: "presentResult",
+          input: {
+            approved: false,
+            summary: "The project is not approved yet.",
+          },
+        }],
+        id: "mock-child-dynamic-subagent",
+      },
+    );
+
+    addMockResponse(
+      (req) => {
+        const matches = req.messages.length === 3 &&
+          req.tools?.["delegate"] !== undefined &&
+          req.tools?.["presentResult"] !== undefined;
+        if (matches) capturedDelegateOutput = delegateOutput(req);
+        return matches;
+      },
+      {
+        role: "assistant",
+        content: [{
+          type: "tool-call",
+          toolCallId: "call_parent_present_result_dynamic_schema",
+          toolName: "presentResult",
+          input: {
+            ok: true,
+          },
+        }],
+        id: "mock-parent-dynamic-subagent-2",
+      },
+    );
+
+    addMockResponse(
+      (req) => {
+        unexpectedRequestSummary = JSON.stringify({
+          messageCount: req.messages.length,
+          tools: Object.keys(req.tools ?? {}),
+          messages: req.messages.map((message) =>
+            typeof message.content === "string" ? message.content : ""
+          ),
+        });
+        return true;
+      },
+      {
+        role: "assistant",
+        content: [{
+          type: "tool-call",
+          toolCallId: "call_unexpected_dynamic_subagent",
+          toolName: "presentResult",
+          input: {
+            ok: false,
+          },
+        }],
+        id: "mock-unexpected-dynamic-subagent",
+      },
+    );
+
+    const childHelperTool = pattern<Record<string, never>, { ok: boolean }>(
+      () => ({ ok: true }),
+      {
+        type: "object",
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        properties: {
+          ok: { type: "boolean" },
+        },
+        required: ["ok"],
+      },
+    );
+
+    const parseResultSchema = lift(
+      ({ resultSchema }) => {
+        if (typeof resultSchema === "string") {
+          return JSON.parse(resultSchema);
+        }
+        return resultSchema;
+      },
+      {
+        type: "object",
+        properties: {
+          resultSchema: {
+            anyOf: [
+              { type: "object", additionalProperties: true },
+              { type: "boolean" },
+              { type: "string" },
+            ],
+          },
+        },
+        required: ["resultSchema"],
+        additionalProperties: false,
+      },
+      true,
+    );
+
+    const subAgentPattern = pattern<any, any>(
+      ({ prompt, resultSchema }) => {
+        const parsedResultSchema = parseResultSchema({ resultSchema });
+        return generateObject({
+          prompt,
+          schema: parsedResultSchema,
+          tools: {
+            helperTool: patternTool(
+              childHelperTool,
+            ) as unknown as BuiltInLLMTool,
+          },
+        } as any).result;
+      },
+      {
+        type: "object",
+        properties: {
+          prompt: { type: "string" },
+          resultSchema: {
+            anyOf: [
+              { type: "object", additionalProperties: true },
+              { type: "boolean" },
+              { type: "string" },
+            ],
+          },
+        },
+        required: ["prompt", "resultSchema"],
+        additionalProperties: false,
+      },
+      true,
+    );
+
+    const testPattern = pattern<Record<string, never>>(
+      () => {
+        return generateObject({
+          prompt: testPrompt,
+          schema: parentResultSchema,
+          tools: {
+            delegate: {
+              description:
+                "Run a child agent and require it to return data matching resultSchema.",
+              ...(patternTool(subAgentPattern) as unknown as BuiltInLLMTool),
+            },
+          },
+        });
+      },
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "generateObject-dynamic-subagent-result-schema-test",
+      testPattern.resultSchema,
+      tx,
+    );
+
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    await waitForLlmSettled(runtime, result);
+
+    expect(unexpectedRequestSummary).toBe("");
+    expect(capturedChildPresentResultSchema).toMatchObject({
+      type: "object",
+      properties: dynamicChildSchema.properties,
+      required: dynamicChildSchema.required,
+    });
+    // The parent's own presentResult lands whether the delegate returned data
+    // or an error, so assert on what the delegate handed back. Without this the
+    // case stays green on a delegate that was abandoned mid-flight.
+    expect(capturedDelegateOutput).toMatchObject({ type: "json" });
+    expect(result.key("result").get()).toEqual({ ok: true });
+  });
 
   it("redacts free-form strings from a userland dynamic subagent messages result", async () => {
     const promptRisk = {
@@ -2272,7 +2285,153 @@ describe("generateObject with tools", () => {
     await liveResult.sync();
     expect(liveResult.key("result").get()).toEqual({ ok: true });
   });
+
+  it("waits for a delegate whose child agent is still in flight", async () => {
+    // The instant mocks everywhere else in this file let a child agent finish
+    // before its tool call looks at anything, so they cannot tell a tool call
+    // that waits for its child from one that reads an empty result cell and
+    // returns. This holds the child's answer open across the whole wait. If the
+    // tool call stopped waiting early, the delegate would report the result cell
+    // as it stood — empty — and the parent's next request would carry that.
+    const childSchema: JSONSchema = {
+      type: "object",
+      properties: { approved: { type: "boolean" } },
+      required: ["approved"],
+      additionalProperties: false,
+    };
+    const parentSchema: JSONSchema = {
+      type: "object",
+      properties: { ok: { type: "boolean" } },
+      required: ["ok"],
+    };
+    let capturedDelegateOutput: unknown;
+
+    addMockResponse(
+      (req) =>
+        req.messages.length === 1 && req.tools?.["delegate"] !== undefined,
+      {
+        role: "assistant",
+        content: [{
+          type: "tool-call",
+          toolCallId: "call_delegate_in_flight",
+          toolName: "delegate",
+          input: { prompt: "child-in-flight" },
+        }],
+        id: "mock-parent-in-flight-1",
+      },
+    );
+    addMockObjectResponse(
+      (req) =>
+        req.messages.some((message) =>
+          typeof message.content === "string" &&
+          message.content.includes("child-in-flight")
+        ),
+      { object: { approved: true }, id: "mock-child-in-flight" },
+    );
+    addMockResponse(
+      (req) => {
+        const matches = req.messages.length === 3 &&
+          req.tools?.["delegate"] !== undefined;
+        if (matches) capturedDelegateOutput = delegateOutput(req);
+        return matches;
+      },
+      {
+        role: "assistant",
+        content: [{
+          type: "tool-call",
+          toolCallId: "call_parent_present_in_flight",
+          toolName: "presentResult",
+          input: { ok: true },
+        }],
+        id: "mock-parent-in-flight-2",
+      },
+    );
+
+    // Hold the child's answer and let every other request through. The child is
+    // the second request the conversation makes: parent, child, parent again.
+    const held = defer<void>();
+    let requests = 0;
+    setMockResponseGate(() => {
+      requests += 1;
+      return requests === 2 ? held.promise : Promise.resolve();
+    });
+
+    // `.result`, not the whole builtin object: a pattern that returns the object
+    // has a result cell that is defined the moment the request starts, as
+    // `{ pending: true }`, and the tool call's value-shaped wait resolves on
+    // that rather than on the run finishing.
+    const subAgentPattern = pattern<any, any>(
+      ({ prompt }) =>
+        generateObject({ prompt, schema: childSchema } as any).result,
+      {
+        type: "object",
+        properties: { prompt: { type: "string" } },
+        required: ["prompt"],
+        additionalProperties: false,
+      },
+      true,
+    );
+
+    const testPattern = pattern<Record<string, never>>(() =>
+      registeredGenerateObject({
+        prompt: "parent-in-flight",
+        schema: parentSchema,
+        tools: {
+          delegate: {
+            description: "Run a child agent.",
+            ...(patternTool(subAgentPattern) as unknown as BuiltInLLMTool),
+          },
+        },
+      } as any)
+    );
+
+    const resultCell = runtime.getCell(
+      space,
+      "generateObject-delegate-in-flight-test",
+      testPattern.resultSchema,
+      tx,
+    );
+    const result = runtime.run(tx, testPattern, {}, resultCell);
+    tx.commit();
+
+    try {
+      // Drain every microtask and zero-delay timer to a fixpoint without moving
+      // the clock, so anything the runtime was going to do while the child is
+      // held has happened. A tool call that stopped waiting early has by now
+      // handed the parent an empty delegate result and issued its third request.
+      await clock.settle();
+      expect(capturedDelegateOutput).toBeUndefined();
+
+      held.resolve();
+      const settledResult = await waitForCellValue<{ ok: boolean }>(
+        runtime,
+        result,
+        (value) =>
+          !isDataUnavailable(value) ||
+          value.reason === "error" ||
+          value.reason === "schema-mismatch",
+      );
+
+      expect(capturedDelegateOutput).toMatchObject({ type: "json" });
+      expect(JSON.stringify(capturedDelegateOutput)).toContain("approved");
+      expect(settledResult).toEqual({ ok: true });
+    } finally {
+      setMockResponseGate(undefined);
+    }
+  });
 });
+
+// The `delegate` tool's output part from the request that follows the delegate
+// call. A completed delegate reports `{ type: "json", ... }`, an abandoned one
+// reports `{ type: "error-text", ... }`, and the difference is otherwise
+// invisible because the conversation continues either way.
+function delegateOutput(req: { messages: readonly BuiltInLLMMessage[] }) {
+  const toolMessage = req.messages.find((message) => message.role === "tool");
+  if (!Array.isArray(toolMessage?.content)) return undefined;
+  return (toolMessage.content as any[]).find((part) =>
+    part?.type === "tool-result" && part.toolName === "delegate"
+  )?.output;
+}
 
 function patternOutputCell(resultCell: Cell<any>, testPattern: any): Cell<any> {
   const liveResultCell = resultCell.withTx();

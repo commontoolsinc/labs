@@ -101,10 +101,39 @@ const PRESETS: Record<FakeClockMode, Omit<ResolvedConfig, "realClockFiles">> = {
   },
 };
 
+// The current call stack, as newline-separated frames with the innermost first.
+//
+// A plain `new Error().stack` is enough until SES enters the picture. The runner
+// package locks SES down the first time a test builds a `Runtime`, with
+// `errorTaming` set to "safe" — a permanent, process-global change. Safe taming
+// still captures each error's frames, but hides them behind the tamed `stack`
+// accessor, which from then on reads back as the empty string. Every timer a
+// test schedules after that first lockdown would otherwise arrive here with no
+// stack to classify, so `callerIsTest` would read every one as `src/` and let a
+// stray test sleep auto-advance instead of freezing.
+//
+// SES hands the real frames back through `getStackString`, the sanctioned hook
+// it installs on the global during lockdown; the runtime's own error mapping
+// reads stacks through the same hook. We use it whenever lockdown has installed
+// it, and fall back to the native `stack` before lockdown, and in a package that
+// loads this harness without ever loading SES. Reading the frames this way keeps
+// the caller classification working without relaxing the production error
+// taming.
+function currentStack(): string {
+  const error = new Error();
+  const getStackString = (globalThis as {
+    getStackString?: (error: Error) => string;
+  }).getStackString;
+  if (typeof getStackString === "function") {
+    return getStackString(error) ?? "";
+  }
+  return error.stack ?? "";
+}
+
 // The immediate caller of setTimeout: the first stack frame outside this file.
 // A frame in a `test/` directory (or a `.test.ts` file) is test code.
 function callerIsTest(): boolean {
-  const stack = new Error().stack ?? "";
+  const stack = currentStack();
   for (const line of stack.split("\n").slice(1)) {
     if (line.includes(HARNESS_FILE)) continue;
     return /\/test\//.test(line) || /\.test\.ts/.test(line);
@@ -181,7 +210,7 @@ function freezeAround(
     const nextTimer = (limit: number, onlyProd: boolean): Timer | undefined => {
       let next: Timer | undefined;
       for (const tm of timers.values()) {
-        if (tm.kind === "zero" || tm.fireAt <= elapsed || tm.fireAt > limit) {
+        if (tm.kind === "zero" || tm.fireAt > limit) {
           continue;
         }
         if (onlyProd && tm.kind !== "prod") continue;
@@ -202,7 +231,11 @@ function freezeAround(
             "This test likely needs explicit clock.tick(ms) control.",
         );
       }
-      elapsed = next.fireAt;
+      // A timer may be armed during tick()'s final async drain, after the
+      // target time was chosen but while the clock still reports its prior
+      // instant. Such a timer is already due; fire it without moving time
+      // backwards.
+      elapsed = Math.max(elapsed, next.fireAt);
       if (next.interval === undefined) timers.delete(next.id);
       else next.fireAt = elapsed + next.interval;
       next.cb(...next.args);
@@ -225,7 +258,7 @@ function freezeAround(
             await settle();
             const next = nextTimer(target, false);
             if (!next) break;
-            elapsed = next.fireAt;
+            elapsed = Math.max(elapsed, next.fireAt);
             if (next.interval === undefined) timers.delete(next.id);
             else next.fireAt = elapsed + next.interval;
             next.cb(...next.args);
@@ -346,7 +379,7 @@ function registeredFromRealClockFile(
   realClockFiles: readonly string[],
 ): boolean {
   if (realClockFiles.length === 0) return false;
-  const stack = new Error().stack ?? "";
+  const stack = currentStack();
   return realClockFiles.some((name) => stack.includes(`${name}.test.ts`));
 }
 

@@ -3,7 +3,7 @@
 > **Status**: Implemented (shipped as the scheduler in PR #4288); this spec
 > governs the current behavior and is updated with it.
 > **Replaces**: the behavior described in
-> `docs/history/specs/pull-based-scheduler/README.md`
+> [the pull-based scheduler record](../../history/specs/pull-based-scheduler/README.md)
 > **Companion records** (archived point-in-time documents):
 > [`current-system-inventory.md`](../../history/specs/scheduler-v2/current-system-inventory.md)
 > — every mechanism in the v1 scheduler and what subsumes it here;
@@ -11,8 +11,13 @@
 > the executed v1→v2 phase plan;
 > [`implementation/`](../../history/specs/scheduler-v2/implementation/00-README.md)
 > — the executed work orders (start at `00-README.md`).
-> **Persistence**: builds on `docs/specs/persistent-scheduler-state.md`
-> (the observation/rehydration model carries over with a smaller payload).
+> **Persistence**: builds on
+> [persistent scheduler state](../persistent-scheduler-state.md). The
+> observation and rehydration model carries over with a smaller payload.
+> [Per-document rehydration](per-doc-rehydration.md) defines restoration for
+> descendant piece documents.
+> [Incremental observation adoption](incremental-observation-adoption.md)
+> extends that state into ongoing multi-user operation.
 
 This document re-derives the scheduler from first principles. It specifies the
 model, the invariants, the node state machine, the algorithms, and the
@@ -795,7 +800,11 @@ the same `{ resultFor: cause }` cell that hosts a launched pattern when the
 handler returns one; when the handler launches nothing, the cell is simply
 the receipt. This gives handlers the same shape as computations: one
 canonical output document per unit of work, whose creation doubles as the
-exactly-once witness.
+exactly-once witness. A receipt-only handling writes `{}`; under the
+experimental `plainResultReceipts` flag it instead carries the handler's
+normalized plain JSON return, so the verb's result is readable back by
+receipt address (`docs/development/EXPERIMENTAL_OPTIONS.md`; verb-contract
+plan) — the create-only witness semantics are unchanged either way.
 
 For an inline, non-navigation handler result, an `inSpace` child does not move
 that canonical handler-result wrapper into the child space. The result/receipt
@@ -953,7 +962,8 @@ a later, unrelated demand wave receives its own full convergence allowance.
 
 ## 9. Persistence and rehydration
 
-The durable model is `docs/specs/persistent-scheduler-state.md`; v2 keeps its
+The durable model is
+[Persistent Scheduler State](../persistent-scheduler-state.md); v2 keeps its
 architecture (observation rows attached to commits, server-side read/write
 indexes for dirtying inactive pieces, durable dirty/stale markers, fingerprint
 validation) and shrinks the per-observation payload.
@@ -977,8 +987,9 @@ the fingerprint string is versioned so v1 observations are simply misses.
   resumed piece **tree**: descendants — sub-pattern nodes and
   map/filter/flatMap per-element runs, each persisted under its own
   `pieceId` — register against their own bucket from the same listing
-  (`per-doc-rehydration.md`). Each node registers in resume mode: look up
-  the observation; on fingerprint match, install `reads` (+ gate config)
+  ([per-document rehydration](per-doc-rehydration.md)). Each node registers in
+  resume mode: look up the observation; on fingerprint match, install `reads`
+  (+ gate config)
   directly into the indexes, set `status = clean`, or `invalid` if durable
   dirty markers say so; on miss/mismatch, degrade that node to `fresh`
   behind a bounded synced-hold. The successful listing path has already synced,

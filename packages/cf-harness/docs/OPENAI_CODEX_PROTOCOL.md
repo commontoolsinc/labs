@@ -5,6 +5,11 @@ This file pins the direct OAuth and ChatGPT Codex Responses contract used by
 contract. Update it together with fixtures when either upstream implementation
 changes.
 
+The wire mapping this pins now lives in `src/model/responses-protocol.ts`, which
+is shared with the OpenAI-compatible gateway client. A change made there for
+gateway reasons also changes the contract described here, so edits to that
+module need checking against this reference and its fixtures.
+
 Reviewed sources:
 
 - OpenCode `411eff73f026d4950c07947c4d983788cb615baa`,
@@ -68,6 +73,16 @@ The response adapter accepts `response.completed`, `response.done`,
 `response.incomplete`, and `response.failed` terminal event spellings because
 the compared clients normalize those terminal forms. It persists encrypted
 reasoning output items only as provider-tagged opaque continuation state.
+
+Under `store: false` the ChatGPT Codex backend streams each completed item via
+`response.output_item.done` but returns **no assembled output** on the terminal
+event — an empty `output` array, or `null` — because it keeps no stored response
+to echo back. The adapter therefore accumulates the streamed `output_item.done`
+items and normalizes from them whenever the terminal output is empty/null; a
+populated terminal `output` (other providers, or stored responses) always wins,
+so the two representations never double-count, and `failed`/`incomplete`
+statuses still fail before normalization. Reading only the terminal `output`
+silently drops the model's message and tool calls.
 
 ## Product boundary
 

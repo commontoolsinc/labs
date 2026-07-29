@@ -4,6 +4,15 @@
 [`pattern-verb-contract.md`](pattern-verb-contract.md) (PR #4968). Keep current
 as work proceeds: check off exit criteria, record scope changes.
 
+**Amended 2026-07-28**, context only — no scope or decision changed: Risks
+names #5059 (`cf piece setsrc --check`) as the candidate preflight for the
+write-storm gate, WS-F gains a read-path guard so `cf piece get` on a verb
+redirects to `cf piece call`, and Non-goals records that constraining
+`cf piece set` is out of scope pending a decision this plan does not make. The
+design doc carries the same pass's larger share: the llm-dialog handler-branch
+precedent, tools restated as deferred rather than rejected, and the
+structural-interface property.
+
 **Amended 2026-07-24** from the first live headless session (a three-topic
 graph, ~24 CLI operations): compact discovery index (A2), closed-world inputs
 (C5), transaction-local acknowledgement as a WS-D exit criterion, phase
@@ -53,6 +62,15 @@ Named so their absence reads as intent, not oversight:
   separate comparison with existing slugs and configured host/space addressing.
 - **Cross-space effect atomicity** — the spec's I11 gap stands; the guarantee
   is same-space, which covers `topics`.
+- **Constraining direct data writes.** `cf piece set` writes a result field
+  directly, past every rule in Part 1 — no declared payload, no atomic unit,
+  no typed rejection. The LLM tool surface has no equivalent (it can only
+  mutate through verbs), so the CLI is the outlier. Whether this stays a
+  sanctioned escape hatch depends on a declarative notion of pattern-managed
+  state that does not exist yet (the `readonly`/opt-in-writability question),
+  and `set` is also an authoring and debugging tool whose non-agent uses this
+  contract does not touch. Until that decision is made, the contract governs
+  verbs and says nothing about `set`.
 - **Batch / session mode** for the CLI — orthogonal call-cost work, linked
   rather than orphaned: even perfect verbs leave a fresh runtime paying boot
   and sync per call (20–80 s per mutation observed live), so this gets its
@@ -95,13 +113,16 @@ Size S–M (~2–4 days). No dependencies. `packages/patterns/topics`.
 
 Size S (~1 day). No dependencies. `packages/cli`.
 
-- Replace `defaultWaitForResult` (25 ms poll, 15 s ceiling,
-  `lib/callable.ts:206-222`) with settlement observed through the existing
-  `running.sink(…)` path. The default time bound remains until WS-F makes the
-  wait caller-controlled, but it bounds an observation, not a poll.
-- Surface the tool result cell's address in `ExecutedCallable` output.
-- **Exit:** no sleep/poll in the callable wait path; `deno task test` in
-  `packages/cli` green.
+- ~~Replace the `defaultWaitForResult` poll with observed settlement~~ —
+  **landed independently as #4946** (2026-07-24): the wait is
+  `runtime.settled()`, draining scheduler, storage, and in-flight async
+  builtins with no poll interval and no deadline. Scope change recorded; this
+  workstream shrank to the second bullet.
+- Surface the tool result cell's address in `ExecutedCallable` output
+  (`resultRef`), threaded through the exec/piece-call wrappers and printed to
+  stderr so stdout stays exactly the tool's JSON result.
+- **Exit:** no sleep/poll in the callable wait path (met by #4946);
+  `resultRef` returned and printed; `deno task test` in `packages/cli` green.
 
 ### WS-C — verb results authoring surface *(critical path)*
 
@@ -111,9 +132,59 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
 
 - **api:** `action` overloads accept a return type (today both overloads type
   the callback `=> void`, `builder/module.ts:606-609`); `Stream<T, R = void>`
-  or equivalent so the result type is visible to the schema layer — the
-  defaulted parameter keeps every existing `Stream<T>` use compiling. A
-  `VerbError { code, message }` type for rule 4's typed rejections.
+  so the result type is visible to the schema layer — the defaulted parameter
+  keeps every existing `Stream<T>` use compiling. A `VerbError { code,
+  message }` type for rule 4's typed rejections.
+- **C1 fork — settled: widen `Stream`, do not add a second carrier.** The
+  alternative was a separate `StreamWithResult<T, R> extends Stream<T>` that
+  only the schema layer interprets, which is tempting because it leaves
+  `Stream<T>` and its one-slot `AsStream` HKT untouched. It loses on one
+  point that outweighs the rest: **a forgotten annotation stays silent.**
+  Because the carrier is a subtype, a verb whose body returns a value but
+  whose declaration still reads `Stream<T>` assigns cleanly, and the result
+  is erased exactly where the schema layer reads it — the same shape of
+  failure as the live board accepting and discarding `agentName`. Widening
+  `Stream` makes that a compile error instead, provided `R` sits in a
+  structural position rather than a phantom one: a purely unused parameter is
+  erased by structural typing (verified — `Stream<string, number>` assigns to
+  `Stream<string>` when `R` appears nowhere), while `R` in a property
+  position discriminates and forces the author to declare what the body
+  returns.
+  Prototyped to measure rather than estimate, following the `CELL_INNER_TYPE`
+  precedent — a `declare const` unique symbol read as a property, which
+  `AnyBrandedCell` already uses for exactly this reason ("without a concrete
+  property mentioning T, T would be a phantom parameter"). The workspace
+  type-checks clean with `Stream` widened: zero errors.
+  **The conditional-type utilities do not need auditing.** An earlier draft of
+  this entry called for widening every `[T] extends [Stream<any>]` guard,
+  on the theory that a result-carrying stream would silently stop matching.
+  It does stop matching — but that does not reach the schema layer, which
+  detects wrappers from the author's annotation by two annotation-rooted
+  paths: the written `ts.TypeNode` name
+  (`schema-generator/src/type-utils.ts:427-437`) and the `[CELL_BRAND]:
+  "stream"` literal on the resolved type
+  (`schema-generator/src/typescript/cell-brand.ts:97-114`), whose
+  `extractWrapperTypeReference` exposes the full `typeArguments` where `R`
+  sits — so detection even survives an alias like
+  `type MyVerb = Stream<E, R>`. The
+  guards shape inference and authoring ergonomics, not schema extraction, and
+  dropping a result there is harmless for every helper that does not care
+  about one. Where a guard genuinely mishandles a returning verb it shows up
+  as a compile error in that pattern, loudly, and only for verbs that opted
+  in — so a single fixture declaring a result catches the class, and guards
+  widen reactively when that fixture proves they must. Removing the default
+  makes the compiler enumerate all 253 `Stream<` sites, which is a useful
+  one-time audit tool but not a prerequisite.
+  What must be threaded is the construction path, not the guards:
+  `Handler`/`HandlerFactory` return the stream, so they carry the result
+  parameter or an author's annotation cannot match what `handler()` produces.
+  `AsStream` — one
+  slot, `Apply` and `IKeyable` assume that — keeps producing `Stream<A,
+  void>`, so a projection through the HKT drops a declared result. That is
+  acceptable because streams are leaves: patterns do not `key()` into a
+  stream to reach another. Both options need a result parameter threaded
+  through `Handler`/`HandlerFactory` regardless, since the factory returns
+  the stream, so that work is not a differentiator.
 - **ts-transformers:** lowering for value-returning `action` bodies; CTS spec
   updates under `docs/specs/ts-transformer/`. (The runtime side already
   consumes returns — `handleJavaScriptHandlerResult` — so this is authoring
@@ -121,19 +192,56 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
 - **schema-generator:** emit a result schema for stream/handler properties so
   it reaches the piece's **durable** schema — the dependency verb discovery
   named; mapping spec update in
-  `docs/specs/schema-generator/ts_to_json_schema_mapping.md`. Verb **input**
+  [the TypeScript-to-JSON-Schema mapping](../specs/schema-generator/ts_to_json_schema_mapping.md).
+  Verb **input**
   schemas become closed-world (an undeclared field is a rejection, never
   ignored — design rule 1): emit `additionalProperties: false` for event
   payloads, confirm the runner enforces it at dispatch, and record the rule
   in the mapping spec.
-- **runner:** plain-return projection — the receipt-only branch
-  (`runner.ts:3713-3725`) writes the validated plain return instead of `{}`,
-  behind a new experimental option (registry entry in
-  `docs/development/EXPERIMENTAL_OPTIONS.md` with owner and end state:
-  default-off → flip after Phase 4's integration proof → fold in). Spec note
-  in scheduler-v2 §7.6 (receipt content), and
-  `packages/runner/test/scheduler-event-receipts.test.ts` extended for both
-  plain and reactive-bearing returns.
+- **Which signal marks a verb — checked, and C3 is not exposed to it.** An
+  earlier revision of this bullet warned that "stream/handler properties" is
+  not one predicate, because `Cell.isStream` accepts three independent signals
+  — construction kind, `asCell: ["stream"]` in the schema, and a stored
+  `{$stream: true}` value (`packages/runner/src/cell.ts:936-958`) — and that
+  C3 might therefore skip verbs carried only by the stored one. That warning
+  was misdirected. C3 runs in schema-generator, off the **TypeScript checker**:
+  `getWrapperSchemaFromCallable` reads a property's call signatures and asks
+  `getCellWrapperInfo` whether the return type is a `Stream`
+  (`packages/schema-generator/src/formatters/object-formatter.ts:44-67`). The
+  `asCell` marker is that check's *output*, not its input, and the stored
+  `{$stream: true}` value is a runtime artifact schema-generator never sees. A
+  result schema would ride the same type check that already emits the marker,
+  so the two travel together: a property is either recognized as a stream and
+  gets both, or is unrecognized and is skipped from `properties` and `required`
+  entirely (mapping spec, "Functions / callables / constructables"). There is
+  no state where the marker lands and the result schema does not. Verified on
+  `packages/patterns/topics/main.tsx`: `addTopic`, `setMyName`, and
+  `submitTopic` all emit `asCell: ["stream"]` from their `Stream<T>`
+  declarations.
+- **The residual check, which belongs to durable-schema readers rather than to
+  C3:** the bullet above requires the result schema to reach the piece's
+  *durable* schema, and only generation was verified — not persistence. If
+  anything strips `asCell` between generation and storage, every consumer that
+  reads verbs back from a stored schema is affected, this workstream included.
+  The three-signal divergence is real at runtime, which is why the CLI carries
+  two workarounds for handlers whose stored schema lacks the marker
+  (`tryResolvePieceHandler`, and the forced-stream probe in
+  `listPieceCallables`). Worth confirming before anything downstream depends on
+  reading verbs out of a durable schema; the design doc's structural-interface
+  note rests on the same question.
+- ~~**runner:** plain-return projection~~ — **done (C4)**:
+  `plainResultReceipts`, default-off, env-reachable
+  (`EXPERIMENTAL_PLAIN_RESULT_RECEIPTS`); registry entry in
+  `EXPERIMENTAL_OPTIONS.md`, scheduler-v2 §7.6 receipt-content note, both
+  flag states tested in `scheduler-event-receipts.test.ts`, including
+  same-id redelivery retaining the original result.
+- ~~**C1 design fork, decide first:** `Stream<T>` is a branded-cell interface
+  wired through a one-slot HKT (`AsStream`, `packages/api/index.ts:1358`), so
+  `Stream<T, R = void>` ripples through the cell-type machinery; the
+  alternative is a separate declared-result carrier (e.g.
+  `StreamWithResult<T, R> extends Stream<T>`) that only the schema layer
+  interprets. Settle this at the top of the C1 PR.~~ — settled in #5123; the
+  decision and its measured costs are the **C1 fork — settled** bullet above.
 - **Exit:** a CTS pattern declares a verb returning `AddTopicResult`; the
   result schema appears in the durable schema; under the flag, both plain and
   reactive returns are readable in the receipt cell.
@@ -143,19 +251,34 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
 Size M (~1 week). Idempotency portion has no dependencies; result readback
 joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
 
-- **runner:** thread a caller-supplied `eventId` from `cell.send()` to
-  `queueEvent` (the parameter exists — `facade.ts:1308`; the send path passes
-  none — `cell.ts:1276`). Expose the receipt cell's link **structurally
-  through the dispatch path**: the commit callback on success, a structured
-  field on the `receipt-exists` rejection on collision. Both branches already
-  know the cell; nobody parses error prose, and the CLI never reconstructs
-  `{ $ctx, $event }` client-side.
-- **cli:** `--invocation <id>` on `piece call` (UUID minted and printed by
+- ~~**runner:** thread a caller-supplied `eventId`; expose the receipt link
+  structurally~~ — **done (D1)**: `cell.send(event, onCommit, { eventId })`
+  internal options thread to `queueEvent`, and `tx.handlingReceiptLink`
+  (mirroring `dispatchedEventId`) carries the receipt address to the sender's
+  commit callback on success AND on `receipt-exists` collision — the loser
+  receives the winner's outcome address; nobody parses error prose or
+  reconstructs `{ $ctx, $event }` client-side. The caller's key is bound to
+  its stream on the way in (`scopeCallerEventId`): a receipt derives from the
+  handler's input bindings plus the event id, and bindings alone do not
+  identify the verb, so an unscoped key lets one id reused across two verbs of
+  a piece collide — the second call is reported as an already-settled success
+  it never made. Scoping restores what minted ids had, since every minted id
+  ends in the stream link. The binding is a content hash over the caller's key
+  plus the whole link, not a delimited join: the caller's half is opaque, so
+  concatenation would let a chosen id shift the separator.
+- ~~**cli:** `--invocation <id>` on `piece call` (UUID minted and printed by
   default, including when the wait times out); after commit, sync and read the
   receipt (a cold plain read returns `undefined` — sync first); reclassify
   `precondition: "receipt-exists"` as success-with-readback, exit 0. Output is
   the `Invocation` JSON — `status` and `id` from day one, `result` once WS-C
-  lands.
+  lands.~~ — **done (D2)**: `cf piece call` mints a UUID (or takes
+  `--invocation <id>`), prints `invocation: <id>` to stderr at dispatch —
+  before any network work — and re-prints it with the furthest phase on every
+  failure exit; the receipt reads back through `tx.handlingReceiptLink`
+  (pull = sync + read); `precondition: "receipt-exists"` settles as success
+  with the original outcome (`deduplicated: true`), exit 0; stdout is the
+  settled `Invocation` JSON (`invocation`, `status`, `result` when the
+  receipt carries a value).
 - **cli, pre-dispatch validation:** `piece call` validates the payload against
   the *deployed* verb schema before sending — an undeclared or malformed
   field is an immediate local rejection. This is the half that catches
@@ -165,23 +288,41 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
 - **cli, phase reporting:** every output — success, failure, timeout — carries
   the furthest observed `phase`
   (`initial_sync | dispatched | committed | readback`) beside the invocation
-  id; verbose output adds per-phase timings (initial sync / dispatch /
-  handler / commit / result sync / readback). With a caller-supplied id a
-  retry is safe in every phase, so phase is diagnosis; a derived `retrySafe`
-  convenience flag may ride along.
-- **Acknowledgement is transaction-local.** The call path awaits *this
+  id — **done (D2)** for the annotation (tracked through an `onPhase`
+  callback, printed on failure exits); verbose output adds per-phase timings
+  (initial sync / dispatch / handler / commit / result sync / readback) —
+  still open. With a caller-supplied id a retry is safe in every phase, so
+  phase is diagnosis; a derived `retrySafe` convenience flag may ride along.
+- ~~**Acknowledgement is transaction-local.** The call path awaits *this
   handling's* commit (D1's commit callback) plus receipt sync — never
   `runtime.idle()` / full-sync quiescence, which today holds a committed
   write hostage to downstream recomputation (60–80 s body writes observed
-  live while `crossrefs` re-derived). Acceptance test: a deliberately slow
-  derived recomputation cannot delay `addTopic` acknowledgement.
-- Integration tests (isolated toolshed, `isolated-test-processes`
+  live while `crossrefs` re-derived).~~ — **done (D2)**: the handler send
+  path awaits only the commit callback and the receipt pull; a unit test
+  fails if the path ever awaits `runtime.idle()` or `manager.synced()`. The
+  live acceptance check — a deliberately slow derived recomputation cannot
+  delay `addTopic` acknowledgement — rides with D3's integration scenarios.
+- ~~Integration tests (isolated toolshed, `isolated-test-processes`
   conventions), four timeout/retry scenarios: timeout before dispatch (retry
   re-executes; one topic); timeout after dispatch, before commit
   acknowledgement; commit succeeded but the response was lost (retry
   collides, reads the original back, exits 0); and a retry from a fresh
   process with the same id — in every case exactly one topic exists
-  afterwards.
+  afterwards.~~ — **done (D3)**: `run_piece_call_retry` in
+  `packages/cli/integration/integration.sh`, running in the existing
+  `piece-call` shard against its own toolshed, each scenario in its own
+  space. Every scenario ends on the same assertion — exactly one message
+  recorded — because that is the property an agent depends on. The
+  killed-after-dispatch case is triggered by the CLI's own `invocation:`
+  announcement, read through a blocking pipe read, so it lands in the window
+  without racing a clock; a `--message` that differs on the retry proves the
+  settled outcome stands rather than being overwritten. Each scenario spawns
+  a fresh `cf` process, so the fresh-process case is the default rather than
+  a special one. One half of the third scenario is not covered yet: the
+  collision is asserted through `deduplicated` and exit 0, but not by reading
+  a *result* back off the receipt, because a void verb leaves none to read.
+  That assertion joins when WS-C gives verbs return values — or sooner
+  against `plainResultReceipts`.
 - **Exit (Phase 2, before WS-C):** the duplicate-on-retry bug is dead on the
   live board. **Exit (Phase 4, with WS-C):** the retry returns the original
   result.
@@ -229,18 +370,24 @@ The provenance half is a separate CFC-gated track:
 
 Size M, mostly parallel. `packages/cli`, `skills/cf`.
 
-- `cf piece verbs --json` — name, kind, input schema per verb from the
-  existing classification (`packages/fuse/callables.ts:88`), plus the
-  deployed pattern's source identity so a skill can detect it targets a newer
-  contract than the live piece; result schemas appear once WS-C lands; v1
-  lists everything, per the decided semantics (every verb listable; tier
-  filtering arrives with the marker, later). **Independent — can ship
-  first.**
+- ~~`cf piece verbs --json`~~ — **shipped** (F1): name, kind, on
+  (result/input), input schema per verb; tools carry their output schema.
+  Walks result-then-input with the same classification `cf piece call`
+  resolves through — including the forced-stream fallback path. v1 lists
+  everything per the decided semantics; handler result schemas appear once
+  WS-C lands, tier filtering with the marker, later. The 2026-07-24 amendment is absorbed: the listing carries the
+  deployed pattern's source identity (skew detection).
 - Generic identity annotation for data reads and callable results. Start with
   an exploration form such as `--include-ids` that annotates points where the
   backing identity changes; evaluate a narrower path-selected form if broad
   output is too noisy. Patterns return child references and never manufacture
   their own fid fields for this purpose.
+- **Read-path guard:** `cf piece get` on a path that resolves to a verb returns
+  the stream's serialization rather than redirecting. The llm-dialog `read`
+  tool already rejects this case with the right message — "Path resolves to a
+  handler; use invoke() instead" — and the CLI read path
+  (`packages/cli/lib/piece.ts`, `getCellValue`) has no equivalent check. Cheap,
+  and it saves an agent a wasted turn.
 - `--await` / `--no-wait` and the caller-controlled wait bound — with WS-D.
 - Skill updates ride each surface (`skills/cf`, `skills/topics`): the handle
   lookup and verification read leave the documented workflow when Phase 4
@@ -320,6 +467,13 @@ change that alters them.
   #4956, merged 2026-07-24 — is the candidate fix; confirm before the first
   Phase 1 deploy). Until the gate clears, a "live-board acceptance pass"
   degrades to a scratch board and must say so rather than pass silently.
+  **#5059 (`cf piece setsrc --check`) is the candidate preflight for this
+  gate:** it answers whether a source can be applied to a given piece before
+  attempting it, driving the real rules in dry-run — the schema subset proof,
+  the CFC envelope merge, the retained-link validator — rather than a second
+  copy of them. It does not measure commit rates, so the rehearsal above
+  stands; what it removes is discovering an incompatibility by attempting the
+  swap on the live board.
 - **WS-E's gates may stall it** (OQ1, CFC review, collection unknown, trusted
   ingress mint and propagation): it is last and severable; everything through
   Phase 4 delivers without it, and `topics.agentName` remains the safe interim.

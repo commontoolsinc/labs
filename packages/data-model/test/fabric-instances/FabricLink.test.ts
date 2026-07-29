@@ -1,7 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { FabricInstance, FabricPrimitive } from "@/interface.ts";
+import {
+  FabricInstance,
+  FabricPrimitive,
+  type MutableFabricPlainObjectLayer,
+} from "@/interface.ts";
 import {
   DEEP_FREEZE,
   IS_DEEP_FROZEN,
@@ -125,7 +129,7 @@ describe("FabricLink", () => {
       const clone = link.deepClone(false) as FabricLink;
       expect(Object.isFrozen(clone)).toBe(false);
       expect(clone.payload).not.toBe(link.payload);
-      clone.payload.id = "fid1:xyz";
+      (clone.payload as MutableFabricPlainObjectLayer).id = "fid1:xyz";
       expect(link.payload.id).toBe("fid1:abc");
     });
 

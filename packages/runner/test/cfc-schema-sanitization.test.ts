@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -491,6 +492,169 @@ describe("cfc schema sanitization", () => {
       .toBeUndefined();
     expect(validateSchemaValue(schema, { item: { value: 1 } }))
       .toContain("value does not match type string");
+  });
+
+  it("walks a shared definition map once, not once per ref path", () => {
+    // resolveCfcSchemaRef() hands every resolved view the owning `$defs`
+    // object. Walking those bodies again at each view expands the definition
+    // graph as a tree rather than a DAG, so node visits grow as
+    // (definition count)^(ref depth) — the shape that made
+    // packages/patterns/lobby/main.tsx take over a minute to validate.
+    // Counting reads of one definition body keeps the bound on the work
+    // itself rather than on the clock.
+    const depth = 8;
+    const definitions: Record<string, JSONSchema> = {};
+    for (let index = 0; index < depth; index++) {
+      definitions[`D${index}`] = index === depth - 1 ? { type: "string" } : {
+        type: "object",
+        properties: {
+          a: { $ref: `#/$defs/D${index + 1}` },
+          b: { $ref: `#/$defs/D${index + 1}` },
+        },
+      };
+    }
+    const countedBody = definitions.D4;
+    let reads = 0;
+    Object.defineProperty(definitions, "D4", {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        reads++;
+        return countedBody;
+      },
+    });
+    const schema: JSONSchema = {
+      type: "object",
+      properties: { root: { $ref: "#/$defs/D0" } },
+      $defs: definitions,
+    };
+
+    expect(validateSchemaDefinition(schema)).toBeUndefined();
+    // 463911 reads before the definition map was claimed once per root; the
+    // bound this asserts does not grow with `depth`.
+    expect(reads).toBeLessThan(100);
+  });
+
+  it("reports definition bodies a recursive ref would cut short", () => {
+    // The definition map belongs to the schema that carries it outermost, so
+    // its bodies are walked with no ref expansion in flight. Claiming it from
+    // a resolved view instead would reach `child` through the very `$ref` the
+    // recursion guard is holding open, and its own keywords would go unchecked.
+    const schema: JSONSchema = {
+      type: "object",
+      properties: { node: { $ref: "#/$defs/Node" } },
+      $defs: {
+        Node: {
+          type: "object",
+          properties: {
+            child: {
+              $ref: "#/$defs/Node",
+              type: "bogus",
+            } as unknown as JSONSchema,
+            name: { type: "string" },
+          },
+        },
+      },
+    };
+
+    expect(validateSchemaDefinition(schema)).toContain(
+      "unsupported schema type bogus",
+    );
+  });
+
+  it("re-walks a definition map a cut walk claimed, entering from a fragment", () => {
+    // The regression this pins is entry-point-specific: `assertSchemaSubset`
+    // validates a FRAGMENT against a root, and the fragment carries no `$defs`
+    // of its own, so the first resolved ref view is what claims the root's map.
+    //
+    // Here the fragment visits `A` then `B`. `A` references itself from a node
+    // with an invalid sibling keyword, so the recursion guard cuts that walk
+    // before the keyword is checked. `B` re-enters the map afterwards, when `A`
+    // is no longer active — but only if the cut walk gave the map back.
+    //
+    // Claiming the map permanently made this ACCEPT an invalid schema. The
+    // whole-schema entry point never showed it: there the outermost carrier
+    // walks the map with no ref in flight, so nothing is cut.
+    const root: JSONSchema = {
+      type: "object",
+      $defs: {
+        A: {
+          type: "object",
+          properties: {
+            self: { $ref: "#/$defs/A", type: "bogus" } as unknown as JSONSchema,
+          },
+        },
+        B: { type: "object", properties: { v: { $ref: "#/$defs/C" } } },
+        C: { type: "string" },
+      },
+    };
+    const fragment: JSONSchema = {
+      type: "object",
+      properties: { a: { $ref: "#/$defs/A" }, b: { $ref: "#/$defs/B" } },
+    };
+
+    expect(validateSchemaDefinition(fragment, root)).toContain(
+      "unsupported schema type bogus",
+    );
+  });
+
+  it("releases a definition map claimed by a view that then hit the ref guard", () => {
+    // A `{$ref}` view claims the owning `$defs` on ENTRY, then returns straight
+    // away on the active-ref guard having walked nothing. The release used to
+    // live only inside the `$defs` iteration, so that frame never reached it
+    // and every later carrier of the map skipped it — forever. `Unreferenced`
+    // is what proves the map went unwalked: nothing else reaches it.
+    const root: JSONSchema = {
+      type: "object",
+      $defs: {
+        Rec: { $ref: "#/$defs/Rec", type: "object" } as unknown as JSONSchema,
+        Ok: { allOf: [{ $ref: "#/$defs/Rec" }] },
+        Unreferenced: {
+          type: "number",
+          required: ["a", "a"],
+        } as unknown as JSONSchema,
+      },
+    };
+    const fragment: JSONSchema = {
+      type: "object",
+      properties: { a: { $ref: "#/$defs/Rec" }, b: { $ref: "#/$defs/Ok" } },
+    };
+
+    expect(validateSchemaDefinition(fragment, root)).toContain(
+      "must be an array of unique strings",
+    );
+  });
+
+  it("drops proofs that leaned on a claim, when the claim is handed back", () => {
+    // `provenByRoot` may record a schema that SKIPPED a definition map on the
+    // strength of someone else's claim. If the claimer later releases that map,
+    // the proof was resting on a claim that no longer stands — so the release
+    // has to take those records with it, or a second path hits the memo and
+    // never re-walks the released map.
+    //
+    // Interning is what makes the resolved views identity-stable enough to hit
+    // the memo, and the builder interns schemas throughout — so this is the
+    // production shape, not an exotic one.
+    const root = internSchema({
+      type: "object",
+      $defs: {
+        W: { type: "object", properties: { x: { $ref: "#/$defs/X" } } },
+        X: { type: "object", properties: { k: { $ref: "#/$defs/Leaf" } } },
+        Leaf: { type: "string" },
+        BadHost: {
+          type: "object",
+          properties: { n: { $ref: "#/$defs/W", type: "bogus" } },
+        },
+      },
+    } as unknown as JSONSchema);
+    const fragment = internSchema({
+      type: "object",
+      properties: { f0: { $ref: "#/$defs/W" }, f1: { $ref: "#/$defs/X" } },
+    } as unknown as JSONSchema);
+
+    expect(validateSchemaDefinition(fragment, root)).toContain(
+      "unsupported schema type bogus",
+    );
   });
 
   it("rejects sparse schema keyword arrays without rejecting sparse values", () => {

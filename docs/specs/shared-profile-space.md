@@ -543,6 +543,9 @@ Add focused runner tests for `wish()`:
   `WishState.result` without throwing out of the scheduler action
 - `wish({ query: "#profile" })` returns the profile default pattern
 
+The [shared-profile participant roster guide](shared-profile-rosters.md) shows
+how multi-user patterns build live participant lists on this profile model.
+
 ## Open Questions
 
 - Should profile spaces be readable by all collaborators by default, or private

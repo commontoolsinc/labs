@@ -1,4 +1,5 @@
 {
+  // Dependency guide: ../../docs/development/DEPENDENCIES.md
   "name": "@commonfabric/test-support",
   "version": "0.1.0",
   "exports": {

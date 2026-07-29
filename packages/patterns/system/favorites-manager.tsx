@@ -64,28 +64,26 @@ export default pattern<Record<string, never>>((_) => {
     [UI]: (
       <cf-vstack gap="3">
         {favorites.map((item) => (
-          <cf-cell-context $cell={item.cell}>
-            <cf-vstack gap="2">
-              <cf-hstack gap="2" align="center">
-                <cf-cell-link $cell={item.cell} spaceName={item.spaceName} />
-                <cf-button
-                  variant="destructive"
-                  size="sm"
-                  onClick={onRemoveFavorite({
-                    favorites,
-                    id: item.id,
-                    item: item.cell,
-                  })}
-                >
-                  Remove
-                </cf-button>
-              </cf-hstack>
-              <cf-tags
-                tags={item.userTags}
-                oncf-change={onUpdateUserTags({ userTags: item.userTags })}
-              />
-            </cf-vstack>
-          </cf-cell-context>
+          <cf-vstack gap="2">
+            <cf-hstack gap="2" align="center">
+              <cf-cell-link $cell={item.cell} spaceName={item.spaceName} />
+              <cf-button
+                variant="destructive"
+                size="sm"
+                onClick={onRemoveFavorite({
+                  favorites,
+                  id: item.id,
+                  item: item.cell,
+                })}
+              >
+                Remove
+              </cf-button>
+            </cf-hstack>
+            <cf-tags
+              tags={item.userTags}
+              oncf-change={onUpdateUserTags({ userTags: item.userTags })}
+            />
+          </cf-vstack>
         ))}
         {favorites!.length === 0 && <p>No favorites yet.</p>}
       </cf-vstack>

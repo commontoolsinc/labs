@@ -1,9 +1,13 @@
 /**
  * Entry point for `cf view`. Reads the input (a file argument or piped stdin),
- * parses it once — as a unified diff when it reads as one, else as transformed
- * TypeScript — then either launches the interactive pager (when stdout is a
- * TTY) or prints the colourised text and exits, mirroring how `less`/`bat`
- * behave when their output is redirected.
+ * parses it once — as a unified diff when it reads as one, otherwise with the
+ * language selected from its filename — then either launches the interactive
+ * pager (when stdout is a TTY) or prints the selected source or rendered
+ * representation and exits, mirroring how `less`/`bat` behave when their
+ * output is redirected.
+ * Filename-free compiler output keeps the transformed TypeScript default.
+ * Other source uses filename and shebang metadata unless an explicit language
+ * selects another language.
  */
 import { renderLineColored } from "./highlight.ts";
 import { runPager } from "./pager.ts";
@@ -15,11 +19,16 @@ import {
   realWorkspace,
   type WorkspaceCache,
 } from "./diffdoc.ts";
-import type { Semantics } from "./languages/language.ts";
 import {
   diffSemanticsFor,
   distinctLanguages,
+  type Language,
   languageForFile,
+  languageForName,
+  languageForSource,
+  languageForTransformedOutput,
+  languageNames,
+  type Semantics,
 } from "./languages/language.ts";
 import {
   type EditableSource,
@@ -37,12 +46,19 @@ export interface ViewOptions {
   color: ColorWhen;
   plain: boolean;
   lineNumbers: boolean;
+  /** Start in the rendered representation when one is available. */
+  rendered?: boolean;
   file?: string;
+  /** Select piped source with this stable language identifier. */
+  language?: string;
+  /** Select piped source as though it had this filename. */
+  filename?: string;
   /** Force (true) or suppress (false) diff mode; undefined auto-detects. */
   diff?: boolean;
 }
 
 export async function viewMain(options: ViewOptions): Promise<void> {
+  const selection = pipedSelection(options);
   const text = await readInput(options.file);
   if (text.trim().length === 0) {
     throw new ViewError(
@@ -59,6 +75,7 @@ export async function viewMain(options: ViewOptions): Promise<void> {
     text,
     options.file,
     options.diff,
+    selection,
   );
   const stdoutTty = Deno.stdout.isTerminal();
   const interactive = !options.plain && stdoutTty;
@@ -71,14 +88,63 @@ export async function viewMain(options: ViewOptions): Promise<void> {
   if (interactive) {
     await runPager(
       doc,
-      { color: true, showLineNumbers: options.lineNumbers },
+      {
+        color: true,
+        showLineNumbers: options.lineNumbers,
+        viewMode: options.rendered ? "rendered" : "source",
+      },
       semantics(),
       editSource,
     );
     return;
   }
 
-  printDocument(doc, color, options.lineNumbers);
+  const shown = options.rendered ? editSource.render?.(doc) ?? doc : doc;
+  printDocument(shown, color, options.lineNumbers);
+}
+
+function pipedSelection(options: ViewOptions): SourceSelection {
+  validateSourceSelection(
+    options.file,
+    options.diff,
+    options.language !== undefined || options.filename !== undefined,
+  );
+  if (options.language === undefined) {
+    return { fileName: options.filename };
+  }
+  const language = languageForName(options.language);
+  if (!language) {
+    throw new ViewError(
+      `cf view: unknown language "${options.language}". Available languages: ${
+        languageNames().join(", ")
+      }`,
+    );
+  }
+  return { language, fileName: options.filename };
+}
+
+/** Explicit syntax selection for source received through a pipe. */
+export interface SourceSelection {
+  readonly language?: Language;
+  readonly fileName?: string;
+}
+
+function validateSourceSelection(
+  file: string | undefined,
+  forceDiff: boolean | undefined,
+  sourceSelected: boolean,
+): void {
+  if (!sourceSelected) return;
+  if (file !== undefined) {
+    throw new ViewError(
+      "cf view: --language and --filename cannot be used with a file argument",
+    );
+  }
+  if (forceDiff === true) {
+    throw new ViewError(
+      "cf view: --diff cannot be combined with --language or --filename",
+    );
+  }
 }
 
 /**
@@ -91,18 +157,26 @@ export async function viewMain(options: ViewOptions): Promise<void> {
  * diff is accepted only if a reasonable share of its lines actually parse as
  * diff content — so a source file that merely EMBEDS a diff (in a string, a
  * test fixture) still views as source. Exported for tests.
+ *
+ * `selection` chooses syntax for piped source. Its virtual filename is
+ * advisory and does not make the source editable.
  */
 export function buildView(
   text: string,
   file?: string,
   forceDiff?: boolean,
+  selection: SourceSelection = {},
 ): {
   doc: Document;
   semantics: () => Semantics | undefined;
   editSource: EditableSource;
 } {
   const commitOutput = looksLikeCommitOutput(text);
-  const tryDiff = forceDiff ?? (looksLikeDiff(text) || commitOutput);
+  const sourceSelected = selection.language !== undefined ||
+    selection.fileName !== undefined;
+  validateSourceSelection(file, forceDiff, sourceSelected);
+  const tryDiff = forceDiff ??
+    (!sourceSelected && (looksLikeDiff(text) || commitOutput));
   const parsedDiff = tryDiff ? parseDiff(text) : null;
   const model: DiffModel | null = parsedDiff ??
     (tryDiff && commitOutput
@@ -121,26 +195,57 @@ export function buildView(
     const languages = distinctLanguages(
       model.files.map((f) => f.newPath ?? f.oldPath),
     );
+    const hasRenderedView = model.files.some((diffFile) =>
+      [diffFile.oldPath, diffFile.newPath].some((path) =>
+        path !== undefined && !!languageForFile(path).renderLines
+      )
+    );
     return {
       doc,
       semantics: () =>
         diffSemanticsFor(languages, text, maps, { cwd: safeCwd() }),
       // A diff edits the new side of the files it touches, in place. Saving
       // edited `git show` output amends HEAD with those file and message edits.
-      editSource: diffSource(ws, edit, cache, realGit(safeCwd())),
+      editSource: diffSource(
+        ws,
+        edit,
+        cache,
+        realGit(safeCwd()),
+        hasRenderedView,
+      ),
     };
   }
-  const language = languageForFile(file);
-  const doc = language.parseDocument(text, file ?? "transformed.tsx");
+  const fileName = selection.fileName ?? file;
+  const transformedOutput = fileName === undefined &&
+    looksLikeTransformedOutput(text);
+  const language = selection.language ??
+    (transformedOutput
+      ? languageForTransformedOutput()
+      : languageForSource(fileName, text));
+  const doc = language.parseDocument(text, fileName);
   return {
     doc,
     semantics: () =>
-      language.createSemantics?.(text, { cwd: safeCwd(), fileName: file }),
+      language.createSemantics?.(text, { cwd: safeCwd(), fileName }),
     // A real file is editable; a pipe (transformed output, etc.) is not.
-    editSource: file ? fileSource(file) : readonlySource(
+    editSource: file ? fileSource(file, language) : readonlySource(
       "This view is of a pipe — there is no underlying file to edit.",
+      language,
+      fileName,
     ),
   };
+}
+
+/** `cf check --show-transformed` starts each output module with this header. */
+function looksLikeTransformedOutput(text: string): boolean {
+  const lineEnd = text.indexOf("\n");
+  const firstLine = (lineEnd < 0 ? text : text.slice(0, lineEnd)).replace(
+    /\r$/,
+    "",
+  );
+  const prefix = "// transformed: ";
+  return firstLine.startsWith(prefix) &&
+    firstLine.slice(prefix.length).trim().length > 0;
 }
 
 /** A standard `git show` or `git log` header. Unlike a diff heuristic, this also

@@ -39,7 +39,7 @@ cf fuse mount ~/mnt/cf --api-url http://localhost:8000
 ls ~/mnt/cf/
 # => home/
 
-# List pieces in the home space
+# List registered pieces in the home space
 ls ~/mnt/cf/home/pieces/
 # => todo-app/  weather-widget/  notes/
 
@@ -77,6 +77,12 @@ echo '{"item":"New task"}' > ~/mnt/cf/home/pieces/todo-app/result/addItem.handle
 # Unmount
 cf fuse unmount ~/mnt/cf
 ```
+
+The named `pieces/` projection is seeded by the space's piece registry. It does
+not enumerate unregistered or orphan pieces. The separate `entities/`
+projection lists live entity IDs when the server supports identifier listing,
+without identifying which entities are piece roots. See
+[Finding Pieces](../../common/concepts/piece-discovery.md).
 
 ---
 

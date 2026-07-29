@@ -138,85 +138,83 @@ export default pattern<Record<string, never>>((_) => {
           {filtered.map(
             (ann: AnnotationPiece) =>
               ann && (
-                <cf-cell-context $cell={ann}>
-                  <cf-vstack
-                    gap="1"
-                    style={{
-                      padding: "10px 12px",
-                      border: "1px solid #e5e7eb",
-                      borderRadius: "8px",
-                      background: "white",
-                    }}
-                  >
-                    {/* Row 1: kind icon + link to annotation + status badge */}
-                    <cf-hstack gap="2" style={{ alignItems: "center" }}>
-                      <span style={{ fontSize: "14px" }}>
-                        {KIND_ICON[ann?.kind ?? "note"] ?? "📌"}
+                <cf-vstack
+                  gap="1"
+                  style={{
+                    padding: "10px 12px",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "8px",
+                    background: "white",
+                  }}
+                >
+                  {/* Row 1: kind icon + link to annotation + status badge */}
+                  <cf-hstack gap="2" style={{ alignItems: "center" }}>
+                    <span style={{ fontSize: "14px" }}>
+                      {KIND_ICON[ann?.kind ?? "note"] ?? "📌"}
+                    </span>
+                    <cf-cell-link $cell={ann} />
+                    <span
+                      style={{
+                        fontSize: "11px",
+                        padding: "2px 6px",
+                        borderRadius: "10px",
+                        ...(STATUS_STYLE[ann?.status ?? "open"]
+                          ? Object.fromEntries(
+                            STATUS_STYLE[ann?.status ?? "open"]
+                              .split(";")
+                              .filter(Boolean)
+                              .map((s) => s.split(":").map((p) => p.trim())),
+                          )
+                          : {}),
+                      }}
+                    >
+                      {ann?.status ?? "open"}
+                    </span>
+                  </cf-hstack>
+
+                  {/* Row 2: target piece link (if set) */}
+                  {ann?.targetPiece && (
+                    <cf-hstack gap="1" style={{ alignItems: "center" }}>
+                      <span style={{ fontSize: "11px", color: "#9ca3af" }}>
+                        on:
                       </span>
-                      <cf-cell-link $cell={ann} />
-                      <span
-                        style={{
-                          fontSize: "11px",
-                          padding: "2px 6px",
-                          borderRadius: "10px",
-                          ...(STATUS_STYLE[ann?.status ?? "open"]
-                            ? Object.fromEntries(
-                              STATUS_STYLE[ann?.status ?? "open"]
-                                .split(";")
-                                .filter(Boolean)
-                                .map((s) => s.split(":").map((p) => p.trim())),
-                            )
-                            : {}),
-                        }}
+                      <cf-cell-link $cell={ann.targetPiece} />
+                    </cf-hstack>
+                  )}
+
+                  {/* Row 3: action buttons */}
+                  <cf-hstack gap="1" style={{ marginTop: "4px" }}>
+                    {(ann?.status === "open" ||
+                      ann?.status === "in-progress") && (
+                      <cf-button
+                        size="sm"
+                        onClick={resolveAnnotation({ status: ann.status! })}
                       >
-                        {ann?.status ?? "open"}
-                      </span>
-                    </cf-hstack>
-
-                    {/* Row 2: target piece link (if set) */}
-                    {ann?.targetPiece && (
-                      <cf-hstack gap="1" style={{ alignItems: "center" }}>
-                        <span style={{ fontSize: "11px", color: "#9ca3af" }}>
-                          on:
-                        </span>
-                        <cf-cell-link $cell={ann.targetPiece} />
-                      </cf-hstack>
+                        Resolve
+                      </cf-button>
                     )}
-
-                    {/* Row 3: action buttons */}
-                    <cf-hstack gap="1" style={{ marginTop: "4px" }}>
-                      {(ann?.status === "open" ||
-                        ann?.status === "in-progress") && (
-                        <cf-button
-                          size="sm"
-                          onClick={resolveAnnotation({ status: ann.status! })}
-                        >
-                          Resolve
-                        </cf-button>
-                      )}
-                      {(ann?.status === "open" ||
-                        ann?.status === "in-progress") && (
-                        <cf-button
-                          size="sm"
-                          variant="secondary"
-                          onClick={dismissAnnotation({ status: ann.status! })}
-                        >
-                          Dismiss
-                        </cf-button>
-                      )}
-                      {(ann?.status === "resolved" ||
-                        ann?.status === "dismissed") && (
-                        <cf-button
-                          size="sm"
-                          variant="secondary"
-                          onClick={reopenAnnotation({ status: ann.status! })}
-                        >
-                          Reopen
-                        </cf-button>
-                      )}
-                    </cf-hstack>
-                  </cf-vstack>
-                </cf-cell-context>
+                    {(ann?.status === "open" ||
+                      ann?.status === "in-progress") && (
+                      <cf-button
+                        size="sm"
+                        variant="secondary"
+                        onClick={dismissAnnotation({ status: ann.status! })}
+                      >
+                        Dismiss
+                      </cf-button>
+                    )}
+                    {(ann?.status === "resolved" ||
+                      ann?.status === "dismissed") && (
+                      <cf-button
+                        size="sm"
+                        variant="secondary"
+                        onClick={reopenAnnotation({ status: ann.status! })}
+                      >
+                        Reopen
+                      </cf-button>
+                    )}
+                  </cf-hstack>
+                </cf-vstack>
               ),
           )}
           {filtered.length === 0 && (

@@ -25,6 +25,8 @@ import {
   type CommitPrecondition,
   type DocumentPath,
   type EntityDocument,
+  type EntityIdListOptions,
+  type EntityIdListResult,
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   type PatchOp,
@@ -1730,6 +1732,24 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.authorizationError();
   }
 
+  ensureSession(): Promise<void> {
+    return this.replica.ensureSession();
+  }
+
+  listEntityIds(): Promise<string[] | undefined> {
+    return this.replica.listEntityIds();
+  }
+
+  listEntityIdPage(
+    options: EntityIdListOptions = {},
+  ): Promise<EntityIdListResult | undefined> {
+    return this.replica.listEntityIdPage(options);
+  }
+
+  entityIdExists(id: string): Promise<boolean | undefined> {
+    return this.replica.entityIdExists(id);
+  }
+
   listSchedulerActionSnapshots(
     query: SchedulerActionSnapshotQuery = {},
   ): Promise<SchedulerSnapshotListResult> {
@@ -2100,6 +2120,10 @@ class SpaceReplica implements ISpaceReplica {
     this.#lastAuthorizationError = null;
   }
 
+  async ensureSession(): Promise<void> {
+    await this.sessionHandle();
+  }
+
   async sqliteQuery(
     db: SqliteDbRef,
     sql: string,
@@ -2107,6 +2131,52 @@ class SpaceReplica implements ISpaceReplica {
   ): Promise<SqliteQueryResult> {
     const { session } = await this.sessionHandle();
     return await session.sqliteQuery(db, sql, params);
+  }
+
+  async listEntityIds(): Promise<string[] | undefined> {
+    const { client, session } = await this.sessionHandle();
+    if (client.serverFlags?.entityIdListing !== true) {
+      return undefined;
+    }
+    if (client.serverFlags.entityIdPagination !== true) {
+      return (await session.listEntityIds())?.ids;
+    }
+
+    const ids: string[] = [];
+    let after: string | undefined;
+    let expectedServerSeq: number | undefined;
+    for (;;) {
+      const page = await session.listEntityIds({
+        ...(after === undefined ? {} : { after }),
+        ...(expectedServerSeq === undefined ? {} : { expectedServerSeq }),
+      });
+      if (page === undefined) return undefined;
+      expectedServerSeq ??= page.serverSeq;
+      ids.push(...page.ids);
+      if (page.nextAfter === undefined) return ids;
+      after = page.nextAfter;
+    }
+  }
+
+  async listEntityIdPage(
+    options: EntityIdListOptions = {},
+  ): Promise<EntityIdListResult | undefined> {
+    const { client, session } = await this.sessionHandle();
+    if (
+      client.serverFlags?.entityIdListing !== true ||
+      client.serverFlags.entityIdPagination !== true
+    ) {
+      return undefined;
+    }
+    return await session.listEntityIds(options);
+  }
+
+  async entityIdExists(id: string): Promise<boolean | undefined> {
+    const { client, session } = await this.sessionHandle();
+    if (client.serverFlags?.entityIdLookup !== true) {
+      return undefined;
+    }
+    return (await session.entityIdExists(id))?.exists;
   }
 
   /**

@@ -11,7 +11,6 @@ import type { Language } from "../language.ts";
 import { remapStructure } from "../../diffremap.ts";
 import {
   createJsonHighlighter,
-  isJsonPath,
   jsonDocument,
   jsonHighlightLines,
 } from "./json.ts";
@@ -19,11 +18,19 @@ import {
 export const jsonLanguage: Language = {
   id: "json",
 
-  matches: (fileName) => isJsonPath(fileName),
+  metadata: {
+    extensions: [".json", ".jsonc"],
+    filenames: [],
+    filenamePatterns: [/\.jsonc?\.example$/i],
+    aliases: ["jsonc"],
+    interpreters: [],
+  },
 
   parseDocument: (text) => jsonDocument(text),
 
   highlightLines: (text) => jsonHighlightLines(text),
+
+  highlightFullFileOnDiffEdit: true,
 
   createHighlighter: (text) => createJsonHighlighter(text),
 

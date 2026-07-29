@@ -1,7 +1,7 @@
 import ts from "typescript";
 import type {
-  JSONSchemaMutable,
-  JSONSchemaObjMutable,
+  MutableJSONSchema,
+  MutableJSONSchemaObj,
 } from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import {
@@ -44,7 +44,7 @@ const logger = getLogger("schema-generator.object", {
 function getWrapperSchemaFromCallable(
   type: ts.Type,
   checker: ts.TypeChecker,
-): JSONSchemaObjMutable | undefined {
+): MutableJSONSchemaObj | undefined {
   const callSignatures = type.getCallSignatures();
   if (callSignatures.length === 0) return undefined;
 
@@ -179,6 +179,26 @@ function shouldSkipInternalProperty(
 }
 
 /**
+ * `FabricExecPlainObject` is used as a compile-time constraint on internal
+ * execution graph types. Its inherited index signature does not describe
+ * authored data accepted by a pattern, so it must not become a JSON Schema
+ * `additionalProperties` declaration.
+ */
+function hasFabricExecPlainObjectBase(
+  type: ts.Type,
+  checker: ts.TypeChecker,
+): boolean {
+  if ((type.flags & ts.TypeFlags.Object) === 0) return false;
+
+  const objectType = type as ts.ObjectType;
+  if ((objectType.objectFlags & ts.ObjectFlags.Interface) === 0) return false;
+
+  return (checker.getBaseTypes(type as ts.InterfaceType) ?? []).some((base) =>
+    base.getSymbol()?.getName() === "FabricExecPlainObject"
+  );
+}
+
+/**
  * Formatter for object types (interfaces, type literals, etc.)
  */
 export class ObjectFormatter implements TypeFormatter {
@@ -195,7 +215,7 @@ export class ObjectFormatter implements TypeFormatter {
   formatType(
     type: ts.Type,
     context: GenerationContext,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     const checker = context.typeChecker;
 
     // If this is the TS `object` type (unknown object shape), emit a permissive
@@ -212,7 +232,7 @@ export class ObjectFormatter implements TypeFormatter {
     // Do not early-return for empty object types. Instead, try to enumerate
     // properties via the checker to allow type literals to surface members.
 
-    const properties: Record<string, JSONSchemaMutable> = {};
+    const properties: Record<string, MutableJSONSchema> = {};
     const required: string[] = [];
     const shouldRespectExplicitPropertyShape = isExplicitPropertyShapeTypeNode(
       context.typeNode,
@@ -329,12 +349,14 @@ export class ObjectFormatter implements TypeFormatter {
       properties[propName] = generated;
     }
 
-    const schema: JSONSchemaObjMutable = { type: "object", properties };
+    const schema: MutableJSONSchemaObj = { type: "object", properties };
 
     // Handle string/number index signatures → additionalProperties with description
     const stringIndex = checker.getIndexTypeOfType(type, ts.IndexKind.String);
     const numberIndex = checker.getIndexTypeOfType(type, ts.IndexKind.Number);
-    const chosenIndex = stringIndex ?? numberIndex;
+    const chosenIndex = hasFabricExecPlainObjectBase(type, checker)
+      ? undefined
+      : stringIndex ?? numberIndex;
     if (chosenIndex) {
       const apSchema = this.schemaGenerator.formatChildType(
         chosenIndex,
@@ -375,7 +397,7 @@ export class ObjectFormatter implements TypeFormatter {
         }
       }
       (schema as Record<string, unknown>).additionalProperties =
-        apSchema as JSONSchemaObjMutable;
+        apSchema as MutableJSONSchemaObj;
     }
     if (required.length > 0) schema.required = required;
 
@@ -385,7 +407,7 @@ export class ObjectFormatter implements TypeFormatter {
   private lookupBuiltInSchema(
     type: ts.Type,
     checker: ts.TypeChecker,
-  ): JSONSchemaMutable | undefined {
+  ): MutableJSONSchema | undefined {
     const builtin = getNativeTypeSchema(type, checker);
     return builtin === undefined ? undefined : cloneSchemaDefinition(builtin);
   }
@@ -412,7 +434,7 @@ function getUiContractHint(
 }
 
 function attachUiContract(
-  schema: JSONSchemaMutable,
+  schema: MutableJSONSchema,
   uiContract: {
     helper: "UiAction" | "UiPromptSlot" | "UiDisclosure";
     action?: string;
@@ -422,7 +444,7 @@ function attachUiContract(
     trustedPattern?: string;
     requiredEventIntegrity?: string[];
   },
-): JSONSchemaMutable {
+): MutableJSONSchema {
   if (typeof schema === "boolean") {
     return schema === false ? { not: true, ifc: { uiContract } } : {
       ifc: { uiContract },

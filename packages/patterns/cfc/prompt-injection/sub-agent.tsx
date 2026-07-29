@@ -4,7 +4,7 @@ import {
   type BuiltInLLMTool,
   generateObject,
   hasError,
-  type ImmutableJSONValue,
+  type JSONValue,
   lift,
   pattern,
   resultOf,
@@ -24,7 +24,7 @@ type SubAgentInput = {
   tools?: Record<string, BuiltInLLMTool>;
   model?: string;
   maxTokens?: number;
-  observationMaxConfidentiality?: readonly ImmutableJSONValue[];
+  observationMaxConfidentiality?: readonly JSONValue[];
   schemaSanitizePromptInjection?: boolean;
 };
 

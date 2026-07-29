@@ -2,9 +2,10 @@ import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricPrimitive } from "@commonfabric/data-model/fabric-value";
 import { isDataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { isRecord } from "@commonfabric/utils/types";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getTopFrame } from "./builder/pattern.ts";
 import { isStreamValue } from "./builder/types.ts";
-import { toCell } from "./back-to-cell.ts";
+import { type BackToCellInternals, toCell } from "./back-to-cell.ts";
 import { diffAndUpdate } from "./data-updating.ts";
 import { resolveLink } from "./link-resolution.ts";
 import { type NormalizedFullLink } from "./link-utils.ts";
@@ -555,7 +556,20 @@ export function createQueryResultProxy<T>(
         : Reflect.ownKeys(value);
       if (Array.isArray(proxyTarget)) {
         if (!keys.includes("length")) {
-          keys.push("length");
+          // Insert `length` where a real array carries it -- after the index
+          // keys, ahead of any other name -- rather than appending it. Own-key
+          // order is load-bearing: a consumer can tell an index-only array from
+          // one carrying named properties by asking whether `length` comes
+          // last (`isArrayWithOnlyIndexProperties()` does exactly that), and
+          // appending would make a named property look like an index-only one.
+          const firstNonIndex = keys.findIndex((key) =>
+            !((typeof key === "string") && isArrayIndexPropertyName(key))
+          );
+          keys.splice(
+            (firstNonIndex === -1) ? keys.length : firstNonIndex,
+            0,
+            "length",
+          );
         }
         // Enumerating an array's keys (`Object.keys`/`values`/`entries`, a spread,
         // `for...in`) observes which index keys are present. For a dense array
@@ -736,7 +750,8 @@ export function getCellOrThrow<T = any>(value: any): Cell<T> {
  * @returns {boolean}
  */
 export function isCellResult(value: any): value is CellResult<any> {
-  return isRecord(value) && typeof value[toCell] === "function";
+  return isRecord(value) &&
+    typeof (value as Partial<BackToCellInternals>)[toCell] === "function";
 }
 
 /**

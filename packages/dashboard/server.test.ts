@@ -6,6 +6,7 @@
 import {
   assert,
   assertEquals,
+  assertMatch,
   assertRejects,
   assertStringIncludes,
 } from "@std/assert";
@@ -92,7 +93,7 @@ interface TestUpdate {
   gridHtml: string;
   wideHtml: string;
   ageSeconds: number;
-  shellVersion: number;
+  shellVersion: string;
   faviconStatus: "good" | "warn" | "bad";
   faviconRedSince: number | null;
   faviconRedAgeMs: number | null;
@@ -1087,7 +1088,7 @@ Deno.test("sse: /events opens a stream, tick pushes new tile markup, disconnect 
   assertEquals(await chunk(reader), ": connected\n\n");
   assertEquals(clients.size, 1);
   const initial = updateFromEvent(await chunk(reader));
-  assert(initial.shellVersion > 0);
+  assertMatch(initial.shellVersion, /^[0-9a-f]{40}$/);
   assert(initial.ageSeconds >= 0);
   assert(["good", "warn", "bad"].includes(initial.faviconStatus));
   assert(Object.hasOwn(initial, "faviconRedSince"));
@@ -1116,7 +1117,7 @@ Deno.test("broadcast: a client whose stream is gone is dropped rather than throw
     gridHtml: "",
     wideHtml: "",
     ageSeconds: 0,
-    shellVersion: 1,
+    shellVersion: "test-shell",
     faviconStatus: "good",
     faviconRedSince: null,
     faviconRedAgeMs: null,

@@ -8,6 +8,7 @@ import {
   runBackgroundParent,
   writeListeningMarker,
 } from "@/background.ts";
+import { announceCloneIfServed } from "@/lib/clone-banner.ts";
 import { identity } from "@/lib/identity.ts";
 import type { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -100,6 +101,9 @@ const handleShutdown = async () => {
 // Start server with the abort controller
 function startServer(onListening?: () => void) {
   console.log(`Server is starting on port http://${env.HOST}:${env.PORT}`);
+  // A rehearsal clone keeps the source space's DID, so nothing else in this
+  // log distinguishes it from production. Announce it before anything else.
+  announceCloneIfServed({ memoryDir: env.MEMORY_DIR, dbPath: env.DB_PATH });
   initializeRuntime();
 
   const serverOptions = {

@@ -64,6 +64,34 @@ Deno.test("common.tools: a prompt 200 -> good, headlining the round-trip time", 
   assertEquals(v.hint, "open ↗");
 });
 
+Deno.test("common.tools: cancels the response body before returning", async () => {
+  let cancelled = false;
+  await withFetch(() => {
+    return new Response(new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+      },
+    }), { status: 200 });
+  }, () => commonToolsUp.collect(ctx()));
+  assertEquals(cancelled, true);
+});
+
+Deno.test("common.tools: a cancellation error does not hide the received status", async () => {
+  let cancellationAttempted = false;
+  const view = await withFetch(() => {
+    return new Response(new ReadableStream<Uint8Array>({
+      cancel() {
+        cancellationAttempted = true;
+        throw new Error("body cleanup failed");
+      },
+    }), { status: 503 });
+  }, () => commonToolsUp.collect(ctx()));
+  assertEquals(cancellationAttempted, true);
+  assertEquals(view.status, "bad");
+  assertEquals(view.value, "erroring");
+  assertEquals(view.sub, "HTTP 503 · common.tools");
+});
+
 Deno.test("common.tools: a redirect is not followed and still reads as good", async () => {
   // redirect: "manual" means the 301 is the answer, not a hop to chase.
   const v = await withFetch(ok(301), () => withElapsed(80, () => commonToolsUp.collect(ctx())));

@@ -466,7 +466,7 @@ export default pattern<PatternInput, PatternOutput>(({ overrideAuth }) => {
   const processingTasks = new Writable<string[]>([]).for("processingTasks");
   const sortNewestFirst = new Writable(true).for("sortNewestFirst");
 
-  // Get all pieces for note discovery
+  // Get registered pieces for note discovery
   const pieceRegistryWish = wish<NotePiece[]>({
     query: "#pieceRegistry",
   });

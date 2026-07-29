@@ -8,6 +8,7 @@ import { join } from "@std/path";
 import {
   CLICK_TARGET_ATTR,
   clickMarked,
+  settleView,
   waitForRuntimeIdle,
   waitForText,
 } from "./cfc-browser-helpers.ts";
@@ -130,8 +131,21 @@ async function topicAt(
  * Wait for a resolved cf-cell-link, mark its native button, then issue one
  * trusted browser click. Returning the link's fid lets the test assert the
  * shell selected exactly the destination represented by the rendered data.
+ *
+ * Settle the view before marking, the same ordering `clickCfButton` uses. A
+ * cold-loaded detail page keeps reflowing as content above the crossref links
+ * settles (the topic body's markdown fills in, the links form and Connections
+ * card render), so the link's layout box moves for a few frames after it first
+ * becomes rendered and resolvable. A trusted click resolves the button's box
+ * and then dispatches the mouse events; if the box moved in between, the click
+ * lands on the shifted-away layout instead of the button, no navigation fires,
+ * and the following `waitForTopicView` waits out its full safety net. Settling
+ * first drains the pipeline that carries a change from the worker through an
+ * applied vdom batch to a finished Lit update, so the target is stationary when
+ * it is clicked.
  */
 async function clickCellLink(page: Page, label: string): Promise<string> {
+  await settleView(page);
   const token = `topics-cell-link-${crypto.randomUUID()}`;
   await waitForCondition(
     page,
@@ -156,7 +170,7 @@ async function clickCellLink(page: Page, label: string): Promise<string> {
         const button = chip?.shadowRoot?.querySelector("button");
         if (!button || !probe.isRendered(button)) continue;
         link.setAttribute("data-topics-link-target", targetToken);
-        button.setAttribute(clickTargetAttribute, targetToken);
+        probe.addToken(button, clickTargetAttribute, targetToken);
         return true;
       }
       return false;

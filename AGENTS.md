@@ -130,6 +130,14 @@ If you are developing runtime code, read the following documentation:
 
 - `docs/development/DEVELOPMENT.md` - Coding style, design principles, and best
   practices
+- `docs/development/DEPENDENCIES.md` - Adding and rolling dependencies, required
+  version pins, and dependency troubleshooting
+- `docs/development/space-clone-rehearsal.md` - Rehearsing a pattern update on a
+  clone of a real space before touching a populated one: when a rehearsal is
+  required, how to get a snapshot, the clone/verify/reset loop (`cf space`), and
+  the reads that will mislead you (~20 s cold loads, unstepped result reads,
+  fresh-replica reads). Read it before any `setsrc` against a space with real
+  data
 - `docs/development/LOCAL_DEV_SERVERS.md` - **CRITICAL**: How to start local dev
   servers correctly (use `dev-local` for shell, not `dev`)
 - `docs/development/TESTING.md` - Running the test suites and the general unit
@@ -188,4 +196,5 @@ task, Deno falls back to the root workspace's test task, which re-runs the
 entire suite recursively — causing exponential process spawning and CI timeouts.
 
 See `packages/utils/deno.jsonc` for an example of a correctly configured
-package.
+package. When the package needs a dependency, follow
+`docs/development/DEPENDENCIES.md`.

@@ -442,8 +442,9 @@ export function fetchProgram(
         "fetchProgram-start",
         () => {
           // Start fetch asynchronously only after the transaction commits.
-          // Tracked as async builtin work so `runtime.settled()`
-          // wait for the program resolve + writeback; `idle()` does not.
+          // Tracked as async builtin work owned by this run, so
+          // `runtime.settled()` and `runtime.settledFor(parentCell)` both wait
+          // for the program resolve + writeback; `idle()` does not.
           clearClaimRetry();
           myRequestId = requestId;
           myInputHash = inputHash;
@@ -496,7 +497,7 @@ export function fetchProgram(
               controller.signal,
             );
           })();
-          runtime.trackAsyncWork(work);
+          runtime.trackAsyncWork(work, parentCell);
         },
       );
     } else if (state.type === "fetching") {

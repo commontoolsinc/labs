@@ -1,0 +1,35 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "tags": {
+        "default": [],
+        "description": "Tags or labels",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "tags"
+    ],
+    "type": "object"
+  },
+  "pattern": "tags.tsx",
+  "resultSchema": {
+    "properties": {
+      "tags": {
+        "default": [],
+        "description": "Tags or labels",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "tags"
+    ],
+    "type": "object"
+  }
+}

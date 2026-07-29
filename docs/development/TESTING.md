@@ -17,6 +17,10 @@ deno task test
 
 ### Tests that start Deno
 
+For deliberate import-map and lockfile changes, follow the
+[dependency maintenance guide](DEPENDENCIES.md). This section covers the
+separate requirement that verification tests preserve the checked-in graph.
+
 Dependency installation and verification are separate parts of CI. Installation
 may fetch registry metadata and package contents. Verification must use the
 dependency graph recorded in `deno.lock` without resolving package versions

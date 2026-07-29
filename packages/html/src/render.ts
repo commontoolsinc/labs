@@ -53,7 +53,6 @@ export function getActiveRenders(): ReadonlyMap<HTMLElement, ActiveRender> {
 export interface RenderOptions {
   setProp?: SetPropHandler;
   document?: Document;
-  rootCell?: CellHandle<VNode>;
   /** Force use of legacy main-thread rendering (default: false) */
   useLegacyRenderer?: boolean;
   /** Optional error handler */
@@ -286,9 +285,6 @@ function renderNode(
   const doc = options.document ?? globalThis.document;
   const [cancel, addCancel] = useCancelGroup();
 
-  const shouldWrapWithContext = inputNode[UI] && options.rootCell;
-  const cellForContext = shouldWrapWithContext ? options.rootCell : undefined;
-
   let node = inputNode;
   // Follow [UI] chain
   while (node && node[UI]) {
@@ -353,15 +349,6 @@ function renderNode(
 
   if (sanitizedNode.children !== undefined) {
     addCancel(bindChildren(element, sanitizedNode.children, options, visited));
-  }
-
-  if (cellForContext && element) {
-    const wrapper = doc.createElement("cf-cell-context") as HTMLElement & {
-      cell?: CellHandle<VNode>;
-    };
-    wrapper.cell = cellForContext;
-    wrapper.appendChild(element);
-    return [wrapper, cancel];
   }
 
   return [element, cancel];

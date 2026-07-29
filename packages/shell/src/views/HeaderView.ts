@@ -652,7 +652,7 @@ export class XHeaderView extends BaseView {
   }
 
   /**
-   * Eagerly fetch all pieces in the current space as soon as the
+   * Eagerly fetch registered pieces in the current space as soon as the
    * runtime is available. Results are cached until the runtime or the
    * viewed space changes. This ensures the piece list is ready by the
    * time the user opens a dropdown.

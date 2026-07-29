@@ -3,12 +3,14 @@ import {
   isFunction,
   isObject,
   isRecord,
+  type Mutable,
 } from "@commonfabric/utils/types";
 import {
   cloneIfNecessary,
   FabricInstance,
   FabricSpecialObject,
   type FabricValue,
+  shallowCleanArray,
   shallowFabricFromNativeValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
@@ -33,6 +35,7 @@ import { encodeCellToSigilString } from "./builtins/sqlite/cf-link-codec.ts";
 import { sqliteQueryNodeFactory } from "./builtins/sqlite/query-node.ts";
 import { checkSqliteWriteCeiling } from "./builtins/sqlite/write-ceiling.ts";
 import { checkSqliteRowLabelWrite } from "./builtins/sqlite/row-label-write.ts";
+import { scopeCallerEventId } from "./scheduler/event-identity.ts";
 import { recordSinkRequestPolicyInput } from "./cfc/sink-request.ts";
 import { cfcLabelViewForCell } from "./cfc/label-view.ts";
 import { cfcConfidentialityForObservationNode } from "./cfc/observation.ts";
@@ -288,22 +291,32 @@ declare module "@commonfabric/api" {
     set(
       value: AnyCellWrapping<T> | T,
       onCommit?: (tx: IExtendedStorageTransaction) => void,
+      sendOptions?: { eventId?: string },
     ): C;
   }
 
   /**
-   * Augment Streamable to add onCommit callback support.
-   * Event is optional only when T is void (matching public API).
+   * Augment Streamable to add onCommit callback and internal send-options
+   * support (`eventId` — caller-supplied durable event id, verb contract
+   * WS-D). Event is optional only when T is void (matching public API).
    */
   interface IStreamable<T> {
     send(
       ...args: T extends void ? [] | [AnyCellWrapping<T> | T] | [
           AnyCellWrapping<T> | T,
           (tx: IExtendedStorageTransaction) => void,
+        ] | [
+          AnyCellWrapping<T> | T,
+          ((tx: IExtendedStorageTransaction) => void) | undefined,
+          { eventId?: string },
         ]
         : [AnyCellWrapping<T> | T] | [
           AnyCellWrapping<T> | T,
           (tx: IExtendedStorageTransaction) => void,
+        ] | [
+          AnyCellWrapping<T> | T,
+          ((tx: IExtendedStorageTransaction) => void) | undefined,
+          { eventId?: string },
         ]
     ): void;
   }
@@ -330,7 +343,7 @@ declare module "@commonfabric/api" {
     ): Cancel;
     sinkMeta(
       metaField: MetaField,
-      callback: (value: Immutable<FabricValue>) => Cancel | undefined | void,
+      callback: (value: FabricValue) => Cancel | undefined | void,
       options?: SinkOptions,
     ): Cancel;
     sync(): Promise<Cell<T>>;
@@ -364,14 +377,14 @@ declare module "@commonfabric/api" {
      * conform to `T` (e.g., `SigilLink` references, stream markers).
      *
      * By default (or with `{ frozen: true }`), returns a deep-frozen
-     * `Immutable<FabricValue>`. Pass `{ frozen: false }` to get a mutable
+     * `FabricValue`. Pass `{ frozen: false }` to get a mutable
      * deep copy instead.
      *
      * Prefer `getRaw()` when the value is expected to match `T`.
      */
     getRawUntyped(
       options?: RawCellReadOptions & { frozen?: true },
-    ): Immutable<FabricValue>;
+    ): FabricValue;
     getRawUntyped(
       options: RawCellReadOptions & { frozen: false },
     ): FabricValue;
@@ -1284,6 +1297,17 @@ export class CellImpl<T extends FabricValue>
      * after success.
      */
     onCommit?: (tx: IExtendedStorageTransaction) => void,
+    /**
+     * Internal-only stream-send options. `eventId` supplies the durable event
+     * id (spec §7.5) instead of minting one: an ingress caller that owns a
+     * delivery id passes it through so a retry of the same id collides on the
+     * handling's create-only receipt (verb contract WS-D,
+     * docs/plans/pattern-verb-contract-implementation.md). The receipt is a
+     * COMMIT witness, not an execution witness — the redelivered event still
+     * runs the handler body and then loses the race, so effects outside the
+     * transaction repeat. Ignored on the plain-cell write path.
+     */
+    sendOptions?: { eventId?: string },
   ): Cell<T> {
     const resolvedToValueLink = resolveLink(
       this.runtime,
@@ -1316,7 +1340,15 @@ export class CellImpl<T extends FabricValue>
         undefined,
         onCommit,
         false,
-        { originTx: this.tx ?? undefined },
+        {
+          // The caller's key is opaque and unscoped; queueEvent expects a
+          // durable delivery id. Binding it to this stream is what keeps two
+          // verbs that share input bindings from colliding on one receipt.
+          eventId: sendOptions?.eventId === undefined
+            ? undefined
+            : scopeCallerEventId(sendOptions.eventId, resolvedToValueLink),
+          originTx: this.tx ?? undefined,
+        },
       );
 
       this.cleanup?.();
@@ -1397,6 +1429,10 @@ export class CellImpl<T extends FabricValue>
          * after success.
          */
         (tx: IExtendedStorageTransaction) => void,
+      ] | [
+        AnyCellWrapping<T>,
+        ((tx: IExtendedStorageTransaction) => void) | undefined,
+        { eventId?: string },
       ]
       : [AnyCellWrapping<T>] | [
         AnyCellWrapping<T>,
@@ -1407,10 +1443,21 @@ export class CellImpl<T extends FabricValue>
          * after success.
          */
         (tx: IExtendedStorageTransaction) => void,
+      ] | [
+        AnyCellWrapping<T>,
+        ((tx: IExtendedStorageTransaction) => void) | undefined,
+        /**
+         * Internal-only stream-send options: `eventId` passes a
+         * caller-supplied durable event id through to the scheduler, so a
+         * same-id retry collides on the handling's create-only receipt and
+         * cannot commit twice — though the body does re-run (verb contract
+         * WS-D).
+         */
+        { eventId?: string },
       ]
   ): void {
-    const [event, onCommit] = args;
-    this.set(event as AnyCellWrapping<T>, onCommit);
+    const [event, onCommit, sendOptions] = args;
+    this.set(event as AnyCellWrapping<T>, onCommit, sendOptions);
   }
 
   update<V extends (Partial<T> | AnyCellWrapping<Partial<T>>)>(
@@ -2053,7 +2100,7 @@ export class CellImpl<T extends FabricValue>
 
   sinkMeta(
     metaField: MetaField,
-    callback: (value: Immutable<FabricValue>) => Cancel | undefined | void,
+    callback: (value: FabricValue) => Cancel | undefined | void,
     options: SinkOptions = {},
   ): Cancel {
     if (!this.synced) this.sync();
@@ -2173,7 +2220,7 @@ export class CellImpl<T extends FabricValue>
    */
   getRawUntyped(
     options?: RawCellReadOptions & { frozen?: true },
-  ): Immutable<FabricValue>;
+  ): FabricValue;
   getRawUntyped(
     options: RawCellReadOptions & { frozen: false },
   ): FabricValue;
@@ -3132,7 +3179,7 @@ export function recursivelyAddIDIfNeeded<T>(
     return Object.freeze(result) as T;
   } else {
     const sourceRecord = converted as Record<string, unknown>;
-    const result: Record<string, unknown> = {};
+    const result: Record<string, unknown> & Mutable<IDFields> = {};
     let changed = convertedDiffers;
 
     seen.set(value, result);
@@ -3152,9 +3199,9 @@ export function recursivelyAddIDIfNeeded<T>(
     if (isRecord(value)) {
       const valueRecord = value as Record<string, unknown>;
       [ID, ID_FIELD].forEach((symbol) => {
-        if (symbol in valueRecord) {
-          (result as IDFields)[symbol as keyof IDFields] =
-            (valueRecord as IDFields)[symbol as keyof IDFields];
+        const key = symbol as keyof IDFields;
+        if (key in valueRecord) {
+          result[key] = (valueRecord as IDFields)[key];
         }
       });
     }
@@ -3217,12 +3264,26 @@ export function convertCellsToLinks(
 
   seen.set(value, path); // ...which needs to be tracked for circularity.
 
-  // Convert the (top level of) the value to fabric form (a valid `FabricValue`)
-  // if it isn't already, or throw if it's neither already valid nor
-  // convertible.
-  value = shallowFabricFromNativeValue(value);
+  // A schema-bearing read hangs a non-enumerable `toCell` symbol on the arrays
+  // it returns. That symbol is machinery, not content, and an array carrying it
+  // is not a `FabricValue`, so drop it before the conversion below would reject
+  // it. Only annotated arrays are cleaned: an array carrying anything else
+  // non-index is genuinely unrepresentable and must still be rejected.
+  if (Array.isArray(value) && isCellResultForDereferencing(value)) {
+    // What this produces is a valid `FabricValueLayer` already, so it wants no
+    // further conversion.
+    value = shallowCleanArray(value, false);
+  } else {
+    // Convert the (top level of) the value to fabric form (a valid
+    // `FabricValue`) if it isn't already, or throw if it's neither already
+    // valid nor convertible.
+    value = shallowFabricFromNativeValue(value);
+  }
 
   // Recursively process arrays and objects, if we ended up with one of those.
+  //
+  // TODO(danfuzz): Both container branches below build a fresh container,
+  // throwing away the copy just made above. One copy could serve both.
   if (!isRecord(value)) {
     // `shallowFabricFromNativeValue()` converted this into a primitive value of some sort.
     return value;

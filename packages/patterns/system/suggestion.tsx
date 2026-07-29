@@ -249,13 +249,11 @@ Use the user context above to personalize your suggestions when relevant.`;
         $cell={llmResult}
         style={computed(() => (llmResult ? "" : "display:none"))}
       />
-      <cf-cell-context $cell={llmResult}>
-        {ifElse(
-          computed(() => !!llmResult),
-          <cf-render $cell={llmResult} />,
-          undefined,
-        )}
-      </cf-cell-context>
+      {ifElse(
+        computed(() => !!llmResult),
+        <cf-render $cell={llmResult} />,
+        undefined,
+      )}
       <cf-message-beads
         label="suggestion"
         $messages={messages}

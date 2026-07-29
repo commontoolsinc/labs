@@ -71,37 +71,33 @@ Write content personalized to the user when appropriate.`;
           />
         </div>
 
-        <cf-cell-context $cell={topic}>
-          {topic.get()
-            ? (
-              <div style="margin-top: 16px;">
-                <h3>Topic:</h3>
-                <blockquote>
-                  {topic.get()}
-                </blockquote>
-              </div>
-            )
-            : null}
-        </cf-cell-context>
+        {topic.get()
+          ? (
+            <div style="margin-top: 16px;">
+              <h3>Topic:</h3>
+              <blockquote>
+                {topic.get()}
+              </blockquote>
+            </div>
+          )
+          : null}
 
-        <cf-cell-context $cell={resultRequest}>
-          {isPending(resultRequest)
-            ? (
-              <div style="margin-top: 16px;">
-                <cf-loader show-elapsed /> Generating personalized content...
+        {isPending(resultRequest)
+          ? (
+            <div style="margin-top: 16px;">
+              <cf-loader show-elapsed /> Generating personalized content...
+            </div>
+          )
+          : result
+          ? (
+            <div style="margin-top: 16px;">
+              <h3>Generated Text:</h3>
+              <div style="white-space: pre-wrap; padding: 12px; background: #f9f9f9; border-radius: 4px; line-height: 1.6;">
+                {result}
               </div>
-            )
-            : result
-            ? (
-              <div style="margin-top: 16px;">
-                <h3>Generated Text:</h3>
-                <div style="white-space: pre-wrap; padding: 12px; background: #f9f9f9; border-radius: 4px; line-height: 1.6;">
-                  {result}
-                </div>
-              </div>
-            )
-            : null}
-        </cf-cell-context>
+            </div>
+          )
+          : null}
       </div>
     ),
     topic,

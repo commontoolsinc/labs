@@ -1,5 +1,7 @@
 #!/usr/bin/env -S deno run -A
 
+import { tscCommand } from "./run-tsc.ts";
+
 const CONFIGS = [
   "tsconfig.baseline.json",
   "tsconfig.key.json",
@@ -10,8 +12,7 @@ const CONFIGS = [
   "tsconfig.ikeyable-realistic.json",
 ] as const;
 
-const scriptDir = new URL(".", import.meta.url);
-const cwd = scriptDir.pathname;
+const cwd = fromFileUrl(new URL(".", import.meta.url));
 
 function fromFileUrl(url: URL): string {
   if (url.protocol !== "file:") throw new TypeError("URL must be a file URL");
@@ -22,32 +23,27 @@ function fromFileUrl(url: URL): string {
   return path;
 }
 
-const tscPath = fromFileUrl(
-  new URL(
-    "../../../node_modules/.deno/typescript@5.8.3/node_modules/typescript/bin/tsc",
-    import.meta.url,
-  ),
-);
-
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 
 async function runScenario(config: string) {
   console.log(`# ${config}`);
 
-  const command = new Deno.Command(tscPath, {
-    args: ["--project", config, "--extendedDiagnostics", "--pretty", "false"],
-    cwd,
-  });
+  const command = tscCommand(
+    ["--project", config, "--extendedDiagnostics", "--pretty", "false"],
+    {
+      cwd,
+    },
+  );
 
   const { code, stdout, stderr } = await command.output();
+  const output = decoder.decode(stdout);
   if (code !== 0) {
-    const err = decoder.decode(stderr);
-    console.error(err);
+    console.error(output);
+    console.error(decoder.decode(stderr));
     throw new Error(`Benchmark failed for ${config}`);
   }
 
-  const output = decoder.decode(stdout);
   console.log(output);
 
   const summary: string[] = [];

@@ -1883,20 +1883,23 @@ export class CfHarnessPromptLoop {
       });
       if (
         attempt.providerId !== "openai-compatible-gateway" ||
-        attempt.operation !== "chat.completions"
+        (attempt.operation !== "chat.completions" &&
+          attempt.operation !== "responses")
       ) {
         return;
       }
       const {
         providerId: _providerId,
         type: _type,
-        operation: _operation,
+        operation,
         ...rest
       } = attempt;
       gatewayAttempts.push({
         ...rest,
         type: "cf-harness.gateway.chat-completion-attempt",
-        operation: "chat.completions",
+        // Preserve which API served the turn: gpt-* goes to the Responses API,
+        // provider-native tools and non-OpenAI models stay on chat completions.
+        operation,
         runId: this.engine.getRunState().runId,
         sequence: gatewayAttempts.length + 1,
         modelTurn: modelTurns,

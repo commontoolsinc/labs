@@ -1,0 +1,56 @@
+{
+  "argumentSchema": {
+    "additionalProperties": false,
+    "properties": {},
+    "type": "object"
+  },
+  "pattern": "suggestable/people-list.tsx",
+  "resultSchema": {
+    "$defs": {
+      "Person": {
+        "properties": {
+          "contact": {
+            "properties": {
+              "email": {
+                "default": "",
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "email"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "contact"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "people": {
+        "items": {
+          "$ref": "#/$defs/Person"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "people",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

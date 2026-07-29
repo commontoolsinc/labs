@@ -49,6 +49,8 @@ export function displayModeLabel(mode: DisplayMode): string {
 export interface DisplayCell {
   readonly ch: string;
   readonly col: number;
+  /** Exclusive source column represented by this display cell. */
+  readonly sourceEnd: number;
   readonly syntax: Style;
   readonly ansi?: Style;
 }
@@ -118,33 +120,48 @@ export function sourceColumnOf(
 
 /** Number of cells a line occupies in one display mode. */
 export function displayWidth(line: Line, mode: DisplayMode): number {
-  if (mode === "pictures") {
-    let width = 0;
-    for (const _ of line.text) width++;
-    return width;
-  }
   let width = 0;
-  let hiddenRun = false;
-  for (let i = 0; i < line.text.length;) {
-    const sequence = matchTextCsi(line.text, i);
-    if (
-      sequence && (mode === "hidden" || sequence.final === "m")
-    ) {
+  visitDisplayCellSources(line.text, mode, () => {
+    width++;
+    return true;
+  });
+  return width;
+}
+
+/**
+ * Visit the UTF-16 source range represented by each visible display cell.
+ * Returning false from the visitor stops the scan.
+ */
+export function visitDisplayCellSources(
+  text: string,
+  mode: DisplayMode,
+  visit: (start: number, end: number) => boolean,
+): boolean {
+  for (let i = 0; i < text.length;) {
+    const sequence = mode === "pictures" ? null : matchTextCsi(text, i);
+    if (sequence && (mode === "hidden" || sequence.final === "m")) {
       i = sequence.end;
-      hiddenRun = false;
       continue;
     }
-    const codePoint = line.text.codePointAt(i)!;
-    if (mode === "hidden" && isNonPrintableCode(codePoint)) {
-      if (!hiddenRun) width++;
-      hiddenRun = true;
-    } else {
-      width++;
-      hiddenRun = false;
+
+    const codePoint = text.codePointAt(i)!;
+    const end = i + (codePoint > 0xffff ? 2 : 1);
+    if (mode !== "hidden" || !isNonPrintableCode(codePoint)) {
+      if (!visit(i, end)) return false;
+      i = end;
+      continue;
     }
-    i += codePoint > 0xffff ? 2 : 1;
+
+    let runEnd = end;
+    while (runEnd < text.length && matchTextCsi(text, runEnd) === null) {
+      const next = text.codePointAt(runEnd)!;
+      if (!isNonPrintableCode(next)) break;
+      runEnd += next > 0xffff ? 2 : 1;
+    }
+    if (!visit(i, runEnd)) return false;
+    i = runEnd;
   }
-  return width;
+  return true;
 }
 
 export function displayLine(
@@ -158,6 +175,7 @@ export function displayLine(
       return src.map((s) => ({
         ch: glyphFor(s.cp),
         col: s.col,
+        sourceEnd: s.col + 1,
         syntax: s.syntax,
       }));
     case "ansi":
@@ -184,6 +202,7 @@ function displayAnsi(src: readonly SourcePoint[]): DisplayCell[] {
     cells.push({
       ch: glyphFor(s.cp),
       col: s.col,
+      sourceEnd: s.col + 1,
       syntax: s.syntax,
       ansi: hasStyle(active) ? active : undefined,
     });
@@ -205,7 +224,12 @@ function displayHidden(src: readonly SourcePoint[]): DisplayCell[] {
     }
     const s = src[i];
     if (!isNonPrintable(s.cp)) {
-      cells.push({ ch: s.cp, col: s.col, syntax: s.syntax });
+      cells.push({
+        ch: s.cp,
+        col: s.col,
+        sourceEnd: s.col + 1,
+        syntax: s.syntax,
+      });
       i += 1;
       continue;
     }
@@ -218,7 +242,12 @@ function displayHidden(src: readonly SourcePoint[]): DisplayCell[] {
     ) {
       j += 1;
     }
-    cells.push({ ch: "…", col: start, syntax });
+    cells.push({
+      ch: "…",
+      col: start,
+      sourceEnd: src[j - 1].col + 1,
+      syntax,
+    });
     i = j;
   }
   return cells;

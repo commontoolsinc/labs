@@ -7,6 +7,7 @@ import type {
 } from "@commonfabric/api";
 import { DataUnavailable } from "@commonfabric/data-model/fabric-instances";
 import { Identity } from "@commonfabric/identity";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import {
   addMockObjectResponse,
   addMockResponse,
@@ -15,6 +16,7 @@ import {
   LLMClient,
 } from "@commonfabric/llm/client";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { defer } from "@commonfabric/utils/defer";
 
 import type { Action } from "../src/scheduler.ts";
 import type { Cell } from "../src/cell.ts";
@@ -34,6 +36,7 @@ describe("generation data unavailability", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let nextId = 0;
+  let providerCallChanged = defer<void>();
 
   beforeEach(() => {
     clearMockResponses();
@@ -42,6 +45,7 @@ describe("generation data unavailability", () => {
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
+    providerCallChanged = defer<void>();
   });
 
   afterEach(async () => {
@@ -139,43 +143,38 @@ describe("generation data unavailability", () => {
   }
 
   async function waitForPendingToBecomeFalse(state: Cell<any>): Promise<void> {
-    for (let attempt = 0; attempt < 500; attempt++) {
-      await runtime.idle();
-      if ((state.key("pending").get() as unknown) === false) return;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    throw new Error("Timeout waiting for generation pending=false");
+    await waitForCellValue<{ pending?: boolean }>(
+      runtime,
+      state,
+      (value) => value?.pending === false,
+    );
   }
 
   async function waitForResult(
     state: Cell<any>,
     predicate: (value: unknown) => boolean,
   ): Promise<void> {
-    for (let attempt = 0; attempt < 500; attempt++) {
-      await runtime.idle();
-      if (predicate(rawResult(state))) return;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    throw new Error(
-      `Timeout waiting for generation result: ${
-        JSON.stringify({
-          result: rawResult(state),
-          pending: state.key("pending").get(),
-          error: state.key("error").get(),
-        })
-      }`,
+    await waitForCellValue<{ result?: unknown }>(
+      runtime,
+      state,
+      (value) => predicate(value?.result),
     );
+  }
+
+  function noteProviderCall(): void {
+    providerCallChanged.resolve();
+    providerCallChanged = defer<void>();
   }
 
   async function waitForCallCount(
     getCount: () => number,
     expected: number,
   ): Promise<void> {
-    for (let attempt = 0; attempt < 500; attempt++) {
+    while (getCount() < expected) {
+      const next = providerCallChanged.promise;
       if (getCount() >= expected) return;
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await next;
     }
-    throw new Error(`Timeout waiting for ${expected} provider calls`);
   }
 
   function rehydrateTextAction(
@@ -253,6 +252,7 @@ describe("generation data unavailability", () => {
     let calls = 0;
     LLMClient.prototype.sendRequest = async function (...args: unknown[]) {
       calls++;
+      noteProviderCall();
       return await originalSendRequest.apply(this, args as never);
     };
 
@@ -324,6 +324,7 @@ describe("generation data unavailability", () => {
         messages?: readonly { content?: unknown }[];
       };
       calls++;
+      noteProviderCall();
       if (
         request.messages?.some((message) => message.content === firstPrompt)
       ) {
@@ -357,7 +358,6 @@ describe("generation data unavailability", () => {
       releaseFirst?.();
       await waitForCallCount(() => calls, 2);
       await runtime.idle();
-      await new Promise((resolve) => setTimeout(resolve, 20));
       expect(rawResult(generation.state)).toBe(DataUnavailable.pending());
       expect(generation.state.key("pending").get()).toBe(true);
 
@@ -401,6 +401,7 @@ describe("generation data unavailability", () => {
         messages?: readonly { content?: unknown }[];
       };
       calls++;
+      noteProviderCall();
       if (
         request.messages?.some((message) => message.content === oldPrompt)
       ) {
@@ -494,6 +495,7 @@ describe("generation data unavailability", () => {
     let calls = 0;
     LLMClient.prototype.sendRequest = async function (...args: unknown[]) {
       calls++;
+      noteProviderCall();
       return await originalSendRequest.apply(this, args as never);
     };
 
@@ -513,7 +515,7 @@ describe("generation data unavailability", () => {
       expect(rawPartial(generation.state, tx)).toBe(marker);
 
       await tx.commit();
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await runtime.settled();
       expect(calls).toBe(0);
     } finally {
       LLMClient.prototype.sendRequest = originalSendRequest;
@@ -526,6 +528,7 @@ describe("generation data unavailability", () => {
     let calls = 0;
     LLMClient.prototype.sendRequest = async function (...args: unknown[]) {
       calls++;
+      noteProviderCall();
       return await originalSendRequest.apply(this, args as never);
     };
 
@@ -585,6 +588,7 @@ describe("generation data unavailability", () => {
     let calls = 0;
     LLMClient.prototype.sendRequest = async function (...args: unknown[]) {
       calls++;
+      noteProviderCall();
       return await originalSendRequest.apply(this, args as never);
     };
 
@@ -642,6 +646,7 @@ describe("generation data unavailability", () => {
     let calls = 0;
     LLMClient.prototype.sendRequest = async function (...args: unknown[]) {
       calls++;
+      noteProviderCall();
       return await originalSendRequest.apply(this, args as never);
     };
 
@@ -735,6 +740,7 @@ describe("generation data unavailability", () => {
         messages?: readonly { content?: unknown }[];
       };
       calls++;
+      noteProviderCall();
       if (
         request.messages?.some((message) => message.content === firstPrompt)
       ) {
@@ -773,7 +779,6 @@ describe("generation data unavailability", () => {
       releaseFirst?.();
       await waitForCallCount(() => calls, 2);
       await runtime.idle();
-      await new Promise((resolve) => setTimeout(resolve, 20));
       expect(rawResult(generation.state)).toBe(DataUnavailable.pending());
       expect(generation.state.key("pending").get()).toBe(true);
 
@@ -835,6 +840,7 @@ describe("generation data unavailability", () => {
     let calls = 0;
     LLMClient.prototype.generateObject = async function (...args: unknown[]) {
       calls++;
+      noteProviderCall();
       return await originalGenerateObject.apply(this, args as never);
     };
 
@@ -884,6 +890,7 @@ describe("generation data unavailability", () => {
     let calls = 0;
     LLMClient.prototype.generateObject = async function (...args: unknown[]) {
       calls++;
+      noteProviderCall();
       return await originalGenerateObject.apply(this, args as never);
     };
 
@@ -900,7 +907,7 @@ describe("generation data unavailability", () => {
       expect(generation.state.key("messages").withTx(tx).get()).toBeUndefined();
 
       await tx.commit();
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      await runtime.settled();
       expect(calls).toBe(0);
     } finally {
       LLMClient.prototype.generateObject = originalGenerateObject;
@@ -913,6 +920,7 @@ describe("generation data unavailability", () => {
     let calls = 0;
     LLMClient.prototype.generateObject = async function (...args: unknown[]) {
       calls++;
+      noteProviderCall();
       return await originalGenerateObject.apply(this, args as never);
     };
 

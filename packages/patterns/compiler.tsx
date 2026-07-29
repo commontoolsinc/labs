@@ -58,29 +58,25 @@ export default pattern<Input>(({ code }) => {
     [NAME]: "My First Compiler",
     [UI]: (
       <div>
-        <cf-cell-context $cell={code} label="Source Code">
-          <cf-code-editor
-            value={code}
-            language="text/x.typescript"
-            oncf-change={updateCode({ code })}
-            //errors={errors}
-          />
-        </cf-cell-context>
-        <cf-cell-context $cell={result} label="Compile Result">
-          {hasError(compileRequest)
-            ? (
-              <b>
-                fix the error: {compileRequest.error.message}
-              </b>
-            )
-            : (
-              <cf-button
-                onClick={visit({ result })}
-              >
-                Navigate To Piece
-              </cf-button>
-            )}
-        </cf-cell-context>
+        <cf-code-editor
+          value={code}
+          language="text/x.typescript"
+          oncf-change={updateCode({ code })}
+          //errors={errors}
+        />
+        {hasError(compileRequest)
+          ? (
+            <b>
+              fix the error: {compileRequest.error.message}
+            </b>
+          )
+          : (
+            <cf-button
+              onClick={visit({ result })}
+            >
+              Navigate To Piece
+            </cf-button>
+          )}
       </div>
     ),
     code,

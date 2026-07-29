@@ -8,6 +8,20 @@
 import type { Cfc, CurrentPrincipal, WriteAuthorizedBy } from "./cfc.ts";
 
 // ============================================================================
+// Common internal definitions
+// ============================================================================
+
+/**
+ * Recursively removes `readonly` from all properties of `T`.
+ *
+ * Copy of `Mutable` from `@commonfabric/utils/types`. These two definitions
+ * should be unified; see that module for the canonical version.
+ */
+type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
+  : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
+  : T;
+
+// ============================================================================
 // Fabric Value Types
 // ============================================================================
 //
@@ -66,19 +80,6 @@ export type DataUnavailableReason =
   | "error"
   | "syncing"
   | "schema-mismatch";
-
-/**
- * Pattern-visible surface of the fabric-native error carried by an unavailable
- * producer. The canonical runtime implementation also preserves supported
- * custom properties through its extras API.
- */
-export interface FabricError {
-  readonly type: string;
-  readonly name: string;
-  readonly message: string;
-  readonly stack: string | undefined;
-  readonly cause: unknown;
-}
 
 /**
  * Pattern-visible surface of a runtime-owned unavailable-data marker.
@@ -273,7 +274,106 @@ export interface FabricBytesConstructor {
 export declare const FabricBytes: FabricBytesConstructor;
 
 /**
+ * An immutable regular expression. Extends `FabricPrimitive` -- treated like a
+ * primitive in the fabric type system (always frozen, passes through
+ * conversion unchanged).
+ *
+ * The pattern is held as a flavor / source / flags triple rather than as a
+ * native `RegExp`, so that flavors with no native representation can still be
+ * carried. `value` reconstitutes a native `RegExp` where one exists.
+ */
+export interface FabricRegExp extends FabricPrimitive {
+  readonly source: string;
+  readonly flags: string;
+  readonly flavor: string;
+
+  /**
+   * A fresh native `RegExp` equivalent to this value, returned anew on each
+   * call so the internal instance is never aliased out. Throws for a flavor
+   * with no native `RegExp` representation.
+   */
+  readonly value: RegExp;
+}
+
+export interface FabricRegExpConstructor {
+  new (regex: RegExp): FabricRegExp;
+  new (flavor: string, source: string, flags: string): FabricRegExp;
+  prototype: FabricRegExp;
+}
+
+export declare const FabricRegExp: FabricRegExpConstructor;
+
+/**
+ * Structured state for constructing a `FabricError`. The fixed-schema slots
+ * are `FabricValue`-typed; `extras` carries any custom enumerable properties,
+ * whose keys must not collide with the slot names.
+ */
+export type FabricErrorState = {
+  /** Constructor name of the originating native `Error` (e.g. `"TypeError"`). */
+  readonly type: string;
+  /** The `.name` property. Omit to mean "same as `type`". */
+  readonly name?: string | null | undefined;
+  /** The `.message` property. */
+  readonly message: string;
+  /** The `.stack` property, or `undefined`. */
+  readonly stack: string | undefined;
+  /** The `.cause` value, in `FabricValue` form, or `undefined`. */
+  readonly cause: FabricValue | undefined;
+  /** Custom enumerable own properties, in `FabricValue` form. */
+  readonly extras?:
+    | Iterable<readonly [string, FabricValue]>
+    | Readonly<Record<string, FabricValue>>
+    | undefined;
+};
+
+/**
+ * An error carried as fabric data. Extends `FabricInstance` (not
+ * `FabricPrimitive`): it holds fixed-schema slots plus a bag of extras, and
+ * `cause` may be an arbitrary `FabricValue`, so it is a small object graph
+ * rather than a leaf.
+ *
+ * Like every `FabricInstance` it is mutable until frozen: the slots are plain
+ * writable properties, and `setExtra()` / `deleteExtra()` are gated on the
+ * frozen state.
+ */
+export interface FabricError extends FabricInstance {
+  type: string;
+  name: string;
+  message: string;
+  stack: string | undefined;
+  cause: FabricValue | undefined;
+
+  getExtra(key: string): FabricValue | undefined;
+  hasExtra(key: string): boolean;
+  setExtra(key: string, value: FabricValue): void;
+  deleteExtra(key: string): boolean;
+  readonly extraSize: number;
+  extraKeys(): IterableIterator<string>;
+  extraEntries(): IterableIterator<[string, FabricValue]>;
+}
+
+export interface FabricErrorConstructor {
+  new (state: FabricErrorState): FabricError;
+  fromNativeError(error: Error): FabricError;
+  prototype: FabricError;
+}
+
+export declare const FabricError: FabricErrorConstructor;
+
+// TODO(danfuzz): `FabricMap` and `FabricSet` are deliberately absent from the
+// declarations above. Both need substantial rework before they are useful, and
+// declaring them here would imply a utility they do not yet have. Their
+// absence is a decision, not an oversight; revisit once that rework lands.
+
+/**
  * The full set of values that the fabric storage layer can represent.
+ *
+ * From a typesystem perspective, all `FabricValue`s are immutable (deeply
+ * read-only), _except_ members of the `FabricInstance` tree. `FabricInstance`s
+ * expose arbitrary methods which can cause a change of instance state including
+ * changing the set of outgoing references from the instance. This is an
+ * _intentional_ hole, because TypeScript has no ergonomic/pithy way to express
+ * the desired semantics. (To be clear, it _can_ be done, just not cleanly.)
  */
 export type FabricValue =
   | null
@@ -287,11 +387,42 @@ export type FabricValue =
   | FabricPlainObject
   | undefined;
 
-/** An array of fabric values. */
-export interface FabricArray extends ArrayLike<FabricValue> {}
+/** A fabric value other than `null` or `undefined`. */
+export type NonNullableFabricValue = NonNullable<FabricValue>;
 
-/** An object/record of fabric values. */
-export interface FabricPlainObject extends Record<string, FabricValue> {}
+/** Read-only array of fabric values. */
+export interface FabricArray extends ReadonlyArray<FabricValue> {}
+
+/** Read-only object/record of fabric values. */
+export interface FabricPlainObject
+  extends Readonly<Record<string, FabricValue>> {}
+
+// ============================================================================
+// Fabric Execution Value Types
+// ============================================================================
+
+/**
+ * A value that can appear in an in-memory fabric execution graph.
+ *
+ * Unlike a {@link FabricValue}, a `FabricExecValue` may contain functions and
+ * therefore is not necessarily durable or serializable. Its arrays and plain
+ * objects recursively contain only other execution values.
+ */
+export type FabricExecValue =
+  | FabricValue
+  | FabricExecFunction
+  | FabricExecArray
+  | FabricExecPlainObject;
+
+/** A callable leaf in a {@link FabricExecValue} graph. */
+export type FabricExecFunction = (...args: any[]) => any;
+
+/** Read-only array of fabric execution values. */
+export interface FabricExecArray extends ReadonlyArray<FabricExecValue> {}
+
+/** Read-only plain object whose string-keyed values are execution values. */
+export interface FabricExecPlainObject
+  extends Readonly<Record<string, FabricExecValue>> {}
 
 // ============================================================================
 // Runtime Constants
@@ -492,8 +623,8 @@ export type MetaField =
   | MetaLinkField
   | "patternIdentity" // content-addressed {identity, symbol} pattern reference
   | "patternSetupIdentity" // setup-completion {identity, symbol} marker
-  | "patternSource" // provenance: the source a piece tracks for updates (a
-  // toolshed pattern path, or later a `cf:` fabric ref)
+  | "patternSource" // active web or `cf:` source origin
+  | "pieceSourceHistory" // append-only source revisions and retention roots
   | "patternRepository" // optional caller-supplied repository locator
   | "displacedPattern" // {identity, symbol, displacedAt}: the prior pattern
   // reference recorded when system-pattern auto-update replaces an unloadable
@@ -1461,6 +1592,7 @@ type CellWrappedData<T> =
   | T
   | AnyBrandedCell<T>
   | (T extends Array<infer U> ? Array<FactoryInput<U>>
+    : T extends ReadonlyArray<infer U> ? ReadonlyArray<FactoryInput<U>>
     : T extends object ? { [K in keyof T]: FactoryInput<T[K]> }
     : never);
 export declare const CELL_LIKE: unique symbol;
@@ -1493,6 +1625,7 @@ type StripCellInner<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - i
   : [T] extends [AnyBrandedCell<infer U>] ? StripCell<U>
   : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
   : [T] extends [Array<infer U>] ? StripCell<U>[]
+  : [T] extends [ReadonlyArray<infer U>] ? readonly StripCell<U>[]
   // deno-lint-ignore ban-types
   : [T] extends [Function] ? T // Preserve function types
   : [T] extends [object] ? { [K in keyof T]: StripCell<T[K]> }
@@ -1528,6 +1661,7 @@ export type FactoryInput<T> =
   // Combined into single check to reduce type instantiation overhead.
   | ([NonNullable<T>] extends [VNode | UIRenderable] ? JSXElement : never)
   | (T extends Array<infer U> ? Array<FactoryInput<U>>
+    : T extends ReadonlyArray<infer U> ? ReadonlyArray<FactoryInput<U>>
     : T extends object ? { [K in keyof T]: FactoryInput<T[K]> }
     : T);
 
@@ -1582,6 +1716,9 @@ export type AnyCellWrapping<T> =
     // Handle arrays
     : T extends Array<infer U>
       ? Array<AnyCellWrapping<U>> | AnyBrandedCell<Array<AnyCellWrapping<U>>>
+    : T extends ReadonlyArray<infer U> ?
+        | ReadonlyArray<AnyCellWrapping<U>>
+        | AnyBrandedCell<ReadonlyArray<AnyCellWrapping<U>>>
     // Handle objects (excluding null)
     : T extends object ?
         | { [K in keyof T]: AnyCellWrapping<T[K]> }
@@ -1595,12 +1732,12 @@ export type AnyCellWrapping<T> =
 // TODO(seefeld): Subset of internal type, just enough to make it
 // differentiated. But this isn't part of the public API, so we need to find a
 // different way to handle this.
-export interface Pattern {
+export interface Pattern extends FabricExecPlainObject {
   argumentSchema: JSONSchema;
   resultSchema: JSONSchema;
   defaultScope?: CellScope;
 }
-export interface Module {
+export interface Module extends FabricExecPlainObject {
   type:
     | "ref"
     | "javascript"
@@ -1653,6 +1790,10 @@ export type HandlerFactory<T, R> =
 
 // JSON types
 
+/**
+ * Pure deeply-immutable JSON value, with the addition of a sidecar of
+ * annotations keyed by unique symbols.
+ */
 export type JSONValue =
   | null
   | boolean
@@ -1661,34 +1802,21 @@ export type JSONValue =
   | JSONArray
   | JSONObject & IDFields;
 
-export interface JSONArray extends ArrayLike<JSONValue> {}
+export interface JSONArray extends ReadonlyArray<JSONValue> {}
 
-export interface JSONObject extends Record<string, JSONValue> {}
+export interface JSONObject extends Readonly<Record<string, JSONValue>> {}
 
 // Annotations when writing data that help determine the entity id. They are
 // removed before sending to storage.
 export interface IDFields {
-  [ID]?: unknown;
-  [ID_FIELD]?: unknown;
+  readonly [ID]?: unknown;
+  readonly [ID_FIELD]?: unknown;
 }
 
 /**
- * Recursively adds `readonly` to all properties of `T`.
- *
- * Mirrors the definition in `@commonfabric/utils/types` but is duplicated here
- * so that `@commonfabric/api` remains dependency-free.
+ * Deeply-mutable version of `JSONValue`.
  */
-type Immutable<T> = T extends ReadonlyArray<infer U>
-  ? ReadonlyArray<Immutable<U>>
-  : T extends object ? ({ readonly [P in keyof T]: Immutable<T[P]> })
-  : T;
-
-/**
- * Deeply-readonly version of `JSONValue`. Used in `JSONSchemaObj` for fields
- * like `default`, `const`, `enum`, and `examples` whose values must not be
- * mutated after construction.
- */
-export type ImmutableJSONValue = Immutable<JSONValue>;
+export type MutableJSONValue = Mutable<JSONValue>;
 
 // Valid values for the "type" property of a JSONSchema
 export type JSONSchemaTypes =
@@ -1744,9 +1872,9 @@ export type JSONSchemaObj = {
 
   // Validation for any
   readonly type?: JSONSchemaTypes | readonly JSONSchemaTypes[];
-  readonly enum?: readonly ImmutableJSONValue[]; // not validated
-  readonly const?: ImmutableJSONValue; // not validated
-  // Validation for numeric
+  readonly enum?: readonly JSONValue[]; // not validated
+  readonly const?: JSONValue; // not validated
+  // Validation for numeric - none applied
   readonly multipleOf?: number;
   readonly maximum?: number;
   readonly exclusiveMaximum?: number;
@@ -1779,10 +1907,10 @@ export type JSONSchemaObj = {
   // Meta-Data
   readonly title?: string;
   readonly description?: string;
-  readonly default?: ImmutableJSONValue;
+  readonly default?: JSONValue;
   readonly readOnly?: boolean;
   readonly writeOnly?: boolean;
-  readonly examples?: readonly ImmutableJSONValue[];
+  readonly examples?: readonly JSONValue[];
   readonly $schema?: string;
   readonly $comment?: string;
 
@@ -1797,11 +1925,11 @@ export type JSONSchemaObj = {
   readonly asCell?: readonly AsCellType[];
   // temporarily used to assign labels like "confidential"
   readonly ifc?: {
-    readonly confidentiality?: readonly ImmutableJSONValue[];
-    readonly integrity?: readonly ImmutableJSONValue[];
-    readonly addIntegrity?: readonly ImmutableJSONValue[];
-    readonly requiredIntegrity?: readonly ImmutableJSONValue[];
-    readonly maxConfidentiality?: readonly ImmutableJSONValue[];
+    readonly confidentiality?: readonly JSONValue[];
+    readonly integrity?: readonly JSONValue[];
+    readonly addIntegrity?: readonly JSONValue[];
+    readonly requiredIntegrity?: readonly JSONValue[];
+    readonly maxConfidentiality?: readonly JSONValue[];
     readonly ownerPrincipal?: string | CurrentPrincipal;
     readonly writeAuthorizedBy?:
       | readonly string[]
@@ -1838,26 +1966,16 @@ export type JSONSchemaObj = {
 };
 
 /**
- * Recursively removes `readonly` from all properties of `T`.
- *
- * Copy of `Mutable` from `@commonfabric/utils/types`. These two definitions
- * should be unified; see that module for the canonical version.
- */
-type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
-  : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
-  : T;
-
-/**
  * A deep-mutable variant of `JSONSchemaObj`. Recursively strips `readonly`
  * from all properties, making the schema safe to build up incrementally.
  */
-export type JSONSchemaObjMutable = Mutable<JSONSchemaObj>;
+export type MutableJSONSchemaObj = Mutable<JSONSchemaObj>;
 
 /**
- * A `JSONSchemaObjMutable` or a boolean. JSON Schema allows `true` (accept any
+ * A `MutableJSONSchemaObj` or a boolean. JSON Schema allows `true` (accept any
  * value) and `false` (reject all values) as valid schemas.
  */
-export type JSONSchemaMutable = JSONSchemaObjMutable | boolean;
+export type MutableJSONSchema = MutableJSONSchemaObj | boolean;
 
 export type * from "./cfc.ts";
 export { CFC_CANONICAL_ALIAS_NAMES } from "./cfc.ts";
@@ -2026,7 +2144,7 @@ export interface BuiltInLLMParams {
   stop?: string;
   maxTokens?: number;
   builtinTools?: boolean;
-  observationMaxConfidentiality?: readonly ImmutableJSONValue[];
+  observationMaxConfidentiality?: readonly JSONValue[];
   /**
    * Specifies the mode of operation for the LLM.
    * - `"json"`: Indicates that the LLM should process and return data in JSON format.
@@ -2112,7 +2230,7 @@ export type BuiltInGenerateObjectParams =
     system?: string;
     cache?: boolean;
     maxTokens?: number;
-    observationMaxConfidentiality?: readonly ImmutableJSONValue[];
+    observationMaxConfidentiality?: readonly JSONValue[];
     schemaSanitizePromptInjection?: boolean;
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;
@@ -2139,7 +2257,7 @@ export type BuiltInGenerateObjectParams =
     system?: string;
     cache?: boolean;
     maxTokens?: number;
-    observationMaxConfidentiality?: readonly ImmutableJSONValue[];
+    observationMaxConfidentiality?: readonly JSONValue[];
     schemaSanitizePromptInjection?: boolean;
     metadata?: Record<string, string | undefined | object>;
     tools?: Record<string, BuiltInLLMTool>;

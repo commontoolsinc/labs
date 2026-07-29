@@ -44,6 +44,10 @@ return {
   global piece list, use the `addPiece` handler via `wish("#default")`.
   See [Adding Pieces](adding-pieces.md).
 
+Mentionables are one deliberate way to make an unregistered child discoverable.
+They do not provide a complete piece listing and cannot expose an orphan. See
+[Finding Pieces](../concepts/piece-discovery.md).
+
 ## Wishing for Mentionables
 
 Patterns can discover mentionables in the current space using `wish()`:

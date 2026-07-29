@@ -1,4 +1,5 @@
 {
+  // Dependency guide: ../../docs/development/DEPENDENCIES.md
   "name": "@commonfabric/generated-patterns",
   "tasks": {
     "integration": "LOG_LEVEL=warn deno test --trace-leaks -A --parallel $INTEGRATION_TEST_FLAGS ./integration/patterns/*.test.ts",

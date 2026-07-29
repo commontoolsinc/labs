@@ -1,0 +1,59 @@
+{
+  "argumentSchema": false,
+  "pattern": "examples/fetch-program-test.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": true,
+      "program": {
+        "anyOf": [
+          {
+            "properties": {
+              "files": {
+                "items": {
+                  "properties": {
+                    "contents": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "contents"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "main": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "files",
+              "main"
+            ],
+            "type": "object"
+          },
+          {
+            "type": "undefined"
+          }
+        ]
+      },
+      "result": true,
+      "url": true
+    },
+    "required": [
+      "$NAME",
+      "$UI",
+      "url",
+      "program",
+      "result"
+    ],
+    "type": "object"
+  }
+}

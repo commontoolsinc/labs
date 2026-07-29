@@ -194,6 +194,195 @@ describe("XRootView", () => {
     }
   });
 
+  it("drops the previous space before a differently named view renders", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const { resolveSpaceDid } = await import("@commonfabric/lib-shell");
+      const view = new XRootView();
+      const identity = await Identity.fromPassphrase(
+        "root-view-named-space-transition-test",
+      );
+      // willUpdate runs before render, which is the point of the test: what
+      // it leaves behind is what the app view is handed.
+      const lifecycle = view as unknown as {
+        willUpdate(changed: Map<string, unknown>): void;
+      };
+      const appChanged = new Map<string, unknown>([["app", undefined]]);
+      const setView = (next: unknown) => {
+        view.app = {
+          ...view.app,
+          identity,
+          view: next as typeof view.app.view,
+        };
+        lifecycle.willUpdate(appChanged);
+      };
+
+      const atlas = await resolveSpaceDid(identity, "atlas");
+      const notebook = await resolveSpaceDid(identity, "notebook");
+      expect(atlas).not.toBe(notebook);
+
+      // A name is looked up asynchronously, so the view has no space yet.
+      setView({ spaceName: "atlas" });
+      expect(view.getRuntimeSpaceDID()).toBeUndefined();
+      await view.spaceResolved();
+      expect(view.getRuntimeSpaceDID()).toBe(atlas);
+
+      // Moving between pieces of one space keeps the space already resolved.
+      setView({ spaceName: "atlas", pieceId: "piece-1" });
+      expect(view.getRuntimeSpaceDID()).toBe(atlas);
+
+      // Naming a different space drops the old DID in the same step that
+      // adopts the new view, so the two are never rendered together.
+      setView({ spaceName: "notebook" });
+      expect(view.getRuntimeSpaceDID()).toBeUndefined();
+      await view.spaceResolved();
+      expect(view.getRuntimeSpaceDID()).toBe(notebook);
+
+      // A view addressing its space by DID needs no lookup at all.
+      setView({ spaceDid: atlas });
+      expect(view.getRuntimeSpaceDID()).toBe(atlas);
+
+      // The home view addresses the identity's own space.
+      setView({ builtin: "home" });
+      expect(view.getRuntimeSpaceDID()).toBe(identity.did());
+    } finally {
+      restore();
+    }
+  });
+
+  it("starts one lookup per name, whatever else changes in the app state", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const { resolveSpaceDid } = await import("@commonfabric/lib-shell");
+      const view = new XRootView();
+      const first = await Identity.fromPassphrase("root-view-one-lookup-first");
+      const second = await Identity.fromPassphrase(
+        "root-view-one-lookup-second",
+      );
+      const lifecycle = view as unknown as {
+        willUpdate(changed: Map<string, unknown>): void;
+      };
+      const appChanged = new Map<string, unknown>([["app", undefined]]);
+
+      // A named space is keyed off the name and a fixed passphrase, so it is
+      // the same space for everyone. Identity has no say in the answer.
+      const atlas = await resolveSpaceDid(first, "atlas");
+      expect(await resolveSpaceDid(second, "atlas")).toBe(atlas);
+      expect(first.did()).not.toBe(second.did());
+
+      view.app = {
+        ...view.app,
+        identity: first,
+        view: { spaceName: "atlas" } as typeof view.app.view,
+      };
+      lifecycle.willUpdate(appChanged);
+      // The promise handed back identifies the lookup now in flight.
+      const lookup = view.spaceResolved();
+
+      // An unrelated change while the lookup is still running leaves it be,
+      // rather than abandoning it and starting the same lookup over.
+      view.app = { ...view.app, config: { showDebuggerView: true } };
+      lifecycle.willUpdate(appChanged);
+      expect(view.spaceResolved()).toBe(lookup);
+
+      await lookup;
+      expect(view.getRuntimeSpaceDID()).toBe(atlas);
+
+      // Switching identity on the same name keeps the space, and asks again
+      // for nothing: the answer cannot have changed.
+      view.app = { ...view.app, identity: second };
+      lifecycle.willUpdate(appChanged);
+      expect(view.getRuntimeSpaceDID()).toBe(atlas);
+      expect(view.spaceResolved()).toBe(lookup);
+
+      // Logging out drops the space; logging back in looks it up afresh.
+      view.app = { ...view.app, identity: undefined };
+      lifecycle.willUpdate(appChanged);
+      expect(view.getRuntimeSpaceDID()).toBeUndefined();
+
+      view.app = { ...view.app, identity: second };
+      lifecycle.willUpdate(appChanged);
+      expect(view.spaceResolved()).not.toBe(lookup);
+      await view.spaceResolved();
+      expect(view.getRuntimeSpaceDID()).toBe(atlas);
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps the view's space when a superseded runtime creation unwinds", async () => {
+    const restore = installBrowserGlobals();
+    const originalError = console.error;
+    console.error = () => {};
+    const { RuntimeInternals, resolveSpaceDid } = await import(
+      "@commonfabric/lib-shell"
+    );
+    const originalCreate = RuntimeInternals.create;
+    // The abandoned creation disposes the runtime it built. Resolving off that
+    // call lands after the whole abandonment block has run.
+    let abandoned!: () => void;
+    const disposed = new Promise<void>((resolve) => {
+      abandoned = resolve;
+    });
+    RuntimeInternals.create = (() =>
+      Promise.resolve({
+        runtime: () => ({}),
+        dispose: () => {
+          abandoned();
+          return Promise.resolve();
+        },
+      } as unknown as Awaited<
+        ReturnType<typeof RuntimeInternals.create>
+      >)) as typeof RuntimeInternals.create;
+
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      const identity = await Identity.fromPassphrase(
+        "root-view-superseded-runtime-test",
+      );
+      const atlas = await resolveSpaceDid(identity, "atlas");
+      const lifecycle = view as unknown as {
+        willUpdate(changed: Map<string, unknown>): void;
+      };
+
+      view.app = {
+        ...view.app,
+        identity,
+        view: { spaceName: "atlas" } as typeof view.app.view,
+      };
+      lifecycle.willUpdate(new Map([["app", undefined]]));
+      await view.spaceResolved();
+      expect(view.getRuntimeSpaceDID()).toBe(atlas);
+
+      const task = (view as unknown as {
+        _rt: {
+          run(args: [typeof view.app]): void;
+          taskComplete: Promise<unknown>;
+        };
+      })._rt;
+
+      // One runtime creation starts and a second supersedes it, which is what
+      // a compiler stack reload does to a creation already under way.
+      task.run([view.app]);
+      task.run([view.app]);
+      await task.taskComplete;
+      await disposed;
+
+      // The abandoned creation says nothing about which space the view
+      // addresses, so the space it resolved has to survive. Nothing would
+      // restore it: the view still names atlas, so no lookup runs again.
+      expect(view.getRuntimeSpaceDID()).toBe(atlas);
+    } finally {
+      RuntimeInternals.create = originalCreate;
+      console.error = originalError;
+      delete (globalThis as { commonfabric?: unknown }).commonfabric;
+      restore();
+    }
+  });
+
   it("guards a browser reload only while the runtime reports pending writes", async () => {
     const restore = installBrowserGlobals();
     try {

@@ -1,0 +1,516 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "AnonymousType_1": {
+        "items": {
+          "$ref": "#/$defs/MentionablePiece"
+        },
+        "type": "array"
+      },
+      "AnonymousType_2": {
+        "items": {
+          "$ref": "#/$defs/NotePiece"
+        },
+        "type": "array"
+      },
+      "MentionablePiece": {
+        "properties": {
+          "$NAME": {
+            "type": "string"
+          },
+          "backlinks": {
+            "$ref": "#/$defs/AnonymousType_1"
+          },
+          "isHidden": {
+            "type": "boolean"
+          },
+          "mentioned": {
+            "$ref": "#/$defs/AnonymousType_1"
+          }
+        },
+        "required": [
+          "mentioned",
+          "backlinks"
+        ],
+        "type": "object"
+      },
+      "NotePiece": {
+        "properties": {
+          "$NAME": {
+            "type": "string"
+          },
+          "backlinks": {
+            "$ref": "#/$defs/AnonymousType_1"
+          },
+          "content": {
+            "type": "string"
+          },
+          "isHidden": {
+            "type": "boolean"
+          },
+          "parentNotebook": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/NotebookPiece"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "setTitle": {
+            "asCell": [
+              "stream"
+            ],
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "NotebookPiece": {
+        "properties": {
+          "$NAME": {
+            "type": "string"
+          },
+          "backlinks": {
+            "$ref": "#/$defs/AnonymousType_1"
+          },
+          "createNote": {
+            "asCell": [
+              "stream"
+            ],
+            "properties": {
+              "content": {
+                "type": "string"
+              },
+              "navigate": {
+                "type": "boolean"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "content"
+            ],
+            "type": "object"
+          },
+          "createNotebook": {
+            "asCell": [
+              "stream"
+            ],
+            "properties": {
+              "notesData": {
+                "items": {
+                  "properties": {
+                    "content": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "content"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title"
+            ],
+            "type": "object"
+          },
+          "createNotes": {
+            "asCell": [
+              "stream"
+            ],
+            "properties": {
+              "notesData": {
+                "items": {
+                  "properties": {
+                    "content": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "content"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "notesData"
+            ],
+            "type": "object"
+          },
+          "isHidden": {
+            "type": "boolean"
+          },
+          "isNotebook": {
+            "type": "boolean"
+          },
+          "notes": {
+            "$ref": "#/$defs/AnonymousType_2"
+          },
+          "setTitle": {
+            "asCell": [
+              "stream"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "createNote",
+          "createNotes",
+          "setTitle",
+          "createNotebook"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "entries": {
+        "$ref": "#/$defs/AnonymousType_2",
+        "asCell": [
+          "cell"
+        ],
+        "default": []
+      },
+      "template": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "",
+        "type": "string"
+      },
+      "title": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "Daily Journal",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "notes/daily-journal.tsx",
+  "resultSchema": {
+    "$defs": {
+      "AnonymousType_1": {
+        "items": {
+          "$ref": "#/$defs/MentionablePiece"
+        },
+        "type": "array"
+      },
+      "AnonymousType_2": {
+        "items": {
+          "$ref": "#/$defs/NotePiece"
+        },
+        "type": "array"
+      },
+      "MentionablePiece": {
+        "properties": {
+          "$NAME": {
+            "type": "string"
+          },
+          "backlinks": {
+            "$ref": "#/$defs/AnonymousType_1"
+          },
+          "isHidden": {
+            "type": "boolean"
+          },
+          "mentioned": {
+            "$ref": "#/$defs/AnonymousType_1"
+          }
+        },
+        "required": [
+          "mentioned",
+          "backlinks"
+        ],
+        "type": "object"
+      },
+      "NotePiece": {
+        "properties": {
+          "$NAME": {
+            "type": "string"
+          },
+          "backlinks": {
+            "$ref": "#/$defs/AnonymousType_1"
+          },
+          "content": {
+            "type": "string"
+          },
+          "isHidden": {
+            "type": "boolean"
+          },
+          "parentNotebook": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/NotebookPiece"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "setTitle": {
+            "asCell": [
+              "stream"
+            ],
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "NotebookPiece": {
+        "properties": {
+          "$NAME": {
+            "type": "string"
+          },
+          "backlinks": {
+            "$ref": "#/$defs/AnonymousType_1"
+          },
+          "createNote": {
+            "asCell": [
+              "stream"
+            ],
+            "properties": {
+              "content": {
+                "type": "string"
+              },
+              "navigate": {
+                "type": "boolean"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "content"
+            ],
+            "type": "object"
+          },
+          "createNotebook": {
+            "asCell": [
+              "stream"
+            ],
+            "properties": {
+              "notesData": {
+                "items": {
+                  "properties": {
+                    "content": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "content"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title"
+            ],
+            "type": "object"
+          },
+          "createNotes": {
+            "asCell": [
+              "stream"
+            ],
+            "properties": {
+              "notesData": {
+                "items": {
+                  "properties": {
+                    "content": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "content"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "notesData"
+            ],
+            "type": "object"
+          },
+          "isHidden": {
+            "type": "boolean"
+          },
+          "isNotebook": {
+            "type": "boolean"
+          },
+          "notes": {
+            "$ref": "#/$defs/AnonymousType_2"
+          },
+          "setTitle": {
+            "asCell": [
+              "stream"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "createNote",
+          "createNotes",
+          "setTitle",
+          "createNotebook"
+        ],
+        "type": "object"
+      },
+      "WeeklyRollup": {
+        "properties": {
+          "accomplishments": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "headline": {
+            "type": "string"
+          },
+          "mood": {
+            "type": "string"
+          },
+          "openThreads": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "themes": {
+            "items": {
+              "properties": {
+                "detail": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "detail"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "headline",
+          "themes",
+          "accomplishments",
+          "openThreads",
+          "mood"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "entries": {
+        "$ref": "#/$defs/AnonymousType_2"
+      },
+      "goToToday": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "isJournal": {
+        "type": "boolean"
+      },
+      "mentionable": {
+        "$ref": "#/$defs/AnonymousType_2"
+      },
+      "summary": {
+        "type": "string"
+      },
+      "template": {
+        "type": "string"
+      },
+      "title": {
+        "type": "string"
+      },
+      "weeklyRollup": {
+        "anyOf": [
+          {
+            "type": "undefined"
+          },
+          {
+            "$ref": "#/$defs/WeeklyRollup"
+          }
+        ]
+      }
+    },
+    "required": [
+      "title",
+      "entries",
+      "template",
+      "isJournal",
+      "summary",
+      "mentionable",
+      "goToToday",
+      "weeklyRollup",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

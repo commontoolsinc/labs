@@ -11,6 +11,10 @@ export {
   FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
+  type MutableFabricArrayLayer,
+  type MutableFabricPlainObjectLayer,
+  type MutableFabricValueLayer,
+  type NonNullableFabricValue,
 } from "./interface.ts";
 
 export {
@@ -37,6 +41,7 @@ export {
   fabricFromNativeValue,
   isFabricCompatible,
   nativeFromFabricValue,
+  shallowCleanArray,
   shallowFabricFromNativeValue,
 } from "./native-conversion.ts";
 

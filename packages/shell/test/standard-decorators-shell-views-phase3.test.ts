@@ -24,6 +24,7 @@ Deno.test("shell view slice type-checks under standard decorators", async () => 
     "packages/shell/src/views/AppView.ts",
     "packages/shell/src/views/BodyView.ts",
     "packages/shell/src/views/DebuggerView.ts",
+    "packages/shell/src/views/DeviceLinkView.ts",
     "packages/shell/src/views/HeaderView.ts",
     "packages/shell/src/views/LoginView.ts",
     "packages/shell/src/views/QuickJumpView.ts",

@@ -5,13 +5,22 @@ expensive particular exported types from `packages/api/index.ts` are to check.
 Each scenario lives in its own `.ts` file with a matching `tsconfig.*.json` so
 that we can profile the types independently.
 
+`run-tsc.ts` resolves the TypeScript version from `packages/api/deno.jsonc`, so
+the harness uses the same compiler pin as the runtime packages. Follow the
+[TypeScript dependency guide](../../../docs/development/DEPENDENCIES.md#typescript)
+when rolling it.
+
+The profiling projects use TypeScript's own module resolver rather than Deno's.
+`tsconfig.base.json` therefore maps the workspace imports reached from the API
+source. Add a path there when the API begins importing another workspace entry.
+
 ## Quick Metrics
 
 Run the compiler with `--extendedDiagnostics` to get counts of type
 instantiations, memory usage, etc.
 
 ```bash
-deno run -A npm:typescript@5.8.3/bin/tsc \
+deno run -A packages/api/perf/run-tsc.ts \
   --project packages/api/perf/tsconfig.key.json \
   --extendedDiagnostics --pretty false
 ```
@@ -25,6 +34,8 @@ Available projects:
 - `tsconfig.schema.json` – exercises the JSON schema conversion helpers.
 - `tsconfig.ikeyable-cell.json` – heavy `IKeyable<Cell<…>>` stress case.
 - `tsconfig.ikeyable-schema.json` – `IKeyable` over `Cell<Schema<…>>`.
+- `tsconfig.ikeyable-realistic.json` – representative nested record and cell
+  shapes.
 
 Each run prints metrics; compare the “Instantiations”, “Types”, and “Check time”
 fields against the baseline to see relative cost.
@@ -36,8 +47,8 @@ is a Chromium CPU profile you can open via DevTools ▸ Performance ▸ “Load
 profile…”.
 
 ```bash
-NODE_OPTIONS=--max-old-space-size=4096 \
-deno run -A npm:typescript@5.8.3/bin/tsc \
+DENO_V8_FLAGS=--max-old-space-size=4096 \
+deno run -A packages/api/perf/run-tsc.ts \
   --project packages/api/perf/tsconfig.ikeyable-cell.json \
   --generateCpuProfile packages/api/perf/traces/ikeyable-cell.cpuprofile
 ```
@@ -56,8 +67,8 @@ exceed V8’s heap limit on the heavy scenarios.
 
 ```bash
 mkdir -p packages/api/perf/traces/ikeyable-cell \
-  && NODE_OPTIONS=--max-old-space-size=4096 \
-     deno run -A npm:typescript@5.8.3/bin/tsc \
+  && DENO_V8_FLAGS=--max-old-space-size=4096 \
+     deno run -A packages/api/perf/run-tsc.ts \
        --project packages/api/perf/tsconfig.ikeyable-cell.json \
        --generateTrace packages/api/perf/traces/ikeyable-cell
 ```
@@ -76,7 +87,8 @@ trace generation; it keeps the scenario minimal enough to succeed.
 To run every scenario in one go (and print a short summary for each), run:
 
 ```bash
-deno run -A packages/api/perf/run-benchmarks.ts
+cd packages/api
+deno task profile-types
 ```
 
 For ad-hoc inspection of trace files you can also use Deno directly:
@@ -96,5 +108,5 @@ Feel free to add your own utilities here if repeated analyses become necessary.
   of loading the module.
 - When experimenting with type changes, re-run the relevant scenario(s) to watch
   how instantiation counts and profile hotspots move.
-- For long-running traces, add `NODE_OPTIONS=--max-old-space-size=<MB>` to keep
-  Node from running out of memory mid-run.
+- For long-running traces, add `DENO_V8_FLAGS=--max-old-space-size=<MB>` to
+  increase Deno's V8 heap limit.

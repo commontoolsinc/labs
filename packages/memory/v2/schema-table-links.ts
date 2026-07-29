@@ -4,6 +4,7 @@ import {
   linkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
+import type { MutableFabricPlainObjectLayer } from "@commonfabric/data-model/fabric-value";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 export const REQUEST_SCHEMA_CAS_REF_PREFIX = "schema-cas@1:";
@@ -146,7 +147,7 @@ const mapRecordChildren = (
   }
   if (!childChanged) return record;
 
-  const mapped: FabricPlainObject = {};
+  const mapped: MutableFabricPlainObjectLayer = {};
   for (let index = 0; index < entries.length; index += 1) {
     const key = entries[index][0];
     const next = mappedChildren[index];

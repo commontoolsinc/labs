@@ -31,6 +31,15 @@ const remoteSpace = (await Identity.fromPassphrase(
   "data unavailability remote test",
 )).did();
 
+function expectUnavailable(
+  value: unknown,
+  reason: DataUnavailableReason,
+): DataUnavailable {
+  expect(value).toBeInstanceOf(DataUnavailable);
+  expect((value as DataUnavailable).reason).toBe(reason);
+  return value as DataUnavailable;
+}
+
 describe("JavaScript-node data unavailability", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
@@ -175,7 +184,7 @@ describe("JavaScript-node data unavailability", () => {
     expect(calls).toBe(0);
   });
 
-  it("suppresses the callback and propagates the selected marker instance", async () => {
+  it("suppresses the callback and propagates the selected marker value", async () => {
     const marker = DataUnavailable.error(new Error("upstream failed"));
     let calls = 0;
     let writtenResult: unknown;
@@ -198,11 +207,11 @@ describe("JavaScript-node data unavailability", () => {
     });
 
     expect(calls).toBe(0);
-    expect(selectedInput).toBeInstanceOf(DataUnavailable);
-    expect(writtenResult).toBe(selectedInput);
-    expect(output).toBeInstanceOf(DataUnavailable);
-    expect((output as DataUnavailable).reason).toBe("error");
-    expect((output as DataUnavailable).error?.message).toBe("upstream failed");
+    expectUnavailable(selectedInput, "error");
+    expectUnavailable(writtenResult, "error");
+    expect(expectUnavailable(output, "error").error?.message).toBe(
+      "upstream failed",
+    );
   });
 
   it("selects by reason precedence, then serialized argument order", async () => {
@@ -247,7 +256,9 @@ describe("JavaScript-node data unavailability", () => {
 
     expect(calls).toBe(0);
     expect((selectedInput as DataUnavailable).error?.message).toBe("first");
-    expect(writtenResult).toBe(selectedInput);
+    expect(expectUnavailable(writtenResult, "error").error?.message).toBe(
+      "first",
+    );
     expect((output as DataUnavailable).error?.message).toBe("first");
 
     const pending = DataUnavailable.pending();
@@ -268,7 +279,7 @@ describe("JavaScript-node data unavailability", () => {
         return "ran";
       },
     });
-    expect(pendingOutput).toBe(pending);
+    expectUnavailable(pendingOutput, "pending");
 
     const syncing = DataUnavailable.syncing();
     const syncingOutput = await runValueNode({
@@ -286,7 +297,7 @@ describe("JavaScript-node data unavailability", () => {
         return "ran";
       },
     });
-    expect(syncingOutput).toBe(syncing);
+    expectUnavailable(syncingOutput, "syncing");
     expect(calls).toBe(0);
   });
 
@@ -350,7 +361,7 @@ describe("JavaScript-node data unavailability", () => {
       },
     });
 
-    expect(propagatedOutput).toBe(unaccepted);
+    expectUnavailable(propagatedOutput, "pending");
     expect(calls).toBe(1);
   });
 
@@ -473,7 +484,7 @@ describe("JavaScript-node data unavailability", () => {
     });
 
     expect(calls).toBe(0);
-    expect(output).toBe(nested);
+    expectUnavailable(output, "pending");
   });
 
   it("checks each exact path when two aliases share one object", async () => {
@@ -524,7 +535,7 @@ describe("JavaScript-node data unavailability", () => {
     });
 
     expect(calls).toBe(0);
-    expect(output).toBe(marker);
+    expectUnavailable(output, "pending");
   });
 
   it("does not duplicate an ordinary linked target's effective read", async () => {
@@ -621,7 +632,7 @@ describe("JavaScript-node data unavailability", () => {
       await output.pull();
 
       expect(calls).toBe(1);
-      expect(output.getRaw()).toBe(DataUnavailable.pending());
+      expectUnavailable(output.getRaw(), "pending");
     }
   });
 
@@ -651,7 +662,7 @@ describe("JavaScript-node data unavailability", () => {
     });
 
     expect(calls).toBe(0);
-    expect(output).toBe(DataUnavailable.pending());
+    expectUnavailable(output, "pending");
   });
 
   it("terminates a linked-container cycle and still selects its sibling marker", async () => {
@@ -683,7 +694,7 @@ describe("JavaScript-node data unavailability", () => {
     });
 
     expect(calls).toBe(0);
-    expect(output).toBe(pending);
+    expectUnavailable(output, "pending");
   });
 
   it("writes schema-mismatch when locally complete input fails its schema", async () => {
@@ -699,7 +710,7 @@ describe("JavaScript-node data unavailability", () => {
     });
 
     expect(calls).toBe(0);
-    expect(output).toBe(DataUnavailable.schemaMismatch());
+    expectUnavailable(output, "schema-mismatch");
   });
 
   it("settles missing linked targets from syncing to schema mismatch", async () => {
@@ -787,7 +798,7 @@ describe("JavaScript-node data unavailability", () => {
     expect(calls).toBe(0);
     expect(writes[0]).toBe("syncing");
     expect(writes.at(-1)).toBe("schema-mismatch");
-    expect(output).toBe(DataUnavailable.schemaMismatch());
+    expectUnavailable(output, "schema-mismatch");
   });
 
   it("passes policy-accepted readiness syncing to the callback", async () => {
@@ -807,7 +818,7 @@ describe("JavaScript-node data unavailability", () => {
       unavailableInputPolicy: [{ path: [], reasons: ["syncing"] }],
       implementation: (value) => {
         calls++;
-        expect(value).toBe(DataUnavailable.syncing());
+        expectUnavailable(value, "syncing");
         return "observed syncing";
       },
       captureWrittenResult: (value) => writes.push(value),
@@ -815,7 +826,7 @@ describe("JavaScript-node data unavailability", () => {
 
     expect(calls).toBe(1);
     expect(writes[0]).toBe("observed syncing");
-    expect(output).toBe(DataUnavailable.schemaMismatch());
+    expectUnavailable(output, "schema-mismatch");
   });
 
   it("still rejects a sibling mismatch beside accepted readiness syncing", async () => {
@@ -858,8 +869,8 @@ describe("JavaScript-node data unavailability", () => {
     });
 
     expect(calls).toBe(0);
-    expect(writes[0]).toBe(DataUnavailable.schemaMismatch());
-    expect(output).toBe(DataUnavailable.schemaMismatch());
+    expectUnavailable(writes[0], "schema-mismatch");
+    expectUnavailable(output, "schema-mismatch");
   });
 
   it("tracks missing-link readiness by full selector identity", async () => {
@@ -1059,7 +1070,7 @@ describe("JavaScript-node data unavailability", () => {
       expect(attempts).toBeGreaterThanOrEqual(2);
       expect(states[0]).toBe("syncing");
       expect(states.at(-1)).toBe("schema-mismatch");
-      expect(output).toBe(DataUnavailable.schemaMismatch());
+      expectUnavailable(output, "schema-mismatch");
     } finally {
       storageManager.syncCell = originalSyncCell;
     }
@@ -1310,7 +1321,7 @@ describe("JavaScript-node data unavailability", () => {
     });
 
     expect(externalActions).toBe(0);
-    expect(output).toBe(marker);
+    expectUnavailable(output, "syncing");
   });
 
   it("uses the normal input-derived scope when writing a propagated marker", async () => {
@@ -1361,9 +1372,10 @@ describe("JavaScript-node data unavailability", () => {
     });
     const scopedOutputLink = parseLink(internal.getRaw(), internal);
     expect(scopedOutputLink?.scope).toBe("user");
-    expect(
+    expectUnavailable(
       runtime.getCellFromLink(scopedOutputLink!).getRaw(),
-    ).toBe(DataUnavailable.pending());
+      "pending",
+    );
   });
 
   it("replays a gated handler event once its captured input is available", async () => {

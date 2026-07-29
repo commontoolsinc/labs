@@ -1224,14 +1224,12 @@ const Notebook = pattern<NotebookInput, NotebookOutput>(
                                     self,
                                   })}
                                 >
-                                  <cf-cell-context $cell={note}>
-                                    <cf-chip
-                                      label={note?.[NAME] ??
-                                        note?.title ??
-                                        "Untitled"}
-                                      interactive
-                                    />
-                                  </cf-cell-context>
+                                  <cf-chip
+                                    label={note?.[NAME] ??
+                                      note?.title ??
+                                      "Untitled"}
+                                    interactive
+                                  />
                                 </div>
                               </cf-drag-source>
                             </cf-drop-zone>

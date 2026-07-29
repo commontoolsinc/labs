@@ -1,6 +1,6 @@
 # CF Protocol: Commit Model (Section 5)
 
-See `docs/specs/verifiable-execution/README.md` for navigation.
+See the [verifiable-execution document map](README.md) for navigation.
 
 ## 5. Commit Structure
 

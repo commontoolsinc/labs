@@ -166,6 +166,28 @@ class MockCatalog {
 // as long as tests within a single file don't run in parallel.
 const mockCatalog = new MockCatalog();
 
+let mockGate: (() => Promise<void>) | undefined;
+
+/**
+ * Hold every matched mock response open until `gate` resolves.
+ *
+ * A mock normally answers within a microtask, which is far quicker than a real
+ * model call and leaves no window in which a request is genuinely outstanding.
+ * A test that needs that window — one asking whether a quiescence barrier
+ * covers an in-flight request, rather than whether the answer eventually
+ * arrives — installs a gate, looks at the system while the request is held,
+ * then releases it.
+ *
+ * The gate is awaited before the streaming callback runs, so a held request has
+ * produced nothing at all. Pass `undefined` to remove it;
+ * `clearMockResponses()` and `resetMockMode()` also clear it.
+ */
+export function setMockResponseGate(
+  gate: (() => Promise<void>) | undefined,
+): void {
+  mockGate = gate;
+}
+
 /**
  * Enable mock mode for testing. When enabled, all LLM requests will be
  * intercepted and matched against registered mock responses.
@@ -197,6 +219,7 @@ export function disableMockMode(): void {
  */
 export function clearMockResponses(): void {
   mockCatalog.clear();
+  mockGate = undefined;
 }
 
 /**
@@ -204,6 +227,7 @@ export function clearMockResponses(): void {
  */
 export function resetMockMode(): void {
   mockCatalog.reset();
+  mockGate = undefined;
 }
 
 /**
@@ -465,6 +489,7 @@ export class LLMClient {
     if (mockCatalog.isEnabled()) {
       const mockResponse = mockCatalog.findObjectResponse(request);
       if (mockResponse) {
+        if (mockGate) await mockGate();
         // Simulate async behavior
         await new Promise((resolve) => setTimeout(resolve, 0));
         return mockResponse;
@@ -549,6 +574,7 @@ export class LLMClient {
     if (mockCatalog.isEnabled()) {
       const mockResponse = mockCatalog.findResponse(request);
       if (mockResponse) {
+        if (mockGate) await mockGate();
         // NOTE: Streaming simulation calls the callback once with the full
         // text rather than delivering incremental chunks. Tests that depend on
         // partial-chunk behavior will need a more granular mock.

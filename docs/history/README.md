@@ -87,6 +87,11 @@ One line per archived document; each document's header carries the fuller
 
 ### Audits and reports
 
+- [cf-view-language-coverage-2026-07.md](packages/cli/cf-view-language-coverage-2026-07.md)
+  — active-repository syntax inventory and `cf view` support snapshot, July
+  2026.
+- [cf-view-rendered-markdown-impact-2026-07.md](packages/cli/cf-view-rendered-markdown-impact-2026-07.md)
+  — source/rendered pager and Markdown feature impact report, July 2026.
 - [cf-json-argument-audit-2026-07.md](packages/cli/cf-json-argument-audit-2026-07.md)
   — command-by-command audit of `cf --json` behavior, July 2026.
 - [cts-docs-audit-2026-07.md](cts-docs-audit-2026-07.md) —
@@ -104,6 +109,15 @@ One line per archived document; each document's header carries the fuller
 - [piece-timeout-hangs-investigation.md](packages/cli/piece-timeout-hangs-investigation.md)
   — why the CLI tool-result poll was replaced event-driven and why the
   piece-start and sync bounds could not be removed at the CLI layer, July 2026.
+- [2026-07-27-session-paging-out-of-memory.md](packages/patterns/agent-sessions-debug/2026-07-27-session-paging-out-of-memory.md)
+  — paging the agent-sessions debug table exhausts the browser runtime's heap,
+  July 2026.
+- [2026-07-28-list-window-child-retention.md](packages/runner/2026-07-28-list-window-child-retention.md)
+  — why a moving list window retained every child run it started, and what the
+  fix covered, July 2026.
+- [2026-07-28-completed-transaction-retention.md](packages/runner/2026-07-28-completed-transaction-retention.md)
+  — a completed transaction kept the activity of everything it read, and the
+  unbounded document cache that still exhausts a browser tab, July 2026.
 
 ### Executed plans and work orders
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-net --allow-run=deno --allow-read --allow-write --allow-env
+#!/usr/bin/env -S deno run --allow-net --allow-run=deno,git --allow-read --allow-write --allow-env
 // Fabric wall — modular live dashboard.
 //
 // Each tile lives in tiles/ and is registered once in registry.ts. This file is
@@ -7,7 +7,7 @@
 // drill-down routes a tile declares. It knows nothing about individual tiles.
 //
 //   cd <repo root>
-//   deno run --allow-net --allow-run=deno --allow-read --allow-write --allow-env \
+//   deno run --allow-net --allow-run=deno,git --allow-read --allow-write --allow-env \
 //     packages/dashboard/server.ts
 //   open http://localhost:8731
 //
@@ -26,8 +26,9 @@ import { makeCtx } from "./ctx.ts";
 import { friendlyError } from "./lib.ts";
 import { faviconPng, faviconStatus } from "./favicon.ts";
 import type { FaviconStatus } from "./favicon.ts";
-import { renderTile, shell, SHELL_VERSION } from "./render.ts";
+import { renderTile, shell } from "./render.ts";
 import type { Ctx, Run, RunSource, Tile, TileView } from "./types.ts";
+import { dashboardVersion } from "./version.ts";
 
 const ctx = makeCtx();
 const views = new Map<string, TileView>();
@@ -69,7 +70,7 @@ interface DashboardUpdate {
   gridHtml: string;
   wideHtml: string;
   ageSeconds: number;
-  shellVersion: number;
+  shellVersion: string;
   faviconStatus: FaviconStatus;
   faviconRedSince: number | null;
   faviconRedAgeMs: number | null;
@@ -398,6 +399,7 @@ const routes = TILES.flatMap((t) => t.routes ?? []);
 // the real cadence for the fastest tile is its interval plus a tick, not the bare
 // interval.
 const REFRESH_MS = Math.min(...TILES.map((t) => t.intervalMs)) + TICK_MS;
+const SHELL_VERSION = dashboardVersion();
 
 export function page(currentViews: ReadonlyMap<string, TileView> = views): string {
   const update = dashboardUpdate(currentViews);
@@ -406,7 +408,7 @@ export function page(currentViews: ReadonlyMap<string, TileView> = views): strin
     update.wideHtml,
     update.ageSeconds,
     REFRESH_MS,
-    update.shellVersion,
+    SHELL_VERSION,
     update.faviconStatus,
     update.faviconRedSince,
     update.faviconRedAgeMs,

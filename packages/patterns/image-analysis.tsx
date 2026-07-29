@@ -93,36 +93,32 @@ export default pattern<ImageChatInput, ImageChatOutput>(
         <cf-vscroll flex showScrollbar fadeEdges>
           <cf-vstack gap="3" style="padding: 1rem;">
             {/* Image Upload */}
-            <cf-cell-context $cell={images} label="Uploaded Images">
-              <cf-card>
-                <cf-vstack gap="2">
-                  <cf-heading level={5}>Upload Images</cf-heading>
-                  <cf-image-input
-                    multiple
-                    maxImages={5}
-                    includeData
-                    showPreview
-                    previewSize="md"
-                    removable
-                    oncf-change={syncUploadedImages({ images })}
-                    oncf-remove={syncUploadedImages({ images })}
-                  />
-                </cf-vstack>
-              </cf-card>
-            </cf-cell-context>
+            <cf-card>
+              <cf-vstack gap="2">
+                <cf-heading level={5}>Upload Images</cf-heading>
+                <cf-image-input
+                  multiple
+                  maxImages={5}
+                  includeData
+                  showPreview
+                  previewSize="md"
+                  removable
+                  oncf-change={syncUploadedImages({ images })}
+                  oncf-remove={syncUploadedImages({ images })}
+                />
+              </cf-vstack>
+            </cf-card>
 
             {/* Prompt Input */}
-            <cf-cell-context $cell={prompt} label="Image Prompt">
-              <cf-card>
-                <cf-vstack gap="2">
-                  <cf-heading level={5}>Your Question</cf-heading>
-                  <cf-input
-                    $value={prompt}
-                    placeholder="Ask about the images..."
-                  />
-                </cf-vstack>
-              </cf-card>
-            </cf-cell-context>
+            <cf-card>
+              <cf-vstack gap="2">
+                <cf-heading level={5}>Your Question</cf-heading>
+                <cf-input
+                  $value={prompt}
+                  placeholder="Ask about the images..."
+                />
+              </cf-vstack>
+            </cf-card>
 
             {/* Response */}
             {ifElse(

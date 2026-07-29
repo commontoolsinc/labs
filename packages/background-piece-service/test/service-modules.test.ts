@@ -1,4 +1,4 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, describe, it } from "@std/testing/bdd";
 import {
   assert,
   assertEquals,
@@ -486,7 +486,7 @@ describe("BackgroundPieceService", () => {
     assertEquals(piecesCell.schemaSyncCount, 1);
 
     piecesCell.emit([]);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await clock.settle();
     assertEquals(stopped, [TEST_DID]);
     await service.stop();
   });
@@ -533,7 +533,7 @@ describe("BackgroundPieceService", () => {
         pieceId: OTHER_PIECE_ID,
       })),
     ]);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await clock.settle();
 
     assertEquals(started, [TEST_DID]);
     assertEquals(stopped, [TEST_DID]);
@@ -542,6 +542,15 @@ describe("BackgroundPieceService", () => {
 });
 
 describe("SpaceManager", () => {
+  // One freezeAround wraps this whole describe, so its timer map and logical
+  // clock persist across cases. Several cases leave a fire-and-forget
+  // WorkerController.shutdown() (from setupWorkerController) parked on a worker
+  // that never answers, so its cleanup timeout lingers in the map. Dropping
+  // every pending timer after each case keeps a leftover from firing in a later
+  // case — here or in a following describe once this one's trailing
+  // auto-advance runs.
+  afterEach(() => clock.reset());
+
   it("schedules, runs, retries, disables, and removes pieces", async () => {
     await withMockWorker(async () => {
       const entry = new FakeEntryCell(pieceEntry());
@@ -629,8 +638,12 @@ describe("SpaceManager", () => {
 
       manager.start();
       manager.start();
-      await new Promise((resolve) => setTimeout(resolve, 2));
+      // execLoop parks on sleep(pollingIntervalMs) each pass; let it reach the
+      // first park, stop it, then fire the parked sleep so the loop observes
+      // isRunning === false and exits.
+      await clock.settle();
       await manager.stop();
+      await clock.tick(1);
       assertEquals(
         (manager as never as { isRunning: boolean }).isRunning,
         false,
@@ -701,10 +714,14 @@ describe("SpaceManager", () => {
         shutdown: () => Promise.resolve(),
       };
       (manager as never as { isRunning: boolean }).isRunning = true;
-      setTimeout(() => {
-        (manager as never as { isRunning: boolean }).isRunning = false;
-      }, 2);
-      await (manager as never as { execLoop: () => Promise<void> }).execLoop();
+      // isReady() === false: the loop parks on sleep(pollingIntervalMs). Let it
+      // reach the park, clear isRunning, then fire the parked sleep so it exits.
+      const idleLoop = (manager as never as { execLoop: () => Promise<void> })
+        .execLoop();
+      await clock.settle();
+      (manager as never as { isRunning: boolean }).isRunning = false;
+      await clock.tick(1);
+      await idleLoop;
 
       (manager as never as { workerController: unknown }).workerController = {
         isReady: () => true,
@@ -713,12 +730,16 @@ describe("SpaceManager", () => {
       (manager as never as { activePiece: FakeEntryCell | null }).activePiece =
         entry;
       (manager as never as { isRunning: boolean }).isRunning = true;
-      setTimeout(() => {
-        (manager as never as { activePiece: FakeEntryCell | null })
-          .activePiece = null;
-        (manager as never as { isRunning: boolean }).isRunning = false;
-      }, 2);
-      await (manager as never as { execLoop: () => Promise<void> }).execLoop();
+      // isReady() === true with an active piece: the loop parks until the active
+      // piece clears.
+      const activeLoop = (manager as never as { execLoop: () => Promise<void> })
+        .execLoop();
+      await clock.settle();
+      (manager as never as { activePiece: FakeEntryCell | null }).activePiece =
+        null;
+      (manager as never as { isRunning: boolean }).isRunning = false;
+      await clock.tick(1);
+      await activeLoop;
 
       (manager as never as { pendingTasks: unknown[] }).pendingTasks = [{
         pieceId: PIECE_ID,
@@ -726,10 +747,14 @@ describe("SpaceManager", () => {
         timestamp: Date.now() + 10,
       }];
       (manager as never as { isRunning: boolean }).isRunning = true;
-      setTimeout(() => {
-        (manager as never as { isRunning: boolean }).isRunning = false;
-      }, 2);
-      await (manager as never as { execLoop: () => Promise<void> }).execLoop();
+      // The only pending task is scheduled in the future: the loop parks until
+      // it comes due.
+      const futureLoop = (manager as never as { execLoop: () => Promise<void> })
+        .execLoop();
+      await clock.settle();
+      (manager as never as { isRunning: boolean }).isRunning = false;
+      await clock.tick(1);
+      await futureLoop;
 
       const calls: string[] = [];
       (manager as never as { workerController: unknown }).workerController = {
@@ -775,9 +800,12 @@ describe("SpaceManager", () => {
       });
 
       manager.watch([entry as never]);
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      // Let the initial worker finish initializing before injecting the error.
+      await clock.settle();
       MockWorker.instances.at(-1)!.error("terminal failure");
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      // The terminal error disables the space and starts a replacement worker,
+      // which initializes on the same reactive turn.
+      await clock.settle();
 
       assert(entry.value.disabledAt > 0);
       assertStringIncludes(entry.value.status, "TerminalError");
@@ -788,6 +816,10 @@ describe("SpaceManager", () => {
 
   it("disables pieces when worker initialization fails", async () => {
     await withMockWorker(async () => {
+      // The first worker never answers, so its initialize request times out and
+      // the space is disabled. Every worker built after it answers, so the
+      // replacement the failure path starts initializes and the recreation loop
+      // stops rather than spinning.
       MockWorker.respondByDefault = false;
       const entry = new FakeEntryCell(pieceEntry());
       const manager = new SpaceManager({
@@ -798,11 +830,11 @@ describe("SpaceManager", () => {
         deactivationTimeoutMs: 1,
         timeoutMs: 1,
       });
+      MockWorker.respondByDefault = true;
       manager.watch([entry as never]);
-      setTimeout(() => {
-        MockWorker.respondByDefault = true;
-      }, 0);
-      await new Promise((resolve) => setTimeout(resolve, 8));
+      // Advance past the first worker's initialize timeout (timeoutMs: 1); the
+      // rejection disables the space and starts a replacement that answers.
+      await clock.tick(1);
 
       assert(entry.value.disabledAt > 0);
       assertStringIncludes(entry.value.status, "Failed to initialize worker");
@@ -830,7 +862,7 @@ describe("SpaceManager", () => {
       await (manager as never as {
         setupWorkerController: () => Promise<void>;
       }).setupWorkerController();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await clock.settle();
 
       assertEquals(removed, true);
       await manager.stop();
@@ -1203,7 +1235,7 @@ describe("background piece service entry point", () => {
 
     try {
       signals.SIGINT();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await clock.settle();
     } catch (_error) {
       // The fake exit throws so the test can observe it.
     }
@@ -1269,7 +1301,7 @@ describe("background piece service entry point", () => {
     );
     try {
       callback();
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await clock.settle();
     } catch (_error) {
       // The fake exit throws so the test can observe it.
     }

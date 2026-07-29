@@ -10,7 +10,7 @@
  * edit makes the diff stop matching disk, which is exactly why it must not be
  * recomputed from the edited text.
  */
-import type { Document, Line, Span } from "./model.ts";
+import type { Document, Line, Span, ViewMode } from "./model.ts";
 import { cpLen } from "./ansi.ts";
 import {
   buildDiffDocument,
@@ -31,7 +31,7 @@ import {
   messageAt,
   sameCommit,
 } from "./commitmsg.ts";
-import type { Highlighter } from "./languages/language.ts";
+import type { Highlighter, Language } from "./languages/language.ts";
 import { languageForFile } from "./languages/language.ts";
 import type {
   EditableSource,
@@ -47,6 +47,7 @@ export function diffSource(
   edit: DiffEdit,
   cache?: WorkspaceCache,
   git?: GitRunner,
+  hasRenderedView = false,
 ): EditableSource {
   const files = [...edit.fileText.keys()];
   const expectedFiles = new Map(edit.fileText);
@@ -56,6 +57,12 @@ export function diffSource(
   const shownHead = git?.headSha() ?? null;
   const shownRef = git?.headRef?.() ?? null;
   let expectedHead = shownHead;
+  const renderedView = hasRenderedView
+    ? {
+      render: (source: Document) =>
+        reparse(ws, source.text, cache, completeFiles, "rendered"),
+    }
+    : {};
   const resolvedCommits = new Map<string, string | null>();
   const matchesShownHead = (sha: string): boolean => {
     if (!shownHead) return false;
@@ -93,6 +100,10 @@ export function diffSource(
     edit,
     hunkCommitOwners(edit.sourceText ?? "", git),
   );
+  const completeFiles: DiffHighlightFiles = {
+    fileText: expectedFiles,
+    hunks: saveHunks,
+  };
 
   // No file on disk backs this diff (nothing resolved or verified): read-only.
   // A deletion of an entire file has no new-side lines, but its empty workspace
@@ -108,6 +119,7 @@ export function diffSource(
       reason:
         "This diff doesn't match any file on disk, so there is nothing to edit.",
       parse: (text) => reparse(ws, text, cache),
+      ...renderedView,
       save: () => "Nothing to save — this diff matches no file on disk.",
     };
   }
@@ -207,14 +219,15 @@ export function diffSource(
     isDiff: true,
     editable: true,
     policy,
-    parse: (text) => reparse(ws, text, cache),
-    // Live highlighting recolours only the lines an edit changes and reuses the
-    // seed (buildDiffDocument's colours, including the file/hunk headers and the
-    // workspace-file syntax highlighting) for the rest. Cost tracks the edit,
-    // not the whole diff, and the unchanged headers never flicker colour. The
-    // full parse on pause restores workspace-verified spans across the edit.
+    parse: (text) => reparse(ws, text, cache, completeFiles),
+    ...renderedView,
+    // Live highlighting recolours the lines an edit changes and reuses the seed
+    // (buildDiffDocument's colours, including the file/hunk headers and the
+    // workspace-file syntax highlighting) for the rest. Languages whose colour
+    // can cross lines re-highlight the complete file. The full parse on
+    // pause restores workspace-verified spans across the edit.
     createHighlighter: (text, seed) =>
-      createDiffHighlighter(text, seed, edit.oldFileLines),
+      createDiffHighlighter(text, seed, edit.oldFileLines, completeFiles),
     dirtyLabels: (original, current) =>
       [
         ...collectFileOutputs(
@@ -974,15 +987,18 @@ function applyExpansion(
  * — the colours {@link buildDiffDocument} produced for the unedited text — for
  * every line the edit leaves alone. Edited removed lines use the complete old
  * file's spans. Other edited body lines use a marker-aware single-line parse.
- * The headers stay in the unchanged prefix or suffix. When no seed is given,
- * the highlighter renders every line itself.
+ * A language can ask to re-highlight complete files when its colours depend on
+ * preceding lines. The headers stay in the unchanged prefix or suffix. When no
+ * seed is given, the highlighter renders every line itself.
  */
 export function createDiffHighlighter(
   initialText: string,
   seed?: readonly Line[],
   oldFileLines?: readonly (readonly Line[] | null)[],
+  completeFiles?: DiffHighlightFiles,
 ): Highlighter {
   let text = initialText;
+  const completeHighlighters = new Map<string, Highlighter>();
   const initialRaw = initialText.split("\n");
   const initialModel = seed ? null : parseDiff(initialText);
   let lines: Line[] = (seed ??
@@ -993,6 +1009,18 @@ export function createDiffHighlighter(
         oldLineSpansAt(initialModel, index, oldFileLines),
       )
     )).slice();
+  if (!seed && initialModel) {
+    rehighlightTouchedHunks(
+      initialRaw,
+      initialModel,
+      lines,
+      0,
+      initialRaw.length,
+      oldFileLines,
+      completeFiles,
+      completeHighlighters,
+    );
+  }
   return {
     get lines() {
       return lines;
@@ -1001,6 +1029,7 @@ export function createDiffHighlighter(
       if (next === text) return lines;
       const oldRaw = text.split("\n");
       const newRaw = next.split("\n");
+      const oldHighlighted = lines;
       const minLen = Math.min(oldRaw.length, newRaw.length);
       let p = 0;
       while (p < minLen && oldRaw[p] === newRaw[p]) p++;
@@ -1011,6 +1040,13 @@ export function createDiffHighlighter(
       ) {
         s++;
       }
+      const localEdit = localDiffLineEdit(
+        oldRaw,
+        newRaw,
+        oldHighlighted,
+        p,
+        s,
+      );
       const model = parseDiff(next);
       const recoloured = newRaw.slice(p, newRaw.length - s).map((l, i) =>
         diffLineRender(
@@ -1023,10 +1059,370 @@ export function createDiffHighlighter(
         recoloured,
         lines.slice(oldRaw.length - s),
       );
+      rehighlightTouchedHunks(
+        newRaw,
+        model,
+        lines,
+        p,
+        newRaw.length - s,
+        oldFileLines,
+        completeFiles,
+        completeHighlighters,
+        localEdit,
+      );
       text = next;
       return lines;
     },
   };
+}
+
+interface DiffHighlightFiles {
+  readonly fileText: ReadonlyMap<string, string>;
+  readonly hunks: readonly MutableHunk[];
+}
+
+interface TouchedHunk {
+  readonly hunk: DiffHunk;
+  readonly info: MutableHunk | undefined;
+}
+
+interface CompleteHunk {
+  readonly hunk: DiffHunk;
+  readonly info: MutableHunk;
+  readonly fileName: string | undefined;
+}
+
+interface LocalDiffLineEdit {
+  readonly newDiffLine: number;
+  readonly before: Line;
+  readonly after: string;
+}
+
+function localDiffLineEdit(
+  oldRaw: readonly string[],
+  newRaw: readonly string[],
+  oldHighlighted: readonly Line[],
+  changedStart: number,
+  commonSuffix: number,
+): LocalDiffLineEdit | undefined {
+  const oldChanged = oldRaw.slice(
+    changedStart,
+    oldRaw.length - commonSuffix,
+  );
+  const newChanged = newRaw.slice(
+    changedStart,
+    newRaw.length - commonSuffix,
+  );
+  let beforeLine: number;
+  let afterLine: number;
+  if (
+    oldChanged.length === 1 && newChanged.length === 1 &&
+    (oldChanged[0][0] === "+" || oldChanged[0][0] === " ") &&
+    oldChanged[0][0] === newChanged[0][0]
+  ) {
+    beforeLine = changedStart;
+    afterLine = changedStart;
+  } else if (
+    oldChanged.length === 1 && newChanged.length === 2 &&
+    oldChanged[0][0] === " " &&
+    newChanged[0] === `-${oldChanged[0].slice(1)}` &&
+    newChanged[1][0] === "+"
+  ) {
+    beforeLine = changedStart;
+    afterLine = changedStart + 1;
+  } else {
+    return undefined;
+  }
+
+  const highlighted = oldHighlighted[beforeLine];
+  const raw = oldRaw[beforeLine];
+  if (!highlighted || !raw || raw.length === 0) return undefined;
+  const marker = raw[0];
+  const markerSpan = highlighted.spans[0];
+  if (
+    markerSpan?.col !== 0 || markerSpan.text !== marker ||
+    markerSpan.text.length !== 1
+  ) {
+    return undefined;
+  }
+  return {
+    newDiffLine: afterLine,
+    before: {
+      text: raw.slice(1),
+      spans: highlighted.spans.slice(1).map((span) => ({
+        ...span,
+        col: span.col - 1,
+      })),
+    },
+    after: newRaw[afterLine].slice(1),
+  };
+}
+
+/**
+ * Re-highlight touched sides with complete files when the language carries
+ * lexical state across lines. A fragment remains the fallback for an unverified
+ * hunk.
+ */
+function rehighlightTouchedHunks(
+  rawLines: string[],
+  model: DiffModel | null,
+  lines: Line[],
+  changedStart: number,
+  changedEnd: number,
+  oldFileLines?: readonly (readonly Line[] | null)[],
+  completeFiles?: DiffHighlightFiles,
+  completeHighlighters?: Map<string, Highlighter>,
+  localEdit?: LocalDiffLineEdit,
+): void {
+  if (!model) return;
+  const changedLast = Math.max(changedStart, changedEnd - 1);
+  const statefulFiles: {
+    fileIndex: number;
+    oldFileName: string | undefined;
+    newFileName: string | undefined;
+    oldLanguage: Language;
+    newLanguage: Language;
+    touched: TouchedHunk[];
+  }[] = [];
+  let hunkIndex = 0;
+  for (const [fileIndex, file] of model.files.entries()) {
+    const oldFileName = file.oldPath ?? file.newPath;
+    const newFileName = file.newPath ?? file.oldPath;
+    const oldLanguage = languageForFile(oldFileName);
+    const newLanguage = languageForFile(newFileName);
+    const touched: TouchedHunk[] = [];
+    for (const hunk of file.hunks) {
+      if (
+        (oldLanguage.highlightFullFileOnDiffEdit ||
+          newLanguage.highlightFullFileOnDiffEdit) &&
+        changedLast >= hunk.headerLine && changedStart <= hunk.endLine
+      ) {
+        touched.push({ hunk, info: completeFiles?.hunks[hunkIndex] });
+      }
+      hunkIndex++;
+    }
+    if (touched.length > 0) {
+      statefulFiles.push({
+        fileIndex,
+        oldFileName,
+        newFileName,
+        oldLanguage,
+        newLanguage,
+        touched,
+      });
+    }
+  }
+  if (statefulFiles.length === 0) return;
+
+  let fullNewFiles: Map<string, string> | undefined;
+  let completeHunksByPath: Map<string, CompleteHunk[]> | undefined;
+  const appliedNewPaths = new Set<string>();
+  for (const stateful of statefulFiles) {
+    const {
+      fileIndex,
+      oldFileName,
+      newFileName,
+      oldLanguage,
+      newLanguage,
+      touched,
+    } = stateful;
+    if (oldLanguage.highlightFullFileOnDiffEdit) {
+      const completeOld = oldFileLines?.[fileIndex];
+      for (const { hunk } of touched) {
+        if (completeOld) {
+          applyCompleteHunkSide(
+            rawLines,
+            model,
+            lines,
+            hunk,
+            "old",
+            completeOld,
+            oldFileName,
+          );
+          continue;
+        }
+        rehighlightHunkSide(
+          rawLines,
+          model,
+          lines,
+          hunk,
+          "old",
+          oldLanguage,
+          oldFileName,
+        );
+      }
+    }
+
+    if (newLanguage.highlightFullFileOnDiffEdit) {
+      const locallyHighlighted = localEdit !== undefined &&
+        touched.some(({ hunk }) =>
+          localEdit.newDiffLine > hunk.headerLine &&
+          localEdit.newDiffLine <= hunk.endLine
+        ) &&
+        newLanguage.highlightDiffLineEditLocally?.(
+          localEdit.before,
+          localEdit.after,
+        );
+      if (locallyHighlighted && localEdit) {
+        lines[localEdit.newDiffLine] = diffLineRender(
+          rawLines[localEdit.newDiffLine],
+          newFileName,
+          locallyHighlighted.spans,
+        );
+        continue;
+      }
+      const path = touched.find(({ info }) => info?.absPath && isWritable(info))
+        ?.info?.absPath;
+      const completeText = path && completeFiles
+        ? (fullNewFiles ??= collectFileOutputs(
+          rawLines.join("\n"),
+          completeFiles.fileText,
+          completeFiles.hunks,
+        )).get(path)
+        : undefined;
+      if (completeText !== undefined && path && completeFiles) {
+        if (appliedNewPaths.has(path)) continue;
+        appliedNewPaths.add(path);
+        let completeHighlighter = completeHighlighters?.get(path);
+        let completeNew: readonly Line[];
+        if (!completeHighlighter) {
+          completeHighlighter = newLanguage.createHighlighter(
+            completeText,
+            newFileName,
+          );
+          completeHighlighters?.set(path, completeHighlighter);
+          completeNew = completeHighlighter.lines;
+        } else {
+          completeNew = completeHighlighter.update(completeText);
+        }
+        completeHunksByPath ??= indexCompleteHunks(model, completeFiles);
+        applyCompleteNewFile(
+          rawLines,
+          model,
+          lines,
+          completeNew,
+          completeHunksByPath.get(path) ?? [],
+        );
+      } else {
+        for (const { hunk } of touched) {
+          rehighlightHunkSide(
+            rawLines,
+            model,
+            lines,
+            hunk,
+            "new",
+            newLanguage,
+            newFileName,
+          );
+        }
+      }
+    }
+  }
+}
+
+function indexCompleteHunks(
+  model: DiffModel,
+  completeFiles: DiffHighlightFiles,
+): Map<string, CompleteHunk[]> {
+  const byPath = new Map<string, CompleteHunk[]>();
+  let index = 0;
+  for (const file of model.files) {
+    const fileName = file.newPath ?? file.oldPath;
+    for (const hunk of file.hunks) {
+      const info = completeFiles.hunks[index++];
+      if (!info?.absPath || !isWritable(info)) continue;
+      const entries = byPath.get(info.absPath) ?? [];
+      entries.push({ hunk, info, fileName });
+      byPath.set(info.absPath, entries);
+    }
+  }
+  return byPath;
+}
+
+function applyCompleteNewFile(
+  rawLines: string[],
+  model: DiffModel,
+  lines: Line[],
+  complete: readonly Line[],
+  entries: readonly CompleteHunk[],
+): void {
+  const ordered = [...entries].sort((a, b) =>
+    spliceStart(a.info) - spliceStart(b.info)
+  );
+  let delta = 0;
+  for (const { hunk, info, fileName } of ordered) {
+    const start = spliceStart(info);
+    applyCompleteHunkSide(
+      rawLines,
+      model,
+      lines,
+      hunk,
+      "new",
+      complete,
+      fileName,
+      start + delta - spliceStart(hunk),
+    );
+    delta += hunk.newCount - info.newCount;
+  }
+}
+
+function applyCompleteHunkSide(
+  rawLines: string[],
+  model: DiffModel,
+  lines: Line[],
+  hunk: DiffHunk,
+  side: "old" | "new",
+  complete: readonly Line[],
+  fileName: string | undefined,
+  lineOffset = 0,
+): void {
+  for (let line = hunk.headerLine + 1; line <= hunk.endLine; line++) {
+    const entry = model.lines[line];
+    const sourceLine = side === "old" ? entry?.oldLine : entry?.newLine;
+    const included = side === "old"
+      ? entry?.kind === "del"
+      : entry?.kind === "ctx" || entry?.kind === "add";
+    if (!included || sourceLine === undefined) continue;
+    lines[line] = diffLineRender(
+      rawLines[line],
+      fileName,
+      complete[sourceLine + lineOffset]?.spans,
+    );
+  }
+}
+
+function rehighlightHunkSide(
+  rawLines: string[],
+  model: DiffModel,
+  lines: Line[],
+  hunk: DiffHunk,
+  side: "old" | "new",
+  language: Language,
+  fileName: string | undefined,
+): void {
+  const fragment: { diffLine: number; code: string }[] = [];
+  for (let line = hunk.headerLine + 1; line <= hunk.endLine; line++) {
+    const kind = model.lines[line]?.kind;
+    const included = side === "old"
+      ? kind === "ctx" || kind === "del"
+      : kind === "ctx" || kind === "add";
+    if (included) {
+      fragment.push({ diffLine: line, code: rawLines[line].slice(1) });
+    }
+  }
+  const highlighted = language.highlightLines(
+    fragment.map((entry) => entry.code).join("\n"),
+    fileName,
+  );
+  for (let index = 0; index < fragment.length; index++) {
+    const { diffLine } = fragment[index];
+    if (side === "old" && model.lines[diffLine]?.kind === "ctx") continue;
+    lines[diffLine] = diffLineRender(
+      rawLines[diffLine],
+      fileName,
+      highlighted[index]?.spans,
+    );
+  }
 }
 
 /**
@@ -1185,20 +1581,87 @@ export const _internal = {
   dropHeaderBetween,
   joinAdjacent,
   oldLineSpansAt,
+  changedStatefulFileOutputs,
 };
 
 function reparse(
   ws: DiffWorkspace,
   text: string,
   cache?: WorkspaceCache,
+  completeFiles?: DiffHighlightFiles,
+  viewMode: ViewMode = "source",
 ): Document {
   const model = parseDiff(text);
   // An edit keeps every line's marker, so the text still parses as a diff; if a
   // pathological edit breaks that, fall back to a plain parse so highlighting
   // still updates.
-  return model
-    ? buildDiffDocument(text, model, ws, cache).doc
-    : languageForFile(undefined).parseDocument(text);
+  if (!model) return languageForFile(undefined).parseDocument(text);
+  if (!completeFiles) {
+    return buildDiffDocument(text, model, ws, cache, viewMode).doc;
+  }
+  const editedFiles = collectFileOutputs(
+    text,
+    completeFiles.fileText,
+    completeFiles.hunks,
+  );
+  const statefulPaths = new Set<string>();
+  let hunkIndex = 0;
+  for (const file of model.files) {
+    const oldLanguage = languageForFile(file.oldPath ?? file.newPath);
+    const newLanguage = languageForFile(file.newPath ?? file.oldPath);
+    const needsCompleteFile = oldLanguage.highlightFullFileOnDiffEdit ||
+      newLanguage.highlightFullFileOnDiffEdit;
+    for (const _hunk of file.hunks) {
+      const path = completeFiles.hunks[hunkIndex++]?.absPath;
+      if (needsCompleteFile && path) statefulPaths.add(path);
+    }
+  }
+  const statefulEdits = changedStatefulFileOutputs(
+    editedFiles,
+    completeFiles.fileText,
+    statefulPaths,
+  );
+  if (statefulEdits.size === 0) {
+    return buildDiffDocument(text, model, ws, cache, viewMode).doc;
+  }
+  // Reconstructed files make the edited new side the complete source used for
+  // syntax highlighting and diff verification.
+  const editedWorkspace: DiffWorkspace = {
+    resolve: (path) => ws.resolve(path),
+    read: (path) => {
+      const edited = statefulEdits.get(path);
+      return edited === undefined ? ws.read(path) : edited;
+    },
+    ...(ws.readBlob
+      ? { readBlob: (object: string) => ws.readBlob!(object) }
+      : {}),
+    ...(ws.readBlobs
+      ? {
+        readBlobs: (objects: readonly string[]) => ws.readBlobs!(objects),
+      }
+      : {}),
+  };
+  const editedCache: WorkspaceCache = new Map(cache);
+  for (const path of statefulEdits.keys()) editedCache.delete(path);
+  return buildDiffDocument(
+    text,
+    model,
+    editedWorkspace,
+    editedCache,
+    viewMode,
+  ).doc;
+}
+
+function changedStatefulFileOutputs(
+  editedFiles: ReadonlyMap<string, string>,
+  baselines: ReadonlyMap<string, string>,
+  statefulPaths: ReadonlySet<string>,
+): Map<string, string> {
+  return new Map(
+    [...editedFiles].filter(([path, edited]) =>
+      statefulPaths.has(path) && edited !== baselines.get(path)
+    ),
+  );
 }
 
 interface FileSplice {

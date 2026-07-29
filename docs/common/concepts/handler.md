@@ -212,6 +212,8 @@ deno task cf piece inspect --piece <ID>
 ```
 
 See [Testing Handlers via CLI](../workflows/handlers-cli-testing.md) for the full workflow.
+Runtime code that needs to invoke a handler stream directly should follow
+[Invoking Handlers from Outside a Pattern](../../development/handlers/invocation-outside-pattern.md).
 
 ## Summary
 
