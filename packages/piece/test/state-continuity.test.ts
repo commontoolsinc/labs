@@ -7,6 +7,8 @@ import { assertPatternSchemasBackwardCompatible } from "../src/schema-compatibil
 import {
   materializeOver,
   openFileBackedRuntime,
+  readVintageArgument,
+  vintageArgumentLink,
   vintageRoot,
   type VintageRuntime,
 } from "./state-continuity-harness.ts";
@@ -32,6 +34,17 @@ import {
  *   only. The two result schemas are byte-identical, so no contract check can
  *   see it, and nothing throws — the data is simply gone. What a pattern
  *   writes is not determined by its schema.
+ * - Typing a key on an OPEN argument object: this tier only, and for a
+ *   sharper reason than the one above. Tier 1 does not fail to see it — it
+ *   WAIVES it, on the documented ground that the runner validates merged
+ *   durable arguments. Measured: on this path it does not.
+ *
+ * Nothing else on the obvious list earns a case here. Dropping a result field,
+ * narrowing one to a disjoint type, and moving a field between nesting levels
+ * are all contract changes Tier 1 rejects outright ("existing result field was
+ * removed", "type … is not accepted by the candidate schema" — a nesting move
+ * reports as a removal). Adding cases for them would grow the slowest tier
+ * without covering anything the fastest one misses.
  */
 
 const signer = await Identity.fromPassphrase("state continuity vintage");
@@ -161,6 +174,60 @@ const RENAMED_STORAGE_KEY: RuntimeProgram = {
   }],
 };
 
+/**
+ * The argument-side vintage: an OPEN argument object, which is what lets the
+ * old version store `count` as a string legally.
+ *
+ * No CFC label here, unlike the result-side fixtures above, and that is the
+ * point rather than an oversight: the CFC envelope exists to give the RESULT
+ * schema something to merge against. An argument travels the runner's setup
+ * validation instead, so a label would add a second mechanism to a case that
+ * is about the first one.
+ *
+ * `[key: string]: any` is load-bearing. `Record<string, unknown>` does NOT
+ * produce an open object — `unknown` maps to `{type:"unknown"}`, so
+ * `additionalProperties` comes out non-boolean and Tier 1's evolution
+ * allowance (which requires a boolean) never applies.
+ */
+const OLD_OPEN_ARGUMENT: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      "import { Writable, pattern } from 'commonfabric';",
+      "interface Args { [key: string]: any }",
+      "interface Output { items: Writable<string[]>; }",
+      "export default pattern<Args, Output>(() => {",
+      "  const items = new Writable<string[]>([]).for('items');",
+      "  return { items };",
+      "});",
+      "",
+    ].join("\n"),
+  }],
+};
+
+/**
+ * Same open object, but `count` is now a NAMED optional number — the shape
+ * Tier 1 waves through on the documented promise that the runner will validate
+ * merged durable arguments against it.
+ */
+const NEW_TYPES_THE_ARGUMENT_KEY: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [{
+    name: "/main.tsx",
+    contents: [
+      "import { Writable, pattern } from 'commonfabric';",
+      "interface Args { count?: number; [key: string]: any }",
+      "interface Output { items: Writable<string[]>; }",
+      "export default pattern<Args, Output>(() => {",
+      "  const items = new Writable<string[]>([]).for('items');",
+      "  return { items };",
+      "});",
+      "",
+    ].join("\n"),
+  }],
+};
+
 interface Captured {
   snapshot: string;
   dir: string;
@@ -212,10 +279,16 @@ describe("pattern update over captured prior state", () => {
     }
   });
 
-  /** Write a space with `program`, populate it, and snapshot it. */
+  /**
+   * Write a space with `program`, populate it, and snapshot it.
+   *
+   * `argument`, when given, is stored in the root's durable ARGUMENT document
+   * — the other half of what a pattern update has to preserve.
+   */
   async function capture(
     program: RuntimeProgram,
     items: string[],
+    argument?: Record<string, unknown>,
   ): Promise<Captured> {
     const dir = await tempDir("continuity-capture-");
     const vintage = await openRuntime(dir);
@@ -253,6 +326,25 @@ describe("pattern update over captured prior state", () => {
       writeError?.message,
       "capture could not write the vintage's prior state",
     ).toBeUndefined();
+
+    if (argument !== undefined) {
+      const link = await vintageArgumentLink(
+        vintage,
+        materialized.resultSchema,
+      );
+      // Written schema-LESS, which is how the vintage's own open argument
+      // object accepts it. Writing it under the new candidate's schema would
+      // beg the question the case asks.
+      const { error: argError } = await vintage.runtime.editWithRetry((tx) => {
+        vintage.runtime.getCellFromLink(link, undefined, tx)
+          .asSchema(undefined as never)
+          .set(argument as never);
+      });
+      expect(
+        argError?.message,
+        "capture could not write the vintage's durable argument",
+      ).toBeUndefined();
+    }
     await vintage.runtime.idle();
 
     const snapshot = `${dir}/vintage.sqlite`;
@@ -260,11 +352,19 @@ describe("pattern update over captured prior state", () => {
     return { snapshot, dir };
   }
 
-  /** Open a fresh runtime over `captured` and materialize `program` on it. */
-  async function replay(captured: Captured, program: RuntimeProgram) {
+  /**
+   * Open a fresh runtime over `captured`, materialize `program` on it, and
+   * hand back the runtime as well — for reads that go beyond the root value.
+   */
+  async function replayOn(captured: Captured, program: RuntimeProgram) {
     const dir = await tempDir("continuity-replay-");
     const vintage = await openRuntime(dir, captured.snapshot);
-    return await materializeOver(vintage, program);
+    return { vintage, outcome: await materializeOver(vintage, program) };
+  }
+
+  /** Open a fresh runtime over `captured` and materialize `program` on it. */
+  async function replay(captured: Captured, program: RuntimeProgram) {
+    return (await replayOn(captured, program)).outcome;
   }
 
   it("captures a real space and reads its state back from the snapshot", async () => {
@@ -369,6 +469,99 @@ describe("pattern update over captured prior state", () => {
         "REWRITTEN, not deleted — Tier 2 exists for this class and Tier 1 " +
         "structurally cannot see it",
     ).toEqual([]); // …not ["alpha", "beta"].
+  });
+
+  it("strands a durable ARGUMENT the new version's schema no longer accepts", async () => {
+    // The second class that is Tier 2's alone — and the one where Tier 1 does
+    // not merely fail to see the problem, it DEFERS it by name.
+    //
+    // `schema-compatibility.ts` has a deliberate evolution allowance: over an
+    // OPEN argument object, a candidate may name a brand-new optional field of
+    // any type and the contract check accepts it unconditionally. The doc
+    // comment justifies that by asserting "the runner validates the piece's
+    // merged durable arguments against the new schema transactionally before
+    // committing such an update".
+    //
+    // Measured here: on the production repair path it does not. The guard is
+    // real — `Runner.validateArgument` → `validateSchemaValue` rejects this
+    // exact pair in isolation — but `applySetupState` only reaches it when the
+    // stored setup differs, and stamping `patternIdentity` before `runSynced`
+    // (which REQUIRES it, see the harness) is what makes the setup look the
+    // same. So the update lands with no refusal and the stored value stops
+    // being readable. The bytes survive; the contract that could reach them
+    // does not.
+    //
+    // Not measured, and worth knowing before this is read as the whole story:
+    // the `pattern-updater` default-root / `setupNeedsRepair` route is a
+    // different entry into setup and may or may not reach the validator.
+    const captured = await capture(OLD_OPEN_ARGUMENT, [], { count: "seven" });
+
+    // Tier 1 waves the pair through — the premise of the case, so it is
+    // asserted IN the case rather than taken on trust from another one.
+    const tier1 = await replayOn(captured, OLD_OPEN_ARGUMENT);
+    const previous = await tier1.vintage.runtime.patternManager.compilePattern(
+      OLD_OPEN_ARGUMENT,
+      { space: tier1.vintage.space as never },
+    );
+    const candidate = await tier1.vintage.runtime.patternManager.compilePattern(
+      NEW_TYPES_THE_ARGUMENT_KEY,
+      { space: tier1.vintage.space as never },
+    );
+    expect(
+      (previous.argumentSchema as { additionalProperties?: unknown })
+        ?.additionalProperties,
+      "the vintage's argument object is not OPEN, so Tier 1's evolution " +
+        "allowance never applies and this case is testing nothing",
+    ).toBe(true);
+    expect(() => assertPatternSchemasBackwardCompatible(previous, candidate))
+      .not.toThrow();
+
+    // CONTROL, in this case for the reason the storage-move case has one: an
+    // argument that reads back empty is also what a fixture that never stored
+    // one looks like.
+    expect(tier1.outcome.error).toBeUndefined();
+    const controlLink = await vintageArgumentLink(
+      tier1.vintage,
+      tier1.outcome.resultSchema,
+    );
+    expect(
+      await readVintageArgument(tier1.vintage, controlLink, undefined),
+      "CONTROL failed, so the case below proves nothing: the vintage itself " +
+        "cannot read the durable argument it captured",
+    ).toEqual({ count: "seven" });
+
+    // Now the candidate. No refusal…
+    const replayed = await replayOn(captured, NEW_TYPES_THE_ARGUMENT_KEY);
+    expect(
+      replayed.outcome.error,
+      "the update was refused. If the runner learned to validate merged " +
+        "durable arguments on this path, that is the FIX — rewrite this case " +
+        "to assert the refusal, and drop the deferral note above",
+    ).toBeUndefined();
+
+    const link = await vintageArgumentLink(
+      replayed.vintage,
+      replayed.outcome.resultSchema,
+    );
+    // …the bytes are still on disk…
+    expect(
+      await readVintageArgument(replayed.vintage, link, undefined),
+      "the stored argument bytes are gone, which is a DIFFERENT failure from " +
+        "the one this case pins — the update deleted state rather than " +
+        "leaving it unreachable",
+    ).toEqual({ count: "seven" });
+    // …and nothing reading through the new contract can see them.
+    expect(
+      await readVintageArgument(
+        replayed.vintage,
+        link,
+        replayed.outcome.argumentSchema,
+      ),
+      "the new argument schema can now read a value the old version stored " +
+        "under an incompatible type. If that is deliberate, this case should " +
+        "be REWRITTEN rather than deleted: Tier 1 waives this class on the " +
+        "promise that something downstream checks it",
+    ).toEqual({});
   });
 
   it("records which classes Tier 1 already covers", async () => {

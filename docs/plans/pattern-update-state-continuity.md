@@ -31,7 +31,7 @@ and it already names this tier as required work — "CI and golden replay tests
 must exercise representative prior state and verify that the proposed source
 still reads and preserves it".
 
-Two facts make that non-optional:
+Three facts make that non-optional:
 
 - **The automatic updater performs no structural check at all.** `cf piece
   setsrc` refuses an incompatible replacement, but `PatternUpdater` compiles,
@@ -43,6 +43,12 @@ Two facts make that non-optional:
   document written under the old name becomes unreachable. Nothing throws; the
   data is simply gone. A document is precisely the thing a schema check does
   not have.
+- **Tier 1 hands one class back on purpose.** Over an OPEN argument object it
+  lets a candidate name a new optional field of any type, on the stated ground
+  that the runner validates merged durable arguments before committing such an
+  update. Measured: on the production repair path it does not. A value the old
+  version stored legally becomes unreadable, with nothing raised anywhere. Two
+  tiers each assuming the other covers a class is how it stays uncovered.
 
 The motivating incident is the 2026-07-22 estuary brick: a home root doc
 predating six separately-added required fields, where "first-absence-wins, so
@@ -80,8 +86,9 @@ Measured on branch `tier2`, not assumed:
 | The same vintage + a candidate differing ONLY by `Default<[]>` commits cleanly, with prior state intact | measured: `{"items":["alpha","beta"],"favorites":[]}` |
 | Tier 1 **does** catch the additive-required class | measured: `assertPatternSchemasBackwardCompatible` throws "result.favorites: newly required result field has no default" |
 | Tier 1 is blind to a storage-key move | measured: result schemas byte-identical, no issue raised, replayed data empty |
-| Every case discriminates — each goes red under a mutation of the thing it claims to test | measured by mutation: dropping `expectedPatternIdentity` reds the rejection case; no-oping the snapshot restore reds **four of five** (the fifth takes no snapshot); undoing `.for('itemList')` reds the storage-move case |
-| A stranded-data assertion needs its control in the SAME case | measured: with the restore no-oped, the storage-move case alone stayed GREEN — `items === []` is also what an unrestored fixture reads. It now replays the vintage over the same snapshot first, which is what moved the restore mutation from three reds to four |
+| Every case discriminates — each goes red under a mutation of the thing it claims to test | measured by mutation: dropping `expectedPatternIdentity` reds the rejection case; no-oping the snapshot restore reds **five of six** (the sixth takes no snapshot); undoing `.for('itemList')` reds the storage-move case; giving the argument candidate a COMPATIBLE type reds the argument case |
+| A stranded-data assertion needs its control in the SAME case | measured: with the restore no-oped, the storage-move case alone stayed GREEN — `items === []` is also what an unrestored fixture reads. It now replays the vintage over the same snapshot first, and the argument case carries the same control for the same reason |
+| Tier 1 **defers** the open-argument evolution class to a runtime guard that the update path does not reach | measured: over an open argument object, a candidate naming a new optional field of any type is waved through (`schema-compatibility.ts`, "Open objects remain evolvable…"), on the doc comment's promise that "the runner validates the piece's merged durable arguments against the new schema". On the production repair call it does not — the update lands with no refusal and `{count:"seven"}` stops being readable through the new schema. `Runner.validateArgument` → `validateSchemaValue` DOES reject the pair in isolation; `applySetupState` only reaches it when the stored setup differs, and stamping `patternIdentity` before `runSynced` is what makes it look the same |
 | Tier 1 also catches field REMOVAL, disjoint TYPE change, and a field moved between nesting levels | read off `schema-compatibility.ts` (messages, not line numbers, are the durable anchor): removal → "existing `<role>` field was removed" (rendered: `result.status: existing result field was removed`); disjoint type → "type … is not accepted by the candidate schema"; a nesting move is *seen* as a removal and reports as one. So none of those is a second Tier-2-only class — they are contract changes. The storage-move stays the only stranding class a contract check structurally cannot see |
 | Two roots in ONE space store would collide on a single fixed cause | `getCell` derives the entity id as `createRef({}, cause)` (`runtime.ts`), and that derivation does not include the space. Fixed by keying the cause per pattern (`vintageRoot(…, key)`); see the stage-3 note below |
 
@@ -159,8 +166,11 @@ Gate: green on `tier2`. **Done.**
       `Default<>`, clean with it, asserting the specific CFC token
 - [x] Prefer `PatternUpdater` semantics over `setsrc`, and pin where they differ
 - [x] Cover the storage-move class — the one Tier 1 structurally cannot see
+- [x] Cover the open-argument class — the one Tier 1 hands back on purpose,
+      populating the root's durable ARGUMENT document rather than only its
+      result cells
 
-Gate: **met.** `packages/piece/test/state-continuity.test.ts`, 5 steps green,
+Gate: **met.** `packages/piece/test/state-continuity.test.ts`, 6 steps green,
 whole package suite green.
 
 Things this stage settled that the plan had wrong or open:
@@ -261,6 +271,14 @@ Gate: a memory migration cannot land without replaying pre-migration stores.
   or whether the fallback needs pinning too.
 - **Where does the replay run?** It needs a real runtime and is heavier than
   Tier 1. Its own job, or folded into an existing one.
+- **Should the open-argument class be FIXED rather than pinned?** Stage 2
+  pins the current behaviour — the update lands and the stored value stops
+  being readable. But Tier 1 waives that class specifically because the runner
+  is supposed to validate merged durable arguments, so the honest resolutions
+  are to make the validator reachable on this path or to stop waiving it in
+  Tier 1. Pinning it is a description, not an endorsement. Unmeasured, and it
+  decides this: whether the `pattern-updater` default-root / `setupNeedsRepair`
+  route reaches the validator where the repair call does not.
 
 ## References
 

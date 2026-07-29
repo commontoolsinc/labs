@@ -47,6 +47,12 @@ import {
 } from "../../runner/src/storage/v2.ts";
 import { type Cell, Runtime } from "@commonfabric/runner";
 import type { RuntimeProgram } from "@commonfabric/runner";
+// Relative into the runner's internals for the same reason as the test
+// utilities below: `getMetaLink` and the link shape it returns are how the
+// runtime itself reaches a root's argument document, and re-deriving that
+// here would be a second spelling to drift.
+import { getMetaLink } from "../../runner/src/link-utils.ts";
+import type { NormalizedFullLink } from "../../runner/src/link-types.ts";
 // Relative into the runner's test utilities: they are not part of the runner's
 // public exports, and the loopback-server auth handshake has exactly one
 // correct spelling — duplicating it here would be a second copy to drift.
@@ -223,6 +229,53 @@ export function vintageRoot<T>(
 }
 
 /**
+ * The link to a root's durable ARGUMENT document.
+ *
+ * State a pattern RETURNS lives in the cells it owns (`.for('items')`); state
+ * it RECEIVES lives in a separate document the root points at through its
+ * `argument` meta link. The two travel different code paths on an update — the
+ * result doc goes through the CFC schema merge, the argument through the
+ * runner's setup validation — so a tier that only ever populates results
+ * measures half the surface.
+ *
+ * Returned as a link rather than a `Cell` because callers need to build the
+ * cell against their own transaction, and because the schema to read it under
+ * is the question (a value stored under the OLD argument schema is exactly
+ * what a NEW one may no longer accept).
+ */
+export async function vintageArgumentLink(
+  vintage: VintageRuntime,
+  resultSchema: unknown,
+  rootKey: string = DEFAULT_VINTAGE_ROOT_KEY,
+): Promise<NormalizedFullLink> {
+  const root = vintageRoot<Record<string, unknown>>(
+    vintage,
+    resultSchema,
+    rootKey,
+  );
+  await root.sync();
+  const link = getMetaLink(root as never, "argument");
+  if (link === undefined) {
+    throw new Error(
+      "vintage root has no argument meta link — it was never set up, so " +
+        "there is no durable argument to capture or replay",
+    );
+  }
+  return link;
+}
+
+/** Read a vintage's stored argument under `schema` (`undefined` = raw). */
+export async function readVintageArgument(
+  vintage: VintageRuntime,
+  link: NormalizedFullLink,
+  schema: unknown,
+): Promise<unknown> {
+  const cell = vintage.runtime.getCellFromLink(link).asSchema(schema as never);
+  await cell.sync();
+  return cell.get();
+}
+
+/**
  * A readable message for anything thrown out of a setup commit.
  *
  * Not every rejection on this path is an `Error`: the storage layer surfaces
@@ -271,6 +324,8 @@ export interface MaterializeOutcome {
    * agree.
    */
   resultSchema: unknown;
+  /** The candidate's compiled argument schema, for the same reason. */
+  argumentSchema: unknown;
 }
 
 /**
@@ -324,19 +379,22 @@ export async function materializeOver(
     );
   }
 
-  const resultSchema = pattern.resultSchema;
+  const schemas = {
+    resultSchema: pattern.resultSchema,
+    argumentSchema: pattern.argumentSchema,
+  };
   try {
     await runtime.runSynced(root.withTx(), pattern, undefined, {
       expectedPatternIdentity: ref,
     });
     await runtime.idle();
   } catch (error) {
-    return { error: describeError(error), resultSchema };
+    return { error: describeError(error), ...schemas };
   }
   await root.pull();
   return {
     value: root.get() as Record<string, unknown> | undefined,
-    resultSchema,
+    ...schemas,
   };
 }
 
