@@ -370,8 +370,7 @@ await input.pressSequentially("user@example.com");
   label="Review"
   size="sm"
   style="--cf-chip-background: linear-gradient(135deg, #5f89ff, #4d77fb); --cf-chip-color: white"
->
-</cf-chip>
+></cf-chip>
 
 <!-- Removable -->
 <cf-chip label="Tag" removable></cf-chip>

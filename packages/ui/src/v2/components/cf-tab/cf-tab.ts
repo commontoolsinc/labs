@@ -83,8 +83,7 @@ export class CFTab extends BaseElement {
       }
 
       /* Vertical orientation styles */
-      :host-context(cf-tab-list[orientation="vertical"])
-        .tab[data-selected="true"]::after {
+      :host-context(cf-tab-list[orientation="vertical"]) .tab[data-selected="true"]::after {
         top: 0;
         bottom: 0;
         left: -1px;
@@ -123,8 +122,7 @@ export class CFTab extends BaseElement {
       }
 
       /* Hover on unselected chip tab */
-      :host([data-variant="chip"])
-        .tab:hover:not(:disabled):not([data-selected="true"]) {
+      :host([data-variant="chip"]) .tab:hover:not(:disabled):not([data-selected="true"]) {
         background: var(
           --cf-theme-color-surface-hover,
           var(--cf-colors-gray-200, #eceef1)
@@ -140,9 +138,9 @@ export class CFTab extends BaseElement {
         );
         border: 1px solid
           var(
-            --cf-theme-color-border,
-            var(--cf-colors-gray-300, #d5d7dd)
-          );
+          --cf-theme-color-border,
+          var(--cf-colors-gray-300, #d5d7dd)
+        );
         color: var(--cf-theme-color-text, var(--cf-colors-gray-900, #16181d));
         font-weight: var(--cf-font-weight-medium, 500);
       }
