@@ -1185,8 +1185,8 @@ Section 4.5.
 - Sparse arrays (arrays with holes) are supported; holes are distinct from
   `undefined` and are represented using run-length encoding in serialized forms
   (see below and Section 3 of `3-json-encoding.md` for the specific JSON encoding)
-- Non-index keys cause rejection: both enumerable named (string-keyed)
-  properties and symbol-keyed properties of any enumerability
+- Non-index keys cause rejection, `length` aside: named (string-keyed) and
+  symbol-keyed properties alike, whether or not they are enumerable
 
 > **Holes vs. `undefined`.** A hole (sparse slot) is distinct from an
 > explicitly-set `undefined` element. Given `const a = [1, , 3]`, index `1` is

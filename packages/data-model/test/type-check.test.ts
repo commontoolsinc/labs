@@ -304,6 +304,12 @@ describe("type-check", () => {
         expect(isFabricValue(arr)).toBe(false);
       });
 
+      it("returns `false` for an array with a non-enumerable named property", () => {
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, "foo", { value: "bar", enumerable: false });
+        expect(isFabricValue(arr)).toBe(false);
+      });
+
       it("returns `false` for a symbol-keyed-property array nested in the graph", () => {
         const arr = [1, 2];
         (arr as unknown as Record<symbol, unknown>)[Symbol.for("extra")] = 42;

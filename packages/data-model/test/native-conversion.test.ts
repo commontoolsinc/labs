@@ -1535,6 +1535,14 @@ describe("native-conversion", () => {
         );
       });
 
+      it("throws for an array with a non-enumerable named property", () => {
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, "foo", { value: "bar", enumerable: false });
+        expect(() => fabricFromNativeValue(arr)).toThrow(
+          "Cannot store array with non-index properties",
+        );
+      });
+
       it("throws for a nested array with a symbol-keyed property", () => {
         const arr = [1, 2];
         (arr as unknown as Record<symbol, unknown>)[Symbol.for("extra")] = 42;

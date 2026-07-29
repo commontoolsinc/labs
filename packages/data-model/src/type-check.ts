@@ -41,7 +41,7 @@ export function isFabricValueLayer(
       }
       if (Array.isArray(value)) {
         // Arrays with `undefined` elements and sparse holes are accepted, but
-        // not arrays with enumerable named or symbol-keyed properties.
+        // not arrays carrying named or symbol-keyed properties.
         return isArrayWithOnlyIndexProperties(value);
       }
       // Plain objects are accepted; class instances are not (except
@@ -69,9 +69,9 @@ export function isFabricValueLayer(
  * Returns `true` for any scalar (`null`, `undefined`, `boolean`, `number`
  * -- including `-0`, `NaN`, and `±Infinity` -- `string`, `bigint`, and
  * registry-interned (`Symbol.for(...)`) symbols), any `FabricInstance` or
- * `FabricPrimitive`, an array of `FabricValue`s with no enumerable named
- * properties and no symbol-keyed ones (sparse holes allowed), or a plain
- * object whose values are all
+ * `FabricPrimitive`, an array of `FabricValue`s with no named or symbol-keyed
+ * properties, `length` aside (sparse holes allowed), or a plain object whose
+ * values are all
  * `FabricValue`s. Returns `false` for a `function` or a unique (uninterned)
  * symbol -- whether the value itself or reached anywhere within it -- and for
  * any other class instance (`Date`, `Map`, ...) not representable as a
@@ -133,8 +133,8 @@ export function isFabricValue(value: unknown): value is FabricValue {
       // type and does not recurse.
       return true;
     } else if (Array.isArray(item)) {
-      // Arrays with enumerable named (non-index) or symbol-keyed properties
-      // have no fabric representation.
+      // Arrays with named (non-index) or symbol-keyed properties have no
+      // fabric representation.
       if (!isArrayWithOnlyIndexProperties(item)) return false;
       for (let i = 0; i < item.length; i++) {
         if (!(i in item)) continue; // sparse hole

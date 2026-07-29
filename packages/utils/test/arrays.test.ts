@@ -169,12 +169,50 @@ describe("arrays", () => {
       expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
     });
 
-    it("returns `true` for an array with a non-enumerable string-keyed property", () => {
-      // Non-enumerable string keys are out of scope: every array has one
-      // (`length`), and they are conventionally implementation detail.
+    it("returns `false` for an array with a non-enumerable string-keyed property", () => {
       const arr = [1, 2, 3];
       Object.defineProperty(arr, "foo", { value: "bar", enumerable: false });
+      expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
+    });
+
+    it("returns `false` for an array with a non-enumerable index-shaped named key", () => {
+      // `"01"` is a named property, not an index, so it is rejected on the same
+      // footing as any other non-enumerable named key.
+      const arr = [1, 2, 3];
+      Object.defineProperty(arr, "01", { value: "bar", enumerable: false });
+      expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
+    });
+
+    it("returns `true` for an array whose only non-index key is `length`", () => {
+      // `length` is intrinsic to every array, so it can never be disqualifying.
+      const arr = [1, 2, 3];
+      expect(Object.getOwnPropertyNames(arr)).toContain("length");
       expect(isArrayWithOnlyIndexProperties(arr)).toBe(true);
+    });
+
+    it("returns `true` after `length` is redefined", () => {
+      // Redefining does not re-create the property, so it keeps its original
+      // position in own-key order.
+      const arr = [1, 2, 3];
+      Object.defineProperty(arr, "length", { value: 3, writable: true });
+      expect(isArrayWithOnlyIndexProperties(arr)).toBe(true);
+    });
+
+    it("returns `false` when a named property outlives a deleted sibling", () => {
+      // Deleting one named property must not restore index-only-ness while
+      // another remains.
+      const arr = [1, 2, 3] as unknown[] & { foo?: string; bar?: string };
+      arr.foo = "a";
+      arr.bar = "b";
+      delete arr.foo;
+      expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
+    });
+
+    it("returns `true` for an `Array` subclass instance with only indices", () => {
+      class Sub extends Array {}
+      const sub = new Sub();
+      sub.push(1, 2);
+      expect(isArrayWithOnlyIndexProperties(sub)).toBe(true);
     });
 
     describe("returns `false` for non-canonical index-shaped named keys", () => {

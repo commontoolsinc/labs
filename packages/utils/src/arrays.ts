@@ -71,47 +71,33 @@ export function isArrayIndexPropertyName(name: string): boolean {
 }
 
 /**
- * Indicates whether all of the given array's own properties are array indices,
- * that is, it has neither enumerable named (string-keyed) properties nor
- * symbol-keyed properties. Returns `true` for sparse arrays.
+ * Indicates whether every one of the given array's own properties is an array
+ * index, `length` aside. Named (string-keyed) properties and symbol-keyed
+ * properties alike cause rejection, whether or not they are enumerable, because
+ * none of them have any representation as array content. Returns `true` for
+ * sparse arrays, whose holes are simply absent properties.
  *
- * Symbol-keyed properties are rejected regardless of enumerability, because a
- * symbol key is not expressible as a property name at all. Non-enumerable
- * _string_-keyed properties are not considered, both because every array
- * necessarily has one (`length`) and because such properties are conventionally
- * implementation detail rather than content.
- *
- * **Note:** This function relies on `Object.keys()` on arrays producing output
- * which agrees with the JavaScript spec with regards to the ordering of index
- * vs. non-index keys. Built-in arrays of course do this, but it's possible for
- * a `Proxy` to (a) effectively purport to be an array, and yet (b) have an
- * `ownKeys()` trap that diverges from the behavior of built-in arrays. In such
- * cases, this function can incorrectly return `true`, exactly because it
- * depends on the spec-defined ordering. The rationale for this implementation
- * is that it's reasonable to expect proxied arrays to implement `ownKeys()` in
- * agreement with the standard array order (even though the spec _does_ allow
- * leeway with regards to what `Proxy`s actually do), _and_ by making this
- * assumpion, this function avoids having to iterate over _all_ keys.
+ * **Note:** This function relies on the given array producing `Reflect.ownKeys()`
+ * output which agrees with the JavaScript spec with regards to key ordering,
+ * namely index keys in ascending numeric order, then the remaining string keys
+ * in property-creation order, then symbol keys in property-creation order.
+ * Built-in arrays of course do this, but it's possible for a `Proxy` to (a)
+ * effectively purport to be an array, and yet (b) have an `ownKeys()` trap that
+ * diverges from the behavior of built-in arrays. In such cases, this function
+ * can return an incorrect answer, exactly because it depends on the
+ * spec-defined ordering. The rationale for this implementation is that it's
+ * reasonable to expect proxied arrays to implement `ownKeys()` in agreement
+ * with the standard array order (even though the spec _does_ allow leeway with
+ * regards to what `Proxy`s actually do), _and_ by making this assumption, this
+ * function avoids having to inspect _every_ key.
  *
  * @param array The array to check.
  * @returns `true` if the array has only index properties, `false` otherwise.
  */
 export function isArrayWithOnlyIndexProperties(array: unknown[]): boolean {
-  const keys = Object.keys(array);
-
-  // `Object.keys()` on an (ordinary) array yields all array-index keys first,
-  // followed by any non-index keys. So if an array has _any_ non-index keys,
-  // then _one_ of them is always the final key. This means the array's named
-  // properties are index-only exactly when it has no keys or its last key is an
-  // index. (But see the doc comment above for potential `Proxy` troubles that
-  // this implementation _intentionally_ does not try to handle.)
-  const lastKey = keys.at(-1);
-  if (!((lastKey === undefined) || isArrayIndexPropertyName(lastKey))) {
-    return false;
-  }
-
-  // `Object.keys()` doesn't report symbol keys at all, so they have to be asked
-  // about separately. A named-property rejection above short-circuits ahead of
-  // this, so such an array never pays for the symbol scan.
-  return Object.getOwnPropertySymbols(array).length === 0;
+  // Given the key ordering described above, `length` -- which is created along
+  // with the array itself, and so precedes every later-created string key --
+  // is the last own key exactly when there is no other non-index key at all:
+  // a named property would sort after it, and a symbol key after that.
+  return Reflect.ownKeys(array).at(-1) === "length";
 }
