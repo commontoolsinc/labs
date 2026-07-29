@@ -12,7 +12,7 @@ Deno.test("runner shard count stays aligned with CI coverage artifacts", async (
     new URL("../.github/workflows/deno.yml", import.meta.url),
   );
   const runnerJob = workflow.match(
-    /\n[ ]{2}runner-test:\n([\s\S]*?)\n[ ]{2}build-binaries:/,
+    /\n[ ]{2}runner-test:\n([\s\S]*?)\n[ ]{2}build-toolshed:/,
   )?.[1];
   assertStringIncludes(
     runnerJob ?? "",
@@ -20,11 +20,11 @@ Deno.test("runner shard count stays aligned with CI coverage artifacts", async (
   );
   assertStringIncludes(runnerJob ?? "", "total: [6]");
 
-  const perfCheck = await Deno.readTextFile(
-    new URL("./perf-check.ts", import.meta.url),
+  const coverageCheck = await Deno.readTextFile(
+    new URL("./coverage-check.ts", import.meta.url),
   );
   assertMatch(
-    perfCheck,
+    coverageCheck,
     /\.\.\.\[1, 2, 3, 4, 5, 6\]\.map\(\(shard\) =>\s*`coverage-profile-runner-\$\{shard\}`\s*\)/,
   );
 });
