@@ -6,6 +6,11 @@
 favorites, mentionables, and profile elements by tag, and returns a reactive
 `WishState<T>`.
 
+These are explicit discovery collections, not an index of every stored piece.
+They can expose pieces outside the space's registry, but they cannot find an
+orphan that was never published and is not reachable from a known piece. See
+[Finding Pieces](../concepts/piece-discovery.md).
+
 ```tsx
 // Shown inside a pattern body.
 const wishResult = wish<{ content: string }>({ query: "#note" });
