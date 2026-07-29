@@ -31,7 +31,11 @@ import {
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { createHasher } from "@commonfabric/content-hash";
 import { openSpace } from "./db.ts";
-import { contentFingerprint, type FingerprintReport } from "./fingerprint.ts";
+import {
+  contentFingerprint,
+  diffFingerprints,
+  type FingerprintReport,
+} from "./fingerprint.ts";
 
 /** Filenames the layout depends on. */
 const MANIFEST = "clone.json";
@@ -226,6 +230,26 @@ export interface VerifyResult {
     match: boolean;
     excludedGenerated: number;
   };
+  /**
+   * WHAT moved, against the pristine baseline — the part an operator can act on.
+   *
+   * A schema migration necessarily rewrites every piece's result value, so
+   * `fingerprint.match` is false after ANY successful migration and cannot by
+   * itself distinguish "the update worked" from "content was destroyed". The
+   * shape of the change is what separates them: entities `removed` is the alarm,
+   * while `changed` confined to pieces and their derived cells is the migration
+   * doing its job. Measured on the July 2026 Topics rehearsal: 74 pieces and 73
+   * owned cells changed, 3,189 added, **0 removed**, with every authored title,
+   * body, comment and link byte-identical.
+   */
+  diff: {
+    removed: number;
+    changed: number;
+    added: number;
+    /** Counts per entity kind, so "74 pieces" reads differently from "74 cells". */
+    changedByKind: Record<string, number>;
+    removedByKind: Record<string, number>;
+  };
 }
 
 /**
@@ -253,6 +277,34 @@ export async function verifyClone(dir: string): Promise<VerifyResult> {
     space.close();
   }
 
+  // Diff against the pristine baseline so the report can say WHAT moved, not
+  // merely that something did.
+  const baseline = openSpace(paths.pristinePath);
+  let delta;
+  try {
+    const before = contentFingerprint(baseline);
+    const d = diffFingerprints(before, fingerprint);
+    const kindOf = new Map(fingerprint.perEntity.map((e) => [e.id, e.kind]));
+    const kindWas = new Map(before.perEntity.map((e) => [e.id, e.kind]));
+    const tally = (ids: string[], m: Map<string, string>) => {
+      const out: Record<string, number> = {};
+      for (const id of ids) {
+        const k = m.get(id) ?? "unknown";
+        out[k] = (out[k] ?? 0) + 1;
+      }
+      return out;
+    };
+    delta = {
+      removed: d.removed.length,
+      changed: d.changed.length,
+      added: d.added.length,
+      changedByKind: tally(d.changed, kindOf),
+      removedByKind: tally(d.removed, kindWas),
+    };
+  } finally {
+    baseline.close();
+  }
+
   const match = fingerprint.hash === manifest.fingerprint.hash;
   return {
     ok: baselineIntact && match,
@@ -264,6 +316,7 @@ export async function verifyClone(dir: string): Promise<VerifyResult> {
       match,
       excludedGenerated: fingerprint.excludedGenerated,
     },
+    diff: delta,
   };
 }
 

@@ -167,6 +167,28 @@ Deno.test("a clean migration keeps the fingerprint even as commits climb", async
   });
 });
 
+Deno.test("verify reports WHAT moved, not merely that something did", async () => {
+  // The headline hash cannot distinguish a successful migration from data
+  // loss: a schema update rewrites every piece result, so it always differs.
+  // `removed` is the unambiguous alarm, and the per-kind tally is what lets an
+  // operator judge the rest.
+  await withDirs(async ({ source, clone }) => {
+    await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
+    const paths = clonePaths(clone, SPACE);
+    mutate(paths.workingPath, [
+      ["of:named", { value: "named-v2", result: link("of:piece") }],
+      ["of:newcomer", { value: "hello" }],
+    ]);
+
+    const v = await verifyClone(clone);
+    assertEquals(v.diff.removed, 0, "nothing was destroyed");
+    assertEquals(v.diff.changed, 1);
+    assertEquals(v.diff.added, 1);
+    assertEquals(v.diff.changedByKind["owned-cell"], 1);
+    assertEquals(v.diff.removedByKind, {});
+  });
+});
+
 Deno.test("verify catches a real content change", async () => {
   await withDirs(async ({ source, clone }) => {
     await createClone({ source, space: SPACE, targetDir: clone, now: NOW });
