@@ -3,6 +3,7 @@ import {
   isFunction,
   isObject,
   isPlainContainer,
+  isPlainObject,
   isRecord,
   type Mutable,
 } from "@commonfabric/utils/types";
@@ -3065,13 +3066,24 @@ export function recursivelyAddIDIfNeeded<T>(
     return value;
   }
 
+  // A plain object may still be carrying an `[ID]` or `[ID_FIELD]` directive
+  // here -- either author-supplied or added by the array walk below -- and those
+  // are instructions for `diffAndUpdate()`, not content, so the conversion
+  // functions rightly refuse to store an object bearing one. Such an object is
+  // walked directly instead; the walk rebuilds it either way, and the directive
+  // survives to the consumer that strips it.
+  const carriesIdDirective = isPlainObject(value) &&
+    ((ID in (value as object)) || (ID_FIELD in (value as object)));
+
   // Convert value to fabric form. This handles:
   // - Primitives (e.g., pass -0/NaN/Infinity/bigint through, reject unique
   //   symbols)
   // - Instances (e.g., Error → FabricError, Date → FabricEpochNsec)
   // - Objects/arrays with toJSON() methods
   // - Sparse arrays (holes preserved)
-  const converted = shallowFabricFromNativeValue(value);
+  const converted = carriesIdDirective
+    ? value
+    : shallowFabricFromNativeValue(value);
 
   // A `FabricSpecialObject` returned by the conversion step (e.g. `FabricError`
   // wrapping a native `Error`, or `FabricEpochNsec` wrapping a native `Date`).
