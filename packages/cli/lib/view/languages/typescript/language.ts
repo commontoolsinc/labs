@@ -19,10 +19,22 @@ import { createDiffSemantics, createSemantics } from "./semantics.ts";
 export const typeScriptLanguage: Language = {
   id: "typescript",
 
-  // Claims the TypeScript / JavaScript family (`.ts`, `.tsx`, `.mts`, `.cts`,
-  // `.js`, `.jsx`, `.mjs`, `.cjs`).
-  matches: (fileName) =>
-    fileName !== undefined && /\.[cm]?[jt]sx?$/i.test(fileName),
+  metadata: {
+    extensions: [
+      ".ts",
+      ".tsx",
+      ".mts",
+      ".cts",
+      ".js",
+      ".jsx",
+      ".mjs",
+      ".cjs",
+    ],
+    filenames: [],
+    filenamePatterns: [],
+    aliases: ["ts", "javascript", "js"],
+    interpreters: ["deno", "node", "nodejs", "bun"],
+  },
 
   parseDocument: (text, fileName) => parseDocument(text, fileName),
 

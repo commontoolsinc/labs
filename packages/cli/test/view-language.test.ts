@@ -1,6 +1,6 @@
 /**
- * Language selection: `languageForFile` picks a language by extension and uses
- * plain text when no filename matches. Transformed compiler output selects
+ * Language selection: declarative metadata covers filenames, aliases, and
+ * shebangs, with plain text when none match. Transformed compiler output selects
  * TypeScript through a separate path. `distinctLanguages` dedupes the languages
  * a diff touches, and `diffSemanticsFor` composes the diff view's semantic layer
  * from the languages present, scoped to each one's files.
@@ -11,9 +11,13 @@ import {
   diffSemanticsFor,
   distinctLanguages,
   languageForFile,
-  languageForId,
+  languageForName,
+  languageForSource,
   languageForTransformedOutput,
   languageIds,
+  type LanguageMetadata,
+  languageNames,
+  metadataMatchesFilename,
   renderedLinesFor,
 } from "../lib/view/languages/language.ts";
 import { typeScriptLanguage } from "../lib/view/languages/typescript/language.ts";
@@ -34,6 +38,9 @@ Deno.test("languageForFile: named files resolve and missing names use plain text
   for (const ts of ["a.ts", "a.tsx", "a.mts", "a.cts", "a.js", "a.jsx"]) {
     assertEquals(languageForFile(ts).id, "typescript", ts);
   }
+  for (const name of ["a.mtsx", "a.ctsx", "a.mjsx", "a.cjsx"]) {
+    assertEquals(languageForFile(name).id, "plain-text", name);
+  }
   assertEquals(languageForFile("README.md").id, "markdown");
   assertEquals(languageForFile("deno.jsonc").id, "json");
   assertEquals(languageForFile("workflow.yml").id, "yaml");
@@ -44,6 +51,24 @@ Deno.test("languageForFile: named files resolve and missing names use plain text
   assertEquals(languageForTransformedOutput().id, "typescript");
 });
 
+Deno.test("language metadata matches extensions, exact names, and compound patterns", () => {
+  const metadata: LanguageMetadata = {
+    extensions: [".demo"],
+    filenames: ["BUILD"],
+    filenamePatterns: [/^Dockerfile\..+$/i],
+    aliases: ["example"],
+    interpreters: ["example-runner"],
+  };
+
+  assert(metadataMatchesFilename(metadata, "/repo/source.DEMO"));
+  assert(metadataMatchesFilename(metadata, "/repo/BUILD"));
+  assert(metadataMatchesFilename(metadata, "containers/Dockerfile.x86_64"));
+  assert(metadataMatchesFilename(metadata, "containers/DOCKERFILE.debug"));
+  assert(!metadataMatchesFilename(metadata, "/repo/build"));
+  assert(!metadataMatchesFilename(metadata, "/repo/demo"));
+  assert(!metadataMatchesFilename(metadata, undefined));
+});
+
 Deno.test("languageForFile: named JavaScript uses the TypeScript-family parser", () => {
   const source = "export const answer = 42;\n";
   const doc = languageForFile("answer.js").parseDocument(source, "answer.js");
@@ -51,15 +76,21 @@ Deno.test("languageForFile: named JavaScript uses the TypeScript-family parser",
   assert(doc.lines[0].spans.some((span) => span.cls === "storageKeyword"));
 });
 
-Deno.test("languageForId: stable identifiers resolve explicit overrides", () => {
-  assertEquals(languageForId("typescript"), typeScriptLanguage);
-  assertEquals(languageForId("markdown"), markdownLanguage);
-  assertEquals(languageForId("json"), jsonLanguage);
-  assertEquals(languageForId("yaml"), yamlLanguage);
-  assertEquals(languageForId("python"), pythonLanguage);
-  assertEquals(languageForId("plain-text"), plainTextLanguage);
-  assertEquals(languageForId("TypeScript"), undefined);
-  assertEquals(languageForId("ruby"), undefined);
+Deno.test("languageForName: identifiers and aliases resolve explicit overrides", () => {
+  assertEquals(languageForName("typescript"), typeScriptLanguage);
+  assertEquals(languageForName("js"), typeScriptLanguage);
+  assertEquals(languageForName("markdown"), markdownLanguage);
+  assertEquals(languageForName("md"), markdownLanguage);
+  assertEquals(languageForName("json"), jsonLanguage);
+  assertEquals(languageForName("jsonc"), jsonLanguage);
+  assertEquals(languageForName("yaml"), yamlLanguage);
+  assertEquals(languageForName("yml"), yamlLanguage);
+  assertEquals(languageForName("python"), pythonLanguage);
+  assertEquals(languageForName("py"), pythonLanguage);
+  assertEquals(languageForName("plain-text"), plainTextLanguage);
+  assertEquals(languageForName("plaintext"), plainTextLanguage);
+  assertEquals(languageForName("TypeScript"), undefined);
+  assertEquals(languageForName("ruby"), undefined);
   assertEquals(languageIds(), [
     "typescript",
     "markdown",
@@ -68,6 +99,99 @@ Deno.test("languageForId: stable identifiers resolve explicit overrides", () => 
     "python",
     "plain-text",
   ]);
+  assertEquals(languageNames(), [
+    "typescript",
+    "ts",
+    "javascript",
+    "js",
+    "markdown",
+    "md",
+    "json",
+    "jsonc",
+    "yaml",
+    "yml",
+    "python",
+    "py",
+    "plain-text",
+    "text",
+    "plaintext",
+  ]);
+});
+
+Deno.test("languageForSource: filenames precede direct and env shebangs", () => {
+  assertEquals(
+    languageForSource(
+      "tool",
+      "#!/usr/bin/python3.12\nprint('selected from a direct shebang')\n",
+    ),
+    pythonLanguage,
+  );
+  assertEquals(
+    languageForSource(
+      undefined,
+      "#!/usr/bin/env -S deno run --allow-read\nconsole.log('deno');\n",
+    ),
+    typeScriptLanguage,
+  );
+  assertEquals(
+    languageForSource(
+      "tool",
+      "#!/usr/bin/env -u PYTHONPATH python3\nprint('env options');\n",
+    ),
+    pythonLanguage,
+  );
+  for (
+    const shebang of [
+      "#!/usr/bin/env -S CF_VIEW_REVIEW=1 python3 -u",
+      '#!/usr/bin/env -S CF_VIEW_REVIEW="quoted value" python3 -u',
+      "#!/usr/bin/env -S -u PYTHONPATH python3",
+      "#!/usr/bin/env --split-string=CF_VIEW_REVIEW=1 python3 -u",
+      "#!/usr/bin/env -vS python3 -S",
+      "#!/usr/bin/env -vSpython3 -S",
+      "#!/usr/bin/env python3 --split-string=node",
+    ]
+  ) {
+    assertEquals(
+      languageForSource("tool", `${shebang}\nprint('env split string');\n`),
+      pythonLanguage,
+      shebang,
+    );
+  }
+  for (const interpreter of ["deno", "node", "nodejs", "bun"]) {
+    assertEquals(
+      languageForSource(
+        "tool",
+        `#!/usr/bin/env ${interpreter}\nconsole.log('selected');\n`,
+      ),
+      typeScriptLanguage,
+      interpreter,
+    );
+  }
+  assertEquals(
+    languageForSource(
+      "notes.md",
+      "#!/usr/bin/env python3\n# Markdown filename wins\n",
+    ),
+    markdownLanguage,
+  );
+  assertEquals(
+    languageForSource(
+      "notes.txt",
+      "#!/usr/bin/env python3\nprint('plain-text filename wins');\n",
+    ),
+    plainTextLanguage,
+  );
+  assertEquals(
+    languageForSource(
+      "LICENSE",
+      "#!/usr/bin/env python3\nprint('exact filename wins');\n",
+    ),
+    plainTextLanguage,
+  );
+  assertEquals(
+    languageForSource("tool", "#!/usr/bin/env bash\necho plain\n"),
+    plainTextLanguage,
+  );
 });
 
 Deno.test("distinctLanguages: dedupes in first-seen order", () => {

@@ -6,7 +6,6 @@ import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import {
   createPythonHighlighter,
-  isPythonPath,
   pythonDocument,
   pythonHighlightLines,
 } from "../lib/view/languages/python/python.ts";
@@ -54,12 +53,15 @@ function tempWorkspace(root: string): DiffWorkspace {
   };
 }
 
-Deno.test("python: path matching recognises source, stub, and windowed files", () => {
+Deno.test("python: metadata selects source, stub, and windowed files", () => {
   for (const path of ["main.py", "types.pyi", "app.pyw", "/tmp/UPPER.PY"]) {
-    assert(isPythonPath(path), path);
+    assertEquals(languageForFile(path).id, "python", path);
   }
   for (const path of ["module.pyc", "archive.pyz", "notes.md", undefined]) {
-    assert(!isPythonPath(path), String(path));
+    assert(
+      languageForFile(path).id !== "python",
+      `${String(path)} selected Python`,
+    );
   }
 });
 

@@ -6,8 +6,8 @@
  * representation and exits, mirroring how `less`/`bat` behave when their
  * output is redirected.
  * Filename-free compiler output keeps the transformed TypeScript default.
- * Other filename-free source uses plain text unless an explicit language or
- * virtual filename selects another language.
+ * Other source uses filename and shebang metadata unless an explicit language
+ * selects another language.
  */
 import { renderLineColored } from "./highlight.ts";
 import { runPager } from "./pager.ts";
@@ -24,9 +24,10 @@ import {
   distinctLanguages,
   type Language,
   languageForFile,
-  languageForId,
+  languageForName,
+  languageForSource,
   languageForTransformedOutput,
-  languageIds,
+  languageNames,
   type Semantics,
 } from "./languages/language.ts";
 import {
@@ -111,11 +112,11 @@ function pipedSelection(options: ViewOptions): SourceSelection {
   if (options.language === undefined) {
     return { fileName: options.filename };
   }
-  const language = languageForId(options.language);
+  const language = languageForName(options.language);
   if (!language) {
     throw new ViewError(
       `cf view: unknown language "${options.language}". Available languages: ${
-        languageIds().join(", ")
+        languageNames().join(", ")
       }`,
     );
   }
@@ -220,14 +221,14 @@ export function buildView(
   const language = selection.language ??
     (transformedOutput
       ? languageForTransformedOutput()
-      : languageForFile(fileName));
+      : languageForSource(fileName, text));
   const doc = language.parseDocument(text, fileName);
   return {
     doc,
     semantics: () =>
       language.createSemantics?.(text, { cwd: safeCwd(), fileName }),
     // A real file is editable; a pipe (transformed output, etc.) is not.
-    editSource: file ? fileSource(file) : readonlySource(
+    editSource: file ? fileSource(file, language) : readonlySource(
       "This view is of a pipe — there is no underlying file to edit.",
       language,
       fileName,

@@ -1,8 +1,7 @@
 /**
  * The plain-text language for input whose syntax `cf view` cannot select from
- * a filename. It must remain last in the language registry because it claims
- * every named file left after the syntax-specific languages; the registry also
- * returns it when no filename exists.
+ * a filename or shebang. It remains last in the language registry and is the
+ * registry's fallback.
  */
 import type { Language } from "../language.ts";
 import {
@@ -14,7 +13,13 @@ import {
 export const plainTextLanguage: Language = {
   id: "plain-text",
 
-  matches: (fileName) => fileName !== undefined,
+  metadata: {
+    extensions: [".txt"],
+    filenames: ["LICENSE", "NOTICE"],
+    filenamePatterns: [/^(?:LICENSE|NOTICE)\..+$/i],
+    aliases: ["text", "plaintext"],
+    interpreters: [],
+  },
 
   parseDocument: (text) => plainTextDocument(text),
 

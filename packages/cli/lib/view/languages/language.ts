@@ -3,10 +3,10 @@
  * colour, navigate, edit and (optionally) reason about it, plus selecting the
  * right language for a file. A language is a stateless strategy object: one
  * instance describes each supported syntax, and plain text handles input that
- * has no recognized filename. The pager selects the right one for a file ONCE
- * (via {@link languageForFile}) and then dispatches every operation through
- * that object's methods — there is no per-operation branch on the file
- * extension.
+ * has no recognized filename or shebang. The pager selects the right one for a
+ * source ONCE (via {@link languageForSource}) and then dispatches every
+ * operation through that object's methods — there is no per-operation branch
+ * on the file extension.
  *
  * Per-file mutable state (a warm incremental parse, a language service) is not
  * held on the language; the language is a factory for the small stateful
@@ -103,18 +103,34 @@ export interface HunkStructureContext {
   readonly definitions: Map<string, Definition[]>;
 }
 
+/** An exact executable basename or regular expression for a shebang. */
+export type InterpreterPattern = string | RegExp;
+
 /**
- * A source language the pager can render and navigate. Selection asks each
- * language {@link matches} once per file; all later work is method dispatch.
+ * Declarative names that select a language. Extensions include their leading
+ * dot and compare without case. Exact filenames and regular-expression
+ * patterns match a path's basename. Aliases name explicit language overrides.
+ * Interpreters match executable basenames extracted from shebangs.
+ */
+export interface LanguageMetadata {
+  readonly extensions: readonly string[];
+  readonly filenames: readonly string[];
+  readonly filenamePatterns: readonly RegExp[];
+  readonly aliases: readonly string[];
+  readonly interpreters: readonly InterpreterPattern[];
+}
+
+/**
+ * A source language the pager can render and navigate. Selection reads each
+ * language's metadata once per source; all later work is method dispatch.
  */
 export interface Language {
   /** Stable identifier, such as `"typescript"`, `"markdown"`, `"json"`,
    * `"yaml"`, `"python"`, or `"plain-text"`. */
   readonly id: string;
 
-  /** Does this language claim `fileName`? Consulted in order by {@link
-   * languageForFile}. */
-  matches(fileName: string | undefined): boolean;
+  /** Filename, explicit-name, and shebang selectors for this language. */
+  readonly metadata: LanguageMetadata;
 
   /** Parse `text` into the full document model: coloured lines, a structure
    * tree, and a name → definition index. `fileName` is advisory. */
@@ -213,9 +229,7 @@ export function renderedLinesFor(
 
 /**
  * Every language the pager knows, most specific first, built on first use.
- * Plain text comes last because it claims every named file left after the
- * syntax-specific languages. The fallback below also uses it when no filename
- * exists.
+ * Plain text comes last and remains the fallback after metadata selection.
  *
  * The list is lazy so this module's top level never reads the concrete language
  * singletons: they and this module form an import cycle (a language's semantic
@@ -235,18 +249,76 @@ function allLanguages(): readonly Language[] {
   ];
 }
 
-/** The language for `fileName` — the first that claims it. Plain text handles
- * unknown named files and input without a filename. */
-export function languageForFile(fileName: string | undefined): Language {
-  for (const language of allLanguages()) {
-    if (language.matches(fileName)) return language;
+/** Whether metadata claims a filename. */
+export function metadataMatchesFilename(
+  metadata: LanguageMetadata,
+  fileName: string | undefined,
+): boolean {
+  if (fileName === undefined) return false;
+  const filename = basename(fileName);
+  const lower = filename.toLowerCase();
+  if (
+    metadata.extensions.some((extension) =>
+      lower.endsWith(extension.toLowerCase())
+    )
+  ) {
+    return true;
   }
-  return plainTextLanguage;
+  if (metadata.filenames.includes(filename)) return true;
+  return metadata.filenamePatterns.some((pattern) =>
+    regularExpressionMatches(pattern, filename)
+  );
 }
 
-/** Look up a language by its stable identifier for an explicit override. */
-export function languageForId(id: string): Language | undefined {
-  return allLanguages().find((language) => language.id === id);
+/** The language selected by filename metadata, with plain text as fallback. */
+export function languageForFile(fileName: string | undefined): Language {
+  return languageMatchingFilename(fileName) ?? plainTextLanguage;
+}
+
+function languageMatchingFilename(
+  fileName: string | undefined,
+): Language | undefined {
+  for (const language of allLanguages()) {
+    if (metadataMatchesFilename(language.metadata, fileName)) return language;
+  }
+  return undefined;
+}
+
+/**
+ * Select a language for complete source. A recognized filename takes
+ * precedence. A filename with no metadata match can defer to a shebang.
+ */
+export function languageForSource(
+  fileName: string | undefined,
+  text: string,
+): Language {
+  const byFilename = languageMatchingFilename(fileName);
+  if (byFilename !== undefined) return byFilename;
+  return languageForShebang(text) ?? plainTextLanguage;
+}
+
+let languagesByName: ReadonlyMap<string, Language> | undefined;
+function namedLanguages(): ReadonlyMap<string, Language> {
+  if (languagesByName !== undefined) return languagesByName;
+  const named = new Map<string, Language>();
+  for (const language of allLanguages()) {
+    for (const name of [language.id, ...language.metadata.aliases]) {
+      const existing = named.get(name);
+      if (existing !== undefined) {
+        throw new Error(
+          `Language name "${name}" belongs to both ${existing.id} and ${language.id}`,
+        );
+      }
+      named.set(name, language);
+    }
+  }
+  languagesByName = named;
+  return named;
+}
+
+/** Look up a language by its stable identifier or alias. */
+export function languageForName(name: string): Language | undefined {
+  return namedLanguages().get(name);
 }
 
 /** Stable identifiers accepted by an explicit language override. */
@@ -254,10 +326,141 @@ export function languageIds(): string[] {
   return allLanguages().map((language) => language.id);
 }
 
+/** Stable identifiers and aliases accepted by an explicit language override. */
+export function languageNames(): string[] {
+  return [...namedLanguages().keys()];
+}
+
 /** The TypeScript default for filename-free `cf check --show-transformed`
  * output. The caller checks the compiler's module header before selecting it. */
 export function languageForTransformedOutput(): Language {
   return typeScriptLanguage;
+}
+
+function basename(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
+
+function languageForShebang(text: string): Language | undefined {
+  const interpreter = shebangInterpreter(text);
+  if (interpreter === undefined) return undefined;
+  return allLanguages().find((language) =>
+    language.metadata.interpreters.some((pattern) =>
+      typeof pattern === "string"
+        ? pattern === interpreter
+        : regularExpressionMatches(pattern, interpreter)
+    )
+  );
+}
+
+function regularExpressionMatches(pattern: RegExp, value: string): boolean {
+  pattern.lastIndex = 0;
+  const matches = pattern.test(value);
+  pattern.lastIndex = 0;
+  return matches;
+}
+
+/**
+ * Extract the executable basename from a direct shebang or an `env` shebang.
+ * `env -S` supplies the command after the split-string flag.
+ */
+function shebangInterpreter(text: string): string | undefined {
+  const end = text.indexOf("\n");
+  const firstLine = (end < 0 ? text : text.slice(0, end)).replace(/\r$/, "");
+  if (!firstLine.startsWith("#!")) return undefined;
+  const words = splitShebangWords(firstLine.slice(2));
+  if (words.length === 0) return undefined;
+  const direct = basename(words[0]);
+  if (direct !== "env") return direct;
+  return envCommand(words.slice(1));
+}
+
+function envCommand(words: readonly string[]): string | undefined {
+  for (let index = 0; index < words.length; index++) {
+    const word = words[index];
+    if (word === "--") {
+      return words[index + 1] === undefined
+        ? undefined
+        : basename(words[index + 1]);
+    }
+    if (word === "-S" || word === "--split-string") {
+      return envCommand(words.slice(index + 1));
+    }
+    if (word.startsWith("--split-string=")) {
+      return envCommand([
+        word.slice("--split-string=".length),
+        ...words.slice(index + 1),
+      ]);
+    }
+    const combinedSplit = word.match(/^-[iv0]*S(.*)$/);
+    if (combinedSplit !== null) {
+      const inline = combinedSplit[1];
+      return envCommand(
+        inline.length > 0
+          ? [inline, ...words.slice(index + 1)]
+          : words.slice(index + 1),
+      );
+    }
+    if (
+      word === "-u" || word === "--unset" || word === "-C" ||
+      word === "--chdir" || word === "-P" || word === "--path" ||
+      word === "-a" || word === "--argv0"
+    ) {
+      index++;
+      continue;
+    }
+    if (word.startsWith("-") || /^[^=]+=/.test(word)) continue;
+    return basename(word);
+  }
+  return undefined;
+}
+
+function splitShebangWords(input: string): string[] {
+  const words: string[] = [];
+  let word = "";
+  let started = false;
+  let quote: "'" | '"' | undefined;
+  let escaped = false;
+
+  for (const char of input) {
+    if (escaped) {
+      word += char;
+      started = true;
+      escaped = false;
+      continue;
+    }
+    if (quote !== undefined) {
+      if (char === quote) {
+        quote = undefined;
+        started = true;
+      } else if (char === "\\" && quote === '"') {
+        escaped = true;
+      } else {
+        word += char;
+        started = true;
+      }
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      started = true;
+    } else if (char === "\\") {
+      escaped = true;
+      started = true;
+    } else if (/\s/.test(char)) {
+      if (started) {
+        words.push(word);
+        word = "";
+        started = false;
+      }
+    } else {
+      word += char;
+      started = true;
+    }
+  }
+  if (escaped) word += "\\";
+  if (started) words.push(word);
+  return words;
 }
 
 /** The distinct languages a set of files resolves to, in first-seen order. */

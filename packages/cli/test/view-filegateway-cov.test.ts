@@ -128,6 +128,23 @@ Deno.test("realFileGateway.open: reads a file into an editable source and its te
   });
 });
 
+Deno.test("realFileGateway.open: keeps shebang selection in the editable source", async () => {
+  await withTempDir((dir) => {
+    const path = join(dir, "greet");
+    const contents = "#!/usr/bin/env python3\ndef greet():\n    return 'hi'\n";
+    Deno.writeTextFileSync(path, contents);
+
+    const opened = realFileGateway().open(path);
+    assert(opened !== null);
+    assert(
+      opened.source.parse(contents).lines.flatMap((line) => line.spans).some(
+        (span) => span.cls === "storageKeyword" && span.text === "def",
+      ),
+      "the editable source retains Python selection",
+    );
+  });
+});
+
 Deno.test("realFileGateway.open: returns null when the file cannot be read", () => {
   const gw = realFileGateway();
   const missing = join(Deno.cwd(), "definitely-not-a-real-file-xyz-12345.ts");
