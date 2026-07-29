@@ -309,12 +309,14 @@ function relaxDefaultedRequired(
     }
   }
 
+  // `items` is a single schema here; the validator rejects the tuple form
+  // outright ("schema must be an object or boolean").
   if (schema.items !== undefined) {
-    relaxed.items = Array.isArray(schema.items)
-      ? (schema.items as JSONSchema[]).map((entry) =>
-        relaxDefaultedRequired(entry, root, seen)
-      )
-      : relaxDefaultedRequired(schema.items as JSONSchema, root, seen);
+    relaxed.items = relaxDefaultedRequired(
+      schema.items as JSONSchema,
+      root,
+      seen,
+    );
   }
 
   const fields = schema as Record<string, unknown>;

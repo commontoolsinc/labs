@@ -1773,6 +1773,69 @@ describe("verbInputSchemaError", () => {
     })).toBeUndefined();
   });
 
+  it("relaxes a defaulted property inside array items", () => {
+    expect(verbInputSchemaError([{}], {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { mode: { type: "string", default: "fast" } },
+        required: ["mode"],
+      },
+    })).toBeUndefined();
+  });
+
+  it("relaxes a defaulted property inside a combinator branch", () => {
+    expect(verbInputSchemaError({}, {
+      anyOf: [
+        {
+          type: "object",
+          properties: { mode: { type: "string", default: "fast" } },
+          required: ["mode"],
+        },
+      ],
+    } as JSONSchema)).toBeUndefined();
+  });
+
+  // A reference that names nothing local cannot be followed to a default.
+  // Relaxation leaves it exactly as written rather than guessing.
+  it("leaves a non-local $ref untouched", () => {
+    expect(verbInputSchemaError({ mode: "x" }, {
+      type: "object",
+      properties: { mode: { $ref: "https://example.com/Mode" } },
+    } as JSONSchema)).toMatch(/cannot resolve schema reference/);
+  });
+
+  it("leaves a $ref naming a missing definition untouched", () => {
+    expect(verbInputSchemaError({ mode: "x" }, {
+      type: "object",
+      properties: { mode: { $ref: "#/$defs/Absent" } },
+      $defs: { Present: { type: "string" } },
+    } as JSONSchema)).toMatch(/cannot resolve schema reference/);
+  });
+
+  it("ignores a malformed $defs pool instead of indexing it", () => {
+    expect(verbInputSchemaError({ mode: "x" }, {
+      type: "object",
+      properties: { mode: { $ref: "#/$defs/Mode" } },
+      $defs: null,
+    } as unknown as JSONSchema)).toMatch(/cannot resolve schema reference/);
+  });
+
+  it("handles a $ref whose target is a boolean schema", () => {
+    expect(verbInputSchemaError({ mode: "x" }, {
+      type: "object",
+      properties: { mode: { $ref: "#/$defs/Anything" } },
+      $defs: { Anything: true },
+    } as JSONSchema)).toBeUndefined();
+  });
+
+  it("passes a boolean property schema through unchanged", () => {
+    expect(verbInputSchemaError({ mode: "x" }, {
+      type: "object",
+      properties: { mode: true },
+    } as JSONSchema)).toBeUndefined();
+  });
+
   // A ref cycle names no schema to check against. Relaxation walks it without
   // looping and hands it on unchanged; the validator is what reports it.
   it("terminates on a $ref cycle instead of looping", () => {
