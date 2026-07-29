@@ -13,6 +13,7 @@ import { hashOf } from "@commonfabric/data-model/value-hash";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isRecord } from "@commonfabric/utils/types";
+import { PatternManager } from "./pattern-manager.ts";
 import { rendererVDOMSchema } from "./schemas.ts";
 import { forEachSubschema } from "./schema-walk.ts";
 import {
@@ -1955,8 +1956,12 @@ export class Runner {
             return;
           }
           // Async load for a pattern change after initial start. Errors are
-          // logged here since there's no caller to propagate to.
-          this.runtime.patternManager
+          // logged here since there's no caller to propagate to. The whole
+          // chain (load attempt + any pointer roll-forward it decides on) is
+          // tracked so dispose() — and deterministic tests — can settle it
+          // without wall-clock waits (the runner suite runs under a frozen
+          // clock).
+          const watcherLoad = this.runtime.patternManager
             .loadPatternByIdentity(
               newRef.identity,
               newRef.symbol,
@@ -1983,10 +1988,20 @@ export class Runner {
                 // pattern's identity, durably, with a superseded-check so a
                 // legitimate concurrent repoint wins. Gated on the same flag
                 // as the rest of the heal family; thrown load errors (which
-                // may be transient) never trigger this.
+                // may be transient) never trigger this. Two verdicts are NOT
+                // definitive and must never trigger it either: with CFC
+                // enforcement disabled, loadPatternByIdentity returns
+                // undefined for anything outside the in-memory index (probe
+                // unsupported, not artifact dead); and a session-synthetic
+                // keyless running ref must never be written durably (a fresh
+                // runtime is guaranteed unable to load it).
                 if (
                   this.runtime.experimental.systemPatternAutoUpdate &&
+                  this.runtime.cfcEnforcementMode !== "disabled" &&
                   runningRef !== undefined &&
+                  !PatternManager.isKeylessPatternIdentity(
+                    runningRef.identity,
+                  ) &&
                   patternIdentityKey(runningRef) !== newKey
                 ) {
                   const revertRef = runningRef;
@@ -2056,6 +2071,10 @@ export class Runner {
                 err,
               );
             });
+          this.pendingPointerMaintenance.add(watcherLoad);
+          watcherLoad.finally(() =>
+            this.pendingPointerMaintenance.delete(watcherLoad)
+          );
         }),
       );
     };
@@ -2174,12 +2193,17 @@ export class Runner {
       currentPatternKey = initialRef ? patternIdentityKey(initialRef) : KEYLESS;
       try {
         instantiateInitialPattern(givenPattern, initialRef, tx);
-        // Real artifact refs only: a keyless pattern's synthetic session
-        // pointer must never be written into durable state by the
-        // unloadable-pointer roll-forward.
-        runningRef =
-          this.runtime.patternManager.getArtifactEntryRef(givenPattern) ??
-            undefined;
+        // Real artifact refs only: setup mints and INDEXES a `keyless:`
+        // session pointer for hand-built patterns, so getArtifactEntryRef
+        // returns it — filter synthetics explicitly, or the roll-forward
+        // would write a pointer no fresh runtime can load.
+        const givenRef = this.runtime.patternManager.getArtifactEntryRef(
+          givenPattern,
+        );
+        runningRef = givenRef !== undefined &&
+            !PatternManager.isKeylessPatternIdentity(givenRef.identity)
+          ? givenRef
+          : undefined;
       } catch (error) {
         // Without cleanup the piece stays registered in `this.cancels`, so
         // every later start() reports "already running" for a piece that has
@@ -3592,9 +3616,17 @@ export class Runner {
     return true;
   }
 
-  /** Settle in-flight pointer roll-forward commits (see dispose()). */
+  /**
+   * Settle in-flight watcher pattern loads and pointer roll-forward commits
+   * (see dispose()); loops because a roll-forward is spawned INSIDE its load
+   * chain. Also the deterministic synchronization point for tests — the
+   * runner suite runs under a frozen clock, so wall-clock polling cannot
+   * observe this work.
+   */
   async idlePointerMaintenance(): Promise<void> {
-    await Promise.allSettled([...this.pendingPointerMaintenance]);
+    while (this.pendingPointerMaintenance.size > 0) {
+      await Promise.allSettled([...this.pendingPointerMaintenance]);
+    }
   }
 
   stopAll(): void {

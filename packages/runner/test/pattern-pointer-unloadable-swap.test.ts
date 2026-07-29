@@ -8,21 +8,26 @@ import { getPatternIdentityRef, resolveEntryIdentity } from "../src/index.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 
 // CT-1923 (2026-07-29 estuary): a running piece whose durable patternIdentity
-// points at an identity this runtime CANNOT load sits stranded forever: the
-// watcher sees the pointer as a change, fails the load, logs
-// "pattern-load-error" — and leaves the unloadable pointer in place. Every
-// later session then starts the piece by that dead pointer and renders
+// names an identity this runtime cannot load sat stranded forever: the
+// watcher saw the pointer as a change, failed the load, logged
+// "pattern-load-error" — and left the unloadable pointer in place. Every
+// later session then started the piece by that dead pointer and rendered
 // nothing. Production shape: a nested home-section piece whose stored vintage
 // used a retired JSX element; the parent re-instantiates the CURRENT
 // sub-pattern each boot, but the durable pointer never rolls forward, so the
 // stranded state reasserts itself per session (blank Favorites/Profile).
 //
-// Desired: with systemPatternAutoUpdate on, a DEFINITIVE load failure of the
-// pointed-at identity (loadPatternByIdentity returns undefined after syncing
-// — the docs are absent or do not compile) while a pattern is RUNNING rolls
-// the pointer back to the running pattern's identity, durably. The stranded
-// state becomes self-converging instead of self-perpetuating. Without the
-// flag, behavior is unchanged (pointer left as written).
+// Desired: with systemPatternAutoUpdate on AND by-identity recovery enabled
+// (CFC enforcement not disabled), a DEFINITIVE load failure of the pointed-at
+// identity while a pattern is RUNNING rolls the pointer back to the running
+// pattern's identity, durably. The stranded state becomes self-converging
+// instead of self-perpetuating. NOT definitive, and never rolled back:
+// CFC-disabled probes (undefined means "probe unsupported" there), and
+// session-synthetic keyless refs are never written durably.
+//
+// All synchronization goes through runner.idlePointerMaintenance() — the
+// runner suite runs under a frozen clock (test/clock-preload.ts), so
+// wall-clock polling cannot observe this work.
 
 const signer = await Identity.fromPassphrase("pattern-pointer-unloadable");
 const space = signer.did();
@@ -31,6 +36,14 @@ const V1 = [
   "import { pattern } from 'commonfabric';",
   "export default pattern<Record<string, never>, { marker: string }>(() => {",
   "  return { marker: 'v1' };",
+  "});",
+  "",
+].join("\n");
+
+const V2_LOADABLE = [
+  "import { pattern } from 'commonfabric';",
+  "export default pattern<Record<string, never>, { marker: string }>(() => {",
+  "  return { marker: 'v2' };",
   "});",
   "",
 ].join("\n");
@@ -50,39 +63,41 @@ const programOf = (contents: string): RuntimeProgram => ({
   files: [{ name: "/main.tsx", contents }],
 });
 
+const unloadableIdentityPromise = resolveEntryIdentity(
+  "/main.tsx",
+  (name) =>
+    name === "/main.tsx"
+      ? Promise.resolve(UNLOADABLE_SOURCE)
+      : Promise.reject(new Error(`not found: ${name}`)),
+);
+
 describe("unloadable patternIdentity pointer vs a running pattern", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let rt: Runtime;
 
-  const newRuntime = (systemPatternAutoUpdate: boolean) =>
+  const newRuntime = (
+    systemPatternAutoUpdate: boolean,
+    extra: { cfcEnforcementMode?: "disabled" } = {},
+  ) =>
     new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
       experimental: { systemPatternAutoUpdate },
+      ...extra,
     });
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
   });
   afterEach(async () => {
-    // Drain the watcher's floating load attempt (and any roll-forward
-    // commit) before teardown so no promise is left pending at process exit
-    // — Deno's event-loop check fails the whole shard otherwise.
-    await rt?.idle();
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Settle the watcher's load attempt and any roll-forward before teardown
+    // so no promise is pending at process exit.
+    await rt?.runner.idlePointerMaintenance();
     await rt?.dispose();
     await storageManager?.close();
   });
 
-  const runV1ThenStrandPointer = async () => {
-    const unloadableIdentity = await resolveEntryIdentity(
-      "/main.tsx",
-      (name) =>
-        name === "/main.tsx"
-          ? Promise.resolve(UNLOADABLE_SOURCE)
-          : Promise.reject(new Error(`not found: ${name}`)),
-    );
-
+  const runV1 = async (cause: string) => {
     const tx = rt.edit();
     const v1 = await rt.patternManager.compilePattern(programOf(V1), {
       space,
@@ -91,7 +106,7 @@ describe("unloadable patternIdentity pointer vs a running pattern", () => {
     const v1Ref = rt.patternManager.getArtifactEntryRef(v1)!;
     const cell = rt.getCell<Record<string, unknown>>(
       space,
-      "unloadable-pointer-piece",
+      cause,
       undefined,
       tx,
     );
@@ -100,42 +115,31 @@ describe("unloadable patternIdentity pointer vs a running pattern", () => {
     await running.pull();
     expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v1");
     expect(getPatternIdentityRef(cell)?.identity).toBe(v1Ref.identity);
-
-    // The stranded durable state, however a session got there: pointer moved
-    // to an identity that cannot load while V1 keeps running.
-    const tx2 = rt.edit();
-    cell.withTx(tx2).setMetaRaw("patternIdentity", {
-      identity: unloadableIdentity,
-      symbol: "default",
-    });
-    await tx2.commit();
-    await rt.idle();
-
-    return { cell, v1Ref, unloadableIdentity };
+    return { cell, v1Ref };
   };
 
-  // The watcher's load attempt and any roll-forward commit are floating
-  // promises `rt.idle()` does not await; poll for the durable outcome.
-  const settleUntil = async (
-    predicate: () => boolean,
-    timeoutMs = 3000,
-  ): Promise<boolean> => {
-    const start = Date.now();
-    while (Date.now() - start < timeoutMs) {
-      if (predicate()) return true;
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    return predicate();
+  const repointTo = async (
+    cell: ReturnType<Runtime["getCell"]>,
+    identity: string,
+  ) => {
+    const tx = rt.edit();
+    cell.withTx(tx).setMetaRaw("patternIdentity", {
+      identity,
+      symbol: "default",
+    });
+    await tx.commit();
+    await rt.idle();
+    // Deterministic: settles the watcher load chain and any roll-forward.
+    await rt.runner.idlePointerMaintenance();
+    await rt.idle();
+    await rt.runner.idlePointerMaintenance();
   };
 
   it("rolls the pointer back to the running identity (flag ON)", async () => {
     rt = newRuntime(true);
-    const { cell, v1Ref } = await runV1ThenStrandPointer();
+    const { cell, v1Ref } = await runV1("unloadable-pointer-flag-on");
+    await repointTo(cell, await unloadableIdentityPromise);
 
-    const converged = await settleUntil(
-      () => getPatternIdentityRef(cell)?.identity === v1Ref.identity,
-    );
-    expect(converged).toBe(true);
     const ref = getPatternIdentityRef(cell);
     expect(ref?.identity).toBe(v1Ref.identity);
     expect(ref?.symbol).toBe(v1Ref.symbol);
@@ -145,14 +149,84 @@ describe("unloadable patternIdentity pointer vs a running pattern", () => {
 
   it("leaves the pointer as written when the flag is OFF", async () => {
     rt = newRuntime(false);
-    const { cell, unloadableIdentity } = await runV1ThenStrandPointer();
+    const { cell } = await runV1("unloadable-pointer-flag-off");
+    const unloadableIdentity = await unloadableIdentityPromise;
+    await repointTo(cell, unloadableIdentity);
 
-    // Give a would-be roll-forward the same window the flag-ON case gets,
-    // then assert nothing moved the pointer.
-    await settleUntil(
-      () => getPatternIdentityRef(cell)?.identity !== unloadableIdentity,
-      500,
+    expect(getPatternIdentityRef(cell)?.identity).toBe(unloadableIdentity);
+  });
+
+  it("never rolls back under CFC-disabled probes (undefined is not a verdict)", async () => {
+    // With cfcEnforcementMode "disabled", loadPatternByIdentity returns
+    // undefined for anything outside the in-memory index — "probe
+    // unsupported", not "artifact dead". A legitimate repoint to a LOADABLE
+    // identity (persisted by another session) must survive.
+    rt = newRuntime(true, { cfcEnforcementMode: "disabled" });
+
+    // Persist a loadable V2 through a separate enforcing runtime so the
+    // artifact genuinely exists in the shared store.
+    const other = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      experimental: {},
+    });
+    let v2Identity: string;
+    try {
+      const otherTx = other.edit();
+      const v2 = await other.patternManager.compilePattern(
+        programOf(V2_LOADABLE),
+        { space, tx: otherTx },
+      );
+      v2Identity = other.patternManager.getArtifactEntryRef(v2)!.identity;
+      await otherTx.commit();
+      await other.idle();
+    } finally {
+      await other.dispose();
+    }
+
+    const { cell } = await runV1("unloadable-pointer-cfc-disabled");
+    await repointTo(cell, v2Identity);
+
+    // The repoint stands: no rollback to V1.
+    expect(getPatternIdentityRef(cell)?.identity).toBe(v2Identity);
+  });
+
+  it("never writes a keyless session pointer durably", async () => {
+    // A hand-built (keyless) pattern gets a session-synthetic `keyless:` ref
+    // minted and indexed during setup. If its piece is repointed to an
+    // unloadable identity, rolling back would write a pointer no fresh
+    // runtime can load — so the roll-forward must not engage at all.
+    rt = newRuntime(true);
+    const keylessPattern = {
+      argumentSchema: {},
+      resultSchema: {
+        type: "object",
+        properties: { marker: { type: "string" } },
+      },
+      result: { marker: "keyless" },
+      nodes: [],
+    };
+    const tx = rt.edit();
+    const cell = rt.getCell<Record<string, unknown>>(
+      space,
+      "unloadable-pointer-keyless",
+      undefined,
+      tx,
     );
+    // deno-lint-ignore no-explicit-any
+    const running = rt.run(tx, keylessPattern as any, {}, cell);
+    await tx.commit();
+    await running.pull();
+    const keylessRef = getPatternIdentityRef(cell);
+    if (keylessRef !== undefined) {
+      expect(keylessRef.identity).toMatch(/^keyless:/);
+    }
+
+    const unloadableIdentity = await unloadableIdentityPromise;
+    await repointTo(cell, unloadableIdentity);
+
+    // No rollback: the pointer keeps the (unloadable) repoint rather than
+    // gaining a session-synthetic identity.
     expect(getPatternIdentityRef(cell)?.identity).toBe(unloadableIdentity);
   });
 });
