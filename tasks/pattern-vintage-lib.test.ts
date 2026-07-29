@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
+  armVerdictGuard,
   AUTO,
   collectVintages,
   coveredPatternKeys,
@@ -304,6 +305,40 @@ describe("reporting", () => {
 
     expect(report).toContain("/api/pattern/system/home.tsx");
     expect(report).toContain("requiredPatternKeys");
+  });
+
+  it("fails the run when the process ends without a verdict", () => {
+    // The wiring, not just the message. This guard is the one piece of the
+    // gate whose failure mode is SILENCE — before it, a `home.tsx` that did
+    // not compile exited 0 with no output at all — so the listeners being
+    // attached to the right events, in the right order, is the assertion.
+    const target = new EventTarget();
+    const exits: number[] = [];
+    const logs: string[] = [];
+    armVerdictGuard(target, (code) => exits.push(code), (m) => logs.push(m));
+
+    const rejection = Object.assign(new Event("unhandledrejection"), {
+      reason: new Error("database disk image is malformed"),
+    });
+    target.dispatchEvent(rejection);
+    target.dispatchEvent(new Event("beforeunload"));
+
+    expect(exits).toEqual([1]);
+    // The rejection has to survive to the message: "something went wrong
+    // somewhere" would send the reader looking in the wrong place.
+    expect(logs[0]).toContain("database disk image is malformed");
+  });
+
+  it("still fails when no rejection was ever observed", () => {
+    // A promise that simply never settles leaves nothing to report, and that
+    // must still be a red rather than a pass for lack of evidence.
+    const target = new EventTarget();
+    const exits: number[] = [];
+    armVerdictGuard(target, (code) => exits.push(code), () => {});
+
+    target.dispatchEvent(new Event("beforeunload"));
+
+    expect(exits).toEqual([1]);
   });
 
   it("explains an end with no verdict, and carries the rejection", () => {

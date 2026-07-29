@@ -353,7 +353,7 @@ export function reportUnmappedUrls(unmapped: readonly string[]): string {
  * green because the thing it gates is too broken to test is worse than no gate,
  * so reaching a verdict is itself part of passing.
  */
-export function reportNoVerdict(reason: unknown): string {
+export function reportNoVerdict(reason?: unknown): string {
   return [
     "The vintage gate ended without reaching a verdict.",
     "",
@@ -366,6 +366,34 @@ export function reportNoVerdict(reason: unknown): string {
       ? "  (no rejection was observed; look for an unresolved await)"
       : `  last unhandled rejection: ${describeError(reason)}`,
   ].join("\n");
+}
+
+/**
+ * Make "ended without a verdict" fail instead of pass.
+ *
+ * `beforeunload` fires when the event loop is about to drain, which is the last
+ * moment at which a run that never finished is still distinguishable from one
+ * that did. The caller's clean path exits explicitly, so anything that reaches
+ * this listener did not get there.
+ *
+ * Takes its `target` and `exit` rather than reaching for `globalThis` and
+ * `Deno.exit`, so the wiring itself is testable — the guard is the one piece of
+ * this gate whose failure mode is silence, and an untested guard against
+ * silence is a comment.
+ */
+export function armVerdictGuard(
+  target: EventTarget,
+  exit: (code: number) => void,
+  log: (message: string) => void = console.error,
+): void {
+  let lastRejection: unknown;
+  target.addEventListener("unhandledrejection", (event) => {
+    lastRejection = (event as { reason?: unknown }).reason;
+  });
+  target.addEventListener("beforeunload", () => {
+    log(reportNoVerdict(lastRejection));
+    exit(1);
+  });
 }
 
 /**

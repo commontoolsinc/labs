@@ -42,11 +42,11 @@ import {
   HOME_PATTERN_URL,
 } from "../packages/piece/src/system-pattern-url.ts";
 import {
+  armVerdictGuard,
   isClean,
   relativeToRepo,
   reportFailures,
   reportNothingReplayed,
-  reportNoVerdict,
   reportUncovered,
   reportUnmappedUrls,
   requiredPatternKeys,
@@ -145,16 +145,8 @@ if (import.meta.main) {
   // compile, and a truncated fixture, both leave `harness.resolve()`'s promise
   // pending forever while the real error surfaces as a rejection nobody
   // awaits — so `main` never returns, the event loop drains, and the process
-  // would exit 0 having replayed nothing and printed nothing. `beforeunload`
-  // is the last point at which that is still distinguishable from success.
-  let lastRejection: unknown;
-  globalThis.addEventListener("unhandledrejection", (event) => {
-    lastRejection = event.reason;
-  });
-  globalThis.addEventListener("beforeunload", () => {
-    console.error(reportNoVerdict(lastRejection));
-    Deno.exit(1);
-  });
+  // would exit 0 having replayed nothing and printed nothing.
+  armVerdictGuard(globalThis, Deno.exit);
   await main();
   // Only the clean path gets here; every other exit is `Deno.exit(1)` above.
   // Exiting explicitly is what keeps the guard from firing on a success.
