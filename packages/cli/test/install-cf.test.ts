@@ -1,0 +1,269 @@
+/**
+ * `deno task install-cf` — putting `cf` on PATH without mise.
+ *
+ * It installs a copy, not a link. `bin/cf` is self-contained: it works out
+ * which checkout to run from `$CF_LABS_ROOT` or the cwd, neither of which
+ * depends on where the copy itself lives. So no particular checkout has to
+ * survive for the install to keep working — which matters here, where
+ * worktrees are created and removed routinely.
+ *
+ * The one thing a copy cannot infer is which checkout to use when you are
+ * outside every checkout, so the installer bakes that in. The two properties
+ * worth guarding are therefore that the copy is independent of its source, and
+ * that the baked default actually lands.
+ *
+ * Each case runs the real script against a fake checkout in a temp dir, with
+ * an explicit `--dir`, so nothing touches the repository or the user's PATH.
+ */
+
+import {
+  assert,
+  assertEquals,
+  assertFalse,
+  assertStringIncludes,
+} from "@std/assert";
+import { dirname, fromFileUrl, join } from "@std/path";
+
+const repoRoot = join(dirname(fromFileUrl(import.meta.url)), "..", "..", "..");
+const installer = join(repoRoot, "scripts", "install-cf.sh");
+
+/** A git checkout with a `bin/cf`, standing in for a real one. */
+async function makeCheckout(
+  root: string,
+  // The installer rewrites this line, and fails loudly if it is absent, so the
+  // stand-in has to carry it like the real bin/cf does.
+  binContents = '#!/bin/sh\nDEFAULT_LABS_ROOT=""\n',
+): Promise<void> {
+  await Deno.mkdir(join(root, "bin"), { recursive: true });
+  await Deno.writeTextFile(join(root, "bin", "cf"), binContents);
+  await Deno.chmod(join(root, "bin", "cf"), 0o755);
+  const git = async (...args: string[]) => {
+    await new Deno.Command("git", {
+      args,
+      cwd: root,
+      stdout: "null",
+      stderr: "null",
+    })
+      .output();
+  };
+  await git("init", "-q");
+  await git("config", "user.email", "test@example.com");
+  await git("config", "user.name", "Test");
+}
+
+async function runInstaller(
+  cwd: string,
+  args: string[],
+): Promise<{ code: number; out: string; err: string }> {
+  const { code, stdout, stderr } = await new Deno.Command(installer, {
+    args,
+    cwd,
+    env: { ...Deno.env.toObject(), SHELL: "/bin/zsh" },
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  return {
+    code,
+    out: new TextDecoder().decode(stdout),
+    err: new TextDecoder().decode(stderr),
+  };
+}
+
+async function withTempDir(
+  body: (dir: string) => Promise<void>,
+): Promise<void> {
+  const dir = await Deno.makeTempDir({ prefix: "install-cf-" });
+  const real = await Deno.realPath(dir);
+  try {
+    await body(real);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+}
+
+Deno.test("installs a copy, independent of its source", async () => {
+  // Deleting or changing the source checkout must not reach back into an
+  // install that is already on someone's PATH.
+  await withTempDir(async (dir) => {
+    const checkout = join(dir, "labs");
+    const target = join(dir, "target");
+    await makeCheckout(
+      checkout,
+      '#!/bin/sh\nDEFAULT_LABS_ROOT=""\necho original\n',
+    );
+    await Deno.mkdir(target);
+
+    assertEquals((await runInstaller(checkout, ["--dir", target])).code, 0);
+
+    const info = await Deno.lstat(join(target, "cf"));
+    assertFalse(info.isSymlink, "expected a real file, not a link");
+    assertStringIncludes(
+      await Deno.readTextFile(join(target, "cf")),
+      "original",
+    );
+
+    await Deno.remove(checkout, { recursive: true });
+    assertStringIncludes(
+      await Deno.readTextFile(join(target, "cf")),
+      "original",
+    );
+  });
+});
+
+Deno.test("bakes the checkout default into the copy", async () => {
+  await withTempDir(async (dir) => {
+    const checkout = join(dir, "labs");
+    const target = join(dir, "target");
+    await makeCheckout(checkout);
+    await Deno.mkdir(target);
+
+    assertEquals((await runInstaller(checkout, ["--dir", target])).code, 0);
+    assertStringIncludes(
+      await Deno.readTextFile(join(target, "cf")),
+      `DEFAULT_LABS_ROOT="${checkout}"`,
+    );
+  });
+});
+
+Deno.test("the shebang stays on line 1", async () => {
+  // The install marker is inserted after it; ahead of it the file is not
+  // executable as a script at all.
+  await withTempDir(async (dir) => {
+    const checkout = join(dir, "labs");
+    const target = join(dir, "target");
+    await makeCheckout(checkout);
+    await Deno.mkdir(target);
+
+    assertEquals((await runInstaller(checkout, ["--dir", target])).code, 0);
+    const lines = (await Deno.readTextFile(join(target, "cf"))).split("\n");
+    assertEquals(lines[0], "#!/bin/sh");
+    assertStringIncludes(lines[1], "installed by scripts/install-cf.sh");
+  });
+});
+
+Deno.test("re-running upgrades an existing install", async () => {
+  // This is the upgrade path, since a copy does not track its source.
+  await withTempDir(async (dir) => {
+    const checkout = join(dir, "labs");
+    const target = join(dir, "target");
+    await makeCheckout(
+      checkout,
+      '#!/bin/sh\nDEFAULT_LABS_ROOT=""\necho original\n',
+    );
+    await Deno.mkdir(target);
+
+    assertEquals((await runInstaller(checkout, ["--dir", target])).code, 0);
+    await Deno.writeTextFile(
+      join(checkout, "bin", "cf"),
+      '#!/bin/sh\nDEFAULT_LABS_ROOT=""\necho upgraded\n',
+    );
+    assertEquals((await runInstaller(checkout, ["--dir", target])).code, 0);
+
+    assertStringIncludes(
+      await Deno.readTextFile(join(target, "cf")),
+      "upgraded",
+    );
+  });
+});
+
+Deno.test("reports what it installed", async () => {
+  await withTempDir(async (dir) => {
+    const checkout = join(dir, "labs");
+    const target = join(dir, "target");
+    await makeCheckout(checkout);
+    await Deno.mkdir(target);
+
+    const { code, out } = await runInstaller(checkout, ["--dir", target]);
+    assertEquals(code, 0);
+    assertStringIncludes(out, join(target, "cf"));
+    assertStringIncludes(out, checkout);
+  });
+});
+
+Deno.test("prints the completion line without editing any rc", async () => {
+  await withTempDir(async (dir) => {
+    const checkout = join(dir, "labs");
+    const target = join(dir, "target");
+    await makeCheckout(checkout);
+    await Deno.mkdir(target);
+
+    const { out } = await runInstaller(checkout, ["--dir", target]);
+    assertStringIncludes(out, "source <(cf completion zsh)");
+    assertStringIncludes(out, "not installed automatically");
+  });
+});
+
+Deno.test("is idempotent", async () => {
+  await withTempDir(async (dir) => {
+    const checkout = join(dir, "labs");
+    const target = join(dir, "target");
+    await makeCheckout(checkout);
+    await Deno.mkdir(target);
+
+    assertEquals((await runInstaller(checkout, ["--dir", target])).code, 0);
+    assertEquals((await runInstaller(checkout, ["--dir", target])).code, 0);
+    assert((await Deno.lstat(join(target, "cf"))).isFile);
+  });
+});
+
+Deno.test("refuses to clobber a real file", async () => {
+  // Something the user put there by hand is not ours to replace.
+  await withTempDir(async (dir) => {
+    const checkout = join(dir, "labs");
+    const target = join(dir, "target");
+    await makeCheckout(checkout);
+    await Deno.mkdir(target);
+    await Deno.writeTextFile(join(target, "cf"), "mine, do not touch\n");
+
+    const { code, err } = await runInstaller(checkout, ["--dir", target]);
+    assertEquals(code, 1);
+    assertStringIncludes(err, "not installed by this script");
+    assertEquals(
+      await Deno.readTextFile(join(target, "cf")),
+      "mine, do not touch\n",
+    );
+  });
+});
+
+Deno.test("dry run changes nothing", async () => {
+  await withTempDir(async (dir) => {
+    const checkout = join(dir, "labs");
+    const target = join(dir, "target");
+    await makeCheckout(checkout);
+    await Deno.mkdir(target);
+
+    const { code, out } = await runInstaller(checkout, [
+      "--dir",
+      target,
+      "--dry-run",
+    ]);
+    assertEquals(code, 0);
+    assertStringIncludes(out, "would install");
+    assertEquals(await Deno.stat(join(target, "cf")).catch(() => null), null);
+  });
+});
+
+Deno.test("a missing target directory is an error, not a silent success", async () => {
+  await withTempDir(async (dir) => {
+    const checkout = join(dir, "labs");
+    await makeCheckout(checkout);
+
+    const { code, err } = await runInstaller(checkout, [
+      "--dir",
+      join(dir, "does-not-exist"),
+    ]);
+    assertEquals(code, 1);
+    assertStringIncludes(err, "does not exist");
+  });
+});
+
+Deno.test("an unknown argument is rejected", async () => {
+  await withTempDir(async (dir) => {
+    const checkout = join(dir, "labs");
+    await makeCheckout(checkout);
+
+    const { code, err } = await runInstaller(checkout, ["--nope"]);
+    assertEquals(code, 2);
+    assertStringIncludes(err, "unknown argument");
+  });
+});

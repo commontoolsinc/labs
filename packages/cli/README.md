@@ -237,8 +237,15 @@ checkout:
 mise trust    # only if this checkout has not been trusted yet
 
 # everyone else (mise is recommended in README.md but not required):
-ln -s "$PWD/bin/cf" ~/.local/bin/cf
+deno task install-cf              # --dry-run to see what it would do
 ```
+
+`install-cf` copies `bin/cf` to a directory already on your PATH — refusing to
+guess if there isn't one, since installing somewhere unreachable would reproduce
+the silent failure this exists to prevent. A copy rather than a link, because
+the lookup below travels with the script: no particular checkout has to survive
+for the install to keep working. Re-run it to upgrade. It never edits your shell
+rc; it prints the completion line for you to add.
 
 ### Which checkout runs
 
@@ -255,8 +262,23 @@ selects, in order:
    checkout before it is tested as a host vendoring one at `vendor/labs`, so
    standing inside `<host>/vendor/labs` selects that labs rather than
    re-deriving it from the host.
-3. **The checkout the script itself lives in** — the default when you are not
-   standing in one at all.
+3. **A default fixed at install time**, then **the checkout the script itself
+   lives in** — for when you are not standing in one at all. An installed copy
+   carries the default (`install-cf` points it at the primary checkout, since
+   worktrees are removed routinely); the in-repo file and any symlink to it fall
+   through to their own checkout. Both are ignored unless they are still real
+   checkouts, so a stale default cannot silently send you somewhere that no
+   longer exists. With none of them usable, `cf` says so and exits 2 rather than
+   guessing.
+
+`cf which` answers "which one would run?" — it prints the CLI path on stdout and
+the reason on stderr, and is handled by the wrapper rather than forwarded, since
+asking the CLI which CLI would run begs the question:
+
+```bash
+cf which              # /path/to/checkout/packages/cli/mod.ts
+cf which 2>/dev/null  # just the path, for scripts
+```
 
 Rule 2 is what mise already does for its route (`_.path` resolves relative to
 the `mise.toml` declaring it), so both install routes agree on which checkout

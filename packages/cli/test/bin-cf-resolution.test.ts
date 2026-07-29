@@ -1,9 +1,10 @@
 /**
  * Which labs checkout `bin/cf` selects.
  *
- * Several checkouts coexisting is normal — a vendored labs inside another repo
- * is a supported layout (see launcher.test.ts) — so a symlinked install must
- * not pin `cf` to the checkout it was installed from.
+ * Several checkouts coexisting is normal — worktrees, and a vendored labs
+ * inside another repo, a supported layout (see launcher.test.ts) — so an
+ * install must not pin `cf` to the checkout it came from. The lookup travels
+ * with the script, which is what lets `deno task install-cf` ship a copy.
  *
  * These drive the real script rather than a reimplementation of its rules, and
  * stub each fake checkout's `launcher.ts` with a dependency-free script that
@@ -44,9 +45,10 @@ async function makeCheckout(root: string): Promise<void> {
 async function resolveFrom(
   cwd: string,
   env: Record<string, string> = {},
+  args: string[] = ["ignored-arg"],
 ): Promise<{ code: number; out: string; err: string }> {
   const command = new Deno.Command(binCf, {
-    args: ["ignored-arg"],
+    args,
     cwd,
     env: { ...Deno.env.toObject(), ...env },
     stdout: "piped",
@@ -179,6 +181,52 @@ Deno.test("outside any checkout, the script's own checkout is used", async () =>
     assertEquals(code, 0);
     // Followed the symlink back to the checkout it lives in, not $PWD.
     assertEquals(new TextDecoder().decode(stdout).trim(), labs);
+  });
+});
+
+Deno.test("`which` reports the CLI that would run, on stdout alone", async () => {
+  // Answered by the wrapper: asking the CLI which CLI would run begs the
+  // question. stdout stays a bare path so a script can consume it.
+  await withTempDir(async (dir) => {
+    const labs = join(dir, "labs");
+    await makeCheckout(labs);
+    const deep = join(labs, "packages");
+    await Deno.mkdir(deep, { recursive: true });
+
+    const { code, out, err } = await resolveFrom(deep, {}, ["which"]);
+    assertEquals(code, 0);
+    assertEquals(out, join(labs, "packages", "cli", "mod.ts"));
+    assertStringIncludes(err, labs);
+    assertStringIncludes(err, "nearest checkout");
+  });
+});
+
+Deno.test("`which` names CF_LABS_ROOT as the reason when it applies", async () => {
+  await withTempDir(async (dir) => {
+    const here = join(dir, "here");
+    const elsewhere = join(dir, "elsewhere");
+    await makeCheckout(here);
+    await makeCheckout(elsewhere);
+
+    const { code, out, err } = await resolveFrom(here, {
+      CF_LABS_ROOT: elsewhere,
+    }, ["which"]);
+    assertEquals(code, 0);
+    assertEquals(out, join(elsewhere, "packages", "cli", "mod.ts"));
+    assertStringIncludes(err, "CF_LABS_ROOT");
+  });
+});
+
+Deno.test("`which` is only intercepted as the first argument", async () => {
+  // `cf piece call ... which` must still reach the CLI.
+  await withTempDir(async (dir) => {
+    const labs = join(dir, "labs");
+    await makeCheckout(labs);
+
+    const { code, out } = await resolveFrom(labs, {}, ["piece", "which"]);
+    assertEquals(code, 0);
+    // The stub launcher ran, so the argument was forwarded rather than caught.
+    assertEquals(out, labs);
   });
 });
 

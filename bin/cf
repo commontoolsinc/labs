@@ -24,11 +24,18 @@ set -e
 #      not pin `cf` to the checkout it was installed from. Several checkouts
 #      coexisting is normal here — a vendored labs inside another repo is a
 #      supported, tested layout (see packages/cli/test/launcher.test.ts).
-#   3. The checkout this script physically lives in — the sensible default
-#      when you are not standing in one at all.
+#   3. A default chosen when this file was installed, then the checkout this
+#      file physically lives in — for when you are not standing in one at all.
+#      An installed copy carries the default; the in-repo file and any symlink
+#      to it fall through to their own checkout. Neither applies while you are
+#      inside a checkout, which is the overwhelmingly common case.
 #
 # This mirrors what mise already does for route 2 (`_.path` resolves relative
-# to the mise.toml declaring it), so both install routes agree.
+# to the mise.toml declaring it), so all install routes agree.
+
+# Rewritten by scripts/install-cf.sh when it installs a copy. Empty here: the
+# in-repo file is reached through a checkout by definition.
+DEFAULT_LABS_ROOT=""
 
 is_labs_checkout() {
   [ -f "${1}/packages/cli/launcher.ts" ]
@@ -55,9 +62,11 @@ resolve_from_cwd() {
   done
 }
 
-# Resolve through symlinks so the `ln -s` install above reports the checkout
-# rather than the link. `readlink -f` is GNU and newer-macOS only, so the links
-# are walked by hand to keep this working on a stock macOS shell.
+# Resolve through symlinks so a linked install reports the checkout rather than
+# the link. `readlink -f` is GNU and newer-macOS only, so the links are walked
+# by hand to keep this working on a stock macOS shell. An installed copy is not
+# a link and lands on its own directory, which is not a checkout — that is what
+# DEFAULT_LABS_ROOT is for.
 script_checkout() {
   target=$0
   while [ -L "${target}" ]; do
@@ -70,15 +79,52 @@ script_checkout() {
   (CDPATH= cd -- "$(dirname -- "${target}")/.." && pwd -P)
 }
 
+# Last resort, in order: the root chosen at install time, then this file's own
+# checkout. Both are skipped unless they really are checkouts, so a stale
+# install-time default cannot silently send you somewhere that no longer exists.
+fallback_root() {
+  if [ -n "${DEFAULT_LABS_ROOT}" ] && is_labs_checkout "${DEFAULT_LABS_ROOT}"; then
+    printf '%s\n' "${DEFAULT_LABS_ROOT}"
+    return 0
+  fi
+  own=$(script_checkout)
+  if is_labs_checkout "${own}"; then
+    printf '%s\n' "${own}"
+    return 0
+  fi
+  return 1
+}
+
 if [ -n "${CF_LABS_ROOT:-}" ]; then
   root=$CF_LABS_ROOT
+  reason="CF_LABS_ROOT"
   if ! is_labs_checkout "${root}"; then
     echo "cf: CF_LABS_ROOT is not a labs checkout: ${root}" >&2
     echo "    (expected ${root}/packages/cli/launcher.ts to exist)" >&2
     exit 2
   fi
+elif root=$(resolve_from_cwd); then
+  reason="nearest checkout above the current directory"
+elif root=$(fallback_root); then
+  reason="fallback (not inside a checkout)"
 else
-  root=$(resolve_from_cwd) || root=$(script_checkout)
+  echo "cf: no labs checkout found." >&2
+  echo "    Not inside one, and this install has no usable default." >&2
+  echo "    cd into a checkout, set CF_LABS_ROOT, or re-run 'deno task install-cf'." >&2
+  exit 2
+fi
+
+# Answered by the wrapper, never forwarded: the question is which CLI would run,
+# so handing it to that CLI would beg it. Only as the first argument, so it
+# cannot swallow a `which` meant as a value for some other command.
+#
+# The path goes to stdout alone so it is usable in a script; how it was chosen
+# goes to stderr, matching the CLI's own output conventions.
+if [ "${1:-}" = "which" ]; then
+  printf '%s\n' "${root}/packages/cli/mod.ts"
+  echo "cf: ${root}" >&2
+  echo "cf: selected by ${reason}" >&2
+  exit 0
 fi
 
 if ! command -v deno >/dev/null 2>&1; then
