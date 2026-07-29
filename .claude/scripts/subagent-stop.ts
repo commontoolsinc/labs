@@ -21,6 +21,13 @@
  * directory; a subagent handed its own worktree is not described by it at all.
  * The subagent's own transcript records where it worked, so that is what we
  * read. See common/worktree.ts.
+ *
+ * The cost of scoping this way, stated plainly: attribution comes from the
+ * Edit/Write tool calls in the transcript, so a file changed through Bash
+ * instead — `sed -i`, a codegen task — is not checked here. That is the
+ * accepted trade. An unattributable check is what made this hook's verdict
+ * worth ignoring, and a gate everyone ignores catches nothing at all. CI and
+ * the pre-commit hook still see those files.
  */
 
 import { env, sameRepository, worktreeRoot } from "./common/worktree.ts";

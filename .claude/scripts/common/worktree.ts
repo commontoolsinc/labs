@@ -110,19 +110,22 @@ export function isGitCommit(cmd: string): boolean {
 /**
  * `cmd` split around the `git … commit` invocation.
  *
- * Callers want the two halves for different reasons, and both matter: earlier
- * commands (a `git add`, a `cd`) are only meaningful in `before`, while the
- * commit's own flags are in `after`. Splitting here also keeps pattern
- * searches out of the commit message, which can contain any text at all —
- * including something that reads exactly like a `git add`.
+ * Each part answers a different question and only one part can answer it:
+ * earlier commands (a `git add`, a `cd`) live in `before`, git's own global
+ * options in `options`, the commit's flags in `after`. Splitting once, here,
+ * is also what keeps every pattern search out of the commit message — which is
+ * free to contain text reading exactly like a `git add` or a `cd`.
  */
 export function splitAtGitCommit(
   cmd: string,
-): { before: string; after: string } {
+): { before: string; options: string; after: string } {
   const m = cmd.match(GIT_COMMIT);
-  if (!m || m.index === undefined) return { before: cmd, after: "" };
+  if (!m || m.index === undefined) {
+    return { before: cmd, options: "", after: "" };
+  }
   return {
     before: cmd.slice(0, m.index),
+    options: m[1] ?? "",
     after: cmd.slice(m.index + m[0].length),
   };
 }
@@ -142,12 +145,9 @@ export function targetDirArgs(cmd: string): string[] | null {
   // deliberately do not try to model. Refuse rather than answer wrongly.
   if (/--git-dir[=\s]|--work-tree[=\s]/.test(cmd)) return null;
 
-  // Isolate the `git … commit` invocation. The options between `git` and
-  // `commit` are the only place a `-C` can affect the commit, and anchoring
-  // here keeps us out of the commit *message*, which may contain anything.
-  const invocation = cmd.match(GIT_COMMIT);
-  const optionsBeforeCommit = invocation?.[1] ?? "";
-  const prefix = invocation ? cmd.slice(0, invocation.index) : cmd;
+  // The options between `git` and `commit` are the only place a `-C` can affect
+  // the commit; `before` is the only place a `cd` can.
+  const { before: prefix, options } = splitAtGitCommit(cmd);
 
   const args: string[] = [];
 
@@ -165,7 +165,7 @@ export function targetDirArgs(cmd: string): string[] | null {
 
   // Then each `-C` the commit itself carries, in order.
   for (
-    const m of optionsBeforeCommit.matchAll(
+    const m of options.matchAll(
       /-C\s+("[^"]*"|'[^']*'|[^\s]+)/g,
     )
   ) {
