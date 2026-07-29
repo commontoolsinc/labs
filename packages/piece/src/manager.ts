@@ -293,19 +293,31 @@ export class PieceManager {
       // resolve the root AGAIN so the retry observes the committed
       // patternIdentity rather than the pre-transaction snapshot held by
       // `defaultPattern` (same trap the boot path documents in
-      // startEnsuredDefaultPattern).
-      await this.runtime.idle();
-      const refreshedSlot = await timePiecePhase(
-        "getDefaultPattern.spaceCell.resync(after-heal)",
-        () => this.spaceCell.key("defaultPattern").sync(),
-      );
-      const healedPattern = refreshedSlot.get();
-      if (!healedPattern) throw error;
-      await healedPattern.sync();
-      return await timePiecePhase(
-        "getDefaultPattern.get(retry-after-heal)",
-        () => this.get(healedPattern, runIt, nameSchema),
-      );
+      // startEnsuredDefaultPattern). The whole settle/re-resolve/retry
+      // sequence surfaces the ORIGINAL start failure if anything in it goes
+      // wrong — a secondary failure here is a diagnostic detail, not the
+      // caller's error.
+      try {
+        await this.runtime.idle();
+        const refreshedSlot = await timePiecePhase(
+          "getDefaultPattern.spaceCell.resync(after-heal)",
+          () => this.spaceCell.key("defaultPattern").sync(),
+        );
+        const healedPattern = refreshedSlot.get();
+        if (!healedPattern) throw error;
+        await healedPattern.sync();
+        return await timePiecePhase(
+          "getDefaultPattern.get(retry-after-heal)",
+          () => this.get(healedPattern, runIt, nameSchema),
+        );
+      } catch (retryError) {
+        pieceHealLogger.warn("default-root-heal-retry-failed", () => [
+          "getDefaultPattern: post-heal retry failed; surfacing the",
+          `original start failure (${this.space})`,
+          retryError,
+        ]);
+        throw error;
+      }
     }
   }
 

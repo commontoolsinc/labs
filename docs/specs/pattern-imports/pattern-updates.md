@@ -126,6 +126,16 @@ Two decisions carry the whole design:
    fire-and-forget check, and the existing watcher re-instantiates a verified
    replacement in place. No new apply machinery.
 
+   The awaited default-root reconcile has a second entry point beyond space
+   open: `PieceManager.getDefaultPattern` — the resolution every registry
+   listing, CLI `piece ls`, FUSE mount, and shell list cell goes through —
+   runs the same awaited check when starting the persisted root FAILS, then
+   re-resolves the slot and retries the start once (a failed retry surfaces
+   the original start error). Without this, an unloadable obsolete root
+   healed only for consumers that happened to enter through space open;
+   every headless/listing consumer died with the root (the 2026-07-29
+   cf-cell-context retirement, caught by the loom vendor gate).
+
 A root created before provenance stamping may be admitted to this loop only
 when its stored `{ identity, symbol }` exactly equals the advertised current
 official entry appropriate to the space (`home.tsx` for Home,

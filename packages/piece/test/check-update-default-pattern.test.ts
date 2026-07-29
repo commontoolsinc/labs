@@ -861,6 +861,45 @@ describe("checkAndUpdateDefaultPattern", () => {
     expect(getPatternIdentityRef(healed)?.symbol).toBe("default");
   });
 
+  it("surfaces the ORIGINAL start failure when the post-heal retry fails", async () => {
+    await setup({ systemPatternAutoUpdate: true });
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    const staleIdentity = await identityForSource(
+      patternSource("unloadable-registry-path-root-retry-fails"),
+    );
+    await manager.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: staleIdentity,
+        symbol: "default",
+      });
+    });
+    expect(error).toBeUndefined();
+    stub.setSource(SOURCE_V2);
+
+    // Inject a failure into the post-heal sequence: runtime.idle() is only
+    // awaited there on this path. The caller must still see the ORIGINAL
+    // "Could not load pattern" failure, not the injected secondary one.
+    const originalIdle = runtime.idle.bind(runtime);
+    let injected = false;
+    runtime.idle = () => {
+      if (!injected) {
+        injected = true;
+        return Promise.reject(new Error("secondary retry failure"));
+      }
+      return originalIdle();
+    };
+    try {
+      await expect(manager.getPieceRegistry()).rejects.toThrow(
+        "Could not load pattern",
+      );
+      expect(injected).toBe(true);
+    } finally {
+      runtime.idle = originalIdle;
+    }
+  });
+
   it("registry path still fails loudly when the flag is OFF", async () => {
     await setup({});
     const piece = await controller.ensureDefaultPattern();
