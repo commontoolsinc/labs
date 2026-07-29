@@ -325,6 +325,33 @@ for raw: its delta behaviour is predictable, where gzip's swings tenfold on a
 setting nobody would think to hold constant. Two different patterns gzipped
 delta not at all either (+249 KiB).
 
+**Across generations, which is what stage 4 actually accumulates.** Four
+captures of `home.tsx`, each after a real pattern change, each its own commit;
+pack size after each:
+
+| After | Raw `.sqlite` | Gzipped, level 6 |
+| --- | --- | --- |
+| gen 1 | 232.50 KiB | 225.87 KiB |
+| gen 2 | 241.11 KiB (+8.6) | 451.52 KiB (+225.7) |
+| gen 3 | 249.75 KiB (+8.6) | 677.19 KiB (+225.7) |
+| gen 4 | 259.46 KiB (+9.7) | 904.89 KiB (+227.7) |
+
+Raw costs ~9 KiB a generation against a 3.5 MiB file; gzipped costs the whole
+file again every time. Git's packfile delta search runs across the WHOLE repo,
+not within a commit, so adjacent generations of a near-identical SQLite store
+delta almost perfectly. Compressing ourselves pre-empts that with a worse
+scheme — worse because it is per-file where git's is cross-file.
+
+No custom append/chunk format is warranted: packfile delta already is that
+mechanism, content-addressed, and a bespoke one would need its own reader,
+pruner and corruption handling while breaking the property that chose SQLite
+over a JSON dump — restore is a single `Deno.copyFile`.
+
+Two caveats. WORKING-TREE disk is the real price (3.5 MiB a generation
+uncompressed), so retention bounds checkouts rather than history. And git's
+delta chain depth (default 50) means growth is ~9 KiB a generation with a
+periodic full-size restart.
+
 Stage 4's whole job is accumulating vintages, so the compounding term
 dominates the one-off. The price
 is working-tree disk (3.5 MiB a fixture rather than 226 KiB), which is transient
