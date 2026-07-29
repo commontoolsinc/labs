@@ -176,6 +176,7 @@ Deno.test("languageForSource: filenames precede direct and env shebangs", () => 
   for (
     const shebang of [
       "#!/usr/bin/env -v CF_VIEW_REVIEW=1 python3",
+      "#!/usr/bin/env -- CF_VIEW_REVIEW=1 python3",
       "#!/usr/bin/env --unset PYTHONPATH python3",
       "#!/usr/bin/env -iu PYTHONPATH python3",
       "#!/usr/bin/env -iP /usr/bin python3",
@@ -188,6 +189,36 @@ Deno.test("languageForSource: filenames precede direct and env shebangs", () => 
       "#!/usr/bin/env -S -iP /usr/bin python3",
       "#!/usr/bin/env -S -iC /tmp python3",
       "#!/usr/bin/env -S -iuPYTHONPATH python3",
+      "#!/usr/bin/env -S -- python3",
+      "#!/usr/bin/env -S -- CF_VIEW_REVIEW=1 python3",
+      "#!/usr/bin/env -S -S python3",
+      '#!/usr/bin/env -S -S "" python3',
+      '#!/usr/bin/env -S -S "-u" PYTHONPATH python3',
+      '#!/usr/bin/env -S -S "--" CF_VIEW_REVIEW=1 python3',
+      '#!/usr/bin/env -S -S "python3 -u"',
+      '#!/usr/bin/env -S -S "CF_VIEW_REVIEW=1" python3',
+      '#!/usr/bin/env -S --split-string "python3 -u"',
+      "#!/usr/bin/env -S --split-string=python3",
+      '#!/usr/bin/env -S --split-string="python3 -u"',
+      '#!/usr/bin/env -S --split-string="CF_VIEW_REVIEW=1" python3',
+      "#!/usr/bin/env -S -vS python3",
+      "#!/usr/bin/env -S -vSpython3",
+      '#!/usr/bin/env -S -vS"python3 -u"',
+      "#!/usr/bin/env -S -S#ignored python3",
+      "#!/usr/bin/env -S --split-string=#ignored python3",
+      "#!/usr/bin/env -S CF=has\\\\backslash python3",
+      '#!/usr/bin/env -S "CF=has\\$dollar" python3',
+      "#!/usr/bin/env -S 'CF=has\\ttext' python3",
+      "#!/usr/bin/env -S CF=one\\ two python3",
+      "#!/usr/bin/env -S CF=one\\\ttwo python3",
+      '#!/usr/bin/env -S "CF=one\\ two" python3',
+      "#!/usr/bin/env -S CF=one\\_python3",
+      '#!/usr/bin/env -S "CF=one\\_two" python3',
+      "#!/usr/bin/env -S ${CF_VIEW_BIN}/python3",
+      '#!/usr/bin/env -S "${CF_VIEW_BIN}/python3"',
+      "#!/usr/bin/env -S '$CF_VIEW_BIN/python3'",
+      "#!/usr/bin/env -S python3\\c ignored",
+      "#!/usr/bin/env -S python3 # ignored",
       "#!/usr/bin/env --split-string python3 -u",
       "#!/usr/bin/env --split-string=CF_VIEW_REVIEW=1 python3 -u",
       "#!/usr/bin/env -vS python3 -S",
@@ -199,6 +230,16 @@ Deno.test("languageForSource: filenames precede direct and env shebangs", () => 
       languageForSource("tool", `${shebang}\nprint('env split string');\n`),
       pythonLanguage,
       shebang,
+    );
+  }
+  const deeplyNestedSplit = "--split-string=".repeat(20_000);
+  for (const command of ["python3", "${CF_VIEW_BIN}/python3"]) {
+    assertEquals(
+      languageForSource(
+        "tool",
+        `#!/usr/bin/env -S ${deeplyNestedSplit}${command}\n`,
+      ),
+      pythonLanguage,
     );
   }
   for (const interpreter of ["deno", "node", "nodejs", "bun"]) {
@@ -253,6 +294,14 @@ Deno.test("languageForSource: malformed and option-only shebangs fall back safel
     plainTextLanguage,
   );
   assertEquals(
+    languageForSource("tool", "#!/usr/bin/env -S\n"),
+    plainTextLanguage,
+  );
+  assertEquals(
+    languageForSource("tool", "#!/usr/bin/env -S --\n"),
+    plainTextLanguage,
+  );
+  assertEquals(
     languageForSource("tool", "#!/usr/bin/env -u PATH\n"),
     plainTextLanguage,
   );
@@ -278,6 +327,27 @@ Deno.test("languageForSource: malformed and option-only shebangs fall back safel
       '#!/usr/bin/env "python3',
       "#!/usr/bin/env 'python3",
       '#!/usr/bin/env -S "python3',
+      "#!/usr/bin/env -S -u",
+      "#!/usr/bin/env -S -S",
+      "#!/usr/bin/env -S -vS",
+      "#!/usr/bin/env -S -S '\"python3'",
+      "#!/usr/bin/env -S py\\thon3",
+      '#!/usr/bin/env -S "py\\thon3"',
+      "#!/usr/bin/env -S python3\\x",
+      '#!/usr/bin/env -S "python3\\c"',
+      "#!/usr/bin/env -S # python3",
+      "#!/usr/bin/env -S -S#/usr/bin/python3",
+      "#!/usr/bin/env -S --split-string=#/usr/bin/python3",
+      "#!/usr/bin/env -S $CF_VIEW_BIN/python3",
+      "#!/usr/bin/env -S $*/python3",
+      "#!/usr/bin/env -S ${}/python3",
+      "#!/usr/bin/env -S ${1}/python3",
+      "#!/usr/bin/env -S ${A-B}/python3",
+      "#!/usr/bin/env -S ${CF_VIEW_BIN/python3",
+      '#!/usr/bin/env -S "$CF_VIEW_BIN/python3"',
+      "#!/usr/bin/env CF_VIEW_REVIEW=1 -S python3",
+      "#!/usr/bin/env -S CF_VIEW_REVIEW=1 -S python3",
+      '#!/usr/bin/env -S -S "CF_VIEW_REVIEW=1" -S python3',
     ]
   ) {
     assertEquals(

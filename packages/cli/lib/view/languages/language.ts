@@ -386,32 +386,48 @@ function shebangInterpreter(text: string): string | undefined {
 
 function envCommandFromShebang(input: string): string | undefined {
   const matches = [...input.matchAll(/\S+/g)];
+  let options = true;
   for (let index = 0; index < matches.length; index++) {
     const match = matches[index];
     const word = match[0];
-    const rest = input.slice((match.index ?? 0) + word.length);
-    if (word === "--") {
-      const command = matches[index + 1]?.[0];
-      return command === undefined ? undefined : basename(command);
+    if (options) {
+      const rest = input.slice(match.index! + word.length);
+      if (word === "--") {
+        options = false;
+        continue;
+      }
+      if (word === "-S" || word === "--split-string") {
+        return splitEnvCommand(rest);
+      }
+      if (word.startsWith("--split-string=")) {
+        return splitEnvCommand(word.slice("--split-string=".length) + rest);
+      }
+      const combinedSplitOffset = envCombinedSplitOffset(word);
+      if (combinedSplitOffset !== undefined) {
+        return splitEnvCommand(word.slice(combinedSplitOffset) + rest);
+      }
+      if (envOptionTakesFollowingWord(word)) {
+        index++;
+        continue;
+      }
+      if (word.startsWith("-")) continue;
     }
-    if (word === "-S" || word === "--split-string") {
-      return splitEnvCommand(rest);
-    }
-    if (word.startsWith("--split-string=")) {
-      return splitEnvCommand(word.slice("--split-string=".length) + rest);
-    }
-    const combinedSplit = word.match(/^-[iv0]*S(.*)$/);
-    if (combinedSplit !== null) {
-      return splitEnvCommand(combinedSplit[1] + rest);
-    }
-    if (envOptionTakesFollowingWord(word)) {
-      index++;
+    if (/^[^=]+=/.test(word)) {
+      options = false;
       continue;
     }
-    if (word.startsWith("-") || /^[^=]+=/.test(word)) continue;
     return basename(word);
   }
   return undefined;
+}
+
+function envCombinedSplitOffset(word: string): number | undefined {
+  if (!word.startsWith("-")) return undefined;
+  let index = 1;
+  while (word[index] === "i" || word[index] === "v" || word[index] === "0") {
+    index++;
+  }
+  return word[index] === "S" ? index + 1 : undefined;
 }
 
 function envOptionTakesFollowingWord(word: string): boolean {
@@ -430,63 +446,168 @@ function splitEnvCommand(input: string): string | undefined {
   return words === undefined ? undefined : envCommand(words);
 }
 
-function envCommand(words: readonly string[]): string | undefined {
-  for (let index = 0; index < words.length; index++) {
-    const word = words[index];
-    if (word === "--") {
-      return words[index + 1] === undefined
-        ? undefined
-        : basename(words[index + 1]);
+interface EnvWord {
+  readonly text: string;
+  readonly stable: boolean;
+}
+
+interface EnvWordFrame {
+  readonly words: readonly EnvWord[];
+  index: number;
+}
+
+function nextEnvWord(frames: EnvWordFrame[]): EnvWord | undefined {
+  while (frames.length > 0) {
+    const frame = frames[frames.length - 1];
+    if (frame.index < frame.words.length) {
+      return frame.words[frame.index++];
     }
-    if (word === "-S" || word === "--split-string") {
-      return envCommand(words.slice(index + 1));
-    }
-    if (word.startsWith("--split-string=")) {
-      return envCommand([
-        word.slice("--split-string=".length),
-        ...words.slice(index + 1),
-      ]);
-    }
-    const combinedSplit = word.match(/^-[iv0]*S(.*)$/);
-    if (combinedSplit !== null) {
-      const inline = combinedSplit[1];
-      return envCommand(
-        inline.length > 0
-          ? [inline, ...words.slice(index + 1)]
-          : words.slice(index + 1),
-      );
-    }
-    if (envOptionTakesFollowingWord(word)) {
-      index++;
-      continue;
-    }
-    if (word.startsWith("-") || /^[^=]+=/.test(word)) continue;
-    return basename(word);
+    frames.pop();
   }
   return undefined;
 }
 
-function splitShebangWords(input: string): string[] | undefined {
-  const words: string[] = [];
+function envWord(text: string, stable: boolean): EnvWord {
+  return {
+    text,
+    stable: stable && text.length > 0,
+  };
+}
+
+function envWordSuffix(word: EnvWord, start: number): EnvWord {
+  const text = word.text.slice(start);
+  return {
+    text,
+    stable: word.stable && text.length > 0 && !text.startsWith("#"),
+  };
+}
+
+function splitEnvWord(word: EnvWord): EnvWord[] | undefined {
+  return word.stable ? [word] : splitShebangWords(word.text);
+}
+
+function envCommand(initialWords: readonly EnvWord[]): string | undefined {
+  const frames: EnvWordFrame[] = [{ words: initialWords, index: 0 }];
+  let options = true;
+  for (;;) {
+    const word = nextEnvWord(frames);
+    if (word === undefined) return undefined;
+    const text = word.text;
+    if (options) {
+      if (text === "--") {
+        options = false;
+        continue;
+      }
+      let splitString: EnvWord | undefined;
+      if (text === "-S" || text === "--split-string") {
+        splitString = nextEnvWord(frames);
+        if (splitString === undefined) return undefined;
+      } else if (text.startsWith("--split-string=")) {
+        splitString = envWordSuffix(word, "--split-string=".length);
+      } else {
+        const combinedSplitOffset = envCombinedSplitOffset(text);
+        if (combinedSplitOffset !== undefined) {
+          splitString = combinedSplitOffset < text.length
+            ? envWordSuffix(word, combinedSplitOffset)
+            : nextEnvWord(frames);
+          if (splitString === undefined) return undefined;
+        }
+      }
+      if (splitString !== undefined) {
+        const splitWords = splitEnvWord(splitString);
+        if (splitWords === undefined) return undefined;
+        frames.push({ words: splitWords, index: 0 });
+        continue;
+      }
+      if (envOptionTakesFollowingWord(text)) {
+        if (nextEnvWord(frames) === undefined) return undefined;
+        continue;
+      }
+      if (text.startsWith("-")) continue;
+    }
+    if (/^[^=]+=/.test(text)) {
+      options = false;
+      continue;
+    }
+    return basename(text);
+  }
+}
+
+const ENV_SPLIT_ESCAPES: Readonly<Record<string, string | undefined>> = {
+  f: "\f",
+  n: "\n",
+  r: "\r",
+  t: "\t",
+  v: "\v",
+  " ": " ",
+  "\t": "\t",
+  "#": "#",
+  "$": "$",
+  '"': '"',
+  "'": "'",
+  "\\": "\\",
+};
+
+function splitShebangWords(input: string): EnvWord[] | undefined {
+  const words: EnvWord[] = [];
   let word = "";
+  let stable = true;
   let started = false;
   let quote: "'" | '"' | undefined;
   let escaped = false;
 
-  for (const char of input) {
+  for (let index = 0; index < input.length; index++) {
+    const char = input[index];
     if (escaped) {
-      word += char;
-      started = true;
       escaped = false;
+      if (quote === "'" && char !== "'" && char !== "\\") {
+        word += `\\${char}`;
+        stable = false;
+        started = true;
+        continue;
+      }
+      if (char === "c") {
+        if (quote === '"') return undefined;
+        break;
+      }
+      if (char === "_") {
+        if (quote === '"') {
+          word += " ";
+          stable = false;
+          started = true;
+        } else if (started) {
+          words.push(envWord(word, stable));
+          word = "";
+          stable = true;
+          started = false;
+        }
+        continue;
+      }
+      const replacement = ENV_SPLIT_ESCAPES[char];
+      if (replacement === undefined) return undefined;
+      stable &&= envTextIsStable(replacement, word.length === 0);
+      word += replacement;
+      started = true;
+      continue;
+    }
+    if (char === "$" && quote !== "'") {
+      const variable = input.slice(index).match(
+        /^\$\{[A-Za-z_][A-Za-z0-9_]*\}/,
+      )?.[0];
+      if (variable === undefined) return undefined;
+      word += variable;
+      started = true;
+      index += variable.length - 1;
       continue;
     }
     if (quote !== undefined) {
       if (char === quote) {
         quote = undefined;
         started = true;
-      } else if (char === "\\" && quote === '"') {
+      } else if (char === "\\") {
         escaped = true;
       } else {
+        stable &&= envTextIsStable(char, word.length === 0);
         word += char;
         started = true;
       }
@@ -497,21 +618,28 @@ function splitShebangWords(input: string): string[] | undefined {
       started = true;
     } else if (char === "\\") {
       escaped = true;
-      started = true;
-    } else if (/\s/.test(char)) {
+    } else if (char === " " || char === "\t") {
       if (started) {
-        words.push(word);
+        words.push(envWord(word, stable));
         word = "";
+        stable = true;
         started = false;
       }
+    } else if (char === "#" && !started) {
+      break;
     } else {
+      stable &&= envTextIsStable(char, word.length === 0);
       word += char;
       started = true;
     }
   }
   if (escaped || quote !== undefined) return undefined;
-  if (started) words.push(word);
+  if (started) words.push(envWord(word, stable));
   return words;
+}
+
+function envTextIsStable(text: string, atStart: boolean): boolean {
+  return !/[ \t\\'"$]/.test(text) && !(atStart && text.startsWith("#"));
 }
 
 /** The distinct languages a set of files resolves to, in first-seen order. */
