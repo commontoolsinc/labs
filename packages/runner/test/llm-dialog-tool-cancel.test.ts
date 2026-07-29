@@ -40,11 +40,7 @@ import {
   enableMockMode,
   loadConversationFixture,
 } from "@commonfabric/llm/client";
-import type {
-  BuiltInLLMMessage,
-  BuiltInLLMTool,
-  JSONSchema,
-} from "@commonfabric/api";
+import type { BuiltInLLMMessage, JSONSchema } from "@commonfabric/api";
 import { createBuilder } from "../src/builder/factory.ts";
 import {
   createTrustedBuilder,
