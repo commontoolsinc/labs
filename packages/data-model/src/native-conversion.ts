@@ -70,9 +70,14 @@ export function shallowCleanArray(
   const from = value as unknown as Record<string, unknown>;
   const to = result as unknown as Record<string, unknown>;
 
-  // `for...in` visits only the keys an array actually has, so a sparse one
-  // costs O(elements) rather than O(length) -- `length` can run to 2**32 - 2 --
-  // and it gets there without materializing a key array. It also yields any
+  // `for...in` visits only the keys an array actually has, so a sparse one --
+  // `length` can run to 2**32 - 2 -- does no JS-level work per absent slot, and
+  // no key array gets materialized either. Note this is a large constant
+  // factor, not a change of order: the engine still scans the index range to
+  // work out which keys exist, measured at roughly 10x per 10x of `length` on a
+  // two-element array. What it buys is that the scan happens inside the engine
+  // instead of as a JS iteration, which for a proxied array also means one
+  // `ownKeys` trap rather than a `has` trap per slot. It also yields any
   // named properties, which the index test drops, those being the whole point
   // of this function. Inherited keys are not a concern: this project bans
   // prototype pollution of the globals, and `Array.prototype`'s own methods are

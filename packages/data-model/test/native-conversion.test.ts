@@ -2001,8 +2001,11 @@ describe("native-conversion", () => {
       expect(1 in result).toBe(false);
     });
 
-    it("touches only the present elements, not every index below `length`", () => {
-      // A hugely sparse array must cost O(present elements), not O(length).
+    it("does not probe every index below `length`", () => {
+      // A hugely sparse array must not be walked slot by slot from JS. The
+      // engine still scans the index range to find which keys exist, so this
+      // is not O(present elements); what it pins is that the scan is not done
+      // here, one property access at a time.
       const target: unknown[] = [];
       target.length = 1_000_000;
       target[5] = "x";
