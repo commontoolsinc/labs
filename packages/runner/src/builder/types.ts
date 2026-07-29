@@ -24,7 +24,6 @@ import type {
   ComputedFunction,
   EntityRefToStringFunction,
   EqualsFunction,
-  FactoryCallInput,
   FactoryInput,
   FetchBinaryFunction,
   FetchJsonFunction,
