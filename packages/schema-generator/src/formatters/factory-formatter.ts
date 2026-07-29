@@ -1,7 +1,7 @@
 import ts from "typescript";
 import type {
-  JSONSchemaMutable,
-  JSONSchemaObjMutable,
+  MutableJSONSchema,
+  MutableJSONSchemaObj,
 } from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 import type { SchemaGenerator } from "../schema-generator.ts";
@@ -181,7 +181,7 @@ export class FactoryFormatter implements TypeFormatter {
   formatType(
     type: ts.Type,
     context: GenerationContext,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     const hints = this.hintedFactories(context);
     const detected = detectTrustedFactoryType(type, context.typeChecker);
     if ((!hints || hints.length === 0) && !detected) {
@@ -199,12 +199,12 @@ export class FactoryFormatter implements TypeFormatter {
   private formatContract(
     context: GenerationContext,
     hint: HintedFactoryContract,
-  ): JSONSchemaObjMutable {
+  ): MutableJSONSchemaObj {
     // Each carried public schema is an independently comparable document.
     // Generate it in a fresh schema context so any $ref has its own $defs
     // rather than borrowing definitions from the containing value schema.
     const inputSchema = hint.inputSchema !== undefined
-      ? hint.inputSchema as JSONSchemaMutable
+      ? hint.inputSchema as MutableJSONSchema
       : this.schemaGenerator.generateHintedFactoryContractSchema(
         hint.inputTypeNode,
         hint.inputType,
@@ -214,7 +214,7 @@ export class FactoryFormatter implements TypeFormatter {
         context.sourceFile,
       );
     const outputSchema = hint.outputSchema !== undefined
-      ? hint.outputSchema as JSONSchemaMutable
+      ? hint.outputSchema as MutableJSONSchema
       : this.schemaGenerator.generateHintedFactoryContractSchema(
         hint.outputTypeNode,
         hint.outputType,
@@ -229,7 +229,7 @@ export class FactoryFormatter implements TypeFormatter {
   private formatDetected(
     context: GenerationContext,
     detected: FactoryTypeInfo,
-  ): JSONSchemaObjMutable {
+  ): MutableJSONSchemaObj {
     const formatContractSchema = (type: ts.Type) =>
       this.schemaGenerator.generateFactoryContractSchema(
         type,
@@ -243,9 +243,9 @@ export class FactoryFormatter implements TypeFormatter {
 
 function asFactorySchema(
   kind: FactoryTypeKind,
-  inputSchema: JSONSchemaMutable,
-  outputSchema: JSONSchemaMutable,
-): JSONSchemaObjMutable {
+  inputSchema: MutableJSONSchema,
+  outputSchema: MutableJSONSchema,
+): MutableJSONSchemaObj {
   const asFactory = kind === "handler"
     ? {
       kind: "handler" as const,
@@ -257,5 +257,5 @@ function asFactorySchema(
       argumentSchema: inputSchema,
       resultSchema: outputSchema,
     };
-  return { asFactory } as JSONSchemaObjMutable;
+  return { asFactory } as MutableJSONSchemaObj;
 }

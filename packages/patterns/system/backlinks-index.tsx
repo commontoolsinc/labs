@@ -73,16 +73,18 @@ const computeIndex = lift<
 });
 
 /**
- * BacklinksIndex builds a map of backlinks across all pieces and exposes a
- * unified mentionable list for consumers like editors.
+ * BacklinksIndex scans registered pieces for backlinks. It also exposes a
+ * mentionable list containing registered pieces and their recursively exported
+ * mentionables for consumers like editors.
  *
  * Behavior:
  * - Backlinks are computed by scanning each piece's `mentioned` list and
  *   mapping mention target -> list of source pieces.
  * - Mentionable list is a union of:
- *   - every piece in `pieceRegistry`
- *   - any items a piece exports via a `mentionable` property
- *     (either an array of pieces or a Cell of such an array)
+ *   - entries in `pieceRegistry` whose values exist and do not set
+ *     `isMentionable` to false
+ *   - items those entries recursively export through a `mentionable` property,
+ *     up to five levels deep
  *
  * The backlinks map is keyed by a piece's `content` value (falling back to
  * its `[NAME]`). This mirrors how existing note patterns identify notes when

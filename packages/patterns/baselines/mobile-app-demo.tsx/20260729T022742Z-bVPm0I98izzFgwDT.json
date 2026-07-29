@@ -1,0 +1,22 @@
+{
+  "argumentSchema": {
+    "properties": {},
+    "type": "object"
+  },
+  "pattern": "mobile-app-demo.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "type": "unknown"
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

@@ -126,6 +126,10 @@ export type {
   CellKind,
   CellScope,
   CellTypeConstructor,
+  FabricExecArray,
+  FabricExecFunction,
+  FabricExecPlainObject,
+  FabricExecValue,
   FabricValue,
   FactoryInput,
   FsProjection,
@@ -143,15 +147,15 @@ export type {
   JSONArray,
   JSONObject,
   JSONSchema,
-  JSONSchemaMutable,
   JSONSchemaObj,
-  JSONSchemaObjMutable,
   JSONSchemaTypes,
   JSONValue,
   KeyResultType,
   LinkScope,
   Module,
   ModuleFactory,
+  MutableJSONSchema,
+  MutableJSONSchemaObj,
   NodeFactory,
   OpaqueCell,
   Pattern,
@@ -255,6 +259,13 @@ export function isModule(value: unknown): value is Module {
   );
 }
 
+/**
+ * A node in a pattern's execution graph.
+ *
+ * This shape is de facto compatible with {@link FabricExecPlainObject}, and is
+ * intended to remain so. It deliberately does not intersect with that type,
+ * because its string index signature would allow undeclared property names.
+ */
 export type Node = {
   description?: string;
   /** Static module metadata or the serialized link for a dynamic factory. */
@@ -487,6 +498,10 @@ export interface BuilderFunctionsAndConstants {
     typeof import("@commonfabric/data-model/fabric-instances").FabricLink;
   FabricBytes:
     typeof import("@commonfabric/data-model/fabric-primitives").FabricBytes;
+  FabricRegExp:
+    typeof import("@commonfabric/data-model/fabric-primitives").FabricRegExp;
+  FabricError:
+    typeof import("@commonfabric/data-model/fabric-instances").FabricError;
 
   // Debug stringifiers
   toCompactDebugString:

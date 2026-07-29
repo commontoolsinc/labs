@@ -1,0 +1,49 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "triggerCount": {
+        "default": 0,
+        "type": "number"
+      }
+    },
+    "required": [
+      "triggerCount"
+    ],
+    "type": "object"
+  },
+  "pattern": "gideon-tests/test-idempotent-side-effects.tsx",
+  "resultSchema": {
+    "properties": {
+      "idempotentData": {
+        "additionalProperties": {
+          "type": "unknown"
+        },
+        "properties": {},
+        "type": "object"
+      },
+      "idempotentRunCount": {
+        "type": "number"
+      },
+      "nonIdempotentData": {
+        "items": {
+          "type": "unknown"
+        },
+        "type": "array"
+      },
+      "nonIdempotentRunCount": {
+        "type": "number"
+      },
+      "triggerCount": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "triggerCount",
+      "nonIdempotentRunCount",
+      "idempotentRunCount",
+      "nonIdempotentData",
+      "idempotentData"
+    ],
+    "type": "object"
+  }
+}

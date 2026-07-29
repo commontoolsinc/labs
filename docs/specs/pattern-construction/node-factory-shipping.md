@@ -1013,7 +1013,7 @@ scheduled runtime callback later consumes an `asFactory` leaf, the runner reads
 and materializes its then-current value from the preserved link/source space.
 
 The alias vocabulary gains `{ $alias: { cell: "params", path, ... } }`.
-`unwrapOneLevelAndBindtoDoc`, `sendValueToBinding`, and direct sub-pattern setup
+`unwrapOneLevelAndBindToDoc`, `sendValueToBinding`, and direct sub-pattern setup
 accept that pseudo-root only when the invocation has a params cell. Nested
 links resolve relative to their original parent before the hidden cell is
 populated; cross-space links remain links rather than copied values. On resume,
@@ -1069,6 +1069,13 @@ label-only selector update leaves a row's output bytes unchanged, the storage
 write remains a no-op and does not retroactively relabel the prior value; the
 current selector label is persisted on that stable row's next value-changing
 execution.
+
+Cold list resume preserves one deliberate dependency on the result container's
+presence. If the container is durably absent, the empty recovery seed must
+invalidate and rerun the coordinator so it can install the resumed rows and
+publish the rebuilt aggregate. Ordinary aggregate comparison reads remain
+non-scheduling to avoid read-own-output feedback; only this absent-container
+presence probe owns the recovery wake-up.
 
 Reactive array lowering does not support the optional JavaScript `thisArg`.
 Pattern callbacks have no ambient JavaScript receiver, and the canonical list
@@ -1353,6 +1360,13 @@ Calls on imported or module-scoped live factories continue using the existing
 direct builder call path. Calls whose callee originates from an eager pattern
 argument/params root are symbolic and are lowered to an internal builder
 helper:
+
+Authored direct factory calls retain the normal per-call cause retargeting for
+ordinary reactive inputs. In contrast, the compiler-generated capture record
+passed to a hoisted lift or handler factory preserves captured Cell references
+unchanged: its injected capture schema carries the Cell contract, and retargeting
+those references at the application site would replace the closure identity
+that the generated callback expects.
 
 ```ts
 // Shown for illustration only.
@@ -1885,6 +1899,9 @@ Each stage is independently testable and revertible.
   factory's state and hash never change.
 - Verify equal state hashes equally across independent module evaluations.
 - Verify params and space selectors participate in traversal and hashing.
+- In untransformed builder unit tests, give every nested factory an explicit
+  cold-resolvable artifact fixture before it crosses a Fabric boundary. Do not
+  make keyless test factories serializable to preserve old test setup.
 
 ### Transformer
 

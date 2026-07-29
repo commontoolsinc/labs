@@ -16,6 +16,7 @@
     "check-withheld-globals": "./scripts/strip-withheld-globals.ts --check"
   },
   "imports": {
+    // Dependency guide: ../../docs/development/DEPENDENCIES.md
     "typescript": "npm:typescript@6.0.3"
   },
   "exports": {

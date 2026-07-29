@@ -12,16 +12,14 @@
     ".": "./mod.ts"
   },
   "imports": {
-    // Held at the release candidate alongside @cliffy/command; the two share
-    // internal packages and resolve as a set.
+    // Dependency guide: ../../docs/development/DEPENDENCIES.md
+    // Cliffy and @std/fmt/colors roll as one set; see "Cliffy" there.
     "@cliffy/table": "jsr:@cliffy/table@1.0.0-rc.8",
     "@node/child_process": "node:child_process",
-    // Pinned to @cliffy/command's own dependency range so lib/color-mode.ts
-    // shares Cliffy's module instance — setColorEnabled() on a second copy
-    // would not de-colorize Cliffy help/version/usage output. Guarded by the
-    // piped-output test in test/color-mode.test.ts.
     "@std/fmt/colors": "jsr:@std/fmt@~1.0.2/colors",
     "@db/sqlite": "jsr:@db/sqlite@0.13.0",
+    "entities": "npm:entities@^8.0.0",
+    "marked": "npm:marked@^18.0.6",
     "typescript": "npm:typescript@6.0.3"
   }
 }

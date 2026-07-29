@@ -383,8 +383,12 @@ describe("FormFieldController registration behavior", () => {
     let flushCount = 0;
 
     const mockCell = {
+      // The write lands on a macrotask, not a wall-clock delay. That boundary
+      // is what gives the test teeth: a flush that failed to await set() would
+      // run its assertions on the microtask that follows, before the write, and
+      // observe the pre-write value.
       set: async (value: string) => {
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        await new Promise((resolve) => setTimeout(resolve, 0));
         cellValue = value;
         flushCount++;
       },

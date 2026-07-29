@@ -26,7 +26,8 @@ import { isAdmittedFabricFactory, sealFactoryState } from "./fabric-factory.ts";
  * — so a special object nested arbitrarily deep is still compared by content.
  *
  * (Unlike `deepEqual()` it does not handle non-`Fabric` class instances or
- * named properties on arrays: those are not representable as `FabricValue`s.)
+ * non-index properties on arrays: those are not representable as
+ * `FabricValue`s.)
  */
 export function valueEqual(a: FabricValue, b: FabricValue): boolean {
   // Validate and compare callable factories before the same-reference fast

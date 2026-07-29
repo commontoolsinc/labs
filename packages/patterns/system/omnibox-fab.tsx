@@ -154,7 +154,7 @@ export default pattern<OmniboxFABInput>(
       return `You are a polite but efficient assistant. Think Star Trek computer - helpful and professional without unnecessary conversation. Let your actions speak for themselves.
 ${profileSection}${indexText}
 Tool usage priority:
-- For finding content in the space: use searchSpace with a query to search across all piece summaries and names
+- For finding content in the space: use searchSpace with a query to search the indexed mentionable pieces that have nonempty summaries
 - For patterns: review the available patterns listed above, then use fetchAndRunPattern to instantiate one
 - For existing pages/notes/content: searchSpace first, then listRecent or listMentionable to identify what they're referencing
 - Attach relevant items to conversation after instantiation/retrieval if they support ongoing tasks
@@ -296,9 +296,7 @@ Be matter-of-fact. Prefer action to explanation.`;
                     })}
                   >
                     <div style="flex: 1; overflow-y: auto; min-height: 0;">
-                      <cf-cell-context $cell={omnibot}>
-                        {omnibot.ui.chatLog}
-                      </cf-cell-context>
+                      {omnibot.ui.chatLog}
                     </div>
                   </div>
 
@@ -326,14 +324,12 @@ Be matter-of-fact. Prefer action to explanation.`;
                           onClick={toggle({ value: showHistory })}
                           style="cursor: pointer;"
                         >
-                          <cf-cell-context $cell={latestAssistantMessage}>
-                            <cf-chat-message
-                              role="assistant"
-                              compact
-                              content={latestAssistantMessage ?? ""}
-                              pending={omnibot.pending}
-                            />
-                          </cf-cell-context>
+                          <cf-chat-message
+                            role="assistant"
+                            compact
+                            content={latestAssistantMessage ?? ""}
+                            pending={omnibot.pending}
+                          />
                         </div>
                       </div>
                     )

@@ -73,6 +73,23 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
     );
   }
 
+  // The raw 32-byte ed25519 seed. Like toPkcs8, only "noble" implementations
+  // expose the private material; WebCrypto (native) hides it, so this throws.
+  // Returns a COPY — serialize() hands back the live internal buffer, and a
+  // caller mutating it would corrupt this signer.
+  toRaw(): Uint8Array {
+    const serialized = this.serialize();
+    if (
+      "privateKey" in serialized &&
+      serialized.privateKey instanceof Uint8Array
+    ) {
+      return new Uint8Array(serialized.privateKey);
+    }
+    throw new Error(
+      'Cannot export raw key material: requires "noble" implementation.',
+    );
+  }
+
   static async fromRaw<ID extends DIDKey>(
     rawPrivateKey: Uint8Array,
     config: Ed25519CreateConfig = {},

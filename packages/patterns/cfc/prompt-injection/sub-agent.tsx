@@ -3,7 +3,7 @@ import {
   type BuiltInLLMMessage,
   type BuiltInLLMTool,
   generateObject,
-  type ImmutableJSONValue,
+  type JSONValue,
   lift,
   pattern,
 } from "commonfabric";
@@ -22,7 +22,7 @@ export type SubAgentInput = {
   tools?: Record<string, BuiltInLLMTool>;
   model?: string;
   maxTokens?: number;
-  observationMaxConfidentiality?: readonly ImmutableJSONValue[];
+  observationMaxConfidentiality?: readonly JSONValue[];
   schemaSanitizePromptInjection?: boolean;
 };
 

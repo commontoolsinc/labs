@@ -44,6 +44,7 @@ on the Common Fabric runtime.
 - [concepts/handler.md](concepts/handler.md) — reusable parameterized handlers with `handler()`
 - [concepts/factories.md](concepts/factories.md) — passing, storing, invoking, and closing over first-class factories
 - [concepts/identity.md](concepts/identity.md) — object identity, `equals()`, why `===` fails across cells
+- [concepts/piece-discovery.md](concepts/piece-discovery.md) — the piece registry, searchable collections, link walks, and the limits of orphan-piece discovery
 - [concepts/self-reference.md](concepts/self-reference.md) — self-referential types with `SELF`
 - [concepts/types-and-schemas/writable.md](concepts/types-and-schemas/writable.md) — `Writable<>` and write access in type signatures
 - [concepts/types-and-schemas/default.md](concepts/types-and-schemas/default.md) — `Default<>` for input defaults
@@ -57,6 +58,8 @@ on the Common Fabric runtime.
 - [patterns/view-switching.md](patterns/view-switching.md) — switching between views with `computed()`
 - [patterns/navigation.md](patterns/navigation.md) — navigating to detail views
 - [patterns/composition.md](patterns/composition.md) — composing patterns into reactive graphs
+- [patterns/primitives.md](patterns/primitives.md) — the composition contract
+  for reusable pattern logic and state
 - [patterns/multi-user-patterns.md](patterns/multi-user-patterns.md) — shared spaces, per-user state, collaboration
 - [patterns/style.md](patterns/style.md) — styling and theme guide (design brief, tokens, fonts)
 - [patterns/ui-cookbook.md](patterns/ui-cookbook.md) — worked UI layout vignettes
@@ -66,7 +69,6 @@ on the Common Fabric runtime.
 
 - [components/COMPONENTS.md](components/COMPONENTS.md) — index of all `cf-*` components, bindable props, usage narrative
 - [components/forms.md](components/forms.md) — stub; form authoring lives in COMPONENTS.md, internals in `packages/ui/docs/`
-- [components/CELL_CONTEXT.md](components/CELL_CONTEXT.md) — `cf-cell-context` debugging tool
 
 ### conventions/ — system integration
 

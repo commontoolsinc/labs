@@ -2,12 +2,14 @@ import { Command, ValidationError } from "@cliffy/command";
 import { HelpCommand } from "@cliffy/command/help";
 import { acl } from "./acl.ts";
 import { check } from "./dev.ts";
+import { completion } from "./completion.ts";
 import { deps } from "./deps.ts";
 import { exec } from "./exec.ts";
 import { fuse } from "./fuse.ts";
 import { init } from "./init.ts";
 import { inspect } from "./inspect.ts";
 import { piece } from "./piece.ts";
+import { space } from "./space.ts";
 import { identity } from "./identity.ts";
 import { test } from "./test-command.ts";
 import { view } from "./view.ts";
@@ -44,6 +46,11 @@ FIRST TIME SETUP:
   cf id new > claude.key            # Create identity key
   export CF_IDENTITY=./claude.key   # Set default identity
   export CF_API_URL=http://localhost:${ports.toolshed}  # Set default API URL
+
+SHELL COMPLETION:
+  source <(cf completion zsh)      # add to ~/.zshrc  (bash: completion bash)
+  Completes commands and flags, plus live piece ids, callable names, and cell
+  paths. Also completes 'deno task cf ...'. See 'cf completion --help'.
 
 LOCAL DEVELOPMENT:
   ./scripts/start-local-dev.sh      # Start local servers
@@ -93,6 +100,8 @@ export const main = new Command()
   .command("deps", deps)
   // @ts-ignore for the above type issue
   .command("inspect", inspect)
+  // @ts-ignore for the above type issue
+  .command("space", space)
   .command("view", view)
   .command("exec", exec)
   // @ts-ignore for the above type issue
@@ -132,6 +141,7 @@ export const main = new Command()
       .option("--identity <path:string>", "Path to an identity keyfile.")
       .option("--exec-cli <path:string>", "Path to the cf exec shim.")
       .option("--log-file <path:string>", "Path to the FUSE child log file.")
+      .option("--debug", "Enable FUSE debug output.")
       .option("--allow-other", "Pass allow_other through to the FUSE child.")
       .option("--noattrcache", "Pass noattrcache through to the FUSE child.")
       .option(
@@ -168,6 +178,7 @@ export const main = new Command()
         await runFuseSupervisor(fuseSupervisorOptions(options, mountpoint));
       }),
   )
+  .command("completion", completion)
   .command("id", identity)
   .command("init", init)
   .command("test", test)

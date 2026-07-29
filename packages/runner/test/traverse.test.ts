@@ -34,7 +34,7 @@ import { StoreObjectManager } from "../src/storage/query.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
-import { Immutable } from "@commonfabric/utils/types";
+
 import { ContextualFlowControl } from "@commonfabric/runner";
 import { IMemorySpaceValueAttestation } from "../src/traverse.ts";
 
@@ -737,7 +737,7 @@ describe("SchemaObjectTraverser array traversal", () => {
       const managedTx = new ManagedStorageTransaction(manager);
       const tx = new ExtendedStorageTransaction(managedTx);
       const tracker = new CompoundCycleTracker<
-        Immutable<FabricValue>,
+        FabricValue,
         JSONSchema | undefined
       >();
       const cfc = new ContextualFlowControl();
@@ -800,7 +800,7 @@ describe("SchemaObjectTraverser array traversal", () => {
       const managedTx = new ManagedStorageTransaction(manager);
       const tx = new ExtendedStorageTransaction(managedTx);
       const tracker = new CompoundCycleTracker<
-        Immutable<FabricValue>,
+        FabricValue,
         JSONSchema | undefined
       >();
       const cfc = new ContextualFlowControl();
@@ -864,7 +864,7 @@ describe("SchemaObjectTraverser array traversal", () => {
       const managedTx = new ManagedStorageTransaction(manager);
       const tx = new ExtendedStorageTransaction(managedTx);
       const tracker = new CompoundCycleTracker<
-        Immutable<FabricValue>,
+        FabricValue,
         JSONSchema | undefined
       >();
       const cfc = new ContextualFlowControl();
@@ -939,7 +939,7 @@ describe("getAtPath array index validation", () => {
     const managedTx = new ManagedStorageTransaction(manager);
     const tx = new ExtendedStorageTransaction(managedTx);
     const tracker: PointerCycleTracker = new CompoundCycleTracker<
-      Immutable<FabricValue>,
+      FabricValue,
       JSONSchema | undefined
     >();
     const cfc = new ContextualFlowControl();

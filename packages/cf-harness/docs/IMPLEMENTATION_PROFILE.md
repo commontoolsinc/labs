@@ -39,8 +39,10 @@ model turn.
 
 ## Trust and execution profile
 
-- Model gateway: OpenAI-compatible chat completions, with optional native model
-  tools declared separately.
+- Model gateway: OpenAI-compatible. `gpt-*` turns use the Responses API, which
+  accepts function tools together with reasoning; provider-native tools and
+  non-OpenAI models use chat completions, which cannot serve that combination.
+  Native model tools are declared separately in either case.
 - Execution substrate: Docker; normally the sibling gVisor `runsc-cfc` runtime,
   with configurable image and runtime.
 - CFC authority: Common Fabric runner/runtime evidence and trusted sandbox

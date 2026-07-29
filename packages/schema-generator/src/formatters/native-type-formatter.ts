@@ -1,8 +1,8 @@
 import ts from "typescript";
-import type { JSONSchemaMutable } from "@commonfabric/api";
+import type { MutableJSONSchema } from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
 
-const NATIVE_TYPE_SCHEMAS: Record<string, JSONSchemaMutable> = {
+const NATIVE_TYPE_SCHEMAS: Record<string, MutableJSONSchema> = {
   // This schema is embedded in the code, so we can have simpler links.
   VNode: { $ref: "https://commonfabric.org/schemas/vnode.json" },
   Date: { type: "string", format: "date-time" },
@@ -72,7 +72,7 @@ export class NativeTypeFormatter implements TypeFormatter {
   formatType(
     type: ts.Type,
     _context: GenerationContext,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     const typeName = NativeTypeFormatter.getTypeName(type);
     const schema = NATIVE_TYPE_SCHEMAS[typeName!];
     // TODO(danfuzz): `structuredClone()` mangles non-JSON `FabricValue`s —

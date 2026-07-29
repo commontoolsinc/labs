@@ -11,7 +11,7 @@ import {
   findAllWriteRedirectCells,
   opaqueArgumentKeys,
   sendValueToBinding,
-  unwrapOneLevelAndBindtoDoc,
+  unwrapOneLevelAndBindToDoc,
 } from "../src/pattern-binding.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Identity } from "@commonfabric/identity";
@@ -155,7 +155,7 @@ describe("params pseudo-alias runtime seam", () => {
     } as const;
 
     expect(() =>
-      unwrapOneLevelAndBindtoDoc(
+      unwrapOneLevelAndBindToDoc(
         runtime.cfc,
         binding,
         argumentCell.getAsNormalizedFullLink(),
@@ -183,7 +183,7 @@ describe("params pseudo-alias runtime seam", () => {
       }),
     );
 
-    const resolved = unwrapOneLevelAndBindtoDoc(
+    const resolved = unwrapOneLevelAndBindToDoc(
       runtime.cfc,
       binding,
       argumentCell.getAsNormalizedFullLink(),
@@ -225,7 +225,7 @@ describe("params pseudo-alias runtime seam", () => {
       }),
     );
 
-    const resolved = unwrapOneLevelAndBindtoDoc(
+    const resolved = unwrapOneLevelAndBindToDoc(
       runtime.cfc,
       {
         $alias: {
@@ -593,7 +593,7 @@ describe("pattern-binding", () => {
         tx,
       );
       argumentCell.set({ b: { c: 2 } });
-      const result = unwrapOneLevelAndBindtoDoc(
+      const result = unwrapOneLevelAndBindToDoc(
         runtime.cfc,
         binding,
         argumentCell.getAsNormalizedFullLink(),
@@ -630,7 +630,7 @@ describe("pattern-binding", () => {
         undefined,
         tx,
       );
-      const result = unwrapOneLevelAndBindtoDoc(
+      const result = unwrapOneLevelAndBindToDoc(
         runtime.cfc,
         binding,
         undefined,
@@ -653,7 +653,7 @@ describe("pattern-binding", () => {
         tx,
       );
       expect(() =>
-        unwrapOneLevelAndBindtoDoc(
+        unwrapOneLevelAndBindToDoc(
           runtime.cfc,
           binding,
           undefined,
@@ -695,7 +695,7 @@ describe("pattern-binding", () => {
         argumentSchema,
         tx,
       );
-      const result = unwrapOneLevelAndBindtoDoc(
+      const result = unwrapOneLevelAndBindToDoc(
         runtime.cfc,
         binding,
         argumentCell.getAsNormalizedFullLink(),
@@ -785,7 +785,7 @@ describe("pattern-binding", () => {
         ],
       };
 
-      const result = unwrapOneLevelAndBindtoDoc(
+      const result = unwrapOneLevelAndBindToDoc(
         runtime.cfc,
         { op: nestedPattern },
         argumentCell.getAsNormalizedFullLink(),
@@ -829,7 +829,7 @@ describe("pattern-binding", () => {
           tx,
         );
         const argumentCell = getMetaCell(resultCell, "argument", tx);
-        const bound = unwrapOneLevelAndBindtoDoc(
+        const bound = unwrapOneLevelAndBindToDoc(
           runtime.cfc,
           keyless,
           argumentCell.getAsNormalizedFullLink(),
@@ -862,7 +862,7 @@ describe("pattern-binding", () => {
         tx,
       );
       const argumentCell = getMetaCell(resultCell, "argument", tx);
-      const bound = unwrapOneLevelAndBindtoDoc(
+      const bound = unwrapOneLevelAndBindToDoc(
         runtime.cfc,
         {
           direct: compiled,
@@ -955,7 +955,7 @@ describe("pattern-binding", () => {
           { $alias: { cell: "result", path: ["targetSpace"] } },
         );
 
-        const bound = unwrapOneLevelAndBindtoDoc(
+        const bound = unwrapOneLevelAndBindToDoc(
           runtime.cfc,
           factory,
           argumentCell.getAsNormalizedFullLink(),
@@ -978,7 +978,7 @@ describe("pattern-binding", () => {
           "targetSpace",
         ]);
 
-        const repeated = unwrapOneLevelAndBindtoDoc(
+        const repeated = unwrapOneLevelAndBindToDoc(
           runtime.cfc,
           { first: factory, second: factory },
           argumentCell.getAsNormalizedFullLink(),
@@ -1006,7 +1006,7 @@ describe("pattern-binding", () => {
         expect(resultCell.key("sink").get()).toBe(42);
 
         const unchanged = derive({ static: "same" });
-        expect(unwrapOneLevelAndBindtoDoc(
+        expect(unwrapOneLevelAndBindToDoc(
           runtime.cfc,
           unchanged,
           argumentCell.getAsNormalizedFullLink(),
@@ -1024,7 +1024,7 @@ describe("pattern-binding", () => {
 
         const invalid = derive({ fn: () => undefined });
         expect(() =>
-          unwrapOneLevelAndBindtoDoc(
+          unwrapOneLevelAndBindToDoc(
             runtime.cfc,
             invalid,
             argumentCell.getAsNormalizedFullLink(),
@@ -1077,7 +1077,7 @@ describe("pattern-binding", () => {
           different,
         )
       ).toThrow("Fabric special binding does not match value");
-      expect(unwrapOneLevelAndBindtoDoc(
+      expect(unwrapOneLevelAndBindToDoc(
         runtime.cfc,
         left,
         argumentCell.getAsNormalizedFullLink(),
@@ -1087,7 +1087,7 @@ describe("pattern-binding", () => {
 
       const arbitrary = () => undefined;
       expect(() =>
-        unwrapOneLevelAndBindtoDoc(
+        unwrapOneLevelAndBindToDoc(
           runtime.cfc,
           arbitrary,
           argumentCell.getAsNormalizedFullLink(),
@@ -1112,7 +1112,7 @@ describe("pattern-binding", () => {
         implementation: arbitrary,
       };
       expect(() =>
-        unwrapOneLevelAndBindtoDoc(
+        unwrapOneLevelAndBindToDoc(
           runtime.cfc,
           forgedModuleShape,
           argumentCell.getAsNormalizedFullLink(),
@@ -1129,7 +1129,7 @@ describe("pattern-binding", () => {
         result: { authored: { toJSON: arbitrary } },
       };
       expect(() =>
-        unwrapOneLevelAndBindtoDoc(
+        unwrapOneLevelAndBindToDoc(
           runtime.cfc,
           legacyPatternWithAuthoredFunction,
           argumentCell.getAsNormalizedFullLink(),
@@ -1168,7 +1168,7 @@ describe("pattern-binding", () => {
       );
       const argumentCell = getMetaCell(resultCell, "argument", tx);
 
-      const bound = unwrapOneLevelAndBindtoDoc(
+      const bound = unwrapOneLevelAndBindToDoc(
         runtime.cfc,
         legacyPattern,
         argumentCell.getAsNormalizedFullLink(),
@@ -1194,7 +1194,7 @@ describe("pattern-binding", () => {
       const links = findAllWriteRedirectCells(binding, testCell);
       expect(links.length).toBe(0);
 
-      const unwrappedBinding = unwrapOneLevelAndBindtoDoc(
+      const unwrappedBinding = unwrapOneLevelAndBindToDoc(
         runtime.cfc,
         binding,
         testCell.getAsNormalizedFullLink(),
@@ -1231,7 +1231,7 @@ describe("pattern-binding", () => {
       // Unwrapping converts the immediate alias to a sigil link; the deferred
       // aliases survive as aliases (defer crossed, next level's wiring) and
       // stay invisible to the walker.
-      const unwrappedBinding = unwrapOneLevelAndBindtoDoc(
+      const unwrappedBinding = unwrapOneLevelAndBindToDoc(
         runtime.cfc,
         binding,
         testCell.getAsNormalizedFullLink(),
@@ -1368,7 +1368,7 @@ describe("pattern-binding", () => {
         { $alias: { cell: "result", path: ["arr", "2"] } },
       ];
       const links = findAllWriteRedirectCells(
-        unwrapOneLevelAndBindtoDoc(
+        unwrapOneLevelAndBindToDoc(
           runtime.cfc,
           binding,
           testCell.getAsNormalizedFullLink(),
@@ -1398,7 +1398,7 @@ describe("pattern-binding", () => {
         c: 3,
       };
       const links = findAllWriteRedirectCells(
-        unwrapOneLevelAndBindtoDoc(
+        unwrapOneLevelAndBindToDoc(
           runtime.cfc,
           binding,
           testCell.getAsNormalizedFullLink(),

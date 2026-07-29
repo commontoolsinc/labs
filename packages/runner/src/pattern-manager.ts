@@ -44,6 +44,7 @@ import {
   loadVerifiedSourceClosure,
   type ModuleDelegationMap,
   moduleDelegationsFromDocs,
+  planCompileCacheWriteChunks,
   ROOT_LINK_SPECIFIER,
   type SourceDoc,
   sourceDocKey,
@@ -792,6 +793,16 @@ export class PatternManager {
     const ref = { identity, symbol: "default" };
     this.associatePatternIdentity(root, ref);
     return ref;
+  }
+
+  /**
+   * Whether `identity` is a session-synthetic keyless pointer (minted by
+   * {@link ensureKeylessPatternIdentity}) rather than a durable
+   * content-addressed artifact identity. A fresh runtime can never load a
+   * keyless pointer, so such refs must never be written into durable state.
+   */
+  static isKeylessPatternIdentity(identity: string): boolean {
+    return identity.startsWith("keyless:");
   }
 
   /**
@@ -2514,41 +2525,86 @@ export class PatternManager {
   ): Promise<void> {
     const writebackStart = performance.now();
     await this.syncCompileCacheWriteTargets(space, modules, opts);
-    // The write-back re-writes source docs whose values carry quote-cell
-    // indirections (one derived doc per import edge). On a cold replica those
-    // derived docs are unknown, and each commit attempt discovers exactly ONE
-    // of them: the engine rejects on the first stale read, editWithRetry
-    // pulls that doc, and only then does the next attempt's diff reach the
-    // following one (CT-1824, live-traced on the browser rig — the system-app
-    // closure re-write conflicts on ~24 pre-existing edge docs, one per
-    // round). Convergence therefore needs one retry per pre-existing derived
-    // doc; the general DEFAULT_MAX_RETRIES (5) exhausts long before that and
-    // the cache never heals, so every later cold boot recompiles. Budget by
-    // the write set's edge count (source + compiled edge docs) with slack.
-    // Rounds are bounded by actual conflicts — a conflict-free write-back
-    // still commits on the first attempt — so the ceiling is only paid during
-    // recovery after a compiler-version bump.
-    const importEdges = modules.reduce((n, m) => n + m.imports.length, 0);
-    const writebackMaxRetries = Math.max(16, 2 * importEdges + 8);
-    let committedModuleDelegations = moduleDelegations;
-    const { error } = await this.runtime.editWithRetry((tx) => {
-      committedModuleDelegations = writeSourceAndCompiledDocs(
-        this.runtime,
-        space,
-        modules,
-        entryIdentity,
-        { ...opts, moduleDelegations },
-        tx,
-      );
-    }, writebackMaxRetries);
-    logger.time(writebackStart, "compile-cache", "writeback");
-    if (error) {
-      logger.error("compile-cache-writeback-failed", () => [
-        `entry=${entryIdentity}`,
-        error.message,
-      ]);
-      throw throwableStorageError(error);
+    // The closure is committed in CHUNKS of bounded module count rather than
+    // one all-or-nothing transaction. A stale-refs recovery (compiler output
+    // change over a pre-existing space) re-writes the entire closure; as a
+    // single commit, a session killed mid-write persisted NOTHING and every
+    // retrying session redid the whole write — under aggressive client
+    // timeouts no session ever landed it (the estuary first-open outage).
+    // Each committed chunk survives interruption: docs are content-addressed,
+    // dependencies commit first and the ENTRY doc last, so an interrupted
+    // write-back never persists the entry of a namespace that lacked one —
+    // and an absent entry is exactly the load paths' miss test, so every
+    // producible partial prefix reads as a plain cache miss. (That is the
+    // precise guarantee; the loaders do NOT fail closed on missing
+    // descendants — see planCompileCacheWriteChunks for why the
+    // entry-present/descendant-missing state, not producible by this
+    // ordering, still degrades to a clean recompile.) The next session's
+    // re-write diffs already-durable docs to nothing. The `persistence`
+    // promise callers await still resolves only after ALL chunks are
+    // durable, so the "refs-only pattern JSON requires a durable closure"
+    // contract is unchanged.
+    const { chunks, extraRoots } = planCompileCacheWriteChunks(
+      modules,
+      entryIdentity,
+    );
+    // Union of the per-chunk effective delegation maps. Chunks partition the
+    // module set and the effective map is keyed per module, so the union over
+    // all chunks equals the single-transaction effective map exactly.
+    const committedModuleDelegations = new Map<string, ReadonlySet<string>>();
+    for (const chunk of chunks) {
+      // The write-back re-writes source docs whose values carry quote-cell
+      // indirections (one derived doc per import edge). On a cold replica
+      // those derived docs are unknown, and each commit attempt discovers
+      // exactly ONE of them: the engine rejects on the first stale read,
+      // editWithRetry pulls that doc, and only then does the next attempt's
+      // diff reach the following one (CT-1824, live-traced on the browser
+      // rig — the system-app closure re-write conflicts on ~24 pre-existing
+      // edge docs, one per round). Convergence therefore needs one retry per
+      // pre-existing derived doc; the general DEFAULT_MAX_RETRIES (5)
+      // exhausts long before that and the cache never heals, so every later
+      // cold boot recompiles. Budget by the chunk's edge count (source +
+      // compiled edge docs) with slack. Rounds are bounded by actual
+      // conflicts — a conflict-free write-back still commits on the first
+      // attempt — so the ceiling is only paid during recovery after a
+      // compiler-version bump.
+      //
+      // The historical fixed floor (16) is NOT applied per chunk — that would
+      // multiply the minimum by chunk count (six low-edge chunks = 96 retries
+      // vs the old closure-wide 16; Codex review on #5094). A single-chunk
+      // write-back keeps the exact historical budget; a multi-chunk one gives
+      // each chunk its edge-proportional share plus one round of slack, so
+      // the aggregate stays >= 16 (8 * 2 chunks minimum) without the 16x
+      // chunk-count inflation.
+      const importEdges = chunk.reduce((n, m) => n + m.imports.length, 0);
+      const writebackMaxRetries = chunks.length === 1
+        ? Math.max(16, 2 * importEdges + 8)
+        : 2 * importEdges + 8;
+      let chunkDelegations: ModuleDelegationMap = new Map();
+      const { error } = await this.runtime.editWithRetry((tx) => {
+        chunkDelegations = writeSourceAndCompiledDocs(
+          this.runtime,
+          space,
+          chunk,
+          entryIdentity,
+          { ...opts, moduleDelegations, extraRoots },
+          tx,
+        );
+      }, writebackMaxRetries);
+      if (error) {
+        logger.time(writebackStart, "compile-cache", "writeback");
+        logger.error("compile-cache-writeback-failed", () => [
+          `entry=${entryIdentity}`,
+          `chunkModules=${chunk.length}/${modules.length}`,
+          error.message,
+        ]);
+        throw throwableStorageError(error);
+      }
+      for (const [identity, predecessors] of chunkDelegations) {
+        committedModuleDelegations.set(identity, predecessors);
+      }
     }
+    logger.time(writebackStart, "compile-cache", "writeback");
     this.runtime.registerModuleDelegations(space, committedModuleDelegations);
   }
 

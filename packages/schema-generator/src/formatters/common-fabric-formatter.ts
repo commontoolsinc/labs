@@ -12,8 +12,8 @@ import { numberFromExpression } from "../typescript/numeric-expression.ts";
 import { dedupeByValueEqual } from "../value-equality.ts";
 import type {
   AsCellEntry,
-  JSONSchemaMutable,
-  JSONSchemaObjMutable,
+  MutableJSONSchema,
+  MutableJSONSchemaObj,
   SchemaScope,
 } from "@commonfabric/api";
 import type { GenerationContext, TypeFormatter } from "../interface.ts";
@@ -203,7 +203,7 @@ export class CommonFabricFormatter implements TypeFormatter {
   formatType(
     type: ts.Type,
     context: GenerationContext,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     const n = context.typeNode;
     const resolvedScopeWrapper = resolveScopeWrapperNode(n);
     const aliasType = type as TypeWithInternals;
@@ -315,7 +315,7 @@ export class CommonFabricFormatter implements TypeFormatter {
           if (typeof valueSchema === "boolean") {
             return (valueSchema === false
               ? { not: true, default: defaultValue }
-              : { default: defaultValue }) as JSONSchemaObjMutable;
+              : { default: defaultValue }) as MutableJSONSchemaObj;
           }
           (valueSchema as Record<string, unknown>).default = defaultValue;
         }
@@ -427,7 +427,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     // results that already resolve (including node-level unions like
     // `string | undefined`) are left untouched.
     fallbackInnerTypeRef?: ts.TypeReference,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     const innerTypeNode = typeRefNode.typeArguments?.[0];
     if (!innerTypeNode) {
       throw new Error(`${wrapperKind}<T> requires type argument`);
@@ -495,7 +495,7 @@ export class CommonFabricFormatter implements TypeFormatter {
         return this.applyWrapperSemantics(innerSchema, "Stream");
       }
       return this.applyWrapperSemantics(
-        innerSchema as JSONSchemaObjMutable,
+        innerSchema as MutableJSONSchemaObj,
         "Stream",
       );
     }
@@ -523,7 +523,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     context: GenerationContext,
     scope: SchemaScope,
     fallbackInnerType?: ts.Type,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     const innerTypeNode = typeRefNode.typeArguments?.[0];
     if (!innerTypeNode) {
       throw new Error(`Scoped wrapper requires type argument`);
@@ -553,9 +553,9 @@ export class CommonFabricFormatter implements TypeFormatter {
   }
 
   private applyScopeWrapperSemantics(
-    schema: JSONSchemaMutable,
+    schema: MutableJSONSchema,
     scope: SchemaScope,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     if (typeof schema === "boolean") {
       return schema === false ? { not: true, scope } : { scope };
     }
@@ -582,7 +582,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     typeRefNode: ts.TypeNode | undefined,
     context: GenerationContext,
     wrapperKind: WrapperKind,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     const innerTypeFromType = typeRef.typeArguments?.[0];
 
     // Only extract innerTypeNode if the typeRefNode has type arguments AND
@@ -711,7 +711,7 @@ export class CommonFabricFormatter implements TypeFormatter {
         return this.applyWrapperSemantics(innerSchema, "Stream");
       }
       return this.applyWrapperSemantics(
-        innerSchema as JSONSchemaObjMutable,
+        innerSchema as MutableJSONSchemaObj,
         "Stream",
       );
     }
@@ -734,8 +734,8 @@ export class CommonFabricFormatter implements TypeFormatter {
     arrayType: ts.Type,
     arrayTypeNode: ts.TypeNode | undefined,
     context: GenerationContext,
-  ): JSONSchemaMutable {
-    const base: JSONSchemaMutable = { type: "unknown" };
+  ): MutableJSONSchema {
+    const base: MutableJSONSchema = { type: "unknown" };
     const elementInfo = getArrayElementInfo(
       arrayType,
       context.typeChecker,
@@ -949,9 +949,9 @@ export class CommonFabricFormatter implements TypeFormatter {
   private fallbackForIncompleteWriterSchema(
     type: ts.Type,
     node: ts.TypeNode,
-    schema: JSONSchemaMutable,
+    schema: MutableJSONSchema,
     context: GenerationContext,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     if (
       !this.isSyntheticWrapperNode(node) ||
       !this.hasIncompleteWriterIdentityObligation(
@@ -1118,7 +1118,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     typeRefNode: ts.TypeReferenceNode,
     context: GenerationContext,
     pairedType?: ts.Type,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     const typeArgs = typeRefNode.typeArguments;
     if (!typeArgs || typeArgs.length < 1 || typeArgs.length > 2) {
       throw new Error("Default<T,V> requires 1 or 2 type arguments");
@@ -1173,7 +1173,7 @@ export class CommonFabricFormatter implements TypeFormatter {
         // For false: { not: true, default: value } (no value is valid)
         return (valueSchema === false
           ? { not: true, default: defaultValue }
-          : { default: defaultValue }) as JSONSchemaObjMutable;
+          : { default: defaultValue }) as MutableJSONSchemaObj;
       }
       (valueSchema as any).default = defaultValue;
     }
@@ -1185,7 +1185,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     typeWithAlias: TypeWithInternals,
     context: GenerationContext,
     aliasName: string,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     const aliasArgs = typeWithAlias.aliasTypeArguments ?? [];
     const baseType = aliasArgs[0];
     if (!baseType) {
@@ -1214,7 +1214,7 @@ export class CommonFabricFormatter implements TypeFormatter {
   private formatResolvedCfcAlias(
     resolved: ResolvedCfcAlias,
     context: GenerationContext,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     const baseType = resolved.aliasArgs[0];
     if (!baseType) {
       throw new Error(`${resolved.aliasName}<T> requires type argument`);
@@ -1242,7 +1242,7 @@ export class CommonFabricFormatter implements TypeFormatter {
   private formatCfcAliasTypeNode(
     typeNode: ts.TypeNode,
     context: GenerationContext,
-  ): JSONSchemaMutable | undefined {
+  ): MutableJSONSchema | undefined {
     if (
       ts.isParenthesizedTypeNode(typeNode) || ts.isTypeOperatorNode(typeNode)
     ) {
@@ -1778,9 +1778,9 @@ export class CommonFabricFormatter implements TypeFormatter {
   }
 
   private mergeIfcMetadata(
-    schema: JSONSchemaMutable,
+    schema: MutableJSONSchema,
     ifc: Record<string, unknown>,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     if (typeof schema === "boolean") {
       return schema === false ? { not: true, ifc } : { ifc };
     }
@@ -2278,9 +2278,9 @@ export class CommonFabricFormatter implements TypeFormatter {
    * Boolean schemas (true/false) can't have properties spread into them.
    */
   private applyWrapperSemantics(
-    schema: JSONSchemaMutable,
+    schema: MutableJSONSchema,
     wrapperKind: WrapperKind,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     const propertyValue = wrapperKindToBrand(wrapperKind);
     // If we couldn't determine a valid wrapper brand, return the schema as-is
     if (propertyValue === undefined) {
@@ -2304,8 +2304,8 @@ export class CommonFabricFormatter implements TypeFormatter {
    * Deduplicates identical schemas before wrapping.
    */
   private maybeWrapInAnyOf(
-    schemas: JSONSchemaMutable[],
-  ): JSONSchemaMutable {
+    schemas: MutableJSONSchema[],
+  ): MutableJSONSchema {
     if (schemas.length === 0) {
       return true;
     } else if (schemas.length === 1) {
@@ -2331,9 +2331,9 @@ export class CommonFabricFormatter implements TypeFormatter {
   private formatWrapperUnion(
     unionType: ts.UnionType,
     context: GenerationContext,
-  ): JSONSchemaMutable {
+  ): MutableJSONSchema {
     const members = unionType.types;
-    const schemas: JSONSchemaMutable[] = [];
+    const schemas: MutableJSONSchema[] = [];
 
     // Check if we have a UnionTypeNode with member nodes
     const hasUnionNode = context.typeNode &&

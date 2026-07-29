@@ -126,6 +126,16 @@ Two decisions carry the whole design:
    fire-and-forget check, and the existing watcher re-instantiates a verified
    replacement in place. No new apply machinery.
 
+   The awaited default-root reconcile has a second entry point beyond space
+   open: `PieceManager.getDefaultPattern` — the resolution every registry
+   listing, CLI `piece ls`, FUSE mount, and shell list cell goes through —
+   runs the same awaited check when starting the persisted root FAILS, then
+   re-resolves the slot and retries the start once (a failed retry surfaces
+   the original start error). Without this, an unloadable obsolete root
+   healed only for consumers that happened to enter through space open;
+   every headless/listing consumer died with the root (the 2026-07-29
+   cf-cell-context retirement, caught by the loom vendor gate).
+
 A root created before provenance stamping may be admitted to this loop only
 when its stored `{ identity, symbol }` exactly equals the advertised current
 official entry appropriate to the space (`home.tsx` for Home,
@@ -308,6 +318,32 @@ source replacement reports a known incompatibility as a warning and can proceed
 only after explicit acceptance. Neither structural check proves semantic state
 continuity. The root-interface contract remains mandatory in both cases. See
 the [`Compatibility policy`](../piece-source-lifecycle.md#compatibility-policy).
+
+### The CI gate (`deno task pattern-compat`)
+
+Because the updater applies without that comparison, an incompatible schema
+that merges reaches every running piece. CI carries the check instead:
+`tasks/pattern-compat.ts` compiles every authored pattern and proves its
+argument/result contract against every contract recorded for it under
+`packages/patterns/baselines/`, using the same
+`assertPatternSchemasBackwardCompatible` that `cf piece setsrc` enforces — so
+the two paths cannot drift apart on what "compatible" means.
+
+- A baseline is a small JSON file holding only the two schemas. That is the
+  whole input to the check, so no compiled artifact or old source is needed.
+- **Every** baseline is checked, never just the newest: a piece rolls forward
+  from whatever version it last opened at, and the evolution-policy allowances
+  are not guaranteed to compose across steps.
+- Baselines are **never pruned**, and `deno task pattern-compat --update` can
+  only add one. An author-run command that could remove a baseline could remove
+  the one that would have caught the break.
+- A pattern with baselines that no longer yields a contract — file deleted, or
+  no longer exporting a pattern — is reported: pieces tracking that path are
+  pinned to their current pattern forever, and nothing surfaces on the piece.
+
+The gate is structural only. State continuity — data under keys the new pattern
+drops or renames — needs the golden replay described above, against captured
+prior state rather than a schema.
 
 ## System-source patterns — the loop
 

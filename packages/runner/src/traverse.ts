@@ -1047,7 +1047,7 @@ export class CompoundCycleTracker<
 }
 
 export type PointerCycleTracker = CompoundCycleTracker<
-  Immutable<FabricValue>,
+  FabricValue,
   JSONSchema | undefined,
   any
 >;
@@ -1106,7 +1106,7 @@ export function createDefaultTraversalContext(
 ): TraversalContext {
   return createTraversalContext(
     new CompoundCycleTracker<
-      Immutable<FabricValue>,
+      FabricValue,
       JSONSchema | undefined
     >(),
     new ContextualFlowControl(),
@@ -1379,12 +1379,12 @@ export abstract class BaseObjectTraverser {
     // Identity passthrough unless CF_TRAVERSE_CAPTURE is recording a fixture.
     this.tx = wrapTxForTraverseCapture(tx);
   }
-  protected dagMemo = new Map<string, Immutable<FabricValue>>();
+  protected dagMemo = new Map<string, FabricValue>();
   traverseDAGCalls = 0;
   getDocAtPathCalls = 0;
   abstract traverse(
     doc: IMemorySpaceValueAttestation,
-  ): TraverseResult<Immutable<FabricValue>>;
+  ): TraverseResult<FabricValue>;
 
   protected get tracker(): PointerCycleTracker {
     return this.context.tracker;
@@ -1422,7 +1422,7 @@ export abstract class BaseObjectTraverser {
     doc: IMemorySpaceValueAttestation,
     defaultValue?: FabricValue,
     itemLink?: NormalizedFullLink,
-  ): Immutable<FabricValue> {
+  ): FabricValue {
     this.traverseDAGCalls++;
     // Memoize by cell address + itemLink to avoid exponential path explosion
     // in DAGs. When multiple parents share children, every unique path triggers
@@ -1457,7 +1457,7 @@ export abstract class BaseObjectTraverser {
     } else if (isPrimitive(doc.value)) {
       return doc.value;
     } else if (Array.isArray(doc.value)) {
-      const newValue = new Array<Immutable<FabricValue>>(doc.value.length);
+      const newValue = new Array<FabricValue>(doc.value.length);
       using t = this.tracker.include(doc.value, true, newValue, doc);
       if (t === null) {
         return this.tracker.getExisting(doc.value, true);
@@ -1583,7 +1583,7 @@ export abstract class BaseObjectTraverser {
           itemLink,
         );
       } else {
-        const newValue: Record<string, Immutable<FabricValue>> = {};
+        const newValue: Record<string, FabricValue> = {};
         using t = this.tracker.include(doc.value, true, newValue, doc);
         if (t === null) {
           return this.tracker.getExisting(doc.value, true);
@@ -1745,7 +1745,7 @@ export abstract class BaseObjectTraverser {
     _linkSchema: JSONSchema | undefined,
     defaultValue: FabricValue,
     itemLink: NormalizedFullLink | undefined,
-  ): Immutable<FabricValue> {
+  ): FabricValue {
     return this.traverseDAG(doc, defaultValue, itemLink);
   }
 }
@@ -1864,7 +1864,7 @@ export function getAtPath(
           ...curDoc.address,
           path: appendToPath(curDoc.address.path, part),
         },
-        value: cursorObj[part] as Immutable<FabricValue>,
+        value: cursorObj[part] as FabricValue,
       };
       tx.read(curDoc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
     } else {
@@ -2329,7 +2329,7 @@ function traverseMetaLinkedDoc(
 
   const docContext = createTraversalContext(
     new CompoundCycleTracker<
-      Immutable<FabricValue>,
+      FabricValue,
       JSONSchema | undefined
     >(),
     context.cfc,
@@ -2349,7 +2349,7 @@ function traverseMetaLinkedDoc(
       ...doc.address,
       path: ["value"],
     },
-    value: fullDoc.value as Immutable<FabricValue>,
+    value: fullDoc.value as FabricValue,
   });
 }
 
@@ -2871,7 +2871,7 @@ type TraverseResult<T> = { ok: T; error?: never } | {
 };
 
 /** Schema memo cache shared across SchemaObjectTraverser instances within a query */
-export type SchemaMemo = Map<string, TraverseResult<Immutable<FabricValue>>>;
+export type SchemaMemo = Map<string, TraverseResult<FabricValue>>;
 
 /** Create a shared memo cache to pass to multiple SchemaObjectTraverser instances */
 export function createSchemaMemo(): SchemaMemo {
@@ -2915,13 +2915,13 @@ export class SchemaObjectTraverser<V extends FabricValue>
   // multiple traverse() calls for the same selectSchema query).
   private schemaMemo = new Map<
     string,
-    TraverseResult<Immutable<FabricValue>>
+    TraverseResult<FabricValue>
   >();
   schemaMemoHits = 0;
 
   private get activeMemo(): Map<
     string,
-    TraverseResult<Immutable<FabricValue>>
+    TraverseResult<FabricValue>
   > {
     return this.sharedSchemaMemo ?? this.schemaMemo;
   }
@@ -2931,7 +2931,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     linkSchema: JSONSchema | undefined,
     defaultValue: FabricValue,
     itemLink: NormalizedFullLink | undefined,
-  ): Immutable<FabricValue> {
+  ): FabricValue {
     if (
       linkSchema !== undefined &&
       !ContextualFlowControl.isTrueSchema(linkSchema)
@@ -2956,7 +2956,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
   override traverse(
     doc: IMemorySpaceValueAttestation,
     link?: NormalizedFullLink,
-  ): TraverseResult<Immutable<FabricValue>> {
+  ): TraverseResult<FabricValue> {
     // No-op unless CF_TRAVERSE_CAPTURE is recording a fixture.
     recordTraverseInvocation(
       doc,
@@ -3054,7 +3054,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     doc: IMemorySpaceValueAttestation,
     selector: SchemaPathSelector,
     link?: NormalizedFullLink,
-  ): TraverseResult<Immutable<FabricValue>> {
+  ): TraverseResult<FabricValue> {
     const docPath = doc.address.path;
     if (deepEqual(docPath, selector.path)) {
       return this.traverseWithSchema(doc, selector.schema!, link);
@@ -3128,7 +3128,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     doc: IMemorySpaceValueAttestation,
     schema: JSONSchema,
     link?: NormalizedFullLink,
-  ): TraverseResult<Immutable<FabricValue>> {
+  ): TraverseResult<FabricValue> {
     this.traverseWithSchemaCalls++;
     this.currentDepth++;
     if (this.currentDepth > this.maxDepth) this.maxDepth = this.currentDepth;
@@ -3166,7 +3166,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     doc: IMemorySpaceValueAttestation,
     schema: JSONSchema,
     link?: NormalizedFullLink,
-  ): TraverseResult<Immutable<FabricValue>> {
+  ): TraverseResult<FabricValue> {
     // Track both the unresolved version of our schema (possibly with top
     // level $ref) and the resolved version.
     let resolved: JSONSchema | undefined = schema;
@@ -3191,7 +3191,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // There are a lot of valid logical schema flags, and we only handle
       // a very limited set here, with no support for combinations.
       if (resolved.anyOf) {
-        const matches: Immutable<FabricValue>[] = [];
+        const matches: FabricValue[] = [];
         if (typeof resolved === "boolean" || !isInternedSchema(resolved)) {
           // Non-interned schema: identity reuse is not guaranteed (frozen
           // schemas can be freshly minted per evaluation), so the prepared
@@ -3326,7 +3326,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
           ...oneOf.filter(SchemaObjectTraverser.hasAsCell),
         ];
         let matchCount = 0;
-        let match: Immutable<FabricValue> | undefined = undefined;
+        let match: FabricValue | undefined = undefined;
         for (const optionSchema of sortedOneOf) {
           if (ContextualFlowControl.isFalseSchema(optionSchema)) {
             continue;
@@ -3369,7 +3369,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         );
         return fail(TRAVERSE_FAILURES.multipleMatchingOneOf);
       } else if (resolved.allOf) {
-        const matches: Immutable<FabricValue>[] = [];
+        const matches: FabricValue[] = [];
         const allOf = resolved.allOf;
         const restSchema = combinatorRestSchema(resolved, "allOf");
         for (const optionSchema of allOf) {
@@ -3520,7 +3520,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         return fail(TRAVERSE_FAILURES.invalidType);
       }
 
-      const newValue: Immutable<FabricValue>[] = [];
+      const newValue: FabricValue[] = [];
       // Our link is based on the last link in the chain and not the first.
       const newLink = link ?? getNormalizedLink(
         doc.address,
@@ -3573,7 +3573,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       if (valid === TypeValidity.False) {
         return fail(TRAVERSE_FAILURES.invalidType);
       }
-      const newValue: Record<string, Immutable<FabricValue>> = {};
+      const newValue: Record<string, FabricValue> = {};
       // Our link is based on the last link in the chain and not the first.
       const newLink = link ?? getNormalizedLink(doc.address, schemaObj);
       using t = this.tracker.include(doc.value, schemaObj, newValue, doc);
@@ -3633,7 +3633,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     doc: IMemorySpaceValueAttestation,
     plan: PlainSchemaPlan,
     link?: NormalizedFullLink,
-  ): TraverseResult<Immutable<FabricValue>> | undefined {
+  ): TraverseResult<FabricValue> | undefined {
     const { path: _path, ...address } = doc.address;
     const reads: PlainSchemaReads = { address, paths: [] };
     const result = this.traversePlainSchemaWithReads(doc, plan, link, reads);
@@ -3667,7 +3667,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       | Record<string, FabricValue | undefined>
       | FabricValue
       | undefined,
-  ): Immutable<FabricValue> {
+  ): FabricValue {
     return this.objectCreator.createPlainSchemaObject?.(link, value) ??
       this.objectCreator.createObject(link, value);
   }
@@ -3677,7 +3677,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     plan: PlainSchemaPlan,
     link: NormalizedFullLink | undefined,
     reads: PlainSchemaReads,
-  ): TraverseResult<Immutable<FabricValue>> | undefined {
+  ): TraverseResult<FabricValue> | undefined {
     if (isSigilLink(doc.value)) return undefined;
 
     if (plan.kind === "primitive") {
@@ -3695,7 +3695,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       }
       if (doc.value.some(isSigilLink)) return undefined;
 
-      const newValue = new Array<Immutable<FabricValue>>(doc.value.length);
+      const newValue = new Array<FabricValue>(doc.value.length);
       const newLink = link ?? getNormalizedLink(doc.address, plan.schema);
       // Match traverseArrayWithSchema's structural and per-index reads.
       reads.paths.push(doc.address.path);
@@ -3734,7 +3734,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     }
     if (!isRecord(doc.value)) return fail(TRAVERSE_FAILURES.invalidType);
 
-    const newValue: Record<string, Immutable<FabricValue>> = {};
+    const newValue: Record<string, FabricValue> = {};
     const newLink = link ?? getNormalizedLink(doc.address, plan.schema);
     for (const propKey of Object.keys(doc.value)) {
       const propValue = doc.value[propKey];
@@ -3798,7 +3798,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
   }
 
   private ordinaryArrayItemLinkTarget(
-    value: Immutable<FabricValue>,
+    value: FabricValue,
     source: IMemorySpaceValueAddress,
   ): IMemorySpaceValueAddress | undefined {
     const link = parseLink(value, source);
@@ -3868,7 +3868,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
    */
   private preparePlainArrayItemLinks(
     doc: IMemorySpaceValueAttestation,
-    docArray: readonly Immutable<FabricValue>[],
+    docArray: readonly FabricValue[],
     itemSchema: JSONSchema | undefined,
   ):
     | {
@@ -3923,10 +3923,10 @@ export class SchemaObjectTraverser<V extends FabricValue>
     doc: IMemorySpaceValueAttestation,
     schema: JSONSchemaObj,
     _link?: NormalizedFullLink,
-  ): Immutable<FabricValue>[] | undefined {
+  ): FabricValue[] | undefined {
     this.traverseArrayCalls++;
-    const docArray = doc.value as Immutable<FabricValue>[];
-    const arrayObj = new Array<Immutable<FabricValue>>(docArray.length);
+    const docArray = doc.value as FabricValue[];
+    const arrayObj = new Array<FabricValue>(docArray.length);
     const directItems = plainArrayItems(schema);
 
     // Rendering or otherwise consuming a schema-backed array depends on its
@@ -4217,9 +4217,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
     doc: IMemorySpaceValueAttestation,
     schema: JSONSchemaObj,
     _link?: NormalizedFullLink,
-  ): Record<string, Immutable<FabricValue>> | undefined {
+  ): Record<string, FabricValue> | undefined {
     this.traverseObjectCalls++;
-    const filteredObj: Record<string, Immutable<FabricValue>> = {};
+    const filteredObj: Record<string, FabricValue> = {};
     const directProperties = plainObjectProperties(schema);
     for (const [propKey, propValue] of Object.entries(doc.value!)) {
       // We'll use marker schemas to detect some places where we want special
@@ -4364,7 +4364,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     doc: IMemorySpaceValueAttestation,
     schema: JSONSchema,
     link?: NormalizedFullLink,
-  ): TraverseResult<Immutable<FabricValue>> {
+  ): TraverseResult<FabricValue> {
     this.traversePointerCalls++;
     const selector = { path: doc.address.path, schema };
     const alreadyTracked = this.traverseCells &&
@@ -4481,7 +4481,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
   private traversePrimitive(
     doc: IMemorySpaceValueAttestation,
     schema: JSONSchema,
-  ): Immutable<FabricValue> {
+  ): FabricValue {
     if (SchemaObjectTraverser.hasAsCell(schema)) {
       return this.objectCreator.createObject(
         getNormalizedLink(doc.address, schema),

@@ -837,8 +837,9 @@ export function llm(
           }
         })();
 
-        // Track the call (loop + writeback) as async builtin work so
-        // `runtime.settled()` wait for the result to land;
+        // Track the call (loop + writeback) as async builtin work owned by
+        // this run, so `runtime.settled()` and
+        // `runtime.settledFor(parentCell)` both wait for the result to land;
         // `idle()` does not, so the handler never blocks on the LLM call.
         runtime.trackAsyncWork(
           resultPromise.catch((e) =>
@@ -860,6 +861,7 @@ export function llm(
               },
             )
           ),
+          parentCell,
         );
       },
     );
@@ -1177,8 +1179,9 @@ export function generateText(
           }
         })();
 
-        // Track the call (loop + writeback) as async builtin work so
-        // `runtime.settled()` wait for the result to land;
+        // Track the call (loop + writeback) as async builtin work owned by
+        // this run, so `runtime.settled()` and
+        // `runtime.settledFor(parentCell)` both wait for the result to land;
         // `idle()` does not, so the handler never blocks on the LLM call.
         runtime.trackAsyncWork(
           resultPromise.catch((e) =>
@@ -1200,6 +1203,7 @@ export function generateText(
               },
             )
           ),
+          parentCell,
         );
       },
     );
@@ -1738,27 +1742,35 @@ export function generateObject<T extends Record<string, unknown>>(
             }
           })();
 
-          resultPromise.catch((e) => {
-            logGenerateObject("error", {
-              ...toolsRequestSummary,
-              error: e instanceof Error ? e.message : String(e),
-            });
-            return handleLLMError(
-              e,
-              runtime,
-              resultCell.key("pending"),
-              resultCell.key("result"),
-              resultCell.key("error"),
-              resultCell.key("partial"),
-              resultCell.key("requestHash"),
-              hash,
-              queueName ? () => thisRun : () => currentRun,
-              thisRun,
-              () => {
-                previousCallHash = undefined;
-              },
-            );
-          });
+          // Track the tools loop (model calls, the tool calls they make, and
+          // the writeback of their results) as async builtin work owned by this
+          // run, so `runtime.settled()` and `runtime.settledFor(parentCell)`
+          // both span it; `idle()` does not, so the handler never blocks on the
+          // LLM call.
+          runtime.trackAsyncWork(
+            resultPromise.catch((e) => {
+              logGenerateObject("error", {
+                ...toolsRequestSummary,
+                error: e instanceof Error ? e.message : String(e),
+              });
+              return handleLLMError(
+                e,
+                runtime,
+                resultCell.key("pending"),
+                resultCell.key("result"),
+                resultCell.key("error"),
+                resultCell.key("partial"),
+                resultCell.key("requestHash"),
+                hash,
+                queueName ? () => thisRun : () => currentRun,
+                thisRun,
+                () => {
+                  previousCallHash = undefined;
+                },
+              );
+            }),
+            parentCell,
+          );
         },
       );
     } else {
@@ -1933,77 +1945,87 @@ export function generateObject<T extends Record<string, unknown>>(
             ? runtime.getOrCreateQueue(queueName).enqueue(doWork)
             : doWork();
 
-          resultPromise
-            .then(async (response) => {
-              if (isRunCancelled()) {
-                logGenerateObject(
-                  "write-skipped-cancelled",
-                  directRequestSummary,
-                );
-                return;
-              }
+          // The writeback hangs off the `.then` below, so the chain — not
+          // `resultPromise` — is what spans the whole operation. Tracked as
+          // async builtin work owned by this run so `runtime.settled()` and
+          // `runtime.settledFor(parentCell)` both wait for the result to land;
+          // `idle()` does not, so the handler never blocks on the LLM call.
+          runtime.trackAsyncWork(
+            resultPromise
+              .then(async (response) => {
+                if (isRunCancelled()) {
+                  logGenerateObject(
+                    "write-skipped-cancelled",
+                    directRequestSummary,
+                  );
+                  return;
+                }
 
-              await runtime.idle();
+                await runtime.idle();
 
-              await runtime.editWithRetry((tx) => {
-                // The InjectionSafe annotations on resultSchema are minted by
-                // the trusted sanitizer; attribute this write to the builtin so
-                // the persist-time evidence gate trusts them (audit S4). The
-                // same attribution keeps the D1b LlmDerived stamp merged into
-                // the result schema root below.
-                tx.setCfcImplementationIdentity({
-                  kind: "builtin",
-                  builtinId: "generateObject",
+                await runtime.editWithRetry((tx) => {
+                  // The InjectionSafe annotations on resultSchema are minted by
+                  // the trusted sanitizer; attribute this write to the builtin
+                  // so the persist-time evidence gate trusts them (audit S4).
+                  // The same attribution keeps the D1b LlmDerived stamp merged
+                  // into the result schema root below.
+                  tx.setCfcImplementationIdentity({
+                    kind: "builtin",
+                    builtinId: "generateObject",
+                  });
+                  const assistantMessage: BuiltInLLMMessage = {
+                    role: "assistant",
+                    content: JSON.stringify(response.object, null, 2),
+                  };
+                  resultCell.key("pending").withTx(tx).set(false);
+                  // D1b: write the model-produced object through the
+                  // resultSchema with `LlmDerived` merged into its root (custom
+                  // or default).
+                  setStampedObjectResult(
+                    tx,
+                    runtime,
+                    resultCell,
+                    response.resultSchema,
+                    response.object,
+                  );
+                  // TODO(danfuzz): Latent — schemas don't admit `Fabric*`
+                  // values on this `.get()`-path today, but will in the
+                  // not-too-distant future; at that point these JSON
+                  // round-trips silently lose any `FabricPrimitive`/
+                  // `FabricInstance` (class instances don't survive JSON). Mark
+                  // ahead of that.
+                  resultCell.key("messages").withTx(tx).set([
+                    ...JSON.parse(JSON.stringify(requestMessages)),
+                    JSON.parse(JSON.stringify(assistantMessage)),
+                  ] as any);
+                  resultCell.key("error").withTx(tx).set(undefined);
+                  resultCell.key("requestHash").withTx(tx).set(hash);
                 });
-                const assistantMessage: BuiltInLLMMessage = {
-                  role: "assistant",
-                  content: JSON.stringify(response.object, null, 2),
-                };
-                resultCell.key("pending").withTx(tx).set(false);
-                // D1b: write the model-produced object through the resultSchema
-                // with `LlmDerived` merged into its root (custom or default).
-                setStampedObjectResult(
-                  tx,
+                logGenerateObject("write-complete", directRequestSummary);
+              })
+              .catch((e) => {
+                logGenerateObject("error", {
+                  ...directRequestSummary,
+                  error: e instanceof Error ? e.message : String(e),
+                });
+                return handleLLMError(
+                  e,
                   runtime,
-                  resultCell,
-                  response.resultSchema,
-                  response.object,
+                  resultCell.key("pending"),
+                  resultCell.key("result"),
+                  resultCell.key("error"),
+                  resultCell.key("partial"),
+                  resultCell.key("requestHash"),
+                  hash,
+                  queueName ? () => thisRun : () => currentRun,
+                  thisRun,
+                  () => {
+                    previousCallHash = undefined;
+                  },
                 );
-                // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values
-                // on this `.get()`-path today, but will in the not-too-distant
-                // future; at that point these JSON round-trips silently lose any
-                // `FabricPrimitive`/`FabricInstance` (class instances don't
-                // survive JSON). Mark ahead of that.
-                resultCell.key("messages").withTx(tx).set([
-                  ...JSON.parse(JSON.stringify(requestMessages)),
-                  JSON.parse(JSON.stringify(assistantMessage)),
-                ] as any);
-                resultCell.key("error").withTx(tx).set(undefined);
-                resultCell.key("requestHash").withTx(tx).set(hash);
-              });
-              logGenerateObject("write-complete", directRequestSummary);
-            })
-            .catch((e) => {
-              logGenerateObject("error", {
-                ...directRequestSummary,
-                error: e instanceof Error ? e.message : String(e),
-              });
-              return handleLLMError(
-                e,
-                runtime,
-                resultCell.key("pending"),
-                resultCell.key("result"),
-                resultCell.key("error"),
-                resultCell.key("partial"),
-                resultCell.key("requestHash"),
-                hash,
-                queueName ? () => thisRun : () => currentRun,
-                thisRun,
-                () => {
-                  previousCallHash = undefined;
-                },
-              );
-            });
+              }),
+            parentCell,
+          );
         },
       );
     }

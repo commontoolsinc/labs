@@ -702,6 +702,47 @@ describe("CellHandle update change detection", () => {
     cell[$onCellUpdate](-0);
     expect(Object.is(calls.at(-1), -0)).toBe(true);
   });
+
+  it("notifies when a linked cell changes scope", () => {
+    const cell = new CellHandle<unknown>(makeRuntime(), ref);
+    const calls: CellHandle[] = [];
+    cell.subscribe((value) => {
+      if (isCellHandle(value)) calls.push(value);
+    });
+    const link = (scope: "space" | "user") => ({
+      "/": {
+        "link@1": {
+          id: "of:scoped-target",
+          space: "did:key:test",
+          scope,
+          path: [],
+        },
+      },
+    });
+
+    cell[$onCellUpdate](link("space"));
+    const spaceTarget = cell.get();
+    cell[$onCellUpdate](link("user"));
+    const userTarget = cell.get();
+
+    expect(isCellHandle(spaceTarget)).toBe(true);
+    expect(isCellHandle(userTarget)).toBe(true);
+    expect(userTarget).not.toBe(spaceTarget);
+    expect((userTarget as CellHandle).ref().scope).toBe("user");
+    expect(calls).toHaveLength(2);
+  });
+
+  it("treats omitted scope as the default space scope", () => {
+    const runtime = makeRuntime();
+    const unscoped = new CellHandle(runtime, {
+      ...ref,
+      scope: undefined,
+    } as unknown as CellRef);
+    const spaceScoped = new CellHandle(runtime, ref);
+
+    expect(unscoped.equals(spaceScoped)).toBe(true);
+    expect(spaceScoped.equals(unscoped)).toBe(true);
+  });
 });
 
 describe("CellHandle disposal-raced writes", () => {

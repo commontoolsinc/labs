@@ -31,13 +31,14 @@ import {
 } from "./pieces-controller.ts";
 import {
   clickCfButton,
+  clickCfButtonsConcurrently,
   collectBrowserLoadSummary,
   fillCfInput,
   logBrowserLoadSummary,
   logStepTimings,
   StepTimer,
   waitForRuntimeIdle,
-  waitForText,
+  waitForSettledText,
 } from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
@@ -179,7 +180,7 @@ describe("lunch poll: two users vote on a shared option", () => {
       await clickCfButton(hostPage, "#lp-join-button");
       await timer.run(
         "host joined (name in roster)",
-        () => waitForText(hostPage, "body", HOST),
+        () => waitForSettledText(hostPage, "body", HOST),
       );
 
       // Guest joins second via the same guest path. The board shows a
@@ -193,8 +194,8 @@ describe("lunch poll: two users vote on a shared option", () => {
         "both join lands (count reaches 2)",
         () =>
           Promise.all([
-            waitForText(hostPage, "body", "2 joined"),
-            waitForText(guestPage, "body", GUEST),
+            waitForSettledText(hostPage, "body", "2 joined"),
+            waitForSettledText(guestPage, "body", GUEST),
           ]),
       );
 
@@ -205,31 +206,38 @@ describe("lunch poll: two users vote on a shared option", () => {
         "option A propagates to both",
         () =>
           Promise.all([
-            waitForText(hostPage, "body", OPTION_A),
-            waitForText(guestPage, "body", OPTION_A),
+            waitForSettledText(hostPage, "body", OPTION_A),
+            waitForSettledText(guestPage, "body", OPTION_A),
           ]),
       );
 
-      // Both users vote green on the SAME option CONCURRENTLY: both clicks are
-      // dispatched before either browser settles, so the second voter is not
-      // guaranteed to have seen the first vote. The votes are distinct entities
-      // (keyed per voter), so both must survive and the tally reaches "2 love
-      // it" on BOTH browsers. A clobbering whole-list write against a base that
-      // missed the other vote would leave it at "1 love it".
+      // Both users vote green on the SAME option CONCURRENTLY. Both page views
+      // settle before the pair is dispatched. Neither page settles again until
+      // both clicks have been delivered. The second voter is not guaranteed to
+      // have seen the first vote. The votes are distinct entities, keyed per
+      // voter. Both must survive, and the tally reaches "2 love it" on BOTH
+      // browsers. A clobbering whole-list write against a base that missed the
+      // other vote would leave it at "1 love it".
       await timer.run(
         "both cast green concurrently",
         () =>
-          Promise.all([
-            clickCfButton(hostPage, voteButton(OPTION_A, "green")),
-            clickCfButton(guestPage, voteButton(OPTION_A, "green")),
+          clickCfButtonsConcurrently([
+            {
+              page: hostPage,
+              selector: voteButton(OPTION_A, "green"),
+            },
+            {
+              page: guestPage,
+              selector: voteButton(OPTION_A, "green"),
+            },
           ]),
       );
       await timer.run(
         "both browsers see 2 love it (merge)",
         () =>
           Promise.all([
-            waitForText(hostPage, "body", "2 love it"),
-            waitForText(guestPage, "body", "2 love it"),
+            waitForSettledText(hostPage, "body", "2 love it"),
+            waitForSettledText(guestPage, "body", "2 love it"),
           ]),
       );
 
@@ -255,8 +263,8 @@ describe("lunch poll: two users vote on a shared option", () => {
       await fillCfInput(hostPage, "#lp-add-option-input", OPTION_B);
       await clickCfButton(hostPage, "#lp-add-option-button");
       await Promise.all([
-        waitForText(hostPage, "body", OPTION_B),
-        waitForText(guestPage, "body", OPTION_B),
+        waitForSettledText(hostPage, "body", OPTION_B),
+        waitForSettledText(guestPage, "body", OPTION_B),
       ]);
       await clickCfButton(guestPage, voteButton(OPTION_B, "red"));
       // The third vote (red on option B) lands on both browsers — the count
@@ -267,9 +275,9 @@ describe("lunch poll: two users vote on a shared option", () => {
         "option B vote lands (3 votes); option A unchanged",
         () =>
           Promise.all([
-            waitForText(hostPage, "body", "3 votes"),
-            waitForText(guestPage, "body", "3 votes"),
-            waitForText(hostPage, "body", "2 love it"),
+            waitForSettledText(hostPage, "body", "3 votes"),
+            waitForSettledText(guestPage, "body", "3 votes"),
+            waitForSettledText(hostPage, "body", "2 love it"),
           ]),
       );
     } finally {

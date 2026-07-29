@@ -1,5 +1,5 @@
 import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
-import { type Immutable, isPlainObject } from "@commonfabric/utils/types";
+import { isPlainObject } from "@commonfabric/utils/types";
 
 import {
   type FabricPlainObject,
@@ -42,7 +42,7 @@ export function isFabricValueLayer(
       }
       if (Array.isArray(value)) {
         // Arrays with `undefined` elements and sparse holes are accepted, but
-        // not arrays with non-index properties.
+        // not arrays carrying named or symbol-keyed properties.
         return isArrayWithOnlyIndexProperties(value);
       }
       // Plain objects are accepted; class instances are not (except
@@ -74,12 +74,12 @@ export function isFabricValueLayer(
  * -- including `-0`, `NaN`, and `±Infinity` -- `string`, `bigint`, and
  * registry-interned (`Symbol.for(...)`) symbols), any `FabricInstance` or
  * `FabricPrimitive`, an admitted `FabricFactory`, an array of `FabricValue`s
- * with no enumerable non-index properties (sparse holes allowed), or a plain
- * object whose values are all `FabricValue`s. Returns `false` for an arbitrary
- * function or a unique (uninterned) symbol -- whether the value itself or
- * reached anywhere within it -- and for any other class instance (`Date`,
- * `Map`, ...) not representable as a `FabricValue`. Handles circular
- * references.
+ * with no named or symbol-keyed properties, `length` aside (sparse holes
+ * allowed), or a plain object whose values are all
+ * `FabricValue`s. Returns `false` for a `function` or a unique (uninterned)
+ * symbol -- whether the value itself or reached anywhere within it -- and for
+ * any other class instance (`Date`, `Map`, ...) not representable as a
+ * `FabricValue`. Handles circular references.
  *
  * This is a *membership* check, not a frozen-ness check: a structurally-valid
  * but unfrozen object or array is still a `FabricValue`. For the deep-frozen
@@ -137,8 +137,8 @@ export function isFabricValue(value: unknown): value is FabricValue {
       // type and does not recurse.
       return true;
     } else if (Array.isArray(item)) {
-      // Arrays with enumerable named (non-index) properties have no fabric
-      // representation.
+      // Arrays with named (non-index) or symbol-keyed properties have no
+      // fabric representation.
       if (!isArrayWithOnlyIndexProperties(item)) return false;
       for (let i = 0; i < item.length; i++) {
         if (!(i in item)) continue; // sparse hole
@@ -177,11 +177,7 @@ export function isFabricValue(value: unknown): value is FabricValue {
  */
 export function isFabricObjectOrArray(
   value: FabricValue,
-): value is FabricValue & object;
-export function isFabricObjectOrArray(
-  value: Immutable<FabricValue>,
-): value is Immutable<FabricValue> & object;
-export function isFabricObjectOrArray(value: unknown): boolean {
+): value is FabricValue & object {
   return typeof value === "object" && value !== null;
 }
 
@@ -195,10 +191,6 @@ export function isFabricObjectOrArray(value: unknown): boolean {
  */
 export function isFabricPlainObject(
   value: FabricValue,
-): value is FabricPlainObject;
-export function isFabricPlainObject(
-  value: Immutable<FabricValue>,
-): value is Immutable<FabricPlainObject>;
-export function isFabricPlainObject(value: unknown): boolean {
+): value is FabricPlainObject {
   return isPlainObject(value);
 }

@@ -284,6 +284,9 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
   readonly originTx?: IExtendedStorageTransaction;
   readonly time?: number;
 }): void {
+  // `eventId` here is an already-durable delivery id, used verbatim — an
+  // ingress caller's opaque idempotency key is bound to its stream earlier,
+  // at the send surface (cell.ts), via scopeCallerEventId.
   const id = args.eventId ?? mintEventId(args.eventLink, args.originTx);
   const sequence = state.nextEventSequence();
   const registration = findEventHandler(state.eventHandlers, args.eventLink);

@@ -93,6 +93,7 @@ export enum RequestType {
   PageGetAll = "page:getAll",
   PageSynced = "page:synced",
   PieceGetSource = "piece:getSource",
+  PieceUpdateSource = "piece:updateSource",
 
   // VDOM operations (main -> worker)
   VDomMount = "vdom:mount",
@@ -240,6 +241,12 @@ export interface CellGetRequest extends BaseRequest {
   // so a caller that needs both pays one round-trip instead of a separate
   // CellGetCfcLabel request.
   includeCfcLabel?: boolean;
+  // Opt in to having the read cell's own schema-bearing ref returned. Useful
+  // when `meta` names a link field (pattern/argument/result): the resolved
+  // cell's ref lets the caller subscribe to it or read it again directly,
+  // and its schema carries the declarations (e.g. stream fields) that the
+  // value alone does not.
+  includeRef?: boolean;
 }
 
 export interface CellSetRequest extends BaseRequest {
@@ -660,6 +667,25 @@ export interface PiecePatternRefView {
   symbol: string;
 }
 
+export type PieceSourceRevisionOperation =
+  | "baseline"
+  | "create"
+  | "edit"
+  | "origin-update"
+  | "detach"
+  | "revert"
+  | "follow"
+  | "repoint";
+
+export interface PieceSourceRevisionView {
+  revisionId: string;
+  timestamp: number;
+  pattern: PiecePatternRefView;
+  origin?: PieceOriginView;
+  operation: PieceSourceRevisionOperation;
+  selectedRevisionId?: string;
+}
+
 export interface PieceSourceView {
   space: DID;
   pieceId: string;
@@ -671,10 +697,32 @@ export interface PieceSourceView {
   repository?: string;
   entry?: string;
   files: PatternSourceFile[];
+  history: PieceSourceRevisionView[];
+  currentRevisionId?: string;
 }
 
 export interface PieceSourceResponse {
   source: PieceSourceView;
+}
+
+export type PieceSourceAction =
+  | { kind: "detach" }
+  | { kind: "restore"; revisionId: string }
+  | { kind: "follow"; revisionId: string };
+
+export interface PieceUpdateSourceRequest extends BaseRequest {
+  type: RequestType.PieceUpdateSource;
+  space: DID;
+  pieceId: string;
+  action: PieceSourceAction;
+  /** Opaque token returned with an incompatibility warning. */
+  confirmationToken?: string;
+}
+
+export interface PieceUpdateSourceResponse extends PieceSourceResponse {
+  compatibilityWarning?: string;
+  confirmationToken?: string;
+  executionWarning?: string;
 }
 
 /** Common shape for one-way main -> worker notifications. */
@@ -828,6 +876,7 @@ export type IPCClientRequest =
   | PageGetAllRequest
   | PageSyncedRequest
   | PieceGetSourceRequest
+  | PieceUpdateSourceRequest
   | RuntimeSyncedRequest
   | ResolveSpaceNameRequest
   | RegisterSpaceHostRequest
@@ -855,6 +904,9 @@ export interface CellGetResponse extends JSONValueResponse {
   // Present only when the request set `includeCfcLabel`. `undefined` is a valid
   // value (the cell carries no label); the field is omitted when not requested.
   cfcLabel?: CfcLabelView | undefined;
+  // Present only when the request set `includeRef` and the read resolved to a
+  // cell (a raw-metadata read has no cell to reference).
+  cell?: CellRef;
 }
 
 export interface CellResponse {
@@ -1015,6 +1067,7 @@ export type RemoteResponse =
   | WriteStackTraceResponse
   | PageResponse
   | PieceSourceResponse
+  | PieceUpdateSourceResponse
   | SlugResponse
   | SpaceResponse
   | VDomMountResponse
@@ -1210,6 +1263,10 @@ export type Commands = {
   [RequestType.PieceGetSource]: {
     request: PieceGetSourceRequest;
     response: PieceSourceResponse;
+  };
+  [RequestType.PieceUpdateSource]: {
+    request: PieceUpdateSourceRequest;
+    response: PieceUpdateSourceResponse;
   };
   [RequestType.GetSpaceRootPattern]: {
     request: PageGetSpaceDefault;

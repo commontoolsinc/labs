@@ -192,8 +192,11 @@ export type FabricValue =
   // -- undefined --
   | undefined;
 
-/** Array of fabric values. */
-export interface FabricArray extends ArrayLike<FabricValue> {}
+/** A fabric value other than `null` or `undefined`. */
+export type NonNullableFabricValue = NonNullable<FabricValue>;
+
+/** Read-only array of fabric values. */
+export interface FabricArray extends ReadonlyArray<FabricValue> {}
 
 /**
  * Object/record of fabric values.
@@ -203,7 +206,8 @@ export interface FabricArray extends ArrayLike<FabricValue> {}
  * If prototype pollution becomes a concern, add boundary validation where
  * values enter the fabric system (e.g., `fabricFromNativeValue()`).
  */
-export interface FabricPlainObject extends Record<string, FabricValue> {}
+export interface FabricPlainObject
+  extends Readonly<Record<string, FabricValue>> {}
 
 /**
  * Single "layer" of fabric conversion -- the result of shallow conversion
@@ -215,6 +219,22 @@ export type FabricValueLayer =
   | FabricValue
   | unknown[]
   | Record<string, unknown>;
+
+/** A mutable array root whose elements remain fabric values. */
+export type MutableFabricArrayLayer = FabricValue[];
+
+/** A mutable record root whose values remain fabric values. */
+export type MutableFabricPlainObjectLayer = Record<string, FabricValue>;
+
+/**
+ * A fabric value with a mutable root container. Nested containers remain
+ * ordinary (readonly) `FabricValue`s, so this models a single construction
+ * layer rather than a deep thaw.
+ */
+export type MutableFabricValueLayer =
+  | Exclude<FabricValue, FabricArray | FabricPlainObject>
+  | MutableFabricArrayLayer
+  | MutableFabricPlainObjectLayer;
 
 /**
  * Union of raw native JS **object** types that the fabric type system can

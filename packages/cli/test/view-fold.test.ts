@@ -244,6 +244,117 @@ Deno.test("fold: f hides the file the viewport is on, f again shows it", () => {
   assertEquals(s.displayDoc().lines.length, full, "showing again restores it");
 });
 
+Deno.test("fold: a summary omits markers for a hidden expansion edge", () => {
+  const ws: DiffWorkspace = {
+    resolve: (path) => path,
+    read: (path) =>
+      path.endsWith("app.test.ts") ? "x\nadded\nafter" : "keep\nnew\nafter",
+  };
+  const model = parseDiff(TWO_FILES)!;
+  const { doc, edit } = buildDiffDocument(TWO_FILES, model, ws);
+  const s = new Session(
+    doc,
+    { color: false, showLineNumbers: false },
+    { width: 80, height: 30 },
+    undefined,
+    diffSource(ws, edit),
+  );
+  press(s, "f");
+  const view = s.view();
+  assertEquals(view.canExpand, true);
+  assertEquals(view.expandRow, 7);
+  assertEquals(view.expandUp, false);
+  assertEquals(view.diffAnnotations, [{ line: 7, kind: "expandDown" }]);
+  const rendered = renderFrame(s.displayDoc(), view);
+  assertEquals(rendered[0].trimEnd(), "▸ src/app.ts  +1 −1");
+  assertEquals(rendered[7].at(-1), "◢");
+
+  const internals = s as unknown as {
+    displayDiffAnnotations(expand: {
+      row: number;
+      markerLine: number;
+      line: number;
+      up: boolean;
+    }): readonly unknown[];
+    displayAdjacentDiffMetadataRows(expand: {
+      row: number;
+      markerLine: number;
+      line: number;
+      up: boolean;
+    }): readonly number[];
+  };
+  const hiddenEdge = {
+    row: 5,
+    markerLine: 5,
+    line: 4,
+    up: true,
+  };
+  assertEquals(internals.displayDiffAnnotations(hiddenEdge), []);
+  assertEquals(internals.displayAdjacentDiffMetadataRows(hiddenEdge), []);
+});
+
+Deno.test("fold: a smaller file-number gutter clamps horizontal panning", () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    const longLine = "x".repeat(40);
+    const diff = [
+      "diff --git a/large.ts b/large.ts",
+      "--- a/large.ts",
+      "+++ b/large.ts",
+      "@@ -1000,3 +1000,3 @@",
+      ` ${longLine}`,
+      "-old",
+      "+new",
+      " tail",
+      "diff --git a/small.ts b/small.ts",
+      "--- a/small.ts",
+      "+++ b/small.ts",
+      "@@ -1,2 +1,2 @@",
+      ` ${longLine}`,
+      "-before",
+      "+after",
+      "",
+    ].join("\n");
+    const largeFile = [
+      ...Array.from({ length: 999 }, (_, i) => `line ${i + 1}`),
+      longLine,
+      "new",
+      "tail",
+      "",
+    ].join("\n");
+    Deno.writeTextFileSync(join(root, "large.ts"), largeFile);
+    Deno.writeTextFileSync(join(root, "small.ts"), `${longLine}\nafter\n`);
+    const ws: DiffWorkspace = {
+      resolve: (path) => join(root, path),
+      read: (path) => Deno.readTextFileSync(path),
+    };
+    const model = parseDiff(diff)!;
+    const { doc, edit } = buildDiffDocument(diff, model, ws);
+    const s = new Session(
+      doc,
+      { color: false, showLineNumbers: false },
+      { width: 20, height: 20 },
+      undefined,
+      diffSource(ws, edit),
+    );
+    assert(s.view().expandMargin, "the diff reserves its expansion margin");
+    press(s, "#", "#");
+    for (let i = 0; i < 20; i++) press(s, "l");
+    const withLargeFileNumbers = s.view().left;
+
+    press(s, "f");
+    assert(
+      s.view().left < withLargeFileNumbers,
+      "the smaller gutter clamps the right edge",
+    );
+    const atRightEdge = s.view().left;
+    press(s, "l");
+    assertEquals(s.view().left, atRightEdge, "right does not move left");
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
 Deno.test("fold: F hides all files, E shows all files", () => {
   const s = foldSession(TWO_FILES);
   const full = s.displayDoc().lines.length;
@@ -364,24 +475,23 @@ Deno.test("fold: a selected file spans every wrapped summary row", () => {
     "+y",
     "",
   ].join("\n");
-  const height = 6;
+  const height = 7;
   const s = foldSession(diff, height, 20);
   press(s, "\\", "F");
   const summaryLine = s.displayDoc().lines.findIndex((line) =>
     line.text.startsWith(`▸ ${longPath}`)
   );
   assert(summaryLine >= 0, "the long file is collapsed to a summary");
-  const plan = s.view().wrapPlan!;
-  const first = plan.firstRow[summaryLine];
-  const last = plan.lastRow[summaryLine];
-  assert(last > first, "the summary occupies continuation rows");
-
   for (let i = 0; i < 500; i++) {
     if (s.view().selected?.label.includes(longPath)) break;
     press(s, "tab");
   }
   assert(s.view().selected?.label.includes(longPath), "the file is selected");
   press(s, "enter", "z");
+  const plan = s.view().wrapPlan!;
+  const first = plan.firstRow[summaryLine];
+  const last = plan.lastRow[summaryLine];
+  assert(last > first, "the revealed summary occupies continuation rows");
   assertEquals(
     s.view().top,
     frameTop(first, last, height, plan.rowCount),

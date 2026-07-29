@@ -14,6 +14,7 @@ import {
   type CallableExecutionDeps,
   type CallableManagerLike,
   type CallablePieceLike,
+  type CallableResultRef,
   detectCallableKind,
 } from "./callable.ts";
 import { executeCallableCommand } from "./callable-command.ts";
@@ -70,6 +71,8 @@ export interface ExecDependencies extends CallableExecutionDeps {
 export interface ExecutedMountedCallableFile {
   helpText?: string;
   outputText?: string;
+  /** Tool result cell address, passed through from ExecutedCallable. */
+  resultRef?: CallableResultRef;
   parsed: ParsedExecArgs;
   resolved: ResolvedMountedCallableFile;
 }

@@ -131,16 +131,36 @@ Deno.test("pattern integration shard rejects unsafe integer values", () => {
   }
 });
 
-Deno.test("pattern integration profile separates the expensive editor and convergence tests", () => {
+Deno.test("pattern integration profile separates a fixed round-robin collision", () => {
   const cfCodeEditor = "cf-code-editor.test.ts";
   const convergenceStorm = "convergence-storm.test.ts";
-  const assignment = assignPatternIntegrationShards(
-    [cfCodeEditor, convergenceStorm],
-    TOTAL_SHARDS,
+  const files = [
+    "a-round-robin-control.test.ts",
+    cfCodeEditor,
+    "cfc-round-robin-control-a.test.ts",
+    "cfc-round-robin-control-b.test.ts",
+    "cfc-round-robin-control-c.test.ts",
+    convergenceStorm,
+  ];
+  const roundRobin = new Map(
+    files.toSorted().map((name, index) => [name, index % TOTAL_SHARDS + 1]),
+  );
+  const assignment = assignPatternIntegrationShards(files, TOTAL_SHARDS);
+
+  assertEquals(
+    {
+      cfCodeEditor: roundRobin.get(cfCodeEditor),
+      convergenceStorm: roundRobin.get(convergenceStorm),
+    },
+    { cfCodeEditor: 2, convergenceStorm: 2 },
+    "the fixed round-robin control should reproduce the collision",
   );
   assertEquals(
-    assignment.get(cfCodeEditor) === assignment.get(convergenceStorm),
-    false,
+    {
+      cfCodeEditor: assignment.get(cfCodeEditor),
+      convergenceStorm: assignment.get(convergenceStorm),
+    },
+    { cfCodeEditor: 1, convergenceStorm: 3 },
     "the profiled assignment should separate the two expensive files",
   );
 });

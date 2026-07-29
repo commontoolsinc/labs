@@ -1,7 +1,7 @@
 # CF Protocol Implementation Plan
 
 This document tracks implementation status of the CF Protocol specification.
-See `docs/specs/verifiable-execution/README.md` for the spec index.
+See the [verifiable-execution document map](README.md) for the spec index.
 
 ## Status Legend
 

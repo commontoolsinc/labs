@@ -12,6 +12,7 @@ import {
   mapFactoryStateValues,
 } from "@commonfabric/data-model/fabric-factory";
 import {
+  type FabricExecValue,
   isModule,
   isPattern,
   type JSONSchema,
@@ -93,7 +94,7 @@ const ARBITRARY_FUNCTION_BINDING_ERROR =
 const FACTORY_VALUE_FIELDS = ["params", "spaceSelector"] as const;
 
 function isLegacyPatternGraphFunctionField(
-  container: Record<PropertyKey, unknown>,
+  container: unknown,
   key: string,
 ): boolean {
   return ((isPattern(container) || isModule(container)) && key === "toJSON") ||
@@ -559,7 +560,7 @@ function sendValueToBindingInner<T>(
  *   links are annotated with the corresponding target schema.
  * @returns The unwrapped binding.
  */
-export function unwrapOneLevelAndBindtoDoc<T, U>(
+export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
   cfc: ContextualFlowControl,
   binding: T,
   argumentCellLink: NormalizedFullLink | undefined,
@@ -589,7 +590,7 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
   };
 
   function convert(
-    binding: unknown,
+    binding: FabricExecValue,
     targetSchema: JSONSchema | undefined,
     allowLegacyImplementationFunction = false,
     preserveIdentityWhenUnchanged = false,
@@ -603,7 +604,13 @@ export function unwrapOneLevelAndBindtoDoc<T, U>(
           const nestedSchema = field === "params" && state.kind === "pattern"
             ? state.paramsSchema
             : undefined;
-          return convert(nested, nestedSchema, false, true, false);
+          return convert(
+            nested as FabricExecValue,
+            nestedSchema,
+            false,
+            true,
+            false,
+          );
         },
         factoryContext,
       );
@@ -845,8 +852,10 @@ export function findAllWriteRedirectCells<T>(
       if (allowLegacyImplementationFunction) return;
       throw new TypeError(ARBITRARY_FUNCTION_BINDING_ERROR);
     } else if (isAliasBinding(binding)) {
-      // Callers unwrap bindings before walking, so a surviving `$alias`
-      // belongs to a nested level and is not part of this level's surface.
+      // Callers unwrap bindings (unwrapOneLevelAndBindToDoc) before walking,
+      // so a surviving `$alias` belongs to a nested level — it just crossed
+      // its `defer` boundary, or sits inside an embedded Pattern value —
+      // and is not part of this level's read/write surface.
       return;
     } else if (isWriteRedirectLink(binding)) {
       // Follow a *chain* of write redirects: record this redirect, then if its

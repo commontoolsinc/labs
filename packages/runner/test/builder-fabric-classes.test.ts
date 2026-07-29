@@ -6,12 +6,16 @@ import {
   FabricPrimitive,
   FabricSpecialObject,
 } from "@commonfabric/data-model/fabric-value";
-import { FabricLink } from "@commonfabric/data-model/fabric-instances";
+import {
+  FabricError,
+  FabricLink,
+} from "@commonfabric/data-model/fabric-instances";
 import {
   FabricBytes,
   FabricEpochDays,
   FabricEpochNsec,
   FabricHash,
+  FabricRegExp,
 } from "@commonfabric/data-model/fabric-primitives";
 import { createBuilder } from "../src/builder/factory.ts";
 import { getRuntimeModuleExports } from "../src/sandbox/runtime-modules.ts";
@@ -35,8 +39,8 @@ const declaredClasses = [
 ].map((match) => match[1]);
 
 // The `data-model` class each binding is expected to be. This table is the
-// test's own knowledge of the eight classes, and the first assertion below
-// pins it against the derived list, so the two cannot drift apart silently.
+// test's own knowledge, and the first assertion below pins it against the
+// derived list, so the two cannot drift apart silently.
 const expectedBindings: Record<string, unknown> = {
   FabricSpecialObject,
   FabricInstance,
@@ -46,6 +50,8 @@ const expectedBindings: Record<string, unknown> = {
   FabricHash,
   FabricLink,
   FabricBytes,
+  FabricRegExp,
+  FabricError,
 };
 
 describe("commonfabric Fabric value classes", () => {
@@ -104,6 +110,67 @@ describe("commonfabric Fabric value classes", () => {
 
       expect(instance).toBeInstanceOf(FabricLink);
       expect(instance.payload).toEqual(payload);
+    });
+  });
+
+  describe("FabricRegExp", () => {
+    // Both declared constructor overloads, since the pattern-visible
+    // declaration offers both and only one of them is the obvious one.
+    it("constructs an instance from a native `RegExp`", () => {
+      const BoundFabricRegExp = commonfabric
+        .FabricRegExp as typeof FabricRegExp;
+      const instance = new BoundFabricRegExp(/ab+c/gi);
+
+      expect(instance).toBeInstanceOf(FabricRegExp);
+      expect(instance.source).toBe("ab+c");
+      expect(instance.flags).toBe("gi");
+      expect(instance.value).toEqual(/ab+c/gi);
+    });
+
+    it("constructs an instance from an explicit flavor, source and flags", () => {
+      const BoundFabricRegExp = commonfabric
+        .FabricRegExp as typeof FabricRegExp;
+      const instance = new BoundFabricRegExp("es2025", "a.c", "s");
+
+      expect(instance.flavor).toBe("es2025");
+      expect(instance.source).toBe("a.c");
+      expect(instance.flags).toBe("s");
+    });
+  });
+
+  describe("FabricError", () => {
+    it("constructs an instance carrying its fixed-schema slots", () => {
+      const BoundFabricError = commonfabric.FabricError as typeof FabricError;
+      const instance = new BoundFabricError({
+        type: "TypeError",
+        message: "nope",
+        stack: undefined,
+        cause: undefined,
+      });
+
+      expect(instance).toBeInstanceOf(FabricError);
+      expect(instance.type).toBe("TypeError");
+      expect(instance.name).toBe("TypeError");
+      expect(instance.message).toBe("nope");
+    });
+
+    // Unlike the other exposed classes, this one is mutable until frozen, so
+    // pattern code can reach its extras bag. Pinned because exposing writable
+    // members is a choice rather than a side effect of exposing the class.
+    it("allows extras to be set and read back", () => {
+      const BoundFabricError = commonfabric.FabricError as typeof FabricError;
+      const instance = new BoundFabricError({
+        type: "Error",
+        message: "with extras",
+        stack: undefined,
+        cause: undefined,
+      });
+
+      instance.setExtra("code", 42);
+
+      expect(instance.getExtra("code")).toBe(42);
+      expect(instance.hasExtra("code")).toBe(true);
+      expect(instance.extraSize).toBe(1);
     });
   });
 

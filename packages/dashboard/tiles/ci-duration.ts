@@ -68,7 +68,7 @@ export async function renderGantt(
         headers: { "cache-control": "no-store" },
       });
     }
-    out = await Deno.makeTempFile({ prefix: "ci-gantt-", suffix: ".png" });
+    out = await Deno.makeTempFile({ prefix: "ci-gantt-", suffix: ".svg" });
     input = await Deno.makeTempFile({
       prefix: "ci-gantt-input-",
       suffix: ".json",
@@ -76,10 +76,8 @@ export async function renderGantt(
     await Deno.writeTextFile(input, JSON.stringify(data));
     const args = [
       "run",
-      "--allow-read",
+      `--allow-read=${input}`,
       `--allow-write=${out}`,
-      "--allow-ffi",
-      "--allow-sys=cpus,networkInterfaces,hostname",
       CIGANTT,
       "--input",
       input,
@@ -89,8 +87,6 @@ export async function renderGantt(
       source.workflow,
       "--limit",
       String(limit),
-      "--scale",
-      "2",
       "--theme",
       "dark",
       "--out",
@@ -110,7 +106,7 @@ export async function renderGantt(
       "--min-runs",
       String(Math.min(defaultMinimum, Math.max(1, data.runs.length))),
     );
-    const { success, stderr } = await new Deno.Command("deno", {
+    const { success, stderr } = await new Deno.Command(Deno.execPath(), {
       args,
       stdout: "piped",
       stderr: "piped",
@@ -128,7 +124,7 @@ export async function renderGantt(
     }
     return new Response(await Deno.readFile(out), {
       headers: {
-        "content-type": "image/png",
+        "content-type": "image/svg+xml",
         "cache-control": "no-store",
       },
     });
@@ -227,7 +223,7 @@ export function ciGanttPage(url: URL): string {
   function imageUrl(){
     const p = parameters();
     p.set('t', Date.now());
-    return '/bench/gantt.png?' + p.toString();
+    return '/bench/gantt.svg?' + p.toString();
   }
   function progressUrl(){
     return '/bench/gantt-progress?' + parameters().toString();
@@ -434,7 +430,7 @@ export function ciCommitGanttPage(url: URL): string {
   const shortSha = sha.slice(0, 7) || "unknown commit";
   const runCount = parameters?.getAll("run").length ?? 0;
   const commitUrl = `https://github.com/${source.repo}/commit/${sha}`;
-  const imageUrl = parameters ? `/ci-gantt.png?${parameters}` : "";
+  const imageUrl = parameters ? `/ci-gantt.svg?${parameters}` : "";
   const progressUrl = parameters ? `/ci-gantt-progress?${parameters}` : "";
   const chart = parameters
     ? `<div class="imgwrap"><img id="g" alt="CI Gantt for ${
@@ -578,6 +574,13 @@ function commitGanttUrl(url: URL): URL | null {
   return normalized;
 }
 
+function redirectGanttImage(url: URL, pathname: string): Response {
+  return new Response(null, {
+    status: 308,
+    headers: { location: `${pathname}${url.search}` },
+  });
+}
+
 const ganttRoutes: Route[] = [
   {
     path: "/ci-gantt",
@@ -588,7 +591,7 @@ const ganttRoutes: Route[] = [
     },
   },
   {
-    path: "/ci-gantt.png",
+    path: "/ci-gantt.svg",
     handler(request, url) {
       const normalized = commitGanttUrl(url);
       return normalized
@@ -602,6 +605,12 @@ const ganttRoutes: Route[] = [
     },
   },
   {
+    path: "/ci-gantt.png",
+    handler(_request, url) {
+      return redirectGanttImage(url, "/ci-gantt.svg");
+    },
+  },
+  {
     path: "/ci-gantt-progress",
     handler(request, url) {
       const normalized = commitGanttUrl(url);
@@ -611,8 +620,14 @@ const ganttRoutes: Route[] = [
     },
   },
   {
-    path: "/bench/gantt.png",
+    path: "/bench/gantt.svg",
     handler: renderGanttRoute,
+  },
+  {
+    path: "/bench/gantt.png",
+    handler(_request, url) {
+      return redirectGanttImage(url, "/bench/gantt.svg");
+    },
   },
   {
     path: "/bench/gantt-progress",

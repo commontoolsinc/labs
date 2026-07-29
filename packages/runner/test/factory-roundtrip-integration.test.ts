@@ -912,20 +912,16 @@ describe("Factory@1 runner round trips", () => {
     );
     copied.set(durableValue);
     const followerCommit = followerTx.commit();
-    const followerSettledBeforeRelease = await Promise.race([
-      followerCommit.then(() => true),
-      new Promise<false>((resolve) => setTimeout(() => resolve(false), 100)),
-    ]);
+    // This await is intentionally before releasing the unrelated blocker. If
+    // the commits are incorrectly coupled, the in-process test fails fast when
+    // the event loop drains rather than relying on a wall-clock timeout.
+    const followerResult = await followerCommit;
 
     releaseBlocker.resolve();
-    const [blockerResult, followerResult] = await Promise.all([
-      blockerCommit,
-      followerCommit,
-    ]);
+    const blockerResult = await blockerCommit;
     blocker.patternManager.prepareArtifactPublication =
       prepareArtifactPublication;
 
-    expect(followerSettledBeforeRelease).toBe(true);
     expect(blockerResult.error?.message).toContain(
       "unrelated pending rewrite rejected",
     );
@@ -1031,23 +1027,18 @@ describe("Factory@1 runner round trips", () => {
     );
     destination.set(onward);
     const secondCommit = secondTx.commit();
-    await Promise.race([
-      loadStarted.promise,
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error("durable source probe did not start")),
-          1_000,
-        )
-      ),
-    ]);
-    const secondSettledBeforeRelease = await Promise.race([
-      secondCommit.then(() => true),
-      new Promise<false>((resolve) => setTimeout(() => resolve(false), 20)),
-    ]);
+    let secondSettled = false;
+    const observedSecondCommit = secondCommit.then((result) => {
+      secondSettled = true;
+      return result;
+    });
+    await loadStarted.promise;
+    await Promise.resolve();
+    const secondSettledBeforeRelease = secondSettled;
 
     releaseFirstPreparation.resolve();
     const firstResult = await firstCommit;
-    const secondResult = await secondCommit;
+    const secondResult = await observedSecondCommit;
     publisher.patternManager.prepareArtifactPublication =
       prepareArtifactPublication;
     managerInternals.loadVerifiedArtifactClosure = loadVerifiedArtifactClosure;
@@ -1143,26 +1134,13 @@ describe("Factory@1 runner round trips", () => {
       secondTx,
     ).set(onward);
     const secondCommit = secondTx.commit();
-    await Promise.race([
-      loadStarted.promise,
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error("durable source probe did not start")),
-          1_000,
-        )
-      ),
-    ]);
-    expect(loadAttempts).toBe(1);
+    await loadStarted.promise;
+    const loadAttemptsBeforeRelease = loadAttempts;
 
     releaseRejectedPreparation.resolve();
-    const [firstResult, secondResult] = await Promise.race([
-      Promise.all([firstCommit, secondCommit]),
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error("dependent publications did not settle")),
-          1_000,
-        )
-      ),
+    const [firstResult, secondResult] = await Promise.all([
+      firstCommit,
+      secondCommit,
     ]);
     publisher.patternManager.prepareArtifactPublication =
       prepareArtifactPublication;
@@ -1174,6 +1152,7 @@ describe("Factory@1 runner round trips", () => {
     expect(secondResult.error?.message).toContain(
       "forced source publication rejection",
     );
+    expect(loadAttemptsBeforeRelease).toBe(1);
     expect(loadAttempts).toBe(1);
   });
 });

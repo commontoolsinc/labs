@@ -99,14 +99,14 @@ Waits split into two groups with different primitives.
   has finished its update cycle. This is the "is the control interactive yet"
   signal.
 - The higher-level wrappers in
-  `packages/patterns/integration/cfc-browser-helpers.ts` — `waitForText`,
-  `waitForTextAbsent`, `fillCfInput`, `clickCfButton`, `clickNthCfButton`,
-  `clickCfButtonAndWaitForText`, `waitForRuntimeIdle`, `waitForRuntimeSynced` —
-  bundle "settle the view, act once, wait for the effect" on top of the two
-  primitives above. `clickCfButton` takes the first match and reaches through a
-  host's shadow root for its inner `[data-cf-button]`; `clickNthCfButton` takes
-  the `index`-th match of a selector that already resolves to the buttons
-  themselves.
+  `packages/patterns/integration/cfc-browser-helpers.ts` compose the two
+  primitives above for common waits and interactions. `clickCfButton` and
+  `clickCfButtonsConcurrently` settle and mark the exact rendered targets before
+  clicking them. `clickCfButton` takes the first match and reaches through a
+  host's shadow root for its inner `[data-cf-button]`.
+  `clickNthCfButton` takes the `index`-th match of a selector that already
+  resolves to the buttons themselves. It does not yet have the same settlement
+  guarantee.
 
 To click a control that appears asynchronously, follow the `clickCfButton`
 shape rather than a find-and-click retry loop: a `waitForCondition` predicate
@@ -116,6 +116,27 @@ target to be rendered — laid out, and not `display:none` or `visibility:hidden
 — so a control still inside a collapsed menu is skipped until it becomes
 clickable rather than tagged while it has no layout box and then failing to
 click.
+
+Resolve the target before settling the view inside that predicate. Let the
+check pass only when the same rendered element remains after the settle. A
+target that appears or is replaced during the settle is checked again after
+the DOM mutation. The next check gives that exact element a complete settle
+before marking it for the click.
+
+Do not reach instead for a check that only watches the DOM. Asking the worker
+whether it is idle queues runnable pull work that nothing else would start, so a
+control that appears only once the page's own pending work runs never arrives
+under a purely passive wait. The settle is both the barrier and the pump, which
+is why it belongs inside the predicate rather than in front of it.
+
+When several controls are clicked as a group, prove that every target is stable
+before marking any of them. Mark the targets inside the successful predicate so
+the click addresses the elements that passed the settle check.
+
+`clickCfButton` and `clickCfButtonsConcurrently` work this way.
+`clickTrustedAction`, `submitViaEnter`, and `settleAndClickNoteButton` in
+`packages/patterns/integration/note-button-helpers.ts` still settle before
+resolving their target, and carry the gap described above.
 
 Ask `probe.isRendered` for that check rather than hand-rolling it, and note that
 it is deliberately not `probe.isVisible`, which additionally requires the
@@ -137,6 +158,19 @@ why it belongs in the predicate that tags the control. Whether the control is
 `disabled` is a separate question — a disabled control still takes the click and
 declines it. A test that needs a control enabled before clicking says so with
 `waitForDisabled(page, selector, false)`.
+
+Waiting for a click's effect carries the same requirement, for the same reason.
+Nothing in an integration test holds a UI subscription, so between one check and
+the next nothing drives the page. A rendering the page has to produce for
+itself — a tally recomputed from a vote, a card drawn for a list entry that
+has just arrived — can sit as runnable work no one schedules, one settle away
+from showing it. The wait then runs to the stuck-condition net, and the
+failure reads as "the state never arrived" when it had arrived and was never
+drawn. So `waitForText`, which only watches the DOM, is for text already there
+or that something else is already drawing. When the text is the effect of a
+stimulus, including one delivered to another browser sharing the same piece, use
+`waitForSettledText`, which settles the page on every check. The lunch-poll
+two-browser vote test uses it for all of its cross-browser waits.
 
 **Non-browser and off-page waits** have no page to observe. Resolve a `defer()`
 (from `packages/utils/src/defer.ts`) inside a callback the test already registers
@@ -371,26 +405,42 @@ logical time to zero and drops pending timers: one frozen clock wraps a whole
 `describe`, so a suite whose cases each read absolute coarsened time (the `#now`
 grid tests) calls it from `beforeEach` to start each case from a known instant.
 
-Two files stay on the real clock, listed with their reasons in the runner
-preload's `realClockFiles` list. A resume runtime drives a real loopback
-memory-client transport whose
-connect/mount/sync does not complete under the fake clock, so the resume
-deadlocks. And a nested-subagent generateObject aborts its delegate tool because
-the tool-calling path's own timeout auto-advances against the subagent's outbox
-progress rather than the wall clock, so the delegate reports "tool call timed
-out" before it completes. These are the honest exceptions: the clock they need
-is the real one, and their own sleeps are the honest way to wait.
+One file stays on the real clock, listed with its reason in the runner preload's
+`realClockFiles` list. It is a resume test whose reload holds each per-element
+child document back by a delay to open the resume window it observes; that delay
+is a frozen test-file timer, and the resuming runtime's pull/idle machinery
+blocks on the deliveries it gates, so the resume deadlocks. That is an honest
+exception: the clock it needs is the real one, and its own sleeps are the honest
+way to wait.
 
-One caveat governs whether a runner test can leave the exemption list, and it is
-worth stating because it is easy to trip over. The `test/` versus `src/`
-classification reads the caller's stack frame through `new Error().stack`, and
-SES's `errorTaming` blanks that stack once a runtime locks down. From the first
-`Runtime` a test builds, the harness can no longer see the `test/` frame that
-scheduled a timer, so a positive-delay `setTimeout` written in test code is
-classified as a production timer and auto-advances instead of freezing. A test
-that schedules its own wall-clock deadline — a `setTimeout(reject, ms)` guarding
-a wait — therefore has that deadline fire early under auto-advance rather than
-acting as a backstop. The fix is the same one the rest of this note prescribes:
+The list used to carry two more, for a reason worth recording because it shows
+what a production deadline costs a test suite. Both held tool-calling cases whose
+delegate runs a child agent against a result schema the model supplies in the
+tool input, so the child could not form its own request until that input had
+settled through the graph, and the round trip carried the delegate's completion
+across a macrotask boundary. The pump read that boundary as an idle event loop
+and jumped logical time to the earliest pending production timer, which was the
+deadline the tool-calling path armed around its wait, and the delegate aborted
+while its child was still in flight. Retiring that deadline retired the
+exemptions with it.
+
+The `test/` versus `src/` classification reads the scheduling frame from a stack
+trace, and that has to keep working after a runtime is running. SES's
+`errorTaming` blanks `new Error().stack` from the first `Runtime` a test builds
+onward — safe taming still captures each error's frames but hides them behind the
+tamed `stack` accessor, which reads back empty for the rest of the process. So
+the harness does not read the frame that way. It reads it through
+`getStackString`, the hook SES installs on the global during lockdown, which
+still returns the real frames after the plain accessor has gone empty; the
+runtime's own error mapping reads stacks through the same hook. A positive-delay
+`setTimeout` written in test code is therefore classified as a `test/` timer and
+freezes across the lockdown boundary, exactly as it does before any runtime
+exists.
+
+One consequence is worth stating because it is easy to trip over. A test that
+guards a wait with its own wall-clock deadline — a `setTimeout(reject, ms)` — has
+that deadline frozen along with every other test sleep, so it never fires and
+backstops nothing. The remedy is the one the rest of this note prescribes:
 resolve the wait on the event itself with no deadline, and let a signal that
 never arrives quiesce the loop so Deno fails the pending wait. That is what let
 the multi-space mergeable-commit test move onto the fake clock — its retry
@@ -398,6 +448,73 @@ backoff is a `src/` timer that auto-advances, and the fast-fail-versus-windowed
 distinction it checks is decided by the rejection's error type rather than by
 elapsed time, so collapsing the backoff timing preserves the outcome each case
 asserts.
+
+Another exemption was retired rather than justified. The
+`list-resume-container-defer` suite looked transport-bound — a resuming runtime
+over a loopback memory client that never settled under the fake clock — but the
+hang was the test's own design. Its transport withheld the result-container
+document from the resuming client's syncs while the server still held it, a
+state no client can reconcile: every commit carrying the client's read of that
+document as absent at seq 0 is rejected as stale, the catch-up the rejection
+waits on can never deliver the withheld document, and the retry loop runs
+forever. On the real clock the test passed anyway, because the server's
+effect-batching timer left short quiet windows in each retry cycle in which
+`runtime.idle()` resolved and the test read its locally recovered value; the
+fake clock's auto-advance closes those windows, so the wait for quiescence
+never returned. The fix modeled the scenario the suite claims — a container
+that was never persisted — by redirecting the container's operations out of the
+first runtime's commits, so the server genuinely never stores the document, the
+resume's seed write is accepted, and the system settles on both clocks. The
+suite's sequence tests do still withhold the server's answers about that one
+document — but bounded, and released within the test: the hold proves the
+recovery waits for the absence confirmation before writing, and it ends before
+any retry can accumulate against the withheld answer.
+
+## The background-piece-service suite: the same clock for a polling loop
+
+`packages/background-piece-service` loads the same shared harness — its
+`packages/background-piece-service/test/clock-preload.ts` calls
+`installFakeClock` in the `auto-advance` mode, wired through `--preload` on the
+package test task, with the controls exposed as a global `clock` typed in
+`test/clock.d.ts` — and follows the same rule for test sleeps. It needs the
+clock for the same reason the runner does: the service's own machinery is
+time-coupled, so freezing every positive-delay timer would deadlock a plain test
+on the service's own loop rather than on any sleep the test wrote.
+
+Three pieces of the service arm positive-delay timers. `SpaceManager.execLoop`
+parks on `sleep(pollingIntervalMs)` between polls of its task queue.
+`SpaceManager.stop` races a `setInterval` that watches for the active job to
+finish against a `sleep(deactivationTimeoutMs)` deadline. And
+`WorkerController.exec` arms a `setTimeout(timeoutMs)` that rejects a worker
+request the worker never answers. Each of these is scheduled from `src/`, so the
+clock reads it as a production timer. The poll and the deactivation deadline
+reach `setTimeout` indirectly, through the `sleep` helper in
+`@commonfabric/utils`; that does not change the classification, because the
+clock reads the immediate caller's frame, and `sleep`'s own frame is a `src/`
+frame too. They therefore auto-advance: the poll interval elapses instantly,
+and an unanswered worker request's timeout fires on its own.
+The auto-advance mechanism is the runner's, described just above.
+
+Each wait these tests need goes through the clock. A test that exercises one
+branch of the exec loop and then stops it starts the loop, calls
+`clock.settle()` to let it reach its parked `sleep`, clears `isRunning`, and
+calls `clock.tick(1)` to fire that parked sleep so the loop sees the flag and
+exits. A test that waits for a worker's initialize request to time out calls
+`clock.tick(1)` to fire the `timeoutMs` timer. A test that needs only the next
+reactive turn — a sink firing, a shutdown callback running — waits on
+`clock.settle()`.
+
+One file stays on the real clock, listed in the preload's `realClockFiles`:
+`otel.test.ts`. It exercises the real OpenTelemetry SDK against a real loopback
+OTLP receiver. The provider's `forceFlush` and `shutdown` guard each flush with
+their own `setTimeout`, armed inside the vendored SDK rather than from `src/`;
+under auto-advance that guard fires against the real HTTP round trip before it
+completes, and the flush reports that the span processor did not finish within
+its timeout. The SDK's periodic metric reader arms a repeating interval that is
+a production timer too. These tests carry no sleeps or deadlines to convert, so
+the fake clock would buy them no determinism; they keep real time, already opt
+out of the op sanitizer for those timers, and tear them down through
+`shutdownOpenTelemetry`.
 
 ## The runtime-client suite stays on the real clock
 
@@ -616,6 +733,26 @@ replica had never loaded, it settles those loads and re-reads as each arrival
 reveals the next hop, for a bounded number of rounds. A sink reports committed
 changes; it does not drive that traversal. Polling the pull until it converges is
 the honest wait.
+
+Reaching a lazily scheduled node, on the other hand, is not a reason to keep a
+pull, and that is where this section is easiest to over-read. The scheduler
+runs a computation only while it is reachable from a live root — an effect, a
+materializer, or a node marked as provisionally demanded — so a node whose
+output nothing observes stays dormant however long a test waits. `pull()`
+supplies such a root: it subscribes an action that reads the cell, marked as an
+effect, and cancels it once the scheduler goes idle. `cell.sink()` subscribes
+the same kind of root and holds it until the caller cancels, so a wait built on
+`waitForCellValue` keeps the node awake for the whole wait rather than for one
+scheduler cycle. Where demand is the only thing the pull supplied, the sink
+supplies it too and the loop around the pull was doing nothing.
+
+`packages/runner/test/cfc-inspect-conf-label-builtin.test.ts` is the worked
+example. Its waits were a bounded `pull()` poll, on the grounds that the pull
+drives the `inspectConfLabel` builtin's node; they are now single
+`waitForCellValue` calls with no loop and no bound. That the demand is what
+matters, and not the pull, is checkable: replace the wait with
+`runtime.settled()` followed by a storage sync and a plain read, and every case
+reads the result cell as undefined, because nothing ever asked for its value.
 
 ### Race, backpressure, and convergence tests
 
@@ -1008,8 +1145,8 @@ another as fast as the event loop allows, a busy loop hammering the host. The
 growing backoff — 25 milliseconds doubling to a 30-second cap, with up to 20
 percent jitter — is the honest way to keep checking whether the server is back
 without flooding it. It is the same shape as the committed-write backoff in
-`committed-write-backpressure.md`, where a capped exponential backoff also stands
-in for a retry that has no event to wait on.
+[committed-write backpressure](committed-write-backpressure.md), where a capped
+exponential backoff also stands in for a retry that has no event to wait on.
 
 Cancelling an in-progress backoff stays event-driven: the pause between attempts
 is a single timer that `close()` cancels directly, so a client closed mid-backoff

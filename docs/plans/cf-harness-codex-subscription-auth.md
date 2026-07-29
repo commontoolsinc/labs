@@ -400,8 +400,13 @@ Expected files:
 
 - [x] Parse chunks incrementally across arbitrary byte boundaries.
 - [x] Normalize assistant text, function calls, response id, encrypted
-  reasoning, usage, and terminal status from the provider's terminal response
-  without exposing raw SSE events to the prompt loop.
+  reasoning, usage, and terminal status from the provider's terminal response,
+  falling back to the completed `response.output_item.done` items streamed
+  earlier when the terminal event carries no assembled output — an empty array
+  or `null`, as the ChatGPT Codex backend returns under `store: false`. A
+  populated terminal output always wins (no double-counting); `failed` and
+  `incomplete` statuses still fail. Raw SSE events are not exposed to the
+  prompt loop.
 - [x] Reject malformed JSON, conflicting duplicate call ids, incomplete
   arguments, and a stream that ends without a terminal response event.
 - [x] Abort the fetch and reader immediately when the run signal aborts.

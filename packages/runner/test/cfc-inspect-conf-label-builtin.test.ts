@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
@@ -66,21 +67,23 @@ const seedLabeledDoc = async (
   return id;
 };
 
-const waitForStatus = async (result: Cell<any>): Promise<unknown> => {
-  // `pull()` — a standing observation — drives the pull-based scheduler;
-  // a bare storage sync would leave the builtin's node dormant.
-  const timeoutMs = 5000;
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const value = await result.pull() as { status?: string } | undefined;
-    if (value?.status !== undefined) {
-      // Plain-JSON snapshot so exact toEqual comparisons see bytes, not a
-      // live query proxy.
-      return JSON.parse(JSON.stringify(value));
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error("Timeout waiting for inspectConfLabel result status");
+const waitForStatus = async (
+  runtime: Runtime,
+  result: Cell<any>,
+): Promise<unknown> => {
+  // The builtin's node runs only while something demands its output, so the
+  // wait has to hold a standing observation of the result cell rather than
+  // sample it. `waitForCellValue` sinks on the cell, and a sink subscribes as
+  // a scheduler effect that reads the value — the liveness root that keeps the
+  // node awake — for as long as the wait is outstanding.
+  const value = await waitForCellValue<{ status?: string }>(
+    runtime,
+    result,
+    (value) => value?.status !== undefined,
+  );
+  // Plain-JSON snapshot so exact toEqual comparisons see bytes, not a
+  // live query proxy.
+  return JSON.parse(JSON.stringify(value));
 };
 
 const storedConfidentialityOf = (
@@ -153,7 +156,10 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       runtime.prepareTxForCommit(tx);
       tx.commit();
 
-      const value = await waitForStatus(result) as InspectConfLabelResult;
+      const value = await waitForStatus(
+        runtime,
+        result,
+      ) as InspectConfLabelResult;
       await runtime.idle();
 
       expect(value.status).toBe("ok");
@@ -233,7 +239,10 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       runtime.prepareTxForCommit(tx);
       tx.commit();
 
-      const value = await waitForStatus(result) as InspectConfLabelResult;
+      const value = await waitForStatus(
+        runtime,
+        result,
+      ) as InspectConfLabelResult;
       await runtime.idle();
       expect(value.status).toBe("ok");
 
@@ -274,7 +283,7 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       runtime.prepareTxForCommit(tx);
       tx.commit();
 
-      const value = await waitForStatus(result);
+      const value = await waitForStatus(runtime, result);
       await runtime.idle();
       expect(value).toEqual({ status: "notAvailable" });
     });
@@ -308,7 +317,7 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       runtime.prepareTxForCommit(tx);
       tx.commit();
 
-      const value = await waitForStatus(result);
+      const value = await waitForStatus(runtime, result);
       await runtime.idle();
       expect(value).toEqual({ status: "notAvailable" });
     });
@@ -329,7 +338,7 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       runtime.prepareTxForCommit(tx);
       tx.commit();
 
-      const value = await waitForStatus(result);
+      const value = await waitForStatus(runtime, result);
       await runtime.idle();
       expect(value).toEqual({ status: "notAvailable" });
     });
@@ -354,7 +363,7 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       runtime.prepareTxForCommit(tx);
       tx.commit();
 
-      const value = await waitForStatus(result);
+      const value = await waitForStatus(runtime, result);
       await runtime.idle();
       expect(value).toEqual({ status: "notAvailable" });
     });
@@ -385,7 +394,7 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       runtime.prepareTxForCommit(tx);
       tx.commit();
 
-      const value = await waitForStatus(result);
+      const value = await waitForStatus(runtime, result);
       await runtime.idle();
       // The match exists, but the result cannot carry its label (flow labels
       // are not persisting): the fail-closed arm returns the SAME
@@ -425,7 +434,7 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       runtime.prepareTxForCommit(tx);
       tx.commit();
 
-      const value = await waitForStatus(result);
+      const value = await waitForStatus(runtime, result);
       await runtime.idle();
       // Establishing this miss consulted only public type observations, so
       // it flows under any dial.

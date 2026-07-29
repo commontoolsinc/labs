@@ -31,6 +31,8 @@ import {
   type DocumentPath,
   type EnsureOperation,
   type EntityDocument,
+  type EntityIdListOptions,
+  type EntityIdListResult,
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   type PatchOp,
@@ -336,15 +338,27 @@ type PendingCommitRead = {
   /**
    * Every pending layer the read's materialized view sat on, as an array —
    * each must resolve to an accepted commit (server pending-dependency
-   * check; client cascade), and staleness is based at the HIGHEST element,
-   * the doc's top-of-stack layer below the reader, which the array always
-   * includes (CT-1872 1c; 03-commit-model.md §3.5). Scalarized to the
-   * top-of-stack element at send time when the server does not advertise
-   * `pendingReadStacks` — the pre-stack wire shape — and in that case the
-   * send is HELD until every omitted lower dependency settles, so the old
-   * server can never durably accept a commit the client cascade-rejects.
+   * check; client cascade), and the array always includes the doc's
+   * top-of-stack layer below the reader (CT-1872 1c; 03-commit-model.md
+   * §3.5), whose resolution is the LEGACY staleness basis on servers that
+   * ignore `basisSeq`. Scalarized to the top-of-stack element at send time
+   * when the server does not advertise `pendingReadStacks` — the pre-stack
+   * wire shape — and in that case the send is HELD until every omitted
+   * lower dependency settles, so the old server can never durably accept a
+   * commit the client cascade-rejects.
    */
   localSeq: number | number[];
+  /**
+   * The reader's confirmed basis for THIS document, in the SERVER's seq
+   * space — the same value the confirmed branch emits as `seq`, which the
+   * pre-CT-1910 pending shape discarded. A server that understands it scans
+   * staleness over the FULL interval (basisSeq, head], excluding only the
+   * session's own predecessor commits (localSeq below the reader's),
+   * repairing the pending-read basis over-advance; older servers ignore the
+   * field and keep the max-dependency basis. See
+   * {@link PendingRead.basisSeq} (memory/v2.ts).
+   */
+  basisSeq: number;
   nonRecursive?: boolean;
 };
 
@@ -676,13 +690,18 @@ const compactCommitReads = <
     nonRecursiveByPath: Map<string, Read>;
   }>();
   for (const candidate of sorted) {
+    // The dependency key carries every admission-relevant field — seq for
+    // confirmed reads, the layer set AND basisSeq for pending reads — so
+    // reads with divergent bases never merge: ancestor-path compaction
+    // within a group may drop a descendant read, and a surviving ancestor
+    // must not claim a higher basis than the dropped read declared.
     const dependencyKey = "seq" in candidate
       ? `confirmed:${
         normalizeCellScope(candidate.scope)
       }:${candidate.id}:${candidate.seq}`
       : `pending:${normalizeCellScope(candidate.scope)}:${candidate.id}:${
         localSeqKey(candidate.localSeq)
-      }`;
+      }:${candidate.basisSeq}`;
     let group = grouped.get(dependencyKey);
     if (!group) {
       group = {
@@ -1671,6 +1690,24 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.authorizationError();
   }
 
+  ensureSession(): Promise<void> {
+    return this.replica.ensureSession();
+  }
+
+  listEntityIds(): Promise<string[] | undefined> {
+    return this.replica.listEntityIds();
+  }
+
+  listEntityIdPage(
+    options: EntityIdListOptions = {},
+  ): Promise<EntityIdListResult | undefined> {
+    return this.replica.listEntityIdPage(options);
+  }
+
+  entityIdExists(id: string): Promise<boolean | undefined> {
+    return this.replica.entityIdExists(id);
+  }
+
   listSchedulerActionSnapshots(
     query: SchedulerActionSnapshotQuery = {},
   ): Promise<SchedulerSnapshotListResult> {
@@ -2075,6 +2112,10 @@ class SpaceReplica implements ISpaceReplica {
     this.#lastAuthorizationError = null;
   }
 
+  async ensureSession(): Promise<void> {
+    await this.sessionHandle();
+  }
+
   async sqliteQuery(
     db: SqliteDbRef,
     sql: string,
@@ -2082,6 +2123,52 @@ class SpaceReplica implements ISpaceReplica {
   ): Promise<SqliteQueryResult> {
     const { session } = await this.sessionHandle();
     return await session.sqliteQuery(db, sql, params);
+  }
+
+  async listEntityIds(): Promise<string[] | undefined> {
+    const { client, session } = await this.sessionHandle();
+    if (client.serverFlags?.entityIdListing !== true) {
+      return undefined;
+    }
+    if (client.serverFlags.entityIdPagination !== true) {
+      return (await session.listEntityIds())?.ids;
+    }
+
+    const ids: string[] = [];
+    let after: string | undefined;
+    let expectedServerSeq: number | undefined;
+    for (;;) {
+      const page = await session.listEntityIds({
+        ...(after === undefined ? {} : { after }),
+        ...(expectedServerSeq === undefined ? {} : { expectedServerSeq }),
+      });
+      if (page === undefined) return undefined;
+      expectedServerSeq ??= page.serverSeq;
+      ids.push(...page.ids);
+      if (page.nextAfter === undefined) return ids;
+      after = page.nextAfter;
+    }
+  }
+
+  async listEntityIdPage(
+    options: EntityIdListOptions = {},
+  ): Promise<EntityIdListResult | undefined> {
+    const { client, session } = await this.sessionHandle();
+    if (
+      client.serverFlags?.entityIdListing !== true ||
+      client.serverFlags.entityIdPagination !== true
+    ) {
+      return undefined;
+    }
+    return await session.listEntityIds(options);
+  }
+
+  async entityIdExists(id: string): Promise<boolean | undefined> {
+    const { client, session } = await this.sessionHandle();
+    if (client.serverFlags?.entityIdLookup !== true) {
+      return undefined;
+    }
+    return (await session.entityIdExists(id))?.exists;
   }
 
   /**
@@ -3670,8 +3757,10 @@ class SpaceReplica implements ISpaceReplica {
       // just the nearest one: name them ALL (ascending; the last element is
       // the doc's top-of-stack below this commit) so a dropped deeper layer
       // still dooms this commit (server: pending-dependency resolution;
-      // client: cascade). Staleness is based at the highest element only —
-      // a staleness basis on a lower layer would false-conflict with the
+      // client: cascade). Servers that honor `basisSeq` scan staleness from
+      // it with predecessor-only own-session exclusion (CT-1910); legacy
+      // servers base staleness at the highest element only — a lower-layer
+      // basis WITHOUT that exclusion would false-conflict with the
       // session's own later stacked writes (CT-1872 1c).
       const layers = [
         ...new Set(
@@ -3687,6 +3776,9 @@ class SpaceReplica implements ISpaceReplica {
           scope,
           path,
           localSeq: layers.length === 1 ? layers[0] : layers,
+          // The true confirmed basis this doc's view sat on — the same value
+          // the confirmed branch below emits (CT-1910).
+          basisSeq: confirmedSeq ?? record?.confirmed.seq ?? 0,
           ...shape,
         });
       } else {

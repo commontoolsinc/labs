@@ -277,7 +277,7 @@ Deno.test("OpenAICompatibleGatewayClient surfaces exhausted chat completion tran
         messages: [],
       }),
     Error,
-    "chat completion transport request failed after 2 attempts",
+    "chat.completions transport request failed after 2 attempts",
   );
   assertEquals(calls, 2);
 });

@@ -16,9 +16,8 @@ import { prodErrors } from "./tiles/prod-errors.ts";
 import {
   GITHUB_LAG_DAYS,
   githubCiSpend,
-  projectMonthly,
-  settled,
 } from "./tiles/github-ci-spend.ts";
+import { projectMonthly, settled } from "./spend.ts";
 import { modelSpend } from "./tiles/model-spend.ts";
 import {
   benchmark,

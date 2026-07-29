@@ -13,6 +13,7 @@
     "./common-fabric-symbols": "./src/typescript/common-fabric-symbols.ts"
   },
   "imports": {
+    // Dependency guide: ../../docs/development/DEPENDENCIES.md
     "typescript": "npm:typescript@6.0.3"
   },
   "tasks": {

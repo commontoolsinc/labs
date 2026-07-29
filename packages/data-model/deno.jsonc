@@ -4,6 +4,7 @@
     "noUncheckedIndexedAccess": true
   },
   "imports": {
+    // Dependency guide: ../../docs/development/DEPENDENCIES.md
     "@/": "./src/"
   },
   "tasks": {

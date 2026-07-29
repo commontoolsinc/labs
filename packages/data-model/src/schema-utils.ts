@@ -5,8 +5,8 @@
 import type {
   JSONSchema,
   JSONSchemaObj,
-  JSONSchemaObjMutable,
   JSONSchemaTypes,
+  MutableJSONSchemaObj,
   SchemaPathSelector,
 } from "@commonfabric/api";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
@@ -601,13 +601,13 @@ export function toDeepFrozenSchema<T extends JSONSchema | undefined>(
 export function cloneSchemaMutable(
   schema: JSONSchema | undefined,
   deep: boolean = false,
-): JSONSchemaObjMutable {
+): MutableJSONSchemaObj {
   if (schema === undefined) return {};
   if (typeof schema === "boolean") return schema ? {} : { not: true };
   return cloneIfNecessary(schema, {
     frozen: false,
     deep,
-  }) as JSONSchemaObjMutable;
+  }) as MutableJSONSchemaObj;
 }
 
 /**

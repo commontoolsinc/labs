@@ -100,6 +100,13 @@ export interface ProbeApi {
   isVisible(element: Element): boolean;
   /** Visible text of `root` plus its shadow and slotted descendants. */
   deepText(root: ParentNode): string;
+  /**
+   * Add `token` to the whitespace-separated token list held in `element`'s
+   * `attribute`, keeping the tokens already there. This is how a predicate
+   * tags an element it has resolved without disturbing a tag another wait
+   * placed on the same element. Adding a token twice leaves one copy.
+   */
+  addToken(element: Element, attribute: string, token: string): void;
 }
 
 /**
@@ -199,6 +206,13 @@ function installWaiter(
       };
       visit(root);
       return parts.join(" ");
+    },
+    addToken(element, attribute, token) {
+      const tokens = new Set(
+        (element.getAttribute(attribute) ?? "").split(/\s+/).filter(Boolean),
+      );
+      tokens.add(token);
+      element.setAttribute(attribute, [...tokens].join(" "));
     },
   };
 

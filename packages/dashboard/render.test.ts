@@ -7,11 +7,12 @@ import {
   formatViewerTimes,
   renderTile,
   shell,
-  SHELL_VERSION,
 } from "./render.ts";
 import { humanSpan } from "./lib.ts";
 import { REPO } from "./config.ts";
 import { FAVICON_VERSION } from "./favicon.ts";
+
+const TEST_VERSION = "1".repeat(40);
 
 function view(over: Partial<TileView> = {}): TileView {
   return { label: "labs ci", status: "good", ...over };
@@ -170,7 +171,7 @@ Deno.test("shell: the grid and the wide tiles land in their own slots", () => {
     `<div class="tile bad wide">w</div>`,
     3,
     30_000,
-    SHELL_VERSION,
+    TEST_VERSION,
     "bad",
   );
   assertStringIncludes(
@@ -193,10 +194,13 @@ Deno.test("shell: the grid and the wide tiles land in their own slots", () => {
 });
 
 Deno.test("shell: the freshness age and the refresh interval reach both the text and the script", () => {
-  const html = shell("", "", 7, 45_000, SHELL_VERSION, "good");
+  const html = shell("", "", 7, 45_000, TEST_VERSION, "good");
   assertStringIncludes(html, `<span id="agotext">updated 7s ago</span>`);
   assertStringIncludes(html, "const REFRESH = 45000;");
-  assertStringIncludes(html, `const SHELL_VERSION = ${SHELL_VERSION};`);
+  assertStringIncludes(
+    html,
+    `const SHELL_VERSION = ${JSON.stringify(TEST_VERSION)};`,
+  );
   assertStringIncludes(html, "let base = 7;");
   assertStringIncludes(html, `new EventSource('/events')`);
   assertStringIncludes(
@@ -220,6 +224,40 @@ Deno.test("shell: the freshness age and the refresh interval reach both the text
   assertStringIncludes(html, `link.dataset.focusKey === focusedKey`);
 });
 
+Deno.test("shell: live data and runtime settings keep the Git commit version", () => {
+  const first = shell(
+    `<div class="tile good">first</div>`,
+    "",
+    0,
+    30_000,
+    TEST_VERSION,
+    "good",
+  );
+  const second = shell(
+    `<div class="tile bad">second</div>`,
+    `<div class="tile warn wide">third</div>`,
+    999,
+    30_000,
+    TEST_VERSION,
+    "bad",
+    123,
+    456,
+  );
+  const differentRefresh = shell(
+    "",
+    "",
+    0,
+    60_000,
+    TEST_VERSION,
+    "good",
+  );
+  const embedded = (html: string): string =>
+    html.match(/const SHELL_VERSION = "([^"]+)";/)?.[1] ?? "";
+  assertEquals(embedded(first), TEST_VERSION);
+  assertEquals(embedded(second), TEST_VERSION);
+  assertEquals(embedded(differentRefresh), TEST_VERSION);
+});
+
 Deno.test("formatViewerTimes: the viewer's formatter replaces the UTC fallback", () => {
   const time = { dateTime: "2024-01-02T17:05:00Z", textContent: "17:05 UTC" };
   const viewerTime = new Intl.DateTimeFormat("en-GB", {
@@ -233,7 +271,7 @@ Deno.test("formatViewerTimes: the viewer's formatter replaces the UTC fallback",
 });
 
 Deno.test("shell: the browser runs the viewer-time formatter", () => {
-  const html = shell("", "", 0, 30_000, SHELL_VERSION, "good");
+  const html = shell("", "", 0, 30_000, TEST_VERSION, "good");
   const source = formatViewerTimes.toString();
   assertStringIncludes(source, `time[data-viewer-time][datetime]`);
   assert(
@@ -256,7 +294,7 @@ Deno.test("shell: the browser runs the viewer-time formatter", () => {
 });
 
 Deno.test("shell: server-measured red age changes the favicon after one hour", () => {
-  const html = shell("", "", 0, 1000, SHELL_VERSION, "good");
+  const html = shell("", "", 0, 1000, TEST_VERSION, "good");
   assertStringIncludes(
     html,
     `const FAVICON_CRY_AFTER_MS = ${FAVICON_CRY_AFTER_MS}`,
@@ -268,7 +306,7 @@ Deno.test("shell: server-measured red age changes the favicon after one hour", (
     "",
     0,
     1000,
-    SHELL_VERSION,
+    TEST_VERSION,
     "bad",
     1_234,
     567,
@@ -319,7 +357,7 @@ Deno.test("shell: server-measured red age changes the favicon after one hour", (
 
 Deno.test("shell: the repo name in the header is escaped", () => {
   assertStringIncludes(
-    shell("", "", 0, 1000, SHELL_VERSION, "good"),
+    shell("", "", 0, 1000, TEST_VERSION, "good"),
     `<span>${REPO.replace(/&/g, "&amp;")}</span>`,
   );
 });

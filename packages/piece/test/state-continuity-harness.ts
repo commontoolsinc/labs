@@ -1,0 +1,445 @@
+/**
+ * Tier 2 of the pattern-update regime: prove a new pattern can still READ the
+ * state an older version of itself wrote.
+ *
+ * Tier 1 (`deno task pattern-compat`) proves the argument/result contract is
+ * backward compatible. That is a statement about schemas, and schemas do not
+ * describe everything a pattern writes: move where a field is STORED
+ * (`.for('items')` → `.for('itemList')`) and the declared contract does not
+ * change by a single byte, while every document written under the old name
+ * becomes unreachable. No contract comparison can see that, and nothing
+ * throws — only replaying a real prior state catches it.
+ *
+ * The other class this replays, the CFC additive-required migration refusing a
+ * setup commit for a required field with no default (the 2026-07-22 estuary
+ * brick), is already covered twice over — by Tier 1's schema check and by
+ * `packages/runner/test/cfc-additive-default-preserves-old-doc.test.ts`, which
+ * drives the same rejection over a legacy root. It is replayed here for the
+ * PIPELINE rather than the guard: proving capture → snapshot → reopen →
+ * materialize end to end needs a class whose correct outcome is already known
+ * independently, or a green run would only be evidence about itself.
+ *
+ * The state is captured as a **SQLite space store**, not a bespoke JSON dump.
+ * A space is one SQLite file, `snapshotSpaceStore` already writes a
+ * crash-consistent copy of one, and restoring is a file copy — where a JSON
+ * dump would need a re-writer that reconstructs docs, causes and links, and
+ * getting causes wrong silently produces a fixture that is not the state that
+ * was captured.
+ *
+ * Capture is deliberately file-backed: `StorageManager.emulate` runs a real
+ * memory server against `:memory:`, which has no file to snapshot.
+ */
+
+import { fromFileUrl } from "@std/path/from-file-url";
+import { Identity } from "@commonfabric/identity";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import {
+  snapshotSpaceStore,
+  spaceStorePath,
+} from "@commonfabric/memory/v2/dump";
+import { resolveSpaceStoreUrl } from "@commonfabric/memory/v2/storage-path";
+import type { Signer } from "@commonfabric/memory/interface";
+import {
+  type Options,
+  type SessionFactory,
+  StorageManager,
+} from "../../runner/src/storage/v2.ts";
+import { type Cell, Runtime } from "@commonfabric/runner";
+import type { RuntimeProgram } from "@commonfabric/runner";
+// Relative into the runner's internals for the same reason as the test
+// utilities below: `getMetaLink` and the link shape it returns are how the
+// runtime itself reaches a root's argument document, and re-deriving that
+// here would be a second spelling to drift.
+import { getMetaLink } from "../../runner/src/link-utils.ts";
+import type { NormalizedFullLink } from "../../runner/src/link-types.ts";
+// Relative into the runner's test utilities: they are not part of the runner's
+// public exports, and the loopback-server auth handshake has exactly one
+// correct spelling — duplicating it here would be a second copy to drift.
+import {
+  TEST_MEMORY_SERVER_AUTH,
+  testPrincipalSessionOpenAuthFactory,
+} from "../../runner/test/memory-v2-test-utils.ts";
+
+class LoopbackSessions implements SessionFactory {
+  constructor(private readonly server: () => MemoryV2Server.Server) {}
+  async create(spaceId: string, signer?: Signer) {
+    const client = await MemoryV2Client.connect({
+      transport: MemoryV2Client.loopback(this.server()),
+    });
+    const session = await client.mount(
+      spaceId,
+      {},
+      testPrincipalSessionOpenAuthFactory(signer),
+    );
+    return { client, session };
+  }
+}
+
+class FileBackedStorageManager extends StorageManager {
+  static make(as: Identity, server: MemoryV2Server.Server) {
+    return new FileBackedStorageManager(
+      { as, memoryHost: new URL("memory://") } as Options,
+      server,
+    );
+  }
+  private constructor(options: Options, server: MemoryV2Server.Server) {
+    super(options, new LoopbackSessions(() => server));
+  }
+  override registerSpaceHost(): boolean {
+    return false;
+  }
+}
+
+function serverOver(storeDir: string): MemoryV2Server.Server {
+  return new MemoryV2Server.Server({
+    authorizeSessionOpen(message) {
+      const principal = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof principal === "string" ? principal : undefined;
+    },
+    sessionOpenAuth: TEST_MEMORY_SERVER_AUTH.sessionOpenAuth,
+    store: new URL(`file://${storeDir}/`),
+  });
+}
+
+export interface VintageRuntime {
+  runtime: Runtime;
+  space: string;
+  storeDir: string;
+  /** Snapshot this space to `destPath`. Crash-consistent, runs no migrations. */
+  snapshot(destPath: string): Promise<void>;
+  dispose(): Promise<void>;
+}
+
+/**
+ * A runtime whose space lives in a real file, so it can be snapshotted.
+ *
+ * `storeDir` is the caller's to clean up. Pass an existing `fromSnapshot` to
+ * start from a captured vintage instead of an empty space.
+ */
+export async function openFileBackedRuntime(
+  signer: Identity,
+  storeDir: string,
+  fromSnapshot?: string,
+): Promise<VintageRuntime> {
+  const space = signer.did();
+  const storeUrl = new URL(`file://${storeDir}/`);
+
+  if (fromSnapshot !== undefined) {
+    // Place the snapshot where the engine resolves this space's store. The
+    // path encodes the DID, and restoring under the SAME DID is deliberate:
+    // re-keying is an unbounded migration that would destroy the fidelity the
+    // fixture exists to buy (CFC labels name the space, among other things).
+    await seedSpaceStore(storeDir, space, fromSnapshot);
+  }
+
+  const server = serverOver(storeDir);
+  const storageManager = FileBackedStorageManager.make(signer, server);
+  const runtime = new Runtime({
+    apiUrl: new URL("http://toolshed.test"),
+    storageManager,
+  });
+
+  return {
+    runtime,
+    space,
+    storeDir,
+    async snapshot(destPath: string) {
+      // Everything must be durable before the copy, or the fixture records a
+      // state the capture never actually reached.
+      await runtime.idle();
+      await runtime.storageManager.synced();
+      const path = spaceStorePath(storeUrl, space);
+      if (path === null) {
+        throw new Error(
+          `no space store for ${space} under ${storeDir} — nothing was written`,
+        );
+      }
+      snapshotSpaceStore(path, destPath);
+    },
+    async dispose() {
+      await runtime.dispose();
+      await storageManager.close();
+      // The server owns what the file actually is: a SQLite engine per space,
+      // a read pool, and a scheduled refresh timer. `storageManager.close()`
+      // only tears down the client side, so without this every case leaks its
+      // engines and its timer past the case that opened them — and the temp
+      // dir is removed out from under still-open handles.
+      await server.close();
+    },
+  };
+}
+
+/**
+ * Copy a snapshot into the place the engine looks for `space`'s store.
+ *
+ * The layout is resolved with `resolveSpaceStoreUrl`, the same helper the
+ * server resolves through — directory mode nests one level deeper than
+ * single-file mode, and rebuilding that rule here would rot silently. Note it
+ * COMPUTES a path rather than stat-ing one, which is what this needs: the
+ * destination does not exist yet.
+ */
+async function seedSpaceStore(
+  storeDir: string,
+  space: string,
+  snapshotPath: string,
+): Promise<void> {
+  const target = fromFileUrl(
+    resolveSpaceStoreUrl(new URL(`file://${storeDir}/`), space as never),
+  );
+  await Deno.mkdir(target.slice(0, target.lastIndexOf("/")), {
+    recursive: true,
+  });
+  await Deno.copyFile(snapshotPath, target);
+}
+
+/** The root key a fixture uses when it holds exactly one pattern. */
+export const DEFAULT_VINTAGE_ROOT_KEY = "vintage-root";
+
+/**
+ * A stable root cell for a captured space.
+ *
+ * The cause is fixed rather than minted, because `PieceManager.setupPersistent`
+ * otherwise defaults to `{ space, random: crypto.randomUUID() }` and the root's
+ * entity id would differ on every capture — the fixture could then never be
+ * re-read by id. (Root creation through `ensureDefaultPattern` bakes
+ * `Date.now()` into its cause for the same reason, so a root fixture has to go
+ * around that path.)
+ *
+ * `key` is what keeps that determinism from becoming ALIASING. `getCell`
+ * derives the entity id as `createRef({}, cause)` (`runtime.ts`), and that
+ * derivation does not include the space — so a single fixed cause would give
+ * every root in every fixture the same entity id. Within one space store that
+ * is a silent collision: materializing a second pattern would stamp its
+ * identity over the first pattern's root, no error, and the fixture would
+ * replay something nobody captured. One key per pattern keeps roots distinct
+ * while each stays addressable across captures.
+ */
+export function vintageRoot<T>(
+  vintage: VintageRuntime,
+  schema: unknown,
+  key: string = DEFAULT_VINTAGE_ROOT_KEY,
+): Cell<T> {
+  return vintage.runtime.getCell<T>(
+    vintage.space as never,
+    { stateContinuity: key },
+    schema as never,
+  );
+}
+
+/**
+ * The link to a root's durable ARGUMENT document.
+ *
+ * State a pattern RETURNS lives in the cells it owns (`.for('items')`); state
+ * it RECEIVES lives in a separate document the root points at through its
+ * `argument` meta link. The two travel different code paths on an update — the
+ * result doc goes through the CFC schema merge, the argument through the
+ * runner's setup validation — so a tier that only ever populates results
+ * measures half the surface.
+ *
+ * Returned as a link rather than a `Cell` because callers need to build the
+ * cell against their own transaction, and because the schema to read it under
+ * is the question (a value stored under the OLD argument schema is exactly
+ * what a NEW one may no longer accept).
+ */
+export async function vintageArgumentLink(
+  vintage: VintageRuntime,
+  resultSchema: unknown,
+  rootKey: string = DEFAULT_VINTAGE_ROOT_KEY,
+): Promise<NormalizedFullLink> {
+  const root = vintageRoot<Record<string, unknown>>(
+    vintage,
+    resultSchema,
+    rootKey,
+  );
+  await root.sync();
+  const link = getMetaLink(root as never, "argument");
+  if (link === undefined) {
+    throw new Error(
+      "vintage root has no argument meta link — it was never set up, so " +
+        "there is no durable argument to capture or replay",
+    );
+  }
+  return link;
+}
+
+/**
+ * The pattern identity a captured vintage's root is already stamped with.
+ *
+ * This is a CONTROL, and the replay gate is unsound without one. A fixture
+ * that did not restore — truncated, empty, or seeded where the engine does not
+ * look — presents to the runtime as a fresh empty space, and materializing
+ * today's source onto a fresh empty space succeeds. The replay would then read
+ * green having proved nothing at all, which is the same trap the storage-move
+ * case hits in `state-continuity.test.ts`: emptiness is indistinguishable from
+ * a fixture that was never there.
+ *
+ * `undefined` means no root was captured. A value that disagrees with the
+ * fixture's filename means the name is not provenance but decoration.
+ */
+export async function vintageStoredIdentity(
+  vintage: VintageRuntime,
+  rootKey: string = DEFAULT_VINTAGE_ROOT_KEY,
+): Promise<string | undefined> {
+  const root = vintageRoot<Record<string, unknown>>(
+    vintage,
+    undefined,
+    rootKey,
+  );
+  await root.sync();
+  let stamp: unknown;
+  try {
+    stamp = root.getMetaRaw("patternIdentity");
+  } catch {
+    // An absent doc reads as a throw rather than `undefined`, and for this
+    // question the two are the same answer: nothing was captured here.
+    return undefined;
+  }
+  const identity = (stamp as { identity?: unknown } | undefined)?.identity;
+  return typeof identity === "string" ? identity : undefined;
+}
+
+/** Read a vintage's stored argument under `schema` (`undefined` = raw). */
+export async function readVintageArgument(
+  vintage: VintageRuntime,
+  link: NormalizedFullLink,
+  schema: unknown,
+): Promise<unknown> {
+  const cell = vintage.runtime.getCellFromLink(link).asSchema(schema as never);
+  await cell.sync();
+  return cell.get();
+}
+
+/**
+ * A readable message for anything thrown out of a setup commit.
+ *
+ * Not every rejection on this path is an `Error`: the storage layer surfaces
+ * plain `{ name, message, reason }` records, and `String()` renders those as
+ * "[object Object]" — which would still satisfy a `toBeDefined()` assertion
+ * while destroying the one thing a caller needs to tell a real migration
+ * refusal from an unrelated failure. Chase `cause`/`reason` so the CFC token
+ * survives the re-wraps between the merge and here.
+ */
+function describeError(error: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; current !== undefined && current !== null && depth < 8;) {
+    depth++;
+    if (typeof current === "string") {
+      parts.push(current);
+      break;
+    }
+    if (typeof current !== "object") {
+      parts.push(String(current));
+      break;
+    }
+    const record = current as {
+      message?: unknown;
+      name?: unknown;
+      cause?: unknown;
+      reason?: unknown;
+    };
+    if (typeof record.message === "string") parts.push(record.message);
+    else if (typeof record.name === "string") parts.push(record.name);
+    current = record.cause ?? record.reason;
+  }
+  return parts.length > 0 ? parts.join(": ") : String(error);
+}
+
+/** What materializing a candidate over a captured vintage did. */
+export interface MaterializeOutcome {
+  /** The setup-commit rejection, if the candidate could not be applied. */
+  error?: string;
+  /** The root's value after a successful materialize. */
+  value?: Record<string, unknown>;
+  /**
+   * The candidate's compiled result schema. Handed back so a caller that needs
+   * to address the root afterwards reads it off the pattern that was actually
+   * materialized, rather than compiling a second time and trusting the two to
+   * agree.
+   */
+  resultSchema: unknown;
+  /** The candidate's compiled argument schema, for the same reason. */
+  argumentSchema: unknown;
+  /**
+   * Identity of the pattern that was materialized — the artifact entry ref's
+   * identity, not a hash of the source text. A fixture is NAMED with this, so
+   * taking it off the compiled artifact is what makes the name provenance
+   * rather than a guess: it records the version that actually wrote the state.
+   */
+  identity: string;
+}
+
+/**
+ * Materialize `program` onto a captured vintage's root, the way production
+ * does.
+ *
+ * This is the production ROOT REPAIR call, not a bare `runtime.setup`:
+ * `PiecesController` commits the candidate's identity onto the root and then
+ * runs `runSynced(root.withTx(), pattern, undefined, { expectedPatternIdentity })`
+ * (`pieces-controller.ts` — the cold-start repair and the roll-forward
+ * materialize both spell it this way). Two things about that shape matter
+ * here and neither holds for a bare setup:
+ *
+ * - `expectedPatternIdentity` is what makes `runSynced` THROW on a
+ *   setup-commit rejection instead of logging and continuing. Without it a
+ *   refused migration reads as a successful materialize over a dead root —
+ *   the gate would be green on exactly the failure it exists to catch.
+ * - Stamping the identity first is the update itself. Passing a ref the root
+ *   does not carry fails the precondition rather than the migration, which
+ *   would be a green-for-the-wrong-reason.
+ */
+export async function materializeOver(
+  vintage: VintageRuntime,
+  program: RuntimeProgram,
+  rootKey: string = DEFAULT_VINTAGE_ROOT_KEY,
+): Promise<MaterializeOutcome> {
+  const { runtime } = vintage;
+  const pattern = await runtime.patternManager.compilePattern(program, {
+    space: vintage.space as never,
+  });
+  const ref = runtime.patternManager.getArtifactEntryRef(pattern);
+  if (ref === undefined) {
+    throw new Error("compiled candidate has no artifact entry ref");
+  }
+  const root = vintageRoot<Record<string, unknown>>(
+    vintage,
+    pattern.resultSchema,
+    rootKey,
+  );
+  await root.sync();
+
+  const { error: stampError } = await runtime.editWithRetry((tx) => {
+    root.withTx(tx).setMetaRaw("patternIdentity", {
+      identity: ref.identity,
+      symbol: ref.symbol,
+    });
+  });
+  if (stampError !== undefined) {
+    throw new Error(
+      `could not stamp candidate identity: ${stampError.message}`,
+    );
+  }
+
+  const schemas = {
+    resultSchema: pattern.resultSchema,
+    argumentSchema: pattern.argumentSchema,
+    identity: ref.identity,
+  };
+  try {
+    await runtime.runSynced(root.withTx(), pattern, undefined, {
+      expectedPatternIdentity: ref,
+    });
+    await runtime.idle();
+  } catch (error) {
+    return { error: describeError(error), ...schemas };
+  }
+  await root.pull();
+  return {
+    value: root.get() as Record<string, unknown> | undefined,
+    ...schemas,
+  };
+}
+
+export type { RuntimeProgram };

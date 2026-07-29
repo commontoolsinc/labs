@@ -30,6 +30,7 @@ was last checked against the code.
 | [`modernCellRep`](#moderncellrep) | `EXPERIMENTAL_MODERN_CELL_REP` env, or `RuntimeOptions.experimental` | off | Dan Bornstein (#3818) | graduate to always-on, then delete flag | implemented, off by default |
 | [`persistentSchedulerState`](#persistentschedulerstate) | `EXPERIMENTAL_PERSISTENT_SCHEDULER_STATE` env, or `RuntimeOptions.experimental` | off | Bernhard Seefeld (#3646) | graduate to always-on | implemented, off by default, rollout in progress |
 | [`commitPreconditions`](#commitpreconditions) | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry) | on | Bernhard Seefeld (#4090) | fold into base scheduler semantics, then delete flag | implemented, on by default |
+| [`plainResultReceipts`](#plainresultreceipts) | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental` | off | Mike Salisbury (verb contract WS-C) | flip default after the invocation-protocol integration proof, then fold into receipt semantics and delete flag | implemented, off by default |
 | [`eagerSourceAnnotation`](#eagersourceannotation) | `EXPERIMENTAL_EAGER_SOURCE_ANNOTATION` env, or `RuntimeOptions.experimental` | off in production, on in shell dev builds | gideon (#4458) | permanent debug toggle, not slated for removal | implemented |
 | [`systemPatternAutoUpdate`](#systempatternautoupdate) | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental` | on in the shell (same-toolshed system sources, including all roots); off server-side | Bernhard Seefeld (#4611; shell default-on #4619) | graduate to always-on, then delete flag | implemented, on in the shell |
 | [`computedCellIds`](#computedcellids) | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental` | on | Robin McCollum (#4659) | graduate to unconditional behavior, then delete flag | implemented, on by default |
@@ -136,6 +137,29 @@ propagate](#how-flags-propagate).
 - **Path to removal.** Confirm rehydration falls back cleanly when observations
   are absent or stale; graduate the default to on across the fleet; then fold
   the behavior into the base scheduler and delete the flag.
+
+### `plainResultReceipts`
+
+- **Toggle via.** `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env var, or
+  `RuntimeOptions.experimental.plainResultReceipts`. Env-reachable so the CLI
+  invocation-protocol work can enable it per process during integration.
+- **Added by.** Mike Salisbury, verb-contract WS-C
+  (`docs/plans/pattern-verb-contract-implementation.md`).
+- **Purpose.** A handler's return value containing reactives/cells projects
+  into its per-event receipt cell via the result-pattern path, but a **plain
+  JSON return is discarded** — the receipt-only branch writes `{}`. Under this
+  flag the receipt carries the (already-normalized) plain return instead, so a
+  caller — or a same-id retry that collides on the create-only receipt — can
+  read the verb's result back by receipt address. `{}` remains the shape for
+  value-less handlers. Requires `commitPreconditions` (the receipt write
+  itself) to be active, which it is by default.
+- **Current default and planned end state.** Off by default. Flips on once the
+  verb-contract WS-D integration proof (caller-supplied event id → collide →
+  read back the original result, cross-process) is green; after a bake period
+  the behavior folds into base receipt semantics and the flag is deleted.
+- **Path to removal.** Delete the flag and make the projection unconditional in
+  `handleJavaScriptHandlerResult`'s receipt-only branch; update the receipt
+  content note in `docs/specs/scheduler-v2/README.md` §7.6.
 
 ### `commitPreconditions`
 
@@ -632,7 +656,23 @@ the per-epic implementation notes).
 >   verdicts. Added on CT-1872 (PR #4606). Path to removal: retire
 >   the scalarization fallback once every server in the fleet advertises the
 >   capability; the flag itself then reads as permanent documentation of the
->   wire shape, and the successor design is tracked as CT-1910.
+>   wire shape. (The CT-1910 basis repair — `basisSeq` on pending reads,
+>   scanned with own-session exclusion — landed WITHOUT a capability of its
+>   own: servers ignore unknown read fields, so clients attach it
+>   unconditionally and older servers keep the legacy max-dependency basis.
+>   CT-1910's remaining scope, server-inferred dependencies, stays a
+>   follow-on protocol step.)
+> - **`entityIdListing`** is a build-inherent capability, hardwired to `true`.
+>   It advertises that the memory server can list live space-scoped entity
+>   identifiers without returning stored values. Older servers omit it, which
+>   parses as `false`. It is permanent.
+> - **`entityIdPagination`** is a build-inherent capability, hardwired to
+>   `true`. It advertises snapshot-checked, server-capped pages for
+>   `entity-id.list`. Older servers return the historical complete response.
+>   It is permanent.
+> - **`entityIdLookup`** is a build-inherent capability, hardwired to `true`.
+>   It advertises identifier-only `entity-id.exists` point lookup. Older
+>   servers omit it, which parses as `false`. It is permanent.
 
 ### `experimentalConcurrentWatchRefresh`
 

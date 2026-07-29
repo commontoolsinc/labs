@@ -1,0 +1,77 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "context": {
+        "additionalProperties": true,
+        "properties": {},
+        "type": "object"
+      },
+      "maxAmount": {
+        "default": 1000,
+        "type": "number"
+      },
+      "topic": {
+        "default": "",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "suggestable/budget-planner.tsx",
+  "resultSchema": {
+    "$defs": {
+      "BudgetItem": {
+        "properties": {
+          "amount": {
+            "default": 0,
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "amount"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "items": {
+        "items": {
+          "$ref": "#/$defs/BudgetItem"
+        },
+        "type": "array"
+      },
+      "pending": {
+        "type": "boolean"
+      },
+      "remaining": {
+        "type": "number"
+      },
+      "topic": {
+        "type": "string"
+      },
+      "total": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "topic",
+      "items",
+      "total",
+      "remaining",
+      "pending",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

@@ -113,53 +113,6 @@ export class XBodyView extends BaseView {
   @property({ type: Boolean })
   accessor embedded = false;
 
-  override connectedCallback() {
-    super.connectedCallback();
-    this.addEventListener("cf-cell-pin", this._handleCellPin);
-  }
-
-  override disconnectedCallback() {
-    super.disconnectedCallback();
-    this.removeEventListener("cf-cell-pin", this._handleCellPin);
-  }
-
-  private _handleCellPin = async (e: Event) => {
-    const event = e as CustomEvent<{
-      cell: CellHandle<unknown>;
-      label?: string;
-      accumulate: boolean;
-    }>;
-
-    const { cell, label, accumulate } = event.detail;
-
-    if (!cell || !this.spaceRootPattern) return;
-
-    // Get cell reference info
-    const ref = cell.ref();
-    // Construct LLM-friendly path from the cell ref
-    const path = ref.path && ref.path.length > 0
-      ? `/${ref.id}/${ref.path.join("/")}`
-      : `/${ref.id}`;
-    const name = label ?? `Cell #${ref.id.slice(-6)}`;
-
-    // Send to the space root pattern's pinToChat stream
-    try {
-      const rootCell = this.spaceRootPattern.cell();
-      if (rootCell) {
-        await (rootCell as any).key("pinToChat").send({
-          path,
-          name,
-          accumulate,
-        });
-      }
-    } catch (error) {
-      // A disposal race (logout, runtime swap) cancels the send; that is not
-      // a pin failure to surface.
-      if (this.rt?.signal.aborted) return;
-      console.error("[BodyView] Failed to pin cell:", error);
-    }
-  };
-
   private _subPages = new Task(this, {
     task: async ([activePattern, spaceRootPattern, embedded]) => {
       if (embedded) {

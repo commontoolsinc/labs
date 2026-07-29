@@ -117,9 +117,9 @@ describe("arrays", () => {
     });
 
     it("returns `false` for a sparse array whose extra key is a named property", () => {
-      // `length` is `3`, hole at index `1`, plus a named `foo` -- so
-      // `Object.keys()` yields `["0", "2", "foo"]`, a key count that equals
-      // `length` but still contains a non-index key.
+      // `length` is `3`, hole at index `1`, plus a named `foo` -- so the own
+      // keys are `["0", "2", "length", "foo"]`, a count that matches a dense
+      // index-only array of the same `length` but still has a non-index key.
       const sparse = [] as unknown[] & { foo?: string };
       sparse[0] = 1;
       sparse[2] = 3;
@@ -128,14 +128,151 @@ describe("arrays", () => {
     });
 
     it("returns `false` when a named property was added before any indices", () => {
-      // `Object.keys()` still orders indices first, so the named key is last:
-      // `["0", "1", "foo"]`. Pins the last-key optimization's reliance on that
-      // ordering rather than on insertion order.
+      // Own-key order puts indices first and `length` ahead of any later-added
+      // named key, so the keys are `["0", "1", "length", "foo"]`. Pins the
+      // last-key check's reliance on that ordering rather than on the order in
+      // which the properties were assigned.
       const arr = [] as unknown[] & { foo?: string };
       arr.foo = "bar";
       arr[0] = 1;
       arr[1] = 2;
       expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
+    });
+
+    it("returns `false` for an array with an enumerable symbol-keyed property", () => {
+      const arr = [1, 2, 3];
+      (arr as unknown as Record<symbol, unknown>)[Symbol("foo")] = "bar";
+      expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
+    });
+
+    it("returns `false` for an array with a non-enumerable symbol-keyed property", () => {
+      // A symbol key is not expressible as a property name at all, so unlike a
+      // non-enumerable string key it is rejected.
+      const arr = [1, 2, 3];
+      Object.defineProperty(arr, Symbol("foo"), {
+        value: "bar",
+        enumerable: false,
+      });
+      expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
+    });
+
+    it("returns `false` for an array with a registered symbol-keyed property", () => {
+      // Registry-interned symbols are portable across realms -- and so are
+      // valid fabric *values* -- but they are still not property *names*.
+      const arr = [1, 2, 3];
+      (arr as unknown as Record<symbol, unknown>)[Symbol.for("foo")] = "bar";
+      expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
+    });
+
+    it("returns `false` for an array with a well-known symbol-keyed property", () => {
+      const arr = [1, 2, 3];
+      (arr as unknown as Record<symbol, unknown>)[Symbol.toStringTag] = "Nope";
+      expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
+    });
+
+    it("returns `false` for an array with a non-enumerable string-keyed property", () => {
+      const arr = [1, 2, 3];
+      Object.defineProperty(arr, "foo", { value: "bar", enumerable: false });
+      expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
+    });
+
+    it("returns `false` for an array with a non-enumerable index-shaped named key", () => {
+      // `"01"` is a named property, not an index, so it is rejected on the same
+      // footing as any other non-enumerable named key.
+      const arr = [1, 2, 3];
+      Object.defineProperty(arr, "01", { value: "bar", enumerable: false });
+      expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
+    });
+
+    it("returns `true` for an array whose only non-index key is `length`", () => {
+      // `length` is intrinsic to every array, so it can never be disqualifying.
+      const arr = [1, 2, 3];
+      expect(Object.getOwnPropertyNames(arr)).toContain("length");
+      expect(isArrayWithOnlyIndexProperties(arr)).toBe(true);
+    });
+
+    it("returns `true` after `length` is redefined", () => {
+      // Redefining does not re-create the property, so it keeps its original
+      // position in own-key order.
+      const arr = [1, 2, 3];
+      Object.defineProperty(arr, "length", { value: 3, writable: true });
+      expect(isArrayWithOnlyIndexProperties(arr)).toBe(true);
+    });
+
+    it("returns `false` when a named property outlives a deleted sibling", () => {
+      // Deleting one named property must not restore index-only-ness while
+      // another remains.
+      const arr = [1, 2, 3] as unknown[] & { foo?: string; bar?: string };
+      arr.foo = "a";
+      arr.bar = "b";
+      delete arr.foo;
+      expect(isArrayWithOnlyIndexProperties(arr)).toBe(false);
+    });
+
+    it("returns `true` for an `Array` subclass instance with only indices", () => {
+      class Sub extends Array {}
+      const sub = new Sub();
+      sub.push(1, 2);
+      expect(isArrayWithOnlyIndexProperties(sub)).toBe(true);
+    });
+
+    describe("returns `false` for anything that isn't an array", () => {
+      // Each of these can name `length` as its final own key, which is what the
+      // implementation keys on for real arrays -- so without an explicit
+      // array check they would be misreported as index-only.
+
+      it("rejects an array-like object", () => {
+        const arrayLike = { 0: "a", 1: "b", length: 2 };
+        expect(
+          isArrayWithOnlyIndexProperties(arrayLike),
+        )
+          .toBe(false);
+      });
+
+      it("rejects a non-array whose prototype is `Array.prototype`", () => {
+        // `constructor` is `Array` here, so type-tag dispatch that keys on the
+        // constructor can route such a value to array handling.
+        const fake = Object.create(Array.prototype) as Record<string, unknown>;
+        fake[0] = "a";
+        fake.length = 1;
+        expect(isArrayWithOnlyIndexProperties(fake))
+          .toBe(false);
+      });
+
+      it("rejects a plain object whose last own key is `length`", () => {
+        const obj = { a: 1, length: 3 };
+        expect(isArrayWithOnlyIndexProperties(obj))
+          .toBe(false);
+      });
+
+      it("answers rather than throwing for `null` and `undefined`", () => {
+        expect(isArrayWithOnlyIndexProperties(null))
+          .toBe(false);
+        expect(
+          isArrayWithOnlyIndexProperties(undefined),
+        )
+          .toBe(false);
+      });
+
+      it("answers rather than throwing for a primitive", () => {
+        expect(isArrayWithOnlyIndexProperties("abc"))
+          .toBe(false);
+        expect(isArrayWithOnlyIndexProperties(42))
+          .toBe(false);
+      });
+
+      it("rejects a `Uint8Array`", () => {
+        const bytes = new Uint8Array([1, 2, 3]);
+        expect(isArrayWithOnlyIndexProperties(bytes))
+          .toBe(false);
+      });
+    });
+
+    it("returns `true` for a `Proxy` over an index-only array", () => {
+      // `Array.isArray()` sees through to the target, so the array check
+      // doesn't reject proxied arrays.
+      const proxied = new Proxy([1, 2, 3], {});
+      expect(isArrayWithOnlyIndexProperties(proxied)).toBe(true);
     });
 
     describe("returns `false` for non-canonical index-shaped named keys", () => {
@@ -144,8 +281,9 @@ describe("arrays", () => {
       // numeric coercion would misclassify the array as index-only.
       for (const key of ["01", " 1", "1.0", "1e1", "-0", ""]) {
         it(`rejects the named key ${JSON.stringify(key)}`, () => {
-          // A roomy all-holes array, so the named key sits below `length` and
-          // doesn't trip the `keys.length > length` quick check.
+          // A roomy all-holes array, so the key is numerically in range for
+          // this `length` -- denying an implementation any excuse to reject it
+          // on size alone rather than on the key not being an index.
           const arr: unknown[] = [];
           arr.length = 1000;
           (arr as unknown as Record<string, unknown>)[key] = "x";

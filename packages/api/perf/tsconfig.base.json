@@ -3,11 +3,36 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "Node16",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable",
+      "DOM.AsyncIterable",
+      "ScriptHost",
+      "ESNext.TypedArrays"
+    ],
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "pretty": false,
-    "incremental": false
+    "incremental": false,
+    "paths": {
+      "@/*": [
+        "../../data-model/src/*"
+      ],
+      "@commonfabric/api": [
+        "../index.ts"
+      ],
+      "@commonfabric/data-model/deep-freeze": [
+        "../../data-model/src/deep-freeze.ts"
+      ],
+      "@commonfabric/utils/*": [
+        "../../utils/src/*"
+      ],
+      "commonfabric": [
+        "../index.ts"
+      ]
+    }
   }
 }

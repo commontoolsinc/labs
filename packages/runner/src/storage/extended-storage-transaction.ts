@@ -1,9 +1,10 @@
-import { Immutable, isRecord } from "@commonfabric/utils/types";
+import { isRecord } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   type FabricPlainObject,
   type FabricValue,
+  type MutableFabricPlainObjectLayer,
   shallowMutableClone,
 } from "@commonfabric/data-model/fabric-value";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
@@ -1567,7 +1568,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   readOrThrow(
     address: IMemorySpaceAddress,
     options?: IReadOptions,
-  ): Immutable<FabricValue> {
+  ): FabricValue {
     options = this.#withAmbientReadMeta(options);
     this.prepareRead(address);
     const readResult = this.tx.read(address, options);
@@ -1588,7 +1589,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   readValueOrThrow(
     address: NormalizedFullLink,
     options?: IReadOptions,
-  ): Immutable<FabricValue> {
+  ): FabricValue {
     return this.readOrThrow(toMemorySpaceAddress(address), options);
   }
 
@@ -1638,7 +1639,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // just start with {}. But if errorPath has content (e.g., ["foo"]), the
       // document exists and we need to read from lastExistingPath to preserve
       // existing fields.
-      let valueObj: FabricPlainObject;
+      let valueObj: MutableFabricPlainObjectLayer;
       if (errorPath.length === 0) {
         valueObj = {};
       } else {
@@ -1660,7 +1661,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         // the shared input.
         valueObj = shallowMutableClone(
           currentValue as FabricValue,
-        ) as FabricPlainObject;
+        ) as MutableFabricPlainObjectLayer;
       }
       const remainingPath = address.path.slice(lastExistingPath.length);
       if (remainingPath.length === 0) {
@@ -1669,7 +1670,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         );
       }
       const lastKey = remainingPath.pop()!;
-      let nextValue: FabricPlainObject = valueObj;
+      let nextValue: MutableFabricPlainObjectLayer = valueObj;
       // Create intermediate containers. The container type depends on whether
       // the NEXT key (the one that will access this container) is a valid array
       // index.

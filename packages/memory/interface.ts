@@ -1,4 +1,9 @@
-import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
+import type {
+  FabricBytes,
+  FabricValue,
+  NonNullableFabricValue,
+  SchemaPathSelector,
+} from "@commonfabric/api";
 import type { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 
 /**
@@ -61,19 +66,19 @@ export interface AuthorizationError extends Error {
 export type Command<
   Ability extends string = The,
   Of extends DID = DID,
-  In extends NonNullable<unknown> = NonNullable<unknown>,
+  In extends NonNullableFabricValue = NonNullableFabricValue,
 > = {
   cmd: Ability;
   sub: Of;
   args: In;
   meta?: Meta;
-  nonce?: Uint8Array;
+  nonce?: FabricBytes;
 };
 
 export type Invocation<
   Ability extends string = The,
   Of extends DID = DID,
-  In extends NonNullable<unknown> = NonNullable<unknown>,
+  In extends NonNullableFabricValue = NonNullableFabricValue,
 > = {
   iss: DID;
   aud?: DID;
@@ -81,7 +86,7 @@ export type Invocation<
   sub: Of;
   args: In;
   meta?: Meta;
-  nonce?: Uint8Array;
+  nonce?: FabricBytes;
   exp?: UTCUnixTimestampInSeconds;
   iat?: UTCUnixTimestampInSeconds;
   prf: Delegation[];
@@ -158,7 +163,7 @@ export type InferProtoMethods<
   Prefix extends string = "",
 > = {
   [Name in keyof Methods & string]: Methods[Name] extends (
-    input: infer In extends NonNullable<unknown>,
+    input: infer In extends NonNullableFabricValue,
   ) => Task<infer Out extends NonNullable<unknown>, infer Effect> ?
       | {
         [The in `${Prefix}/${Name}`]: Method<
@@ -178,7 +183,9 @@ export type InferProtoMethods<
 export type Method<
   Protocol,
   Ability extends The,
-  In extends NonNullable<unknown>,
+  In extends NonNullableFabricValue,
+  // Method results may be in-process `Result` envelopes carrying raw `Error`s,
+  // so they are non-nullish but not necessarily `FabricValue`s.
   Out extends NonNullable<unknown>,
   Effect,
 > = {
@@ -195,7 +202,7 @@ export type Method<
     sub: MemorySpace;
     args: In;
     meta?: Meta;
-    nonce?: Uint8Array;
+    nonce?: FabricBytes;
   };
   ConsumerInvocation: Invocation<Ability, InferOf<Protocol>, In>;
   ProviderCommand: Receipt<

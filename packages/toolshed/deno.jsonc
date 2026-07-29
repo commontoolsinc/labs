@@ -11,6 +11,7 @@
     "exclude": ["./llm_documentation/*"]
   },
   "imports": {
+    // Dependency guide: ../../docs/development/DEPENDENCIES.md
     "@/": "./",
     "@db/sqlite": "jsr:@db/sqlite@0.13.0",
     "ai": "npm:ai@^7.0.31",

@@ -3,7 +3,10 @@ import {
   isRecord,
   isUnsafeObjectKey,
 } from "@commonfabric/utils/types";
-import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
+import {
+  isArrayIndexPropertyName,
+  isArrayWithOnlyIndexProperties,
+} from "@commonfabric/utils/arrays";
 
 import {
   type FabricOrConvertibleNativeValue,
@@ -32,6 +35,66 @@ function rejectExtraProperties(value: object, typeName: string): void {
       `Cannot store ${typeName} with extra enumerable properties`,
     );
   }
+}
+
+/**
+ * Returns a shallow clone of the given array carrying nothing but its
+ * enumerable index properties and `length`, that is, one which satisfies
+ * `isArrayWithOnlyIndexProperties()`. Holes are preserved as holes, and
+ * elements are copied by reference without themselves being converted or
+ * validated, this being a shallow operation.
+ *
+ * This exists for a caller holding an array that has picked up non-index own
+ * properties which it knows are not content -- a runtime annotation, say --
+ * and which the conversion functions here would therefore reject outright.
+ * Calling this is how such a caller says explicitly that it means to drop
+ * them. Code with no such warrant should let the rejection happen ("death
+ * before confusion").
+ *
+ * @param value The array to clean.
+ * @param frozen Whether to freeze the result. Defaults to `true`.
+ */
+export function shallowCleanArray(
+  value: unknown[],
+  frozen = true,
+): FabricValueLayer {
+  const result: unknown[] = [];
+
+  // Set the extent first, so that trailing holes survive; assigning only the
+  // present elements would leave `length` short.
+  result.length = value.length;
+
+  // A canonical index string addresses exactly the element slot it names, so
+  // these are indexed by key directly, with no number parsing. The record views
+  // exist only to say as much to TypeScript, which otherwise rejects a string
+  // index on an array (TS7015).
+  const from = value as unknown as Record<string, unknown>;
+  const to = result as unknown as Record<string, unknown>;
+
+  // `for...in` visits only the keys an array actually has, so a sparse one --
+  // `length` can run to 2**32 - 2 -- does no JS-level work per absent slot, and
+  // no key array gets materialized either. Note this is a large constant
+  // factor, not a change of order: the engine still scans the index range to
+  // work out which keys exist, measured at roughly 10x per 10x of `length` on a
+  // two-element array. What it buys is that the scan happens inside the engine
+  // instead of as a JS iteration, which for a proxied array also means one
+  // `ownKeys` trap rather than a `has` trap per slot. It also yields any
+  // named properties, which the index test drops, those being the whole point
+  // of this function. Inherited keys are not a concern: this project bans
+  // prototype pollution of the globals, and `Array.prototype`'s own methods are
+  // non-enumerable. Every index key is necessarily below `length`, so none of
+  // these assignments extends it.
+  for (const key in value) {
+    if (isArrayIndexPropertyName(key)) {
+      to[key] = from[key];
+    }
+  }
+
+  if (frozen) {
+    Object.freeze(result);
+  }
+
+  return result as FabricValueLayer;
 }
 
 /**
@@ -149,12 +212,12 @@ export function shallowFabricFromNativeValue(
     }
 
     case NATIVE_TAGS.Array: {
-      // Arrays may only carry numeric index properties. An enumerable named
-      // property has no fabric representation, so reject it outright rather
-      // than silently dropping it ("death before confusion").
-      if (!isArrayWithOnlyIndexProperties(value as unknown[])) {
+      // Arrays may only carry numeric index properties. A named property or a
+      // symbol-keyed one has no fabric representation, so reject it outright
+      // rather than silently dropping it ("death before confusion").
+      if (!isArrayWithOnlyIndexProperties(value)) {
         throw new Error(
-          "Cannot store array with enumerable named properties",
+          "Cannot store array with non-index properties",
         );
       }
       // Delegate frozenness handling to `cloneHelper()`.
@@ -549,7 +612,7 @@ function isFabricCompatibleInternal(
       seen.add(value);
 
       if (Array.isArray(value)) {
-        // Check array structure (no named properties).
+        // Check array structure (no non-index properties).
         if (!isArrayWithOnlyIndexProperties(value)) {
           seen.delete(value);
           return false;

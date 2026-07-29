@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { defer } from "@commonfabric/utils/defer";
 import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
 import type { CellHandle } from "@commonfabric/runtime-client";
 import {
@@ -83,6 +84,760 @@ describe("CFRender variant handling", () => {
       element.variant = variant;
       expect(element.variant).toBe(variant);
     }
+  });
+});
+
+describe("CFRender render concurrency", () => {
+  it("cleans up the mounted render when its cell is cleared", async () => {
+    const element = new CFRender();
+    let cleanups = 0;
+    const internals = element as unknown as {
+      _cleanup?: () => void;
+      _containerRef: { value?: HTMLDivElement };
+      _renderCell(): Promise<void>;
+    };
+    internals._containerRef = { value: {} as HTMLDivElement };
+    internals._cleanup = () => cleanups++;
+    element.cell = undefined;
+
+    await internals._renderCell();
+
+    expect(cleanups).toBe(1);
+    expect(internals._cleanup).toBeUndefined();
+  });
+
+  it("cleans up an error render when its cell is cleared", async () => {
+    const element = new CFRender();
+    const container = { innerHTML: "" } as HTMLDivElement;
+    const internals = element as unknown as {
+      _cleanup?: () => void;
+      _containerRef: { value?: HTMLDivElement };
+      _handleRenderError(error: unknown): void;
+      _renderCell(): Promise<void>;
+    };
+    internals._containerRef = { value: container };
+    element.cell = {
+      runtime: () => ({ signal: { aborted: false } }),
+    } as unknown as CellHandle;
+
+    captureConsoleError(() => {
+      internals._handleRenderError(new Error("boom"));
+    });
+    expect(container.innerHTML).toContain("Error rendering content: boom");
+
+    element.cell = undefined;
+    await internals._renderCell();
+
+    expect(container.innerHTML).toBe("");
+    expect(internals._cleanup).toBeUndefined();
+  });
+
+  it("accepts a retarget delivered before subscribe returns", async () => {
+    const link = createMockCellHandle({ name: "piece link" }, {
+      id: "of:fid1:link-holder" as never,
+      space: "did:key:zSpace" as never,
+      path: ["piece"],
+    }) as CellHandle;
+    const target = createMockCellHandle({ name: "piece" }, {
+      id: "of:fid1:piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    const nextTarget = createMockCellHandle({ name: "next piece" }, {
+      id: "of:fid1:next-piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    (link as unknown as {
+      asSchema(): {
+        sync(): Promise<CellHandle | undefined>;
+        subscribe(
+          callback: (value: CellHandle | undefined) => void,
+        ): () => void;
+      };
+    }).asSchema = () => ({
+      sync: () => Promise.resolve(target),
+      subscribe(callback) {
+        callback(target);
+        callback(nextTarget);
+        return () => {};
+      },
+    });
+
+    const element = new CFRender();
+    element.cell = link;
+    let renders = 0;
+    const internals = element as unknown as {
+      _cleanupLinkTargetSubscription(): void;
+      _renderCell(): Promise<void>;
+      _watchLinkTarget(
+        cell: CellHandle,
+        resolved: CellHandle,
+      ): Promise<CellHandle | undefined>;
+    };
+    internals._renderCell = () => {
+      renders++;
+      return Promise.resolve();
+    };
+
+    await internals._watchLinkTarget(link, target);
+    expect(renders).toBe(1);
+    internals._cleanupLinkTargetSubscription();
+  });
+
+  it("does not rerender when the followed target identity is unchanged", async () => {
+    const link = createMockCellHandle({ name: "piece link" }, {
+      id: "of:fid1:link-holder" as never,
+      space: "did:key:zSpace" as never,
+      path: ["piece"],
+    }) as CellHandle;
+    const target = createMockCellHandle({ name: "piece" }, {
+      id: "of:fid1:piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    let update: ((value: CellHandle | undefined) => void) | undefined;
+    (link as unknown as {
+      asSchema(): {
+        sync(): Promise<CellHandle | undefined>;
+        subscribe(
+          callback: (value: CellHandle | undefined) => void,
+        ): () => void;
+      };
+    }).asSchema = () => ({
+      sync: () => Promise.resolve(target),
+      subscribe(callback) {
+        callback(target);
+        update = callback;
+        return () => {};
+      },
+    });
+
+    const element = new CFRender();
+    element.cell = link;
+    let renders = 0;
+    const internals = element as unknown as {
+      _cleanupLinkTargetSubscription(): void;
+      _renderCell(): Promise<void>;
+      _watchLinkTarget(
+        cell: CellHandle,
+        resolved: CellHandle,
+      ): Promise<CellHandle | undefined>;
+    };
+    internals._renderCell = () => {
+      renders++;
+      return Promise.resolve();
+    };
+
+    await internals._watchLinkTarget(link, target);
+    update?.(target);
+    update?.(target);
+
+    expect(renders).toBe(0);
+    internals._cleanupLinkTargetSubscription();
+  });
+
+  it("rerenders when only the followed target scope changes", async () => {
+    const link = createMockCellHandle({ name: "piece link" }, {
+      id: "of:fid1:link-holder" as never,
+      space: "did:key:zSpace" as never,
+      path: ["piece"],
+    }) as CellHandle;
+    const spaceTarget = createMockCellHandle({ name: "space piece" }, {
+      id: "of:fid1:piece" as never,
+      space: "did:key:zSpace" as never,
+      scope: "space",
+    }) as CellHandle;
+    const userTarget = createMockCellHandle({ name: "user piece" }, {
+      id: "of:fid1:piece" as never,
+      space: "did:key:zSpace" as never,
+      scope: "user",
+    }) as CellHandle;
+    let update: ((value: CellHandle | undefined) => void) | undefined;
+    (link as unknown as {
+      asSchema(): {
+        sync(): Promise<CellHandle | undefined>;
+        subscribe(
+          callback: (value: CellHandle | undefined) => void,
+        ): () => void;
+      };
+    }).asSchema = () => ({
+      sync: () => Promise.resolve(spaceTarget),
+      subscribe(callback) {
+        callback(spaceTarget);
+        update = callback;
+        return () => {};
+      },
+    });
+
+    const element = new CFRender();
+    element.cell = link;
+    let renders = 0;
+    const internals = element as unknown as {
+      _cleanupLinkTargetSubscription(): void;
+      _renderCell(): Promise<void>;
+      _watchLinkTarget(
+        cell: CellHandle,
+        resolved: CellHandle,
+      ): Promise<CellHandle | undefined>;
+    };
+    internals._renderCell = () => {
+      renders++;
+      return Promise.resolve();
+    };
+
+    await internals._watchLinkTarget(link, spaceTarget);
+    update?.(userTarget);
+
+    expect(renders).toBe(1);
+    internals._cleanupLinkTargetSubscription();
+  });
+
+  it("clears a missing target and rerenders when the target returns", async () => {
+    const link = createMockCellHandle({ name: "piece link" }, {
+      id: "of:fid1:link-holder" as never,
+      space: "did:key:zSpace" as never,
+      path: ["piece"],
+    }) as CellHandle;
+    const target = createMockCellHandle({ name: "piece" }, {
+      id: "of:fid1:piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    let update: ((value: CellHandle | undefined) => void) | undefined;
+    (link as unknown as {
+      asSchema(): {
+        sync(): Promise<CellHandle | undefined>;
+        subscribe(
+          callback: (value: CellHandle | undefined) => void,
+        ): () => void;
+      };
+    }).asSchema = () => ({
+      sync: () => Promise.resolve(target),
+      subscribe(callback) {
+        callback(target);
+        update = callback;
+        return () => {};
+      },
+    });
+
+    const element = new CFRender();
+    element.cell = link;
+    let cleanups = 0;
+    let renders = 0;
+    const internals = element as unknown as {
+      _cleanup?: () => void;
+      _cleanupLinkTargetSubscription(): void;
+      _hasRendered: boolean;
+      _renderCell(): Promise<void>;
+      _resolvedCell?: CellHandle;
+      _watchLinkTarget(
+        cell: CellHandle,
+        resolved: CellHandle,
+      ): Promise<CellHandle | undefined>;
+    };
+    internals._cleanup = () => cleanups++;
+    internals._renderCell = () => {
+      renders++;
+      return Promise.resolve();
+    };
+
+    expect(await internals._watchLinkTarget(link, target)).toBe(target);
+    update?.(undefined);
+    expect(cleanups).toBe(1);
+    expect(renders).toBe(0);
+    expect(internals._resolvedCell).toBeUndefined();
+    expect(internals._hasRendered).toBe(true);
+
+    update?.(target);
+    expect(renders).toBe(1);
+    internals._cleanupLinkTargetSubscription();
+  });
+
+  it("keeps watching an empty link across a variant change", async () => {
+    const link = createMockCellHandle({ name: "piece link" }, {
+      id: "of:fid1:link-holder" as never,
+      space: "did:key:zSpace" as never,
+      path: ["piece"],
+    }) as CellHandle;
+    const target = createMockCellHandle({ name: "piece" }, {
+      id: "of:fid1:piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    (target as unknown as { sync(): Promise<unknown> }).sync = () =>
+      Promise.resolve();
+
+    let currentTarget: CellHandle | undefined = target;
+    let publish: ((value: CellHandle | undefined) => void) | undefined;
+    let unsubscribes = 0;
+    (link as unknown as { resolveAsCell(): Promise<CellHandle> })
+      .resolveAsCell = () => Promise.resolve(currentTarget ?? link);
+    (link as unknown as {
+      asSchema(): {
+        sync(): Promise<CellHandle | undefined>;
+        subscribe(
+          callback: (value: CellHandle | undefined) => void,
+        ): () => void;
+      };
+    }).asSchema = () => ({
+      sync: () => Promise.resolve(currentTarget),
+      subscribe(callback) {
+        callback(currentTarget);
+        publish = (value) => {
+          currentTarget = value;
+          callback(value);
+        };
+        return () => unsubscribes++;
+      },
+    });
+
+    const restored = defer();
+    let renders = 0;
+    const element = new CFRender();
+    const internals = element as unknown as {
+      _cleanupLinkTargetSubscription(): void;
+      _containerRef: { value?: HTMLDivElement };
+      _linkTargetUnsubscribe?: () => void;
+      _renderCell(): Promise<void>;
+      _renderChipDefault(
+        container: HTMLElement,
+        cell: CellHandle,
+      ): () => void;
+      _renderTileDefault(
+        container: HTMLElement,
+        cell: CellHandle,
+      ): () => void;
+      _resolvedCell?: CellHandle;
+    };
+    internals._containerRef = { value: {} as HTMLDivElement };
+    const renderDefault = (_container: HTMLElement, cell: CellHandle) => {
+      expect(cell).toBe(target);
+      renders++;
+      if (renders === 2) restored.resolve();
+      return () => {};
+    };
+    internals._renderChipDefault = renderDefault;
+    internals._renderTileDefault = renderDefault;
+    element.cell = link;
+    element.variant = "chip";
+
+    await internals._renderCell();
+    expect(renders).toBe(1);
+    expect(internals._resolvedCell).toBe(target);
+
+    publish?.(undefined);
+    element.variant = "tile";
+    await internals._renderCell();
+    expect(internals._resolvedCell).toBeUndefined();
+    expect(internals._linkTargetUnsubscribe).toBeDefined();
+    expect(unsubscribes).toBe(0);
+
+    publish?.(target);
+    await restored.promise;
+    expect(renders).toBe(2);
+    expect(internals._resolvedCell).toBe(target);
+
+    internals._cleanupLinkTargetSubscription();
+    expect(unsubscribes).toBe(1);
+  });
+
+  it("reuses pending target setup across an empty-link variant change", async () => {
+    const targetSync = defer<CellHandle | undefined>();
+    const syncEntered = defer();
+    const restored = defer();
+    const link = createMockCellHandle({ name: "piece link" }, {
+      id: "of:fid1:link-holder" as never,
+      space: "did:key:zSpace" as never,
+      path: ["piece"],
+    }) as CellHandle;
+    const target = createMockCellHandle({ name: "piece" }, {
+      id: "of:fid1:piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    (target as unknown as { sync(): Promise<unknown> }).sync = () =>
+      Promise.resolve();
+
+    let currentTarget: CellHandle | undefined = target;
+    let publish: ((value: CellHandle | undefined) => void) | undefined;
+    let subscriptions = 0;
+    let unsubscribes = 0;
+    (link as unknown as { resolveAsCell(): Promise<CellHandle> })
+      .resolveAsCell = () => Promise.resolve(currentTarget ?? link);
+    (link as unknown as {
+      asSchema(): {
+        sync(): Promise<CellHandle | undefined>;
+        subscribe(
+          callback: (value: CellHandle | undefined) => void,
+        ): () => void;
+      };
+    }).asSchema = () => ({
+      sync() {
+        syncEntered.resolve();
+        return targetSync.promise;
+      },
+      subscribe(callback) {
+        subscriptions++;
+        callback(currentTarget);
+        publish = (value) => {
+          currentTarget = value;
+          callback(value);
+        };
+        return () => unsubscribes++;
+      },
+    });
+
+    const element = new CFRender();
+    const internals = element as unknown as {
+      _cleanupLinkTargetSubscription(): void;
+      _containerRef: { value?: HTMLDivElement };
+      _renderCell(): Promise<void>;
+      _renderTileDefault(
+        container: HTMLElement,
+        cell: CellHandle,
+      ): () => void;
+      _resolvedCell?: CellHandle;
+    };
+    internals._containerRef = { value: {} as HTMLDivElement };
+    internals._renderTileDefault = (_container, cell) => {
+      expect(cell).toBe(target);
+      restored.resolve();
+      return () => {};
+    };
+    element.cell = link;
+    element.variant = "chip";
+
+    const firstRender = internals._renderCell();
+    await syncEntered.promise;
+
+    currentTarget = undefined;
+    element.variant = "tile";
+    const variantRender = internals._renderCell();
+    targetSync.resolve(undefined);
+    await Promise.all([firstRender, variantRender]);
+
+    expect(internals._resolvedCell).toBeUndefined();
+    expect(subscriptions).toBe(1);
+    expect(unsubscribes).toBe(0);
+
+    publish?.(target);
+    await restored.promise;
+    expect(internals._resolvedCell).toBe(target);
+
+    internals._cleanupLinkTargetSubscription();
+    expect(unsubscribes).toBe(1);
+  });
+
+  it("observes a target cleared between resolution and subscription", async () => {
+    const link = createMockCellHandle({ name: "piece link" }, {
+      id: "of:fid1:link-holder" as never,
+      space: "did:key:zSpace" as never,
+      path: ["piece"],
+    }) as CellHandle;
+    const staleTarget = createMockCellHandle({ name: "stale piece" }, {
+      id: "of:fid1:stale-piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    const nextTarget = createMockCellHandle({ name: "next piece" }, {
+      id: "of:fid1:next-piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    let update: ((value: CellHandle | undefined) => void) | undefined;
+    (link as unknown as {
+      asSchema(): {
+        sync(): Promise<CellHandle | undefined>;
+        subscribe(
+          callback: (value: CellHandle | undefined) => void,
+        ): () => void;
+      };
+    }).asSchema = () => ({
+      sync: () => Promise.resolve(undefined),
+      subscribe(callback) {
+        callback(undefined);
+        update = callback;
+        return () => {};
+      },
+    });
+
+    const element = new CFRender();
+    element.cell = link;
+    let renders = 0;
+    const internals = element as unknown as {
+      _cleanupLinkTargetSubscription(): void;
+      _renderCell(): Promise<void>;
+      _watchLinkTarget(
+        cell: CellHandle,
+        resolved: CellHandle,
+      ): Promise<CellHandle | undefined>;
+    };
+    internals._renderCell = () => {
+      renders++;
+      return Promise.resolve();
+    };
+
+    expect(await internals._watchLinkTarget(link, staleTarget)).toBeUndefined();
+    expect(renders).toBe(0);
+
+    update?.(nextTarget);
+    expect(renders).toBe(1);
+    internals._cleanupLinkTargetSubscription();
+  });
+
+  it("does not subscribe after disconnecting during target sync", async () => {
+    const targetSync = defer<CellHandle | undefined>();
+    const link = createMockCellHandle({ name: "piece link" }, {
+      id: "of:fid1:link-holder" as never,
+      space: "did:key:zSpace" as never,
+      path: ["piece"],
+    }) as CellHandle;
+    const target = createMockCellHandle({ name: "piece" }, {
+      id: "of:fid1:piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    let subscriptions = 0;
+    (link as unknown as {
+      asSchema(): {
+        sync(): Promise<CellHandle | undefined>;
+        subscribe(
+          callback: (value: CellHandle | undefined) => void,
+        ): () => void;
+      };
+    }).asSchema = () => ({
+      sync: () => targetSync.promise,
+      subscribe() {
+        subscriptions++;
+        return () => {};
+      },
+    });
+
+    const element = new CFRender();
+    element.cell = link;
+    const internals = element as unknown as {
+      _watchLinkTarget(
+        cell: CellHandle,
+        resolved: CellHandle,
+      ): Promise<CellHandle | undefined>;
+    };
+
+    const watching = internals._watchLinkTarget(link, target);
+    element.disconnectedCallback();
+    targetSync.resolve(target);
+
+    expect(await watching).toBeUndefined();
+    expect(subscriptions).toBe(0);
+  });
+
+  it("reuses one target sync for overlapping same-cell watches", async () => {
+    const targetSync = defer<CellHandle | undefined>();
+    const link = createMockCellHandle({ name: "piece link" }, {
+      id: "of:fid1:link-holder" as never,
+      space: "did:key:zSpace" as never,
+      path: ["piece"],
+    }) as CellHandle;
+    const target = createMockCellHandle({ name: "piece" }, {
+      id: "of:fid1:piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    let syncs = 0;
+    let subscriptions = 0;
+    (link as unknown as {
+      asSchema(): {
+        sync(): Promise<CellHandle | undefined>;
+        subscribe(
+          callback: (value: CellHandle | undefined) => void,
+        ): () => void;
+      };
+    }).asSchema = () => ({
+      sync() {
+        syncs++;
+        return targetSync.promise;
+      },
+      subscribe(callback) {
+        subscriptions++;
+        callback(target);
+        return () => {};
+      },
+    });
+
+    const element = new CFRender();
+    element.cell = link;
+    const internals = element as unknown as {
+      _cleanupLinkTargetSubscription(): void;
+      _watchLinkTarget(
+        cell: CellHandle,
+        resolved: CellHandle,
+      ): Promise<CellHandle | undefined>;
+    };
+
+    const firstWatch = internals._watchLinkTarget(link, target);
+    const secondWatch = internals._watchLinkTarget(link, target);
+
+    expect(syncs).toBe(1);
+    targetSync.resolve(target);
+    expect(await firstWatch).toBe(target);
+    expect(await secondWatch).toBe(target);
+    expect(subscriptions).toBe(1);
+    internals._cleanupLinkTargetSubscription();
+  });
+
+  it("drops a delayed resolution after switching spaces", async () => {
+    const firstResolution = defer<CellHandle>();
+    const secondResolution = defer<CellHandle>();
+    const sharedId = "of:fid1:shared-piece" as never;
+    const first = createMockCellHandle({ name: "first link" }, {
+      id: sharedId,
+      space: "did:key:zFirstSpace" as never,
+      path: ["piece"],
+    }) as CellHandle;
+    const second = createMockCellHandle({ name: "second link" }, {
+      id: sharedId,
+      space: "did:key:zSecondSpace" as never,
+      path: ["piece"],
+    }) as CellHandle;
+    const firstTarget = createMockCellHandle({ name: "first piece" }, {
+      id: sharedId,
+      space: "did:key:zFirstSpace" as never,
+    }) as CellHandle;
+    const secondTarget = createMockCellHandle({ name: "second piece" }, {
+      id: sharedId,
+      space: "did:key:zSecondSpace" as never,
+    }) as CellHandle;
+    (first as unknown as { resolveAsCell(): Promise<CellHandle> })
+      .resolveAsCell = () => firstResolution.promise;
+    (second as unknown as { resolveAsCell(): Promise<CellHandle> })
+      .resolveAsCell = () => secondResolution.promise;
+    (second as unknown as {
+      asSchema(): {
+        sync(): Promise<CellHandle | undefined>;
+        subscribe(
+          callback: (value: CellHandle | undefined) => void,
+        ): () => void;
+      };
+    }).asSchema = () => ({
+      sync: () => Promise.resolve(secondTarget),
+      subscribe(callback) {
+        callback(secondTarget);
+        return () => {};
+      },
+    });
+
+    const element = new CFRender();
+    const internals = element as unknown as {
+      _containerRef: { value?: HTMLDivElement };
+      _handleRenderError(error: unknown): void;
+      _renderCell(): Promise<void>;
+      _resolvedCell?: CellHandle;
+    };
+    internals._containerRef = { value: {} as HTMLDivElement };
+    internals._handleRenderError = () => {};
+    element.variant = "full";
+
+    element.cell = first;
+    const firstRender = internals._renderCell();
+    element.cell = second;
+    const secondRender = internals._renderCell();
+
+    firstResolution.resolve(firstTarget);
+    await firstRender;
+    expect(internals._resolvedCell).toBeUndefined();
+
+    secondResolution.resolve(secondTarget);
+    await secondRender;
+    expect(internals._resolvedCell).toBe(secondTarget);
+  });
+
+  it("re-resolves a link when its target changes", async () => {
+    const secondResolutionEntered = defer();
+    const secondResolution = defer<CellHandle>();
+    const secondRendered = defer();
+    const link = createMockCellHandle({ name: "piece link" }, {
+      id: "of:fid1:link-holder" as never,
+      space: "did:key:zSpace" as never,
+      path: ["piece"],
+    }) as CellHandle;
+    const firstTarget = createMockCellHandle({ name: "first piece" }, {
+      id: "of:fid1:first-piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    const secondTarget = createMockCellHandle({ name: "second piece" }, {
+      id: "of:fid1:second-piece" as never,
+      space: "did:key:zSpace" as never,
+    }) as CellHandle;
+    (firstTarget as unknown as { sync(): Promise<unknown> }).sync = () =>
+      Promise.resolve();
+    (secondTarget as unknown as { sync(): Promise<unknown> }).sync = () =>
+      Promise.resolve();
+
+    let resolveCount = 0;
+    (link as unknown as { resolveAsCell(): Promise<CellHandle> })
+      .resolveAsCell = () => {
+        resolveCount++;
+        if (resolveCount === 1) return Promise.resolve(firstTarget);
+        secondResolutionEntered.resolve();
+        return secondResolution.promise;
+      };
+    const retargets: Array<
+      (value: CellHandle | undefined) => void
+    > = [];
+    (link as unknown as {
+      asSchema(): {
+        sync(): Promise<CellHandle | undefined>;
+        subscribe(
+          callback: (value: CellHandle | undefined) => void,
+        ): () => void;
+      };
+    }).asSchema = () => ({
+      sync: () =>
+        Promise.resolve(
+          retargets.length === 0 ? firstTarget : secondTarget,
+        ),
+      subscribe(callback) {
+        callback(retargets.length === 0 ? firstTarget : secondTarget);
+        retargets.push(callback);
+        return () => {};
+      },
+    });
+
+    const element = new CFRender();
+    const internals = element as unknown as {
+      _containerRef: { value?: HTMLDivElement };
+      _cleanupLinkTargetSubscription(): void;
+      _renderCell(): Promise<void>;
+      _renderChipDefault(
+        container: HTMLElement,
+        cell: CellHandle,
+      ): () => void;
+      _resolvedCell?: CellHandle;
+      _watchLinkTarget(
+        cell: CellHandle,
+        resolved: CellHandle,
+      ): Promise<CellHandle | undefined>;
+    };
+    internals._containerRef = { value: {} as HTMLDivElement };
+    internals._renderChipDefault = (_container, cell) => {
+      if (cell === secondTarget) secondRendered.resolve();
+      return () => {};
+    };
+    element.variant = "chip";
+    element.cell = link;
+
+    await internals._renderCell();
+    expect(internals._resolvedCell).toBe(firstTarget);
+
+    retargets[0](secondTarget);
+    await secondResolutionEntered.promise;
+    secondResolution.resolve(secondTarget);
+    await secondRendered.promise;
+    expect(internals._resolvedCell).toBe(secondTarget);
+
+    const oldRetarget = retargets[0];
+    internals._cleanupLinkTargetSubscription();
+    await internals._watchLinkTarget(link, secondTarget);
+    expect(retargets).toHaveLength(2);
+    oldRetarget(firstTarget);
+    await Promise.resolve();
+    expect(resolveCount).toBe(2);
+
+    const queuedRetarget = retargets[1];
+    element.disconnectedCallback();
+    queuedRetarget(firstTarget);
+    await Promise.resolve();
+    expect(resolveCount).toBe(2);
   });
 });
 
@@ -261,7 +1016,7 @@ describe("CFRender disconnectedCallback", () => {
 
     // Cell and variant are Lit properties — not cleared by disconnectedCallback
     // (Lit preserves properties across disconnect/reconnect).
-    // The internal _renderingCellId and _hasRendered are reset though.
+    // The internal render generation and _hasRendered are reset though.
     // We verify it doesn't throw and the element is still usable.
     expect(element.cell).toBe(cell);
     expect(element.variant).toBe("chip");
@@ -436,9 +1191,9 @@ describe("CFRender piece context menu", () => {
     }
   });
 
-  it("reports the resolved root when a chip or tile resolved a link", () => {
+  it("reports the resolved root when full rendering resolved a link", () => {
     const element = new CFRender();
-    element.variant = "tile";
+    element.variant = "full";
     element.cell = createMockCellHandle({ name: "link" }, {
       id: "of:fid1:list" as never,
       space: "did:key:zSpace" as never,
@@ -452,6 +1207,6 @@ describe("CFRender piece context menu", () => {
 
     const detail = rightClick(element, contextMenuEvent());
     expect(detail?.pieceId).toBe("of:fid1:tile-piece");
-    expect(detail?.variant).toBe("tile");
+    expect(detail?.variant).toBe("full");
   });
 });

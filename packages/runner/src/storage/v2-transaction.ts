@@ -915,6 +915,31 @@ export class V2StorageTransaction implements IStorageTransaction {
     doc: DocumentEntry;
   };
 
+  /**
+   * Complete the transaction, keeping its result and releasing the state that
+   * only an open transaction needs: the materialized branches, the read and
+   * write activity, and the cached reactivity log. Those are consumed while
+   * the transaction is open — the scheduler takes the reactivity log when the
+   * action that opened the transaction finishes, and the commit path takes the
+   * write details before the result is known. Whatever holds a completed
+   * transaction afterwards, such as a cell bound to it or a cleanup closure
+   * that captured it, would otherwise also hold every address that
+   * transaction read.
+   *
+   * Only a commit that ran ends here. A transaction that never reached storage
+   * — aborted, or rejected by validation — keeps its activity, because the
+   * scheduler retries the action that opened it and re-establishes that
+   * action's dependencies from those reads.
+   */
+  #finish(result: Result<Unit, StorageTransactionFailed>): void {
+    this.#state = { status: "done", result };
+    this.#branches.clear();
+    this.#readActivities.length = 0;
+    this.#writeAttemptLog.length = 0;
+    this.#reactivityLogCache = undefined;
+    this.#lastDocument = undefined;
+  }
+
   constructor(private readonly storage: IStorageManager) {}
 
   setReadOnly(reason = "runtime.readTx()"): void {
@@ -1986,6 +2011,8 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (ready.error) {
       return { error: ready.error };
     }
+    // Aborted before reaching storage, so the activity stays: the scheduler
+    // rebuilds this action's dependencies from it and retries.
     this.#state = {
       status: "done",
       result: { error: TransactionAborted(reason) },
@@ -2022,7 +2049,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       schedulerObservationCommitSpace(this.#schedulerObservation);
     if (!writeSpace) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
-      this.#state = { status: "done", result };
+      this.#finish(result);
       return result;
     }
 
@@ -2040,7 +2067,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       !hasCommitPreconditions && !hasSqliteOps && !hasPreparations
     ) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
-      this.#state = { status: "done", result };
+      this.#finish(result);
       return result;
     }
 
@@ -2049,6 +2076,8 @@ export class V2StorageTransaction implements IStorageTransaction {
       () => this.validate(),
     );
     if (validation.error) {
+      // Rejected before reaching storage, so the activity stays: the scheduler
+      // rebuilds this action's dependencies from it and retries.
       this.#state = {
         status: "done",
         result: { error: validation.error },
@@ -2073,13 +2102,13 @@ export class V2StorageTransaction implements IStorageTransaction {
     this.#state = { status: "pending", promise };
     try {
       const result = await promise;
-      this.#state = { status: "done", result };
+      this.#finish(result);
       return result;
     } catch (error) {
       const result: Result<Unit, StorageTransactionRejected> = {
         error: toStoreError(error),
       };
-      this.#state = { status: "done", result };
+      this.#finish(result);
       return result;
     }
   }
@@ -2112,13 +2141,18 @@ export class V2StorageTransaction implements IStorageTransaction {
 
     if (commits.length === 0) {
       const result = { ok: {} } satisfies Result<Unit, CommitError>;
-      this.#state = { status: "done", result };
+      this.#finish(result);
       return result;
     }
 
     const validation = this.validate();
     if (validation.error) {
-      this.#state = { status: "done", result: { error: validation.error } };
+      // Rejected before reaching storage, so the activity stays: the scheduler
+      // rebuilds this action's dependencies from it and retries.
+      this.#state = {
+        status: "done",
+        result: { error: validation.error },
+      };
       this.rejectNativeCommitPreparations(validation.error);
       return { error: validation.error };
     }
@@ -2127,7 +2161,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     this.#state = { status: "pending", promise };
     try {
       const result = await promise;
-      this.#state = { status: "done", result };
+      this.#finish(result);
       return result;
     } catch (error) {
       // Mirror the single-space path: a rejected commit must still transition
@@ -2136,7 +2170,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       const result: Result<Unit, StorageTransactionRejected> = {
         error: toStoreError(error),
       };
-      this.#state = { status: "done", result };
+      this.#finish(result);
       return result;
     }
   }

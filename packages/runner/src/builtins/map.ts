@@ -319,6 +319,14 @@ export function map(
         },
         fn,
       );
+    const resumePresenceProbeScoped = <T>(fn: () => T): T =>
+      tx.runWithAmbientReadMeta(
+        {
+          ...linkResolutionProbe,
+          ...machineryRead,
+        },
+        fn,
+      );
     // Resume against confirmed state, not the not-yet-loaded value: on the
     // resume reconcile an undefined container is its durable value still
     // streaming in (a map that has run persisted at least []). Reconciling now
@@ -328,7 +336,7 @@ export function map(
     // reconcile, which then no-ops against the durable value.
     if (
       elementAwaitSync &&
-      probeScoped(() => resultWithLog.get()) === undefined
+      resumePresenceProbeScoped(() => resultWithLog.get()) === undefined
     ) {
       // Capture this container: a later row-readiness attempt deliberately
       // clears `result` so its aborted binding is rebuilt, while this async

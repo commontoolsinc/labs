@@ -1,3 +1,8 @@
+import type {
+  FabricRegExp as ApiFabricRegExp,
+  FabricRegExpConstructor as ApiFabricRegExpConstructor,
+} from "@commonfabric/api";
+
 import type { FabricValue } from "@/interface.ts";
 import { BaseFabricPrimitive } from "./BaseFabricPrimitive.ts";
 import { BaseFabricCodec } from "@/codec-common/BaseFabricCodec.ts";
@@ -33,7 +38,8 @@ const DEFAULT_FLAVOR = "es2025";
  * other regex syntaxes in the future.
  * See Section 1.4.1 of the formal spec.
  */
-export class FabricRegExp extends BaseFabricPrimitive {
+export class FabricRegExp extends BaseFabricPrimitive
+  implements ApiFabricRegExp {
   /** The pattern source text. */
   readonly #source: string;
 
@@ -194,3 +200,11 @@ function rejectExtraRegExpProperties(regex: RegExp): void {
     );
   }
 }
+
+// Compile-time check that the exported `FabricRegExp` constructor matches the
+// `FabricRegExpConstructor` declared in `@commonfabric/api`. This catches a
+// declared member that is missing here or has the wrong type. It does NOT
+// catch the other direction: `satisfies` is an assignability check, so a
+// public member on this class that the declaration omits passes silently.
+// Members added here need adding there by hand.
+FabricRegExp satisfies ApiFabricRegExpConstructor;

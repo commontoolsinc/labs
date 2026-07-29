@@ -1,11 +1,10 @@
 import type ts from "typescript";
-import type { JSONSchema } from "@commonfabric/api";
-import { type Mutable } from "@commonfabric/utils/types";
+import type { JSONSchema, MutableJSONSchema } from "@commonfabric/api";
 
 /**
  * JSON Schema object type - mutable version of the Common Fabric JSONSchema interface
  */
-export type SchemaDefinition = Mutable<JSONSchema>;
+export type SchemaDefinition = MutableJSONSchema;
 
 /** Compiler-owned metadata for schema generation, keyed by TypeNode. */
 export interface SchemaHint {

@@ -6,6 +6,7 @@ import {
   FactoryArtifactUnavailableError,
   getPatternIdentityRef,
   getPatternRepository,
+  getPieceSourceRevisions,
   isCell,
   isLink,
   type JSONSchema,
@@ -49,6 +50,7 @@ import {
   resolveDeclaredStreamCapability,
   selectCurrentContainerSchema,
 } from "../src/ops/piece-controller.ts";
+import { readPieceSourceState } from "../src/ops/piece-origin.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase("piece pull materialization");
@@ -76,6 +78,44 @@ function doublePattern(): Pattern {
         module: {
           type: "javascript",
           implementation: (input: number) => input * 2,
+        },
+        inputs: { $alias: { cell: "argument", path: ["input"] } },
+        outputs: { $alias: { partialCause: "output", path: [] } },
+      },
+    ],
+  };
+}
+
+function sourceLessMultiplierPattern(
+  version: string,
+  multiplier: number,
+): Pattern {
+  return {
+    argumentSchema: {
+      type: "object",
+      properties: {
+        input: { type: "number" },
+      },
+      required: ["input"],
+    },
+    resultSchema: {
+      type: "object",
+      properties: {
+        version: { type: "string" },
+        output: { type: "number" },
+      },
+      required: ["version"],
+    },
+    derivedInternalCells: [{ partialCause: "output" }],
+    result: {
+      version,
+      output: { $alias: { partialCause: "output", path: [] } },
+    },
+    nodes: [
+      {
+        module: {
+          type: "javascript",
+          implementation: (input: number) => input * multiplier,
         },
         inputs: { $alias: { cell: "argument", path: ["input"] } },
         outputs: { $alias: { partialCause: "output", path: [] } },
@@ -5207,6 +5247,39 @@ describe("piece pull materialization", () => {
     expect(getPatternRepository(piece)).toBe(repository);
   });
 
+  it("moves a source-less programmatic piece into source history on edit", async () => {
+    const piece = await manager.runPersistent(
+      trustPattern(
+        runtime,
+        sourceLessMultiplierPattern("source-less", 2),
+      ),
+      { input: 5 },
+      "source-less-set-pattern-" + crypto.randomUUID(),
+      { start: true },
+    );
+    const previous = getPatternIdentityRef(piece)!;
+    expect(getPieceSourceRevisions(piece)).toEqual([]);
+
+    const controller = new PieceController(manager, piece);
+    await controller.setPattern(
+      compiledMultiplierProgram("source-backed", 3),
+    );
+
+    expect(
+      getPieceSourceRevisions(piece).map((revision) => revision.operation),
+    ).toEqual(["edit"]);
+    expect((await readPieceSourceState(runtime, piece)).displacedPattern)
+      .toEqual({
+        identity: previous.identity,
+        symbol: previous.symbol,
+        displacedAt: expect.any(Number),
+      });
+    expect(await controller.result.get()).toEqual({
+      version: "source-backed",
+      output: 15,
+    });
+  });
+
   it("persists setPattern replacement by identity for fresh runtime reloads", async () => {
     const repository = "https://github.com/commontoolsinc/labs";
     const firstPattern = await runtime.patternManager.compilePattern(
@@ -6448,7 +6521,7 @@ describe("piece pull materialization", () => {
     }
   });
 
-  it("keeps a committed newer schema after its post-commit failure", async () => {
+  it("accepts a committed newer schema after its post-commit failure", async () => {
     const initialProgram = compiledResultNarrowingProgram(
       "string | number | boolean",
     );
@@ -6509,9 +6582,8 @@ describe("piece pull materialization", () => {
     try {
       const firstUpdate = controller.setPattern(firstProgram);
       await firstRunReturned.promise;
-      await expect(controller.setPattern(winnerProgram)).rejects.toThrow(
-        /injected post-commit failure/,
-      );
+      await expect(controller.setPattern(winnerProgram)).resolves
+        .toBeUndefined();
       expect(getPatternIdentityRef(piece)).toEqual(
         runtime.patternManager.getArtifactEntryRef(winnerPattern),
       );

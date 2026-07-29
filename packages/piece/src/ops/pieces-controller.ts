@@ -1,14 +1,17 @@
 import {
+  applyPieceSourceTransition,
   type Cell,
   entityIdFrom,
   type EnvReader,
   experimentalOptionsFromEnv,
   getPatternIdentityRef,
+  getPieceSourceSnapshot,
   type JSONSchema,
-  type MemorySpace,
   type ModuleByteCache,
   type PatternCoverageCollector,
   type PatternUpdateOutcome,
+  type PieceSourceTransition,
+  preparePieceSourceTransitionBaseline,
   Runtime,
   runtimePresets,
   RuntimeProgram,
@@ -32,31 +35,21 @@ import { homeSchema } from "@commonfabric/home-schemas";
 const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
   Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
 
-// System space-root patterns, served as raw TSX by the toolshed patterns route.
-export const HOME_PATTERN_URL = "/api/patterns/system/home.tsx";
-export const DEFAULT_APP_PATTERN_URL = "/api/patterns/system/default-app.tsx";
+// System space-root pattern URLs and their derivation live in
+// ../system-pattern-url.ts (shared with PieceManager's default-root
+// heal-on-load-failure retry); re-exported here for existing importers.
+import {
+  DEFAULT_APP_PATTERN_URL,
+  deriveSystemPatternUrl,
+  HOME_PATTERN_URL,
+} from "../system-pattern-url.ts";
+export { DEFAULT_APP_PATTERN_URL, deriveSystemPatternUrl, HOME_PATTERN_URL };
 
 // Default roots have a stronger update policy than ordinary pieces: an
 // existing root is reconciled before start, while a new root is compiled from
 // the current source immediately before creation. Keep the runner's watcher,
 // but do not schedule its duplicate fire-and-forget source check.
 const DEFAULT_ROOT_RUN_OPTIONS = { schedulePatternUpdate: false } as const;
-
-/**
- * The official system space-root pattern URL for a space type — the home DID
- * gets home.tsx, every other space gets the default app. This derivation only
- * selects the identity to check; it never proves that a sourceless root tracks
- * that URL. Exact equality with the official content identity supplies
- * that proof below.
- */
-export function deriveSystemPatternUrl(
-  space: MemorySpace,
-  runtime: Runtime,
-): string {
-  return space === runtime.userIdentityDID
-    ? HOME_PATTERN_URL
-    : DEFAULT_APP_PATTERN_URL;
-}
 
 // Same logger as manager.ts's timePiecePhase: timing stats record even while
 // the logger is disabled, so controller phases show up in the load summaries
@@ -129,6 +122,7 @@ async function timePiecesPhase<T>(
 export interface CreatePieceOptions {
   input?: object;
   repository?: string;
+  origin?: string;
   start?: boolean;
 }
 
@@ -157,7 +151,7 @@ export class PiecesController<T = unknown> {
       pattern,
       options.input,
       cause,
-      { repository: options.repository, start },
+      { repository: options.repository, origin: options.origin, start },
     );
     if (!start) {
       await this.#manager.runtime.idle();
@@ -190,6 +184,7 @@ export class PiecesController<T = unknown> {
     return new PieceController(this.#manager, cell);
   }
 
+  /** Return the piece registry, not every stored piece root. */
   async getRegisteredPieces() {
     this.disposeCheck();
     const piecesCell = await this.#manager.getPieceRegistry();
@@ -852,6 +847,24 @@ export class PiecesController<T = unknown> {
     // clobbered by our stale `officialRef`. Returning `false` aborts the write
     // without committing — precedent: pattern-updater's `stillMatches`/
     // `canWrite`. `result.ok === false` (no error) then means "superseded".
+    const sourceSnapshot = getPieceSourceSnapshot(rootToStart);
+    if (sourceSnapshot === undefined) {
+      throw clearError("has no source state to update", migrationError);
+    }
+    const baseline = await preparePieceSourceTransitionBaseline(
+      runtime,
+      rootToStart,
+      sourceSnapshot,
+      { allowUnavailable: true },
+    );
+    const sourceTransition: PieceSourceTransition = {
+      revisionId: crypto.randomUUID(),
+      baseline,
+      timestamp: Date.now(),
+      operation: "origin-update",
+      origin: officialUrlPath,
+      expected: sourceSnapshot,
+    };
     const swapResult = await runtime.editWithRetry((tx) => {
       const rootTx = rootToStart.withTx(tx);
       const currentRef = getPatternIdentityRef(rootTx);
@@ -861,13 +874,19 @@ export class PiecesController<T = unknown> {
       ) {
         return false;
       }
+      applyPieceSourceTransition(
+        runtime,
+        rootToStart,
+        tx,
+        officialRef,
+        sourceTransition,
+      );
       rootTx.setMetaRaw("displacedPattern", {
         identity: pinnedRef.identity,
         symbol: pinnedRef.symbol,
-        displacedAt: Date.now(),
+        displacedAt: sourceTransition.timestamp,
       });
       rootTx.setMetaRaw("patternIdentity", officialRef);
-      setPatternSource(rootToStart, tx, officialUrlPath);
       return true;
     });
     if (swapResult.error) {

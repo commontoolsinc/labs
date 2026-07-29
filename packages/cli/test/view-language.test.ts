@@ -1,35 +1,361 @@
 /**
- * Language selection: `languageForFile` picks a language by extension (and
- * backstops to TypeScript for pipes and unknown files), `distinctLanguages`
- * dedupes the languages a diff touches, and `diffSemanticsFor` composes the diff
- * view's semantic layer from the languages present, scoped to each one's files.
+ * Language selection: declarative metadata covers filenames, aliases, and
+ * shebangs, with plain text when none match. Transformed compiler output selects
+ * TypeScript through a separate path. `distinctLanguages` dedupes the languages
+ * a diff touches, and `diffSemanticsFor` composes the diff view's semantic layer
+ * from the languages present, scoped to each one's files.
  */
-import { assert, assertEquals } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import {
   diffSemanticsFor,
   distinctLanguages,
+  indexLanguagesByName,
   languageForFile,
+  languageForName,
+  languageForSource,
+  languageForTransformedOutput,
+  languageIds,
+  type LanguageMetadata,
+  languageNames,
+  metadataMatchesFilename,
+  renderedLinesFor,
 } from "../lib/view/languages/language.ts";
 import { typeScriptLanguage } from "../lib/view/languages/typescript/language.ts";
 import { markdownLanguage } from "../lib/view/languages/markdown/language.ts";
 import { jsonLanguage } from "../lib/view/languages/json/language.ts";
+import { yamlLanguage } from "../lib/view/languages/yaml/language.ts";
+import { pythonLanguage } from "../lib/view/languages/python/language.ts";
+import { plainTextLanguage } from "../lib/view/languages/plain-text/language.ts";
 import {
   buildDiffDocument,
   type DiffMaps,
   type DiffWorkspace,
 } from "../lib/view/diffdoc.ts";
 import { parseDiff } from "../lib/view/diff.ts";
+import type { Line } from "../lib/view/model.ts";
 
-Deno.test("languageForFile: extensions resolve, and the rest backstops to TS", () => {
+Deno.test("languageForFile: named files resolve and missing names use plain text", () => {
   for (const ts of ["a.ts", "a.tsx", "a.mts", "a.cts", "a.js", "a.jsx"]) {
     assertEquals(languageForFile(ts).id, "typescript", ts);
   }
+  for (const name of ["a.mtsx", "a.ctsx", "a.mjsx", "a.cjsx"]) {
+    assertEquals(languageForFile(name).id, "plain-text", name);
+  }
   assertEquals(languageForFile("README.md").id, "markdown");
   assertEquals(languageForFile("deno.jsonc").id, "json");
-  // No language claims these, so the fallback (TypeScript) resolves them.
-  assertEquals(languageForFile("notes.xyz").id, "typescript");
-  assertEquals(languageForFile(undefined).id, "typescript");
+  assertEquals(languageForFile("workflow.yml").id, "yaml");
+  assertEquals(languageForFile("script.py").id, "python");
+  assertEquals(languageForFile("notes.xyz").id, "plain-text");
+  assertEquals(languageForFile("LICENSE").id, "plain-text");
+  assertEquals(languageForFile(undefined).id, "plain-text");
+  assertEquals(languageForTransformedOutput().id, "typescript");
+});
+
+Deno.test("language metadata matches extensions, exact names, and compound patterns", () => {
+  const metadata: LanguageMetadata = {
+    extensions: [".demo"],
+    filenames: ["BUILD"],
+    filenamePatterns: [/^Dockerfile\..+$/i],
+    aliases: ["example"],
+    interpreters: ["example-runner"],
+  };
+
+  assert(metadataMatchesFilename(metadata, "/repo/source.DEMO"));
+  assert(metadataMatchesFilename(metadata, "/repo/BUILD"));
+  assert(metadataMatchesFilename(metadata, "containers/Dockerfile.x86_64"));
+  assert(metadataMatchesFilename(metadata, "containers/DOCKERFILE.debug"));
+  assert(!metadataMatchesFilename(metadata, "/repo/build"));
+  assert(!metadataMatchesFilename(metadata, "/repo/demo"));
+  assert(!metadataMatchesFilename(metadata, undefined));
+});
+
+Deno.test("languageForFile: named JavaScript uses the TypeScript-family parser", () => {
+  const source = "export const answer = 42;\n";
+  const doc = languageForFile("answer.js").parseDocument(source, "answer.js");
+  assertEquals(doc.text, source);
+  assert(doc.lines[0].spans.some((span) => span.cls === "storageKeyword"));
+});
+
+Deno.test("languageForName: identifiers and aliases resolve explicit overrides", () => {
+  assertEquals(languageForName("typescript"), typeScriptLanguage);
+  assertEquals(languageForName("js"), typeScriptLanguage);
+  assertEquals(languageForName("markdown"), markdownLanguage);
+  assertEquals(languageForName("md"), markdownLanguage);
+  assertEquals(languageForName("json"), jsonLanguage);
+  assertEquals(languageForName("jsonc"), jsonLanguage);
+  assertEquals(languageForName("yaml"), yamlLanguage);
+  assertEquals(languageForName("yml"), yamlLanguage);
+  assertEquals(languageForName("python"), pythonLanguage);
+  assertEquals(languageForName("py"), pythonLanguage);
+  assertEquals(languageForName("plain-text"), plainTextLanguage);
+  assertEquals(languageForName("plaintext"), plainTextLanguage);
+  assertEquals(languageForName("TypeScript"), undefined);
+  assertEquals(languageForName("ruby"), undefined);
+  assertEquals(languageIds(), [
+    "typescript",
+    "markdown",
+    "json",
+    "yaml",
+    "python",
+    "plain-text",
+  ]);
+  assertEquals(languageNames(), [
+    "typescript",
+    "ts",
+    "javascript",
+    "js",
+    "markdown",
+    "md",
+    "json",
+    "jsonc",
+    "yaml",
+    "yml",
+    "python",
+    "py",
+    "plain-text",
+    "text",
+    "plaintext",
+  ]);
+});
+
+Deno.test("language names reject ambiguous identifiers and aliases", () => {
+  const collidingLanguage = {
+    ...markdownLanguage,
+    id: "other-markdown",
+    metadata: {
+      ...markdownLanguage.metadata,
+      aliases: ["typescript"],
+    },
+  };
+  assertThrows(
+    () =>
+      indexLanguagesByName([
+        typeScriptLanguage,
+        collidingLanguage,
+      ]),
+    Error,
+    'Language name "typescript" belongs to both typescript and other-markdown',
+  );
+});
+
+Deno.test("languageForSource: filenames precede direct and env shebangs", () => {
+  assertEquals(
+    languageForSource(
+      "tool",
+      "#!/usr/bin/python3.12\nprint('selected from a direct shebang')\n",
+    ),
+    pythonLanguage,
+  );
+  assertEquals(
+    languageForSource(
+      undefined,
+      "#!/usr/bin/env -S deno run --allow-read\nconsole.log('deno');\n",
+    ),
+    typeScriptLanguage,
+  );
+  for (
+    const shebang of [
+      '#!/usr/bin/python3 "unterminated',
+      "#!/usr/bin/python3 trailing\\",
+    ]
+  ) {
+    assertEquals(
+      languageForSource("tool", `${shebang}\n`),
+      pythonLanguage,
+      shebang,
+    );
+  }
+  assertEquals(
+    languageForSource(
+      "tool",
+      "#!/usr/bin/env -u PYTHONPATH python3\nprint('env options');\n",
+    ),
+    pythonLanguage,
+  );
+  for (
+    const shebang of [
+      "#!/usr/bin/env -v CF_VIEW_REVIEW=1 python3",
+      "#!/usr/bin/env -- CF_VIEW_REVIEW=1 python3",
+      "#!/usr/bin/env --unset PYTHONPATH python3",
+      "#!/usr/bin/env -iu PYTHONPATH python3",
+      "#!/usr/bin/env -iP /usr/bin python3",
+      "#!/usr/bin/env -iC /tmp python3",
+      "#!/usr/bin/env -iuPYTHONPATH python3",
+      "#!/usr/bin/env -S CF_VIEW_REVIEW=1 python3 -u",
+      '#!/usr/bin/env -S CF_VIEW_REVIEW="quoted value" python3 -u',
+      "#!/usr/bin/env -S -u PYTHONPATH python3",
+      "#!/usr/bin/env -S -iu PYTHONPATH python3",
+      "#!/usr/bin/env -S -iP /usr/bin python3",
+      "#!/usr/bin/env -S -iC /tmp python3",
+      "#!/usr/bin/env -S -iuPYTHONPATH python3",
+      "#!/usr/bin/env -S -- python3",
+      "#!/usr/bin/env -S -- CF_VIEW_REVIEW=1 python3",
+      "#!/usr/bin/env -S -S python3",
+      '#!/usr/bin/env -S -S "" python3',
+      '#!/usr/bin/env -S -S "-u" PYTHONPATH python3',
+      '#!/usr/bin/env -S -S "--" CF_VIEW_REVIEW=1 python3',
+      '#!/usr/bin/env -S -S "python3 -u"',
+      '#!/usr/bin/env -S -S "CF_VIEW_REVIEW=1" python3',
+      '#!/usr/bin/env -S --split-string "python3 -u"',
+      "#!/usr/bin/env -S --split-string=python3",
+      '#!/usr/bin/env -S --split-string="python3 -u"',
+      '#!/usr/bin/env -S --split-string="CF_VIEW_REVIEW=1" python3',
+      "#!/usr/bin/env -S -vS python3",
+      "#!/usr/bin/env -S -vSpython3",
+      '#!/usr/bin/env -S -vS"python3 -u"',
+      "#!/usr/bin/env -S -S#ignored python3",
+      "#!/usr/bin/env -S --split-string=#ignored python3",
+      "#!/usr/bin/env -S CF=has\\\\backslash python3",
+      '#!/usr/bin/env -S "CF=has\\$dollar" python3',
+      "#!/usr/bin/env -S 'CF=has\\ttext' python3",
+      "#!/usr/bin/env -S CF=one\\ two python3",
+      "#!/usr/bin/env -S CF=one\\\ttwo python3",
+      '#!/usr/bin/env -S "CF=one\\ two" python3',
+      "#!/usr/bin/env -S CF=one\\_python3",
+      '#!/usr/bin/env -S "CF=one\\_two" python3',
+      "#!/usr/bin/env -S ${CF_VIEW_BIN}/python3",
+      '#!/usr/bin/env -S "${CF_VIEW_BIN}/python3"',
+      "#!/usr/bin/env -S '$CF_VIEW_BIN/python3'",
+      "#!/usr/bin/env -S python3\\c ignored",
+      "#!/usr/bin/env -S python3 # ignored",
+      "#!/usr/bin/env --split-string python3 -u",
+      "#!/usr/bin/env --split-string=CF_VIEW_REVIEW=1 python3 -u",
+      "#!/usr/bin/env -vS python3 -S",
+      "#!/usr/bin/env -vSpython3 -S",
+      "#!/usr/bin/env python3 --split-string=node",
+    ]
+  ) {
+    assertEquals(
+      languageForSource("tool", `${shebang}\nprint('env split string');\n`),
+      pythonLanguage,
+      shebang,
+    );
+  }
+  const deeplyNestedSplit = "--split-string=".repeat(20_000);
+  for (const command of ["python3", "${CF_VIEW_BIN}/python3"]) {
+    assertEquals(
+      languageForSource(
+        "tool",
+        `#!/usr/bin/env -S ${deeplyNestedSplit}${command}\n`,
+      ),
+      pythonLanguage,
+    );
+  }
+  for (const interpreter of ["deno", "node", "nodejs", "bun"]) {
+    assertEquals(
+      languageForSource(
+        "tool",
+        `#!/usr/bin/env ${interpreter}\nconsole.log('selected');\n`,
+      ),
+      typeScriptLanguage,
+      interpreter,
+    );
+  }
+  assertEquals(
+    languageForSource(
+      "notes.md",
+      "#!/usr/bin/env python3\n# Markdown filename wins\n",
+    ),
+    markdownLanguage,
+  );
+  assertEquals(
+    languageForSource(
+      "notes.txt",
+      "#!/usr/bin/env python3\nprint('plain-text filename wins');\n",
+    ),
+    plainTextLanguage,
+  );
+  assertEquals(
+    languageForSource(
+      "LICENSE",
+      "#!/usr/bin/env python3\nprint('exact filename wins');\n",
+    ),
+    plainTextLanguage,
+  );
+  assertEquals(
+    languageForSource("tool", "#!/usr/bin/env bash\necho plain\n"),
+    plainTextLanguage,
+  );
+});
+
+Deno.test("languageForSource: malformed and option-only shebangs fall back safely", () => {
+  assertEquals(languageForSource("tool", "#!   \n"), plainTextLanguage);
+  assertEquals(
+    languageForSource("tool", "#!/usr/bin/env -- python3\n"),
+    pythonLanguage,
+  );
+  assertEquals(
+    languageForSource("tool", "#!/usr/bin/env --\n"),
+    plainTextLanguage,
+  );
+  assertEquals(
+    languageForSource("tool", "#!/usr/bin/env\n"),
+    plainTextLanguage,
+  );
+  assertEquals(
+    languageForSource("tool", "#!/usr/bin/env -S\n"),
+    plainTextLanguage,
+  );
+  assertEquals(
+    languageForSource("tool", "#!/usr/bin/env -S --\n"),
+    plainTextLanguage,
+  );
+  assertEquals(
+    languageForSource("tool", "#!/usr/bin/env -u PATH\n"),
+    plainTextLanguage,
+  );
+  for (
+    const shebang of [
+      '#!/usr/bin/env python3 "unterminated',
+      "#!/usr/bin/env python3 argument\\",
+    ]
+  ) {
+    assertEquals(
+      languageForSource("tool", `${shebang}\n`),
+      pythonLanguage,
+      shebang,
+    );
+  }
+  for (
+    const shebang of [
+      '#!/usr/bin/env "python3"',
+      "#!/usr/bin/env py\\thon3",
+      "#!/usr/bin/env python3\\x",
+      '#!/usr/bin/env "python3\\x"',
+      "#!/usr/bin/env python3\\",
+      '#!/usr/bin/env "python3',
+      "#!/usr/bin/env 'python3",
+      '#!/usr/bin/env -S "python3',
+      "#!/usr/bin/env -S -u",
+      "#!/usr/bin/env -S -S",
+      "#!/usr/bin/env -S -vS",
+      "#!/usr/bin/env -S -S '\"python3'",
+      "#!/usr/bin/env -S py\\thon3",
+      '#!/usr/bin/env -S "py\\thon3"',
+      "#!/usr/bin/env -S python3\\x",
+      '#!/usr/bin/env -S "python3\\c"',
+      "#!/usr/bin/env -S # python3",
+      "#!/usr/bin/env -S -S#/usr/bin/python3",
+      "#!/usr/bin/env -S --split-string=#/usr/bin/python3",
+      "#!/usr/bin/env -S $CF_VIEW_BIN/python3",
+      "#!/usr/bin/env -S $*/python3",
+      "#!/usr/bin/env -S ${}/python3",
+      "#!/usr/bin/env -S ${1}/python3",
+      "#!/usr/bin/env -S ${A-B}/python3",
+      "#!/usr/bin/env -S ${CF_VIEW_BIN/python3",
+      '#!/usr/bin/env -S "$CF_VIEW_BIN/python3"',
+      "#!/usr/bin/env CF_VIEW_REVIEW=1 -S python3",
+      "#!/usr/bin/env -S CF_VIEW_REVIEW=1 -S python3",
+      '#!/usr/bin/env -S -S "CF_VIEW_REVIEW=1" -S python3',
+    ]
+  ) {
+    assertEquals(
+      languageForSource("tool", `${shebang}\n`),
+      plainTextLanguage,
+      shebang,
+    );
+  }
 });
 
 Deno.test("distinctLanguages: dedupes in first-seen order", () => {
@@ -38,9 +364,68 @@ Deno.test("distinctLanguages: dedupes in first-seen order", () => {
     "b.ts",
     "c.md",
     "d.json",
+    "e.yaml",
+    "f.py",
+    "LICENSE",
     undefined,
   ]);
-  assertEquals(languages.map((l) => l.id), ["typescript", "markdown", "json"]);
+  assertEquals(
+    languages.map((l) => l.id),
+    ["typescript", "markdown", "json", "yaml", "python", "plain-text"],
+  );
+});
+
+Deno.test("renderedLinesFor rejects a renderer that changes line topology", () => {
+  assertEquals(
+    renderedLinesFor(plainTextLanguage, "plain", "notes.txt"),
+    undefined,
+  );
+  assertThrows(
+    () =>
+      renderedLinesFor(
+        {
+          ...markdownLanguage,
+          id: "malformed",
+          renderLines: () => [],
+        },
+        "first\nsecond",
+        "notes.md",
+      ),
+    Error,
+    "malformed rendered 0 lines for 2 source lines",
+  );
+});
+
+Deno.test("renderedLinesFor rejects malformed display lines", () => {
+  const malformed = (renderLines: () => Line[]) => ({
+    ...markdownLanguage,
+    id: "malformed",
+    renderLines,
+  });
+  assertThrows(
+    () =>
+      renderedLinesFor(
+        malformed(() => [{
+          text: "first\nsecond",
+          spans: [{ col: 0, text: "first\nsecond", cls: "plain" }],
+        }]),
+        "source",
+      ),
+    Error,
+    "malformed rendered a line break inside display line 1",
+  );
+  assertThrows(
+    () =>
+      renderedLinesFor(
+        malformed(() => [{
+          text: "visible",
+          spans: [{ col: 0, text: "different", cls: "plain" }],
+        }]),
+        "source",
+      ),
+    Error,
+    "malformed rendered spans that do not reconstruct display line 1",
+  );
 });
 
 const FILE_TEXT = `export function double(n: number): number {
@@ -102,9 +487,18 @@ Deno.test("diffSemanticsFor: TypeScript answers over its own files in the diff",
     // Languages without a semantic layer contribute none, so a diff of only
     // those resolves to no service.
     assertEquals(
-      diffSemanticsFor([markdownLanguage, jsonLanguage], DIFF, maps, {
-        cwd: root,
-      }),
+      diffSemanticsFor(
+        [
+          markdownLanguage,
+          jsonLanguage,
+          yamlLanguage,
+          pythonLanguage,
+          plainTextLanguage,
+        ],
+        DIFF,
+        maps,
+        { cwd: root },
+      ),
       undefined,
     );
   } finally {
@@ -131,6 +525,59 @@ Deno.test("typeScriptLanguage exposes both semantic services", () => {
   } finally {
     done();
   }
+});
+
+Deno.test("typeScriptLanguage identifies edits confined to quoted string contents", () => {
+  const highlightLocally = typeScriptLanguage.highlightDiffLineEditLocally!;
+  const stringLine = typeScriptLanguage.highlightLines(
+    '  "AAHED",',
+    "words.ts",
+  )[0];
+  assert(
+    highlightLocally(stringLine, '  "AAHEDS",'),
+    "an insertion before the unchanged closing quote stays within one string",
+  );
+  const contextualBefore = [
+    "const value = {",
+    '  label: "A", nested: [true],',
+    "};",
+  ].join("\n");
+  const contextualAfter = contextualBefore.replace('"A"', '"A😀"');
+  assertEquals(
+    highlightLocally(
+      typeScriptLanguage.highlightLines(contextualBefore, "object.ts")[1],
+      '  label: "A😀", nested: [true],',
+    ),
+    typeScriptLanguage.highlightLines(contextualAfter, "object.ts")[1],
+    "other token classes, bracket depths, and Unicode columns stay unchanged",
+  );
+  assertEquals(
+    highlightLocally(stringLine, '  "AAHED\\S",'),
+    null,
+    "an escape change can alter how the rest of the line is tokenised",
+  );
+  const escapedLine = typeScriptLanguage.highlightLines(
+    String.raw`const value = "a\"b";`,
+    "escaped.ts",
+  )[0];
+  assertEquals(
+    highlightLocally(
+      escapedLine,
+      String.raw`const value = "ax\"b";`,
+    ),
+    null,
+    "an existing escape can interact with an adjacent edit",
+  );
+
+  const templateLine = typeScriptLanguage.highlightLines(
+    "const value = `\nbefore\n`;\n",
+    "template.ts",
+  )[1];
+  assertEquals(
+    highlightLocally(templateLine, "after"),
+    null,
+    "template contents retain state from an earlier line",
+  );
 });
 
 Deno.test("diffSemanticsFor: a language with no matching files is skipped", () => {

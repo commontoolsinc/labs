@@ -68,6 +68,24 @@ export default pattern<PatternState>((state) => {
 });
 `;
 
+const FOLLOWED_SOURCE_V1 = `import { pattern } from "commonfabric";
+
+interface PatternState {
+  seed?: string;
+}
+
+export default pattern<PatternState>(() => ({ version: "current" }));
+`;
+
+const FOLLOWED_SOURCE_V2 = `import { pattern } from "commonfabric";
+
+interface PatternState {
+  seed?: number;
+}
+
+export default pattern<PatternState>(() => ({ version: "candidate" }));
+`;
+
 describe("RuntimeClient", () => {
   describe("lifecycle", () => {
     it("initializes and reaches ready state", async () => {
@@ -406,15 +424,145 @@ describe("RuntimeClient", () => {
       assertEquals(source.space, session.space);
       assertExists(source.pattern);
       // A piece created from a program records no origin: nothing supplies new
-      // code for it.
+      // code for it. Its first exact source remains available as detached
+      // history.
       assertEquals(source.origin, undefined);
       // Its authored source is retained in its own space, entry file first.
       assertExists(source.entry);
       assertEquals(source.files[0].name, source.entry);
       assertEquals(
+        source.history.map((revision) => revision.operation),
+        ["create"],
+      );
+      assertEquals(
         source.files.some((file) => file.contents.includes("home")),
         true,
       );
+    });
+
+    it("detaches a followed root through the runtime-client protocol", async () => {
+      const session = await createTestSession();
+      await using rt = await createRuntimeClient(session);
+      const root = await rt.getSpaceRootPattern(session.space);
+      const before = await rt.getPieceSource(root.id(), session.space);
+      assertExists(before.origin);
+
+      const response = await rt.updatePieceSource(
+        root.id(),
+        session.space,
+        { kind: "detach" },
+      );
+
+      assertEquals(response.compatibilityWarning, undefined);
+      assertEquals(response.source.origin, undefined);
+      assertEquals(
+        response.source.pattern?.identity,
+        before.pattern?.identity,
+      );
+      assertEquals(
+        response.source.history.map((revision) => revision.operation),
+        ["baseline", "detach"],
+      );
+    });
+
+    it("confirms an incompatible followed source with a one-use token", async () => {
+      let servedSource = FOLLOWED_SOURCE_V1;
+      const sourceServer = Deno.serve(
+        {
+          hostname: "127.0.0.1",
+          port: 0,
+          onListen: () => {},
+        },
+        () =>
+          new Response(servedSource, {
+            headers: { "content-type": "text/typescript-jsx" },
+          }),
+      );
+      const address = sourceServer.addr as Deno.NetAddr;
+      const sourceUrl = new URL(
+        `http://${address.hostname}:${address.port}/followed.tsx`,
+      );
+
+      try {
+        const session = await createTestSession();
+        await using rt = await createRuntimeClient(session);
+        await assertRejects(
+          () =>
+            rt.createPage(
+              new URL("data:text/typescript,export%20default%2042"),
+              session.space,
+            ),
+          Error,
+          "Piece source URL must use HTTP or HTTPS",
+        );
+        const page = await rt.createPage(sourceUrl, session.space, {
+          argument: {},
+          run: true,
+        });
+        const followed = await rt.getPieceSource(page.id(), session.space);
+        assertEquals(followed.origin?.url, sourceUrl.href);
+
+        const detached = await rt.updatePieceSource(
+          page.id(),
+          session.space,
+          { kind: "detach" },
+        );
+        const followedRevision = detached.source.history.find((revision) =>
+          revision.origin?.url === sourceUrl.href
+        );
+        assertExists(followedRevision);
+        servedSource = FOLLOWED_SOURCE_V2;
+        const action = {
+          kind: "follow" as const,
+          revisionId: followedRevision.revisionId,
+        };
+
+        const warning = await rt.updatePieceSource(
+          page.id(),
+          session.space,
+          action,
+        );
+        assertExists(warning.compatibilityWarning);
+        assertExists(warning.confirmationToken);
+
+        await assertRejects(
+          () =>
+            rt.updatePieceSource(page.id(), session.space, action, {
+              confirmationToken: "",
+            }),
+          Error,
+          "confirmationToken must be a non-empty string",
+        );
+        await assertRejects(
+          () =>
+            rt.updatePieceSource(page.id(), session.space, action, {
+              confirmationToken: 42,
+            } as unknown as { confirmationToken: string }),
+          Error,
+          "confirmationToken must be a non-empty string",
+        );
+
+        const applied = await rt.updatePieceSource(
+          page.id(),
+          session.space,
+          action,
+          { confirmationToken: warning.confirmationToken },
+        );
+        assertEquals(applied.compatibilityWarning, undefined);
+        assertEquals(applied.confirmationToken, undefined);
+        assertEquals(applied.source.origin?.url, sourceUrl.href);
+
+        await assertRejects(
+          () =>
+            rt.updatePieceSource(page.id(), session.space, action, {
+              confirmationToken: warning.confirmationToken,
+            }),
+          Error,
+          "compatibility confirmation is no longer valid",
+        );
+      } finally {
+        await sourceServer.shutdown();
+      }
     });
 
     it("retrieves a page with its result schema, including UI", async () => {

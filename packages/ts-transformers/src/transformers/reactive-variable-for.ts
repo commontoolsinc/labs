@@ -13,6 +13,10 @@ import {
   isCellLikeType,
   isReactiveValueExpression,
 } from "../ast/mod.ts";
+import {
+  SYNTHETIC_HANDLER_HOIST_PREFIX,
+  SYNTHETIC_LIFT_HOIST_PREFIX,
+} from "../ast/call-kind.ts";
 import { HelpersOnlyTransformer, TransformationContext } from "../core/mod.ts";
 import { unwrapExpression } from "../utils/expression.ts";
 import { isBrandedCellType } from "./cell-type.ts";
@@ -775,6 +779,24 @@ function shouldPreserveStructuralCallArgumentReferences(
   call: ts.CallExpression,
   context: TransformationContext,
 ): boolean {
+  const callKind = detectCallKind(call, context.checker);
+  const callee = unwrapExpression(call.expression);
+  const isSyntheticAppliedBuilder = ts.isIdentifier(callee) &&
+    (
+      callee.text.startsWith(SYNTHETIC_LIFT_HOIST_PREFIX) ||
+      callee.text.startsWith(SYNTHETIC_HANDLER_HOIST_PREFIX)
+    );
+  if (
+    callKind?.kind === "lift-applied" ||
+    (
+      isSyntheticAppliedBuilder &&
+      callKind?.kind === "builder" &&
+      (callKind.builderName === "lift" || callKind.builderName === "handler")
+    )
+  ) {
+    return true;
+  }
+
   return isPatternFactoryCalleeExpression(
     call.expression,
     context.checker,

@@ -1,6 +1,7 @@
 {
   "name": "@commonfabric/content-hash",
   "imports": {
+    // Dependency guide: ../../docs/development/DEPENDENCIES.md
     "@/": "./src/"
   },
   "tasks": {

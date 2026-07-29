@@ -51,6 +51,10 @@ export type {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "./storage/interface.ts";
+export type {
+  EntityIdListOptions,
+  EntityIdListResult,
+} from "@commonfabric/memory/v2";
 export {
   debugTransactionWrites,
   formatTransactionSummary,
@@ -121,14 +125,23 @@ export {
   PatternUpdater,
 } from "./pattern-updater.ts";
 export {
+  applyPieceSourceTransition,
   asPatternIdentityRef,
   extractDefaultValues,
   getPatternIdentityRef,
   getPatternRepository,
   getPatternSetupIdentityRef,
   getPatternSource,
+  getPieceSourceRevisions,
+  getPieceSourceSnapshot,
   mergeSchemaDefaults,
   patternIdentityKey,
+  type PieceSourceRevision,
+  type PieceSourceRevisionOperation,
+  type PieceSourceSnapshot,
+  type PieceSourceTransition,
+  type PieceSourceTransitionBaseline,
+  preparePieceSourceTransitionBaseline,
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
   setPatternRepository,
@@ -174,10 +187,10 @@ export {
   isStreamValue,
   type JSONObject,
   type JSONSchema,
-  type JSONSchemaObjMutable,
   type JSONValue,
   type Module,
   type ModuleFactory,
+  type MutableJSONSchemaObj,
   NAME,
   type NodeFactory,
   OAuth2TokenSchema,
