@@ -99,11 +99,37 @@ precisely the foundation those need.
    (**the C1.5a/C2.5 RANK-DIAL enablement question — owner-gated per
    CA4; 14/15 fixture offenders classify claim-ready at user rank
    with the dial on**), lease-fence ×62 transients, two singletons.
-   REMAINING BUILD: R5 brokers `llm`/`sqliteQuery`, descriptors, R13
-   `wish`, sqlite commit path per D2 — the effect rows no relabel can
-   serve. Gate unchanged: inventory empty or per-action-gated — the
-   computation side now IS per-action-gated (on the rank dials);
-   the effect rows are the open build.
+   REMAINING BUILD — **now the whole of step 3, and the next build to
+   start** (the computation side closed 2026-07-28, see the §5g note
+   below): the R5/R13 effect rows, which no relabel and no rank dial can
+   serve. Priority is **crossing-weighted per CP10** — a mid-chain
+   unservable strands everything downstream of it, so it outranks a leaf
+   with higher raw incidence. The worklist, from the R5 register row
+   (context-lattice-execution.md §8 R5) and R13:
+   1. **Broker implementations** for the effect builtins that have none:
+      `llm`, `sqliteQuery`. (`streamData` was the third; P2.0 corrected
+      its kind to `isEffect: true`, pinned by
+      `builtin-effect-registry.test.ts`.)
+   2. **W2.15-shape descriptors** for computation builtins that lack
+      them: `llmDialog` (CONFIRMED a computation — CP6's egress claim was
+      REFUTED, it orchestrates effect-classified `llm` nodes with no
+      direct egress of its own), `compileAndRun`, `sqliteDatabase`,
+      `navigateTo`, `inspectConfLabel`.
+   3. **R13 `wish`** — static identity, no descriptor; shape decided by
+      the resolver contract (plan W2.15b). Measured ×4 in the flagship
+      fixture, so a real hole rather than a corner.
+   4. **The served sqlite-op commit path per D2** (routing-layer
+      lane-scope admission + row-label re-derivation). D2 says BUILD it;
+      the permanent-ruling alternative was rejected because CP21 shows
+      the required static detectability is structurally absent.
+   Why this is the right next build and not more computation coverage:
+   README §1 (2026-07-28) records server-side authority and quota over
+   effects as a GOAL of the move rather than deferred hardening, and
+   notes these calls already transit our server — so this row
+   consolidates control we are already paying for. Gate unchanged:
+   inventory empty or per-action-gated — the computation side now IS
+   per-action-gated (on the rank dials); the effect rows are the open
+   build.
    ALSO CLOSED with the same runs: §5d residual (a) — all 55
    demand→wave trigger overrides were `closure-growth`+`closure-shrink`
    composites (the shrink genuinely needs the full re-walk with
@@ -1437,10 +1463,19 @@ arm's residual 2 are.
    enable a configuration that is inert at best; per the cohort gate it
    would also make user lanes un-openable in exactly the deployments
    worth measuring.
-2. **R7 — DONE (see the fix section above); the
-   `dynamic-write-outside-static-surface` ×12 offender is what remains
-   undiagnosed at this layer.** It survives both scoped ranks and is the
-   last live unserved class the rank dials do not explain.
+2. **R7 — DONE (see the fix section above). The next BUILD is the R5/R13
+   effect rows** — the worklist is in §0 step 3, crossing-weighted per
+   CP10. That is where the remaining value is: the computation side is
+   closed at session rank, and README §1 records effect authority/quota
+   as a goal of the move rather than deferred hardening.
+   Beside it, one undiagnosed item at this layer:
+   `dynamic-write-outside-static-surface` ×12, which survives both scoped
+   ranks and is the last live unserved class the rank dials do not
+   explain. **Diagnose it only after checking whether P3 deletes it** —
+   it is a §4 output-widening artifact whose entire purpose is to keep a
+   CLIENT reader correct, so a passive client may remove the requirement
+   rather than the fix. Repairing something we are about to delete is the
+   specific waste this ordering avoids.
 3. **Build the client-side negotiation path** (shell/runner) with an
    F5-style red-first env-bridge gate asserting the subcapability
    negotiates END TO END from the dials alone. This is the one item
@@ -1482,7 +1517,7 @@ failures at clean HEAD** with no local changes applied, and 0/6 across
 two quiet 3-run A/B halves. It is load-sensitive and pre-existing, not
 caused by anything here; worth its own barrier/timeout fix.
 
-## 7. Owner decisions — RESOLVED 2026-07-26
+## 7. Owner decisions — RESOLVED 2026-07-26 (D1-D7); amended 2026-07-28 (D8-D10)
 
 Recorded from the owner's "build all of D" directive. Where the panel
 recommended, the recommendation is adopted; the genuinely open calls
@@ -1533,3 +1568,34 @@ that consumes them starts building.
    Rationale: the P6 bar is non-negotiable by this plan's own language;
    a pre-ratified session-lane cold-start budget would hollow it out.
    Conditional: engages only if the P6 k∈{3,10} gate actually fails.
+
+8. **D8 — compute centralization: ACCEPTED, deliberately.** N clients
+   executing the whole graph is distributed compute that is free to us;
+   server-primary execution moves it onto infrastructure we pay for and
+   must scale. That bill is the price of the trust asymmetry and of
+   removing races, and it is not to be re-litigated when it arrives.
+   Obligation attached: any phase that raises it says so with numbers.
+   Full statement and mechanisms in
+   [README §1](README.md#1-summary).
+9. **D9 — the trust model is a GOAL, present tense.** Moving execution
+   server-side is what lets the system treat the CLIENT AS LESS TRUSTED.
+   What the server computed is what downstream integrity guarantees may
+   be built on; the client's copy is display state. This upgrades the
+   README's earlier "eventual side benefit" framing. Corollary: holding
+   authority and quota over effect builtins (`llm`, `sqliteQuery`,
+   egress) server-side is a REASON to move rather than deferred
+   hardening — and largely not a new cost, since those calls already
+   transit our server (#2659, the §B.6 egress broker). This is what makes
+   the R5/R13 rows in §0 step 3 the next build.
+10. **D10 — speculation is FOR interaction latency, and nothing else.**
+    The acceptance property is an immediately responsive UI — tab
+    switches, opening a piece, typing — which is explicitly allowed to
+    render GAPS for values the server has not delivered yet and fill them
+    in on arrival. Speculation is never for correctness and never
+    load-bearing for convergence; D5's hold-never-flicker rule governs
+    divergence. This is what makes "client execution is purely
+    speculative" an end state distinct from Approach D (the client still
+    computes, it just never commits), and it sets the bar at FAST first
+    paint with gaps rather than the zero-execution first paint README
+    §B.9 reserves for D. Full statement in
+    [README §4 Q3](README.md#4-the-four-design-questions).

@@ -60,12 +60,42 @@ capability-compatible clients as trusted participants; a required handshake
 rejects clients that do not understand the authority protocol. Later server
 admission and CFC work may make the split adversarially enforceable.
 
-A third motivation joins races and cost: **trust asymmetry** — the server is
-more trustworthy than any client, so executor-computed results can eventually
-form the basis for downstream integrity guarantees. In v1, however, the
-important identity fact is narrower and concrete: each server execution is
-attributable as `onBehalfOf` an authenticated user. A future delegated user
-key can strengthen that authorization without changing the execution model.
+A third motivation joins races and cost: **trust asymmetry**, and it is a
+goal in its own right rather than an eventual side benefit. The server is
+more trustworthy than any client, and moving execution there is precisely
+what lets the system **treat the client as less trusted** (owner,
+2026-07-28). In v1 the concrete identity fact is still narrow — each server
+execution is attributable as `onBehalfOf` an authenticated user, and a
+future delegated user key strengthens that authorization without changing
+the execution model — but the direction is settled: what the server
+computed is what downstream integrity guarantees may be built on, and the
+client's copy is display state.
+
+**The accepted trade: compute centralizes.** Today N clients each execute
+the whole graph, and that compute is distributed and free to us.
+Server-primary execution moves it onto infrastructure we pay for and must
+scale. §B.9's per-space model is the static picture; the measured
+arbitration growth during the transition is the dynamic one (client-
+passivity §5g: on the flagship product, accepted attempts and claimed
+conflicts roughly double while both sides still execute). **This cost is
+accepted deliberately** (owner, 2026-07-28) — it buys the trust asymmetry
+above and the removal of races, and it is not to be re-litigated when the
+bill arrives. What it does obligate is honesty about where the cost lands:
+the pool's resource caps (§6.6), hibernation (§6.5) and the demand model
+(§6.3) are what keep it bounded, and any phase that raises it should say so
+with numbers rather than discover it in production.
+
+**Effects are the clearest case for the move, not the hardest.** Holding
+authority and quota over effect builtins (`llm`, `sqliteQuery`, egress)
+server-side is a GOAL of this design, not deferred hardening (owner,
+2026-07-28): those decisions belong where they can actually be enforced,
+and a client that can be told "no" is a client that can be trusted less.
+The apparent new cost is largely illusory — these calls already transit our
+server today (per-space LLM throttling #2659; the host egress broker,
+§B.6) — so moving the *execution* alongside them consolidates control
+rather than adding a hop. G12's durable quotas, ledger and circuit breakers
+remain the build; what this records is that they are a REASON to move, not
+a tax on having moved.
 
 Four approaches are explored in depth:
 
@@ -415,6 +445,20 @@ approach comparison honest.
   reconciled?** Nothing (A, D) / claimed-action overlay reconciled by an
   explicit input basis and settlement acknowledgement (B) / handlers +
   derived, reconciled by event acks (C).
+  **What speculation is FOR — interaction latency, and nothing else**
+  (owner, 2026-07-28). The acceptance property is that the UI responds
+  immediately to user action — switching a tab, opening a piece, typing —
+  and it is explicitly allowed to render GAPS for values the server has not
+  delivered yet and fill them in as they arrive. Speculation is never for
+  correctness and never load-bearing for convergence: a value the client
+  computed and the server has not confirmed is display state, and D5's
+  hold-never-flicker rule (client-passivity §7) governs what the user sees
+  when the two differ. This is what makes "client execution is purely
+  speculative" a coherent end state distinct from D — the client still
+  computes, it just never commits. Note the bar this sets is *fast* first
+  paint with gaps, NOT the zero-execution first paint §B.9 says would
+  require D/projector output; the two are compatible, and only the former
+  is required here.
 - **Q4 — Executor placement and isolation:** none (status quo) / worker
   thread per active branch/space co-located with the memory engine (§6.1) /
   subprocess
