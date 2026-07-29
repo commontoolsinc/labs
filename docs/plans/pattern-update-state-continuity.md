@@ -434,20 +434,49 @@ exactly what a migrated-forward database no longer holds.
       (`home.test.tsx` instantiates `Home({})` and drives it with
       `action()`/`assert()`), so the state they produce is real pattern state
       written through real handlers.
-- [ ] Capture on identity change, in the post-merge job, committed — not
-      uploaded as an artifact (see the decision above).
-- [ ] Retention, if any, argued as a bound on CHECKOUT size rather than
-      history, and still structurally unable to reach `pinned/`.
+- [ ] Capture on identity change, committed — not uploaded as an artifact
+      (see the decision above).
+- [ ] Replay the current pattern against EVERY prior vintage, not just the
+      newest. Shard when the corpus makes it slow; `pattern-compat`'s 4-way
+      split is the precedent.
+- [ ] Retention, if any, weighed as LOST COVERAGE against working-tree disk —
+      not applied as housekeeping, and still structurally unable to reach
+      `pinned/`.
 
 Gate: a vintage contains data a change can strand, so stage 5's value
-comparison has something to compare.
+comparison has something to compare, and every change is checked against every
+world ever captured.
 
-**Open, and a real fork:** what the replay applies to a test-populated vintage.
-Applying today's TEST pattern validates the whole graph in one step and is
-simplest, but a changed test file then muddies "the pattern failed to upgrade"
-with "the test changed". Applying today's PATTERN to the inner root keeps the
-question clean but requires addressing a cell the test owns. Decide before
-building, not after.
+**The cycle — DECIDED.** Per change:
+
+1. Run the current tests against a file-backed store → a new database.
+2. Apply the CURRENT pattern to **every prior** database. All must succeed.
+3. Commit the new database, so future changes are validated against it too.
+
+That makes the fixture set an accumulating regression corpus rather than a spot
+check: every change is tested against every version of the world that has ever
+been captured, not just the most recent one.
+
+**Step 2 does not write back.** "Update all prior databases" means apply and
+verify, on a scratch copy; the committed vintage is never the upgraded result.
+Writing back would rebuild the single lineage this design exists to avoid —
+each vintage would carry every migration since, and would no longer be state
+written by a version that knew nothing about today's. It would also break
+append-only: an upgrade that silently succeeded would overwrite the very
+fixture that would have caught the next break.
+
+Two consequences of validating against ALL prior vintages, both bounded but
+worth naming before they bite:
+
+- **Cost is O(N) per CI run.** A replay is ~1-2s, so 50 generations is under
+  two minutes and 200 needs sharding — `pattern-compat`'s 4-way split is the
+  precedent, and the work is already per-fixture so it shards trivially.
+- **Retention now REMOVES coverage**, which inverts its meaning from stage 3.
+  Pruning a prior vintage deletes a regression the corpus was carrying. Git
+  cost is ~9 KiB a generation, so history is not the reason to prune;
+  working-tree disk (3.5 MiB a fixture, uncompressed, in every checkout) is the
+  only pressure, and it should be weighed against losing coverage rather than
+  applied as housekeeping.
 
 ### 5. Value comparison, and migration coverage
 
