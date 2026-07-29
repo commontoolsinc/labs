@@ -156,11 +156,11 @@ Useful references:
 
 ### Runtime And Interaction
 
-| Element         | Element           | Element        | Element          |
-| --------------- | ----------------- | -------------- | ---------------- |
-| `cf-autostart`  | `cf-cell-context` | `cf-cell-link` | `cf-drag-source` |
-| `cf-draggable`  | `cf-drop-zone`    | `cf-keybind`   | `cf-piece`       |
-| `cf-piece-menu` | `cf-render`       | `cf-toolbar`   | `cf-updater`     |
+| Element        | Element        | Element          | Element         |
+| -------------- | -------------- | ---------------- | --------------- |
+| `cf-autostart` | `cf-cell-link` | `cf-drag-source` | `cf-draggable`  |
+| `cf-drop-zone` | `cf-keybind`   | `cf-piece`       | `cf-piece-menu` |
+| `cf-render`    | `cf-toolbar`   | `cf-updater`     |                 |
 
 ## 🔒 Security Constraints
 

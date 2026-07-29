@@ -218,7 +218,7 @@ export function parseAliasBinding(
   // document minted from the result cell and the partialCause (see
   // getDerivedInternalCellLink), in the alias's own `scope` — not a path
   // within the base document, so it cannot be parsed against a base link.
-  // Callers must convert it via unwrapOneLevelAndBindtoDoc instead.
+  // Callers must convert it via unwrapOneLevelAndBindToDoc instead.
   if (alias.partialCause !== undefined) {
     throw new Error(
       `Cannot parse partialCause alias as link: ${JSON.stringify(value)}`,

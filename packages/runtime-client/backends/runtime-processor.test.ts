@@ -5,7 +5,7 @@ import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
-import { PiecesController } from "@commonfabric/piece/ops";
+import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
   browserWorkerParamsFromInitializationData,
   renderConfidentialityResolverFor,
@@ -25,12 +25,14 @@ import {
 } from "../protocol/mod.ts";
 import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { entityRefFrom } from "@commonfabric/data-model/cell-rep";
 import {
   cellRefToSigilLink,
   getCell,
   mapCellRefsToSigilLinks,
 } from "./utils.ts";
 import { entityIdFrom, Runtime } from "@commonfabric/runner";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import * as V2Storage from "../../runner/src/storage/v2.ts";
 import { parseLink } from "../../runner/src/link-utils.ts";
@@ -341,6 +343,237 @@ describe("piece source state", () => {
     // with no readable source — reported as such rather than as a failure.
     expect(result.source.origin).toBeUndefined();
     expect(result.source.files).toEqual([]);
+    expect(result.source.history).toEqual([]);
+  });
+
+  it("rejects an unknown compatibility confirmation before changing a piece", async () => {
+    const space = "did:key:z6Mk-runtime-processor-source" as const;
+    const processor = {
+      getSpaceCtx: () => ({
+        pieceManager: { getSpace: () => space },
+      }),
+      pieceSourceConfirmations: new Map(),
+    };
+
+    await expect(
+      (RuntimeProcessor.prototype as any).handlePieceUpdateSource.call(
+        processor,
+        {
+          type: RequestType.PieceUpdateSource,
+          space,
+          pieceId: fid("sourced-piece"),
+          action: { kind: "restore", revisionId: "older" },
+          confirmationToken: "unknown-confirmation",
+        },
+      ),
+    ).rejects.toThrow(
+      "the piece source compatibility confirmation is no longer valid",
+    );
+  });
+
+  it("rejects empty and non-string compatibility confirmations", async () => {
+    for (const confirmationToken of ["", 42]) {
+      await expect(
+        (RuntimeProcessor.prototype as any).handlePieceUpdateSource.call(
+          { pieceSourceConfirmations: new Map() },
+          {
+            type: RequestType.PieceUpdateSource,
+            space: "did:key:z6Mk-runtime-processor-source",
+            pieceId: fid("sourced-piece"),
+            action: { kind: "restore", revisionId: "older" },
+            confirmationToken,
+          },
+        ),
+      ).rejects.toThrow("confirmationToken must be a non-empty string");
+    }
+  });
+
+  it("issues one-use confirmation tokens for incompatible source changes", async () => {
+    const space = "did:key:z6Mk-runtime-processor-source" as const;
+    const pieceId = fid("sourced-piece");
+    const cell = {
+      space,
+      entityId: entityRefFrom(entityIdFrom(pieceId)),
+      sync: () => Promise.resolve(),
+      getMetaRaw: () => undefined,
+      getAsNormalizedFullLink: () => ({ id: `of:${pieceId}`, path: [] }),
+      asSchema: () => ({ get: () => ({}) }),
+    };
+    const processor = {
+      getSpaceCtx: () => ({
+        pieceManager: { getSpace: () => space },
+      }),
+      pieceSourceConfirmations: new Map(),
+      runtime: {
+        getCellFromEntityId: () => cell,
+        patternManager: {
+          getPatternSourceProgramByIdentity: () => Promise.resolve(undefined),
+        },
+        hostForSpace: () => new URL("https://toolshed.test"),
+      },
+    };
+    const action = { kind: "restore", revisionId: "older" } as const;
+    const prepared = {
+      action,
+      expected: {
+        pattern: { identity: "current", symbol: "default" },
+        origin: null,
+        revisionId: "current",
+      },
+      candidate: { identity: "older", symbol: "default" },
+      origin: null,
+      operation: "revert",
+      baseline: { kind: "retain", revisionId: "baseline" },
+      review: { argumentEvidence: "argument", issues: { schema: "narrowed" } },
+    };
+    let receivedConfirmation: unknown;
+    let calls = 0;
+    const changeSource = PieceController.prototype.changeSource;
+    PieceController.prototype.changeSource = ((_action, options) => {
+      calls++;
+      if (calls === 1) {
+        return Promise.resolve({
+          status: "incompatible",
+          message: "result schema narrowed",
+          prepared,
+        });
+      }
+      receivedConfirmation = options?.confirmedChange;
+      return Promise.resolve({ status: "applied" });
+    }) as typeof changeSource;
+
+    try {
+      const first = await (RuntimeProcessor.prototype as any)
+        .handlePieceUpdateSource.call(processor, {
+          type: RequestType.PieceUpdateSource,
+          space,
+          pieceId,
+          action,
+        });
+      expect(first.compatibilityWarning).toBe("result schema narrowed");
+      expect(first.confirmationToken).toBeDefined();
+      expect(processor.pieceSourceConfirmations.size).toBe(1);
+
+      const second = await (RuntimeProcessor.prototype as any)
+        .handlePieceUpdateSource.call(processor, {
+          type: RequestType.PieceUpdateSource,
+          space,
+          pieceId,
+          action,
+          confirmationToken: first.confirmationToken,
+        });
+      expect(receivedConfirmation).toBe(prepared);
+      expect(second.compatibilityWarning).toBeUndefined();
+      expect(processor.pieceSourceConfirmations.size).toBe(0);
+
+      await expect(
+        (RuntimeProcessor.prototype as any).handlePieceUpdateSource.call(
+          processor,
+          {
+            type: RequestType.PieceUpdateSource,
+            space,
+            pieceId,
+            action,
+            confirmationToken: first.confirmationToken,
+          },
+        ),
+      ).rejects.toThrow(
+        "the piece source compatibility confirmation is no longer valid",
+      );
+    } finally {
+      PieceController.prototype.changeSource = changeSource;
+    }
+  });
+
+  it("does not hide a source-read failure for an incompatible change", async () => {
+    const space = "did:key:z6Mk-runtime-processor-source" as const;
+    const pieceId = fid("sourced-piece");
+    const processor = {
+      getSpaceCtx: () => ({
+        pieceManager: { getSpace: () => space },
+      }),
+      pieceSourceConfirmations: new Map(),
+      runtime: {
+        getCellFromEntityId: () => ({
+          space,
+          entityId: entityRefFrom(entityIdFrom(pieceId)),
+          sync: () => Promise.reject("source read failed"),
+          getMetaRaw: () => undefined,
+          getAsNormalizedFullLink: () => ({ id: `of:${pieceId}`, path: [] }),
+          asSchema: () => ({ get: () => ({}) }),
+        }),
+      },
+    };
+    const changeSource = PieceController.prototype.changeSource;
+    PieceController.prototype.changeSource = (() =>
+      Promise.resolve({
+        status: "incompatible",
+        message: "result schema narrowed",
+        prepared: {},
+      })) as unknown as typeof changeSource;
+
+    let reason: unknown;
+    try {
+      await (RuntimeProcessor.prototype as any).handlePieceUpdateSource.call(
+        processor,
+        {
+          type: RequestType.PieceUpdateSource,
+          space,
+          pieceId,
+          action: { kind: "restore", revisionId: "older" },
+        },
+      );
+    } catch (error) {
+      reason = error;
+    } finally {
+      PieceController.prototype.changeSource = changeSource;
+    }
+    expect(reason).toBe("source read failed");
+  });
+
+  it("preserves an applied result when source-detail refresh fails", async () => {
+    const storageManager = StorageManager.emulate({ as: cfcSigner });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://toolshed.test"),
+      storageManager,
+    });
+    const space = cfcSigner.did();
+    const cell = runtime.getCell(space, "source-refresh-failure");
+    await cell.sync();
+    const sync = cell.sync.bind(cell);
+    cell.sync = () => Promise.reject(new Error("refresh unavailable"));
+    const getCellFromEntityId = runtime.getCellFromEntityId.bind(runtime);
+    runtime.getCellFromEntityId = (() => cell) as typeof getCellFromEntityId;
+    const processor = {
+      getSpaceCtx: () => ({
+        pieceManager: { getSpace: () => space },
+      }),
+      pieceSourceConfirmations: new Map(),
+      runtime,
+    };
+    const changeSource = PieceController.prototype.changeSource;
+    PieceController.prototype.changeSource =
+      (() => Promise.resolve({ status: "applied" })) as typeof changeSource;
+    try {
+      const result = await (RuntimeProcessor.prototype as any)
+        .handlePieceUpdateSource.call(processor, {
+          type: RequestType.PieceUpdateSource,
+          space,
+          pieceId: fid("sourced-piece"),
+          action: { kind: "detach" },
+        });
+
+      expect(result.source.history).toEqual([]);
+      expect(result.executionWarning).toContain(
+        "source details could not be refreshed: refresh unavailable",
+      );
+    } finally {
+      PieceController.prototype.changeSource = changeSource;
+      cell.sync = sync;
+      runtime.getCellFromEntityId = getCellFromEntityId;
+      await runtime.dispose();
+      await storageManager.close();
+    }
   });
 });
 
@@ -1534,6 +1767,90 @@ describe("RuntimeProcessor CFC label IPC", () => {
     expect(atom.type).toBe(CFC_ATOM_TYPE.Caveat);
     expect(atom.kind).toBe("derived-from");
     expect("source" in atom).toBe(false);
+  });
+
+  it("returns the read cell's schema-bearing ref when includeRef is set", () => {
+    const ref: CellRef = {
+      id: "of:include-ref-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const processor = {
+      runtime: {
+        getCellFromLink: () => ({
+          get: () => "plain value",
+          getAsLink: () => ({
+            "/": {
+              "link@1": {
+                id: "of:include-ref-cell",
+                space: "did:key:test",
+                path: [],
+                schema: { type: "string" },
+              },
+            },
+          }),
+        }),
+      },
+    } as unknown as RuntimeProcessor;
+
+    const withRef = RuntimeProcessor.prototype.handleCellGet.call(processor, {
+      type: RequestType.CellGet,
+      cell: ref,
+      includeRef: true,
+    });
+    expect(withRef.cell?.id).toBe("of:include-ref-cell");
+    expect(withRef.cell?.schema).toEqual({ type: "string" });
+
+    // Not requested: not returned.
+    const without = RuntimeProcessor.prototype.handleCellGet.call(processor, {
+      type: RequestType.CellGet,
+      cell: ref,
+    });
+    expect(without.cell).toBeUndefined();
+  });
+
+  it("returns the ref alongside the CFC label when both are requested", () => {
+    const ref: CellRef = {
+      id: "of:include-ref-label-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+    const processor = {
+      runtime: {
+        getCellFromLink: () => ({
+          get: () => "plain value",
+          getAsLink: () => ({
+            "/": {
+              "link@1": {
+                id: "of:include-ref-label-cell",
+                space: "did:key:test",
+                path: [],
+              },
+            },
+          }),
+          runtime: {
+            readTx: () => ({
+              readOrThrow: () => ({ value: "plain value" }),
+            }),
+          },
+          getAsNormalizedFullLink: () => ref,
+          getMetaRaw: () => undefined,
+        }),
+      },
+    } as unknown as RuntimeProcessor;
+
+    const response = RuntimeProcessor.prototype.handleCellGet.call(processor, {
+      type: RequestType.CellGet,
+      cell: ref,
+      includeRef: true,
+      includeCfcLabel: true,
+    });
+    expect(response.cell?.id).toBe("of:include-ref-label-cell");
+    // The cell carries no label; the field is present-but-undefined.
+    expect(response.cfcLabel).toBeUndefined();
+    expect(response.value).toBe("plain value");
   });
 
   it("redacts Caveat.source in sigil label views inside subscription updates", async () => {

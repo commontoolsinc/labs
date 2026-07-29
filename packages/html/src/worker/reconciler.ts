@@ -10,6 +10,15 @@
  * - Uses cell.sink() instead of effect() for subscriptions
  * - Emits VDomOp operations instead of DOM mutations
  * - Batches operations using queueMicrotask()
+ *
+ * Sub-piece cell regions: the retired cf-cell-context overlay could outline
+ * the region of the page each cell rendered, because the legacy main-thread
+ * renderer held the cells while it built the DOM. This reconciler is the
+ * place that knowledge crosses the worker boundary, so restoring that kind
+ * of inspection (e.g. routing a region to cf-piece-menu's Data/Actions
+ * panels) means tagging emitted VDomOps with the cell identity whenever
+ * reconciliation crosses a cell boundary, and letting the main thread mark
+ * the applied DOM ranges. Nothing does that yet; this note is the marker.
  */
 
 import {

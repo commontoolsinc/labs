@@ -1,8 +1,8 @@
-// Micro-benchmark for `unwrapOneLevelAndBindtoDoc`.
+// Micro-benchmark for `unwrapOneLevelAndBindToDoc`.
 //
 // CONTEXT / CONCLUSION: reload profiling showed `bindNodeIO` is ~90% of per-node
 // instantiation cost during the `raw:map` notes-list reconcile (~3ms/node, up to
-// ~52ms for one node). `bindNodeIO` = unwrapOneLevelAndBindtoDoc(in/out) +
+// ~52ms for one node). `bindNodeIO` = unwrapOneLevelAndBindToDoc(in/out) +
 // findAllWriteRedirectCells(in/out). This bench was written to study the unwrap
 // part — and it PROVED unwrap is NOT the bottleneck:
 //   * unwrap is ~1.9µs/alias (5.2µs with $ref/$defs schemas) and linear — a real
@@ -16,14 +16,14 @@
 // isn't covered by this pure micro-bench (TODO: add an emulate-runtime bench for
 // findAllWriteRedirectCells to study/optimize the actual hotspot).
 //
-// unwrapOneLevelAndBindtoDoc itself is PURE (CFC schema traversal + deep
+// unwrapOneLevelAndBindToDoc itself is PURE (CFC schema traversal + deep
 // clone/rebind of the binding tree; no storage/tx), studied in isolation below.
 //
 // Run as a bench:        deno bench -A packages/runner/test/pattern-binding.bench.ts
 // Run directly (study):  deno run  -A packages/runner/test/pattern-binding.bench.ts
 //                        deno run  -A packages/runner/test/pattern-binding.bench.ts 2000   # custom size
 
-import { unwrapOneLevelAndBindtoDoc } from "../src/pattern-binding.ts";
+import { unwrapOneLevelAndBindToDoc } from "../src/pattern-binding.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
 import type { AnyCell } from "../src/cell.ts";
 import type { NormalizedFullLink } from "../src/link-types.ts";
@@ -194,7 +194,7 @@ function makeUiBinding(opts: BuildOpts): FabricExecValue {
 type Links = typeof withSchema;
 
 function op(binding: FabricExecValue, links: Links = withSchema): void {
-  unwrapOneLevelAndBindtoDoc(
+  unwrapOneLevelAndBindToDoc(
     cfc,
     binding,
     links.arg,
@@ -206,7 +206,7 @@ function op(binding: FabricExecValue, links: Links = withSchema): void {
 for (const aliases of [10, 30, 100, 300]) {
   const binding = makeUiBinding({ aliases, pathDepth: 2 });
   Deno.bench(
-    `unwrapOneLevelAndBindtoDoc aliases=${aliases}`,
+    `unwrapOneLevelAndBindToDoc aliases=${aliases}`,
     () => op(binding),
   );
 }

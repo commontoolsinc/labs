@@ -7,6 +7,7 @@ import {
   type Cell,
   getPatternIdentityRef,
   getPatternSource,
+  getPieceSourceRevisions,
   resolveEntryIdentity,
   Runtime,
   type RuntimeFetch,
@@ -31,6 +32,14 @@ function source(marker: string): string {
   return [
     "import { computed, pattern } from 'commonfabric';",
     `export const ${SYMBOL} = pattern<Record<string, never>, { marker: string }>(() => ({ marker: computed(() => "${marker}") }));`,
+    "",
+  ].join("\n");
+}
+
+function sourceWithRequiredInput(marker: string): string {
+  return [
+    "import { computed, pattern } from 'commonfabric';",
+    `export const ${SYMBOL} = pattern<{ required: string }, { marker: string }>(() => ({ marker: computed(() => "${marker}") }));`,
     "",
   ].join("\n");
 }
@@ -191,7 +200,9 @@ describe("lazy system-pattern auto-update", () => {
     identityGate.resolve();
     await runtime.patternUpdater.idle();
     expect(identityFetches).toBe(1);
-    expect(getPatternSource(piece)).toBe(PARENT_PATH);
+    expect(getPatternSource(piece)).toBe(
+      new URL(PARENT_PATH, runtime.apiUrl).href,
+    );
   });
 
   it("does not schedule a generic check for an explicitly handled root", async () => {
@@ -517,7 +528,9 @@ describe("lazy system-pattern auto-update", () => {
       identity: v2Identity,
       symbol: SYMBOL,
     });
-    expect(getPatternSource(piece)).toBe(PARENT_PATH);
+    expect(getPatternSource(piece)).toBe(
+      new URL(PARENT_PATH, runtime.apiUrl).href,
+    );
     expect(requested).toContainEqual({
       href: `http://toolshed.test${PARENT_PATH}?identity=`,
       cache: "no-cache",
@@ -558,8 +571,103 @@ describe("lazy system-pattern auto-update", () => {
     await runtime.patternUpdater.idle();
 
     expect(getPatternIdentityRef(piece)).toEqual(originalRef);
-    expect(getPatternSource(piece)).toBe(PARENT_PATH);
+    expect(getPatternSource(piece)).toBe(
+      new URL(PARENT_PATH, runtime.apiUrl).href,
+    );
     expect(sourceFetches).toBe(0);
+  });
+
+  it("repairs an active legacy origin whose retained source probe failed", async () => {
+    const v1Identity = await identityFor(source("v1"));
+    let sourceFetches = 0;
+    const piece = await preparePiece((input) => {
+      const href = input instanceof Request
+        ? input.url
+        : input instanceof URL
+        ? input.href
+        : input;
+      const url = new URL(href);
+      if (url.pathname === PARENT_PATH && url.searchParams.has("identity")) {
+        return Promise.resolve(new Response(v1Identity));
+      }
+      const contents = url.pathname === PARENT_PATH
+        ? parentSource
+        : url.pathname === SOURCE_PATH
+        ? source("v1")
+        : undefined;
+      if (contents !== undefined) sourceFetches++;
+      return Promise.resolve(
+        new Response(contents ?? "not found", {
+          status: contents === undefined ? 404 : 200,
+        }),
+      );
+    });
+    const stamped = await runtime.editWithRetry((tx) => {
+      setPatternSource(piece, tx, PARENT_PATH);
+    });
+    expect(stamped.error).toBeUndefined();
+    const getSource = runtime.patternManager
+      .getPatternSourceProgramByIdentity.bind(runtime.patternManager);
+    let failedProbe = false;
+    runtime.patternManager.getPatternSourceProgramByIdentity = ((...args) => {
+      if (!failedProbe) {
+        failedProbe = true;
+        return Promise.resolve(undefined);
+      }
+      return getSource(...args);
+    }) as typeof runtime.patternManager.getPatternSourceProgramByIdentity;
+
+    try {
+      await runtime.start(piece);
+      await runtime.patternUpdater.idle();
+    } finally {
+      runtime.patternManager.getPatternSourceProgramByIdentity = getSource;
+    }
+
+    expect(sourceFetches).toBeGreaterThan(0);
+    expect(getPieceSourceRevisions(piece).map((entry) => entry.operation))
+      .toEqual(["baseline", "origin-update"]);
+    expect(getPatternSource(piece)).toBe(
+      new URL(PARENT_PATH, runtime.apiUrl).href,
+    );
+  });
+
+  it("rejects an unattended update that changes the piece contract", async () => {
+    const incompatible = sourceWithRequiredInput("v2");
+    const v2Identity = await identityFor(incompatible);
+    const piece = await preparePiece((input) => {
+      const href = input instanceof Request
+        ? input.url
+        : input instanceof URL
+        ? input.href
+        : input;
+      const url = new URL(href);
+      if (url.pathname === PARENT_PATH && url.searchParams.has("identity")) {
+        return Promise.resolve(new Response(v2Identity));
+      }
+      const contents = url.pathname === PARENT_PATH
+        ? parentSource
+        : url.pathname === SOURCE_PATH
+        ? incompatible
+        : undefined;
+      return Promise.resolve(
+        new Response(contents ?? "not found", {
+          status: contents === undefined ? 404 : 200,
+        }),
+      );
+    });
+    const original = getPatternIdentityRef(piece);
+    const stamped = await runtime.editWithRetry((tx) => {
+      setPatternSource(piece, tx, PARENT_PATH);
+    });
+    expect(stamped.error).toBeUndefined();
+
+    await runtime.start(piece);
+    await runtime.patternUpdater.idle();
+
+    expect(getPatternIdentityRef(piece)).toEqual(original);
+    expect(getPieceSourceRevisions(piece)).toEqual([]);
+    expect((await piece.pull())?.marker).toBe("v1");
   });
 
   it("leaves an ordinary pattern alone when its source has no identity route", async () => {

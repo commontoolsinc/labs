@@ -1,0 +1,27 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "url": {
+        "default": "https://github.com",
+        "type": "string"
+      }
+    },
+    "required": [
+      "url"
+    ],
+    "type": "object"
+  },
+  "pattern": "link-preview.tsx",
+  "resultSchema": {
+    "properties": {
+      "url": {
+        "default": "https://github.com",
+        "type": "string"
+      }
+    },
+    "required": [
+      "url"
+    ],
+    "type": "object"
+  }
+}

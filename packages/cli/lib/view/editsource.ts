@@ -66,8 +66,8 @@ export interface SaveOptions {
 export interface EditableSource {
   /** A short label for the editable target (the filename), or null. */
   readonly label: string | null;
-  /** True for a diff view (whether or not it is editable), so the pager offers
-   * file folding. Absent/false for a plain file or a non-diff pipe. */
+  /** True for a diff view, whether or not it is editable. Absent or false for a
+   * plain file or a non-diff pipe. */
   readonly isDiff?: boolean;
   /** False when there is no underlying file to edit. `reason` is shown when a
    * cursor move is attempted on a non-editable view. */

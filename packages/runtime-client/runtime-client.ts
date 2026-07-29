@@ -35,7 +35,9 @@ import {
   NavigateRequestNotification,
   type PatternSourcesResponse,
   PendingWritesNotification,
+  type PieceSourceAction,
   type PieceSourceView,
+  type PieceUpdateSourceResponse,
   RequestType,
   TelemetryNotification,
   type UploadBlobResponse,
@@ -315,6 +317,27 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       space,
     });
     return response.source;
+  }
+
+  /**
+   * Change a piece's source lifecycle state and return the resulting source
+   * view. An incompatible candidate is returned as a warning without mutation.
+   */
+  async updatePieceSource(
+    pieceId: string,
+    space: DID,
+    action: PieceSourceAction,
+    options: { confirmationToken?: string } = {},
+  ): Promise<PieceUpdateSourceResponse> {
+    return await this.#conn.request<RequestType.PieceUpdateSource>({
+      type: RequestType.PieceUpdateSource,
+      pieceId,
+      space,
+      action,
+      ...(options.confirmationToken === undefined
+        ? {}
+        : { confirmationToken: options.confirmationToken }),
+    });
   }
 
   async getPageSlug(pageId: string, space: DID): Promise<string | undefined> {

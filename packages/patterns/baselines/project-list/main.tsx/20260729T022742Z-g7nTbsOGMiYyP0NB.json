@@ -1,0 +1,82 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "ProjectItem": {
+        "properties": {
+          "done": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "done"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "items": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/ProjectItem"
+        },
+        "type": "array"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "project-list/main.tsx",
+  "resultSchema": {
+    "$defs": {
+      "ProjectItem": {
+        "properties": {
+          "done": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "done"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "items": {
+        "items": {
+          "$ref": "#/$defs/ProjectItem"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "items",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

@@ -9,6 +9,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Database } from "@db/sqlite";
+import { clonePaths } from "@commonfabric/state-inspector";
 import { cf, withEnv } from "./utils.ts";
 
 /** `CliResult` streams are line arrays; join before substring assertions. */
@@ -73,9 +74,14 @@ function appendDocs(db: Database, docs: [string, unknown][]): void {
   });
 }
 
+/** The working copy's path, derived the way the server resolves it — never
+ *  spelled out here, which is what let an earlier version of this suite pass
+ *  against a store no server would read. */
+const workingCopy = (dir: string): string => clonePaths(dir, SPACE).workingPath;
+
 /** Apply writes to the clone's working copy, as a rehearsal attempt would. */
 function writeToWorkingCopy(dir: string, docs: [string, unknown][]): void {
-  const db = new Database(`${dir}/engine-v3/${SPACE}.sqlite`);
+  const db = new Database(workingCopy(dir));
   appendDocs(db, docs);
   db.close();
 }
@@ -104,7 +110,7 @@ describe("cf space", () => {
       expect(cloned.code).toBe(0);
       // The working copy lands where the memory server resolves a space store,
       // so MEMORY_DIR can serve the clone under the same DID.
-      expect(text(cloned.stdout)).toContain(`engine-v3/${SPACE}.sqlite`);
+      expect(text(cloned.stdout)).toContain(workingCopy(clone));
       expect(text(cloned.stdout)).toContain("1 generated cells excluded");
 
       const clean = await cf(`space verify ${clone}`);
@@ -168,7 +174,7 @@ describe("cf space", () => {
   it("reports a fingerprint that ignores generated-cell churn", async () => {
     await withFixture(async ({ snapshot, clone }) => {
       await cf(`space clone ${SPACE} --from ${snapshot} --to ${clone}`);
-      const working = `${clone}/engine-v3/${SPACE}.sqlite`;
+      const working = workingCopy(clone);
 
       const before = await cf(`space fingerprint ${working}`);
       expect(before.code).toBe(0);
@@ -280,7 +286,7 @@ describe("cf space", () => {
     // listing must name it rather than let it vanish from the roll-up.
     await withFixture(async ({ snapshot, clone }) => {
       await cf(`space clone ${SPACE} --from ${snapshot} --to ${clone}`);
-      const working = `${clone}/engine-v3/${SPACE}.sqlite`;
+      const working = workingCopy(clone);
       let deep: unknown = null;
       for (let i = 0; i < 5000; i++) deep = { a: deep };
       writeToWorkingCopy(clone, [["of:pathological", { value: deep }]]);
@@ -300,7 +306,7 @@ describe("cf space", () => {
       await cf(`space clone ${SPACE} --from ${snapshot} --to ${clone}`);
       // Corrupt the baseline itself: reset will "succeed" mechanically but the
       // clone no longer matches its manifest, which must not report success.
-      const pristine = `${clone}/pristine/${SPACE}.sqlite`;
+      const pristine = clonePaths(clone, SPACE).pristinePath;
       const db = new Database(pristine);
       appendDocs(db, [["of:input", { value: { title: "ROTTED BASELINE" } }]]);
       db.close();
@@ -385,7 +391,7 @@ describe("cf space", () => {
     // hide a real content change, so it must never be silent.
     await withFixture(async ({ snapshot, clone }) => {
       await cf(`space clone ${SPACE} --from ${snapshot} --to ${clone}`);
-      const working = `${clone}/engine-v3/${SPACE}.sqlite`;
+      const working = workingCopy(clone);
       writeToWorkingCopy(clone, [
         ["of:second-piece", {
           value: { $NAME: "Other" },

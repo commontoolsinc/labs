@@ -1,0 +1,30 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "value": {
+        "default": 0,
+        "type": "number"
+      }
+    },
+    "required": [
+      "value"
+    ],
+    "type": "object"
+  },
+  "pattern": "examples/output_schema.tsx",
+  "resultSchema": {
+    "properties": {
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "value": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "value",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

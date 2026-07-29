@@ -132,6 +132,12 @@ If you are developing runtime code, read the following documentation:
   practices
 - `docs/development/DEPENDENCIES.md` - Adding and rolling dependencies, required
   version pins, and dependency troubleshooting
+- `docs/development/space-clone-rehearsal.md` - Rehearsing a pattern update on a
+  clone of a real space before touching a populated one: when a rehearsal is
+  required, how to get a snapshot, the clone/verify/reset loop (`cf space`), and
+  the reads that will mislead you (~20 s cold loads, unstepped result reads,
+  fresh-replica reads). Read it before any `setsrc` against a space with real
+  data
 - `docs/development/LOCAL_DEV_SERVERS.md` - **CRITICAL**: How to start local dev
   servers correctly (use `dev-local` for shell, not `dev`)
 - `docs/development/TESTING.md` - Running the test suites and the general unit

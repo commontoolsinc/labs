@@ -9,23 +9,104 @@
  * then run-length encoded into ANSI. Horizontal scrolling, the line-number
  * gutter and the structure guide bar are all column maths over that grid.
  */
+import { diffContentRowCount, maxPagerTop, maxTop } from "./actions.ts";
 import { cpLen, paint, RESET, type Style } from "./ansi.ts";
 import type { Document, Line, StructureNode, ViewMode } from "./model.ts";
 import {
   type DisplayCell,
   displayLine,
   type DisplayMode,
+  displayWidth,
   glyphFor,
 } from "./display.ts";
 import { overlaySpanStyle, spanStyle } from "./highlight.ts";
 import { lineBg, ui } from "./theme.ts";
 import {
   buildWrapPlan,
-  fitWrapChrome,
+  fitViewLayout,
+  type WrapDecoration,
   type WrappedRow,
   wrappedRowAt,
+  wrappedRowForPosition,
   type WrapPlan,
 } from "./wrap.ts";
+
+/** Maximum columns used by the Ctrl-L label and its diff-edge marker. */
+export const DIFF_MARGIN_WIDTH = 3;
+
+/** Downward-pointing fleuron end marks for wide, compact, and narrow areas. */
+const END_MARK_ROWS = {
+  wide: ["☙   ❦   ❧", "☙   ❧", "❦"],
+  compact: ["☙ ❦ ❧", "☙ ❧", "❦"],
+  narrow: ["❦"],
+} as const;
+
+function endMarkRows(width: number, availableRows: number): readonly string[] {
+  if (availableRows >= 3 && width >= 9) return END_MARK_ROWS.wide;
+  if (availableRows >= 3 && width >= 5) return END_MARK_ROWS.compact;
+  if (availableRows >= 2 && width >= 9) return END_MARK_ROWS.wide.slice(1);
+  if (availableRows >= 2 && width >= 5) return END_MARK_ROWS.compact.slice(1);
+  if (width >= 9) return [END_MARK_ROWS.wide[0]];
+  if (width >= 5) return [END_MARK_ROWS.compact[0]];
+  return END_MARK_ROWS.narrow;
+}
+
+export type DiffAnnotationKind =
+  | "expandUp"
+  | "expandDown"
+  | "diffMetadata";
+
+export interface DiffAnnotation {
+  /** Folded logical line carrying the annotation. */
+  readonly line: number;
+  readonly kind: DiffAnnotationKind;
+}
+
+/** Wrapped source widths reserved by one diff annotation. */
+export function diffAnnotationDecoration(
+  kind: DiffAnnotationKind,
+  width: number,
+  labelMetadata = true,
+): WrapDecoration {
+  const available = Math.max(0, width - 1);
+  return {
+    firstWidth: Math.min(
+      kind === "diffMetadata" && labelMetadata ? 3 : 1,
+      available,
+    ),
+    firstContinuationWidth: Math.min(
+      kind === "expandDown" ? 3 : kind === "expandUp" ? 0 : 1,
+      available,
+    ),
+    continuationWidth: Math.min(
+      kind === "expandUp" ? 0 : 1,
+      available,
+    ),
+  };
+}
+
+/** The metadata line that carries the Ctrl-L label in this wrapped layout. */
+export function labeledDiffMetadataLine(
+  lines: readonly Line[],
+  mode: DisplayMode,
+  width: number,
+  annotations: readonly DiffAnnotation[],
+): number | null {
+  const metadata = annotations.find((annotation) =>
+    annotation.kind === "diffMetadata"
+  );
+  if (!metadata) return null;
+  const downward = annotations.find((annotation) =>
+    annotation.kind === "expandDown"
+  );
+  if (!downward || metadata.line !== downward.line + 1) return metadata.line;
+  const line = lines[downward.line];
+  if (!line) return metadata.line;
+  const firstWidth = diffAnnotationDecoration("expandDown", width).firstWidth;
+  return displayWidth(line, mode) > Math.max(1, width) - firstWidth
+    ? null
+    : metadata.line;
+}
 
 /** A key suggestion for the status line: the key (already capitalised for
  * display, e.g. `Q`, `^X^S`, `WASD`) and what it does. Drawn Turbo-Pascal style,
@@ -41,6 +122,8 @@ export interface ViewState {
   width: number;
   height: number;
   color: boolean;
+  /** Whether the source is a diff. */
+  isDiff?: boolean;
   showLineNumbers: boolean;
   /** Whether long logical lines continue on later screen rows. */
   wrapLines: boolean;
@@ -76,6 +159,16 @@ export interface ViewState {
   /** Whether Ctrl-L can reveal more context here (a diff), so the navigation
    * help advertises it. */
   canExpand?: boolean;
+  /** Whether this pager can draw diff annotations. */
+  expandMargin?: boolean;
+  /** Per-line annotations drawn against the right edge. */
+  diffAnnotations?: readonly DiffAnnotation[];
+  /** Absolute display row of the diff edge the next Ctrl-L will expand. */
+  expandRow?: number | null;
+  /** Whether the marked edge expands upward. False means downward. */
+  expandUp?: boolean | null;
+  /** Absolute display rows occupied by metadata adjacent to the expansion edge. */
+  diffMetadataRows?: readonly number[];
   /** Whether the view is editable, so the navigation help advertises `e`. */
   canEdit?: boolean;
   /** Whether this source offers an alternate rendered representation. */
@@ -109,14 +202,23 @@ function gutterWidth(doc: Document, view: ViewState): number {
 function layout(
   doc: Document,
   view: ViewState,
-): { gutterWidth: number; guideWidth: number } {
-  const requested = {
-    gutterWidth: gutterWidth(doc, view),
-    guideWidth: view.selected ? 1 : 0,
+): {
+  gutterWidth: number;
+  guideWidth: number;
+  contentWidth: number;
+} {
+  const fitted = fitViewLayout(
+    view.width,
+    gutterWidth(doc, view),
+    view.selected ? 1 : 0,
+    view.expandMargin ? DIFF_MARGIN_WIDTH : 0,
+    view.wrapLines,
+  );
+  return {
+    gutterWidth: fitted.gutterWidth,
+    guideWidth: fitted.guideWidth,
+    contentWidth: fitted.contentWidth + fitted.marginWidth,
   };
-  return view.wrapLines
-    ? fitWrapChrome(view.width, requested.gutterWidth, requested.guideWidth)
-    : requested;
 }
 
 /**
@@ -132,18 +234,15 @@ export function cursorScreenPos(
   if (!view.cursor || view.overlay || view.dialog) return null;
   const { line, col } = view.cursor;
   if (line < 0 || line >= doc.lines.length) return null;
-  const { gutterWidth, guideWidth } = layout(doc, view);
-  const contentWidth = Math.max(1, view.width - gutterWidth - guideWidth);
+  const { gutterWidth, guideWidth, contentWidth } = layout(doc, view);
   let screenLine = line;
   let contentCol = col - view.left;
   if (view.wrapLines) {
     const plan = view.wrapPlan ??
       buildWrapPlan(doc.lines, view.displayMode, contentWidth);
-    const first = plan.firstRow[line];
-    const last = plan.lastRow[line];
-    screenLine = Math.min(first + Math.floor(col / plan.rowStride), last);
-    const rowOffset = (screenLine - first) * plan.rowStride;
-    contentCol = col - rowOffset;
+    const row = wrappedRowForPosition(plan, line, col);
+    screenLine = row?.row ?? plan.firstRow[line];
+    contentCol = col - (row?.offset ?? 0);
   }
   const contentHeight = view.height - 1;
   const r = screenLine - view.top;
@@ -207,6 +306,34 @@ interface LineMatches {
   blockPrefixMaxEnd?: Float64Array;
 }
 
+type MarginMarker =
+  | "expandUp"
+  | "expandDown"
+  | "diffMetadata"
+  | "diffEnd"
+  | null;
+
+function marginAnnotation(marker: MarginMarker, width: number): string {
+  if (marker === null) return "";
+  const text = marker === "expandUp"
+    ? "◥"
+    : marker === "expandDown"
+    ? "◢"
+    : "█";
+  return clipAnnotation(text, width);
+}
+
+/** Keep at least one source cell when an annotation meets a narrow view. */
+function clipAnnotation(text: string, width: number): string {
+  const capacity = Math.max(0, width - 1);
+  return capacity === 0 ? "" : [...text].slice(-capacity).join("");
+}
+
+function clipConnectorAnnotation(text: string, width: number): string {
+  const capacity = Math.max(0, width);
+  return capacity === 0 ? "" : [...text].slice(-capacity).join("");
+}
+
 const MATCH_BLOCK_SIZE = 64;
 
 /** The contiguous slice of document-ordered matches on one visible line. */
@@ -242,12 +369,71 @@ function matchesOnLine(
 export function renderFrame(doc: Document, view: ViewState): string[] {
   const rows: string[] = [];
   const contentHeight = view.height - 1;
-  const { gutterWidth: gw, guideWidth } = layout(doc, view);
-  const contentWidth = Math.max(1, view.width - gw - guideWidth);
+  const {
+    gutterWidth: gw,
+    guideWidth,
+    contentWidth,
+  } = layout(doc, view);
+  const annotations = new Map(
+    (view.diffAnnotations ?? []).map((annotation) => [
+      annotation.line,
+      annotation.kind,
+    ]),
+  );
+  const metadataLabelLine = view.wrapLines
+    ? labeledDiffMetadataLine(
+      doc.lines,
+      view.displayMode,
+      contentWidth,
+      view.diffAnnotations ?? [],
+    )
+    : view.diffAnnotations?.find((annotation) =>
+      annotation.kind === "diffMetadata"
+    )?.line ?? null;
+  const decorations = new Map<number, WrapDecoration>();
+  for (const [line, kind] of annotations) {
+    decorations.set(
+      line,
+      diffAnnotationDecoration(
+        kind,
+        contentWidth,
+        kind !== "diffMetadata" || line === metadataLabelLine,
+      ),
+    );
+  }
   const wrapPlan = view.wrapLines
-    ? view.wrapPlan ?? buildWrapPlan(doc.lines, view.displayMode, contentWidth)
+    ? view.wrapPlan ??
+      buildWrapPlan(doc.lines, view.displayMode, contentWidth, decorations)
     : null;
-  const rowStride = wrapPlan?.rowStride ?? contentWidth;
+  const documentRowCount = wrapPlan?.rowCount ?? doc.lines.length;
+  const hasTrailingEmptyLine = view.isDiff === true &&
+    doc.lines.at(-1)?.text.length === 0;
+  const diffEndRow = diffContentRowCount(
+    documentRowCount,
+    hasTrailingEmptyLine,
+  );
+  const lastDiffLine = doc.lines.length - (hasTrailingEmptyLine ? 2 : 1);
+  const finalTriangleRow = annotations.get(lastDiffLine) === "expandDown"
+    ? wrapPlan?.firstRow[lastDiffLine] ?? lastDiffLine
+    : null;
+  const hasDiffEndConnector = view.isDiff === true &&
+    view.expandMargin === true &&
+    finalTriangleRow !== null;
+  const labelDiffEnd = finalTriangleRow !== null &&
+    finalTriangleRow + 1 === diffEndRow;
+  const diffEndSuffix = (width: number) =>
+    clipConnectorAnnotation(labelDiffEnd ? "^L█" : "█", width);
+  let endMarkStart = diffEndRow + (hasDiffEndConnector ? 1 : 0);
+  const availableEndRows = contentHeight - Math.max(0, endMarkStart - view.top);
+  const showEndMark = view.isDiff === true && !view.cursor;
+  let endRows = showEndMark ? endMarkRows(view.width, availableEndRows) : [];
+  if (
+    showEndMark && hasDiffEndConnector && availableEndRows <= 0 &&
+    diffEndRow >= view.top && diffEndRow < view.top + contentHeight
+  ) {
+    endMarkStart = diffEndRow;
+    endRows = END_MARK_ROWS.narrow;
+  }
   let displayedLine = -1;
   let displayedCells: readonly DisplayCell[] | undefined;
   let displayedSelection: SelectionSpan | null = null;
@@ -255,27 +441,75 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
 
   for (let r = 0; r < contentHeight; r++) {
     const rowIdx = view.top + r;
+    const endMark = endRows[rowIdx - endMarkStart] ?? null;
+    if (endMark !== null) {
+      const suffix = hasDiffEndConnector && rowIdx === diffEndRow
+        ? diffEndSuffix(view.width)
+        : "";
+      rows.push(
+        composeContent(
+          undefined,
+          view,
+          0,
+          Math.max(1, view.width),
+          Math.max(1, view.width),
+          false,
+          null,
+          undefined,
+          null,
+          endMark,
+          suffix,
+        ),
+      );
+      continue;
+    }
     const wrappedRow: WrappedRow | undefined = wrapPlan
       ? wrappedRowAt(wrapPlan, rowIdx)
-      : { line: rowIdx, offset: view.left, lastOffset: view.left };
+      : undefined;
+    const lineIdx = wrappedRow?.line ?? rowIdx;
     const firstOfLine = !wrapPlan || wrappedRow === undefined ||
       wrapPlan.firstRow[wrappedRow.line] === rowIdx;
-    if (wrappedRow && wrappedRow.line !== displayedLine) {
-      displayedLine = wrappedRow.line;
+    if (lineIdx < doc.lines.length && lineIdx !== displayedLine) {
+      displayedLine = lineIdx;
       const line = doc.lines[displayedLine];
       displayedCells = line ? displayLine(line, view.displayMode) : undefined;
       displayedSelection = selectionSpan(view, displayedLine, line);
       displayedMatches = view.color ? matchesOnLine(view, displayedLine) : null;
-    } else if (!wrappedRow) {
+    } else if (lineIdx >= doc.lines.length) {
       displayedCells = undefined;
       displayedSelection = null;
       displayedMatches = null;
     }
+    const annotation = annotations.get(lineIdx);
+    const labelsWrappedExpansion = annotation === "expandDown" &&
+      wrapPlan !== null &&
+      wrappedRow !== undefined &&
+      rowIdx === wrapPlan.firstRow[lineIdx] + 1;
+    const marginMarker: MarginMarker = firstOfLine && annotation
+      ? annotation
+      : wrappedRow && wrappedRow.suffixWidth > 0
+      ? "diffMetadata"
+      : hasDiffEndConnector && rowIdx === diffEndRow
+      ? "diffEnd"
+      : null;
+    const suffix = firstOfLine && annotation === "diffMetadata" &&
+        lineIdx === metadataLabelLine
+      ? clipAnnotation("^L█", contentWidth)
+      : labelsWrappedExpansion
+      ? clipAnnotation("^L█", contentWidth)
+      : hasDiffEndConnector && rowIdx === diffEndRow
+      ? diffEndSuffix(contentWidth)
+      : marginAnnotation(marginMarker, contentWidth);
+    const sourceWidth = wrappedRow?.sourceWidth ??
+      Math.max(1, contentWidth - suffix.length);
     rows.push(
       renderContentRow(
         doc,
         view,
-        wrappedRow,
+        lineIdx,
+        wrappedRow?.offset ?? view.left,
+        sourceWidth,
+        wrappedRow?.wrapMarker ?? false,
         displayedCells,
         displayedSelection,
         displayedMatches,
@@ -283,7 +517,8 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
         gw,
         guideWidth,
         contentWidth,
-        rowStride,
+        wrapPlan,
+        suffix,
       ),
     );
   }
@@ -308,7 +543,10 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
 function renderContentRow(
   doc: Document,
   view: ViewState,
-  row: WrappedRow | undefined,
+  lineIdx: number,
+  offset: number,
+  sourceWidth: number,
+  wrapMarker: boolean,
   display: readonly DisplayCell[] | undefined,
   selection: SelectionSpan | null,
   matches: LineMatches | null,
@@ -316,9 +554,9 @@ function renderContentRow(
   gutterWidth: number,
   guideWidth: number,
   contentWidth: number,
-  rowStride: number,
+  wrapPlan: WrapPlan | null,
+  suffix: string,
 ): string {
-  const lineIdx = row?.line ?? -1;
   const line: Line | undefined = doc.lines[lineIdx];
   const inSelRange = !!view.selected &&
     lineIdx >= view.selected.startLine && lineIdx <= view.selected.endLine;
@@ -344,9 +582,8 @@ function renderContentRow(
           view.selected!,
           lineIdx,
           line,
-          row?.offset ?? 0,
-          rowStride,
-          row?.lastOffset ?? 0,
+          offset,
+          wrapPlan!,
           selection,
           display,
         )
@@ -359,12 +596,15 @@ function renderContentRow(
   const content = composeContent(
     line,
     view,
-    row?.offset ?? 0,
+    offset,
     contentWidth,
+    sourceWidth,
+    wrapMarker,
     selection,
     display,
     matches,
-    row !== undefined && row.offset < row.lastOffset,
+    null,
+    suffix,
   );
   return gutter + guide + content;
 }
@@ -386,8 +626,7 @@ function wrappedGuideChar(
   lineIdx: number,
   line: Line | undefined,
   offset: number,
-  stride: number,
-  lastOffset: number,
+  plan: WrapPlan,
   span: SelectionSpan | null,
   display: readonly DisplayCell[] | undefined,
 ): string {
@@ -397,8 +636,8 @@ function wrappedGuideChar(
   const bounds = selectionRowBounds(
     span,
     display ?? [],
-    stride,
-    lastOffset,
+    plan,
+    lineIdx,
   );
   if (offset < bounds.first || offset > bounds.last) return " ";
   const first = lineIdx === selected.startLine && offset === bounds.first;
@@ -412,8 +651,8 @@ function wrappedGuideChar(
 function selectionRowBounds(
   span: SelectionSpan | null,
   display: readonly DisplayCell[],
-  stride: number,
-  lastOffset: number,
+  plan: WrapPlan,
+  line: number,
 ): { first: number; last: number } {
   if (display.length === 0) return { first: 0, last: 0 };
   const lo = span ? displayIndexAtOrAfter(display, span.lo) : 0;
@@ -421,8 +660,8 @@ function selectionRowBounds(
   const firstCell = Math.min(lo, display.length - 1);
   const lastCell = Math.max(firstCell, hi - 1);
   return {
-    first: Math.min(Math.floor(firstCell / stride) * stride, lastOffset),
-    last: Math.min(Math.floor(lastCell / stride) * stride, lastOffset),
+    first: wrappedRowForPosition(plan, line, firstCell)?.offset ?? 0,
+    last: wrappedRowForPosition(plan, line, lastCell)?.offset ?? 0,
   };
 }
 
@@ -497,10 +736,13 @@ function composeContent(
   view: ViewState,
   offset: number,
   width: number,
+  sourceWidth: number,
+  showWrapMarker: boolean,
   sel: SelectionSpan | null,
   display: readonly DisplayCell[] | undefined,
   lineMatches: LineMatches | null,
-  continues: boolean,
+  endMark: string | null,
+  suffix: string,
 ): string {
   const { color } = view;
   // Every content cell sits on the blue editor background; a diff line carries a
@@ -510,10 +752,9 @@ function composeContent(
     ? { bg: line?.bg ? lineBg(line.bg) : ui.editorBg }
     : EMPTY_STYLE;
   const cells: Cell[] = new Array(width);
-  for (let i = 0; i < width; i++) cells[i] = { ch: " ", style: rowBg };
-  const showWrapMarker = continues && width > 1;
-  const sourceWidth = showWrapMarker ? width - 1 : width;
-
+  for (let i = 0; i < cells.length; i++) {
+    cells[i] = { ch: " ", style: rowBg };
+  }
   if (line && display) {
     // The display list may hold fewer cells than the line has code points —
     // ANSI sequences are hidden and runs of control codes collapse — so cells
@@ -542,10 +783,36 @@ function composeContent(
   }
 
   if (showWrapMarker) {
-    cells[width - 1] = {
+    cells[sourceWidth] = {
       ch: "\\",
       style: color ? mergeBg(ui.wrapMarker, rowBg) : EMPTY_STYLE,
     };
+  }
+  const suffixCells = [...suffix];
+  if (endMark !== null) {
+    const ornament = [...endMark];
+    const centeredStart = Math.floor((width - ornament.length) / 2);
+    const suffixStart = cells.length - suffixCells.length;
+    const start = centeredStart + ornament.length <= suffixStart
+      ? centeredStart
+      : Math.floor((suffixStart - ornament.length) / 2);
+    if (start >= 0) {
+      for (let i = 0; i < ornament.length; i++) {
+        cells[start + i] = {
+          ch: ornament[i],
+          style: color ? mergeBg(ui.endMark, rowBg) : EMPTY_STYLE,
+        };
+      }
+    }
+  }
+  if (suffixCells.length > 0) {
+    const start = cells.length - suffixCells.length;
+    for (let i = 0; i < suffixCells.length; i++) {
+      cells[start + i] = {
+        ch: suffixCells[i],
+        style: color ? mergeBg(ui.wrapMarker, rowBg) : EMPTY_STYLE,
+      };
+    }
   }
 
   return cellsToAnsi(cells, color);
@@ -610,8 +877,16 @@ function renderStatus(
       ? paint(padTo(view.inputLine, view.width), ui.statusBar)
       : padTo(view.inputLine, view.width);
   }
-  const total = doc.lines.length;
-  const rowCount = wrapPlan?.rowCount ?? total;
+  const hasTrailingEmptyDiffRow = view.isDiff === true && !view.cursor &&
+    doc.lines.at(-1)?.text.length === 0;
+  const total = diffContentRowCount(
+    doc.lines.length,
+    hasTrailingEmptyDiffRow,
+  );
+  const rowCount = diffContentRowCount(
+    wrapPlan?.rowCount ?? doc.lines.length,
+    hasTrailingEmptyDiffRow,
+  );
   const lastRow = Math.min(
     Math.max(0, rowCount - 1),
     view.top + view.height - 2,
@@ -629,7 +904,10 @@ function renderStatus(
   const pct = rowCount <= 1
     ? 100
     : Math.round((view.top / (rowCount - 1)) * 100);
-  const atEnd = view.top + view.height - 1 >= rowCount;
+  const endTop = view.cursor || view.isDiff !== true
+    ? maxTop(rowCount, view.height)
+    : maxPagerTop(rowCount, view.height);
+  const atEnd = view.top >= endTop;
 
   // The left of the bar is either a message / selected-node label (plain text)
   // or a row of key hints (keys highlighted, Turbo Pascal style).

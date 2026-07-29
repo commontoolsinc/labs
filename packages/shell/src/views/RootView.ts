@@ -5,12 +5,11 @@ import {
   AppUpdateEvent,
   clone,
   Command,
-  isAppViewEqual,
   isCommand,
   navigate,
 } from "../../shared/mod.ts";
 import { BaseView, createDefaultAppState, SHELL_COMMAND } from "./BaseView.ts";
-import { KeyStore } from "@commonfabric/identity";
+import { type Identity, KeyStore } from "@commonfabric/identity";
 import { property, state } from "lit/decorators.js";
 import { Task } from "@lit/task";
 import {
@@ -128,9 +127,10 @@ export class XRootView extends BaseView {
         }
 
         if (!app || !app.identity) {
-          // Clear the runtime and space when no app state
+          // Clear the runtime when no app state. The space belongs to the
+          // view, and #syncViewSpace has already cleared it for the same
+          // change that took the identity away.
           this.runtime = undefined;
-          this.space = undefined;
           this.#telemetry = undefined;
           clearRuntimeDebugGlobals(getCommonfabricGlobal());
           return undefined;
@@ -139,7 +139,7 @@ export class XRootView extends BaseView {
         // Browser OpenTelemetry (Phase 3): self-gated + lazy — returns null
         // (and imports no OTel SDK) unless telemetryEnabled is set. Attributes
         // use the identity's DID and the currently resolved space; the runtime
-        // (and this sink) outlives navigations, so #resolveViewSpace keeps the
+        // (and this sink) outlives navigations, so #syncViewSpace keeps the
         // sink's space.did current via setSpace.
         const userDid = app.identity.did();
         const telemetry = await initBrowserOtel({
@@ -176,15 +176,17 @@ export class XRootView extends BaseView {
         });
 
         if (signal.aborted) {
+          // A newer creation replaced this one. Drop what this one built and
+          // leave the space alone: which space the view addresses does not
+          // depend on which runtime creation won.
           rt.dispose().catch(console.error);
           this.runtime = undefined;
-          this.space = undefined;
           clearRuntimeDebugGlobals(getCommonfabricGlobal());
           return;
         }
 
         // Update the provided runtime; `space` is view state, resolved
-        // from app.view in updated() independent of the runtime's life.
+        // from app.view in willUpdate() independent of the runtime's life.
         this.runtime = rt.runtime();
 
         // Expose the runtime and cell debug utilities for console use
@@ -234,6 +236,16 @@ export class XRootView extends BaseView {
     }
   };
 
+  // Point `space` at the space the new view addresses. This runs before
+  // render, not in updated(), so no render ever pairs a view with the space
+  // of the view it replaced. AppView reads the view and the space together
+  // and treats a space name that disagrees with a space DID as an error.
+  protected override willUpdate(changedProperties: PropertyValues<this>): void {
+    if (changedProperties.has("app")) {
+      this.#syncViewSpace(this.app);
+    }
+  }
+
   protected override updated(changedProperties: PropertyValues<this>): void {
     if (!changedProperties.has("app")) {
       return;
@@ -251,41 +263,77 @@ export class XRootView extends BaseView {
     if (flipState || stateChanged) {
       this._rt.run([current]);
     }
-    if (
-      flipState || stateChanged ||
-      (previous && !isAppViewEqual(previous.view, current.view))
-    ) {
-      void this.#resolveViewSpace(current);
-    }
   }
 
   // The active browser telemetry sink (undefined when telemetry is disabled
   // or no runtime); kept only so space.did attribution can track navigation.
   #telemetry: BrowserTelemetry | undefined;
 
-  // Resolve the current view to a space DID — view state, independent of
-  // the runtime's lifecycle.
+  // The name the current lookup was started for, while the view addresses its
+  // space by name. Navigating within that name keeps the space already
+  // resolved, and keeps a lookup still in flight running. A lookup that fails
+  // clears this, so a later navigation to the same name tries again.
+  #resolvedSpaceName: string | undefined;
+  // Invalidates a resolution that a newer navigation has superseded.
   #resolveSpaceToken = 0;
-  async #resolveViewSpace(app: AppState | undefined): Promise<void> {
-    const token = ++this.#resolveSpaceToken;
-    let space: DID | undefined;
+  #spaceResolution: Promise<void> | undefined;
+
+  // Resolves once the space the current view addresses is known. A view that
+  // names its space resolves that name asynchronously, and addresses no space
+  // until the name lands.
+  spaceResolved(): Promise<void> {
+    return this.#spaceResolution ?? Promise.resolve();
+  }
+
+  // Derive the view's space DID — view state, independent of the runtime's
+  // lifecycle. Every path assigns synchronously except a space named by the
+  // view, which has to be looked up.
+  #syncViewSpace(app: AppState | undefined): void {
     const identity = app?.identity;
     const view = app?.view;
+    if (identity && view && "spaceName" in view) {
+      // The name alone decides the space: a named space's key is derived from
+      // the name and a fixed passphrase, so every identity on one name
+      // addresses the same space. A change of identity leaves the answer
+      // alone. The home view below is the case that does turn on identity,
+      // and it recomputes on every change.
+      if (view.spaceName === this.#resolvedSpaceName) return;
+      this.#resolveNamedSpace(identity, view.spaceName);
+      return;
+    }
+
+    this.#resolvedSpaceName = undefined;
+    this.#spaceResolution = undefined;
+    let space: DID | undefined;
     if (identity && view) {
       if ("builtin" in view) {
         space = view.builtin === "home" ? identity.did() : undefined;
       } else if ("spaceDid" in view) {
         space = view.spaceDid;
-      } else if ("spaceName" in view) {
-        try {
-          space = await resolveSpaceDid(identity, view.spaceName);
-        } catch (error) {
-          console.error("[RootView] Failed to resolve space name:", error);
-          space = undefined;
-        }
       }
     }
-    if (token !== this.#resolveSpaceToken) return;
+    this.#setSpace(space, ++this.#resolveSpaceToken);
+  }
+
+  #resolveNamedSpace(identity: Identity, spaceName: string): void {
+    const token = ++this.#resolveSpaceToken;
+    this.#resolvedSpaceName = spaceName;
+    // The lookup is asynchronous, so the view addresses no space until it
+    // completes. The space of the view being replaced is not it.
+    this.#setSpace(undefined, token);
+    this.#spaceResolution = resolveSpaceDid(identity, spaceName).then(
+      (space) => this.#setSpace(space, token),
+      (error) => {
+        console.error("[RootView] Failed to resolve space name:", error);
+        if (token !== this.#resolveSpaceToken) return;
+        this.#resolvedSpaceName = undefined;
+        this.#setSpace(undefined, token);
+      },
+    );
+  }
+
+  #setSpace(space: DID | undefined, token: number): void {
+    if (token !== this.#resolveSpaceToken || space === this.space) return;
     this.space = space;
     // Keep browser OTel span attribution in sync with the resolved space —
     // the telemetry sink lives across navigations.

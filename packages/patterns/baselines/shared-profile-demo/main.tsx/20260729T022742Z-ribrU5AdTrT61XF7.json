@@ -1,0 +1,17 @@
+{
+  "argumentSchema": false,
+  "pattern": "shared-profile-demo/main.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": true
+    },
+    "required": [
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

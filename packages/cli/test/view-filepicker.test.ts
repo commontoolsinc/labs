@@ -167,6 +167,24 @@ Deno.test("filepicker: escape cancels and leaves the buffer untouched", () => {
   assertEquals(s.doc.text, FILES["/work/a.ts"]);
 });
 
+Deno.test("filepicker: opening from pager mode preserves the viewport", () => {
+  const path = "/work/a.ts";
+  const text = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join("\n");
+  const s = new Session(
+    parseDocument(text, path),
+    { color: false, showLineNumbers: false },
+    { width: 60, height: 5 },
+    undefined,
+    fakeSource(path),
+    gateway(),
+  );
+  for (let i = 0; i < 8; i++) press(s, "down");
+  assertEquals(s.view().top, 8);
+  openPicker(s);
+  press(s, "escape");
+  assertEquals(s.view().top, 8);
+});
+
 Deno.test("filepicker: refuses to open with unsaved edits", () => {
   const s = session();
   press(s, "e"); // reveal cursor

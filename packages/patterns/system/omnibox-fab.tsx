@@ -293,9 +293,7 @@ Be matter-of-fact. Prefer action to explanation.`;
                     })}
                   >
                     <div style="flex: 1; overflow-y: auto; min-height: 0;">
-                      <cf-cell-context $cell={omnibot}>
-                        {omnibot.ui.chatLog}
-                      </cf-cell-context>
+                      {omnibot.ui.chatLog}
                     </div>
                   </div>
 
@@ -323,14 +321,12 @@ Be matter-of-fact. Prefer action to explanation.`;
                           onClick={toggle({ value: showHistory })}
                           style="cursor: pointer;"
                         >
-                          <cf-cell-context $cell={latestAssistantMessage}>
-                            <cf-chat-message
-                              role="assistant"
-                              compact
-                              content={latestAssistantMessage ?? ""}
-                              pending={omnibot.pending}
-                            />
-                          </cf-cell-context>
+                          <cf-chat-message
+                            role="assistant"
+                            compact
+                            content={latestAssistantMessage ?? ""}
+                            pending={omnibot.pending}
+                          />
                         </div>
                       </div>
                     )

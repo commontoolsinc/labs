@@ -1,0 +1,95 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "Person": {
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "default": "user",
+            "enum": [
+              "admin",
+              "user"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "role"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "people": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/Person"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "people"
+    ],
+    "type": "object"
+  },
+  "pattern": "form-demo.tsx",
+  "resultSchema": {
+    "$defs": {
+      "Person": {
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "default": "user",
+            "enum": [
+              "admin",
+              "user"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "email",
+          "role"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "people": {
+        "items": {
+          "$ref": "#/$defs/Person"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "people",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

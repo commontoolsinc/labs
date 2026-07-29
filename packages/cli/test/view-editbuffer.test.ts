@@ -79,6 +79,20 @@ Deno.test("editbuffer: dirty tracks against the original", () => {
   assert(!b.dirty(), "back to original content is clean again");
 });
 
+Deno.test("editbuffer: commitSaved makes the current text clean", () => {
+  const b = new EditBuffer("before");
+  b.moveLineEnd();
+  b.insert(" after");
+  assert(b.dirty(), "the edit starts dirty");
+
+  b.commitSaved();
+  assertEquals(b.baseline(), "before after");
+  assert(!b.dirty(), "the saved text is the new clean baseline");
+
+  b.insert(" again");
+  assert(b.dirty(), "a later edit is measured against the saved text");
+});
+
 // --- kill / yank ------------------------------------------------------------
 
 Deno.test("editbuffer: kill-line then yank round-trips", () => {

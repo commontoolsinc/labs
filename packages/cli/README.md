@@ -148,6 +148,11 @@ use `cf exec <mounted-file> --help --json` or
 
 The supported output switches are:
 
+- `cf space ... --json` serializes the clone manifest, verify result, or
+  fingerprint. `cf space verify` and `cf space reset` exit nonzero when the
+  clone does not match its baseline, so a rehearsal script can gate on them; the
+  printed report, not usage help, is the output in that case. The procedure
+  these commands serve is `docs/development/space-clone-rehearsal.md`.
 - `cf inspect ... --json` serializes an inspector result. `inspect html` does
   not have a JSON representation, so `html` and `--json` are mutually exclusive.
   `inspect graph --dot` and `--json` are also mutually exclusive.
@@ -191,4 +196,90 @@ piece-call JSON file. These rules keep the options before the callable name for
 
 Every registered top-level command appears in `cf --help`. The direct
 `fuse-daemon` and `fuse-supervisor` entry points are visible because packaged
-launchers use them.
+launchers use them. Shell completion is the exception: it drops commands whose
+description opens with `Internal:`, because those are spawned by `cf fuse` and
+never typed at a prompt.
+
+## Shell completion
+
+`cf completion <shell>` prints a completion script for bash or zsh.
+
+```bash
+# zsh — eager form, in ~/.zshrc after compinit. Required for the `deno` binding
+# described below; the fpath form does not activate it until `cf` completes once.
+source <(cf completion zsh)
+
+# zsh — fpath form. Completes `cf` itself; add the two lines under
+# "deno task cf" below if you also want `deno task cf` to complete.
+cf completion zsh > "${fpath[1]}/_cf"
+autoload -U compinit && compinit
+
+# bash
+cf completion bash > /usr/local/etc/bash_completion.d/cf
+# or, for the current shell only:
+source <(cf completion bash)
+```
+
+Completion covers the command tree — subcommands, flags, and enumerated values
+such as `--log-level` — plus live values read from the fabric:
+
+| Slot                            | Completes to                                |
+| ------------------------------- | ------------------------------------------- |
+| `--piece`                       | piece ids, annotated with each piece's name |
+| `piece call <callable>`         | the piece's callables, as `cf piece verbs`  |
+| `piece get`/`set <path>`        | cell keys, one path segment at a time       |
+| `piece link <source>/<target>`  | `pieceId/path/to/field` endpoints           |
+| `--space`                       | space DIDs of local memory-v2 stores        |
+| `--identity`, pattern arguments | `*.key` / `*.tsx` files, via the shell      |
+
+Live values need an identity and an api-url. Both are read from the line being
+typed (`-i`, `-a`, `-u`) before falling back to `CF_IDENTITY`/`CF_API_URL`, so
+`cf piece call -s other-space --piece <TAB>` lists that space's pieces rather
+than the environment's. When neither is resolvable, or the server is
+unreachable, completion yields nothing — it never prints an error into the
+command line. Each request costs one CLI invocation plus one round trip, so
+value completion is as fast as the fabric it queries.
+
+### `deno task cf` and other invocations
+
+The scripts bind `deno` as well as `cf`, so `deno task cf piece <TAB>` completes
+the same way the binary does; `deno run … packages/cli/mod.ts` and the
+`launcher.ts` form (including arguments after `--`) are recognized too. The
+binding is cooperative: a `deno` line that is not a CLI invocation is handed
+back to whatever completed `deno` beforehand, so `deno test` and
+`deno task build-binaries` keep their own completions. Pass `--no-deno-task` to
+bind only `cf`.
+
+The binding is installed by the script body, so it needs the script to be
+_evaluated_, not merely autoloadable. bash's `bash_completion.d` and zsh's
+`source <(…)` both do that. zsh's fpath form does not: `_cf` is autoloaded on
+the first `cf` completion, so until then `deno task cf <TAB>` does nothing. To
+keep the fpath install and still bind `deno`, add this after `compinit`:
+
+```zsh
+_cf_deno_previous="${_comps[deno]:-}"   # preserve deno's own completion
+compdef _cf deno
+```
+
+Capturing eagerly matters: `_cf` records the previous completer when it loads,
+and by then `_comps[deno]` is already `_cf`. It refuses to chain to itself
+(which would recurse and hang the terminal) and keeps any value recorded
+earlier, so the line above survives.
+
+### Implementation
+
+Cliffy ships a `CompletionsCommand`, but its dynamic hook passes the callback
+only `(command, parent)` — no cursor word and no access to the options already
+typed — so it cannot answer "the callables of the piece named by the `--piece`
+on this line". `lib/completion/` therefore emits its own scripts, which are
+deliberately thin: they forward the raw command line and let
+`cf completion complete` decide everything. A sourced completion function lives
+in a user's shell profile and is not updated when the CLI is rebuilt, so it must
+not encode a command tree that can go stale.
+
+Resolution walks Cliffy's live `Command` tree rather than a hand-maintained
+table, so a newly registered subcommand or flag completes as soon as it exists.
+Two facts cannot be read off that tree and are carried explicitly in
+`lib/completion/`: the pre-parse globals `--log-level` and `--no-color` (both
+stripped from `argv` before Cliffy parses, in `lib/log-level.ts` and
+`lib/color-mode.ts`), and the provider table binding slots to live data.

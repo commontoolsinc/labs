@@ -372,18 +372,50 @@ logical time to zero and drops pending timers: one frozen clock wraps a whole
 grid tests) calls it from `beforeEach` to start each case from a known instant.
 
 Three files stay on the real clock, listed with their reasons in the runner
-preload's `realClockFiles` list. Two are resume tests, where a second runtime
-resumes from storage over a real loopback memory-client transport. In the first,
-the transport's connect/mount/sync does not complete under the fake clock, so
-the resume deadlocks. In the second, the reload holds each per-element child
-document back by a delay to open the resume window it observes; that delay is a
-frozen test-file timer, and the resuming runtime's pull/idle machinery blocks on
-the deliveries it gates, so the resume deadlocks there too. The third is a
-nested-subagent generateObject that aborts its delegate tool because the
-tool-calling path's own timeout auto-advances against the subagent's outbox
-progress rather than the wall clock, so the delegate reports "tool call timed
-out" before it completes. These are the honest exceptions: the clock they need
-is the real one, and their own sleeps are the honest way to wait.
+preload's `realClockFiles` list, and they are there for two different kinds of
+reason. One is a resume test whose reload holds each per-element child document
+back by a delay to open the resume window it observes; that delay is a frozen
+test-file timer, and the resuming runtime's pull/idle machinery blocks on the
+deliveries it gates, so the resume deadlocks. That one is an honest exception:
+the clock it needs is the real one, and its own sleeps are the honest way to
+wait. The other two are carried rather than endorsed, and the next section says
+why.
+
+### The dynamic-schema subagent shape
+
+`generate-object-tools-dynamic-subagent.test.ts` and
+`llm-dialog-dynamic-subagent.test.ts` are on the list for one reason, worth
+spelling out because the same shape will catch the next person who writes it.
+
+Each of their three cases drives a tool call whose delegate runs a child agent,
+and the result schema that child works to is supplied by the model in the tool
+input rather than fixed when the pattern is written. Because the schema arrives
+that way, the child cannot form its own request until the tool input has been
+written into its inputs and the graph has settled. That round trip carries the
+delegate's completion across a macrotask boundary. The pump reads that boundary
+as an idle event loop and jumps logical time to the earliest pending production
+timer, which is the deadline the tool-calling path arms around the wait, so the
+delegate aborts with "Tool call timed out" while its child is still in flight.
+
+Only one of the three ever went red. The other two passed while their delegate
+aborted, because their closing assertions are reached whether the delegate
+returned data or an error. All three now assert on the delegate's own tool
+result, so they go red if they ever run under the fake clock again — through a
+rename, or through the exemption being dropped — rather than going quietly
+green. A tool aborting is not reliably visible in the exit status, so when you
+suspect it, the check is the absence of `Tool ... failed` lines in a run,
+compared against the same file on the real clock.
+
+Teaching the pump to hold time still while zero-delay work is queued does fix
+all three, and it costs more than it buys: the pump cannot tell that deadline
+apart from a backoff window, and other tests need backoff windows to fire during
+exactly this kind of reactive churn. Hold time still and
+`scheduler-commit-backpressure.test.ts` never gets the retries it waits on,
+while the burst in `reactive-stale-basis-strand.test.ts` consumes none of its
+fifteen injected failures rather than all of them.
+
+The real fix is retiring the deadline these cases trip over, which
+[a proposal](proposals/retiring-llm-tool-call-deadlines.md) works through.
 
 The `test/` versus `src/` classification reads the scheduling frame from a stack
 trace, and that has to keep working after a runtime is running. SES's
@@ -409,6 +441,27 @@ backoff is a `src/` timer that auto-advances, and the fast-fail-versus-windowed
 distinction it checks is decided by the rejection's error type rather than by
 elapsed time, so collapsing the backoff timing preserves the outcome each case
 asserts.
+
+Another exemption was retired rather than justified. The
+`list-resume-container-defer` suite looked transport-bound — a resuming runtime
+over a loopback memory client that never settled under the fake clock — but the
+hang was the test's own design. Its transport withheld the result-container
+document from the resuming client's syncs while the server still held it, a
+state no client can reconcile: every commit carrying the client's read of that
+document as absent at seq 0 is rejected as stale, the catch-up the rejection
+waits on can never deliver the withheld document, and the retry loop runs
+forever. On the real clock the test passed anyway, because the server's
+effect-batching timer left short quiet windows in each retry cycle in which
+`runtime.idle()` resolved and the test read its locally recovered value; the
+fake clock's auto-advance closes those windows, so the wait for quiescence
+never returned. The fix modeled the scenario the suite claims — a container
+that was never persisted — by redirecting the container's operations out of the
+first runtime's commits, so the server genuinely never stores the document, the
+resume's seed write is accepted, and the system settles on both clocks. The
+suite's sequence tests do still withhold the server's answers about that one
+document — but bounded, and released within the test: the hold proves the
+recovery waits for the absence confirmation before writing, and it ends before
+any retry can accumulate against the withheld answer.
 
 ## The background-piece-service suite: the same clock for a polling loop
 

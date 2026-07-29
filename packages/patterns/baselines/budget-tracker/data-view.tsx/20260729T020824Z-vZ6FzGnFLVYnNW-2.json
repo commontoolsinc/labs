@@ -1,0 +1,171 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "CategoryBudget": {
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "limit": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "category",
+          "limit"
+        ],
+        "type": "object"
+      },
+      "Expense": {
+        "properties": {
+          "amount": {
+            "type": "number"
+          },
+          "category": {
+            "default": "Other",
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "amount",
+          "category",
+          "date"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "budgets": {
+        "items": {
+          "$ref": "#/$defs/CategoryBudget"
+        },
+        "type": "array"
+      },
+      "expenses": {
+        "items": {
+          "$ref": "#/$defs/Expense"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "expenses",
+      "budgets"
+    ],
+    "type": "object"
+  },
+  "pattern": "budget-tracker/data-view.tsx",
+  "resultSchema": {
+    "$defs": {
+      "JSXElement": {
+        "anyOf": [
+          {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          {
+            "$ref": "#/$defs/UIRenderable"
+          },
+          {
+            "properties": {},
+            "type": "object"
+          }
+        ]
+      },
+      "UIRenderable": {
+        "properties": {
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          }
+        },
+        "required": [
+          "$UI"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "#/$defs/JSXElement"
+      },
+      "budgetStatus": {
+        "items": {
+          "properties": {
+            "category": {
+              "type": "string"
+            },
+            "limit": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "percentUsed": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "remaining": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "spent": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "category",
+            "spent",
+            "limit",
+            "remaining",
+            "percentUsed"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "spentByCategory": {
+        "additionalProperties": {
+          "type": "number"
+        },
+        "properties": {},
+        "type": "object"
+      },
+      "totalSpent": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI",
+      "totalSpent",
+      "spentByCategory",
+      "budgetStatus"
+    ],
+    "type": "object"
+  }
+}

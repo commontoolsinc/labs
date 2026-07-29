@@ -1,0 +1,69 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "title": {
+        "default": "UI Variants Demo",
+        "type": "string"
+      }
+    },
+    "required": [
+      "title"
+    ],
+    "type": "object"
+  },
+  "pattern": "examples/ui-variants-demo.tsx",
+  "resultSchema": {
+    "$defs": {
+      "JSXElement": {
+        "anyOf": [
+          {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          {
+            "$ref": "#/$defs/UIRenderable"
+          },
+          {
+            "properties": {},
+            "type": "object"
+          }
+        ]
+      },
+      "UIRenderable": {
+        "properties": {
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          }
+        },
+        "required": [
+          "$UI"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$CHIP_UI": {
+        "$ref": "#/$defs/JSXElement"
+      },
+      "$NAME": {
+        "type": "string"
+      },
+      "$TILE_UI": {
+        "$ref": "#/$defs/JSXElement"
+      },
+      "$UI": {
+        "$ref": "#/$defs/JSXElement"
+      },
+      "title": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI",
+      "$CHIP_UI",
+      "$TILE_UI",
+      "title"
+    ],
+    "type": "object"
+  }
+}
