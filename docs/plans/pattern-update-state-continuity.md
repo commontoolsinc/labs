@@ -1,9 +1,11 @@
 # Pattern update state continuity (Tier 2)
 
-Status: In progress. The capture/replay machinery is built and green on branch
-`tier2` (`packages/piece/test/state-continuity-harness.ts` +
-`state-continuity.test.ts`); it is not yet a PR and not yet wired to CI. Tier 1
-— the schema gate — merged as [#5144] and runs on every PR.
+Status: In progress. Stages 1–2 are complete: the capture/replay machinery is
+built and the estuary brick is reproduced from a captured vintage through the
+production repair call (`packages/piece/test/state-continuity-harness.ts` +
+`state-continuity.test.ts`). Not yet wired to CI — stages 3–5 are what turn a
+green test into a gate. Tier 1 — the schema gate — merged as [#5144] and runs
+on every PR.
 
 This plan takes the pattern-update regime from "the contract still type-checks"
 to "the new pattern can still read what the old one wrote".
@@ -34,19 +36,29 @@ Two facts make that non-optional:
 - **The automatic updater performs no structural check at all.** `cf piece
   setsrc` refuses an incompatible replacement, but `PatternUpdater` compiles,
   verifies the entry identity, and applies. So CI is the only gate.
-- **Tier 1 cannot see this class.** It proves argument/result contracts are
+- **Tier 1 cannot see one whole class.** It proves argument/result contracts are
   backward compatible. A schema does not describe everything a pattern writes:
-  data under keys the new version drops or renames becomes unreachable with no
-  subset violation, and a migration can refuse a document older than a field
-  while both contracts are individually fine. A document is precisely the thing
-  a schema check does not have.
+  move where a field is STORED — `.for('items')` becomes `.for('itemList')` —
+  and the declared contract does not change by a single byte, while every
+  document written under the old name becomes unreachable. Nothing throws; the
+  data is simply gone. A document is precisely the thing a schema check does
+  not have.
 
-The concrete precedent is the 2026-07-22 estuary brick: a home root doc
+The motivating incident is the 2026-07-22 estuary brick: a home root doc
 predating six separately-added required fields, where "first-absence-wins, so
 each fixed field unmasks the next"
 (`packages/patterns/system/home.vintage-defaults.test.ts`). That guard is
 currently a hand-enumerated list of source-text assertions — it only covers
 fields someone remembered to add after each incident.
+
+**That particular class is caught by Tier 1 too**, and this plan originally
+claimed otherwise. Measured: `assertPatternSchemasBackwardCompatible` rejects an
+additive required result field with no default outright ("result.favorites:
+newly required result field has no default"). Tier 2 still covers it, as
+deliberate overlap rather than redundancy — Tier 1 rejects the *contract*, Tier
+2 shows the *runtime* refusing the commit over a real document, which is the
+failure itself rather than a proxy for it. The tier's unique value is the
+storage-move class above.
 
 ## What is verified
 
@@ -61,14 +73,20 @@ Measured on branch `tier2`, not assumed:
 | Entity ids are content-addressed from `{source, cause}` | `packages/runner/src/create-ref.ts` |
 | `setupPersistent` mints `{ space, random: randomUUID }` when given no cause | `packages/piece/src/manager.ts` |
 | Root creation bakes `Date.now()` into its cause | `packages/piece/src/ops/pieces-controller.ts` |
-| The CFC additive-required guard does **not** fire on a bare `runtime.setup` onto a plain cell, even at `enforce-explicit` | `state-continuity.test.ts` boundary test; the pattern's own setup creates the owned cell with its initial value, so no value is missing to preserve |
+| The additive-required guard fires only on a **CFC-relevant** root — one with a stored CFC schema envelope | `prepare.ts` merges only when `storedMetadataFor` returns an envelope; a plain unlabelled root has nothing to merge against, so the guard never runs |
+| Replayed through the production repair call, the guard produces the estuary rejection verbatim | measured: `CFC enforcement rejected commit: … cfc-schema-migration-incompatible: required field favorites needs a default to preserve old documents` |
+| The same vintage + a candidate differing ONLY by `Default<[]>` commits cleanly, with prior state intact | measured: `{"items":["alpha","beta"],"favorites":[]}` |
+| Tier 1 **does** catch the additive-required class | measured: `assertPatternSchemasBackwardCompatible` throws "result.favorites: newly required result field has no default" |
+| Tier 1 is blind to a storage-key move | measured: result schemas byte-identical, no issue raised, replayed data empty |
 
-That last row is a correction to an assumption this work started with, and it
-sets the next stage: reaching the guard at
-`packages/runner/src/cfc/schema-merge.ts` needs the root repair path
-(`PiecesController` / `ensureDefaultPattern` over a piece result cell), the way
-`packages/piece/test/check-update-default-pattern.test.ts` drives it — not a
-bare setup.
+The CFC-relevance row corrects an assumption this work started with. An earlier
+boundary test recorded that the guard "does not fire on a bare `runtime.setup`"
+and inferred the missing ingredient was the repair path. The repair path was
+necessary but not sufficient: the actual precondition is a **stored CFC
+envelope** on the root. A pattern with no CFC-labelled field produces no
+envelope, so the merge is skipped and no guard can run, whichever call drives
+the setup. Real system roots (home, profile) are CFC-relevant, so the fixture
+models them rather than working around them.
 
 ## Decisions
 
@@ -127,16 +145,35 @@ Gate: green on `tier2`. **Done.**
 
 ### 2. Drive the real update path
 
-- [ ] Replay through `PiecesController` / `ensureDefaultPattern` rather than a
-      bare `runtime.setup`, so the root repair path — and with it the CFC
-      additive-required guard — is actually exercised
-- [ ] Reproduce the estuary brick from a captured vintage: red before the
-      `Default<>` fix, green after
-- [ ] Decide `setPattern` (the `setsrc` semantics) versus `PatternUpdater` (what
-      the field actually runs); prefer the latter, and say so where they differ
+- [x] Replay through the production root-repair call rather than a bare
+      `runtime.setup` — `runSynced(root.withTx(), pattern, undefined,
+      { expectedPatternIdentity })`, preceded by the identity stamp, exactly as
+      `pieces-controller.ts` spells it
+- [x] Reproduce the estuary brick from a captured vintage: refused without
+      `Default<>`, clean with it, asserting the specific CFC token
+- [x] Prefer `PatternUpdater` semantics over `setsrc`, and pin where they differ
+- [x] Cover the storage-move class — the one Tier 1 structurally cannot see
 
-Gate: a test that is red against a pattern missing `Default<>` and green with
-it, driven from a captured vintage rather than inline sources.
+Gate: **met.** `packages/piece/test/state-continuity.test.ts`, 5 steps green,
+whole package suite green.
+
+Two things this stage settled that the plan had wrong or open:
+
+- `expectedPatternIdentity` is not a formality. It is what makes `runSynced`
+  THROW on a setup-commit rejection instead of logging and continuing. Without
+  it a refused migration reads as a successful materialize over a dead root —
+  the gate would be green on exactly the failure it exists to catch.
+- Capture and replay must materialize through the SAME call. A pattern's owned
+  cells are addressed off the pattern instance, so a capture that allocated
+  them by another route hands the replay a root whose keys resolve to documents
+  it never wrote — an empty-looking fixture and assertions that fail for a
+  reason unrelated to the pattern under test.
+
+On `setPattern` versus `PatternUpdater`: the replay drives the updater's path,
+because that is what the field actually runs. The difference is the whole
+reason this regime is CI-only — `cf piece setsrc` calls
+`assertPatternSchemasBackwardCompatible` and refuses on failure, while the
+automatic updater performs no structural check at all.
 
 ### 3. Curated vintages in git
 

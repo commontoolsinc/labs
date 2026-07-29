@@ -4,11 +4,18 @@
  *
  * Tier 1 (`deno task pattern-compat`) proves the argument/result contract is
  * backward compatible. That is a statement about schemas, and schemas do not
- * describe everything a pattern writes — data under keys the new version drops
- * or renames becomes unreachable with no schema change at all, and the CFC
- * additive-required migration refuses a setup commit for a required field with
- * no default (the 2026-07-22 estuary brick) without either contract being
- * "incompatible". Only replaying a real prior state catches those.
+ * describe everything a pattern writes: move where a field is STORED
+ * (`.for('items')` → `.for('itemList')`) and the declared contract does not
+ * change by a single byte, while every document written under the old name
+ * becomes unreachable. No contract comparison can see that, and nothing
+ * throws — only replaying a real prior state catches it.
+ *
+ * The other class this replays, the CFC additive-required migration refusing a
+ * setup commit for a required field with no default (the 2026-07-22 estuary
+ * brick), IS also caught by Tier 1's schema check. Covering it here is
+ * deliberate overlap: Tier 1 rejects the contract, this proves the runtime
+ * refuses the commit over a real document — which is the failure the gate
+ * exists to prevent, not a proxy for it.
  *
  * The state is captured as a **SQLite space store**, not a bespoke JSON dump.
  * A space is one SQLite file, `snapshotSpaceStore` already writes a
@@ -194,6 +201,111 @@ export function vintageRoot<T>(
     VINTAGE_ROOT_CAUSE,
     schema as never,
   );
+}
+
+/**
+ * A readable message for anything thrown out of a setup commit.
+ *
+ * Not every rejection on this path is an `Error`: the storage layer surfaces
+ * plain `{ name, message, reason }` records, and `String()` renders those as
+ * "[object Object]" — which would still satisfy a `toBeDefined()` assertion
+ * while destroying the one thing a caller needs to tell a real migration
+ * refusal from an unrelated failure. Chase `cause`/`reason` so the CFC token
+ * survives the re-wraps between the merge and here.
+ */
+function describeError(error: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; current !== undefined && current !== null && depth < 8;) {
+    depth++;
+    if (typeof current === "string") {
+      parts.push(current);
+      break;
+    }
+    if (typeof current !== "object") {
+      parts.push(String(current));
+      break;
+    }
+    const record = current as {
+      message?: unknown;
+      name?: unknown;
+      cause?: unknown;
+      reason?: unknown;
+    };
+    if (typeof record.message === "string") parts.push(record.message);
+    else if (typeof record.name === "string") parts.push(record.name);
+    current = record.cause ?? record.reason;
+  }
+  return parts.length > 0 ? parts.join(": ") : String(error);
+}
+
+/** What materializing a candidate over a captured vintage did. */
+export interface MaterializeOutcome {
+  /** The setup-commit rejection, if the candidate could not be applied. */
+  error?: string;
+  /** The root's value after a successful materialize. */
+  value?: Record<string, unknown>;
+}
+
+/**
+ * Materialize `program` onto a captured vintage's root, the way production
+ * does.
+ *
+ * This is the production ROOT REPAIR call, not a bare `runtime.setup`:
+ * `PiecesController` commits the candidate's identity onto the root and then
+ * runs `runSynced(root.withTx(), pattern, undefined, { expectedPatternIdentity })`
+ * (`pieces-controller.ts` — the cold-start repair and the roll-forward
+ * materialize both spell it this way). Two things about that shape matter
+ * here and neither holds for a bare setup:
+ *
+ * - `expectedPatternIdentity` is what makes `runSynced` THROW on a
+ *   setup-commit rejection instead of logging and continuing. Without it a
+ *   refused migration reads as a successful materialize over a dead root —
+ *   the gate would be green on exactly the failure it exists to catch.
+ * - Stamping the identity first is the update itself. Passing a ref the root
+ *   does not carry fails the precondition rather than the migration, which
+ *   would be a green-for-the-wrong-reason.
+ */
+export async function materializeOver(
+  vintage: VintageRuntime,
+  program: RuntimeProgram,
+): Promise<MaterializeOutcome> {
+  const { runtime } = vintage;
+  const pattern = await runtime.patternManager.compilePattern(program, {
+    space: vintage.space as never,
+  });
+  const ref = runtime.patternManager.getArtifactEntryRef(pattern);
+  if (ref === undefined) {
+    throw new Error("compiled candidate has no artifact entry ref");
+  }
+  const root = vintageRoot<Record<string, unknown>>(
+    vintage,
+    pattern.resultSchema,
+  );
+  await root.sync();
+
+  const { error: stampError } = await runtime.editWithRetry((tx) => {
+    root.withTx(tx).setMetaRaw("patternIdentity", {
+      identity: ref.identity,
+      symbol: ref.symbol,
+    });
+  });
+  if (stampError !== undefined) {
+    throw new Error(
+      `could not stamp candidate identity: ${stampError.message}`,
+    );
+  }
+
+  try {
+    await runtime.runSynced(root.withTx(), pattern, undefined, {
+      expectedPatternIdentity: ref,
+    });
+    await runtime.idle();
+  } catch (error) {
+    return { error: describeError(error) };
+  }
+  await root.pull();
+  return { value: root.get() as Record<string, unknown> | undefined };
 }
 
 export type { RuntimeProgram };
