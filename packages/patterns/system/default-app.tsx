@@ -165,17 +165,6 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
   // Dropdown menu state
   const menuOpen = new Writable(false);
 
-  // Keep registry entries as cells so inspecting one display field does not
-  // materialize every field on every linked piece.
-  const registeredPieceCells = computed(() => {
-    const pieces: Writable<MentionablePiece>[] = [];
-    const length = pieceRegistry.key("length").get();
-    for (let index = 0; index < length; index++) {
-      pieces.push(pieceRegistry.key(index));
-    }
-    return pieces;
-  });
-
   // Filter out hidden pieces and pieces without resolved NAME
   // (prevents transient hash-only pills during reactive updates)
   const visiblePieces = computed(() => {
@@ -192,7 +181,8 @@ export default pattern<PiecesListInput, PiecesListOutput>((_) => {
     return pieces;
   });
 
-  const index = BacklinksIndex({ pieceRegistry: registeredPieceCells });
+  // Preserve the established argument link for this long-lived sub-pattern.
+  const index = BacklinksIndex({ pieceRegistry });
   const summaryIdx = SummaryIndex({});
 
   const gridView = PieceGrid({ pieces: visiblePieces });
