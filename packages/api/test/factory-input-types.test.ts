@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import "@commonfabric/api/schema";
 import type {
+  DataUnavailableVariant,
   Default,
   FactoryInput,
   HandlerFactory,
@@ -89,6 +90,10 @@ const _wrongRoomBinding: MustBeTrue<
   AssertNotAssignable<WrongRoomBinding, FactoryInput<StripCell<RoomInput>>>
 > = true;
 
+const _unavailableInput: MustBeTrue<
+  AssertAssignable<DataUnavailableVariant, FactoryInput<string>>
+> = true;
+
 type SchemaPatternOverloadAcceptsFactoryInput = PatternFunction extends {
   <IS extends JSONSchema = JSONSchema, OS extends JSONSchema = JSONSchema>(
     fn: (
@@ -127,9 +132,10 @@ Deno.test("FactoryInput accepts reactive cell handles in factory bindings", asyn
       _handlerFactory,
       _patternFactory,
       _wrongRoomBinding,
+      _unavailableInput,
       _schemaPatternOverload,
       _schemaWishOverload,
     ],
-    ["object", true, true, true, true, true, true, true],
+    ["object", true, true, true, true, true, true, true, true],
   );
 });

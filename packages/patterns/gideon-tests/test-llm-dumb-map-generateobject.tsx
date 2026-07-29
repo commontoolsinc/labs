@@ -30,6 +30,7 @@
  * 7. Check console for any "Tried to directly access opaque value" errors (should be none)
  */
 import {
+  type BuiltInLLMMessage,
   computed,
   Default,
   generateObject,
@@ -38,7 +39,9 @@ import {
   isPending,
   NAME,
   pattern,
+  type Reactive,
   resultOf,
+  type Stream,
   UI,
   Writable,
 } from "commonfabric";
@@ -53,6 +56,20 @@ interface Sentiment {
   confidence: number;
   keywords: string[];
 }
+
+type LegacySentimentAnalysis = {
+  pending: Reactive<boolean>;
+  result?: Reactive<Sentiment | undefined>;
+  error?: Reactive<string>;
+  messages?: Reactive<BuiltInLLMMessage[]>;
+  partial?: Reactive<string>;
+  cancelGeneration: Stream<void>;
+};
+
+const cancelGeneration = handler<
+  void,
+  Record<string, never>
+>(() => {});
 
 interface Input {
   items: Item[] | Default<[]>;
@@ -92,17 +109,32 @@ export default pattern<Input>(({ items }) => {
         "Analyze the sentiment of the following text. Return positive, neutral, or negative sentiment with confidence 0-1 and relevant keywords.",
       prompt: item.content,
     });
-    const result = resultOf(request);
-    return { itemId: item.id, content: item.content, request, result };
+    const analysis: LegacySentimentAnalysis = {
+      pending: computed(() => isPending(request)),
+      result: computed(() =>
+        isPending(request) || hasError(request) ? undefined : resultOf(request)
+      ),
+      error: computed(() => hasError(request) ? request.error.message : ""),
+      messages: computed((): BuiltInLLMMessage[] => []),
+      partial: computed(() => ""),
+      // The old output exposed cancellation even though the direct API does not.
+      cancelGeneration: cancelGeneration({}),
+    };
+    return {
+      itemId: item.id,
+      content: item.content,
+      // Project the direct request through the deployed output contract.
+      analysis,
+    };
   });
 
   const pendingCount = computed(() =>
-    sentimentAnalyses.filter((item) => isPending(item.request)).length
+    sentimentAnalyses.map((s) => s.analysis.pending).filter((p) => p).length
   );
 
   const completedCount = computed(() =>
-    sentimentAnalyses.filter((item) =>
-      !isPending(item.request) && !hasError(item.request) && item.result
+    sentimentAnalyses.map((s) => s.analysis.result).filter((result) =>
+      result !== undefined
     ).length
   );
 
@@ -158,7 +190,9 @@ export default pattern<Input>(({ items }) => {
               </div>
 
               {computed(() => {
-                const pending = isPending(item.request);
+                const pending = item.analysis.pending;
+                const result = item.analysis.result;
+                const error = item.analysis.error;
                 if (pending) {
                   return (
                     <div
@@ -180,7 +214,7 @@ export default pattern<Input>(({ items }) => {
                     </div>
                   );
                 }
-                if (hasError(item.request)) {
+                if (error) {
                   return (
                     <div
                       style={{
@@ -190,11 +224,11 @@ export default pattern<Input>(({ items }) => {
                         borderRadius: "4px",
                       }}
                     >
-                      <strong>Error:</strong> {item.request.error.message}
+                      <strong>Error:</strong> {String(error)}
                     </div>
                   );
                 }
-                const sentimentResult = item.result;
+                const sentimentResult = result as Sentiment | undefined;
                 if (sentimentResult) {
                   return (
                     <div

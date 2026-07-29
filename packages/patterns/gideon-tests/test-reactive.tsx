@@ -1,9 +1,15 @@
 import {
+  type BuiltInLLMMessage,
+  computed,
   generateObject,
+  handler,
+  hasError,
+  isPending,
   JSONSchema,
   pattern,
-  Reactive,
+  type Reactive,
   resultOf,
+  type Stream,
 } from "commonfabric";
 
 interface Email {
@@ -15,6 +21,20 @@ interface ExtractedData {
   summary: string;
 }
 
+type LegacyAnalysis<T> = {
+  pending: Reactive<boolean>;
+  result?: Reactive<T | undefined>;
+  error?: Reactive<string>;
+  messages?: Reactive<BuiltInLLMMessage[]>;
+  partial?: Reactive<string>;
+  cancelGeneration: Stream<void>;
+};
+
+const cancelGeneration = handler<
+  void,
+  Record<string, never>
+>(() => {});
+
 // Generic building block - T is a type parameter
 function BuildingBlock<T>(emails: Reactive<Email[]>, schema: JSONSchema) {
   // This is the problematic case: generateObject<T> where T is a type parameter
@@ -24,11 +44,23 @@ function BuildingBlock<T>(emails: Reactive<Email[]>, schema: JSONSchema) {
       prompt: email.content,
       schema,
     });
-    const result = resultOf(request);
+    const usableResult = resultOf(request);
+    const result = computed(() =>
+      isPending(request) || hasError(request) ? undefined : usableResult
+    );
+    const analysis: LegacyAnalysis<T> = {
+      pending: computed(() => isPending(request)),
+      result,
+      error: computed(() => hasError(request) ? request.error.message : ""),
+      messages: computed((): BuiltInLLMMessage[] => []),
+      partial: computed(() => ""),
+      cancelGeneration: cancelGeneration({}),
+    };
 
     return {
       email,
-      request,
+      // Project the direct request through the deployed output contract.
+      analysis,
       result,
     };
   });

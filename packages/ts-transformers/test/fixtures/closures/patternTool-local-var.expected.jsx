@@ -46,7 +46,7 @@ const __cfLift_2 = __cfHelpers.lift<{
     type: "string"
 } as const satisfies __cfHelpers.JSONSchema, { completeSchedulerScopeSummary: true });
 const __cfLift_3 = __cfHelpers.lift<{
-    genResult: (string & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "error"; readonly error: Error; } & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "syncing"; readonly syncing: true; } & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "schema-mismatch"; readonly schemaMismatch: true; } & PartialResultSource<string, string>);
+    genResult: (string & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "error"; readonly error: FabricError; } & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "syncing"; readonly syncing: true; } & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "schema-mismatch"; readonly schemaMismatch: true; } & PartialResultSource<string, string>);
 }, string | undefined>(({ genResult }) => {
     if (isPending(genResult))
         return undefined;
@@ -65,7 +65,7 @@ const __cfLift_3 = __cfHelpers.lift<{
                             "enum": ["error"]
                         },
                         error: {
-                            $ref: "#/$defs/Error"
+                            $ref: "#/$defs/FabricError"
                         }
                     },
                     required: ["reason", "error"]
@@ -100,23 +100,8 @@ const __cfLift_3 = __cfHelpers.lift<{
     },
     required: ["genResult"],
     $defs: {
-        Error: {
-            type: "object",
-            properties: {
-                name: {
-                    type: "string"
-                },
-                message: {
-                    type: "string"
-                },
-                stack: {
-                    type: "string"
-                },
-                cause: {
-                    type: "unknown"
-                }
-            },
-            required: ["name", "message"]
+        FabricError: {
+            type: "object"
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, {

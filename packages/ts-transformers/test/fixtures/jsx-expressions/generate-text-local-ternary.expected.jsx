@@ -12,7 +12,7 @@ const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
-    text: (string & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "pending"; readonly pending: true; } & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "error"; readonly error: Error; } & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "syncing"; readonly syncing: true; } & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "schema-mismatch"; readonly schemaMismatch: true; } & PartialResultSource<string, string>);
+    text: (string & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "pending"; readonly pending: true; } & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "error"; readonly error: FabricError; } & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "syncing"; readonly syncing: true; } & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "schema-mismatch"; readonly schemaMismatch: true; } & PartialResultSource<string, string>);
 }, boolean>(({ text }) => isPending(text), {
     type: "object",
     properties: {
@@ -40,7 +40,7 @@ const __cfLift_1 = __cfHelpers.lift<{
                             "enum": ["error"]
                         },
                         error: {
-                            $ref: "#/$defs/Error"
+                            $ref: "#/$defs/FabricError"
                         }
                     },
                     required: ["reason", "error"]
@@ -75,23 +75,8 @@ const __cfLift_1 = __cfHelpers.lift<{
     },
     required: ["text"],
     $defs: {
-        Error: {
-            type: "object",
-            properties: {
-                name: {
-                    type: "string"
-                },
-                message: {
-                    type: "string"
-                },
-                stack: {
-                    type: "string"
-                },
-                cause: {
-                    type: "unknown"
-                }
-            },
-            required: ["name", "message"]
+        FabricError: {
+            type: "object"
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, {

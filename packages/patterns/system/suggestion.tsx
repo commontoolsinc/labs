@@ -42,6 +42,7 @@ type SuggestionResultCell = Writable<SuggestionResult>;
 type SuggestionPatternState = {
   result: SuggestionResultCell | undefined;
   candidates: SuggestionResultCell[];
+  error?: unknown;
   [UI]: VNode;
 };
 
@@ -216,6 +217,9 @@ Use the user context above to personalize your suggestions when relevant.`;
     queue: "suggestions",
   });
   const { addMessage, pending } = dialog;
+  const error = computed(() =>
+    hasError(dialog.result) ? dialog.result.error.message : undefined
+  );
   const shouldGenerate = computed(() =>
     isPending(dialog.result) || hasError(dialog.result)
   );
@@ -293,6 +297,7 @@ Use the user context above to personalize your suggestions when relevant.`;
   return {
     result,
     candidates: initialResults,
+    error,
     // [UI] must be a static VNode — the reconciler breaks if it's a computed.
     // Switch between modes at the child level instead.
     [UI]: (

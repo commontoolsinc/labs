@@ -12,7 +12,7 @@ const define = undefined;
 const runtimeDeps = undefined;
 const __cfAmdHooks = undefined;
 const __cfLift_1 = __cfHelpers.lift<{
-    request: (string & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "pending"; readonly pending: true; } & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "error"; readonly error: Error; } & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "syncing"; readonly syncing: true; } & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "schema-mismatch"; readonly schemaMismatch: true; } & PartialResultSource<string, string>);
+    request: (string & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "pending"; readonly pending: true; } & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "error"; readonly error: FabricError; } & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "syncing"; readonly syncing: true; } & PartialResultSource<string, string>) | (DataUnavailable & { readonly reason: "schema-mismatch"; readonly schemaMismatch: true; } & PartialResultSource<string, string>);
 }, boolean>(({ request }) => isPending(request), {
     type: "object",
     properties: {
@@ -40,7 +40,7 @@ const __cfLift_1 = __cfHelpers.lift<{
                             "enum": ["error"]
                         },
                         error: {
-                            $ref: "#/$defs/Error"
+                            $ref: "#/$defs/FabricError"
                         }
                     },
                     required: ["reason", "error"]
@@ -75,30 +75,15 @@ const __cfLift_1 = __cfHelpers.lift<{
     },
     required: ["request"],
     $defs: {
-        Error: {
-            type: "object",
-            properties: {
-                name: {
-                    type: "string"
-                },
-                message: {
-                    type: "string"
-                },
-                stack: {
-                    type: "string"
-                },
-                cause: {
-                    type: "unknown"
-                }
-            },
-            required: ["name", "message"]
+        FabricError: {
+            type: "object"
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, {
     type: "boolean"
 } as const satisfies __cfHelpers.JSONSchema, { unavailableInputPolicy: [{ path: ["request"], reasons: ["pending"] }] });
 const __cfLift_2 = __cfHelpers.lift<{
-    request: (string & __cfHelpers.PartialResultSource<string, string>) | (__cfHelpers.DataUnavailable & { readonly reason: "pending"; readonly pending: true; } & __cfHelpers.PartialResultSource<string, string>) | (__cfHelpers.DataUnavailable & { readonly reason: "error"; readonly error: Error; } & __cfHelpers.PartialResultSource<string, string>) | (__cfHelpers.DataUnavailable & { readonly reason: "syncing"; readonly syncing: true; } & __cfHelpers.PartialResultSource<string, string>) | (__cfHelpers.DataUnavailable & { readonly reason: "schema-mismatch"; readonly schemaMismatch: true; } & __cfHelpers.PartialResultSource<string, string>);
+    request: (string & __cfHelpers.PartialResultSource<string, string>) | (__cfHelpers.DataUnavailable & { readonly reason: "pending"; readonly pending: true; } & __cfHelpers.PartialResultSource<string, string>) | (__cfHelpers.DataUnavailable & { readonly reason: "error"; readonly error: __cfHelpers.FabricError; } & __cfHelpers.PartialResultSource<string, string>) | (__cfHelpers.DataUnavailable & { readonly reason: "syncing"; readonly syncing: true; } & __cfHelpers.PartialResultSource<string, string>) | (__cfHelpers.DataUnavailable & { readonly reason: "schema-mismatch"; readonly schemaMismatch: true; } & __cfHelpers.PartialResultSource<string, string>);
 }, boolean>(({ request }) => !!request, {
     type: "object",
     properties: {
@@ -126,7 +111,7 @@ const __cfLift_2 = __cfHelpers.lift<{
                             "enum": ["error"]
                         },
                         error: {
-                            $ref: "#/$defs/Error"
+                            $ref: "#/$defs/FabricError"
                         }
                     },
                     required: ["reason", "error"]
@@ -161,23 +146,8 @@ const __cfLift_2 = __cfHelpers.lift<{
     },
     required: ["request"],
     $defs: {
-        Error: {
-            type: "object",
-            properties: {
-                name: {
-                    type: "string"
-                },
-                message: {
-                    type: "string"
-                },
-                stack: {
-                    type: "string"
-                },
-                cause: {
-                    type: "unknown"
-                }
-            },
-            required: ["name", "message"]
+        FabricError: {
+            type: "object"
         }
     }
 } as const satisfies __cfHelpers.JSONSchema, {

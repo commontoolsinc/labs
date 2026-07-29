@@ -1645,6 +1645,9 @@ type StripCellInner<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - i
  */
 export type FactoryInput<T> =
   | T
+  // Unavailable values propagate through factory boundaries and suspend the
+  // downstream computation until a usable value arrives.
+  | DataUnavailable
   // We have to list them explicitly so Typescript can unwrap them. Doesn't seem
   // to work if we just say AnyBrandedCell<T>
   | AnyCell<T>
@@ -3333,9 +3336,13 @@ export interface ObserveAvailabilityFunction {
  * Returns the usable view of an asynchronous result without creating a node.
  * The runner filters unavailable variants at the next computation boundary.
  */
-export type ResultOfFunction = <R>(
-  result: R,
-) => Reactive<AvailableResult<R>>;
+export interface ResultOfFunction {
+  <Final, Partial>(
+    result: Reactive<AsyncStreamResult<Final, Partial>>,
+  ): Reactive<Final>;
+  <T>(result: Reactive<AsyncResult<T>>): Reactive<T>;
+  <R>(result: R): Reactive<AvailableResult<R>>;
+}
 
 /**
  * Returns the usable intermediate value associated with a streaming call.
