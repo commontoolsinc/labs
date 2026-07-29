@@ -54,7 +54,7 @@ otherwise complete first-time creation command into an unimplemented command.
 
 ## Last updated
 
-2026-07-28
+2026-07-29
 
 ## Terms
 
@@ -596,8 +596,8 @@ an affected live session remain open design work.
 | Capability | Repository status | Remaining work |
 |---|---|---|
 | Register a late host hint before a space opens | **Implemented** | `StorageManager.registerSpaceHost` adds the route. A seed can only be confirmed, and an opened space accepts only its previously registered matching hint |
-| Keep an accepted late hint stable before opening | **Conflict guard required** | `StorageManager.registerSpaceHost` currently replaces a different late hint while the space remains unopened |
-| Hydrate durable hints in a new runtime | **Implemented** | The runtime processor watches the home-space site table and registers its entries. Callers that need ordering must also register through IPC before the first open |
+| Keep an accepted late hint stable before opening | **Implemented** | `StorageManager.registerSpaceHost` accepts the first late hint and rejects a different hint before or after the space opens |
+| Hydrate durable hints in a new runtime | **Implemented** | The runtime processor watches the home-space site table, selects its last valid HTTP or HTTPS entry for each space, and registers those hints. A route already accepted through IPC remains fixed; a conflicting table route accepted first makes later IPC registration fail |
 | Accept a host-qualified piece origin | **Origin integration required** | No source lifecycle operation persists and registers a `cf://` hint before resolving and committing the origin |
 | Recover from host failure or space movement | **Reliability design required** | There is no authoritative route-change, failover, or live close-and-reopen protocol |
 
@@ -883,11 +883,14 @@ The implementation evidence for this table is concentrated in:
   exception.
 - Storage supports late registration of a space-to-host hint before that space
   opens. The runtime processor hydrates durable hints from the home-space site
-  table. A seeded route can only be confirmed. An opened space accepts only its
-  previously registered matching hint. Before a space opens, however, a new
-  late hint currently replaces the previous one. Historical fabric origin
-  resolution can register a matching live route, but it does not yet persist
-  that route through the site table.
+  table by selecting its last valid HTTP or HTTPS entry for each space. A
+  seeded route can only be confirmed. An opened space accepts only its
+  previously registered matching hint. The first accepted late hint also
+  remains stable before the space opens, including against a later table
+  update. IPC callers must check the registration result and stop before
+  mounting on a conflict. Historical fabric origin resolution can register a
+  matching live route, but it does not yet persist that route through the site
+  table.
 - Tooling exposes the immutable source ref, optional repository locator,
   authored entry path, current origin, revision history, and lifecycle actions
   separately.
@@ -936,15 +939,15 @@ The implementation evidence for this table is concentrated in:
    alias resolution outside the lifecycle resolver. Persist an
    accepted space-to-host route before removing the host from the canonical
    target. Validate and register the route before writing it to the site table,
-   then open the origin space. Fail a conflicting seeded route or previously
-   accepted late hint, including before the first open. Once the space opens,
-   fail any hint that was not already registered and matching. Do not create a
-   secondary session. Keep the supplied canonical URL in history. Do not make
-   shortlink retention part of the lifecycle contract until the open provenance
-   question is settled. Any later alias provenance must remain separate from
-   active origins and repoint targets. Keep `patternRepository` separate and
-   clear it when newly generated or directly edited code no longer belongs to
-   that repository.
+   then open the origin space. Honor the conflict guards for seeded routes and
+   previously accepted late hints. Once the space opens, fail any hint that was
+   not already registered and matching. Do not create a secondary session.
+   Keep the supplied canonical URL in history. Do not make shortlink retention
+   part of the lifecycle contract until the open provenance question is
+   settled. Any later alias provenance must remain separate from active origins
+   and repoint targets. Keep `patternRepository` separate and clear it when
+   newly generated or directly edited code no longer belongs to that
+   repository.
 4. Add origin reconciliation to the ordinary piece start path. Add an
    event-driven subscription while an unpinned mutable fabric origin is
    running. Observe its source revision rather than only its executable

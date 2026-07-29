@@ -44,10 +44,11 @@ export type SpacesList = Schema<typeof spacesListSchema>;
  * session handshake before host hints ever come from less-trusted
  * data.
  *
- * Table semantics: an array with no uniqueness constraint — for an
- * unopened space, the LAST entry for a did wins; REMOVING an entry
- * does not unregister an already-learned hint until the runtime
- * restarts.
+ * Table semantics: an array with no uniqueness constraint. During initial
+ * hydration, the last valid HTTP or HTTPS entry for a DID is the candidate
+ * route. A route already accepted by the runtime remains fixed, including
+ * before the space opens. Removing an entry does not unregister an accepted
+ * route until the runtime restarts.
  */
 export const spaceHostEntrySchema = {
   type: "object",

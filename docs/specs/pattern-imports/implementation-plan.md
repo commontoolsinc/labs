@@ -1189,12 +1189,15 @@ One integration test (runner-level, in-process, two "deploys"):
   secondary session. A seeded route can only be confirmed. Once a late hint is
   accepted, a different hint is a conflict even before the space opens. After
   the space opens, only the hint already in effect can be confirmed. The
-  current registry still needs the pre-open conflict guard. Dynamic
-  registration and site-table hydration exist as foundations, but
-  import-resolver integration, host failure, and space relocation remain work.
-  Cross-host publication also needs CFC label propagation for fetched source
-  (spec § Security). A possible public-pattern HTTP endpoint remains open under
-  the public distribution question in the spec.
+  registry enforces these conflict rules. Initial site-table hydration selects
+  the last valid HTTP or HTTPS entry for each space without replacing a route
+  already accepted through IPC. A conflicting table route accepted first makes
+  later IPC registration fail. Dynamic registration and site-table hydration
+  exist as foundations, but import-resolver integration, host failure, and
+  space relocation remain work. Cross-host publication also needs CFC label
+  propagation for fetched source (spec § Security). A possible public-pattern
+  HTTP endpoint remains open under the public distribution question in the
+  spec.
 - **M4 explicit subpaths**: extend lifecycle source ingestion and retained
   publications with the following behavior.
 

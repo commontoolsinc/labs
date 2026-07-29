@@ -144,11 +144,11 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   open(space: MemorySpace): IStorageProviderWithReplica;
 
   /**
-   * Record a runtime-learned host hint for a space (federation site
-   * table). Optional: managers without remote, per-space resolution
+   * Record a runtime-learned HTTP or HTTPS host hint for a space
+   * (federation site table). Optional: managers without remote resolution
    * (emulated/test) simply don't implement it. Returns true when the
-   * hint is in effect; false when refused (seeded differently, or the
-   * space's connection is already open to another host).
+   * hint is accepted or confirms a configured or accepted route. Returns
+   * false on a conflict or when the space opened without that late hint.
    */
   registerSpaceHost?(space: MemorySpace, host: string): boolean;
 

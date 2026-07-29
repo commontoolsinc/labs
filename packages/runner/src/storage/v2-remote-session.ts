@@ -3,6 +3,7 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { type MemorySpace, type Signer } from "@commonfabric/memory/interface";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import { MEMORY_PROTOCOL } from "@commonfabric/memory/v2";
+import { normalizeSpaceHost } from "../space-host.ts";
 
 export interface SessionFactory {
   /** Opt in to StorageManager's ACL genesis handshake. Scripted factories used
@@ -42,6 +43,30 @@ export const toSpaceWebSocketAddress = (
 export const MEMORY_STORAGE_PATH = "/api/storage/memory";
 
 /**
+ * Resolve a shared HTTP or HTTPS space host to the memory storage endpoint.
+ * Space hosts also serve compute requests, so WebSocket-only URLs are not
+ * valid routes.
+ */
+export const storageAddressForHost = (host: string | URL): URL => {
+  return new URL(MEMORY_STORAGE_PATH, normalizeSpaceHost(host));
+};
+
+const storageAddressForMemoryHost = (host: URL): URL => {
+  const parsed = new URL(host);
+  if (
+    parsed.protocol !== "http:" &&
+    parsed.protocol !== "https:" &&
+    parsed.protocol !== "ws:" &&
+    parsed.protocol !== "wss:"
+  ) {
+    throw new TypeError(
+      `Unsupported memory host protocol: ${parsed.protocol}`,
+    );
+  }
+  return new URL(MEMORY_STORAGE_PATH, parsed);
+};
+
+/**
  * Validity window stamped onto each signed `session.open`.
  * `session.open` is a live handshake sent when a connection opens, so a few
  * minutes covers clock skew and round-trip time while bounding replay.
@@ -63,17 +88,17 @@ export const createStorageAddressResolver = (
   defaultHost: URL,
   spaceHostMap?: Record<string, string>,
   /**
-   * Late-bound host hints (space DID → host base URL) learned at
+   * Late-bound host hints mapping a space DID to a host base URL, learned at
    * runtime, e.g. from the home-space site table. Consulted AFTER the
-   * seed map and BEFORE the default. The caller owns mutation rules
-   * (a hint must never re-point an already-opened space).
+   * seed map and BEFORE the default. The caller keeps the first accepted
+   * hint stable, including after the space opens.
    */
   dynamicHosts?: ReadonlyMap<string, string>,
 ): (space: MemorySpace) => URL => {
   const overrides = new Map<string, URL>();
   for (const [space, host] of Object.entries(spaceHostMap ?? {})) {
     try {
-      overrides.set(space, new URL(MEMORY_STORAGE_PATH, host));
+      overrides.set(space, storageAddressForHost(host));
     } catch (cause) {
       throw new Error(
         `Invalid spaceHostMap entry for ${space}: "${host}"`,
@@ -81,12 +106,12 @@ export const createStorageAddressResolver = (
       );
     }
   }
-  const fallback = new URL(MEMORY_STORAGE_PATH, defaultHost);
+  const fallback = storageAddressForMemoryHost(defaultHost);
   return (space) => {
     const seeded = overrides.get(space);
     if (seeded) return new URL(seeded);
     const dynamic = dynamicHosts?.get(space);
-    if (dynamic) return new URL(MEMORY_STORAGE_PATH, dynamic);
+    if (dynamic) return storageAddressForHost(dynamic);
     return new URL(fallback);
   };
 };

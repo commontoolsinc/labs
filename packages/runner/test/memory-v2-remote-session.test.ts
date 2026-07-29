@@ -5,6 +5,7 @@ import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import {
   createStorageAddressResolver,
   MEMORY_STORAGE_PATH,
+  storageAddressForHost,
   toSpaceWebSocketAddress,
   toWebSocketAddress,
   WebSocketTransport,
@@ -58,6 +59,23 @@ describe("per-space storage address resolution", () => {
     );
   });
 
+  it("preserves a WebSocket-only default memory host", () => {
+    const resolve = createStorageAddressResolver(
+      new URL("wss://host-a.test/some/base/"),
+    );
+    expect(resolve(spaceA).toString()).toBe(
+      `wss://host-a.test${MEMORY_STORAGE_PATH}`,
+    );
+    expect(toSpaceWebSocketAddress(resolve(spaceA), spaceA).protocol).toBe(
+      "wss:",
+    );
+  });
+
+  it("rejects an unsupported default memory host protocol", () => {
+    expect(() => createStorageAddressResolver(new URL("ftp://host-a.test")))
+      .toThrow("Unsupported memory host protocol: ftp:");
+  });
+
   it("resolves a mapped space to its host and others to the default", () => {
     const resolve = createStorageAddressResolver(
       new URL("https://host-a.test"),
@@ -105,6 +123,19 @@ describe("per-space storage address resolution", () => {
       createStorageAddressResolver(
         new URL("https://host-a.test"),
         { [spaceB]: "not a url" },
+      )
+    ).toThrow(`Invalid spaceHostMap entry for ${spaceB}`);
+  });
+
+  it("rejects a host protocol that cannot serve storage and compute", () => {
+    expect(() => storageAddressForHost("ftp://host-b.test"))
+      .toThrow("Unsupported space host protocol");
+    expect(() => storageAddressForHost("wss://host-b.test"))
+      .toThrow("Unsupported space host protocol");
+    expect(() =>
+      createStorageAddressResolver(
+        new URL("https://host-a.test"),
+        { [spaceB]: "ftp://host-b.test" },
       )
     ).toThrow(`Invalid spaceHostMap entry for ${spaceB}`);
   });
@@ -180,8 +211,8 @@ describe("StorageManager per-space host wiring", () => {
   });
 });
 
-// Site-table v0: runtime-learned host hints. The registry's refusal
-// semantics ARE the contract — seed wins, opened spaces never re-point.
+// Site-table v0: runtime-learned host hints. The first configured or accepted
+// route remains in effect for the manager's lifetime.
 describe("StorageManager.registerSpaceHost", () => {
   const spaceSeeded = "did:key:z6Mk-register-seeded" as MemorySpace;
   const spaceLearned = "did:key:z6Mk-register-learned" as MemorySpace;
@@ -207,7 +238,7 @@ describe("StorageManager.registerSpaceHost", () => {
       .toBe(false);
   });
 
-  it("never re-points an opened space, and the hint routes a fresh open", async () => {
+  it("keeps the first accepted hint before and after opening a space", async () => {
     const realWebSocket = globalThis.WebSocket;
     (globalThis as { WebSocket: unknown }).WebSocket = RecordingWebSocket;
     RecordingWebSocket.dialed.length = 0;
@@ -215,6 +246,10 @@ describe("StorageManager.registerSpaceHost", () => {
       const manager = await makeManager();
       expect(manager.registerSpaceHost(spaceLearned, "http://host-b.test"))
         .toBe(true);
+      expect(manager.registerSpaceHost(spaceLearned, "http://host-b.test/"))
+        .toBe(true);
+      expect(manager.registerSpaceHost(spaceLearned, "http://host-c.test"))
+        .toBe(false);
       manager.open(spaceLearned).sync("of:register-probe" as URI)
         .catch(() => {});
       await RecordingWebSocket.whenDialed(1);
@@ -240,6 +275,20 @@ describe("StorageManager.registerSpaceHost", () => {
     const manager = await makeManager();
     expect(() => manager.registerSpaceHost(spaceLearned, "not a url"))
       .toThrow(`Invalid host for space ${spaceLearned}`);
+  });
+
+  it("rejects an unusable first hint without fixing the route", async () => {
+    const manager = await makeManager();
+    expect(() =>
+      manager.registerSpaceHost(
+        spaceLearned,
+        "mailto:memory@example.test",
+      )
+    ).toThrow(`Invalid host for space ${spaceLearned}`);
+    expect(() => manager.registerSpaceHost(spaceLearned, "wss://host-b.test"))
+      .toThrow(`Invalid host for space ${spaceLearned}`);
+    expect(manager.registerSpaceHost(spaceLearned, "https://host-b.test"))
+      .toBe(true);
   });
 });
 

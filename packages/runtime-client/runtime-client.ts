@@ -388,11 +388,13 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   /**
-   * Record a runtime-learned host hint for a space (site-table v0):
-   * makes a just-learned `space → host` fact effective on the live
-   * runtime. The durable record belongs in the home-space site table;
-   * this is the immediate, in-session half. Returns whether the hint
-   * is in effect (seed wins; an opened space is never re-pointed).
+   * Record a runtime-learned HTTP or HTTPS host hint for a space
+   * (site-table v0). This makes a just-learned space-to-host fact effective
+   * on the live runtime. The durable record belongs in the home-space table;
+   * this is the immediate, in-session half. Returns whether the worker
+   * accepted or confirmed the hint. A seed, an accepted late hint, or
+   * an open connection fixes the route for the session. Callers must
+   * not mount the space under this hint when the method returns false.
    */
   async registerSpaceHost(space: DID, host: string): Promise<boolean> {
     const res = await this.#conn.request<RequestType.RegisterSpaceHost>({

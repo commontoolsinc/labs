@@ -146,6 +146,7 @@ import {
   createStorageAddressResolver,
   RemoteSessionFactory,
   type SessionFactory,
+  storageAddressForHost,
 } from "./v2-remote-session.ts";
 import * as V2Transaction from "./v2-transaction.ts";
 import { normalizeCellScope } from "../scope.ts";
@@ -590,7 +591,8 @@ export interface Options {
   /**
    * Base URL of the default memory host. The storage endpoint path
    * (`/api/storage/memory`) is joined internally — pass the host, not
-   * the full endpoint.
+   * the full endpoint. This storage-only route may use HTTP, HTTPS,
+   * WebSocket, or secure WebSocket.
    */
   memoryHost: URL;
   /**
@@ -912,21 +914,22 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
-   * Record a runtime-learned host hint for a space (e.g. from the
-   * home-space site table). Returns true when the hint is (now) in
-   * effect for the space's storage connection. Refusals, by design:
+   * Record a runtime-learned HTTP or HTTPS host hint for a space (e.g. from
+   * the home-space site table). Returns true when the hint is accepted or
+   * confirms a configured or previously accepted route. Refusals:
    *
    * - The seed map wins: a seeded space cannot be re-pointed.
-   * - An already-OPENED space keeps its connection — a hint must never
-   *   silently re-point live storage (re-pointing requires an explicit
-   *   close, which is lifecycle follow-up work).
+   * - The first accepted late hint remains in effect.
+   * - A space that opened without a late hint accepts no new late hint.
    *
    * Idempotent when the hint matches what is already in effect.
    */
   registerSpaceHost(space: MemorySpace, host: string): boolean {
     let normalized: string;
     try {
-      normalized = new URL(host).toString();
+      const parsed = new URL(host);
+      storageAddressForHost(parsed);
+      normalized = parsed.toString();
     } catch (cause) {
       throw new Error(
         `Invalid host for space ${space}: "${host}"`,
@@ -938,12 +941,13 @@ export class StorageManager implements IStorageManager {
       return new URL(seeded).toString() === normalized;
     }
     const existing = this.#dynamicHosts.get(space);
-    if (this.#providers.has(space)) {
-      // Connection already established — only confirmable, not changeable.
-      return existing !== undefined &&
-        new URL(existing).toString() === normalized;
+    if (existing !== undefined) {
+      return existing === normalized;
     }
-    this.#dynamicHosts.set(space, host);
+    if (this.#providers.has(space)) {
+      return false;
+    }
+    this.#dynamicHosts.set(space, normalized);
     return true;
   }
 

@@ -134,6 +134,7 @@ import {
   type UnsafeHostTrust,
   type UnsafeHostTrustOptions,
 } from "./unsafe-host-trust.ts";
+import { normalizeSpaceHost } from "./space-host.ts";
 
 const isFullNormalizedLinkShape = (
   value: unknown,
@@ -965,9 +966,10 @@ export class Runtime {
     // Validate eagerly, mirroring the storage layer's resolver: a
     // malformed host should fail at configuration time naming the
     // space, not mid-builtin as a bare Invalid URL.
+    const normalizedSpaceHostMap: Record<string, string> = {};
     for (const [space, host] of Object.entries(options.spaceHostMap ?? {})) {
       try {
-        new URL(host);
+        normalizedSpaceHostMap[space] = normalizeSpaceHost(host).toString();
       } catch (cause) {
         throw new Error(
           `Invalid spaceHostMap entry for ${space}: "${host}"`,
@@ -980,7 +982,7 @@ export class Runtime {
     // space → host never changes), so a caller mutating their object
     // after construction must not change routing.
     this.spaceHostMap = options.spaceHostMap
-      ? Object.freeze({ ...options.spaceHostMap })
+      ? Object.freeze(normalizedSpaceHostMap)
       : undefined;
     // Default is a late-bound wrapper that reads `globalThis.fetch` at call time,
     // preserving the existing behavior where a test overrides the global AFTER
@@ -2087,16 +2089,25 @@ export class Runtime {
   }
 
   /**
-   * Record a runtime-learned host hint for a space (the v0 site-table
-   * flow). Storage decides first — the seed map wins and an opened
-   * space is never silently re-pointed — and compute routing follows
-   * exactly when storage accepted, keeping the two layers in agreement.
-   * Returns whether the hint is in effect.
+   * Record a runtime-learned HTTP or HTTPS host hint for a space (the v0
+   * site-table flow). Storage decides first. A seed, an accepted late hint,
+   * or an open connection fixes the route for the session. Compute routing
+   * follows when storage accepts the hint. Returns whether storage accepted
+   * or confirmed the hint.
    */
   registerSpaceHost(space: MemorySpace, host: string): boolean {
-    const accept = this.storageManager.registerSpaceHost?.(space, host);
+    let normalized: string;
+    try {
+      normalized = normalizeSpaceHost(host).toString();
+    } catch (cause) {
+      throw new Error(
+        `Invalid host for space ${space}: "${host}"`,
+        { cause },
+      );
+    }
+    const accept = this.storageManager.registerSpaceHost?.(space, normalized);
     if (accept === undefined) return false; // manager has no remote resolution
-    if (accept) this.#dynamicHosts.set(space, host);
+    if (accept) this.#dynamicHosts.set(space, normalized);
     return accept;
   }
 

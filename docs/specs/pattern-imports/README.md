@@ -102,7 +102,7 @@ general piece origin model is described in `../piece-source-lifecycle.md`.
 | Slug cells: generic **redirect link to any cell** (`setSlugLink` is target-agnostic; only `resolvePieceAddress` layers a "must be a piece" check) | `packages/piece/src/slugs.ts` | Slugs can name pieces *or* patterns today, mechanically |
 | Slug ids: `hashOf({causal:{space, slug}})`; slug grammar `[a-z0-9]+(-[a-z0-9]+)*`, ≤80 chars; **`isSlugAddress(t) = !t.includes(":")`** | `packages/runner/src/slugs.ts` | The existing slug-vs-URI discriminator the grammar reuses |
 | `loadPatternByIdentity(entryIdentity, symbol, space)` | `packages/runner/src/pattern-manager.ts` | Existing by-identity load path the resolver builds on |
-| Per-space host routing: `spaceHostMap` seeds routes, `registerSpaceHost` adds a route before a space opens, and the home-space site table hydrates durable hints; foreign-host sessions are ordinary authenticated memory sessions | `packages/runner/src/storage/v2-remote-session.ts`, `packages/runner/src/storage/v2.ts`, and `packages/runtime-client/backends/runtime-processor.ts` | Reads work for a foreign space whose route is already known. A seeded route can only be confirmed. A later hint currently replaces an earlier late hint while the space remains unopened. After the space opens, only its previously registered matching hint can be confirmed. Applying a host from an explicit `cf://` reference remains planned |
+| Per-space host routing: `spaceHostMap` seeds routes, `registerSpaceHost` adds a route before a space opens, and the home-space site table hydrates durable hints; foreign-host sessions are ordinary authenticated memory sessions | `packages/runner/src/storage/v2-remote-session.ts`, `packages/runner/src/storage/v2.ts`, and `packages/runtime-client/backends/runtime-processor.ts` | Reads work for a foreign space whose route is already known. A seeded route can only be confirmed. The first accepted late hint remains stable before and after the space opens. Initial table hydration selects the last valid HTTP or HTTPS entry for each space without replacing a route already accepted through IPC. A conflicting table route accepted first makes later IPC registration fail. Applying a host from an explicit `cf://` reference remains planned |
 
 ### The two "pattern by hash" handles, explicitly
 
@@ -688,9 +688,9 @@ Consequences:
   late hint must also remain stable before the first open; a different hint is
   a conflict. After the space opens, registration can only confirm the hint
   that was already in effect. Any other registration attempt fails rather than
-  opening a second connection for the same space. The current registry still
-  replaces a different late hint before the first open. Host-qualified import
-  resolution must add this conflict guard when it adopts the registration path.
+  opening a second connection for the same space. Host-qualified import
+  resolution must use this registration path before opening the referenced
+  space.
 - A cacheable, anonymous HTTP mirror for published patterns (CDN-style
   distribution to readers with no fabric identity) remains *possible* later.
   It would need an explicit anonymous visibility policy that covers the whole
@@ -863,10 +863,9 @@ unchanged.
    reference. A seeded route can only be confirmed. Once a late hint is
    accepted, a different hint is a conflict even before the space opens. After
    the space opens, only the hint already in effect can be confirmed. Any other
-   attempt fails rather than silently changing the route. The current registry
-   still needs the pre-open conflict guard. This settles how a known hint enters
-   the current session. It does not settle host discovery, availability,
-   failover, or space relocation.
+   attempt fails rather than silently changing the route. This settles how a
+   known hint enters the current session. It does not settle host discovery,
+   availability, failover, or space relocation.
 3. **Runtime-fingerprint interaction.** A runtime fingerprint change creates a
    new executable identity for an importer whose reachable graph contains an
    external dependency, even when its authored source and fabric pins are
