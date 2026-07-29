@@ -176,6 +176,15 @@ precisely the foundation those need.
    flag-off on interaction AND boot, engagement by counters, cold row
    published alongside.
 
+**BUILD ORCHESTRATION — start here if you are picking the work up:**
+[`passivity-arc-orchestration.md`](passivity-arc-orchestration.md)
+carries the arc's state, the standing knowledge that is expensive to
+rediscover (executor serve discipline, CFC fixture requirements, test
+topology, the known-flaky gate, the R5 mechanism, the pre-diagnosed
+`llm` hole), and a pre-written delegation prompt per work item. It is
+designed so a fresh context can drive the whole arc without re-deriving
+any of it; keep its §1 state table and §6 log accurate as work lands.
+
 **Measurement protocol (hard-won, mandatory):** fresh store per run
 (`rm -rf packages/toolshed/cache` after stopping the 750 servers);
 kill leftover `ms-playwright` browsers between runs; record load
