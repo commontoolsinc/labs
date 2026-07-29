@@ -668,6 +668,12 @@ interface SchemaDefinitionContext {
    * count moved must not be memoized as proven.
    */
   cuts: number;
+  /**
+   * Every `provenByRoot` record, in the order it was made. A schema proven
+   * while a definition map was merely claimed may have skipped that map on the
+   * strength of the claim, so handing the map back takes those records with it.
+   */
+  provenLog: Array<{ rootKey: object; schema: object }>;
 }
 
 /** Validate the schema language understood by strict Fabric migration checks. */
@@ -691,10 +697,12 @@ export const validateSchemaDefinition = (
     walkedDefinitionsByRoot: new WeakMap(),
     provenByRoot: new WeakMap(),
     cuts: 0,
+    provenLog: [],
   });
 };
 
 const DEFINITION_KEYS = ["$defs", "definitions"] as const;
+type DefinitionKey = (typeof DEFINITION_KEYS)[number];
 
 /**
  * Claim the definition maps this schema walks, so a schema that merely carries
@@ -714,8 +722,8 @@ const claimDefinitionScopes = (
   schema: Exclude<JSONSchema, boolean>,
   rootKey: object,
   context: SchemaDefinitionContext,
-): ReadonlySet<string> | undefined => {
-  let claimed: Set<string> | undefined;
+): ReadonlySet<DefinitionKey> | undefined => {
+  let claimed: Set<DefinitionKey> | undefined;
   for (const key of DEFINITION_KEYS) {
     const definitions = schema[key];
     if (!isRecord(definitions) || Array.isArray(definitions)) continue;
@@ -743,8 +751,16 @@ const releaseCutDefinitionScope = (
   rootKey: object,
   definitions: object,
   context: SchemaDefinitionContext,
+  logMark: number,
 ): void => {
   context.walkedDefinitionsByRoot.get(rootKey)?.delete(definitions);
+  // Anything memoized while the claim stood may have skipped this map because
+  // of it. The claim is gone, so those proofs go with it.
+  for (let index = context.provenLog.length - 1; index >= logMark; index--) {
+    const record = context.provenLog[index];
+    context.provenByRoot.get(record.rootKey)?.delete(record.schema);
+  }
+  context.provenLog.length = logMark;
 };
 
 const validateSchemaDefinitionInternal = (
@@ -773,6 +789,8 @@ const validateSchemaDefinitionInternal = (
   active.add(schema);
   const cutsOnEntry = context.cuts;
   const claimedDefinitions = claimDefinitionScopes(schema, rootKey, context);
+  const settledDefinitions = new Set<string>();
+  const provenLogMark = context.provenLog.length;
 
   try {
     if (Object.hasOwn(schema, "$ref")) {
@@ -1021,8 +1039,11 @@ const validateSchemaDefinitionInternal = (
         );
         if (issue !== undefined) return issue;
       }
-      if (isDefinitionScope && context.cuts !== cutsBeforeScope) {
-        releaseCutDefinitionScope(rootKey, children, context);
+      if (isDefinitionScope) {
+        settledDefinitions.add(key);
+        if (context.cuts !== cutsBeforeScope) {
+          releaseCutDefinitionScope(rootKey, children, context, provenLogMark);
+        }
       }
     }
 
@@ -1032,11 +1053,21 @@ const validateSchemaDefinitionInternal = (
         proven = new WeakSet();
         context.provenByRoot.set(rootKey, proven);
       }
-      proven.add(schema);
+      if (!proven.has(schema)) {
+        proven.add(schema);
+        context.provenLog.push({ rootKey, schema });
+      }
     }
     return undefined;
   } finally {
     active.delete(schema);
+    for (const key of claimedDefinitions ?? []) {
+      if (settledDefinitions.has(key)) continue;
+      const definitions = schema[key];
+      if (isRecord(definitions)) {
+        releaseCutDefinitionScope(rootKey, definitions, context, provenLogMark);
+      }
+    }
   }
 };
 

@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -591,6 +592,65 @@ describe("cfc schema sanitization", () => {
       type: "object",
       properties: { a: { $ref: "#/$defs/A" }, b: { $ref: "#/$defs/B" } },
     };
+
+    expect(validateSchemaDefinition(fragment, root)).toContain(
+      "unsupported schema type bogus",
+    );
+  });
+
+  it("releases a definition map claimed by a view that then hit the ref guard", () => {
+    // A `{$ref}` view claims the owning `$defs` on ENTRY, then returns straight
+    // away on the active-ref guard having walked nothing. The release used to
+    // live only inside the `$defs` iteration, so that frame never reached it
+    // and every later carrier of the map skipped it — forever. `Unreferenced`
+    // is what proves the map went unwalked: nothing else reaches it.
+    const root: JSONSchema = {
+      type: "object",
+      $defs: {
+        Rec: { $ref: "#/$defs/Rec", type: "object" } as unknown as JSONSchema,
+        Ok: { allOf: [{ $ref: "#/$defs/Rec" }] },
+        Unreferenced: {
+          type: "number",
+          required: ["a", "a"],
+        } as unknown as JSONSchema,
+      },
+    };
+    const fragment: JSONSchema = {
+      type: "object",
+      properties: { a: { $ref: "#/$defs/Rec" }, b: { $ref: "#/$defs/Ok" } },
+    };
+
+    expect(validateSchemaDefinition(fragment, root)).toContain(
+      "must be an array of unique strings",
+    );
+  });
+
+  it("drops proofs that leaned on a claim, when the claim is handed back", () => {
+    // `provenByRoot` may record a schema that SKIPPED a definition map on the
+    // strength of someone else's claim. If the claimer later releases that map,
+    // the proof was resting on a claim that no longer stands — so the release
+    // has to take those records with it, or a second path hits the memo and
+    // never re-walks the released map.
+    //
+    // Interning is what makes the resolved views identity-stable enough to hit
+    // the memo, and the builder interns schemas throughout — so this is the
+    // production shape, not an exotic one.
+    const root = internSchema({
+      type: "object",
+      $defs: {
+        W: { type: "object", properties: { x: { $ref: "#/$defs/X" } } },
+        X: { type: "object", properties: { k: { $ref: "#/$defs/Leaf" } } },
+        Leaf: { type: "string" },
+        BadHost: {
+          type: "object",
+          properties: { n: { $ref: "#/$defs/W", type: "bogus" } },
+        },
+      },
+    } as unknown as JSONSchema);
+    const fragment = internSchema({
+      type: "object",
+      properties: { f0: { $ref: "#/$defs/W" }, f1: { $ref: "#/$defs/X" } },
+    } as unknown as JSONSchema);
 
     expect(validateSchemaDefinition(fragment, root)).toContain(
       "unsupported schema type bogus",
