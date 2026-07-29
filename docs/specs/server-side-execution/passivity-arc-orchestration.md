@@ -284,8 +284,14 @@ this wrong makes every cross-arm set relation vacuously zero.
    the server may execute. Membership is what earns the `:server-v1`
    implementation fingerprint (`serverBuiltinImplementationHash`).
 2. `packages/runner/src/runner.ts:~5134` stamps that fingerprint; a canonical
-   builtin outside the set instead gets `builtinImplementationHash` (`:v1`) and
-   then rejects `incomplete-static-surface` until a descriptor exists.
+   builtin outside the set instead gets `builtinImplementationHash` (`:v1`)
+   and then rejects until a descriptor exists. **Which rejection depends on
+   the KIND, and this doc named only one arm until 2026-07-29:** a
+   *computation* rejects `incomplete-static-surface`; an *effect* with no
+   assembled summary rejects **`unknown-effect-surface`**
+   (`scheduler/servability.ts:382-388`). Grepping for the computation code
+   while chasing an effect row finds nothing and reads as "not classified at
+   all". (Caught by the navigateTo design.)
 3. `packages/runner/src/runner.ts:~5244` mints the
    `ServerBuiltinActionDescriptor` **generically** from `serverBuiltinId` —
    so adding an id to the allowlist gives it a descriptor automatically from
