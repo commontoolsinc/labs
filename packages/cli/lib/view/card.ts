@@ -149,9 +149,21 @@ export function buildPeekCard(
 
   append(outlineSection(node, expanded));
   append(usesSection(doc, node, expanded));
-  append(depsSection(doc, node, definitionOf, identUses, expanded));
+  const dependencies = depsSection(
+    doc,
+    node,
+    definitionOf,
+    identUses,
+    expanded,
+  );
+  append(dependencies);
   append(externalSection(definitionOf, identUses, expanded));
-  append(deferredDefinitionsSection(deferredIdentUses));
+  append(
+    deferredDefinitionsSection(
+      deferredIdentUses,
+      dependencies.deferredDependencies,
+    ),
+  );
 
   // Drop a trailing blank for tidiness.
   while (info.length > 0 && info[info.length - 1].text === "") info.pop();
@@ -495,7 +507,7 @@ function depsSection(
   definitionOf: DefinitionLookup | undefined,
   identUses: readonly IdentUse[],
   expanded: boolean,
-): Section {
+): Section & { deferredDependencies: number } {
   const deps = findDependencies(doc, node);
   const processedOffsets = definitionOf
     ? new Set(identUses.map((use) => use.useOffset))
@@ -511,8 +523,12 @@ function depsSection(
     defEndOffset?: number;
     definitionOffset: number;
   }[] = [];
+  let deferredDependencies = 0;
   for (const d of deps) {
-    if (processedOffsets && !processedOffsets.has(d.useOffset)) continue;
+    if (processedOffsets && !processedOffsets.has(d.useOffset)) {
+      deferredDependencies++;
+      continue;
+    }
     const jump = dependencyJump(doc, d, definitionOf);
     if (jump.external) continue; // a same-named external def; in "defined elsewhere"
     candidates.push({
@@ -607,10 +623,12 @@ function depsSection(
       candidate.definitionOffset,
     );
   }
-  if (rows.length === 0) return { lines: [], targets: [] };
+  if (rows.length === 0) {
+    return { lines: [], targets: [], deferredDependencies };
+  }
   const lines: Line[] = [heading(`depends on · ${rows.length}`), ...rows];
   if (more > 0) pushMore(lines, targets, more);
-  return { lines, targets };
+  return { lines, targets, deferredDependencies };
 }
 
 /**
@@ -729,14 +747,25 @@ function cachedDefinitionLookup(semantics: Semantics): DefinitionLookup {
 
 /** A collapsed card resolves a bounded prefix of symbol uses. This selectable
  * row rebuilds the card with every remaining position resolved. */
-function deferredDefinitionsSection(count: number): Section {
+function deferredDefinitionsSection(
+  count: number,
+  possibleDependencies: number,
+): Section {
   if (count === 0) return { lines: [], targets: [] };
+  const possible = possibleDependencies === 0
+    ? ""
+    : ` · ${possibleDependencies} possible ${
+      possibleDependencies === 1 ? "dependency" : "dependencies"
+    }`;
   return {
     lines: [
       heading("definition lookup"),
       row(
         ["  … inspect ", "comment"],
-        [`${count} remaining use${count === 1 ? "" : "s"}`, "comment"],
+        [
+          `${count} remaining use${count === 1 ? "" : "s"}${possible}`,
+          "comment",
+        ],
       ),
     ],
     targets: [{

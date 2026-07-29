@@ -744,4 +744,8 @@ function typeQuery(
 }
 
 /** Internals exposed for tests only. */
-export const _internal = { lazyProgram, makeHost };
+export const _internal = {
+  lazyProgram,
+  makeHost,
+  signedNumericElementDefinitions,
+};
