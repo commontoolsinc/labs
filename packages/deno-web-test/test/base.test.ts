@@ -25,3 +25,16 @@ Deno.test("smoke test", async function () {
   assert(stderrText.split("\n").length === 2, "stderr has no other messages");
   assert(stderrText.split("\n")[1] === "", "stderr has no other messages");
 });
+
+Deno.test("dependency downloads do not enter harness stderr", async function () {
+  const { success, stderr } = await runDenoWebTest("success-project", {
+    reload: "npm:typescript",
+  });
+  const stderrText = decode(stderr);
+
+  assert(success, "test successful");
+  assert(
+    !stderrText.includes("Download"),
+    `stderr has no download diagnostics:\n${stderrText}`,
+  );
+});

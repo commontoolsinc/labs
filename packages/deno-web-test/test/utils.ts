@@ -6,6 +6,10 @@ const dirname = import.meta.dirname as string;
 const CLI_PATH = path.join(dirname, "..", "cli.ts");
 const DenoWebTestCache: Map<string, Promise<Deno.CommandOutput>> = new Map();
 
+interface RunDenoWebTestOptions {
+  reload?: string;
+}
+
 // Runs deno-web-test in `projectDir` and caches
 // the results for multiple test usages.
 //
@@ -15,8 +19,10 @@ const DenoWebTestCache: Map<string, Promise<Deno.CommandOutput>> = new Map();
 // before running tests.
 export const runDenoWebTest = async (
   projectDir: string,
+  options: RunDenoWebTestOptions = {},
 ): Promise<Deno.CommandOutput> => {
-  const fromCache = DenoWebTestCache.get(projectDir);
+  const cacheKey = JSON.stringify([projectDir, options]);
+  const fromCache = DenoWebTestCache.get(cacheKey);
   if (fromCache) {
     return fromCache;
   }
@@ -33,8 +39,9 @@ export const runDenoWebTest = async (
   const manifest = parseJsonc(await Deno.readTextFile(manifestPath)) as {
     tasks: { test: string };
   };
+  const reload = options.reload ? `--reload=${options.reload} ` : "";
   manifest.tasks.test =
-    `deno run --allow-env --allow-read --allow-write --allow-run --allow-net ${CLI_PATH} *.test.ts`;
+    `deno run ${reload}--allow-env --allow-read --allow-write --allow-run --allow-net ${CLI_PATH} *.test.ts`;
   await Deno.writeTextFile(manifestPath, JSON.stringify(manifest));
 
   // Populate the cache for the harness and each test entrypoint before the task.
@@ -62,6 +69,6 @@ export const runDenoWebTest = async (
     ],
     cwd: tmpProjectPath,
   }).output();
-  DenoWebTestCache.set(projectDir, output);
+  DenoWebTestCache.set(cacheKey, output);
   return output;
 };
