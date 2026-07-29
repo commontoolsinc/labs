@@ -1068,6 +1068,11 @@ const replaceDemand = (
 ): Promise<void> => {
   const next = [...new Set(pieces)].sort();
   const nextSet = new Set(next);
+  // `enqueue<T>` takes `() => Promise<T>` (queue.ts:33), so the callback must
+  // return a promise. The body has no `await` today, but dropping `async`
+  // would mean hand-rolling the Promise around a block that throws and
+  // branches — strictly worse than this pin.
+  // deno-lint-ignore require-await
   return enqueue(async (): Promise<void> => {
     if (runtime === null || space === null) {
       throw new Error("executor Worker is not initialized");
