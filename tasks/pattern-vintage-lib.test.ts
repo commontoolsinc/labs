@@ -4,8 +4,13 @@ import {
   AUTO,
   collectVintages,
   coveredPatternKeys,
+  describeError,
+  isClean,
   parseVintagePath,
   PINNED,
+  relativeToRepo,
+  reportFailures,
+  reportUncovered,
   requiredPatternKeys,
   stampFor,
   uncoveredRequiredPatterns,
@@ -210,5 +215,77 @@ describe("collectVintages", () => {
     // "No fixtures yet" must report as uncovered patterns — the actionable
     // message — not as an ENOENT from the gate.
     expect(await collectVintages("/nonexistent/vintages/root")).toEqual([]);
+  });
+});
+
+describe("reporting", () => {
+  const failure = {
+    patternKey: "system/home.tsx",
+    path: "packages/patterns/vintages/system/home.tsx/pinned/x.sqlite.gz",
+    detail: "materializing today's source over this vintage was REFUSED",
+  };
+
+  it("names every uncovered pattern and the command that fixes it", () => {
+    // The report is the gate's entire interface to whoever trips it. A gate
+    // that fails with an unclear message costs more than one that fails late.
+    const report = reportUncovered([
+      "system/home.tsx",
+      "system/default-app.tsx",
+    ]);
+
+    expect(report).toContain("system/home.tsx");
+    expect(report).toContain("system/default-app.tsx");
+    expect(report).toContain("deno task pattern-vintage --update");
+    // Says WHY it matters, not just what is missing — the reader is usually
+    // someone who has never heard of this gate.
+    expect(report).toContain("bricks that piece");
+  });
+
+  it("names the pattern, the fixture, and the rejection for each failure", () => {
+    const report = reportFailures([failure]);
+
+    expect(report).toContain("system/home.tsx");
+    expect(report).toContain(failure.path);
+    expect(report).toContain("REFUSED");
+    // The stakes, because a red gate on a test fixture reads as ignorable and
+    // this one is not.
+    expect(report).toContain("deployed piece is holding RIGHT NOW");
+  });
+
+  it("reports every failure, not just the first", () => {
+    const report = reportFailures([
+      failure,
+      { ...failure, patternKey: "system/default-app.tsx" },
+    ]);
+
+    expect(report).toContain("2 vintage(s)");
+    expect(report).toContain("system/default-app.tsx");
+  });
+
+  it("passes only when there is nothing to report", () => {
+    // Stated once and tested, rather than an `if` at the bottom of main that a
+    // later edit can quietly invert. A gate that exits 0 on failure is worse
+    // than no gate at all.
+    expect(isClean([], [])).toBe(true);
+    expect(isClean([failure], [])).toBe(false);
+    expect(isClean([], ["system/home.tsx"])).toBe(false);
+    expect(isClean([failure], ["system/home.tsx"])).toBe(false);
+  });
+});
+
+describe("path and error helpers", () => {
+  it("strips the repo root and leaves an outside path alone", () => {
+    expect(relativeToRepo("/repo/packages/x.gz", "/repo")).toBe(
+      "packages/x.gz",
+    );
+    expect(relativeToRepo("/elsewhere/x.gz", "/repo")).toBe("/elsewhere/x.gz");
+  });
+
+  it("describes a non-Error throw without rendering it useless", () => {
+    // `String({})` is "[object Object]", which satisfies a truthiness check
+    // while destroying the reason — the class of bug that made an earlier
+    // rejection assertion pass for nothing.
+    expect(describeError(new Error("boom"))).toBe("boom");
+    expect(describeError("plain string")).toBe("plain string");
   });
 });

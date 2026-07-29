@@ -218,3 +218,71 @@ export function uncoveredRequiredPatterns(
   const covered = coveredPatternKeys(vintages);
   return requiredKeys.filter((key) => !covered.has(key)).sort();
 }
+
+/** A vintage that could not be replayed under today's source. */
+export interface ReplayFailure {
+  patternKey: string;
+  /** Repo-relative fixture path. */
+  path: string;
+  detail: string;
+}
+
+/** A readable message for anything thrown across the task's I/O boundary. */
+export function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** An absolute path back to a repo-relative one, for readable output. */
+export function relativeToRepo(path: string, repoRoot: string): string {
+  const prefix = `${repoRoot}/`;
+  return path.startsWith(prefix) ? path.slice(prefix.length) : path;
+}
+
+/**
+ * What the gate prints when a pattern has no vintage.
+ *
+ * The report is the gate's entire interface to whoever trips it, so it is
+ * built here and tested rather than assembled inline: a gate that fails with
+ * an unclear message costs more than one that fails a little late.
+ */
+export function reportUncovered(uncovered: readonly string[]): string {
+  return [
+    `${uncovered.length} auto-updating pattern(s) have no pinned vintage:`,
+    "",
+    ...uncovered.map((key) => `  ${key}`),
+    "",
+    "These patterns auto-update onto a root someone is already using, so a",
+    "change that cannot read the old state bricks that piece. Capture one with:",
+    "",
+    "  deno task pattern-vintage --update",
+  ].join("\n");
+}
+
+/** What the gate prints when a committed vintage no longer replays. */
+export function reportFailures(failures: readonly ReplayFailure[]): string {
+  return [
+    `${failures.length} vintage(s) could not be replayed:`,
+    "",
+    ...failures.flatMap(({ patternKey, path, detail }) => [
+      `  ${patternKey}`,
+      `    ${path}`,
+      `    ${detail}`,
+    ]),
+    "",
+    "This is state a deployed piece is holding RIGHT NOW. The automatic updater",
+    "performs no structural check, so nothing at runtime will stop this change",
+    "from reaching it.",
+  ].join("\n");
+}
+
+/**
+ * Whether the run passes. Split out so the exit condition is stated once and
+ * tested, rather than being an `if` at the bottom of `main` that a later edit
+ * can quietly invert — a gate that exits 0 on failure is worse than no gate.
+ */
+export function isClean(
+  failures: readonly ReplayFailure[],
+  uncovered: readonly string[],
+): boolean {
+  return failures.length === 0 && uncovered.length === 0;
+}

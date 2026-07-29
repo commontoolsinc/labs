@@ -27,7 +27,13 @@ import {
 } from "../packages/piece/src/system-pattern-url.ts";
 import {
   collectVintages,
+  describeError,
+  isClean,
   PINNED,
+  relativeToRepo,
+  type ReplayFailure,
+  reportFailures,
+  reportUncovered,
   requiredPatternKeys,
   stampFor,
   uncoveredRequiredPatterns,
@@ -60,11 +66,6 @@ const VINTAGES_ROOT = `${REPO_ROOT}/${VINTAGES_DIR}`;
  */
 const FIXTURE_SIGNER = await Identity.fromPassphrase("pattern vintage fixture");
 
-interface Failure {
-  vintage: VintageRef;
-  detail: string;
-}
-
 async function withRuntime<T>(
   fromSnapshot: string | undefined,
   run: (
@@ -90,7 +91,9 @@ function resolveProgram(key: string) {
 }
 
 /** Replay one fixture under today's source. Returns a failure, or undefined. */
-async function replay(vintage: VintageRef): Promise<Failure | undefined> {
+async function replay(
+  vintage: VintageRef,
+): Promise<ReplayFailure | undefined> {
   const snapshot = vintage.path;
   return await withRuntime(snapshot, async (runtimeVintage) => {
     let program;
@@ -100,21 +103,21 @@ async function replay(vintage: VintageRef): Promise<Failure | undefined> {
       );
     } catch (error) {
       return {
-        vintage,
-        detail: `today's source does not resolve: ${describe(error)}`,
+        ...where(vintage),
+        detail: `today's source does not resolve: ${describeError(error)}`,
       };
     }
     const outcome = await materializeOver(runtimeVintage, program as never);
     if (outcome.error !== undefined) {
       return {
-        vintage,
+        ...where(vintage),
         detail:
           `materializing today's source over this vintage was REFUSED:\n      ${outcome.error}`,
       };
     }
     if (outcome.value === undefined) {
       return {
-        vintage,
+        ...where(vintage),
         detail:
           "materialized, but the root reads as undefined — the vintage's state is gone",
       };
@@ -149,15 +152,12 @@ async function capture(key: string): Promise<string> {
   });
 }
 
-/** Absolute fixture path back to a repo-relative one, for readable output. */
-function relative(path: string): string {
-  return path.startsWith(`${REPO_ROOT}/`)
-    ? path.slice(REPO_ROOT.length + 1)
-    : path;
-}
-
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+/** The reportable location of a fixture. */
+function where(vintage: VintageRef): { patternKey: string; path: string } {
+  return {
+    patternKey: vintage.patternKey,
+    path: relativeToRepo(vintage.path, REPO_ROOT),
+  };
 }
 
 async function main() {
@@ -187,7 +187,7 @@ async function main() {
         // Report every failure rather than dying on the first: a run that
         // captures 9 of 10 and then throws leaves the tree half-seeded with no
         // statement about which one is the problem.
-        problems.push(`  ${key}: ${describe(error)}`);
+        problems.push(`  ${key}: ${describeError(error)}`);
       }
     }
     if (problems.length > 0) {
@@ -198,39 +198,16 @@ async function main() {
     return;
   }
 
-  const failures: Failure[] = [];
+  const failures: ReplayFailure[] = [];
   for (const vintage of existing) {
     const failure = await replay(vintage);
     if (failure !== undefined) failures.push(failure);
   }
 
-  if (uncovered.length > 0) {
-    console.error(
-      `${uncovered.length} auto-updating pattern(s) have no pinned vintage:\n`,
-    );
-    for (const key of uncovered) console.error(`  ${key}`);
-    console.error(
-      `\nThese patterns auto-update onto a root someone is already using, so a ` +
-        `change that cannot read the old state bricks that piece. Capture one ` +
-        `with:\n\n  deno task pattern-vintage --update\n`,
-    );
-  }
+  if (uncovered.length > 0) console.error(reportUncovered(uncovered));
+  if (failures.length > 0) console.error(`\n${reportFailures(failures)}`);
 
-  if (failures.length > 0) {
-    console.error(`\n${failures.length} vintage(s) could not be replayed:\n`);
-    for (const { vintage, detail } of failures) {
-      console.error(`  ${vintage.patternKey}`);
-      console.error(`    ${relative(vintage.path)}`);
-      console.error(`    ${detail}`);
-    }
-    console.error(
-      `\nThis is state a deployed piece is holding RIGHT NOW. The automatic ` +
-        `updater performs no structural check, so nothing at runtime will stop ` +
-        `this change from reaching it.`,
-    );
-  }
-
-  if (failures.length > 0 || uncovered.length > 0) Deno.exit(1);
+  if (!isClean(failures, uncovered)) Deno.exit(1);
   console.log(
     `Replayed ${existing.length} vintage(s) under today's source; all readable.`,
   );
