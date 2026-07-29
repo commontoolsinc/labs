@@ -77,6 +77,12 @@ export function isArrayIndexPropertyName(name: string): boolean {
  * none of them have any representation as array content. Returns `true` for
  * sparse arrays, whose holes are simply absent properties.
  *
+ * Anything that isn't actually an array is rejected, including an array-_like_
+ * object and one whose prototype is `Array.prototype`. Such a value can
+ * perfectly well name `length` as its final own property, so the key-order
+ * reasoning below says nothing about it. This also makes the function total:
+ * it answers rather than throwing no matter what it is handed.
+ *
  * **Note:** This function relies on the given array producing `Reflect.ownKeys()`
  * output which agrees with the JavaScript spec with regards to key ordering,
  * namely index keys in ascending numeric order, then the remaining string keys
@@ -95,6 +101,12 @@ export function isArrayIndexPropertyName(name: string): boolean {
  * @returns `true` if the array has only index properties, `false` otherwise.
  */
 export function isArrayWithOnlyIndexProperties(array: unknown[]): boolean {
+  // `Array.isArray()` sees through a `Proxy` to its target, so a proxied array
+  // is still recognized as one here.
+  if (!Array.isArray(array)) {
+    return false;
+  }
+
   // Given the key ordering described above, `length` -- which is created along
   // with the array itself, and so precedes every later-created string key --
   // is the last own key exactly when there is no other non-index key at all:

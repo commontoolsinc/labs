@@ -1543,6 +1543,19 @@ describe("native-conversion", () => {
         );
       });
 
+      it("throws for a non-array whose prototype is `Array.prototype`", () => {
+        // Such a value has `constructor === Array`, so type-tag dispatch routes
+        // it to array handling even though `Array.isArray()` is `false` for it.
+        // It has no fabric representation as either an array or an object, so
+        // it must be rejected rather than quietly converted.
+        const fake = Object.create(Array.prototype) as Record<string, unknown>;
+        fake[0] = "a";
+        fake.length = 1;
+        expect(() => fabricFromNativeValue(fake)).toThrow(
+          "Cannot store array with non-index properties",
+        );
+      });
+
       it("throws for a nested array with a symbol-keyed property", () => {
         const arr = [1, 2];
         (arr as unknown as Record<symbol, unknown>)[Symbol.for("extra")] = 42;
