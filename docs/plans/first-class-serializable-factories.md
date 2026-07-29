@@ -700,7 +700,7 @@ and the transformer pipeline regression suite.
   linking them into the hidden cell.
 - [ ] Preserve nested link parents and cross-space links rather than copying
   values across spaces.
-- [ ] Update `unwrapOneLevelAndBindtoDoc`, `sendValueToBinding`, and direct
+- [ ] Update `unwrapOneLevelAndBindToDoc`, `sendValueToBinding`, and direct
   sub-pattern setup to accept the params pseudo-root only when the invocation
   owns a params cell.
 - [ ] Populate the same deterministic cell from serialized `Factory@1` state on

@@ -45,7 +45,7 @@ import { RetryImmediately } from "./scheduler/retry-immediately.ts";
 import {
   findAllWriteRedirectCells,
   opaqueArgumentKeys,
-  unwrapOneLevelAndBindtoDoc,
+  unwrapOneLevelAndBindToDoc,
 } from "./pattern-binding.ts";
 import { resolveLink } from "./link-resolution.ts";
 import {
@@ -1249,7 +1249,7 @@ export class Runner {
       ? resultCell.withTx(tx)
       : resultCell.withTx(tx).asSchema(pattern.resultSchema);
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
-    let result = unwrapOneLevelAndBindtoDoc<R, any>(
+    let result = unwrapOneLevelAndBindToDoc<R>(
       this.runtime.cfc,
       pattern.result as R,
       argumentCellLink,
@@ -3248,7 +3248,7 @@ export class Runner {
         let outputs: NormalizedFullLink[];
         try {
           inputs = findAllWriteRedirectCells(
-            unwrapOneLevelAndBindtoDoc(
+            unwrapOneLevelAndBindToDoc(
               this.runtime.cfc,
               node.inputs,
               argumentMetaLink,
@@ -3258,7 +3258,7 @@ export class Runner {
             resultCell,
           );
           outputs = findAllWriteRedirectCells(
-            unwrapOneLevelAndBindtoDoc(
+            unwrapOneLevelAndBindToDoc(
               this.runtime.cfc,
               node.outputs,
               argumentMetaLink,
@@ -3451,7 +3451,7 @@ export class Runner {
 
     // May be undefined: this walk runs before setup writes the meta on fresh
     // first runs, and child result cells are not synced yet on a cold-cache
-    // resume. That is fine for binding — unwrapOneLevelAndBindtoDoc only needs
+    // resume. That is fine for binding — unwrapOneLevelAndBindToDoc only needs
     // the argument link when an output actually aliases the argument doc, and
     // throws otherwise. Substituting a different document instead would derive
     // the wrong `resultFor` identity and pre-sync the wrong owned-cell subtree
@@ -3477,7 +3477,7 @@ export class Runner {
       // cell, pre-syncing the wrong owned-cell subtree.
       let spotLink: NormalizedFullLink | undefined;
       try {
-        const unwrappedOutputs = unwrapOneLevelAndBindtoDoc(
+        const unwrappedOutputs = unwrapOneLevelAndBindToDoc(
           this.runtime.cfc,
           node.outputs,
           argumentLink,
@@ -3791,14 +3791,14 @@ export class Runner {
     pattern: Pattern,
   ): BoundNodeIO {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
-    const inputs = unwrapOneLevelAndBindtoDoc(
+    const inputs = unwrapOneLevelAndBindToDoc(
       this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
-    const outputs = unwrapOneLevelAndBindtoDoc(
+    const outputs = unwrapOneLevelAndBindToDoc(
       this.runtime.cfc,
       outputBindings,
       argumentCellLink,
@@ -5618,7 +5618,7 @@ export class Runner {
    * so the builtin's sync resolution cannot miss short of a bug — and a bug
    * should be loud, not silently served a stale graph. `inputBindings` here is
    * the freshly bound (mutable, unfrozen) copy produced by
-   * `unwrapOneLevelAndBindtoDoc`; its pattern values carry their derivation
+   * `unwrapOneLevelAndBindToDoc`; its pattern values carry their derivation
    * link (`noteDerivedCopy`), so `getArtifactEntryRef` can resolve the ref
    * (assigned post-eval by `registerEvaluatedModules`).
    *
@@ -5695,14 +5695,14 @@ export class Runner {
       tx.setCfcImplementationIdentity(builtinIdentity);
     }
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
-    const mappedInputBindings = unwrapOneLevelAndBindtoDoc(
+    const mappedInputBindings = unwrapOneLevelAndBindToDoc(
       this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
-    const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
+    const mappedOutputBindings = unwrapOneLevelAndBindToDoc(
       this.runtime.cfc,
       outputBindings,
       argumentCellLink,
@@ -5977,14 +5977,14 @@ export class Runner {
     pattern: Pattern,
   ) {
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
-    const inputs = unwrapOneLevelAndBindtoDoc(
+    const inputs = unwrapOneLevelAndBindToDoc(
       this.runtime.cfc,
       inputBindings,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
-    const outputs = unwrapOneLevelAndBindtoDoc(
+    const outputs = unwrapOneLevelAndBindToDoc(
       this.runtime.cfc,
       outputBindings,
       argumentCellLink,
@@ -6015,14 +6015,14 @@ export class Runner {
     const parentResultCell = resultCell;
     const argumentCellLink = getMetaLink(resultCell, "argument")!;
     if (!isPattern(module.implementation)) throw new Error(`Invalid pattern`);
-    const patternImpl = unwrapOneLevelAndBindtoDoc(
+    const patternImpl = unwrapOneLevelAndBindToDoc(
       this.runtime.cfc,
       module.implementation,
       argumentCellLink,
       resultCell,
       { derivedInternalCells: pattern.derivedInternalCells },
     );
-    const inputs = unwrapOneLevelAndBindtoDoc(
+    const inputs = unwrapOneLevelAndBindToDoc(
       this.runtime.cfc,
       inputBindings,
       argumentCellLink,
@@ -6037,7 +6037,7 @@ export class Runner {
         sourceSchemas: { argument: pattern.argumentSchema },
       },
     );
-    const outputs = unwrapOneLevelAndBindtoDoc(
+    const outputs = unwrapOneLevelAndBindToDoc(
       this.runtime.cfc,
       outputBindings,
       argumentCellLink,
@@ -6077,7 +6077,7 @@ export class Runner {
       // `bindPatterns: false` — output bindings never carry sub-patterns to
       // instantiate, so skip that work; we only need the pseudo-cell aliases
       // resolved to their concrete links.
-      const mappedOutputBindings = unwrapOneLevelAndBindtoDoc(
+      const mappedOutputBindings = unwrapOneLevelAndBindToDoc(
         this.runtime.cfc,
         outputBindings,
         argumentCellLink,
