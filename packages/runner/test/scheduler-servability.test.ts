@@ -936,6 +936,168 @@ describe("§4 output-widening pair servability (C1.9)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// The AUXILIARY result cell gap — a CHARACTERIZATION pin, not a statement of
+// desired behavior.
+//
+// `scoped-cell-instances.md` ("Computation Rules") says the output-widening
+// rule "applies to auxiliary result cells created to represent structured or
+// captured reactive outputs as well as direct scalar outputs. Any intermediate
+// or result cell allocated for the computation must use the effective output
+// scope […]; broader output locations then store links to that scoped instance
+// with the same causal id." The `ifElse`/`when`/`unless` selectors do exactly
+// that: each output-producing run mints a `{ <builtin>: cause }` result
+// document and stores a link to it in the broad output SPOT. With a
+// user-scoped condition the minted document is allocated at `user` scope
+// (`runner.ts` `instantiateJavaScriptNode` effective-output-scope branch)
+// while the runner-authored descriptor declares it at `space`
+// (`runner.ts` `selectorMintedResultWrite`, whose comment records the
+// consequence: "a scoped actual write fails closed at the firewall's scope
+// check instead of being served").
+//
+// The §4 relaxation below does not reach it: `covers` is exact-scope, and the
+// lane-instance widening applies to `directOutputs` only — the minted document
+// is a declared WRITE, never a direct output. This is the measured live
+// offender behind `dynamic-write-outside-static-surface` (client-passivity
+// §5g's live inventory: 12 events / 1 offender at user AND session rank,
+// fingerprint `impl:cf:builtin/ifElse:v1`).
+//
+// Whether to close it in the descriptor (declare the minted document's lane
+// instances) or in this classifier (widen the relaxation from `directOutputs`
+// to the declared write surface, with the matching change in the executor's
+// `widenLaneOutputEnvelopes`) is an open owner decision. Until it is made,
+// these pins keep the shape reproducible in milliseconds instead of a
+// three-arm live probe, and a fix flips exactly the two `toBe(...)` lines.
+// ---------------------------------------------------------------------------
+
+describe("auxiliary result-cell coverage (measured gap)", () => {
+  // The selector's two documents: the broad output SPOT (its direct output,
+  // holding a link) and the MINTED result document (declared at space scope,
+  // written at the condition's scope).
+  const outputSpot = address("of:spot");
+  const mintedSpace = address("of:minted");
+  const mintedUser = address("of:minted", { scope: "user" });
+  const summary = {
+    reads: [address("of:condition", { scope: "user" })],
+    writes: [mintedSpace, outputSpot],
+    directOutputs: [outputSpot],
+  };
+  const userContext = {
+    servedSpace,
+    branch: "",
+    contextRank: "user",
+    laneActingCommit: true,
+  } as const;
+
+  function observation(
+    overrides: Partial<SchedulerActionObservation> = {},
+  ): SchedulerActionObservation {
+    return {
+      version: 2,
+      ownerSpace: servedSpace,
+      branch: "",
+      pieceId: "space:of:piece",
+      processGeneration: 1,
+      actionId: "cf:builtin/ifElse:v1:instance",
+      actionKind: "computation",
+      implementationFingerprint: "impl:computation-v1",
+      runtimeFingerprint: "runner:scheduler:v3",
+      observedAtSeq: 0,
+      transactionKind: "action-run",
+      reads: [address("of:condition", { scope: "user" })],
+      shallowReads: [],
+      actualChangedWrites: [mintedUser],
+      currentKnownWrites: [],
+      materializerWriteEnvelopes: [],
+      completeActionScopeSummary: withSummary(summary)
+        .completeActionScopeSummary as CompleteActionScopeSummary,
+      status: "success",
+      ...overrides,
+    };
+  }
+
+  function routeInput(
+    operations: ClientCommit["operations"],
+    observed: SchedulerActionObservation,
+  ): ActionTransactionRouteInput {
+    return {
+      space: servedSpace,
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations,
+        schedulerObservation: observed,
+      },
+      sourceAction: {},
+    };
+  }
+
+  it("classifies the selector claim-ready at user rank (so a claim issues)", () => {
+    // The gap is a DYNAMIC one: the action is statically servable and does
+    // take a user-rank claim — it only fails the per-attempt firewall.
+    expect(classifyStaticActionServability(
+      withSummary(summary),
+      servedSpace,
+      { userContext: true },
+    )).toEqual({
+      status: "claim-ready",
+      actionKind: "computation",
+      contextRank: "user",
+    });
+  });
+
+  it("reports dynamic-write-outside-static-surface for the lane-hydrated run", () => {
+    // The live executor shape: the Worker re-runs inside an already hydrated
+    // lane, so the broad spot link is unchanged and never enters the commit.
+    // Only the scoped minted-result value write remains — declared at
+    // `space`, written at `user`, covered by neither arm.
+    const observed = observation();
+    expect(dynamicActionTransactionUnservableReason(
+      routeInput(
+        [{ op: "set", id: "of:minted", scope: "user", value: { value: 6 } }],
+        observed,
+      ),
+      observed,
+      userContext,
+    )).toBe("dynamic-write-outside-static-surface");
+  });
+
+  it("reports malformed-scope-naming-link when the broad spot link is written", () => {
+    // The same derivation's other face (the classification arm's ×12): the
+    // spot's link is a CROSS-DOCUMENT scope-naming link — it names the minted
+    // document and carries no principal or session id, so it is still
+    // byte-identical across lanes, but the §4 wire contract admits only
+    // SELF-redirects. Separate question from the coverage gap above.
+    const observed = observation({
+      actualChangedWrites: [outputSpot, mintedUser],
+    });
+    expect(dynamicActionTransactionUnservableReason(
+      routeInput(
+        [
+          {
+            op: "patch",
+            id: "of:spot",
+            scope: "space",
+            patches: [{
+              op: "add",
+              path: "/value",
+              value: {
+                "/": {
+                  "link@1": { path: [], id: "of:minted", scope: "user" },
+                },
+              },
+            }],
+          },
+          { op: "set", id: "of:minted", scope: "user", value: { value: 6 } },
+        ],
+        observed,
+      ),
+      observed,
+      userContext,
+    )).toBe("malformed-scope-naming-link");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // C2.2 — session-lane surface classification and the §4 pair at session
 // rank. The lattice (context-lattice §2: `space < user:<principal> <
 // session:<principal>:<sessionId>`) makes a session lane's admissible scope
