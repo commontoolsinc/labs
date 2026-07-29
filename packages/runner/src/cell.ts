@@ -10,6 +10,7 @@ import {
   FabricInstance,
   FabricSpecialObject,
   type FabricValue,
+  shallowCleanArray,
   shallowFabricFromNativeValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
@@ -3235,6 +3236,15 @@ export function convertCellsToLinks(
   // At this point `value` is a non-`null` object(ish) thing.
 
   seen.set(value, path); // ...which needs to be tracked for circularity.
+
+  // A schema-bearing read hangs a non-enumerable `toCell` symbol on the arrays
+  // it returns. That symbol is machinery, not content, and an array carrying it
+  // is not a `FabricValue`, so drop it before the conversion below would reject
+  // it. Only annotated arrays are cleaned: an array carrying anything else
+  // non-index is genuinely unrepresentable and must still be rejected.
+  if (Array.isArray(value) && isCellResultForDereferencing(value)) {
+    value = shallowCleanArray(value, false);
+  }
 
   // Convert the (top level of) the value to fabric form (a valid `FabricValue`)
   // if it isn't already, or throw if it's neither already valid nor

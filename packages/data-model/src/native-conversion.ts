@@ -3,7 +3,10 @@ import {
   isRecord,
   isUnsafeObjectKey,
 } from "@commonfabric/utils/types";
-import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
+import {
+  isArrayIndexPropertyName,
+  isArrayWithOnlyIndexProperties,
+} from "@commonfabric/utils/arrays";
 
 import {
   type FabricOrConvertibleNativeValue,
@@ -31,6 +34,57 @@ function rejectExtraProperties(value: object, typeName: string): void {
       `Cannot store ${typeName} with extra enumerable properties`,
     );
   }
+}
+
+/**
+ * Returns a shallow clone of the given array carrying nothing but its index
+ * properties and `length`, that is, one which satisfies
+ * `isArrayWithOnlyIndexProperties()`. Holes are preserved as holes, and
+ * elements are copied by reference without themselves being converted or
+ * validated, this being a shallow operation.
+ *
+ * This exists for a caller holding an array that has picked up non-index own
+ * properties which it knows are not content -- a runtime annotation, say --
+ * and which the conversion functions here would therefore reject outright.
+ * Calling this is how such a caller says explicitly that it means to drop
+ * them. Code with no such warrant should let the rejection happen ("death
+ * before confusion").
+ *
+ * @param value The array to clean.
+ * @param frozen Whether to freeze the result. Defaults to `true`.
+ */
+export function shallowCleanArray(
+  value: unknown[],
+  frozen = true,
+): FabricValueLayer {
+  const result: unknown[] = [];
+
+  // Set the extent first, so that trailing holes survive; assigning only the
+  // present elements would leave `length` short.
+  result.length = value.length;
+
+  // Iterate the own keys rather than counting from `0` to `length`: a sparse
+  // array's `length` can run to 2**32 - 2 while holding a handful of elements,
+  // and only the elements it actually has need copying. Every index key is
+  // necessarily below `length`, so none of these assignments extends it.
+  // A canonical index string addresses exactly the element slot it names, so
+  // these are indexed by key directly, with no number parsing. The record views
+  // exist only to say as much to TypeScript, which otherwise rejects a string
+  // index on an array (TS7015).
+  const from = value as unknown as Record<string, unknown>;
+  const to = result as unknown as Record<string, unknown>;
+
+  for (const key of Reflect.ownKeys(value)) {
+    if ((typeof key === "string") && isArrayIndexPropertyName(key)) {
+      to[key] = from[key];
+    }
+  }
+
+  if (frozen) {
+    Object.freeze(result);
+  }
+
+  return result as FabricValueLayer;
 }
 
 /**

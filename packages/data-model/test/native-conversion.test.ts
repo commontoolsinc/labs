@@ -19,8 +19,10 @@ import {
   isConvertibleNativeInstance,
   isFabricCompatible,
   nativeFromFabricValue,
+  shallowCleanArray,
   shallowFabricFromNativeValue,
 } from "@/native-conversion.ts";
+import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
 import { FrozenMap, FrozenSet } from "@/frozen-builtins.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
@@ -1930,6 +1932,144 @@ describe("native-conversion", () => {
       const arr = [1] as number[] & { extra?: string };
       arr.extra = "nope";
       expect(isFabricCompatible({ list: arr })).toBe(false);
+    });
+  });
+
+  describe("shallowCleanArray()", () => {
+    it("drops an enumerable named property", () => {
+      const arr = [1, 2, 3] as unknown[] & { foo?: string };
+      arr.foo = "bar";
+
+      const result = shallowCleanArray(arr) as unknown[];
+
+      expect(isArrayWithOnlyIndexProperties(result)).toBe(true);
+      expect(result).toEqual([1, 2, 3]);
+    });
+
+    it("drops a non-enumerable named property", () => {
+      const arr = [1, 2, 3];
+      Object.defineProperty(arr, "foo", { value: "bar", enumerable: false });
+
+      const result = shallowCleanArray(arr) as unknown[];
+
+      expect(isArrayWithOnlyIndexProperties(result)).toBe(true);
+      expect(Object.getOwnPropertyNames(result)).toEqual([
+        "0",
+        "1",
+        "2",
+        "length",
+      ]);
+    });
+
+    it("drops a symbol-keyed property, enumerable or not", () => {
+      const arr = [1, 2];
+      (arr as unknown as Record<symbol, unknown>)[Symbol("enum")] = "x";
+      Object.defineProperty(arr, Symbol("nonEnum"), {
+        value: "y",
+        enumerable: false,
+      });
+
+      const result = shallowCleanArray(arr) as unknown[];
+
+      expect(isArrayWithOnlyIndexProperties(result)).toBe(true);
+      expect(Object.getOwnPropertySymbols(result)).toEqual([]);
+    });
+
+    it("preserves interior holes as holes rather than `undefined`", () => {
+      const arr: unknown[] = [];
+      arr[0] = 1;
+      arr[2] = 3;
+
+      const result = shallowCleanArray(arr) as unknown[];
+
+      expect(result.length).toBe(3);
+      expect(0 in result).toBe(true);
+      expect(1 in result).toBe(false); // the hole
+      expect(2 in result).toBe(true);
+    });
+
+    it("preserves trailing holes, so `length` survives", () => {
+      // Assigning element-by-element without setting `length` first would
+      // truncate these away.
+      const arr: unknown[] = [];
+      arr[0] = 1;
+      arr.length = 10;
+
+      const result = shallowCleanArray(arr) as unknown[];
+
+      expect(result.length).toBe(10);
+      expect(1 in result).toBe(false);
+    });
+
+    it("touches only the present elements, not every index below `length`", () => {
+      // A hugely sparse array must cost O(present elements), not O(length).
+      const target: unknown[] = [];
+      target.length = 1_000_000;
+      target[5] = "x";
+
+      let probes = 0;
+      const counting = new Proxy(target, {
+        has(t, p) {
+          probes++;
+          return Reflect.has(t, p);
+        },
+        get(t, p, r) {
+          if (p !== "length") probes++;
+          return Reflect.get(t, p, r);
+        },
+      });
+
+      const result = shallowCleanArray(counting) as unknown[];
+
+      expect(result.length).toBe(1_000_000);
+      expect(result[5]).toBe("x");
+      expect(probes).toBeLessThan(100);
+    });
+
+    it("distinguishes a stored `undefined` from a hole", () => {
+      const arr: unknown[] = [undefined, 2];
+
+      const result = shallowCleanArray(arr) as unknown[];
+
+      expect(0 in result).toBe(true);
+      expect(result[0]).toBe(undefined);
+    });
+
+    it("returns a frozen result by default, and a mutable one on request", () => {
+      const arr = [1, 2, 3];
+
+      expect(Object.isFrozen(shallowCleanArray(arr) as unknown[])).toBe(true);
+      expect(Object.isFrozen(shallowCleanArray(arr, false) as unknown[]))
+        .toBe(false);
+    });
+
+    it("does not mutate or alias its input", () => {
+      const arr = [1, 2, 3] as unknown[] & { foo?: string };
+      arr.foo = "bar";
+
+      const result = shallowCleanArray(arr) as unknown[];
+
+      expect(result).not.toBe(arr);
+      expect(arr.foo).toBe("bar"); // input untouched
+    });
+
+    it("copies elements by reference, being a shallow operation", () => {
+      const inner = { a: 1 };
+      const arr = [inner] as unknown[] & { foo?: string };
+      arr.foo = "bar";
+
+      const result = shallowCleanArray(arr) as unknown[];
+
+      expect(result[0]).toBe(inner);
+    });
+
+    it("produces a value the conversion functions accept", () => {
+      const arr = [1, 2, 3] as unknown[] & { foo?: string };
+      arr.foo = "bar";
+
+      expect(() => shallowFabricFromNativeValue(arr)).toThrow();
+      expect(() => shallowFabricFromNativeValue(shallowCleanArray(arr, false)))
+        .not.toThrow();
     });
   });
 });
