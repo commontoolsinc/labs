@@ -2,6 +2,7 @@ import { assertEquals } from "@std/assert";
 import { parseDocument } from "./view-helpers.ts";
 import type { Line } from "../lib/view/model.ts";
 import {
+  _internal as wrapInternal,
   buildWrapPlan,
   fitWrapChrome,
   wrappedRowAt,
@@ -398,6 +399,19 @@ Deno.test("word wrap plan: narrow rows fall back to forward hard wrapping", () =
   assertEquals(wrappedRowAt(plan, 1)?.offset, 5);
   assertEquals(wrappedRowAt(plan, 2)?.offset, 10);
   assertEquals(wrappedRowAt(plan, 2)?.sourceEnd, 13);
+});
+
+Deno.test("word wrap internals: fixed offsets use the compact layout", () => {
+  const line = parseDocument("abcdefgh").lines[0];
+
+  assertEquals(
+    wrapInternal.buildWordWrapLine(line, "pictures", 4, 0, 0, 0),
+    null,
+  );
+  assertEquals(
+    wrapInternal.hasFixedWrapOffsets([0], 8, 4, 0, 0, 0),
+    false,
+  );
 });
 
 Deno.test("wrap plan: exact-width lines do not add an empty row", () => {

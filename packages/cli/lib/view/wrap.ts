@@ -712,3 +712,8 @@ function isPrefixCharacter(codePoint: string): boolean {
     ASCII_PUNCTUATION.test(codePoint) ||
     UNICODE_PUNCTUATION.test(codePoint));
 }
+
+export const _internal = {
+  buildWordWrapLine,
+  hasFixedWrapOffsets,
+};
