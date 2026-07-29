@@ -1732,6 +1732,56 @@ Two consequences that reorder the plan:
    false positive for a sanctioned class. That needs a handler-commit
    discriminator, and it narrows the firewall, never the pair.
 
+### 5h.2 The provenance meta-path envelope — the two caveats resolved
+
+Investigated by the orchestrator 2026-07-29 (three delegated attempts died
+on platform 529s, so this was done directly). It answers the two things
+flagged as needing a check before the rule could be recommended.
+
+**Background.** `sqliteDatabase` cannot take a W2.15a computation
+descriptor because `makeResultCell` stamps a document-root `["result"]`
+meta path on the document it mints — a parent back-pointer that six
+production readers walk to resolve piece ownership
+(`ensure-piece-running.ts:57`, `piece/manager.ts:1057`, and four others).
+A value-root envelope renders `["value"]`, so `["result"]` falls outside
+it and every minting run de-claims. Proposed rule: **a minted-document
+declaration implicitly covers the provenance meta paths every mint writes
+— `["result"]` and `["pattern"]` — and nothing else.**
+
+**Caveat 1 — can `["result"]`'s CONTENT vary? Resolved: it does not
+matter.** `covers()` (`packages/runner/src/scheduler/servability.ts:884-892`)
+compares `space`, `id`, `scopeOf`, and a **path prefix**. There is no value
+comparison anywhere in it. So the envelope bounds *which addresses may be
+written*, never what is written there, and `getAsWriteRedirectLink({
+includeSchema: true })` producing different bytes between two runs cannot
+break an address-keyed envelope. The question was mis-aimed.
+
+**What CAN break it is scope**, since `scopeOf(envelope) ===
+scopeOf(address)` is exact — and that is precisely the ×12 defect
+(§5h.1). Its fix (`8e1cb7d99`) already installed the lane-instance
+relaxation for exactly this shape, so **the scope half of the problem is
+already solved**; the provenance rule only needs the path half.
+
+**Caveat 2 — are there meta paths beyond those two?** `makeResultCell`
+(`packages/runner/src/builtins/sqlite-builtins.ts:85-109`) writes exactly
+two: `setResultCell` → `["result"]` unconditionally, and `setPatternCell`
+→ `["pattern"]` **conditionally** (`result-utils.ts:15-18` writes it only
+when `patternCell.getRaw() !== undefined`). The other minters —
+`filter.ts:233,407` and `fetch-program.ts:229-231` — call `setResultCell`
+only. `cell.sync()` is not a meta write.
+
+**Verdict: the rule is sound, and cheaper to express than expected.**
+Because `covers()` matches a path *prefix*, an envelope declared at
+`["result"]` covers `["result", …anything]` — so the two provenance paths
+are exactly expressible with no new matching machinery. The conditional
+nature of `["pattern"]` is also harmless: an envelope may be declared and
+not written, only the reverse de-claims.
+
+**Not yet verified, and worth one look before building:** whether any
+minter reachable from a builtin writes a meta path this survey missed. The
+enumeration above covers `makeResultCell` and the two other
+`setResultCell` callers, not every conceivable mint path.
+
 ### The client never received authority — and that reframes the goal
 
 Investigated 2026-07-28 after the owner asked what actually triggers the

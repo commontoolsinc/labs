@@ -99,11 +99,22 @@ server; closing them all is what makes the claim mechanism unnecessary.
 **Known-open (pruned 2026-07-29 — closed items removed, not archived here;
 the Log in §6 is the history):**
 
-- **`sqliteDatabase` still has no descriptor.** `makeResultCell` writes the
-  document-root `["result"]` path, which a computation envelope cannot bound.
-  Measured and pinned in
-  `packages/runner/test/sqlite-database-servability.test.ts`. Needs a registry
-  decision nobody has made — **owner-facing**.
+- **`sqliteDatabase` still has no descriptor**, but the design question is
+  now ANSWERED and only the build remains. `makeResultCell` writes the
+  document-root `["result"]` path (a parent back-pointer six production
+  readers walk), which a value-root computation envelope cannot bound; pinned
+  in `packages/runner/test/sqlite-database-servability.test.ts`. The rule to
+  build: **a minted-document declaration implicitly covers `["result"]` and
+  `["pattern"]`, and nothing else.** Both caveats are resolved in
+  client-passivity §5h.2 — `covers()` is address-only with a path-PREFIX
+  match, so content variance is irrelevant and the two paths are exactly
+  expressible; and the scope half is already solved by the ×12 fix's
+  lane-instance relaxation. Do NOT take the materializer route: joining
+  `SERVER_MATERIALIZER_BUILTIN_IDS` also installs
+  `materializerWriteEnvelopes`, which re-indexes the node in
+  `SchedulerMaterializers` and changes **when it is scheduled**
+  (`isMaterializer` is read at `scheduler/dependency-graph.ts:41,325`,
+  `event-preflight-dependencies.ts:217`, `facade.ts:2709`).
 - **`navigateTo` / `compileAndRun`** need the server→client channel designed
   in [`navigate-to-server-side.md`](navigate-to-server-side.md). Owner gates
   in its §7 are open.
