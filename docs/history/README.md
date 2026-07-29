@@ -267,6 +267,9 @@ One line per archived document; each document's header carries the fuller
 - [2026-07-binary-artifact-transfer.md](development/performance/2026-07-binary-artifact-transfer.md)
   — binary artifact file and byte transfer snapshot before the per-binary
   workflow split, July 2026.
+- [2026-07-document-release.md](development/performance/2026-07-document-release.md)
+  — what a space replica held before and after documents could be released,
+  July 2026.
 - [scoped-cells-field-notes.md](development/scoped-cells-field-notes.md) —
   field journal from the first scoped-cell patterns.
 - [2026-07-02-convergence-evidence-appendix.md](plans/2026-07-02-convergence-evidence-appendix.md)

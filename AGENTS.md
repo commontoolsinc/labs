@@ -169,6 +169,10 @@ If you are developing runtime code, read the following documentation:
   layers. Its neighbour `mergeable-collection-writes.md` covers why the
   mergeable ops exist and what they do to conflict detection; read it before
   changing how a handler writes to a list
+- `docs/development/document-release.md` - What keeps a document in a space
+  replica, how the runner tells storage that nothing reads one any more, how the
+  watch set shrinks, and what a read of a released document does. Read it before
+  changing what a replica holds or how watches are installed
 - `docs/development/UI_TESTING.md` - How to work with shadow dom in our
   integration tests
 - `docs/development/EXPERIMENTAL_OPTIONS.md` - The central registry of every

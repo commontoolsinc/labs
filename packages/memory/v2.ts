@@ -321,6 +321,13 @@ export type MemoryProtocolFlags = {
   entityIdPagination: boolean;
   /** The server can test one entity identifier without loading its value. */
   entityIdLookup: boolean;
+  /**
+   * The server accepts `session.watch.remove`, which drops watches by id and
+   * recomputes the session's watch union. A client that sees this absent (an
+   * older server) shrinks its watch set with `session.watch.set` instead,
+   * which is equivalent but carries every surviving spec in the request.
+   */
+  watchRemove: boolean;
 };
 
 /**
@@ -337,6 +344,7 @@ export type WireMemoryProtocolFlags = {
   entityIdListing?: boolean;
   entityIdPagination?: boolean;
   entityIdLookup?: boolean;
+  watchRemove?: boolean;
 };
 
 export type HelloMessage = {
@@ -476,6 +484,11 @@ export type WatchSetResult = {
 };
 
 export type WatchAddResult = {
+  serverSeq: number;
+  sync: SessionSync;
+};
+
+export type WatchRemoveResult = {
   serverSeq: number;
   sync: SessionSync;
 };
@@ -646,6 +659,15 @@ export type WatchAddRequest = {
   space: string;
   sessionId: SessionId;
   watches: WatchSpec[];
+};
+
+export type WatchRemoveRequest = {
+  type: "session.watch.remove";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  /** Watch ids to drop. Ids the session does not hold are ignored. */
+  watchIds: string[];
 };
 
 export type SessionAckRequest = {
@@ -856,6 +878,7 @@ export type ClientMessage =
   | SqliteRegisterDiskSourceRequest
   | WatchSetRequest
   | WatchAddRequest
+  | WatchRemoveRequest
   | SchedulerSnapshotListRequest
   | SessionAckRequest;
 export type ServerMessage =
@@ -946,6 +969,8 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   entityIdListing: true,
   entityIdPagination: true,
   entityIdLookup: true,
+  // Build-inherent: this build's server implements the verb.
+  watchRemove: true,
   syncSchemaTableV2: getSyncSchemaTableConfig(),
 });
 
@@ -1051,6 +1076,14 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const watchRemove = value.watchRemove;
+  if (
+    watchRemove !== undefined &&
+    typeof watchRemove !== "boolean"
+  ) {
+    return null;
+  }
+
   return {
     modernCellRep: modernCellRep === true,
     persistentSchedulerState: persistentSchedulerState === true,
@@ -1066,6 +1099,9 @@ export const parseMemoryProtocolFlags = (
     entityIdListing: entityIdListing === true,
     entityIdPagination: entityIdPagination === true,
     entityIdLookup: entityIdLookup === true,
+    // Absent (an older server) parses to false: the client shrinks its watch
+    // set with `session.watch.set` unless the verb is positively advertised.
+    watchRemove: watchRemove === true,
   };
 };
 
@@ -1085,6 +1121,7 @@ export const wireMemoryProtocolFlags = (
   entityIdListing: flags.entityIdListing,
   entityIdPagination: flags.entityIdPagination,
   entityIdLookup: flags.entityIdLookup,
+  watchRemove: flags.watchRemove,
 });
 
 /**

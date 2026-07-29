@@ -1,7 +1,6 @@
 import { assertEquals } from "@std/assert";
 import {
   buildDiffSync,
-  buildFullSync,
   cacheKeyForEntity,
   toCacheEntry,
 } from "../v2/server-sync.ts";
@@ -58,15 +57,6 @@ Deno.test("memory v2 session sync removes include scope", () => {
     }],
   ]);
 
-  assertEquals(buildFullSync(previous, new Map(), 1, 2).removes, [{
-    branch: "",
-    id: "of:space",
-    scope: "space",
-  }, {
-    branch: "",
-    id: "of:user",
-    scope: "user",
-  }]);
   assertEquals(buildDiffSync(previous, new Map(), 1, 2).removes, [{
     branch: "",
     id: "of:space",

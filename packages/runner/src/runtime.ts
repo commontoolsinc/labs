@@ -40,6 +40,7 @@ import type {
   ChangeGroup,
   CommitError,
   DID,
+  IDocumentReleaseHooks,
   IExtendedStorageTransaction,
   IStorageManager,
   IStorageProvider,
@@ -1102,6 +1103,23 @@ export class Runtime {
       options.consoleHandler,
       options.errorHandlers,
     );
+
+    // Hand the storage layer the two answers it needs to release documents:
+    // whether a live reactive reader still depends on one, and what to forget
+    // once one is gone. Duck-typed like the telemetry hand-off above: only the
+    // v2 manager implements it.
+    (this.storageManager as {
+      setDocumentReleaseHooks?: (hooks: IDocumentReleaseHooks) => void;
+    }).setDocumentReleaseHooks?.({
+      hasReaders: (space, id, scope) =>
+        this.scheduler.hasDocumentReaders({ space, id, scope }),
+      documentDropped: (space, id, scope) => {
+        this.missingDocLoadKicks.delete(
+          `${space}\0${normalizeCellScope(scope)}\0${id}`,
+        );
+        this.storageManager.retractDocPullKick?.(space, id, scope);
+      },
+    });
 
     // Register built-in modules with runtime injection
     registerBuiltins(this);

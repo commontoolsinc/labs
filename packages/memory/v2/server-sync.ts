@@ -130,34 +130,6 @@ export const sameWatchSpec = (
   left.kind === right.kind &&
   watchQueryIdentity(left) === watchQueryIdentity(right);
 
-export const buildFullSync = (
-  previous: ReadonlyMap<string, SessionCacheEntry>,
-  next: ReadonlyMap<string, SessionCacheEntry>,
-  fromSeq: number,
-  toSeq: number,
-): SessionSync => {
-  const removes = [...previous.values()]
-    .filter((entry) =>
-      !next.has(
-        cacheKeyForEntity(entry.branch, entry.id, entry.scope),
-      )
-    )
-    .map((entry) => ({
-      branch: entry.branch,
-      id: entry.id,
-      scope: entry.scope,
-    }))
-    .sort(compareSyncAddress);
-  const upserts = [...next.values()].sort(compareSyncAddress);
-  return {
-    type: "sync",
-    fromSeq,
-    toSeq,
-    upserts,
-    removes,
-  };
-};
-
 export const buildDiffSync = (
   previous: ReadonlyMap<string, SessionCacheEntry>,
   next: ReadonlyMap<string, SessionCacheEntry>,

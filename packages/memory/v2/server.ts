@@ -48,6 +48,8 @@ import {
   type V2Error,
   type WatchAddRequest,
   type WatchAddResult,
+  type WatchRemoveRequest,
+  type WatchRemoveResult,
   type WatchSetRequest,
   type WatchSetResult,
   type WatchSpec,
@@ -91,7 +93,6 @@ import { respondToHello } from "./handshake.ts";
 import { compressServerMessageSchemas } from "./sync-schema-table.ts";
 import {
   buildDiffSync,
-  buildFullSync,
   cacheKeyForEntity,
   groupedQueries,
   isEmptySync,
@@ -775,6 +776,26 @@ class Connection {
         }
         {
           const response = await this.server.watchAdd(parsed);
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
+        return;
+      case "session.watch.remove":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        {
+          const response = await this.server.watchRemove(parsed);
           this.sendSessionResponse(
             parsed.space,
             parsed.sessionId,
@@ -2543,8 +2564,30 @@ export class Server {
     }
   }
 
-  async watchSet(
+  watchSet(
     message: WatchSetRequest,
+  ): Promise<ResponseMessage<WatchSetResult>> {
+    return this.replaceSessionWatches(message, () => message.watches);
+  }
+
+  /**
+   * Drop watches by id. Equivalent to a `session.watch.set` carrying the
+   * survivors, but the request names only what goes — which is what a client
+   * shrinking a large watch set one page at a time actually has to say.
+   */
+  watchRemove(
+    message: WatchRemoveRequest,
+  ): Promise<ResponseMessage<WatchRemoveResult>> {
+    const dropped = new Set(message.watchIds);
+    return this.replaceSessionWatches(
+      message,
+      (current) => current.filter((watch) => !dropped.has(watch.id)),
+    );
+  }
+
+  private async replaceSessionWatches(
+    message: WatchSetRequest | WatchRemoveRequest,
+    next: (current: readonly WatchSpec[]) => WatchSpec[],
   ): Promise<ResponseMessage<WatchSetResult>> {
     const session = this.#sessions.get(message.space, message.sessionId);
     if (session === null) {
@@ -2575,23 +2618,30 @@ export class Server {
       }
     }
 
+    const watches = next(session.watches);
     try {
       const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
         message.space,
-        message.watches,
+        watches,
         aclEngine,
         {
           principal: session.principal,
           sessionId: message.sessionId,
         },
+        message.type,
       );
-      const sync = buildFullSync(
+      // Entities the session already holds at the same seq are not resent
+      // (protocol §4.6.3); the client learns what left the union from
+      // `removes`. On the reconnect path, where a non-resumed session starts
+      // with an empty entity cache, this produces the same frame a full
+      // send would.
+      const sync = buildDiffSync(
         session.entities,
         entities,
         session.seenSeq,
         serverSeq,
       );
-      session.watches = message.watches;
+      session.watches = watches;
       session.graphs = graphs;
       session.entities = entities;
       session.trackedIds = trackedIdsFromEntries(entities.values());
@@ -2822,6 +2872,7 @@ export class Server {
     watches: readonly WatchSpec[],
     engine?: Engine.Engine,
     scopeContext: { principal?: string; sessionId?: string } = {},
+    label = "session.watch.set",
   ): Promise<{
     serverSeq: number;
     graphs: Map<string, TrackedGraphState>;
@@ -2864,7 +2915,7 @@ export class Server {
       }
     }
 
-    recordSlowQueryDuration("session.watch.set", space, startedAt, {
+    recordSlowQueryDuration(label, space, startedAt, {
       watches: watches.length,
     });
     return {
@@ -3920,6 +3971,23 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       watches: parsed.watches as WatchSpec[],
+    };
+  }
+
+  if (
+    parsed.type === "session.watch.remove" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    Array.isArray(parsed.watchIds) &&
+    parsed.watchIds.every((id: unknown) => typeof id === "string")
+  ) {
+    return {
+      type: "session.watch.remove",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      watchIds: parsed.watchIds as string[],
     };
   }
 

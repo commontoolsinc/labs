@@ -19,6 +19,7 @@ export interface ExecuteContinuationState {
   readonly setPendingQueueTaskTimer: (
     timer: ReturnType<typeof setTimeout> | null,
   ) => void;
+  readonly releaseUnreadDocuments: () => void;
   readonly execute: () => void;
 }
 
@@ -90,6 +91,11 @@ function resolveIdlePromises(promises: (() => void)[]): void {
 }
 
 function finishIdleEpisode(state: ExecuteContinuationState): void {
+  // The reactive graph has settled, so the read sets it leaves behind are the
+  // ones that matter: documents nothing reads any more can go back. Done
+  // before idle waiters resume, so a caller that awaits idle and then measures
+  // sees the decision taken.
+  state.releaseUnreadDocuments();
   resolveIdlePromises(state.idlePromises);
   state.resetConvergenceHoldPasses();
   state.resetSettlingTracker();

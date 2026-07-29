@@ -40,6 +40,7 @@ import {
   type SqliteQueryResult,
   type SqliteRegisterDiskSourceResult,
   toDocumentPath,
+  type WatchSpec,
 } from "@commonfabric/memory/v2";
 import { parentPath } from "../../../memory/v2/path.ts";
 import {
@@ -69,6 +70,7 @@ import type { Cancel } from "../cancel.ts";
 import { recordCommitLocalSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
 import type {
+  IDocumentReleaseHooks,
   IMemoryAddress,
   IMemorySpaceAddress,
   IMergedChanges,
@@ -895,6 +897,8 @@ export class StorageManager implements IStorageManager {
   #defaultStorageRoute?: string;
   /** Late-bound marker sink (the Runtime's telemetry bus); see setTelemetry. */
   #telemetry?: TelemetrySink;
+  /** Late-bound runner half of document release; see setDocumentReleaseHooks. */
+  #releaseHooks?: IDocumentReleaseHooks;
 
   /**
    * Attach the runtime's telemetry bus so replicas can emit the
@@ -904,6 +908,49 @@ export class StorageManager implements IStorageManager {
    */
   setTelemetry(telemetry: TelemetrySink): void {
     this.#telemetry = telemetry;
+  }
+
+  /**
+   * Attach the runner's answers to "is anything still reading this document"
+   * and "this document is gone". Late-bound for the same reason as the
+   * telemetry bus, and read through a getter so replicas opened earlier pick
+   * it up.
+   */
+  setDocumentReleaseHooks(hooks: IDocumentReleaseHooks): void {
+    this.#releaseHooks = hooks;
+  }
+
+  releasesDocuments(): boolean {
+    return this.#settings.experimentalDocumentRelease === true;
+  }
+
+  releaseDocuments(
+    addresses: readonly Pick<
+      IMemorySpaceAddress,
+      "space" | "scope" | "id"
+    >[],
+  ): void {
+    if (!this.releasesDocuments()) return;
+    if (addresses.length === 0) {
+      // Nothing new to give up, but a replica may still be holding a decision
+      // from a shrink that failed. This is the event that arms another attempt.
+      for (const provider of this.#providers.values()) {
+        provider.releaseDocuments([]);
+      }
+      return;
+    }
+    const bySpace = new Map<
+      MemorySpace,
+      { id: URI; scope?: CellScope }[]
+    >();
+    for (const address of addresses) {
+      let entries = bySpace.get(address.space);
+      if (entries === undefined) bySpace.set(address.space, entries = []);
+      entries.push({ id: address.id as URI, scope: address.scope });
+    }
+    for (const [space, entries] of bySpace) {
+      this.#providers.get(space)?.releaseDocuments(entries);
+    }
   }
 
   static open(options: Options) {
@@ -1037,6 +1084,7 @@ export class StorageManager implements IStorageManager {
         syncReplayDependencies: (document) =>
           this.syncCfcSchemaDocument(space, document),
         getTelemetry: () => this.#telemetry,
+        getReleaseHooks: () => this.#releaseHooks,
       });
       this.#providers.set(space, provider);
     }
@@ -1758,6 +1806,8 @@ type ProviderOptions = {
   ) => Promise<Error | undefined>;
   /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
   getTelemetry?: () => TelemetrySink | undefined;
+  /** Late-bound: resolves to the runner's release hooks once attached. */
+  getReleaseHooks?: () => IDocumentReleaseHooks | undefined;
 };
 
 type SpaceReplicaOptions = Omit<ProviderOptions, "createSession"> & {
@@ -1973,6 +2023,12 @@ class Provider implements IStorageProviderWithReplica {
     return this.replica.sinkDocument(uri, callback);
   }
 
+  releaseDocuments(
+    entries: readonly { id: URI; scope?: CellScope }[],
+  ): void {
+    this.replica.releaseDocuments(entries);
+  }
+
   async destroy(): Promise<void> {
     if (this.#destroyed) {
       return;
@@ -2153,6 +2209,29 @@ class SpaceReplica implements ISpaceReplica {
   #subscribedWatchView: MemoryV2Client.WatchView | null = null;
   #watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
   #watchedIds = new Set<string>();
+  // Every watch spec this replica has installed on the server, keyed by the
+  // spec id, together with the document it is rooted at. A shrink needs the
+  // root association to decide which specs to give up, and the fallback form
+  // needs the specs themselves to re-send the survivors. Only kept when
+  // `experimentalDocumentRelease` is on; nothing prunes it otherwise.
+  readonly #watchSpecs = new Map<string, {
+    spec: WatchSpec;
+    docKey: string;
+  }>();
+  // Documents whose watches are to be given up, gathered between sweeps.
+  readonly #pendingRelease = new Set<string>();
+  // Set when the replica has thrown away documents it did not have the server's
+  // agreement to drop (`reset`), so the whole watch set has to be re-sent even
+  // though no individual document was released.
+  #watchSetAbandoned = false;
+  #watchShrinkInFlight: Promise<Result<Unit, PullError>> | undefined;
+  // True while the shrink in flight is the kind that names the watches that
+  // survive. Only that kind conflicts with a refresh; see
+  // `replacesWholeWatchSet`.
+  #watchSetReplaceInFlight = false;
+  // Documents named as the root of a pull that has not resolved. Their watches
+  // survive a sweep: the request that asked for them is still outstanding.
+  readonly #pullRoots = new Map<string, number>();
   #nextLocalSeq = 1;
   #closed = false;
   readonly #closeSignal = Promise.withResolvers<void>();
@@ -2192,12 +2271,14 @@ class SpaceReplica implements ISpaceReplica {
     | undefined;
 
   #settings: IRemoteStorageProviderSettings;
+  #getReleaseHooks: () => IDocumentReleaseHooks | undefined;
 
   constructor(options: SpaceReplicaOptions) {
     this.#space = options.space;
     this.#subscription = options.subscription;
     this.#createSession = options.createSession;
     this.#getTelemetry = options.getTelemetry ?? (() => undefined);
+    this.#getReleaseHooks = options.getReleaseHooks ?? (() => undefined);
     this.#settings = options.settings;
     this.#routeState = options.routeState;
     this.#routeGeneration = options.routeGeneration;
@@ -2541,6 +2622,8 @@ class SpaceReplica implements ISpaceReplica {
     await Promise.allSettled([...this.#syncPromises]);
     await Promise.allSettled([...this.#updatePromises]);
     this.#syncTasks.clear();
+    this.#watchSpecs.clear();
+    this.#pendingRelease.clear();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
   }
 
@@ -2622,6 +2705,8 @@ class SpaceReplica implements ISpaceReplica {
     void Promise.allSettled([...this.#suppressedVerdicts]);
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     this.#syncTasks.clear();
+    this.#watchSpecs.clear();
+    this.#pendingRelease.clear();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>();
   }
 
@@ -2653,6 +2738,34 @@ class SpaceReplica implements ISpaceReplica {
     }
 
     const normalizedEntries = normalizeSyncEntries(entries);
+    // Hold every document this pull is waiting for against a concurrent sweep,
+    // for as long as the pull is outstanding. Not just the ones fetched below:
+    // an entry an in-flight watch already covers is one the caller is still
+    // waiting for, and giving up the watch that covers it would leave the pull
+    // resolving successfully onto a document the server has stopped tracking.
+    const heldRoots = normalizedEntries.map(([address]) =>
+      docKey(address.id, address.scope)
+    );
+    for (const root of heldRoots) {
+      this.#pullRoots.set(root, (this.#pullRoots.get(root) ?? 0) + 1);
+    }
+    try {
+      return await this.pullHeld(normalizedEntries);
+    } finally {
+      for (const root of heldRoots) {
+        const held = this.#pullRoots.get(root)! - 1;
+        if (held === 0) this.#pullRoots.delete(root);
+        else this.#pullRoots.set(root, held);
+      }
+    }
+  }
+
+  private async pullHeld(
+    normalizedEntries: [
+      { id: URI; type: MIME; scope?: CellScope },
+      SchemaPathSelector,
+    ][],
+  ): Promise<Result<Unit, PullError>> {
     // Compose the dedup key from per-part hashes instead of hashing a fresh
     // wrapper object: hashOf's frozen-object cache is only consulted at entry
     // level, so embedding the (large, already canonical) selector schema in a
@@ -2830,6 +2943,15 @@ class SpaceReplica implements ISpaceReplica {
     );
   }
 
+  /**
+   * Throw away every document this replica holds.
+   *
+   * A replica must never discard a document without also giving up the watch
+   * that covers it: the server does not resend what it believes this session
+   * holds, so a document dropped on the client's own initiative can never be
+   * pulled back. That is why this gives up the whole watch set as well —
+   * anything added here that discards documents has to do the same.
+   */
   reset(): void {
     // Every unsettled in-flight commit's optimistic pending write is about to
     // be wiped by #docs.clear(); locally reject each so its pushCommit
@@ -2844,6 +2966,19 @@ class SpaceReplica implements ISpaceReplica {
     }
     this.#docs.clear();
     this.#watchedIds.clear();
+    this.#pendingRelease.clear();
+    // The server tracks what this session holds, and answers a watch mutation
+    // only with what it believes the session is missing. A replica that has
+    // just thrown its documents away holds nothing, so it must give up its
+    // watches too; the pulls that rebuild it then arrive as new watches and
+    // carry their documents with them.
+    if (
+      this.#watchSpecs.size > 0 && this.#settings.experimentalDocumentRelease
+    ) {
+      this.#watchSpecs.clear();
+      this.#watchSetAbandoned = true;
+      this.startWatchShrink();
+    }
     this.resetConflictAdmissionState();
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica reset"));
     this.cancelQueuedWatchRefresh();
@@ -2895,23 +3030,229 @@ class SpaceReplica implements ISpaceReplica {
         return { error: toConnectionError(new Error("memory replica closed")) };
       }
 
-      this.#watchView = view;
-      this.applySessionSync(sync, type);
-      if (this.#updatePromises.size === 0) {
-        this.#subscribedWatchView = view;
-        const updates = this.consumeUpdates(view.subscribeSync())
-          .finally(() => {
-            this.#updatePromises.delete(updates);
-            if (this.#subscribedWatchView === view) {
-              this.#subscribedWatchView = null;
-            }
-          });
-        this.#updatePromises.add(updates);
+      if (this.#settings.experimentalDocumentRelease) {
+        watchEntries.forEach(([address], index) => {
+          const spec = watches[index]!;
+          const root = docKey(address.id, address.scope);
+          this.#watchSpecs.set(spec.id, { spec, docKey: root });
+          // A watch just installed for this document supersedes a queued
+          // decision to give it up.
+          this.#pendingRelease.delete(root);
+        });
       }
+      this.adoptWatchView(view);
+      this.applySessionSync(sync, type);
       return { ok: {} };
     } catch (error) {
       return { error: toPullError(error) };
     }
+  }
+
+  /**
+   * Take a watch view as the replica's current one, starting the update
+   * consumer when none is running. The memory client hands back the same view
+   * instance across watch mutations once one exists, so a set that follows an
+   * add reuses the running consumer rather than opening a second.
+   */
+  private adoptWatchView(view: MemoryV2Client.WatchView): void {
+    this.#watchView = view;
+    if (this.#updatePromises.size > 0) {
+      return;
+    }
+    this.#subscribedWatchView = view;
+    const updates = this.consumeUpdates(view.subscribeSync())
+      .finally(() => {
+        this.#updatePromises.delete(updates);
+        if (this.#subscribedWatchView === view) {
+          this.#subscribedWatchView = null;
+        }
+      });
+    this.#updatePromises.add(updates);
+  }
+
+  /**
+   * Give up the watches rooted at these documents. Nothing is discarded here:
+   * the watch set is re-sent without those roots, and the server's answer says
+   * which documents left the session's watch union. Those, and only those, are
+   * the ones this replica may drop — `session.watch.add` does not resend an
+   * entity the server believes the session already holds, so a document
+   * dropped without the server's agreement could never be pulled back.
+   */
+  releaseDocuments(
+    entries: readonly { id: URI; scope?: CellScope }[],
+  ): void {
+    if (this.#closed || !this.#settings.experimentalDocumentRelease) {
+      return;
+    }
+    for (const { id, scope } of entries) {
+      this.#pendingRelease.add(docKey(id, scope));
+    }
+    // Called with nothing to add as well, as the nudge that arms a shrink whose
+    // last attempt failed and left its documents queued.
+    this.startWatchShrink();
+  }
+
+  /**
+   * A shrink that has to name the watches that SURVIVE is built from a
+   * snapshot of the watch set, so it must not overlap a refresh: watch
+   * mutations reach the server in issue order, and a set built from a snapshot
+   * taken before the refresh would take the refresh's new watches straight back
+   * off. Two shrinks need that form — the one after `reset`, which has no ids
+   * to name, and the fallback for a server without `session.watch.remove`. A
+   * shrink that names only the watches that GO is independent of the snapshot
+   * and never has to wait.
+   */
+  private replacesWholeWatchSet(): boolean {
+    return this.#watchSetAbandoned ||
+      this.#sessionSession?.supportsWatchRemove !== true;
+  }
+
+  private startWatchShrink(): void {
+    if (this.#closed || this.#watchShrinkInFlight !== undefined) {
+      return;
+    }
+    if (this.#pendingRelease.size === 0 && !this.#watchSetAbandoned) {
+      return;
+    }
+    const replacing = this.replacesWholeWatchSet();
+    if (
+      replacing &&
+      (this.#watchRefreshInFlight > 0 || this.#queuedWatchRefresh !== null)
+    ) {
+      // A refresh finishing re-arms this.
+      return;
+    }
+    // Registered as storage work in flight from the moment the shrink is
+    // issued, so `synced()` covers it and teardown drains it rather than
+    // leaving a request outstanding. Resolved rather than rejected on failure,
+    // matching how a watch refresh reports one, so `synced()` cannot reject on
+    // a shrink the caller did not ask for.
+    this.#watchSetReplaceInFlight = replacing;
+    const tracked: Promise<Result<Unit, PullError>> = this.shrinkWatchSet()
+      .catch((error): boolean => {
+        logger.warn(
+          "watch-shrink",
+          () => [`giving up watches failed: ${error}`],
+        );
+        return false;
+      })
+      .then((sent): Result<Unit, PullError> => {
+        this.#watchShrinkInFlight = undefined;
+        this.#watchSetReplaceInFlight = false;
+        this.#syncPromises.delete(tracked);
+        this.scheduleWatchRefreshFlush();
+        // Only a shrink that reached the server arms another. A failed one
+        // leaves its decision queued for whatever releases documents next,
+        // rather than retrying against a session that is still broken.
+        if (
+          sent && (this.#pendingRelease.size > 0 || this.#watchSetAbandoned)
+        ) {
+          this.startWatchShrink();
+        }
+        return { ok: {} };
+      });
+    this.#syncPromises.add(tracked);
+    this.#watchShrinkInFlight = tracked;
+  }
+
+  /** Whether the shrink reached the server. */
+  private async shrinkWatchSet(): Promise<boolean> {
+    // Documents held back by a local reason stay queued: they have already lost
+    // their readers, so nothing will offer them again.
+    const dropping = new Set<string>();
+    for (const key of this.#pendingRelease) {
+      if (this.mustKeepDocument(key)) continue;
+      dropping.add(key);
+    }
+    for (const key of dropping) this.#pendingRelease.delete(key);
+
+    const surviving: WatchSpec[] = [];
+    const dropped: { id: string; spec: WatchSpec }[] = [];
+    for (const [id, entry] of this.#watchSpecs) {
+      if (dropping.has(entry.docKey)) dropped.push({ id, spec: entry.spec });
+      else surviving.push(entry.spec);
+    }
+    const abandoned = this.#watchSetAbandoned;
+    this.#watchSetAbandoned = false;
+    if ((dropped.length === 0 && !abandoned) || this.#closed) {
+      return true;
+    }
+
+    try {
+      const { session } = await this.sessionHandle();
+      session.setConcurrentWatchRefresh?.(
+        this.#settings.experimentalConcurrentWatchRefresh === true,
+      );
+      // Naming what goes keeps the request proportional to the page just left
+      // rather than to everything still on screen. A server too old for the
+      // verb gets the equivalent full replacement, and so does an abandoned
+      // watch set, which has no list of ids to name.
+      const { view, sync } = !abandoned &&
+          session.supportsWatchRemove === true
+        ? await session.watchRemoveSync(dropped.map((entry) => entry.id))
+        : await session.watchSetSync(surviving);
+      if (this.#closed) {
+        view.close();
+        return false;
+      }
+      for (const entry of dropped) {
+        this.#watchSpecs.delete(entry.id);
+        // The pull path treats a document covered by a registered selector as
+        // already available. With the watch gone that is no longer true, so the
+        // selectors go with it and a later read pulls the document again.
+        this.forgetSelectorsFor(entry.spec);
+      }
+      this.adoptWatchView(view);
+      this.applySessionSync(sync, "pull");
+      return true;
+    } catch (error) {
+      // The server's watch set is whatever it was; the specs stay recorded and
+      // the documents stay held. Put the decision back so a later sweep tries
+      // again rather than holding these documents for the session's lifetime.
+      logger.warn(
+        "watch-shrink",
+        () => [`giving up watches failed: ${error}`],
+      );
+      for (const key of dropping) this.#pendingRelease.add(key);
+      this.#watchSetAbandoned ||= abandoned;
+      return false;
+    }
+  }
+
+  private forgetSelectorsFor(spec: WatchSpec): void {
+    for (const root of spec.query.roots) {
+      const address = {
+        id: root.id as URI,
+        type: DOCUMENT_MIME,
+        scope: normalizeCellScope(root.scope as CellScope | undefined),
+      };
+      this.#watchSelectorTracker.delete(
+        address,
+        root.selector as SchemaPathSelector,
+      );
+    }
+  }
+
+  /**
+   * Local reasons a document must stay, whatever the runner's readers say:
+   * unconfirmed writes that have yet to be replayed, an identifier a conflict
+   * marked stale, a provider-level `sink` subscriber, and a pull that named it
+   * as a root and has not come back.
+   */
+  private mustKeepDocument(key: string): boolean {
+    if (this.#pullRoots.has(key)) return true;
+    if (this.#staleFloor.has(key)) return true;
+    if ((this.#sinks.get(key)?.size ?? 0) > 0) return true;
+    const record = this.#docs.get(key);
+    return record !== undefined && record.pending.length > 0;
+  }
+
+  retentionStats(): { documents: number; watched: number; watches: number } {
+    return {
+      documents: this.#docs.size,
+      watched: this.#watchedIds.size,
+      watches: this.#watchSpecs.size,
+    };
   }
 
   private enqueueWatchRefresh(
@@ -2964,6 +3305,7 @@ class SpaceReplica implements ISpaceReplica {
     if (
       this.#queuedWatchRefresh === null ||
       this.#queuedWatchRefreshScheduled ||
+      this.#watchSetReplaceInFlight ||
       this.#watchRefreshInFlight >= this.#maxWatchRefreshInFlight()
     ) {
       return;
@@ -2973,6 +3315,7 @@ class SpaceReplica implements ISpaceReplica {
       this.#queuedWatchRefreshScheduled = false;
       if (
         this.#queuedWatchRefresh === null ||
+        this.#watchSetReplaceInFlight ||
         this.#watchRefreshInFlight >= this.#maxWatchRefreshInFlight()
       ) {
         return;
@@ -3005,6 +3348,13 @@ class SpaceReplica implements ISpaceReplica {
     } finally {
       this.#watchRefreshInFlight -= 1;
       this.scheduleWatchRefreshFlush();
+      // A shrink that stood aside for this refresh can go once the wire is
+      // free again.
+      if (
+        this.#watchRefreshInFlight === 0 && this.#queuedWatchRefresh === null
+      ) {
+        this.startWatchShrink();
+      }
     }
   }
 
@@ -4053,12 +4403,46 @@ class SpaceReplica implements ISpaceReplica {
       record.materialized = undefined;
       this.#watchedIds.add(docKey(upsert.id as URI, upsert.scope));
     }
+    const repull: [
+      { id: URI; type: MIME; scope?: CellScope },
+      SchemaPathSelector | undefined,
+    ][] = [];
     for (const remove of sync.removes) {
       const id = remove.id as URI;
-      const record = this.record(id, remove.scope);
-      record.confirmed = confirmedVersion(0, undefined);
-      record.materialized = undefined;
-      this.#watchedIds.delete(docKey(id, remove.scope));
+      const key = docKey(id, remove.scope);
+      this.#watchedIds.delete(key);
+      if (!this.#settings.experimentalDocumentRelease) {
+        const record = this.record(id, remove.scope);
+        record.confirmed = confirmedVersion(0, undefined);
+        record.materialized = undefined;
+        continue;
+      }
+      const hooks = this.#getReleaseHooks();
+      if (
+        hooks?.hasReaders(this.#space, id, remove.scope) === true ||
+        this.mustKeepDocument(key)
+      ) {
+        // Still wanted here, so this document left the union as collateral: the
+        // shrink gave up a watch that was covering it as well as its own root.
+        // Pull it again to get a watch back, and leave the value in place
+        // meanwhile — the document did not go away, it only left this session's
+        // watch union. The value stands rather than being wiped to absent: a
+        // reader would see a deletion that did not happen, and a pending write
+        // replays onto the confirmed base, which must not move backwards.
+        //
+        // The default selector asks for the document itself and nothing it
+        // links to. That is all this pull is for: a watch covering this
+        // document again. Whatever else the dropped watch reached stays
+        // reachable from its own roots, and a reader that walks onward from
+        // here pulls what it walks into, as it did the first time.
+        this.forgetSelectorsForDocument(id, remove.scope);
+        repull.push([
+          { id, type: DOCUMENT_MIME as MIME, scope: remove.scope },
+          undefined,
+        ]);
+        continue;
+      }
+      this.dropDocument(id, remove.scope);
     }
 
     if (before !== undefined) {
@@ -4093,6 +4477,92 @@ class SpaceReplica implements ISpaceReplica {
       } as StorageNotification);
     }
     this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
+    if (repull.length > 0) {
+      // An ordinary consequence of shrinking, not a fault: a watch this replica
+      // gave up was covering these documents as well as its own root.
+      logger.debug(
+        "watch-shrink",
+        () => [
+          `${repull.length} document(s) left the watch union while still ` +
+          `read; pulling them again`,
+        ],
+      );
+      // Registered as storage work, so `synced()` covers getting the watch back
+      // — and covers the drop that follows if it cannot be got.
+      const restored: Promise<Result<Unit, PullError>> = this
+        .restoreWatchesFor(repull)
+        .then(() => {
+          this.#syncPromises.delete(restored);
+          return { ok: {} };
+        });
+      this.#syncPromises.add(restored);
+    }
+  }
+
+  /**
+   * Get a watch back for documents that left the union while this replica still
+   * wanted them. Until one lands, the replica holds a value the server has
+   * stopped sending updates for, so a failure here cannot pass silently: the
+   * document is dropped instead. That makes the state honest — the next read
+   * reports absent and kicks a load, exactly as for any document this replica
+   * does not hold — rather than serving a value that has quietly stopped
+   * tracking the server for as long as the tab is open.
+   */
+  private async restoreWatchesFor(
+    entries: [
+      { id: URI; type: MIME; scope?: CellScope },
+      SchemaPathSelector | undefined,
+    ][],
+  ): Promise<void> {
+    let failure: unknown;
+    try {
+      const result = await this.pull(entries);
+      if (result.error === undefined) return;
+      failure = result.error;
+    } catch (error) {
+      failure = error;
+    }
+    if (this.#closed) return;
+    logger.error(
+      "watch-shrink",
+      () => [
+        `could not get a watch back for ${entries.length} document(s) after a ` +
+        `shrink; dropping them rather than serving a value the server no ` +
+        `longer updates: ${failure}`,
+      ],
+    );
+    for (const [address] of entries) {
+      // A local reason to keep it outranks this: a document with an unreplayed
+      // write still needs its record, and dropping it would lose the write.
+      if (this.mustKeepDocument(docKey(address.id, address.scope))) continue;
+      this.dropDocument(address.id, address.scope);
+    }
+  }
+
+  /**
+   * Discard a document. The replica keeps no trace of it, so a later read of
+   * it behaves exactly as a read of a document this replica has never pulled:
+   * it reports absent, and the read path kicks a load whose arrival re-runs the
+   * reader. The one-shot bookkeeping that says such a load has already been
+   * kicked is retracted here, so that kick is actually issued.
+   */
+  private dropDocument(id: URI, scope?: CellScope): void {
+    const key = docKey(id, scope);
+    this.#docs.delete(key);
+    this.#watchedIds.delete(key);
+    this.forgetSelectorsForDocument(id, scope);
+    this.#getReleaseHooks()?.documentDropped(this.#space, id, scope);
+  }
+
+  private forgetSelectorsForDocument(id: URI, scope?: CellScope): void {
+    const address = {
+      id,
+      type: DOCUMENT_MIME,
+      scope: normalizeCellScope(scope),
+    };
+    for (const selector of [...this.#watchSelectorTracker.get(address)]) {
+      this.#watchSelectorTracker.delete(address, selector);
+    }
   }
 
   // Mark every id this conflicted commit touched (reads + writes) stale until

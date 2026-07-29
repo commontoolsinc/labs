@@ -172,7 +172,7 @@ import type {
   TriggerTraceEntry,
 } from "./types.ts";
 import { ensureNotRenderThread } from "@commonfabric/utils/env";
-import { entityKey } from "./keys.ts";
+import { entityKey, parseEntityKey } from "./keys.ts";
 
 ensureNotRenderThread();
 
@@ -1190,6 +1190,47 @@ export class Scheduler {
 
   async run(action: Action): Promise<any> {
     return await runSchedulerAction(this.actionRunState, action);
+  }
+
+  /**
+   * Whether any live action reads this document. This is the runner's record
+   * of reactive interest, and the storage layer's answer to "does anything
+   * still want this?".
+   */
+  hasDocumentReaders(
+    address: Pick<IMemorySpaceAddress, "space" | "id" | "scope">,
+  ): boolean {
+    return this.triggerIndex.hasReaders(entityKey(address));
+  }
+
+  /**
+   * Tell the storage layer about documents whose last reactive reader has
+   * gone. Called when the scheduler reaches quiescence, so no action is
+   * part-way through a run and the trigger index is settled: an entity that
+   * lost a reader and gained another during the same wave is filtered out
+   * here rather than released and immediately pulled back.
+   */
+  private releaseUnreadDocuments(): void {
+    // Drained unconditionally: the record is only bounded by something taking
+    // it, so leaving it to grow when nothing releases documents would be a leak
+    // of its own.
+    const candidates = this.triggerIndex.drainIdleCandidates();
+    const storage = this.runtime.storageManager;
+    if (storage.releasesDocuments?.() !== true) return;
+    const unread = candidates
+      .filter((entity) => !this.triggerIndex.hasReaders(entity))
+      .map(parseEntityKey)
+      // A `data:` identifier carries its value rather than naming a stored
+      // document, so there is nothing behind it to release. Decided here, where
+      // the identifier comes back out of its key, so the storage layer does not
+      // have to know the difference.
+      .filter(({ id }) => !id.startsWith("data:"));
+    // Reported even when this pass found nothing. A shrink that failed leaves
+    // its documents queued, and quiescence is the event that arms another
+    // attempt: without this it would wait for a fresh set of documents to lose
+    // their last reader, which may never come, and the release would silently
+    // stop happening.
+    storage.releaseDocuments?.(unread);
   }
 
   idle(): Promise<void> {
@@ -2477,6 +2518,7 @@ export class Scheduler {
       setPendingQueueTaskTimer: (timer) => {
         this.pendingQueueTaskTimer = timer;
       },
+      releaseUnreadDocuments: () => this.releaseUnreadDocuments(),
       execute: () => this.execute(),
     };
   }

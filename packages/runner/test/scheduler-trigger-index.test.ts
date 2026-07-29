@@ -7,6 +7,7 @@ import {
 } from "../src/scheduler/trigger-index.ts";
 import type { Action, ReactivityLog } from "../src/scheduler/types.ts";
 import type { IMemorySpaceAddress } from "../src/storage/interface.ts";
+import { entityKey } from "../src/scheduler/keys.ts";
 
 describe("SchedulerTriggerIndex", () => {
   it("removes empty trigger entities when the last action unsubscribes", () => {
@@ -147,5 +148,45 @@ describe("applyActionReadDelta", () => {
     expect(triggerIndex.collectReadersForWrite(secondRead).has(action)).toBe(
       false,
     );
+  });
+
+  it("forgets a removed space's idle candidates", () => {
+    const triggerIndex = new SchedulerTriggerIndex();
+    const space = "did:key:z6Mk-trigger-space" as IMemorySpaceAddress["space"];
+    const other = "did:key:z6Mk-trigger-other" as IMemorySpaceAddress["space"];
+    const mine = `${space}/space/of:doc` as const;
+    const theirs = `${other}/space/of:doc` as const;
+
+    triggerIndex.noteIdleCandidates([mine, theirs]);
+    // A space that has gone takes its candidates with it: nothing will read
+    // them again, and releasing against a replica that is closing is pointless.
+    triggerIndex.removeSpace(space);
+
+    expect(triggerIndex.drainIdleCandidates()).toEqual([theirs]);
+  });
+
+  it("never offers an entity no action ever read", () => {
+    const triggerIndex = new SchedulerTriggerIndex();
+    const action: Action = () => {};
+    const read: IMemorySpaceAddress = {
+      space: "did:key:z6Mk-untracked" as IMemorySpaceAddress["space"],
+      id: "of:tracked" as IMemorySpaceAddress["id"],
+      type: "application/json",
+      path: [],
+    };
+
+    // This is the precondition document release rests on: a release candidate
+    // can only be an entity that was registered as a read and then lost its
+    // last reader. A document only ever read without registering a trigger —
+    // every `ignoreReadForScheduling` read — is never a candidate, so it is
+    // never released out from under the code reading it that way.
+    triggerIndex.addActionReads(action, [read], []);
+    triggerIndex.removeActionFromEntities(action, [entityKey(read)]);
+
+    const offered = triggerIndex.drainIdleCandidates();
+    expect(offered).toEqual([entityKey(read)]);
+    // Nothing else: an untracked identifier cannot appear here, because both
+    // routes into the record start from entities the index already held.
+    expect(offered.length).toBe(1);
   });
 });

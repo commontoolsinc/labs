@@ -30,8 +30,7 @@ rewrite. In particular:
   than a server-issued, principal-bound identifier
 - the public one-shot read surfaces are `graph.query`, `entity-id.list`, and
   `entity-id.exists`
-- watch-set mutations return inline `sync` payloads, and steady-state topology
-  shrink does not yet guarantee automatic `removes`
+- watch-set mutations return inline `sync` payloads
 
 ## 4.1 Transport
 
@@ -55,7 +54,8 @@ The client MUST declare its protocol version in the first WebSocket message:
     "syncSchemaTableV2": true,
     "entityIdListing": true,
     "entityIdPagination": true,
-    "entityIdLookup": true
+    "entityIdLookup": true,
+    "watchRemove": true
   }
 }
 ```
@@ -72,7 +72,8 @@ If the server accepts the protocol, it returns:
     "syncSchemaTableV2": true,
     "entityIdListing": true,
     "entityIdPagination": true,
-    "entityIdLookup": true
+    "entityIdLookup": true,
+    "watchRemove": true
   },
   "sessionOpen": {
     "audience": "did:key:z6Mk...",
@@ -153,6 +154,11 @@ advertises the capability.
 `entity-id.exists`. Both default to `false` when absent. A client connected to
 an older server may make the historical unpaginated list request, but must not
 send continuation fields or an existence request.
+
+`watchRemove` advertises support for `session.watch.remove`. It defaults to
+`false` when absent. A client connected to an older server shrinks its watch
+set with `session.watch.set` carrying the survivors, which has the same
+effect.
 
 ### 4.1.2 Logical Sessions and Resume
 
@@ -273,6 +279,7 @@ interface HelloMessage {
     entityIdListing?: boolean;
     entityIdPagination?: boolean;
     entityIdLookup?: boolean;
+    watchRemove?: boolean;
   };
 }
 
@@ -285,6 +292,7 @@ interface RequestMessage {
     | "entity-id.exists"
     | "session.watch.set"
     | "session.watch.add"
+    | "session.watch.remove"
     | "session.ack";
   requestId: string;
   space: SpaceId;
@@ -635,9 +643,21 @@ Semantics:
 
 - the provided watch list replaces the entire prior watch set for the session
 - the server recomputes the union of watched entities
-- the response carries the initial `sync` needed to bring the session cache in
-  line with the new interest set
+- the response carries the `sync` needed to bring the session cache in line
+  with the new interest set: `upserts` for entities the session does not
+  already hold at that sequence number, and `removes` for entities that left
+  the union
+- a session that has just been opened fresh holds nothing, so its first
+  `session.watch.set` carries every entity in the union
 - later committed changes continue to arrive via `session/effect`
+
+Shrinking the watch set is how a client hands memory back. The server tracks
+which entities each session holds, and `session.watch.add` deliberately does
+not resend an entity the session already holds at the current sequence number,
+so a client that drops a document on its own initiative can never pull it back.
+A client that wants to forget a document must therefore drop the watches that
+cover it and take the resulting `removes` as the authority for what it may
+discard.
 
 ### 4.3.6 `session.watch.add` — Extend the Session Watch Set
 
@@ -673,13 +693,48 @@ Semantics:
   entity-plus-selector pair
 - the server returns the inline `sync` needed for the mutation; pure additive
   growth does not emit `removes`
-- in the current pass, `removes` are only guaranteed for explicit watch-set
-  replacement; steady-state topology shrink does not yet drive automatic
-  unwatch behavior
+- `removes` are emitted by an explicit watch-set change — `session.watch.set`
+  and `session.watch.remove` — and by a background refresh whose re-evaluated
+  union turned out smaller. Pure additive growth emits none
 - watch mutations are applied in order per session; clients must serialize
   `session.watch.set` and `session.watch.add`
 
-### 4.3.7 Branch Lifecycle Commands
+### 4.3.7 `session.watch.remove` — Shrink the Session Watch Set
+
+`session.watch.remove` drops watches from the session watch set by `id`.
+Requires the `watchRemove` capability.
+
+```typescript
+// Shown at module scope.
+interface WatchRemoveRequest {
+  type: "session.watch.remove";
+  requestId: string;
+  space: SpaceId;
+  sessionId: SessionId;
+  watchIds: string[];
+}
+
+interface WatchRemoveResult {
+  serverSeq: number;
+  sync: SessionSync;
+}
+```
+
+Semantics:
+
+- each named watch is dropped; an `id` the session does not hold is ignored
+- the server recomputes the union of the surviving watches and answers exactly
+  as `session.watch.set` would for that same surviving list: `upserts` for
+  entities the session does not already hold at that sequence number, and
+  `removes` for entities that left the union
+- the two verbs differ only in what the request has to carry. Replacement names
+  everything that stays, so its request grows with the size of the watch set; a
+  removal names only what goes. A client shrinking a large watch set a page at a
+  time should prefer this one
+- watch mutations are applied in order per session, alongside
+  `session.watch.set` and `session.watch.add`
+
+### 4.3.8 Branch Lifecycle Commands
 
 Branch create / delete / merge lifecycle commands are not currently exposed on
 the v2 wire. The engine already carries branch state internally, but public wire
@@ -827,9 +882,10 @@ When the client replaces the watch set:
 - entities still relevant but unchanged are not resent unless needed for
   catch-up
 
-In the current pass, that `removes` guarantee only applies to explicit
-watch-set replacement. Steady-state topology shrink during background refresh
-does not yet drive automatic unwatch behavior.
+The same holds for a background refresh: the server diffs the re-evaluated
+union against what the session holds, so an entity that has left it is reported
+as a `remove` there too. What no verb does is shrink the watch set on the
+client's behalf — the set changes only when the client changes it.
 
 ### 4.6.4 Cross-Session Delivery
 

@@ -319,6 +319,56 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * @returns Promise that resolves when the cell sync is complete.
    */
   syncCell<T>(cell: Cell<T>): Promise<Cell<T>>;
+
+  /**
+   * Attach the runner-side half of document release. Late-bound and optional,
+   * for the same reason `setTelemetry` is: the manager is built before the
+   * Runtime that owns the reactive graph. See `IDocumentReleaseHooks`.
+   */
+  setDocumentReleaseHooks?(hooks: IDocumentReleaseHooks): void;
+
+  /**
+   * Whether this manager releases documents at all, so a caller can skip the
+   * work of collecting them. False when `experimentalDocumentRelease` is off,
+   * in which case `releaseDocuments` is a no-op.
+   */
+  releasesDocuments?(): boolean;
+
+  /**
+   * Report documents no live reactive reader depends on any more. The manager
+   * drops the watches that cover them, and the server's answer says which
+   * documents may then be discarded. Called when the scheduler reaches
+   * quiescence, so no action is part-way through a run. A no-op when
+   * `releasesDocuments()` is false.
+   */
+  releaseDocuments?(
+    addresses: readonly Pick<
+      IMemorySpaceAddress,
+      "space" | "scope" | "id"
+    >[],
+  ): void;
+}
+
+/**
+ * What the storage layer needs from the runner to release documents. The
+ * runner's reactive graph is the authority on which documents are still
+ * wanted; storage is the authority on which ones it may drop.
+ */
+export interface IDocumentReleaseHooks {
+  /**
+   * Whether a live reactive reader depends on this document. Consulted when
+   * the server retires a document from the session's watch union, to tell a
+   * document nothing wants any more from one that is still being read and so
+   * has to be pulled again.
+   */
+  hasReaders(space: MemorySpace, id: URI, scope?: CellScope): boolean;
+
+  /**
+   * Called after a document has been dropped from the replica. The runner
+   * clears the one-shot bookkeeping that says "a load for this document has
+   * already been kicked", so the next read of it kicks a fresh one.
+   */
+  documentDropped(space: MemorySpace, id: URI, scope?: CellScope): void;
 }
 
 export interface IRemoteStorageProviderSettings {
@@ -347,6 +397,19 @@ export interface IRemoteStorageProviderSettings {
    * docs/development/EXPERIMENTAL_OPTIONS.md.
    */
   experimentalConcurrentWatchRefresh?: boolean;
+
+  /**
+   * EXPERIMENTAL (default off): hand documents back when no live reactive
+   * reader depends on them any more, by giving up the watches that cover them
+   * and discarding what the server then reports as having left the session's
+   * watch union. Off, a replica keeps every document it has ever pulled for as
+   * long as it is open, so a view that pages through a large collection costs
+   * memory per page visited and never gets any of it back. See
+   * docs/development/document-release.md, and
+   * docs/development/EXPERIMENTAL_OPTIONS.md for what still has to be true
+   * before this can be the default.
+   */
+  experimentalDocumentRelease?: boolean;
 }
 
 export interface LocalStorageOptions {
@@ -1773,6 +1836,19 @@ export interface ISpaceReplica extends ISpace {
     transaction: NativeStorageCommit,
     source?: IStorageTransaction,
   ): Promise<Result<Unit, StorageTransactionRejected>>;
+
+  /**
+   * Give up the watches rooted at these documents. The server recomputes the
+   * union of the surviving watches and answers with the entities that left it;
+   * those are the documents this replica then discards. A no-op unless
+   * `experimentalDocumentRelease` is on.
+   */
+  releaseDocuments?(
+    entries: readonly { id: URI; scope?: CellScope }[],
+  ): void;
+
+  /** How many documents this replica holds, and how many it watches. */
+  retentionStats?(): { documents: number; watched: number; watches: number };
 }
 
 export type PushError =

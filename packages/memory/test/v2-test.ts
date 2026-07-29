@@ -146,6 +146,7 @@ describe("memory v2 flags", () => {
       entityIdListing: true,
       entityIdPagination: true,
       entityIdLookup: true,
+      watchRemove: true,
       syncSchemaTableV2: false,
     });
 
@@ -164,6 +165,7 @@ describe("memory v2 flags", () => {
       entityIdListing: true,
       entityIdPagination: true,
       entityIdLookup: true,
+      watchRemove: true,
       syncSchemaTableV2: true,
     });
 
@@ -186,6 +188,7 @@ describe("memory v2 flags", () => {
         entityIdListing: true,
         entityIdPagination: true,
         entityIdLookup: true,
+        watchRemove: false,
       },
       {
         modernCellRep: true,
@@ -201,6 +204,7 @@ describe("memory v2 flags", () => {
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
+        watchRemove: false,
       },
     ));
   });
@@ -219,6 +223,7 @@ describe("parseMemoryProtocolFlags", () => {
       entityIdListing: false,
       entityIdPagination: false,
       entityIdLookup: false,
+      watchRemove: false,
     });
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: false }), {
       modernCellRep: false,
@@ -231,6 +236,7 @@ describe("parseMemoryProtocolFlags", () => {
       entityIdListing: false,
       entityIdPagination: false,
       entityIdLookup: false,
+      watchRemove: false,
     });
   });
 
@@ -250,6 +256,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
+        watchRemove: false,
       },
     );
   });
@@ -270,6 +277,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
+        watchRemove: false,
       },
     );
   });
@@ -290,6 +298,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
+        watchRemove: false,
       },
     );
   });
@@ -310,6 +319,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
+        watchRemove: false,
       },
     );
   });
@@ -330,6 +340,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
+        watchRemove: false,
       },
     );
   });
@@ -350,6 +361,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
+        watchRemove: false,
       },
     );
   });
@@ -368,6 +380,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdListing: true,
         entityIdPagination: false,
         entityIdLookup: false,
+        watchRemove: false,
       },
     );
   });
@@ -389,8 +402,29 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdListing: false,
         entityIdPagination: true,
         entityIdLookup: true,
+        watchRemove: false,
       },
     );
+  });
+
+  it("accepts the watchRemove capability key", () => {
+    assertEquals(
+      parseMemoryProtocolFlags({ watchRemove: true }),
+      {
+        modernCellRep: false,
+        persistentSchedulerState: false,
+        commitPreconditions: false,
+        syncSchemaTable: false,
+        syncSchemaTableV2: false,
+        sqliteCommitRowLabelEval: false,
+        pendingReadStacks: false,
+        entityIdListing: false,
+        entityIdPagination: false,
+        entityIdLookup: false,
+        watchRemove: true,
+      },
+    );
+    assertEquals(parseMemoryProtocolFlags({ watchRemove: "true" }), null);
   });
 
   it("rejects values that are not a recognizable flags shape", () => {

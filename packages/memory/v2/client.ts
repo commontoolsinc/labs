@@ -31,6 +31,7 @@ import {
   type SqliteQueryResult,
   type SqliteRegisterDiskSourceResult,
   type WatchAddResult,
+  type WatchRemoveResult,
   type WatchSetResult,
   type WatchSpec,
 } from "../v2.ts";
@@ -876,6 +877,47 @@ export class SpaceSession {
             [...this.#watchSpecs, ...watches].map((watch) => [watch.id, watch]),
           ).values(),
         ];
+        if (this.#watchView === null) {
+          this.#watchView = WatchView.fromSync(result.sync);
+        } else {
+          this.#watchView.applySync(result.sync, false);
+        }
+        this.scheduleAck(result.serverSeq);
+        return {
+          view: this.#watchView,
+          sync: result.sync,
+        };
+      },
+    );
+  }
+
+  /**
+   * Whether this session's server accepts `session.watch.remove`. A caller
+   * shrinking its watch set uses `watchRemoveSync` when it does and
+   * `watchSetSync` with the survivors when it does not; the two have the same
+   * effect, and only the request differs.
+   */
+  get supportsWatchRemove(): boolean {
+    return this.client.serverFlags?.watchRemove === true;
+  }
+
+  async watchRemoveSync(watchIds: string[]): Promise<WatchMutationResult> {
+    this.#assertOpen();
+    return await this.runWatchMutation(
+      () =>
+        this.client.request<WatchRemoveResult>({
+          type: "session.watch.remove",
+          requestId: crypto.randomUUID(),
+          space: this.space,
+          sessionId: this.#sessionId,
+          watchIds,
+        }),
+      (result) => {
+        this.noteResult(result.serverSeq);
+        const dropped = new Set(watchIds);
+        this.#watchSpecs = this.#watchSpecs.filter((watch) =>
+          !dropped.has(watch.id)
+        );
         if (this.#watchView === null) {
           this.#watchView = WatchView.fromSync(result.sync);
         } else {

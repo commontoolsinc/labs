@@ -39,6 +39,13 @@ export interface TriggerIndexState {
   removeSpace(space: MemorySpace): void;
   collectReadersForWrite(write: IMemorySpaceAddress): Set<Action>;
   hasRegisteredTriggers(): boolean;
+  /**
+   * Remember entities whose reader set may have just emptied, so the storage
+   * layer can be told about them once the scheduler is quiescent. Entities
+   * that still have readers are dropped on the way in. The record is read back
+   * with `SchedulerTriggerIndex.drainIdleCandidates`.
+   */
+  noteIdleCandidates(entities: Iterable<SpaceScopeAndURI>): void;
   clear(): void;
   collectTriggeredActionsForChange(
     space: MemorySpace,
@@ -153,6 +160,10 @@ export class SchedulerTriggerSubscriptions implements TriggerSubscriptionState {
     return this.state.triggerIndex.hasRegisteredTriggers();
   }
 
+  noteIdleCandidates(entities: Iterable<SpaceScopeAndURI>): void {
+    this.state.triggerIndex.noteIdleCandidates(entities);
+  }
+
   clear(): void {
     this.state.triggerIndex.clear();
   }
@@ -185,6 +196,7 @@ export class SchedulerTriggerIndex implements TriggerIndexState {
     Action,
     Set<SpaceScopeAndURI>
   >();
+  readonly #idleCandidates = new Set<SpaceScopeAndURI>();
 
   addActionReads(
     action: Action,
@@ -240,12 +252,16 @@ export class SchedulerTriggerIndex implements TriggerIndexState {
         action,
       );
     }
+    this.noteIdleCandidates(entities);
   }
 
   removeSpace(space: MemorySpace): void {
     const spacePrefix = `${space}/`;
     removeTriggerMapSpace(this.triggers, spacePrefix);
     removeTriggerMapSpace(this.nonRecursiveTriggers, spacePrefix);
+    for (const entity of this.#idleCandidates) {
+      if (entity.startsWith(spacePrefix)) this.#idleCandidates.delete(entity);
+    }
   }
 
   collectReadersForWrite(write: IMemorySpaceAddress): Set<Action> {
@@ -281,9 +297,34 @@ export class SchedulerTriggerIndex implements TriggerIndexState {
     return this.triggers.size > 0 || this.nonRecursiveTriggers.size > 0;
   }
 
+  /**
+   * Whether any live action reads this entity. This is the runner's record of
+   * reactive interest in a document: every sink, running node, and view
+   * subscription registers its reads here, and they are withdrawn when the
+   * action's read set changes or the action is cancelled.
+   */
+  hasReaders(entity: SpaceScopeAndURI): boolean {
+    return this.triggers.has(entity) || this.nonRecursiveTriggers.has(entity);
+  }
+
+  noteIdleCandidates(entities: Iterable<SpaceScopeAndURI>): void {
+    for (const entity of entities) {
+      if (this.hasReaders(entity)) continue;
+      this.#idleCandidates.add(entity);
+    }
+  }
+
+  drainIdleCandidates(): SpaceScopeAndURI[] {
+    if (this.#idleCandidates.size === 0) return [];
+    const drained = [...this.#idleCandidates];
+    this.#idleCandidates.clear();
+    return drained;
+  }
+
   clear(): void {
     this.triggers.clear();
     this.nonRecursiveTriggers.clear();
+    this.#idleCandidates.clear();
   }
 
   collectTriggeredActionsForChange(
@@ -377,6 +418,18 @@ export function applyActionReadDelta(
     ...nextNonRecursivePathsByEntity.keys(),
   ]);
   state.actionTriggerEntities.set(action, entities);
+
+  // Entities this run stopped reading may have just lost their last reader.
+  const dropped: SpaceScopeAndURI[] = [];
+  for (
+    const entity of [
+      ...prevPathsByEntity.keys(),
+      ...prevNonRecursivePathsByEntity.keys(),
+    ]
+  ) {
+    if (!entities.has(entity)) dropped.push(entity);
+  }
+  state.noteIdleCandidates(dropped);
 
   return { entities, triggerPathsByEntity: nextPathsByEntity };
 }

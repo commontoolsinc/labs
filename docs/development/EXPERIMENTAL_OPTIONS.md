@@ -693,6 +693,11 @@ the per-epic implementation notes).
 > - **`entityIdLookup`** is a build-inherent capability, hardwired to `true`.
 >   It advertises identifier-only `entity-id.exists` point lookup. Older
 >   servers omit it, which parses as `false`. It is permanent.
+> - **`watchRemove`** is a build-inherent capability, hardwired to `true`. It
+>   advertises `session.watch.remove`, which drops watches by id instead of
+>   replacing the whole set. Older servers omit it, which parses as `false`,
+>   and the runner shrinks its watch set with `session.watch.set` carrying the
+>   survivors — same effect, larger request. It is permanent.
 
 ### `experimentalConcurrentWatchRefresh`
 
@@ -730,6 +735,81 @@ the per-epic implementation notes).
   measured end-to-end over real latency.
 - **Path to removal.** Graduate to always-on once measured safe and beneficial,
   or remove if superseded by reducing the round-trip count at the source.
+
+### `experimentalDocumentRelease`
+
+- **Toggle via.** `experimentalDocumentRelease` on
+  `IRemoteStorageProviderSettings`
+  ([`packages/runner/src/storage/interface.ts`](../../packages/runner/src/storage/interface.ts)),
+  passed through `StorageManager` settings and fixed at `StorageManager.open`
+  time.
+- **Purpose.** Off, a space replica keeps every document it has ever pulled and
+  every watch it has ever installed for as long as it is open, so a view that
+  pages through a large collection costs memory per page visited and never gets
+  any of it back. On, the scheduler reports documents whose last reactive reader
+  has gone, the replica gives up the watches that cover them, and it discards
+  what the server then reports as having left the session's watch union. The
+  mechanism is described in
+  [document release](document-release.md); the measurement is in
+  [the release record](../history/development/performance/2026-07-document-release.md).
+- **Current default and planned end state.** Off by default. End state is
+  always-on, with the flag removed.
+- **Status on 2026-08-03.** Implemented and measured
+  (`packages/runner/test/measure-document-retention.ts`): over a forty-page walk
+  of a thousand-document collection it holds the replica to a bounded document
+  set instead of a monotonically growing one. It is off because it breaks the
+  runner suite, not for bake time.
+
+  Graduating the flag means every test runs with it, so the suite is the
+  experiment. Adding `experimentalDocumentRelease: true` to `defaultSettings`
+  and running all 539 runner test files gives three hangs and eleven failing
+  cases across ten files. All of them pass with the flag off.
+
+  Three files hang, none completing in 90 seconds where they otherwise finish in
+  under three:
+
+  - `array-push-mergeable.test.ts` (5 tests, 80 steps, 0.6 s with the flag off)
+  - `commit-conflict-reconcile.test.ts`
+  - `list-resume-preserve.test.ts`
+
+  All three are conflict work. A conflicted commit waits on
+  `waitForCaughtUpLocalSeq`, and `#caughtUpLocalSeq` only advances through
+  `noteCaughtUpLocalSeq` inside `applySessionSync` — that is, only when a sync
+  frame arrives, which needs the watch a release may have given up. The wait has
+  no timer, correctly, so it presents as a hang rather than an error. Holding
+  documents named by an unsettled commit's reads was tried and does **not**
+  clear it, so the read set is not the whole cause; this needs a real diagnosis
+  rather than a guess.
+
+  Eleven cases fail outright:
+
+  - `list-resume-container-defer.test.ts` — all three, filter, flatMap and map:
+    "resume confirms absence, seeds, then rebuilds durably". The aggregate comes
+    out empty against an expected `["a", "b", "d"]`. This is the stale-aggregate
+    symptom, in every builtin.
+  - `patterns-dynamic.test.ts` — "should clean up predicate runs when filter
+    list becomes undefined" and the flatMap equivalent.
+  - `effect-conflict-recovery.test.ts` — "recovers a plain effect off the retry
+    budget (not stranded)".
+  - `scheduler-observations.test.ts` — "resumes a clean piece without rerunning
+    or fetching cell data".
+  - `scheduler-event-receipts.test.ts` — "projects a plain JSON return into the
+    receipt under plainResultReceipts".
+  - `fetch-claim-takeover.test.ts` — "releases the entry it claimed when the
+    pattern is stopped".
+  - `llm-dialog-message-drop.test.ts` — "accepts once another replica's turn
+    passes the staleness bound".
+  - `llm-dialog.test.ts`, `llm-conversation-fixture.test.ts` and
+    `memory-v2-watch-remove-coverage.test.ts` — one case each.
+
+  (`document-release.test.ts` also fails, but only its own "off by default"
+  block, whose control the forced flag defeats. That one is an artefact of the
+  experiment.)
+- **Path to removal.** Two defects have to be fixed, and the suite re-run with
+  the flag forced on until it is clean — reasoning that a defect is gone is
+  worth nothing next to that one-line experiment. First, a released document
+  leaves a list projection's aggregate stale. Second, and separately, conflict
+  handling can wait forever for a sync frame the release made unreachable.
 
 ---
 
