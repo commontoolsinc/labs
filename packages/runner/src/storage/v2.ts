@@ -47,6 +47,7 @@ import {
   touchedPointerPaths,
 } from "../../../memory/v2/patch.ts";
 import type { AppliedCommit } from "@commonfabric/memory/v2/engine";
+import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   isObject,
@@ -242,7 +243,31 @@ function conflictAdmissionMode(): ConflictAdmissionMode {
     return "off";
   }
 }
-const dataURISyncCache = new Map<string, Promise<Cell<any>>>();
+/**
+ * Identity of one data-URI pull: the URI, the schema it was read against, the
+ * path into it, and where it lives.
+ *
+ * The result is a hash rather than those parts joined together. A data URI
+ * carries its whole value in its id, so the id is the one part that varies
+ * without bound — a rendered UI tree reaches tens of kilobytes — and a cache
+ * keyed on it directly would cost that much per entry.
+ */
+export function dataURISyncKey(identity: {
+  id: string;
+  schema: JSONSchema | undefined;
+  path: readonly string[];
+  space: MemorySpace;
+  scope: CellScope | undefined;
+}): string {
+  return hashStringOf([
+    identity.id,
+    identity.schema ? hashStringOf(identity.schema) : "",
+    [...identity.path],
+    identity.space,
+    normalizeCellScope(identity.scope),
+  ]);
+}
+
 const DOCUMENT_MIME = "application/json" as const;
 const UNCACHED_TRANSACTION_VALUE = Symbol("uncachedTransactionValue");
 
@@ -850,6 +875,13 @@ export class StorageManager implements IStorageManager {
   // absent targets (dangling links, deleted docs) from churning the
   // cross-space convergence loop on every read.
   #docPullKicks = new Set<string>();
+  // Data URIs whose linked targets this manager has already pulled, keyed by a
+  // hash of the URI, schema, path, space, and scope. Per manager rather than
+  // per process: a hit skips the pull, and a manager that inherited another
+  // manager's hit would leave its own replica without those documents.
+  #dataURISyncs = new BoundedKeyMap<string, Promise<void>>(
+    DATA_URI_SYNC_CACHE_MAX,
+  );
   // In-flight commits, registered synchronously by the transaction layer at
   // commit() entry (see IStorageManager.trackPendingCommit). This is the
   // write-durability barrier: distinct from #crossSpacePromises, which also
@@ -1108,6 +1140,7 @@ export class StorageManager implements IStorageManager {
       [...this.#providers.values()].map((provider) => provider.destroy()),
     );
     this.#providers.clear();
+    this.#dataURISyncs.clear();
     this.#sessionId = crypto.randomUUID();
   }
 
@@ -1119,6 +1152,7 @@ export class StorageManager implements IStorageManager {
       [...this.#providers.values()].map((provider) => provider.destroyNow()),
     );
     this.#providers.clear();
+    this.#dataURISyncs.clear();
     this.#sessionId = crypto.randomUUID();
   }
 
@@ -1461,47 +1495,40 @@ export class StorageManager implements IStorageManager {
       .finally(() => this.resolveCrossSpace(resolve));
   }
 
-  private syncDataURICell<T>(
+  private async syncDataURICell<T>(
     cell: Cell<T>,
     space: MemorySpace,
     id: string,
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
   ): Promise<Cell<T>> {
-    const pathStr = JSON.stringify(cell.path);
-    const schemaStr = schema ? hashStringOf(schema) : "";
-    const cacheKey = `${id}|${schemaStr}|${pathStr}|${space}|${
-      normalizeCellScope(scope)
-    }`;
-    const existing = dataURISyncCache.get(cacheKey);
-    if (existing) {
-      return existing as Promise<Cell<T>>;
-    }
-    const promise = this.syncDataURICellUncached(
-      cell,
-      space,
+    const cacheKey = dataURISyncKey({
       id,
       schema,
+      path: cell.path.map(String),
+      space,
       scope,
-    );
-    if (dataURISyncCache.size >= DATA_URI_SYNC_CACHE_MAX) {
-      dataURISyncCache.clear();
+    });
+    let work = this.#dataURISyncs.get(cacheKey);
+    if (work === undefined) {
+      work = this.syncDataURILinkTargets(cell, space, id, schema, scope);
+      this.#dataURISyncs.set(cacheKey, work);
     }
-    dataURISyncCache.set(cacheKey, promise);
-    return promise;
+    await work;
+    return cell;
   }
 
-  private async syncDataURICellUncached<T>(
+  private async syncDataURILinkTargets<T>(
     cell: Cell<T>,
     space: MemorySpace,
     id: string,
     schema: JSONSchema | undefined,
     scope: CellScope | undefined,
-  ): Promise<Cell<T>> {
+  ): Promise<void> {
     let value: unknown = valueFromDataUri(id);
     for (const segment of [...cell.path.map(String)]) {
       if (!isRecord(value) && !Array.isArray(value)) {
-        return cell;
+        return;
       }
       value = (value as Record<string, unknown>)[segment];
     }
@@ -1524,7 +1551,6 @@ export class StorageManager implements IStorageManager {
     if (promises.length > 0) {
       await Promise.all(promises);
     }
-    return cell;
   }
 
   private collectLinkedCellSyncs(

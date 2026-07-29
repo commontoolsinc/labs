@@ -121,9 +121,17 @@ const CANONICAL_NAN_BYTES = new Uint8Array([
   0x00,
 ]);
 
-/** LRU cache for string representations. */
+/**
+ * LRU cache for string representations. The entry count suits the short,
+ * repeated strings this mostly sees — property names, ids, tags. The byte
+ * budget covers the rest: values reach this hasher as whole documents and
+ * inlined data URIs that run to tens of kilobytes each, and 50,000 of those
+ * held by their key alone would be gigabytes.
+ */
 const stringRepCache = new LRUCache<string, Uint8Array>({
   capacity: 50_000,
+  weigh: (key, value) => key.length * 2 + value.length + 64,
+  maxWeight: 8 * 1024 * 1024,
 });
 
 /** Prepopulated cache of encoded small-length numbers. */
