@@ -10,14 +10,36 @@ serves), [`passivity-arc-orchestration.md`](passivity-arc-orchestration.md)
 
 **Status: DRAFTED, NOT RATIFIED** (2026-07-29). §7's owner gates are open.
 
-**Scope note added by the orchestrator:** `compileAndRun` has the same
-structural problem and should be designed with this, not separately. Its
-blocker is not the "unbounded async writes" earlier recorded — `llm` is
-async and now runs server-side, and `sqliteQuery` writes post-commit
-through a gate — but `pieceCreatedCallback`, which is a `browserWorker`-only
-runtime delta sitting in the same table row as `navigateCallback`
-(`packages/runner/src/runtime-presets.ts:74-78`). Both builtins need the
-same thing: a server→client channel for information directed at a client.
+**Scope note — RETRACTED 2026-07-29.** An earlier revision of this header
+folded `compileAndRun` into this design on the grounds that both builtins
+need a client callback. **The owner pushed back ("compileAndRun feels
+quite different from navigateTo?") and was right.** The two callbacks are
+different in kind, visible one after the other in the same client file:
+
+- `navigateCallback` does
+  `self.postMessage({ type: NotificationType.NavigateRequest, … })`
+  (`packages/runtime-client/backends/runtime-processor.ts:596`) —
+  **ephemeral**, UI-directed, no durable state, and semantically about
+  *one* client.
+- `pieceCreatedCallback` does `manager.add([piece])` (same file, `:602`) —
+  a **durable write to the space's piece list**.
+
+So `compileAndRun` needs no server→client channel at all — and per the
+owner's follow-up ruling the same day, it needs no server-side replacement
+either:
+
+> Remove the `manager.add([piece])` part, it doesn't belong in there
+> anymore.
+
+Registering a piece in a list is an `addPiece` handler's job
+(`docs/common/conventions/adding-pieces.md`), not a side effect of a compile
+builtin. So `pieceCreatedCallback` is **deleted**, not relocated. That
+removes `compileAndRun`'s only client-directed coupling and leaves it
+ordinary server-side work. It is tracked as its own wave-G row.
+
+`compileAndRun`'s blocker is also NOT the "unbounded async writes" recorded
+before that: `llm` is async and now runs server-side, and `sqliteQuery`
+writes post-commit through a suppression gate.
 
 **Provenance.** Drafted by a subagent; the orchestrator verified the two
 claims the design turns on. Verified: `laneAdmitsScope`
