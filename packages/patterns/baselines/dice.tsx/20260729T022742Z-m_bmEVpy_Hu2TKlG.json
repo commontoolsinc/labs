@@ -1,0 +1,50 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "value": {
+        "default": 1,
+        "type": "number"
+      }
+    },
+    "required": [
+      "value"
+    ],
+    "type": "object"
+  },
+  "pattern": "dice.tsx",
+  "resultSchema": {
+    "properties": {
+      "roll": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "sides": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "something": {
+        "properties": {
+          "nested": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "nested"
+        ],
+        "type": "object"
+      },
+      "value": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "value",
+      "something",
+      "roll"
+    ],
+    "type": "object"
+  }
+}

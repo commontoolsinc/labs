@@ -1,0 +1,31 @@
+{
+  "argumentSchema": {
+    "additionalProperties": false,
+    "properties": {},
+    "type": "object"
+  },
+  "pattern": "system/profile-embed.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "type": "unknown"
+      },
+      "hasProfile": {
+        "type": "boolean"
+      },
+      "isEditing": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "hasProfile",
+      "isEditing",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

@@ -97,6 +97,59 @@ jobs:
           CFCHECK_SHARD: "${{ matrix.shard }}/${{ matrix.total }}"
         run: deno task cfcheck
 
+  pattern-compat:
+    name: "Pattern Update Compatibility (${{ matrix.shard }}/${{ matrix.total }})"
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+        total: [4]
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v7
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      # Proves every pattern can still be applied over each contract recorded
+      # under packages/patterns/baselines/. The automatic updater performs NO
+      # structural check before swapping a pattern onto a running piece, so an
+      # incompatible schema that merges here reaches every deployed piece.
+      - name: 🔎 Check pattern update compatibility
+        env:
+          PATTERN_COMPAT_SHARD: "${{ matrix.shard }}/${{ matrix.total }}"
+        run: deno task pattern-compat
+
+  baselines-append-only:
+    name: "Pattern Baselines Append-Only"
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
+    steps:
+      # Needs real history: the check diffs against the merge base, and the
+      # default shallow checkout has none.
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 🦕 Setup Deno
+        uses: ./.github/actions/deno-setup
+
+      - name: 🔍 Verify lock file & install dependencies
+        uses: ./.github/actions/deno-install
+
+      # The gate's safety argument is that `--update` can only ADD a baseline.
+      # `rm` is not `--update`, and one deleted file hides easily in a diff full
+      # of recorded JSON — so deleting a baseline without retiring its pattern
+      # is refused here.
+      - name: 🔎 Check pattern baselines are append-only
+        run: deno task check-baselines-append-only origin/${{ github.base_ref || 'main' }}
+
   test:
     name: "Test (${{ matrix.shard }}/${{ matrix.total }})"
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -981,6 +1034,8 @@ jobs:
     needs:
       - check
       - cfcheck
+      - pattern-compat
+      - baselines-append-only
       - test
       - runner-test
       - build-toolshed

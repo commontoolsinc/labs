@@ -461,14 +461,30 @@ const recordRawBuiltinResultSchemaPolicyInput = (
  * suitable as the cause for the node's result cell instead of hashing the
  * pattern object (which drags in the session-varying `program`). Returns
  * undefined if the binding contains no write redirect.
+ *
+ * Exported for tests only.
  */
-function firstResolvedOutputRedirect(
+export function firstResolvedOutputRedirect(
   runtime: Runtime,
   tx: IExtendedStorageTransaction,
   binding: unknown,
   baseCell: Cell<any>,
 ): NormalizedFullLink | undefined {
   if (isWriteRedirectLink(binding) || isAliasBinding(binding)) {
+    // A partialCause alias denotes a DERIVED INTERNAL cell — of the child
+    // level it was deferred to when it still carried `defer` — never the
+    // node's reserved result spot, and it cannot be parsed as a link
+    // (parseAliasBinding throws by design). Before 2026-07 this threw here,
+    // and the caller's catch skipped the WHOLE node's owned-cell pre-sync —
+    // silently re-exposing the cold-cache commit-revert race the pre-sync
+    // exists to prevent, for every sub-pattern whose outputs lead with such
+    // an alias (seen live on estuary home spaces as "resume-owned-cells
+    // skipping…"). Skip just this entry and keep scanning: the derived
+    // cells themselves are collected from each pattern's own
+    // derivedInternalCells manifest.
+    if (isAliasBinding(binding) && binding.$alias.partialCause !== undefined) {
+      return undefined;
+    }
     const bindingBase = baseCell.getAsNormalizedFullLink();
     return resolveLink(
       runtime,

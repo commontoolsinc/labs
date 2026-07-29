@@ -1,0 +1,38 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "adminName": {
+        "default": "",
+        "scope": "space",
+        "type": "string"
+      },
+      "myName": {
+        "default": "",
+        "scope": "user",
+        "type": "string"
+      },
+      "question": {
+        "default": "Where should we eat?",
+        "scope": "space",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "scope-bug-ct1597-forward/MINIMAL-REPRO.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}
