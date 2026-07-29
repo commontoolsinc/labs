@@ -1,16 +1,16 @@
 # Pattern update state continuity (Tier 2)
 
-Status: In progress. Stages 1–2 are complete: the capture/replay machinery is
-built and the estuary brick is reproduced from a captured vintage through the
-production repair call (`packages/piece/test/state-continuity-harness.ts` +
-`state-continuity.test.ts`). Not yet wired to CI — stages 3–5 are what turn a
-green test into a gate. Tier 1 — the schema gate — merged as [#5144] and runs
-on every PR.
+Status: In progress. Stages 1–3 are complete and the tier is now a REAL GATE:
+`deno task pattern-vintage` runs on every PR, replaying committed vintages of
+`system/home.tsx` and `system/default-app.tsx` under the source being merged.
+Stage 2 landed as [#5148]. Stages 4–5 (auto captures, migration coverage)
+remain. Tier 1 — the schema gate — merged as [#5144].
 
 This plan takes the pattern-update regime from "the contract still type-checks"
 to "the new pattern can still read what the old one wrote".
 
 [#5144]: https://github.com/commontoolsinc/labs/pull/5144
+[#5148]: https://github.com/commontoolsinc/labs/pull/5148
 
 ## Status convention
 
@@ -76,7 +76,9 @@ Measured on branch `tier2`, not assumed:
 | --- | --- |
 | A file-backed store snapshots and reopens faithfully | `openFileBackedRuntime` + `snapshotSpaceStore`; state written by one runtime reads back in a fresh one |
 | State written by an OLD pattern survives a NEW one adding a defaulted field | `state-continuity.test.ts`, green |
-| A snapshot of a trivial one-pattern space is **~1.5 MB** | measured; it is the floor, since the store carries compiled artifacts |
+| A snapshot of a trivial one-pattern space is **1.5 MiB** raw | measured; it is the floor, since the store carries compiled artifacts |
+| Real patterns are larger raw but COMPRESS 15-48x | measured: `home.tsx` 3.50 MiB raw / 226 KiB gzipped; `favorites-manager.tsx` 1.53 MiB / 32 KiB. A store is mostly slack — 99 revisions in 3.5 MiB — which is why the retention decision below was made on the wrong number |
+| The gate catches a real break, not just a synthetic one | measured by mutation on the ACTUAL `home.tsx`: adding a required defaultless output field makes `deno task pattern-vintage` exit 1 naming the field; restoring returns exit 0 |
 | `StorageManager.emulate` runs its real memory server against `:memory:` | `engine.ts` `toDatabaseAddress`; there is no file to snapshot, hence file-backed capture |
 | Entity ids are content-addressed from `{source, cause}` | `packages/runner/src/create-ref.ts` |
 | `setupPersistent` mints `{ space, random: randomUUID }` when given no cause | `packages/piece/src/manager.ts` |
@@ -121,9 +123,22 @@ that is not the state that was captured. Restore is same-DID; re-keying is an
 unbounded migration that destroys the fidelity the fixture exists to buy (see
 [`space-clone-rehearsal.md`](space-clone-rehearsal.md)).
 
-**Auto captures live in CI artifacts; pinned vintages live in git.** At ~1.5 MB
-a floor, committing every capture would grow the repo without bound, and git
-history keeps deleted blobs forever, so pruning reclaims nothing. Auto captures
+**Auto captures live in CI artifacts; pinned vintages live in git.** REVISIT
+BEFORE BUILDING STAGE 4 — this was decided on a number that turned out to be
+wrong. The reasoning was "at ~1.5 MB a floor, committing every capture would
+grow the repo without bound". Measured, a capture costs 32-226 KiB compressed,
+which is what git actually stores; both seeded vintages together are 494 KiB.
+At that price the artifact machinery (upload, fetch, retention-by-count, a
+pruner that cannot reach `pinned/`) may be solving a problem we do not have,
+and simply committing auto captures under the same append-only discipline
+would be far less machinery. The counter-argument that survives: git keeps
+deleted blobs forever and auto captures churn by design, so churn still costs —
+but the break-even is much further out than assumed. Original reasoning
+follows.
+
+At ~1.5 MB a floor, committing every capture would grow the repo without
+bound, and git history keeps deleted blobs forever, so pruning reclaims
+nothing. Auto captures
 exist only to cover what staging is running, churn constantly, and are
 regenerable from the build that produced them — artifact retention covers the
 window. Pinned vintages are irreplaceable and few.
@@ -214,37 +229,66 @@ automatic updater performs no structural check at all.
 
 ### 3. Curated vintages in git
 
-- [ ] `fixtures/<pattern key>/pinned/<iso>-<identity>.sqlite`, labelled by the
-      pattern identity that wrote it (provenance, not an address — nothing looks
-      a fixture up by it; the replay enumerates the directory)
-- [ ] Seed with the vintages worth having: a pre-migration home doc, and any
-      transition an incident makes worth pinning
-- [ ] Assert every `packages/patterns/system/**` pattern has at least one
-      vintage, so a system pattern cannot change without one
+- [x] `packages/patterns/vintages/<pattern key>/pinned/<iso>-<identity>.sqlite.gz`,
+      labelled by the pattern identity that wrote it (provenance, not an
+      address — nothing looks a fixture up by it; the replay enumerates the
+      directory)
+- [x] Seed the auto-updating patterns from today's source
+- [x] Assert every REQUIRED pattern has a vintage, and replay every vintage
+      that exists under today's source
+- [x] `deno task pattern-vintage` wired into CI
 
-Gate: a system-pattern schema change with no vintage fails CI.
+Gate: **met, and verified by mutation.** Adding a required, defaultless output
+field to the real `home.tsx` makes the task exit 1 with the estuary rejection
+naming the field; restoring it returns exit 0.
 
-Two constraints the stage-2 harness imposes on this layout, both measured:
+**Scope is what provably auto-updates**, derived from `HOME_PATTERN_URL` and
+`DEFAULT_APP_PATTERN_URL` rather than a hand-kept list, so the gate cannot
+drift from the runtime. This plan previously said "every
+`packages/patterns/system/**` pattern"; that over-reached. The directory also
+holds personal variants (`*-ben.tsx`) and modules that are not patterns
+(`piece-registry-migration.ts`), and a first attempt at requiring all 23 wedged
+on a file with no default export. A vintage that EXISTS is always replayed;
+the required list only governs what CI insists on. Pinning a profile or other
+long-lived pattern is a deliberate act, and works today.
 
-- **A cross-DID restore is fine — corrected.** An earlier revision of this plan
-  claimed a vintage captured under one DID and restored under another reads
-  EMPTY, which would be a false positive on the gate (emptiness is this tier's
-  stranding signal). **It does not reproduce.** Measured: capture under signer
-  A, restore under signer B, replay reads `["alpha","beta"]` with no error,
-  identical to the same-DID replay. The capturing DID *is* embedded in the
-  store — 16 occurrences in a 1.5 MiB snapshot — but it is not load-bearing for
+**Fixtures are gzipped, and the size argument this plan was built on was
+wrong.** Measured: `home.tsx` is 3.50 MiB raw / **226 KiB** gzipped (15x);
+`favorites-manager.tsx` 1.53 MiB / **32 KiB** (48x). A store is mostly slack —
+99 revisions in 3.5 MiB — so the compressed file is what git would have stored
+anyway and the raw one is pure working-tree cost. Both seeded vintages together
+are 494 KiB. See the retention decision below, which the real numbers undercut.
+
+Two constraints the harness imposes, both measured:
+
+- **A cross-DID restore is fine — corrected.** An earlier revision claimed a
+  vintage captured under one DID and restored under another reads EMPTY, which
+  would be a false positive on the gate (emptiness is this tier's stranding
+  signal). **It does not reproduce.** Capture under signer A, restore under
+  signer B, replay reads `["alpha","beta"]` with no error. The capturing DID is
+  embedded — 16 occurrences in a 1.5 MiB snapshot — but is not load-bearing for
   the read path, because a root is addressed by cause alone and the space is
-  whichever file the server opens.
+  whichever file the server opens. The task still uses a fixed signer, for
+  reproducibility rather than correctness.
 
-  What is still untested: a label that lowers `CurrentPrincipal` names the
-  capturing space, so a vintage carrying owner-scoped CFC labels may behave
-  differently under a different DID. The probe used a literal `subject`. Worth
-  measuring if a pinned vintage ever carries such a label — but it is not the
-  general blocker this section previously claimed, and it does not gate seeding.
+  Still untested: a label lowering `CurrentPrincipal` names the capturing
+  space, so an owner-scoped label may behave differently across DIDs.
 - **One root key per pattern.** Roots are addressed by cause and the cause
   alone determines the entity id, so a fixture holding two patterns needs two
-  keys (`vintageRoot(vintage, schema, key)`). One fixture per pattern, as the
-  layout above has it, needs nothing further.
+  keys (`vintageRoot(vintage, schema, key)`). One fixture per pattern needs
+  nothing further.
+
+Two bugs the gate found in itself, both now pinned by tests, both of the class
+that fails SILENTLY rather than loudly:
+
+- **Identities are base64url and contain dashes.** Parsing the identity as the
+  last dash-separated field split `home.tsx`'s own filename in the wrong place,
+  so the gate did not recognise the fixture it had just written and reported the
+  pattern as uncovered with the file sitting right there. Anchored on the
+  stamp's fixed shape now — both fields contain dashes, so only that is a
+  reliable boundary.
+- **`Deno.readDir` is lazy**, so a try/catch around the call alone caught
+  nothing and a missing tree escaped as ENOENT instead of "no fixtures yet".
 
 ### 4. Auto captures and retention
 
