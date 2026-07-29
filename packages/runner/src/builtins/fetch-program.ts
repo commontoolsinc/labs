@@ -279,18 +279,22 @@ export function fetchProgram(
         "fetchProgram-start",
         () => {
           // Start fetch asynchronously only after the transaction commits.
-          // Tracked as async builtin work so `runtime.settled()`
-          // wait for the program resolve + writeback; `idle()` does not.
+          // Tracked as async builtin work owned by this run, so
+          // `runtime.settled()` and `runtime.settledFor(parentCell)` both wait
+          // for the program resolve + writeback; `idle()` does not.
           myRequestId = requestId;
           abortController = new AbortController();
-          runtime.trackAsyncWork(startFetch(
-            runtime,
-            cache,
-            inputHash,
-            url,
-            requestId,
-            abortController.signal,
-          ));
+          runtime.trackAsyncWork(
+            startFetch(
+              runtime,
+              cache,
+              inputHash,
+              url,
+              requestId,
+              abortController.signal,
+            ),
+            parentCell,
+          );
         },
       );
     } else if (state.type === "fetching") {

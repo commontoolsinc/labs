@@ -126,9 +126,6 @@ const client = new LLMClient();
 // by a requestId match, so only the replica running the turn refreshes it.
 // Nothing distinguishes a crashed replica from a slow one without a bound.
 const REQUEST_TIMEOUT = 1000 * 60 * 5; // 5 minutes
-// Pattern-backed tools can themselves run LLM/tool loops (for example generic
-// sub-agents), so the dialog needs a budget longer than a single model call.
-const TOOL_CALL_TIMEOUT = 1000 * 120; // 120 seconds
 const MAX_SERIALIZE_DEPTH = 100;
 
 /**
@@ -2773,12 +2770,16 @@ async function handleInvoke(
     r !== undefined && resolve(r);
   });
 
-  // Ends three ways: the result lands, the turn is cancelled, or the deadline
-  // fires. The deadline is the one that should not be here — it bounds how long
-  // a healthy tool may take, and firing early reports a working tool to the
-  // model as a failure. Removing it needs a signal for "this run finished
-  // without writing anything", which the runtime cannot yet produce; see
-  // docs/development/proposals/retiring-llm-tool-call-deadlines.md.
+  // Ends three ways, each of them an event: the result lands, the run quiesces,
+  // or the turn is cancelled.
+  //
+  // The middle one is what makes the wait above determinate. "The result cell
+  // became defined" conflates two questions — has the run finished, and did it
+  // produce anything — so a run that finishes having written nothing looks the
+  // same as one still working. `settledFor` answers the first question directly
+  // for the run this tool call started, so a tool that produced nothing ends
+  // here with the cell still undefined rather than waiting for a value that is
+  // never coming.
   const aborted = abortSignal
     ? new Promise<void>((resolveAborted) => {
       if (abortSignal.aborted) return resolveAborted();
@@ -2788,21 +2789,16 @@ async function handleInvoke(
     })
     : undefined;
 
-  let timeout;
-  const timeoutPromise = new Promise((_, reject) => {
-    timeout = setTimeout(() => {
-      reject(new Error("Tool call timed out"));
-    }, TOOL_CALL_TIMEOUT);
-  }).then(() => {
-    throw new Error("Tool call timed out");
-  });
-
+  // The barrier keeps re-checking until the run goes quiet, so a race the result
+  // wins would otherwise leave it looping with nobody waiting.
+  const quiescence = new AbortController();
   try {
     await Promise.race(
-      [promise, timeoutPromise, aborted].filter(Boolean),
+      [promise, runtime.settledFor(result, quiescence.signal), aborted]
+        .filter(Boolean),
     );
   } finally {
-    clearTimeout(timeout);
+    quiescence.abort();
     cancel();
   }
 
@@ -3166,7 +3162,8 @@ export function llmDialog(
 
               abortController = new AbortController();
               // Track the dialog turn (LLM call + writeback) as async builtin
-              // work so `runtime.settled()` wait for the result;
+              // work owned by this run, so `runtime.settled()` and
+              // `runtime.settledFor(parentCell)` both wait for the result;
               // `idle()` does not, so the handler never blocks on the LLM call.
               runtime.trackAsyncWork(
                 startRequest(
@@ -3182,6 +3179,7 @@ export function llmDialog(
                   abortController.signal,
                   capturedRequest,
                 ),
+                parentCell,
               );
             },
           );
