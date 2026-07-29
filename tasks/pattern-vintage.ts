@@ -42,7 +42,6 @@ import {
   HOME_PATTERN_URL,
 } from "../packages/piece/src/system-pattern-url.ts";
 import {
-  collectVintages,
   isClean,
   relativeToRepo,
   reportFailures,
@@ -128,11 +127,8 @@ async function main() {
     return;
   }
 
-  const { replayed, failures } = await replayAll(roots);
-  const uncovered = uncoveredRequiredPatterns(
-    required,
-    await collectVintages(roots.vintagesRoot),
-  );
+  const { vintages, replayed, failures } = await replayAll(roots);
+  const uncovered = uncoveredRequiredPatterns(required, vintages);
 
   if (uncovered.length > 0) console.error(reportUncovered(uncovered));
   if (replayed === 0) console.error(`\n${reportNothingReplayed()}`);

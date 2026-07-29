@@ -237,10 +237,16 @@ automatic updater performs no structural check at all.
 
 ### 3. Curated vintages in git
 
-- [x] `packages/patterns/vintages/<pattern key>/pinned/<iso>-<identity>.sqlite`,
+- [x] `packages/piece/test/vintages/<pattern key>/pinned/<iso>-<identity>.sqlite`,
       labelled by the pattern identity that wrote it (provenance, not an
       address — nothing looks a fixture up by it; the replay enumerates the
-      directory)
+      directory). **Not** under `packages/patterns/`, though the key is a path
+      relative to it: `build-binaries.ts` hands that whole directory to
+      `deno compile --include`, which is recursive over non-source files
+      (measured; neither `deno.json`'s `exclude` nor `.denoignore` filters it),
+      so fixtures would ship inside the toolshed binary and grow it with every
+      stage-4 capture — and `PatternsServer` serves the same directory by path,
+      so they would be fetchable from any deployment
 - [x] Seed the auto-updating patterns from today's source
 - [x] Assert every REQUIRED pattern has a vintage, and replay every vintage
       that exists under today's source

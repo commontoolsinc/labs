@@ -10,10 +10,20 @@
  *
  * Layout:
  *
- *     packages/patterns/vintages/<pattern key>/pinned/<iso>-<identity>.sqlite
+ *     packages/piece/test/vintages/<pattern key>/pinned/<iso>-<identity>.sqlite
  *
  * `<pattern key>` is the pattern's repo path under `packages/patterns/`, so a
  * fixture sits next to nothing and is found by path alone.
+ *
+ * The tree is deliberately NOT under `packages/patterns/`, which is the
+ * obvious home for it and the wrong one. `tasks/build-binaries.ts` passes that
+ * whole directory to `deno compile --include`, which is recursive and takes
+ * arbitrary non-source files — measured, and neither `deno.json`'s `exclude`
+ * nor `.denoignore` filters it — so every fixture would be baked into the
+ * shipped toolshed binary, and stage 4 accumulates fixtures. The same
+ * directory is what `PatternsServer` serves by path, so they would also be
+ * fetchable from any deployment. It lives beside the harness that reads it
+ * instead.
  *
  * `<identity>` is PROVENANCE, not an address: it records which pattern version
  * wrote the state. Nothing looks a fixture up by it — the replay enumerates the
@@ -49,10 +59,8 @@
  * everyone who clones.
  */
 
-import { PATTERNS_DIR } from "./pattern-files.ts";
-
-/** Root of the committed fixture tree. */
-export const VINTAGES_DIR = `${PATTERNS_DIR}/vintages`;
+/** Root of the committed fixture tree. See the note above on why it is here. */
+export const VINTAGES_DIR = "packages/piece/test/vintages";
 
 /** Vintages that are never pruned and are the gate's real coverage. */
 export const PINNED = "pinned";

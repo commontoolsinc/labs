@@ -237,7 +237,7 @@ describe("collectVintages", () => {
 describe("reporting", () => {
   const failure = {
     patternKey: "system/home.tsx",
-    path: "packages/patterns/vintages/system/home.tsx/pinned/x.sqlite",
+    path: `${VINTAGES_DIR}/system/home.tsx/pinned/x.sqlite`,
     detail: "materializing today's source over this vintage was REFUSED",
   };
 

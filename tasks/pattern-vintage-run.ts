@@ -109,17 +109,28 @@ export async function replayVintage(
   });
 }
 
-/** Replay every fixture under `vintagesRoot`. */
+/**
+ * Replay every fixture under `vintagesRoot`.
+ *
+ * Hands the enumeration back so the coverage check reads the SAME list rather
+ * than walking the tree a second time. Two walks would be two answers to one
+ * question, and the pair "replayed nothing" / "everything is covered" is
+ * exactly the disagreement that reads as a pass.
+ */
 export async function replayAll(
   roots: GateRoots,
-): Promise<{ replayed: number; failures: ReplayFailure[] }> {
+): Promise<{
+  vintages: VintageRef[];
+  replayed: number;
+  failures: ReplayFailure[];
+}> {
   const vintages = await collectVintages(roots.vintagesRoot);
   const failures: ReplayFailure[] = [];
   for (const vintage of vintages) {
     const failure = await replayVintage(roots, vintage);
     if (failure !== undefined) failures.push(failure);
   }
-  return { replayed: vintages.length, failures };
+  return { vintages, replayed: vintages.length, failures };
 }
 
 /** Capture a vintage for `patternKey` from today's source. */
