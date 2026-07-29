@@ -1566,7 +1566,9 @@ export const loopback = (server: Server): Transport => {
   return {
     async send(payload: string) {
       if (await connection.receive(payload) === "closed") {
-        closeReceiver(protocolError("memory protocol version mismatch"));
+        closeReceiver(
+          permanentProtocolError("memory protocol version mismatch"),
+        );
       }
     },
     close() {

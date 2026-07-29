@@ -3215,6 +3215,36 @@ Deno.test("memory v2 client drops connections when protocol versions disagree", 
   assertEquals(helloCount, 1);
 });
 
+Deno.test("memory v2 loopback marks protocol mismatch closes permanent", async () => {
+  const server = new Server({
+    ...testSessionOpenServerOptions,
+    store: new URL("memory://memory-v2-client-loopback-version-mismatch"),
+  });
+  const transport = loopback(server);
+  let closeError: Error | undefined;
+  transport.setCloseReceiver?.((error) => {
+    closeError = error;
+  });
+
+  try {
+    await transport.send(encodeMemoryBoundary({
+      type: "hello",
+      protocol: "memory/v2.2",
+      flags: getMemoryProtocolFlags(),
+    }));
+
+    assertExists(closeError);
+    assertEquals(closeError.name, "ProtocolError");
+    assertEquals(
+      (closeError as Error & { permanent?: boolean }).permanent,
+      true,
+    );
+  } finally {
+    await transport.close();
+    await server.close();
+  }
+});
+
 Deno.test("memory v2 client stores the server's advertised flags (capability handshake)", async () => {
   // An OLD server's hello.ok omits sqliteCommitRowLabelEval: the parsed
   // server flags must read false (the runner's write gate then keeps failing
