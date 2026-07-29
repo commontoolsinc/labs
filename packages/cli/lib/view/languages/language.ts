@@ -226,11 +226,11 @@ export function renderedLinesFor(
 let languages: readonly Language[] | undefined;
 function allLanguages(): readonly Language[] {
   return languages ??= [
+    typeScriptLanguage,
     markdownLanguage,
     jsonLanguage,
     yamlLanguage,
     pythonLanguage,
-    typeScriptLanguage,
     plainTextLanguage,
   ];
 }
@@ -242,6 +242,16 @@ export function languageForFile(fileName: string | undefined): Language {
     if (language.matches(fileName)) return language;
   }
   return plainTextLanguage;
+}
+
+/** Look up a language by its stable identifier for an explicit override. */
+export function languageForId(id: string): Language | undefined {
+  return allLanguages().find((language) => language.id === id);
+}
+
+/** Stable identifiers accepted by an explicit language override. */
+export function languageIds(): string[] {
+  return allLanguages().map((language) => language.id);
 }
 
 /** The TypeScript default for filename-free `cf check --show-transformed`

@@ -1,6 +1,7 @@
 import { Command } from "@cliffy/command";
 import { type ColorWhen, ViewError, viewMain } from "../lib/view/mod.ts";
 import { cliText } from "../lib/cli-name.ts";
+import { languageIds } from "../lib/view/languages/language.ts";
 
 const description = cliText(
   `Interactive, syntax-aware pager for transformed patterns, source files and diffs.
@@ -12,10 +13,12 @@ uses, so blocks, closures, schemas, type positions and Common Fabric builders
 Markdown, JSON, JSONC, YAML and Python files use syntax highlighting selected
 from their names. Filename-free compiler output keeps TypeScript highlighting
 when its transformed-module header identifies it. Other unnamed source and
-named files with unrecognized syntax remain plain text. The Markdown language
-also has a rendered view that formats headings, lists, quotes, tables, links,
-emphasis and code while retaining source line positions. Source views remain
-verbatim and add colour only.
+named files with unrecognized syntax remain plain text. Piped source can select
+syntax explicitly with '--language' or supply a virtual name with '--filename'.
+Either option suppresses unified-diff auto-detection; use '--diff' instead for a
+diff. The Markdown language also has a rendered view that formats headings,
+lists, quotes, tables, links, emphasis and code while retaining source line
+positions. Source views remain verbatim and add colour only.
 
 Unified diffs are detected automatically: piping 'git diff' in gives added and
 removed lines their tints, full syntax colour, a structure tree of the code
@@ -26,6 +29,7 @@ COMMON USAGE:
   cf check ./pattern.tsx --show-transformed --no-run | cf view
   git diff origin/main | cf view        # diff mode
   cf view transformed.ts                # view a saved file
+  generate-source | cf view --filename script.py
   cf check ./p.tsx --show-transformed --no-run | cf view --plain | bat
 
 KEYS (press ? in the viewer for the full list):
@@ -71,6 +75,14 @@ export const view = new Command()
     "Start in the rendered view when the input language supports one.",
   )
   .option(
+    "--language <language:string>",
+    `Select piped source explicitly: ${languageIds().join(", ")}.`,
+  )
+  .option(
+    "--filename <filename:string>",
+    "Select piped source as though it had this filename.",
+  )
+  .option(
     "--diff",
     "Treat the input as a unified diff, overriding auto-detection.",
   )
@@ -86,6 +98,8 @@ export const view = new Command()
         plain?: boolean;
         lineNumbers?: boolean;
         rendered?: boolean;
+        language?: string;
+        filename?: string;
         diff?: boolean;
       },
       file?: string,
@@ -102,6 +116,8 @@ export const view = new Command()
           plain: options.plain ?? false,
           lineNumbers: options.lineNumbers ?? false,
           rendered: options.rendered ?? false,
+          language: options.language,
+          filename: options.filename,
           file,
           diff: options.diff,
         });
