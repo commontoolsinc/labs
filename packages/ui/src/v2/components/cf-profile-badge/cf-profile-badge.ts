@@ -294,11 +294,11 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         mix-blend-mode: screen;
         background:
           radial-gradient(
-            circle at var(--seal-mx, 50%) var(--seal-my, 50%),
-            rgba(255, 255, 255, 1) 0%,
-            rgba(255, 255, 255, 0.6) 11%,
-            rgba(255, 255, 255, 0) 32%
-          ),
+          circle at var(--seal-mx, 50%) var(--seal-my, 50%),
+          rgba(255, 255, 255, 1) 0%,
+          rgba(255, 255, 255, 0.6) 11%,
+          rgba(255, 255, 255, 0) 32%
+        ),
           radial-gradient(
           circle at var(--seal-mx, 50%) var(--seal-my, 50%),
           hsl(var(--seal-sheen-hue, 200) 100% 72% / 0.9) 0%,

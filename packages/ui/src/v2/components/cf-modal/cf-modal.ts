@@ -452,8 +452,7 @@ export class CFModal extends BaseElement {
       <div
         class="backdrop"
         part="backdrop"
-      >
-      </div>
+      ></div>
 
       <div
         class="container"
