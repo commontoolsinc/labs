@@ -2026,6 +2026,24 @@ describe("native-conversion", () => {
       expect(probes).toBeLessThan(100);
     });
 
+    it("copies every index even when a proxy reports a named key first", () => {
+      // A `Proxy` chooses its own key order, so index keys need not come first
+      // the way they do on an ordinary array. Stopping at the first non-index
+      // key would therefore silently drop elements -- here, all of them.
+      const target = [10, 20];
+      const reordered = new Proxy(target, {
+        ownKeys: () => ["foo", "0", "1", "length"],
+        getOwnPropertyDescriptor: (t, p) => {
+          if (p === "foo") {
+            return { configurable: true, enumerable: true, value: "x" };
+          }
+          return Object.getOwnPropertyDescriptor(t, p);
+        },
+      });
+
+      expect(shallowCleanArray(reordered)).toEqual([10, 20]);
+    });
+
     it("distinguishes a stored `undefined` from a hole", () => {
       const arr: unknown[] = [undefined, 2];
 

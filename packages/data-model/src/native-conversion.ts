@@ -37,8 +37,8 @@ function rejectExtraProperties(value: object, typeName: string): void {
 }
 
 /**
- * Returns a shallow clone of the given array carrying nothing but its index
- * properties and `length`, that is, one which satisfies
+ * Returns a shallow clone of the given array carrying nothing but its
+ * enumerable index properties and `length`, that is, one which satisfies
  * `isArrayWithOnlyIndexProperties()`. Holes are preserved as holes, and
  * elements are copied by reference without themselves being converted or
  * validated, this being a shallow operation.
@@ -63,10 +63,6 @@ export function shallowCleanArray(
   // present elements would leave `length` short.
   result.length = value.length;
 
-  // Iterate the own keys rather than counting from `0` to `length`: a sparse
-  // array's `length` can run to 2**32 - 2 while holding a handful of elements,
-  // and only the elements it actually has need copying. Every index key is
-  // necessarily below `length`, so none of these assignments extends it.
   // A canonical index string addresses exactly the element slot it names, so
   // these are indexed by key directly, with no number parsing. The record views
   // exist only to say as much to TypeScript, which otherwise rejects a string
@@ -74,8 +70,16 @@ export function shallowCleanArray(
   const from = value as unknown as Record<string, unknown>;
   const to = result as unknown as Record<string, unknown>;
 
-  for (const key of Reflect.ownKeys(value)) {
-    if ((typeof key === "string") && isArrayIndexPropertyName(key)) {
+  // `for...in` visits only the keys an array actually has, so a sparse one
+  // costs O(elements) rather than O(length) -- `length` can run to 2**32 - 2 --
+  // and it gets there without materializing a key array. It also yields any
+  // named properties, which the index test drops, those being the whole point
+  // of this function. Inherited keys are not a concern: this project bans
+  // prototype pollution of the globals, and `Array.prototype`'s own methods are
+  // non-enumerable. Every index key is necessarily below `length`, so none of
+  // these assignments extends it.
+  for (const key in value) {
+    if (isArrayIndexPropertyName(key)) {
       to[key] = from[key];
     }
   }
