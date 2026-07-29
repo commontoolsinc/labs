@@ -604,9 +604,30 @@ export const assert: (fn: () => boolean) => Reactive<AssertRecord> = (
  */
 // Overload 1: Zero-parameter callback returns Stream<void>
 export function action(_event: () => void): Stream<void>;
-// Overload 2: Parameterized callback returns Stream<T>
-export function action<T>(_event: (event: T) => void): Stream<T>;
-export function action<T>(_event: (event?: T) => void): Stream<T> {
+// Overload 2: Parameterized callback returns Stream<E>
+export function action<E>(_event: (event: E) => void): Stream<E>;
+// Overload 3: a declared result, reached only by supplying both type arguments
+// explicitly — `action<AddTopic, TopicRef>((e) => { ...; return ref })`.
+//
+// The result is NOT inferred from the callback, deliberately. A concise arrow
+// body returns whatever its last call evaluates to, and the common ones return
+// values rather than void — `Cell.set` returns the cell (api `ISettable`), so
+// `action((id: string) => selected.set(id))` would infer a `Cell` result and
+// silently declare a verb result nobody wrote. TypeScript cannot tell that
+// incidental return from a deliberate one, so overload 2 absorbs every
+// callback (anything is assignable to a void-returning signature) and a result
+// has to be asked for by name.
+//
+// Contextual typing does not reach here either: annotating the binding
+// `const v: Stream<E, R> = action(...)` still selects overload 2 and fails to
+// assign. That failure is the intended one — dropping a declared result is a
+// compile error naming `[CELL_RESULT_TYPE]`, not silence.
+export function action<E, R>(
+  _event: (event: E) => R,
+): Stream<E, R>;
+export function action<E, R = void>(
+  _event: (event?: E) => R,
+): Stream<E, R> {
   throw new Error(
     "action() must be used with CTS transforms enabled - remove /// <cf-disable-transform /> from your file",
   );

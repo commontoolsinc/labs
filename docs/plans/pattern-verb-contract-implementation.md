@@ -132,10 +132,38 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
 
 - **api:** `action` overloads accept a return type (today both overloads type
   the callback `=> void` — the `action()` overloads in
-  `packages/runner/src/builder/module.ts`); `Stream<T, R = void>`
+  `packages/runner/src/builder/module.ts`); `Stream<E, R = void>`
   so the result type is visible to the schema layer — the defaulted parameter
-  keeps every existing `Stream<T>` use compiling. A `VerbError { code,
+  keeps every existing `Stream<E>` use compiling. A `VerbError { code,
   message }` type for rule 4's typed rejections.
+
+  Verb-shaped type parameters read the same way throughout: **`E`** the event,
+  **`R`** the declared result, **`T`** the handler's bound state where there is
+  one. `Handler`/`HandlerFactory`'s second parameter was spelled `R` while it
+  meant the event; it is `E` now so `R` names one concept everywhere.
+
+  **A result is opt-in by explicit type argument — `action<E, R>(...)` — and
+  is never inferred from the callback.** Inferring it is not available: a
+  concise arrow body's completion value is whatever its last call returns, and
+  `Cell.set` returns the cell rather than `void` (api `ISettable`), so
+  `action((id: string) => selected.set(id))` would infer a `Cell` result and
+  declare a verb result nobody wrote. TypeScript cannot distinguish that
+  incidental return from a deliberate one, so overload 2 (`(event: E) => void`)
+  absorbs every callback and a result must be asked for by name. Contextual
+  typing does not reach it either: annotating the binding
+  `const v: Stream<E, R> = action(...)` still selects overload 2 and fails to
+  assign — which is the intended catch, an error naming `[CELL_RESULT_TYPE]`
+  rather than a silent erasure.
+- **C2 must close the case the type layer cannot see.** The catch above fires
+  at a *declaration* — an Output interface saying `Stream<E, R>`, or explicit
+  type arguments. A verb that declares its result in neither place, whose body
+  nonetheless returns a value, compiles as `Stream<E, void>` with nothing to
+  object: this is the "forgotten annotation stays silent" failure the fork
+  decision set out to kill, surviving in the one spot types cannot reach.
+  The transformer can see it, because it reads the body: a `return` statement
+  carrying a value, under a stream whose declared result is `void`, is an
+  error C2 raises. Without that, C4's `plainResultReceipts` projection will
+  happily persist a result the schema layer never described.
 - **C1 fork — settled: widen `Stream`, do not add a second carrier.** The
   alternative was a separate `StreamWithResult<T, R> extends Stream<T>` that
   only the schema layer interprets, which is tempting because it leaves

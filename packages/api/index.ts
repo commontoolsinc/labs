@@ -384,6 +384,28 @@ export declare const CELL_BRAND: unique symbol;
 export declare const CELL_INNER_TYPE: unique symbol;
 
 /**
+ * Symbol for the phantom property carrying a verb's declared result type.
+ *
+ * `Stream<E, R>` already discriminates on `R` without this, because
+ * `ICreatable<Stream<E, R>>` puts the stream in `for()`'s return position.
+ * That is incidental: it survives only as long as `Stream` extends
+ * `ICreatable` with a signature mentioning the full type. Were that to change
+ * — `for(cause): this`, say — `R` would fall back to a phantom parameter,
+ * `Stream<E, R>` and `Stream<E>` would become mutually assignable, and a
+ * declared result would start being dropped on assignment with nothing to
+ * catch it.
+ *
+ * So the discrimination is pinned locally instead of inherited, the same
+ * device {@link CELL_INNER_TYPE} uses for the same class of problem.
+ *
+ * Nothing reads this at runtime — a verb's result schema travels on
+ * `module.resultSchema`, never on the stream cell's own schema, which stays
+ * the event/payload schema that `cf piece verbs` publishes and that
+ * `piece call` validates against.
+ */
+export declare const CELL_RESULT_TYPE: unique symbol;
+
+/**
  * Minimal cell type with just the brand, no methods.
  * Used for type-level operations like unwrapping nested cells without
  * creating circular dependencies.
@@ -1394,12 +1416,24 @@ export interface AsStream extends HKT {
   type: Stream<this["_A"]>;
 }
 
-export interface Stream<T>
+/**
+ * `R` is the verb's declared result — what a caller reads back from the
+ * handling's receipt. It defaults to `void`: a stream that declares nothing
+ * is a value-less verb, which is the overwhelmingly common shape and stays
+ * spelled `Stream<Event>`.
+ *
+ * A `Stream<E, R>` does not satisfy a `Stream<E>`, or vice versa, so a
+ * declared result cannot be dropped on assignment (see
+ * {@link CELL_RESULT_TYPE} for why that is pinned here rather than inherited).
+ */
+export interface Stream<E, R = void>
   extends
-    BrandedCell<T, "stream">,
-    IAnyCell<T>,
-    ICreatable<Stream<T>>,
-    IStreamable<T> {}
+    BrandedCell<E, "stream">,
+    IAnyCell<E>,
+    ICreatable<Stream<E, R>>,
+    IStreamable<E> {
+  readonly [CELL_RESULT_TYPE]: R;
+}
 
 export declare const Stream: CellTypeConstructor<AsStream>;
 
@@ -1630,8 +1664,18 @@ export type toJSON = {
   toJSON(): unknown;
 };
 
-export type Handler<T = any, R = any> = Module & {
-  with: (inputs: FactoryInput<StripCell<T>>) => Stream<R>;
+/**
+ * Verb-shaped type parameters read the same way throughout this file and the
+ * builder: **`E`** is the event a verb accepts, **`R`** is the result it
+ * declares back to a caller (`void` for the value-less majority), and **`T`**
+ * is the handler's bound state, present only where there is one.
+ *
+ * `Handler`'s second parameter was spelled `R` before a result existed; it has
+ * always been the event type, so it is `E` now and `R` means one thing
+ * everywhere. Type parameters are positional — no caller changes.
+ */
+export type Handler<T = any, E = any, R = void> = Module & {
+  with: (inputs: FactoryInput<StripCell<T>>) => Stream<E, R>;
 };
 
 export type NodeFactory<T, R> =
@@ -1659,9 +1703,9 @@ export type ModuleFactory<T, R> =
     asScope(scope: CellScope): ModuleFactory<T, R>;
   };
 
-export type HandlerFactory<T, R> =
-  & ((inputs: FactoryInput<StripCell<T>>) => Stream<R>)
-  & Handler<T, R>
+export type HandlerFactory<T, E, R = void> =
+  & ((inputs: FactoryInput<StripCell<T>>) => Stream<E, R>)
+  & Handler<T, E, R>
   & toJSON;
 
 // JSON types
