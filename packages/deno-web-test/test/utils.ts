@@ -41,7 +41,7 @@ export const runDenoWebTest = async (
   };
   const reload = options.reload ? `--reload=${options.reload} ` : "";
   manifest.tasks.test =
-    `deno run ${reload}--allow-env --allow-read --allow-write --allow-run --allow-net ${CLI_PATH} *.test.ts`;
+    `deno run --quiet ${reload}--allow-env --allow-read --allow-write --allow-run --allow-net ${CLI_PATH} *.test.ts`;
   await Deno.writeTextFile(manifestPath, JSON.stringify(manifest));
 
   // Populate the cache for the harness and each test entrypoint before the task.
