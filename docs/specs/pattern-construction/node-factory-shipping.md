@@ -615,7 +615,7 @@ against the parent binding context, writes or links them into this cell while
 preserving CFC labels, and supplies the cell to alias resolution.
 
 The alias vocabulary gains `{ $alias: { cell: "params", path, ... } }`.
-`unwrapOneLevelAndBindtoDoc`, `sendValueToBinding`, and direct sub-pattern setup
+`unwrapOneLevelAndBindToDoc`, `sendValueToBinding`, and direct sub-pattern setup
 accept that pseudo-root only when the invocation has a params cell. Nested
 links resolve relative to their original parent before the hidden cell is
 populated; cross-space links remain links rather than copied values. On resume,
