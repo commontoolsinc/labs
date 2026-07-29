@@ -94,8 +94,10 @@ describe("llmDialog drops messages added during a running turn", () => {
   });
 
   // Start the dialog and return its result cell. The caller sends messages
-  // through `addMessage` and reads `messages` and `pending` back.
-  const startDialog = (cause: string) => {
+  // through `addMessage` and reads `messages` and `pending` back. The setup
+  // commit is awaited so a failure to write the dialog into place is reported
+  // here rather than as whatever the rest of the case does without it.
+  const startDialog = async (cause: string) => {
     const testPattern = pattern(
       () => {
         const messages = Cell.of<BuiltInLLMMessage[]>([]);
@@ -112,7 +114,8 @@ describe("llmDialog drops messages added during a running turn", () => {
 
     const resultCell = runtime.getCell(space, cause, resultSchema, tx);
     const result = runtime.run(tx, testPattern, {}, resultCell);
-    tx.commit();
+    const { error } = await tx.commit();
+    if (error) throw error;
     return result;
   };
 
@@ -138,7 +141,7 @@ describe("llmDialog drops messages added during a running turn", () => {
       ],
     });
 
-    const result = startDialog("llmDialog-message-drop-own-fresh-turn");
+    const result = await startDialog("llmDialog-message-drop-own-fresh-turn");
 
     let requestsSeen = 0;
     const requestReached = defer<void>();
@@ -183,7 +186,7 @@ describe("llmDialog drops messages added during a running turn", () => {
       ],
     });
 
-    const result = startDialog("llmDialog-message-drop-own-turn");
+    const result = await startDialog("llmDialog-message-drop-own-turn");
 
     // Hold the model's answer so the turn stays genuinely in flight, and count
     // the requests that reach the model. A dropped message starts no request,
@@ -244,7 +247,7 @@ describe("llmDialog drops messages added during a running turn", () => {
       ],
     });
 
-    const result = startDialog("llmDialog-message-drop-live-peer");
+    const result = await startDialog("llmDialog-message-drop-live-peer");
 
     const addMessage = await result.key("addMessage").pull();
     addMessage.send({ role: "user", content: "First" });
@@ -288,7 +291,7 @@ describe("llmDialog drops messages added during a running turn", () => {
       ],
     });
 
-    const result = startDialog("llmDialog-message-drop-gone-peer");
+    const result = await startDialog("llmDialog-message-drop-gone-peer");
 
     const addMessage = await result.key("addMessage").pull();
     addMessage.send({ role: "user", content: "First" });
