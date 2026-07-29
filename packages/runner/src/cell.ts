@@ -2,6 +2,8 @@ import {
   type Immutable,
   isFunction,
   isObject,
+  isPlainContainer,
+  isPlainObject,
   isRecord,
   type Mutable,
 } from "@commonfabric/utils/types";
@@ -11,6 +13,7 @@ import {
   FabricSpecialObject,
   type FabricValue,
   shallowCleanArray,
+  shallowCleanPlainObject,
   shallowFabricFromNativeValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
@@ -3267,13 +3270,32 @@ export function recursivelyAddIDIfNeeded<T>(
     return value;
   }
 
+  // A plain object may still be carrying an `[ID]` or `[ID_FIELD]` directive
+  // here -- either author-supplied or added by the array walk below -- and those
+  // are instructions for `diffAndUpdate()`, not content, so the conversion
+  // functions rightly refuse to store an object bearing one. Such an object is
+  // walked directly instead; the walk rebuilds it either way, and the directive
+  // survives to the consumer that strips it.
+  // Known gap, deliberately left: the bypass is unconditional, so an object
+  // carrying a directive AND some other symbol or non-enumerable key keeps its
+  // other key out of the key check too, and the record walk below then drops it
+  // silently (it rebuilds from `Object.entries()` and copies back only `ID` and
+  // `ID_FIELD`). That drop predates the key check rather than being introduced
+  // by this bypass, and it goes away with the directives themselves. Should they
+  // outlive this comment, close it by requiring everything other than the
+  // directives to satisfy `isPlainObjectWithOnlyEnumerableStringKeys()`.
+  const carriesIdDirective = isPlainObject(value) &&
+    ((ID in (value as object)) || (ID_FIELD in (value as object)));
+
   // Convert value to fabric form. This handles:
   // - Primitives (e.g., pass -0/NaN/Infinity/bigint through, reject unique
   //   symbols)
   // - Instances (e.g., Error → FabricError, Date → FabricEpochNsec)
   // - Objects/arrays with toJSON() methods
   // - Sparse arrays (holes preserved)
-  const converted = shallowFabricFromNativeValue(value);
+  const converted = carriesIdDirective
+    ? value
+    : shallowFabricFromNativeValue(value);
 
   // A `FabricSpecialObject` returned by the conversion step (e.g. `FabricError`
   // wrapping a native `Error`, or `FabricEpochNsec` wrapping a native `Date`).
@@ -3691,10 +3713,14 @@ export function convertCellsToLinks(
   // is not a `FabricValue`, so drop it before the conversion below would reject
   // it. Only annotated arrays are cleaned: an array carrying anything else
   // non-index is genuinely unrepresentable and must still be rejected.
-  if (Array.isArray(value) && isCellResultForDereferencing(value)) {
-    // What this produces is a valid `FabricValueLayer` already, so it wants no
-    // further conversion.
-    value = shallowCleanArray(value, false);
+  if (isCellResultForDereferencing(value) && isPlainContainer(value)) {
+    // What these produce is a valid `FabricValueLayer` already, so it wants no
+    // further conversion. Objects need this as much as arrays do -- the
+    // annotation goes on either (see `schema.ts`) -- and before the object rule
+    // rejected non-string keys the object case was dropping it silently instead.
+    value = Array.isArray(value)
+      ? shallowCleanArray(value, false)
+      : shallowCleanPlainObject(value, false);
   } else {
     // Convert the (top level of) the value to fabric form (a valid
     // `FabricValue`) if it isn't already, or throw if it's neither already

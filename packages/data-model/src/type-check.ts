@@ -1,4 +1,5 @@
 import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
+import { isPlainObjectWithOnlyEnumerableStringKeys } from "@commonfabric/utils/objects";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 import {
@@ -46,9 +47,10 @@ export function isFabricValueLayer(
         return isArrayWithOnlyIndexProperties(value);
       }
       // Plain objects are accepted; class instances are not (except
-      // `FabricSpecialObject`, handled above).
-      const proto = Object.getPrototypeOf(value);
-      return proto === null || proto === Object.prototype;
+      // `FabricSpecialObject`, handled above). `FabricPlainObject` is keyed by
+      // `string`, so a symbol key has no representation either, and neither
+      // does a non-enumerable string key.
+      return isPlainObjectWithOnlyEnumerableStringKeys(value);
     }
 
     case "symbol": {
@@ -146,6 +148,9 @@ export function isFabricValue(value: unknown): value is FabricValue {
       }
       return true;
     } else if (isPlainObject(item)) {
+      // Symbol-keyed and non-enumerable string-keyed properties have no fabric
+      // representation, the same as an array's non-index properties.
+      if (!isPlainObjectWithOnlyEnumerableStringKeys(item)) return false;
       const record = item as Record<string, unknown>;
       for (const key of Object.keys(record)) {
         if (!check(record[key])) return false;

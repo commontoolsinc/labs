@@ -3,6 +3,7 @@ import {
   isRecord,
   isUnsafeObjectKey,
 } from "@commonfabric/utils/types";
+import { isPlainObjectWithOnlyEnumerableStringKeys } from "@commonfabric/utils/objects";
 import {
   isArrayIndexPropertyName,
   isArrayWithOnlyIndexProperties,
@@ -89,6 +90,44 @@ export function shallowCleanArray(
       to[key] = from[key];
     }
   }
+
+  if (frozen) {
+    Object.freeze(result);
+  }
+
+  return result as FabricValueLayer;
+}
+
+/**
+ * Returns a shallow clone of the given object carrying nothing but its
+ * enumerable string-keyed properties, that is, one which satisfies
+ * `isPlainObjectWithOnlyEnumerableStringKeys()`. Values are copied by reference
+ * without themselves being converted or validated, this being a shallow
+ * operation.
+ *
+ * This is the object counterpart of `shallowCleanArray()`, and exists for the
+ * same reason: a caller holding an object that has picked up keys which it
+ * knows are not content -- a runtime annotation, say -- uses this to say
+ * explicitly that it means to drop them. Code with no such warrant should let
+ * the rejection happen ("death before confusion").
+ *
+ * The result is always `Object.prototype`-based, so a null-prototype input
+ * comes back with an ordinary prototype. That is not a loss here: the fabric
+ * model draws no distinction between the two, and reconstruction produces
+ * ordinary plain objects either way.
+ *
+ * @param value The object to clean.
+ * @param frozen Whether to freeze the result. Defaults to `true`.
+ */
+export function shallowCleanPlainObject(
+  value: object,
+  frozen = true,
+): FabricValueLayer {
+  // `Object.entries()` yields exactly the enumerable string keys, which is the
+  // set being kept, so rebuilding from it drops symbol keys and non-enumerable
+  // string keys alike. A key holding `undefined` is still a present key and
+  // survives as one, `undefined` being a fabric value in its own right.
+  const result = Object.fromEntries(Object.entries(value));
 
   if (frozen) {
     Object.freeze(result);
@@ -230,7 +269,17 @@ export function shallowFabricFromNativeValue(
       ) as FabricValueLayer;
     }
 
-    case NATIVE_TAGS.Object:
+    case NATIVE_TAGS.Object: {
+      // `FabricPlainObject` is keyed by `string`, so a symbol key has no fabric
+      // representation, and neither does a non-enumerable string key. Reject
+      // either outright rather than dropping it on the way through ("death
+      // before confusion"), matching how an array's non-index properties are
+      // treated.
+      if (!isPlainObjectWithOnlyEnumerableStringKeys(value)) {
+        throw new Error(
+          "Cannot store object with non-string-keyed properties",
+        );
+      }
       // Plain objects: delegate frozenness handling to `cloneHelper()`.
       return cloneHelper(
         value as FabricValue,
@@ -239,6 +288,7 @@ export function shallowFabricFromNativeValue(
         false,
         null,
       ) as FabricValueLayer;
+    }
 
     case NATIVE_TAGS.HasToJSON: {
       // Objects (or arrays/class instances) with a `toJSON()` method.
@@ -642,7 +692,13 @@ function isFabricCompatibleInternal(
         return false;
       }
 
-      // Plain objects -- check all property values recursively.
+      // Plain objects -- check the key shape, then all property values
+      // recursively. A symbol key or a non-enumerable string key has no fabric
+      // representation, just as an array's non-index properties do not.
+      if (!isPlainObjectWithOnlyEnumerableStringKeys(value)) {
+        seen.delete(value);
+        return false;
+      }
       for (const val of Object.values(value)) {
         if (!isFabricCompatibleInternal(val, seen)) {
           seen.delete(value);

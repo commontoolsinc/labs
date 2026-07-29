@@ -20,9 +20,11 @@ import {
   isFabricCompatible,
   nativeFromFabricValue,
   shallowCleanArray,
+  shallowCleanPlainObject,
   shallowFabricFromNativeValue,
 } from "@/native-conversion.ts";
 import { isArrayWithOnlyIndexProperties } from "@commonfabric/utils/arrays";
+import { isPlainObjectWithOnlyEnumerableStringKeys } from "@commonfabric/utils/objects";
 import { FrozenMap, FrozenSet } from "@/frozen-builtins.ts";
 import { UnknownValue } from "@/fabric-instances/UnknownValue.ts";
 import { ProblematicValue } from "@/fabric-instances/ProblematicValue.ts";
@@ -1623,6 +1625,32 @@ describe("native-conversion", () => {
         );
       });
 
+      it("throws for an object with a symbol-keyed property", () => {
+        // Previously such a property was silently dropped, which is exactly the
+        // confusion the array rule already refuses to allow.
+        const obj = { a: 1 } as Record<string | symbol, unknown>;
+        obj[Symbol("s")] = 2;
+        expect(() => fabricFromNativeValue(obj)).toThrow(
+          "Cannot store object with non-string-keyed properties",
+        );
+      });
+
+      it("throws for an object with a non-enumerable string-keyed property", () => {
+        const obj = { a: 1 };
+        Object.defineProperty(obj, "hidden", { value: 2, enumerable: false });
+        expect(() => fabricFromNativeValue(obj)).toThrow(
+          "Cannot store object with non-string-keyed properties",
+        );
+      });
+
+      it("throws for a symbol-keyed object nested inside an array", () => {
+        const inner = { a: 1 } as Record<string | symbol, unknown>;
+        inner[Symbol("s")] = 2;
+        expect(() => fabricFromNativeValue([inner])).toThrow(
+          "Cannot store object with non-string-keyed properties",
+        );
+      });
+
       it("throws for an array with a non-enumerable named property", () => {
         const arr = [1, 2, 3];
         Object.defineProperty(arr, "foo", { value: "bar", enumerable: false });
@@ -2061,10 +2089,90 @@ describe("native-conversion", () => {
       expect(isFabricCompatible(arr)).toBe(false);
     });
 
+    it("rejects an object with a symbol-keyed property", () => {
+      const obj = { a: 1 } as Record<string | symbol, unknown>;
+      obj[Symbol("s")] = 2;
+      expect(isFabricCompatible(obj)).toBe(false);
+    });
+
+    it("rejects an object with a non-enumerable string-keyed property", () => {
+      const obj = { a: 1 };
+      Object.defineProperty(obj, "hidden", { value: 2, enumerable: false });
+      expect(isFabricCompatible(obj)).toBe(false);
+    });
+
     it("rejects an array with named properties nested inside an object", () => {
       const arr = [1] as number[] & { extra?: string };
       arr.extra = "nope";
       expect(isFabricCompatible({ list: arr })).toBe(false);
+    });
+  });
+
+  describe("shallowCleanPlainObject()", () => {
+    it("drops a symbol-keyed property, enumerable or not", () => {
+      const obj = { a: 1 } as Record<string | symbol, unknown>;
+      obj[Symbol("enum")] = 2;
+      Object.defineProperty(obj, Symbol("nonEnum"), {
+        value: 3,
+        enumerable: false,
+      });
+
+      const result = shallowCleanPlainObject(obj) as Record<string, unknown>;
+
+      expect(isPlainObjectWithOnlyEnumerableStringKeys(result)).toBe(true);
+      expect(result).toEqual({ a: 1 });
+    });
+
+    it("drops a non-enumerable string-keyed property", () => {
+      const obj = { a: 1 };
+      Object.defineProperty(obj, "hidden", { value: 2, enumerable: false });
+
+      const result = shallowCleanPlainObject(obj) as Record<string, unknown>;
+
+      expect(Object.getOwnPropertyNames(result)).toEqual(["a"]);
+    });
+
+    it("preserves a stored `undefined` as a present key", () => {
+      const result = shallowCleanPlainObject({ a: undefined }) as Record<
+        string,
+        unknown
+      >;
+
+      expect("a" in result).toBe(true);
+      expect(result.a).toBe(undefined);
+    });
+
+    it("returns a frozen result by default, and a mutable one on request", () => {
+      expect(Object.isFrozen(shallowCleanPlainObject({ a: 1 }) as object)).toBe(
+        true,
+      );
+      expect(
+        Object.isFrozen(shallowCleanPlainObject({ a: 1 }, false) as object),
+      )
+        .toBe(false);
+    });
+
+    it("does not mutate or alias its input, and copies values by reference", () => {
+      const inner = { deep: 1 };
+      const obj = { inner } as Record<string | symbol, unknown>;
+      obj[Symbol("s")] = 2;
+
+      const result = shallowCleanPlainObject(obj) as Record<string, unknown>;
+
+      expect(result).not.toBe(obj);
+      expect(result.inner).toBe(inner);
+      expect(Object.getOwnPropertySymbols(obj)).toHaveLength(1); // input intact
+    });
+
+    it("produces a value the conversion functions accept", () => {
+      const obj = { a: 1 } as Record<string | symbol, unknown>;
+      obj[Symbol("s")] = 2;
+
+      expect(() => shallowFabricFromNativeValue(obj)).toThrow();
+      expect(() =>
+        shallowFabricFromNativeValue(shallowCleanPlainObject(obj, false))
+      )
+        .not.toThrow();
     });
   });
 

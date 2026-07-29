@@ -139,6 +139,36 @@ describe("type-check", () => {
       });
     });
 
+    describe("given a plain object with unrepresentable keys", () => {
+      // A symbol is a valid fabric *value* but not a property *name*:
+      // `FabricPlainObject` is keyed by `string`. A non-enumerable string key
+      // has no representation either, being dropped by every serialization.
+
+      it("returns `false` for a symbol-keyed property", () => {
+        const obj = { a: 1 } as Record<string | symbol, unknown>;
+        obj[Symbol("s")] = 2;
+        expect(isFabricValueLayer(obj)).toBe(false);
+      });
+
+      it("returns `false` for a registered symbol-keyed property", () => {
+        const obj = { a: 1 } as Record<string | symbol, unknown>;
+        obj[Symbol.for("s")] = 2;
+        expect(isFabricValueLayer(obj)).toBe(false);
+      });
+
+      it("returns `false` for a non-enumerable string-keyed property", () => {
+        const obj = { a: 1 };
+        Object.defineProperty(obj, "hidden", { value: 2, enumerable: false });
+        expect(isFabricValueLayer(obj)).toBe(false);
+      });
+
+      it("returns `true` for an object whose keys are all enumerable strings", () => {
+        expect(isFabricValueLayer({ a: 1, b: 2 })).toBe(true);
+        expect(isFabricValueLayer({})).toBe(true);
+        expect(isFabricValueLayer(Object.create(null))).toBe(true);
+      });
+    });
+
     describe("given a non-`FabricValue`", () => {
       it("returns `false` for an array with extra non-numeric properties", () => {
         const arr = [1, 2, 3] as unknown[] & { foo?: string };
@@ -237,6 +267,24 @@ describe("type-check", () => {
         const obj = Object.create(null) as Record<string, unknown>;
         obj.a = 1;
         expect(isFabricValue(obj)).toBe(true);
+      });
+
+      it("returns `false` for an object with a symbol-keyed property", () => {
+        const obj = { a: 1 } as Record<string | symbol, unknown>;
+        obj[Symbol("s")] = 2;
+        expect(isFabricValue(obj)).toBe(false);
+      });
+
+      it("returns `false` for an object with a non-enumerable string key", () => {
+        const obj = { a: 1 };
+        Object.defineProperty(obj, "hidden", { value: 2, enumerable: false });
+        expect(isFabricValue(obj)).toBe(false);
+      });
+
+      it("returns `false` for a symbol-keyed object nested in the graph", () => {
+        const inner = { a: 1 } as Record<string | symbol, unknown>;
+        inner[Symbol("s")] = 2;
+        expect(isFabricValue({ outer: [inner] })).toBe(false);
       });
 
       it("returns `true` for an array of `FabricValue`s", () => {
