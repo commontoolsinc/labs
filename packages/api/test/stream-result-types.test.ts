@@ -75,6 +75,36 @@ type _ValueLessPinnedLocally = MustBeTrue<
   AssertAssignable<ValueLess[typeof CELL_RESULT_TYPE], void>
 >;
 
+// Schema compatibility checks results as candidate ⊆ previous, and "results may
+// narrow freely" governs values, not named fields: removing a named property is
+// rejected outright, so every top-level name a result publishes is permanent.
+// A result nested under one key leaves only that key permanent and everything
+// beneath it free to narrow — which is why a verb's declared result wants to be
+// an envelope rather than the payload spread flat.
+interface AddTopicResult {
+  topic: { fid: string; title: string };
+}
+
+type EnvelopedVerb = Stream<AddTopic, AddTopicResult>;
+
+// The permanent surface of the enveloped form is one key.
+type _EnvelopeCommitsOneName = MustBeTrue<
+  AssertAssignable<keyof ResultOf<EnvelopedVerb>, "topic">
+>;
+
+// Spread flat, every field would be permanent instead. Kept as a contrast so
+// the envelope reads as a decision rather than an accident.
+type FlatVerb = Stream<AddTopic, { fid: string; title: string }>;
+type _FlatCommitsEveryName = MustBeTrue<
+  AssertAssignable<keyof ResultOf<FlatVerb>, "fid" | "title">
+>;
+
+// The two are not interchangeable, so reshaping a result after the fact is a
+// compile error rather than a quiet schema break.
+type _EnvelopeIsNotFlat = MustBeTrue<
+  AssertNotAssignable<EnvelopedVerb, FlatVerb>
+>;
+
 Deno.test("Stream result type parameter is structural", () => {
   // The assertions above are compile-time; this keeps the module a test file
   // and fails loudly if it ever stops being type-checked.

@@ -1708,6 +1708,36 @@ export type HandlerFactory<T, E, R = void> =
   & Handler<T, E, R>
   & toJSON;
 
+/**
+ * A verb declining on its own terms — invalid input, a precondition unmet, a
+ * turn taken out of order. Verb contract rule 4: rejection is a value.
+ *
+ * `code` is the half an agent branches on, so it is meant to be stable across
+ * rewording and translation: `"NOT_YOUR_TURN"` says wait, `"EMPTY_TITLE"` says
+ * fix the payload and call again. `message` is for whoever reads the log.
+ *
+ * Throwing is the authoring surface — `throw` is a failed invocation carrying
+ * the code, `return` is a settled one carrying the result. Only settlement is
+ * durable; a rejection is reported to its caller, never recorded.
+ *
+ * ```tsx
+ * if (!trimmed) throw new VerbError("EMPTY_TITLE", "title must be non-empty");
+ * ```
+ *
+ * What this buys today is the declaration, not yet the protocol: until the
+ * invocation surface carries the code (WS-E), a thrown `VerbError` surfaces
+ * the way any thrown handler error does — a nonzero CLI exit with the message
+ * as prose. It exists now so verbs can be authored against stable codes
+ * before there is a wire format to report them on, which is the opposite
+ * order from letting prose harden into an accidental contract.
+ */
+export class VerbError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message);
+    this.name = "VerbError";
+  }
+}
+
 // JSON types
 
 /**

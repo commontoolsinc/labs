@@ -130,12 +130,29 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
 `packages/api`, `packages/ts-transformers`, `packages/schema-generator`,
 `packages/runner`.
 
-- **api:** `action` overloads accept a return type (today both overloads type
+- ~~**api:** `action` overloads accept a return type (today both overloads type
   the callback `=> void` — the `action()` overloads in
   `packages/runner/src/builder/module.ts`); `Stream<E, R = void>`
   so the result type is visible to the schema layer — the defaulted parameter
   keeps every existing `Stream<E>` use compiling. A `VerbError { code,
-  message }` type for rule 4's typed rejections.
+  message }` type for rule 4's typed rejections.~~ — **done (C1)**: the
+  workspace type-checks clean and schema-generator still recognizes every
+  stream (its detection reads `CELL_BRAND` and takes `typeArguments[0]`, so a
+  second parameter is invisible to it). `R` is pinned by a `CELL_RESULT_TYPE`
+  property rather than left to ride on `ICreatable<Stream<E, R>>`'s return
+  position, which discriminates today but only incidentally — were
+  `for(cause): C` to become `for(cause): this`, `R` would fall back to phantom
+  and declared results would start dropping silently. `VerbError` is a real
+  `Error` subclass, so until the invocation surface reports codes (WS-E) a
+  thrown one degrades to exactly what a thrown handler error does today.
+  Both type-level guards are verified to fail when what they protect is
+  removed: deleting `CELL_RESULT_TYPE` raises `TS2538`, deleting `action`'s
+  overload 2 raises `TS2344`.
+
+  A declared result wants to be an **envelope** — one key with the payload
+  beneath it — because every top-level name a result publishes is permanent
+  (Results and schema evolution, design doc). Pinned as a type assertion
+  rather than left to authoring habit.
 
   Verb-shaped type parameters read the same way throughout: **`E`** the event,
   **`R`** the declared result, **`T`** the handler's bound state where there is
