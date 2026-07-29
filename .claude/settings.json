@@ -25,6 +25,10 @@
           },
           {
             "type": "command",
+            "command": "deno run --allow-read --allow-run --allow-env \"$CLAUDE_PROJECT_DIR/.claude/scripts/pre-commit.ts\""
+          },
+          {
+            "type": "command",
             "command": "deno run --allow-read --allow-env \"$CLAUDE_PROJECT_DIR/.claude/scripts/deno-test-filter.ts\""
           },
           {
@@ -59,6 +63,17 @@
           {
             "type": "command",
             "command": "deno run --allow-read \"$CLAUDE_PROJECT_DIR/.claude/scripts/post-exit-plan.ts\""
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "deno run --allow-read --allow-run --allow-env \"$CLAUDE_PROJECT_DIR/.claude/scripts/subagent-stop.ts\"",
+            "timeout": 120
           }
         ]
       }

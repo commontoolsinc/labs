@@ -37,7 +37,10 @@ export async function parseCommand(): Promise<string> {
 /**
  * Returns true if the command is a git commit (with message content
  * that should not be inspected for command patterns).
+ *
+ * Re-exported rather than defined here so there is one answer to "is this a
+ * commit?" across all the hooks. The version this replaced missed
+ * `git -C <dir> commit`, which for these callers meant a commit message
+ * mentioning `node` or a legacy CLI was inspected as if it were a command.
  */
-export function isGitCommit(cmd: string): boolean {
-  return /\bgit\s+commit\b/.test(cmd);
-}
+export { isGitCommit } from "./worktree.ts";
