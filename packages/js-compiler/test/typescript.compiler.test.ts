@@ -52,22 +52,35 @@ const TESTS: TestDef[] = [
     expectedError: "Cannot find module './foo.ts'",
   },
   {
-    // Stored sources are recompiled by every future toolchain against
-    // PLATFORM-supplied types; a directive that becomes unnecessary when
-    // those types improve must not brick the source (CT-1916 — 2026-07-28
-    // estuary, loom-mobile patterns vs. a jsx.d.ts that gained a prop).
-    name: "Unused @ts-expect-error compiles (durable-source drift)",
+    // Authoring surfaces stay strict: with the author present, the right fix
+    // for a stale directive is removing it.
+    name: "Throws: unused @ts-expect-error is fatal when authoring",
     source: [
       "const add = (x: number, y: number): number => x + y;",
       "// @ts-expect-error -- suppressed an error under an older type env",
       "export default add(1, 2);",
       "",
     ].join("\n"),
+    expectedError: "Unused '@ts-expect-error' directive.",
   },
   {
-    // The suppression is code-2578-narrow: a directive that still covers a
-    // REAL error keeps suppressing it, and errors outside any directive
-    // still fail (covered by "Throws: type check failure" above).
+    // Stored sources are recompiled by every future toolchain against
+    // PLATFORM-supplied types; a directive that becomes unnecessary when
+    // those types improve must not brick the reload (CT-1916 — 2026-07-28
+    // estuary, loom-mobile patterns vs. a jsx.d.ts that gained a prop).
+    name: "Unused @ts-expect-error compiles under storedSource",
+    source: [
+      "const add = (x: number, y: number): number => x + y;",
+      "// @ts-expect-error -- suppressed an error under an older type env",
+      "export default add(1, 2);",
+      "",
+    ].join("\n"),
+    storedSource: true,
+  },
+  {
+    // The tolerance is code-2578-narrow: a directive that still covers a
+    // REAL error keeps suppressing it in either mode, and errors outside any
+    // directive still fail (covered by "Throws: type check failure" above).
     name: "@ts-expect-error still suppresses a live error",
     source: [
       "const add = (x: number, y: number): number => x + y;",
@@ -75,6 +88,15 @@ const TESTS: TestDef[] = [
       "export default add('1', 2);",
       "",
     ].join("\n"),
+  },
+  {
+    // storedSource must not weaken real type errors — only hygiene codes.
+    name: "Throws: real type error still fatal under storedSource",
+    source:
+      "function add(x:number, y:number): number {return x+y}; export default add(`0`, 2);",
+    storedSource: true,
+    expectedError:
+      "Argument of type 'string' is not assignable to parameter of type 'number'.",
   },
 ];
 
@@ -151,10 +173,10 @@ describe("TypeScriptCompiler", () => {
     ]);
   });
 
-  it("compileToModulesCollecting reports real errors, drops non-fatal codes", async () => {
-    // The corpus-collecting path applies the same non-fatal filter as the
-    // throwing path: an unused @ts-expect-error (TS2578) is dropped, a real
-    // type error in another file is still attributed and reported.
+  it("compileToModulesCollecting reports stale directives AND real errors", async () => {
+    // The corpus check is an AUTHORING surface — no stored-source tolerance:
+    // an unused @ts-expect-error is reported (for the author to remove)
+    // alongside real type errors, each attributed to its file.
     const compiler = new TypeScriptCompiler(types);
     const resolved = await compiler.resolveProgram(
       new InMemoryProgram("/main.ts", {
@@ -169,8 +191,18 @@ describe("TypeScriptCompiler", () => {
       }),
     );
     const collected = compiler.compileToModulesCollecting(resolved);
-    expect(collected.diagnostics.map((d) => d.file)).toEqual(["/bad.ts"]);
-    expect(collected.diagnostics[0].message).toContain(
+    // The emit pass re-reports per-file diagnostics, so assert the SET of
+    // attributed files rather than exact multiplicity.
+    expect([...new Set(collected.diagnostics.map((d) => d.file))].sort())
+      .toEqual([
+        "/bad.ts",
+        "/main.ts",
+      ]);
+    const byFile = Object.fromEntries(
+      collected.diagnostics.map((d) => [d.file, d.message]),
+    );
+    expect(byFile["/main.ts"]).toContain("Unused '@ts-expect-error'");
+    expect(byFile["/bad.ts"]).toContain(
       "Type 'string' is not assignable to type 'number'.",
     );
   });

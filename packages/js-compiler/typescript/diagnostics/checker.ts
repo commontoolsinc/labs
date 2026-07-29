@@ -7,6 +7,12 @@ import {
 
 export interface CheckerOptions {
   messageTransformer?: DiagnosticMessageTransformer;
+  /**
+   * Compiling durable STORED pattern source (see
+   * `TypeScriptCompilerOptions.storedSource`): authoring-hygiene-only codes
+   * ({@link isNonFatalDiagnosticCode}) are dropped instead of thrown.
+   */
+  storedSource?: boolean;
 }
 
 // These symbols are exported from commonfabric but TypeScript's declaration
@@ -22,28 +28,33 @@ const KNOWN_EXPORTED_SYMBOLS = [
   "SCOPE_BRAND",
 ];
 
-// TS2578 "Unused '@ts-expect-error' directive." must not fail compilation
-// here. Pattern sources are DURABLE: the same stored bytes are recompiled by
-// every future toolchain, while the type environment they check against
-// (vendored jsx.d.ts and friends) is supplied by the PLATFORM, not the
-// author. A directive that suppressed a real error when authored becomes
-// "unused" the moment the platform's types improve — treating that as fatal
-// retroactively bricks every stored pattern that carried it (2026-07-28
-// estuary: loom-mobile patterns embedding a `cf-cell-link label` directive
-// hard-failed to load after the vendored JSX types gained `label`, CT-1916).
+// TS2578 "Unused '@ts-expect-error' directive." must not fail STORED-source
+// recompiles. Pattern sources are DURABLE: the same stored bytes are
+// recompiled by every future toolchain, while the type environment they
+// check against (vendored jsx.d.ts and friends) is supplied by the PLATFORM,
+// not the author. A directive that suppressed a real error when authored
+// becomes "unused" the moment the platform's types improve — treating that
+// as fatal retroactively bricks every stored pattern that carried it
+// (2026-07-28 estuary: loom-mobile patterns embedding a `cf-cell-link label`
+// directive hard-failed to load after the vendored JSX types gained `label`,
+// CT-1916). Authoring paths stay strict — there the author is present and
+// removing the stale directive is the right fix.
 const UNUSED_TS_EXPECT_ERROR = 2578;
 
-/** Diagnostic codes {@link Checker} refuses to treat as fatal. */
+/** Diagnostic codes dropped when compiling stored source (see
+ * `CheckerOptions.storedSource`). */
 export const isNonFatalDiagnosticCode = (code: number): boolean =>
   code === UNUSED_TS_EXPECT_ERROR;
 
 export class Checker {
   private program: Program;
   private messageTransformer?: DiagnosticMessageTransformer;
+  private storedSource: boolean;
 
   constructor(program: Program, options: CheckerOptions = {}) {
     this.program = program;
     this.messageTransformer = options.messageTransformer;
+    this.storedSource = options.storedSource === true;
   }
 
   typeCheck() {
@@ -75,7 +86,9 @@ export class Checker {
   /** Per-file semantic diagnostics, as the error details typeCheck throws. */
   collectSemanticErrors(sourceFile: SourceFile): ErrorDetails[] {
     return this.program.getSemanticDiagnostics(sourceFile)
-      .filter((diagnostic) => !isNonFatalDiagnosticCode(diagnostic.code))
+      .filter((diagnostic) =>
+        !this.storedSource || !isNonFatalDiagnosticCode(diagnostic.code)
+      )
       .map(
         (diagnostic) => ({ diagnostic, source: sourceFile.text }),
       );
@@ -134,9 +147,11 @@ export class Checker {
 
   check(diagnostics: readonly Diagnostic[] | undefined) {
     // The emit path re-reports some semantic codes (TS surfaces 2578 through
-    // per-file emit diagnostics), so the non-fatal filter applies here too.
+    // per-file emit diagnostics), so the stored-source filter applies here
+    // too.
     const fatal = (diagnostics ?? []).filter(
-      (diagnostic) => !isNonFatalDiagnosticCode(diagnostic.code),
+      (diagnostic) =>
+        !this.storedSource || !isNonFatalDiagnosticCode(diagnostic.code),
     );
     if (fatal.length === 0) {
       return;
