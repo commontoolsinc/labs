@@ -100,3 +100,28 @@ Deno.test("non-SGR control sequences do not identify Deno diagnostics", function
     );
   }
 });
+
+Deno.test("application download lines remain in harness stderr", function () {
+  const encoder = new TextEncoder();
+  for (const colorized of [false, true]) {
+    const taskLine = colorized
+      ? "\x1b[0m\x1b[32mTask\x1b[0m \x1b[0m\x1b[36mtest\x1b[0m deno run cli.ts *.test.ts\n"
+      : "Task test deno run cli.ts *.test.ts\n";
+    const applicationLine = colorized
+      ? "\x1b[0m\x1b[32mDownload\x1b[0m https://example.test/from-application\n"
+      : "Download https://example.test/from-application\n";
+    const output: Deno.CommandOutput = {
+      code: 0,
+      success: true,
+      signal: null,
+      stdout: encoder.encode("test output"),
+      stderr: encoder.encode(taskLine + applicationLine),
+    };
+
+    assertEquals(
+      sanitizeDenoWebTestOutput(output),
+      output,
+      colorized ? "colorized application output" : "plain application output",
+    );
+  }
+});
