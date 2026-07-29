@@ -3072,6 +3072,14 @@ export function recursivelyAddIDIfNeeded<T>(
   // functions rightly refuse to store an object bearing one. Such an object is
   // walked directly instead; the walk rebuilds it either way, and the directive
   // survives to the consumer that strips it.
+  // Known gap, deliberately left: the bypass is unconditional, so an object
+  // carrying a directive AND some other symbol or non-enumerable key keeps its
+  // other key out of the key check too, and the record walk below then drops it
+  // silently (it rebuilds from `Object.entries()` and copies back only `ID` and
+  // `ID_FIELD`). That drop predates the key check rather than being introduced
+  // by this bypass, and it goes away with the directives themselves. Should they
+  // outlive this comment, close it by requiring everything other than the
+  // directives to satisfy `isPlainObjectWithOnlyEnumerableStringKeys()`.
   const carriesIdDirective = isPlainObject(value) &&
     ((ID in (value as object)) || (ID_FIELD in (value as object)));
 
