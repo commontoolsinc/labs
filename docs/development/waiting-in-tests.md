@@ -100,13 +100,13 @@ Waits split into two groups with different primitives.
   signal.
 - The higher-level wrappers in
   `packages/patterns/integration/cfc-browser-helpers.ts` — `waitForText`,
-  `waitForTextAbsent`, `fillCfInput`, `clickCfButton`, `clickNthCfButton`,
-  `clickCfButtonAndWaitForText`, `waitForRuntimeIdle`, `waitForRuntimeSynced` —
-  bundle "settle the view, act once, wait for the effect" on top of the two
-  primitives above. `clickCfButton` takes the first match and reaches through a
-  host's shadow root for its inner `[data-cf-button]`; `clickNthCfButton` takes
-  the `index`-th match of a selector that already resolves to the buttons
-  themselves.
+  `waitForSettledText`, `waitForTextAbsent`, `fillCfInput`, `clickCfButton`,
+  `clickNthCfButton`, `clickCfButtonAndWaitForText`, `waitForRuntimeIdle`,
+  `waitForRuntimeSynced` — bundle "settle the view with the control present,
+  act once, wait for the effect" on top of the two primitives above.
+  `clickCfButton` takes the first match and reaches through a host's shadow root
+  for its inner `[data-cf-button]`; `clickNthCfButton` takes the `index`-th
+  match of a selector that already resolves to the buttons themselves.
 
 To click a control that appears asynchronously, follow the `clickCfButton`
 shape rather than a find-and-click retry loop: a `waitForCondition` predicate
@@ -116,6 +116,26 @@ target to be rendered — laid out, and not `display:none` or `visibility:hidden
 — so a control still inside a collapsed menu is skipped until it becomes
 clickable rather than tagged while it has no layout box and then failing to
 click.
+
+Settle the view inside that predicate, on every check, and let the check pass
+only on one the settle preceded. Settling is what makes a rendered control
+interactive, so a settle that ran before the control existed says nothing about
+it: the click lands on an element whose handler is not bound, is silently
+dropped, and the wait for its effect runs to the stuck-condition safety net.
+
+Do not reach instead for a check that only watches the DOM. Asking the worker
+whether it is idle queues runnable pull work that nothing else would start, so a
+control that appears only once the page's own pending work runs never arrives
+under a purely passive wait. The settle is both the barrier and the pump, which
+is why it belongs inside the predicate rather than in front of it.
+
+When several controls are clicked as a group, resolve every one of them before
+marking any, so no settle falls between the marks and the clicks.
+
+`clickCfButton` and `clickCfButtonsConcurrently` work this way.
+`clickTrustedAction`, `submitViaEnter`, and `settleAndClickNoteButton` in
+`packages/patterns/integration/note-button-helpers.ts` still settle before
+resolving their target, and carry the gap described above.
 
 Ask `probe.isRendered` for that check rather than hand-rolling it, and note that
 it is deliberately not `probe.isVisible`, which additionally requires the
@@ -137,6 +157,19 @@ why it belongs in the predicate that tags the control. Whether the control is
 `disabled` is a separate question — a disabled control still takes the click and
 declines it. A test that needs a control enabled before clicking says so with
 `waitForDisabled(page, selector, false)`.
+
+Waiting for a click's effect carries the same requirement, for the same reason.
+Nothing in an integration test holds a UI subscription, so between one check and
+the next nothing drives the page. A rendering the page has to produce for
+itself — a tally recomputed from a vote, a card drawn for a list entry that
+has just arrived — can sit as runnable work no one schedules, one settle away
+from showing it. The wait then runs to the stuck-condition net, and the
+failure reads as "the state never arrived" when it had arrived and was never
+drawn. So `waitForText`, which only watches the DOM, is for text already there
+or that something else is already drawing. When the text is the effect of a
+stimulus, including one delivered to another browser sharing the same piece, use
+`waitForSettledText`, which settles the page on every check. The lunch-poll
+two-browser vote test uses it for all of its cross-browser waits.
 
 **Non-browser and off-page waits** have no page to observe. Resolve a `defer()`
 (from `packages/utils/src/defer.ts`) inside a callback the test already registers
