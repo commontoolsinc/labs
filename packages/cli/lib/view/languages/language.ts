@@ -299,9 +299,15 @@ export function languageForSource(
 
 let languagesByName: ReadonlyMap<string, Language> | undefined;
 function namedLanguages(): ReadonlyMap<string, Language> {
-  if (languagesByName !== undefined) return languagesByName;
+  return languagesByName ??= indexLanguagesByName(allLanguages());
+}
+
+/** Build the explicit-name index and reject ambiguous identifiers or aliases. */
+export function indexLanguagesByName(
+  languages: readonly Language[],
+): ReadonlyMap<string, Language> {
   const named = new Map<string, Language>();
-  for (const language of allLanguages()) {
+  for (const language of languages) {
     for (const name of [language.id, ...language.metadata.aliases]) {
       const existing = named.get(name);
       if (existing !== undefined) {
@@ -312,7 +318,6 @@ function namedLanguages(): ReadonlyMap<string, Language> {
       named.set(name, language);
     }
   }
-  languagesByName = named;
   return named;
 }
 
@@ -368,11 +373,61 @@ function shebangInterpreter(text: string): string | undefined {
   const end = text.indexOf("\n");
   const firstLine = (end < 0 ? text : text.slice(0, end)).replace(/\r$/, "");
   if (!firstLine.startsWith("#!")) return undefined;
-  const words = splitShebangWords(firstLine.slice(2));
-  if (words.length === 0) return undefined;
-  const direct = basename(words[0]);
+  const command = firstLine.slice(2).trimStart();
+  if (command.length === 0) return undefined;
+  const separator = command.search(/\s/);
+  const executable = separator < 0 ? command : command.slice(0, separator);
+  const direct = basename(executable);
   if (direct !== "env") return direct;
-  return envCommand(words.slice(1));
+  return envCommandFromShebang(
+    separator < 0 ? "" : command.slice(separator),
+  );
+}
+
+function envCommandFromShebang(input: string): string | undefined {
+  const matches = [...input.matchAll(/\S+/g)];
+  for (let index = 0; index < matches.length; index++) {
+    const match = matches[index];
+    const word = match[0];
+    const rest = input.slice((match.index ?? 0) + word.length);
+    if (word === "--") {
+      const command = matches[index + 1]?.[0];
+      return command === undefined ? undefined : basename(command);
+    }
+    if (word === "-S" || word === "--split-string") {
+      return splitEnvCommand(rest);
+    }
+    if (word.startsWith("--split-string=")) {
+      return splitEnvCommand(word.slice("--split-string=".length) + rest);
+    }
+    const combinedSplit = word.match(/^-[iv0]*S(.*)$/);
+    if (combinedSplit !== null) {
+      return splitEnvCommand(combinedSplit[1] + rest);
+    }
+    if (envOptionTakesFollowingWord(word)) {
+      index++;
+      continue;
+    }
+    if (word.startsWith("-") || /^[^=]+=/.test(word)) continue;
+    return basename(word);
+  }
+  return undefined;
+}
+
+function envOptionTakesFollowingWord(word: string): boolean {
+  if (
+    word === "--unset" || word === "--chdir" || word === "--path" ||
+    word === "--argv0"
+  ) {
+    return true;
+  }
+  const grouped = word.match(/^-[iv0]*[uCPa](.*)$/);
+  return grouped !== null && grouped[1].length === 0;
+}
+
+function splitEnvCommand(input: string): string | undefined {
+  const words = splitShebangWords(input);
+  return words === undefined ? undefined : envCommand(words);
 }
 
 function envCommand(words: readonly string[]): string | undefined {
@@ -401,11 +456,7 @@ function envCommand(words: readonly string[]): string | undefined {
           : words.slice(index + 1),
       );
     }
-    if (
-      word === "-u" || word === "--unset" || word === "-C" ||
-      word === "--chdir" || word === "-P" || word === "--path" ||
-      word === "-a" || word === "--argv0"
-    ) {
+    if (envOptionTakesFollowingWord(word)) {
       index++;
       continue;
     }
@@ -415,7 +466,7 @@ function envCommand(words: readonly string[]): string | undefined {
   return undefined;
 }
 
-function splitShebangWords(input: string): string[] {
+function splitShebangWords(input: string): string[] | undefined {
   const words: string[] = [];
   let word = "";
   let started = false;
@@ -458,7 +509,7 @@ function splitShebangWords(input: string): string[] {
       started = true;
     }
   }
-  if (escaped) word += "\\";
+  if (escaped || quote !== undefined) return undefined;
   if (started) words.push(word);
   return words;
 }

@@ -10,6 +10,7 @@ import { join } from "@std/path";
 import {
   diffSemanticsFor,
   distinctLanguages,
+  indexLanguagesByName,
   languageForFile,
   languageForName,
   languageForSource,
@@ -118,6 +119,26 @@ Deno.test("languageForName: identifiers and aliases resolve explicit overrides",
   ]);
 });
 
+Deno.test("language names reject ambiguous identifiers and aliases", () => {
+  const collidingLanguage = {
+    ...markdownLanguage,
+    id: "other-markdown",
+    metadata: {
+      ...markdownLanguage.metadata,
+      aliases: ["typescript"],
+    },
+  };
+  assertThrows(
+    () =>
+      indexLanguagesByName([
+        typeScriptLanguage,
+        collidingLanguage,
+      ]),
+    Error,
+    'Language name "typescript" belongs to both typescript and other-markdown',
+  );
+});
+
 Deno.test("languageForSource: filenames precede direct and env shebangs", () => {
   assertEquals(
     languageForSource(
@@ -133,6 +154,18 @@ Deno.test("languageForSource: filenames precede direct and env shebangs", () => 
     ),
     typeScriptLanguage,
   );
+  for (
+    const shebang of [
+      '#!/usr/bin/python3 "unterminated',
+      "#!/usr/bin/python3 trailing\\",
+    ]
+  ) {
+    assertEquals(
+      languageForSource("tool", `${shebang}\n`),
+      pythonLanguage,
+      shebang,
+    );
+  }
   assertEquals(
     languageForSource(
       "tool",
@@ -142,9 +175,20 @@ Deno.test("languageForSource: filenames precede direct and env shebangs", () => 
   );
   for (
     const shebang of [
+      "#!/usr/bin/env -v CF_VIEW_REVIEW=1 python3",
+      "#!/usr/bin/env --unset PYTHONPATH python3",
+      "#!/usr/bin/env -iu PYTHONPATH python3",
+      "#!/usr/bin/env -iP /usr/bin python3",
+      "#!/usr/bin/env -iC /tmp python3",
+      "#!/usr/bin/env -iuPYTHONPATH python3",
       "#!/usr/bin/env -S CF_VIEW_REVIEW=1 python3 -u",
       '#!/usr/bin/env -S CF_VIEW_REVIEW="quoted value" python3 -u',
       "#!/usr/bin/env -S -u PYTHONPATH python3",
+      "#!/usr/bin/env -S -iu PYTHONPATH python3",
+      "#!/usr/bin/env -S -iP /usr/bin python3",
+      "#!/usr/bin/env -S -iC /tmp python3",
+      "#!/usr/bin/env -S -iuPYTHONPATH python3",
+      "#!/usr/bin/env --split-string python3 -u",
       "#!/usr/bin/env --split-string=CF_VIEW_REVIEW=1 python3 -u",
       "#!/usr/bin/env -vS python3 -S",
       "#!/usr/bin/env -vSpython3 -S",
@@ -192,6 +236,56 @@ Deno.test("languageForSource: filenames precede direct and env shebangs", () => 
     languageForSource("tool", "#!/usr/bin/env bash\necho plain\n"),
     plainTextLanguage,
   );
+});
+
+Deno.test("languageForSource: malformed and option-only shebangs fall back safely", () => {
+  assertEquals(languageForSource("tool", "#!   \n"), plainTextLanguage);
+  assertEquals(
+    languageForSource("tool", "#!/usr/bin/env -- python3\n"),
+    pythonLanguage,
+  );
+  assertEquals(
+    languageForSource("tool", "#!/usr/bin/env --\n"),
+    plainTextLanguage,
+  );
+  assertEquals(
+    languageForSource("tool", "#!/usr/bin/env\n"),
+    plainTextLanguage,
+  );
+  assertEquals(
+    languageForSource("tool", "#!/usr/bin/env -u PATH\n"),
+    plainTextLanguage,
+  );
+  for (
+    const shebang of [
+      '#!/usr/bin/env python3 "unterminated',
+      "#!/usr/bin/env python3 argument\\",
+    ]
+  ) {
+    assertEquals(
+      languageForSource("tool", `${shebang}\n`),
+      pythonLanguage,
+      shebang,
+    );
+  }
+  for (
+    const shebang of [
+      '#!/usr/bin/env "python3"',
+      "#!/usr/bin/env py\\thon3",
+      "#!/usr/bin/env python3\\x",
+      '#!/usr/bin/env "python3\\x"',
+      "#!/usr/bin/env python3\\",
+      '#!/usr/bin/env "python3',
+      "#!/usr/bin/env 'python3",
+      '#!/usr/bin/env -S "python3',
+    ]
+  ) {
+    assertEquals(
+      languageForSource("tool", `${shebang}\n`),
+      plainTextLanguage,
+      shebang,
+    );
+  }
 });
 
 Deno.test("distinctLanguages: dedupes in first-seen order", () => {
