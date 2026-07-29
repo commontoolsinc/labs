@@ -27,100 +27,20 @@ import {
   PATTERNS_DIR,
 } from "./pattern-files.ts";
 import {
-  type Baseline,
-  baselineFileName,
   checkPattern,
-  contractHash,
-  decodeBaseline,
-  encodeBaseline,
   type Finding,
+  findRetired,
   parseArgs,
   parseShard,
   type PatternContract,
-  type StoredBaseline,
+  readBaselines,
+  writeBaseline,
 } from "./pattern-compat-lib.ts";
 
 const BASELINES_DIR = `${PATTERNS_DIR}/baselines`;
 
 const formatError = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
-
-/** Read every recorded contract for a pattern. */
-async function readBaselines(key: string): Promise<Baseline[]> {
-  const dir = `${BASELINES_DIR}/${key}`;
-  const baselines: Baseline[] = [];
-  let entries: Deno.DirEntry[];
-  try {
-    entries = [...Deno.readDirSync(dir)];
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return [];
-    throw error;
-  }
-  for (const entry of entries) {
-    if (!entry.isFile || !entry.name.endsWith(".json")) continue;
-    const stored = decodeBaseline(
-      await Deno.readTextFile(
-        `${dir}/${entry.name}`,
-      ),
-    );
-    baselines.push({
-      label: entry.name.replace(/\.json$/, ""),
-      contract: {
-        argumentSchema: stored.argumentSchema,
-        resultSchema: stored.resultSchema,
-      },
-    });
-  }
-  return baselines.sort((a, b) => a.label.localeCompare(b.label));
-}
-
-/** Every pattern key that has a baseline directory, including retired ones. */
-async function collectBaselineKeys(): Promise<string[]> {
-  const keys: string[] = [];
-  async function walk(current: string, prefix: string) {
-    let entries: Deno.DirEntry[];
-    try {
-      entries = [...Deno.readDirSync(current)];
-    } catch (error) {
-      if (error instanceof Deno.errors.NotFound) return;
-      throw error;
-    }
-    for (const entry of entries) {
-      if (!entry.isDirectory) continue;
-      const key = prefix ? `${prefix}/${entry.name}` : entry.name;
-      // A pattern's own directory is named for its file (`home.tsx`); anything
-      // else is an intermediate path segment.
-      if (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) {
-        keys.push(key);
-      } else {
-        await walk(`${current}/${entry.name}`, key);
-      }
-    }
-  }
-  await walk(BASELINES_DIR, "");
-  return keys.sort();
-}
-
-/**
- * Baselines whose pattern file is gone. Deleting a served pattern pins every
- * piece tracking it forever — the updater's `?identity` probe just fails and it
- * "does nothing" — so this is worth surfacing even though it needs no compiler.
- *
- * Deliberately filesystem-only: it must see the whole tree, so it cannot ride
- * along with the sharded, filterable compile pass below.
- */
-async function findRetired(): Promise<Finding[]> {
-  const findings: Finding[] = [];
-  for (const key of await collectBaselineKeys()) {
-    try {
-      Deno.statSync(`${PATTERNS_DIR}/${key}`);
-    } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) throw error;
-      findings.push(...checkPattern(key, undefined, await readBaselines(key)));
-    }
-  }
-  return findings;
-}
 
 async function main() {
   let update: boolean;
@@ -222,7 +142,7 @@ async function main() {
   // Retirement is a whole-tree question, so only an unfiltered shard 1 asks it;
   // otherwise every pattern outside this shard would look retired.
   if (only.length === 0 && shard.index === 0) {
-    findings.push(...await findRetired());
+    findings.push(...await findRetired(BASELINES_DIR, PATTERNS_DIR));
   }
 
   const recorded: string[] = [];
@@ -232,7 +152,7 @@ async function main() {
     .sort();
   for (const key of keys) {
     const current = contracts.get(key);
-    const baselines = await readBaselines(key);
+    const baselines = await readBaselines(BASELINES_DIR, key);
     const checkStarted = performance.now();
     const patternFindings = checkPattern(key, current, baselines);
     if (timingEnabled) {
@@ -253,11 +173,12 @@ async function main() {
         f.kind === "incompatible" && f.baseline === "(current)"
       );
       if (missing && !invalid) {
-        const dir = `${BASELINES_DIR}/${key}`;
-        await Deno.mkdir(dir, { recursive: true });
-        const name = baselineFileName(new Date(), contractHash(current));
-        const stored: StoredBaseline = { pattern: key, ...current };
-        await Deno.writeTextFile(`${dir}/${name}`, encodeBaseline(stored));
+        const name = await writeBaseline(
+          BASELINES_DIR,
+          key,
+          current,
+          new Date(),
+        );
         recorded.push(`${key}/${name}`);
       }
       // A recorded contract still has to survive the incompatibility check

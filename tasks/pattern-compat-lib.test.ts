@@ -5,12 +5,16 @@ import {
   type Baseline,
   baselineFileName,
   checkPattern,
+  collectBaselineKeys,
   contractHash,
   decodeBaseline,
   encodeBaseline,
+  findRetired,
   parseArgs,
   parseShard,
   type PatternContract,
+  readBaselines,
+  writeBaseline,
 } from "./pattern-compat-lib.ts";
 
 const contract = (
@@ -233,5 +237,131 @@ describe("baseline encoding", () => {
     expect(Object.is(properties.negZero.default, -0)).toBe(true);
     expect(Number.isNaN(properties.notANumber.default)).toBe(true);
     expect(properties.infinite.default).toBe(Infinity);
+  });
+});
+
+describe("baseline store", () => {
+  const contractOf = () => contract(EMPTY_ARGUMENT, RESULT_WITH_TITLE);
+
+  /** Runs `body` against a throwaway baselines+patterns tree. */
+  const withTree = async (
+    body: (dirs: { baselines: string; patterns: string }) => Promise<void>,
+  ) => {
+    const root = await Deno.makeTempDir({ prefix: "pattern-compat-" });
+    try {
+      await body({
+        baselines: `${root}/baselines`,
+        patterns: `${root}/patterns`,
+      });
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  };
+
+  it("reads back what it writes, round-tripping through the codec", async () => {
+    await withTree(async ({ baselines }) => {
+      const name = await writeBaseline(
+        baselines,
+        "system/home.tsx",
+        contractOf(),
+        new Date("2026-07-28T15:45:00Z"),
+      );
+      expect(name).toBe(
+        `20260728T154500Z-${contractHash(contractOf())}.json`,
+      );
+
+      const read = await readBaselines(baselines, "system/home.tsx");
+      expect(read.length).toBe(1);
+      expect(contractHash(read[0].contract)).toBe(contractHash(contractOf()));
+    });
+  });
+
+  it("treats an absent directory as no baselines, not an error", async () => {
+    await withTree(async ({ baselines }) => {
+      expect(await readBaselines(baselines, "never/existed.tsx")).toEqual([]);
+      expect(await collectBaselineKeys(baselines)).toEqual([]);
+    });
+  });
+
+  it("ignores non-JSON files rather than failing to decode them", async () => {
+    await withTree(async ({ baselines }) => {
+      await writeBaseline(baselines, "a.tsx", contractOf(), new Date());
+      await Deno.writeTextFile(
+        `${baselines}/a.tsx/README.md`,
+        "not a baseline",
+      );
+      expect((await readBaselines(baselines, "a.tsx")).length).toBe(1);
+    });
+  });
+
+  it("walks nested paths, stopping at the directory named for the pattern file", async () => {
+    await withTree(async ({ baselines }) => {
+      await writeBaseline(
+        baselines,
+        "system/home.tsx",
+        contractOf(),
+        new Date(),
+      );
+      await writeBaseline(
+        baselines,
+        "notes/note.tsx",
+        contractOf(),
+        new Date(),
+      );
+      await writeBaseline(baselines, "top.ts", contractOf(), new Date());
+
+      expect(await collectBaselineKeys(baselines)).toEqual([
+        "notes/note.tsx",
+        "system/home.tsx",
+        "top.ts",
+      ]);
+    });
+  });
+
+  it("reports a baseline whose pattern file is gone, and only that one", async () => {
+    await withTree(async ({ baselines, patterns }) => {
+      await writeBaseline(
+        baselines,
+        "system/home.tsx",
+        contractOf(),
+        new Date(),
+      );
+      await writeBaseline(
+        baselines,
+        "system/gone.tsx",
+        contractOf(),
+        new Date(),
+      );
+      await Deno.mkdir(`${patterns}/system`, { recursive: true });
+      await Deno.writeTextFile(`${patterns}/system/home.tsx`, "// still here");
+
+      const findings = await findRetired(baselines, patterns);
+      expect(findings.length).toBe(1);
+      expect(findings[0]).toMatchObject({
+        kind: "retired",
+        pattern: "system/gone.tsx",
+      });
+    });
+  });
+
+  it("sorts baselines by label so the oldest is checked first", async () => {
+    await withTree(async ({ baselines }) => {
+      await writeBaseline(
+        baselines,
+        "a.tsx",
+        contract(EMPTY_ARGUMENT, RESULT_WITH_TITLE),
+        new Date("2026-12-01T00:00:00Z"),
+      );
+      await writeBaseline(
+        baselines,
+        "a.tsx",
+        contract(EMPTY_ARGUMENT, RESULT_WITHOUT_TITLE),
+        new Date("2026-01-01T00:00:00Z"),
+      );
+      const labels = (await readBaselines(baselines, "a.tsx")).map((b) =>
+        b.label
+      );
+      expect(labels[0].startsWith("20260101")).toBe(true);
+    });
   });
 });

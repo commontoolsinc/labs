@@ -264,3 +264,116 @@ export function checkPattern(
 
   return findings;
 }
+
+// ---------------------------------------------------------------------------
+// Baseline store
+//
+// Parameterized by directory so these are testable against a temp tree rather
+// than only against the real `packages/patterns` layout.
+// ---------------------------------------------------------------------------
+
+/** Read every recorded contract for a pattern. Absent directory → none. */
+export async function readBaselines(
+  baselinesDir: string,
+  key: string,
+): Promise<Baseline[]> {
+  const dir = `${baselinesDir}/${key}`;
+  const baselines: Baseline[] = [];
+  let entries: Deno.DirEntry[];
+  try {
+    entries = [...Deno.readDirSync(dir)];
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return [];
+    throw error;
+  }
+  for (const entry of entries) {
+    if (!entry.isFile || !entry.name.endsWith(".json")) continue;
+    const stored = decodeBaseline(
+      await Deno.readTextFile(`${dir}/${entry.name}`),
+    );
+    baselines.push({
+      label: entry.name.replace(/\.json$/, ""),
+      contract: {
+        argumentSchema: stored.argumentSchema,
+        resultSchema: stored.resultSchema,
+      },
+    });
+  }
+  return baselines.sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * Every pattern key that has a baseline directory, including retired ones.
+ *
+ * A pattern's own directory is named for its file (`home.tsx`), so a name
+ * ending in `.ts`/`.tsx` terminates the walk and anything else is an
+ * intermediate path segment (`system/`). That is the only thing distinguishing
+ * the two — baselines live at `<dir>/<pattern path>/<file>.json`, and a pattern
+ * path is exactly the route suffix the updater keys on.
+ */
+export async function collectBaselineKeys(
+  baselinesDir: string,
+): Promise<string[]> {
+  const keys: string[] = [];
+  async function walk(current: string, prefix: string) {
+    let entries: Deno.DirEntry[];
+    try {
+      entries = [...Deno.readDirSync(current)];
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) return;
+      throw error;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory) continue;
+      const key = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) {
+        keys.push(key);
+      } else {
+        await walk(`${current}/${entry.name}`, key);
+      }
+    }
+  }
+  await walk(baselinesDir, "");
+  return keys.sort();
+}
+
+/**
+ * Baselines whose pattern file is gone. Deleting a served pattern pins every
+ * piece tracking it forever — the updater's `?identity` probe just fails and it
+ * "does nothing" — so this is worth surfacing even though it needs no compiler.
+ *
+ * Filesystem-only by design: it must see the whole tree, so it cannot ride
+ * along with the sharded, filterable compile pass.
+ */
+export async function findRetired(
+  baselinesDir: string,
+  patternsDir: string,
+): Promise<Finding[]> {
+  const findings: Finding[] = [];
+  for (const key of await collectBaselineKeys(baselinesDir)) {
+    try {
+      Deno.statSync(`${patternsDir}/${key}`);
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) throw error;
+      findings.push(
+        ...checkPattern(key, undefined, await readBaselines(baselinesDir, key)),
+      );
+    }
+  }
+  return findings;
+}
+
+/** Record a contract as a new baseline. Returns the filename written. */
+export async function writeBaseline(
+  baselinesDir: string,
+  key: string,
+  contract: PatternContract,
+  recordedAt: Date,
+): Promise<string> {
+  const dir = `${baselinesDir}/${key}`;
+  await Deno.mkdir(dir, { recursive: true });
+  const name = baselineFileName(recordedAt, contractHash(contract));
+  const stored: StoredBaseline = { pattern: key, ...contract };
+  await Deno.writeTextFile(`${dir}/${name}`, encodeBaseline(stored));
+  return name;
+}
