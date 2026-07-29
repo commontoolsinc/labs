@@ -49,11 +49,15 @@ async function withRuntime<T>(
   ) => Promise<T>,
 ): Promise<T> {
   const dir = await Deno.makeTempDir({ prefix: "pattern-vintage-" });
-  const vintage = await openFileBackedRuntime(roots.signer, dir, fromSnapshot);
+  // `openFileBackedRuntime` is INSIDE the try: opening a corrupt fixture is a
+  // way it throws, and leaving the open outside would leak the temp copy of
+  // every fixture that failed to open — 3.5 MiB a time.
+  let vintage: Awaited<ReturnType<typeof openFileBackedRuntime>> | undefined;
   try {
+    vintage = await openFileBackedRuntime(roots.signer, dir, fromSnapshot);
     return await run(vintage);
   } finally {
-    await vintage.dispose().catch(() => {});
+    await vintage?.dispose().catch(() => {});
     await Deno.remove(dir, { recursive: true }).catch(() => {});
   }
 }

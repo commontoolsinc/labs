@@ -140,12 +140,17 @@ jobs:
         uses: ./.github/actions/deno-install
 
       # Tier 2. pattern-compat proves the CONTRACT still fits; this replays a
-      # real captured DOCUMENT under today's source. A schema does not describe
-      # everything a pattern writes — move where a field is stored and the
-      # contract does not change while the data becomes unreachable — and the
-      # additive-required migration refuses a commit no contract check sees as
-      # a failure to apply. The space roots auto-update onto a root someone is
-      # already using, so a break here bricks a live piece.
+      # real captured DOCUMENT under today's source and fails if today's source
+      # cannot be materialized over it — the additive-required migration
+      # refuses a setup commit that no contract check sees as a failure to
+      # apply. The space roots auto-update onto a root someone is already
+      # using, so a break here bricks a live piece.
+      #
+      # What it does NOT yet catch (measured, and tracked as stage 5 in
+      # docs/plans/pattern-update-state-continuity.md): a MOVED storage key.
+      # The committed vintages hold a freshly set-up root and the replay
+      # compares no values, so `.for('x')` → `.for('y')` replays clean here.
+      # `packages/piece/test/state-continuity.test.ts` covers that class.
       - name: 🔁 Replay pinned vintages under today's source
         run: deno task pattern-vintage
 

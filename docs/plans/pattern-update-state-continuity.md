@@ -79,6 +79,9 @@ Measured on branch `tier2`, not assumed:
 | A snapshot of a trivial one-pattern space is **1.5 MiB** raw | measured; it is the floor, since the store carries compiled artifacts |
 | Real patterns are larger raw but COMPRESS 15-48x | measured: `home.tsx` 3.50 MiB raw / 226 KiB gzipped; `favorites-manager.tsx` 1.53 MiB / 32 KiB. A store is mostly slack — 99 revisions in 3.5 MiB — which is why the retention decision below was made on the wrong number |
 | The gate catches a real break, not just a synthetic one | measured by mutation on the ACTUAL `home.tsx`: adding a required defaultless output field makes `deno task pattern-vintage` exit 1 naming the field; restoring returns exit 0 |
+| The gate does NOT catch a moved storage key | measured by mutation on the ACTUAL `home.tsx`: `.for("favorites")` → `.for("favouriteList")` exits 0, "Replayed 2 vintage(s) … all readable". A captured vintage holds a freshly set-up root, so there is no prior data to strand, and the replay compares no values. Pinned as a limit in `tasks/pattern-vintage-run.test.ts`; the class itself is covered by `state-continuity.test.ts` over a populated vintage. Closing it in the gate is stage 5 |
+| The gate could exit 0 having replayed NOTHING | measured twice: a `home.tsx` that does not compile, and a truncated fixture, both leave `harness.resolve()`'s promise pending forever while the error surfaces as an unhandled rejection — `main` never reached a verdict, the event loop drained, and the process exited 0 printing no verdict at all. Fixed: `beforeunload` is the last point where that is still distinguishable from success, so it reports and exits 1. Re-measured after the fix: broken source exits 1 naming the rejection, corrupt fixture exits 1, clean tree exits 0 |
+| A run that replays zero fixtures is a FAILURE | `isClean` takes `replayed` and requires it positive. Measured: with the fixture tree moved aside the task exits 1 reporting both the uncovered patterns and "covered NOTHING" |
 | `StorageManager.emulate` runs its real memory server against `:memory:` | `engine.ts` `toDatabaseAddress`; there is no file to snapshot, hence file-backed capture |
 | Entity ids are content-addressed from `{source, cause}` | `packages/runner/src/create-ref.ts` |
 | `setupPersistent` mints `{ space, random: randomUUID }` when given no cause | `packages/piece/src/manager.ts` |
@@ -128,8 +131,9 @@ BEFORE BUILDING STAGE 4 — this was decided on a number that turned out to be
 wrong, and the corrected number argues the other way harder than first thought.
 The reasoning was "at ~1.5 MB a floor, committing every capture would grow the
 repo without bound". Measured, a SECOND vintage of the same pattern costs
-git essentially NOTHING when stored raw (352 KiB for one, 352 KiB for two —
-see the table above), because near-identical stores delta almost perfectly.
+git essentially NOTHING when stored raw (232.50 KiB for one, 232.86 KiB for
+two — see the table below), because near-identical stores delta almost
+perfectly.
 Repeated captures of the same pattern are the best case for delta compression,
 and repeated captures of the same pattern are exactly what auto captures are.
 
@@ -233,7 +237,7 @@ automatic updater performs no structural check at all.
 
 ### 3. Curated vintages in git
 
-- [x] `packages/patterns/vintages/<pattern key>/pinned/<iso>-<identity>.sqlite.gz`,
+- [x] `packages/patterns/vintages/<pattern key>/pinned/<iso>-<identity>.sqlite`,
       labelled by the pattern identity that wrote it (provenance, not an
       address — nothing looks a fixture up by it; the replay enumerates the
       directory)
@@ -246,6 +250,28 @@ Gate: **met, and verified by mutation.** Adding a required, defaultless output
 field to the real `home.tsx` makes the task exit 1 with the estuary rejection
 naming the field; restoring it returns exit 0.
 
+**What a green run does and does not assert.** Per fixture it asserts that
+today's source resolves, that the setup commit carrying it onto the vintage's
+root is not refused, and that the root then reads as something rather than
+nothing. It compares no VALUES, and a captured vintage holds a freshly set-up
+root rather than a populated one. So the storage-move class — the one this tier
+was built for — replays clean here: measured on the real `home.tsx`, renaming
+`.for("favorites")` to `.for("favouriteList")` exits 0. That is pinned as a
+limit in `tasks/pattern-vintage-run.test.ts`, covered as a behaviour by
+`state-continuity.test.ts` over a populated vintage, and listed in stage 5 as
+the thing to close. Until it is closed, this gate's honest claim is "the update
+still APPLIES", not "the data survives".
+
+**A run that reaches no verdict is a failure.** The first version of this gate
+could exit 0 having replayed nothing and printed nothing: a pattern that fails
+to compile, and a corrupt fixture, both reject a promise nobody awaits while
+`harness.resolve()`'s own promise never settles, so the event loop drained with
+`main` still mid-flight. A `beforeunload` guard now reports the last rejection
+and exits 1, and `isClean` takes `replayed` so zero replays cannot be a pass.
+`unmappedPatternUrls` covers the third shape of the same failure: a
+`HOME_PATTERN_URL` that stopped containing `/patterns/` would derive an empty
+required set and quietly stop insisting on anything.
+
 **Scope is what provably auto-updates**, derived from `HOME_PATTERN_URL` and
 `DEFAULT_APP_PATTERN_URL` rather than a hand-kept list, so the gate cannot
 drift from the runtime. This plan previously said "every
@@ -254,7 +280,9 @@ holds personal variants (`*-ben.tsx`) and modules that are not patterns
 (`piece-registry-migration.ts`), and a first attempt at requiring all 23 wedged
 on a file with no default export. A vintage that EXISTS is always replayed;
 the required list only governs what CI insists on. Pinning a profile or other
-long-lived pattern is a deliberate act, and works today.
+long-lived pattern is a deliberate act, and is spelled
+`deno task pattern-vintage --update <pattern key>` — named keys are captured
+under the same only-ever-ADD rule as the required ones.
 
 **Fixtures are stored RAW, and both size arguments this plan reasoned from were
 wrong.** A store is mostly slack — 99 revisions in 3.5 MiB — and gzips 15-48x
@@ -264,16 +292,24 @@ pre-compressing looks free given git zlib-compresses blobs anyway.
 Measured, it is not free: **it defeats git's DELTA compression**, which is the
 mechanism that makes accumulating vintages cheap.
 
-| | git storage, 1 vintage | git storage, 2 independent vintages | working tree |
+Two captures of `home.tsx`, each committed into a fresh repo (`git init`, add,
+commit, `git gc`) and read off `git count-objects -vH`:
+
+| | git storage, 1 vintage | git storage, 2 captures | working tree, 2 captures |
 | --- | --- | --- | --- |
-| Raw `.sqlite` | 352 KiB | **352 KiB** | 7.0 MiB |
-| Gzipped `.sqlite.gz` | 360 KiB | 380 KiB | 484 KiB |
+| Raw `.sqlite` | 232.50 KiB | **232.86 KiB** (+0.36) | 7.00 MiB |
+| Gzipped `.sqlite.gz` | 226.13 KiB | 450.27 KiB (+224) | 452 KiB |
 
 A second raw vintage costs essentially nothing — git deltas it against the
-first — where two gzip streams delta poorly. Stage 4's whole job is
+first — where two gzip streams delta not at all. Stage 4's whole job is
 accumulating vintages, so the compounding term dominates the one-off. The price
-is working-tree disk (3.5 MiB a fixture rather than 250 KiB), which is transient
+is working-tree disk (3.5 MiB a fixture rather than 226 KiB), which is transient
 and local where git history is permanent and shared by everyone who clones.
+
+An earlier revision of this table reported 352/352 and 360/380 KiB. Those
+numbers are not reproducible by the method above and are replaced rather than
+patched; the direction they were used to argue survives, and is larger than
+they showed.
 
 Two constraints the harness imposes, both measured:
 
@@ -294,8 +330,8 @@ Two constraints the harness imposes, both measured:
   keys (`vintageRoot(vintage, schema, key)`). One fixture per pattern needs
   nothing further.
 
-Two bugs the gate found in itself, both now pinned by tests, both of the class
-that fails SILENTLY rather than loudly:
+Three bugs the gate found in itself, all now pinned by tests, all of the class
+that fails SILENTLY rather than loudly — which for a gate means passing:
 
 - **Identities are base64url and contain dashes.** Parsing the identity as the
   last dash-separated field split `home.tsx`'s own filename in the wrong place,
@@ -305,6 +341,14 @@ that fails SILENTLY rather than loudly:
   reliable boundary.
 - **`Deno.readDir` is lazy**, so a try/catch around the call alone caught
   nothing and a missing tree escaped as ENOENT instead of "no fixtures yet".
+- **Ending without a verdict counted as passing.** The worst of the three,
+  because the two inputs that trigger it — a pattern that does not compile, and
+  a corrupt fixture — are exactly when you most want a red. Both reject a
+  promise nobody awaits while the promise the replay is awaiting never settles,
+  so the process exited 0 with no output at all. A `beforeunload` guard now
+  reports the last rejection and exits 1, `isClean` requires a positive
+  `replayed`, and a system pattern URL that no longer derives a key stops the
+  run rather than emptying the requirement.
 
 ### 4. Auto captures and retention
 
@@ -316,13 +360,23 @@ that fails SILENTLY rather than loudly:
 
 Gate: a staging deploy always has a capture the replay can use.
 
-### 5. Migration coverage
+### 5. Migration coverage, and the storage-move class
 
 - [ ] Trigger on memory-engine schema change
 - [ ] Promote the affected auto captures to pinned rather than recapturing
 - [ ] Breadth across shapes rather than depth per pattern
+- [ ] **Capture POPULATED vintages and compare values on replay**, so the gate
+      sees the storage-move class rather than only refusals. Both halves are
+      needed and neither is sufficient: a vintage captured straight off setup
+      has no data to strand, and a replay that only asks "was the commit
+      refused" would not notice if it did. `state-continuity.test.ts` shows the
+      shape — replay the vintage's OWN source first as a control, so an empty
+      read is attributable to the change rather than to a fixture that never
+      restored. Inverting the pinned limit in `tasks/pattern-vintage-run.test.ts`
+      is the acceptance test.
 
-Gate: a memory migration cannot land without replaying pre-migration stores.
+Gate: a memory migration cannot land without replaying pre-migration stores,
+and a change that strands data fails even when it applies cleanly.
 
 ## Open questions
 

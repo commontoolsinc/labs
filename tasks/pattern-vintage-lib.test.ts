@@ -10,10 +10,14 @@ import {
   PINNED,
   relativeToRepo,
   reportFailures,
+  reportNothingReplayed,
+  reportNoVerdict,
   reportUncovered,
+  reportUnmappedUrls,
   requiredPatternKeys,
   stampFor,
   uncoveredRequiredPatterns,
+  unmappedPatternUrls,
   vintageDir,
   vintageFileName,
   VINTAGES_DIR,
@@ -176,6 +180,18 @@ describe("coverage", () => {
     expect(requiredPatternKeys(["/api/meta", ""])).toEqual([]);
   });
 
+  it("names a URL the derivation could not map, rather than dropping it", () => {
+    // The dangerous shape: reroute the patterns endpoint and every required
+    // key derives to nothing, leaving a gate that insists on nothing while
+    // still exiting 0. The caller refuses to run on this, so the drift is
+    // loud rather than a silently empty requirement.
+    expect(unmappedPatternUrls([
+      "/api/patterns/system/home.tsx",
+      "/api/pattern/system/default-app.tsx",
+    ])).toEqual(["/api/pattern/system/default-app.tsx"]);
+    expect(unmappedPatternUrls(["/api/patterns/system/home.tsx"])).toEqual([]);
+  });
+
   it("treats several vintages of one pattern as one covered pattern", () => {
     const uncovered = uncoveredRequiredPatterns(
       ["system/home.tsx"],
@@ -266,10 +282,43 @@ describe("reporting", () => {
     // Stated once and tested, rather than an `if` at the bottom of main that a
     // later edit can quietly invert. A gate that exits 0 on failure is worse
     // than no gate at all.
-    expect(isClean([], [])).toBe(true);
-    expect(isClean([failure], [])).toBe(false);
-    expect(isClean([], ["system/home.tsx"])).toBe(false);
-    expect(isClean([failure], ["system/home.tsx"])).toBe(false);
+    expect(isClean([], [], 2)).toBe(true);
+    expect(isClean([failure], [], 2)).toBe(false);
+    expect(isClean([], ["system/home.tsx"], 2)).toBe(false);
+    expect(isClean([failure], ["system/home.tsx"], 2)).toBe(false);
+  });
+
+  it("FAILS a run that replayed nothing, however clean it looks", () => {
+    // The catastrophic shape: no failures, nothing uncovered, and no evidence
+    // whatsoever. A run that replays nothing proves nothing, so it cannot be
+    // the same answer as a run that replayed everything and found it readable.
+    expect(isClean([], [], 0)).toBe(false);
+    expect(reportNothingReplayed()).toContain("covered NOTHING");
+    expect(reportNothingReplayed()).toContain(
+      "deno task pattern-vintage --update",
+    );
+  });
+
+  it("names the URLs that stopped deriving a required pattern", () => {
+    const report = reportUnmappedUrls(["/api/pattern/system/home.tsx"]);
+
+    expect(report).toContain("/api/pattern/system/home.tsx");
+    expect(report).toContain("requiredPatternKeys");
+  });
+
+  it("explains an end with no verdict, and carries the rejection", () => {
+    // Measured twice — a pattern that does not compile, and a truncated
+    // fixture — both leave the replay's promise pending forever while the real
+    // error surfaces as a rejection nobody awaits. The reader needs the
+    // rejection, or the message is "something went wrong somewhere".
+    const report = reportNoVerdict(
+      new Error("database disk image is malformed"),
+    );
+
+    expect(report).toContain("without reaching a verdict");
+    expect(report).toContain("database disk image is malformed");
+    // And it still says something useful when nothing was observed.
+    expect(reportNoVerdict(undefined)).toContain("unresolved await");
   });
 });
 

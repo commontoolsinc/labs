@@ -5,17 +5,29 @@
  * Tier 1 (`deno task pattern-compat`) proves the contract a pattern declares is
  * still compatible with every contract it has declared before. That is a
  * statement about schemas. This proves the stronger thing schemas cannot say:
- * that a real document written by an older version is still readable — and
- * still materializable — by the version about to be merged.
+ * that a real document written by an older version is still materializable by
+ * the version about to be merged.
  *
- *   deno task pattern-vintage             # replay; fail on a stranded fixture
- *   deno task pattern-vintage --update    # capture a vintage where one is missing
+ * Precisely what a green run asserts, per fixture: today's source RESOLVES,
+ * the setup commit that carries it onto the vintage's root is NOT REFUSED, and
+ * the root then reads as something rather than nothing. It does not compare
+ * VALUES, and a captured vintage holds a freshly set-up root rather than a
+ * populated one — so the class where a moved `.for()` key strands real data
+ * replays clean here. Measured on the real `home.tsx`: renaming
+ * `.for("favorites")` exits 0. That class is covered by
+ * `packages/piece/test/state-continuity.test.ts` and closing it in the gate is
+ * stage 5 of `docs/plans/pattern-update-state-continuity.md`.
+ *
+ *   deno task pattern-vintage                      # replay; fail on a stranded fixture
+ *   deno task pattern-vintage --update             # capture where a REQUIRED one is missing
+ *   deno task pattern-vintage --update system/x.tsx  # pin any pattern deliberately
  *
  * `--update` can only ADD. It never rewrites or deletes an existing fixture,
  * for the reason Tier 1's baselines are append-only: a command that could
  * replace a vintage could replace the very vintage that would have caught a
  * break. Deleting one is a deliberate act that shows up in review as a deleted
- * file.
+ * file. Naming keys explicitly does not weaken that — a key that already has a
+ * pinned vintage is skipped whichever way it was asked for.
  *
  * This file is the shell — roots, argument parsing, printing, exit code. The
  * work is in `pattern-vintage-run.ts`, which takes its roots as arguments so
@@ -34,9 +46,13 @@ import {
   isClean,
   relativeToRepo,
   reportFailures,
+  reportNothingReplayed,
+  reportNoVerdict,
   reportUncovered,
+  reportUnmappedUrls,
   requiredPatternKeys,
   uncoveredRequiredPatterns,
+  unmappedPatternUrls,
   VINTAGES_DIR,
 } from "./pattern-vintage-lib.ts";
 import {
@@ -72,20 +88,34 @@ async function main() {
     signer: FIXTURE_SIGNER,
   };
   // The required set comes from the runtime's OWN constants, so the gate
-  // cannot drift from what actually auto-updates.
-  const required = requiredPatternKeys([
-    HOME_PATTERN_URL,
-    DEFAULT_APP_PATTERN_URL,
-  ]);
+  // cannot drift from what actually auto-updates. A constant that stops
+  // deriving a key would leave the gate requiring nothing, so that is checked
+  // rather than absorbed.
+  const systemUrls = [HOME_PATTERN_URL, DEFAULT_APP_PATTERN_URL];
+  const unmapped = unmappedPatternUrls(systemUrls);
+  if (unmapped.length > 0) {
+    console.error(reportUnmappedUrls(unmapped));
+    Deno.exit(1);
+  }
+  const required = requiredPatternKeys(systemUrls);
 
   if (Deno.args.includes("--update")) {
+    // Keys named on the command line pin a pattern nobody auto-updates — the
+    // deliberate act the layout allows for. With none named, the required set
+    // is what gets seeded.
+    const named = Deno.args.filter((arg) => !arg.startsWith("--"));
+    const wanted = named.length > 0 ? named : required;
     const { captured, problems } = await captureMissing(
       roots,
-      required,
+      wanted,
       new Date(),
     );
     if (captured.length === 0 && problems.length === 0) {
-      console.log("Every auto-updating pattern already has a pinned vintage.");
+      console.log(
+        named.length > 0
+          ? `Already pinned: ${named.join(", ")}.`
+          : "Every auto-updating pattern already has a pinned vintage.",
+      );
     }
     for (const path of captured) {
       console.log(`  + ${relativeToRepo(path, REPO_ROOT)}`);
@@ -105,14 +135,32 @@ async function main() {
   );
 
   if (uncovered.length > 0) console.error(reportUncovered(uncovered));
+  if (replayed === 0) console.error(`\n${reportNothingReplayed()}`);
   if (failures.length > 0) console.error(`\n${reportFailures(failures)}`);
 
-  if (!isClean(failures, uncovered)) Deno.exit(1);
+  if (!isClean(failures, uncovered, replayed)) Deno.exit(1);
   console.log(
     `Replayed ${replayed} vintage(s) under today's source; all readable.`,
   );
 }
 
 if (import.meta.main) {
+  // Reaching a verdict is part of passing. Measured: a pattern that does not
+  // compile, and a truncated fixture, both leave `harness.resolve()`'s promise
+  // pending forever while the real error surfaces as a rejection nobody
+  // awaits — so `main` never returns, the event loop drains, and the process
+  // would exit 0 having replayed nothing and printed nothing. `beforeunload`
+  // is the last point at which that is still distinguishable from success.
+  let lastRejection: unknown;
+  globalThis.addEventListener("unhandledrejection", (event) => {
+    lastRejection = event.reason;
+  });
+  globalThis.addEventListener("beforeunload", () => {
+    console.error(reportNoVerdict(lastRejection));
+    Deno.exit(1);
+  });
   await main();
+  // Only the clean path gets here; every other exit is `Deno.exit(1)` above.
+  // Exiting explicitly is what keeps the guard from firing on a success.
+  Deno.exit(0);
 }

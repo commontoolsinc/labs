@@ -33,14 +33,18 @@
  * across 99 revisions) and gzips 15x, so pre-compressing looks free — git
  * zlib-compresses blobs anyway.
  *
- * Measured, it is not free, because it defeats DELTA compression. Two
- * independent captures of home.tsx cost 352 KiB in git raw and 380 KiB
- * gzipped — and the second raw vintage is essentially FREE (352 KiB for one,
- * 352 KiB for two) because git deltas it against the first, where two gzip
- * streams delta poorly. Accumulating vintages is precisely what stage 4 does,
- * so the compounding term dominates the one-off.
+ * Measured, it is not free, because it defeats DELTA compression. Two captures
+ * of home.tsx, packed into a fresh repo (`git init`, add, commit, `git gc`,
+ * `git count-objects -vH`):
  *
- * The cost is working-tree disk: 3.5 MiB a fixture rather than 250 KiB. That
+ *     raw .sqlite     one 232.50 KiB   two 232.86 KiB   (+0.36 KiB)
+ *     gzipped .gz     one 226.13 KiB   two 450.27 KiB   (+224 KiB)
+ *
+ * The second raw vintage is essentially free because git deltas it against the
+ * first; two gzip streams delta not at all. Accumulating vintages is precisely
+ * what stage 4 does, so the compounding term dominates the one-off.
+ *
+ * The cost is working-tree disk: 3.5 MiB a fixture rather than 226 KiB. That
  * is transient and local, where git history is permanent and shared by
  * everyone who clones.
  */
@@ -206,20 +210,36 @@ export function coveredPatternKeys(
  * (`piece-registry-migration.ts`), and requiring a vintage for those would
  * either wedge the gate on files that cannot be materialized or pad coverage
  * with fixtures nobody replays. Any other pattern can still be pinned
- * deliberately — a vintage that exists is always replayed; it is only being
- * REQUIRED that this list governs.
+ * deliberately (`--update <pattern key>`) — a vintage that exists is always
+ * replayed; it is only being REQUIRED that this list governs.
  */
+const PATTERN_ROUTE_MARKER = "/patterns/";
+
 export function requiredPatternKeys(
   systemPatternUrls: readonly string[],
 ): string[] {
-  const marker = "/patterns/";
   const keys: string[] = [];
   for (const url of systemPatternUrls) {
-    const at = url.indexOf(marker);
+    const at = url.indexOf(PATTERN_ROUTE_MARKER);
     if (at === -1) continue;
-    keys.push(url.slice(at + marker.length));
+    keys.push(url.slice(at + PATTERN_ROUTE_MARKER.length));
   }
   return [...new Set(keys)].sort();
+}
+
+/**
+ * The URLs `requiredPatternKeys` could not turn into a pattern key.
+ *
+ * `requiredPatternKeys` skips what it does not recognise, which is right for a
+ * derivation and catastrophic for a gate: reroute the patterns endpoint and
+ * every required key silently disappears, leaving a gate that insists on
+ * nothing. The caller checks this and refuses to run rather than passing an
+ * empty requirement, so a drift in the runtime's own constants is loud.
+ */
+export function unmappedPatternUrls(
+  systemPatternUrls: readonly string[],
+): string[] {
+  return systemPatternUrls.filter((url) => !url.includes(PATTERN_ROUTE_MARKER));
 }
 
 /** Required patterns with no pinned vintage. */
@@ -287,14 +307,71 @@ export function reportFailures(failures: readonly ReplayFailure[]): string {
   ].join("\n");
 }
 
+/** What the gate prints when it found no fixture to replay at all. */
+export function reportNothingReplayed(): string {
+  return [
+    "Replayed 0 vintages — this gate covered NOTHING.",
+    "",
+    "A run that replays nothing proves nothing, so it is a failure rather than",
+    "a pass. Either the fixture tree is missing (a bad checkout, or a path that",
+    "moved without this task moving with it) or every file under it was",
+    "declined as not a fixture. Capture one with:",
+    "",
+    "  deno task pattern-vintage --update",
+  ].join("\n");
+}
+
+/** What the gate prints when it cannot tell which patterns it must cover. */
+export function reportUnmappedUrls(unmapped: readonly string[]): string {
+  return [
+    `${unmapped.length} system pattern URL(s) no longer name a pattern:`,
+    "",
+    ...unmapped.map((url) => `  ${url}`),
+    "",
+    "The required set is derived from these so the gate cannot drift from what",
+    "actually auto-updates. A URL that no longer contains `/patterns/` derives",
+    "nothing, which would leave the gate requiring nothing at all — so it stops",
+    "here instead. Teach `requiredPatternKeys` the new route shape.",
+  ].join("\n");
+}
+
+/**
+ * What the gate prints when the process is about to end without a verdict.
+ *
+ * Measured, twice: a pattern that fails to compile and a truncated fixture BOTH
+ * reject a promise nobody awaits while `harness.resolve()`'s own promise never
+ * settles. `main` never reaches its verdict, the event loop drains, and the
+ * process exits 0 having replayed nothing and printed nothing. A gate that goes
+ * green because the thing it gates is too broken to test is worse than no gate,
+ * so reaching a verdict is itself part of passing.
+ */
+export function reportNoVerdict(reason: unknown): string {
+  return [
+    "The vintage gate ended without reaching a verdict.",
+    "",
+    "Something the replay awaited never settled — a pattern that does not",
+    "compile and a corrupt fixture both do this, because the failure surfaces",
+    "as an unhandled rejection while the promise stays pending forever. The",
+    "gate proved nothing, so it fails.",
+    "",
+    reason === undefined
+      ? "  (no rejection was observed; look for an unresolved await)"
+      : `  last unhandled rejection: ${describeError(reason)}`,
+  ].join("\n");
+}
+
 /**
  * Whether the run passes. Split out so the exit condition is stated once and
  * tested, rather than being an `if` at the bottom of `main` that a later edit
  * can quietly invert — a gate that exits 0 on failure is worse than no gate.
+ *
+ * `replayed` is part of the condition and not just a number to print: zero
+ * replays is the shape a broken gate takes, not the shape a clean tree takes.
  */
 export function isClean(
   failures: readonly ReplayFailure[],
   uncovered: readonly string[],
+  replayed: number,
 ): boolean {
-  return failures.length === 0 && uncovered.length === 0;
+  return failures.length === 0 && uncovered.length === 0 && replayed > 0;
 }

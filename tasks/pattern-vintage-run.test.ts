@@ -73,6 +73,9 @@ const COMPATIBLE = BREAKING.replace(
   "  addedLater: Writable<string[] | Default<[]>>;",
 );
 
+/** Same contract, different backing cell — the class the gate cannot see. */
+const MOVED_KEY = HEALTHY.replace(".for('items')", ".for('itemList')");
+
 describe("the vintage gate, end to end", () => {
   let dir = "";
   let roots: GateRoots;
@@ -162,6 +165,30 @@ describe("the vintage gate, end to end", () => {
 
     const { failures } = await replayAll(roots);
 
+    expect(failures).toEqual([]);
+  });
+
+  it("does NOT catch a moved storage key — the gap, pinned", async () => {
+    // Asserting a LIMIT, deliberately. `.for('items')` → `.for('itemList')`
+    // leaves the declared contract byte-identical and strands every document
+    // written under the old name — the class Tier 2 was built for, and the one
+    // this gate's own header and CI comment must not be read as claiming.
+    //
+    // Two reasons it replays clean, both structural rather than incidental:
+    // `captureVintage` snapshots a root that was just set up, so there is no
+    // prior data to strand; and `replayVintage` asks only whether the
+    // materialize was refused, never whether the values survived. Closing
+    // either would close this.
+    //
+    // `packages/piece/test/state-continuity.test.ts` covers the class itself,
+    // over a POPULATED vintage. When the gate grows a value comparison this
+    // test should be INVERTED, not deleted.
+    await captureMissing(roots, [KEY], new Date("2026-07-29T12:00:00.000Z"));
+    await setSource(MOVED_KEY);
+
+    const { replayed, failures } = await replayAll(roots);
+
+    expect(replayed).toBe(1);
     expect(failures).toEqual([]);
   });
 
