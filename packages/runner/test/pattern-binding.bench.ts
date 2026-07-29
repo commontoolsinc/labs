@@ -27,7 +27,7 @@ import { unwrapOneLevelAndBindtoDoc } from "../src/pattern-binding.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
 import type { AnyCell } from "../src/cell.ts";
 import type { NormalizedFullLink } from "../src/link-types.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
+import type { FabricExecValue, JSONSchema } from "../src/builder/types.ts";
 
 const cfc = new ContextualFlowControl();
 
@@ -148,7 +148,7 @@ function aliasPath(i: number, depth: number): string[] {
   return p.slice(0, Math.max(1, depth + 1));
 }
 
-function makeAlias(i: number, opts: BuildOpts): unknown {
+function makeAlias(i: number, opts: BuildOpts): FabricExecValue {
   return {
     $alias: {
       cell: "argument",
@@ -162,9 +162,9 @@ function makeAlias(i: number, opts: BuildOpts): unknown {
 
 // Build a VNode-tree binding (what a node's `[UI]` inputBindings look like):
 // a tree of {type:"vnode", name, props, children:[...]} with alias leaves.
-function makeUiBinding(opts: BuildOpts): unknown {
+function makeUiBinding(opts: BuildOpts): FabricExecValue {
   let leaf = 0;
-  const child = (): unknown => {
+  const child = (): FabricExecValue => {
     if (leaf >= opts.aliases) {
       return { type: "vnode", name: "span", props: {}, children: ["·"] };
     }
@@ -177,9 +177,9 @@ function makeUiBinding(opts: BuildOpts): unknown {
     };
   };
   // ~branching factor 4 until all aliases are placed
-  const children: unknown[] = [];
+  const children: FabricExecValue[] = [];
   while (leaf < opts.aliases) {
-    const group: unknown[] = [];
+    const group: FabricExecValue[] = [];
     for (let k = 0; k < 4 && leaf < opts.aliases; k++) group.push(child());
     children.push({
       type: "vnode",
@@ -193,7 +193,7 @@ function makeUiBinding(opts: BuildOpts): unknown {
 
 type Links = typeof withSchema;
 
-function op(binding: unknown, links: Links = withSchema): void {
+function op(binding: FabricExecValue, links: Links = withSchema): void {
   unwrapOneLevelAndBindtoDoc(
     cfc,
     binding,
@@ -214,7 +214,7 @@ for (const aliases of [10, 30, 100, 300]) {
 // ---- direct-run study harness ---------------------------------------------
 function time(
   label: string,
-  binding: unknown,
+  binding: FabricExecValue,
   iters: number,
   links: Links = withSchema,
 ): void {
