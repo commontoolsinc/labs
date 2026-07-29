@@ -1,0 +1,79 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "Repo": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "repos": {
+        "default": [
+          {
+            "id": "1",
+            "name": "react"
+          },
+          {
+            "id": "2",
+            "name": "vue"
+          },
+          {
+            "id": "3",
+            "name": "angular"
+          }
+        ],
+        "items": {
+          "$ref": "#/$defs/Repo"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "repos"
+    ],
+    "type": "object"
+  },
+  "pattern": "gideon-tests/test-30-fetchjson-dynamic-instantiation.tsx",
+  "resultSchema": {
+    "$defs": {
+      "Repo": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "repos": {
+        "items": {
+          "$ref": "#/$defs/Repo"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "repos"
+    ],
+    "type": "object"
+  }
+}

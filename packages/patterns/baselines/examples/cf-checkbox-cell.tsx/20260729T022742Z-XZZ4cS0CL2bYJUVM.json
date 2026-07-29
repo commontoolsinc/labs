@@ -1,0 +1,43 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "simpleEnabled": {
+        "asCell": [
+          "cell"
+        ],
+        "default": false,
+        "type": "boolean"
+      },
+      "trackedEnabled": {
+        "asCell": [
+          "cell"
+        ],
+        "default": false,
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "simpleEnabled",
+      "trackedEnabled"
+    ],
+    "type": "object"
+  },
+  "pattern": "examples/cf-checkbox-cell.tsx",
+  "resultSchema": {
+    "properties": {
+      "simpleEnabled": {
+        "default": false,
+        "type": "boolean"
+      },
+      "trackedEnabled": {
+        "default": false,
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "simpleEnabled",
+      "trackedEnabled"
+    ],
+    "type": "object"
+  }
+}

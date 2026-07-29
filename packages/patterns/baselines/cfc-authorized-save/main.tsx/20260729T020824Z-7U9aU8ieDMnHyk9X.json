@@ -1,0 +1,86 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "TrustedSaveTitleUiContract": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedSaveTitle",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedSaveSurface"
+            ],
+            "trustedPattern": "TrustedSaveSurface"
+          }
+        },
+        "type": "string"
+      }
+    },
+    "properties": {
+      "draftTitle": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "",
+        "type": "string"
+      },
+      "savedTitle": {
+        "$ref": "#/$defs/TrustedSaveTitleUiContract",
+        "asCell": [
+          "cell"
+        ],
+        "default": ""
+      }
+    },
+    "required": [
+      "draftTitle",
+      "savedTitle"
+    ],
+    "type": "object"
+  },
+  "pattern": "cfc-authorized-save/main.tsx",
+  "resultSchema": {
+    "$defs": {
+      "TrustedSaveTitleUiContract": {
+        "ifc": {
+          "uiContract": {
+            "action": "TrustedSaveTitle",
+            "helper": "UiAction",
+            "requiredEventIntegrity": [
+              "TrustedSaveSurface"
+            ],
+            "trustedPattern": "TrustedSaveSurface"
+          }
+        },
+        "type": "string"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "draftTitle": {
+        "type": "string"
+      },
+      "save": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "savedTitle": {
+        "$ref": "#/$defs/TrustedSaveTitleUiContract"
+      }
+    },
+    "required": [
+      "draftTitle",
+      "savedTitle",
+      "save",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

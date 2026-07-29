@@ -309,6 +309,32 @@ only after explicit acceptance. Neither structural check proves semantic state
 continuity. The root-interface contract remains mandatory in both cases. See
 the [`Compatibility policy`](../piece-source-lifecycle.md#compatibility-policy).
 
+### The CI gate (`deno task pattern-compat`)
+
+Because the updater applies without that comparison, an incompatible schema
+that merges reaches every running piece. CI carries the check instead:
+`tasks/pattern-compat.ts` compiles every authored pattern and proves its
+argument/result contract against every contract recorded for it under
+`packages/patterns/baselines/`, using the same
+`assertPatternSchemasBackwardCompatible` that `cf piece setsrc` enforces — so
+the two paths cannot drift apart on what "compatible" means.
+
+- A baseline is a small JSON file holding only the two schemas. That is the
+  whole input to the check, so no compiled artifact or old source is needed.
+- **Every** baseline is checked, never just the newest: a piece rolls forward
+  from whatever version it last opened at, and the evolution-policy allowances
+  are not guaranteed to compose across steps.
+- Baselines are **never pruned**, and `deno task pattern-compat --update` can
+  only add one. An author-run command that could remove a baseline could remove
+  the one that would have caught the break.
+- A pattern with baselines that no longer yields a contract — file deleted, or
+  no longer exporting a pattern — is reported: pieces tracking that path are
+  pinned to their current pattern forever, and nothing surfaces on the piece.
+
+The gate is structural only. State continuity — data under keys the new pattern
+drops or renames — needs the golden replay described above, against captured
+prior state rather than a schema.
+
 ## System-source patterns — the loop
 
 **Toolshed side (memoized per file for the process lifetime; patterns are fixed

@@ -1,0 +1,79 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "count": {
+        "default": 0,
+        "type": "number"
+      },
+      "isProcessing": {
+        "default": false,
+        "type": "boolean"
+      },
+      "pending": {
+        "default": false,
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "count",
+      "pending",
+      "isProcessing"
+    ],
+    "type": "object"
+  },
+  "pattern": "gideon-tests/test-onclick-toplevel-disabled-working.tsx",
+  "resultSchema": {
+    "$defs": {
+      "JSXElement": {
+        "anyOf": [
+          {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          },
+          {
+            "$ref": "#/$defs/UIRenderable"
+          },
+          {
+            "properties": {},
+            "type": "object"
+          }
+        ]
+      },
+      "UIRenderable": {
+        "properties": {
+          "$UI": {
+            "$ref": "https://commonfabric.org/schemas/vnode.json"
+          }
+        },
+        "required": [
+          "$UI"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "#/$defs/JSXElement"
+      },
+      "count": {
+        "type": "number"
+      },
+      "isProcessing": {
+        "type": "boolean"
+      },
+      "pending": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI",
+      "count",
+      "pending",
+      "isProcessing"
+    ],
+    "type": "object"
+  }
+}

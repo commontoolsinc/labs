@@ -1,0 +1,41 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "leftText": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "Hello",
+        "type": "string"
+      },
+      "rightText": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "World",
+        "type": "string"
+      }
+    },
+    "required": [
+      "leftText",
+      "rightText"
+    ],
+    "type": "object"
+  },
+  "pattern": "text-swapper.tsx",
+  "resultSchema": {
+    "properties": {
+      "leftText": {
+        "type": "string"
+      },
+      "rightText": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "leftText",
+      "rightText"
+    ],
+    "type": "object"
+  }
+}
