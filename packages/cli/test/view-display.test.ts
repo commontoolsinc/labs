@@ -138,6 +138,7 @@ Deno.test("hidden: a run of control codes collapses to one ellipsis at its start
     1,
     "the ellipsis stands at the run's first column",
   );
+  assertEquals(cells[1].sourceEnd, 4, "the ellipsis covers the complete run");
   assertEquals(cells[2].col, 4, "text after keeps its source column");
 });
 

@@ -19,7 +19,7 @@ function baseView(over: Partial<ViewState> = {}): ViewState {
     height: 10,
     color: true,
     showLineNumbers: false,
-    wrapLines: false,
+    wrapMode: "off",
     displayMode: "pictures",
     selected: null,
     matches: null,
@@ -192,7 +192,7 @@ Deno.test("renderFrame: the end mark follows the final wrapped row", () => {
       width: 15,
       height: 6,
       color: false,
-      wrapLines: true,
+      wrapMode: "hard",
     }),
   );
   assertEquals(rows.slice(0, 5), [
@@ -299,7 +299,7 @@ Deno.test("renderFrame: wraps long lines onto later screen rows", () => {
   const doc = parseDocument("abcdefgh\nnext");
   const rows = renderFrame(
     doc,
-    baseView({ width: 4, height: 5, color: false, wrapLines: true }),
+    baseView({ width: 4, height: 5, color: false, wrapMode: "hard" }),
   ).map(stripAnsi);
   assertEquals(rows.slice(0, 4).map((row) => row.trimEnd()), [
     "abc\\",
@@ -309,11 +309,55 @@ Deno.test("renderFrame: wraps long lines onto later screen rows", () => {
   ]);
 });
 
+Deno.test("renderFrame: word wrapping preserves spaces and control pictures", () => {
+  const spaces = renderFrame(
+    parseDocument("foo     bar"),
+    baseView({ width: 4, height: 5, color: false, wrapMode: "word" }),
+  );
+  assertEquals(spaces.slice(0, 4), [
+    "foo\\",
+    "   \\",
+    "   \\",
+    "bar ",
+  ]);
+
+  const tab = renderFrame(
+    parseDocument("foo\tbar"),
+    baseView({ width: 4, height: 3, color: false, wrapMode: "word" }),
+  );
+  assertEquals(tab.slice(0, 2), ["foo\\", "␉bar"]);
+});
+
+Deno.test("renderFrame: word-wrapped separators retain search highlighting", () => {
+  const rows = renderFrame(
+    parseDocument("foo     bar"),
+    baseView({
+      width: 4,
+      height: 5,
+      wrapMode: "word",
+      matches: [{ line: 0, start: 3, end: 8 }],
+      currentMatch: 0,
+    }),
+  );
+
+  assertEquals(bgColumns(rows[1]), [true, true, true, false]);
+  assertEquals(bgColumns(rows[2]), [true, true, false, false]);
+});
+
+Deno.test("renderFrame: word wrapping does not break at a non-breaking space", () => {
+  const rows = renderFrame(
+    parseDocument("foo\u00a0bar"),
+    baseView({ width: 4, height: 3, color: false, wrapMode: "word" }),
+  );
+
+  assertEquals(rows.slice(0, 2), ["foo\\", "\u00a0bar"]);
+});
+
 Deno.test("renderFrame: styles wrapped continuation markers", () => {
   const doc = parseDocument("abcdefgh");
   const rows = renderFrame(
     doc,
-    baseView({ width: 4, height: 4, wrapLines: true }),
+    baseView({ width: 4, height: 4, wrapMode: "hard" }),
   );
   assertEquals(stripAnsi(rows[0]), "abc\\");
   assertEquals(stripAnsi(rows[1]), "def\\");
@@ -333,7 +377,7 @@ Deno.test("renderFrame: annotates only the lines that carry diff markers", () =>
       height: 5,
       expandMargin: true,
       diffAnnotations: [{ line: 1, kind: "expandDown" }],
-      wrapLines: true,
+      wrapMode: "hard",
     }),
   );
   assertEquals(stripAnsi(rows[0]), "1234567");
@@ -359,7 +403,7 @@ Deno.test("renderFrame: a wrapped edge labels only its closest connector", () =>
         { line: 0, kind: "expandDown" },
         { line: 1, kind: "diffMetadata" },
       ],
-      wrapLines: true,
+      wrapMode: "hard",
     }),
   );
   assertEquals(rows.slice(0, 5), [
@@ -381,7 +425,7 @@ Deno.test("renderFrame: a wrapped edge labels only its closest connector", () =>
         { line: 0, kind: "expandDown" },
         { line: 1, kind: "diffMetadata" },
       ],
-      wrapLines: true,
+      wrapMode: "hard",
     }),
   );
   assertEquals(fittingRows.slice(0, 2), [
@@ -471,7 +515,7 @@ Deno.test("renderFrame: wrapped metadata keeps its label beside the backslash", 
         { line: 0, kind: "expandDown" },
         { line: 1, kind: "diffMetadata" },
       ],
-      wrapLines: true,
+      wrapMode: "hard",
     }),
   );
   assertEquals(rows.slice(0, 5), [
@@ -576,7 +620,7 @@ Deno.test("renderFrame: a wrapped final triangle connects below the diff", () =>
       color: false,
       expandMargin: true,
       diffAnnotations: [{ line: 0, kind: "expandDown" }],
-      wrapLines: true,
+      wrapMode: "hard",
     }),
   );
   assertEquals(rows.slice(0, 5), [
@@ -672,7 +716,7 @@ Deno.test("renderFrame: a wrapped marker keeps each diff-row background", () => 
     };
     const rows = renderFrame(
       doc,
-      baseView({ width: 4, height: 4, wrapLines: true }),
+      baseView({ width: 4, height: 4, wrapMode: "hard" }),
     );
     assertEquals(stripAnsi(rows[0]), "abc\\");
     assertEquals(bgAtColumn(rows[0], 3), lineBg(bg).join(","));
@@ -683,7 +727,7 @@ Deno.test("renderFrame: the final wrapped row keeps the full content width", () 
   const doc = parseDocument("abcdefg");
   const rows = renderFrame(
     doc,
-    baseView({ width: 4, height: 3, color: false, wrapLines: true }),
+    baseView({ width: 4, height: 3, color: false, wrapMode: "hard" }),
   );
   assertEquals(rows.slice(0, 2), ["abc\\", "defg"]);
 });
@@ -698,7 +742,7 @@ Deno.test("renderFrame: a physically one-column view preserves source text", () 
       color: false,
       expandMargin: true,
       diffAnnotations: [{ line: 0, kind: "diffMetadata" }],
-      wrapLines: true,
+      wrapMode: "hard",
     }),
   );
   assertEquals(rows.slice(0, 2), ["a", "b"]);
@@ -713,7 +757,7 @@ Deno.test("renderFrame: wrapping reclaims a gutter that leaves one content colum
       height: 3,
       color: false,
       showLineNumbers: true,
-      wrapLines: true,
+      wrapMode: "hard",
     }),
   );
   assertEquals(rows.slice(0, 2), ["abcd\\", "ef   "]);
@@ -740,7 +784,7 @@ Deno.test("renderFrame: wrapping reclaims a guide that leaves one content column
       height: 3,
       color: false,
       selected,
-      wrapLines: true,
+      wrapMode: "hard",
     }),
   );
   assertEquals(rows.slice(0, 2), ["a\\", "bc"]);
@@ -755,7 +799,7 @@ Deno.test("renderFrame: wrapped top offsets address continuation rows", () => {
       width: 4,
       height: 3,
       color: false,
-      wrapLines: true,
+      wrapMode: "hard",
     }),
   ).map(stripAnsi);
   assertEquals(rows.slice(0, 2).map((row) => row.trimEnd()), [
@@ -773,7 +817,7 @@ Deno.test("renderFrame: only the first wrapped row repeats its line number", () 
       height: 5,
       color: false,
       showLineNumbers: true,
-      wrapLines: true,
+      wrapMode: "hard",
     }),
   ).map(stripAnsi);
   assertEquals(rows[0], "  1 abc\\");
@@ -792,7 +836,7 @@ Deno.test("renderFrame: a selected line's guide spans its wrapped rows", () => {
       height: 4,
       color: false,
       selected,
-      wrapLines: true,
+      wrapMode: "hard",
     }),
   ).map(stripAnsi);
   assertEquals(rows.slice(0, 3).map((row) => row[0]), ["╭", "│", "╰"]);
@@ -812,7 +856,7 @@ Deno.test("renderFrame: a selected node guides only its wrapped column range", (
       height: 5,
       color: false,
       selected,
-      wrapLines: true,
+      wrapMode: "hard",
     }),
   ).map(stripAnsi);
   assertEquals(rows.slice(0, 3).map((row) => row[0]), [" ", "▶", " "]);
@@ -828,7 +872,7 @@ Deno.test("renderFrame: wrapped selection columns count Unicode code points", ()
       height: 6,
       color: false,
       selected,
-      wrapLines: true,
+      wrapMode: "hard",
     }),
   ).map(stripAnsi);
   assertEquals(rows.slice(0, 5).map((row) => row[0]), [
@@ -856,7 +900,7 @@ Deno.test("renderFrame: a selected empty line keeps its wrapped guide", () => {
       height: 4,
       color: false,
       selected,
-      wrapLines: true,
+      wrapMode: "hard",
     }),
   ).map(stripAnsi);
   assertEquals(rows[1][0], "│");
@@ -872,7 +916,7 @@ Deno.test("renderFrame: a wrapped guide is blank outside the selected node", () 
       height: 7,
       color: false,
       selected,
-      wrapLines: true,
+      wrapMode: "hard",
     }),
   ).map(stripAnsi);
   assertEquals(rows[0][0], " ");
@@ -884,7 +928,7 @@ Deno.test("renderFrame: wrapped status reports logical source lines", () => {
   const status = stripAnsi(
     renderFrame(
       doc,
-      baseView({ width: 6, height: 3, color: false, wrapLines: true }),
+      baseView({ width: 6, height: 3, color: false, wrapMode: "hard" }),
     ).at(-1)!,
   );
   assert(status.includes("1-1/2"), status);
@@ -896,7 +940,7 @@ Deno.test("renderFrame: wrapped status reports an empty document", () => {
   const status = stripAnsi(
     renderFrame(
       doc,
-      baseView({ width: 12, height: 3, color: false, wrapLines: true }),
+      baseView({ width: 12, height: 3, color: false, wrapMode: "hard" }),
     ).at(-1)!,
   );
   assert(status.includes("0-0/0"), status);
@@ -1017,7 +1061,7 @@ Deno.test("renderFrame: dense wrapped matches keep the focused overlap", () => {
       top: 19,
       width: 10,
       height: 4,
-      wrapLines: true,
+      wrapMode: "hard",
       matches,
       currentMatch: 176,
     }),
@@ -1138,7 +1182,7 @@ Deno.test("renderFrame: diff status excludes only its terminal parser row", () =
     height: 4,
     top: 1,
     isDiff: true,
-    wrapLines: true,
+    wrapMode: "hard",
   });
   assert(wrapped.includes("1-2/2  50%"), wrapped);
 

@@ -25,6 +25,7 @@ import {
   buildWrapPlan,
   fitViewLayout,
   type WrapDecoration,
+  type WrapMode,
   type WrappedRow,
   wrappedRowAt,
   wrappedRowForPosition,
@@ -125,8 +126,8 @@ export interface ViewState {
   /** Whether the source is a diff. */
   isDiff?: boolean;
   showLineNumbers: boolean;
-  /** Whether long logical lines continue on later screen rows. */
-  wrapLines: boolean;
+  /** How long logical lines continue on later screen rows. */
+  wrapMode: WrapMode;
   /** A precomputed wrapping layout for `doc`, when the session has one. */
   wrapPlan?: WrapPlan | null;
   /** The number to show in the gutter on each display row, or null there for a
@@ -212,7 +213,7 @@ function layout(
     gutterWidth(doc, view),
     view.selected ? 1 : 0,
     view.expandMargin ? DIFF_MARGIN_WIDTH : 0,
-    view.wrapLines,
+    view.wrapMode !== "off",
   );
   return {
     gutterWidth: fitted.gutterWidth,
@@ -237,12 +238,18 @@ export function cursorScreenPos(
   const { gutterWidth, guideWidth, contentWidth } = layout(doc, view);
   let screenLine = line;
   let contentCol = col - view.left;
-  if (view.wrapLines) {
+  if (view.wrapMode !== "off") {
     const plan = view.wrapPlan ??
-      buildWrapPlan(doc.lines, view.displayMode, contentWidth);
+      buildWrapPlan(
+        doc.lines,
+        view.displayMode,
+        contentWidth,
+        new Map(),
+        view.wrapMode,
+      );
     const row = wrappedRowForPosition(plan, line, col);
     screenLine = row?.row ?? plan.firstRow[line];
-    contentCol = col - (row?.offset ?? 0);
+    contentCol = (row?.prefixWidth ?? 0) + col - (row?.offset ?? 0);
   }
   const contentHeight = view.height - 1;
   const r = screenLine - view.top;
@@ -380,7 +387,7 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
       annotation.kind,
     ]),
   );
-  const metadataLabelLine = view.wrapLines
+  const metadataLabelLine = view.wrapMode !== "off"
     ? labeledDiffMetadataLine(
       doc.lines,
       view.displayMode,
@@ -401,9 +408,15 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
       ),
     );
   }
-  const wrapPlan = view.wrapLines
+  const wrapPlan = view.wrapMode !== "off"
     ? view.wrapPlan ??
-      buildWrapPlan(doc.lines, view.displayMode, contentWidth, decorations)
+      buildWrapPlan(
+        doc.lines,
+        view.displayMode,
+        contentWidth,
+        decorations,
+        view.wrapMode,
+      )
     : null;
   const documentRowCount = wrapPlan?.rowCount ?? doc.lines.length;
   const hasTrailingEmptyLine = view.isDiff === true &&
@@ -453,6 +466,8 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
           0,
           Math.max(1, view.width),
           Math.max(1, view.width),
+          Math.max(1, view.width),
+          0,
           false,
           null,
           undefined,
@@ -509,6 +524,8 @@ export function renderFrame(doc: Document, view: ViewState): string[] {
         lineIdx,
         wrappedRow?.offset ?? view.left,
         sourceWidth,
+        wrappedRow?.sourceEnd ?? Number.POSITIVE_INFINITY,
+        wrappedRow?.prefixWidth ?? 0,
         wrappedRow?.wrapMarker ?? false,
         displayedCells,
         displayedSelection,
@@ -546,6 +563,8 @@ function renderContentRow(
   lineIdx: number,
   offset: number,
   sourceWidth: number,
+  sourceEnd: number,
+  prefixWidth: number,
   wrapMarker: boolean,
   display: readonly DisplayCell[] | undefined,
   selection: SelectionSpan | null,
@@ -577,7 +596,7 @@ function renderContentRow(
   if (guideWidth > 0) {
     // guideWidth > 0 only when view.selected is set (see guideWidth above).
     guide = paintIf(
-      view.wrapLines
+      view.wrapMode !== "off"
         ? wrappedGuideChar(
           view.selected!,
           lineIdx,
@@ -599,6 +618,8 @@ function renderContentRow(
     offset,
     contentWidth,
     sourceWidth,
+    sourceEnd,
+    prefixWidth,
     wrapMarker,
     selection,
     display,
@@ -737,6 +758,8 @@ function composeContent(
   offset: number,
   width: number,
   sourceWidth: number,
+  sourceEnd: number,
+  prefixWidth: number,
   showWrapMarker: boolean,
   sel: SelectionSpan | null,
   display: readonly DisplayCell[] | undefined,
@@ -761,29 +784,35 @@ function composeContent(
     // are placed by their position in this list, not by their source column.
     // Each cell still knows the source column it stands for, which is what the
     // selection and search ranges are stated in.
-    const end = Math.min(display.length, offset + sourceWidth);
-    for (let d = offset; d < end; d++) {
-      const idx = d - offset;
+    const styleCell = (dc: DisplayCell, synthetic: boolean): Style => {
+      if (!color) return EMPTY_STYLE;
+      const hit = !synthetic && lineMatches
+        ? matchStyle(lineMatches, dc.col)
+        : null;
+      if (hit) return hit;
+      const base = mergeBg(dc.ansi ?? dc.syntax, rowBg);
+      const inSel = !synthetic && sel !== null &&
+        dc.col >= sel.lo && dc.col < sel.hi;
+      return inSel ? mergeBg(base, sel.bg) : base;
+    };
+    for (let d = 0; d < prefixWidth && d < display.length; d++) {
       const dc = display[d];
-      let style: Style;
-      if (!color) {
-        style = EMPTY_STYLE;
-      } else {
-        const hit = lineMatches ? matchStyle(lineMatches, dc.col) : null;
-        if (hit) {
-          style = hit;
-        } else {
-          const base = mergeBg(dc.ansi ?? dc.syntax, rowBg);
-          const inSel = sel !== null && dc.col >= sel.lo && dc.col < sel.hi;
-          style = inSel ? mergeBg(base, sel.bg) : base;
-        }
-      }
-      cells[idx] = { ch: dc.ch, style };
+      cells[d] = { ch: dc.ch, style: styleCell(dc, true) };
+    }
+    const end = Math.min(
+      display.length,
+      sourceEnd,
+      offset + sourceWidth,
+    );
+    for (let d = offset; d < end; d++) {
+      const idx = prefixWidth + d - offset;
+      const dc = display[d];
+      cells[idx] = { ch: dc.ch, style: styleCell(dc, false) };
     }
   }
 
   if (showWrapMarker) {
-    cells[sourceWidth] = {
+    cells[prefixWidth + sourceWidth] = {
       ch: "\\",
       style: color ? mergeBg(ui.wrapMarker, rowBg) : EMPTY_STYLE,
     };
@@ -1023,7 +1052,12 @@ function browseHints(view: ViewState): KeyHint[] {
   }
   if (view.canEdit) hints.push({ key: "e", label: "Edit" });
   if (view.hasNonPrintables) hints.push({ key: "C", label: "Chars" });
-  hints.push({ key: "\\", label: view.wrapLines ? "Unwrap" : "Wrap" });
+  const wrapLabel = view.wrapMode === "off"
+    ? "Hard wrap"
+    : view.wrapMode === "hard"
+    ? "Word wrap"
+    : "Unwrap";
+  hints.push({ key: "\\", label: wrapLabel });
   hints.push({ key: "#", label: "Lines" });
   return hints;
 }

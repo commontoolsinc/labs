@@ -36,7 +36,7 @@ KEYS (press ? in the viewer for the full list):
   ↑/↓ k/j scroll · ←/→ h/l pan · Space/b page · g/G top/bottom · / search
   structure tree: w/s sibling · a/d parent/child · Tab/⇧Tab depth-first
   Enter info card · in it: ↑/↓ pick a reference · Enter opens it · z reveals it
-  v source/rendered · t look up a definition · # line numbers · \\ wrap · q quit
+  v source/rendered · t look up a definition · # line numbers · \\ wrap mode · q quit
 
 When stdout is not a terminal (piped/redirected) it prints the colourised text
 and exits, like less.`,
