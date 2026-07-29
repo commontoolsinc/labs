@@ -50,14 +50,14 @@ resumable.
 ## 1. State
 
 **Branch:** `codex/server-execution-w1-2-shared-pool` (LABS repo).
-**Last landed:** `91434cc6d` — README §1/§4 motivations (D8–D10) + R5 worklist
-into client-passivity §0 step 3.
+**Last landed:** `57e625424` — wave A (A1–A4) + C1 + the branch's lint/fmt debt.
 
 | Wave | What | Status |
 | --- | --- | --- |
-| **A** | R5/R13 effect rows — brokers, descriptors, `wish`, sqlite commit path | **NEXT** — A1 diagnosed, not built |
-| B | Post-A measurement re-run | blocked on A |
-| C | P3 preconditions (does P3 delete the §4 widening artifact? client-side lattice-claims negotiation) | C1 can start in parallel with A |
+| A | R5/R13 effect rows — brokers, descriptors, `wish` | **DONE** except A5 |
+| **A5** | served sqlite-op commit path (D2) | **NEXT** — scope grew, see below |
+| **B** | Post-A measurement re-run | **READY** — can run in parallel with A5 |
+| C | P3 preconditions | C1 **DONE** (ruled SURVIVES); C2 next after A5/B |
 | D | P3 passivity mechanism — the client stops running standing work | blocked on B + C |
 | E | P5 passive delivery + warm spaces | blocked on D |
 | F | P6 acceptance | blocked on E |
@@ -70,15 +70,30 @@ into client-passivity §0 step 3.
 - `9caf341e2` R7 diagnosis.
 - `dbb5fc86c` R7 fix — issuance-side context-floor consult; fences 2 → 0 → 0.
 - `91434cc6d` spec motivations + R5 worklist.
+- `b058731e1` this orchestration plan.
 
-**Known-open, deliberately deferred:**
+**Known-open:**
 
-- `dynamic-write-outside-static-surface` ×12 (1 offender), survives both scoped
-  ranks. **Do not diagnose before C1** — it is a §4 output-widening artifact
-  whose purpose is keeping a *client* reader correct, so P3 may delete the
-  requirement rather than the fix.
+- `dynamic-write-outside-static-surface` ×12 (1 offender). **C1 UNBLOCKED
+  THIS** — ruled SURVIVES, so it is not a P3 dependency and is now ordinary
+  P2 serving-coverage work. Start from the certificate-completeness
+  hypothesis in client-passivity §5h, not from a fresh investigation.
+- **CP6's refutation is re-opened, owner-gated.** A3 proved `llmDialog` and
+  `navigateTo` are effect nodes at runtime (§2.7 item 6). Whether `llmDialog`
+  performs *double* egress was never re-measured after the kind changed.
+- **`wish` bypasses the executor's egress denial.** It builds
+  `new HttpProgramResolver(url)` with no fetch transport, so it falls through
+  to `globalThis.fetch` and `fetch: denyExternalBuiltinFetch` never sees the
+  call. Independent of the descriptor question; needs its own decision.
 - The rank dials remain programmatic-only. No deployment can flip them; the
   browser cannot negotiate `context-lattice-claims-v1` at all. That is wave C2.
+- **A5's scope grew.** A2 established that `sqliteQuery` is NOT blocked on
+  D2, and that the lane-scoped read seam in `packages/memory` (G1) and the
+  descriptor shape (G3) fold INTO A5 rather than preceding it. Compose A5's
+  prompt from client-passivity §5h's A2 paragraph.
+- The arc's goal statement vs CP1 — see the tension flagged at the end of
+  §5h. Owner call: is the target zero client reactive commits, or zero on the
+  served path?
 
 ---
 
@@ -137,6 +152,41 @@ fails its 60s `waitForCondition` barrier intermittently under load.
 re-run it before believing it; it deserves its own barrier fix, which is not
 part of this arc.
 
+### 2.4b The fmt/lint gate — measured on BOTH sides, attribution settled
+
+Measured by the orchestrator in detached worktrees with empty `git status`:
+
+| | `deno fmt --check` | `deno lint` |
+| --- | --- | --- |
+| main `aac9bd3dc` | 26 unformatted / 2128 files | **clean** |
+| branch `b058731e1` | 22 unformatted / 3735 files | **1 problem** |
+
+**The lint error is ARC DEBT, not repo debt.** main is lint-clean;
+`require-await` at `packages/runner/src/executor/executor-worker.ts:1071`
+arrived on this branch (the file has 51 branch-only commits; the error came in
+with `d28092a64`). It therefore blocks §5's A→B "full battery green" gate and
+the arc has to fix it. The `async` keyword is load-bearing — `enqueue<T>`
+requires `() => Promise<T>` — so the fix is a `// deno-lint-ignore
+require-await` carrying a reason, matching the precedent at
+`packages/fuse/cell-bridge.ts:3110`, NOT deleting the keyword.
+
+**The fmt drift is on both sides and they are different sets.** All 22 on the
+branch are in branch-modified files, so the arc introduced those; main
+separately carries 26 of its own. Two distinct cleanups; do not conflate them,
+and do not let "main is dirty too" excuse the branch's 22.
+
+**Do not run repo-wide `deno fmt` mid-wave** — it rewrites files other agents
+have open, which is the whole-file-clobber hazard §3 warns about. Take the
+branch's fmt cleanup as its own commit on a quiet tree (all agents reported),
+and keep it separate from any behavioral commit so the mechanical reformat
+stays reviewable.
+
+**Beware the dirty-tree reading.** Mid-wave, two of the 22
+(`packages/runner/src/runner.ts`,
+`packages/runner/test/executor-action-router.test.ts`) sit in the working set,
+so it looks like the agents caused it. They did not — every subagent in this
+wave independently checked and reported this correctly.
+
 ### 2.5 Measurement discipline (mandatory — see client-passivity §0)
 
 Fresh store per run (`rm -rf packages/toolshed/cache` after stopping the
@@ -179,6 +229,29 @@ this wrong makes every cross-arm set relation vacuously zero.
 5. Kind pins live in `packages/runner/test/builtin-effect-registry.test.ts`
    (static, no Runtime): a builtin performing egress must register
    `isEffect: true` and appear in its id list.
+6. **A builtin's registration is not its kind.** `runner.ts:5304` resolves
+   `module.isEffect ?? builtinIsEffect` — the FACTORY's return wins over
+   `index.ts`. `llmDialog` (`llm-dialog.ts:3219`) and `navigateTo`
+   (`navigate-to.ts:121`) both `return { ..., isEffect: true }`, so they are
+   **effect** nodes at runtime no matter what `addModuleByRef` says.
+   Consequence for W2.15: never give them a computation descriptor —
+   `serverBuiltinComputationScopeSummary` returns undefined unless
+   `observation.actionKind === "computation"`, so the descriptor would mint
+   and then never assemble. Pinned by "builtins whose factory declares
+   isEffect are effect nodes regardless of the registration source" in the
+   same file.
+
+**CORRECTION (2026-07-28, A3).** An earlier revision of this plan asserted
+"`llmDialog` is CONFIRMED a computation — CP6's egress claim was REFUTED."
+**That was wrong**, and it came from a test comment that was itself wrong: the
+"llmDialog stays a computation" assertion only regex-parses `index.ts`
+registrations, so it is green while the effective kind is the opposite. This
+is the exact failure mode §0 step 5 warns about — a green test asserting a
+false thing — so it is worth remembering that it occurred inside this arc's
+own standing knowledge. **CP6's refutation is re-opened and is owner-gated:**
+the claim was that `llmDialog` performs no direct egress. Its *kind* is now
+known to be effect; whether it performs *double* egress is a separate
+question that nobody has re-measured.
 
 ### 2.8 The `llm` hole, already diagnosed (wave A1)
 
@@ -228,6 +301,22 @@ argument for crossing rather than lingering.
 
 Use `general-purpose` unless the item says otherwise. Dispatch items marked
 `parallel: yes` in a single message with multiple tool calls.
+
+**Cap: at most THREE subagents in flight at once** (owner, 2026-07-28) — the
+5-hour quota is a real budget and a wide fan-out burns it. `parallel: yes`
+means "may run alongside others", not "dispatch all of them now". When a wave
+has more than three parallel items, dispatch the highest crossing-weight three
+(CP10) and hold the rest until a slot frees. A second reason to prefer three:
+every parallel item shares one worktree, so each extra agent adds edit-collision
+and test-interference risk on the shared registry files.
+
+**When parallel items share a file** (wave A: `server-execution.ts`, and the
+zero-verdict pin in `server-execution-product-fixtures.test.ts`), add to each
+prompt: use anchored `Edit`s and never whole-file `Write`s on a shared file;
+never `git checkout`/`stash`/`commit`; keep test runs narrow; and check
+`git diff --stat` before chasing a failure that looks unrelated. Without that
+clause the likeliest wave failure is not a bad build — it is one agent
+debugging another's half-applied edit.
 
 ### Do NOT delegate — do these yourself
 
@@ -564,3 +653,16 @@ Append one line per landed item: date, item, commit, one-sentence outcome.
 
 - 2026-07-28 — plan created (`docs/specs/server-side-execution/passivity-arc-orchestration.md`);
   wave A next, A1 pre-diagnosed in §2.8.
+- 2026-07-28 — A1 `cfa827f82`: `llm` gets the server broker route; all three
+  LLM builtins share it.
+- 2026-07-28 — A2 `8cb00bbf8`: fetch broker refused as a misfit;
+  `sqliteQuery`'s post-commit effect now routes through the sink-request
+  suppression gate. Not blocked on D2; rest folds into A5.
+- 2026-07-28 — A3 `f221411df`: `inspectConfLabel` added, 4 of 5 refused with
+  evidence. Found a green test asserting a false thing; CP6 re-opened.
+- 2026-07-28 — A4 `a69aec5f9`: `wish` refused a descriptor (its surface is
+  misleadingly narrow) and the block is pinned. Found an egress-denial bypass.
+- 2026-07-28 — arc debt `a34c15fd2` (lint pin) + `57e625424` (fmt 21 files);
+  A→B gate's lint and format halves now met.
+- 2026-07-28 — C1 ruled **SURVIVES**; the ×12 is unblocked as P2 work and the
+  question's framing was wrong at the source. Full ruling: client-passivity §5h.

@@ -1526,6 +1526,116 @@ failures at clean HEAD** with no local changes applied, and 0/6 across
 two quiet 3-run A/B halves. It is load-sensitive and pre-existing, not
 caused by anything here; worth its own barrier/timeout fix.
 
+## 5h. Wave A (R5/R13 rows) + the C1 ruling (2026-07-28)
+
+Built by five parallel subagents against the orchestration script in
+[`passivity-arc-orchestration.md`](passivity-arc-orchestration.md); every
+Verify line was re-run by the orchestrator rather than accepted. Landed as
+`cfa827f82`, `8cb00bbf8`, `f221411df`, `a69aec5f9`, plus `a34c15fd2` /
+`57e625424` for the branch's own lint and format debt.
+
+### What the R5/R13 rows bought
+
+| Item | Outcome |
+| --- | --- |
+| A1 `llm` broker | **BUILT.** All three LLM builtins now share one route. |
+| A2 `sqliteQuery` | **Gate built, broker refused.** See below. |
+| A3 five descriptors | **1 of 5 added** (`inspectConfLabel`); 4 refused. |
+| A4 `wish` | **Refused, with the block pinned.** |
+
+Three of the four refused something, and the refusals carry more
+information than the builds.
+
+**A2 — the fetch broker does not fit, and that is fine.** `sqliteQuery`
+is not fetch-shaped and the executor Worker already carries a
+`sqlite.query` transport over its memory port; a second broker would
+duplicate a working path. It is **not** blocked on D2/A5. What it was
+actually missing is double-execution prevention: it enqueued its
+post-commit effect directly, bypassing `externalSinkDisposition()`. The
+ordering matters — the dedup marker must not be written on the suppressed
+side, or the result stays permanently `pending` *and* wedges the side
+that was supposed to issue. Remaining `sqliteQuery` work (lane-scoped
+read seam, descriptor shape) folds **into** A5 rather than preceding it.
+
+**A3 — a green test was asserting a false thing.** `llmDialog` and
+`navigateTo` return `isEffect: true` from their factories, and
+`runner.ts:5304` resolves `module.isEffect ?? builtinIsEffect`, so they
+are EFFECT nodes whatever `index.ts` says. A computation descriptor can
+never serve them: `serverBuiltinComputationScopeSummary` requires
+`actionKind === "computation"`, so it would mint and never assemble. The
+existing pin asserting "llmDialog stays a computation" only regex-parses
+registrations, so it was green while the effective kind was the opposite
+— and that false claim had already propagated into the arc plan's
+standing knowledge. Corrected at the source; real behavior now pinned.
+
+**→ CP6's refutation is RE-OPENED and owner-gated.** The refuted claim
+was that `llmDialog` performs no direct egress. Its *kind* is now known
+to be effect; whether it performs *double* egress is a separate question
+nobody has re-measured.
+
+**A4 — `wish` is not descriptor-shaped because its surface is
+misleadingly NARROW.** Its sidecar paths load a pattern over HTTP, run it
+on their own transaction, and subscribe fresh scheduler actions — none of
+which appears in the action's own transaction. So the run with the
+smallest in-transaction write surface is exactly the run that egresses. A
+W2.15a descriptor would classify those runs `claim-ready` and sail them
+through the dynamic write firewall, re-opening CP6 from the other side.
+
+**→ New finding, independent of the descriptor question:** that egress is
+neither brokered nor deniable. `wish` constructs `new
+HttpProgramResolver(url)` with no fetch transport, so the resolver falls
+back to `globalThis.fetch` and the executor Worker's `fetch:
+denyExternalBuiltinFetch` option never sees the call. The executor's
+egress denial has a bypass.
+
+### C1 ruling: **SURVIVES** — and the question was mis-framed
+
+C1 asked whether a purely speculative client deletes the §4 widening
+requirement. **Ruled SURVIVES**, and the premise behind the question is
+wrong at the source: the pair is not a client-authority mechanism. It is
+a base-runtime scope-discovery rule from
+[`scoped-cell-instances.md`](../scoped-cell-instances.md), emitted
+unconditionally by every runtime. The emission predicate
+(`pattern-binding.ts:274`) contains no lane, claim, executor or server
+term — verified directly. The context-lattice §4 firewall is a *backstop*
+on that pre-existing rule.
+
+Passivity removes client **writes**; the pair serves client **reads**.
+Every reader of the broad instance (link resolution, scope propagation
+through the derivation graph, doc-set/sync discovery, other principals'
+lanes, the servability classifiers, out-of-runtime readers) is a
+read-path consumer, and render is client-inherent by this document's own
+§1. P3 deletes exactly one thing: the `laneActingCommit === false` arm of
+the runner mirror, which is dead-code cleanup.
+
+Two consequences that reorder the plan:
+
+1. **The `dynamic-write-outside-static-surface` ×12 is NOT a P3
+   dependency.** It is unblocked as ordinary P2 serving-coverage work.
+   Leading hypothesis to start from (flagged, not asserted):
+   `widenLaneOutputEnvelopes` synthesizes lane twins only for
+   `directOutputs` already at scope `space`, while the spec requires the
+   widening rule to apply equally to auxiliary result cells — so an
+   auxiliary cell absent from `directOutputs` would report this code with
+   a perfectly well-formed pair. That would make it a
+   certificate-completeness bug, one offender, ~1 hour to confirm.
+2. **The real narrowing pressure on the firewall arrives with P5, not
+   P3.** When handlers move server-side, lanes begin carrying legitimate
+   narrow-to-wide *value* writes and `broad-lane-value-write` becomes a
+   false positive for a sanctioned class. That needs a handler-commit
+   discriminator, and it narrows the firewall, never the pair.
+
+**Tension worth the owner's attention.** The arc's goal is stated as "the
+client never commits any non-handler/non-event-driven changes", but CP1
+already carves out the opposite for the dynamic fail-open class — revoked
+claims, unserved candidates, firewall discards, de-claimed actions — where
+the client's rerun-commit *is* the canonical value, mechanized at
+`storage/v2.ts:6276`. P3 does not make the goal statement literally true;
+it shrinks the exception. Worth deciding whether the arc's target is
+"zero client reactive commits" (which would require eliminating fail-open)
+or "no client reactive commits on the served path" (which is what CP1
+describes and what is actually being built).
+
 ## 7. Owner decisions — RESOLVED 2026-07-26 (D1-D7); amended 2026-07-28 (D8-D10)
 
 Recorded from the owner's "build all of D" directive. Where the panel
