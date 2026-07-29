@@ -1,5 +1,5 @@
 #!/bin/sh
-# `cf` on PATH, backed by this checkout's source.
+# `cf` on PATH, backed by whichever labs checkout you are standing in.
 #
 # Shell completion is why this exists: the function `cf completion bash|zsh`
 # installs calls `cf completion complete` by name on every Tab, so completion
@@ -10,23 +10,76 @@
 #   - mise users get it automatically (`_.path` in mise.toml)
 #   - everyone else: ln -s "$PWD/bin/cf" ~/.local/bin/cf
 #
-# Runs from source, so it never goes stale against the checkout. For the ~2x
-# faster compiled binary, see "Installing cf on PATH" in packages/cli/README.md.
+# Runs from source, so it never goes stale against the checkout. `dist/cf` is
+# deliberately not used here — see "Why not dist/cf" in packages/cli/README.md.
 
 set -e
+
+# Which labs checkout to run, in precedence order:
+#
+#   1. $CF_LABS_ROOT, if set — an explicit override for when the cwd cannot
+#      say what you mean (working on a pattern in /tmp, say). A value that is
+#      not a checkout is an error, not a quiet fall-through to something else.
+#   2. The nearest checkout walking up from $PWD, so a symlinked install does
+#      not pin `cf` to the checkout it was installed from. Several checkouts
+#      coexisting is normal here — a vendored labs inside another repo is a
+#      supported, tested layout (see packages/cli/test/launcher.test.ts).
+#   3. The checkout this script physically lives in — the sensible default
+#      when you are not standing in one at all.
+#
+# This mirrors what mise already does for route 2 (`_.path` resolves relative
+# to the mise.toml declaring it), so both install routes agree.
+
+is_labs_checkout() {
+  [ -f "${1}/packages/cli/launcher.ts" ]
+}
+
+# First match walking up wins. A directory is checked as a checkout before it
+# is checked as a vendoring host, so standing inside `<host>/vendor/labs`
+# selects that labs rather than walking up and re-deriving it from the host.
+resolve_from_cwd() {
+  dir=$PWD
+  while :; do
+    if is_labs_checkout "${dir}"; then
+      printf '%s\n' "${dir}"
+      return 0
+    fi
+    if is_labs_checkout "${dir}/vendor/labs"; then
+      printf '%s\n' "${dir}/vendor/labs"
+      return 0
+    fi
+    parent=$(dirname "${dir}")
+    # dirname("/") is "/" — stop rather than spin.
+    [ "${parent}" = "${dir}" ] && return 1
+    dir=$parent
+  done
+}
 
 # Resolve through symlinks so the `ln -s` install above reports the checkout
 # rather than the link. `readlink -f` is GNU and newer-macOS only, so the links
 # are walked by hand to keep this working on a stock macOS shell.
-target=$0
-while [ -L "$target" ]; do
-  link=$(readlink "$target")
-  case $link in
-    /*) target=$link ;;
-    *) target=$(dirname "$target")/$link ;;
-  esac
-done
-root=$(CDPATH= cd -- "$(dirname -- "$target")/.." && pwd -P)
+script_checkout() {
+  target=$0
+  while [ -L "${target}" ]; do
+    link=$(readlink "${target}")
+    case ${link} in
+      /*) target=$link ;;
+      *) target=$(dirname "${target}")/$link ;;
+    esac
+  done
+  (CDPATH= cd -- "$(dirname -- "${target}")/.." && pwd -P)
+}
+
+if [ -n "${CF_LABS_ROOT:-}" ]; then
+  root=$CF_LABS_ROOT
+  if ! is_labs_checkout "${root}"; then
+    echo "cf: CF_LABS_ROOT is not a labs checkout: ${root}" >&2
+    echo "    (expected ${root}/packages/cli/launcher.ts to exist)" >&2
+    exit 2
+  fi
+else
+  root=$(resolve_from_cwd) || root=$(script_checkout)
+fi
 
 if ! command -v deno >/dev/null 2>&1; then
   echo "cf: deno not found on PATH." >&2

@@ -230,16 +230,39 @@ itself, and local runs of those same scripts set `CF_CLI_INTEGRATION_USE_LOCAL`
 to force the source CLI.)
 
 `bin/cf` is the install. It runs from source, so it never goes stale against the
-checkout, and it resolves the repo from its own location, so a symlink works:
+checkout:
 
 ```bash
-# mise users: nothing to do. mise.toml puts this checkout's bin/ on PATH, so
-# `cf` follows the worktree you are standing in.
+# mise users: nothing to do. mise.toml puts this checkout's bin/ on PATH.
 mise trust    # only if this checkout has not been trusted yet
 
 # everyone else (mise is recommended in README.md but not required):
 ln -s "$PWD/bin/cf" ~/.local/bin/cf
 ```
+
+### Which checkout runs
+
+Several checkouts coexisting is normal — worktrees, and a vendored labs inside
+another repo (a supported, tested layout: see `test/launcher.test.ts`). So the
+symlink above does **not** pin `cf` to the checkout you installed it from. It
+selects, in order:
+
+1. **`$CF_LABS_ROOT`**, when set — the explicit override for when your cwd
+   cannot say what you mean, such as working on a pattern under `/tmp`. A value
+   that is not a checkout is an error, not a quiet fall-through. It chooses
+   which CLI runs; it does not change your working directory.
+2. **The nearest checkout walking up from `$PWD`.** A directory is tested as a
+   checkout before it is tested as a host vendoring one at `vendor/labs`, so
+   standing inside `<host>/vendor/labs` selects that labs rather than
+   re-deriving it from the host.
+3. **The checkout the script itself lives in** — the default when you are not
+   standing in one at all.
+
+Rule 2 is what mise already does for its route (`_.path` resolves relative to
+the `mise.toml` declaring it), so both install routes agree on which checkout
+you get. The consequence worth knowing: `cf` inside checkout B runs B's code
+even though you installed the link from A. That is the point, but it means a
+stack trace is the quickest way to confirm which checkout answered.
 
 ### Why not `dist/cf`
 
