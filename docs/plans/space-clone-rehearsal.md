@@ -305,6 +305,25 @@ rehearsal isn't over-trusted:
 - `cf space clone --verify` — fingerprint check against the manifest.
 - `cf inspect churn <space> [--bucket 1m] [--since …] [--top N]`.
 
+**Layout correction (2026-07-28).** The first implementation wrote the working
+copy to `<dir>/engine-v3/<did>.sqlite` and told the operator to point
+`MEMORY_DIR` at `<dir>`. A server pointed there actually reads
+`<dir>/engine-v3/engine-v3/<did>.sqlite`: toolshed's
+`resolveMemoryEngineStoreRootUrl` appends `engine-v3`, and memory's
+`resolveSpaceStoreUrl` appends it again. Every clone produced was therefore
+unservable — the server found nothing and silently created a fresh empty space
+— and every test passed, because they all checked the layout against the
+tool's own hardcoded constant rather than against the resolvers. Only booting a
+real toolshed and reading the board back exposed it.
+
+The fix is not to hardcode the doubled path, which would be a third statement
+of the layout. `resolveMemoryEngineStoreRootUrl` moved into
+`memory/v2/storage-path.ts` beside `resolveSpaceStoreUrl`, and both the clone
+and its tests now COMPOSE the two. If the redundant append is ever removed,
+clones follow with no further change. The doubling itself is a latent bug worth
+its own change: every existing store depends on it, so removing it is a
+migration, not a drive-by.
+
 **Build (increment 2, optional).** Toolshed clone banner. **Shipped** —
 `packages/toolshed/lib/clone-banner.ts` reads the `.cf-clone` marker at
 startup and prints the clone's provenance, so a served clone is visible in

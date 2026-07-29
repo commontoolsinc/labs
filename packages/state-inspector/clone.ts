@@ -24,6 +24,11 @@
 // serves the clone as a live space under the SAME DID.
 
 import * as Path from "@std/path";
+import {
+  resolveMemoryEngineStoreRootUrl,
+  resolveSpaceStoreUrl,
+} from "@commonfabric/memory/v2/storage-path";
+import type { MemorySpace } from "@commonfabric/memory/interface";
 import { createHasher } from "@commonfabric/content-hash";
 import { openSpace } from "./db.ts";
 import { contentFingerprint, type FingerprintReport } from "./fingerprint.ts";
@@ -32,8 +37,6 @@ import { contentFingerprint, type FingerprintReport } from "./fingerprint.ts";
 const MANIFEST = "clone.json";
 const MARKER = ".cf-clone";
 const PRISTINE_DIR = "pristine";
-/** The memory server's own per-space directory name — must match the engine. */
-const WORKING_DIR = "engine-v3";
 
 export interface CloneManifest {
   /** Schema version of this file, so a future reader can refuse politely. */
@@ -81,14 +84,31 @@ export interface ClonePaths {
   workingPath: string;
 }
 
-/** Where each artifact lives for a clone of `space` in `dir`. */
+/**
+ * Where each artifact lives for a clone of `space` in `dir`.
+ *
+ * The working copy's path is DERIVED, never spelled out: `dir` is used exactly
+ * as a server's `MEMORY_DIR`, and the store lands wherever composing
+ * `resolveMemoryEngineStoreRootUrl` with `resolveSpaceStoreUrl` puts it — which
+ * today means a doubled `engine-v3/engine-v3/`. Restating that here is how the
+ * first version of this file wrote a clone to a path no server ever reads: the
+ * copy/verify/reset loop was self-consistent and served nothing.
+ */
 export function clonePaths(dir: string, space: string): ClonePaths {
-  const file = `${space}.sqlite`;
+  const workingPath = Path.fromFileUrl(
+    resolveSpaceStoreUrl(
+      resolveMemoryEngineStoreRootUrl(
+        Path.toFileUrl(dir.endsWith("/") ? dir : `${dir}/`),
+        { singleFileMode: false },
+      ),
+      space as MemorySpace,
+    ),
+  );
   return {
     dir,
     manifestPath: `${dir}/${MANIFEST}`,
-    pristinePath: `${dir}/${PRISTINE_DIR}/${file}`,
-    workingPath: `${dir}/${WORKING_DIR}/${file}`,
+    pristinePath: `${dir}/${PRISTINE_DIR}/${space}.sqlite`,
+    workingPath,
   };
 }
 
@@ -119,7 +139,7 @@ export async function createClone(
 
   const paths = clonePaths(dir, options.space);
   await Deno.mkdir(`${dir}/${PRISTINE_DIR}`, { recursive: true });
-  await Deno.mkdir(`${dir}/${WORKING_DIR}`, { recursive: true });
+  await Deno.mkdir(Path.dirname(paths.workingPath), { recursive: true });
 
   // Plain copies. `VACUUM INTO` server-side already produced a consistent,
   // companion-free file; re-vacuuming here would need the live source, which by
