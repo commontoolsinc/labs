@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-07-29
+archived: 2026-07-29
+reason: "Executed plan; the tool-call deadline is gone and the message-drop heuristic is narrowed."
+---
+
 # Retiring the LLM Tool-Call Deadline
 
 _Replacing the wall-clock deadline on LLM tool calls with a quiescence barrier
@@ -28,7 +35,7 @@ Do not delete it on the strength of the argument for the first.
 
 `TOOL_CALL_TIMEOUT` was the shape `AGENTS.md` rules out: a bound on how long
 success may take. By the test in
-[`waiting-in-tests.md`](../waiting-in-tests.md#wall-clock-time-is-not-a-measure-of-progress)
+[`waiting-in-tests.md`](../../../development/waiting-in-tests.md#wall-clock-time-is-not-a-measure-of-progress)
 — "is firing early safe?" — it is not. Firing early discards a real result and
 misreports it to the model as a failure.
 
@@ -352,7 +359,7 @@ With no deadline in the tool call, the three cases in
 fire early. They are folded back into `generate-object-tools.test.ts` and
 `llm-dialog.test.ts`, both split files are deleted, both entries are gone from
 the runner preload's `realClockFiles`, and the "dynamic-schema subagent shape"
-section is gone from [`waiting-in-tests.md`](../waiting-in-tests.md). Only the
+section is gone from [`waiting-in-tests.md`](../../../development/waiting-in-tests.md). Only the
 resume test is left on the list, and it is there for an unrelated reason.
 
 Each case asserts on the delegate's own tool result, so this step proves itself:
