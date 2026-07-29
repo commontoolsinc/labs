@@ -9,7 +9,12 @@ const DenoWebTestCache: Map<string, Promise<Deno.CommandOutput>> = new Map();
 export function stripDenoDownloadDiagnostics(
   stderr: Uint8Array,
 ): Uint8Array {
-  return stderr;
+  const text = new TextDecoder().decode(stderr);
+  const withoutDownloads = text.replace(
+    /^Download https?:\/\/[^\r\n]*(?:\r?\n|$)/gm,
+    "",
+  );
+  return new TextEncoder().encode(withoutDownloads);
 }
 
 // Runs deno-web-test in `projectDir` and caches
@@ -40,7 +45,7 @@ export const runDenoWebTest = async (
     tasks: { test: string };
   };
   manifest.tasks.test =
-    `deno run --quiet --allow-env --allow-read --allow-write --allow-run --allow-net ${CLI_PATH} *.test.ts`;
+    `deno run --allow-env --allow-read --allow-write --allow-run --allow-net ${CLI_PATH} *.test.ts`;
   await Deno.writeTextFile(manifestPath, JSON.stringify(manifest));
 
   // Populate the cache for the harness and each test entrypoint before the task.
@@ -67,7 +72,10 @@ export const runDenoWebTest = async (
       "test",
     ],
     cwd: tmpProjectPath,
-  }).output();
+  }).output().then((result) => ({
+    ...result,
+    stderr: stripDenoDownloadDiagnostics(result.stderr),
+  }));
   DenoWebTestCache.set(projectDir, output);
   return output;
 };
