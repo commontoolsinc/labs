@@ -488,10 +488,7 @@ export const piece = new Command()
   .option("--json", "Output machine-readable JSON.")
   .action(listPiecesFromCommand)
   /* piece search */
-  .command(
-    "search",
-    "Search readable input and result data in registered pieces.",
-  )
+  .command("search", "Search input and result data in registered pieces.")
   .usage(`${spaceUsage} <query>`)
   .example(
     cliText(`cf piece search ${EX_ID} ${EX_COMP} "meeting notes"`),
@@ -1114,10 +1111,7 @@ JSON VALUES: Strings need quotes: echo '"hello"' | cf piece set ...`),
     );
   })
   /* piece map */
-  .command(
-    "map",
-    "Display registered pieces and the connections between them",
-  )
+  .command("map", "Show registered pieces and the connections between them")
   .usage(spaceUsage)
   .example(
     cliText(`cf piece map ${EX_ID} ${EX_COMP}`),

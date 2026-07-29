@@ -415,7 +415,7 @@ describe("cli piece parsing", () => {
     checkStderr(stderr);
     const output = stripAnsi(stdout.join("\n"));
     expect(output).toContain(
-      "Search readable input and result data in registered pieces.",
+      "Search input and result data in registered pieces.",
     );
     expect(output).toContain("<query>");
     expect(output).toContain("--space <space>");
@@ -431,8 +431,7 @@ describe("cli piece parsing", () => {
       },
       {
         args: "piece map --help",
-        description:
-          "Display registered pieces and the connections between them",
+        description: "Show registered pieces and the connections between them",
       },
     ];
     for (const command of commands) {
