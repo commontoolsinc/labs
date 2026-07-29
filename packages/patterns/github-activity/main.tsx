@@ -90,68 +90,64 @@ export default pattern<{
           />
         </div>
 
-        <cf-cell-context $cell={summary.pending}>
-          {summary.pending
-            ? (
-              <div style="margin-bottom: 16px;">
-                <cf-loader show-elapsed /> Generating summary...
-              </div>
-            )
-            : summary.result
-            ? (
-              <div style="margin-bottom: 16px; padding: 12px; background: #f5f5f5; border-radius: 4px;">
-                <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">
-                  Activity Summary
-                </h3>
-                <p style="margin: 0; line-height: 1.5;">{summary.result}</p>
-              </div>
-            )
-            : null}
-        </cf-cell-context>
+        {summary.pending
+          ? (
+            <div style="margin-bottom: 16px;">
+              <cf-loader show-elapsed /> Generating summary...
+            </div>
+          )
+          : summary.result
+          ? (
+            <div style="margin-bottom: 16px; padding: 12px; background: #f5f5f5; border-radius: 4px;">
+              <h3 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600;">
+                Activity Summary
+              </h3>
+              <p style="margin: 0; line-height: 1.5;">{summary.result}</p>
+            </div>
+          )
+          : null}
 
-        <cf-cell-context $cell={commits}>
-          {computed(() => {
-            const commitList = commits;
-            if (!commitList || commitList.length === 0) {
-              return (
-                <div style="padding: 16px; text-align: center; color: #666;">
-                  No commits found
-                </div>
-              );
-            }
-
+        {computed(() => {
+          const commitList = commits;
+          if (!commitList || commitList.length === 0) {
             return (
-              <div style="max-height: 500px; overflow-y: auto;">
-                {commitList.slice(0, 20).map((commit) => {
-                  const firstLine = commit.commit.message.split("\n")[0];
-                  const date = new Date(commit.commit.author.date)
-                    .toLocaleDateString();
-
-                  return (
-                    <cf-card style="margin-bottom: 8px;">
-                      <div style="padding: 12px;">
-                        <div style="font-weight: 500; margin-bottom: 4px;">
-                          {firstLine}
-                        </div>
-                        <div style="font-size: 13px; color: #666; margin-bottom: 8px;">
-                          {commit.commit.author.name} • {date}
-                        </div>
-                        <a
-                          href={commit.html_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style="font-size: 13px; color: #0969da;"
-                        >
-                          View commit →
-                        </a>
-                      </div>
-                    </cf-card>
-                  );
-                })}
+              <div style="padding: 16px; text-align: center; color: #666;">
+                No commits found
               </div>
             );
-          })}
-        </cf-cell-context>
+          }
+
+          return (
+            <div style="max-height: 500px; overflow-y: auto;">
+              {commitList.slice(0, 20).map((commit) => {
+                const firstLine = commit.commit.message.split("\n")[0];
+                const date = new Date(commit.commit.author.date)
+                  .toLocaleDateString();
+
+                return (
+                  <cf-card style="margin-bottom: 8px;">
+                    <div style="padding: 12px;">
+                      <div style="font-weight: 500; margin-bottom: 4px;">
+                        {firstLine}
+                      </div>
+                      <div style="font-size: 13px; color: #666; margin-bottom: 8px;">
+                        {commit.commit.author.name} • {date}
+                      </div>
+                      <a
+                        href={commit.html_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style="font-size: 13px; color: #0969da;"
+                      >
+                        View commit →
+                      </a>
+                    </div>
+                  </cf-card>
+                );
+              })}
+            </div>
+          );
+        })}
       </div>
     ),
   };

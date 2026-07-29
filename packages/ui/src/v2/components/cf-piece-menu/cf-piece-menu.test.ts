@@ -1,8 +1,15 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { CellHandle, PieceSourceView } from "@commonfabric/runtime-client";
+import { $conn, CellHandle, RequestType } from "@commonfabric/runtime-client";
+import type {
+  CellRef,
+  PieceSourceView,
+  RuntimeClient,
+} from "@commonfabric/runtime-client";
 import {
   CFPieceMenu,
+  formatPieceValue,
+  isStreamHandle,
   openPieceMenu,
   pieceMenuEntries,
 } from "./cf-piece-menu.ts";
@@ -154,10 +161,12 @@ function openMenu(cell: CellHandle = pieceCell()): CFPieceMenu {
 }
 
 describe("piece menu entries", () => {
-  it("offers exactly the two read actions, in order", () => {
+  it("offers exactly the four entries, in order", () => {
     expect(pieceMenuEntries().map((entry) => entry.label)).toEqual([
       "View source",
       "Origin and history",
+      "Data",
+      "Actions",
     ]);
   });
 
@@ -165,6 +174,8 @@ describe("piece menu entries", () => {
     expect(pieceMenuEntries().map((entry) => entry.testId)).toEqual([
       "piece-menu-source",
       "piece-menu-origin",
+      "piece-menu-data",
+      "piece-menu-actions",
     ]);
   });
 
@@ -172,6 +183,8 @@ describe("piece menu entries", () => {
     expect(pieceMenuEntries(true).map((entry) => entry.label)).toEqual([
       "View source",
       "Origin and history",
+      "Data",
+      "Actions",
       "Stop following source",
     ]);
     expect(pieceMenuEntries(true).at(-1)?.testId).toBe(
@@ -875,6 +888,487 @@ describe("source history actions", () => {
 
     const rendered = shows(menu);
     for (const [, label] of operations) expect(rendered).toContain(label);
+  });
+});
+
+/**
+ * A live-ish piece for the data and actions panels: a real `CellHandle` (the
+ * panels detect streams with `instanceof`) over a fake connection that
+ * records every request it is asked to make.
+ */
+function statefulPiece(
+  {
+    result = {},
+    argument: initialArgument = {} as unknown,
+    argumentRef,
+    getPageFails = false,
+    deferGetPage = false,
+    sendFails = false,
+    pieceSchema = { type: "object" } as Record<string, unknown>,
+  }: {
+    result?: Record<string, unknown>;
+    argument?: unknown;
+    /** When set, the argument read also returns this schema-bearing ref. */
+    argumentRef?: CellRef;
+    getPageFails?: boolean;
+    /** When true, getPage stays pending until `resolveGetPage()` is called. */
+    deferGetPage?: boolean;
+    sendFails?: boolean;
+    pieceSchema?: Record<string, unknown>;
+  } = {},
+) {
+  const requests: Array<Record<string, unknown>> = [];
+  const counters = { subscribes: 0, unsubscribes: 0 };
+  const argument = initialArgument;
+  const conn = {
+    subscribe: () => {
+      counters.subscribes++;
+    },
+    unsubscribe: () => {
+      counters.unsubscribes++;
+      return Promise.resolve();
+    },
+    request: (request: Record<string, unknown>) => {
+      requests.push(request);
+      if (request.type === RequestType.CellGet) {
+        return Promise.resolve(
+          request.includeRef && argumentRef
+            ? { value: argument, cell: argumentRef }
+            : { value: argument },
+        );
+      }
+      if (request.type === RequestType.CellSet) {
+        return Promise.resolve({});
+      }
+      if (request.type === RequestType.CellSend) {
+        return sendFails
+          ? Promise.reject(new Error("handler refused the event"))
+          : Promise.resolve({});
+      }
+      return Promise.reject(new Error(`unexpected request: ${request.type}`));
+    },
+    signal: { aborted: false },
+  };
+  const pendingPages: Array<() => void> = [];
+  const rt = {
+    [$conn]: () => conn,
+    signal: { aborted: false },
+    getPieceSource: () => Promise.resolve(SOURCE),
+    getPage: (..._args: unknown[]) => {
+      if (getPageFails) {
+        return Promise.reject(new Error("no page for this piece"));
+      }
+      if (deferGetPage) {
+        return new Promise((resolve) => {
+          pendingPages.push(() => resolve(page));
+        });
+      }
+      return Promise.resolve(page);
+    },
+  } as unknown as RuntimeClient;
+
+  const pieceRef: CellRef = {
+    id: "of:fid1:piece",
+    space: SPACE,
+    path: [],
+    schema: pieceSchema,
+  } as unknown as CellRef;
+  const cell = new CellHandle(rt, pieceRef, result);
+  const page = { cell: () => cell };
+
+  /** Resolve the oldest still-pending deferred getPage call. */
+  const resolveGetPage = () => pendingPages.shift()?.();
+
+  /** A nested handler stream whose own ref schema carries the stream tag. */
+  const streamHandle = (name: string): CellHandle =>
+    new CellHandle(rt, {
+      id: "of:fid1:piece",
+      space: SPACE,
+      path: [name],
+      schema: { asCell: ["stream"] },
+    } as unknown as CellRef);
+
+  /**
+   * A handler as a schema'd piece read actually delivers one: a handle to the
+   * stream's own doc carrying the handler's EVENT schema, with the stream
+   * declaration living on the piece schema's property instead.
+   */
+  const handlerHandle = (name: string, eventSchema: unknown): CellHandle =>
+    new CellHandle(rt, {
+      id: `of:fid1:handler-${name}`,
+      space: SPACE,
+      path: [],
+      schema: eventSchema,
+    } as unknown as CellRef);
+
+  return {
+    cell,
+    requests,
+    counters,
+    streamHandle,
+    handlerHandle,
+    resolveGetPage,
+    rt,
+  };
+}
+
+describe("the data panel", () => {
+  it("shows the argument and the result", async () => {
+    const piece = statefulPiece({
+      argument: { title: "hello input" },
+      result: {},
+    });
+    // The result carries a plain field, a linked cell, and a stream.
+    await piece.cell.set({
+      count: 3,
+      addItem: piece.streamHandle("addItem"),
+    });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("data");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("Argument");
+    expect(rendered).toContain("hello input");
+    expect(rendered).toContain("Result");
+    expect(rendered).toContain('"count": 3');
+    expect(rendered).toContain("[stream]");
+  });
+
+  it("omits the view keys, which hold VDOM rather than data", async () => {
+    const piece = statefulPiece();
+    await piece.cell.set({ real: "data", $UI: { huge: "vdom" } });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("data");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("real");
+    expect(rendered).not.toContain("vdom");
+  });
+
+  it("reads the piece state once for data and actions", async () => {
+    const piece = statefulPiece({ argument: { a: 1 } });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("data");
+    await menu.showPanel("actions");
+    await menu.showPanel("data");
+
+    const argumentReads = piece.requests.filter(
+      (request) => request.type === RequestType.CellGet,
+    );
+    expect(argumentReads.length).toBe(1);
+  });
+
+  it("reports a data read that failed", async () => {
+    const piece = statefulPiece({ getPageFails: true });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("data");
+
+    expect(shows(menu)).toContain("no page for this piece");
+  });
+});
+
+describe("the actions panel", () => {
+  it("lists the piece's handler streams", async () => {
+    const piece = statefulPiece({ argument: { plain: "value" } });
+    await piece.cell.set({
+      addItem: piece.streamHandle("addItem"),
+      clear: piece.streamHandle("clear"),
+      count: 3,
+    });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("addItem");
+    expect(rendered).toContain("clear");
+    expect(rendered).toContain("piece-action-addItem");
+    // Plain fields are data, not actions.
+    expect(rendered).not.toContain("piece-action-count");
+  });
+
+  it("finds handlers the piece schema declares, and hints their payload", async () => {
+    // The live shape: the handle carries the event schema, the stream
+    // declaration lives on the piece schema's property.
+    const piece = statefulPiece({
+      pieceSchema: {
+        type: "object",
+        properties: {
+          addSpace: { asCell: ["stream"], type: "object" },
+          spaces: { type: "array" },
+        },
+      },
+    });
+    await piece.cell.set({
+      addSpace: piece.handlerHandle("addSpace", {
+        type: "object",
+        properties: { name: { type: "string" } },
+      }),
+      spaces: [],
+    });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("piece-action-addSpace");
+    expect(rendered).toContain("{ name }");
+
+    // The Data panel shows the same key as a stream, not a bare cell link.
+    await menu.showPanel("data");
+    expect(shows(menu)).toContain('"addSpace": "[stream]"');
+  });
+
+  it("does not offer a cell that merely contains a stream", async () => {
+    // asCell ["cell", "stream"] is a CELL wrapping a stream: sending to the
+    // outer cell would overwrite data, so it must not be dispatchable.
+    const piece = statefulPiece({
+      pieceSchema: {
+        type: "object",
+        properties: {
+          wrapped: { asCell: ["cell", "stream"], type: "object" },
+        },
+      },
+    });
+    await piece.cell.set({
+      wrapped: piece.handlerHandle("wrapped", { type: "object" }),
+    });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    expect(shows(menu)).toContain("no handler streams");
+  });
+
+  it("finds handlers the argument schema declares", async () => {
+    // The argument arrives in wire form: sigil links that deserialize back
+    // into handles carrying the handler's event schema, while the stream
+    // declaration lives on the argument schema's property.
+    const piece = statefulPiece({
+      argument: {
+        ping: {
+          "/": {
+            "link@1": {
+              id: "of:fid1:handler-ping",
+              space: SPACE,
+              path: [],
+              schema: { type: "object" },
+            },
+          },
+        },
+      },
+      argumentRef: {
+        id: "of:fid1:argument",
+        space: SPACE,
+        path: [],
+        schema: {
+          type: "object",
+          properties: { ping: { asCell: ["stream"] } },
+        },
+      } as unknown as CellRef,
+    });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("piece-action-ping");
+    expect(rendered).toContain("argument");
+  });
+
+  it("offers a declared stream even when its value is a raw marker", async () => {
+    // A schema-less read can leave `{$stream:true}` in place of a handle;
+    // the parent declaration is the trusted signal, so the action derives
+    // its address from the parent cell instead.
+    const piece = statefulPiece({
+      pieceSchema: {
+        type: "object",
+        properties: { go: { asCell: ["stream"] } },
+      },
+    });
+    await piece.cell.set({ go: { $stream: true } });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    expect(shows(menu)).toContain("piece-action-go");
+
+    const [action] = menu.collectActions();
+    await menu.dispatchAction(action);
+    const sends = piece.requests.filter(
+      (request) => request.type === RequestType.CellSend,
+    );
+    expect(sends.length).toBe(1);
+    expect((sends[0].cell as CellRef).path).toEqual(["go"]);
+  });
+
+  it("never offers a raw marker the schema does not declare", async () => {
+    const piece = statefulPiece();
+    await piece.cell.set({ mystery: { $stream: true } });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    expect(shows(menu)).toContain("no handler streams");
+  });
+
+  it("says so when the piece exposes no handlers", async () => {
+    const piece = statefulPiece({ argument: { a: 1 } });
+    await piece.cell.set({ count: 3 });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    expect(shows(menu)).toContain("no handler streams");
+  });
+
+  it("dispatches an event with the JSON payload entered", async () => {
+    const piece = statefulPiece();
+    await piece.cell.set({ addItem: piece.streamHandle("addItem") });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    (menu as unknown as { payloadText: string }).payloadText =
+      '{ "title": "new item" }';
+    const [action] = menu.collectActions();
+    await menu.dispatchAction(action);
+
+    const sends = piece.requests.filter(
+      (request) => request.type === RequestType.CellSend,
+    );
+    expect(sends.length).toBe(1);
+    expect(sends[0].event).toEqual({ title: "new item" });
+    expect((sends[0].cell as CellRef).path).toEqual(["addItem"]);
+    // "Accepted", not "sent": the worker commits asynchronously after
+    // acknowledging, so the panel only claims what the request proves.
+    expect(shows(menu)).toContain("Event accepted for addItem");
+  });
+
+  it("rejects an unparsable payload without dispatching", async () => {
+    const piece = statefulPiece();
+    await piece.cell.set({ addItem: piece.streamHandle("addItem") });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    (menu as unknown as { payloadText: string }).payloadText = "{not json";
+    const [action] = menu.collectActions();
+    await menu.dispatchAction(action);
+
+    expect(shows(menu)).toContain("not valid JSON");
+    expect(
+      piece.requests.filter((r) => r.type === RequestType.CellSend).length,
+    ).toBe(0);
+  });
+
+  it("reports a dispatch the runtime refused", async () => {
+    const piece = statefulPiece({ sendFails: true });
+    await piece.cell.set({ addItem: piece.streamHandle("addItem") });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    const [action] = menu.collectActions();
+    await menu.dispatchAction(action);
+
+    expect(shows(menu)).toContain("handler refused the event");
+  });
+
+  it("sends once for a rapid double-click", async () => {
+    const piece = statefulPiece();
+    await piece.cell.set({ addItem: piece.streamHandle("addItem") });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("actions");
+
+    const [action] = menu.collectActions();
+    // Both clicks land before the first request settles.
+    await Promise.all([
+      menu.dispatchAction(action),
+      menu.dispatchAction(action),
+    ]);
+
+    expect(
+      piece.requests.filter((r) => r.type === RequestType.CellSend).length,
+    ).toBe(1);
+  });
+});
+
+describe("piece-state read lifecycle", () => {
+  it("a refresh during a pending read drops the older read entirely", async () => {
+    const piece = statefulPiece({ deferGetPage: true });
+    await piece.cell.set({ value: "current" });
+    const menu = openMenu(piece.cell);
+
+    const first = menu.showPanel("data");
+    menu.refreshData();
+    // The OLDER read resolves after the refresh started a newer one; it must
+    // not install a second subscription or overwrite anything.
+    piece.resolveGetPage();
+    await first;
+    piece.resolveGetPage();
+    await Promise.resolve();
+
+    expect(piece.counters.subscribes).toBe(1);
+    menu.close();
+    expect(piece.counters.unsubscribes).toBe(piece.counters.subscribes);
+  });
+
+  it("a read resolving after disconnect installs nothing", async () => {
+    const piece = statefulPiece({ deferGetPage: true });
+    const menu = openMenu(piece.cell);
+
+    const pending = menu.showPanel("data");
+    menu.disconnectedCallback();
+    piece.resolveGetPage();
+    await pending;
+
+    expect(piece.counters.subscribes).toBe(0);
+  });
+
+  it("balances subscriptions when the menu closes", async () => {
+    const piece = statefulPiece({
+      argumentRef: {
+        id: "of:fid1:argument",
+        space: SPACE,
+        path: [],
+        schema: { type: "object" },
+      } as unknown as CellRef,
+    });
+    await piece.cell.set({ value: 1 });
+    const menu = openMenu(piece.cell);
+    await menu.showPanel("data");
+
+    // One subscription per side: result and argument.
+    expect(piece.counters.subscribes).toBe(2);
+    menu.close();
+    expect(piece.counters.unsubscribes).toBe(piece.counters.subscribes);
+  });
+});
+
+describe("formatPieceValue", () => {
+  it("stubs a linked cell instead of printing its sigil form", () => {
+    const piece = statefulPiece();
+    const linked = new CellHandle(piece.rt, {
+      id: "of:fid1:other",
+      space: SPACE,
+      path: ["items", "0"],
+      schema: { type: "object" },
+    } as unknown as CellRef);
+
+    const formatted = formatPieceValue({ item: linked });
+    expect(formatted).toContain('"@cell": "of:fid1:other"');
+    expect(formatted).toContain("items/0");
+  });
+
+  it("caps the depth of a deep value", () => {
+    type Deep = { deeper?: Deep; leaf?: string };
+    let value: Deep = { leaf: "bottom" };
+    for (let i = 0; i < 12; i++) value = { deeper: value };
+
+    const formatted = formatPieceValue(value);
+    expect(formatted).toContain("…");
+    expect(formatted).not.toContain("bottom");
+  });
+});
+
+describe("isStreamHandle", () => {
+  it("recognizes only handles whose schema declares a stream", () => {
+    const piece = statefulPiece();
+    expect(isStreamHandle(piece.streamHandle("go"))).toBe(true);
+    expect(isStreamHandle(piece.cell)).toBe(false);
+    expect(isStreamHandle({ $stream: true })).toBe(false);
+    expect(isStreamHandle("addItem")).toBe(false);
   });
 });
 

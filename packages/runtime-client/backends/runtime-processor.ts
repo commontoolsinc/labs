@@ -880,14 +880,19 @@ export class RuntimeProcessor {
         includeCfcLabelView: true,
       }),
     ) as JSONValue | undefined;
+    // The resolved cell's own schema-bearing ref, when asked for — for a meta
+    // link read this addresses the linked cell itself, so the caller can
+    // subscribe to it or consult its schema's declarations.
+    const refField = request.includeRef ? { cell: createCellRef(cell) } : {};
     if (!request.includeCfcLabel) {
-      return { value: converted };
+      return { value: converted, ...refField };
     }
     // Same display-label read as handleCellGetCfcLabel: pure store read, then
     // redact Caveat.source for display (audit 28b). One round-trip for both.
     const cfcLabel = cfcLabelViewForCell(cell);
     return {
       value: converted,
+      ...refField,
       cfcLabel: cfcLabel === undefined
         ? undefined
         : redactCaveatSourcesForDisplay(cfcLabel),

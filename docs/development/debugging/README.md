@@ -147,4 +147,3 @@ guide:
 - [@reactivity](../../common/concepts/reactivity.md) - Reactivity system
 - [@writeable](../../common/concepts/types-and-schemas/writable.md) - Writable type system
 - [@COMPONENTS](../../common/components/COMPONENTS.md) - UI components
-- [@CELL_CONTEXT](../../common/components/CELL_CONTEXT.md) - Debug tool details

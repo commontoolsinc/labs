@@ -195,39 +195,37 @@ export default pattern<
           />
         </div>
 
-        <cf-cell-context $cell={validData}>
+        <div>
+          <h3 id="github-title">
+            {validData.name}
+          </h3>
+          <p>
+            by {validData.owner.login}
+          </p>
+          <p>{validData.description}</p>
           <div>
-            <h3 id="github-title">
-              {validData.name}
-            </h3>
-            <p>
-              by {validData.owner.login}
-            </p>
-            <p>{validData.description}</p>
             <div>
-              <div>
-                <span>⭐</span>
-                <strong>{validData.stargazers_count}</strong> stars
-              </div>
-              <div>
-                <span>🍴</span>
-                <strong>{validData.forks_count}</strong> forks
-              </div>
-              <div>
-                <span>🔤</span>
-                <strong>{validData.language}</strong>
-              </div>
-              <div>
-                <a
-                  href={validData.html_url}
-                  target="_blank"
-                >
-                  View on GitHub →
-                </a>
-              </div>
+              <span>⭐</span>
+              <strong>{validData.stargazers_count}</strong> stars
+            </div>
+            <div>
+              <span>🍴</span>
+              <strong>{validData.forks_count}</strong> forks
+            </div>
+            <div>
+              <span>🔤</span>
+              <strong>{validData.language}</strong>
+            </div>
+            <div>
+              <a
+                href={validData.html_url}
+                target="_blank"
+              >
+                View on GitHub →
+              </a>
             </div>
           </div>
-        </cf-cell-context>
+        </div>
       </div>
     ),
     repo: validData,

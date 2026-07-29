@@ -2928,7 +2928,6 @@ interface CFToolbarElement extends CFHTMLElement {}
 interface CFKbdElement extends CFHTMLElement {}
 interface CFKeybindElement extends CFHTMLElement {}
 interface CFRenderElement extends CFHTMLElement {}
-interface CFCellContextElement extends CFHTMLElement {}
 interface CFCFCAuthorshipElement extends CFHTMLElement {}
 interface CFCFCLabelElement extends CFHTMLElement {}
 interface CFCFCRenderBoundaryElement extends CFHTMLElement {}
@@ -3587,12 +3586,6 @@ interface CFRenderAttributes<T> extends CFHTMLAttributes<T> {
   "$cell": CellLike<any>;
   // CT-1321 UI-variant spectrum (see cf-render.ts UIVariant).
   "variant"?: "full" | "chip" | "tile";
-}
-
-interface CFCellContextAttributes<T> extends CFHTMLAttributes<T> {
-  "$cell": CellLike<any>;
-  "label"?: string;
-  "inline"?: boolean;
 }
 
 interface CFCFCLabelAttributes<T> extends CFHTMLAttributes<T> {
@@ -5125,10 +5118,6 @@ declare global {
       "cf-render": CFDOM.DetailedHTMLProps<
         CFRenderAttributes<CFRenderElement>,
         CFRenderElement
-      >;
-      "cf-cell-context": CFDOM.DetailedHTMLProps<
-        CFCellContextAttributes<CFCellContextElement>,
-        CFCellContextElement
       >;
       "cf-cfc-authorship": CFDOM.DetailedHTMLProps<
         CFCFCAuthorshipAttributes<CFCFCAuthorshipElement>,

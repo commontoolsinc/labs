@@ -223,8 +223,6 @@ export class CFRender extends BaseElement {
   }
 
   protected override render() {
-    // Note: cf-cell-context is now auto-injected by the renderer when
-    // traversing [UI] with a CellHandle, so we don't need to wrap here
     // Chip is inline and resolves to a lightweight default fast — a full-size
     // spinner would reserve the wrong space, so skip it for chip.
     return html`

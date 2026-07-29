@@ -1,8 +1,14 @@
 import { css, html, nothing, type TemplateResult } from "lit";
 import { state } from "lit/decorators.js";
 import { BaseElement } from "../../core/base-element.ts";
-import type {
+import {
+  $conn,
   CellHandle,
+  isCellHandle,
+  RequestType,
+} from "@commonfabric/runtime-client";
+import type {
+  JSONValue,
   PieceSourceAction,
   PieceSourceRevisionView,
   PieceSourceView,
@@ -14,7 +20,7 @@ import {
 } from "./origin-view.ts";
 
 /** Which panel is showing, if any. */
-export type Panel = "source" | "origin";
+export type Panel = "source" | "origin" | "data" | "actions";
 
 /** One entry in the menu, and the panel it opens. */
 interface MenuEntry {
@@ -31,7 +37,16 @@ const ENTRIES: readonly MenuEntry[] = [
     testId: "piece-menu-origin",
     panel: "origin",
   },
+  { label: "Data", testId: "piece-menu-data", panel: "data" },
+  { label: "Actions", testId: "piece-menu-actions", panel: "actions" },
 ];
+
+const PANEL_TITLES: Record<Panel, string> = {
+  source: "Source",
+  origin: "Origin and history",
+  data: "Data",
+  actions: "Actions",
+};
 
 const DETACH_ENTRY = {
   label: "Stop following source",
@@ -46,9 +61,119 @@ export function pieceMenuEntries(
 }
 
 /**
+ * Whether a schema fragment declares a directly dispatchable stream. Only the
+ * OUTERMOST `asCell` entry names the immediate kind: `["cell", "stream"]` is
+ * a cell that contains a stream, and sending to that outer cell would be a
+ * plain value write, not a dispatch.
+ */
+function schemaDeclaresStream(schema: unknown): boolean {
+  const asCell = (schema as { asCell?: unknown } | null | undefined)?.asCell;
+  if (!Array.isArray(asCell) || asCell.length === 0) return false;
+  const outermost = asCell[0];
+  return (typeof outermost === "string"
+    ? outermost
+    : (outermost as { kind?: string } | null)?.kind) === "stream";
+}
+
+/**
+ * A handler stream whose own ref schema carries the `asCell: ["stream"]`
+ * marker. This is not the usual live shape — a handler read through the
+ * piece's schema arrives as a `CellHandle` carrying the handler's *event*
+ * schema, and the stream declaration stays on the piece schema's property —
+ * so callers also consult the parent schema (see `collectActions`).
+ */
+export function isStreamHandle(value: unknown): value is CellHandle {
+  return isCellHandle(value) && schemaDeclaresStream(value.ref().schema);
+}
+
+/** The raw `{ $stream: true }` marker a schema-less read can surface. */
+function isRawStreamMarker(value: unknown): boolean {
+  return typeof value === "object" && value !== null &&
+    (value as { $stream?: unknown }).$stream === true;
+}
+
+/** Well-known view keys the Data panel omits: they hold VDOM, not data. */
+const VIEW_KEYS = new Set(["$UI", "$TILE_UI", "$CHIP_UI"]);
+
+/**
+ * A read piece value is not plain JSON: links arrive hydrated as nested
+ * `CellHandle`s, whose own toJSON would print verbose sigil links. Walk the
+ * value into a display shape first — handles become `{"@cell": id}` stubs,
+ * streams a `[stream]` tag — and cap the depth so a deep graph stays legible.
+ */
+export function formatPieceValue(
+  value: unknown,
+  streamKeys?: ReadonlySet<string>,
+): string {
+  const display = toDisplay(value, 0, streamKeys);
+  if (display === undefined) return "undefined";
+  try {
+    return JSON.stringify(display, null, 2) ?? String(display);
+  } catch (error) {
+    return `<unrenderable: ${
+      error instanceof Error ? error.message : String(error)
+    }>`;
+  }
+}
+
+function toDisplay(
+  value: unknown,
+  depth: number,
+  streamKeys?: ReadonlySet<string>,
+): unknown {
+  if (isStreamHandle(value) || isRawStreamMarker(value)) return "[stream]";
+  if (isCellHandle(value)) {
+    const ref = value.ref();
+    return ref.path.length > 0
+      ? { "@cell": ref.id, path: ref.path.join("/") }
+      : { "@cell": ref.id };
+  }
+  if (depth >= 8) return "…";
+  if (Array.isArray(value)) {
+    return value.map((item) => toDisplay(item, depth + 1));
+  }
+  if (typeof value === "object" && value !== null) {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      if (depth === 0 && VIEW_KEYS.has(key)) continue;
+      out[key] = depth === 0 && streamKeys?.has(key)
+        ? "[stream]"
+        : toDisplay(item, depth + 1);
+    }
+    return out;
+  }
+  return value;
+}
+
+/** One dispatchable handler stream found on the piece. */
+export interface PieceAction {
+  name: string;
+  /** Which side of the piece carries it. */
+  source: "result" | "argument";
+  handle: CellHandle;
+  /**
+   * The event schema the handler declares, when one is known: the schema a
+   * stream handle read through the piece's schema carries is the handler's
+   * payload shape.
+   */
+  eventSchema?: unknown;
+}
+
+/** The top-level property names of an event schema, as a payload hint. */
+export function payloadHint(action: PieceAction): string | undefined {
+  const properties =
+    (action.eventSchema as { properties?: Record<string, unknown> } | undefined)
+      ?.properties;
+  if (!properties) return undefined;
+  const names = Object.keys(properties);
+  return names.length > 0 ? `{ ${names.join(", ")} }` : undefined;
+}
+
+/**
  * CFPieceMenu — the menu a right-click on a piece opens, with the panels for
- * the two things it can show about that piece: its authored source, and the
- * origin and history it records.
+ * what it can show and do about that piece: its authored source, the origin
+ * and history it records, its live argument and result data, and the handler
+ * streams an event can be dispatched to.
  *
  * @element cf-piece-menu
  *
@@ -249,6 +374,105 @@ export class CFPieceMenu extends BaseElement {
       overflow-wrap: anywhere;
     }
 
+    .status {
+      margin: 0.75rem 0 0;
+      font-size: 0.8125rem;
+      color: var(--cf-theme-color-text-muted, #6b7280);
+    }
+
+    .section-title {
+      margin: 0 0 0.5rem;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--cf-theme-color-text-muted, #6b7280);
+    }
+
+    .section-title + p,
+    pre.source + .section-title {
+      margin-top: 1rem;
+    }
+
+    .payload-label {
+      display: block;
+      margin-bottom: 0.75rem;
+      font-size: 0.75rem;
+      color: var(--cf-theme-color-text-muted, #6b7280);
+    }
+
+    .payload {
+      display: block;
+      width: 100%;
+      min-height: 4rem;
+      margin-top: 0.25rem;
+      padding: 0.5rem;
+      box-sizing: border-box;
+      border: 1px solid var(--cf-theme-color-border, rgba(0, 0, 0, 0.15));
+      border-radius: 6px;
+      background: none;
+      color: inherit;
+      font-family: var(--cf-theme-font-mono, "SF Mono", monospace);
+      font-size: 12px;
+      resize: vertical;
+    }
+
+    .actions-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .action-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.375rem 0.5rem;
+      border: 1px solid var(--cf-theme-color-border, rgba(0, 0, 0, 0.1));
+      border-radius: 6px;
+    }
+
+    .action-name {
+      flex: 1;
+      min-width: 6rem;
+      font-family: var(--cf-theme-font-mono, "SF Mono", monospace);
+      font-size: 0.8125rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .action-hint {
+      font-family: var(--cf-theme-font-mono, "SF Mono", monospace);
+      font-size: 0.6875rem;
+      color: var(--cf-theme-color-text-muted, #6b7280);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 18rem;
+    }
+
+    .action-source {
+      font-size: 0.6875rem;
+      color: var(--cf-theme-color-text-muted, #6b7280);
+    }
+
+    .action-send,
+    .refresh {
+      padding: 0.25rem 0.625rem;
+      border: 1px solid var(--cf-theme-color-border, rgba(0, 0, 0, 0.15));
+      border-radius: 6px;
+      background: none;
+      font: inherit;
+      font-size: 0.75rem;
+      color: inherit;
+      cursor: pointer;
+    }
+
+    .action-send:hover,
+    .refresh:hover {
+      background: var(--cf-theme-color-surface-hover, rgba(0, 0, 0, 0.06));
+    }
+
     .history {
       margin-top: 1.25rem;
     }
@@ -343,6 +567,26 @@ export class CFPieceMenu extends BaseElement {
   private accessor readError: string | undefined = undefined;
 
   @state()
+  private accessor argumentValue: unknown = undefined;
+
+  @state()
+  private accessor argumentLoaded = false;
+
+  @state()
+  private accessor resultValue: unknown = undefined;
+
+  @state()
+  private accessor dataError: string | undefined = undefined;
+
+  @state()
+  private accessor payloadText = "";
+
+  @state()
+  private accessor dispatchNote:
+    | { kind: "ok" | "error"; text: string }
+    | undefined = undefined;
+
+  @state()
   private accessor sourceActionPending = false;
 
   @state()
@@ -364,6 +608,32 @@ export class CFPieceMenu extends BaseElement {
   private readToken = 0;
   private sourceRead: Promise<void> | undefined;
 
+  /** Set once a data/actions panel has started its piece-state read. */
+  #dataRequested = false;
+
+  /**
+   * The generation of the current piece-state read. Every reset — reopening,
+   * closing, disconnecting, refreshing — advances it, and every step of an
+   * in-flight read checks it, so a read that outlives its generation can
+   * neither install a subscription nor write stale state.
+   */
+  #dataGeneration = 0;
+
+  /** The schema-bearing handle the page read resolved, for addressing streams. */
+  #pieceCell: CellHandle | undefined;
+
+  /** The schema-bearing handle of the piece's argument cell, when resolved. */
+  #argumentCell: CellHandle | undefined;
+
+  /** Cancels the live result subscription. */
+  #cancelResult: (() => void) | undefined;
+
+  /** Cancels the live argument subscription. */
+  #cancelArgument: (() => void) | undefined;
+
+  /** True while a dispatch is in flight, so a rapid double-click sends once. */
+  #dispatching = false;
+
   constructor() {
     super();
     this.x = 0;
@@ -377,6 +647,7 @@ export class CFPieceMenu extends BaseElement {
 
   override disconnectedCallback() {
     globalThis.removeEventListener("keydown", this.#onKeyDown);
+    this.#resetPieceState();
     super.disconnectedCallback();
   }
 
@@ -389,6 +660,8 @@ export class CFPieceMenu extends BaseElement {
     this.selectedFile = 0;
     this.source = undefined;
     this.readError = undefined;
+    this.#resetPieceState();
+    this.payloadText = "";
     this.sourceRead = undefined;
     this.sourceActionPending = false;
     this.sourceActionError = undefined;
@@ -405,12 +678,33 @@ export class CFPieceMenu extends BaseElement {
     this.panel = undefined;
     this.cell = undefined;
     this.source = undefined;
+    this.#resetPieceState();
     this.sourceRead = undefined;
     this.sourceActionPending = false;
     this.sourceActionError = undefined;
     this.sourceExecutionWarning = undefined;
     this.compatibilityWarning = undefined;
     this.readToken++;
+  }
+
+  /** Drop everything the data/actions panels read, and their subscriptions. */
+  #resetPieceState(): void {
+    // Invalidate first: an in-flight read must see the new generation before
+    // any of its remaining steps run, or a late completion could subscribe
+    // after this cleanup and leak.
+    this.#dataGeneration++;
+    this.#cancelResult?.();
+    this.#cancelResult = undefined;
+    this.#cancelArgument?.();
+    this.#cancelArgument = undefined;
+    this.#pieceCell = undefined;
+    this.#argumentCell = undefined;
+    this.#dataRequested = false;
+    this.argumentValue = undefined;
+    this.argumentLoaded = false;
+    this.resultValue = undefined;
+    this.dataError = undefined;
+    this.dispatchNote = undefined;
   }
 
   #onKeyDown = (e: KeyboardEvent) => {
@@ -436,14 +730,23 @@ export class CFPieceMenu extends BaseElement {
   };
 
   /**
-   * Show one of the panels, as choosing its entry does, reading the piece's
-   * source state the first time a panel is opened for that piece.
+   * Show one of the panels, as choosing its entry does. The source panels
+   * read the piece's source state the first time either is opened for that
+   * piece; the data and actions panels read its argument and result the
+   * first time either of those is.
    */
   async showPanel(panel: Panel) {
     this.panel = panel;
     this.selectedFile = 0;
     const cell = this.cell;
-    if (!cell || this.source !== undefined) return;
+    if (!cell) return;
+    if (panel === "data" || panel === "actions") {
+      if (this.#dataRequested) return;
+      this.#dataRequested = true;
+      await this.#readPieceState(cell);
+      return;
+    }
+    if (this.source !== undefined) return;
     await this.#readSource(cell);
   }
 
@@ -467,6 +770,219 @@ export class CFPieceMenu extends BaseElement {
       // cancellation, not a failure to report.
       if (cell.runtime().signal.aborted) return;
       this.readError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  /**
+   * Read the piece's argument and result. The menu's own cell addresses the
+   * piece but carries no result schema, and stream fields only keep their
+   * `asCell` tags under a schema'd read, so the page read resolves one —
+   * running the piece if it was not already.
+   */
+  async #readPieceState(cell: CellHandle): Promise<void> {
+    const generation = this.#dataGeneration;
+    const fresh = () => generation === this.#dataGeneration;
+    try {
+      const rt = cell.runtime();
+      const page = await rt.getPage(cell.id(), cell.space(), true);
+      if (!fresh()) return;
+      const pieceCell = (page?.cell() as CellHandle | undefined) ?? cell;
+      this.#pieceCell = pieceCell;
+      this.#cancelResult = pieceCell.subscribe((value) => {
+        if (!fresh()) return;
+        this.resultValue = value;
+      });
+      const response = await rt[$conn]().request<RequestType.CellGet>({
+        type: RequestType.CellGet,
+        cell: pieceCell.ref(),
+        meta: "argument",
+        includeRef: true,
+      });
+      if (!fresh()) return;
+      if (response.cell) {
+        // The argument's own schema-bearing ref: its schema carries the
+        // stream declarations for argument-side handlers, and the handle
+        // gives the panel a live view instead of a one-shot snapshot.
+        const argumentCell = new CellHandle(
+          rt,
+          response.cell,
+          CellHandle.deserialize(
+            new CellHandle(rt, response.cell),
+            response.value,
+          ),
+        );
+        this.#argumentCell = argumentCell;
+        this.#cancelArgument = argumentCell.subscribe((value) => {
+          if (!fresh()) return;
+          this.argumentValue = value;
+        });
+      } else {
+        this.argumentValue = CellHandle.deserialize(pieceCell, response.value);
+      }
+      this.argumentLoaded = true;
+    } catch (error) {
+      if (!fresh()) return;
+      if (cell.runtime().signal.aborted) return;
+      this.dataError = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  /**
+   * Re-read the piece's argument and result, as the Refresh control does.
+   * Also the retry path for a failed read: the reset advances the read
+   * generation, so a still-in-flight earlier read cannot install anything.
+   */
+  refreshData(): void {
+    const cell = this.cell;
+    if (!cell) return;
+    const dispatchNote = this.dispatchNote;
+    this.#resetPieceState();
+    // A refresh replaces the read, not the conversation: keep the last
+    // dispatch outcome visible.
+    this.dispatchNote = dispatchNote;
+    this.#dataRequested = true;
+    void this.#readPieceState(cell);
+  }
+
+  /** A schema's per-property fragments. */
+  #schemaProperties(of: CellHandle | undefined): Record<string, unknown> {
+    const schema = of?.ref().schema as
+      | { properties?: Record<string, unknown> }
+      | undefined;
+    return schema?.properties ?? {};
+  }
+
+  /** The result keys the piece schema declares as streams. */
+  #declaredStreamKeys(): ReadonlySet<string> {
+    const keys = new Set<string>();
+    for (
+      const [name, fragment] of Object.entries(
+        this.#schemaProperties(this.#pieceCell),
+      )
+    ) {
+      if (schemaDeclaresStream(fragment)) keys.add(name);
+    }
+    return keys;
+  }
+
+  /**
+   * The handler streams the piece's argument and result carry at their top
+   * level, deduplicated when the same stream is reachable from both sides.
+   *
+   * A handler read through a schema'd read arrives as a `CellHandle` carrying
+   * the handler's event schema; the `asCell: ["stream"]` declaration stays on
+   * the PARENT schema's property, so each side's parent schema is the primary
+   * signal (piece schema for the result, argument schema for the argument).
+   * The handle's own schema tag covers a value that arrived stream-tagged.
+   * There is deliberately no guess for an untagged, undeclared handle:
+   * dispatching to a non-stream cell would silently overwrite its value.
+   */
+  collectActions(): PieceAction[] {
+    const actions: PieceAction[] = [];
+    const seen = new Set<string>();
+    const parents = {
+      result: this.#pieceCell,
+      argument: this.#argumentCell,
+    };
+    const scan = (value: unknown, source: "result" | "argument") => {
+      if (
+        typeof value !== "object" || value === null || Array.isArray(value)
+      ) return;
+      const declared = this.#schemaProperties(parents[source]);
+      for (const [name, item] of Object.entries(value)) {
+        const declaredStream = schemaDeclaresStream(declared[name]);
+        let handle: CellHandle | undefined;
+        if (isCellHandle(item)) {
+          if (!declaredStream && !isStreamHandle(item)) continue;
+          handle = item;
+        } else if (declaredStream && parents[source]) {
+          // The value did not arrive as a handle (e.g. a raw `{$stream:true}`
+          // marker from a schema-less read), but the parent schema declares
+          // the stream — address it through the parent, which is the trusted
+          // signal here; a bare marker alone is never dispatchable.
+          handle = (parents[source]!.asSchema(
+            {
+              type: "object",
+              properties: { [name]: { asCell: ["stream"] } },
+              required: [name],
+            } as unknown as Parameters<CellHandle["asSchema"]>[0],
+          ) as CellHandle<Record<string, unknown>>).key(name) as CellHandle;
+        } else {
+          continue;
+        }
+        // Identity is structural, minus the schema: the same stream seen
+        // through two reads carries two different schema views.
+        const ref = handle.ref();
+        const key = JSON.stringify({
+          space: ref.space,
+          scope: ref.scope,
+          id: ref.id,
+          path: ref.path,
+        });
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const eventSchema = schemaDeclaresStream(ref.schema)
+          ? undefined
+          : ref.schema;
+        actions.push({ name, source, handle, eventSchema });
+      }
+    };
+    scan(this.resultValue, "result");
+    scan(this.argumentValue, "argument");
+    return actions;
+  }
+
+  /**
+   * Dispatch an event to one of the piece's handler streams, with the panel's
+   * JSON payload if one was entered. Goes through the raw request rather than
+   * `CellHandle.send()`, which logs and swallows failures — but note the
+   * limit: the worker commits the event asynchronously after acknowledging
+   * the request, so acceptance here means "accepted for delivery". A refusal
+   * during the later commit is not reported back.
+   */
+  async dispatchAction(action: PieceAction): Promise<void> {
+    const cell = this.cell;
+    if (!cell || this.#dispatching) return;
+    this.dispatchNote = undefined;
+    let payload: unknown = {};
+    const text = this.payloadText.trim();
+    if (text.length > 0) {
+      try {
+        payload = JSON.parse(text);
+      } catch (error) {
+        this.dispatchNote = {
+          kind: "error",
+          text: `The payload is not valid JSON: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        };
+        return;
+      }
+    }
+    const generation = this.#dataGeneration;
+    this.#dispatching = true;
+    try {
+      await cell.runtime()[$conn]().request<RequestType.CellSend>({
+        type: RequestType.CellSend,
+        cell: action.handle.ref(),
+        event: CellHandle.serialize(payload) as JSONValue,
+      });
+      if (generation !== this.#dataGeneration) return;
+      this.dispatchNote = {
+        kind: "ok",
+        text: `Event accepted for ${action.name}.`,
+      };
+    } catch (error) {
+      if (generation !== this.#dataGeneration) return;
+      if (cell.runtime().signal.aborted) return;
+      this.dispatchNote = {
+        kind: "error",
+        text: `Dispatch to ${action.name} failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      };
+    } finally {
+      this.#dispatching = false;
     }
   }
 
@@ -567,7 +1083,7 @@ export class CFPieceMenu extends BaseElement {
   }
 
   #renderPanel(panel: Panel): TemplateResult {
-    const title = panel === "source" ? "Source" : "Origin and history";
+    const title = PANEL_TITLES[panel];
     const subject = this.source?.name ?? this.cell?.id() ?? "";
     return html`
       <div class="backdrop dimmed" @click="${() => this.close()}"></div>
@@ -586,7 +1102,11 @@ export class CFPieceMenu extends BaseElement {
         </div>
         ${panel === "source" ? this.#renderSourceTabs() : nothing}
         <div class="panel-body">
-          ${this.readError
+          ${panel === "data"
+            ? this.#renderData()
+            : panel === "actions"
+            ? this.#renderActions()
+            : this.readError
             ? html`
               <p class="error">
                 Could not read this piece's source: ${this.readError}
@@ -601,6 +1121,116 @@ export class CFPieceMenu extends BaseElement {
             : this.#renderOrigin(this.source)}
         </div>
       </div>
+    `;
+  }
+
+  /** A read failure with the retry the failure would otherwise block. */
+  #renderDataError(what: string): TemplateResult {
+    return html`
+      <p class="error">
+        Could not read this piece's ${what}: ${this.dataError}
+        <button class="refresh" @click="${() => this.refreshData()}">
+          Retry
+        </button>
+      </p>
+    `;
+  }
+
+  #renderData(): TemplateResult {
+    if (this.dataError) return this.#renderDataError("data");
+    return html`
+      <h3 class="section-title">Argument</h3>
+      ${this.argumentLoaded
+        ? html`
+          <pre class="source">${formatPieceValue(this.argumentValue)}</pre>
+        `
+        : html`
+          <p>Reading argument…</p>
+        `}
+      <h3 class="section-title">Result</h3>
+      ${this.resultValue === undefined
+        ? html`
+          <p>Waiting for a value…</p>
+        `
+        : html`
+          <pre class="source">${formatPieceValue(
+            this.resultValue,
+            this.#declaredStreamKeys(),
+          )}</pre>
+        `}
+      <p class="note">
+        Values stay live while the menu is open.
+        <button class="refresh" @click="${() => this.refreshData()}">
+          Refresh
+        </button>
+      </p>
+    `;
+  }
+
+  #renderActions(): TemplateResult {
+    if (this.dataError) return this.#renderDataError("handlers");
+    if (!this.argumentLoaded && this.resultValue === undefined) {
+      return html`
+        <p>Reading handlers…</p>
+      `;
+    }
+    const actions = this.collectActions();
+    if (actions.length === 0) {
+      return html`
+        <p>This piece exposes no handler streams.</p>
+        <p class="note">
+          Handlers appear here when the piece's argument or result carries stream
+          fields.
+        </p>
+      `;
+    }
+    return html`
+      <label class="payload-label">
+        Optional JSON event payload
+        <textarea
+          class="payload"
+          placeholder="{}"
+          .value="${this.payloadText}"
+          @input="${(e: Event) => {
+            this.payloadText = (e.target as HTMLTextAreaElement).value;
+          }}"
+        ></textarea>
+      </label>
+      <div class="actions-list">
+        ${actions.map((action) =>
+          html`
+            <div class="action-row">
+              <span class="action-name">${action.name}</span>
+              ${payloadHint(action)
+                ? html`
+                  <span class="action-hint">${payloadHint(action)}</span>
+                `
+                : nothing}
+              <span class="action-source">${action.source}</span>
+              <button
+                class="action-send"
+                test-id="piece-action-${action.name}"
+                @click="${() => this.dispatchAction(action)}"
+              >
+                Send
+              </button>
+            </div>
+          `
+        )}
+      </div>
+      ${this.dispatchNote
+        ? html`
+          <p class="${this.dispatchNote.kind === "error" ? "error" : "status"}">
+            ${this.dispatchNote.text}
+          </p>
+        `
+        : nothing}
+      <p class="note">
+        "Accepted" means the runtime accepted the event for delivery; the commit
+        happens asynchronously, so a later refusal is not reported here. Events sent
+        here are also not renderer-trusted: a handler gated on UI provenance will
+        refuse them.
+      </p>
     `;
   }
 
