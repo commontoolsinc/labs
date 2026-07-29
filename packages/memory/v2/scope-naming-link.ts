@@ -42,11 +42,46 @@ import { isInstance, isObject } from "@commonfabric/utils/types";
  * - `overwrite` (required): exactly `"redirect"` — the emission path always
  *   resolves the binding in write-redirect mode with `preserveOverwrite`.
  * - `id` (optional): omitted for the self case (emission is base-relative);
- *   when present it must equal the written document id. A foreign id is
- *   nonconforming.
+ *   when present it must equal the written document id, OR name an AUXILIARY
+ *   result instance (see below). A foreign id is otherwise nonconforming.
  * - `schema` and every other key are contract violations: `schema` carries
- *   an arbitrary FabricValue and would be a per-lane covert channel; `space`
- *   is never emitted same-space and cross-space is inadmissible anyway.
+ *   an arbitrary FabricValue and would be a per-lane covert channel.
+ *
+ * ## The AUXILIARY result-instance form
+ *
+ * `scoped-cell-instances.md` ("Computation Rules") states the same widening
+ * rule for cells the computation allocates for itself: "Any intermediate or
+ * result cell allocated for the computation must use the effective output
+ * scope […]; **broader output locations then store links to that scoped
+ * instance with the same causal id**." The broad output location and the
+ * scoped instance are then DIFFERENT documents, so the self-redirect shape
+ * above cannot express it. This is what the `ifElse`/`when`/`unless`/
+ * `inspectConfLabel` selectors emit: each output-producing run mints a
+ * `{ <builtin>: cause }` result document at the effective output scope and
+ * stores a plain link to it in the broad output spot.
+ *
+ * That link is a second conforming shape, admitted only when
+ * `declaredWriteIds` is supplied and names the target:
+ *
+ * - `id` (required, and the whole safety argument): must be a document the
+ *   action's own TRUSTED STATIC CERTIFICATE declares as a write. The
+ *   certificate is authored by the runner from the pattern and bound to the
+ *   implementation fingerprint, so it is identical for every lane — a
+ *   certificate-drawn id therefore cannot vary with lane-private data, which
+ *   is the same byte-identity property the self case gets syntactically.
+ * - `space` (optional): only the served space. Cross-space stays inadmissible.
+ * - `scope` (required): as the self case — a scope NAME in the validating
+ *   lane's own chain, never a principal or session id.
+ * - `overwrite` (optional): `"redirect"` when present. An auxiliary result
+ *   link is an ordinary result reference, not a write redirect, so the real
+ *   emission omits it.
+ * - `path`: an array of strings addressing a position INSIDE the named
+ *   target (`[]` for the minted result's value root). The self-redirect path
+ *   equality does not apply — the link does not name its own document.
+ * - `schema` and every other key stay contract violations.
+ *
+ * A broad VALUE write remains rejected in both forms: this admits a scope
+ * REDIRECT into a scoped instance, never a value.
  */
 export const SCOPE_NAMING_LINK_TAG = "link@1";
 
@@ -112,6 +147,43 @@ export const SESSION_SCOPE_NAMING_LINK_CONFORMANCE = Object.freeze({
   readonly link: FabricValue;
 };
 
+/**
+ * Canonical conforming envelope for the AUXILIARY result-instance form: the
+ * plain link a broad output location stores to point at the scoped instance
+ * the computation minted for itself. A pure function of (target id, path,
+ * scope, space) — again no principal or session id input exists.
+ */
+export const auxiliaryScopeNamingLinkForTarget = (
+  target: { id: string; space?: string; path?: readonly string[] },
+  scope: ScopeNamingLinkScope = "user",
+): FabricValue => ({
+  "/": {
+    [SCOPE_NAMING_LINK_TAG]: {
+      path: [...(target.path ?? [])],
+      id: target.id,
+      ...(target.space === undefined ? {} : { space: target.space }),
+      scope,
+    },
+  },
+});
+
+/**
+ * Shared conformance fixture for the auxiliary form, captured verbatim from a
+ * real user-scoped `ifElse` run through the executor router (2026-07-28): the
+ * broad output spot's patch value, naming the minted `{ ifElse: cause }`
+ * result document at the `user` scope NAME. No `overwrite` (it is a result
+ * reference, not a write redirect) and no principal anywhere.
+ */
+export const AUXILIARY_SCOPE_NAMING_LINK_CONFORMANCE = Object.freeze({
+  documentPath: Object.freeze(["value"]),
+  targetId: "of:minted-result",
+  link: auxiliaryScopeNamingLinkForTarget({ id: "of:minted-result" }),
+}) as {
+  readonly documentPath: readonly string[];
+  readonly targetId: string;
+  readonly link: FabricValue;
+};
+
 export interface ScopeNamingLinkViolation {
   /** Execution-action firewall diagnostic code. */
   code: "broad-lane-value-write" | "malformed-scope-naming-link";
@@ -119,6 +191,13 @@ export interface ScopeNamingLinkViolation {
 }
 
 const PAYLOAD_KEYS = new Set(["id", "path", "scope", "overwrite"]);
+const AUXILIARY_PAYLOAD_KEYS = new Set([
+  "id",
+  "path",
+  "scope",
+  "overwrite",
+  "space",
+]);
 
 const isPlainRecord = (
   value: unknown,
@@ -158,13 +237,23 @@ const payloadViolation = (
   documentPath: readonly string[],
   writtenDocId: string,
   laneScope: ScopeNamingLinkScope,
+  auxiliary: AuxiliaryLinkAdmission | undefined,
 ): ScopeNamingLinkViolation | undefined => {
   const malformed = (detail: string): ScopeNamingLinkViolation => ({
     code: "malformed-scope-naming-link",
     detail,
   });
+  // Which of the two conforming shapes this envelope is claiming. An `id`
+  // naming another document is only ever the AUXILIARY form; without an
+  // admission set (or with an id the certificate does not declare) it stays
+  // the foreign-id violation it has always been.
+  const namesAnotherDocument = typeof payload.id === "string" &&
+    payload.id !== writtenDocId;
+  const isAuxiliary = namesAnotherDocument &&
+    auxiliary?.declaredWriteIds?.has(payload.id as string) === true;
+  const keys = isAuxiliary ? AUXILIARY_PAYLOAD_KEYS : PAYLOAD_KEYS;
   for (const key of Object.keys(payload)) {
-    if (!PAYLOAD_KEYS.has(key)) {
+    if (!keys.has(key)) {
       return malformed(
         key === "schema"
           ? "scope-naming links must not carry a schema"
@@ -172,7 +261,13 @@ const payloadViolation = (
       );
     }
   }
-  if (payload.overwrite !== "redirect") {
+  // The self form always redirects; the auxiliary form is an ordinary result
+  // reference, so `overwrite` is optional there but still only "redirect".
+  if (
+    isAuxiliary
+      ? payload.overwrite !== undefined && payload.overwrite !== "redirect"
+      : payload.overwrite !== "redirect"
+  ) {
     return malformed('scope-naming links carry overwrite "redirect"');
   }
   const scopes = admissibleLinkScopes(laneScope);
@@ -183,9 +278,18 @@ const payloadViolation = (
       }] — never a principal or session id`,
     );
   }
-  if (payload.id !== undefined && payload.id !== writtenDocId) {
+  if (payload.id !== undefined && payload.id !== writtenDocId && !isAuxiliary) {
     return malformed(
-      "scope-naming links must name the written document itself",
+      "scope-naming links must name the written document itself, or a " +
+        "document the action's own static certificate declares as a write",
+    );
+  }
+  if (
+    isAuxiliary && payload.space !== undefined &&
+    payload.space !== auxiliary?.servedSpace
+  ) {
+    return malformed(
+      "auxiliary scope-naming links stay inside the served space",
     );
   }
   const path = payload.path;
@@ -195,6 +299,9 @@ const payloadViolation = (
   ) {
     return malformed("scope-naming link path must be an array of strings");
   }
+  // The self-redirect property is only meaningful when the link names its own
+  // document; an auxiliary link addresses a position inside the target.
+  if (isAuxiliary) return undefined;
   const expected = documentPath[0] === "value"
     ? documentPath.slice(1)
     : undefined;
@@ -210,6 +317,23 @@ const payloadViolation = (
 };
 
 /**
+ * Admission parameters for the AUXILIARY result-instance form. Absent, only
+ * the self-redirect shape conforms — which is the pre-existing contract, so
+ * every caller that does not opt in stays byte-identical.
+ */
+export interface AuxiliaryLinkAdmission {
+  /**
+   * Every document id the action's TRUSTED STATIC CERTIFICATE declares as a
+   * write (declared writes, materializer envelopes and direct outputs). The
+   * certificate is lane-independent, which is what makes an id drawn from it
+   * safe to name from a lane.
+   */
+  readonly declaredWriteIds: ReadonlySet<string>;
+  /** The served space; an auxiliary link may name it, never another. */
+  readonly servedSpace: string;
+}
+
+/**
  * Validate one scoped-lane write payload against a broad (space-scoped)
  * document position: every leaf must be a conforming scope-naming link at
  * its own document path; any plain value — primitives, class instances,
@@ -222,6 +346,10 @@ const payloadViolation = (
  * `"user"`, keeping every existing caller — the engine firewall included —
  * byte-identical to the pre-C2 user-only contract until it explicitly
  * threads the session rank.
+ *
+ * `auxiliary`, when supplied, additionally admits the auxiliary
+ * result-instance form documented at the top of this module. Absent, only
+ * self-redirects conform.
  */
 export const scopeNamingLinkWriteViolation = (options: {
   value: FabricValue | undefined;
@@ -229,8 +357,9 @@ export const scopeNamingLinkWriteViolation = (options: {
   documentPath: readonly string[];
   writtenDocId: string;
   laneScope?: ScopeNamingLinkScope;
+  auxiliary?: AuxiliaryLinkAdmission;
 }): ScopeNamingLinkViolation | undefined => {
-  const { value, documentPath, writtenDocId } = options;
+  const { value, documentPath, writtenDocId, auxiliary } = options;
   const laneScope = options.laneScope ?? "user";
   const broad = (detail: string): ScopeNamingLinkViolation => ({
     code: "broad-lane-value-write",
@@ -258,7 +387,13 @@ export const scopeNamingLinkWriteViolation = (options: {
         detail: "scope-naming link payload must be a record",
       };
     }
-    return payloadViolation(payload, documentPath, writtenDocId, laneScope);
+    return payloadViolation(
+      payload,
+      documentPath,
+      writtenDocId,
+      laneScope,
+      auxiliary,
+    );
   }
   if (Array.isArray(value)) {
     if (value.length === 0) {
@@ -270,6 +405,7 @@ export const scopeNamingLinkWriteViolation = (options: {
         documentPath: [...documentPath, String(index)],
         writtenDocId,
         laneScope,
+        auxiliary,
       });
       if (violation !== undefined) return violation;
     }
@@ -286,6 +422,7 @@ export const scopeNamingLinkWriteViolation = (options: {
         documentPath: [...documentPath, key],
         writtenDocId,
         laneScope,
+        auxiliary,
       });
       if (violation !== undefined) return violation;
     }

@@ -13,7 +13,10 @@ import {
   parsePointer,
   pathsOverlap,
 } from "./path.ts";
-import { scopeNamingLinkWriteViolation } from "./scope-naming-link.ts";
+import {
+  type AuxiliaryLinkAdmission,
+  scopeNamingLinkWriteViolation,
+} from "./scope-naming-link.ts";
 import {
   ANYONE_USER,
   type Capability,
@@ -6391,14 +6394,17 @@ const assertLaneScopedAddress = (
 
 /**
  * Broad-instance scope-naming-link backstop (context-lattice §4 / C1.2): a
- * scoped lane may write a broad document only as the conforming self-scoping
- * link the runner's output-scoping step emits — the shared wire contract in
- * `scope-naming-link.ts`. A broad value write from a lane means
- * output-scoping failed and rejects the whole transaction.
+ * scoped lane may write a broad document only as one of the two conforming
+ * scope-naming links the runner's output-scoping step emits — the
+ * self-scoping redirect, or the auxiliary result-instance link naming a
+ * document the action's own trusted certificate declares as a write (the
+ * shared wire contract in `scope-naming-link.ts`). A broad VALUE write from a
+ * lane means output-scoping failed and rejects the whole transaction.
  */
 const assertLaneBroadScopeNamingWrite = (
   operation: Exclude<Operation, SqliteOperation>,
   laneScope: "user" | "session" = "user",
+  auxiliary?: AuxiliaryLinkAdmission,
 ): void => {
   const reject: (code: string, detail: string) => never = (code, detail) =>
     rejectExecutionAction(code, `broad lane write ${operation.id}: ${detail}`);
@@ -6423,12 +6429,13 @@ const assertLaneBroadScopeNamingWrite = (
       documentPath: ["value"],
       writtenDocId: operation.id,
       laneScope,
+      auxiliary,
     });
     if (violation !== undefined) reject(violation.code, violation.detail);
     return;
   }
-  // op === "patch": only exact-position writes can prove the self-redirect
-  // property at commit time; positional and merge kinds stay value writes.
+  // op === "patch": only exact-position writes can prove the link property at
+  // commit time; positional and merge kinds stay value writes.
   for (const patch of operation.patches) {
     if (patch.op !== "replace" && patch.op !== "add") {
       return reject(
@@ -6448,9 +6455,35 @@ const assertLaneBroadScopeNamingWrite = (
       documentPath,
       writtenDocId: operation.id,
       laneScope,
+      auxiliary,
     });
     if (violation !== undefined) reject(violation.code, violation.detail);
   }
+};
+
+/**
+ * Every document id the TRUSTED certificate declares as a write — the same
+ * union `schedulerRuntimeWritesExceedSummary` bounds runtime writes by. The
+ * certificate is bound to the implementation fingerprint and authored from
+ * the pattern, so it is identical across lanes: an id drawn from it cannot
+ * encode lane-private data, which is what makes the auxiliary
+ * scope-naming-link form byte-identical across lanes the way the self form
+ * is syntactically.
+ */
+const summaryDeclaredWriteIds = (
+  summary: CompleteActionScopeSummary,
+): ReadonlySet<string> => {
+  const ids = new Set<string>();
+  for (
+    const envelopes of [
+      summary.writes,
+      summary.materializerWriteEnvelopes,
+      summary.directOutputs,
+    ]
+  ) {
+    for (const envelope of envelopes) ids.add(envelope.id);
+  }
+  return ids;
 };
 
 /**
@@ -6632,10 +6665,15 @@ const assertExecutionActionTransaction = (
     if (laneScopeKey !== undefined && resolvedScope === DEFAULT_SCOPE_KEY) {
       // CA2 (C2.2): the admissible link scopes are the lane's non-space chain
       // — a session lane's broad self-scoping link may name "user" or
-      // "session"; a user lane's only "user".
+      // "session"; a user lane's only "user". The auxiliary form is bounded
+      // by this action's own trusted certificate.
       assertLaneBroadScopeNamingWrite(
         operation,
         laneScopeKey.startsWith("session:") ? "session" : "user",
+        {
+          declaredWriteIds: summaryDeclaredWriteIds(summary),
+          servedSpace: options.servedSpace,
+        },
       );
     }
     const matchingWrites = observation.actualChangedWrites.filter((write) =>

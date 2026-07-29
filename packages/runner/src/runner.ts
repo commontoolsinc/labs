@@ -5180,11 +5180,25 @@ export class Runner {
     // SAME cause the builtin keys it on (`selectorBuiltinResultCause` over
     // the hoisted `builtinCause`) and fold it into the descriptor's write
     // surface as an EXACT write: the identity is deterministic per node, so
-    // no envelope is needed. Declared at space scope like the materializer
-    // container — the builtin re-addresses the instance at the resolved
-    // condition's scope, which never forks the entity id, and a scoped
-    // actual write fails closed at the firewall's scope check instead of
-    // being served.
+    // no envelope is needed.
+    //
+    // Declared at space scope like the materializer container, and that is
+    // the only thing this site CAN declare: the builtin allocates the
+    // instance at the effective output scope — `resolvedCellScope` over the
+    // resolved condition link (`builtins/if-else.ts`) — which is discovered
+    // per transaction, while the descriptor is authored once at
+    // registration. Scope re-addresses the instance and never forks the
+    // entity id, so the declaration stays correct; the SCOPE half is
+    // resolved downstream, by the §4 lane-instance relaxation that spans the
+    // declared write surface (`scheduler/servability.ts` `laneInstanceCovers`
+    // plus the matching `widenLaneOutputEnvelopes` in
+    // `executor/action-transaction-router.ts`) — exactly the auxiliary
+    // result-cell rule in `scoped-cell-instances.md` ("Computation Rules").
+    // An earlier revision of this comment recorded "a scoped actual write
+    // fails closed at the firewall's scope check instead of being served" as
+    // accepted behavior; that was the defect, not the design, and it is
+    // fixed — see the owner ruling of 2026-07-28 and client-passivity §5g's
+    // `dynamic-write-outside-static-surface` inventory.
     const selectorMintedResultWrite = ((): NormalizedFullLink | undefined => {
       if (computationBuiltinId === undefined) return undefined;
       const mintedLink = this.runtime.getCell(

@@ -747,6 +747,223 @@ describe("per-builtin computation descriptors — end to end (W2.15a)", () => {
     ).toEqual([]);
   });
 
+  // The SCOPED case (the §4 auxiliary result-instance shape). With a
+  // `PerUser` input every selector allocates its minted `{ <builtin>: cause }`
+  // result document at the effective output scope — `user` — and stores a
+  // cross-document link to that scoped instance in the broad output spot,
+  // which is what `scoped-cell-instances.md` ("Computation Rules") requires:
+  // "broader output locations then store links to that scoped instance with
+  // the same causal id."
+  //
+  // Both legs used to fail closed at the user-rank firewall, and both are the
+  // measured live offender behind client-passivity §5g's inventory: the VALUE
+  // leg as `dynamic-write-outside-static-surface` ×12 / 1 offender (the
+  // runner-authored descriptor declares the mint at `space` — it is static
+  // and the effective scope is discovered per transaction, so it cannot
+  // declare anything else), and the LINK leg as `malformed-scope-naming-link`
+  // ×12 / 1 offender (the §4 wire contract only ever implemented the
+  // degenerate self-redirect case).
+  //
+  // The whole registry has the identical shape, so this drives all four ids
+  // rather than `ifElse` alone.
+  it("scoped selector runs (PerUser condition) pass the dynamic claim firewall at user rank", async () => {
+    type CapturedAttempt = {
+      readonly input: ActionTransactionRouteInput;
+      readonly observation: SchedulerActionObservation;
+    };
+    const attempts: CapturedAttempt[] = [];
+    const diagnostics: ExecutorCandidateDiagnostic[] = [];
+    const executorRouter = createExecutorActionTransactionRouter({
+      servedSpace: integrationSpace,
+      branch: "",
+      userRankCandidates: true,
+      lanePrincipal: integrationSpace,
+      claimForAction: () => undefined,
+      onCandidate: () => {},
+      onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    });
+    storageManager = StorageManager.emulate({
+      as: integrationSigner,
+      actionTransactionRouter(input) {
+        const route = executorRouter(input);
+        const observation = input.commit.schedulerObservation;
+        if (
+          observation !== undefined &&
+          (observation as { transactionKind?: unknown }).transactionKind ===
+            "action-run"
+        ) {
+          attempts.push({
+            input: {
+              ...input,
+              commit: structuredClone(input.commit) as ClientCommit,
+            },
+            observation: structuredClone(
+              observation,
+            ) as SchedulerActionObservation,
+          });
+        }
+        return route;
+      },
+    });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      experimental: {
+        persistentSchedulerState: true,
+        serverPrimaryExecution: true,
+      },
+    });
+
+    const compiled = await runtime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: [
+          "import { pattern, ifElse, when, unless, inspectConfLabel, Default, Writable, PerUser } from 'commonfabric';",
+          "export default pattern<{ flag: PerUser<Writable<boolean | Default<true>>> }>(",
+          "  ({ flag }) => {",
+          "    const chosen = ifElse(flag, 'yes', 'no');",
+          "    const gated = when(flag, 'shown');",
+          "    const fallback = unless(flag, 'default');",
+          "    const label = inspectConfLabel(flag, '', {});",
+          "    return { chosen, gated, fallback, label };",
+          "  },",
+          ");",
+        ].join("\n"),
+      }],
+    });
+    const tx = runtime.edit();
+    const resultCell = runtime.getCell(
+      integrationSpace,
+      "scoped-selector-firewall-e2e",
+      undefined,
+      tx,
+    );
+    const handle = runtime.run(tx, compiled, {}, resultCell);
+    await tx.commit();
+    for (let k = 0; k < 4; k++) {
+      await handle.pull();
+      await runtime.idle();
+    }
+    await runtime.settled();
+
+    const userContext = {
+      servedSpace: integrationSpace,
+      branch: "",
+      contextRank: "user",
+      laneActingCommit: true,
+    } as const;
+
+    for (
+      const id of ["ifElse", "when", "unless", "inspectConfLabel"] as const
+    ) {
+      const fingerprint = `impl:${builtinImplementationHash(id)}`;
+      const matches = attempts.filter(({ observation }) =>
+        observation.implementationFingerprint === fingerprint
+      );
+      expect(matches.length).toBeGreaterThan(0);
+      for (const attempt of matches) {
+        const summary = attempt.observation.completeActionScopeSummary;
+        expect(summary).toBeDefined();
+        // Guard against a vacuous pass (the FB16 class): this really is the
+        // scoped shape. The descriptor declares BOTH documents at `space`…
+        expect(
+          summary!.writes.every((write) =>
+            (write.scope ?? "space") === "space"
+          ),
+        ).toBe(true);
+        // …while the run actually wrote the minted document at `user`…
+        const scopedMints = attempt.observation.actualChangedWrites.filter(
+          (address) =>
+            (address.scope ?? "space") === "user" &&
+            !summary!.directOutputs.some((output) => output.id === address.id),
+        );
+        expect(scopedMints.length).toBeGreaterThan(0);
+        // …and stored a cross-document link to it in the broad output spot.
+        const spotLink = attempt.input.commit.operations.find((operation) =>
+          operation.op === "patch" &&
+          (operation.scope ?? "space") === "space" &&
+          summary!.directOutputs.some((output) => output.id === operation.id)
+        );
+        expect(spotLink).toBeDefined();
+
+        expect(
+          classifyStaticActionServability(
+            attempt.observation,
+            integrationSpace,
+            { userContext: true },
+          ),
+        ).toEqual({
+          status: "claim-ready",
+          actionKind: "computation",
+          contextRank: "user",
+        });
+        expect(
+          dynamicActionTransactionUnservableReason(
+            attempt.input,
+            attempt.observation,
+            userContext,
+          ),
+        ).toBeUndefined();
+      }
+    }
+    for (
+      const code of [
+        "dynamic-write-outside-static-surface",
+        "malformed-scope-naming-link",
+        "broad-lane-value-write",
+      ]
+    ) {
+      expect(
+        diagnostics.filter((diagnostic) => diagnostic.diagnosticCode === code),
+      ).toEqual([]);
+    }
+
+    // CARVE-OUT, asserted against the REAL captured commit rather than a
+    // hand-built fixture: replacing the broad spot's auxiliary LINK with a
+    // plain VALUE must still reject. Alice's and Bob's user lanes resolve the
+    // same broad document, so a broad value write from one is visible to the
+    // other at the space instance — the cross-principal leak this admission
+    // must never open.
+    const leakAttempt = attempts.find(({ observation }) =>
+      observation.implementationFingerprint ===
+        `impl:${builtinImplementationHash("ifElse")}`
+    )!;
+    const summary = leakAttempt.observation.completeActionScopeSummary!;
+    const tamper = (
+      mutate: (patchValue: { "/": { "link@1": { id: string } } }) => unknown,
+    ): ActionTransactionRouteInput => {
+      const commit = structuredClone(leakAttempt.input.commit) as ClientCommit;
+      const broadSpot = commit.operations.find((operation) =>
+        operation.op === "patch" &&
+        summary.directOutputs.some((output) => output.id === operation.id)
+      ) as { op: "patch"; patches: { value: unknown }[] };
+      broadSpot.patches[0].value = mutate(
+        broadSpot.patches[0].value as { "/": { "link@1": { id: string } } },
+      );
+      return { ...leakAttempt.input, commit };
+    };
+    expect(
+      dynamicActionTransactionUnservableReason(
+        tamper(() => "a value only this lane could know"),
+        leakAttempt.observation,
+        userContext,
+      ),
+    ).toBe("broad-lane-value-write");
+
+    // …and so must a link naming a document the certificate does not declare.
+    expect(
+      dynamicActionTransactionUnservableReason(
+        tamper((payload) => {
+          payload["/"]["link@1"].id = "of:a-document-nobody-declared";
+          return payload;
+        }),
+        leakAttempt.observation,
+        userContext,
+      ),
+    ).toBe("malformed-scope-naming-link");
+  });
+
   // R5 worklist: `inspectConfLabel` joins the registry. Its surface is the
   // selector shape verified literally against `inspect-conf-label.ts` — it
   // mints ONE side document keyed `{ inspectConfLabel: cause }` (bare

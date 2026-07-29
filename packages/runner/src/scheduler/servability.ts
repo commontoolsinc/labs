@@ -8,7 +8,10 @@ import {
   userExecutionContextKey,
 } from "@commonfabric/memory/v2";
 import type { FabricValue } from "@commonfabric/api";
-import { scopeNamingLinkWriteViolation } from "@commonfabric/memory/v2/scope-naming-link";
+import {
+  type AuxiliaryLinkAdmission,
+  scopeNamingLinkWriteViolation,
+} from "@commonfabric/memory/v2/scope-naming-link";
 import { parsePointer } from "../../../memory/v2/path.ts";
 import type {
   CompleteActionScopeSummary,
@@ -562,6 +565,17 @@ export function dynamicActionTransactionUnservableReason(
   }
   if (commit.merge !== undefined) return "dynamic-branch-merge";
   const laneRank = context.contextRank ?? "space";
+  // §4 auxiliary result-instance admission (see `scope-naming-link.ts`): the
+  // ids the action's own certificate declares as writes. Read here rather
+  // than after the summary gate below so the operation loop keeps reporting
+  // operation-level codes first; an absent or malformed summary yields an
+  // empty set, which is the pre-existing self-redirect-only contract, and
+  // the summary gate then reports `dynamic-incomplete-static-surface` as
+  // before.
+  const auxiliaryAdmission: AuxiliaryLinkAdmission = {
+    declaredWriteIds: declaredWriteIds(observation.completeActionScopeSummary),
+    servedSpace: context.servedSpace,
+  };
   for (const read of [...commit.reads.confirmed, ...commit.reads.pending]) {
     if (!laneAdmitsScope(read.scope, laneRank)) {
       return "dynamic-non-space-read-scope";
@@ -580,16 +594,22 @@ export function dynamicActionTransactionUnservableReason(
     }
     // §4 backstop, mirroring the engine's broad-instance firewall (memory/v2
     // engine `assertLaneBroadScopeNamingWrite`): a scoped-rank LANE-ACTING
-    // commit may write a broad (space-scoped) document only as the
-    // conforming scope-naming redirect link of the output-widening pair. A
-    // broad VALUE write means output-scoping failed; routing it would only
-    // bounce off the engine. Client suppression mirrors keep this off (see
+    // commit may write a broad (space-scoped) document only as one of the two
+    // conforming scope-naming links of the output-widening pair — the
+    // self-redirect, or the auxiliary result-instance link naming a document
+    // the action's own certificate declares. A broad VALUE write means
+    // output-scoping failed; routing it would only bounce off the engine.
+    // Client suppression mirrors keep this off (see
     // ActionTransactionServabilityContext.laneActingCommit).
     if (
       laneRank !== "space" && context.laneActingCommit === true &&
       scopeOf(operation) === "space"
     ) {
-      const reason = laneBroadScopeNamingWriteViolation(operation, laneRank);
+      const reason = laneBroadScopeNamingWriteViolation(
+        operation,
+        laneRank,
+        auxiliaryAdmission,
+      );
       if (reason !== undefined) return reason;
     }
   }
@@ -629,16 +649,25 @@ export function dynamicActionTransactionUnservableReason(
     if (reason !== undefined) return reason;
   }
   // §4 output-widening pair (context-lattice C1.2/C1.9, session rank with
-  // C2.2): under a scoped lane, the certificate's broad direct output covers
-  // BOTH legs of the pair — the broad scope-naming redirect link write and
-  // the value write at the ACTING context's scoped instance of the SAME
-  // document. Coverage widens across the lane's own instance boundary only
-  // (space/user at user rank; space/user/session at session rank — the
-  // chain, CA3) and only for direct outputs. The commit-value backstop
-  // above keeps the broad leg an actual scope-naming link.
-  const directOutputCovers = (address: IMemorySpaceAddress): boolean =>
+  // C2.2): under a scoped lane, the certificate's broad declared write covers
+  // BOTH legs of the pair — the broad scope-naming link write and the value
+  // write at the ACTING context's scoped instance of the SAME document.
+  // Coverage widens across the lane's own instance boundary only (space/user
+  // at user rank; space/user/session at session rank — the chain, CA3) and
+  // never across DOCUMENTS: the id must already be declared. The commit-value
+  // backstop above keeps the broad leg an actual scope-naming link.
+  //
+  // This spans the whole declared write surface, not just `directOutputs`,
+  // because `scoped-cell-instances.md` applies the widening rule "to
+  // auxiliary result cells created to represent structured or captured
+  // reactive outputs as well as direct scalar outputs". The selectors'
+  // minted `{ <builtin>: cause }` result document is exactly such a cell: a
+  // declared WRITE, allocated at the effective output scope discovered per
+  // transaction, while the runner-authored descriptor can only declare it
+  // statically at `space`.
+  const laneInstanceCovers = (address: IMemorySpaceAddress): boolean =>
     laneRank !== "space" &&
-    summary.directOutputs.some((envelope) =>
+    writeEnvelopes.some((envelope) =>
       laneInstanceScope(envelope, laneRank) &&
       laneInstanceScope(address, laneRank) &&
       envelope.space === address.space && envelope.id === address.id &&
@@ -663,7 +692,7 @@ export function dynamicActionTransactionUnservableReason(
     if (reason !== undefined) return reason;
     if (
       !writeEnvelopes.some((envelope) => covers(envelope, address)) &&
-      !directOutputCovers(address)
+      !laneInstanceCovers(address)
     ) {
       return "dynamic-write-outside-static-surface";
     }
@@ -676,7 +705,7 @@ export function dynamicActionTransactionUnservableReason(
         scopeOf(envelope) === scopeOf(operation)
       ) &&
       !(laneRank !== "space" && laneInstanceScope(operation, laneRank) &&
-        summary.directOutputs.some((envelope) =>
+        writeEnvelopes.some((envelope) =>
           envelope.id === operation.id && laneInstanceScope(envelope, laneRank)
         ))
     ) {
@@ -717,10 +746,12 @@ function laneInstanceAddressesEqual(
 /**
  * Runner-side mirror of the engine's broad-instance scope-naming-link
  * backstop (memory/v2 engine `assertLaneBroadScopeNamingWrite`, C1.2/C2.2):
- * every broad write a scoped-rank action commits must be the conforming
- * self-scoping redirect link the output-scoping step emits — validated by
- * the shared wire contract in memory/v2/scope-naming-link.ts, parameterized
- * by the lane's rank (a session lane admits links naming its own chain,
+ * every broad write a scoped-rank action commits must be one of the two
+ * conforming scope-naming links the output-scoping step emits — the
+ * self-scoping redirect, or the auxiliary result-instance link naming a
+ * document the action's own certificate declares. Validated by the shared
+ * wire contract in memory/v2/scope-naming-link.ts, parameterized by the
+ * lane's rank (a session lane admits links naming its own chain,
  * "user" | "session"; a user lane admits "user" only). Returns the engine's
  * diagnostic code so the two seams reject identically.
  */
@@ -730,6 +761,7 @@ function laneBroadScopeNamingWriteViolation(
     { op: "sqlite" }
   >,
   laneScope: "user" | "session",
+  auxiliary: AuxiliaryLinkAdmission,
 ): string | undefined {
   if (operation.op === "delete") return "broad-lane-value-write";
   if (operation.op === "set") {
@@ -742,10 +774,11 @@ function laneBroadScopeNamingWriteViolation(
       documentPath: ["value"],
       writtenDocId: operation.id,
       laneScope,
+      auxiliary,
     })?.code;
   }
-  // op === "patch": only exact-position writes can prove the self-redirect
-  // property at commit time; positional and merge kinds stay value writes.
+  // op === "patch": only exact-position writes can prove the link property at
+  // commit time; positional and merge kinds stay value writes.
   for (const patch of operation.patches) {
     if (patch.op !== "replace" && patch.op !== "add") {
       return "broad-lane-value-write";
@@ -757,10 +790,38 @@ function laneBroadScopeNamingWriteViolation(
       documentPath,
       writtenDocId: operation.id,
       laneScope,
+      auxiliary,
     });
     if (violation !== undefined) return violation.code;
   }
   return undefined;
+}
+
+/**
+ * Every document id the action's certificate declares as a write — declared
+ * writes, materializer envelopes and direct outputs. Mirrors the engine's own
+ * write-envelope union (`schedulerRuntimeWritesExceedSummary`). An absent or
+ * malformed summary yields the empty set, which keeps the auxiliary
+ * scope-naming-link form inadmissible until a certificate vouches for it.
+ */
+function declaredWriteIds(
+  summary: CompleteActionScopeSummary | undefined,
+): ReadonlySet<string> {
+  const ids = new Set<string>();
+  if (summary === undefined) return ids;
+  for (
+    const envelopes of [
+      summary.writes,
+      summary.materializerWriteEnvelopes,
+      summary.directOutputs,
+    ]
+  ) {
+    if (!Array.isArray(envelopes)) continue;
+    for (const envelope of envelopes) {
+      if (typeof envelope?.id === "string") ids.add(envelope.id);
+    }
+  }
+  return ids;
 }
 
 function dynamicAddressReason(

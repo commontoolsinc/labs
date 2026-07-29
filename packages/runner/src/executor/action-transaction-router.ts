@@ -1274,14 +1274,23 @@ function laneScopedDocumentAddresses(
  * (context-lattice C1.2/C1.9, session rank with C2.2/C2.5): the transformer
  * certificate declares the derived output ONCE at the broad space address,
  * while a scoped-rank run writes that document twice — the broad
- * scope-naming redirect link plus the value at the ACTING context's
- * instance (the principal's user instance at user rank; the acting
- * session's instance at session rank). The engine's write-coverage check is
- * scope-sensitive, so the claimed commit's trusted summary must carry the
- * lane instance explicitly; add `laneScope`-scope twins of the broad direct
- * outputs to the write envelopes (id and path unchanged — never another
- * document, never a scope outside the acting rank). This mirrors the shape
- * pinned by the engine's lane-firewall conformance tests.
+ * scope-naming link plus the value at the ACTING context's instance (the
+ * principal's user instance at user rank; the acting session's instance at
+ * session rank). The engine's write-coverage check is scope-sensitive, so
+ * the claimed commit's trusted summary must carry the lane instance
+ * explicitly; add `laneScope`-scope twins of the broad declared writes to
+ * the write envelopes (id and path unchanged — never another document,
+ * never a scope outside the acting rank). This mirrors the shape pinned by
+ * the engine's lane-firewall conformance tests.
+ *
+ * The twins span the whole declared write surface, not just `directOutputs`,
+ * in lockstep with the runner classifier's `laneInstanceCovers`
+ * (`scheduler/servability.ts`): `scoped-cell-instances.md` applies the
+ * widening rule to auxiliary result cells as well as direct outputs, and the
+ * selectors' minted `{ <builtin>: cause }` result document is a declared
+ * WRITE allocated at the effective output scope. Without the twin here the
+ * engine rejects that run `runtime-exceeds-static-scope` even though the
+ * classifier served it.
  */
 function widenLaneOutputEnvelopes(
   observation: SchedulerActionObservation,
@@ -1289,19 +1298,47 @@ function widenLaneOutputEnvelopes(
 ): SchedulerActionObservation {
   const summary = observation.completeActionScopeSummary;
   if (summary === undefined) return observation;
-  const laneInstances = summary.directOutputs
-    .filter((output) => (output.scope ?? "space") === "space")
-    .map((output) => ({
-      ...output,
-      scope: laneScope,
-      path: [...output.path],
-    }));
+  const laneTwins = (
+    envelopes: readonly IMemorySpaceAddress[],
+  ): IMemorySpaceAddress[] =>
+    envelopes
+      .filter((output) => (output.scope ?? "space") === "space")
+      .map((output) => ({
+        ...output,
+        scope: laneScope,
+        path: [...output.path],
+      }));
+  const laneInstances = laneTwins([
+    ...summary.directOutputs,
+    ...summary.writes,
+    ...summary.materializerWriteEnvelopes,
+  ]);
   if (laneInstances.length === 0) return observation;
   const writes = dedupeAddresses([...summary.writes, ...laneInstances]);
-  if (writes.length === summary.writes.length) return observation;
+  // The engine checks OBSERVED materializer envelopes against the DECLARED
+  // materializer envelopes separately from the write union
+  // (`schedulerRuntimeWritesExceedSummary`), and that check is scope-sensitive
+  // too — a scoped result CONTAINER (`map` over a PerUser list, `filter`,
+  // `flatMap`) needs its lane twin there as well, or the two seams disagree
+  // about the same run.
+  const materializerWriteEnvelopes = dedupeAddresses([
+    ...summary.materializerWriteEnvelopes,
+    ...laneTwins(summary.materializerWriteEnvelopes),
+  ]);
+  if (
+    writes.length === summary.writes.length &&
+    materializerWriteEnvelopes.length ===
+      summary.materializerWriteEnvelopes.length
+  ) {
+    return observation;
+  }
   return {
     ...observation,
-    completeActionScopeSummary: { ...summary, writes },
+    completeActionScopeSummary: {
+      ...summary,
+      writes,
+      materializerWriteEnvelopes,
+    },
   };
 }
 

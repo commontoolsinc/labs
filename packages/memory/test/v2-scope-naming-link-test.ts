@@ -1,5 +1,7 @@
 import { assertEquals } from "@std/assert";
 import {
+  AUXILIARY_SCOPE_NAMING_LINK_CONFORMANCE,
+  auxiliaryScopeNamingLinkForTarget,
   SCOPE_NAMING_LINK_CONFORMANCE,
   scopeNamingLinkForPath,
   scopeNamingLinkWriteViolation,
@@ -196,6 +198,178 @@ Deno.test("the self-redirect path property holds at session scope", () => {
       writtenDocId: "of:output",
       laneScope: "session",
     })?.code,
+    "malformed-scope-naming-link",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The AUXILIARY result-instance form. `scoped-cell-instances.md` requires
+// that "broader output locations then store links to that scoped instance
+// with the same causal id" — a CROSS-document link, which the self-redirect
+// shape above cannot express. Admitted only against an explicit admission
+// set drawn from the action's own trusted certificate.
+// ---------------------------------------------------------------------------
+
+const SERVED_SPACE = "did:key:z6Mk-scope-naming-served";
+
+const auxiliaryCode = (
+  value: unknown,
+  options: {
+    declaredWriteIds?: readonly string[];
+    laneScope?: "user" | "session";
+    documentPath?: readonly string[];
+  } = {},
+): string | undefined =>
+  scopeNamingLinkWriteViolation({
+    value: value as FabricValue,
+    documentPath: options.documentPath ?? ["value"],
+    writtenDocId: "of:output",
+    laneScope: options.laneScope ?? "user",
+    ...(options.declaredWriteIds === undefined ? {} : {
+      auxiliary: {
+        declaredWriteIds: new Set(options.declaredWriteIds),
+        servedSpace: SERVED_SPACE,
+      },
+    }),
+  })?.code;
+
+Deno.test("the auxiliary conformance fixture is the canonical builder output", () => {
+  assertEquals(
+    AUXILIARY_SCOPE_NAMING_LINK_CONFORMANCE.link,
+    auxiliaryScopeNamingLinkForTarget({
+      id: AUXILIARY_SCOPE_NAMING_LINK_CONFORMANCE.targetId,
+    }),
+  );
+  // The exact wire shape a real user-scoped selector emits into its broad
+  // output spot: a cross-document link naming the minted result at the
+  // `user` scope NAME. No `overwrite` (a result reference, not a redirect)
+  // and no principal or session id anywhere.
+  assertEquals(
+    JSON.parse(JSON.stringify(AUXILIARY_SCOPE_NAMING_LINK_CONFORMANCE.link)),
+    { "/": { "link@1": { path: [], id: "of:minted-result", scope: "user" } } },
+  );
+  // Byte-identity across lanes: the builder takes no principal input, so two
+  // lanes asking for the same target get identical bytes.
+  assertEquals(
+    JSON.stringify(auxiliaryScopeNamingLinkForTarget({ id: "of:minted" })),
+    JSON.stringify(auxiliaryScopeNamingLinkForTarget({ id: "of:minted" })),
+  );
+});
+
+Deno.test("an auxiliary link conforms only when the certificate declares its target", () => {
+  const link = AUXILIARY_SCOPE_NAMING_LINK_CONFORMANCE.link;
+  // Without an admission set at all, the pre-existing contract holds: a
+  // foreign id is the foreign-id violation it has always been.
+  assertEquals(auxiliaryCode(link), "malformed-scope-naming-link");
+  // Declared: admitted.
+  assertEquals(
+    auxiliaryCode(link, { declaredWriteIds: ["of:minted-result"] }),
+    undefined,
+  );
+  // Undeclared: still rejected. This is the bound that keeps the named id
+  // certificate-derived — and therefore identical across lanes — instead of
+  // a per-lane choice a broad reader could observe.
+  assertEquals(
+    auxiliaryCode(link, { declaredWriteIds: ["of:something-else"] }),
+    "malformed-scope-naming-link",
+  );
+});
+
+Deno.test("the auxiliary form keeps the payload discipline of the self form", () => {
+  const declaredWriteIds = ["of:minted-result"];
+  const base = (JSON.parse(
+    JSON.stringify(AUXILIARY_SCOPE_NAMING_LINK_CONFORMANCE.link),
+  ) as { "/": { "link@1": Record<string, unknown> } })["/"]["link@1"];
+  const rejected: Array<Record<string, unknown>> = [
+    // Schema-bearing: the per-lane covert channel, closed in both forms.
+    { ...base, schema: { type: "string", default: "covert" } },
+    // A session name under a user lane stays outside the lane's chain.
+    { ...base, scope: "session" },
+    // A resolved scope key or principal in place of the scope name.
+    { ...base, scope: "user:did:key:alice" },
+    // `space` is never a scope-naming target.
+    { ...base, scope: "space" },
+    // A foreign space: cross-space stays inadmissible.
+    { ...base, space: "did:key:z6Mk-somewhere-else" },
+    // Unknown keys.
+    { ...base, sessionId: "s1" },
+    // A non-redirect overwrite.
+    { ...base, overwrite: "value" },
+  ];
+  for (const payload of rejected) {
+    assertEquals(
+      auxiliaryCode({ "/": { "link@1": payload } }, { declaredWriteIds }),
+      "malformed-scope-naming-link",
+      `expected rejection for ${JSON.stringify(payload)}`,
+    );
+  }
+  const admitted: Array<Record<string, unknown>> = [
+    // The served space may be named (the real emission carries it).
+    { ...base, space: SERVED_SPACE },
+    // `overwrite` is optional here, but "redirect" stays legal.
+    { ...base, overwrite: "redirect" },
+    // A path inside the named target; the self-redirect equality does not
+    // apply because the link does not name its own document.
+    { ...base, path: ["status"] },
+  ];
+  for (const payload of admitted) {
+    assertEquals(
+      auxiliaryCode({ "/": { "link@1": payload } }, { declaredWriteIds }),
+      undefined,
+      `expected admission for ${JSON.stringify(payload)}`,
+    );
+  }
+});
+
+Deno.test("the auxiliary admission never admits a broad VALUE write", () => {
+  // The carve-out: admitting a scope REDIRECT into a scoped instance must
+  // not admit a value. Alice's and Bob's user lanes resolve the same broad
+  // document, so a broad value write from one is visible to the other.
+  const declaredWriteIds = ["of:minted-result"];
+  for (
+    const value of [
+      "a plain broad value",
+      6,
+      true,
+      { chosen: "alice-only" },
+      [1, 2, 3],
+      { "/": { "link@1": { path: [], id: "of:minted-result" } } }, // no scope
+    ]
+  ) {
+    const code = auxiliaryCode(value, { declaredWriteIds });
+    assertEquals(
+      code !== undefined,
+      true,
+      `expected rejection for ${JSON.stringify(value)}`,
+    );
+  }
+  assertEquals(
+    auxiliaryCode("a plain broad value", { declaredWriteIds }),
+    "broad-lane-value-write",
+  );
+  assertEquals(
+    auxiliaryCode({ chosen: "alice-only" }, { declaredWriteIds }),
+    "broad-lane-value-write",
+  );
+});
+
+Deno.test("a session lane may name its own chain in an auxiliary link", () => {
+  const declaredWriteIds = ["of:minted-result"];
+  for (const scope of ["user", "session"] as const) {
+    assertEquals(
+      auxiliaryCode(
+        auxiliaryScopeNamingLinkForTarget({ id: "of:minted-result" }, scope),
+        { declaredWriteIds, laneScope: "session" },
+      ),
+      undefined,
+    );
+  }
+  // A user lane keeps rejecting the session name.
+  assertEquals(
+    auxiliaryCode(
+      auxiliaryScopeNamingLinkForTarget({ id: "of:minted-result" }, "session"),
+      { declaredWriteIds, laneScope: "user" },
+    ),
     "malformed-scope-naming-link",
   );
 });

@@ -936,40 +936,43 @@ describe("§4 output-widening pair servability (C1.9)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// The AUXILIARY result cell gap — a CHARACTERIZATION pin, not a statement of
-// desired behavior.
+// The AUXILIARY result cell — the second §4 shape, now SERVED.
 //
 // `scoped-cell-instances.md` ("Computation Rules") says the output-widening
 // rule "applies to auxiliary result cells created to represent structured or
 // captured reactive outputs as well as direct scalar outputs. Any intermediate
 // or result cell allocated for the computation must use the effective output
 // scope […]; broader output locations then store links to that scoped instance
-// with the same causal id." The `ifElse`/`when`/`unless` selectors do exactly
-// that: each output-producing run mints a `{ <builtin>: cause }` result
-// document and stores a link to it in the broad output SPOT. With a
-// user-scoped condition the minted document is allocated at `user` scope
-// (`runner.ts` `instantiateJavaScriptNode` effective-output-scope branch)
-// while the runner-authored descriptor declares it at `space`
-// (`runner.ts` `selectorMintedResultWrite`, whose comment records the
-// consequence: "a scoped actual write fails closed at the firewall's scope
-// check instead of being served").
+// with the same causal id." The `ifElse`/`when`/`unless`/`inspectConfLabel`
+// selectors do exactly that: each output-producing run mints a
+// `{ <builtin>: cause }` result document and stores a link to it in the broad
+// output SPOT. With a user-scoped condition the minted document is allocated
+// at `user` scope (`runner.ts` `instantiateJavaScriptNode` effective-output-
+// scope branch) while the runner-authored descriptor declares it at `space`
+// (`runner.ts` `selectorMintedResultWrite`) — the descriptor is static and the
+// effective scope is discovered per transaction, so the declaration cannot be
+// anything else.
 //
-// The §4 relaxation below does not reach it: `covers` is exact-scope, and the
-// lane-instance widening applies to `directOutputs` only — the minted document
-// is a declared WRITE, never a direct output. This is the measured live
-// offender behind `dynamic-write-outside-static-surface` (client-passivity
-// §5g's live inventory: 12 events / 1 offender at user AND session rank,
-// fingerprint `impl:cf:builtin/ifElse:v1`).
+// Both legs of that shape used to fail closed and both are now admitted:
 //
-// Whether to close it in the descriptor (declare the minted document's lane
-// instances) or in this classifier (widen the relaxation from `directOutputs`
-// to the declared write surface, with the matching change in the executor's
-// `widenLaneOutputEnvelopes`) is an open owner decision. Until it is made,
-// these pins keep the shape reproducible in milliseconds instead of a
-// three-arm live probe, and a fix flips exactly the two `toBe(...)` lines.
+//  - the VALUE leg (the scoped minted write) rode neither arm of the §4
+//    relaxation, because `covers` is exact-scope and the lane-instance
+//    widening spanned `directOutputs` only, while the minted document is a
+//    declared WRITE. Measured live as `dynamic-write-outside-static-surface`
+//    ×12 / 1 offender at user AND session rank (client-passivity §5g).
+//  - the LINK leg (the broad spot's cross-document scope-naming link) was
+//    rejected `malformed-scope-naming-link` because the §4 wire contract only
+//    ever implemented the degenerate SELF-redirect case. Measured in the
+//    classification arm as `malformed-scope-naming-link` ×12 / 1 offender.
+//
+// The relaxation is bounded, not open: an auxiliary link may only name a
+// document the action's own trusted certificate declares as a write, so the
+// named id is certificate-derived and therefore identical across lanes. The
+// carve-out pins below are the boundary — a broad VALUE write and a link
+// naming an UNDECLARED document both still reject.
 // ---------------------------------------------------------------------------
 
-describe("auxiliary result-cell coverage (measured gap)", () => {
+describe("auxiliary result-cell coverage (§4 second shape)", () => {
   // The selector's two documents: the broad output SPOT (its direct output,
   // holding a link) and the MINTED result document (declared at space scope,
   // written at the condition's scope).
@@ -987,6 +990,22 @@ describe("auxiliary result-cell coverage (measured gap)", () => {
     contextRank: "user",
     laneActingCommit: true,
   } as const;
+
+  // The link the runner really emits into the broad spot, captured verbatim
+  // from a real user-scoped `ifElse` run through the executor router: a
+  // cross-document link naming the minted result at the `user` scope NAME,
+  // carrying the served space and NO `overwrite` (it is a plain result link,
+  // not a write redirect). No principal or session id anywhere.
+  const auxiliaryLink = {
+    "/": {
+      "link@1": {
+        path: [],
+        id: "of:minted",
+        space: servedSpace,
+        scope: "user",
+      },
+    },
+  };
 
   function observation(
     overrides: Partial<SchedulerActionObservation> = {},
@@ -1031,9 +1050,16 @@ describe("auxiliary result-cell coverage (measured gap)", () => {
     };
   }
 
+  function spotLinkPatch(link: unknown): ClientCommit["operations"][number] {
+    return {
+      op: "patch",
+      id: "of:spot",
+      scope: "space",
+      patches: [{ op: "add", path: "/value", value: link }],
+    } as ClientCommit["operations"][number];
+  }
+
   it("classifies the selector claim-ready at user rank (so a claim issues)", () => {
-    // The gap is a DYNAMIC one: the action is statically servable and does
-    // take a user-rank claim — it only fails the per-attempt firewall.
     expect(classifyStaticActionServability(
       withSummary(summary),
       servedSpace,
@@ -1045,11 +1071,12 @@ describe("auxiliary result-cell coverage (measured gap)", () => {
     });
   });
 
-  it("reports dynamic-write-outside-static-surface for the lane-hydrated run", () => {
+  it("serves the lane-hydrated run whose only write is the scoped mint", () => {
     // The live executor shape: the Worker re-runs inside an already hydrated
     // lane, so the broad spot link is unchanged and never enters the commit.
     // Only the scoped minted-result value write remains — declared at
-    // `space`, written at `user`, covered by neither arm.
+    // `space`, written at `user`. The lane-instance relaxation now spans the
+    // declared write surface, not just the direct outputs.
     const observed = observation();
     expect(dynamicActionTransactionUnservableReason(
       routeInput(
@@ -1058,35 +1085,120 @@ describe("auxiliary result-cell coverage (measured gap)", () => {
       ),
       observed,
       userContext,
-    )).toBe("dynamic-write-outside-static-surface");
+    )).toBeUndefined();
   });
 
-  it("reports malformed-scope-naming-link when the broad spot link is written", () => {
-    // The same derivation's other face (the classification arm's ×12): the
-    // spot's link is a CROSS-DOCUMENT scope-naming link — it names the minted
-    // document and carries no principal or session id, so it is still
-    // byte-identical across lanes, but the §4 wire contract admits only
-    // SELF-redirects. Separate question from the coverage gap above.
+  it("serves the cold run that also writes the broad spot's auxiliary link", () => {
     const observed = observation({
       actualChangedWrites: [outputSpot, mintedUser],
     });
     expect(dynamicActionTransactionUnservableReason(
       routeInput(
         [
-          {
-            op: "patch",
-            id: "of:spot",
-            scope: "space",
-            patches: [{
-              op: "add",
-              path: "/value",
-              value: {
-                "/": {
-                  "link@1": { path: [], id: "of:minted", scope: "user" },
-                },
+          spotLinkPatch(auxiliaryLink),
+          { op: "set", id: "of:minted", scope: "user", value: { value: 6 } },
+        ],
+        observed,
+      ),
+      observed,
+      userContext,
+    )).toBeUndefined();
+  });
+
+  it("serves the same shape at session rank", () => {
+    const sessionSummary = {
+      reads: [address("of:condition", { scope: "session" })],
+      writes: [mintedSpace, outputSpot],
+      directOutputs: [outputSpot],
+    };
+    const mintedSession = address("of:minted", { scope: "session" });
+    const observed = observation({
+      reads: [address("of:condition", { scope: "session" })],
+      actualChangedWrites: [outputSpot, mintedSession],
+      completeActionScopeSummary: withSummary(sessionSummary)
+        .completeActionScopeSummary as CompleteActionScopeSummary,
+    });
+    expect(dynamicActionTransactionUnservableReason(
+      routeInput(
+        [
+          spotLinkPatch({
+            "/": {
+              "link@1": {
+                path: [],
+                id: "of:minted",
+                space: servedSpace,
+                scope: "session",
               },
-            }],
-          },
+            },
+          }),
+          { op: "set", id: "of:minted", scope: "session", value: { value: 6 } },
+        ],
+        observed,
+      ),
+      observed,
+      { ...userContext, contextRank: "session" },
+    )).toBeUndefined();
+  });
+
+  // --- CARVE-OUT: the leak this relaxation must NOT open --------------------
+
+  it("still rejects a broad VALUE write from the same scoped lane", () => {
+    // Alice's user lane and Bob's user lane resolve the SAME broad document,
+    // so a broad value write from one is visible to the other at the space
+    // instance. Unchanged by the auxiliary-link admission.
+    const observed = observation({
+      actualChangedWrites: [outputSpot, mintedUser],
+    });
+    expect(dynamicActionTransactionUnservableReason(
+      routeInput(
+        [
+          spotLinkPatch({ chosen: "alice-only" }),
+          { op: "set", id: "of:minted", scope: "user", value: { value: 6 } },
+        ],
+        observed,
+      ),
+      observed,
+      userContext,
+    )).toBe("broad-lane-value-write");
+  });
+
+  it("still rejects a broad delete from a scoped lane", () => {
+    const observed = observation({
+      actualChangedWrites: [outputSpot, mintedUser],
+    });
+    expect(dynamicActionTransactionUnservableReason(
+      routeInput(
+        [
+          { op: "delete", id: "of:spot", scope: "space" },
+          { op: "set", id: "of:minted", scope: "user", value: { value: 6 } },
+        ],
+        observed,
+      ),
+      observed,
+      userContext,
+    )).toBe("broad-lane-value-write");
+  });
+
+  it("still rejects an auxiliary link naming an UNDECLARED document", () => {
+    // The bound that keeps the named id lane-independent: only documents the
+    // action's own certificate declares as writes may be named. A link naming
+    // an arbitrary document could encode lane-private data in the choice.
+    const observed = observation({
+      actualChangedWrites: [outputSpot, mintedUser],
+    });
+    expect(dynamicActionTransactionUnservableReason(
+      routeInput(
+        [
+          spotLinkPatch({
+            "/": {
+              "link@1": {
+                path: [],
+                id: "of:some-other-document",
+                space: servedSpace,
+                scope: "user",
+              },
+            },
+          }),
           { op: "set", id: "of:minted", scope: "user", value: { value: 6 } },
         ],
         observed,
@@ -1094,6 +1206,154 @@ describe("auxiliary result-cell coverage (measured gap)", () => {
       observed,
       userContext,
     )).toBe("malformed-scope-naming-link");
+  });
+
+  it("still rejects an auxiliary link carrying a schema (covert channel)", () => {
+    const observed = observation({
+      actualChangedWrites: [outputSpot, mintedUser],
+    });
+    expect(dynamicActionTransactionUnservableReason(
+      routeInput(
+        [
+          spotLinkPatch({
+            "/": {
+              "link@1": {
+                path: [],
+                id: "of:minted",
+                space: servedSpace,
+                scope: "user",
+                schema: { type: "string", default: "covert per-lane payload" },
+              },
+            },
+          }),
+          { op: "set", id: "of:minted", scope: "user", value: { value: 6 } },
+        ],
+        observed,
+      ),
+      observed,
+      userContext,
+    )).toBe("malformed-scope-naming-link");
+  });
+
+  it("still rejects an auxiliary link naming a FOREIGN space", () => {
+    const observed = observation({
+      actualChangedWrites: [outputSpot, mintedUser],
+    });
+    expect(dynamicActionTransactionUnservableReason(
+      routeInput(
+        [
+          spotLinkPatch({
+            "/": {
+              "link@1": {
+                path: [],
+                id: "of:minted",
+                space: foreignSpace,
+                scope: "user",
+              },
+            },
+          }),
+          { op: "set", id: "of:minted", scope: "user", value: { value: 6 } },
+        ],
+        observed,
+      ),
+      observed,
+      userContext,
+    )).toBe("malformed-scope-naming-link");
+  });
+
+  it("still rejects an auxiliary link naming a scope outside the lane's chain", () => {
+    // A USER lane may not name `session`: that link would redirect readers to
+    // instances the lane's computations can never have written.
+    const observed = observation({
+      actualChangedWrites: [outputSpot, mintedUser],
+    });
+    expect(dynamicActionTransactionUnservableReason(
+      routeInput(
+        [
+          spotLinkPatch({
+            "/": {
+              "link@1": {
+                path: [],
+                id: "of:minted",
+                space: servedSpace,
+                scope: "session",
+              },
+            },
+          }),
+          { op: "set", id: "of:minted", scope: "user", value: { value: 6 } },
+        ],
+        observed,
+      ),
+      observed,
+      userContext,
+    )).toBe("malformed-scope-naming-link");
+  });
+
+  it("still rejects a write to a document outside the declared surface", () => {
+    // The relaxation widens SCOPE coverage, never DOCUMENT coverage.
+    const observed = observation({
+      actualChangedWrites: [address("of:elsewhere", { scope: "user" })],
+    });
+    expect(dynamicActionTransactionUnservableReason(
+      routeInput(
+        [{ op: "set", id: "of:elsewhere", scope: "user", value: { value: 6 } }],
+        observed,
+      ),
+      observed,
+      userContext,
+    )).toBe("dynamic-write-outside-static-surface");
+  });
+
+  it("covers a scoped materializer result CONTAINER instance too", () => {
+    // The list builtins' result container is the other auxiliary cell the
+    // rule names (`map` over a PerUser list, `filter`, `flatMap`). It rides
+    // `materializerWriteEnvelopes` rather than `writes`, and the executor's
+    // `widenLaneOutputEnvelopes` widens BOTH so the classifier and the
+    // engine agree about the same run.
+    const container = address("of:container", { path: [] });
+    const containerUser = address("of:container", {
+      scope: "user",
+      path: ["value", "0"],
+    });
+    const materializerSummary = {
+      reads: [address("of:items", { scope: "user" })],
+      writes: [outputSpot],
+      materializerWriteEnvelopes: [container],
+      directOutputs: [outputSpot],
+    };
+    const observed = observation({
+      reads: [address("of:items", { scope: "user" })],
+      actualChangedWrites: [containerUser],
+      completeActionScopeSummary: withSummary(materializerSummary)
+        .completeActionScopeSummary as CompleteActionScopeSummary,
+    });
+    expect(dynamicActionTransactionUnservableReason(
+      routeInput(
+        [{
+          op: "set",
+          id: "of:container",
+          scope: "user",
+          value: { value: [1] },
+        }],
+        observed,
+      ),
+      observed,
+      userContext,
+    )).toBeUndefined();
+  });
+
+  it("keeps the space-rank lane strict: no lane-instance widening at all", () => {
+    // At space rank there is no acting lane, so the scoped write never gets
+    // as far as envelope coverage — it fails the operation scope check.
+    const observed = observation();
+    expect(dynamicActionTransactionUnservableReason(
+      routeInput(
+        [{ op: "set", id: "of:minted", scope: "user", value: { value: 6 } }],
+        observed,
+      ),
+      observed,
+      { servedSpace, branch: "" },
+    )).toBe("dynamic-non-space-write-scope");
   });
 });
 

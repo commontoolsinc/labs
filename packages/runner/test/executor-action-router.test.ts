@@ -11,6 +11,7 @@ import {
   userExecutionContextKey,
 } from "@commonfabric/memory/v2";
 import {
+  auxiliaryScopeNamingLinkForTarget,
   SCOPE_NAMING_LINK_CONFORMANCE,
   SESSION_SCOPE_NAMING_LINK_CONFORMANCE,
 } from "@commonfabric/memory/v2/scope-naming-link";
@@ -1309,6 +1310,241 @@ Deno.test("executor router rejects a broad value write in the pair with the engi
     space: SPACE,
     // Output-scoping failed: the broad leg carries a plain value.
     commit: wideningPairCommit({ value: 42 }),
+    sourceAction: {},
+  });
+  assertEquals(route.disposition, "local");
+  if (route.disposition !== "local") throw new Error("expected local");
+  if (route.kind === "executor-shadow") route.afterLocalApply?.();
+  assertEquals(candidates, []);
+  assertEquals(diagnostics.map((entry) => entry.diagnosticCode), [
+    "broad-lane-value-write",
+  ]);
+});
+
+// --- The §4 AUXILIARY result-instance shape at the router seam -------------
+//
+// `scoped-cell-instances.md` applies the widening rule to auxiliary result
+// cells too: the computation allocates the cell at the effective output scope
+// and the broad output location stores a link to that scoped instance. The
+// runner's selectors mint exactly such a cell — a DECLARED WRITE, never a
+// direct output — so the lane twin the claimed certificate presents has to
+// span the whole declared write surface. Without it the engine rejects the
+// run `runtime-exceeds-static-scope` even though the classifier served it.
+
+const mintedOutput = {
+  space: SPACE,
+  scope: "space" as const,
+  id: "of:action-router-minted-result",
+  path: ["value"],
+};
+
+/** The real scoped-selector shape: the certificate declares the output spot
+ * AND the minted result document broadly, while the run writes the spot's
+ * cross-document link plus the mint at the acting principal's instance. */
+const auxiliaryPairObservation = () => {
+  const base = wideningPairObservation();
+  return {
+    ...base,
+    actualChangedWrites: [output, { ...mintedOutput, scope: "user" as const }],
+    currentKnownWrites: [output],
+    completeActionScopeSummary: {
+      ...base.completeActionScopeSummary,
+      writes: [output, mintedOutput],
+      directOutputs: [output],
+    },
+  };
+};
+
+Deno.test("executor router lane-widens the whole declared write surface, not just direct outputs", async () => {
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const claim: ExecutionClaim = {
+    ...key,
+    contextKey: userExecutionContextKey(LANE_PRINCIPAL),
+    leaseGeneration: 3,
+    claimGeneration: 4,
+    expiresAt: 100_000,
+  };
+  const router = createExecutorActionTransactionRouter({
+    servedSpace: SPACE,
+    branch: "",
+    userRankCandidates: true,
+    lanePrincipal: LANE_PRINCIPAL,
+    claimForAction: () => claim,
+    onCandidate: (candidate, sourceAction) =>
+      candidates.push({ claimKey: candidate.claimKey, sourceAction }),
+    onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  });
+
+  const claimed: ClientCommit = {
+    localSeq: 1,
+    reads: {
+      confirmed: [{
+        id: "of:action-router-user-input",
+        scope: "user",
+        path: toDocumentPath(["value"]),
+        seq: 2,
+      }],
+      pending: [],
+    },
+    operations: [
+      {
+        op: "set",
+        id: "of:action-router-output",
+        scope: "space",
+        value: {
+          value: auxiliaryScopeNamingLinkForTarget({
+            id: mintedOutput.id,
+            space: SPACE,
+          }),
+        } as unknown as Record<string, never>,
+      },
+      {
+        op: "set",
+        id: mintedOutput.id,
+        scope: "user",
+        value: { value: 42 },
+      },
+    ],
+    schedulerObservation: auxiliaryPairObservation(),
+  };
+  const route = await router({
+    space: SPACE,
+    commit: claimed,
+    sourceAction: {},
+  });
+  assertEquals(diagnostics, []);
+  assertEquals(candidates, []);
+  assertEquals(route.disposition, "upstream");
+  const routed = claimed.schedulerObservation as ReturnType<
+    typeof auxiliaryPairObservation
+  >;
+  // Both declared documents get their lane twin — the minted result is the
+  // one that was missing while the widening spanned `directOutputs` only.
+  assertEquals(routed.completeActionScopeSummary.writes, [
+    output,
+    mintedOutput,
+    { ...output, scope: "user" },
+    { ...mintedOutput, scope: "user" },
+  ]);
+  assertEquals(routed.completeActionScopeSummary.directOutputs, [output]);
+});
+
+Deno.test("executor router lane-widens the declared MATERIALIZER envelopes in lockstep", async () => {
+  // The engine checks observed materializer envelopes against the DECLARED
+  // materializer envelopes separately from the write union, and that check is
+  // scope-sensitive too. A scoped result container (`map` over a PerUser
+  // list) therefore needs its lane twin in BOTH places, or the classifier
+  // serves a run the engine then rejects.
+  const container = {
+    space: SPACE,
+    scope: "space" as const,
+    id: "of:action-router-container",
+    path: [] as string[],
+  };
+  const claim: ExecutionClaim = {
+    ...key,
+    contextKey: userExecutionContextKey(LANE_PRINCIPAL),
+    leaseGeneration: 3,
+    claimGeneration: 4,
+    expiresAt: 100_000,
+  };
+  const router = createExecutorActionTransactionRouter({
+    servedSpace: SPACE,
+    branch: "",
+    userRankCandidates: true,
+    lanePrincipal: LANE_PRINCIPAL,
+    claimForAction: () => claim,
+    onCandidate: () => {},
+    onDiagnostic: () => {},
+  });
+  const base = wideningPairObservation();
+  const claimed: ClientCommit = {
+    localSeq: 1,
+    reads: {
+      confirmed: [{
+        id: "of:action-router-user-input",
+        scope: "user",
+        path: toDocumentPath(["value"]),
+        seq: 2,
+      }],
+      pending: [],
+    },
+    operations: [
+      {
+        op: "set",
+        id: container.id,
+        scope: "user",
+        value: { value: [1, 2] } as unknown as Record<string, never>,
+      },
+    ],
+    schedulerObservation: {
+      ...base,
+      actualChangedWrites: [{ ...container, scope: "user" as const }],
+      currentKnownWrites: [],
+      materializerWriteEnvelopes: [{ ...container, scope: "user" as const }],
+      completeActionScopeSummary: {
+        ...base.completeActionScopeSummary,
+        writes: [output],
+        directOutputs: [output],
+        materializerWriteEnvelopes: [container],
+      },
+    },
+  };
+  const route = await router({
+    space: SPACE,
+    commit: claimed,
+    sourceAction: {},
+  });
+  assertEquals(route.disposition, "upstream");
+  const routed = claimed.schedulerObservation as typeof base;
+  // The container's lane twin lands in the declared MATERIALIZER envelopes
+  // (the engine's separate, scope-sensitive containment check) as well as in
+  // the write union.
+  assertEquals(routed.completeActionScopeSummary.materializerWriteEnvelopes, [
+    container,
+    { ...container, scope: "user" },
+  ]);
+  assertEquals(routed.completeActionScopeSummary.writes, [
+    output,
+    { ...output, scope: "user" },
+    { ...container, scope: "user" },
+  ]);
+});
+
+Deno.test("executor router still rejects a broad value write in the auxiliary shape", async () => {
+  // The carve-out at this seam: admitting the auxiliary LINK leg must not
+  // admit a broad VALUE leg.
+  const candidates: { claimKey: ActionClaimKey; sourceAction: object }[] = [];
+  const diagnostics: ExecutorCandidateDiagnostic[] = [];
+  const router = userLaneRouter(LANE_PRINCIPAL, candidates, diagnostics);
+
+  const route = await router({
+    space: SPACE,
+    commit: {
+      localSeq: 1,
+      reads: {
+        confirmed: [{
+          id: "of:action-router-user-input",
+          scope: "user",
+          path: toDocumentPath(["value"]),
+          seq: 2,
+        }],
+        pending: [],
+      },
+      operations: [
+        {
+          op: "set",
+          id: "of:action-router-output",
+          scope: "space",
+          value: {
+            value: "a value only this lane could know",
+          } as unknown as Record<string, never>,
+        },
+        { op: "set", id: mintedOutput.id, scope: "user", value: { value: 42 } },
+      ],
+      schedulerObservation: auxiliaryPairObservation(),
+    },
     sourceAction: {},
   });
   assertEquals(route.disposition, "local");

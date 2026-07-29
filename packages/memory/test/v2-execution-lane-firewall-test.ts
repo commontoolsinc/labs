@@ -13,6 +13,7 @@ import type {
   SchedulerObservationAddress,
 } from "../v2/engine.ts";
 import {
+  auxiliaryScopeNamingLinkForTarget,
   SCOPE_NAMING_LINK_CONFORMANCE,
   scopeNamingLinkForPath,
   SESSION_SCOPE_NAMING_LINK_CONFORMANCE,
@@ -372,6 +373,193 @@ Deno.test("user-lane conforming scope-naming links commit as emitted", async () 
     assertEquals(
       Engine.read(engine, { id: BROAD_LINK_WRITE.id }),
       { value: { value: SCOPE_NAMING_LINK_CONFORMANCE.link } },
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The AUXILIARY result-instance leg of the §4 pair. `scoped-cell-instances.md`
+// ("Computation Rules") applies the widening rule to auxiliary result cells
+// too: the computation allocates the cell at the effective output scope and
+// "broader output locations then store links to that scoped instance with the
+// same causal id". That link is CROSS-document, so the self-redirect shape
+// cannot express it — the runner's selectors (ifElse/when/unless/
+// inspectConfLabel) emit exactly this on every output-producing run under a
+// scoped condition.
+//
+// The admission is bounded by the action's own trusted certificate, which is
+// bound to the implementation fingerprint and authored from the pattern: a
+// certificate-drawn id cannot vary with lane-private data.
+// ---------------------------------------------------------------------------
+
+// The minted result instance, declared in the certificate at `space` (the
+// descriptor is static; the effective scope is discovered per transaction)
+// and actually written at the lane's scope.
+const MINTED_SPACE = address("space", "of:lane-minted-result");
+const MINTED_USER = address("user", "of:lane-minted-result");
+
+const mintedValueOperation: Operation = {
+  op: "set",
+  id: MINTED_SPACE.id,
+  scope: "user",
+  value: { value: "selected-branch" },
+};
+
+Deno.test("user-lane auxiliary result-instance links commit as emitted", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const claim = claimFor(lease, USER_CONTEXT_KEY);
+    const link = auxiliaryScopeNamingLinkForTarget({
+      id: MINTED_SPACE.id,
+      space: SPACE,
+    });
+    const applied = applyClaimed(engine, lease, claim, {
+      operations: [broadLinkOperation(link), mintedValueOperation],
+      surfaces: {
+        // The certificate declares BOTH documents broadly; the run writes the
+        // mint at the lane instance. The executor router's
+        // `widenLaneOutputEnvelopes` is what adds the lane twin, modeled here
+        // by carrying both.
+        writes: [BROAD_LINK_WRITE, MINTED_SPACE, MINTED_USER],
+      },
+      nowMs: nowMs + 1,
+    });
+    assertExists(applied.schedulerObservationResults);
+    const [result] = applied.schedulerObservationResults;
+    assert(result.status === "kept");
+    assertEquals(result.executionContextKey, USER_CONTEXT_KEY);
+    assertEquals(
+      Engine.read(engine, { id: BROAD_LINK_WRITE.id }),
+      { value: { value: link } },
+    );
+    // The value landed at the lane's instance only — the broad instance holds
+    // the link, never the value.
+    assertEquals(
+      Engine.read(engine, {
+        id: MINTED_SPACE.id,
+        scope: "user",
+        principal: PRINCIPAL,
+      }),
+      { value: "selected-branch" },
+    );
+    assertEquals(
+      Engine.read(engine, {
+        id: MINTED_SPACE.id,
+        scope: "user",
+        principal: OTHER_PRINCIPAL,
+      }),
+      null,
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("auxiliary links are byte-identical across two lanes", async () => {
+  // The §4 soundness argument: the id comes from the certificate and the
+  // scope is a NAME, so Alice's lane and Bob's lane write the same bytes at
+  // the same broad address. Nothing about the acting principal is observable
+  // in the broad document.
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const link = auxiliaryScopeNamingLinkForTarget({
+      id: MINTED_SPACE.id,
+      space: SPACE,
+    });
+    const surfaces = {
+      writes: [BROAD_LINK_WRITE, MINTED_SPACE, MINTED_USER],
+    };
+    for (
+      const [index, contextKey] of [
+        USER_CONTEXT_KEY,
+        OTHER_USER_CONTEXT_KEY,
+      ].entries()
+    ) {
+      const applied = applyClaimed(engine, lease, claimFor(lease, contextKey), {
+        operations: [broadLinkOperation(link), mintedValueOperation],
+        surfaces,
+        nowMs: nowMs + 1 + index,
+        localSeq: index + 1,
+      });
+      assertExists(applied.schedulerObservationResults);
+      assert(applied.schedulerObservationResults[0].status === "kept");
+      assertEquals(
+        Engine.read(engine, { id: BROAD_LINK_WRITE.id }),
+        { value: { value: link } },
+      );
+    }
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("user-lane auxiliary links naming an UNDECLARED document reject", async () => {
+  // The bound. A link naming a document the certificate does not declare
+  // could encode lane-private data in the choice of target.
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const claim = claimFor(lease, USER_CONTEXT_KEY);
+    const before = Engine.serverSeq(engine);
+    assertFirewallReject(
+      () =>
+        applyClaimed(engine, lease, claim, {
+          operations: [
+            broadLinkOperation(
+              auxiliaryScopeNamingLinkForTarget({
+                id: "of:a-document-nobody-declared",
+                space: SPACE,
+              }),
+            ),
+            userInstanceOperation,
+          ],
+          surfaces: { writes: [USER_OUTPUT, BROAD_LINK_WRITE] },
+          nowMs: nowMs + 1,
+        }),
+      "malformed-scope-naming-link",
+    );
+    assertEquals(Engine.serverSeq(engine), before);
+    assertEquals(Engine.read(engine, { id: BROAD_LINK_WRITE.id }), null);
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("user-lane auxiliary links naming a foreign space reject", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const claim = claimFor(lease, USER_CONTEXT_KEY);
+    assertFirewallReject(
+      () =>
+        applyClaimed(engine, lease, claim, {
+          operations: [
+            broadLinkOperation(
+              auxiliaryScopeNamingLinkForTarget({
+                id: MINTED_SPACE.id,
+                space: "did:key:z6Mk-lane-firewall-elsewhere",
+              }),
+            ),
+            mintedValueOperation,
+          ],
+          surfaces: {
+            writes: [BROAD_LINK_WRITE, MINTED_SPACE, MINTED_USER],
+          },
+          nowMs: nowMs + 1,
+        }),
+      "malformed-scope-naming-link",
     );
   } finally {
     Engine.close(engine);
