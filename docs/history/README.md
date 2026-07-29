@@ -133,6 +133,10 @@ One line per archived document; each document's header carries the fuller
   — the CFC future-work epics (clause core, exchange rules/policy,
   observation classes, integrity floors, sqlite row-set, deployment flips),
   executed 2026-07.
+- [retiring-llm-tool-call-deadlines.md](development/proposals/retiring-llm-tool-call-deadlines.md)
+  — replacing the LLM tool-call deadline with a run-scoped quiescence barrier,
+  and narrowing the dialog message-drop heuristic the deadline's argument did
+  not reach, executed 2026-07.
 - [STANDARD_DECORATORS_MIGRATION_PLAN.md](development/STANDARD_DECORATORS_MIGRATION_PLAN.md)
   — the cutover to standard decorators.
 - [content-addressed-action-identity-implementation-plan.md](specs/content-addressed-action-identity-implementation-plan.md)
