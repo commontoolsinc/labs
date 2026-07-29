@@ -79,7 +79,10 @@ const connectClient = (server: Server): Promise<MemoryClient.Client> =>
   } as MemoryClient.ConnectOptions);
 
 type ExecutionSession = MemoryClient.SpaceSession & {
-  setExecutionDemand(branch: string, pieces: readonly string[]): Promise<boolean>;
+  setExecutionDemand(
+    branch: string,
+    pieces: readonly string[],
+  ): Promise<boolean>;
 };
 
 const mountAs = async (
@@ -96,7 +99,7 @@ const mountAs = async (
 // variant reading a nested field. Applied to the value the transaction resolves
 // through loadRoot — the seam under test.
 const doubled = (value: unknown): number =>
-  ((typeof value === "number" ? value : 0)) * 2;
+  (typeof value === "number" ? value : 0) * 2;
 
 Deno.test("C3.13-2: the served foreign VALUE reaches a Runtime-over-HostStorageManager derivation read through loadRoot (folds 82, not 0), at root and deep paths", async () => {
   const server = createServer(`c3-13-2-${crypto.randomUUID()}`);
@@ -145,7 +148,11 @@ Deno.test("C3.13-2: the served foreign VALUE reaches a Runtime-over-HostStorageM
     await other.transact({
       localSeq: otherSeq++,
       reads: { confirmed: [], pending: [] },
-      operations: [{ op: "set", id: DEEP_DOC, value: { value: { inner: 20 } } }],
+      operations: [{
+        op: "set",
+        id: DEEP_DOC,
+        value: { value: { inner: 20 } },
+      }],
     });
 
     // ---- The executor WORKER plane: a lease-bound HostStorageManager. ----
@@ -205,9 +212,13 @@ Deno.test("C3.13-2: the served foreign VALUE reaches a Runtime-over-HostStorageM
     });
     assert(served.status === "served", `source read served: ${served.status}`);
     assertEquals((served.document as { value?: unknown } | null)?.value, 41);
-    const servedDeep = await workerStorage.readForeignDoc(READ_SPACE, claimRef, {
-      id: DEEP_DOC,
-    });
+    const servedDeep = await workerStorage.readForeignDoc(
+      READ_SPACE,
+      claimRef,
+      {
+        id: DEEP_DOC,
+      },
+    );
     assert(
       servedDeep.status === "served",
       `deep read served: ${servedDeep.status}`,
@@ -226,7 +237,11 @@ Deno.test("C3.13-2: the served foreign VALUE reaches a Runtime-over-HostStorageM
     await other.transact({
       localSeq: otherSeq++,
       reads: { confirmed: [], pending: [] },
-      operations: [{ op: "set", id: DEEP_DOC, value: { value: { inner: 333 } } }],
+      operations: [{
+        op: "set",
+        id: DEEP_DOC,
+        value: { value: { inner: 333 } },
+      }],
     });
 
     // The Runtime over the mount-only HostStorageManager. Its transaction reads
@@ -269,7 +284,11 @@ Deno.test("C3.13-2: the served foreign VALUE reaches a Runtime-over-HostStorageM
 
     // The served scalar (mount 41, NOT the server's later 999) resolves and folds
     // to 82 — RED (undefined → 0) before C3.13-1.
-    assertEquals(sourceValue, 41, "loadRoot must resolve the served mount value");
+    assertEquals(
+      sourceValue,
+      41,
+      "loadRoot must resolve the served mount value",
+    );
     assertEquals(
       doubledValue,
       82,

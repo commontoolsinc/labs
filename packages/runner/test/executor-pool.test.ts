@@ -1930,7 +1930,11 @@ Deno.test("P0 re-anchor: claim-authority loss on a live lane replaces the genera
       1,
       "re-acquisition rotated onto the live sponsor",
     );
-    assertEquals(metrics.leaseLosses, 0, "not a lease loss — a deliberate re-anchor");
+    assertEquals(
+      metrics.leaseLosses,
+      0,
+      "not a lease loss — a deliberate re-anchor",
+    );
   } finally {
     await pool.close();
   }
@@ -2002,7 +2006,11 @@ Deno.test("P0 re-anchor: no live or in-grace demand means no re-anchor (the drai
     clock = 20_000; // grace lapsed; drain not yet fired (timer unfired)
     await pool.noteClaimAuthorityLoss(SPACE, BRANCH);
     await pool.idle();
-    assertEquals(pool.metrics().sponsorReanchors, 0, "no sponsor to re-anchor onto");
+    assertEquals(
+      pool.metrics().sponsorReanchors,
+      0,
+      "no sponsor to re-anchor onto",
+    );
     assertEquals(factory.starts.length, 1);
   } finally {
     await pool.close();

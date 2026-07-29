@@ -5185,15 +5185,14 @@ export class Runner {
     // condition's scope, which never forks the entity id, and a scoped
     // actual write fails closed at the firewall's scope check instead of
     // being served.
-    const selectorMintedResultWrite =
-      ((): NormalizedFullLink | undefined => {
-        if (computationBuiltinId === undefined) return undefined;
-        const mintedLink = this.runtime.getCell(
-          processCell.space,
-          selectorBuiltinResultCause(computationBuiltinId, builtinCause),
-        ).getAsNormalizedFullLink();
-        return { ...mintedLink, scope: "space", path: [] };
-      })();
+    const selectorMintedResultWrite = ((): NormalizedFullLink | undefined => {
+      if (computationBuiltinId === undefined) return undefined;
+      const mintedLink = this.runtime.getCell(
+        processCell.space,
+        selectorBuiltinResultCause(computationBuiltinId, builtinCause),
+      ).getAsNormalizedFullLink();
+      return { ...mintedLink, scope: "space", path: [] };
+    })();
     // W2.16: map/filter/flatMap mint a result CONTAINER document (the output
     // collection) distinct from their direct output and write the whole array
     // plus per-slot element links into it. Re-derive that container's identity

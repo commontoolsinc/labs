@@ -345,9 +345,7 @@ export const trackGraph = (
   // the seeded doc keys so their snapshots are OMITTED from the result
   // (the wave path owns their delivery). The caller's tracker is only
   // read; the seeds are copied into this traversal's private tracker.
-  const coveredDocKeys = coverage === undefined
-    ? undefined
-    : new Set<string>();
+  const coveredDocKeys = coverage === undefined ? undefined : new Set<string>();
   if (coverage !== undefined) {
     for (const [key, selectors] of coverage.covered) {
       coveredDocKeys!.add(key);

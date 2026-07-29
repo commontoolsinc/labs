@@ -45,7 +45,8 @@ export class ExecutionDemandShrinkGate {
       ((callback, delayMs) =>
         setTimeout(callback, delayMs) as unknown as number);
     this.#clearTimer = options.clearTimer ??
-      ((timer) => clearTimeout(timer as unknown as ReturnType<typeof setTimeout>));
+      ((timer) =>
+        clearTimeout(timer as unknown as ReturnType<typeof setTimeout>));
   }
 
   /** Demand grew (a piece started): cancel any held shrink for the space and

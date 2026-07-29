@@ -355,10 +355,14 @@ const assertLaneReadRejection = (
 
 const sharedDocOf = (
   response: {
-    ok?: { entities: Array<{ id: string; document?: unknown; scopeKey?: string }> };
+    ok?: {
+      entities: Array<{ id: string; document?: unknown; scopeKey?: string }>;
+    };
   },
 ): { document?: unknown; scopeKey?: string } | undefined =>
-  response.ok?.entities.find((candidate) => candidate.id === SHARED_SESSION_DOC);
+  response.ok?.entities.find((candidate) =>
+    candidate.id === SHARED_SESSION_DOC
+  );
 
 // --- (a) THE CA8 PAIR: one provider channel, two live alice session grants;
 // each read resolves the GRANT's session instance, never the channel's own

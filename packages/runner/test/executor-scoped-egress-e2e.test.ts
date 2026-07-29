@@ -142,9 +142,7 @@ const awaitBarrier = async <T>(
       () =>
         reject(
           new Error(
-            `${label} timed out; events: ${
-              JSON.stringify(events.slice(-40))
-            }`,
+            `${label} timed out; events: ${JSON.stringify(events.slice(-40))}`,
           ),
         ),
       timeoutMs,
@@ -593,9 +591,7 @@ for (const laneKind of ["session", "user"] as const) {
       } as ClientCommit);
       await executor.settle();
       assertEquals(
-        brokerRequests.filter((request) =>
-          request.url === "/lane-after-drain"
-        ),
+        brokerRequests.filter((request) => request.url === "/lane-after-drain"),
         [],
         `egress occurred after the lane fence: ${
           JSON.stringify(events.slice(-30))

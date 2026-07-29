@@ -185,52 +185,52 @@ class DocSetWatchTransport extends ScriptedSessionTransport {
     const watches = wire.watches ?? [];
     this.watchSets.push(watches);
     {
-        // Replace semantics, conforming to the real (FW1-fixed) server: the
-        // next graph surface is the closure of the set's graph watches; docs
-        // watches contribute exact member seeds, never closure expansion.
-        const graphRoots = watches.flatMap((watch) =>
-          watch.kind === "docs"
-            ? []
-            : watch.query?.roots?.map((root) => root.id as URI) ?? []
-        );
-        const memberIds = watches.flatMap((watch) =>
-          watch.kind === "docs"
-            ? watch.docs?.map((doc) => doc.id as URI) ?? []
-            : []
-        );
-        const graphUpserts = this.#closureUpserts(graphRoots);
-        const nextGraphIds = new Set(
-          graphUpserts.map((entry) => entry.id as URI),
-        );
-        const nextMembers = new Set(memberIds);
-        // The real server's full-sync diff: previously graph-tracked docs
-        // absent from the next graph surface remove — UNLESS the incoming
-        // set holds them as members (FW1's suppressDocSetMemberRemoves; the
-        // FB1 fix). A doc in neither surface is a genuine shrink remove.
-        const removes: SessionSyncRemove[] = [...this.graphTracked]
-          .filter((id) => !nextGraphIds.has(id) && !nextMembers.has(id))
-          .map((id) => ({ branch: "", id }));
-        const seen = new Set(graphUpserts.map((entry) => entry.id));
-        const memberSeeds: SessionSyncUpsert[] = [];
-        for (const id of nextMembers) {
-          if (seen.has(id)) continue;
-          const held = this.store.get(id);
-          if (held !== undefined) {
-            memberSeeds.push(upsert(id, held.seq, held.value));
-          }
+      // Replace semantics, conforming to the real (FW1-fixed) server: the
+      // next graph surface is the closure of the set's graph watches; docs
+      // watches contribute exact member seeds, never closure expansion.
+      const graphRoots = watches.flatMap((watch) =>
+        watch.kind === "docs"
+          ? []
+          : watch.query?.roots?.map((root) => root.id as URI) ?? []
+      );
+      const memberIds = watches.flatMap((watch) =>
+        watch.kind === "docs"
+          ? watch.docs?.map((doc) => doc.id as URI) ?? []
+          : []
+      );
+      const graphUpserts = this.#closureUpserts(graphRoots);
+      const nextGraphIds = new Set(
+        graphUpserts.map((entry) => entry.id as URI),
+      );
+      const nextMembers = new Set(memberIds);
+      // The real server's full-sync diff: previously graph-tracked docs
+      // absent from the next graph surface remove — UNLESS the incoming
+      // set holds them as members (FW1's suppressDocSetMemberRemoves; the
+      // FB1 fix). A doc in neither surface is a genuine shrink remove.
+      const removes: SessionSyncRemove[] = [...this.graphTracked]
+        .filter((id) => !nextGraphIds.has(id) && !nextMembers.has(id))
+        .map((id) => ({ branch: "", id }));
+      const seen = new Set(graphUpserts.map((entry) => entry.id));
+      const memberSeeds: SessionSyncUpsert[] = [];
+      for (const id of nextMembers) {
+        if (seen.has(id)) continue;
+        const held = this.store.get(id);
+        if (held !== undefined) {
+          memberSeeds.push(upsert(id, held.seq, held.value));
         }
-        this.graphTracked.clear();
-        for (const id of nextGraphIds) this.graphTracked.add(id);
-        this.members.clear();
-        for (const id of nextMembers) this.members.add(id);
-        this.respond({
-          type: "response",
-          requestId: message.requestId!,
-          ok: {
-            serverSeq: ++this.#seq,
-            sync: fullSync(this.#seq, [...graphUpserts, ...memberSeeds], removes),
-          },
-        });
+      }
+      this.graphTracked.clear();
+      for (const id of nextGraphIds) this.graphTracked.add(id);
+      this.members.clear();
+      for (const id of nextMembers) this.members.add(id);
+      this.respond({
+        type: "response",
+        requestId: message.requestId!,
+        ok: {
+          serverSeq: ++this.#seq,
+          sync: fullSync(this.#seq, [...graphUpserts, ...memberSeeds], removes),
+        },
+      });
     }
   }
 

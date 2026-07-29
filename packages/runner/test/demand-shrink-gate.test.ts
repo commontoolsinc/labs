@@ -13,7 +13,12 @@ class ManualTimers {
   #next = 0;
   readonly setTimer = (callback: () => void, delayMs: number): number => {
     const timer = ++this.#next;
-    this.records.set(timer, { callback, delayMs, cleared: false, fired: false });
+    this.records.set(timer, {
+      callback,
+      delayMs,
+      cleared: false,
+      fired: false,
+    });
     return timer;
   };
   readonly clearTimer = (timer: number): void => {
@@ -69,7 +74,11 @@ Deno.test("genuine departure: the shrunken set publishes once the hold lapses, w
   gate.shrink(SPACE, [], publish); // stop B inside the same hold
   assertEquals(published, [["piece:a", "piece:b"]], "shrinks held");
   timers.fireAll();
-  assertEquals(published, [["piece:a", "piece:b"], []], "one publish, latest set");
+  assertEquals(
+    published,
+    [["piece:a", "piece:b"], []],
+    "one publish, latest set",
+  );
 });
 
 Deno.test("teardown flushes immediately through any held shrink", () => {
@@ -122,4 +131,3 @@ Deno.test("spaces are independent; dispose cancels without publishing", () => {
   timers.fireAll();
   assertEquals(published, [], "disposed holds never publish");
 });
-

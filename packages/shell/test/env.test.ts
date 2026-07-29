@@ -85,7 +85,8 @@ Deno.test({
   // the subcapability, whatever the server advertises — the 2026-07-24
   // integration finding. Layered above serverPrimaryExecution exactly like
   // the runner option; no build-environment default.
-  name: "shell env exposes the server-primary doc-set-watch flag with exact override semantics",
+  name:
+    "shell env exposes the server-primary doc-set-watch flag with exact override semantics",
   permissions: { read: true },
   async fn() {
     const unset = await withPatchedGlobals({

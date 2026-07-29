@@ -31,8 +31,8 @@ import {
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
   MEMORY_PROTOCOL,
-  type ResponseMessage,
   resetServerPrimaryExecutionGraphRetirementConfig,
+  type ResponseMessage,
   type ServerMessage,
   type SessionEffectMessage,
   type SessionSync,
@@ -123,7 +123,9 @@ const openSession = async (server: Server, space: string): Promise<Harness> => {
     },
     authorization: { principal: SPONSOR },
   }));
-  const opened = shiftMessage(messages) as ResponseMessage<{ sessionId: string }>;
+  const opened = shiftMessage(messages) as ResponseMessage<
+    { sessionId: string }
+  >;
   const sessionId = opened.ok!.sessionId;
   return { server, connection, messages, sessionId };
 };
@@ -341,10 +343,12 @@ const reportLeg = (
     before.refreshResidualGraphWatchesTraversed,
   waveResidualDagTraversalsBySpace: after.refreshResidualDagTraversalsBySpace -
     before.refreshResidualDagTraversalsBySpace,
-  waveGraphsRefreshed: after.refreshGraphsRefreshed - before.refreshGraphsRefreshed,
+  waveGraphsRefreshed: after.refreshGraphsRefreshed -
+    before.refreshGraphsRefreshed,
   waveDocSetMemberDeliveries: after.docSetMemberDeliveries -
     before.docSetMemberDeliveries,
-  waveSessionsTouched: after.refreshSessionsTouched - before.refreshSessionsTouched,
+  waveSessionsTouched: after.refreshSessionsTouched -
+    before.refreshSessionsTouched,
 });
 
 // Drive WAVES waves. Each wave updates note_i AND re-sets the index doc, so the
@@ -500,7 +504,11 @@ Deno.test("F5 retirement delta: a fully-doc-set surface zeroes session.watch.ref
     "point reads do zero graph/schema/DAG traversal (only manager reads)",
   );
   assertEquals(on.waveDocsetRead.dagTraversals, 0);
-  assertEquals(on.waveDocSetMemberDeliveries, 2 * WAVES, "note_i + idx per wave");
+  assertEquals(
+    on.waveDocSetMemberDeliveries,
+    2 * WAVES,
+    "note_i + idx per wave",
+  );
 
   // --- MIXED (fails open): the residual graph watch keeps traversing. ---
   assertEquals(mixed.waveRetirementEligibleSessions, WAVES);

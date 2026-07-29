@@ -671,12 +671,17 @@ Deno.test("a takeover downgrade fences the session's own lane and leaks no sessi
     // connection STAYS OPEN, so the re-open rejection below exercises the
     // negotiation gate, not connection liveness.
     const downgradedRaw = await rawConnect(server, flagsWithoutContextLattice);
-    const downgraded = await rawOpen(downgradedRaw, "resume-downgraded", ALICE, {
-      sessionId: openedC.ok.sessionId,
-      sessionToken: openedC.ok.sessionToken,
-      seenSeq: openedC.ok.serverSeq,
-      executionFeedSeq: openedC.ok.sync?.execution?.toFeedSeq ?? 0,
-    });
+    const downgraded = await rawOpen(
+      downgradedRaw,
+      "resume-downgraded",
+      ALICE,
+      {
+        sessionId: openedC.ok.sessionId,
+        sessionToken: openedC.ok.sessionToken,
+        seenSeq: openedC.ok.serverSeq,
+        executionFeedSeq: openedC.ok.sync?.execution?.toFeedSeq ?? 0,
+      },
+    );
     assertExists(downgraded.ok?.sync?.execution);
     assertEquals(
       server.sessionLaneGrant(SPACE, "", ALICE, openedC.ok.sessionId),

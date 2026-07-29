@@ -150,7 +150,8 @@ const envelopeBody = (
  */
 const admissibleLinkScopes = (
   laneScope: ScopeNamingLinkScope,
-): readonly string[] => laneScope === "session" ? ["user", "session"] : ["user"];
+): readonly string[] =>
+  laneScope === "session" ? ["user", "session"] : ["user"];
 
 const payloadViolation = (
   payload: Record<string, FabricValue>,

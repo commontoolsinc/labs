@@ -506,9 +506,10 @@ async function runScenario(config: ScenarioConfig): Promise<Observations> {
     const bWatchInitial = bReplicaWatch(reader, spaceB);
 
     // ---- Writer commits a LATER B change AND a later control change. --------
-    const tapInBefore =
-      reader.taps.filter((t) => t.space === spaceB && t.direction === "in")
-        .length;
+    const tapInBefore = reader.taps.filter((t) =>
+      t.space === spaceB && t.direction === "in"
+    )
+      .length;
     {
       const tx2 = writer.runtime.edit();
       writer.runtime.getCell<number>(spaceB, SOURCE_NAME, undefined, tx2)
@@ -543,9 +544,10 @@ async function runScenario(config: ScenarioConfig): Promise<Observations> {
       "in",
       B_LATER,
     );
-    const tapInAfter =
-      reader.taps.filter((t) => t.space === spaceB && t.direction === "in")
-        .length;
+    const tapInAfter = reader.taps.filter((t) =>
+      t.space === spaceB && t.direction === "in"
+    )
+      .length;
     const doubledLast = doubledSeen.at(-1);
 
     cancelDirect();

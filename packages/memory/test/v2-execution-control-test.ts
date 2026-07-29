@@ -3220,7 +3220,9 @@ Deno.test("a stale sponsor binding with no live same-principal demander still fa
 });
 
 Deno.test("claim renewal re-anchors the sponsor instead of revoking the live claim", async () => {
-  const server = createControlServer("memory-v2-execution-claim-renew-reanchor");
+  const server = createControlServer(
+    "memory-v2-execution-claim-renew-reanchor",
+  );
   const clientA = await connectControlClient(server);
   const clientB = await connectControlClient(server);
   try {

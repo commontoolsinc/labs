@@ -330,7 +330,10 @@ Deno.test("C3.8 (b): a stable foreign epoch applies the claimed attempt with its
     const component = readForeignComponent(applied);
     assertExists(component);
     assertEquals(component.seq, toInputBasisSeq(5));
-    assertEquals(component.authorizationEpoch, { principal: SPONSOR, epoch: 3 });
+    assertEquals(component.authorizationEpoch, {
+      principal: SPONSOR,
+      epoch: 3,
+    });
     // The home component rides too (no epoch stamp — fenced by the lease).
     const home = applied.actionAttempts?.[0]?.provenance.inputBasis?.find((c) =>
       c.space === HOME_SPACE
@@ -486,8 +489,10 @@ Deno.test("C3.8 (f): a same-space attempt is dormant — the fence resolver is n
     const lease = acquire(engine, NOW);
     const claim = spaceClaim(lease);
     const trap = (): number => {
-      throw new Error("the fence must not consult the resolver for a " +
-        "same-space attempt");
+      throw new Error(
+        "the fence must not consult the resolver for a " +
+          "same-space attempt",
+      );
     };
     // Semantic-write path: no foreignInputBases at all.
     const written = applyClaimed(engine, lease, claim, {
@@ -552,7 +557,10 @@ Deno.test("C3.8 (g): the observation-only apply path fences a stale foreign epoc
     assertEquals(served.actionAttempts?.[0]?.outcome, "no-op");
     const component = readForeignComponent(served);
     assertExists(component);
-    assertEquals(component.authorizationEpoch, { principal: SPONSOR, epoch: 3 });
+    assertEquals(component.authorizationEpoch, {
+      principal: SPONSOR,
+      epoch: 3,
+    });
   } finally {
     Engine.close(engine);
     await Deno.remove(directory, { recursive: true });

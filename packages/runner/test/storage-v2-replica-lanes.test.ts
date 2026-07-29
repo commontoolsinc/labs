@@ -1024,7 +1024,10 @@ Deno.test("CA3/A16: the collapse shares confirmed state but never a chain siblin
       }
       return undefined;
     })();
-    assert(upstream !== undefined, "the session lane's commit reached the host");
+    assert(
+      upstream !== undefined,
+      "the session lane's commit reached the host",
+    );
     assertEquals(upstream.reads.pending, []);
     const sharedRead = upstream.reads.confirmed.find((read) =>
       read.id === SCOPED

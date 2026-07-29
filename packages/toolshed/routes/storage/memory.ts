@@ -246,7 +246,8 @@ export function startServerExecutionPool(runtime: Runtime): void {
   // (authority fenced immediately), so ordinary navigation churn does not
   // re-pay the measured 7-33s piece instantiation. `...=0` restores the
   // legacy immediate stop.
-  const pieceLingerEnv = "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_PIECE_LINGER_MS";
+  const pieceLingerEnv =
+    "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_PIECE_LINGER_MS";
   if (Deno.env.get(pieceLingerEnv) === undefined) {
     Deno.env.set(pieceLingerEnv, "30000");
   }

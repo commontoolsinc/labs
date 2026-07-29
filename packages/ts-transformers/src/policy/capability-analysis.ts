@@ -193,11 +193,10 @@ export function functionWritesCapturedCells(
         ) {
           const root = capturedRootIdentifier(callee.expression);
           if (root !== undefined) {
-            const methodName =
-              ts.isPropertyAccessExpression(callee) &&
+            const methodName = ts.isPropertyAccessExpression(callee) &&
                 ts.isIdentifier(callee.name)
-                ? callee.name.text
-                : undefined;
+              ? callee.name.text
+              : undefined;
             if (methodName !== undefined && writerNames.has(methodName)) {
               found = true;
               return;

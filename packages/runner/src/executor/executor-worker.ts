@@ -444,7 +444,8 @@ const cancelClaimedAttempts = (lane?: string): void => {
  * the shape every existing suite pins; startServerExecutionPool
  * defaults it on for server-primary deployments.
  */
-const PIECE_LINGER_ENV = "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_PIECE_LINGER_MS";
+const PIECE_LINGER_ENV =
+  "EXPERIMENTAL_SERVER_PRIMARY_EXECUTION_PIECE_LINGER_MS";
 const pieceLingerWindowMs = (): number => {
   try {
     const raw = Deno.env.get(PIECE_LINGER_ENV);
