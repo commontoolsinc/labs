@@ -17,6 +17,10 @@ import {
   zshCompletionScript,
 } from "../lib/completion/script.ts";
 import { complete, tokenizeLine } from "../lib/completion/mod.ts";
+import {
+  missingCommandWarning,
+  resolvesOnPath,
+} from "../lib/completion/install-check.ts";
 
 const description = `Generate shell completion scripts.
 
@@ -29,6 +33,13 @@ Live values need an identity and api-url, taken from the line being typed
 completes.
 
 These also complete "deno task ${cliName()} ..." — see DENO TASK below.
+
+REQUIRES '${cliName()}' ON PATH:
+  The installed function calls '${cliName()} completion complete' on every Tab,
+  and swallows its errors, so without a '${cliName()}' on PATH completion
+  silently yields nothing — including for "deno task ${cliName()} <TAB>".
+  mise puts the checkout's bin/ on PATH; otherwise symlink bin/${cliName()}.
+  See "Installing ${cliName()} on PATH" in packages/cli/README.md.
 
 INSTALL (zsh), in ~/.zshrc after compinit:
   source <(${cliName()} completion zsh)
@@ -133,6 +144,19 @@ const completeCommand = new Command()
     }
   });
 
+/**
+ * Warn on stderr when the generated script cannot reach the CLI it calls.
+ *
+ * stderr specifically: stdout is the script, and these commands are meant to be
+ * redirected into a file or `source <(…)`. A warning on stdout would be
+ * installed as shell code.
+ */
+function warnIfNotInstalled(name: string): void {
+  if (!resolvesOnPath(name)) {
+    console.error(missingCommandWarning(name));
+  }
+}
+
 export const completion = new Command()
   .description(description)
   .default("help")
@@ -145,11 +169,12 @@ export const completion = new Command()
         `Do not also complete "deno task ${cliName()} ...".`,
       )
       .noGlobals()
-      .action((options) =>
+      .action((options) => {
+        warnIfNotInstalled(cliName());
         console.log(
           bashCompletionScript(cliName(), { denoTask: options.denoTask }),
-        )
-      ),
+        );
+      }),
   )
   .command(
     "zsh",
@@ -160,10 +185,11 @@ export const completion = new Command()
         `Do not also complete "deno task ${cliName()} ...".`,
       )
       .noGlobals()
-      .action((options) =>
+      .action((options) => {
+        warnIfNotInstalled(cliName());
         console.log(
           zshCompletionScript(cliName(), { denoTask: options.denoTask }),
-        )
-      ),
+        );
+      }),
   )
   .command("complete", completeCommand.hidden());

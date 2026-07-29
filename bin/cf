@@ -1,0 +1,42 @@
+#!/bin/sh
+# `cf` on PATH, backed by this checkout's source.
+#
+# Shell completion is why this exists: the function `cf completion bash|zsh`
+# installs calls `cf completion complete` by name on every Tab, so completion
+# is silently dead for anyone without a `cf` on PATH — including for
+# `deno task cf <TAB>`, since the same function services the `deno` binding.
+#
+# Two ways to pick this up, neither of which needs the binary built:
+#   - mise users get it automatically (`_.path` in mise.toml)
+#   - everyone else: ln -s "$PWD/bin/cf" ~/.local/bin/cf
+#
+# Runs from source, so it never goes stale against the checkout. For the ~2x
+# faster compiled binary, see "Installing cf on PATH" in packages/cli/README.md.
+
+set -e
+
+# Resolve through symlinks so the `ln -s` install above reports the checkout
+# rather than the link. `readlink -f` is GNU and newer-macOS only, so the links
+# are walked by hand to keep this working on a stock macOS shell.
+target=$0
+while [ -L "$target" ]; do
+  link=$(readlink "$target")
+  case $link in
+    /*) target=$link ;;
+    *) target=$(dirname "$target")/$link ;;
+  esac
+done
+root=$(CDPATH= cd -- "$(dirname -- "$target")/.." && pwd -P)
+
+if ! command -v deno >/dev/null 2>&1; then
+  echo "cf: deno not found on PATH." >&2
+  echo "    Install it with mise (\`mise install\` in ${root}) or directly:" >&2
+  echo "    https://docs.deno.com/runtime/getting_started/installation/" >&2
+  exit 127
+fi
+
+# `--cwd "$PWD"` because the launcher otherwise prefers an inherited INIT_CWD,
+# which is stale whenever `cf` is called from inside a `deno task`. `--` keeps
+# launcher option parsing off the user's own arguments (`cf --config …`).
+exec deno run --allow-run --allow-env --allow-read \
+  "${root}/packages/cli/launcher.ts" --cwd "$PWD" -- "$@"

@@ -20,19 +20,12 @@ deno task cf check --help     # Type checking
 
 ## Invocation Paths
 
-Three equivalent ways to run the CLI, in order of preference for agents:
+Three ways to run the CLI, in order of preference. All run from source, so they
+always match the working tree:
 
-1. **Built binary (recommended for scripted/agent use):**
-
-   ```bash
-   deno task build-binaries --cli-only   # produces dist/cf
-   export PATH="$PWD/dist:$PATH"         # or copy dist/cf onto PATH
-   cf piece ls ...                       # works from any cwd, no Deno noise
-   ```
-
-   The binary is fully cwd-independent and prints nothing but CLI output.
-   **Rebuild it after every `git pull`** — a stale binary rejects newer flags
-   and can hit wire-protocol skew against an updated server.
+1. **`cf` (via `bin/cf`)** — a plain `cf` backed by this checkout's source.
+   Already on PATH under mise; otherwise `ln -s "$PWD/bin/cf" ~/.local/bin/cf`.
+   Works from any cwd, and shell completion requires a `cf` on PATH.
 
 2. **`deno task cf ...`** — works from any directory inside the repo (the
    launcher resolves the repo root itself and runs the CLI from your invoking
@@ -42,6 +35,14 @@ Three equivalent ways to run the CLI, in order of preference for agents:
 3. **`deno run -q -A packages/cli/mod.ts ...`** — repo-root-relative; only works
    with the repo root as cwd. The `-q` suppresses Deno's own warnings (e.g. the
    npm "Ignored build scripts" banner).
+
+**Do not put `dist/cf` on your PATH.** `deno task build-binaries cf` still
+produces it, and CI uses it (a CI run never edits the source it was built from),
+but there is no invalidation story for a working tree you are actively editing:
+nothing compares the binary against its sources, so it silently serves stale
+behavior after a `git pull` or a local edit. See "Why not `dist/cf`" in
+`packages/cli/README.md`, and the "FUSE mount wrapper mismatch" entry below for
+what this looks like when it bites.
 
 ## Output Conventions (scripts & agents)
 
