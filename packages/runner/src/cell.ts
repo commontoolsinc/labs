@@ -2,6 +2,7 @@ import {
   type Immutable,
   isFunction,
   isObject,
+  isPlainContainer,
   isRecord,
   type Mutable,
 } from "@commonfabric/utils/types";
@@ -11,6 +12,7 @@ import {
   FabricSpecialObject,
   type FabricValue,
   shallowCleanArray,
+  shallowCleanPlainObject,
   shallowFabricFromNativeValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
@@ -3242,10 +3244,14 @@ export function convertCellsToLinks(
   // is not a `FabricValue`, so drop it before the conversion below would reject
   // it. Only annotated arrays are cleaned: an array carrying anything else
   // non-index is genuinely unrepresentable and must still be rejected.
-  if (Array.isArray(value) && isCellResultForDereferencing(value)) {
-    // What this produces is a valid `FabricValueLayer` already, so it wants no
-    // further conversion.
-    value = shallowCleanArray(value, false);
+  if (isCellResultForDereferencing(value) && isPlainContainer(value)) {
+    // What these produce is a valid `FabricValueLayer` already, so it wants no
+    // further conversion. Objects need this as much as arrays do -- the
+    // annotation goes on either (see `schema.ts`) -- and before the object rule
+    // rejected non-string keys the object case was dropping it silently instead.
+    value = Array.isArray(value)
+      ? shallowCleanArray(value, false)
+      : shallowCleanPlainObject(value, false);
   } else {
     // Convert the (top level of) the value to fabric form (a valid
     // `FabricValue`) if it isn't already, or throw if it's neither already
