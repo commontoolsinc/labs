@@ -2,6 +2,7 @@ import { getLogger } from "@commonfabric/utils/logger";
 import { getPersistentSchedulerStateConfig } from "@commonfabric/memory/v2";
 import type { Runtime } from "../runtime.ts";
 import { toMemorySpaceAddress } from "../link-utils.ts";
+import type { NormalizedFullLink } from "../link-types.ts";
 import { isCellScope, normalizeCellScope } from "../scope.ts";
 import type {
   ChangeGroup,
@@ -1292,6 +1293,7 @@ export function serverBuiltinComputationScopeSummary(
   const writes = sortAndCompactPaths([
     ...descriptor.writes.map(toMemorySpaceAddress),
     ...descriptor.directOutputs.map(toMemorySpaceAddress),
+    ...provenanceMetaWriteEnvelopes(descriptor.mintedDocuments),
   ]);
   return {
     version: 1,
@@ -1312,6 +1314,49 @@ export function serverBuiltinComputationScopeSummary(
     materializerWriteEnvelopes: [],
     directOutputs: descriptor.directOutputs.map(toMemorySpaceAddress),
   };
+}
+
+/**
+ * The PROVENANCE META paths a declared minted document implicitly covers
+ * (client-passivity §5h.2): `["result"]` and `["pattern"]`, and nothing else.
+ *
+ * Every mint that runs through `setResultCell`/`setPatternCell`
+ * (`result-utils.ts`) stamps these two DOCUMENT-ROOT siblings of `["value"]` on
+ * the document it allocates — `["result"]` unconditionally, `["pattern"]` only
+ * when the parent pattern cell has a raw value. They are parent back-pointers
+ * production code walks to resolve piece ownership (`ensure-piece-running.ts`,
+ * `piece/manager.ts`), so they are not optional; but a minted-document
+ * declaration is a value-root link, which `toMemorySpaceAddress` renders
+ * `["value"]`, so without this expansion they fall outside the envelope and
+ * every minting run de-claims `dynamic-write-outside-static-surface`
+ * (measured for `sqliteDatabase` in `sqlite-database-servability.test.ts`).
+ *
+ * Deliberately NOT the materializer summary's blanket value-root → document-root
+ * lift (FB19/CA6): that lift bounds the WHOLE document, and it cannot be applied
+ * here because the same descriptor declares the node's direct OUTPUT SPOT at
+ * link path `[]` too — bounding that document would be far too wide. The two
+ * paths are enumerated instead, and `covers()` matches a path PREFIX, so an
+ * envelope at `["result"]` already covers `["result", …anything]` with no new
+ * matching machinery.
+ *
+ * Declaring a path a run does not write is harmless: the envelope bounds WHICH
+ * addresses may be written, never what is written there, so the conditional
+ * `["pattern"]` write costs nothing when it is skipped. A non-value-root minted
+ * link is ignored — it names a subtree, not a whole minted document, and a
+ * subtree has no provenance meta of its own.
+ */
+function provenanceMetaWriteEnvelopes(
+  mintedDocuments: readonly NormalizedFullLink[],
+): IMemorySpaceAddress[] {
+  const envelopes: IMemorySpaceAddress[] = [];
+  for (const minted of mintedDocuments) {
+    if (minted.path.length !== 0) continue;
+    const document = toMemorySpaceAddress(minted);
+    for (const metaField of ["result", "pattern"] as const) {
+      envelopes.push({ ...document, path: [metaField] });
+    }
+  }
+  return envelopes;
 }
 
 /**

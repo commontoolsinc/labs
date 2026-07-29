@@ -5284,6 +5284,15 @@ export class Runner {
               selectorMintedResultWrite,
             ]),
             directOutputs: outputCells,
+            // The same minted document, declared a SECOND time under the
+            // field that carries provenance-meta coverage: the summary
+            // assembler renders `["result"]`/`["pattern"]` siblings for
+            // exactly these links (see the field's docblock). It is named
+            // separately from `writes` rather than inferred from it because
+            // the coverage must attach to the MINTED document only — the
+            // output spot is a value-root link too, and lifting it would
+            // bound the whole output-spot document.
+            mintedDocuments: [selectorMintedResultWrite],
           },
         }
         : {}),

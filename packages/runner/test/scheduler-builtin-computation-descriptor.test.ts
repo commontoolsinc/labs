@@ -90,6 +90,11 @@ function descriptor(
     // `selectorBuiltinResultCause`.
     writes: [link("of:output"), link("of:minted-result")],
     directOutputs: [link("of:output")],
+    // The same minted document under the field that carries provenance-meta
+    // coverage: declaring it implicitly covers its `["result"]`/`["pattern"]`
+    // back-pointers (§5h.2). Named separately from `writes` so the coverage
+    // never reaches the output spot, which is a value-root link too.
+    mintedDocuments: [link("of:minted-result")],
     ...overrides,
   };
 }
@@ -160,17 +165,33 @@ describe("per-builtin computation descriptors (W2.15a)", () => {
       // as an idempotent GET of our own pattern route — see
       // wish-resolver-servability.test.ts.
       "wish",
+      // R5, owner ruling 2026-07-29: `sqliteDatabase` writes exactly the
+      // handle document it mints through `makeResultCell` plus the output spot
+      // linking to it. Both of A3's objections are closed — the db owner comes
+      // from the acting execution lane, and the PROVENANCE META paths the mint
+      // stamps on that handle (`["result"]`, and `["pattern"]` conditionally)
+      // are now covered by the descriptor's `mintedDocuments` declaration
+      // rather than needing the materializer family's blanket document-root
+      // lift. Measured end to end in `sqlite-database-servability.test.ts`.
+      "sqliteDatabase",
     ]);
     for (
-      const id of ["ifElse", "when", "unless", "inspectConfLabel", "wish"]
+      const id of [
+        "ifElse",
+        "when",
+        "unless",
+        "inspectConfLabel",
+        "wish",
+        "sqliteDatabase",
+      ]
     ) {
       expect(isServerComputationBuiltinId(id)).toBe(true);
     }
     for (const id of ["map", "filter", "flatMap", "generateText"]) {
       expect(isServerComputationBuiltinId(id)).toBe(false);
     }
-    // The four ids audited alongside `inspectConfLabel` for the R5 worklist
-    // and REJECTED — each fails the "reads its inputs, writes exactly its
+    // The ids audited alongside `inspectConfLabel` for the R5 worklist and
+    // still REJECTED — each fails the "reads its inputs, writes exactly its
     // direct output(s)" shape this registry encodes, so the exactness pin
     // names them rather than leaving their absence to inference:
     //  - llmDialog / navigateTo: their builtin factories return
@@ -180,18 +201,11 @@ describe("per-builtin computation descriptors (W2.15a)", () => {
     //  - compileAndRun: mints FOUR side documents
     //    (pending/result/error/errors), then `runSynced`s a whole compiled
     //    pattern under the result doc and writes from async
-    //    `editWithRetry` transactions outside its own run.
-    //  - sqliteDatabase: mints its handle through `makeResultCell`, which
-    //    writes a document-root `["result"]` META path beside `["value"]` —
-    //    outside a value-root computation envelope (the lift that covers it
-    //    is the MATERIALIZER summary's, FB19/CA6, and it cannot be applied
-    //    blanket because the direct output spot is declared at link path
-    //    `[]` too). Measured in `sqlite-database-servability.test.ts`. Its
-    //    owner-derivation blocker is GONE (owner ruling 2026-07-29: the db
-    //    owner now comes from the acting execution lane); only the envelope
-    //    shape is left, and it needs a registry decision.
+    //    `editWithRetry` transactions outside its own run. The provenance-meta
+    //    rule does not reach it: its problem is document COUNT and unbounded
+    //    out-of-run transactions, not the meta siblings of one mint.
     for (
-      const id of ["llmDialog", "compileAndRun", "sqliteDatabase", "navigateTo"]
+      const id of ["llmDialog", "compileAndRun", "navigateTo"]
     ) {
       expect(isServerComputationBuiltinId(id)).toBe(false);
     }
@@ -208,8 +222,14 @@ describe("per-builtin computation descriptors (W2.15a)", () => {
       expect(summary!.directOutputs).toEqual([valueAddress("of:output")]);
       // Fail-closed: the envelope is exactly the DECLARED surface — the
       // output spot plus the minted result document (FB3) — no more, and
-      // never widened by observed runtime writes.
+      // never widened by observed runtime writes. The minted document ALSO
+      // carries its two provenance meta paths (§5h.2), and note where they do
+      // NOT appear: `of:output` keeps a bare `["value"]` envelope even though
+      // it is a value-root link too, which is the narrowness that ruled out
+      // the materializer summary's blanket document-root lift.
       expect(summary!.writes).toEqual([
+        valueAddress("of:minted-result", { path: ["pattern"] }),
+        valueAddress("of:minted-result", { path: ["result"] }),
         valueAddress("of:minted-result"),
         valueAddress("of:output"),
       ]);

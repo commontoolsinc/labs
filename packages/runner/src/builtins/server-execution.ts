@@ -132,20 +132,24 @@ export interface ServerBuiltinActionDescriptor {
  *    compiled pattern under the result doc and writes from async
  *    `editWithRetry` transactions outside its own run: unbounded, and not even
  *    envelope-shaped.
- *  - `sqliteDatabase` mints its handle through `makeResultCell`, which writes
- *    a document-root `["result"]` META path beside the `["value"]` payload —
- *    outside a value-root computation envelope, since only the MATERIALIZER
- *    summary lifts to document root (FB19/CA6), and that lift cannot be
- *    applied blanket here because the same descriptor declares the direct
- *    OUTPUT SPOT at link path `[]` too. Measured and pinned in
- *    `sqlite-database-servability.test.ts`; giving it an envelope needs a
- *    registry decision (join the materializer family, or grow a
- *    minted-document envelope field on the computation descriptor) that
- *    nobody has made. Its OTHER blocker is gone: since the 2026-07-29 owner
- *    ruling the db `owner` comes from the acting execution lane
- *    (`actingHandleOwner` in `sqlite-builtins.ts`), not the ambient
- *    `trustSnapshotProvider()`, so a server-side first run no longer mints
- *    the handle owned by the executor's lease principal.
+ *
+ * `sqliteDatabase` JOINS them (R5, owner ruling 2026-07-29). Both of A3's
+ * objections are closed. The db `owner` now comes from the acting execution
+ * lane (`actingHandleOwner` in `sqlite-builtins.ts`), not the ambient
+ * `trustSnapshotProvider()`, so a server-side first run no longer mints the
+ * handle owned by the executor's lease principal. And its write surface IS this
+ * shape: a mint writes exactly the handle document it allocates through
+ * `makeResultCell` plus the output spot linking to it. What kept it out was the
+ * PROVENANCE META paths `makeResultCell` stamps on that handle — a document-root
+ * `["result"]` back-pointer (and `["pattern"]`, conditionally) beside the
+ * `["value"]` payload — which a value-root envelope cannot cover, so every
+ * minting run de-claimed `dynamic-write-outside-static-surface`. That is now
+ * covered by the descriptor's `mintedDocuments` declaration (see below), not by
+ * joining the materializer family: that route would also install
+ * `materializerWriteEnvelopes`, which re-indexes the node in
+ * `SchedulerMaterializers` and changes WHEN it is scheduled — a scheduling
+ * change bought for an envelope fix. Measured end to end in
+ * `sqlite-database-servability.test.ts`.
  */
 export const SERVER_COMPUTATION_BUILTIN_IDS = [
   "ifElse",
@@ -153,6 +157,7 @@ export const SERVER_COMPUTATION_BUILTIN_IDS = [
   "unless",
   "inspectConfLabel",
   "wish",
+  "sqliteDatabase",
 ] as const;
 
 export type ServerComputationBuiltinId =
@@ -182,6 +187,40 @@ export interface ServerBuiltinComputationDescriptor {
   readonly reads: readonly NormalizedFullLink[];
   readonly writes: readonly NormalizedFullLink[];
   readonly directOutputs: readonly NormalizedFullLink[];
+  /**
+   * The side documents this node MINTS (a subset of `writes`, always value-root
+   * links). Declaring one implicitly covers its PROVENANCE META paths —
+   * `["result"]` and `["pattern"]`, and nothing else — beside the `["value"]`
+   * payload the link itself renders (client-passivity §5h.2).
+   *
+   * Every mint that runs through `setResultCell`/`setPatternCell`
+   * (`result-utils.ts`) stamps those two document-root siblings of `["value"]`:
+   * `["result"]` unconditionally, `["pattern"]` only when the parent pattern
+   * cell has a raw value. They are parent back-pointers production code walks
+   * to resolve piece ownership (`ensure-piece-running.ts`, `piece/manager.ts`),
+   * so they are not optional — but a value-root envelope can never cover them,
+   * which de-claimed every minting run `dynamic-write-outside-static-surface`.
+   *
+   * Why this field rather than the MATERIALIZER summary's blanket value-root →
+   * document-root lift (FB19/CA6): the lift would have to apply to the whole
+   * declared surface, and this descriptor also declares the node's direct
+   * OUTPUT SPOT at link path `[]` — bounding that whole document is far too
+   * wide. Attaching the coverage to the minted document specifically keeps it
+   * exact, and the minted document is wholly this node's own creation (its
+   * identity is re-derived from the registration cause via
+   * `selectorBuiltinResultCause`), so bounding its provenance meta is as tight
+   * as bounding its value.
+   *
+   * Declaring a path the run does not write is harmless — the firewall bounds
+   * WHICH addresses may be written, never what is written there — so a mint
+   * that skips the conditional `["pattern"]` write still matches exactly. Only
+   * the reverse de-claims. The SCOPE half needs nothing here: the §4
+   * lane-instance relaxation (`servability.ts` `laneInstanceCovers` plus
+   * `widenLaneOutputEnvelopes` in `executor/action-transaction-router.ts`)
+   * already spans the whole declared write surface, so a mint allocated at a
+   * scoped instance carries its provenance paths along.
+   */
+  readonly mintedDocuments: readonly NormalizedFullLink[];
 }
 
 /**

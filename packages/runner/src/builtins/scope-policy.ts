@@ -83,8 +83,10 @@ export function listBuiltinResultContainerCause(
 /**
  * Canonical registry names of the single-output result-minting builtins: the
  * pure selectors, `inspectConfLabel` whose surface is the same shape (one
- * minted side document, written from its inputs, and nothing else), and `wish`
- * whose resolved state document is the same shape one level deeper. Kept in
+ * minted side document, written from its inputs, and nothing else), `wish`
+ * whose resolved state document is the same shape one level deeper, and
+ * `sqliteDatabase` whose handle document is that shape again (its mint runs
+ * through `makeResultCell`, see {@link resultCellMintCause}). Kept in
  * lockstep with `SERVER_COMPUTATION_BUILTIN_IDS`: the runner re-derives the
  * minted document for exactly the ids in that registry, so a registry member
  * missing here is a type error rather than a silently wrong write surface.
@@ -94,7 +96,27 @@ export type SelectorBuiltinKey =
   | "when"
   | "unless"
   | "inspectConfLabel"
-  | "wish";
+  | "wish"
+  | "sqliteDatabase";
+
+/**
+ * Canonical registry names of the builtins whose minted side document is
+ * allocated by `makeResultCell` (`sqlite-builtins.ts`), whose `getCell` cause
+ * has always been `{ <label>: { result: <registration cause> } }`. The entity
+ * id is causal, so this shape is frozen by every committed handle / query
+ * state document — it is expressed here, not inline at the mint, so the
+ * servability layer can re-derive the SAME document for the computation
+ * descriptor's minted-document declaration.
+ */
+export type ResultCellMinterKey = "sqliteDatabase" | "sqliteQuery";
+
+/** The `getCell` cause `makeResultCell` keys its minted document on. */
+export function resultCellMintCause(
+  label: ResultCellMinterKey,
+  cause: unknown,
+): Record<string, unknown> {
+  return { [label]: { result: cause } };
+}
 
 /**
  * The `getCell` cause each single-output result minter keys its minted result
@@ -112,20 +134,25 @@ export type SelectorBuiltinKey =
  * cause or every output-producing run de-claims fail-closed at the dynamic
  * write firewall.
  *
- * `wish` is the one member whose cause is not the bare `{ <key>: cause }`
- * shape: it has minted `{ wish: { state: cause } }` since long before this
- * helper existed, and the entity id is causal, so re-keying it would orphan
- * every committed wish state document. The nesting is expressed HERE rather
- * than left inline in `wish.ts` precisely so both sites keep reading it from
- * one place.
+ * Two members' causes are not the bare `{ <key>: cause }` shape, and for the
+ * same reason in both cases — the entity id is causal, so re-keying would
+ * orphan every already-committed document:
+ *  - `wish` has minted `{ wish: { state: cause } }` since long before this
+ *    helper existed;
+ *  - `sqliteDatabase` mints through `makeResultCell`, whose cause is
+ *    `{ sqliteDatabase: { result: cause } }` ({@link resultCellMintCause}).
+ * Both nestings are expressed HERE rather than left inline at the mint site
+ * precisely so the two sites keep reading them from one place.
  */
 export function selectorBuiltinResultCause(
   builtinKey: SelectorBuiltinKey,
   cause: unknown,
 ): Record<string, unknown> {
-  return builtinKey === "wish"
-    ? { wish: { state: cause } }
-    : { [builtinKey]: cause };
+  if (builtinKey === "wish") return { wish: { state: cause } };
+  if (builtinKey === "sqliteDatabase") {
+    return resultCellMintCause(builtinKey, cause);
+  }
+  return { [builtinKey]: cause };
 }
 
 export function cellIdentityKey(cell: Cell<any>): {

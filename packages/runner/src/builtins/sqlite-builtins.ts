@@ -32,6 +32,10 @@ import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import type { CellScope } from "../builder/types.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
+import {
+  resultCellMintCause,
+  type ResultCellMinterKey,
+} from "./scope-policy.ts";
 import { isCellScope, narrowestScope } from "../scope.ts";
 import { computeInputHashFromValue } from "./fetch-utils.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
@@ -81,18 +85,25 @@ const errMsg = (error: unknown): string =>
 /** Allocate a result cell linked to the parent/pattern cells, at `scope` (the
  *  author-declared scope of the SqliteDb / its query result). The base entity
  *  id is scope-independent; `scope` only re-addresses which scoped instance the
- *  value lands in, matching how the server partitions the on-disk db. */
+ *  value lands in, matching how the server partitions the on-disk db.
+ *
+ *  The mint cause comes from the shared `resultCellMintCause` rather than being
+ *  spelled inline: `sqliteDatabase` carries a W2.15a computation descriptor,
+ *  and the runner re-derives THIS document at registration to declare it
+ *  (`selectorBuiltinResultCause` → the descriptor's `mintedDocuments`). The two
+ *  sites MUST agree on the cause or every minting run de-claims fail-closed at
+ *  the dynamic write firewall. */
 function makeResultCell<T>(
   runtime: Runtime,
   parentCell: Cell<any>,
   cause: unknown,
-  label: string,
+  label: ResultCellMinterKey,
   tx: IExtendedStorageTransaction,
   scope: CellScope = "space",
 ): Cell<T> {
   const base = runtime.getCell<T>(
     parentCell.space,
-    { [label]: { result: cause } },
+    resultCellMintCause(label, cause),
     undefined,
     tx,
   );
