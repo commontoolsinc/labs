@@ -297,6 +297,33 @@ export interface FabricPlainObject
   extends Readonly<Record<string, FabricValue>> {}
 
 // ============================================================================
+// Fabric Execution Value Types
+// ============================================================================
+
+/**
+ * A value that can appear in an in-memory fabric execution graph.
+ *
+ * Unlike a {@link FabricValue}, a `FabricExecValue` may contain functions and
+ * therefore is not necessarily durable or serializable. Its arrays and plain
+ * objects recursively contain only other execution values.
+ */
+export type FabricExecValue =
+  | FabricValue
+  | FabricExecFunction
+  | FabricExecArray
+  | FabricExecPlainObject;
+
+/** A callable leaf in a {@link FabricExecValue} graph. */
+export type FabricExecFunction = (...args: any[]) => any;
+
+/** Read-only array of fabric execution values. */
+export interface FabricExecArray extends ReadonlyArray<FabricExecValue> {}
+
+/** Read-only plain object whose string-keyed values are execution values. */
+export interface FabricExecPlainObject
+  extends Readonly<Record<string, FabricExecValue>> {}
+
+// ============================================================================
 // Runtime Constants
 // ============================================================================
 
