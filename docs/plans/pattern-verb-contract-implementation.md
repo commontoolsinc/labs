@@ -114,9 +114,59 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
 
 - **api:** `action` overloads accept a return type (today both overloads type
   the callback `=> void`, `builder/module.ts:606-609`); `Stream<T, R = void>`
-  or equivalent so the result type is visible to the schema layer — the
-  defaulted parameter keeps every existing `Stream<T>` use compiling. A
-  `VerbError { code, message }` type for rule 4's typed rejections.
+  so the result type is visible to the schema layer — the defaulted parameter
+  keeps every existing `Stream<T>` use compiling. A `VerbError { code,
+  message }` type for rule 4's typed rejections.
+- **C1 fork — settled: widen `Stream`, do not add a second carrier.** The
+  alternative was a separate `StreamWithResult<T, R> extends Stream<T>` that
+  only the schema layer interprets, which is tempting because it leaves
+  `Stream<T>` and its one-slot `AsStream` HKT untouched. It loses on one
+  point that outweighs the rest: **a forgotten annotation stays silent.**
+  Because the carrier is a subtype, a verb whose body returns a value but
+  whose declaration still reads `Stream<T>` assigns cleanly, and the result
+  is erased exactly where the schema layer reads it — the same shape of
+  failure as the live board accepting and discarding `agentName`. Widening
+  `Stream` makes that a compile error instead, provided `R` sits in a
+  structural position rather than a phantom one: a purely unused parameter is
+  erased by structural typing (verified — `Stream<string, number>` assigns to
+  `Stream<string>` when `R` appears nowhere), while `R` in a property
+  position discriminates and forces the author to declare what the body
+  returns.
+  Prototyped to measure rather than estimate, following the `CELL_INNER_TYPE`
+  precedent — a `declare const` unique symbol read as a property, which
+  `AnyBrandedCell` already uses for exactly this reason ("without a concrete
+  property mentioning T, T would be a phantom parameter"). The workspace
+  type-checks clean with `Stream` widened: zero errors.
+  **The conditional-type utilities do not need auditing.** An earlier draft of
+  this entry called for widening every `[T] extends [Stream<any>]` guard,
+  on the theory that a result-carrying stream would silently stop matching.
+  It does stop matching — but that does not reach the schema layer, which
+  detects wrappers from the author's annotation by two annotation-rooted
+  paths: the written `ts.TypeNode` name
+  (`schema-generator/src/type-utils.ts:427-437`) and the `[CELL_BRAND]:
+  "stream"` literal on the resolved type
+  (`schema-generator/src/typescript/cell-brand.ts:97-114`), whose
+  `extractWrapperTypeReference` exposes the full `typeArguments` where `R`
+  sits — so detection even survives an alias like
+  `type MyVerb = Stream<E, R>`. The
+  guards shape inference and authoring ergonomics, not schema extraction, and
+  dropping a result there is harmless for every helper that does not care
+  about one. Where a guard genuinely mishandles a returning verb it shows up
+  as a compile error in that pattern, loudly, and only for verbs that opted
+  in — so a single fixture declaring a result catches the class, and guards
+  widen reactively when that fixture proves they must. Removing the default
+  makes the compiler enumerate all 253 `Stream<` sites, which is a useful
+  one-time audit tool but not a prerequisite.
+  What must be threaded is the construction path, not the guards:
+  `Handler`/`HandlerFactory` return the stream, so they carry the result
+  parameter or an author's annotation cannot match what `handler()` produces.
+  `AsStream` — one
+  slot, `Apply` and `IKeyable` assume that — keeps producing `Stream<A,
+  void>`, so a projection through the HKT drops a declared result. That is
+  acceptable because streams are leaves: patterns do not `key()` into a
+  stream to reach another. Both options need a result parameter threaded
+  through `Handler`/`HandlerFactory` regardless, since the factory returns
+  the stream, so that work is not a differentiator.
 - **ts-transformers:** lowering for value-returning `action` bodies; CTS spec
   updates under `docs/specs/ts-transformer/`. (The runtime side already
   consumes returns — `handleJavaScriptHandlerResult` — so this is authoring
@@ -151,12 +201,13 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   `EXPERIMENTAL_OPTIONS.md`, scheduler-v2 §7.6 receipt-content note, both
   flag states tested in `scheduler-event-receipts.test.ts`, including
   same-id redelivery retaining the original result.
-- **C1 design fork, decide first:** `Stream<T>` is a branded-cell interface
-  wired through a one-slot HKT (`AsStream`, `packages/api/index.ts:1239`), so
+- ~~**C1 design fork, decide first:** `Stream<T>` is a branded-cell interface
+  wired through a one-slot HKT (`AsStream`, `packages/api/index.ts:1358`), so
   `Stream<T, R = void>` ripples through the cell-type machinery; the
   alternative is a separate declared-result carrier (e.g.
   `StreamWithResult<T, R> extends Stream<T>`) that only the schema layer
-  interprets. Settle this at the top of the C1 PR.
+  interprets. Settle this at the top of the C1 PR.~~ — settled in #5123; the
+  decision and its measured costs are the **C1 fork — settled** bullet above.
 - **Exit:** a CTS pattern declares a verb returning `AddTopicResult`; the
   result schema appears in the durable schema; under the flag, both plain and
   reactive returns are readable in the receipt cell.

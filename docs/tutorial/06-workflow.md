@@ -50,6 +50,20 @@ Every piece command below takes `-i/--identity`, `-a/--api-url`,
 space name. (What the key actually is, and how a space name becomes a DID,
 is Chapter 10.)
 
+Worth doing once, since the rest of this chapter is a lot of typing — turn on
+tab completion:
+
+```bash
+# zsh: add to ~/.zshrc after compinit (bash: swap zsh -> bash, use ~/.bashrc)
+source <(deno run -A packages/cli/mod.ts completion zsh)
+```
+
+It completes commands and flags offline, and — once `CF_IDENTITY`/`CF_API_URL`
+are set as above — the values that are actually painful to type: piece ids
+(annotated with each piece's name), a piece's callable names, and cell paths a
+segment at a time. It completes `deno task cf ...` as well as a `cf` binary.
+See `cf completion --help`.
+
 ## Deploy and iterate
 
 ```bash

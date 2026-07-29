@@ -170,7 +170,7 @@ async function clickCellLink(page: Page, label: string): Promise<string> {
         const button = chip?.shadowRoot?.querySelector("button");
         if (!button || !probe.isRendered(button)) continue;
         link.setAttribute("data-topics-link-target", targetToken);
-        button.setAttribute(clickTargetAttribute, targetToken);
+        probe.addToken(button, clickTargetAttribute, targetToken);
         return true;
       }
       return false;

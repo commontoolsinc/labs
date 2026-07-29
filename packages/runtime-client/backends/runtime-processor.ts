@@ -4,7 +4,10 @@ import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { JsonEncodingContext } from "@commonfabric/data-model/codec-json";
 import { PieceManager } from "@commonfabric/piece";
 import {
+  PieceController,
   PiecesController,
+  type PreparedPieceSourceChange,
+  readPieceSourceMetadata,
   readPieceSourceState,
 } from "@commonfabric/piece/ops";
 import {
@@ -111,6 +114,8 @@ import {
   type PatternSourcesResponse,
   type PieceGetSourceRequest,
   type PieceSourceResponse,
+  type PieceUpdateSourceRequest,
+  type PieceUpdateSourceResponse,
   type RecreateSpaceRootPatternRequest,
   type RegisterSpaceHostRequest,
   RequestType,
@@ -457,6 +462,10 @@ export class RuntimeProcessor {
   private _isDisposed = false;
   private disposingPromise: Promise<void> | undefined;
   private subscriptions = new Map<string, Cancel>();
+  private pieceSourceConfirmations = new Map<
+    string,
+    { token: string; prepared: PreparedPieceSourceChange }
+  >();
   private telemetry: RuntimeTelemetry;
   #telemetryEnabled = false;
 
@@ -751,6 +760,7 @@ export class RuntimeProcessor {
           cancel();
         }
         this.subscriptions.clear();
+        this.pieceSourceConfirmations.clear();
 
         // Clean up VDOM mounts
         for (const { reconciler, cancel } of this.vdomMounts.values()) {
@@ -1152,9 +1162,15 @@ export class RuntimeProcessor {
   ): Promise<PageResponse> {
     const { cc } = this.getSpaceCtx(request.space);
     let program: Program | undefined;
+    let origin: string | undefined;
     if ("url" in request.source && request.source.url) {
+      const sourceUrl = new URL(request.source.url);
+      if (sourceUrl.protocol !== "http:" && sourceUrl.protocol !== "https:") {
+        throw new Error("Piece source URL must use HTTP or HTTPS.");
+      }
+      origin = sourceUrl.href;
       program = await cc.manager().runtime.harness.resolve(
-        new HttpProgramResolver(request.source.url),
+        new HttpProgramResolver(sourceUrl),
       );
     } else if ("program" in request.source) {
       program = request.source.program;
@@ -1164,6 +1180,7 @@ export class RuntimeProcessor {
 
     const piece = await cc.create<NameSchema>(program, {
       input: request.argument as object | undefined,
+      origin,
       start: request.run ?? true,
     }, request.cause);
     return {
@@ -1310,6 +1327,86 @@ export class RuntimeProcessor {
     );
     const state = await readPieceSourceState(this.runtime, cell);
     return { source: { ...state, space: state.space as DID } };
+  }
+
+  async handlePieceUpdateSource(
+    request: PieceUpdateSourceRequest,
+  ): Promise<PieceUpdateSourceResponse> {
+    if (
+      request.confirmationToken !== undefined &&
+      (typeof request.confirmationToken !== "string" ||
+        request.confirmationToken.length === 0)
+    ) {
+      throw new Error("confirmationToken must be a non-empty string");
+    }
+    const { pieceManager } = this.getSpaceCtx(request.space);
+    const confirmationKey = `${request.space}\u0000${
+      pageIdForRouting(request.pieceId)
+    }`;
+    let confirmedChange: PreparedPieceSourceChange | undefined;
+    if (request.confirmationToken === undefined) {
+      this.pieceSourceConfirmations.delete(confirmationKey);
+    } else {
+      const pending = this.pieceSourceConfirmations.get(confirmationKey);
+      this.pieceSourceConfirmations.delete(confirmationKey);
+      if (
+        pending === undefined ||
+        pending.token !== request.confirmationToken
+      ) {
+        throw new Error(
+          "the piece source compatibility confirmation is no longer valid",
+        );
+      }
+      confirmedChange = pending.prepared;
+    }
+    const cell = this.runtime.getCellFromEntityId(
+      pieceManager.getSpace(),
+      entityIdFrom(pageIdForRouting(request.pieceId)),
+    );
+    const controller = new PieceController(pieceManager, cell);
+    const result = await controller.changeSource(request.action, {
+      confirmedChange,
+    });
+    let confirmationToken: string | undefined;
+    if (result.status === "incompatible") {
+      confirmationToken = crypto.randomUUID();
+      this.pieceSourceConfirmations.set(confirmationKey, {
+        token: confirmationToken,
+        prepared: result.prepared,
+      });
+    }
+    const appliedState = result.status === "applied"
+      ? readPieceSourceMetadata(this.runtime, cell)
+      : undefined;
+    let state;
+    let sourceReadWarning: string | undefined;
+    try {
+      state = await readPieceSourceState(this.runtime, cell);
+    } catch (error) {
+      if (result.status !== "applied") throw error;
+      state = appliedState!;
+      sourceReadWarning = `source details could not be refreshed: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+    }
+    const executionWarning = result.status === "applied"
+      ? [result.executionWarning, sourceReadWarning]
+        .filter((message): message is string => message !== undefined)
+        .join("; ") || undefined
+      : undefined;
+    const executionResponse = executionWarning === undefined
+      ? {}
+      : { executionWarning };
+    return {
+      source: { ...state, space: state.space as DID },
+      ...executionResponse,
+      ...(result.status === "incompatible"
+        ? {
+          compatibilityWarning: result.message,
+          confirmationToken,
+        }
+        : {}),
+    };
   }
 
   handleRegisterSpaceHost(
@@ -1623,6 +1720,8 @@ export class RuntimeProcessor {
         return await this.handlePageGetAll(request);
       case RequestType.PieceGetSource:
         return await this.handlePieceGetSource(request);
+      case RequestType.PieceUpdateSource:
+        return await this.handlePieceUpdateSource(request);
       case RequestType.PageSynced:
         return await this.handlePageSynced(request);
       case RequestType.RuntimeSynced:

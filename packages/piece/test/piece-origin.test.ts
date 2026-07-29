@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { type MemorySpace, Runtime } from "@commonfabric/runner";
+import {
+  applyPieceSourceTransition,
+  getPatternIdentityRef,
+  getPieceSourceRevisions,
+  getPieceSourceSnapshot,
+  type MemorySpace,
+  preparePieceSourceTransitionBaseline,
+  Runtime,
+} from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PieceManager } from "../src/manager.ts";
@@ -13,6 +21,7 @@ import {
   PieceOriginError,
   readPieceOrigin,
   readPieceSourceState,
+  resolvePieceOriginSource,
 } from "../src/ops/piece-origin.ts";
 import type { Cell } from "@commonfabric/runner";
 
@@ -135,6 +144,202 @@ describe("classifyOrigin", () => {
     expect(() => classifyOrigin(runtime, SPACE, "cf:module/x")).toThrow(
       PieceOriginError,
     );
+  });
+});
+
+describe("resolvePieceOriginSource", () => {
+  it("rejects a fabric source subpath before resolving its entry", async () => {
+    const runtime = {
+      hostForSpace: () => new URL("https://toolshed.test"),
+    } as unknown as Runtime;
+    await expect(
+      resolvePieceOriginSource(
+        runtime,
+        SPACE,
+        `cf:pattern:${HASH}/schemas`,
+        "default",
+      ),
+    ).rejects.toThrow("piece source subpaths are not supported");
+  });
+
+  it("rejects a mutable fabric alias as lifecycle authority", async () => {
+    const runtime = {
+      hostForSpace: () => new URL("https://toolshed.test"),
+    } as unknown as Runtime;
+    await expect(
+      resolvePieceOriginSource(
+        runtime,
+        SPACE,
+        `cf:/${SPACE}/friendly-name`,
+        "default",
+      ),
+    ).rejects.toThrow(
+      "piece origins require a stable fabric entity or pattern reference",
+    );
+  });
+
+  it("rejects cross-space refollow until source replication is checked", async () => {
+    const otherSpace = "did:key:z6MkspaceBBBB" as MemorySpace;
+    const runtime = {
+      hostForSpace: () => new URL("https://toolshed.test"),
+    } as unknown as Runtime;
+    await expect(
+      resolvePieceOriginSource(
+        runtime,
+        SPACE,
+        `cf:/${otherSpace}/of:fid1:${HASH}`,
+        "default",
+      ),
+    ).rejects.toThrow(
+      "following a source from another space requires checked source replication",
+    );
+  });
+
+  it("rejects a named space without resolving or registering it", async () => {
+    let resolvedName = false;
+    const runtime = {
+      hostForSpace: () => new URL("https://toolshed.test"),
+      resolveSpaceName: () => {
+        resolvedName = true;
+        return Promise.resolve(SPACE);
+      },
+    } as unknown as Runtime;
+    await expect(
+      resolvePieceOriginSource(
+        runtime,
+        SPACE,
+        `cf:/friendly-space/of:fid1:${HASH}`,
+        "default",
+      ),
+    ).rejects.toThrow("piece origins require an explicit space DID");
+    expect(resolvedName).toBe(false);
+  });
+
+  it("accepts the effective default host after the space provider opens", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+    });
+    try {
+      const manager = new PieceManager(
+        await createSession({
+          identity: signer,
+          spaceName: `same-host-origin-${crypto.randomUUID()}`,
+        }),
+        runtime,
+      );
+      await manager.synced();
+      const piece = await new PiecesController(manager).create({
+        main: "/main.tsx",
+        files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+      }, { input: { label: "same host" } });
+      const state = await readPieceSourceState(runtime, piece.getCell());
+
+      for (const host of ["toolshed.test", "TOOLSHED.TEST:80"]) {
+        const resolved = await resolvePieceOriginSource(
+          runtime,
+          manager.getSpace(),
+          `cf://${host}/${manager.getSpace()}/pattern:${
+            state.pattern!.identity
+          }`,
+          state.pattern!.symbol,
+        );
+
+        expect(resolved.pattern).toEqual(state.pattern);
+        expect(resolved.program.main).toBe("/main.tsx");
+      }
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("registers an explicit source host using its transport scheme", async () => {
+    const registrations: string[] = [];
+    const runtime = {
+      hostForSpace: () => new URL("https://toolshed.test"),
+      mappedHostFor: () => undefined,
+      registerSpaceHost: (_space: MemorySpace, host: string) => {
+        registrations.push(host);
+        return true;
+      },
+      patternManager: {
+        getPatternSourceProgramByIdentity: () =>
+          Promise.resolve({ main: "/main.tsx", files: [] }),
+      },
+    } as unknown as Runtime;
+
+    for (
+      const [host, registered] of [
+        ["source.test", "https://source.test"],
+        ["localhost:8787", "http://localhost:8787"],
+        ["127.0.0.1:8787", "http://127.0.0.1:8787"],
+      ]
+    ) {
+      const resolved = await resolvePieceOriginSource(
+        runtime,
+        SPACE,
+        `cf://${host}/${SPACE}/pattern:${HASH}`,
+        "named",
+      );
+      expect(resolved.pattern).toEqual({ identity: HASH, symbol: "named" });
+      expect(registrations.at(-1)).toBe(registered);
+    }
+  });
+
+  it("rejects an explicit source host the runtime cannot register", async () => {
+    const runtime = {
+      hostForSpace: () => new URL("https://toolshed.test"),
+      mappedHostFor: () => undefined,
+      registerSpaceHost: () => false,
+    } as unknown as Runtime;
+
+    await expect(
+      resolvePieceOriginSource(
+        runtime,
+        SPACE,
+        `cf://source.test/${SPACE}/pattern:${HASH}`,
+        "default",
+      ),
+    ).rejects.toThrow(`the host source.test is not available for ${SPACE}`);
+  });
+
+  it("rejects a mutable piece that does not currently name a pattern", async () => {
+    const runtime = {
+      hostForSpace: () => new URL("https://toolshed.test"),
+      getCellFromEntityId: () => ({
+        sync: () => Promise.resolve(),
+        getMetaRaw: () => undefined,
+      }),
+    } as unknown as Runtime;
+
+    await expect(
+      resolvePieceOriginSource(
+        runtime,
+        SPACE,
+        `cf:/${SPACE}/of:fid1:${HASH}`,
+        "default",
+      ),
+    ).rejects.toThrow("does not currently resolve to a piece pattern");
+  });
+
+  it("rejects a fabric pattern whose retained source is unavailable", async () => {
+    const runtime = {
+      hostForSpace: () => new URL("https://toolshed.test"),
+      patternManager: {
+        getPatternSourceProgramByIdentity: () => Promise.resolve(undefined),
+      },
+    } as unknown as Runtime;
+
+    await expect(
+      resolvePieceOriginSource(
+        runtime,
+        SPACE,
+        `cf:pattern:${HASH}`,
+        "default",
+      ),
+    ).rejects.toThrow(`source for ${HASH} is not available`);
   });
 });
 
@@ -324,6 +529,11 @@ describe("reading a piece's source state", () => {
     expect(state.entry).toBe("/main.tsx");
     expect(state.files.map((file) => file.name)).toEqual(["/main.tsx"]);
     expect(state.space).toBe(manager.getSpace());
+    expect(state.history).toHaveLength(1);
+    expect(state.history[0]).toMatchObject({
+      operation: "create",
+      pattern: state.pattern,
+    });
   });
 
   it("reports a space root's stamped path as an absolute web origin", async () => {
@@ -339,5 +549,57 @@ describe("reading a piece's source state", () => {
     });
     expect(state.files.length).toBeGreaterThan(0);
     expect(state.files[0].name).toBe(state.entry);
+  });
+
+  it("keeps the recorded form on the active source revision", async () => {
+    const piece = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    });
+    const cell = piece.getCell();
+    const pattern = getPatternIdentityRef(cell)!;
+    const expected = getPieceSourceSnapshot(cell)!;
+    const baseline = await preparePieceSourceTransitionBaseline(
+      runtime,
+      cell,
+      expected,
+    );
+    const tx = runtime.edit();
+    applyPieceSourceTransition(runtime, cell, tx, pattern, {
+      revisionId: "active-relative-origin",
+      baseline,
+      timestamp: 42,
+      operation: "origin-update",
+      origin: DEFAULT_APP_PATTERN_URL,
+      expected,
+    });
+    await tx.commit();
+
+    const state = await readPieceSourceState(runtime, cell);
+    expect(state.origin).toEqual({
+      url: `http://toolshed.test${DEFAULT_APP_PATTERN_URL}`,
+      kind: "web",
+      recorded: DEFAULT_APP_PATTERN_URL,
+    });
+    expect(state.history.at(-1)?.origin).toEqual(state.origin);
+  });
+
+  it("keeps an unclassifiable historical origin out of the source view", async () => {
+    const piece = await controller.create({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
+    });
+    const cell = piece.getCell();
+    const revision = getPieceSourceRevisions(cell)[0];
+    const tx = runtime.edit();
+    cell.withTx(tx).setMetaRaw("pieceSourceHistory", [{
+      ...revision,
+      origin: "not an origin",
+    }] as never);
+    await tx.commit();
+
+    const state = await readPieceSourceState(runtime, cell);
+    expect(state.history).toHaveLength(1);
+    expect(state.history[0].origin).toBeUndefined();
   });
 });

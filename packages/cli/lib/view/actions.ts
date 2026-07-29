@@ -17,6 +17,22 @@ export function maxTop(lineCount: number, height: number): number {
   return Math.max(0, lineCount - contentRows);
 }
 
+/** Largest pager `top`, with the last line at the end of the top quarter. */
+export function maxPagerTop(lineCount: number, height: number): number {
+  const contentRows = Math.max(1, height - 1);
+  const visibleDocumentRows = Math.max(1, Math.ceil(contentRows / 4));
+  return Math.max(0, lineCount - visibleDocumentRows);
+}
+
+/** Number of rows occupied by diff content. The empty logical line after a
+ * final line break begins the padded area. */
+export function diffContentRowCount(
+  rowCount: number,
+  hasTrailingEmptyLine: boolean,
+): number {
+  return Math.max(0, rowCount - (hasTrailingEmptyLine ? 1 : 0));
+}
+
 /** All occurrences of `query`, document-ordered. Smartcase: lower-case query
  * matches case-insensitively, any upper-case forces case-sensitivity. */
 export function findMatches(doc: Document, query: string): Match[] {
@@ -237,7 +253,7 @@ export function frameTop(
   const top = nodeHeight <= rows
     ? startLine - Math.floor((rows - nodeHeight) / 2)
     : startLine - Math.floor(rows / 10);
-  return clamp(top, 0, maxTop(lineCount, height));
+  return clamp(top, 0, maxPagerTop(lineCount, height));
 }
 
 /**
@@ -259,7 +275,7 @@ export function scrollToAnchor(
   const target = anchorLine < top
     ? anchorLine - margin
     : anchorLine - rows + 1 + margin;
-  return clamp(target, 0, maxTop(lineCount, height));
+  return clamp(target, 0, maxPagerTop(lineCount, height));
 }
 
 /**

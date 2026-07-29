@@ -204,6 +204,14 @@ type SubPieceEntryHandle =
   & Omit<SubPieceEntry, "piece">
   & { piece: Cell<Record<string, unknown>> };
 
+// Trashing a module and restoring it moves the module's piece from the active
+// list into the trash and back. The move reads the piece across a handler
+// boundary, so a trashed entry types its piece as a live Cell too, the same way
+// the active list's handle does.
+type TrashedSubPieceEntryHandle =
+  & Omit<TrashedSubPieceEntry, "piece">
+  & { piece: Cell<Record<string, unknown>> };
+
 // ===== Module-Scope Handlers (avoid closures, use references not indices) =====
 
 // Toggle pin state for a sub-piece - uses entry reference, not index
@@ -323,8 +331,8 @@ const addSubPiece = handler<
 const trashSubPiece = handler<
   unknown,
   {
-    subPieces: Writable<SubPieceEntry[]>;
-    trashedSubPieces: Writable<TrashedSubPieceEntry[]>;
+    subPieces: Writable<SubPieceEntryHandle[]>;
+    trashedSubPieces: Writable<TrashedSubPieceEntryHandle[]>;
     expandedIndex: Writable<number | undefined>;
     settingsModuleIndex: Writable<number | undefined>;
     index: number;
@@ -380,8 +388,8 @@ const trashSubPiece = handler<
 const restoreSubPiece = handler<
   unknown,
   {
-    subPieces: Writable<SubPieceEntry[]>;
-    trashedSubPieces: Writable<TrashedSubPieceEntry[]>;
+    subPieces: Writable<SubPieceEntryHandle[]>;
+    trashedSubPieces: Writable<TrashedSubPieceEntryHandle[]>;
     trashIndex: number;
   }
 >((_event, { subPieces: sc, trashedSubPieces: trash, trashIndex }) => {
@@ -717,8 +725,8 @@ const handleUpdateModule = handler<
 const handleRemoveModule = handler<
   { index: number; result?: Writable<unknown> },
   {
-    subPieces: Writable<SubPieceEntry[]>;
-    trashedSubPieces: Writable<TrashedSubPieceEntry[]>;
+    subPieces: Writable<SubPieceEntryHandle[]>;
+    trashedSubPieces: Writable<TrashedSubPieceEntryHandle[]>;
   }
 >(({ index, result }, { subPieces: sc, trashedSubPieces: trash }) => {
   const current = sc.get() || [];
@@ -855,6 +863,19 @@ const Record = pattern<RecordInput, RecordOutput>(
 
     // Settings modal state - tracks which module's settings are being edited
     const settingsModuleIndex = new Writable<number | undefined>();
+
+    // Handle views of the two lists for the handlers that read or move a
+    // module's piece. The piece is declared `unknown` on the entry, which reads
+    // back across a handler boundary as undefined; typing it as a live Cell
+    // keeps the handle. getSummary and updateModule read the active list this
+    // way, and trashSubPiece, removeModule and restoreSubPiece carry a piece
+    // into the trash and back through both. The cast only bridges the declared
+    // list type to that view; the cell is the same either way.
+    // deno-lint-ignore no-explicit-any
+    const subPiecesHandle: Writable<SubPieceEntryHandle[]> = subPieces as any;
+    const trashedHandle: Writable<TrashedSubPieceEntryHandle[]> =
+      // deno-lint-ignore no-explicit-any
+      trashedSubPieces as any;
 
     // Create Record pattern JSON for wiki-links in Notes
     // Using computed() defers evaluation until render time, avoiding circular dependency
@@ -1371,8 +1392,8 @@ const Record = pattern<RecordInput, RecordOutput>(
                                   <button
                                     type="button"
                                     onClick={trashSubPiece({
-                                      subPieces,
-                                      trashedSubPieces,
+                                      subPieces: subPiecesHandle,
+                                      trashedSubPieces: trashedHandle,
                                       expandedIndex,
                                       settingsModuleIndex,
                                       index,
@@ -1663,8 +1684,8 @@ const Record = pattern<RecordInput, RecordOutput>(
                                     <button
                                       type="button"
                                       onClick={trashSubPiece({
-                                        subPieces,
-                                        trashedSubPieces,
+                                        subPieces: subPiecesHandle,
+                                        trashedSubPieces: trashedHandle,
                                         expandedIndex,
                                         settingsModuleIndex,
                                         index,
@@ -1948,8 +1969,8 @@ const Record = pattern<RecordInput, RecordOutput>(
                                 <button
                                   type="button"
                                   onClick={trashSubPiece({
-                                    subPieces,
-                                    trashedSubPieces,
+                                    subPieces: subPiecesHandle,
+                                    trashedSubPieces: trashedHandle,
                                     expandedIndex,
                                     settingsModuleIndex,
                                     index,
@@ -2073,8 +2094,8 @@ const Record = pattern<RecordInput, RecordOutput>(
                               <button
                                 type="button"
                                 onClick={restoreSubPiece({
-                                  subPieces,
-                                  trashedSubPieces,
+                                  subPieces: subPiecesHandle,
+                                  trashedSubPieces: trashedHandle,
                                   trashIndex,
                                 })}
                                 style={{
@@ -2266,16 +2287,16 @@ const Record = pattern<RecordInput, RecordOutput>(
       "#record": true,
       // LLM-callable streams for Omnibot integration
       // Omnibot can invoke these via: invoke({ "@link": "/of:record-id/getSummary" }, {})
-      // getSummary and updateModule read the piece handles the list holds, so
-      // they take the `SubPieceEntryHandle` view of `subPieces`, which types
-      // the piece as a live Cell. The cell is the same either way; the cast
-      // only bridges the two static views.
-      // deno-lint-ignore no-explicit-any
-      getSummary: handleGetSummary({ title, subPieces: subPieces as any }),
+      // getSummary, updateModule and removeModule reach the piece handles the
+      // lists hold, so they take the handle views (`subPiecesHandle`,
+      // `trashedHandle`) that type the piece as a live Cell.
+      getSummary: handleGetSummary({ title, subPieces: subPiecesHandle }),
       addModule: handleAddModule({ subPieces, trashedSubPieces, title }),
-      // deno-lint-ignore no-explicit-any
-      updateModule: handleUpdateModule({ subPieces: subPieces as any }),
-      removeModule: handleRemoveModule({ subPieces, trashedSubPieces }),
+      updateModule: handleUpdateModule({ subPieces: subPiecesHandle }),
+      removeModule: handleRemoveModule({
+        subPieces: subPiecesHandle,
+        trashedSubPieces: trashedHandle,
+      }),
       setTitle: handleSetTitle({ title }),
       listModuleTypes: handleListModuleTypes({}),
     };

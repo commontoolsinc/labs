@@ -495,8 +495,8 @@ export type MetaField =
   | MetaLinkField
   | "patternIdentity" // content-addressed {identity, symbol} pattern reference
   | "patternSetupIdentity" // setup-completion {identity, symbol} marker
-  | "patternSource" // provenance: the source a piece tracks for updates (a
-  // toolshed pattern path, or later a `cf:` fabric ref)
+  | "patternSource" // active web or `cf:` source origin
+  | "pieceSourceHistory" // append-only source revisions and retention roots
   | "patternRepository" // optional caller-supplied repository locator
   | "displacedPattern" // {identity, symbol, displacedAt}: the prior pattern
   // reference recorded when system-pattern auto-update replaces an unloadable
@@ -1818,13 +1818,13 @@ export type JSONSchemaObj = {
  * A deep-mutable variant of `JSONSchemaObj`. Recursively strips `readonly`
  * from all properties, making the schema safe to build up incrementally.
  */
-export type JSONSchemaObjMutable = Mutable<JSONSchemaObj>;
+export type MutableJSONSchemaObj = Mutable<JSONSchemaObj>;
 
 /**
- * A `JSONSchemaObjMutable` or a boolean. JSON Schema allows `true` (accept any
+ * A `MutableJSONSchemaObj` or a boolean. JSON Schema allows `true` (accept any
  * value) and `false` (reject all values) as valid schemas.
  */
-export type JSONSchemaMutable = JSONSchemaObjMutable | boolean;
+export type MutableJSONSchema = MutableJSONSchemaObj | boolean;
 
 export type * from "./cfc.ts";
 export { CFC_CANONICAL_ALIAS_NAMES } from "./cfc.ts";

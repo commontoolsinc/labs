@@ -113,6 +113,22 @@ Deno.test("cf view reads and prints a file argument", async () => {
   }
 });
 
+Deno.test("cf view --rendered formats a named Markdown file", async () => {
+  const dir = Deno.makeTempDirSync();
+  try {
+    const file = `${dir}/notes.md`;
+    Deno.writeTextFileSync(file, "# Title with **weight**\n");
+    const { code, stdout } = await cf(
+      `view --plain --rendered --color never ${file}`,
+    );
+    assertEquals(code, 0);
+    assert(stdout.includes("Title with weight"), stdout.join("\n"));
+    assert(!stdout.join("\n").includes("# Title"), stdout.join("\n"));
+  } finally {
+    Deno.removeSync(dir, { recursive: true });
+  }
+});
+
 Deno.test("cf view reports an empty file argument", async () => {
   const dir = Deno.makeTempDirSync();
   try {

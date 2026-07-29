@@ -1,14 +1,18 @@
 import {
+  applyPieceSourceTransition,
   type Cell,
   entityIdFrom,
   type EnvReader,
   experimentalOptionsFromEnv,
   getPatternIdentityRef,
+  getPieceSourceSnapshot,
   type JSONSchema,
   type MemorySpace,
   type ModuleByteCache,
   type PatternCoverageCollector,
   type PatternUpdateOutcome,
+  type PieceSourceTransition,
+  preparePieceSourceTransitionBaseline,
   Runtime,
   runtimePresets,
   RuntimeProgram,
@@ -129,6 +133,7 @@ async function timePiecesPhase<T>(
 export interface CreatePieceOptions {
   input?: object;
   repository?: string;
+  origin?: string;
   start?: boolean;
 }
 
@@ -157,7 +162,7 @@ export class PiecesController<T = unknown> {
       pattern,
       options.input,
       cause,
-      { repository: options.repository, start },
+      { repository: options.repository, origin: options.origin, start },
     );
     if (!start) {
       await this.#manager.runtime.idle();
@@ -852,6 +857,24 @@ export class PiecesController<T = unknown> {
     // clobbered by our stale `officialRef`. Returning `false` aborts the write
     // without committing — precedent: pattern-updater's `stillMatches`/
     // `canWrite`. `result.ok === false` (no error) then means "superseded".
+    const sourceSnapshot = getPieceSourceSnapshot(rootToStart);
+    if (sourceSnapshot === undefined) {
+      throw clearError("has no source state to update", migrationError);
+    }
+    const baseline = await preparePieceSourceTransitionBaseline(
+      runtime,
+      rootToStart,
+      sourceSnapshot,
+      { allowUnavailable: true },
+    );
+    const sourceTransition: PieceSourceTransition = {
+      revisionId: crypto.randomUUID(),
+      baseline,
+      timestamp: Date.now(),
+      operation: "origin-update",
+      origin: officialUrlPath,
+      expected: sourceSnapshot,
+    };
     const swapResult = await runtime.editWithRetry((tx) => {
       const rootTx = rootToStart.withTx(tx);
       const currentRef = getPatternIdentityRef(rootTx);
@@ -861,13 +884,19 @@ export class PiecesController<T = unknown> {
       ) {
         return false;
       }
+      applyPieceSourceTransition(
+        runtime,
+        rootToStart,
+        tx,
+        officialRef,
+        sourceTransition,
+      );
       rootTx.setMetaRaw("displacedPattern", {
         identity: pinnedRef.identity,
         symbol: pinnedRef.symbol,
-        displacedAt: Date.now(),
+        displacedAt: sourceTransition.timestamp,
       });
       rootTx.setMetaRaw("patternIdentity", officialRef);
-      setPatternSource(rootToStart, tx, officialUrlPath);
       return true;
     });
     if (swapResult.error) {

@@ -442,9 +442,15 @@ See `packages/patterns/examples/ui-variants-demo.tsx` for a full example.
 
 ### The piece context menu
 
-Right-clicking a rendered piece opens `cf-piece-menu` for it, with four entries:
-**View source** shows the piece's retained authored files, **Origin and
-history** shows the origin it records and the pattern identities it has run,
+Right-clicking a rendered piece opens `cf-piece-menu` for it. **View source**
+shows the piece's retained authored files. **Origin and history** shows its
+active origin and recorded source revisions. A followed piece also has **Stop
+following source**, which keeps the exact current source and clears the origin.
+Historical entries can restore their retained source version or resume
+following their earlier origin. The menu warns before applying a structurally
+incompatible historical source. Its confirmation remains bound to the exact
+candidate that produced the warning.
+
 **Data** shows the piece's argument and result values (both stay live while
 the menu is open; linked cells appear as `{"@cell": …}` stubs), and
 **Actions** lists the handler streams the piece's declared argument and
@@ -454,8 +460,9 @@ output (or argument) type — the schema'd read is closed-world, so a handler
 returned at runtime behind an index signature is invisible to it. Dispatches
 from the menu are accepted-for-delivery acknowledgements (the commit is
 asynchronous) and are not renderer-trusted, so a handler gated on UI
-provenance will refuse them. The
-menu comes with `cf-render` — importing the component registers it — and mounts
+provenance will refuse them.
+
+The menu comes with `cf-render`. Importing the component registers it. It mounts
 itself on `document.body` so a piece's clipping or a tile's scaling cannot reach
 it.
 

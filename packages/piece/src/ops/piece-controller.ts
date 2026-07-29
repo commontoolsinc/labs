@@ -1,4 +1,5 @@
 import {
+  applyPieceSourceTransition,
   Cell,
   type CellPath,
   cellWithScopedLinkRequiredsRelaxed,
@@ -10,6 +11,8 @@ import {
   getPatternIdentityRef,
   getPatternRepository,
   getPatternSource,
+  getPieceSourceRevisions,
+  getPieceSourceSnapshot,
   getValueAtPath,
   isCell,
   isLink,
@@ -20,6 +23,11 @@ import {
   NAME,
   parseLinkOrThrow,
   type Pattern,
+  type PieceSourceRevision,
+  type PieceSourceSnapshot,
+  type PieceSourceTransition,
+  type PieceSourceTransitionBaseline,
+  preparePieceSourceTransitionBaseline,
   resolveCellPath,
   resolveLink,
   type RuntimeProgram,
@@ -40,6 +48,8 @@ import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
 } from "../schema-compatibility.ts";
+import { resolvePieceOriginSource } from "./piece-origin.ts";
+import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 
 interface PieceCellIo {
   get(path?: CellPath): Promise<unknown>;
@@ -197,6 +207,39 @@ export interface PiecePatternRef {
   symbol: string;
   source: PiecePatternSourceRef;
 }
+
+export type PieceSourceAction =
+  | { kind: "detach" }
+  | { kind: "restore"; revisionId: string }
+  | { kind: "follow"; revisionId: string };
+
+export interface PreparedPieceSourceChange {
+  action: PieceSourceAction;
+  expected: PieceSourceSnapshot;
+  candidate: { identity: string; symbol: string };
+  origin: string | null;
+  operation: PieceSourceTransition["operation"];
+  baseline: PieceSourceTransitionBaseline;
+  selectedRevisionId?: string;
+  review?: {
+    argumentEvidence: string;
+    issues: PieceSourceCompatibilityIssues;
+  };
+}
+
+interface PieceSourceCompatibilityIssues {
+  schema?: string;
+  argument?: string;
+  retainedLinks?: string;
+}
+
+export type PieceSourceActionResult =
+  | { status: "applied"; executionWarning?: string }
+  | {
+    status: "incompatible";
+    message: string;
+    prepared: PreparedPieceSourceChange;
+  };
 
 function storedCellTopology(
   value: unknown,
@@ -2839,6 +2882,288 @@ export class PieceController<T = unknown> {
     return (await this.getPatternSourceProgram())?.files;
   }
 
+  /**
+   * Detach from the current origin, restore an exact retained source revision,
+   * or follow an origin recorded by an earlier revision.
+   */
+  async changeSource(
+    action: PieceSourceAction,
+    options: { confirmedChange?: PreparedPieceSourceChange } = {},
+  ): Promise<PieceSourceActionResult> {
+    if (!isPieceSourceAction(action)) {
+      throw new Error("unsupported piece source action");
+    }
+    const { pattern: previousPattern, ref: previousRef } = await this
+      .#loadCurrentPattern();
+    const expected = getPieceSourceSnapshot(this.#cell);
+    if (expected === undefined) {
+      throw new Error("piece missing source state");
+    }
+
+    const confirmed = options.confirmedChange;
+    if (
+      confirmed !== undefined &&
+      (!samePieceSourceAction(confirmed.action, action) ||
+        !samePieceSourceSnapshot(confirmed.expected, expected))
+    ) {
+      throw new Error(
+        "the piece source changed after compatibility was checked",
+      );
+    }
+
+    const revisions = getPieceSourceRevisions(this.#cell);
+
+    if (action.kind === "detach") {
+      if (confirmed !== undefined) {
+        throw new Error("detach does not use compatibility confirmation");
+      }
+      if (expected.origin === null) {
+        throw new Error("piece is not following a source");
+      }
+      const baseline = await preparePieceSourceTransitionBaseline(
+        this.#manager.runtime,
+        this.#cell,
+        expected,
+      );
+      const transition = pieceSourceTransition(
+        expected,
+        "detach",
+        null,
+        baseline,
+      );
+      const mutationVersion = ++this.#mutationVersion;
+      try {
+        await this.#runMutation(mutationVersion, async () => {
+          const result = await this.#manager.runtime.editWithRetry((tx) => {
+            applyPieceSourceTransition(
+              this.#manager.runtime,
+              this.#cell,
+              tx,
+              previousRef,
+              transition,
+            );
+            return true;
+          });
+          if (result.error !== undefined) throw result.error;
+          return this.#cell;
+        });
+        return { status: "applied" };
+      } catch (error) {
+        if (await this.#sourceTransitionCommitted(transition.revisionId)) {
+          return {
+            status: "applied",
+            executionWarning: pieceSourceErrorMessage(error),
+          };
+        }
+        throw error;
+      }
+    }
+
+    let candidate: Pattern;
+    let prepared: PreparedPieceSourceChange;
+    let acceptedReview: PreparedPieceSourceChange["review"];
+    if (confirmed !== undefined) {
+      if (confirmed.review === undefined) {
+        throw new Error(
+          "the piece source compatibility confirmation is incomplete",
+        );
+      }
+      assertPieceSourceArgumentUsable(confirmed.review);
+      const loaded = await this.#manager.runtime.patternManager
+        .loadPatternByIdentity(
+          confirmed.candidate.identity,
+          confirmed.candidate.symbol,
+          this.#manager.getSpace(),
+        );
+      if (loaded === undefined) {
+        throw new Error("the confirmed source version is not available");
+      }
+      candidate = loaded;
+      prepared = confirmed;
+      const currentReview = await pieceSourceCompatibilityReview(
+        previousPattern,
+        candidate,
+        this.#cell,
+        this.#manager,
+      );
+      assertPieceSourceArgumentUsable(currentReview);
+      if (
+        currentReview.argumentEvidence !==
+          confirmed.review.argumentEvidence ||
+        !deepEqual(currentReview.issues, confirmed.review.issues)
+      ) {
+        if (hasPieceSourceCompatibilityIssues(currentReview.issues)) {
+          prepared = { ...confirmed, review: currentReview };
+          return {
+            status: "incompatible",
+            message: pieceSourceCompatibilityMessage(currentReview.issues),
+            prepared,
+          };
+        }
+        throw new Error(
+          "the retained piece input changed after compatibility was checked",
+        );
+      } else {
+        acceptedReview = confirmed.review;
+      }
+    } else {
+      const baseline = await preparePieceSourceTransitionBaseline(
+        this.#manager.runtime,
+        this.#cell,
+        expected,
+      );
+      let program: RuntimeProgram;
+      let origin: string | null;
+      let operation: PieceSourceTransition["operation"];
+      let selectedRevisionId: string | undefined;
+      const selected = sourceRevision(revisions, action.revisionId);
+      if (action.kind === "restore") {
+        const retained = await this.#manager.runtime.patternManager
+          .getPatternSourceProgramByIdentity(
+            selected.pattern.identity,
+            this.#manager.getSpace(),
+          );
+        if (retained === undefined) {
+          throw new Error(
+            `source revision ${selected.revisionId} is not available`,
+          );
+        }
+        program = { ...retained, mainExport: selected.pattern.symbol };
+        origin = null;
+        operation = "revert";
+        selectedRevisionId = selected.revisionId;
+      } else {
+        if (selected.origin === undefined) {
+          throw new Error(
+            `source revision ${selected.revisionId} has no origin to follow`,
+          );
+        }
+        const resolved = await resolvePieceOriginSource(
+          this.#manager.runtime,
+          this.#manager.getSpace(),
+          selected.origin,
+          selected.pattern.symbol,
+        );
+        program = resolved.program;
+        origin = selected.origin;
+        operation = "repoint";
+        selectedRevisionId = selected.revisionId;
+      }
+
+      candidate = await compileProgram(this.#manager, program, {
+        previousEntryIdentity: previousRef.identity,
+      });
+      const candidateRef = this.#manager.runtime.patternManager
+        .getArtifactEntryRef(candidate);
+      if (candidateRef === undefined) {
+        throw new Error("the candidate source has no pattern identity");
+      }
+      prepared = {
+        action,
+        expected,
+        candidate: candidateRef,
+        origin,
+        operation,
+        baseline,
+        ...(selectedRevisionId === undefined ? {} : { selectedRevisionId }),
+      };
+      const review = await pieceSourceCompatibilityReview(
+        previousPattern,
+        candidate,
+        this.#cell,
+        this.#manager,
+      );
+      assertPieceSourceArgumentUsable(review);
+      if (hasPieceSourceCompatibilityIssues(review.issues)) {
+        prepared.review = review;
+        return {
+          status: "incompatible",
+          message: pieceSourceCompatibilityMessage(review.issues),
+          prepared,
+        };
+      }
+    }
+
+    const transition = pieceSourceTransition(
+      expected,
+      prepared.operation,
+      prepared.origin,
+      prepared.baseline,
+      { selectedRevisionId: prepared.selectedRevisionId },
+    );
+    const mutationVersion = ++this.#mutationVersion;
+    try {
+      await this.#runMutation(mutationVersion, async () => {
+        return await execute(
+          this.#manager,
+          this.id,
+          candidate,
+          undefined,
+          {
+            start: true,
+            expectedPatternIdentity: previousRef,
+            validateCurrentArgument: acceptedReview === undefined
+              ? undefined
+              : (argumentCell) => {
+                const evidence = pieceSourceArgumentEvidence(
+                  argumentCell,
+                  this.#manager,
+                );
+                if (evidence !== acceptedReview.argumentEvidence) {
+                  throw new Error(
+                    "the retained piece input changed after compatibility was checked",
+                  );
+                }
+              },
+            validateArgumentLinks: (argumentCell, argumentSchema) => {
+              try {
+                assertPieceSourceRetainedLinksCompatible(
+                  argumentCell,
+                  argumentSchema,
+                  this.#manager,
+                  previousPattern.argumentSchema,
+                );
+              } catch (error) {
+                const message = error instanceof Error
+                  ? error.message
+                  : String(error);
+                if (acceptedReview?.issues.retainedLinks === message) return;
+                throw error;
+              }
+            },
+            sourceTransition: transition,
+          },
+        ) as Cell<T>;
+      });
+      return { status: "applied" };
+    } catch (error) {
+      if (await this.#sourceTransitionCommitted(transition.revisionId)) {
+        return {
+          status: "applied",
+          executionWarning: pieceSourceErrorMessage(error),
+        };
+      }
+      if (isOverridableArgumentCompatibilityError(error)) {
+        const review = await pieceSourceCompatibilityReview(
+          previousPattern,
+          candidate,
+          this.#cell,
+          this.#manager,
+        );
+        assertPieceSourceArgumentUsable(review);
+        if (hasPieceSourceCompatibilityIssues(review.issues)) {
+          prepared.review = review;
+          return {
+            status: "incompatible",
+            message: pieceSourceCompatibilityMessage(review.issues),
+            prepared,
+          };
+        }
+      }
+      throw error;
+    }
+  }
+
   async setPattern(
     program: RuntimeProgram,
     options?: {
@@ -2847,42 +3172,80 @@ export class PieceController<T = unknown> {
     },
   ): Promise<void> {
     const mutationVersion = ++this.#mutationVersion;
-    await this.#runMutation(mutationVersion, async () => {
-      const { pattern: previousPattern, ref: previousRef } = await this
-        .#loadCurrentPattern();
-      const pattern = await compileProgram(this.#manager, program, {
-        previousEntryIdentity: previousRef.identity,
+    let transition: PieceSourceTransition | undefined;
+    try {
+      await this.#runMutation(mutationVersion, async () => {
+        const { pattern: previousPattern, ref: previousRef } = await this
+          .#loadCurrentPattern();
+        const expected = getPieceSourceSnapshot(this.#cell);
+        if (expected === undefined) {
+          throw new Error("piece missing source state");
+        }
+        const baseline = await preparePieceSourceTransitionBaseline(
+          this.#manager.runtime,
+          this.#cell,
+          expected,
+          expected.revisionId === null && expected.origin === null
+            ? { allowUnavailable: true }
+            : {},
+        );
+        const pattern = await compileProgram(
+          this.#manager,
+          program,
+          baseline.kind === "retain"
+            ? { previousEntryIdentity: previousRef.identity }
+            : {},
+        );
+        if (!options?.dangerouslyAllowIncompatibleSchema) {
+          assertPatternSchemasBackwardCompatible(previousPattern, pattern);
+        }
+        transition = pieceSourceTransition(
+          expected,
+          "edit",
+          null,
+          baseline,
+        );
+        return await execute(this.#manager, this.id, pattern, undefined, {
+          start: true,
+          expectedPatternIdentity: previousRef,
+          validateArgumentLinks: options?.dangerouslyAllowIncompatibleSchema
+            ? undefined
+            : (argumentCell, argumentSchema) =>
+              assertSuppliedLinkSchemasCompatible(
+                suppliedLinks(argumentCell.getRaw()),
+                argumentSchema,
+                argumentCell,
+                this.#manager,
+                {
+                  priorArgumentSchema: previousPattern.argumentSchema,
+                  // `applySetupState` rewrites the argument from `getRaw()`, so
+                  // every retained link's envelope is written back unchanged and
+                  // nothing here is rebuilt as an alias. The validator verifies
+                  // that per link against committed state rather than taking
+                  // this declaration on trust — anything the setup staged that
+                  // is NOT already committed (e.g. a link-shaped schema
+                  // default from the incoming pattern) still faces the full
+                  // rebuild rules.
+                  linksPreservedVerbatim: true,
+                },
+              ),
+          repository: options?.repository,
+          sourceTransition: transition,
+        }) as Cell<T>;
       });
-      if (!options?.dangerouslyAllowIncompatibleSchema) {
-        assertPatternSchemasBackwardCompatible(previousPattern, pattern);
+    } catch (error) {
+      if (
+        transition !== undefined &&
+        await this.#sourceTransitionCommitted(transition.revisionId)
+      ) {
+        console.warn(
+          "Piece source was saved, but refreshing the running piece failed:",
+          error,
+        );
+        return;
       }
-      return await execute(this.#manager, this.id, pattern, undefined, {
-        start: true,
-        expectedPatternIdentity: previousRef,
-        validateArgumentLinks: options?.dangerouslyAllowIncompatibleSchema
-          ? undefined
-          : (argumentCell, argumentSchema) =>
-            assertSuppliedLinkSchemasCompatible(
-              suppliedLinks(argumentCell.getRaw()),
-              argumentSchema,
-              argumentCell,
-              this.#manager,
-              {
-                priorArgumentSchema: previousPattern.argumentSchema,
-                // `applySetupState` rewrites the argument from `getRaw()`, so
-                // every retained link's envelope is written back unchanged and
-                // nothing here is rebuilt as an alias. The validator verifies
-                // that per link against committed state rather than taking
-                // this declaration on trust — anything the setup staged that
-                // is NOT already committed (e.g. a link-shaped schema
-                // default from the incoming pattern) still faces the full
-                // rebuild rules.
-                linksPreservedVerbatim: true,
-              },
-            ),
-        repository: options?.repository,
-      }) as Cell<T>;
-    });
+      throw error;
+    }
   }
 
   async #runMutation(
@@ -2949,6 +3312,24 @@ export class PieceController<T = unknown> {
     }
   }
 
+  async #sourceTransitionCommitted(revisionId: string): Promise<boolean> {
+    try {
+      if (
+        getPieceSourceRevisions(this.#cell).some((revision) =>
+          revision.revisionId === revisionId
+        )
+      ) {
+        return true;
+      }
+      await this.#cell.sync();
+      return getPieceSourceRevisions(this.#cell).some((revision) =>
+        revision.revisionId === revisionId
+      );
+    } catch {
+      return false;
+    }
+  }
+
   async readingFrom(): Promise<PieceController[]> {
     const cells = await this.#manager.getReadingFrom(this.#cell);
     return cells.map((cell) => new PieceController(this.#manager, cell));
@@ -2964,6 +3345,235 @@ export class PieceController<T = unknown> {
   }
 }
 
+function sourceRevision(
+  revisions: readonly PieceSourceRevision[],
+  revisionId: string,
+): PieceSourceRevision {
+  const revision = revisions.find((candidate) =>
+    candidate.revisionId === revisionId
+  );
+  if (revision === undefined) {
+    throw new Error(`source revision ${revisionId} does not exist`);
+  }
+  return revision;
+}
+
+function isPieceSourceAction(action: unknown): action is PieceSourceAction {
+  if (typeof action !== "object" || action === null || !("kind" in action)) {
+    return false;
+  }
+  if (action.kind === "detach") return true;
+  return (action.kind === "restore" || action.kind === "follow") &&
+    "revisionId" in action &&
+    typeof action.revisionId === "string" &&
+    action.revisionId.length > 0;
+}
+
+function samePieceSourceAction(
+  left: PieceSourceAction,
+  right: PieceSourceAction,
+): boolean {
+  return left.kind === right.kind &&
+    (left.kind === "detach" ||
+      right.kind !== "detach" && left.revisionId === right.revisionId);
+}
+
+function samePieceSourceSnapshot(
+  left: PieceSourceSnapshot,
+  right: PieceSourceSnapshot,
+): boolean {
+  return left.pattern.identity === right.pattern.identity &&
+    left.pattern.symbol === right.pattern.symbol &&
+    left.origin === right.origin &&
+    left.revisionId === right.revisionId;
+}
+
+const RETAINED_INPUT_COMPATIBILITY_PREFIX =
+  "piece source is incompatible with retained input: ";
+
+function assertPieceSourceRetainedLinksCompatible(
+  argumentCell: Cell<unknown>,
+  candidateSchema: JSONSchema,
+  manager: PieceManager,
+  priorArgumentSchema: JSONSchema,
+): void {
+  try {
+    assertSuppliedLinkSchemasCompatible(
+      suppliedLinks(argumentCell.getRaw()),
+      candidateSchema,
+      argumentCell,
+      manager,
+      {
+        priorArgumentSchema,
+        linksPreservedVerbatim: true,
+      },
+    );
+  } catch (error) {
+    throw new Error(
+      RETAINED_INPUT_COMPATIBILITY_PREFIX +
+        (error instanceof Error ? error.message : String(error)),
+      { cause: error },
+    );
+  }
+}
+
+function pieceSourceArgumentEvidence(
+  argumentCell: Cell<unknown>,
+  manager: PieceManager,
+): string {
+  const raw = argumentCell.getRaw();
+  const links = suppliedLinks(raw).map((suppliedLink) => {
+    let linkBase = argumentCell;
+    for (const segment of suppliedLink.path) {
+      linkBase = linkBase.key(segment as keyof unknown) as Cell<unknown>;
+    }
+    try {
+      const link = parseLinkOrThrow(suppliedLink.value, linkBase);
+      const linkedCell = manager.runtime.getCellFromLink(
+        { ...link, schema: undefined },
+        undefined,
+        linkBase.tx,
+      );
+      const contract = durableSourceContract(linkedCell, manager);
+      return {
+        path: suppliedLink.path,
+        target: {
+          space: linkedCell.space,
+          id: linkedCell.getAsNormalizedFullLink().id,
+          scope: linkedCell.getAsNormalizedFullLink().scope,
+          path: linkedCell.getAsNormalizedFullLink().path,
+        },
+        contract: contract?.schemas.map((schema) => ({
+          root: schema.root,
+          path: schema.path,
+          rawBasePath: schema.rawBasePath,
+          schemaBaseDepth: schema.schemaBaseDepth,
+          validationTarget: (() => {
+            const target = schema.validationCell.getAsNormalizedFullLink();
+            return {
+              space: target.space,
+              id: target.id,
+              scope: target.scope,
+              path: target.path,
+            };
+          })(),
+          validationPath: schema.validationPath,
+        })) ?? null,
+      };
+    } catch (error) {
+      return { path: suppliedLink.path, error: pieceSourceErrorMessage(error) };
+    }
+  });
+  return taggedHashStringOf({ raw, links });
+}
+
+async function pieceSourceCompatibilityReview(
+  previousPattern: Pattern,
+  candidate: Pattern,
+  piece: Cell<unknown>,
+  manager: PieceManager,
+): Promise<NonNullable<PreparedPieceSourceChange["review"]>> {
+  const issues: PieceSourceCompatibilityIssues = {};
+  try {
+    assertPatternSchemasBackwardCompatible(previousPattern, candidate);
+  } catch (error) {
+    issues.schema = error instanceof Error ? error.message : String(error);
+  }
+
+  const argumentCell = manager.getArgument(piece);
+  await argumentCell.sync();
+  const materializedArgument = argumentCell.asSchema(undefined).get();
+  const validationArgument = mergeSchemaDefaults(
+    materializedArgument,
+    extractDefaultValues(candidate.argumentSchema),
+    candidate.argumentSchema,
+    { mergeMaterializedLinks: true },
+  );
+  const validationFailure = validateSchemaValue(
+    candidate.argumentSchema,
+    validationArgument,
+    candidate.argumentSchema,
+    { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
+  );
+  if (validationFailure !== undefined) {
+    issues.argument =
+      `updated arguments do not match the candidate schema: ${validationFailure}`;
+  }
+
+  try {
+    assertPieceSourceRetainedLinksCompatible(
+      argumentCell,
+      candidate.argumentSchema,
+      manager,
+      previousPattern.argumentSchema,
+    );
+  } catch (error) {
+    issues.retainedLinks = error instanceof Error
+      ? error.message
+      : String(error);
+  }
+  return {
+    argumentEvidence: pieceSourceArgumentEvidence(argumentCell, manager),
+    issues,
+  };
+}
+
+function hasPieceSourceCompatibilityIssues(
+  issues: PieceSourceCompatibilityIssues,
+): boolean {
+  return issues.schema !== undefined ||
+    issues.argument !== undefined ||
+    issues.retainedLinks !== undefined;
+}
+
+function assertPieceSourceArgumentUsable(
+  review: NonNullable<PreparedPieceSourceChange["review"]>,
+): void {
+  if (review.issues.argument !== undefined) {
+    throw new Error(review.issues.argument);
+  }
+}
+
+function pieceSourceCompatibilityMessage(
+  issues: PieceSourceCompatibilityIssues,
+): string {
+  return [issues.schema, issues.argument, issues.retainedLinks]
+    .filter((message): message is string => message !== undefined)
+    .join("\n");
+}
+
+function isOverridableArgumentCompatibilityError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.message.includes(
+    "updated arguments do not match the candidate schema:",
+  ) || error.message.includes(RETAINED_INPUT_COMPATIBILITY_PREFIX);
+}
+
+function pieceSourceErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function pieceSourceTransition(
+  expected: PieceSourceSnapshot,
+  operation: PieceSourceTransition["operation"],
+  origin: string | null,
+  baseline: PieceSourceTransitionBaseline,
+  options: { selectedRevisionId?: string } = {},
+): PieceSourceTransition {
+  const timestamp = Date.now();
+  return {
+    revisionId: crypto.randomUUID(),
+    baseline,
+    timestamp,
+    operation,
+    origin,
+    expected,
+    ...(options.selectedRevisionId === undefined
+      ? {}
+      : { selectedRevisionId: options.selectedRevisionId }),
+  };
+}
+
 async function execute(
   manager: PieceManager,
   pieceId: string,
@@ -2972,11 +3582,15 @@ async function execute(
   options?: {
     start?: boolean;
     expectedPatternIdentity?: { identity: string; symbol: string };
+    validateCurrentArgument?: (
+      argumentCell: Cell<unknown>,
+    ) => void;
     validateArgumentLinks?: (
       argumentCell: Cell<unknown>,
       argumentSchema: JSONSchema,
     ) => void;
     repository?: string;
+    sourceTransition?: PieceSourceTransition;
   },
 ): Promise<Cell<unknown>> {
   return await manager.runWithPattern(pattern, pieceId, input, options);

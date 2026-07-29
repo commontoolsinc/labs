@@ -90,6 +90,7 @@ export enum RequestType {
   PageGetAll = "page:getAll",
   PageSynced = "page:synced",
   PieceGetSource = "piece:getSource",
+  PieceUpdateSource = "piece:updateSource",
 
   // VDOM operations (main -> worker)
   VDomMount = "vdom:mount",
@@ -660,6 +661,25 @@ export interface PiecePatternRefView {
   symbol: string;
 }
 
+export type PieceSourceRevisionOperation =
+  | "baseline"
+  | "create"
+  | "edit"
+  | "origin-update"
+  | "detach"
+  | "revert"
+  | "follow"
+  | "repoint";
+
+export interface PieceSourceRevisionView {
+  revisionId: string;
+  timestamp: number;
+  pattern: PiecePatternRefView;
+  origin?: PieceOriginView;
+  operation: PieceSourceRevisionOperation;
+  selectedRevisionId?: string;
+}
+
 export interface PieceSourceView {
   space: DID;
   pieceId: string;
@@ -671,10 +691,32 @@ export interface PieceSourceView {
   repository?: string;
   entry?: string;
   files: PatternSourceFile[];
+  history: PieceSourceRevisionView[];
+  currentRevisionId?: string;
 }
 
 export interface PieceSourceResponse {
   source: PieceSourceView;
+}
+
+export type PieceSourceAction =
+  | { kind: "detach" }
+  | { kind: "restore"; revisionId: string }
+  | { kind: "follow"; revisionId: string };
+
+export interface PieceUpdateSourceRequest extends BaseRequest {
+  type: RequestType.PieceUpdateSource;
+  space: DID;
+  pieceId: string;
+  action: PieceSourceAction;
+  /** Opaque token returned with an incompatibility warning. */
+  confirmationToken?: string;
+}
+
+export interface PieceUpdateSourceResponse extends PieceSourceResponse {
+  compatibilityWarning?: string;
+  confirmationToken?: string;
+  executionWarning?: string;
 }
 
 /** Common shape for one-way main -> worker notifications. */
@@ -828,6 +870,7 @@ export type IPCClientRequest =
   | PageGetAllRequest
   | PageSyncedRequest
   | PieceGetSourceRequest
+  | PieceUpdateSourceRequest
   | RuntimeSyncedRequest
   | ResolveSpaceNameRequest
   | RegisterSpaceHostRequest
@@ -1010,6 +1053,7 @@ export type RemoteResponse =
   | WriteStackTraceResponse
   | PageResponse
   | PieceSourceResponse
+  | PieceUpdateSourceResponse
   | SlugResponse
   | SpaceResponse
   | VDomMountResponse
@@ -1204,6 +1248,10 @@ export type Commands = {
   [RequestType.PieceGetSource]: {
     request: PieceGetSourceRequest;
     response: PieceSourceResponse;
+  };
+  [RequestType.PieceUpdateSource]: {
+    request: PieceUpdateSourceRequest;
+    response: PieceUpdateSourceResponse;
   };
   [RequestType.GetSpaceRootPattern]: {
     request: PageGetSpaceDefault;

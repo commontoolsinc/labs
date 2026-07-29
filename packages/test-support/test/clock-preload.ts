@@ -101,10 +101,39 @@ const PRESETS: Record<FakeClockMode, Omit<ResolvedConfig, "realClockFiles">> = {
   },
 };
 
+// The current call stack, as newline-separated frames with the innermost first.
+//
+// A plain `new Error().stack` is enough until SES enters the picture. The runner
+// package locks SES down the first time a test builds a `Runtime`, with
+// `errorTaming` set to "safe" — a permanent, process-global change. Safe taming
+// still captures each error's frames, but hides them behind the tamed `stack`
+// accessor, which from then on reads back as the empty string. Every timer a
+// test schedules after that first lockdown would otherwise arrive here with no
+// stack to classify, so `callerIsTest` would read every one as `src/` and let a
+// stray test sleep auto-advance instead of freezing.
+//
+// SES hands the real frames back through `getStackString`, the sanctioned hook
+// it installs on the global during lockdown; the runtime's own error mapping
+// reads stacks through the same hook. We use it whenever lockdown has installed
+// it, and fall back to the native `stack` before lockdown, and in a package that
+// loads this harness without ever loading SES. Reading the frames this way keeps
+// the caller classification working without relaxing the production error
+// taming.
+function currentStack(): string {
+  const error = new Error();
+  const getStackString = (globalThis as {
+    getStackString?: (error: Error) => string;
+  }).getStackString;
+  if (typeof getStackString === "function") {
+    return getStackString(error) ?? "";
+  }
+  return error.stack ?? "";
+}
+
 // The immediate caller of setTimeout: the first stack frame outside this file.
 // A frame in a `test/` directory (or a `.test.ts` file) is test code.
 function callerIsTest(): boolean {
-  const stack = new Error().stack ?? "";
+  const stack = currentStack();
   for (const line of stack.split("\n").slice(1)) {
     if (line.includes(HARNESS_FILE)) continue;
     return /\/test\//.test(line) || /\.test\.ts/.test(line);
@@ -346,7 +375,7 @@ function registeredFromRealClockFile(
   realClockFiles: readonly string[],
 ): boolean {
   if (realClockFiles.length === 0) return false;
-  const stack = new Error().stack ?? "";
+  const stack = currentStack();
   return realClockFiles.some((name) => stack.includes(`${name}.test.ts`));
 }
 

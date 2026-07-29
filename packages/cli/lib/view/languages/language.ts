@@ -125,8 +125,25 @@ export interface Language {
    * advisory (a language may parse `.ts` and `.tsx` differently). */
   highlightLines(text: string, fileName?: string): Line[];
 
-  /** Whether diff edits need complete-file highlighting because an earlier line
-   * can determine how later lines are coloured. */
+  /**
+   * Format `text` as the language's rendered representation. The result keeps
+   * one display line for every source line, including blank display lines for
+   * source-only delimiters. That shared line topology keeps line numbers,
+   * structure ranges, diff markers, expansion, and source editing aligned. A
+   * line that omits meaningful source content sets `renderedSourceHidden` so a
+   * diff can retain its source form when that content changes.
+   */
+  renderLines?(text: string, fileName?: string): Line[];
+
+  /**
+   * Rendering needs the complete file because syntax before a fragment can
+   * determine how the fragment is interpreted. A contextless diff fragment
+   * stays in source form when this is true.
+   */
+  readonly renderNeedsCompleteFile?: boolean;
+
+  /** Whether live diff edits need complete-file highlighting because an earlier
+   * line can determine how later lines are coloured. */
   readonly highlightFullFileOnDiffEdit?: boolean;
 
   /** Highlight one source-line edit from its previous complete-file colours, or
@@ -157,6 +174,38 @@ export interface Language {
     maps: DiffMaps,
     options: SemanticsOptions,
   ): Semantics | undefined;
+}
+
+/** Render through a language and enforce the shared source-line topology. */
+export function renderedLinesFor(
+  language: Language,
+  text: string,
+  fileName?: string,
+): Line[] | undefined {
+  if (!language.renderLines) return undefined;
+  const lines = language.renderLines(text, fileName);
+  const sourceLineCount = text.split("\n").length;
+  if (lines.length !== sourceLineCount) {
+    throw new Error(
+      `${language.id} rendered ${lines.length} lines for ${sourceLineCount} source lines`,
+    );
+  }
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (line.text.includes("\n")) {
+      throw new Error(
+        `${language.id} rendered a line break inside display line ${index + 1}`,
+      );
+    }
+    if (line.spans.map((span) => span.text).join("") !== line.text) {
+      throw new Error(
+        `${language.id} rendered spans that do not reconstruct display line ${
+          index + 1
+        }`,
+      );
+    }
+  }
+  return lines;
 }
 
 // --- selection ---------------------------------------------------------------

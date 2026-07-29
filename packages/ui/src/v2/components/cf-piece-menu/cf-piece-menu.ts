@@ -7,7 +7,12 @@ import {
   isCellHandle,
   RequestType,
 } from "@commonfabric/runtime-client";
-import type { JSONValue, PieceSourceView } from "@commonfabric/runtime-client";
+import type {
+  JSONValue,
+  PieceSourceAction,
+  PieceSourceRevisionView,
+  PieceSourceView,
+} from "@commonfabric/runtime-client";
 import {
   describeOrigin,
   formatTimestamp,
@@ -43,9 +48,16 @@ const PANEL_TITLES: Record<Panel, string> = {
   actions: "Actions",
 };
 
-/** The entries every piece menu shows, in order. */
-export function pieceMenuEntries(): readonly MenuEntry[] {
-  return ENTRIES;
+const DETACH_ENTRY = {
+  label: "Stop following source",
+  testId: "piece-menu-detach-source",
+} as const;
+
+/** The entries a piece menu shows, including detach for a followed piece. */
+export function pieceMenuEntries(
+  hasOrigin = false,
+): readonly (MenuEntry | typeof DETACH_ENTRY)[] {
+  return hasOrigin ? [...ENTRIES, DETACH_ENTRY] : ENTRIES;
 }
 
 /**
@@ -460,6 +472,73 @@ export class CFPieceMenu extends BaseElement {
     .refresh:hover {
       background: var(--cf-theme-color-surface-hover, rgba(0, 0, 0, 0.06));
     }
+
+    .history {
+      margin-top: 1.25rem;
+    }
+
+    .history h3 {
+      margin: 0 0 0.625rem;
+      font-size: 0.8125rem;
+    }
+
+    .revision {
+      display: grid;
+      gap: 0.375rem;
+      padding: 0.75rem 0;
+      border-top: 1px solid var(--cf-theme-color-border, rgba(0, 0, 0, 0.1));
+      font-size: 0.75rem;
+    }
+
+    .revision-head,
+    .revision-actions,
+    .warning-actions {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .revision-head {
+      justify-content: space-between;
+    }
+
+    .revision-details {
+      color: var(--cf-theme-color-text-muted, #6b7280);
+      overflow-wrap: anywhere;
+    }
+
+    .revision button,
+    .source-action,
+    .warning button {
+      padding: 0.3rem 0.625rem;
+      border: 1px solid var(--cf-theme-color-border, rgba(0, 0, 0, 0.15));
+      border-radius: 6px;
+      background: var(--cf-theme-color-surface, #ffffff);
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .revision button:disabled,
+    .source-action:disabled,
+    .warning button:disabled {
+      cursor: default;
+      opacity: 0.55;
+    }
+
+    .warning {
+      margin: 1rem 0;
+      padding: 0.75rem;
+      border: 1px solid var(--cf-theme-color-error, #b91c1c);
+      border-radius: 8px;
+      font-size: 0.75rem;
+    }
+
+    .warning p {
+      margin: 0 0 0.625rem;
+      white-space: pre-wrap;
+    }
   `;
 
   /** The piece the menu addresses. */
@@ -507,8 +586,27 @@ export class CFPieceMenu extends BaseElement {
     | { kind: "ok" | "error"; text: string }
     | undefined = undefined;
 
+  @state()
+  private accessor sourceActionPending = false;
+
+  @state()
+  private accessor sourceActionError: string | undefined = undefined;
+
+  @state()
+  private accessor sourceExecutionWarning: string | undefined = undefined;
+
+  @state()
+  private accessor compatibilityWarning:
+    | {
+      action: PieceSourceAction;
+      message: string;
+      confirmationToken: string;
+    }
+    | undefined = undefined;
+
   /** Identifies the read a late response belongs to, so a stale one is dropped. */
   private readToken = 0;
+  private sourceRead: Promise<void> | undefined;
 
   /** Set once a data/actions panel has started its piece-state read. */
   #dataRequested = false;
@@ -564,8 +662,14 @@ export class CFPieceMenu extends BaseElement {
     this.readError = undefined;
     this.#resetPieceState();
     this.payloadText = "";
+    this.sourceRead = undefined;
+    this.sourceActionPending = false;
+    this.sourceActionError = undefined;
+    this.sourceExecutionWarning = undefined;
+    this.compatibilityWarning = undefined;
     this.readToken++;
     this.hidden = false;
+    void this.#readSource(cell);
   }
 
   /** Hide the menu and forget the piece it was describing. */
@@ -575,6 +679,11 @@ export class CFPieceMenu extends BaseElement {
     this.cell = undefined;
     this.source = undefined;
     this.#resetPieceState();
+    this.sourceRead = undefined;
+    this.sourceActionPending = false;
+    this.sourceActionError = undefined;
+    this.sourceExecutionWarning = undefined;
+    this.compatibilityWarning = undefined;
     this.readToken++;
   }
 
@@ -637,8 +746,16 @@ export class CFPieceMenu extends BaseElement {
       await this.#readPieceState(cell);
       return;
     }
-    this.readError = undefined;
     if (this.source !== undefined) return;
+    await this.#readSource(cell);
+  }
+
+  #readSource(cell: CellHandle): Promise<void> {
+    this.sourceRead ??= this.#performSourceRead(cell);
+    return this.sourceRead;
+  }
+
+  async #performSourceRead(cell: CellHandle): Promise<void> {
     const token = this.readToken;
     try {
       const source = await cell.runtime().getPieceSource(
@@ -763,23 +880,39 @@ export class CFPieceMenu extends BaseElement {
   collectActions(): PieceAction[] {
     const actions: PieceAction[] = [];
     const seen = new Set<string>();
-    const declaredBySource = {
-      result: this.#schemaProperties(this.#pieceCell),
-      argument: this.#schemaProperties(this.#argumentCell),
+    const parents = {
+      result: this.#pieceCell,
+      argument: this.#argumentCell,
     };
     const scan = (value: unknown, source: "result" | "argument") => {
       if (
         typeof value !== "object" || value === null || Array.isArray(value)
       ) return;
+      const declared = this.#schemaProperties(parents[source]);
       for (const [name, item] of Object.entries(value)) {
-        if (!isCellHandle(item)) continue;
-        const declaredStream = schemaDeclaresStream(
-          declaredBySource[source][name],
-        );
-        if (!declaredStream && !isStreamHandle(item)) continue;
+        const declaredStream = schemaDeclaresStream(declared[name]);
+        let handle: CellHandle | undefined;
+        if (isCellHandle(item)) {
+          if (!declaredStream && !isStreamHandle(item)) continue;
+          handle = item;
+        } else if (declaredStream && parents[source]) {
+          // The value did not arrive as a handle (e.g. a raw `{$stream:true}`
+          // marker from a schema-less read), but the parent schema declares
+          // the stream — address it through the parent, which is the trusted
+          // signal here; a bare marker alone is never dispatchable.
+          handle = (parents[source]!.asSchema(
+            {
+              type: "object",
+              properties: { [name]: { asCell: ["stream"] } },
+              required: [name],
+            } as unknown as Parameters<CellHandle["asSchema"]>[0],
+          ) as CellHandle<Record<string, unknown>>).key(name) as CellHandle;
+        } else {
+          continue;
+        }
         // Identity is structural, minus the schema: the same stream seen
         // through two reads carries two different schema views.
-        const ref = item.ref();
+        const ref = handle.ref();
         const key = JSON.stringify({
           space: ref.space,
           scope: ref.scope,
@@ -791,7 +924,7 @@ export class CFPieceMenu extends BaseElement {
         const eventSchema = schemaDeclaresStream(ref.schema)
           ? undefined
           : ref.schema;
-        actions.push({ name, source, handle: item, eventSchema });
+        actions.push({ name, source, handle, eventSchema });
       }
     };
     scan(this.resultValue, "result");
@@ -853,6 +986,54 @@ export class CFPieceMenu extends BaseElement {
     }
   }
 
+  /** Apply one source-history action, optionally accepting incompatibility. */
+  async changeSource(
+    action: PieceSourceAction,
+    confirmationToken?: string,
+  ): Promise<void> {
+    const cell = this.cell;
+    if (!cell || this.sourceActionPending) return;
+    const token = this.readToken;
+    this.sourceActionPending = true;
+    this.sourceActionError = undefined;
+    this.sourceExecutionWarning = undefined;
+    this.compatibilityWarning = undefined;
+    try {
+      const response = await cell.runtime().updatePieceSource(
+        cell.id(),
+        cell.space(),
+        action,
+        confirmationToken === undefined ? {} : { confirmationToken },
+      );
+      if (token !== this.readToken) return;
+      this.source = response.source;
+      if (response.compatibilityWarning !== undefined) {
+        if (response.confirmationToken === undefined) {
+          throw new Error(
+            "the runtime did not provide a compatibility confirmation",
+          );
+        }
+        this.compatibilityWarning = {
+          action,
+          message: response.compatibilityWarning,
+          confirmationToken: response.confirmationToken,
+        };
+      } else {
+        this.compatibilityWarning = undefined;
+        this.sourceExecutionWarning = response.executionWarning;
+        this.panel = "origin";
+      }
+    } catch (error) {
+      if (token !== this.readToken || cell.runtime().signal.aborted) return;
+      this.sourceActionError = error instanceof Error
+        ? error.message
+        : String(error);
+      this.panel = "origin";
+    } finally {
+      if (token === this.readToken) this.sourceActionPending = false;
+    }
+  }
+
   protected override render() {
     if (this.hidden || !this.cell) return nothing;
     return this.panel ? this.#renderPanel(this.panel) : this.#renderMenu();
@@ -861,8 +1042,9 @@ export class CFPieceMenu extends BaseElement {
   #renderMenu(): TemplateResult {
     // Keep the menu inside the viewport: a click near the right or bottom edge
     // clamps it back into view.
+    const entries = pieceMenuEntries(this.source?.origin !== undefined);
     const width = 240;
-    const height = 40 + ENTRIES.length * 34;
+    const height = 40 + entries.length * 34;
     const left = Math.max(
       4,
       Math.min(this.x, globalThis.innerWidth - width - 4),
@@ -880,13 +1062,17 @@ export class CFPieceMenu extends BaseElement {
       </div>
       <div class="menu" role="menu" style="left: ${left}px; top: ${top}px">
         <div class="menu-title">Piece ${this.cell!.id()}</div>
-        ${ENTRIES.map((entry) =>
+        ${entries.map((entry) =>
           html`
             <button
               class="menu-item"
               role="menuitem"
               test-id="${entry.testId}"
-              @click="${() => this.showPanel(entry.panel)}"
+              ?disabled="${this.sourceActionPending}"
+              @click="${() =>
+                "panel" in entry
+                  ? this.showPanel(entry.panel)
+                  : this.changeSource({ kind: "detach" })}"
             >
               ${entry.label}
             </button>
@@ -1153,12 +1339,179 @@ export class CFPieceMenu extends BaseElement {
         <dt>Space</dt>
         <dd>${source.space}</dd>
       </dl>
-      <p class="note">
-        These are the source facts this piece records. A per-revision history of
-        earlier source and origin states is not recorded yet, so reverting to an
-        earlier version is not offered here.
-      </p>
+      ${this.sourceActionError
+        ? html`
+          <p class="error">
+            Could not change this piece's source: ${this.sourceActionError}
+          </p>
+        `
+        : nothing} ${this.sourceExecutionWarning
+        ? html`
+          <p class="error">
+            The source change was saved, but a later refresh failed: ${this
+              .sourceExecutionWarning}
+          </p>
+        `
+        : nothing} ${this.#renderCompatibilityWarning()} ${source.origin
+        ? html`
+          <p>
+            <button
+              class="source-action"
+              test-id="piece-origin-detach-source"
+              ?disabled="${this.sourceActionPending}"
+              @click="${() => this.changeSource({ kind: "detach" })}"
+            >
+              Stop following source
+            </button>
+          </p>
+        `
+        : nothing} ${this.#renderHistory(source)}
     `;
+  }
+
+  #renderCompatibilityWarning() {
+    const warning = this.compatibilityWarning;
+    if (warning === undefined) return nothing;
+    return html`
+      <div class="warning" role="alert" test-id="piece-source-warning">
+        <p>
+          This source version changes the piece's data contract: ${warning
+            .message}
+        </p>
+        <div class="warning-actions">
+          <button
+            test-id="piece-source-warning-confirm"
+            ?disabled="${this.sourceActionPending}"
+            @click="${() =>
+              this.changeSource(
+                warning.action,
+                warning.confirmationToken,
+              )}"
+          >
+            Use it anyway
+          </button>
+          <button
+            test-id="piece-source-warning-cancel"
+            ?disabled="${this.sourceActionPending}"
+            @click="${() => {
+              this.compatibilityWarning = undefined;
+            }}"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  #renderHistory(source: PieceSourceView) {
+    if (source.history.length === 0) {
+      return html`
+        <section class="history">
+          <h3>Source history</h3>
+          <p class="note">
+            No source changes have been recorded yet. The first change will retain this
+            current version as the baseline.
+          </p>
+        </section>
+      `;
+    }
+    return html`
+      <section class="history">
+        <h3>Source history</h3>
+        ${[...source.history].reverse().map((revision) =>
+          this.#renderRevision(source, revision)
+        )}
+      </section>
+    `;
+  }
+
+  #renderRevision(
+    source: PieceSourceView,
+    revision: PieceSourceRevisionView,
+  ) {
+    const current = revision.revisionId === source.currentRevisionId;
+    const origin = describeOrigin(revision.origin);
+    const alreadyFollowing = revision.origin !== undefined &&
+      source.origin?.url === revision.origin.url;
+    return html`
+      <article class="revision" test-id="piece-source-revision">
+        <div class="revision-head">
+          <strong>
+            ${sourceOperationLabel(revision.operation)}${current
+              ? " · Current"
+              : ""}
+          </strong>
+          <span>${formatTimestamp(revision.timestamp)}</span>
+        </div>
+        <div class="revision-details">
+          Pattern ${shortIdentity(revision.pattern.identity)} · ${revision
+            .pattern.symbol}
+        </div>
+        <div class="revision-details">
+          ${origin.label}${revision.origin
+            ? html`
+              — <code>${revision.origin.url}</code>
+            `
+            : nothing}
+        </div>
+        ${current ? nothing : html`
+          <div class="revision-actions">
+            <button
+              test-id="piece-source-restore"
+              ?disabled="${this.sourceActionPending}"
+              @click="${() =>
+                this.changeSource({
+                  kind: "restore",
+                  revisionId: revision.revisionId,
+                })}"
+            >
+              Use this version
+            </button>
+            ${revision.origin !== undefined && !alreadyFollowing
+              ? html`
+                <button
+                  test-id="piece-source-follow"
+                  ?disabled="${this.sourceActionPending}"
+                  @click="${() =>
+                    this.changeSource({
+                      kind: "follow",
+                      revisionId: revision.revisionId,
+                    })}"
+                >
+                  ${revision.origin.kind === "fabric-pattern"
+                    ? "Use this pinned source again"
+                    : "Follow this source again"}
+                </button>
+              `
+              : nothing}
+          </div>
+        `}
+      </article>
+    `;
+  }
+}
+
+function sourceOperationLabel(
+  operation: PieceSourceRevisionView["operation"],
+): string {
+  switch (operation) {
+    case "baseline":
+      return "Baseline";
+    case "create":
+      return "Created from source";
+    case "edit":
+      return "Direct source edit";
+    case "origin-update":
+      return "Source update";
+    case "detach":
+      return "Stopped following source";
+    case "revert":
+      return "Restored source version";
+    case "follow":
+      return "Followed source";
+    case "repoint":
+      return "Followed earlier source";
   }
 }
 

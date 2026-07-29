@@ -1,3 +1,4 @@
+/// <reference path="./clock.d.ts" />
 // The SES pattern compartment endows no timers (part of the structural barrier
 // pinned by security-timing.test.ts). Pattern code that needs a delay — API
 // clients doing retry/backoff — must therefore guard its timer use: read
@@ -74,8 +75,10 @@ describe("sandbox timers (channel: no fine clock)", () => {
 
   it("the same guard DOES wait when a timer is present (host behavior unchanged)", async () => {
     // Outside the sandbox (this test's own Deno global has setTimeout), the guard
-    // takes the real-wait branch, so the API clients' plain-Deno unit tests keep
-    // exercising actual backoff.
+    // takes the waiting branch, so the API clients' plain-Deno unit tests keep
+    // exercising actual backoff. This runs under the package's fake clock, so the
+    // waiting branch's `setTimeout` is a frozen test-file timer: it does not
+    // resolve on its own, and `clock.tick` advances logical time to fire it.
     const sleep = (ms: number): Promise<void> => {
       if (ms <= 0) return Promise.resolve();
       const timer =
@@ -89,7 +92,8 @@ describe("sandbox timers (channel: no fine clock)", () => {
     const p = sleep(10).then(() => {
       fired = true;
     });
-    expect(fired).toBe(false); // did not resolve synchronously — a real wait
+    expect(fired).toBe(false); // did not resolve synchronously — the waiting branch
+    await clock.tick(10);
     await p;
     expect(fired).toBe(true);
   });

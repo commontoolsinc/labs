@@ -91,6 +91,7 @@ describe("RuntimeClient.getPieceSource", () => {
       space: "did:key:z6Mk-runtime-client-source",
       pieceId: "of:fid1:piece",
       files: [{ name: "/main.tsx", contents: "export default 1;" }],
+      history: [],
     };
     const requests: unknown[] = [];
     const conn = {
@@ -116,6 +117,44 @@ describe("RuntimeClient.getPieceSource", () => {
     }]);
     // The response is unwrapped: callers get the source state, not the envelope.
     expect(result).toBe(source);
+  });
+});
+
+describe("RuntimeClient.updatePieceSource", () => {
+  it("sends a discriminated source action to the worker", async () => {
+    const source = {
+      space: "did:key:z6Mk-runtime-client-source",
+      pieceId: "of:fid1:piece",
+      files: [],
+      history: [],
+    };
+    const requests: unknown[] = [];
+    const conn = {
+      on: () => {},
+      request: (message: unknown) => {
+        requests.push(message);
+        return Promise.resolve({ source });
+      },
+    } as unknown as never;
+    const client = new (RuntimeClient as unknown as {
+      new (conn: never, options: unknown): RuntimeClient;
+    })(conn, {});
+
+    const response = await client.updatePieceSource(
+      "of:fid1:piece",
+      "did:key:z6Mk-runtime-client-source" as never,
+      { kind: "restore", revisionId: "revision-1" },
+      { confirmationToken: "confirmation-1" },
+    );
+
+    expect(requests).toEqual([{
+      type: RequestType.PieceUpdateSource,
+      pieceId: "of:fid1:piece",
+      space: "did:key:z6Mk-runtime-client-source",
+      action: { kind: "restore", revisionId: "revision-1" },
+      confirmationToken: "confirmation-1",
+    }]);
+    expect(response).toEqual({ source });
   });
 });
 
