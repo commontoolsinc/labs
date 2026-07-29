@@ -841,6 +841,10 @@ function dedupeNormalizedLinks(
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${CellScope}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
+  // In-flight unloadable-pointer roll-forward commits (CT-1923). Deliberately
+  // outside the scheduler, like PatternUpdater's checks — dispose() settles
+  // them before the storage sessions they write through close.
+  private pendingPointerMaintenance = new Set<Promise<unknown>>();
   private locallyPreparedResults = new Map<
     `${MemorySpace}/${CellScope}/${URI}`,
     string
@@ -1986,7 +1990,7 @@ export class Runner {
                   patternIdentityKey(runningRef) !== newKey
                 ) {
                   const revertRef = runningRef;
-                  void this.runtime.editWithRetry((tx) => {
+                  const rollForward = this.runtime.editWithRetry((tx) => {
                     const cur = asPatternIdentityRef(
                       resultCell.withTx(tx).getMetaRaw("patternIdentity", {
                         meta: ignoreReadForScheduling,
@@ -2001,7 +2005,12 @@ export class Runner {
                     });
                     return true;
                   }).then((result) => {
-                    if (result.ok) {
+                    // Only reclaim the observed key while it is STILL the
+                    // failed one — a valid repoint that raced this rollback
+                    // has already advanced the watcher state, and clobbering
+                    // it would make the key guard discard that repoint's
+                    // in-flight load.
+                    if (result.ok && currentPatternKey === newKey) {
                       currentPatternKey = patternIdentityKey(revertRef);
                       logger.warn(
                         "unloadable-pointer-rolled-forward",
@@ -2023,6 +2032,12 @@ export class Runner {
                       ],
                     );
                   });
+                  // Track so dispose() can settle it before storage teardown
+                  // (same contract as PatternUpdater's pending checks).
+                  this.pendingPointerMaintenance.add(rollForward);
+                  rollForward.finally(() =>
+                    this.pendingPointerMaintenance.delete(rollForward)
+                  );
                 }
                 return;
               }
@@ -3575,6 +3590,11 @@ export class Runner {
       }
     }
     return true;
+  }
+
+  /** Settle in-flight pointer roll-forward commits (see dispose()). */
+  async idlePointerMaintenance(): Promise<void> {
+    await Promise.allSettled([...this.pendingPointerMaintenance]);
   }
 
   stopAll(): void {

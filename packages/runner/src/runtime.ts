@@ -1221,6 +1221,10 @@ export class Runtime {
     // and settle them before the storage sessions they may write through close.
     await this.patternUpdater.dispose();
 
+    // Same contract for the runner's unloadable-pointer roll-forward commits
+    // (CT-1923): settle before their storage sessions close.
+    await this.runner.idlePointerMaintenance();
+
     // Scheduler background work can still be using storage, for example the
     // lifecycle-guarded boot-time persistent-state listing. Let that finish
     // before tearing down storage sessions.

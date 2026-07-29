@@ -65,6 +65,11 @@ describe("unloadable patternIdentity pointer vs a running pattern", () => {
     storageManager = StorageManager.emulate({ as: signer });
   });
   afterEach(async () => {
+    // Drain the watcher's floating load attempt (and any roll-forward
+    // commit) before teardown so no promise is left pending at process exit
+    // — Deno's event-loop check fails the whole shard otherwise.
+    await rt?.idle();
+    await new Promise((resolve) => setTimeout(resolve, 150));
     await rt?.dispose();
     await storageManager?.close();
   });
