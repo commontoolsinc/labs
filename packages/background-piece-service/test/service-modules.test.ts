@@ -1,4 +1,4 @@
-import { afterEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import {
   assert,
   assertEquals,
@@ -49,11 +49,13 @@ import {
   runIfMain as runCastIfMain,
 } from "../cast-admin.ts";
 import * as backgroundPieceService from "../src/lib.ts";
+import { installDisconnectedWebSocket } from "./disconnected-websocket.ts";
 
 const TEST_DID = "did:key:z6Mktestspace";
 const OTHER_DID = "did:key:z6Mkotherspace";
 const PIECE_ID = `fid1:${"a".repeat(54)}`;
 const OTHER_PIECE_ID = `fid1:${"b".repeat(54)}`;
+const TEST_API_URL = "https://background-piece-service.invalid";
 
 async function runDenoSubprocess(args: string[]): Promise<void> {
   const coverageDir = Deno.env.get("DENO_COVERAGE_DIR");
@@ -282,9 +284,10 @@ async function withRealWorker<T>(
     ) => Promise<Record<string, unknown>>,
   ) => Promise<T>,
 ): Promise<T> {
-  const worker = new Worker(new URL("../src/worker.ts", import.meta.url).href, {
-    type: "module",
-  });
+  const worker = new Worker(
+    new URL("./worker-test-entry.ts", import.meta.url).href,
+    { type: "module" },
+  );
   const messages: Record<string, unknown>[] = [];
   const waiters: {
     predicate: (message: Record<string, unknown>) => boolean;
@@ -912,7 +915,7 @@ describe("background worker", () => {
         WorkerIPCMessageType.Initialize,
         {
           did: identity.did(),
-          toolshedUrl: "memory://bg-worker-test",
+          toolshedUrl: TEST_API_URL,
           rawIdentity: identity.serialize(),
           experimental: { modernCellRep: true },
         },
@@ -926,7 +929,7 @@ describe("background worker", () => {
         WorkerIPCMessageType.Initialize,
         {
           did: identity.did(),
-          toolshedUrl: "memory://bg-worker-test",
+          toolshedUrl: TEST_API_URL,
           rawIdentity: identity.serialize(),
         },
       );
@@ -1166,7 +1169,7 @@ describe("background piece service entry point", () => {
     const identity = await Identity.generate({ implementation: "noble" });
     const runtime = createMainRuntime(
       {
-        API_URL: "memory://main-runtime-test",
+        API_URL: TEST_API_URL,
         OPERATOR_PASS: "operator",
         IDENTITY: undefined,
         ENV: "test",
@@ -1342,6 +1345,17 @@ describe("background piece service entry point", () => {
 });
 
 describe("cast admin entry point", () => {
+  let restoreWebSocket: (() => void) | undefined;
+
+  beforeEach(() => {
+    restoreWebSocket = installDisconnectedWebSocket();
+  });
+
+  afterEach(() => {
+    restoreWebSocket?.();
+    restoreWebSocket = undefined;
+  });
+
   function fakeCastDependencies(
     overrides: Partial<CastAdminDependencies> = {},
   ): CastAdminDependencies & { exitCodes: number[] } {
@@ -1411,7 +1425,7 @@ describe("cast admin entry point", () => {
     assertEquals(dependencies.envGet, Deno.env.get);
 
     const identity = await Identity.generate({ implementation: "noble" });
-    const runtime = createCastRuntime("memory://cast-default-deps", identity);
+    const runtime = createCastRuntime(TEST_API_URL, identity);
     try {
       const session = await dependencies.createSession({
         identity,
@@ -1427,7 +1441,7 @@ describe("cast admin entry point", () => {
   it("compiles the actual admin pattern source", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
     const runtime = createUncachedCompileRuntime(
-      "memory://cast-admin-compile",
+      TEST_API_URL,
       identity,
     );
     try {
@@ -1476,7 +1490,7 @@ describe("cast admin entry point", () => {
 
   it("creates the cast runtime", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
-    const runtime = createCastRuntime("memory://cast-runtime-test", identity);
+    const runtime = createCastRuntime(TEST_API_URL, identity);
     const cell = runtime.getCell(identity.did(), "cast-runtime-test", {
       type: "object",
       properties: {},
@@ -1490,7 +1504,7 @@ describe("cast admin entry point", () => {
     const identity = await Identity.generate({ implementation: "noble" });
     const consulted = new Set<string>();
     const runtime = createCastRuntime(
-      "memory://cast-env-reader",
+      TEST_API_URL,
       identity,
       (key) => {
         consulted.add(key);

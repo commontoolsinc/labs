@@ -74,6 +74,8 @@ describe("per-space storage address resolution", () => {
   it("rejects an unsupported default memory host protocol", () => {
     expect(() => createStorageAddressResolver(new URL("ftp://host-a.test")))
       .toThrow("Unsupported memory host protocol: ftp:");
+    expect(() => createStorageAddressResolver(new URL("memory://local")))
+      .toThrow("Unsupported memory host protocol: memory:");
   });
 
   it("resolves a mapped space to its host and others to the default", () => {
