@@ -734,6 +734,26 @@ reveals the next hop, for a bounded number of rounds. A sink reports committed
 changes; it does not drive that traversal. Polling the pull until it converges is
 the honest wait.
 
+Reaching a lazily scheduled node, on the other hand, is not a reason to keep a
+pull, and that is where this section is easiest to over-read. The scheduler
+runs a computation only while it is reachable from a live root — an effect, a
+materializer, or a node marked as provisionally demanded — so a node whose
+output nothing observes stays dormant however long a test waits. `pull()`
+supplies such a root: it subscribes an action that reads the cell, marked as an
+effect, and cancels it once the scheduler goes idle. `cell.sink()` subscribes
+the same kind of root and holds it until the caller cancels, so a wait built on
+`waitForCellValue` keeps the node awake for the whole wait rather than for one
+scheduler cycle. Where demand is the only thing the pull supplied, the sink
+supplies it too and the loop around the pull was doing nothing.
+
+`packages/runner/test/cfc-inspect-conf-label-builtin.test.ts` is the worked
+example. Its waits were a bounded `pull()` poll, on the grounds that the pull
+drives the `inspectConfLabel` builtin's node; they are now single
+`waitForCellValue` calls with no loop and no bound. That the demand is what
+matters, and not the pull, is checkable: replace the wait with
+`runtime.settled()` followed by a storage sync and a plain read, and every case
+reads the result cell as undefined, because nothing ever asked for its value.
+
 ### Race, backpressure, and convergence tests
 
 Here the poll measures eventual convergence across timing the test does not
