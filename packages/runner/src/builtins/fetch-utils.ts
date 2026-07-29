@@ -13,7 +13,32 @@ import {
 } from "@commonfabric/data-model/fabric-instances";
 import { selectUnavailableInput } from "../data-unavailability.ts";
 
-export const REQUEST_TIMEOUT = 1000 * 5; // 5 seconds
+/**
+ * How long a claimed request mutex is believed before another replica may take
+ * it over.
+ *
+ * This is not a bound on the request. A request issued here ends when its
+ * promise settles or its AbortSignal fires, and `fetch.ts` decides from its own
+ * state, not from the clock, whether it already has one in flight. The only
+ * reader is a replica that finds a claim it did not make and has to decide
+ * whether the replica that made it is still there. Nothing in the runner
+ * reports another replica's presence, so that question has no event to wait on
+ * and a staleness bound is the only answer available.
+ *
+ * The value is left where it was. Once an early takeover no longer costs a
+ * result, the size is a trade with a cost on both sides: too low sends a second
+ * copy of the request to the remote peer whenever another replica looks in
+ * while one is running, too high leaves a replica that arrives before the bound
+ * elapses looking at a claim it will not take over and has no reason to
+ * re-examine, so the piece keeps showing a spinner. A duplicate request is
+ * wasted work; a spinner that never resolves is a dead end, so the trade goes
+ * to the lower value. A caller whose endpoint is slow enough that duplicates
+ * matter raises its own bound with `options.mutexTimeoutMs`.
+ *
+ * `docs/development/fetch-request-deadlines.md` records why this bound stays
+ * and what an early takeover costs.
+ */
+export const MUTEX_STALE_AFTER = 1000 * 5;
 
 export const internalSchema = internSchema(
   {
@@ -219,63 +244,11 @@ export function liveFetchClaimMatches<
 }
 
 /**
- * Arms recovery for a non-terminal mutex claim whose owner is not local.
- * The exact claim is released only after its lease expires and only while
- * live inputs and the direct pending result still match.
- */
-export function scheduleFetchMutexClaimRetry<
-  TInputs extends Record<string, any>,
-  TSnapshot extends Record<string, any>,
->(
-  runtime: Runtime,
-  inputsCell: Cell<TInputs>,
-  snapshotInputs: (cell: Cell<TInputs>) => TSnapshot,
-  result: Cell<unknown>,
-  internal: Cell<Schema<typeof internalSchema>>,
-  expectedInputHash: string,
-  requestId: string,
-  lastActivity: number,
-  timeout: number,
-): () => void {
-  const delay = Math.max(0, lastActivity + timeout - Date.now());
-  const timer = setTimeout(() => {
-    void runtime.editWithRetry((tx) => {
-      const unavailable = selectUnavailableFetchInput(
-        inputsCell.withTx(tx).getRaw(),
-        { runtime, tx, base: inputsCell },
-      );
-      if (unavailable !== undefined) return;
-
-      const liveHash = computeInputHashFromValue(
-        snapshotInputs(inputsCell.withTx(tx)),
-      );
-      const currentInternal = internal.withTx(tx).get();
-      const currentResult = result.withTx(tx).getRaw();
-      if (
-        liveHash === expectedInputHash &&
-        currentInternal.inputHash === expectedInputHash &&
-        currentInternal.requestId === requestId &&
-        currentInternal.lastActivity <= Date.now() - timeout &&
-        isDataUnavailable(currentResult) &&
-        currentResult.reason === "pending"
-      ) {
-        internal.withTx(tx).update({
-          requestId: "",
-          lastActivity: 0,
-        });
-      }
-    }).catch(() => {
-      // Runtime shutdown or a conflicting owner will reconcile separately.
-    });
-  }, delay + 1);
-  return () => clearTimeout(timer);
-}
-
-/**
- * Attempts to claim the mutex for a request. Only claims if no other
- * request is active or if the previous request has timed out.
- * When claiming, atomically publishes the pending marker and retains the
- * legacy pending/error sibling cells during the API transition.
+ * Attempts to claim the mutex for a request. Only claims if no other request
+ * is active, or if the standing claim was made longer than `timeout` ago and is
+ * therefore treated as abandoned (see {@link MUTEX_STALE_AFTER}). Claiming
+ * atomically publishes the direct pending marker and retains the legacy
+ * pending/error sibling cells during the API transition.
  */
 export async function tryClaimMutex<T extends Record<string, any>>(
   runtime: Runtime,
@@ -287,7 +260,7 @@ export async function tryClaimMutex<T extends Record<string, any>>(
   requestId: string,
   snapshotInputs: (cell: Cell<T>) => T,
   expectedInputHash?: string,
-  timeout: number = REQUEST_TIMEOUT,
+  timeout: number = MUTEX_STALE_AFTER,
 ): Promise<{
   claimed: boolean;
   inputs: T;
@@ -334,9 +307,9 @@ export async function tryClaimMutex<T extends Record<string, any>>(
       claimed = false;
       return;
     }
-    // Can claim if:
+    // Can claim if no settled result raced this claim attempt and either:
     // 1. Nothing is pending, OR
-    // 2. Previous request timed out
+    // 2. The standing claim has gone stale and is treated as abandoned.
     const hasSettledResult = currentResult !== undefined &&
       !(isDataUnavailable(currentResult) &&
         currentResult.reason === "pending");
@@ -378,7 +351,6 @@ export async function tryWriteResult<T extends Record<string, any>>(
   expectedHash: string,
   action: (tx: IExtendedStorageTransaction) => void,
   snapshotInputs?: (cell: Cell<T>) => T,
-  expectedRequestId?: string,
 ): Promise<boolean> {
   let success = false;
   await runtime.editWithRetry((tx) => {
@@ -387,12 +359,6 @@ export async function tryWriteResult<T extends Record<string, any>>(
       { runtime, tx, base: inputsCell },
     );
     if (unavailable !== undefined) return;
-
-    const currentInternal = internal.withTx(tx).get();
-    if (
-      expectedRequestId !== undefined &&
-      currentInternal.requestId !== expectedRequestId
-    ) return;
 
     const inputs = snapshotInputs
       ? snapshotInputs(inputsCell.withTx(tx))
@@ -404,10 +370,6 @@ export async function tryWriteResult<T extends Record<string, any>>(
       action(tx);
       internal.withTx(tx).update({
         inputHash: currentHash,
-        ...(expectedRequestId !== undefined && {
-          requestId: "",
-          lastActivity: 0,
-        }),
       });
       success = true;
     }

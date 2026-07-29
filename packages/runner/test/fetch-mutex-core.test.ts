@@ -15,7 +15,6 @@ import { setPatternEnvironment } from "../src/env.ts";
 import {
   computeInputHashFromValue,
   internalSchema,
-  scheduleFetchMutexClaimRetry,
   tryClaimMutex,
   tryWriteResult,
 } from "../src/builtins/fetch-utils.ts";
@@ -355,64 +354,7 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
     expect(internal.get().requestId).toBe("");
   });
 
-  it("releases a persisted pending claim when its lease expires", async () => {
-    const inputs = runtime.getCell<{ url?: string }>(
-      space,
-      "fetch-mutex-persisted-inputs",
-      undefined,
-      tx,
-    );
-    const result = runtime.getCell<unknown>(
-      space,
-      "fetch-mutex-persisted-result",
-      undefined,
-      tx,
-    );
-    const internal = runtime.getCell<Schema<typeof internalSchema>>(
-      space,
-      "fetch-mutex-persisted-internal",
-      internalSchema,
-      tx,
-    );
-    const snapshot = { url: "/api/recover" };
-    const inputHash = computeInputHashFromValue(snapshot);
-    inputs.set(snapshot);
-    result.setRaw(DataUnavailable.pending());
-    internal.set({
-      requestId: "persisted-owner",
-      lastActivity: Date.now(),
-      inputHash,
-    });
-    await tx.commit();
-    tx = runtime.edit();
-
-    const cancel = scheduleFetchMutexClaimRetry(
-      runtime,
-      inputs,
-      (cell) => cell.get() ?? {},
-      result,
-      internal,
-      inputHash,
-      "persisted-owner",
-      Date.now(),
-      20,
-    );
-    try {
-      await clock.tick(21);
-      await runtime.idle();
-      const readTx = runtime.edit();
-      try {
-        expect(internal.withTx(readTx).get().requestId).toBe("");
-        expect(internal.withTx(readTx).get().lastActivity).toBe(0);
-      } finally {
-        readTx.abort();
-      }
-    } finally {
-      cancel();
-    }
-  });
-
-  it("rejects completion from an abandoned same-input claim owner", async () => {
+  it("accepts completion from an earlier same-input claim owner", async () => {
     const inputs = runtime.getCell<{ url?: string }>(
       space,
       "fetch-mutex-owner-inputs",
@@ -448,27 +390,15 @@ describe("fetch-json mutex mechanism: core mutex behavior", () => {
       internal,
       inputs,
       inputHash,
-      (writeTx) => result.withTx(writeTx).setRaw("stale"),
+      (writeTx) => result.withTx(writeTx).setRaw("completed"),
       (cell) => cell.get() ?? {},
-      "old-owner",
     );
-    expect(oldWrite).toBe(false);
-
-    const newWrite = await tryWriteResult(
-      runtime,
-      internal,
-      inputs,
-      inputHash,
-      (writeTx) => result.withTx(writeTx).setRaw("fresh"),
-      (cell) => cell.get() ?? {},
-      "new-owner",
-    );
-    expect(newWrite).toBe(true);
+    expect(oldWrite).toBe(true);
 
     const readTx = runtime.edit();
     try {
-      expect(result.withTx(readTx).getRaw()).toBe("fresh");
-      expect(internal.withTx(readTx).get().requestId).toBe("");
+      expect(result.withTx(readTx).getRaw()).toBe("completed");
+      expect(internal.withTx(readTx).get().requestId).toBe("new-owner");
     } finally {
       readTx.abort();
     }

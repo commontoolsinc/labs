@@ -31,7 +31,30 @@ import {
   isDataUnavailable,
 } from "@commonfabric/data-model/fabric-instances";
 
-const PROGRAM_REQUEST_TIMEOUT = 1000 * 10; // 10 seconds for program resolution
+/**
+ * How long a `fetching` cache entry left by another replica is believed before
+ * this one takes the resolution over.
+ *
+ * This is not a bound on resolving a program. A resolution running here ends
+ * when its promise settles, and the entry it owns is never judged by elapsed
+ * time — `inFlight` below answers "am I already resolving this?" from local
+ * state. The bound applies only to an entry this replica did not claim, where
+ * the question is whether the replica that claimed it is still there. Nothing
+ * in the runner reports another replica's presence, so that question has no
+ * event to wait on.
+ *
+ * The value is left where it was. Once an early takeover no longer costs a
+ * result, the size is a trade with a cost on both sides: too low duplicates a
+ * resolution whenever another replica looks in while one is running, too high
+ * leaves a replica that arrives before the bound elapses looking at a claim it
+ * will not take over and has no reason to re-examine, so the piece keeps
+ * showing a spinner. A duplicated resolution is wasted work; a spinner that
+ * never resolves is a dead end, so the trade goes to the lower value.
+ *
+ * `docs/development/fetch-request-deadlines.md` records why this bound stays
+ * and what an early takeover costs.
+ */
+const PROGRAM_CLAIM_STALE_AFTER = 1000 * 10;
 
 export interface ProgramFile extends FabricPlainObject {
   name: string;
@@ -217,66 +240,49 @@ export function fetchProgram(
   let error: Cell<any | undefined>;
   let cache: Cell<Record<string, FetchCacheEntry>>;
   let cellScope: CellScope | undefined;
-  let myRequestId: string | undefined = undefined;
-  let myInputHash: string | undefined = undefined;
-  let abortController: AbortController | undefined = undefined;
-  let cancelClaimRetry: (() => void) | undefined;
+  // Input hash to the claim id this replica wrote for it, for every resolution
+  // running here right now. The claim id carries `runtime.id`, which is unique
+  // per storage manager and so per replica; the entry's `requestId` used to be
+  // the input hash, which every replica resolving the same URL writes
+  // identically, so no replica could tell its own claim from anyone else's.
+  const inFlight = new Map<
+    string,
+    { requestId: string; controller: AbortController }
+  >();
 
-  const clearClaimRetry = (): void => {
-    cancelClaimRetry?.();
-    cancelClaimRetry = undefined;
-  };
-
-  const scheduleClaimRetry = (
-    inputHash: string,
-    requestId: string,
-    startTime: number,
-  ): void => {
-    clearClaimRetry();
-    cancelClaimRetry = scheduleFetchProgramClaimRetry(
-      runtime,
-      cache,
-      inputHash,
-      requestId,
-      startTime,
-    );
-  };
-
-  const releaseOwnedRequest = (
+  const releaseOwnedRequests = (
     tx: IExtendedStorageTransaction,
     reason: string,
   ): void => {
-    clearClaimRetry();
-    const requestId = myRequestId;
-    const inputHash = myInputHash;
-    if (requestId === undefined || inputHash === undefined) return;
-
-    abortController?.abort(reason);
-    const entry = cache.withTx(tx).get()[inputHash];
-    if (
-      entry?.state.type === "fetching" &&
-      entry.state.requestId === requestId
-    ) {
-      cache.withTx(tx).update({
-        [inputHash]: {
-          inputHash,
+    const currentCache = cache.withTx(tx).get();
+    const updates: Record<string, FetchCacheEntry> = {};
+    for (const [hash, owned] of inFlight) {
+      owned.controller.abort(reason);
+      const entry = currentCache[hash];
+      if (
+        entry?.state.type === "fetching" &&
+        entry.state.requestId === owned.requestId
+      ) {
+        updates[hash] = {
+          inputHash: hash,
           state: { type: "idle" },
-        },
-      });
+        };
+      }
     }
-    abortController = undefined;
-    myRequestId = undefined;
-    myInputHash = undefined;
+    if (Object.keys(updates).length > 0) {
+      cache.withTx(tx).update(updates);
+    }
+    inFlight.clear();
   };
 
   // This is called when the pattern containing this node is being stopped.
   addCancel(() => {
-    clearClaimRetry();
-    // Abort the request if it's still pending.
-    abortController?.abort("Pattern stopped");
+    for (const { controller } of inFlight.values()) {
+      controller.abort("Pattern stopped");
+    }
 
     // Only try to update state if cells were initialized
-    if (!cellsInitialized || !myRequestId) return;
+    if (!cellsInitialized || inFlight.size === 0) return;
 
     const tx = runtime.edit();
 
@@ -285,10 +291,13 @@ export function fetchProgram(
       const currentCache = cache.withTx(tx).get();
       const updates: Record<string, FetchCacheEntry> = {};
 
+      // Release only the entries this replica still holds. An entry another
+      // replica took over carries its claim id, not ours, and resetting it
+      // would strand the resolution that replica is running.
       for (const [hash, entry] of Object.entries(currentCache)) {
         if (
           entry.state.type === "fetching" &&
-          entry.state.requestId === myRequestId
+          entry.state.requestId === inFlight.get(hash)?.requestId
         ) {
           updates[hash] = {
             inputHash: hash,
@@ -303,6 +312,7 @@ export function fetchProgram(
 
       runtime.prepareTxForCommit(tx);
       tx.commit();
+      inFlight.clear();
     } catch (_) {
       // Ignore errors during cleanup - the runtime might be shutting down
       tx.abort();
@@ -321,6 +331,9 @@ export function fetchProgram(
     const outputScope = tx.getNarrowestReadScope();
 
     if (!cellsInitialized || cellScope !== outputScope) {
+      if (cellsInitialized) {
+        releaseOwnedRequests(tx, "Output scope changed");
+      }
       const basePending = runtime.getCell<boolean>(
         parentCell.space,
         { fetchProgram: { pending: cause } },
@@ -385,8 +398,7 @@ export function fetchProgram(
     }
 
     if (unavailableInput !== undefined) {
-      clearClaimRetry();
-      releaseOwnedRequest(tx, "Inputs unavailable");
+      releaseOwnedRequests(tx, "Inputs unavailable");
       writeUnavailableFetchResult(
         tx,
         pending,
@@ -402,8 +414,7 @@ export function fetchProgram(
     const inputHash = computeInputHashFromValue(requestSnapshot);
 
     if (!url) {
-      clearClaimRetry();
-      releaseOwnedRequest(tx, "URL unavailable");
+      releaseOwnedRequests(tx, "URL unavailable");
       // An authored empty URL is locally complete but invalid.
       pending.withTx(tx).set(false);
       result.withTx(tx).setRaw(DataUnavailable.schemaMismatch());
@@ -412,20 +423,27 @@ export function fetchProgram(
       return;
     }
 
-    if (myRequestId !== undefined && myInputHash !== inputHash) {
-      releaseOwnedRequest(tx, "Inputs changed");
-    }
-
     // Get current state for this input hash
     const allEntries = cache.withTx(tx).get();
     const cacheEntry = allEntries[inputHash];
     const state: FetchState = cacheEntry?.state ?? { type: "idle" };
 
-    // State machine transitions
-    if (state.type === "idle") {
-      clearClaimRetry();
-      // Try to transition to fetching
-      const requestId = crypto.randomUUID();
+    // State machine transitions. A resolution running in this replica ends
+    // when its promise settles, so an entry in `inFlight` is left alone
+    // whatever the entry says and however long it has been running. An entry
+    // claimed elsewhere and left untouched for longer than the staleness bound
+    // is taken over directly, without passing through `idle`: a round trip
+    // through `idle` would publish `pending: false` with no result for a tick,
+    // which reads to a consumer as "finished, nothing here".
+    const resolvingHere = inFlight.has(inputHash);
+    const claimAbandoned = state.type === "fetching" && !resolvingHere &&
+      Date.now() - state.startTime > PROGRAM_CLAIM_STALE_AFTER;
+
+    if (!resolvingHere && (state.type === "idle" || claimAbandoned)) {
+      // Try to transition to fetching. The claim id names this replica; the
+      // outbox id stays the input hash, which is what makes it an idempotency
+      // key for the same request from anywhere.
+      const requestId = `${runtime.id}:${inputHash}`;
       const startTime = Date.now();
       cache.withTx(tx).update({
         [inputHash]: {
@@ -445,35 +463,27 @@ export function fetchProgram(
           // Tracked as async builtin work owned by this run, so
           // `runtime.settled()` and `runtime.settledFor(parentCell)` both wait
           // for the program resolve + writeback; `idle()` does not.
-          clearClaimRetry();
-          myRequestId = requestId;
-          myInputHash = inputHash;
+          // Recorded in `inFlight` here rather than above, because a
+          // transaction that never commits never reaches this callback.
           const controller = new AbortController();
-          abortController = controller;
+          inFlight.set(inputHash, { requestId, controller });
           const work = (async () => {
             if (
-              (
-                !liveFetchInputsMatch(
-                  runtime,
-                  inputsCell,
-                  snapshotFetchProgramInputs,
-                  inputHash,
-                ) ||
-                !liveFetchProgramClaimMatches(
-                  runtime,
-                  cache,
-                  inputHash,
-                  requestId,
-                  startTime,
-                )
+              !liveFetchInputsMatch(
+                runtime,
+                inputsCell,
+                snapshotFetchProgramInputs,
+                inputHash,
+              ) ||
+              !liveFetchProgramClaimMatches(
+                runtime,
+                cache,
+                inputHash,
+                requestId,
+                startTime,
               )
             ) {
               controller.abort("Inputs changed before fetch started");
-              if (myRequestId === requestId) {
-                myRequestId = undefined;
-                myInputHash = undefined;
-                abortController = undefined;
-              }
               await resetFetchProgramClaim(
                 runtime,
                 cache,
@@ -492,43 +502,16 @@ export function fetchProgram(
               error,
               inputHash,
               url,
-              requestId,
-              startTime,
               controller.signal,
             );
-          })();
+          })().finally(() => {
+            if (inFlight.get(inputHash)?.requestId === requestId) {
+              inFlight.delete(inputHash);
+            }
+          });
           runtime.trackAsyncWork(work, parentCell);
         },
       );
-    } else if (state.type === "fetching") {
-      // Check for timeout
-      const isTimedOut = Date.now() - state.startTime > PROGRAM_REQUEST_TIMEOUT;
-      if (isTimedOut) {
-        clearClaimRetry();
-        if (myRequestId === state.requestId) {
-          abortController?.abort("Program request timed out");
-          abortController = undefined;
-          myRequestId = undefined;
-          myInputHash = undefined;
-        }
-        // Transition back to idle if timed out
-        cache.withTx(tx).update({
-          [inputHash]: {
-            inputHash,
-            state: { type: "idle" },
-          },
-        });
-      } else if (myRequestId !== state.requestId) {
-        scheduleClaimRetry(
-          inputHash,
-          state.requestId,
-          state.startTime,
-        );
-      } else {
-        clearClaimRetry();
-      }
-    } else {
-      clearClaimRetry();
     }
 
     // Convert state machine state to output cells
@@ -579,8 +562,17 @@ export function fetchProgram(
 }
 
 /**
- * Start fetching a program. Uses CAS to ensure only the tab that initiated
- * the fetch can write the result.
+ * Start fetching a program. The writeback lands only on an entry still marked
+ * `fetching`, so a resolution whose entry has since reached `success` or
+ * `error`, or been released, writes nothing. It deliberately does not require
+ * the entry to carry *this* replica's claim id: after a takeover two
+ * resolutions for the same input hash are running, they resolve the same URL,
+ * and whichever finishes first should be the one that counts.
+ *
+ * The abort signal does not reach the network. `HttpProgramResolver` issues its
+ * requests without one, so this checks the signal between steps: it suppresses
+ * a writeback from a resolution nobody is waiting for, and does not end the
+ * resolution.
  */
 async function startFetch(
   runtime: Runtime,
@@ -591,8 +583,6 @@ async function startFetch(
   error: Cell<any | undefined>,
   inputHash: string,
   url: string,
-  requestId: string,
-  startTime: number,
   abortSignal: AbortSignal,
 ) {
   try {
@@ -614,33 +604,13 @@ async function startFetch(
     if (abortSignal.aborted) return;
 
     await runtime.idle();
-    if (
-      abortSignal.aborted ||
-      !liveFetchInputsMatch(
-        runtime,
-        inputsCell,
-        snapshotFetchProgramInputs,
-        inputHash,
-      )
-    ) return;
+    if (abortSignal.aborted) return;
 
-    // CAS: Only write if we're still the active request
+    // Only write into an entry that is still marked `fetching`.
     await runtime.editWithRetry((tx) => {
-      if (
-        !fetchProgramInputsMatchInTx(
-          runtime,
-          tx,
-          inputsCell,
-          inputHash,
-        )
-      ) return;
       const allEntries = cache.withTx(tx).get();
       const entry = allEntries[inputHash];
-      if (
-        entry?.state.type === "fetching" &&
-        entry.state.requestId === requestId &&
-        entry.state.startTime === startTime
-      ) {
+      if (entry?.state.type === "fetching") {
         cache.withTx(tx).update({
           [inputHash]: {
             inputHash,
@@ -662,37 +632,17 @@ async function startFetch(
     if (abortSignal.aborted) return;
 
     await runtime.idle();
-    if (
-      abortSignal.aborted ||
-      !liveFetchInputsMatch(
-        runtime,
-        inputsCell,
-        snapshotFetchProgramInputs,
-        inputHash,
-      )
-    ) return;
+    if (abortSignal.aborted) return;
 
     const nativeError = err instanceof Error ? err : new Error(String(err));
     const unavailable = DataUnavailable.error(nativeError);
     const fabricError = unavailable.error;
 
-    // CAS: Only write error if we're still the active request
+    // Only write into an entry that is still marked `fetching`.
     await runtime.editWithRetry((tx) => {
-      if (
-        !fetchProgramInputsMatchInTx(
-          runtime,
-          tx,
-          inputsCell,
-          inputHash,
-        )
-      ) return;
       const allEntries = cache.withTx(tx).get();
       const entry = allEntries[inputHash];
-      if (
-        entry?.state.type === "fetching" &&
-        entry.state.requestId === requestId &&
-        entry.state.startTime === startTime
-      ) {
+      if (entry?.state.type === "fetching") {
         cache.withTx(tx).update({
           [inputHash]: {
             inputHash,
@@ -702,41 +652,26 @@ async function startFetch(
             },
           },
         });
-        writeUnavailableFetchResult(
-          tx,
-          pending,
-          result,
-          error,
-          unavailable,
-          nativeError,
-        );
+        if (
+          fetchProgramInputsMatchInTx(
+            runtime,
+            tx,
+            inputsCell,
+            inputHash,
+          )
+        ) {
+          writeUnavailableFetchResult(
+            tx,
+            pending,
+            result,
+            error,
+            unavailable,
+            nativeError,
+          );
+        }
       }
     });
   }
-}
-
-/** Arms lease-expiry recovery for a persisted fetchProgram claim. */
-export function scheduleFetchProgramClaimRetry(
-  runtime: Runtime,
-  cache: Cell<Record<string, FetchCacheEntry>>,
-  inputHash: string,
-  requestId: string,
-  startTime: number,
-  timeout: number = PROGRAM_REQUEST_TIMEOUT,
-): () => void {
-  const delay = Math.max(0, startTime + timeout - Date.now());
-  const timer = setTimeout(() => {
-    void resetFetchProgramClaim(
-      runtime,
-      cache,
-      inputHash,
-      requestId,
-      startTime,
-    ).catch(() => {
-      // Runtime shutdown or a conflicting owner will reconcile separately.
-    });
-  }, delay + 1);
-  return () => clearTimeout(timer);
 }
 
 async function resetFetchProgramClaim(

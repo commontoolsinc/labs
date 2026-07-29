@@ -17,7 +17,6 @@ import {
 } from "../src/storage/extended-storage-transaction.ts";
 import { setPatternEnvironment } from "../src/env.ts";
 import { computeInputHashFromValue } from "../src/builtins/fetch-utils.ts";
-import { scheduleFetchProgramClaimRetry } from "../src/builtins/fetch-program.ts";
 import { parseLink } from "../src/link-utils.ts";
 
 const signer = await Identity.fromPassphrase("test fetch-program outbox");
@@ -183,52 +182,6 @@ describe("fetch-program outbox mechanism", () => {
     } finally {
       txPrototype.enqueuePostCommitEffect = originalTxEnqueue;
       wrapperPrototype.enqueuePostCommitEffect = originalWrapperEnqueue;
-    }
-  });
-
-  it("releases a persisted program claim when its lease expires", async () => {
-    const cache = runtime.getCell<Record<string, any>>(
-      space,
-      "fetch-program-persisted-cache",
-      undefined,
-      tx,
-    );
-    const inputHash = computeInputHashFromValue({
-      url: "http://mock-test-server.local/recover-program.ts",
-    });
-    const requestId = "persisted-program-owner";
-    const startTime = Date.now();
-    cache.setRaw({
-      [inputHash]: {
-        inputHash,
-        state: { type: "fetching", requestId, startTime },
-      },
-    });
-    tx.commit();
-    tx = runtime.edit();
-
-    const cancel = scheduleFetchProgramClaimRetry(
-      runtime,
-      cache,
-      inputHash,
-      requestId,
-      startTime,
-      20,
-    );
-    try {
-      await clock.tick(21);
-      await runtime.idle();
-      const readTx = runtime.edit();
-      try {
-        expect(
-          (cache.withTx(readTx).getRaw() as Record<string, any>)[inputHash]
-            .state.type,
-        ).toBe("idle");
-      } finally {
-        readTx.abort();
-      }
-    } finally {
-      cancel();
     }
   });
 

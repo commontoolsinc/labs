@@ -28,8 +28,6 @@ import {
   legacyFetchResultMarker,
   liveFetchClaimMatches,
   releaseFetchMutexClaim,
-  REQUEST_TIMEOUT,
-  scheduleFetchMutexClaimRetry,
   selectUnavailableFetchInput,
   tryClaimMutex,
   tryWriteResult,
@@ -318,36 +316,9 @@ function fetchBuiltin(kind: FetchKind) {
     let cellScope: CellScope | undefined;
     let myRequestId: string | undefined = undefined;
     let abortController: AbortController | undefined = undefined;
-    let cancelClaimRetry: (() => void) | undefined;
-
-    const clearClaimRetry = (): void => {
-      cancelClaimRetry?.();
-      cancelClaimRetry = undefined;
-    };
-
-    const scheduleClaimRetry = (
-      expectedInputHash: string,
-      requestId: string,
-      lastActivity: number,
-      timeout: number,
-    ): void => {
-      clearClaimRetry();
-      cancelClaimRetry = scheduleFetchMutexClaimRetry(
-        runtime,
-        inputsCell,
-        snapshotInputs,
-        result,
-        internal,
-        expectedInputHash,
-        requestId,
-        lastActivity,
-        timeout,
-      );
-    };
 
     // This is called when the pattern containing this node is being stopped.
     addCancel(() => {
-      clearClaimRetry();
       // Abort the request if it's still pending.
       abortController?.abort("Pattern stopped");
 
@@ -357,9 +328,11 @@ function fetchBuiltin(kind: FetchKind) {
       const tx = runtime.edit();
 
       try {
-        // If the pending request is ours, set pending to false and clear the requestId.
+        // If the pending request is ours, set pending to false and clear the
+        // requestId. A claim another replica has taken over carries its id,
+        // not ours, and releasing it would strand the request it is running.
         const currentRequestId = internal.withTx(tx).key("requestId").get();
-        if (currentRequestId === myRequestId) {
+        if (myRequestId !== undefined && currentRequestId === myRequestId) {
           pending.withTx(tx).set(false);
           internal.withTx(tx).key("requestId").set("");
         }
@@ -455,7 +428,6 @@ function fetchBuiltin(kind: FetchKind) {
       sendResult(tx, { pending, result, error });
 
       if (unavailableInput !== undefined) {
-        clearClaimRetry();
         abortController?.abort("Inputs unavailable");
         abortController = undefined;
         myRequestId = undefined;
@@ -476,7 +448,6 @@ function fetchBuiltin(kind: FetchKind) {
 
       const url = inputsSnapshot?.url;
       if (!url) {
-        clearClaimRetry();
         abortController?.abort("URL unavailable");
         abortController = undefined;
         myRequestId = undefined;
@@ -530,7 +501,6 @@ function fetchBuiltin(kind: FetchKind) {
 
       // If inputs changed, clear everything and abort any in-flight request
       if (!inputsMatch) {
-        clearClaimRetry();
         if (myRequestId) {
           abortController?.abort("Inputs changed");
           myRequestId = undefined;
@@ -560,25 +530,14 @@ function fetchBuiltin(kind: FetchKind) {
       const alreadyFetching = inputsMatch && currentPending &&
         myRequestId !== undefined;
 
-      const claimTimeout = mutexTimeoutMs ?? REQUEST_TIMEOUT;
-      const persistedClaim = inputsMatch && currentPending &&
-        myRequestId === undefined && currentInternal.requestId !== "" &&
-        isDataUnavailable(currentResult) &&
-        currentResult.reason === "pending";
-      if (persistedClaim) {
-        scheduleClaimRetry(
-          inputHash,
-          currentInternal.requestId,
-          currentInternal.lastActivity,
-          claimTimeout,
-        );
-      } else {
-        clearClaimRetry();
-      }
-
       // Start a new fetch if we don't have a result/error and aren't already fetching
       if (!hasValidResult && !hasError && !alreadyFetching) {
-        const newRequestId = crypto.randomUUID();
+        // The claim id names this replica, so teardown can tell a claim it
+        // still holds from one another replica has taken over. `runtime.id` is
+        // unique per storage manager and so per replica. The outbox id stays
+        // the input hash, which is what makes it an idempotency key for the
+        // same request from anywhere.
+        const newRequestId = `${runtime.id}:${inputHash}`;
         enqueueSinkRequestPostCommitEffect(
           tx,
           kind.name,
@@ -613,7 +572,6 @@ function fetchBuiltin(kind: FetchKind) {
                   return;
                 }
 
-                clearClaimRetry();
                 const controller = new AbortController();
                 abortController = controller;
                 myRequestId = newRequestId;
@@ -666,7 +624,9 @@ function fetchBuiltin(kind: FetchKind) {
                   return;
                 }
 
-                // We claimed the mutex, start the fetch
+                // We claimed the mutex, start the fetch. `startFetch` compares
+                // against the input hash, not the claim id: any request for
+                // these inputs may write the result.
                 await startFetch(
                   runtime,
                   kind,
@@ -674,7 +634,6 @@ function fetchBuiltin(kind: FetchKind) {
                   inputsCell,
                   inputsSnapshot,
                   inputHash,
-                  newRequestId,
                   pending,
                   result,
                   error,
@@ -731,7 +690,6 @@ async function startFetch(
   inputsCell: Cell<FetchInputs>,
   inputsSnapshot: FetchInputs,
   inputHash: string,
-  requestId: string,
   pending: Cell<boolean>,
   result: Cell<any | undefined>,
   error: Cell<any | undefined>,
@@ -786,7 +744,6 @@ async function startFetch(
         error.withTx(tx).set(undefined);
       },
       snapshotInputs,
-      requestId,
     );
   } catch (err) {
     // Don't write errors if request was aborted
@@ -800,26 +757,39 @@ async function startFetch(
         err instanceof Error ? err : new Error(String(err)),
       );
 
-    // Write the failure only while this request still owns the live inputs.
-    // A stale failure must not clear a newer input's pending marker.
-    await tryWriteResult(
-      runtime,
-      internal,
-      inputsCell,
-      inputHash,
-      (tx) => {
-        writeUnavailableFetchResult(
-          tx,
-          pending,
-          result,
-          error,
-          unavailable,
-          err,
-        );
-      },
-      snapshotInputs,
-      requestId,
-    );
+    // A takeover can leave two requests for the same inputs in flight. A
+    // failure must not replace a usable result the other request already
+    // recorded, but it may publish while the direct result is still pending.
+    await runtime.editWithRetry((tx) => {
+      const unavailableInput = selectUnavailableFetchInput(
+        inputsCell.withTx(tx).getRaw(),
+        { runtime, tx, base: inputsCell },
+      );
+      if (unavailableInput !== undefined) return;
+
+      const currentHash = computeInputHashFromValue(
+        snapshotInputs(inputsCell.withTx(tx)),
+      );
+      if (currentHash !== inputHash) return;
+
+      const currentResult = result.withTx(tx).getRaw();
+      pending.withTx(tx).set(false);
+      if (
+        currentResult !== undefined && !isDataUnavailable(currentResult)
+      ) {
+        return;
+      }
+
+      writeUnavailableFetchResult(
+        tx,
+        pending,
+        result,
+        error,
+        unavailable,
+        err,
+      );
+      internal.withTx(tx).update({ inputHash });
+    });
   }
 }
 

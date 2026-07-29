@@ -80,8 +80,10 @@ function makeAction(cacheState: Record<string, unknown>) {
   const cache = new FakeCell("cache", cacheState);
   const parent = new FakeCell("parent", undefined);
   const cancels: Array<() => void> = [];
+  const effects: unknown[] = [];
   const cells = { pending, result, error, cache };
   const runtime = {
+    id: "test-runtime",
     getCell(
       _space: unknown,
       cause: { fetchProgram: Record<string, unknown> },
@@ -94,6 +96,10 @@ function makeAction(cacheState: Record<string, unknown>) {
     resetNarrowestReadScope() {},
     getNarrowestReadScope() {
       return "space";
+    },
+    recordCfcWritePolicyInput() {},
+    enqueuePostCommitEffect(effect: unknown) {
+      effects.push(effect);
     },
   } as unknown as IExtendedStorageTransaction;
   let sent: Record<string, Cell<unknown>> | undefined;
@@ -114,12 +120,13 @@ function makeAction(cacheState: Record<string, unknown>) {
     error,
     cache,
     cancels,
+    effects,
     sent: () => sent,
   };
 }
 
 describe("fetchProgram state-machine edge paths", () => {
-  it("parks behind a live persisted claim and arms its lease retry", () => {
+  it("parks behind a live persisted claim", () => {
     const startTime = Date.now();
     const inputHash = computeInputHashFromValue({
       url: "https://example.test/main.ts",
@@ -136,10 +143,11 @@ describe("fetchProgram state-machine edge paths", () => {
     expect(fixture.sent()).toBeDefined();
     expect(fixture.pending.value).toBe(true);
     expect(fixture.result.value).toBe(DataUnavailable.pending());
+    expect(fixture.effects).toHaveLength(0);
     fixture.cancels.forEach((cancel) => cancel());
   });
 
-  it("expires a stale persisted claim back to idle", () => {
+  it("takes a stale persisted claim over directly", () => {
     const inputHash = computeInputHashFromValue({
       url: "https://example.test/main.ts",
     });
@@ -152,8 +160,12 @@ describe("fetchProgram state-machine edge paths", () => {
 
     fixture.action(fixture.tx);
 
-    expect((fixture.cache.value as any)[inputHash].state.type).toBe("idle");
+    expect((fixture.cache.value as any)[inputHash].state).toMatchObject({
+      type: "fetching",
+      requestId: `test-runtime:${inputHash}`,
+    });
     expect(fixture.result.value).toBe(DataUnavailable.pending());
+    expect(fixture.effects).toHaveLength(1);
     fixture.cancels.forEach((cancel) => cancel());
   });
 
