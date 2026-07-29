@@ -307,19 +307,33 @@ mechanism that makes accumulating vintages cheap.
 Two captures of `home.tsx`, each committed into a fresh repo (`git init`, add,
 commit, `git gc`) and read off `git count-objects -vH`:
 
-| | git storage, 1 vintage | git storage, 2 captures | working tree, 2 captures |
+| Storage | git, 1 vintage | git, 2 captures | working tree, 2 captures |
 | --- | --- | --- | --- |
 | Raw `.sqlite` | 232.50 KiB | **232.86 KiB** (+0.36) | 7.00 MiB |
-| Gzipped `.sqlite.gz` | 226.13 KiB | 450.27 KiB (+224) | 452 KiB |
+| Gzipped, level 9 | 240.30 KiB | 260.92 KiB (+21) | 484 KiB |
+| Gzipped, level 6 | 225.59 KiB | 449.53 KiB (+224) | 452 KiB |
 
-A second raw vintage costs essentially nothing — git deltas it against the
-first — where two gzip streams delta not at all. Stage 4's whole job is
-accumulating vintages, so the compounding term dominates the one-off. The price
+Method: `git init`, add, commit, `git gc`, `git count-objects -vH` size-pack.
+Two INDEPENDENT captures of `home.tsx`, not a perturbed copy — a one-byte
+perturbation flatters delta compression and was measured first by mistake.
+
+A second raw vintage costs essentially nothing; git deltas it against the
+first. A second gzipped one costs between +21 KiB and the entire file
+depending on the compression LEVEL — level 6 (what `CompressionStream` emits)
+deltas not at all, level 9 partially. That instability is itself an argument
+for raw: its delta behaviour is predictable, where gzip's swings tenfold on a
+setting nobody would think to hold constant. Two different patterns gzipped
+delta not at all either (+249 KiB).
+
+Stage 4's whole job is accumulating vintages, so the compounding term
+dominates the one-off. The price
 is working-tree disk (3.5 MiB a fixture rather than 226 KiB), which is transient
 and local where git history is permanent and shared by everyone who clones.
 
-An earlier revision of this table reported 352/352 and 360/380 KiB. Those
-numbers are not reproducible by the method above and are replaced rather than
+An earlier revision reported 352/352 and 360/380 KiB. Those measured `du -sk
+.git`, which reproduces exactly but overstates by ~120 KiB of git overhead
+(config, hooks, refs) that is not blob storage. `count-objects` is the honest
+metric and is used above. They are corrected rather than
 patched; the direction they were used to argue survives, and is larger than
 they showed.
 
