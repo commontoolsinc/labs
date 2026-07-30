@@ -238,9 +238,10 @@ describe("pattern update validates the stored argument", () => {
   it("lets a MARKERLESS root through, and marks it on the way", async () => {
     // The deliberate exemption, pinned so it is a decision rather than an
     // assumption. `storedSetupMarker` reports an absent `patternSetupIdentity`
-    // as "same": absence cannot be told from a pending update, and re-staging
-    // every such root would validate — and rewrite defaults over — arguments no
-    // update is touching.
+    // as `"absent"`, and `restageStoredArgument` re-stages only on `"other"`, so
+    // an absent marker means no re-stage: absence cannot be told from a pending
+    // update, and re-staging every such root would validate — and rewrite
+    // defaults over — arguments no update is touching.
     //
     // Nothing else covers this population. Tier 2's vintage replay cannot: its
     // captures run setup through the current runner, which always stamps the
