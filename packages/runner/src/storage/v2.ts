@@ -207,9 +207,11 @@ const cloneActionSettlement = (
   ) as unknown as ActionSettlement;
 
 /**
- * Successful-settlement frontier merge for one exact claim incarnation —
- * the runner-side settlement coalescer (used by the early-settlement cache
- * and pending-settlement coalescing). Scalar basis takes the max; the
+ * Successful-settlement frontier merge for one action family (identity +
+ * acting lane; see `executionOverlayFamilyKey`) — the runner-side settlement
+ * coalescer (used by the early-settlement cache and pending-settlement
+ * coalescing). The merged record carries `next`'s claim, which is the newer
+ * of the two. Scalar basis takes the max; the
  * accepted-data barrier keeps every contributing gate (max acceptedCommitSeq
  * survives); and since C3.5 the vector basis merges per component under the
  * C3A15 vacuous union (`mergeInputBasisVectors`) — a component either side
@@ -2284,6 +2286,43 @@ type ClaimedOverlayGeneration = {
   readonly unresolvedForeignBasis: Map<string, Set<number>>;
   readonly touched: readonly { id: URI; scope?: CellScope }[];
 };
+
+/**
+ * THE SUCCESSFUL OVERLAY DROP'S CARRIER (`claim-deletion-scope.md` §2b, the
+ * "successful overlay drop" row): the ACTION FAMILY a speculative overlay and
+ * a server settlement share — **action identity + the acting lane**, and
+ * nothing else.
+ *
+ * It used to be {@link executionClaimIncarnationKey}, which is this key plus
+ * `leaseGeneration` and `claimGeneration`. Those two components answer *who is
+ * authorised to run this action* — pure arbitration, and they disappear with
+ * the claim mechanism. The question this index has to answer is *which local
+ * speculation does the server's canonical value replace*, and the ordering
+ * half of that answer was never carried by the generations: it is carried by
+ * the SEQ comparisons, which are unchanged below —
+ * {@link SpaceReplica.settlementCoversOverlay} (`basisSeq` vs the settlement's
+ * `inputBasisSeq` plus every present foreign component) and the accepted-data
+ * barrier (`#executionAppliedSeq` vs `acceptedCommitSeq`). So the carrier is
+ * `(action identity, acting lane, seq)` with the seq exactly where it already
+ * was, and the generations simply drop out.
+ *
+ * PRECISION IS NOT LOST. Two overlays of one family never carry two
+ * incarnations at the same instant: every incarnation change drops the
+ * previous incarnation's overlays before installing the new claim
+ * (`claim-generation-replaced`, `claim-snapshot-replaced`, `claim-revoked`),
+ * and an overlay minted against a claim that is no longer live is dropped at
+ * creation (`captured-claim-no-longer-live`). Partitioning by family is
+ * therefore the SAME partition the incarnation key produced — pinned by
+ * "one action family holds at most one overlay generation" in
+ * `client-execution-overlay.test.ts`.
+ *
+ * `contextKey` IS the acting lane (`space`, `user:<enc>`, `session:<enc>:<enc>`
+ * — the same canonical encoding `laneScopeKeyForActingContext` consumes on the
+ * host), so the family key partitions lanes apart exactly as before: a user
+ * lane's settlement can never retire a session lane's speculation.
+ */
+const executionOverlayFamilyKey = (claim: ActionClaimKey): string =>
+  actionClaimMapKey(claim);
 
 /**
  * C3.9 (C3A19): the computable divergence comparand, surfaced as a
@@ -5819,11 +5858,11 @@ class SpaceReplica implements ISpaceReplica {
     ) {
       return;
     }
-    const incarnation = executionClaimIncarnationKey(settlement.claim);
-    const current = this.#earlyExecutionSettlements.get(incarnation);
+    const family = executionOverlayFamilyKey(settlement.claim);
+    const current = this.#earlyExecutionSettlements.get(family);
     if (current === undefined) {
       this.#earlyExecutionSettlements.set(
-        incarnation,
+        family,
         cloneActionSettlement(settlement),
       );
       return;
@@ -5831,9 +5870,12 @@ class SpaceReplica implements ISpaceReplica {
 
     // This cache is a successful-settlement frontier, not merely the latest
     // event. A newer no-op may advance the covered input basis, but it cannot
-    // erase an accepted-data barrier contributed by an earlier commit.
+    // erase an accepted-data barrier contributed by an earlier commit. §2b: it
+    // is coherence machinery, so it is indexed by the action FAMILY — a claim
+    // generation advancing says nothing about whether the server's accepted
+    // data has reached this replica.
     this.#earlyExecutionSettlements.set(
-      incarnation,
+      family,
       this.mergeSuccessfulExecutionSettlements(current, settlement),
     );
   }
@@ -5841,12 +5883,12 @@ class SpaceReplica implements ISpaceReplica {
   private coalescePendingSuccessfulExecutionSettlement(
     settlement: ActionSettlement,
   ): ActionSettlement {
-    const incarnation = executionClaimIncarnationKey(settlement.claim);
+    const family = executionOverlayFamilyKey(settlement.claim);
     let frontier = settlement;
     this.#pendingExecutionSettlements = this.#pendingExecutionSettlements
       .filter((current) => {
         if (
-          executionClaimIncarnationKey(current.claim) !== incarnation ||
+          executionOverlayFamilyKey(current.claim) !== family ||
           (current.outcome !== "committed" && current.outcome !== "no-op")
         ) {
           return true;
@@ -5858,25 +5900,19 @@ class SpaceReplica implements ISpaceReplica {
   }
 
   private reconcileEarlyExecutionSettlement(claim: ExecutionClaim): void {
-    const incarnation = executionClaimIncarnationKey(claim);
-    const settlement = this.#earlyExecutionSettlements.get(incarnation);
+    const family = executionOverlayFamilyKey(claim);
+    const settlement = this.#earlyExecutionSettlements.get(family);
     if (settlement === undefined) return;
-    this.#earlyExecutionSettlements.delete(incarnation);
+    this.#earlyExecutionSettlements.delete(family);
     const frontier = this.coalescePendingSuccessfulExecutionSettlement(
       settlement,
     );
     if (
-      this.settlementMatchesLiveClaim(frontier) &&
+      this.settlementAddressesLocalSpeculation(frontier) &&
       this.reconcileExecutionSettlement(frontier)
     ) {
       this.#pendingExecutionSettlements.push(frontier);
     }
-  }
-
-  private clearEarlyExecutionSettlement(claim: ExecutionClaim): void {
-    this.#earlyExecutionSettlements.delete(
-      executionClaimIncarnationKey(claim),
-    );
   }
 
   /**
@@ -6233,7 +6269,12 @@ class SpaceReplica implements ISpaceReplica {
         executionClaimIncarnationKey(replacement) !==
           executionClaimIncarnationKey(previous)
       ) {
-        this.clearEarlyExecutionSettlement(previous);
+        // §2b row 6: the early-settlement frontier SURVIVES this. It records
+        // that the server has accepted data for this action family which this
+        // replica has not applied yet — a fact about data, not about who was
+        // authorised to produce it. Clearing it here erased a live
+        // accepted-data barrier and let the next speculation be retired before
+        // its replacement had landed (D5: HOLD, never flicker).
         const invalidated = this.dropClaimedOverlays(
           (overlay) =>
             executionClaimIncarnationKey(overlay.claim) ===
@@ -6287,7 +6328,11 @@ class SpaceReplica implements ISpaceReplica {
           "claim-generation-replaced",
           invalidated,
         );
-        this.clearEarlyExecutionSettlement(current);
+        // The early-settlement frontier survives the generation bump — see the
+        // snapshot-replace arm above. Same action identity, same acting lane,
+        // same implementation and runtime fingerprints: only the arbitration
+        // moved, and the server's accepted data is exactly as unapplied as it
+        // was a line ago.
       }
       this.#executionClaims.set(key, event.claim);
       return;
@@ -6304,7 +6349,9 @@ class SpaceReplica implements ISpaceReplica {
         return;
       }
       this.#executionClaims.delete(key);
-      this.clearEarlyExecutionSettlement(current);
+      // The early-settlement frontier survives the revoke — see the
+      // snapshot-replace arm above. A revoke retires an authority; it does not
+      // un-accept data the server already committed.
       const invalidated = this.dropClaimedOverlays(
         (overlay) =>
           executionClaimIncarnationKey(overlay.claim) ===
@@ -6335,12 +6382,13 @@ class SpaceReplica implements ISpaceReplica {
       return;
     }
 
-    if (this.settlementMatchesLiveClaim(event.settlement)) {
+    const hasOverlay = this.hasClaimedOverlaysInFamily(
+      executionOverlayFamilyKey(event.settlement.claim),
+    );
+    if (
+      this.settlementAddressesLocalSpeculation(event.settlement, hasOverlay)
+    ) {
       this.noteExecutionSettlement(event.settlement);
-      const incarnation = executionClaimIncarnationKey(event.settlement.claim);
-      const hasOverlay = [...this.#claimedOverlays.values()].some((overlay) =>
-        executionClaimIncarnationKey(overlay.claim) === incarnation
-      );
       if (!hasOverlay) {
         this.retainEarlyExecutionSettlement(event.settlement);
         return;
@@ -6355,10 +6403,40 @@ class SpaceReplica implements ISpaceReplica {
     }
   }
 
-  private settlementMatchesLiveClaim(settlement: ActionSettlement): boolean {
-    const current = this.#executionClaims.get(
-      actionClaimMapKey(settlement.claim),
-    );
+  /** True while any local speculation for this action family is still held. */
+  private hasClaimedOverlaysInFamily(family: string): boolean {
+    for (const overlay of this.#claimedOverlays.values()) {
+      if (executionOverlayFamilyKey(overlay.claim) === family) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Does this settlement speak to speculation THIS replica is holding?
+   *
+   * §2b row 6: the successful drop is keyed by the action family, so the
+   * admission test is family-shaped too — **do I hold an overlay this
+   * settlement's action ran?** When the answer is yes the seq comparisons
+   * below decide everything else, and they are the only things that can: two
+   * settlements of one family carry the same `implementationFingerprint` and
+   * `runtimeFingerprint` (both are components of the family key), so at equal
+   * input basis they name the same value. A claim generation cannot change
+   * what the server computed — it only ever said who was allowed to compute
+   * it, which is the arbitration this arc deletes.
+   *
+   * The claim check survives only on the OTHER arm, where nothing local is at
+   * stake: a settlement with no overlay to retire is merely cached as an early
+   * frontier, and while claims still exist there is no reason to cache one the
+   * client is not deferring to. That arm is the last claim term on this path;
+   * once claims stop being minted the family arm is the whole predicate.
+   */
+  private settlementAddressesLocalSpeculation(
+    settlement: ActionSettlement,
+    hasOverlay?: boolean,
+  ): boolean {
+    const family = executionOverlayFamilyKey(settlement.claim);
+    if (hasOverlay ?? this.hasClaimedOverlaysInFamily(family)) return true;
+    const current = this.#executionClaims.get(family);
     return current !== undefined &&
       executionClaimIncarnationKey(current) ===
         executionClaimIncarnationKey(settlement.claim);
@@ -6367,13 +6445,20 @@ class SpaceReplica implements ISpaceReplica {
   /** Returns true only while this exact settlement still awaits a local basis
    * translation or accepted-data application barrier. */
   private reconcileExecutionSettlement(settlement: ActionSettlement): boolean {
-    const incarnation = executionClaimIncarnationKey(settlement.claim);
+    const family = executionOverlayFamilyKey(settlement.claim);
     const matching = [...this.#claimedOverlays.values()].filter((overlay) =>
-      executionClaimIncarnationKey(overlay.claim) === incarnation
+      executionOverlayFamilyKey(overlay.claim) === family
     );
     if (matching.length === 0) return false;
     if (settlement.outcome === "failed") return false;
     if (settlement.outcome === "unserved") {
+      // §1f / CP1: the fail-open, client-authoritative arm. It keeps its exact
+      // claim-incarnation predicate — an unserved settlement is a statement
+      // about ONE claim attempt, not about the action's value, so it must not
+      // inherit the family widening above. Today the two predicates select the
+      // same overlays (one family holds one incarnation at a time), so this is
+      // the same set it always dropped.
+      const incarnation = executionClaimIncarnationKey(settlement.claim);
       this.dropClaimedOverlays(
         (overlay) =>
           executionClaimIncarnationKey(overlay.claim) === incarnation,
@@ -6513,11 +6598,12 @@ class SpaceReplica implements ISpaceReplica {
     const pending = this.#pendingExecutionSettlements;
     this.#pendingExecutionSettlements = [];
     for (const settlement of pending) {
-      if (!this.settlementMatchesLiveClaim(settlement)) continue;
-      const incarnation = executionClaimIncarnationKey(settlement.claim);
-      const hasOverlay = [...this.#claimedOverlays.values()].some((overlay) =>
-        executionClaimIncarnationKey(overlay.claim) === incarnation
+      const hasOverlay = this.hasClaimedOverlaysInFamily(
+        executionOverlayFamilyKey(settlement.claim),
       );
+      if (!this.settlementAddressesLocalSpeculation(settlement, hasOverlay)) {
+        continue;
+      }
       if (
         !hasOverlay &&
         (settlement.outcome === "committed" || settlement.outcome === "no-op")

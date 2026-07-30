@@ -859,6 +859,179 @@ Deno.test("a later early no-op retains an earlier committed data barrier", async
   }
 });
 
+// ---------------------------------------------------------------------------
+// §2b row 6 — the successful overlay drop is keyed by the ACTION FAMILY
+// (action identity + acting lane), not by a claim incarnation.
+//
+// `claim-deletion-scope.md` §2b: "the accepted-data barrier
+// (`retainEarlyExecutionSettlement`, `reconcileExecutionSettlement`,
+// `overlayHasUnresolvedBasis`) is coherence machinery, not arbitration — it
+// survives with a re-keyed index."
+//
+// The barrier answers "has the server's committed data reached this replica
+// yet?". A claim generation answers "who is authorised to run this action".
+// While the barrier was indexed by claim incarnation the two questions were
+// fused, and a generation bump ERASED a live accepted-data barrier — the
+// classic drop-too-eagerly failure: the next speculation is retired before the
+// server value it is standing in for has been applied, and the user sees the
+// pre-commit value flash. D5 says HOLD, never flicker.
+
+Deno.test("a claim generation bump must not erase the server's committed data barrier", async () => {
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  const replacement = { ...claim, claimGeneration: claim.claimGeneration + 1 };
+  const query = {
+    space: SPACE,
+    branch: "",
+    pieceId: claim.pieceId,
+    actionId: claim.actionId,
+  };
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    // The server commits at seq 5 before this replica speculates anything, so
+    // the settlement is cached as an early successful frontier.
+    await factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim,
+            inputBasisSeq: toInputBasisSeq(0),
+            outcome: "committed",
+            acceptedCommitSeq: 5 as AcceptedCommitSeq,
+          },
+        }],
+      },
+    }));
+    // The claim's generation advances — a re-claim of the SAME action on the
+    // SAME lane. Nothing about the server's already-accepted data at seq 5
+    // changed; only who holds the (transitional) right to run it.
+    await factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 2,
+        toFeedSeq: 3,
+        events: [{
+          type: "session.execution.claim.set",
+          claim: replacement,
+        }],
+      },
+    }));
+    assertCondition(() =>
+      storage.getExecutionRoutingDiagnostics(query).executionFeedSeq === 3
+    );
+
+    await writeClaimedOutput(storage, "speculation-under-new-generation");
+    assertEquals(visibleOutput(storage), "speculation-under-new-generation");
+
+    // A covering no-op under the NEW generation. Its basis covers the overlay,
+    // but the committed data at seq 5 is still not applied here, so the drop
+    // must wait: retiring the overlay now reveals the pre-commit value.
+    await factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 3,
+        toFeedSeq: 4,
+        events: [{
+          type: "session.execution.settlement",
+          settlement: {
+            branch: "",
+            claim: replacement,
+            inputBasisSeq: toInputBasisSeq(0),
+            outcome: "no-op",
+          },
+        }],
+      },
+    }));
+    assertEquals(visibleOutput(storage), "speculation-under-new-generation");
+    assertEquals(
+      storage.getExecutionRoutingDiagnostics(query).actions[0]
+        ?.pendingOverlayCount,
+      1,
+    );
+
+    await factory.view.push(emptySync({
+      toSeq: 5,
+      upserts: [{
+        branch: "",
+        id: OUTPUT,
+        seq: 5,
+        doc: { value: "authoritative-across-generations" },
+      }],
+    }));
+    assertCondition(() =>
+      visibleOutput(storage) === "authoritative-across-generations"
+    );
+    const diagnostics = storage.getExecutionRoutingDiagnostics(query);
+    assertEquals(diagnostics.actions[0]?.pendingOverlayCount, 0);
+    assertEquals(diagnostics.actions[0]?.basisCoveredOverlayDrops, 1);
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
+Deno.test("one action family holds at most one overlay generation — the family key loses no precision", async () => {
+  // The precision obligation of the re-key: two overlays distinguished today
+  // by claim incarnation must not collapse to one family key tomorrow. They
+  // cannot, because they never coexist. Every incarnation change drops the
+  // previous incarnation's overlays before the new claim is installed
+  // (`claim-generation-replaced`), and an overlay minted against a stale claim
+  // is dropped at creation (`captured-claim-no-longer-live`). So within one
+  // (action identity, acting lane) family the live overlay set carries exactly
+  // one incarnation at every instant, and partitioning by family is the SAME
+  // partition the incarnation key produced.
+  setServerPrimaryExecutionConfig(true);
+  const factory = new OverlaySessionFactory();
+  const storage = OverlayStorageManager.connect(factory);
+  const replacement = { ...claim, leaseGeneration: claim.leaseGeneration + 1 };
+  const query = {
+    space: SPACE,
+    branch: "",
+    pieceId: claim.pieceId,
+    actionId: claim.actionId,
+  };
+  try {
+    await storage.open(SPACE).sync(INPUT);
+    await writeClaimedOutput(storage, "first-generation-overlay");
+    assertEquals(
+      storage.getExecutionRoutingDiagnostics(query).actions[0]
+        ?.pendingOverlayCount,
+      1,
+    );
+
+    await factory.view.push(emptySync({
+      execution: {
+        fromFeedSeq: 1,
+        toFeedSeq: 2,
+        events: [{
+          type: "session.execution.claim.set",
+          claim: replacement,
+        }],
+      },
+    }));
+    // The lease bump retired the first generation's overlay outright.
+    assertCondition(() => visibleOutput(storage) === undefined);
+    assertEquals(
+      storage.getExecutionRoutingDiagnostics(query).actions[0]
+        ?.pendingOverlayCount,
+      0,
+    );
+
+    await writeClaimedOutput(storage, "second-generation-overlay");
+    assertEquals(
+      storage.getExecutionRoutingDiagnostics(query).actions[0]
+        ?.pendingOverlayCount,
+      1,
+    );
+  } finally {
+    await storage.close();
+    resetServerPrimaryExecutionConfig();
+  }
+});
+
 Deno.test("live computation claims are exposed without broadening builtin capture", async () => {
   setServerPrimaryExecutionConfig(true);
   const factory = new OverlaySessionFactory();
@@ -1386,7 +1559,29 @@ Deno.test("a later live no-op retains an earlier committed data barrier", async 
   }
 });
 
-Deno.test("old claim generation settlement cannot clear a replacement overlay", async () => {
+// RE-EXPECTED (§2b row 6, the successful overlay drop's carrier). This test
+// was titled "old claim generation settlement cannot clear a replacement
+// overlay" and asserted that the replacement overlay stayed visible. That was
+// the claim-incarnation index speaking, and the index was answering the wrong
+// question: it asked "did the same claim attempt produce this?" when the only
+// thing that matters is "has the server produced the canonical value for these
+// inputs?".
+//
+// Two settlements of one action family carry the same `pieceId`, `actionId`,
+// `actionKind`, `implementationFingerprint` and `runtimeFingerprint` — all five
+// are components of the family key — so at equal input basis they name the same
+// value. A claim generation never changed what the server computed; it said who
+// was allowed to compute it, which is the arbitration D11 deletes. Holding the
+// overlay here therefore held a speculation the server had already contradicted
+// at that exact basis: silent divergence, not safety.
+//
+// The other failure mode is not opened. A `no-op` carries no
+// `acceptedCommitSeq` because it produced no new data — the canonical value IS
+// the confirmed base already in this replica, so the drop reveals data in hand
+// and cannot flicker. A `committed` settlement still waits behind
+// `#executionAppliedSeq`, pinned by "a claim generation bump must not erase the
+// server's committed data barrier" above.
+Deno.test("a settlement from an earlier claim generation retires the same family's overlay at that basis", async () => {
   setServerPrimaryExecutionConfig(true);
   const factory = new OverlaySessionFactory();
   const storage = OverlayStorageManager.connect(factory);
@@ -1406,6 +1601,7 @@ Deno.test("old claim generation settlement cannot clear a replacement overlay", 
     }));
     assertCondition(() => visibleOutput(storage) === undefined);
     await writeClaimedOutput(storage, "replacement-overlay");
+    assertEquals(visibleOutput(storage), "replacement-overlay");
 
     await factory.view.push(emptySync({
       execution: {
@@ -1422,7 +1618,18 @@ Deno.test("old claim generation settlement cannot clear a replacement overlay", 
         }],
       },
     }));
-    assertEquals(visibleOutput(storage), "replacement-overlay");
+    // The server says the canonical result of THIS action at basis 0 is the
+    // confirmed base. The overlay is retired authoritatively — a basis-covered
+    // drop, not a producer-dirtying one, so no client rerun is provoked.
+    assertEquals(visibleOutput(storage), undefined);
+    const diagnostics = storage.getExecutionRoutingDiagnostics({
+      space: SPACE,
+      branch: "",
+      pieceId: claim.pieceId,
+      actionId: claim.actionId,
+    });
+    assertEquals(diagnostics.actions[0]?.pendingOverlayCount, 0);
+    assertEquals(diagnostics.actions[0]?.basisCoveredOverlayDrops, 1);
   } finally {
     await storage.close();
     resetServerPrimaryExecutionConfig();
