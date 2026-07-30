@@ -96,6 +96,7 @@ describe("llmDialog message document scope", () => {
     );
     const result = runtime.run(tx, testPattern, {}, resultCell);
     await tx.commit();
+    await runtime.idle();
 
     const addMessage = await result.key("addMessage").pull();
     addMessage.send({ role: "user", content: "Hello" });
