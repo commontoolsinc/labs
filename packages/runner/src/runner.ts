@@ -114,6 +114,7 @@ import { getVerifiedProvenance } from "./harness/verified-provenance.ts";
 import {
   getArtifactEntryRef,
   getPatternProgram,
+  getPatternSourcePath,
   isTrustedBuilderArtifact,
   resolveOriginal,
 } from "./builder/pattern-metadata.ts";
@@ -1525,7 +1526,11 @@ export class Runner {
       this.runtime.onPatternInstantiated?.({
         identity: entryRef.identity,
         symbol: entryRef.symbol,
-        main: getPatternProgram(pattern)?.main,
+        // The source path stamped at module-index time is the reliable one: a
+        // pattern reloaded BY IDENTITY carries no program, so a nested
+        // instantiation would otherwise arrive sourceless. Fall back to the
+        // program for a hand-built pattern that has one.
+        main: getPatternSourcePath(pattern) ?? getPatternProgram(pattern)?.main,
         cell: resultCell.getAsNormalizedFullLink(),
       });
     }

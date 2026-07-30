@@ -43,6 +43,7 @@ import {
 } from "../packages/piece/src/system-pattern-url.ts";
 import {
   armVerdictGuard,
+  collectVintages,
   isClean,
   relativeToRepo,
   reportFailures,
@@ -127,16 +128,27 @@ async function main() {
     return;
   }
 
-  const { vintages, replayed, failures } = await replayAll(roots);
-  const uncovered = uncoveredRequiredPatterns(required, vintages);
+  const { replayed, candidates, changed, updated, failures } = await replayAll(
+    roots,
+  );
+  const uncovered = uncoveredRequiredPatterns(
+    required,
+    await collectVintages(roots.vintagesRoot),
+  );
 
   if (uncovered.length > 0) console.error(reportUncovered(uncovered));
   if (replayed === 0) console.error(`\n${reportNothingReplayed()}`);
   if (failures.length > 0) console.error(`\n${reportFailures(failures)}`);
 
-  if (!isClean(failures, uncovered, replayed)) Deno.exit(1);
+  // CANDIDATES is the soundness floor, not `updated`. A run where nothing
+  // changed legitimately updates nothing — that is the common case, and the
+  // auto-updater fires on the same condition. But a run with no candidates
+  // examined no update targets at all, which is the shape that has read as
+  // success three separate times in this tier's history.
+  if (!isClean(failures, uncovered, replayed, candidates)) Deno.exit(1);
   console.log(
-    `Replayed ${replayed} vintage(s) under today's source; all readable.`,
+    `Replayed ${replayed} vintage(s): ${candidates} recorded instantiation(s), ` +
+      `${changed} changed since capture, ${updated} updated cleanly.`,
   );
 }
 

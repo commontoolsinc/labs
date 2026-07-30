@@ -1,19 +1,18 @@
 /**
- * The vintage gate's actual work: capture a missing vintage, replay every
- * vintage that exists.
+ * The vintage gate's actual work: capture a populated store by running a
+ * pattern's own tests, and replay a captured store under today's source.
  *
- * Split from `pattern-vintage.ts` so it takes its roots as arguments instead
- * of deriving them from `import.meta.url`. That is what makes the gate
- * testable against a temp tree holding a throwaway pattern — and the test
- * that buys is the one that matters: break a pattern on purpose and prove the
- * gate goes red. Verifying that by hand on every change is exactly the check
- * that stops happening.
- *
- * The shell (`pattern-vintage.ts`) keeps only argument parsing and printing.
+ * Split from `pattern-vintage.ts` so it takes its roots as arguments instead of
+ * deriving them from `import.meta.url`. That is what makes the gate testable
+ * against a temp tree holding a throwaway pattern — and the test that buys is
+ * the one that matters: break a pattern on purpose and prove the gate goes red.
+ * Verifying that by hand on every change is exactly the check that stops
+ * happening.
  */
 
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import type { Identity } from "@commonfabric/identity";
+import { runTestPattern } from "../packages/cli/lib/test-runner.ts";
 import {
   collectVintages,
   describeError,
@@ -26,9 +25,13 @@ import {
   type VintageRef,
 } from "./pattern-vintage-lib.ts";
 import {
-  materializeOver,
+  materializeOnCell,
   openFileBackedRuntime,
-  vintageStoredIdentity,
+  readVintageManifest,
+  type VintageManifestEntry,
+  vintageRootCause,
+  vintageRootHasState,
+  writeVintageManifest,
 } from "../packages/piece/test/state-continuity-harness.ts";
 
 export interface GateRoots {
@@ -70,108 +73,278 @@ function resolver(roots: GateRoots, patternKey: string) {
   );
 }
 
-/** Replay one fixture under today's source. Returns a failure, or undefined. */
+/** A test pattern creates stores; it is never an upgrade target (#5180). */
+export function isUpgradeTarget(entry: VintageManifestEntry): boolean {
+  return entry.main !== undefined && !/\.test\.tsx?$/.test(entry.main);
+}
+
+/** What replaying one fixture found. */
+export interface ReplayReport {
+  /** Instantiations the fixture recorded. Zero means it proved nothing. */
+  candidates: number;
+  /** Recorded instantiations that are legitimate upgrade targets. */
+  targets: number;
+  /** Targets whose source CHANGED since capture — the actual migrations. */
+  changed: number;
+  /** Changed targets that applied cleanly. */
+  updated: number;
+  failures: ReplayFailure[];
+}
+
+/**
+ * Replay one fixture: apply today's source to every RECORDED instantiation
+ * whose pattern has changed since the capture.
+ *
+ * Only the changed ones are applied, because an unchanged identity has no
+ * migration to exercise — the same condition the auto-updater itself fires on.
+ * So the recorded set is the CANDIDATE set, not the work list.
+ */
 export async function replayVintage(
   roots: GateRoots,
   vintage: VintageRef,
-): Promise<ReplayFailure | undefined> {
+): Promise<ReplayReport> {
   const where = {
     patternKey: vintage.patternKey,
     path: relativeToRepo(vintage.path, roots.repoRoot),
   };
+  const fail = (detail: string): ReplayReport => ({
+    candidates: 0,
+    targets: 0,
+    changed: 0,
+    updated: 0,
+    failures: [{ ...where, detail }],
+  });
+
   return await withRuntime(roots, vintage.path, async (runtimeVintage) => {
     // The control, before anything is applied. A fixture that did not restore
     // presents as a fresh empty space, and today's source materializes onto a
     // fresh empty space just fine — so without this, "green" and "the fixture
-    // was never there" are the same reading. Checking it against the identity
-    // in the FILENAME does double duty: it also proves that name is provenance
-    // rather than decoration.
-    const stored = await vintageStoredIdentity(runtimeVintage);
-    if (stored !== vintage.identity) {
-      return {
-        ...where,
-        detail: stored === undefined
-          ? "this fixture holds no captured root — it did not restore, so replaying it would prove nothing"
-          : `this fixture's root was written by ${stored}, but its name records ${vintage.identity}`,
-      };
-    }
-    let program;
-    try {
-      program = await runtimeVintage.runtime.harness.resolve(
-        resolver(roots, vintage.patternKey),
+    // was never there" are the same reading.
+    if (!await vintageRootHasState(runtimeVintage)) {
+      return fail(
+        "this fixture holds no captured root — it did not restore, so " +
+          "replaying it would prove nothing",
       );
-    } catch (error) {
-      return {
-        ...where,
-        detail: `today's source does not resolve: ${describeError(error)}`,
-      };
     }
-    const outcome = await materializeOver(runtimeVintage, program as never);
-    if (outcome.error !== undefined) {
-      return {
-        ...where,
-        detail:
-          `materializing today's source over this vintage was REFUSED:\n      ${outcome.error}`,
-      };
+    const manifest = await readVintageManifest(runtimeVintage);
+    if (manifest === undefined || manifest.entries.length === 0) {
+      return fail(
+        "this fixture records no pattern instantiations, so there is nothing " +
+          "to update and a green run would assert nothing. Recapture it with " +
+          "`deno task pattern-vintage --update`",
+      );
     }
-    if (outcome.value === undefined) {
-      return {
-        ...where,
-        detail:
-          "materialized, but the root reads as undefined — the vintage's state is gone",
-      };
+
+    const targets = manifest.entries.filter(isUpgradeTarget);
+    const report: ReplayReport = {
+      candidates: manifest.entries.length,
+      targets: targets.length,
+      changed: 0,
+      updated: 0,
+      failures: [],
+    };
+
+    for (const entry of targets) {
+      const source = `${roots.repoRoot}${entry.main}`;
+      let program;
+      try {
+        program = await runtimeVintage.runtime.harness.resolve(
+          new FileSystemProgramResolver(source, roots.repoRoot),
+        );
+      } catch (error) {
+        report.failures.push({
+          ...where,
+          detail: `${entry.main} no longer resolves: ${describeError(error)}`,
+        });
+        continue;
+      }
+      const pattern = await runtimeVintage.runtime.patternManager
+        .compilePattern(program as never, {
+          space: runtimeVintage.space as never,
+        });
+      const today = runtimeVintage.runtime.patternManager
+        .getArtifactEntryRef(pattern)?.identity;
+      // Unchanged identity, no migration to exercise. This is the common case
+      // and a legitimate no-op, NOT a skipped check.
+      if (today === entry.identity) continue;
+      report.changed++;
+
+      const outcome = await materializeOnCell(
+        runtimeVintage,
+        program as never,
+        (v, resultSchema) =>
+          v.runtime.getCellFromEntityId(
+            v.space as never,
+            entry.cellId as never,
+            [],
+            resultSchema as never,
+          ),
+      );
+      if (outcome.error !== undefined) {
+        report.failures.push({
+          ...where,
+          detail:
+            `updating ${entry.main} (${entry.symbol}) over this vintage ` +
+            `was REFUSED:\n      ${outcome.error}`,
+        });
+        continue;
+      }
+      report.updated++;
     }
-    return undefined;
+    return report;
   });
 }
 
-/**
- * Replay every fixture under `vintagesRoot`.
- *
- * Hands the enumeration back so the coverage check reads the SAME list rather
- * than walking the tree a second time. Two walks would be two answers to one
- * question, and the pair "replayed nothing" / "everything is covered" is
- * exactly the disagreement that reads as a pass.
- */
+/** Replay every fixture under `vintagesRoot`. */
 export async function replayAll(
   roots: GateRoots,
-): Promise<{
-  vintages: VintageRef[];
-  replayed: number;
-  failures: ReplayFailure[];
-}> {
+): Promise<
+  {
+    replayed: number;
+    candidates: number;
+    changed: number;
+    updated: number;
+    failures: ReplayFailure[];
+  }
+> {
   const vintages = await collectVintages(roots.vintagesRoot);
+  let candidates = 0, changed = 0, updated = 0;
   const failures: ReplayFailure[] = [];
   for (const vintage of vintages) {
-    const failure = await replayVintage(roots, vintage);
-    if (failure !== undefined) failures.push(failure);
+    const report = await replayVintage(roots, vintage);
+    candidates += report.candidates;
+    changed += report.changed;
+    updated += report.updated;
+    failures.push(...report.failures);
   }
-  return { vintages, replayed: vintages.length, failures };
+  return { replayed: vintages.length, candidates, changed, updated, failures };
 }
 
-/** Capture a vintage for `patternKey` from today's source. */
+/** The pattern-test file that populates a vintage for `patternKey`. */
+export function testPathFor(roots: GateRoots, patternKey: string): string {
+  return `${roots.patternsRoot}/${patternKey.replace(/\.tsx?$/, "")}.test.tsx`;
+}
+
+/**
+ * Capture a vintage for `patternKey` by running its OWN tests against a
+ * file-backed store, then snapshotting.
+ *
+ * The tests are what put DATA in the fixture. A vintage captured straight off
+ * setup holds a freshly materialized root and nothing else, so no change can
+ * strand anything in it. Pattern tests are themselves patterns —
+ * `home.test.tsx` instantiates `Home({})` and drives it with
+ * `action()`/`assert()` — so what they leave behind is real pattern state
+ * written through real handlers.
+ *
+ * Each capture gets a FRESH store. Vintages are independent snapshots of one
+ * version's world, never one database migrated forward: a carried-forward
+ * lineage would already be shaped by every migration since, and would no longer
+ * be state written by a version that knew nothing about today's.
+ */
 export async function captureVintage(
   roots: GateRoots,
   patternKey: string,
   now: Date,
 ): Promise<string> {
-  return await withRuntime(roots, undefined, async (runtimeVintage) => {
-    const program = await runtimeVintage.runtime.harness.resolve(
-      resolver(roots, patternKey),
-    );
-    const outcome = await materializeOver(runtimeVintage, program as never);
-    if (outcome.error !== undefined) {
+  const testPath = testPathFor(roots, patternKey);
+  const dir = await Deno.makeTempDir({ prefix: "pattern-vintage-capture-" });
+  const vintage = await openFileBackedRuntime(roots.signer, dir);
+  try {
+    // What the run instantiates and where. There is no way to enumerate this
+    // from the store afterwards, so it is observed as it happens.
+    const seen = new Map<string, VintageManifestEntry>();
+    const result = await runTestPattern(testPath, {
+      root: roots.repoRoot,
+      storageHost: {
+        identity: roots.signer,
+        storageManager: vintage.storageManager as never,
+        // Pin the test's root so the replay can find it; the runner otherwise
+        // causes it with Date.now().
+        resultCause: vintageRootCause(),
+        onPatternInstantiated: (instantiation) => {
+          const cellId = String(instantiation.cell.id);
+          // Dedupe: a pattern re-materialized during a run is one target.
+          seen.set(`${instantiation.identity}/${cellId}`, {
+            identity: instantiation.identity,
+            symbol: instantiation.symbol,
+            main: instantiation.main,
+            cellId,
+            space: String(instantiation.cell.space),
+          });
+        },
+      },
+    });
+    // A failed test run would record a state the pattern never legitimately
+    // reaches, so refuse rather than pin it.
+    const failed = result.results.filter((r) => !r.passed && !r.skipped);
+    if (result.error !== undefined || failed.length > 0) {
       throw new Error(
-        `cannot capture ${patternKey}: its own setup was refused: ${outcome.error}`,
+        `cannot capture ${patternKey}: its own tests did not pass, so the ` +
+          `fixture would record a state the pattern never reaches: ${
+            result.error ??
+              failed.map((r) => `${r.name}: ${r.error}`).join("; ")
+          }`,
       );
     }
-    const dir = `${roots.vintagesRoot}/${patternKey}/${PINNED}`;
-    await Deno.mkdir(dir, { recursive: true });
-    const name = vintageFileName(stampFor(now), outcome.identity);
-    const path = `${dir}/${name}`;
-    await runtimeVintage.snapshot(path);
+    if (result.results.length === 0) {
+      throw new Error(
+        `cannot capture ${patternKey}: ${testPath} ran no assertions, so the ` +
+          `fixture would hold no test-written state`,
+      );
+    }
+    // The pattern's own identity, read off the compiled artifact rather than
+    // guessed — provenance for which version wrote the state, and the name the
+    // fixture carries.
+    const program = await vintage.runtime.harness.resolve(
+      new FileSystemProgramResolver(
+        `${roots.patternsRoot}/${patternKey}`,
+        roots.repoRoot,
+      ),
+    );
+    const pattern = await vintage.runtime.patternManager.compilePattern(
+      program as never,
+      { space: vintage.space as never },
+    );
+    const ref = vintage.runtime.patternManager.getArtifactEntryRef(pattern);
+    if (ref === undefined) {
+      throw new Error(
+        `cannot capture ${patternKey}: compiled pattern has no identity`,
+      );
+    }
+
+    // Fill in the source for the pattern under test where the runtime could
+    // not. `setPatternSourcePath` stamps it at module-index time, but not every
+    // evaluate path carries `sourcePathByIdentity` yet, so a nested
+    // instantiation can still arrive sourceless — including the one this
+    // fixture exists for. The capture knows that one mapping for certain, by
+    // matching the identity it just compiled.
+    //
+    // The remaining sourceless entries are recorded anyway rather than dropped:
+    // they are real update targets that cannot yet be mapped to a file, and the
+    // replay reports them. Completing the runtime-side propagation is what
+    // removes this fallback.
+    const entries = [...seen.values()].map((entry) =>
+      entry.identity === ref.identity && entry.main === undefined
+        ? { ...entry, main: `/packages/patterns/${patternKey}` }
+        : entry
+    );
+    if (!entries.some(isUpgradeTarget)) {
+      throw new Error(
+        `cannot capture ${patternKey}: the run instantiated no upgradable ` +
+          `pattern (${entries.length} instantiation(s), all test patterns or ` +
+          `sourceless), so the fixture would have nothing to replay`,
+      );
+    }
+    await writeVintageManifest(vintage, entries);
+    const outDir = `${roots.vintagesRoot}/${patternKey}/${PINNED}`;
+    await Deno.mkdir(outDir, { recursive: true });
+    const path = `${outDir}/${vintageFileName(stampFor(now), ref.identity)}`;
+    await vintage.snapshot(path);
     return path;
-  });
+  } finally {
+    await vintage.dispose().catch(() => {});
+    await Deno.remove(dir, { recursive: true }).catch(() => {});
+  }
 }
 
 /** Capture a vintage for every required pattern that has none. */

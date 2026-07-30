@@ -57,6 +57,37 @@ function asKey(value: unknown): object | undefined {
 }
 
 /** The rehydration source associated with a pattern, if any. */
+/**
+ * The authored file a pattern was defined in.
+ *
+ * Distinct from `patternProgram`, which is the whole source CLOSURE and is
+ * deliberately absent on the by-identity reload path. This is just the
+ * filename, which that path does know and can afford to keep — enough to map a
+ * live pattern back to a file without carrying its sources.
+ */
+// A WeakMap for the same reason `programByPattern` above is one: an evaluated
+// module's exports are HARDENED, so defining a property on one throws
+// ("object is not extensible"). The association has to live beside the value,
+// not on it.
+const sourcePathByPattern = new WeakMap<object, string>();
+
+export function setPatternSourcePath(
+  pattern: unknown,
+  sourcePath: string,
+): void {
+  if (pattern === null) return;
+  if (typeof pattern !== "object" && typeof pattern !== "function") return;
+  sourcePathByPattern.set(pattern as object, sourcePath);
+}
+
+export function getPatternSourcePath(pattern: unknown): string | undefined {
+  if (pattern === null) return undefined;
+  if (typeof pattern !== "object" && typeof pattern !== "function") {
+    return undefined;
+  }
+  return sourcePathByPattern.get(pattern as object);
+}
+
 export function getPatternProgram(
   pattern: unknown,
 ): RuntimeProgram | undefined {

@@ -401,6 +401,12 @@ export function armVerdictGuard(
  * tested, rather than being an `if` at the bottom of `main` that a later edit
  * can quietly invert — a gate that exits 0 on failure is worse than no gate.
  *
+ * `candidates` is the soundness floor, NOT the number updated. A run where no
+ * pattern changed legitimately updates nothing, which is the common case and
+ * the same condition the auto-updater fires on. A run with no CANDIDATES
+ * examined no update targets at all — the shape that has read as success three
+ * separate times in this tier's history.
+ *
  * `replayed` is part of the condition and not just a number to print: zero
  * replays is the shape a broken gate takes, not the shape a clean tree takes.
  */
@@ -408,6 +414,8 @@ export function isClean(
   failures: readonly ReplayFailure[],
   uncovered: readonly string[],
   replayed: number,
+  candidates: number,
 ): boolean {
-  return failures.length === 0 && uncovered.length === 0 && replayed > 0;
+  return failures.length === 0 && uncovered.length === 0 && replayed > 0 &&
+    candidates > 0;
 }

@@ -107,6 +107,7 @@ import type {
   ExperimentalOptions,
   ModuleByteCache,
   NavigateCallback,
+  PatternInstantiationObserver,
   PieceCreatedCallback,
   RuntimeFetch,
   RuntimeOptions,
@@ -310,6 +311,8 @@ export interface PatternTestPresetParams extends CoreParams {
   cfcEnforcementMode?: CfcEnforcementMode;
   /** Statement-coverage collector for `cf test` and the pattern harnesses. */
   patternCoverage?: PatternCoverageCollector;
+  /** Records what a run materializes; see the vintage capture. */
+  onPatternInstantiated?: PatternInstantiationObserver;
 }
 
 export interface BrowserWorkerPresetParams extends CoreParams {
@@ -413,6 +416,9 @@ export const runtimePresets = {
         : {}),
       ...(params.patternCoverage !== undefined
         ? { patternCoverage: params.patternCoverage }
+        : {}),
+      ...(params.onPatternInstantiated !== undefined
+        ? { onPatternInstantiated: params.onPatternInstantiated }
         : {}),
     };
   },

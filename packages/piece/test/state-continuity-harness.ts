@@ -105,6 +105,13 @@ function serverOver(storeDir: string): MemoryV2Server.Server {
 
 export interface VintageRuntime {
   runtime: Runtime;
+  /**
+   * The store behind `runtime`, exposed so another harness can write into the
+   * same file. The vintage capture hands this to the pattern-test runner so a
+   * pattern's OWN tests populate the fixture — real state through real
+   * handlers, rather than a bare materialized root with nothing in it.
+   */
+  storageManager: StorageManager;
   space: string;
   storeDir: string;
   /** Snapshot this space to `destPath`. Crash-consistent, runs no migrations. */
@@ -143,6 +150,7 @@ export async function openFileBackedRuntime(
 
   return {
     runtime,
+    storageManager,
     space,
     storeDir,
     async snapshot(destPath: string) {
@@ -216,6 +224,12 @@ export const DEFAULT_VINTAGE_ROOT_KEY = "vintage-root";
  * replay something nobody captured. One key per pattern keeps roots distinct
  * while each stays addressable across captures.
  */
+export function vintageRootCause(
+  key: string = DEFAULT_VINTAGE_ROOT_KEY,
+): { stateContinuity: string } {
+  return { stateContinuity: key };
+}
+
 export function vintageRoot<T>(
   vintage: VintageRuntime,
   schema: unknown,
@@ -223,7 +237,7 @@ export function vintageRoot<T>(
 ): Cell<T> {
   return vintage.runtime.getCell<T>(
     vintage.space as never,
-    { stateContinuity: key },
+    vintageRootCause(key),
     schema as never,
   );
 }
@@ -257,6 +271,35 @@ export interface VintageManifest {
   entries: VintageManifestEntry[];
 }
 
+/**
+ * Schema for the manifest doc.
+ *
+ * Explicit rather than `undefined`: a schema-less read comes back as a
+ * query-result proxy whose array elements resolve lazily, and iterating it gave
+ * `undefined` entries — the manifest has to materialize as plain data before
+ * anything reads it.
+ */
+const VINTAGE_MANIFEST_SCHEMA = {
+  type: "object",
+  properties: {
+    entries: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          identity: { type: "string" },
+          symbol: { type: "string" },
+          main: { type: "string" },
+          cellId: { type: "string" },
+          space: { type: "string" },
+        },
+        required: ["identity", "symbol", "cellId", "space"],
+      },
+    },
+  },
+  required: ["entries"],
+} as const;
+
 /** Write the manifest into the store, so it travels with the state. */
 export async function writeVintageManifest(
   vintage: VintageRuntime,
@@ -265,15 +308,19 @@ export async function writeVintageManifest(
   const cell = vintage.runtime.getCell<VintageManifest>(
     vintage.space as never,
     VINTAGE_MANIFEST_CAUSE,
-    undefined as never,
+    VINTAGE_MANIFEST_SCHEMA as never,
   );
   const { error } = await vintage.runtime.editWithRetry((tx) => {
-    cell.withTx(tx).set({ entries: [...entries] } as never);
+    cell.withTx(tx).set({ entries: entries.map((e) => ({ ...e })) } as never);
   });
   if (error !== undefined) {
     throw new Error(`could not write vintage manifest: ${error.message}`);
   }
   await vintage.runtime.idle();
+  // The snapshot copies the FILE, so the write has to be durable before it —
+  // an in-flight manifest would produce a fixture whose state is real and whose
+  // update targets are missing.
+  await vintage.runtime.storageManager.synced();
 }
 
 /** Read a restored fixture's manifest. `undefined` = none recorded. */
@@ -283,13 +330,18 @@ export async function readVintageManifest(
   const cell = vintage.runtime.getCell<VintageManifest>(
     vintage.space as never,
     VINTAGE_MANIFEST_CAUSE,
-    undefined as never,
+    VINTAGE_MANIFEST_SCHEMA as never,
   );
   await cell.sync();
   try {
     const value = cell.get() as VintageManifest | undefined;
     if (value === undefined || !Array.isArray(value.entries)) return undefined;
-    return value;
+    // Detach from the query-result proxy: its array elements resolve lazily,
+    // and a caller that iterates the live view sees `undefined` entries.
+    const entries = value.entries
+      .map((entry) => (entry === undefined ? undefined : { ...entry }))
+      .filter((entry): entry is VintageManifestEntry => entry !== undefined);
+    return { entries };
   } catch {
     // An absent doc reads as a throw rather than undefined; for this question
     // the two are the same answer.
@@ -334,39 +386,43 @@ export async function vintageArgumentLink(
 }
 
 /**
- * The pattern identity a captured vintage's root is already stamped with.
+ * Whether a restored fixture's root already holds state.
  *
- * This is a CONTROL, and the replay gate is unsound without one. A fixture
- * that did not restore — truncated, empty, or seeded where the engine does not
- * look — presents to the runtime as a fresh empty space, and materializing
- * today's source onto a fresh empty space succeeds. The replay would then read
- * green having proved nothing at all, which is the same trap the storage-move
- * case hits in `state-continuity.test.ts`: emptiness is indistinguishable from
- * a fixture that was never there.
+ * This is a CONTROL, and the replay gate is unsound without one. A fixture that
+ * did not restore — truncated, empty, or seeded where the engine does not look
+ * — presents to the runtime as a fresh empty space, and materializing today's
+ * source onto a fresh empty space succeeds. The replay would then read green
+ * having proved nothing at all: emptiness is indistinguishable from a fixture
+ * that was never there.
  *
- * `undefined` means no root was captured. A value that disagrees with the
- * fixture's filename means the name is not provenance but decoration.
+ * The evidence is "the root holds a value", NOT "the root carries a matching
+ * patternIdentity stamp". A vintage is captured by running the pattern's own
+ * TESTS, and the test harness roots its graph with `runtime.run`, so the stamp
+ * at the root belongs to the TEST pattern rather than to the pattern the
+ * fixture is named for — an identity check would reject every fixture the
+ * capture produces.
  */
-export async function vintageStoredIdentity(
+export async function vintageRootHasState(
   vintage: VintageRuntime,
   rootKey: string = DEFAULT_VINTAGE_ROOT_KEY,
-): Promise<string | undefined> {
+): Promise<boolean> {
   const root = vintageRoot<Record<string, unknown>>(
     vintage,
     undefined,
     rootKey,
   );
   await root.sync();
-  let stamp: unknown;
   try {
-    stamp = root.getMetaRaw("patternIdentity");
+    const value = root.get();
+    if (value === undefined || value === null) return false;
+    // An object with no keys is what a fresh space yields for a doc nobody
+    // wrote, so it is not evidence either.
+    return typeof value !== "object" || Object.keys(value).length > 0;
   } catch {
     // An absent doc reads as a throw rather than `undefined`, and for this
     // question the two are the same answer: nothing was captured here.
-    return undefined;
+    return false;
   }
-  const identity = (stamp as { identity?: unknown } | undefined)?.identity;
-  return typeof identity === "string" ? identity : undefined;
 }
 
 /** Read a vintage's stored argument under `schema` (`undefined` = raw). */
@@ -464,6 +520,30 @@ export async function materializeOver(
   program: RuntimeProgram,
   rootKey: string = DEFAULT_VINTAGE_ROOT_KEY,
 ): Promise<MaterializeOutcome> {
+  return await materializeOnCell(
+    vintage,
+    program,
+    (v, schema) => vintageRoot<Record<string, unknown>>(v, schema, rootKey),
+  );
+}
+
+/**
+ * Materialize `program` onto a cell chosen by `locate`, through the production
+ * repair call.
+ *
+ * The indirection exists so the replay can target a cell recorded in a
+ * fixture's manifest rather than only the well-known vintage root. `locate`
+ * receives the compiled result schema, because a root has to be read under the
+ * schema of the pattern being applied to it.
+ */
+export async function materializeOnCell(
+  vintage: VintageRuntime,
+  program: RuntimeProgram,
+  locate: (
+    vintage: VintageRuntime,
+    resultSchema: unknown,
+  ) => Cell<Record<string, unknown>>,
+): Promise<MaterializeOutcome> {
   const { runtime } = vintage;
   const pattern = await runtime.patternManager.compilePattern(program, {
     space: vintage.space as never,
@@ -472,11 +552,7 @@ export async function materializeOver(
   if (ref === undefined) {
     throw new Error("compiled candidate has no artifact entry ref");
   }
-  const root = vintageRoot<Record<string, unknown>>(
-    vintage,
-    pattern.resultSchema,
-    rootKey,
-  );
+  const root = locate(vintage, pattern.resultSchema);
   await root.sync();
 
   const { error: stampError } = await runtime.editWithRetry((tx) => {
