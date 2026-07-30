@@ -498,10 +498,18 @@ Deno.test("user-rank issuance requires a live lane grant", async () => {
   }
 });
 
-// Engine-level: the new named fence cause for stale lane generations. The
-// host supplies `laneAuthority` on the commit fence; a claim bound to a
-// fenced or superseded lane generation rejects before any row is written.
-Deno.test("stale lane generations fence commits with lane-generation-stale", async () => {
+// Engine-level: the named fence cause for stale lane generations. The host
+// supplies `laneAuthority` on the commit fence; a claim bound to a fenced or
+// superseded lane generation rejects before any row is written.
+//
+// Slice 2b row 4 re-carried this cause onto the lane a commit ACTS AS, so it
+// no longer needs a claim to be reached (the unclaimed half is pinned in
+// `v2-execution-lane-firewall-test.ts`). This case keeps the CLAIMED half, and
+// re-expects the query shape: while claims exist the consult still carries the
+// claim, which pins the generation bound at ISSUANCE — strictly stronger than
+// the acting lane's liveness lookup, and therefore not weakened by the
+// widening.
+Deno.test("stale lane generations fence a CLAIMED commit with lane-generation-stale", async () => {
   const directory = await Deno.makeTempDir();
   const engine = await Engine.open({
     url: toFileUrl(`${directory}/space.sqlite`),
@@ -572,6 +580,7 @@ Deno.test("stale lane generations fence commits with lane-generation-stale", asy
       status: "success",
     };
     const before = Engine.serverSeq(engine);
+    const consulted: { contextKey: unknown; claimed: boolean }[] = [];
     const error = assertThrows(
       () =>
         Engine.applyCommit(engine, {
@@ -595,12 +604,23 @@ Deno.test("stale lane generations fence commits with lane-generation-stale", asy
             lease,
             nowMs: nowMs + 1,
             authorize: () => true,
-            laneAuthority: () => false,
+            laneAuthority: (query) => {
+              consulted.push({
+                contextKey: (query as { contextKey?: unknown }).contextKey,
+                claimed: (query as { claim?: unknown }).claim !== undefined,
+              });
+              return false;
+            },
           },
         }),
       Engine.ExecutionLeaseFenceError,
     );
     assertEquals(error.fenceCause, "lane-generation-stale");
+    // The claimed consult, named by lane and still carrying its claim.
+    assertEquals(consulted, [{
+      contextKey: claim.contextKey,
+      claimed: true,
+    }]);
     assertEquals(Engine.serverSeq(engine), before);
     assertEquals(
       Engine.read(engine, {

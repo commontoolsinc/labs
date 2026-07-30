@@ -512,7 +512,14 @@ Deno.test("one commit may assert claims of exactly one lane", async () => {
   }
 });
 
-Deno.test("acting-principal WRITE loss at commit time fences lane-write-authority", async () => {
+// Slice 2b row 3 re-carried this check onto the lane the commit ACTS AS, so an
+// unclaimed served run gets it too (pinned in
+// `v2-execution-lane-firewall-test.ts`). This case keeps the CLAIMED half, and
+// its single-element `consulted` expectation is now load-bearing in a second
+// way: the acting-lane consult must DEDUPE against the claim's, which names
+// the same lane and resolves the same principal. Two entries here would mean
+// the widening double-charged the claimed set.
+Deno.test("acting-principal WRITE loss at commit time fences a CLAIMED commit with lane-write-authority", async () => {
   const { directory, engine } = await openTempEngine();
   const nowMs = 1_800_000_000_000;
   try {

@@ -1055,8 +1055,10 @@ const unclaimedObservation = (
   return unclaimed;
 };
 
-/** A served run's commit with no claim and no lease fence — the post-deletion
- * shape. `actingContext` is the ONLY thing naming its lane. */
+/** A served run's commit with no claim — the post-deletion shape.
+ * `actingContext` is the ONLY thing naming its lane. A `lease` may be supplied
+ * to exercise the in-transaction lease fence (slice 2b): the host builds one
+ * for every bound executor session, claim or no claim. */
 const applyActingLane = (
   engine: Engine.Engine,
   options: {
@@ -1069,6 +1071,10 @@ const applyActingLane = (
     observation?: SchedulerActionObservation;
     scopeSessionId?: string;
     localSeq?: number;
+    lease?: ExecutionLease;
+    nowMs?: number;
+    fence?: Partial<Engine.ExecutionLeaseFence>;
+    executionClaims?: ReadonlyMap<number, ExecutionClaim>;
   },
 ) => {
   const localSeq = options.localSeq ?? 1;
@@ -1088,8 +1094,36 @@ const applyActingLane = (
     ...(options.actingContext !== undefined
       ? { actingContext: options.actingContext }
       : {}),
+    ...(options.executionClaims !== undefined
+      ? { executionClaims: options.executionClaims }
+      : {}),
+    ...(options.lease !== undefined
+      ? {
+        executionLeaseFence: {
+          lease: options.lease,
+          nowMs: options.nowMs ?? 0,
+          authorize: () => true,
+          ...options.fence,
+        },
+      }
+      : {}),
   });
 };
+
+const assertFenceCause = (run: () => unknown, cause: string): void => {
+  const error = assertThrows(run, Engine.ExecutionLeaseFenceError);
+  assertEquals(error.fenceCause, cause, error.message);
+};
+
+/** The context key an authority consult named, plus whether it carried a
+ * claim. Typed loosely so the pin reads the same shape before and after the
+ * `laneAuthority` signature change. */
+const laneConsultShape = (
+  query: unknown,
+): { contextKey: unknown; claimed: boolean } => ({
+  contextKey: (query as { contextKey?: unknown }).contextKey,
+  claimed: (query as { claim?: unknown }).claim !== undefined,
+});
 
 Deno.test("an UNCLAIMED commit acting as a user lane reaches the firewall — broad value writes still reject broad-lane-value-write", async () => {
   const { directory, engine } = await openTempEngine();
@@ -1232,6 +1266,393 @@ Deno.test("a commit that names NO lane stays outside the firewall (ordinary clie
     assertEquals(
       Engine.read(engine, { id: BROAD_LINK_WRITE.id }),
       { value: { value: "a plain broad value" } },
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// SLICE 2b rows 3 & 4 — the two AUTHORITY checks that decide who may write
+// are carried by the acting lane, not by a claim
+// (`claim-deletion-scope.md` §2b, rows 3 and 4).
+//
+// Both live in the in-transaction lease fence and both survive claim deletion:
+// they decide WHO MAY WRITE, which is write bounding, not arbitration.
+//
+//   `lane-write-authority`  — re-resolves WRITE for the ACTING principal at
+//                             transaction time, so a mid-run ACL revocation
+//                             fences the in-flight commit instead of landing
+//                             rows under her scope.
+//   `lane-generation-stale` — the lane's grant must still be live; a drained
+//                             or superseded lane may not commit.
+//
+// Before this slice both were reached ONLY from `for (const claim of
+// options.claims)`, so an unclaimed served lane run — the shape every served
+// run has once claims are gone — wrote with NEITHER check. The claimed set
+// keeps every byte: the acting lane of a claimed commit IS the claim's lane
+// (`claim-observation-mismatch` fences any disagreement upstream), so the
+// per-claim consults still run, still first, still against the same lane, and
+// the acting-lane consult dedupes against them rather than double-charging.
+
+const LANE_DRAINED = { laneAuthority: () => false } as const;
+
+Deno.test("an UNCLAIMED commit acting as a user lane fences lane-generation-stale when its lane grant is gone", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const before = Engine.serverSeq(engine);
+    assertFenceCause(
+      () =>
+        applyActingLane(engine, {
+          actingContext: USER_CONTEXT_KEY,
+          operations: [],
+          surfaces: { writes: [USER_OUTPUT] },
+          lease,
+          nowMs: nowMs + 1,
+          fence: LANE_DRAINED,
+        }),
+      "lane-generation-stale",
+    );
+    assertEquals(Engine.serverSeq(engine), before);
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("the acting-lane grant consult names the CONTEXT KEY and carries no claim", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const consulted: { contextKey: unknown; claimed: boolean }[] = [];
+    applyActingLane(engine, {
+      actingContext: USER_CONTEXT_KEY,
+      operations: [],
+      surfaces: { writes: [USER_OUTPUT] },
+      lease,
+      nowMs: nowMs + 1,
+      fence: {
+        laneAuthority: (query) => {
+          consulted.push(laneConsultShape(query));
+          return true;
+        },
+      },
+    });
+    // The grant registry is keyed by (space, branch, contextKey), so the lane
+    // the run acted as is a sufficient lookup — that is the whole of row 4.
+    assertEquals(consulted, [{ contextKey: USER_CONTEXT_KEY, claimed: false }]);
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("an UNCLAIMED commit acting as a user lane fences lane-write-authority when the lane principal lost WRITE", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const before = Engine.serverSeq(engine);
+    const consulted: string[] = [];
+    assertFenceCause(
+      () =>
+        applyActingLane(engine, {
+          actingContext: USER_CONTEXT_KEY,
+          operations: [],
+          surfaces: { writes: [USER_OUTPUT] },
+          lease,
+          nowMs: nowMs + 1,
+          fence: {
+            authorizeActingPrincipal: (_engine, principal) => {
+              consulted.push(principal);
+              return false;
+            },
+          },
+        }),
+      "lane-write-authority",
+    );
+    // The DECODED lane principal, never the sponsor — identical to the claimed
+    // path's resolution, because it reads the same canonical context key.
+    assertEquals(consulted, [PRINCIPAL]);
+    assertEquals(Engine.serverSeq(engine), before);
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("an UNCLAIMED commit acting as a SESSION lane decodes its principal from the canonical session key", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const consulted: string[] = [];
+    // CA7: without the session decode the WRITE re-check fails OPEN for
+    // session lanes — the acting-lane carrier must keep that leg.
+    assertFenceCause(
+      () =>
+        applyActingLane(engine, {
+          actingContext: SESSION_CONTEXT_KEY,
+          scopeSessionId: "s1",
+          operations: [],
+          surfaces: { writes: [SESSION_OUTPUT] },
+          lease,
+          nowMs: nowMs + 1,
+          fence: {
+            authorizeActingPrincipal: (_engine, principal) => {
+              consulted.push(principal);
+              return false;
+            },
+          },
+        }),
+      "lane-write-authority",
+    );
+    assertEquals(consulted, [PRINCIPAL]);
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("a CLAIMED commit's authority consults are unchanged in number and lane", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const claim = claimFor(lease, USER_CONTEXT_KEY);
+    const lanes: { contextKey: unknown; claimed: boolean }[] = [];
+    const writes: string[] = [];
+    const commit: ClientCommit = {
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservation: observationFor(claim, { writes: [USER_OUTPUT] }),
+    };
+    Engine.applyCommit(engine, {
+      sessionId: "executor-session",
+      scopeSessionId: "executor-session",
+      space: SPACE,
+      principal: PRINCIPAL,
+      commit,
+      actingContext: USER_CONTEXT_KEY,
+      executionClaims: new Map([[1, claim]]),
+      executionLeaseFence: {
+        lease,
+        nowMs: nowMs + 1,
+        authorize: () => true,
+        laneAuthority: (query) => {
+          lanes.push(laneConsultShape(query));
+          return true;
+        },
+        authorizeActingPrincipal: (_engine, principal) => {
+          writes.push(principal);
+          return true;
+        },
+      },
+    });
+    // TWO consults, both claim-carrying: the lane-admission consult
+    // (`admitExecutionCommitLanes`) and the fence's per-claim consult. Both
+    // keep their ISSUANCE-generation pin (`claimed: true`) — strictly stronger
+    // than the acting lane's liveness lookup — and the acting-lane consult
+    // dedupes against them because it names the same lane. Widening authority
+    // coverage must not add a third charge to the claimed set.
+    assertEquals(lanes, [
+      { contextKey: USER_CONTEXT_KEY, claimed: true },
+      { contextKey: USER_CONTEXT_KEY, claimed: true },
+    ]);
+    assertEquals(writes, [PRINCIPAL]);
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test('an acting lane of "space" consults NEITHER lane authority', async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const consulted: unknown[] = [];
+    const applied = applyActingLane(engine, {
+      actingContext: "space" as SchedulerExecutionContextKey,
+      operations: [],
+      surfaces: { writes: [address("space", "of:lane-space-observed")] },
+      lease,
+      nowMs: nowMs + 1,
+      fence: {
+        laneAuthority: (query) => {
+          consulted.push(query);
+          return false;
+        },
+        authorizeActingPrincipal: (_engine, principal) => {
+          consulted.push(principal);
+          return false;
+        },
+      },
+    });
+    // Space-rank runs are not lane-scoped: neither check has a lane to
+    // resolve, and both stay byte-identical to the pre-lane fence.
+    assertEquals(consulted, []);
+    assertExists(applied.schedulerObservationResults);
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("a commit naming NO lane consults NEITHER lane authority (ordinary clients are unchanged)", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const consulted: unknown[] = [];
+    const applied = applyActingLane(engine, {
+      operations: [],
+      surfaces: { writes: [USER_OUTPUT] },
+      lease,
+      nowMs: nowMs + 1,
+      fence: {
+        laneAuthority: (query) => {
+          consulted.push(query);
+          return false;
+        },
+        authorizeActingPrincipal: (_engine, principal) => {
+          consulted.push(principal);
+          return false;
+        },
+      },
+    });
+    assertEquals(consulted, []);
+    assertExists(applied.schedulerObservationResults);
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("an exact observation replay stays idempotent after the ACTING lane is drained", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const apply = (laneLive: boolean) =>
+      applyActingLane(engine, {
+        actingContext: USER_CONTEXT_KEY,
+        operations: [],
+        surfaces: { writes: [USER_OUTPUT] },
+        lease,
+        nowMs: nowMs + 1,
+        fence: { laneAuthority: () => laneLive },
+      });
+    const first = apply(true);
+    assert(first.schedulerObservationResults?.[0].status === "kept");
+    // Replay detection runs BEFORE the fence, so a lost-response replay of an
+    // already-settled observation still returns its stored result rather than
+    // fencing on the now-drained lane. The acting-lane consult must not move
+    // ahead of that ordering.
+    const replay = apply(false);
+    assert(Engine.isAppliedCommitReplay(replay));
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The observation BATCH path — the firewall must reach it too.
+//
+// Slice 2a re-parameterized the firewall on the acting lane, and the batch
+// fan-out (`applySchedulerObservationBatchCommit`) does not forward one, so a
+// batched item reached the firewall's precondition with `actingLane ===
+// undefined` and skipped every check. Batched items are the same served
+// action runs as the single-observation path and must be bounded identically.
+
+Deno.test("a CLAIMED BATCH item acting as a user lane reaches the firewall", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const claim = claimFor(lease, USER_CONTEXT_KEY);
+    const sessionOutput = address("session", "of:lane-batch-session-output");
+    const commit: ClientCommit = {
+      localSeq: 10,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservationBatch: [{
+        localSeq: 11,
+        reads: { confirmed: [], pending: [] },
+        schedulerObservation: observationFor(claim, {
+          writes: [sessionOutput],
+        }),
+      }],
+    };
+    assertFirewallReject(
+      () =>
+        Engine.applyCommit(engine, {
+          sessionId: "executor-session",
+          scopeSessionId: "executor-session",
+          space: SPACE,
+          principal: PRINCIPAL,
+          commit,
+          executionClaims: new Map([[11, claim]]),
+          executionLeaseFence: {
+            lease,
+            nowMs: nowMs + 1,
+            authorize: () => true,
+          },
+        }),
+      "non-lane-scope",
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("an UNCLAIMED BATCH item acting as a user lane reaches both the firewall and the lane authorities", async () => {
+  const { directory, engine } = await openTempEngine();
+  const nowMs = 1_800_000_000_000;
+  try {
+    const lease = acquire(engine, nowMs);
+    const sessionOutput = address("session", "of:lane-batch-unclaimed");
+    const batchCommit = (
+      writes: readonly SchedulerObservationAddress[],
+    ): ClientCommit => ({
+      localSeq: 20,
+      reads: { confirmed: [], pending: [] },
+      operations: [],
+      schedulerObservationBatch: [{
+        localSeq: 21,
+        reads: { confirmed: [], pending: [] },
+        schedulerObservation: unclaimedObservation({ writes }),
+      }],
+    });
+    const applyBatch = (
+      writes: readonly SchedulerObservationAddress[],
+      fence?: Partial<Engine.ExecutionLeaseFence>,
+    ) =>
+      Engine.applyCommit(engine, {
+        sessionId: "executor-session",
+        scopeSessionId: "executor-session",
+        space: SPACE,
+        principal: PRINCIPAL,
+        commit: batchCommit(writes),
+        actingContext: USER_CONTEXT_KEY,
+        executionLeaseFence: {
+          lease,
+          nowMs: nowMs + 1,
+          authorize: () => true,
+          ...fence,
+        },
+      });
+    assertFirewallReject(() => applyBatch([sessionOutput]), "non-lane-scope");
+    assertFenceCause(
+      () => applyBatch([USER_OUTPUT], LANE_DRAINED),
+      "lane-generation-stale",
     );
   } finally {
     Engine.close(engine);

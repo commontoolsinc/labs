@@ -4511,13 +4511,26 @@ export class Server {
       // through the shared binding — is live at the generation bound at
       // issuance; the engine rejects otherwise with the counted cause
       // `lane-generation-stale`.
-      laneAuthority: (claim) => {
-        const binding = this.#executionClaimLaneBindings.get(
+      //
+      // Slice 2b row 4: the same consult answers for a lane no claim covers.
+      // The registry is keyed by (space, branch, contextKey), so the lane the
+      // commit ACTS AS is a complete lookup — this is the identical
+      // `#liveLaneGrantForKey` sample `#actingReadScopeContext` takes when it
+      // validates the wire's acting context, re-taken INSIDE the commit's
+      // IMMEDIATE transaction, which is what closes the window between the two.
+      // A claim, when present, keeps the strictly stronger generation pin.
+      laneAuthority: ({ contextKey, claim }) => {
+        if (claim === undefined) {
+          return this.#liveLaneGrantForKey(
+            laneGrantKey(space, binding.lease.branch, contextKey),
+          ) !== undefined;
+        }
+        const laneBinding = this.#executionClaimLaneBindings.get(
           actionClaimMapKey(claim),
         );
-        return binding !== undefined &&
-          this.#liveLaneGrantForKey(binding.laneKey)?.laneGeneration ===
-            binding.laneGeneration;
+        return laneBinding !== undefined &&
+          this.#liveLaneGrantForKey(laneBinding.laneKey)?.laneGeneration ===
+            laneBinding.laneGeneration;
       },
       // C1.4 (amendment 2): the same transaction-time authorize also
       // resolves WRITE for the ACTING principal of a scoped claim, so a

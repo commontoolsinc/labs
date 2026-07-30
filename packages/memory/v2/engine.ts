@@ -1069,6 +1069,30 @@ export interface ReleaseLegacyBackgroundExclusionOptions {
   authorizeService?: (engine: Engine) => boolean;
 }
 
+/**
+ * What the host is asked about when a commit's lane must still be live
+ * (slice 2b row 4, `claim-deletion-scope.md` §2b). The lane-grant registry is
+ * keyed by `(space, branch, contextKey)`, so the CONTEXT KEY is the whole
+ * lookup — which is why this survives the claim's deletion as a signature
+ * change rather than a redesign.
+ */
+export interface ExecutionLaneAuthorityQuery {
+  /** The lane whose grant must be live: the lane the commit ACTS AS, or the
+   * lane of the claim being validated. Both name the same lane whenever both
+   * exist — `claim-observation-mismatch` fences any disagreement upstream. */
+  contextKey: SchedulerExecutionContextKey;
+  /**
+   * Transitional, and STRICTLY STRONGER than the acting-lane query: present
+   * only while claims exist, it pins the lane generation bound at claim
+   * ISSUANCE, so a lane that drained and was re-granted under a new generation
+   * fences even though a grant is live under the same key. Absent = the
+   * per-commit acting-lane consult, which asks liveness only. A claimed
+   * commit therefore keeps its stronger answer, and the acting-lane consult
+   * dedupes against it rather than weakening or double-charging it.
+   */
+  claim?: ExecutionClaim;
+}
+
 /** Host-only authority checked against the durable row inside applyCommit. */
 export interface ExecutionLeaseFence {
   lease: ExecutionLease;
@@ -1081,21 +1105,26 @@ export interface ExecutionLeaseFence {
    */
   authorize?: (engine: Engine) => boolean;
   /**
-   * Host-supplied lane-grant currency check for scoped (non-space) claims
-   * (C1.3). Lane generations are host-internal — never a wire field on
-   * claims — so the host re-samples its live lane grant against the
-   * generation bound at claim issuance, inside the same IMMEDIATE
-   * transaction as the fence. Returning false fences the commit with the
-   * named cause `lane-generation-stale`. Space-rank claims never consult it.
+   * Host-supplied lane-grant currency check for a scoped (non-space) LANE
+   * (C1.3; slice 2b row 4). Lane generations are host-internal — never a wire
+   * field — so the host re-samples its live lane grant inside the same
+   * IMMEDIATE transaction as the fence. Returning false fences the commit
+   * with the named cause `lane-generation-stale`. The space lane never
+   * consults it, and neither does a commit that names no lane at all.
+   *
+   * The query carries the claim while claims exist (see
+   * {@link ExecutionLaneAuthorityQuery}); an unclaimed served run asks the
+   * same question about the lane it ACTED AS.
    */
-  laneAuthority?: (claim: ExecutionClaim) => boolean;
+  laneAuthority?: (lane: ExecutionLaneAuthorityQuery) => boolean;
   /**
    * Transaction-time WRITE resolution for a scoped lane's ACTING principal
-   * (C1.4, review amendment 2), consulted inside the same IMMEDIATE
-   * transaction as the sponsor `authorize` checks — a mid-run ACL
+   * (C1.4, review amendment 2; slice 2b row 3), consulted inside the same
+   * IMMEDIATE transaction as the sponsor `authorize` checks — a mid-run ACL
    * revocation of the lane principal fences the in-flight commit instead
    * of landing rows under her scope. Returning false fences with the named
-   * cause `lane-write-authority`. Space-rank claims never consult it.
+   * cause `lane-write-authority`. The space lane never consults it, and
+   * neither does a commit that names no lane at all.
    */
   authorizeActingPrincipal?: (engine: Engine, principal: string) => boolean;
 }
@@ -4034,6 +4063,68 @@ export const releaseLegacyBackgroundExclusion = (
   engine.database.transaction(releaseLegacyBackgroundExclusionTransaction)
     .immediate(engine, options);
 
+/**
+ * The acting principal a scoped lane resolves to — the identity whose WRITE
+ * authority `lane-write-authority` re-checks at transaction time.
+ *
+ * C2.1 (amendment CA7): session lanes resolve their principal from the
+ * canonical session key. Without that leg the WRITE re-check fails OPEN for
+ * every session lane, so the decode belongs with the check, not at one of its
+ * call sites. The space lane and any unparseable key resolve to `undefined`,
+ * which is exactly today's "no acting principal to re-check" behavior.
+ */
+const laneActingPrincipal = (
+  contextKey: SchedulerExecutionContextKey,
+): string | undefined =>
+  contextKey === "space" ? undefined : principalOfUserContextKey(contextKey) ??
+    parseSessionExecutionContextKey(contextKey)?.principal;
+
+/**
+ * The two lane AUTHORITY checks — `lane-generation-stale` (the lane's grant is
+ * still live) and `lane-write-authority` (the lane principal still holds
+ * WRITE). Both decide WHO MAY WRITE, so both survive claim deletion
+ * (`claim-deletion-scope.md` §2b rows 3 and 4); slice 2b re-carries them off
+ * the claim loop and onto the lane the commit ACTS AS.
+ *
+ * Pure re-carrying, never a re-decision: a claimed commit's acting lane IS its
+ * claim's lane, so the claim consults below still run, still first, still
+ * against the same lane, and this per-commit consult DEDUPES against them —
+ * the claimed set keeps its byte-identical answers and its call counts.
+ */
+const assertActingLaneAuthority = (
+  engine: Engine,
+  options: {
+    fence: ExecutionLeaseFence;
+    actingLane?: SchedulerExecutionContextKey;
+    claims: readonly ExecutionClaim[];
+  },
+): void => {
+  const lane = options.actingLane;
+  // `undefined` — nothing named a lane — is the whole ordinary-client
+  // population, and `"space"` is not lane-scoped: neither has a lane grant or
+  // an acting principal to resolve, exactly as before.
+  if (lane === undefined || lane === "space") return;
+  // Already checked by a claim of this same lane, under the stronger
+  // issuance-generation pin. Re-asking would only double-charge the host.
+  if (options.claims.some((claim) => claim.contextKey === lane)) return;
+  if (options.fence.laneAuthority?.({ contextKey: lane }) === false) {
+    throw new ExecutionLeaseFenceError(
+      "lane-generation-stale",
+      "execution lane grant is fenced or superseded",
+    );
+  }
+  const actingPrincipal = laneActingPrincipal(lane);
+  if (
+    actingPrincipal !== undefined &&
+    options.fence.authorizeActingPrincipal?.(engine, actingPrincipal) === false
+  ) {
+    throw new ExecutionLeaseFenceError(
+      "lane-write-authority",
+      "execution lane acting principal lacks current WRITE authority",
+    );
+  }
+};
+
 const assertExecutionLeaseFenceTransaction = (
   engine: Engine,
   options: {
@@ -4042,6 +4133,9 @@ const assertExecutionLeaseFenceTransaction = (
     branch: BranchName;
     principal?: string;
     claims: readonly ExecutionClaim[];
+    /** Slice 2b: the lane this commit ACTS AS — the claim-free carrier of the
+     * two lane authority checks below. `undefined` names no lane. */
+    actingLane?: SchedulerExecutionContextKey;
     requireExactClaim?: boolean;
   },
 ): void => {
@@ -4103,7 +4197,7 @@ const assertExecutionLeaseFenceTransaction = (
     }
     if (
       claim.contextKey !== "space" &&
-      fence.laneAuthority?.(claim) === false
+      fence.laneAuthority?.({ contextKey: claim.contextKey, claim }) === false
     ) {
       throw new ExecutionLeaseFenceError(
         "lane-generation-stale",
@@ -4113,11 +4207,7 @@ const assertExecutionLeaseFenceTransaction = (
     if (claim.contextKey !== "space") {
       // Amendment 2: the fence resolves WRITE for the ACTING principal in
       // the same transaction-time authorize as the sponsor lease checks.
-      // C2.1 (amendment CA7): session-rank claims resolve their principal
-      // from the canonical session key — without this the WRITE re-check
-      // would fail OPEN for session lanes.
-      const actingPrincipal = principalOfUserContextKey(claim.contextKey) ??
-        parseSessionExecutionContextKey(claim.contextKey)?.principal;
+      const actingPrincipal = laneActingPrincipal(claim.contextKey);
       if (
         actingPrincipal !== undefined &&
         fence.authorizeActingPrincipal?.(engine, actingPrincipal) === false
@@ -4129,6 +4219,16 @@ const assertExecutionLeaseFenceTransaction = (
       }
     }
   }
+  // Slice 2b: the same two checks for the lane this commit ACTS AS. Runs
+  // AFTER the claim loop so every rejection a claimed commit takes today
+  // keeps its cause and its ordering; it is reached only by a lane-naming
+  // commit whose lane no claim covered — the shape every served run has once
+  // claims stop being minted.
+  assertActingLaneAuthority(engine, {
+    fence,
+    actingLane: options.actingLane,
+    claims: options.claims,
+  });
 };
 
 export const applyCommit = (
@@ -8667,7 +8767,12 @@ const admitExecutionCommitLanes = (
         "execution claim incarnation does not match the accepted scheduler action",
       );
     }
-    if (options.executionLeaseFence?.laneAuthority?.(claim) === false) {
+    if (
+      options.executionLeaseFence?.laneAuthority?.({
+        contextKey: claim.contextKey,
+        claim,
+      }) === false
+    ) {
       throw new ExecutionLeaseFenceError(
         "lane-generation-stale",
         "execution claim lane grant is fenced or superseded",
@@ -8811,6 +8916,7 @@ const applyCommitTransaction = (
       space,
       principal,
       actingPrincipal,
+      actingLane,
       branch,
       batch: schedulerObservationBatch,
       executionClaims,
@@ -8909,6 +9015,7 @@ const applyCommitTransaction = (
     branch,
     principal,
     claims: executionClaims === undefined ? [] : [...executionClaims.values()],
+    actingLane,
     requireExactClaim: commit.operations.length > 0,
   });
 
@@ -10132,6 +10239,7 @@ const applySchedulerObservationOnlyCommit = (
     branch,
     principal,
     claims: executionClaim === undefined ? [] : [executionClaim],
+    actingLane,
   });
   // C3.8: the home-apply epoch fence for a served observation-only attempt
   // (no-op / failed with foreign reads). An unserved-attempt marker authors
@@ -10247,6 +10355,7 @@ const applySchedulerObservationBatchCommit = (
     space,
     principal,
     actingPrincipal,
+    actingLane,
     branch,
     batch,
     executionClaims,
@@ -10262,6 +10371,10 @@ const applySchedulerObservationBatchCommit = (
     /** C1.4: one acting principal for the WHOLE batch — lane admission has
      * already enforced that the batch asserts exactly one lane. */
     actingPrincipal?: string;
+    /** Slice 2b: and one acting LANE, for the same reason. Batched items are
+     * the same served action runs as the single-observation path — they must
+     * reach the write firewall and the lane authorities identically. */
+    actingLane?: SchedulerExecutionContextKey;
     branch: BranchName;
     batch: NonNullable<ClientCommit["schedulerObservationBatch"]>;
     executionClaims?: ReadonlyMap<number, ExecutionClaim>;
@@ -10289,6 +10402,7 @@ const applySchedulerObservationBatchCommit = (
       space,
       principal,
       actingPrincipal,
+      actingLane,
       branch,
       localSeq: item.localSeq,
       transaction: {
