@@ -264,15 +264,17 @@ export interface ExecutionPoolMetricsSnapshot {
    * grace windows — the keep-warm cost of the grace dial (P0b), reported
    * against the context-lattice §4 cost-honesty budget. */
   readonly demandGraceIdleWorkerMs: number;
-  /** Generation replacements triggered by claim-authority loss on a live
-   * lane (P0): the lease's pinned sponsor died while the grace window kept
-   * the Worker alive, so re-acquisition re-anchors onto a live demanding
-   * sponsor. (Before the grace window, demand churn itself forced this
-   * rotation as a side effect of constant teardowns.) */
+  /** Generation replacements triggered by LEASE-authority loss on a live
+   * lane (P0, §2b row 7): the lease's pinned sponsor departed while the
+   * grace window kept the Worker alive, so re-acquisition re-anchors onto a
+   * live demanding sponsor. (Before the grace window, demand churn itself
+   * forced this rotation as a side effect of constant teardowns.) */
   readonly sponsorReanchors: number;
   /** Sponsor bindings re-pointed IN PLACE (no Worker restart) after a
-   * claim-authority loss — the cheap common case (same-principal session
-   * churn, e.g. a page reload). */
+   * lease-authority loss — the cheap common case (same-principal session
+   * churn, e.g. a page reload). Since the trigger moved off the claim
+   * decline onto the demand wire this counts probes the host could satisfy,
+   * which includes ones where the pin had not actually gone stale yet. */
   readonly sponsorRebinds: number;
   /** Coalesced reconciliation passes queued for indexed-relevant
    * executor-null/draining lanes. */
@@ -366,7 +368,7 @@ type Slot = {
   demandEmptyAt: number | null;
   /** The armed grace-expiry timer, cleared on blip/drain/close. */
   demandGraceTimer: number | null;
-  /** A sponsor re-anchor is queued or in flight (P0: claim-authority loss
+  /** A sponsor re-anchor is queued or in flight (P0: lease-authority loss
    * on a live lane); collapses repeated loss notes into one replacement. */
   reanchorQueued: boolean;
   /** When the last sponsor re-anchor ran (cooldown bookkeeping). */
@@ -386,6 +388,14 @@ type Slot = {
 
 const laneKey = (space: string, branch: BranchName): string =>
   JSON.stringify([space, branch]);
+
+/** The triple the host pins a lease's sponsor to. A row whose identity
+ * changes — connection hop, session resume, principal change — is a
+ * DEPARTURE plus an arrival, which is what a stale pin looks like. */
+const demandRowIdentity = (
+  demand: ExecutionDemandSnapshot["demands"][number],
+): string =>
+  JSON.stringify([demand.connectionId, demand.sessionId, demand.principal]);
 
 const unionPieces = (
   demands: ExecutionDemandSnapshot["demands"],
@@ -690,7 +700,9 @@ export class SharedExecutionPool {
     if (snapshot.order <= slot.order) return slot.tail;
     this.#metrics.demandSnapshots++;
     slot.order = snapshot.order;
+    const departed = this.#sponsorDepartures(slot.demands, snapshot.demands);
     slot.demands = snapshot.demands;
+    if (departed) this.#noteSponsorDeparture(slot);
     if (snapshot.demands.length === 0) {
       // P0 grace (client-passivity plan): defer both the in-flight-start
       // abort and the drain reconcile — the browser clears demand on every
@@ -721,21 +733,38 @@ export class SharedExecutionPool {
   }
 
   /**
-   * P0 sponsor re-anchor: a live lane's claim issuance failed with
-   * authority loss. The lease pins its sponsor (session, connection,
-   * demand row) at acquisition; when that session dies while the demand
-   * grace window keeps the Worker alive, every claim is refused
-   * server-side ("execution lease is not active and authorized") and
+   * P0 sponsor re-anchor, carried at LEASE level (§2b row 7).
+   *
+   * The lease pins its sponsor (session, connection, demand row) at
+   * acquisition; when that binding goes stale while the demand grace window
+   * keeps the Worker alive, the lease stops being able to authorize work and
    * nothing rotates — before the grace window, the constant demand-churn
-   * teardowns rotated the sponsor as a side effect. This entry replaces
-   * the generation deliberately: graceful settle under the still-active
-   * lease, drain, and re-acquisition — which picks its sponsor from the
-   * CURRENT demand set (`sponsorRotations` counts an actual change).
-   * Debounced by the queued flag and a cooldown of max(grace, 10s) so a
-   * space with NO authorizable sponsor cannot restart-loop.
+   * teardowns rotated the sponsor as a side effect. This entry replaces the
+   * generation deliberately: graceful settle under the still-active lease,
+   * drain, and re-acquisition — which picks its sponsor from the CURRENT
+   * demand set (`sponsorRotations` counts an actual change). Debounced by the
+   * queued flag and a cooldown of max(grace, 10s) so a space with NO
+   * authorizable sponsor cannot restart-loop.
+   *
+   * The trigger used to be the `claim-authority-lost` diagnostic — a
+   * claim-shaped report of a lease-shaped fact, and one that could only be
+   * raised AFTER a claim had already been refused. It now takes the lease
+   * itself: `#noteSponsorDeparture` raises it from the demand wire, and the
+   * generation the handle names is fenced below, which a `(space, branch)`
+   * claim key could not express.
+   *
+   * `suspected` marks the demand-wire caller, which knows a pinned row COULD
+   * have gone stale but not that it did. The only difference it makes is at
+   * the bottom of the ladder: a suspicion may escalate to a Worker restart
+   * when the host was asked to re-point and refused, never merely because a
+   * control has no rebind surface to ask.
    */
-  noteClaimAuthorityLoss(space: string, branch: BranchName): Promise<void> {
+  noteExecutionLeaseAuthorityLoss(
+    lease: ExecutionLeaseHandle,
+    options?: { readonly suspected?: boolean },
+  ): Promise<void> {
     if (this.#closed) return Promise.resolve();
+    const { space, branch } = lease;
     const slot = this.#slots.get(laneKey(space, branch));
     // A recovery path that silently declines to run is undebuggable (the
     // P0-R2 probe found 54 loss notes producing ZERO rebind attempts with
@@ -755,6 +784,15 @@ export class SharedExecutionPool {
     if (slot.state !== "live") return skipped(`state-${slot.state}`);
     if (slot.reanchorQueued) return skipped("queued");
     if (slot.lease === null) return skipped("no-lease");
+    // Fence the generation the note names. A note left over from a torn-down
+    // incarnation must not spend this one's cooldown — or, worse, restart a
+    // Worker whose lease was never the one that lost authority.
+    if (slot.lease.leaseGeneration !== lease.leaseGeneration) {
+      return skipped(
+        `superseded-lease[${lease.leaseGeneration}->` +
+          `${slot.lease.leaseGeneration}]`,
+      );
+    }
     const cooldownMs = Math.max(this.#demandGraceMs, 10_000);
     if (
       slot.lastReanchorAt !== null &&
@@ -764,17 +802,29 @@ export class SharedExecutionPool {
     // Cooldown runs from the ATTEMPT, so a storm of loss notes during the
     // async rebind cannot queue a second recovery.
     slot.lastReanchorAt = this.#now();
-    const lease = slot.lease;
+    // The pool's own handle, not the caller's: the generation fence above
+    // proved they name the same incarnation, and this one is the live object
+    // the host's authority map is keyed by.
+    const held = slot.lease;
+    const rebind = this.#control.reanchorExecutionLeaseSponsor;
+    const generation = slot.generationToken;
     return (async () => {
       try {
         // Cheap common case first: same-principal session churn (a page
         // reload killed the sponsor session). The host re-points the
         // lease's sponsor binding in place — no Worker restart, no lease
         // re-issue. Runs OFF the slot queue: it touches host state only.
-        const rebound =
-          await this.#control.reanchorExecutionLeaseSponsor?.(lease) ?? false;
+        const rebound = rebind === undefined
+          ? false
+          : await rebind.call(this.#control, held);
         if (rebound) {
           this.#metrics.sponsorRebinds++;
+          return;
+        }
+        // A suspicion the host was never asked about establishes nothing.
+        // Restarting a Worker on it would turn ordinary demand churn — one
+        // of ten clients closing a tab — into a generation replacement.
+        if (options?.suspected === true && rebind === undefined) {
           return;
         }
         // True principal change (or a control without the rebind surface):
@@ -784,6 +834,13 @@ export class SharedExecutionPool {
           if (
             this.#closed || slot.executor === null || slot.state !== "live"
           ) return;
+          // `#reconcile` opens every live pass with `renewExecutionLease`,
+          // which is the pool's OTHER lease-authority probe: a lease the
+          // host already drained (a connection close sweeps the sponsor's
+          // demand row AND drains) fails renewal there and is replaced on
+          // the queue ahead of this job. Two recoveries for one event is one
+          // Worker restart too many — stand down if that already happened.
+          if (slot.generationToken !== generation) return;
           // A lane whose demand is genuinely gone drains through the grace
           // path instead; re-anchoring needs a live (or in-grace) demander
           // for the re-acquisition to sponsor against.
@@ -800,6 +857,42 @@ export class SharedExecutionPool {
         slot.reanchorQueued = false;
       }
     })();
+  }
+
+  /**
+   * §2b row 7 — the claim-free carrier for lease authority loss.
+   *
+   * The host pins the lease's sponsor to ONE authenticated demand row
+   * (connection, session, principal) and re-validates that exact triple
+   * whenever the lease has to authorize anything. The browser breaks the pin
+   * routinely without surrendering anything: an explicit demand clear when a
+   * page departs, a connection hop with session resume, a reload. Every one
+   * of those shows up here first, as a row that was in the previous snapshot
+   * and is not in this one — which is why this fires BEFORE authority is
+   * exercised rather than after something was refused.
+   *
+   * The pool cannot see WHICH row is pinned (that is host state), so this is
+   * deliberately a superset: any departure is treated as a pin at risk. The
+   * host's own re-anchor decides whether anything actually moved, the
+   * cooldown bounds the probe rate to one per lane per max(grace, 10s), and
+   * the cheap leg is an in-place re-point with no Worker restart.
+   */
+  #sponsorDepartures(
+    previous: ExecutionDemandSnapshot["demands"],
+    next: ExecutionDemandSnapshot["demands"],
+  ): boolean {
+    if (previous.length === 0) return false;
+    const live = new Set(next.map(demandRowIdentity));
+    return previous.some((demand) => !live.has(demandRowIdentity(demand)));
+  }
+
+  #noteSponsorDeparture(slot: Slot): void {
+    // A lane whose demand is genuinely gone has no sponsor to re-anchor
+    // ONTO: departure belongs to the grace window and the drain, exactly as
+    // it did when the claim decline drove this.
+    if (slot.demands.length === 0) return;
+    if (slot.state !== "live" || slot.lease === null) return;
+    void this.noteExecutionLeaseAuthorityLoss(slot.lease, { suspected: true });
   }
 
   /** Whether the lane's empty demand is still inside the grace window. */

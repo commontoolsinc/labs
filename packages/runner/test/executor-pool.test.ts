@@ -1,13 +1,21 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertExists } from "@std/assert";
 import { getTimingStatsBreakdown } from "@commonfabric/utils/logger";
-import type { BranchName, ExecutionLease } from "@commonfabric/memory/v2";
+import { Identity } from "@commonfabric/identity";
 import type {
-  AcceptedCommitEvent,
-  AcceptedCommitListener,
-  AuthenticatedExecutionDemand,
-  ExecutionDemandListener,
-  ExecutionDemandSnapshot,
-  ExecutionLeaseHandle,
+  ActionClaimKey,
+  BranchName,
+  ExecutionLease,
+  MemoryProtocolFlags,
+} from "@commonfabric/memory/v2";
+import * as MemoryClient from "@commonfabric/memory/v2/client";
+import {
+  type AcceptedCommitEvent,
+  type AcceptedCommitListener,
+  type AuthenticatedExecutionDemand,
+  type ExecutionDemandListener,
+  type ExecutionDemandSnapshot,
+  type ExecutionLeaseHandle,
+  Server,
 } from "@commonfabric/memory/v2/server";
 import {
   type ExecutionPoolControl,
@@ -1881,7 +1889,7 @@ Deno.test("P0 legacy parity: grace 0 keeps the immediate empty-demand startup ab
   }
 });
 
-Deno.test("P0 re-anchor: claim-authority loss on a live lane replaces the generation onto a live sponsor", async () => {
+Deno.test("P0 re-anchor: LEASE-authority loss on a live lane replaces the generation onto a live sponsor", async () => {
   const control = new FakeExecutionControl();
   const timers = new ManualTimers();
   let clock = 0;
@@ -1916,7 +1924,7 @@ Deno.test("P0 re-anchor: claim-authority loss on a live lane replaces the genera
     assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "live");
 
     clock = 5_000;
-    await pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    await pool.noteExecutionLeaseAuthorityLoss(control.current!);
     await pool.idle();
 
     assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "live");
@@ -1959,9 +1967,9 @@ Deno.test("P0 re-anchor cooldown: repeated authority-loss notes collapse; a fres
     await pool.idle();
 
     clock = 1_000;
-    const first = pool.noteClaimAuthorityLoss(SPACE, BRANCH);
-    void pool.noteClaimAuthorityLoss(SPACE, BRANCH);
-    void pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    const first = pool.noteExecutionLeaseAuthorityLoss(control.current!);
+    void pool.noteExecutionLeaseAuthorityLoss(control.current!);
+    void pool.noteExecutionLeaseAuthorityLoss(control.current!);
     await first;
     await pool.idle();
     assertEquals(pool.metrics().sponsorReanchors, 1, "burst collapses to one");
@@ -1969,13 +1977,13 @@ Deno.test("P0 re-anchor cooldown: repeated authority-loss notes collapse; a fres
 
     // Inside the cooldown (max(grace, 10s)): a further note is a no-op.
     clock = 6_000;
-    await pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    await pool.noteExecutionLeaseAuthorityLoss(control.current!);
     await pool.idle();
     assertEquals(pool.metrics().sponsorReanchors, 1, "cooldown holds");
 
     // A fresh window: the persistent failure re-anchors once more.
     clock = 20_000;
-    await pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    await pool.noteExecutionLeaseAuthorityLoss(control.current!);
     await pool.idle();
     assertEquals(pool.metrics().sponsorReanchors, 2);
     assertEquals(factory.starts.length, 3);
@@ -2004,7 +2012,7 @@ Deno.test("P0 re-anchor: no live or in-grace demand means no re-anchor (the drai
     clock = 1_000;
     await control.emit(2, []);
     clock = 20_000; // grace lapsed; drain not yet fired (timer unfired)
-    await pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    await pool.noteExecutionLeaseAuthorityLoss(control.current!);
     await pool.idle();
     assertEquals(
       pool.metrics().sponsorReanchors,
@@ -2106,7 +2114,7 @@ Deno.test("P0 rebind: same-principal sponsor churn re-points the lease in place 
     assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "live");
 
     clock = 5_000;
-    await pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    await pool.noteExecutionLeaseAuthorityLoss(control.current!);
     await pool.idle();
 
     assertEquals(control.rebinds, 1, "host rebind attempted first");
@@ -2118,13 +2126,13 @@ Deno.test("P0 rebind: same-principal sponsor churn re-points the lease in place 
 
     // Cooldown applies to the rebind path too: a storm collapses.
     clock = 6_000;
-    await pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    await pool.noteExecutionLeaseAuthorityLoss(control.current!);
     assertEquals(control.rebinds, 1, "cooldown holds for rebinds");
 
     // A rebind refusal after the window falls back to replacement.
     control.rebindResult = false;
     clock = 20_000;
-    await pool.noteClaimAuthorityLoss(SPACE, BRANCH);
+    await pool.noteExecutionLeaseAuthorityLoss(control.current!);
     await pool.idle();
     assertEquals(control.rebinds, 2);
     assertEquals(factory.starts.length, 2, "refusal fell back to replacement");
@@ -2132,4 +2140,424 @@ Deno.test("P0 rebind: same-principal sponsor churn re-points the lease in place 
   } finally {
     await pool.close();
   }
+});
+
+/** Counts host rebinds so the demand-wire trigger is observable without a
+ * claim anywhere in the fixture. */
+class RebindCountingControl extends FakeExecutionControl {
+  rebinds = 0;
+  rebindResult = true;
+  reanchorExecutionLeaseSponsor(
+    _lease: ExecutionLeaseHandle,
+  ): Promise<boolean> {
+    this.rebinds++;
+    return Promise.resolve(this.rebindResult);
+  }
+}
+
+Deno.test("§2b row 7: a sponsor demand row DEPARTING a live lane re-anchors the lease — no claim in the fixture", async () => {
+  const control = new RebindCountingControl();
+  const timers = new ManualTimers();
+  let clock = 0;
+  const factory = new FakeExecutorFactory();
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    now: () => clock,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    demandGraceMs: 10_000,
+  });
+  pool.start();
+  try {
+    // Two demanding sessions; the lease pins ONE of them as its sponsor.
+    await control.emit(1, [demand(1, ["piece:a"]), demand(2, ["piece:a"])]);
+    await pool.idle();
+    assertEquals(pool.snapshot(SPACE, BRANCH)?.state, "live");
+    assertEquals(control.rebinds, 0, "a steady lane never probes");
+
+    // The pinned sponsor's row leaves (explicit demand clear / page
+    // departure). The host's pin may now be stale — which is exactly what
+    // the claim decline used to report AFTER the fact. The demand wire says
+    // it BEFORE any claim is attempted.
+    clock = 5_000;
+    await control.emit(2, [demand(2, ["piece:a"])]);
+    await pool.idle();
+
+    assertEquals(control.rebinds, 1, "departure drove the lease re-anchor");
+    assertEquals(pool.metrics().sponsorRebinds, 1);
+    assertEquals(factory.starts.length, 1, "cheap leg: no Worker restart");
+    assertEquals(factory.executors[0].stopped, 0);
+  } finally {
+    await pool.close();
+  }
+});
+
+Deno.test("§2b row 7: a departure the host REFUSES to re-point escalates; one it was never asked about does not", async () => {
+  // The escalation is a Worker restart, so a demand-wire suspicion may only
+  // reach it on a host ANSWER. Ten clients sharing a space means routine
+  // departures; conflating "no rebind surface" with "the host said no" turns
+  // one closing tab into a generation replacement.
+  const refusing = new RebindCountingControl();
+  refusing.rebindResult = false;
+  const bare = new FakeExecutionControl();
+  for (const control of [refusing, bare] as FakeExecutionControl[]) {
+    const timers = new ManualTimers();
+    let clock = 0;
+    const factory = new FakeExecutorFactory();
+    const pool = new SharedExecutionPool({
+      control,
+      factory,
+      now: () => clock,
+      setTimer: timers.setTimer,
+      clearTimer: timers.clearTimer,
+      demandGraceMs: 10_000,
+    });
+    pool.start();
+    try {
+      await control.emit(1, [demand(1, ["piece:a"]), demand(2, ["piece:a"])]);
+      await pool.idle();
+      clock = 5_000;
+      await control.emit(2, [demand(2, ["piece:a"])]);
+      await pool.idle();
+
+      const answered = control === refusing;
+      assertEquals(
+        factory.starts.length,
+        answered ? 2 : 1,
+        answered
+          ? "the host has no sponsor left: replace the generation"
+          : "an unasked suspicion never restarts a Worker",
+      );
+      assertEquals(pool.metrics().sponsorReanchors, answered ? 1 : 0);
+      assertEquals(pool.metrics().sponsorRebinds, 0);
+    } finally {
+      await pool.close();
+    }
+  }
+});
+
+Deno.test("§2b row 7: arrivals and piece-only demand churn never re-anchor", async () => {
+  const control = new RebindCountingControl();
+  const timers = new ManualTimers();
+  let clock = 0;
+  const factory = new FakeExecutorFactory();
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    now: () => clock,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    demandGraceMs: 10_000,
+  });
+  pool.start();
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+
+    // A second session ARRIVES: no pinned row can have gone stale.
+    clock = 1_000;
+    await control.emit(2, [demand(1, ["piece:a"]), demand(2, ["piece:b"])]);
+    await pool.idle();
+    assertEquals(control.rebinds, 0, "an arrival is not an authority loss");
+
+    // The SAME rows change their demanded pieces: still no departure.
+    clock = 2_000;
+    await control.emit(3, [
+      demand(1, ["piece:a", "piece:c"]),
+      demand(2, ["piece:b"]),
+    ]);
+    await pool.idle();
+    assertEquals(control.rebinds, 0, "piece churn is not an authority loss");
+    assertEquals(pool.metrics().sponsorRebinds, 0);
+    assertEquals(pool.metrics().sponsorReanchors, 0);
+  } finally {
+    await pool.close();
+  }
+});
+
+Deno.test("§2b row 7: full departure still belongs to the drain path, not the re-anchor", async () => {
+  const control = new RebindCountingControl();
+  const timers = new ManualTimers();
+  let clock = 0;
+  const factory = new FakeExecutorFactory();
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    now: () => clock,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    demandGraceMs: 10_000,
+  });
+  pool.start();
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+
+    // The last row leaves: the grace window plus the drain own this, and
+    // there is no surviving demander to re-anchor onto anyway.
+    clock = 1_000;
+    await control.emit(2, []);
+    await pool.idle();
+    assertEquals(control.rebinds, 0, "empty demand never probes the host");
+    assertEquals(pool.metrics().sponsorRebinds, 0);
+    assertEquals(pool.metrics().sponsorReanchors, 0);
+  } finally {
+    await pool.close();
+  }
+});
+
+Deno.test("§2b row 7: a note naming a superseded lease generation is skipped", async () => {
+  const control = new RebindCountingControl();
+  const timers = new ManualTimers();
+  let clock = 0;
+  const factory = new FakeExecutorFactory();
+  const pool = new SharedExecutionPool({
+    control,
+    factory,
+    now: () => clock,
+    setTimer: timers.setTimer,
+    clearTimer: timers.clearTimer,
+    demandGraceMs: 10_000,
+  });
+  pool.start();
+  try {
+    await control.emit(1, [demand(1, ["piece:a"])]);
+    await pool.idle();
+    const live = control.current!;
+
+    // The claim-keyed entry point could only name (space, branch), so a loss
+    // note left over from a torn-down generation re-anchored whichever lease
+    // happened to be live. A lease-level note carries the generation and is
+    // fenced by it.
+    clock = 5_000;
+    await pool.noteExecutionLeaseAuthorityLoss({
+      ...live,
+      leaseGeneration: live.leaseGeneration - 1,
+    } as ExecutionLeaseHandle);
+    await pool.idle();
+    assertEquals(control.rebinds, 0, "stale generation never re-anchors");
+    assertEquals(factory.starts.length, 1);
+
+    // The live generation still re-anchors.
+    await pool.noteExecutionLeaseAuthorityLoss(live);
+    await pool.idle();
+    assertEquals(control.rebinds, 1);
+  } finally {
+    await pool.close();
+  }
+});
+
+const REAL_SEAM_FLAGS = {
+  persistentSchedulerState: true,
+  schedulerWriterLookup: true,
+  serverPrimaryExecutionV1: true,
+  serverPrimaryExecutionClaimRoutingV1: true,
+  serverPrimaryExecutionBuiltinPassivityV1: true,
+} as const satisfies Partial<MemoryProtocolFlags>;
+
+type RealSession = MemoryClient.SpaceSession & {
+  sessionId: string;
+  transact(commit: unknown): Promise<{ seq: number }>;
+  setExecutionDemand(
+    branch: string,
+    pieces: readonly string[],
+  ): Promise<boolean>;
+};
+
+/**
+ * REAL authority loss over the REAL host, with no claim anywhere in the
+ * trigger path.
+ *
+ * The host pins the lease's sponsor to the FIRST registered demand row and
+ * an explicit demand clear (`setExecutionDemand("", [])`) deletes that row
+ * WITHOUT draining the lease — `Server.setExecutionDemand` sweeps lease
+ * drains only on connection close. The lease therefore stays live and keeps
+ * renewing (lease renewal does not require a demand row at all) while being
+ * unable to authorize anything: the measured `sponsor-demand-gone` state.
+ *
+ * The two demanders are DIFFERENT principals on purpose. With one principal
+ * the host heals the pin inside claim issuance itself
+ * (`#reanchorExecutionSponsorInPlace`, server.ts:6216) and authority is
+ * never actually lost — measured here, and it is why the counterfactual arm
+ * exists. Only a departing principal with no same-principal demander left
+ * produces the loss this recovery path is for.
+ *
+ * `withRebindSurface: false` is that counterfactual: the same real host and
+ * the same real departure, proving authority really was lost rather than
+ * asserting recovery against a fixture that never broke.
+ */
+const realSponsorDeparture = async (
+  { withRebindSurface }: { withRebindSurface: boolean },
+): Promise<
+  {
+    claimAfterDeparture: unknown;
+    reanchors: number;
+    generations: number;
+    sponsors: string[];
+  }
+> => {
+  const stamp = crypto.randomUUID();
+  const owner = await Identity.fromPassphrase(`pool departure owner ${stamp}`);
+  const writerA = await Identity.fromPassphrase(`pool departure A ${stamp}`);
+  const writerB = await Identity.fromPassphrase(`pool departure B ${stamp}`);
+  const space = owner.did();
+  const PIECE = "space:of:sponsor-departure-piece";
+  const server = new Server({
+    authorizeSessionOpen(message) {
+      const value = (message.authorization as { principal?: unknown })
+        ?.principal;
+      return typeof value === "string" ? value : undefined;
+    },
+    sessionOpenAuth: { audience: "did:key:z6Mk-pool-sponsor-departure" },
+    protocolFlags: REAL_SEAM_FLAGS,
+    acl: { mode: "enforce", serviceDids: [space] },
+  });
+  const bound = {
+    subscribeExecutionDemands: server.subscribeExecutionDemands.bind(server),
+    subscribeAcceptedCommits: server.subscribeAcceptedCommits.bind(server),
+    legacyBackgroundActive: server.legacyBackgroundActive.bind(server),
+    acquireExecutionLease: server.acquireExecutionLease.bind(server),
+    renewExecutionLease: server.renewExecutionLease.bind(server),
+    beginExecutionLeaseDrain: server.beginExecutionLeaseDrain.bind(server),
+    finishExecutionLeaseDrain: server.finishExecutionLeaseDrain.bind(server),
+  };
+  const control: ExecutionPoolControl = withRebindSurface
+    ? {
+      ...bound,
+      reanchorExecutionLeaseSponsor: server.reanchorExecutionLeaseSponsor
+        .bind(server),
+    }
+    : bound;
+
+  const leases: ExecutionLeaseHandle[] = [];
+  const factory: SpaceExecutorFactory = {
+    start(options: SpaceExecutorStartOptions): Promise<SpaceExecutor> {
+      leases.push(options.lease);
+      return Promise.resolve(new FakeExecutor());
+    },
+  };
+  const pool = new SharedExecutionPool({ control, factory });
+
+  const connect = async (
+    principal: string,
+  ): Promise<{ client: MemoryClient.Client; session: RealSession }> => {
+    const client = await MemoryClient.connect({
+      transport: MemoryClient.loopback(server),
+      protocolFlags: REAL_SEAM_FLAGS,
+    });
+    const session = await client.mount(
+      space,
+      {},
+      (_space, _session, context) => ({
+        invocation: {
+          aud: context.audience,
+          challenge: context.challenge.value,
+        },
+        authorization: { principal },
+      }),
+    ) as RealSession;
+    return { client, session };
+  };
+
+  const claimKey = (index: number): ActionClaimKey => ({
+    branch: "" as BranchName,
+    space,
+    contextKey: "space",
+    pieceId: PIECE,
+    actionId: `cf:module/sponsor-departure:compute:instance-${index}`,
+    actionKind: "computation",
+    implementationFingerprint: "impl:sponsor-departure",
+    runtimeFingerprint: "runtime:sponsor-departure",
+  });
+
+  const clients: (MemoryClient.Client | null)[] = [];
+  try {
+    const ownerConnection = await connect(space);
+    clients.push(ownerConnection.client);
+    await ownerConnection.session.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: `of:${space}`,
+        value: {
+          value: {
+            [space]: "OWNER",
+            [writerA.did()]: "WRITE",
+            [writerB.did()]: "WRITE",
+          },
+        },
+      }],
+    });
+
+    pool.start();
+    // A demands FIRST, so the host pins A's row as the lease's sponsor.
+    const a = await connect(writerA.did());
+    clients.push(a.client);
+    await a.session.setExecutionDemand("", [PIECE]);
+    await pool.idle();
+    assertEquals(pool.snapshot(space, BRANCH)?.state, "live");
+    assertEquals(leases.length, 1, "the pool acquired a real lease");
+    assertEquals(leases[0].onBehalfOf, writerA.did());
+
+    const b = await connect(writerB.did());
+    clients.push(b.client);
+    await b.session.setExecutionDemand("", [PIECE]);
+    await pool.idle();
+
+    // Authority is healthy while A's row is present.
+    assertExists(
+      await server.trySetExecutionClaim(leases[0], claimKey(1)),
+      "the pinned sponsor authorizes work",
+    );
+
+    // A departs. The row is deleted; the lease is NOT drained, and A has no
+    // other session, so nothing can heal the pin in place.
+    await a.session.setExecutionDemand("", []);
+    await pool.idle();
+
+    const claimAfterDeparture = await server.trySetExecutionClaim(
+      leases.at(-1)!,
+      claimKey(2),
+    );
+    return {
+      claimAfterDeparture,
+      reanchors: pool.metrics().sponsorReanchors,
+      generations: leases.length,
+      sponsors: leases.map((held) => held.onBehalfOf),
+    };
+  } finally {
+    await pool.close();
+    for (const client of clients) await client?.close();
+    await server.close();
+  }
+};
+
+Deno.test("§2b row 7 (REAL host): the pinned sponsor's demand row departing loses lease authority, and the pool re-anchors off the demand wire", async () => {
+  // Counterfactual: the same real host, the same real departure, with the
+  // pool unable to ask for a re-anchor. The lease cannot authorize work.
+  const unrecovered = await realSponsorDeparture({ withRebindSurface: false });
+  assertEquals(
+    unrecovered.claimAfterDeparture,
+    null,
+    "a departed pinned sponsor is real, unrecovered authority loss",
+  );
+  assertEquals(unrecovered.generations, 1);
+  assertEquals(unrecovered.reanchors, 0);
+
+  // With the re-anchor the demand wire alone drives the recovery: no claim
+  // was ever attempted before the trigger fired.
+  const recovered = await realSponsorDeparture({ withRebindSurface: true });
+  assertEquals(recovered.reanchors, 1, "the departure drove one re-anchor");
+  assertEquals(recovered.generations, 2, "a fresh generation was acquired");
+  assertEquals(
+    recovered.sponsors[1] !== recovered.sponsors[0],
+    true,
+    `re-acquisition rotated the sponsor: ${recovered.sponsors.join(" -> ")}`,
+  );
+  assertExists(
+    recovered.claimAfterDeparture,
+    "the re-anchored lease authorizes work again",
+  );
 });

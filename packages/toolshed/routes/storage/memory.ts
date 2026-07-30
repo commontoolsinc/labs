@@ -294,20 +294,16 @@ export function startServerExecutionPool(runtime: Runtime): void {
           candidate.claimKey,
         );
       },
+      // §2b row 7: this used to bridge the `claim-authority-lost` diagnostic
+      // into the pool's sponsor re-anchor. It no longer does. The re-anchor
+      // survives claim deletion — it decides which Worker sponsors a space's
+      // execution, a liveness property, not arbitration — so its trigger
+      // moved to the lease itself: the pool raises
+      // `noteExecutionLeaseAuthorityLoss` off the demand wire, where a
+      // departing sponsor row is visible BEFORE any claim is refused. The
+      // diagnostic stays a diagnostic; nothing recovers from it any more.
       onCandidateDiagnostic: (diagnostic) => {
         memoryServer.recordExecutionCandidateUnserved(diagnostic);
-        // P0 sponsor re-anchor: authority loss on a live lane means the
-        // lease's pinned sponsor died while the demand grace window kept
-        // the Worker alive (before the grace window, demand-churn teardowns
-        // rotated the sponsor as a side effect). The pool replaces the
-        // generation — re-acquisition sponsors against the CURRENT demand
-        // set — debounced pool-side (queued flag + cooldown).
-        if (diagnostic.diagnosticCode === "claim-authority-lost") {
-          const key = diagnostic.claimKey ?? diagnostic.claim;
-          if (key !== undefined) {
-            executionPool?.noteClaimAuthorityLoss(key.space, key.branch);
-          }
-        }
         console.debug(
           "Memory: Server execution candidate unserved",
           diagnostic,
