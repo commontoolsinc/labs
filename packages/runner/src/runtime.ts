@@ -1309,8 +1309,63 @@ export class Runtime {
    * Any unawaited tx.commit() calls will be canceled when
    * storageManager.close() tears down storage sessions. Callers
    * should await all pending commits before calling dispose().
+   *
+   * `closeStorage: false` leaves the storage manager OPEN for a caller that
+   * OWNS it and is still using it — a second runtime sharing the same store, or
+   * one that reads the store after this runtime is done writing to it. Every
+   * other step still runs, which is the point: quiescing the WRITER is what
+   * makes a subsequent read of the store a statement about a state this runtime
+   * actually reached. `idle()` and `synced()` cannot substitute, because they
+   * say nothing about the background work that only teardown stops —
+   * `patternUpdater`'s source checks and the runner's pointer-commit
+   * roll-forwards both live outside the scheduler and can still commit. That
+   * path also drains in-flight async builtin work first; see below.
+   *
+   * It is about OWNERSHIP, not survivability. `close()` destroys the manager's
+   * providers and rotates its session id rather than latching it shut, so what
+   * a later write does is a matter of circumstance rather than contract — all
+   * measured: over a caller-held server, a write to a doc the replica never saw
+   * lands, a retrying writer (`editWithRetry`) recovers, and a bare `commit()`
+   * to a doc the replica already knew fails its stale-read precondition and
+   * LOSES the write; over `StorageManager.emulate`, which owns its server,
+   * closing strands everything. A callee cannot see which of those its caller
+   * is in, so it hands the decision back rather than betting on the recovery.
+   *
+   * Passing `false` makes closing the CALLER's job — nothing else will. Note
+   * `await using` / `[Symbol.asyncDispose]` always takes the closing path.
+   *
+   * Either way this resets the PROCESS-GLOBAL experimental config to defaults
+   * (`resetModernCellRepConfig` and friends). Under a non-default flag that is
+   * visible to a second runtime still running against the same store, which is
+   * exactly the caller this option serves — so set the flags per process, not
+   * per runtime, if two of them must agree.
    */
-  async dispose(): Promise<void> {
+  async dispose(
+    { closeStorage = true }: { closeStorage?: boolean } = {},
+  ): Promise<void> {
+    // A kept store keeps RECORDING, so this path drains what could still write
+    // into it. In-flight async builtin work is that shape: a fetch / llm call or
+    // a sqlite RPC runs from a post-commit outbox flush and writes its result
+    // back when it lands, and `trackAsyncWork` exists because neither `idle()`
+    // nor `synced()` waits for it. `settled()` is the barrier that does. The
+    // closing path skips it because a caller who let the store close has no
+    // reader left to mislead, and waiting on the network in every teardown is a
+    // real cost; here the caller is about to read what this runtime wrote.
+    //
+    // BEFORE the cancellation below, not after: `stopAll()` and
+    // `scheduler.dispose()` would cut a writeback's reactive cascade midway,
+    // leaving the store holding part of a result — which is worse than either
+    // extreme for a reader trying to learn what state this runtime reached.
+    //
+    // UNCAPPED, deliberately. `settled()`'s default 50 rounds falls out of the
+    // loop and returns — silently, with work still outstanding — which is
+    // exactly the hole this drain exists to close, one layer down. Measured: 60
+    // generations of chained tracked work, and a capped drain returned at
+    // generation 50 while the chain kept running and writing. `settledFor`'s
+    // JSDoc gives the reason a cap is wrong for this question and why removing
+    // it cannot spin: every round awaits real promises, so a runtime that keeps
+    // working keeps the barrier open rather than busy-looping.
+    if (!closeStorage) await this.settled(Infinity);
     // Abort any pending (not-yet-started) queued jobs so they don't start
     // after storage is torn down.
     for (const queue of this.queues.values()) {
@@ -1339,7 +1394,7 @@ export class Runtime {
     this.moduleRegistry.clear();
 
     // Cancel all storage operations
-    await this.storageManager.close();
+    if (closeStorage) await this.storageManager.close();
 
     // Wait for any pending operations
     await this.scheduler.idle();
