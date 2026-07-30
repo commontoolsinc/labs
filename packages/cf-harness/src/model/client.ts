@@ -54,9 +54,12 @@ export interface HarnessModelTurnRequest {
 
 export interface HarnessModelUsage {
   inputTokens?: number;
+  /** Cache-read tokens included within `inputTokens`, not additional tokens. */
   cachedInputTokens?: number;
+  /** Cache-write tokens included within `inputTokens`, not additional tokens. */
   cacheWriteTokens?: number;
   outputTokens?: number;
+  /** Reasoning tokens included within `outputTokens`, not additional tokens. */
   reasoningTokens?: number;
   totalTokens?: number;
   /**
@@ -68,9 +71,23 @@ export interface HarnessModelUsage {
    * Estimate based on the harness pricing table, not a provider invoice.
    */
   estimatedCostUsd?: number;
+  /**
+   * Why `estimatedCostUsd` is absent. Aggregate usage reports
+   * `incomplete-estimates` when any included turn lacks an estimate.
+   */
+  estimateWithheldReason?: HarnessCostEstimateWithheldReason;
 }
 
-export const HARNESS_MODEL_USAGE_FIELDS = [
+export type HarnessCostEstimateWithheldReason =
+  | "unknown-model"
+  | "missing-token-counts"
+  | "missing-cache-detail"
+  | "invalid-token-counts"
+  | "inconsistent-token-counts"
+  | "provider-pricing-unavailable"
+  | "incomplete-estimates";
+
+export const HARNESS_MODEL_USAGE_NUMERIC_FIELDS = [
   "inputTokens",
   "cachedInputTokens",
   "cacheWriteTokens",
@@ -79,7 +96,12 @@ export const HARNESS_MODEL_USAGE_FIELDS = [
   "totalTokens",
   "costUsd",
   "estimatedCostUsd",
-] as const satisfies readonly (keyof HarnessModelUsage)[];
+] as const satisfies readonly {
+  [K in keyof HarnessModelUsage]: HarnessModelUsage[K] extends
+    | number
+    | undefined ? K
+    : never;
+}[keyof HarnessModelUsage][];
 
 export interface HarnessModelTurnResult {
   assistant: HarnessAssistantTranscriptMessage;

@@ -3344,6 +3344,21 @@ Deno.test("formatCfHarnessCliResult summarizes cache usage and cost", () => {
   assertEquals(createCfHarnessBatchResult(result, 50).usage, result.usage);
 });
 
+Deno.test("formatCfHarnessCliResult explains why a cost estimate is absent", () => {
+  const result = completedCliResult("run-usage-withheld");
+  result.usage = {
+    inputTokens: 2_000,
+    outputTokens: 100,
+    totalTokens: 2_100,
+    estimateWithheldReason: "missing-cache-detail",
+  };
+
+  assertStringIncludes(
+    formatCfHarnessCliResult(result),
+    "estimateWithheld=missing-cache-detail",
+  );
+});
+
 Deno.test("formatCfHarnessCliResult returns plain final text in batch mode", () => {
   assertEquals(
     formatCfHarnessCliResult({

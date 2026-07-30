@@ -1,5 +1,6 @@
 import {
-  HARNESS_MODEL_USAGE_FIELDS,
+  HARNESS_MODEL_USAGE_NUMERIC_FIELDS,
+  type HarnessCostEstimateWithheldReason,
   type HarnessModelUsage,
 } from "./client.ts";
 
@@ -67,19 +68,50 @@ export const normalizeOpenAIUsage = (
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 };
 
-/** Sums all reported fields while preserving "not reported" as absent. */
+/**
+ * Sums reported token fields while preserving "not reported" as absent.
+ *
+ * Cost fields are all-or-nothing: a partial cost would look like the whole
+ * run's cost, so they are omitted unless every entry reports them.
+ */
 export const sumHarnessModelUsage = (
   entries: readonly (HarnessModelUsage | undefined)[],
 ): HarnessModelUsage | undefined => {
+  const reportedEntries = entries.filter(
+    (entry): entry is HarnessModelUsage => entry !== undefined,
+  );
   const total: HarnessModelUsage = {};
-  for (const field of HARNESS_MODEL_USAGE_FIELDS) {
-    const values = entries.flatMap((entry) => {
-      const value = entry?.[field];
+  for (const field of HARNESS_MODEL_USAGE_NUMERIC_FIELDS) {
+    const values = reportedEntries.flatMap((entry) => {
+      const value = entry[field];
       return value === undefined ? [] : [value];
     });
-    if (values.length > 0) {
+    const requiresCompleteCoverage = field === "costUsd" ||
+      field === "estimatedCostUsd";
+    if (
+      values.length > 0 &&
+      (!requiresCompleteCoverage ||
+        values.length === entries.length)
+    ) {
       total[field] = values.reduce((sum, value) => sum + value, 0);
     }
+  }
+  if (
+    reportedEntries.length > 0 &&
+    reportedEntries.length === entries.length &&
+    reportedEntries.every((entry) => entry.estimatedCostUsd !== undefined)
+  ) {
+    // Every estimate was summed above, so no withheld reason applies.
+  } else if (entries.length > 0) {
+    const reasons = reportedEntries.flatMap((entry) =>
+      entry.estimateWithheldReason === undefined
+        ? []
+        : [entry.estimateWithheldReason]
+    );
+    total.estimateWithheldReason =
+      reasons.length === entries.length && new Set(reasons).size === 1
+        ? reasons[0]
+        : "incomplete-estimates";
   }
   return Object.keys(total).length > 0 ? total : undefined;
 };
@@ -113,6 +145,77 @@ const OPENAI_MODEL_TOKEN_PRICES: Record<string, OpenAIModelTokenPrices> = {
   },
 };
 
+type OpenAICostEstimateResult =
+  | { estimatedCostUsd: number }
+  | { estimateWithheldReason: HarnessCostEstimateWithheldReason };
+
+const estimateOpenAIModelUsageCost = (
+  model: string,
+  usage: HarnessModelUsage | undefined,
+): OpenAICostEstimateResult => {
+  const prices = OPENAI_MODEL_TOKEN_PRICES[model];
+  if (prices === undefined) {
+    return { estimateWithheldReason: "unknown-model" };
+  }
+  if (usage?.inputTokens === undefined || usage.outputTokens === undefined) {
+    return { estimateWithheldReason: "missing-token-counts" };
+  }
+  if (
+    usage.cachedInputTokens === undefined ||
+    usage.cacheWriteTokens === undefined
+  ) {
+    return { estimateWithheldReason: "missing-cache-detail" };
+  }
+  const tokenCounts = [
+    usage.inputTokens,
+    usage.cachedInputTokens,
+    usage.cacheWriteTokens,
+    usage.outputTokens,
+    ...(usage.reasoningTokens === undefined ? [] : [usage.reasoningTokens]),
+    ...(usage.totalTokens === undefined ? [] : [usage.totalTokens]),
+  ];
+  if (
+    tokenCounts.some((value) => !Number.isSafeInteger(value) || value < 0)
+  ) {
+    return { estimateWithheldReason: "invalid-token-counts" };
+  }
+  // OpenAI reports cache reads and cache writes as disjoint subsets of input
+  // tokens. Anthropic-style additive cache-creation accounting would require a
+  // different estimator.
+  const uncachedInputTokens = usage.inputTokens - usage.cachedInputTokens -
+    usage.cacheWriteTokens;
+  if (uncachedInputTokens < 0) {
+    return { estimateWithheldReason: "inconsistent-token-counts" };
+  }
+  if (
+    usage.totalTokens !== undefined &&
+    usage.totalTokens !== usage.inputTokens + usage.outputTokens
+  ) {
+    return { estimateWithheldReason: "inconsistent-token-counts" };
+  }
+  if (
+    usage.reasoningTokens !== undefined &&
+    usage.reasoningTokens > usage.outputTokens
+  ) {
+    return { estimateWithheldReason: "inconsistent-token-counts" };
+  }
+  // The GPT-5.6 model pages apply these multipliers to the full request above
+  // 272K input tokens.
+  const longContextInputMultiplier = usage.inputTokens > 272_000 ? 2 : 1;
+  const longContextOutputMultiplier = usage.inputTokens > 272_000 ? 1.5 : 1;
+  return {
+    estimatedCostUsd: (
+      (
+          uncachedInputTokens * prices.inputPerMillionUsd +
+          usage.cachedInputTokens * prices.cachedInputPerMillionUsd +
+          usage.cacheWriteTokens * prices.inputPerMillionUsd * 1.25
+        ) * longContextInputMultiplier +
+      usage.outputTokens * prices.outputPerMillionUsd *
+        longContextOutputMultiplier
+    ) / 1_000_000,
+  };
+};
+
 /**
  * Estimates GPT-5.6 token cost from the public OpenAI price schedule.
  *
@@ -126,54 +229,20 @@ export const estimateOpenAIModelUsageCostUsd = (
   model: string,
   usage: HarnessModelUsage | undefined,
 ): number | undefined => {
-  const prices = OPENAI_MODEL_TOKEN_PRICES[model];
-  if (
-    prices === undefined || usage?.inputTokens === undefined ||
-    usage.cachedInputTokens === undefined ||
-    usage.cacheWriteTokens === undefined ||
-    usage.outputTokens === undefined
-  ) return undefined;
-  const tokenCounts = [
-    usage.inputTokens,
-    usage.cachedInputTokens,
-    usage.cacheWriteTokens,
-    usage.outputTokens,
-    ...(usage.reasoningTokens === undefined ? [] : [usage.reasoningTokens]),
-    ...(usage.totalTokens === undefined ? [] : [usage.totalTokens]),
-  ];
-  if (
-    tokenCounts.some((value) => !Number.isSafeInteger(value) || value < 0)
-  ) return undefined;
-  const uncachedInputTokens = usage.inputTokens - usage.cachedInputTokens -
-    usage.cacheWriteTokens;
-  if (uncachedInputTokens < 0) return undefined;
-  if (
-    usage.totalTokens !== undefined &&
-    usage.totalTokens !== usage.inputTokens + usage.outputTokens
-  ) return undefined;
-  if (
-    usage.reasoningTokens !== undefined &&
-    usage.reasoningTokens > usage.outputTokens
-  ) return undefined;
-  const longContextInputMultiplier = usage.inputTokens > 272_000 ? 2 : 1;
-  const longContextOutputMultiplier = usage.inputTokens > 272_000 ? 1.5 : 1;
-  return (
-    (
-        uncachedInputTokens * prices.inputPerMillionUsd +
-        usage.cachedInputTokens * prices.cachedInputPerMillionUsd +
-        usage.cacheWriteTokens * prices.inputPerMillionUsd * 1.25
-      ) * longContextInputMultiplier +
-    usage.outputTokens * prices.outputPerMillionUsd *
-      longContextOutputMultiplier
-  ) / 1_000_000;
+  const estimate = estimateOpenAIModelUsageCost(model, usage);
+  return "estimatedCostUsd" in estimate ? estimate.estimatedCostUsd : undefined;
 };
 
 export const withEstimatedOpenAIModelUsageCost = (
   model: string,
   usage: HarnessModelUsage | undefined,
 ): HarnessModelUsage | undefined => {
-  const estimatedCostUsd = estimateOpenAIModelUsageCostUsd(model, usage);
-  return usage === undefined || estimatedCostUsd === undefined
-    ? usage
-    : { ...usage, estimatedCostUsd };
+  if (usage === undefined) return undefined;
+  const estimate = estimateOpenAIModelUsageCost(model, usage);
+  const {
+    estimatedCostUsd: _estimatedCostUsd,
+    estimateWithheldReason: _estimateWithheldReason,
+    ...reportedUsage
+  } = usage;
+  return { ...reportedUsage, ...estimate };
 };

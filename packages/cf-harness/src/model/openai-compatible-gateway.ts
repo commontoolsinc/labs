@@ -192,6 +192,38 @@ const assertSupportedToolCombination = (
   }
 };
 
+const GPT_5_6_REASONING_EFFORTS = [
+  "none",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+
+const assertReasoningEffortSupported = (
+  model: string,
+  nativeModelToolIds: readonly LLMNativeModelToolId[],
+  effort: string | undefined,
+): void => {
+  if (effort === undefined) return;
+  if (!usesResponsesApi(model, nativeModelToolIds)) {
+    throw new Error(
+      `reasoning effort ${effort} requires a model routed through the Responses API; received ${model}`,
+    );
+  }
+  if (
+    model.startsWith("gpt-5.6") &&
+    !GPT_5_6_REASONING_EFFORTS.includes(
+      effort as typeof GPT_5_6_REASONING_EFFORTS[number],
+    )
+  ) {
+    throw new Error(
+      `reasoning effort ${effort} is not supported by ${model}`,
+    );
+  }
+};
+
 const toModelAttempt = (
   attempt: OpenAIChatCompletionAttemptDiagnostic,
 ): HarnessModelAttemptDiagnostic => ({
@@ -210,6 +242,11 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
   ): Promise<HarnessModelTurnResult> {
     assertSupportedToolCombination(request.model, request.nativeModelToolIds);
     assertPromptCacheModeSupported(request.model, request.promptCacheMode);
+    assertReasoningEffortSupported(
+      request.model,
+      request.nativeModelToolIds,
+      request.reasoningEffort,
+    );
     return usesResponsesApi(request.model, request.nativeModelToolIds)
       ? await this.#completeViaResponses(request)
       : await this.#completeViaChatCompletions(request);
@@ -276,7 +313,10 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
         ? { instructions: converted.instructions }
         : {}),
       input: request.promptCacheMode === "explicit"
-        ? addFirstUserPromptCacheBreakpoint(converted.input)
+        ? addFirstUserPromptCacheBreakpoint(
+          converted.input,
+          GATEWAY_RESPONSES_LABEL,
+        )
         : converted.input,
       ...(tools.length > 0 ? { tools } : {}),
       tool_choice: "auto",
@@ -341,7 +381,9 @@ export class OpenAICompatibleGatewayModelClient implements HarnessModelClient {
           inputModalities: item.capabilities?.images === true
             ? ["text", "image"]
             : ["text"],
-          supportedReasoningEfforts: [],
+          supportedReasoningEfforts: item.id.startsWith("gpt-5.6")
+            ? GPT_5_6_REASONING_EFFORTS
+            : [],
           supportsParallelToolCalls: false,
         }]
         : []

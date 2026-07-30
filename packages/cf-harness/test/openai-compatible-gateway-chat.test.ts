@@ -172,7 +172,22 @@ Deno.test("chat responses preserve cache and reasoning usage", async () => {
     outputTokens: 100,
     reasoningTokens: 40,
     totalTokens: 1_600,
+    estimateWithheldReason: "unknown-model",
   });
+});
+
+Deno.test("chat-routed models reject reasoning effort before provider traffic", async () => {
+  const captured: Captured[] = [];
+  const client = clientWith(captured, () => ({
+    body: assistantText("unused"),
+  }));
+
+  await assertRejects(
+    () => client.complete(turn({ reasoningEffort: "low" })),
+    Error,
+    "reasoning effort low requires a model routed through the Responses API",
+  );
+  assertEquals(captured.length, 0);
 });
 
 Deno.test("chat responses surface native model tool results", async () => {
@@ -231,6 +246,15 @@ Deno.test("listModels maps the gateway registry", async () => {
   assertEquals(models.map((m) => m.id), ["gpt-5.6-sol", "claude-opus-5"]);
   assertEquals(models[0].inputModalities, ["text", "image"]);
   assertEquals(models[1].inputModalities, ["text"]);
+  assertEquals(models[0].supportedReasoningEfforts, [
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+  ]);
+  assertEquals(models[1].supportedReasoningEfforts, []);
 });
 
 Deno.test("listModels surfaces a failed registry fetch", async () => {

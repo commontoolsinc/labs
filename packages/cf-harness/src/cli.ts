@@ -397,8 +397,8 @@ Options:
   --no-skill-catalog            Disable automatic skill catalog disclosure
   --model <name>                Model name (default: ${DEFAULT_MODEL})
   --model-provider <provider>   openai-compatible-gateway | openai-codex
-  --reasoning-effort <effort>  Provider reasoning effort (for example low, medium, high)
-  --prompt-cache-mode <mode>   implicit | explicit (GPT-5.6 API gateway only)
+  --reasoning-effort <effort>   Provider reasoning effort (for example low, medium, high)
+  --prompt-cache-mode <mode>    implicit | explicit (GPT-5.6 API gateway only)
   --gateway-base-url <url>      OpenAI-compatible gateway URL
   --gateway-auth-mode <mode>    bearer | none (default: bearer)
   --artifact-root <path>        Host-side artifact directory
@@ -2098,6 +2098,9 @@ export const formatCfHarnessCliResult = (
         : undefined,
       usage.estimatedCostUsd !== undefined
         ? `estimatedCostUsd=${usage.estimatedCostUsd.toFixed(6)}`
+        : undefined,
+      usage.estimateWithheldReason !== undefined
+        ? `estimateWithheld=${usage.estimateWithheldReason}`
         : undefined,
     ].filter((value): value is string => value !== undefined);
     lines.push(`usage: ${fields.join(" ")}`);

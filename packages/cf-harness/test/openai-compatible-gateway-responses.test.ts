@@ -433,7 +433,10 @@ Deno.test("explicit cache breakpoint selects the last cacheable user block", () 
     },
   ];
 
-  const withBreakpoint = addFirstUserPromptCacheBreakpoint(original);
+  const withBreakpoint = addFirstUserPromptCacheBreakpoint(
+    original,
+    "test provider",
+  );
   const content = withBreakpoint[1].content as ResponsesInputItem[];
   assertEquals(content[1].prompt_cache_breakpoint, { mode: "explicit" });
   assertEquals(content[2].prompt_cache_breakpoint, undefined);
@@ -454,11 +457,17 @@ Deno.test("explicit cache breakpoint selects the last cacheable user block", () 
     },
   ]);
 
-  const imageOnly = addFirstUserPromptCacheBreakpoint([{
-    type: "message",
-    role: "user",
-    content: [{ type: "input_image", image_url: "data:image/png;base64,AA==" }],
-  }]);
+  const imageOnly = addFirstUserPromptCacheBreakpoint(
+    [{
+      type: "message",
+      role: "user",
+      content: [{
+        type: "input_image",
+        image_url: "data:image/png;base64,AA==",
+      }],
+    }],
+    "test provider",
+  );
   const imageContent = imageOnly[0].content as ResponsesInputItem[];
   assertEquals(imageContent[0].prompt_cache_breakpoint, { mode: "explicit" });
 });
@@ -470,9 +479,9 @@ Deno.test("explicit cache breakpoint requires cacheable user content", () => {
         type: "message",
         role: "user",
         content: [{ type: "unsupported_test_block" }],
-      }]),
+      }], "test provider"),
     Error,
-    "explicit prompt caching requires a cacheable user content block",
+    "test provider explicit prompt caching requires a cacheable user content block",
   );
 });
 
@@ -488,6 +497,18 @@ Deno.test("GPT-5.6 cache controls fail before sending an older model", async () 
       })),
     Error,
     "prompt cache mode explicit requires a GPT-5.6 model",
+  );
+  assertEquals(captured.length, 0);
+});
+
+Deno.test("unsupported GPT-5.6 reasoning effort fails before sending", async () => {
+  const captured: Captured[] = [];
+  const client = clientWith(captured, [completedResponse([])]);
+
+  await assertRejects(
+    () => client.complete(turn({ reasoningEffort: "ultra" })),
+    Error,
+    "reasoning effort ultra is not supported by gpt-5.6-terra",
   );
   assertEquals(captured.length, 0);
 });

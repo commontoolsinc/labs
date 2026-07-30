@@ -3,6 +3,7 @@ import {
   estimateOpenAIModelUsageCostUsd,
   normalizeOpenAIUsage,
   sumHarnessModelUsage,
+  withEstimatedOpenAIModelUsageCost,
 } from "../src/model/usage.ts";
 
 Deno.test("normalizeOpenAIUsage maps Responses cache and reasoning details", () => {
@@ -63,7 +64,35 @@ Deno.test("sumHarnessModelUsage preserves absent fields", () => {
       inputTokens: 30,
       cachedInputTokens: 12,
       outputTokens: 8,
+      estimateWithheldReason: "incomplete-estimates",
     },
+  );
+});
+
+Deno.test("sumHarnessModelUsage never presents a partial cost as a total", () => {
+  assertEquals(
+    sumHarnessModelUsage([
+      {
+        inputTokens: 10,
+        costUsd: 0.1,
+        estimatedCostUsd: 0.08,
+      },
+      {
+        inputTokens: 20,
+        estimateWithheldReason: "missing-cache-detail",
+      },
+    ]),
+    {
+      inputTokens: 30,
+      estimateWithheldReason: "incomplete-estimates",
+    },
+  );
+  assertEquals(
+    sumHarnessModelUsage([
+      { costUsd: 0.1, estimatedCostUsd: 0.08 },
+      { costUsd: 0.2, estimatedCostUsd: 0.16 },
+    ]),
+    { costUsd: 0.30000000000000004, estimatedCostUsd: 0.24 },
   );
 });
 
@@ -93,6 +122,17 @@ Deno.test("cost estimate is withheld when cache detail is unavailable", () => {
       outputTokens: 300,
     }),
     undefined,
+  );
+  assertEquals(
+    withEstimatedOpenAIModelUsageCost("gpt-5.6-terra", {
+      inputTokens: 2_000,
+      outputTokens: 300,
+    }),
+    {
+      inputTokens: 2_000,
+      outputTokens: 300,
+      estimateWithheldReason: "missing-cache-detail",
+    },
   );
 });
 
@@ -144,5 +184,17 @@ Deno.test("cost estimate is withheld for invalid token counts", () => {
       outputTokens: 100,
     }),
     undefined,
+  );
+});
+
+Deno.test("GPT-5.6 long-context pricing applies to the full request", () => {
+  assertEquals(
+    estimateOpenAIModelUsageCostUsd("gpt-5.6-terra", {
+      inputTokens: 272_001,
+      cachedInputTokens: 0,
+      cacheWriteTokens: 0,
+      outputTokens: 100,
+    }),
+    (272_001 * 2.5 * 2 + 100 * 15 * 1.5) / 1_000_000,
   );
 });

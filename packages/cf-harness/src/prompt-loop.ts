@@ -1656,7 +1656,6 @@ export class CfHarnessPromptLoop {
   readonly #cacheAffinityKey?: string;
   readonly #promptCacheMode?: "implicit" | "explicit";
   readonly #reasoningEffort?: string;
-  readonly #descendantUsage: HarnessModelUsage[] = [];
 
   constructor(options: CreateHarnessPromptLoopOptions = {}) {
     this.engine = options.engine ?? new CfHarnessEngine(options);
@@ -1855,7 +1854,7 @@ export class CfHarnessPromptLoop {
     const gatewayAttempts: HarnessGatewayAttempt[] = [];
     const modelAttempts: HarnessModelAttempt[] = [];
     const modelUsage: HarnessModelTurnUsage[] = [];
-    this.#descendantUsage.length = 0;
+    const descendantUsage: HarnessModelUsage[] = [];
     const reportTimeline: HarnessRunTimelineEntryInput[] = [];
     let modelTurns = 0;
     const buildPolicyTrace = async () => {
@@ -1911,11 +1910,11 @@ export class CfHarnessPromptLoop {
             }
             : {}),
           ...(
-            modelUsage.length > 0 || this.#descendantUsage.length > 0
+            modelUsage.length > 0 || descendantUsage.length > 0
               ? {
                 totalUsage: sumHarnessModelUsage([
                   ...modelUsage.map((entry) => entry.usage),
-                  ...this.#descendantUsage,
+                  ...descendantUsage,
                 ]),
               }
               : {}
@@ -2039,11 +2038,11 @@ export class CfHarnessPromptLoop {
               }
               : {}),
             ...(
-              modelUsage.length > 0 || this.#descendantUsage.length > 0
+              modelUsage.length > 0 || descendantUsage.length > 0
                 ? {
                   totalUsage: sumHarnessModelUsage([
                     ...modelUsage.map((entry) => entry.usage),
-                    ...this.#descendantUsage,
+                    ...descendantUsage,
                   ]),
                 }
                 : {}
@@ -2062,6 +2061,7 @@ export class CfHarnessPromptLoop {
             options.signal,
             toolActivity.length + 1,
             (activity) => toolActivity.push(activity),
+            (usage) => descendantUsage.push(usage),
           );
           const toolMessage = invokedToolCall.toolMessage;
           transcript.push(toolMessage);
@@ -2137,6 +2137,7 @@ export class CfHarnessPromptLoop {
     signal?: AbortSignal,
     sequence = 1,
     recordActivity: (activity: HarnessToolActivity) => void = () => {},
+    recordDescendantUsage: (usage: HarnessModelUsage) => void = () => {},
   ): Promise<InvokedToolCallMessages> {
     if (!isBuiltinToolId(toolCall.function.name)) {
       throw new Error(
@@ -2422,6 +2423,7 @@ export class CfHarnessPromptLoop {
         ReturnType<CfHarnessEngine["invokeBuiltinTool"]>
       >["output"];
       resultRef: ToolResultRef;
+      descendantUsage?: HarnessModelUsage;
     };
     try {
       result = toolCall.function.name === "delegate_task"
@@ -2455,6 +2457,9 @@ export class CfHarnessPromptLoop {
       // narrowing at the tool boundary is what lets this catch stay run-fatal
       // without matching error-message strings.
       throw error;
+    }
+    if (result.descendantUsage !== undefined) {
+      recordDescendantUsage(result.descendantUsage);
     }
     const modelOutputResult = await this.#modelFacingToolOutput(
       toolCall.function.name,
@@ -2721,6 +2726,7 @@ export class CfHarnessPromptLoop {
   }): Promise<{
     output: DelegateTaskToolOutput;
     resultRef: ToolResultRef;
+    descendantUsage?: HarnessModelUsage;
   }> {
     const delegateInput = options.input;
     const profileConfig = getHarnessSubagentProfileConfig(
@@ -2847,6 +2853,7 @@ export class CfHarnessPromptLoop {
     let subagentStatus: HarnessSubagentResult["status"] = "completed";
     let summary = "";
     let childModelTurns = 0;
+    let descendantUsage: HarnessModelUsage | undefined;
     let structuredReturn: HarnessSubagentStructuredReturn | undefined;
     try {
       if (
@@ -2896,7 +2903,7 @@ export class CfHarnessPromptLoop {
       childModelTurns = childResult.modelTurns;
       const childUsage = childResult.totalUsage ?? childResult.usage;
       if (childUsage !== undefined) {
-        this.#descendantUsage.push(childUsage);
+        descendantUsage = childUsage;
       }
       if (childResult.runState.status !== "completed") {
         subagentStatus = "failed";
@@ -2964,6 +2971,7 @@ export class CfHarnessPromptLoop {
     return {
       output: result.output,
       resultRef: result.resultRef,
+      ...(descendantUsage !== undefined ? { descendantUsage } : {}),
     };
   }
 }

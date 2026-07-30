@@ -240,26 +240,32 @@ export const toResponsesTools = (
  */
 export const addFirstUserPromptCacheBreakpoint = (
   input: readonly ResponsesInputItem[],
+  providerLabel: string,
 ): ResponsesInputItem[] => {
-  const copied = input.map((item) => structuredClone(item));
-  for (const item of copied) {
+  const copied = [...input];
+  for (let itemIndex = 0; itemIndex < input.length; itemIndex += 1) {
+    const item = input[itemIndex];
     if (item.role !== "user" || !Array.isArray(item.content)) continue;
-    const content = item.content as ResponsesInputItem[];
+    const content = item.content;
     for (let index = content.length - 1; index >= 0; index -= 1) {
       const block = content[index];
+      if (typeof block !== "object" || block === null) continue;
       if (
-        block.type !== "input_text" && block.type !== "input_image" &&
-        block.type !== "input_file"
+        !("type" in block) ||
+        (block.type !== "input_text" && block.type !== "input_image" &&
+          block.type !== "input_file")
       ) continue;
-      content[index] = {
+      const copiedContent = [...content];
+      copiedContent[index] = {
         ...block,
         prompt_cache_breakpoint: { mode: "explicit" },
       };
+      copied[itemIndex] = { ...item, content: copiedContent };
       return copied;
     }
   }
   throw new Error(
-    "explicit prompt caching requires a cacheable user content block",
+    `${providerLabel} explicit prompt caching requires a cacheable user content block`,
   );
 };
 

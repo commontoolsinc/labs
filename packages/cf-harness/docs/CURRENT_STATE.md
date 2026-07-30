@@ -109,7 +109,11 @@ mode.
 - `estimatedCostUsd` is available only for known GPT-5.6 gateway models when the
   response includes cache reads and writes. It uses public OpenAI pricing;
   gateway markup, subscription quota accounting, and provider invoices remain
-  outside the harness.
+  outside the harness. `estimateWithheldReason` distinguishes missing provider
+  detail, unknown models, invalid counters, subscription pricing, and incomplete
+  aggregate estimates. Aggregate dollar costs are omitted unless every included
+  usage record reports one, so a partial cost is never presented as the whole
+  run's.
 
 ## Verification
 

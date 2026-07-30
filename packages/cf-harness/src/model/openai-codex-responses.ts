@@ -486,7 +486,11 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
         terminal.usage !== null && !Array.isArray(terminal.usage)
       ? terminal.usage as Record<string, unknown>
       : undefined;
-    const usage = normalizeOpenAIUsage(rawUsage);
+    const normalizedUsage = normalizeOpenAIUsage(rawUsage);
+    const usage = normalizedUsage === undefined ? undefined : {
+      ...normalizedUsage,
+      estimateWithheldReason: "provider-pricing-unavailable" as const,
+    };
     return {
       assistant: normalizeTerminalResponse(
         terminal,

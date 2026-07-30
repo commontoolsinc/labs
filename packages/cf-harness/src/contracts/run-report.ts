@@ -108,6 +108,7 @@ export interface HarnessRunReport {
   generatedAt: string;
   status: string;
   model: string;
+  /** Requested effort; provider clients reject routes that cannot apply it. */
   reasoningEffort?: string;
   promptCacheMode?: "implicit" | "explicit";
   cacheAffinity?: "run" | "custom";

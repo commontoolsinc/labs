@@ -734,6 +734,7 @@ Deno.test("Codex Responses client parses CRLF SSE split across byte boundaries",
     inputTokens: 3,
     outputTokens: 2,
     totalTokens: 5,
+    estimateWithheldReason: "provider-pricing-unavailable",
   });
 });
 

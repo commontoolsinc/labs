@@ -414,6 +414,7 @@ Deno.test("CfHarnessPromptLoop executes injected model-client tool calls through
     cacheWriteTokens: 80,
     outputTokens: 50,
     totalTokens: 350,
+    estimateWithheldReason: "incomplete-estimates",
   });
   assertEquals(result.totalUsage, result.usage);
   assertEquals(result.modelUsage?.map((entry) => entry.modelTurn), [1, 2]);
