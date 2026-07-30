@@ -3149,22 +3149,32 @@ export function llmDialog(
           // Before starting request, set pending and append the new message.
           pending.withTx(tx).set(true);
           // Each message becomes its own document, which the LlmDerived
-          // stamping downstream relies on. Built-ins do not get automatic
-          // entity splitting, so the document is made explicitly and its link
-          // pushed. The link is taken relative to the messages cell so it
-          // stores bare, exactly as an automatically split element does.
+          // stamping downstream relies on. Pushing a plain message would also
+          // produce one, since `Cell.push` anchors objects in arrays; the
+          // document is made explicitly to control its identity -- a
+          // deliberate cause rather than a frame-relative counter.
           // TODO(seefeld): Once we have event ids, the cause should be that.
+          //
+          // Space AND scope come from the messages cell, so the document lands
+          // in the same partition an anchored one would, and its link stores
+          // bare relative to that cell.
           const messagesForPush = inputs.key("messages");
+          const messagesBase = messagesForPush.getAsNormalizedFullLink();
           const messageCell = runtime.getCell(
-            messagesForPush.getAsNormalizedFullLink().space,
+            messagesBase.space,
             { llmDialog: { message: cause, id: crypto.randomUUID() } },
-            undefined,
+            LLMMessageSchema,
             tx,
+            messagesBase.scope,
           );
           messageCell.withTx(tx).set(
             // Cast because we can't yet express ArrayBuffer in JSON Schema
             { ...event } as Schema<typeof LLMMessageSchema>,
           );
+          // `push()` is typed for message values and cells of them, not for
+          // links, so appending the bare link needs the cast. Pushing the cell
+          // itself would type cleanly but store the link with space, scope and
+          // the whole message schema inlined -- a copy per message.
           messagesForPush.withTx(tx).push(
             messageCell.getAsLink({ base: messagesForPush }) as never,
           );
@@ -3433,20 +3443,25 @@ async function startRequest(
       | readonly CfcConfClause[]
       | undefined)?.length ?? 0;
     // Each message becomes its own document, which the stamping below reads
-    // back. Built-ins get no automatic entity splitting, so the documents are
-    // made here explicitly. Links are taken relative to the messages cell, so
-    // they store bare -- the same shape an automatically split element has.
+    // back. Pushing plain messages would also produce them, since `Cell.push`
+    // anchors objects in arrays; they are made explicitly to control their
+    // identity -- a deliberate cause rather than a frame-relative counter.
     // TODO(seefeld): Once we have event ids, the cause should be that.
-    const space = messagesCell.getAsNormalizedFullLink().space;
+    //
+    // Space AND scope come from the messages cell, so the documents land in
+    // the same partition anchored ones would, and their links store bare.
+    const base = messagesCell.getAsNormalizedFullLink();
     messagesCell.withTx(tx).push(
       ...messages.map((message) => {
         const messageCell = runtime.getCell(
-          space,
+          base.space,
           { llmDialog: { message: cause, id: crypto.randomUUID() } },
-          undefined,
+          LLMMessageSchema,
           tx,
+          base.scope,
         );
         messageCell.withTx(tx).set(message);
+        // See the note at the user-message push: bare link, hence the cast.
         return messageCell.getAsLink({ base: messagesCell }) as never;
       }),
     );
@@ -3470,7 +3485,6 @@ async function startRequest(
     // PolicyInput` on the child doc), which also marks the transaction
     // CFC-relevant so `prepareTxForCommit` runs the persist pass that mints
     // the labelMap entry.
-    const base = messagesCell.getAsNormalizedFullLink();
     for (let index = 0; index < messages.length; index++) {
       const raw = messagesCell.withTx(tx).key(startIndex + index).getRaw();
       const link = parseLink(raw);
@@ -3692,16 +3706,20 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
           internal,
           requestId,
           (tx) => {
-            // As above: its own document, made explicitly, link stored bare.
+            // As above: made explicitly for identity control, in the messages
+            // cell's space and scope, link stored bare.
+            const errorBase = messagesCell.getAsNormalizedFullLink();
             const errorCell = runtime.getCell(
-              messagesCell.getAsNormalizedFullLink().space,
+              errorBase.space,
               { llmDialog: { message: cause, id: crypto.randomUUID() } },
-              undefined,
+              LLMMessageSchema,
               tx,
+              errorBase.scope,
             );
             errorCell.withTx(tx).set(
               errorMessage as Schema<typeof LLMMessageSchema>,
             );
+            // See the note at the user-message push: bare link, hence the cast.
             messagesCell.withTx(tx).push(
               errorCell.getAsLink({ base: messagesCell }) as never,
             );

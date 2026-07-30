@@ -21,7 +21,7 @@ import { createTrustedBuilder } from "./support/trusted-builder.ts";
 import { LLMMessageSchema } from "../src/builtins/llm-schemas.ts";
 import { waitForLlmMessages } from "./support/llm-result.ts";
 
-const signer = await Identity.fromPassphrase("llm invalid content");
+const signer = await Identity.fromPassphrase("llm dialog error messages");
 
 describe("llmDialog error-path messages", () => {
   let runtime: Runtime;
@@ -94,7 +94,7 @@ describe("llmDialog error-path messages", () => {
       tx,
     );
     const result = runtime.run(tx, testPattern, {}, resultCell);
-    tx.commit();
+    await tx.commit();
 
     const addMessage = await result.key("addMessage").pull();
     addMessage.send({ role: "user", content: "Hello" });
@@ -175,7 +175,7 @@ describe("llmDialog error-path messages", () => {
         tx,
       );
       const result = runtime.run(tx, testPattern, {}, resultCell);
-      tx.commit();
+      await tx.commit();
 
       const addMessage = await result.key("addMessage").pull();
       addMessage.send({ role: "user", content: "Hello" });
