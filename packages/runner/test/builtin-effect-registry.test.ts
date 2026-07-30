@@ -127,7 +127,14 @@ const FACTORY_DECLARED_EFFECT_SOURCES: Record<string, string> = {
   // in the returned literal — keep it that way, or this pin silently reports
   // that the kind changed when only the formatting did.
   "llm-dialog.ts": "llmDialog",
-  // `return { action, isEffect: true, useDeclaredReadsAsDependencies: true };`
+  // `return { action: navigateAction, isEffect: true,
+  //   useDeclaredReadsAsDependencies: true };`
+  // Same rule as llmDialog above, and for the same reason: since navigateTo
+  // gained `serverBuiltinRuntimeWrites` its plumbing is attached to a named
+  // const (`navigateAction`) instead of inline in the returned literal. An
+  // inline `Object.assign(action, { … })` puts a nested brace before
+  // `isEffect`, which this regex reads as "the factory stopped declaring the
+  // kind" — measured, not predicted: it went red on exactly that.
   "navigate-to.ts": "navigateTo",
 };
 
@@ -195,13 +202,36 @@ Deno.test("P2.0: no builtin source performs network egress without a classificat
  * is documented here with the reason its effect is not a suppression surface.
  */
 const DIRECT_POST_COMMIT_EFFECT_ALLOWLIST: Record<string, string> = {
-  // navigateTo's post-commit effect is the LOCAL shell navigation callback
-  // (`runtime.navigateCallback`), not an external sink: there is no second
-  // issuer to double-fire, and the executor Worker installs no navigate
-  // callback at all, so the effect is inert server-side. Its server-side
-  // classification is tracked by register row R5 (W2.15 descriptors), not by
-  // the suppression gate.
-  "navigate-to.ts": "local shell navigation callback, not an external sink",
+  // navigateTo's post-commit effect actuates a view change on ONE client, and
+  // that is a different kind of thing from an external sink — not a weaker one.
+  // The suppression gate exists to stop two issuers performing the same
+  // outside-world action twice; a navigation has no outside world and no
+  // reconciliation problem, because it is idempotent per session against a
+  // receipt the builtin already keeps (the session-scoped result cell: `:58`
+  // short-circuits when it is already `true`). Two deliveries to one session
+  // are one navigation.
+  //
+  // REWRITTEN 2026-07-29 (navigate-to-server-side.md §1d(i)). The previous text
+  // said "there is no second issuer to double-fire, and the executor Worker
+  // installs no navigate callback at all, so the effect is inert server-side".
+  // Both halves were defects. The first recorded a property of today's NODE
+  // PLACEMENT — the node only exists on the machine that ran the handler — as a
+  // property of the builtin; that incidence is exactly what wave G removes, and
+  // `navigateTo` is now in `SERVER_EXECUTABLE_BUILTIN_IDS`, so a server-side
+  // issuer is the point rather than an impossibility. The second was never
+  // accurate even before that: the Worker's `runtimePresets.productionServer`
+  // really does install no `navigateCallback`, but the consequence is
+  // `navigate-to.ts`'s `throw new Error("navigateCallback is not set")` BEFORE
+  // the post-commit effect is ever enqueued. "Inert" and "throws" are different
+  // acceptance criteria.
+  //
+  // What replaces both: the server-side sink is the SEAM, not a second
+  // actuation. The executor's runtime resolves the navigation to a
+  // `session.execution.navigate` event on the session execution feed and the
+  // client actuates it, so there is exactly one actuator per session by
+  // construction and nothing for the suppression gate to arbitrate.
+  "navigate-to.ts":
+    "one-shot per-session view actuation with its own receipt, not an external sink",
   // compileAndRun's post-commit effect is a local TS compile
   // (`compileOrGetPattern` — a content-addressed cell-cache write-back, no
   // `fetch`) plus `runtime.runSynced`, which instantiates the compiled pattern.

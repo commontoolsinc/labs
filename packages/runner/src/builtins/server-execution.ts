@@ -5,6 +5,16 @@ import type { NormalizedFullLink } from "../link-utils.ts";
  * server-primary rollout. Keep this list deliberately exact: a raw module only
  * receives this identity when it was resolved through the canonical builtin
  * registry ref, never from caller-controlled debug metadata.
+ *
+ * "Server-side implementation" is NOT a synonym for "has a broker fetch route".
+ * Every member up to `llmDialog` dials `runtime.fetchBuiltin`, and that made the
+ * two read as the same thing; `navigateTo` is the first member whose server-side
+ * work is a MESSAGE rather than an egress (see its entry below). What membership
+ * actually buys is uniform: the `:server-v1` implementation fingerprint, which
+ * is the only key `supportedBuiltinDescriptor`
+ * (`executor/action-transaction-router.ts`) accepts, and therefore the only way
+ * an EFFECT node ever acquires an assembled scope summary instead of
+ * classifying `unknown-effect-surface`.
  */
 export const SERVER_EXECUTABLE_BUILTIN_IDS = [
   "fetchBinary",
@@ -27,6 +37,32 @@ export const SERVER_EXECUTABLE_BUILTIN_IDS = [
   // which is exactly what "handlers stay client-side, the dialog runs
   // server-side" requires.
   "llmDialog",
+  // `navigateTo` joins for the SEAM, not for a broker route (owner gate 2,
+  // `docs/specs/server-side-execution/navigate-to-server-side.md` §2c: it is
+  // not a pattern effect OR a rendering effect but BOTH, split at a seam — the
+  // DECISION to navigate derives from pattern state and belongs server-side;
+  // the ACTUATION is a shell view change and stays a client rendering effect,
+  // and the server→client message IS the seam).
+  //
+  // It dials no `/api/...` route at all, so its `runtime.fetchBuiltin` channel
+  // is never opened. Membership is load-bearing for one thing only: the
+  // `:server-v1` fingerprint that lets the generically-minted
+  // `ServerBuiltinActionDescriptor` be honored, without which the node
+  // classifies `unknown-effect-surface` forever and no lane can ever claim it.
+  //
+  // Its write surface is why the effect route is the only one available: the
+  // SESSION-scoped result instance it mints (`navigate-to.ts`,
+  // `createCell(..., scope: "session")`) is not a registered output cell, so it
+  // rides `serverBuiltinRuntimeWrites` — a field the computation descriptor has
+  // no equivalent of. The same declaration is the design's safety hinge: a
+  // `session`-declared write is admitted ONLY at session lane rank
+  // (`scheduler/servability.ts` `laneAdmitsScope`), which is what makes a
+  // space-rank navigate claim — the one shape whose delivery has no principal
+  // filter, and would therefore drag every co-tenant of a shared space —
+  // structurally unreachable rather than merely unintended. Pinned by
+  // `test/navigate-to-rank-containment.test.ts`; drop the declaration and that
+  // file goes red.
+  "navigateTo",
 ] as const;
 
 export type ServerExecutableBuiltinId =

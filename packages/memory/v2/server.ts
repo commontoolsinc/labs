@@ -56,6 +56,7 @@ import {
   type ExecutionDemandSetRequest,
   type ExecutionDemandSetResult,
   type ExecutionLease,
+  type ExecutionNavigateEvent,
   getMemoryProtocolFlags,
   getPersistentSchedulerStateConfig,
   type GraphQuery,
@@ -2512,6 +2513,16 @@ export class Server {
     settlementsNoOp: 0,
     settlementsFailed: 0,
     settlementsUnserved: 0,
+    // navigate-to-server-side.md §2c: server-side `navigateTo` actuations
+    // handed to their one issuing session over the execution feed.
+    navigatesPublished: 0,
+    // ...and the ones REFUSED at that boundary, by cause
+    // (`publishExecutionNavigate`). `non-session-rank` here is the loud
+    // signal that the rank-containment invariant leaked upstream: it means
+    // something asked to navigate under a space- or user-rank claim, which is
+    // the shape whose delivery would reach a co-tenant or a second device.
+    navigatesDeclined: 0,
+    navigatesDeclinedCauses: {} as Record<string, number>,
     leaseFenceRejects: 0,
     // Per-cause breakdown of leaseFenceRejects (ExecutionLeaseFenceError
     // .fenceCause). A fenced commit in a measured run must name itself: a
@@ -4379,6 +4390,13 @@ export class Server {
           : event.claim;
       case "session.execution.settlement":
         return event.settlement.claim;
+      case "session.execution.navigate":
+        // The navigate event's claim is an ADDRESSING field only, so this arm
+        // is all the delivery narrowing it needs: the same predicate that
+        // narrows a claim.set narrows the navigation, and because navigateTo is
+        // confined to session rank it resolves to exactly the one session the
+        // contextKey names (navigate-to-server-side.md §2c).
+        return event.claim;
     }
   }
 
@@ -6687,6 +6705,103 @@ export class Server {
     this.#publishExecutionControl(Object.freeze({
       type: "session.execution.settlement",
       settlement: Object.freeze({ ...settlement, claim: live }),
+    }));
+    return true;
+  }
+
+  /**
+   * The SEAM (navigate-to-server-side.md §2c, owner gate 2): hand a server-side
+   * `navigateTo`'s resolved target to the one session that issued it, as a
+   * one-shot command on the session execution feed.
+   *
+   * Shaped exactly like {@link publishActionSettlement} and for the same
+   * reason: the caller is the executor, whose payload the host must not trust,
+   * so every authority input is re-derived here from state the host itself
+   * authored. In particular **the session identity comes from the LIVE claim's
+   * `contextKey`, never from the payload** — the executor names a claim, and the
+   * host decides who that claim reaches (`#sessionAcceptsClaim`). That is CA9's
+   * rule: a session id must enter from authenticated state, never from a
+   * caller-supplied field.
+   *
+   * ## Why the session-rank refusal below is not belt-and-braces
+   *
+   * Cross-principal navigation has to be UNREACHABLE, not merely unintended,
+   * and it has two independent guards because the consequence of losing it is
+   * silent and user-visible. Upstream, `navigateTo`'s session-scoped write
+   * confines the action to session rank at classification time (the runner's
+   * `scheduler/servability.ts` `laneAdmitsScope`, pinned by
+   * `test/navigate-to-rank-containment.test.ts`). Here, the publish boundary
+   * refuses anything else. The asymmetry that motivates the second guard is in
+   * `#sessionAcceptsClaim`: its principal comparison sits INSIDE the
+   * `contextKey !== "space"` branch, so a `space`-rank claim delivers to every
+   * session in the space regardless of principal. For state reconciliation that
+   * is correct and long-standing. For a view change it would drag every
+   * co-tenant of a shared space — a group chat, a shared poll — to a piece one
+   * of them opened. A `user:` claim is milder but still wrong: it reaches every
+   * device of the principal, which owner gate 1 approved as an interim and which
+   * the demand plumbing then made unnecessary (§8b: only the ISSUING runtime
+   * publishes demand for the deferred navigate root, so the reachable set is the
+   * issuing session alone).
+   *
+   * @returns `true` when the navigation was published, `false` when it was
+   *   refused — a refusal is never an error: the claim may simply have been
+   *   revoked while the actuation was in flight, which is exactly the case where
+   *   nobody should be navigated.
+   */
+  publishExecutionNavigate(
+    claim: ActionClaimKey & {
+      leaseGeneration: number;
+      claimGeneration: number;
+    },
+    target: ExecutionNavigateEvent["target"],
+  ): boolean {
+    const decline = (cause: string): false => {
+      this.executionStats.navigatesDeclined += 1;
+      this.executionStats.navigatesDeclinedCauses[cause] =
+        (this.executionStats.navigatesDeclinedCauses[cause] ?? 0) + 1;
+      return false;
+    };
+    this.expireExecutionClaims();
+    if (
+      typeof target?.space !== "string" || target.space.length === 0 ||
+      typeof target.id !== "string" || target.id.length === 0 ||
+      !Array.isArray(target.path) ||
+      target.path.some((segment) => typeof segment !== "string") ||
+      (target.scope !== undefined && target.scope !== "space" &&
+        target.scope !== "user" && target.scope !== "session")
+    ) {
+      return decline("malformed-target");
+    }
+    // The live claim at the EXACT authority incarnation the caller named. A
+    // revoked or re-issued claim navigates nobody: the actuation belongs to the
+    // run that earned that incarnation.
+    const key = actionClaimMapKey(claim);
+    const live = this.#executionClaims.get(key);
+    if (
+      live === undefined ||
+      live.leaseGeneration !== claim.leaseGeneration ||
+      live.claimGeneration !== claim.claimGeneration
+    ) {
+      return decline("no-live-claim");
+    }
+    // See the docblock: session rank or nothing.
+    if (Engine.parseSessionExecutionContextKey(live.contextKey) === undefined) {
+      return decline("non-session-rank");
+    }
+    if (!this.memoryProtocolFlags().serverPrimaryExecutionV1) {
+      this.#revokeExecutionClaimsForSpace(live.space);
+      return decline("execution-disabled");
+    }
+    this.executionStats.navigatesPublished += 1;
+    this.#publishExecutionControl(Object.freeze({
+      type: "session.execution.navigate",
+      claim: Object.freeze(canonicalActionClaimKey(live)),
+      target: Object.freeze({
+        space: target.space,
+        id: target.id,
+        path: Object.freeze([...target.path]),
+        ...(target.scope !== undefined ? { scope: target.scope } : {}),
+      }),
     }));
     return true;
   }

@@ -2,6 +2,7 @@ import {
   actionClaimMapKey,
   executionClaimIncarnationKey,
   ExecutionControlEvent,
+  type ExecutionNavigateEvent,
   type ExecutionSettlementFrontier,
   mergeInputBasisVectors,
   SessionDescriptor,
@@ -323,6 +324,25 @@ export class SessionRegistry {
     return session;
   }
 
+  /**
+   * Allocate this session's next feed sequence for `event`, retaining it for
+   * reconnect replay unless the event is a COMMAND rather than state.
+   *
+   * `session.execution.navigate` is deliberately NOT retained
+   * (navigate-to-server-side.md §2c, §5 item 4). Claim set/revoke/settlement
+   * are idempotent state, which is exactly what makes replaying them on
+   * reconnect correct — `attachExecutionFeed` replays retained events and
+   * coalesces successful settlements into frontiers for that reason. A
+   * navigation is a one-shot command with a side effect on the user's view; a
+   * replayed one yanks the view on every reconnect. Dropping it HERE rather
+   * than filtering it at the replay site is what makes that structural: it
+   * cannot reach `executionEvents`, so it cannot reach a replay run, a
+   * reconnect snapshot, or a settlement frontier by any path.
+   *
+   * The sequence is still allocated, so the navigate occupies its ordinal in
+   * the feed exactly like any other event and a client's `fromFeedSeq ===
+   * #executionFeedSeq` contiguity check on the NEXT batch still holds.
+   */
   appendExecutionEvent(
     session: SessionState,
     event: ExecutionControlEvent,
@@ -330,6 +350,9 @@ export class SessionRegistry {
     const fromFeedSeq = session.executionFeedSeq;
     const toFeedSeq = fromFeedSeq + 1;
     session.executionFeedSeq = toFeedSeq;
+    if (event.type === "session.execution.navigate") {
+      return { fromFeedSeq, toFeedSeq };
+    }
     session.executionEvents.push({ feedSeq: toFeedSeq, event });
     this.#updateExecutionSettlementFrontier(session, event, toFeedSeq);
     const excess = session.executionEvents.length - this.#maxExecutionEvents;
@@ -355,9 +378,20 @@ export class SessionRegistry {
     );
   }
 
+  /**
+   * The event type deliberately EXCLUDES the navigate variant rather than
+   * handling it. A settlement frontier is a reconnect-replay summary, and
+   * `session.execution.navigate` is the one variant that is never retained and
+   * therefore never replayed (see {@link appendExecutionEvent}) — so it must not
+   * be able to reach this coalescer at all, not merely be ignored by it. Saying
+   * that in the type is what makes the guarantee checkable: without it, this
+   * body's `event.settlement` tail would silently read a field the navigate
+   * variant does not have (navigate-to-server-side.md §6 item 4 — the piggyback
+   * falsifier, which the type checker duly fired on).
+   */
   #updateExecutionSettlementFrontier(
     session: SessionState,
-    event: ExecutionControlEvent,
+    event: Exclude<ExecutionControlEvent, ExecutionNavigateEvent>,
     feedSeq: number,
   ): void {
     if (event.type === "session.execution.claim.set") {

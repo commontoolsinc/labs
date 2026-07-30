@@ -49,7 +49,20 @@ type ExecutionControlEvent =
     leaseGeneration: number;
     claimGeneration: number;
   }
-  | { type: "session.execution.settlement"; settlement: unknown };
+  | { type: "session.execution.settlement"; settlement: unknown }
+  | {
+    // The 4th variant (navigate-to-server-side.md §2c: the navigateTo seam).
+    // Mirrored here only so the real `ExecutionControlEvent` stays assignable
+    // to this file's local copy — no test in this file publishes one.
+    type: "session.execution.navigate";
+    claim: ActionClaimKey;
+    target: {
+      space: string;
+      id: string;
+      path: readonly string[];
+      scope?: "space" | "user" | "session";
+    };
+  };
 
 type ExecutionSession = MemoryClient.SpaceSession & {
   setExecutionDemand(branch: string, pieces: readonly string[]): Promise<

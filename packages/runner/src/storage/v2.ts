@@ -36,6 +36,7 @@ import {
   executionClaimIncarnationKey,
   type ExecutionControlEvent,
   type ExecutionFeedBatch,
+  type ExecutionNavigateEvent,
   getCommitPreconditionsConfig,
   getPersistentSchedulerStateConfig,
   getServerPrimaryExecutionConfig,
@@ -2052,6 +2053,13 @@ type ProviderOptions = {
    * in space A's replica). Absent leaves the confirmation local-only.
    */
   onSourceCommitConfirmed?: (localSeq: number, seq: number) => void;
+  /**
+   * The client end of the navigateTo seam (navigate-to-server-side.md §2c): a
+   * `session.execution.navigate` event this session received. Absent leaves the
+   * event inert, which is the right posture for any replica with no view to
+   * actuate (the executor Worker's own included).
+   */
+  onExecutionNavigate?: (event: ExecutionNavigateEvent) => void;
   /** Late-bound: resolves to the Runtime's telemetry bus once attached. */
   getTelemetry?: () => TelemetrySink | undefined;
   /** FA4/FB7: same-step latch release on membership retraction — the manager
@@ -2450,6 +2458,20 @@ class SpaceReplica implements ISpaceReplica {
   ) => ForeignExecutionBasisCapture;
   /** C3.9: announce a confirmed source commit for cross-replica correlation. */
   readonly #onSourceCommitConfirmed?: (localSeq: number, seq: number) => void;
+  /**
+   * The client end of the navigateTo seam (navigate-to-server-side.md §2c): a
+   * `session.execution.navigate` event delivered to THIS session, handed on for
+   * actuation. Absent on any replica whose host has no shell to navigate — the
+   * executor Worker's own replica included — and absent is correct there, not a
+   * dropped message: the server half of navigateTo is the decision, and a
+   * process with no view has nothing to actuate.
+   *
+   * Deliberately typed as the raw event rather than a resolved Cell. The
+   * payload is exactly the four `NormalizedFullLink` fields the shell already
+   * round-trips through `postMessage` today, and resolving it into a Cell is
+   * the consumer's job (and may require sync), not this replica's.
+   */
+  readonly #onExecutionNavigate?: (event: ExecutionNavigateEvent) => void;
   /** Owning lane of a source action's transactions (C1.5b): the executor
    * Worker resolves a claimed action to its claim's contextKey so commits
    * assert exactly one lane (A6) and key their documents by it. */
@@ -2625,6 +2647,7 @@ class SpaceReplica implements ISpaceReplica {
     this.#executionActionsForClaimKey = options.executionActionsForClaimKey;
     this.#captureForeignExecutionBasis = options.captureForeignExecutionBasis;
     this.#onSourceCommitConfirmed = options.onSourceCommitConfirmed;
+    this.#onExecutionNavigate = options.onExecutionNavigate;
     this.#executionLaneForAction = options.executionLaneForAction;
   }
 
@@ -6263,6 +6286,22 @@ class SpaceReplica implements ISpaceReplica {
         "claim-revoked",
         invalidated,
       );
+      return;
+    }
+
+    if (event.type === "session.execution.navigate") {
+      // The SEAM's client end (navigate-to-server-side.md §2c). This arm must
+      // return before the settlement tail below: that tail is only reached
+      // because the other three variants are exhaustive, so a fourth variant
+      // without an explicit return would read `event.settlement` off an event
+      // that has none. That is §6 item 4's piggyback falsifier, and it is why
+      // "add a fourth variant" is not automatically free.
+      //
+      // Deliberately NOT a claim mutation: a navigate is an addressing use of
+      // its claim, so nothing here touches `#executionClaims`, the claimed
+      // overlays, or the registered-action index. Applying one twice changes no
+      // client state.
+      this.#onExecutionNavigate?.(event);
       return;
     }
 

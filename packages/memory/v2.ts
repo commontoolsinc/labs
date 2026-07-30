@@ -677,10 +677,66 @@ export interface ExecutionSettlementEvent {
   settlement: ActionSettlement;
 }
 
+/**
+ * The one-shot COMMAND on an otherwise state-reconciling feed: the client half
+ * of a server-side `navigateTo`
+ * (`docs/specs/server-side-execution/navigate-to-server-side.md` §2c, owner
+ * gate 2). `navigateTo` is neither a pattern effect nor a rendering effect but
+ * both, split at a seam — the DECISION to navigate derives from pattern state
+ * and runs server-side; the ACTUATION is a shell view change and stays a client
+ * rendering effect. This event IS that seam.
+ *
+ * It is deliberately unlike its three siblings, and the difference is the whole
+ * reason it needs its own variant rather than a field on one of them. Claim
+ * set/revoke/settlement are IDEMPOTENT STATE: applying one twice reaches the
+ * same place, which is why the feed may retain and replay them on reconnect. A
+ * navigation is a command with a side effect on the user's view — replaying it
+ * yanks the view on every reconnect. So this variant is NEVER retained (see
+ * `appendExecutionEvent` in `v2/session-registry.ts`) and can therefore never
+ * appear in a reconnect snapshot or a replayed event run.
+ *
+ * Addressing needs nothing new. The `claim` carries the canonical
+ * `contextKey`, so the existing delivery predicate (`#sessionAcceptsClaim`)
+ * narrows the event for free — and because `navigateTo`'s session-scoped write
+ * confines it to session rank (`runner`'s `scheduler/servability.ts`
+ * `laneAdmitsScope`), that predicate resolves to EXACTLY ONE session: the
+ * `session:<principal>:<sessionId>` the key names, never a sibling of the same
+ * principal, never a co-tenant of the space.
+ *
+ * Duplicate delivery is a no-op without any work here: `navigateTo` keeps its
+ * per-session receipt (the session-scoped result cell it sets to `true`, whose
+ * `false` reading is the "already navigated" guard), so a second event for the
+ * same target lands on an already-navigated session.
+ */
+export interface ExecutionNavigateEvent {
+  type: "session.execution.navigate";
+  /**
+   * The navigateTo action's claim. Canonical key only — this is an addressing
+   * field, not a claim mutation: the event neither grants nor revokes
+   * authority, and applying it must not touch the client's claim map.
+   */
+  claim: ActionClaimKey;
+  /**
+   * The resolved navigation target, as the shell's `navigateCallback` consumes
+   * it: exactly the four fields of a `NormalizedFullLink`, which is what the
+   * client already round-trips through `postMessage` today
+   * (`runtime-client/backends/runtime-processor.ts`). Nothing richer is needed
+   * — the shell reconstitutes a Cell from the link and calls `cell.id()` /
+   * `cell.space()`.
+   */
+  target: {
+    space: string;
+    id: EntityId;
+    path: readonly string[];
+    scope?: CellScope;
+  };
+}
+
 export type ExecutionControlEvent =
   | ExecutionClaimSetEvent
   | ExecutionClaimRevokeEvent
-  | ExecutionSettlementEvent;
+  | ExecutionSettlementEvent
+  | ExecutionNavigateEvent;
 
 export interface ExecutionClaimSnapshot {
   claims: ExecutionClaim[];

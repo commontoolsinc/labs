@@ -1461,6 +1461,18 @@ export class SpaceSession {
       case "session.execution.settlement":
         this.#deliverOrBufferSettlement(event.settlement);
         return;
+      case "session.execution.navigate":
+        // An EXPLICIT arm, not a fall-through. This switch has no default, so a
+        // fourth variant with no case would be silently dropped here and a lost
+        // navigation would be indistinguishable from a message that never
+        // arrived (navigate-to-server-side.md §6 item 4).
+        //
+        // Nothing touches `#executionClaims` or the pending settlements: a
+        // navigate uses its claim only for ADDRESSING — it neither grants nor
+        // revokes authority — so there is no claim state to reconcile and no
+        // ordering barrier to respect. Emit it straight to listeners.
+        this.#emitExecutionControl(event);
+        return;
     }
   }
 

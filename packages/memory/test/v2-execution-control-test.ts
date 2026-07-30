@@ -93,7 +93,20 @@ type ExecutionControlEvent =
     leaseGeneration: number;
     claimGeneration: number;
   }
-  | { type: "session.execution.settlement"; settlement: ActionSettlement };
+  | { type: "session.execution.settlement"; settlement: ActionSettlement }
+  | {
+    // The 4th variant (navigate-to-server-side.md §2c: the navigateTo seam).
+    // Mirrored here only so the real `ExecutionControlEvent` stays assignable
+    // to this file's local copy — no test in this file publishes one.
+    type: "session.execution.navigate";
+    claim: ActionClaimKey;
+    target: {
+      space: string;
+      id: string;
+      path: readonly string[];
+      scope?: "space" | "user" | "session";
+    };
+  };
 
 type AuthenticatedExecutionDemand = {
   space: string;

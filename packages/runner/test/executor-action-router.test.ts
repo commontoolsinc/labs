@@ -38,6 +38,7 @@ const EXPECTED_SERVER_EXECUTABLE_BUILTIN_IDS = [
   "generateText",
   "generateObject",
   "llmDialog",
+  "navigateTo",
 ] as const satisfies readonly ServerExecutableBuiltinId[];
 const action = {};
 const output = {
@@ -391,8 +392,19 @@ Deno.test("server executable builtin registry is exact and excludes ambient capa
   // This pin exists to make registry growth DELIBERATE, and it earned that
   // on 2026-07-29: the `llmDialog` addition landed without updating the
   // expected list, and the resulting type error was the only signal — the
-  // narrow per-item verify command could not see it. If you are updating
-  // this list, confirm the id genuinely has a broker route first.
+  // narrow per-item verify command could not see it.
+  //
+  // "Confirm the id genuinely has a broker route first" USED to be the rule for
+  // updating this list, and `navigateTo` is the deliberate exception that
+  // retires it (owner gate 2, navigate-to-server-side.md §2c). It dials no
+  // route at all: its server-side half is the DECISION to navigate, and the
+  // actuation crosses to the client as a message on the session execution feed.
+  // The honest membership rule is the one the registry's own docblock now
+  // states — membership is what earns the `:server-v1` fingerprint, hence the
+  // only path by which an EFFECT node acquires an assembled scope summary. So
+  // the question to answer before adding an id is "does the server perform this
+  // builtin's half of the work", not "does it fetch". `sqliteQuery` still
+  // stays outside: nothing server-side runs it at all yet.
   // `fetch`/`generateImage` are ambient capabilities, not builtin ids, and
   // must never resolve here.
   assertEquals(
