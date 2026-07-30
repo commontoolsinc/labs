@@ -51,6 +51,11 @@ import {
   getPatternSetupIdentityRef,
   Runtime,
 } from "@commonfabric/runner";
+import {
+  companionFileName,
+  companionSpace,
+  vintageCompanionDir,
+} from "./vintage-layout.ts";
 import type { RuntimeProgram } from "@commonfabric/runner";
 // Relative into the runner's internals for the same reason as the test
 // utilities below: `getMetaLink` and the link shape it returns are how the
@@ -120,15 +125,19 @@ export interface VintageRuntime {
   /** The PRIMARY space: the signer's own, and the one a fixture is named for. */
   space: string;
   /**
-   * Every space this runtime was restored WITH, primary and companions alike.
-   * Empty for a fresh store.
+   * Every space this runtime was restored WITH, primary and companions alike,
+   * sorted. Empty for a fresh store.
    *
-   * Read at open, before anything can write, so it answers "what does this
-   * fixture CARRY" rather than "what has been touched since". A replay needs
-   * exactly that question answered: reading a recorded root out of a space the
-   * fixture does not carry finds a fresh empty space, materializes onto it
-   * happily, and counts as a clean update — the same false green an absent
-   * fixture produces.
+   * Read at open, before anything can write, so it answers "what did this
+   * fixture CARRY" rather than "what has been touched since" — the engine opens
+   * a store with `{ create: true }`, so by the time a replay has read anything
+   * the answer would already have changed.
+   *
+   * It is a DIAGNOSIS, not a control: "carries the space" does not imply "holds
+   * the root", since a store that opened but never committed restores as a
+   * valid empty database. `vintageHoldsRoot` is the control; this is what lets
+   * a failure say "the fixture does not carry did:key:…" instead of leaving the
+   * reader to work out why a root was not there.
    */
   restoredSpaces: readonly string[];
   storeDir: string;
@@ -144,38 +153,6 @@ export interface VintageRuntime {
   dispose(): Promise<void>;
 }
 
-/**
- * Suffix of the directory carrying a fixture's NON-primary space stores.
- *
- * A space is one SQLite file, so a capture that instantiates a pattern in
- * another space (`Factory.inSpace(...)` — how a profile is created) writes a
- * SECOND file, and a fixture that copied only the first would record roots
- * whose state it does not hold. The companion directory sits beside the primary
- * file, holds one raw `.sqlite` per other space, and travels with it in git —
- * raw, so delta compression still works (see `tasks/pattern-vintage-lib.ts`).
- *
- * The suffix keeps the primary file's `.sqlite` in view rather than replacing
- * it — `<stamp>-<identity>.sqlite` → `<stamp>-<identity>.sqlite.spaces/` — so
- * the pair reads as one fixture, and so `parseVintagePath` can decline anything
- * inside one on the directory NAME alone. A bare `.spaces` would be a weaker
- * discriminator over a tree that is not exclusively fixtures.
- */
-export const VINTAGE_SPACES_SUFFIX = ".sqlite.spaces";
-
-/** The companion directory for the fixture at `fixturePath` (`…/<name>.sqlite`). */
-export function vintageCompanionDir(fixturePath: string): string {
-  return `${fixturePath.replace(/\.sqlite$/, "")}${VINTAGE_SPACES_SUFFIX}`;
-}
-
-/**
- * A companion's filename encodes its space id, and `encodeURIComponent` is the
- * same escape `encodeStoreSubject` applies to a space's own store filename — so
- * the two ends agree without a second spelling of "how a DID becomes a name".
- */
-function companionFileName(space: string): string {
-  return `${encodeURIComponent(space)}.sqlite`;
-}
-
 /** Every companion store beside `fixturePath`, as `[space, path]`. */
 async function companionStores(
   fixturePath: string,
@@ -184,11 +161,13 @@ async function companionStores(
   const found: [string, string][] = [];
   try {
     for await (const entry of Deno.readDir(dir)) {
-      if (!entry.isFile || !entry.name.endsWith(".sqlite")) continue;
-      found.push([
-        decodeURIComponent(entry.name.slice(0, -".sqlite".length)),
-        `${dir}/${entry.name}`,
-      ]);
+      if (!entry.isFile) continue;
+      // A name this repo could not have written is not a companion — skipping
+      // it cannot lose a real space, and every root whose space did not restore
+      // is reported by the replay anyway.
+      const space = companionSpace(entry.name);
+      if (space === undefined) continue;
+      found.push([space, `${dir}/${entry.name}`]);
     }
   } catch (error) {
     // No companion directory means a single-space fixture, which is the common
@@ -246,7 +225,7 @@ export async function openFileBackedRuntime(
     // to know.
     restoredSpaces: fromSnapshot === undefined
       ? []
-      : listSpaceStores(storeUrl).map((info) => info.space),
+      : listSpaceStores(storeUrl).map((info) => info.space).sort(),
     storeDir,
     async snapshot(destPath: string) {
       // Everything must be durable before the copy, or the fixture records a
@@ -262,13 +241,20 @@ export async function openFileBackedRuntime(
       snapshotSpaceStore(path, destPath);
       // Every OTHER space the run wrote travels too, enumerated from the store
       // itself rather than from what an observer recorded: the two can disagree,
-      // and the copy has to be a statement about what is on disk. A space with
-      // no store file wrote nothing durable, so there is nothing to carry and
-      // nothing a replay could validate there.
+      // and the copy has to be a statement about what is on disk.
+      //
+      // "Has a store file" is NOT "holds state" — the engine opens with
+      // `{ create: true }`, so merely reaching a space leaves an empty database
+      // behind, and copying one carries nothing. That is why the replay's
+      // per-root control is `vintageHoldsRoot` and not a question about spaces.
       const companionDir = vintageCompanionDir(destPath);
-      for (const info of listSpaceStores(storeUrl)) {
-        if (info.space === space) continue;
+      const companions = listSpaceStores(storeUrl).filter((info) =>
+        info.space !== space
+      );
+      if (companions.length > 0) {
         await Deno.mkdir(companionDir, { recursive: true });
+      }
+      for (const info of companions) {
         // `listSpaceStores` just stat'd this file, so re-resolving it cannot
         // legitimately come back null; `!` rather than a branch nothing can
         // reach. `snapshotSpaceStore` throws on a path that is not there.
@@ -530,6 +516,48 @@ export function isPresentRootValue(value: unknown): boolean {
   // wrote, so it is not evidence either.
   return typeof value !== "object" ||
     Object.keys(value as Record<string, unknown>).length > 0;
+}
+
+/**
+ * Whether the fixture actually HOLDS the root a manifest entry names.
+ *
+ * The control that has to run per entry, before today's source is applied to
+ * it. "The fixture carries this space" is not the same claim: a space store
+ * that opened but never committed is a valid empty database, an entity id is
+ * content-derived and so names a cell in any space, and a cell nobody wrote
+ * reads as absent rather than as an error. Materializing onto one of those
+ * SUCCEEDS — the root then holds today's defaults, `isPresentRootValue` is
+ * satisfied, and the entry counts as updated cleanly over state that was never
+ * there. Measured: with a companion store truncated to zero bytes, a break that
+ * the gate is built to catch replays with no failures at all.
+ *
+ * The evidence is the SETUP MARKER, not a value. The runner stamps
+ * `patternSetupIdentity` under the same condition that reports an instantiation
+ * to the capture observer (`runner.ts` — deliberately the same, so the store
+ * cannot label roots the observer missed or vice versa), so every manifest
+ * entry's cell carries one by construction. A value check would instead depend
+ * on the pattern's result shape, and a root whose result is legitimately `{}`
+ * would read as missing.
+ */
+export async function vintageHoldsRoot(
+  vintage: VintageRuntime,
+  space: string,
+  cellId: string,
+): Promise<boolean> {
+  const cell = vintage.runtime.getCellFromEntityId(
+    space as never,
+    cellId as never,
+    [],
+    undefined as never,
+  );
+  try {
+    await cell.sync();
+    return getPatternSetupIdentityRef(cell as Cell<unknown>) !== undefined;
+  } catch {
+    // An absent doc surfaces as a throw rather than `undefined`, and for this
+    // question the two are the same answer: nothing was captured here.
+    return false;
+  }
 }
 
 export async function vintageRootHasState(

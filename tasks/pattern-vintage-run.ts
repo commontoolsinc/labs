@@ -30,12 +30,13 @@ import {
   materializeOnCell,
   openFileBackedRuntime,
   readVintageManifest,
-  vintageCompanionDir,
+  vintageHoldsRoot,
   type VintageManifestEntry,
   vintageRootCause,
   vintageRootHasState,
   writeVintageManifest,
 } from "../packages/piece/test/state-continuity-harness.ts";
+import { vintageCompanionDir } from "../packages/piece/test/vintage-layout.ts";
 
 export interface GateRoots {
   /** Repo root, used only to shorten paths in reports. */
@@ -182,14 +183,28 @@ export async function replayVintage(
     }
 
     const targets = manifest.entries.filter(isUpgradeTarget);
-    // Which spaces this fixture actually holds. A target recorded in another one
-    // is unreachable here, and unreachable reads CLEAN: the read finds a fresh
-    // empty space, the materialize succeeds against nothing, and the root then
-    // holds today's defaults — a green verdict over state that was never there.
-    // Cross-space children are not hypothetical; `Factory.inSpace(...)` is how a
-    // profile is created.
+    // The per-entry control, and the one the whole gate leans on: does this
+    // fixture actually HOLD the root it is about to validate? A root that is not
+    // there reads CLEAN — the cell is absent, today's source materializes onto
+    // it, the root then holds today's defaults, and the entry counts as updated
+    // cleanly over state that was never captured. `vintageRootHasState` above
+    // cannot answer this: it is one check on the well-known capture root and
+    // says nothing about the nested cell each entry names.
+    //
+    // Measured, three ways to be absent and all of them read green without this:
+    // a root recorded in a space the fixture does not carry (a cross-space child
+    // — `Factory.inSpace(...)` is how a profile is created), a companion store
+    // that restored but is empty, and a recorded cell id that names nothing.
     const carried = new Set(runtimeVintage.restoredSpaces);
-    const unreachable = targets.filter((e) => !carried.has(e.space));
+    const missing = new Set<VintageManifestEntry>();
+    for (const entry of targets) {
+      const held = await vintageHoldsRoot(
+        runtimeVintage,
+        entry.space,
+        entry.cellId,
+      );
+      if (!held) missing.add(entry);
+    }
     // Unaddressable, not merely un-targeted. Both shapes belong here: no source
     // path at all, and a path that is not repo-root-relative — the evaluate loop
     // records injected helper modules (`cfc.ts`) whose names carry no leading
@@ -223,18 +238,20 @@ export async function replayVintage(
           }) — it was recorded but NOT validated`,
       });
     }
-    // Same rule for a space the fixture does not carry, and for the same reason:
+    // Same rule for a root the fixture does not hold, and for the same reason:
     // the replay cannot reach it, so a green verdict would be a claim about
-    // fewer roots than the fixture records. Scoped to TARGETS because those are
-    // the entries the loop below would otherwise "validate" against an empty
-    // space; a non-target in a dropped space was never going to be applied.
-    for (const entry of unreachable) {
+    // fewer roots than the fixture records. A missing SPACE is called out by
+    // name because it is both the likeliest cause and the one with an obvious
+    // remedy; anything else says plainly that the root is not there.
+    for (const entry of missing) {
       report.failures.push({
         ...where,
         detail: `recorded instantiation ${entry.identity}#${entry.symbol} ` +
-          `was materialized in ${entry.space}, which this fixture does not ` +
-          `carry (it holds ${[...carried].join(", ")}) — it was recorded but ` +
-          `NOT validated. Recapture it with ` +
+          (carried.has(entry.space)
+            ? `holds no captured root at ${entry.cellId} in ${entry.space}`
+            : `was materialized in ${entry.space}, which this fixture does ` +
+              `not carry (it holds ${[...carried].sort().join(", ")})`) +
+          ` — it was recorded but NOT validated. Recapture it with ` +
           `\`deno task pattern-vintage --update\``,
       });
     }
@@ -242,7 +259,7 @@ export async function replayVintage(
     for (const entry of targets) {
       // Already reported above. Materializing it anyway would apply today's
       // source to an empty cell and count the result as a clean update.
-      if (!carried.has(entry.space)) continue;
+      if (missing.has(entry)) continue;
       const source = `${roots.repoRoot}${entry.main}`;
       let program;
       try {

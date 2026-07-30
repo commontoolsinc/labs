@@ -151,18 +151,12 @@ async function main() {
     console.error(`\n${reportFailures(replay.failures)}`);
   }
 
-  // CANDIDATES is the soundness floor, not `updated`. A run where nothing
-  // changed legitimately updates nothing — that is the common case, and the
-  // auto-updater fires on the same condition. But a run with no candidates
-  // examined no update targets at all, which is the shape that has read as
-  // success three separate times in this tier's history.
-  const clean = isClean(
-    replay.failures,
-    uncovered,
-    replay.replayed,
-    replay.candidates,
-  );
-  if (!clean) Deno.exit(1);
+  // CANDIDATES and TARGETS are the soundness floor, not `updated`. A run where
+  // nothing changed legitimately updates nothing — that is the common case, and
+  // the auto-updater fires on the same condition. But a run with no candidates,
+  // or none that today's source could be applied to, examined no update targets
+  // at all — the shape that has read as success three separate times here.
+  if (!isClean(replay.failures, uncovered, replay)) Deno.exit(1);
   console.log(reportReplaySummary(replay));
 }
 

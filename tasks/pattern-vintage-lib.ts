@@ -20,8 +20,9 @@
  * that instantiates a pattern via `Factory.inSpace(...)` writes a second store,
  * and a fixture that held only the first would record roots whose state it does
  * not have. It is part of the FIXTURE, not a fixture itself, so
- * `parseVintagePath` declines everything inside one; the harness owns its shape
- * (`VINTAGE_SPACES_SUFFIX`).
+ * `parseVintagePath` declines everything inside one. Its shape lives in
+ * `packages/piece/test/vintage-layout.ts`, which the snapshot/restore side needs
+ * too and which is dependency-free so this module stays so.
  *
  * The tree is deliberately NOT under `packages/patterns/`, which is the
  * obvious home for it and the wrong one. `tasks/build-binaries.ts` passes that
@@ -67,7 +68,7 @@
  * everyone who clones.
  */
 
-import { VINTAGE_SPACES_SUFFIX } from "../packages/piece/test/state-continuity-harness.ts";
+import { VINTAGE_SPACES_SUFFIX } from "../packages/piece/test/vintage-layout.ts";
 
 /** Root of the committed fixture tree. See the note above on why it is here. */
 export const VINTAGES_DIR = "packages/piece/test/vintages";
@@ -452,11 +453,15 @@ export function armVerdictGuard(
  * tested, rather than being an `if` at the bottom of `main` that a later edit
  * can quietly invert — a gate that exits 0 on failure is worse than no gate.
  *
- * `candidates` is the soundness floor, NOT the number updated. A run where no
- * pattern changed legitimately updates nothing, which is the common case and
- * the same condition the auto-updater fires on. A run with no CANDIDATES
- * examined no update targets at all — the shape that has read as success three
- * separate times in this tier's history.
+ * `counts.candidates` and `counts.targets` are the soundness floor, NOT the
+ * number updated. A run where no pattern changed legitimately updates nothing,
+ * which is the common case and the same condition the auto-updater fires on. A
+ * run with no CANDIDATES examined no update targets at all — the shape that has
+ * read as success three separate times in this tier's history. `targets` is the
+ * same floor one step further in: recorded instantiations that today's source
+ * cannot be applied to (a test pattern, a keyless session pointer) are not
+ * coverage, so a run whose every candidate was one of those applied nothing
+ * either, and must not read as a pass.
  *
  * `replayed` is part of the condition and not just a number to print: zero
  * replays is the shape a broken gate takes, not the shape a clean tree takes.
@@ -464,9 +469,8 @@ export function armVerdictGuard(
 export function isClean(
   failures: readonly ReplayFailure[],
   uncovered: readonly string[],
-  replayed: number,
-  candidates: number,
+  counts: { replayed: number; candidates: number; targets: number },
 ): boolean {
-  return failures.length === 0 && uncovered.length === 0 && replayed > 0 &&
-    candidates > 0;
+  return failures.length === 0 && uncovered.length === 0 &&
+    counts.replayed > 0 && counts.candidates > 0 && counts.targets > 0;
 }

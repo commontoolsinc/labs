@@ -5,9 +5,9 @@ import { collectVintages, PINNED } from "./pattern-vintage-lib.ts";
 import {
   openFileBackedRuntime,
   readVintageManifest,
-  vintageCompanionDir,
   writeVintageManifest,
 } from "../packages/piece/test/state-continuity-harness.ts";
+import { vintageCompanionDir } from "../packages/piece/test/vintage-layout.ts";
 import {
   captureMissing,
   captureVintage,
@@ -538,6 +538,10 @@ describe("the vintage gate, end to end", () => {
     } finally {
       await vintage.dispose().catch(() => {});
     }
+    // The PRIMARY file only, which is enough here because this fixture is
+    // single-space. Do not copy this idiom onto a multi-space one: `snapshot`
+    // writes a companion directory too, and moving the primary alone would
+    // silently leave the other spaces behind.
     await Deno.copyFile(`${tmp}/rewritten.sqlite`, pinned.path);
     await Deno.remove(tmp, { recursive: true }).catch(() => {});
 
@@ -850,6 +854,33 @@ describe("the vintage gate, end to end", () => {
 
       expect((await Deno.stat(first)).mtime).toEqual(before.mtime);
       expect(await collectVintages(roots.vintagesRoot)).toHaveLength(1);
+    });
+
+    it("FAILS a fixture whose recorded root is not IN the space it carries", async () => {
+      // Carrying the space is not the same claim as holding the root. A space
+      // store that opened but never committed is a valid EMPTY database, so it
+      // restores, `restoredSpaces` lists it, and every space-level check passes
+      // — while the recorded cell is absent, the candidate materializes onto
+      // nothing, and the entry counts as updated cleanly. Measured: without the
+      // per-root control this replays the `string[]` break above with zero
+      // failures.
+      await captureCross();
+      const [pinned] = await collectVintages(roots.vintagesRoot);
+      const companion = `${vintageCompanionDir(pinned.path)}/${
+        encodeURIComponent(CHILD_SPACE)
+      }.sqlite`;
+      await Deno.writeFile(companion, new Uint8Array());
+      await writeCross(crossSource("string[]"));
+
+      const { failures } = await replayAll(roots);
+
+      const childFailure = failures.find((f) => f.detail.includes("#Child"));
+      expect(childFailure?.detail).toContain("holds no captured root");
+      expect(childFailure?.detail).toContain("recorded but NOT validated");
+      // NOT the missing-space diagnosis: the space is right there, empty. A
+      // message that blamed the space would send the reader after the wrong
+      // thing.
+      expect(childFailure?.detail).not.toContain("does not carry");
     });
 
     it("FAILS a fixture that dropped a recorded space, rather than reading it clean", async () => {
