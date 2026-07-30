@@ -5,6 +5,7 @@ import { patchOpDescriptors } from "@commonfabric/memory/v2/patch";
 import {
   buildMergeableIntent,
   MERGEABLE_WIRE_OPS,
+  mergeableOpPayloadContains,
 } from "../src/storage/mergeable-ops.ts";
 
 // Ties the three places a mergeable patch op is registered together, so a new op
@@ -148,5 +149,76 @@ describe("mergeable tail-op build guards", () => {
         },
       ),
     ).toEqual({ ops: [], suppress: [], abandon: true });
+  });
+});
+
+// Which paths an op's PAYLOAD already carries. Two intents on one document are
+// mutually exclusive when one contains the other: the contained one has already
+// had its change applied by the containing op, whose payload is read from the
+// working array at commit. `buildMergeableOps` abandons the contained intent;
+// this pins the per-op answers it asks for.
+describe("mergeable op payload containment", () => {
+  // A tail op sends `array.slice(tailStart)` — live values out of the working
+  // document — so it carries every path at or past that index, at any depth.
+  it("a tail op contains the paths at or past its tail start", () => {
+    const ctx = {
+      workingArray: [["a"], ["x"]],
+      hadInitialArray: true,
+      hadInitialValue: true,
+      initialArrayLength: 1,
+    };
+    const intent = { op: "append", path: ["value"], count: 1 } as const;
+
+    // The appended element, and anything beneath it.
+    expect(mergeableOpPayloadContains(intent, ctx, ["value", "1"])).toBe(true);
+    expect(mergeableOpPayloadContains(intent, ctx, ["value", "1", "0"]))
+      .toBe(true);
+    // An element below the tail is not in the payload; nor is the array itself,
+    // a sibling, or a non-index key.
+    expect(mergeableOpPayloadContains(intent, ctx, ["value", "0"])).toBe(false);
+    expect(mergeableOpPayloadContains(intent, ctx, ["value"])).toBe(false);
+    expect(mergeableOpPayloadContains(intent, ctx, ["other", "1"])).toBe(false);
+    expect(mergeableOpPayloadContains(intent, ctx, ["value", "length"]))
+      .toBe(false);
+  });
+
+  // With no base array the whole working array is the payload, so every element
+  // is contained.
+  it("a tail op with no base array contains every element", () => {
+    expect(
+      mergeableOpPayloadContains(
+        { op: "add-unique", path: ["value"], count: 1 },
+        {
+          workingArray: [["a"], ["x"]],
+          hadInitialArray: false,
+          hadInitialValue: false,
+        },
+        ["value", "0"],
+      ),
+    ).toBe(true);
+  });
+
+  // An `increment` sends a number and a `remove-by-value` sends the element it
+  // removes; neither carries another intent's target.
+  it("the non-tail ops contain nothing", () => {
+    expect(
+      mergeableOpPayloadContains(
+        { op: "increment", path: ["value"], by: 1 },
+        { hadInitialArray: false, hadInitialValue: true },
+        ["value", "0"],
+      ),
+    ).toBe(false);
+    expect(
+      mergeableOpPayloadContains(
+        { op: "remove-by-value", path: ["value"], values: ["a"] },
+        {
+          workingArray: ["b"],
+          hadInitialArray: true,
+          hadInitialValue: true,
+          initialArrayLength: 2,
+        },
+        ["value", "0"],
+      ),
+    ).toBe(false);
   });
 });

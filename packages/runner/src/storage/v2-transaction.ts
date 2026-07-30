@@ -88,8 +88,10 @@ import {
   buildMergeableIntent,
   foldMergeableIntent,
   isNoopMergeableDelta,
+  type MergeableBuildContext,
   type MergeableOpDelta,
   type MergeableOpIntent,
+  mergeableOpPayloadContains,
   type OpSuppression,
 } from "./mergeable-ops.ts";
 import { recordWriteStackTrace } from "./write-stack-trace.ts";
@@ -2640,6 +2642,16 @@ export class V2StorageTransaction implements IStorageTransaction {
   // hand the replacing whole-value diff a read set it has not earned. This runs
   // inside getNativeCommit, which precedes that narrowing, so both sides see the
   // same intents.
+  //
+  // One intent is also abandoned for what its SIBLINGS carry, which is why the
+  // contexts are computed for all of them before any is built: a tail op's
+  // payload is live values read out of the working document, so an intent whose
+  // target sits inside that payload has already had its change applied by the
+  // covering op, and sending it too would apply it twice (see
+  // `mergeableOpPayloadContains`). Coverage is judged on what each intent
+  // RECORDED, not on which ops survived — an intent contained by an op that is
+  // itself abandoned must fall back with it, so that the whole-value diff is the
+  // only thing carrying that region.
   private buildMergeableOps(
     doc: WritableDocumentEntry,
   ): { ops: PatchOp[]; suppress: OpSuppression[] } {
@@ -2648,31 +2660,18 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (!doc.mergeableOps || doc.current.value === undefined) {
       return { ops, suppress };
     }
+    const pending = [...doc.mergeableOps.values()].map((intent) => ({
+      intent,
+      ctx: this.mergeableBuildContext(doc, intent),
+    }));
+
     const abandoned: string[] = [];
-    for (const intent of doc.mergeableOps.values()) {
-      const working = readValueAtPath(doc.current.value, intent.path, {
-        allowArrayLength: true,
-      });
-      const initial = doc.initial.value === undefined ? undefined : (
-        readValueAtPath(doc.initial.value, intent.path, {
-          allowArrayLength: true,
-        })
-      );
-      // Presence, not definedness: an already-present slot (even holding
-      // `undefined`) does not add a key to its parent, so the op does not
-      // materialize a path and must not stamp `createsKey`.
-      const hadInitialValue = doc.initial.value !== undefined &&
-        hasValueAtPath(doc.initial.value, intent.path, {
-          allowArrayLength: true,
-        });
-      const built = buildMergeableIntent(intent, {
-        workingArray: Array.isArray(working)
-          ? working as FabricValue[]
-          : undefined,
-        hadInitialArray: Array.isArray(initial),
-        hadInitialValue,
-        initialArrayLength: Array.isArray(initial) ? initial.length : undefined,
-      });
+    for (const { intent, ctx } of pending) {
+      const built = pending.some(({ intent: other, ctx: otherCtx }) =>
+          mergeableOpPayloadContains(other, otherCtx, intent.path)
+        )
+        ? { abandon: true, ops: [], suppress: [] }
+        : buildMergeableIntent(intent, ctx);
       if (built.abandon) {
         abandoned.push(encodePointer(intent.path));
         continue;
@@ -2685,5 +2684,35 @@ export class V2StorageTransaction implements IStorageTransaction {
       (doc.mergeableOpsPoisoned ??= new Set()).add(pathKey);
     }
     return { ops, suppress };
+  }
+
+  // The working / initial state at one intent's path, which its builder turns
+  // into wire ops.
+  private mergeableBuildContext(
+    doc: WritableDocumentEntry,
+    intent: MergeableOpIntent,
+  ): MergeableBuildContext {
+    const working = readValueAtPath(doc.current.value, intent.path, {
+      allowArrayLength: true,
+    });
+    const initial = doc.initial.value === undefined ? undefined : (
+      readValueAtPath(doc.initial.value, intent.path, {
+        allowArrayLength: true,
+      })
+    );
+    return {
+      workingArray: Array.isArray(working)
+        ? working as FabricValue[]
+        : undefined,
+      hadInitialArray: Array.isArray(initial),
+      // Presence, not definedness: an already-present slot (even holding
+      // `undefined`) does not add a key to its parent, so the op does not
+      // materialize a path and must not stamp `createsKey`.
+      hadInitialValue: doc.initial.value !== undefined &&
+        hasValueAtPath(doc.initial.value, intent.path, {
+          allowArrayLength: true,
+        }),
+      initialArrayLength: Array.isArray(initial) ? initial.length : undefined,
+    };
   }
 }
