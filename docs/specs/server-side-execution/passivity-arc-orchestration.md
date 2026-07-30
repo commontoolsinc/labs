@@ -78,6 +78,19 @@
 > not flip it before then — silent missing side effects are worse than
 > duplicated ones.
 >
+> **THE OPERATIONAL TARGET, owner 2026-07-29: refusals to commit must reach
+> ZERO.** *"What we'll see are refusals to commit and we need to get those to
+> 0."* This follows from the deletion scope's load-bearing fact — the executor
+> already RUNS the whole demanded closure, so the gap was never in producing
+> results, only in **admitting** them. Every refusal is therefore work the
+> server already did and then threw away.
+>
+> Concretely, drive to zero across all arms:
+> `candidateUnservedByCode` + `actionFirewallRejects` + `commit-rejected:*`
+> (the corrected gate, [client-passivity §5h.5](client-passivity.md)).
+> Zero refusals is what makes the categorical egress flip safe — the flip is
+> the acceptance test, this is the thing being tested.
+>
 > Full rationale: decision **D11** in
 > [`client-passivity.md`](client-passivity.md) §6b, §5h.4.
 

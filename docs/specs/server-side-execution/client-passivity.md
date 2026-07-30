@@ -1913,14 +1913,25 @@ optimism. Three consequences:
    that do NOT narrow, which §6c is right to say are the easy ones. The
    algorithm is still correct; it simply saves less often than the phrase
    "scope is discovered by running" might suggest.
-2. **"Start the adjacent ones" is NOT a design target** — corrected by the
-   owner the same day, against my reading of it as a build item: *"don't
-   treat it as a direct design target, that could as well be a side-effect
-   of a higher level invariant. Maybe all that happens is that the part
-   that sends data to the client realizes that this still needs
-   computing."* So the trigger is the delivery path finding no value for a
-   principal, not an explicit enumerate-and-start scheduler. **Build no
-   machinery for it**; expect it to emerge from demand + delivery.
+2. **"Start the adjacent ones" — ASSERT it, do not BUILD it.** Corrected by
+   the owner twice, against two different misreadings of mine. First I
+   called it a build item; the owner: *"don't treat it as a direct design
+   target, that could as well be a side-effect of a higher level
+   invariant. Maybe all that happens is that the part that sends data to
+   the client realizes that this still needs computing."* Then I recorded
+   that as the goal being deferred, which was also wrong. The owner:
+
+   > Please add tests that ensure this is happening. If they fail, we have
+   > to debug it. **The goal isn't fenced out** — just that this should
+   > **not** be specific functionality, it should **follow from** the
+   > larger design.
+
+   So: **the behaviour is required now and must be under test now; the
+   dedicated mechanism is what is forbidden.** A failing test here is the
+   signal that the higher-level invariant is not in fact producing the
+   fan-out — which is exactly what we want to learn early rather than
+   assume. Tests are the specification; demand + delivery is the intended
+   producer.
 3. It disposes of §6c as a blocker, because the S runs were never assumed
    away — they are scheduled deliberately.
 
