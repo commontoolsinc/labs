@@ -2275,22 +2275,22 @@ class PiecePropIo implements PieceCellIo {
 
         await selectedCell.pull();
         const selected = cellWithScopedLinkRequiredsRelaxed(selectedCell).get();
-        if (selected === undefined) break;
-        if (isCell(selected)) {
-          if (isLast) {
-            return await selected.pull();
-          }
-          selectedCell = selected;
-        } else if (isLast) {
-          return selected;
-        } else {
-          break;
+        if (selected === undefined) {
+          return await this.#getFromRoot(targetCell, path);
         }
+        if (isLast) {
+          return isCell(selected) ? await selected.pull() : selected;
+        }
+        if (!isCell(selected)) return await this.#getFromRoot(targetCell, path);
+        selectedCell = selected;
       }
-      // Preserve the existing missing-path diagnostics and the distinction
-      // between an absent field and a schema-valid undefined value. This slow
-      // fallback is reached only when the narrow projection produced no value.
     }
+    return await this.#getFromRoot(targetCell, path ?? []);
+  }
+
+  async #getFromRoot(targetCell: Cell<unknown>, path: CellPath) {
+    // Preserve the existing missing-path diagnostics and the distinction
+    // between an absent field and a schema-valid undefined value.
     await targetCell.pull();
     // Terminal read boundary: relax `required` for properties whose stored
     // value links into a scope this session may not be able to materialize
@@ -2300,7 +2300,7 @@ class PiecePropIo implements PieceCellIo {
     // #4746-compatible rationale.
     return resolveCellPath(
       cellWithScopedLinkRequiredsRelaxed(targetCell),
-      path ?? [],
+      path,
     );
   }
 
