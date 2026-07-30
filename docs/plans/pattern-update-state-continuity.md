@@ -701,6 +701,36 @@ measurement, because it leaves nothing unexercised: a comment-only edit to
 EVERY file the two committed fixtures name changes all 14 targets at once, and
 exits 0 with `14 updated cleanly with no state stranded`.
 
+### What stage 5 does NOT compare
+
+The replay compares a root's RESULT only. Its **argument document** is never
+compared, and the harness header says results-only "measures half the surface".
+`vintageArgumentLink` / `readVintageArgument` exist and are used by
+`packages/piece/test/state-continuity.test.ts`, so the reach is already built —
+`replayVintage` simply does not use it.
+
+An argument-side REFUSAL is still caught (the completion-marker check fires), so
+this is not a hole in "the update applied". It is a hole in "the data survived":
+an argument value that silently stops being readable passes. That matters more
+than it looks, because Tier 1 hands the open-argument evolution class to a
+runtime validator that measurably does not fire — so nothing checks it today.
+Closing it is the natural next increment.
+
+Three further limits, all measured, all in the gate as shipped:
+
+- **A field emptied IN PLACE under the same document id.** A live cell reduces
+  to the document it points at, so a field that MOVED document is caught and one
+  emptied where it stands is not.
+- **A key the schema declares neither by name nor via `additionalProperties`.**
+  `unknown`-typed positions are now relaxed and read (that was a silent pass —
+  dropping `trackRecent` from `default-app.tsx` exited 0 before the fix), but a
+  key the schema does not mention at all stays invisible. Measured: `$NAME` on
+  three roots, all derived names.
+- **A target whose every comparable key is a rendering** reports "updated
+  cleanly with no state stranded" having compared nothing, and the output cannot
+  distinguish that from a real check. Three of fourteen targets today
+  (`profile-picker.tsx`, and the two map-body hoists).
+
 ## Open questions
 
 - **How many vintages is enough?** Retention is a policy statement — "a piece
