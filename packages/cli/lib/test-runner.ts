@@ -1980,7 +1980,20 @@ export async function runTests(
   for (const testPath of paths) {
     console.log(`\n${basename(testPath)}`);
 
-    const result = await runTestPattern(testPath, options);
+    // `runTestPattern` RAISES a teardown that did not complete, which is the
+    // right contract for a direct caller — the vintage capture is about to read
+    // what the run wrote, so it must refuse rather than snapshot. A multi-file
+    // run is the other case: one wedged file is a failure of that file, not a
+    // reason the remaining ones go unreported. Counted and skipped past, so the
+    // exit code is still non-zero.
+    let result: TestRunResult;
+    try {
+      result = await runTestPattern(testPath, options);
+    } catch (error) {
+      totalFailed++;
+      console.log(`  ✗ ${formatError(error)}`);
+      continue;
+    }
     allResults.push(result);
 
     if (result.error) {
