@@ -29,7 +29,10 @@ import {
   isPresentRootValue,
   materializeOnCell,
   openFileBackedRuntime,
+  readStateUnder,
   readVintageManifest,
+  readVintageState,
+  strandedKeys,
   vintageHoldsRoot,
   type VintageManifestEntry,
   vintageRootCause,
@@ -99,6 +102,27 @@ export function isUpgradeTarget(entry: VintageManifestEntry): boolean {
   return !entry.identity.startsWith("keyless:");
 }
 
+/**
+ * A stranded value, short enough to sit in a failure line.
+ *
+ * `JSON.stringify` on its own is not safe to call here even though both sides
+ * have been through `comparableState`: `bigint` is a value a durable doc may
+ * hold and stringifying one THROWS. A report that can take the run down is a
+ * report that fails exactly when it is needed, so this can only ever return a
+ * string.
+ */
+export function snippet(value: unknown): string {
+  try {
+    const text = JSON.stringify(
+      value,
+      (_key, item) => typeof item === "bigint" ? `${item}n` : item,
+    );
+    return (text ?? String(value)).slice(0, 80);
+  } catch {
+    return String(value).slice(0, 80);
+  }
+}
+
 /** What replaying one fixture found. */
 export interface ReplayReport {
   /** Instantiations the fixture recorded. Zero means it proved nothing. */
@@ -120,6 +144,8 @@ export interface ReplayReport {
   changed: number;
   /** Changed targets that applied cleanly. */
   updated: number;
+  /** Keys an applied update stopped being able to read back. */
+  stranded: number;
   failures: ReplayFailure[];
 }
 
@@ -145,6 +171,7 @@ export async function replayVintage(
     unmappable: 0,
     changed: 0,
     updated: 0,
+    stranded: 0,
     failures: [{ ...where, detail }],
   });
   // Stated once, because every "this fixture is not usable" message needs it and
@@ -256,6 +283,7 @@ export async function replayVintage(
       unmappable: unmappable.length,
       changed: 0,
       updated: 0,
+      stranded: 0,
       failures: [],
     };
     // A recorded root nothing can address is a FAILURE, not a note. The replay
@@ -294,6 +322,35 @@ export async function replayVintage(
               `not carry (it holds ${[...carried].sort().join(", ")})`) +
           ` — it was recorded but NOT validated. ${remedy}`,
       });
+    }
+
+    // Every target's before-state, captured BEFORE the first materialize.
+    //
+    // Not an optimization — a correctness fix. A fixture holds a parent and its
+    // nested sub-patterns, and they share one runtime. Materializing the parent
+    // runs its reactive graph, which can write through to a nested root before
+    // that entry's own turn comes. A before-snapshot taken lazily inside the
+    // loop would then be the ALREADY-UPDATED state, and the nested target would
+    // compare it against itself and pass — a storage-key move in a sub-pattern
+    // silently uncaught, which is the exact class this comparison exists for.
+    // Keyed by SPACE and id, not id alone. An entity id is content-derived and
+    // carries no space, so the same id can name different roots in different
+    // spaces — keying on it alone would hand one root's prior state to another
+    // root's comparison.
+    const beforeByCell = new Map<
+      string,
+      Record<string, unknown> | undefined
+    >();
+    for (const entry of targets) {
+      // Skip what the presence check already reported. Reading it would only
+      // re-derive "absent" and risk reporting the same root twice.
+      if (missing.has(entry)) continue;
+      const key = `${entry.space}/${entry.cellId}`;
+      if (beforeByCell.has(key)) continue;
+      beforeByCell.set(
+        key,
+        await readVintageState(runtimeVintage, entry.space, entry.cellId),
+      );
     }
 
     for (const entry of targets) {
@@ -351,6 +408,8 @@ export async function replayVintage(
       if (today === entry.identity) continue;
       report.changed++;
 
+      const before = beforeByCell.get(`${entry.space}/${entry.cellId}`);
+
       const outcome = await materializeOnCell(
         runtimeVintage,
         program as never,
@@ -387,6 +446,69 @@ export async function replayVintage(
             `was REFUSED:\n      ${outcome.error}`,
         });
         continue;
+      }
+
+      // The update APPLIED. That is not the same as the data surviving, and
+      // until this comparison existed the gate could not tell the two apart:
+      // a moved `.for()` key materializes perfectly and silently reads back
+      // empty. Compare what the old version could see against what today's
+      // source can.
+      // A recorded target whose prior state cannot be read is a FAILURE, not a
+      // skip. The manifest says a pattern WAS materialized at this cell, so a
+      // root with no stored schema means the fixture does not hold what it
+      // claims — and skipping the comparison there would report "updated
+      // cleanly" for a target whose data was never examined. That is the
+      // silent-non-coverage shape this tier has hit repeatedly.
+      //
+      // UNREADABLE is the finding, not EMPTY. A prior state of `{}` compares
+      // clean against anything and so asserts nothing — but a pattern's result
+      // can legitimately BE `{}`, so treating that as loss would red a valid
+      // root. Telling "held nothing" from "was never here" is a question about
+      // the ROOT rather than about its value, and belongs to the presence
+      // control that runs before any of this, not to the comparison.
+      if (before === undefined) {
+        report.failures.push({
+          ...where,
+          detail: `recorded instantiation ${entry.identity}#${entry.symbol} ` +
+            `carries a setup marker but no readable stored schema, so ` +
+            `applying ${entry.main} over it could not be checked for stranded ` +
+            `state`,
+        });
+        continue;
+      }
+      {
+        // Re-read rather than reuse `outcome.value`, and through the SAME
+        // helper the before state came from. `outcome.value` is the root under
+        // the candidate's compiled schema verbatim, and that schema stops at
+        // its `unknown` positions exactly as the stored one does — so every key
+        // the before side newly resolves would come back `undefined` here and
+        // report as stranded. The two sides have to be read the same way or the
+        // comparison measures the reading. `outcome.resultSchema` is handed
+        // back for precisely this: the schema of the pattern that was actually
+        // materialized, rather than a second compile trusted to agree.
+        const after = await readStateUnder(
+          runtimeVintage,
+          entry.space,
+          entry.cellId,
+          outcome.resultSchema,
+        );
+        const stranded = strandedKeys(before, after);
+        if (stranded.length > 0) {
+          report.stranded += stranded.length;
+          report.failures.push({
+            ...where,
+            detail:
+              `updating ${entry.main} (${entry.symbol}) APPLIED CLEANLY ` +
+              `but stranded state the vintage held: ${
+                stranded.map((key) =>
+                  `${key} (was ${snippet(before[key])}, now ${
+                    snippet(after?.[key])
+                  })`
+                ).join("; ")
+              }`,
+          });
+          continue;
+        }
       }
       // A migration can apply without being refused and still leave the root
       // reading as nothing — the state gone rather than rejected. "Not refused"
@@ -427,11 +549,17 @@ export async function replayAll(
     unmappable: number;
     changed: number;
     updated: number;
+    stranded: number;
     failures: ReplayFailure[];
   }
 > {
   const vintages = await collectVintages(roots.vintagesRoot);
-  let candidates = 0, targets = 0, changed = 0, updated = 0, unmappable = 0;
+  let candidates = 0,
+    targets = 0,
+    changed = 0,
+    updated = 0,
+    unmappable = 0,
+    stranded = 0;
   const failures: ReplayFailure[] = [];
   for (const vintage of vintages) {
     const report = await replayVintage(roots, vintage);
@@ -440,6 +568,7 @@ export async function replayAll(
     unmappable += report.unmappable;
     changed += report.changed;
     updated += report.updated;
+    stranded += report.stranded;
     failures.push(...report.failures);
   }
   return {
@@ -450,6 +579,7 @@ export async function replayAll(
     unmappable,
     changed,
     updated,
+    stranded,
     failures,
   };
 }

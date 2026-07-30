@@ -533,8 +533,7 @@ describe("list builtin resume container defer", () => {
         expected,
       );
       discoveredContainerId = discovery.containerId;
-      discovery.runtime.scheduler.dispose();
-      await discovery.runtime.dispose();
+      await discovery.runtime.dispose({ closeStorage: false });
     } finally {
       await sm0.close();
     }
@@ -586,59 +585,57 @@ describe("list builtin resume container defer", () => {
       expected,
     );
     const rt1 = created.runtime;
+    // Quiesce the writer in full; sm1 stays open for rt2 and afterEach closes
+    // it. Nothing below can throw before this, so no finally is needed.
+    await rt1.dispose({ closeStorage: false });
+
+    // RESUME (runtime B): the server has no document under the container id,
+    // so the coordinator reconcile reads it undefined and takes the
+    // defer-then-seed recovery path.
+    const rt2 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm2,
+    });
     try {
-      rt1.scheduler.dispose();
+      await rt2.patternManager.compilePattern(program, { space });
+      const tx = rt2.edit();
+      const rc2 = rt2.getCell(
+        space,
+        resultKey,
+        created.compiled.resultSchema,
+        tx,
+      );
+      await tx.commit();
 
-      // RESUME (runtime B): the server has no document under the container id,
-      // so the coordinator reconcile reads it undefined and takes the
-      // defer-then-seed recovery path.
-      const rt2 = new Runtime({
-        apiUrl: new URL(import.meta.url),
-        storageManager: sm2,
-      });
-      try {
-        await rt2.patternManager.compilePattern(program, { space });
-        const tx = rt2.edit();
-        const rc2 = rt2.getCell(
-          space,
-          resultKey,
-          created.compiled.resultSchema,
-          tx,
-        );
-        await tx.commit();
+      const started = await rt2.start(rc2);
+      expect(started).toBe(true);
 
-        const started = await rt2.start(rc2);
-        expect(started).toBe(true);
-
-        for (let k = 0; k < 25; k++) {
-          await rc2.pull();
-          await rt2.idle();
-        }
-        // Durable convergence: every resume commit (the seeded container and
-        // the rebuilt aggregate) confirmed by the server.
-        await sm2.synced();
-
-        // The resume wrote the container itself — the seeded empty array and
-        // the rebuilt aggregate — which only the recovery path does.
-        expect(resumeContainerWrites).toBeGreaterThan(0);
-        // Until that first recovery write, the server had delivered no
-        // document under the container id — only `deleted: true` absence
-        // statements — so the reconcile ran against a genuinely absent
-        // container.
-        expect(upsertsBeforeFirstContainerWrite).toBe(0);
-        // After the seed lands the document exists, and the resume session
-        // watches it, so the server's later sync frames deliver it. This also
-        // keeps the receive-side counter honest: if the sync wire shape
-        // drifted past countWithheldUpserts, this fails rather than letting
-        // the absence assertion above pass vacuously.
-        expect(withheldUpserts).toBeGreaterThan(0);
-        // Converges to the durable aggregate despite the missing container.
-        expect(read(rc2)).toEqual(expected);
-      } finally {
-        await rt2.dispose();
+      for (let k = 0; k < 25; k++) {
+        await rc2.pull();
+        await rt2.idle();
       }
+      // Durable convergence: every resume commit (the seeded container and
+      // the rebuilt aggregate) confirmed by the server.
+      await sm2.synced();
+
+      // The resume wrote the container itself — the seeded empty array and
+      // the rebuilt aggregate — which only the recovery path does.
+      expect(resumeContainerWrites).toBeGreaterThan(0);
+      // Until that first recovery write, the server had delivered no
+      // document under the container id — only `deleted: true` absence
+      // statements — so the reconcile ran against a genuinely absent
+      // container.
+      expect(upsertsBeforeFirstContainerWrite).toBe(0);
+      // After the seed lands the document exists, and the resume session
+      // watches it, so the server's later sync frames deliver it. This also
+      // keeps the receive-side counter honest: if the sync wire shape
+      // drifted past countWithheldUpserts, this fails rather than letting
+      // the absence assertion above pass vacuously.
+      expect(withheldUpserts).toBeGreaterThan(0);
+      // Converges to the durable aggregate despite the missing container.
+      expect(read(rc2)).toEqual(expected);
     } finally {
-      await rt1.dispose();
+      await rt2.dispose({ closeStorage: false });
     }
   }
 
@@ -911,7 +908,7 @@ describe("list builtin resume container defer", () => {
       expect(persisted.has(durableStateKey(created.containerId, "space"))).toBe(
         false,
       );
-      rt1.scheduler.dispose();
+      await rt1.dispose({ closeStorage: false });
 
       // Durable state as resume begins: the container has no document, while
       // every document the persisted run committed is present.
@@ -1136,10 +1133,10 @@ describe("list builtin resume container defer", () => {
           await sm3.close();
         }
       } finally {
-        await rt2.dispose();
+        await rt2.dispose({ closeStorage: false });
       }
     } finally {
-      await rt1.dispose();
+      await rt1.dispose({ closeStorage: false });
     }
   }
 

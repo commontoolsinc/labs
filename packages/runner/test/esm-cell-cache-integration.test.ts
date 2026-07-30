@@ -73,7 +73,7 @@ describe("ESM compile via content-addressed cell cache", () => {
   afterEach(async () => {
     await runtime?.patternManager.flushCompileCacheWrites();
     await tx.commit();
-    await runtime?.dispose();
+    await runtime?.dispose({ closeStorage: false });
     await storageManager?.close();
   });
 
@@ -246,11 +246,11 @@ describe("ESM compile via content-addressed cell cache", () => {
         }
         inspectTx.abort?.("repaired coverage closure inspection complete");
       } finally {
-        await restoredRuntime.dispose();
+        await restoredRuntime.dispose({ closeStorage: false });
       }
     } finally {
       firstTx.abort?.("coverage format recovery test complete");
-      await firstRuntime.dispose();
+      await firstRuntime.dispose({ closeStorage: false });
     }
   });
 
@@ -420,7 +420,7 @@ describe("ESM compile via content-addressed cell cache", () => {
       expect(recovered.has(compiled.entryIdentity)).toBe(true);
     } finally {
       runtime2.editWithRetry = originalEditWithRetry;
-      await runtime2.dispose();
+      await runtime2.dispose({ closeStorage: false });
     }
   });
 
@@ -514,7 +514,7 @@ describe("ESM compile via content-addressed cell cache", () => {
           readTx2.abort?.("source-only reload assertion complete");
         }
       } finally {
-        await runtime2.dispose();
+        await runtime2.dispose({ closeStorage: false });
       }
     } finally {
       restoreRuntimeVersion();
@@ -620,7 +620,7 @@ describe("ESM compile via content-addressed cell cache", () => {
       expect(typeof warm).toBe("function");
     } finally {
       await tx2.commit();
-      await runtime2.dispose();
+      await runtime2.dispose({ closeStorage: false });
     }
   });
 
@@ -644,7 +644,7 @@ describe("ESM compile via content-addressed cell cache", () => {
       expect(typeof compiled).toBe("function");
     } finally {
       await dtx.commit();
-      await disabled.dispose();
+      await disabled.dispose({ closeStorage: false });
     }
   });
 });
@@ -736,7 +736,7 @@ describe("ESM compile cache — Pattern.inSpace A → B routing", () => {
       readTx.abort?.();
     } finally {
       await tx.commit();
-      await runtime.dispose();
+      await runtime.dispose({ closeStorage: false });
     }
   });
 
@@ -775,8 +775,8 @@ describe("ESM compile cache — Pattern.inSpace A → B routing", () => {
       });
       await tx2.commit();
     } finally {
-      await rt2?.dispose();
-      await rt1.dispose();
+      await rt2?.dispose({ closeStorage: false });
+      await rt1.dispose({ closeStorage: false });
     }
   });
 });

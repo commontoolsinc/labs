@@ -330,7 +330,6 @@ export interface FabricExecPlainObject
 // Runtime constants - defined by @commonfabric/runner/src/builder/types.ts
 // These are ambient declarations since the actual values are provided by the runtime environment
 export declare const ID: unique symbol;
-export declare const ID_FIELD: unique symbol;
 
 // Should be Symbol("UI") or so, but this makes repeat() use these when
 // iterating over patterns.
@@ -1653,8 +1652,8 @@ export type UnwrapCell<T> =
  * is a type utility that allows any part of type T to be wrapped in AnyCell<>,
  * and allow any part of T that is currently wrapped in AnyCell<> to be used
  * unwrapped. This is designed for use with cell method parameters, allowing
- * flexibility in how values are passed. The ID and ID_FIELD metadata symbols
- * allows controlling id generation and can only be passed to write operations.
+ * flexibility in how values are passed. The ID metadata symbol allows
+ * controlling id generation and can only be passed to write operations.
  */
 export type AnyCellWrapping<T> =
   // Handle existing AnyBrandedCell<> types, allowing unwrapping
@@ -1669,7 +1668,7 @@ export type AnyCellWrapping<T> =
     // Handle objects (excluding null)
     : T extends object ?
         | { [K in keyof T]: AnyCellWrapping<T[K]> }
-          & { [ID]?: AnyCellWrapping<JSONValue>; [ID_FIELD]?: string }
+          & { [ID]?: AnyCellWrapping<JSONValue> }
         | AnyBrandedCell<{ [K in keyof T]: AnyCellWrapping<T[K]> }>
     // Handle primitives
     : T | AnyBrandedCell<T>;
@@ -1798,7 +1797,6 @@ export interface JSONObject extends Readonly<Record<string, JSONValue>> {}
 // removed before sending to storage.
 export interface IDFields {
   readonly [ID]?: unknown;
-  readonly [ID_FIELD]?: unknown;
 }
 
 /**
@@ -1904,7 +1902,6 @@ export type JSONSchemaObj = {
 
   // Common Fabric extensions
   readonly [ID]?: unknown;
-  readonly [ID_FIELD]?: unknown;
   readonly scope?: SchemaScope;
   // Discovery hashtags from the doc comment (lowercased, without the leading
   // `#`). Populated by the schema generator; mirrors the description text.

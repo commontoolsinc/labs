@@ -83,7 +83,11 @@ describe("link-resolution", () => {
         undefined,
         rawTx,
       );
-      expect(rawLinked.getRawUntyped()).toEqual(sourceCell.getAsLink());
+      // The stored link elides what it shares with the slot it sits in, so
+      // the expected form has to be taken relative to that same base.
+      expect(rawLinked.getRawUntyped()).toEqual(
+        sourceCell.getAsLink({ base: rawLinked }),
+      );
       expect(rawTx.getCfcState().dereferenceTraces).toEqual([]);
       rawTx.abort();
     });

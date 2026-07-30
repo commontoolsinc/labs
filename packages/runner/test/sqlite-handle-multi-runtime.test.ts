@@ -232,6 +232,10 @@ describe("sqlite handle across runtimes (rule term lists)", () => {
       Promise.allSettled([runtimeA.settled(), runtimeB?.settled()]),
       grace,
     ]);
+    // Scheduler only, not `dispose({ closeStorage: false })`: BOTH runtimes
+    // must stop before EITHER is torn down, because each can still be answering
+    // the other's shared query. A dispose call quiesces one runtime completely
+    // before the next one starts, which is the ordering this pair rules out.
     runtimeB?.scheduler.dispose();
     runtimeA.scheduler.dispose();
     await Promise.allSettled([
