@@ -866,11 +866,23 @@ interface SetupStateReuse {
   sameStoredSetup: boolean;
   /** Re-point the stored argument at this schema and validate it. */
   restageStoredArgument: boolean;
+  /**
+   * The completion marker POSITIVELY names this pattern. Distinct from
+   * `!restageStoredArgument`, which is also true when the marker is absent —
+   * absence is not evidence that the running graph is this pattern.
+   */
+  storedSetupMatches: boolean;
 }
 
 /**
- * Whether the setup state stored on `resultCell` was staged by a DIFFERENT
- * pattern version than `entryRef`.
+ * What the setup-completion marker on `resultCell` says about `entryRef`:
+ * `"matches"` (staged by this pattern), `"other"` (staged by a different
+ * version), or `"absent"` (nothing recorded).
+ *
+ * Three states rather than a boolean, because the two ways of not being
+ * `"other"` license different things. `"matches"` is positive evidence that the
+ * running graph is this pattern; `"absent"` is no evidence at all, and code
+ * that collapses them writes state describing a version that may not be there.
  *
  * `patternIdentity` alone cannot answer this, because an update can move the
  * pointer before any setup runs. `PiecesController`'s roll-forward materialize
@@ -903,14 +915,18 @@ interface SetupStateReuse {
  * unvalidated setup, and it is the aged roots — the ones most likely to hold an
  * argument a new schema cannot read — that are exempt for that one setup.
  */
-function stagedByOtherVersion(
+type StoredSetupMarker = "matches" | "other" | "absent";
+
+function storedSetupMarker(
   resultCell: Cell<unknown>,
   entryRef: { identity: string; symbol: string } | undefined,
-): boolean {
-  if (entryRef === undefined) return false;
+): StoredSetupMarker {
+  if (entryRef === undefined) return "absent";
   const stagedRef = getPatternSetupIdentityRef(resultCell);
-  return stagedRef !== undefined &&
-    patternIdentityKey(stagedRef) !== patternIdentityKey(entryRef);
+  if (stagedRef === undefined) return "absent";
+  return patternIdentityKey(stagedRef) === patternIdentityKey(entryRef)
+    ? "matches"
+    : "other";
 }
 
 function dedupeNormalizedLinks(
@@ -1362,7 +1378,7 @@ export class Runner {
     // durable write contract present. Both branches need it: a caller may
     // re-run a running piece WITH an argument (`PieceManager.runWithPattern`),
     // and that piece's metadata is no less worth repairing.
-    if (!setupState.restageStoredArgument) {
+    if (setupState.storedSetupMatches) {
       this.updateResultSchemaMeta(tx, resultCell, pattern.resultSchema);
     }
 
@@ -1759,13 +1775,17 @@ export class Runner {
     // setup was staged by another version would otherwise keep skipping the
     // re-stage no matter what the re-stage branch itself decides — the repair
     // would report success over an argument nothing validated.
+    // Read through `tx`, like the identity read above: this decides whether the
+    // transaction writes the argument, so it belongs in the same conflict set
+    // rather than reading around it off committed state.
+    const marker = storedSetupMarker(resultCell.withTx(tx), entryRef);
     const setupState: SetupStateReuse = {
       sameStoredSetup,
-      // Read through `tx`, like the identity read above: this decides whether
-      // the transaction writes the argument, so it belongs in the same
-      // conflict set rather than reading around it off committed state.
-      restageStoredArgument: !sameStoredSetup ||
-        stagedByOtherVersion(resultCell.withTx(tx), entryRef),
+      restageStoredArgument: !sameStoredSetup || marker === "other",
+      // "matches" only. An ABSENT marker is not evidence that the running graph
+      // is this pattern — it is the absence of evidence either way, and the two
+      // must not collapse into one boolean.
+      storedSetupMatches: sameStoredSetup && marker === "matches",
     };
     const sourceKey = getTxDebugActionId(tx) ?? "none";
     triggerFlowLogger.debug(`setup-internal/${sourceKey}`, () => [
@@ -2132,7 +2152,11 @@ export class Runner {
             setupTx,
             pattern,
             newRef,
-            { sameStoredSetup: false, restageStoredArgument: true },
+            {
+              sameStoredSetup: false,
+              restageStoredArgument: true,
+              storedSetupMatches: false,
+            },
             undefined,
             resultCell,
           );
@@ -2365,7 +2389,13 @@ export class Runner {
             // the pinned identity, so this is the SAME pattern repairing its
             // own internal cells, not an update. Re-pointing the argument here
             // would rewrite user data on a narrow instantiation repair.
-            { sameStoredSetup: true, restageStoredArgument: false },
+            {
+              sameStoredSetup: true,
+              restageStoredArgument: false,
+              // Same pattern by precondition, but this repair deliberately
+              // touches nothing but the internal cells.
+              storedSetupMatches: false,
+            },
             undefined,
             resultCell,
           );

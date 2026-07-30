@@ -525,6 +525,104 @@ describe("pattern update validates the stored argument", () => {
     ).toBeUndefined();
   });
 
+  it("does not half-swap a MARKERLESS running piece either", async () => {
+    // The schema repair is safe only when the marker POSITIVELY names this
+    // pattern. "Not staged by another version" is a weaker fact than that: it
+    // is also true when the marker is ABSENT, and a markerless piece can be
+    // running something other than what the pointer names — a pre-marker root
+    // resumes into the running set without setup, `PatternUpdater`'s
+    // instantiated mode moves the pointer with no setup, and a refused swap
+    // leaves the graph where it was. Treating absent as "matches" would write
+    // the candidate's result schema over a graph producing the old shape, which
+    // is the half-swap the reuse gate exists to prevent.
+    const tx = rt.edit();
+    const pm = rt.patternManager;
+    const stored = (marker: string, key: string, extra = false) =>
+      programOf([
+        "import { Writable, pattern } from 'commonfabric';",
+        "interface Args { count?: number; [key: string]: any }",
+        extra
+          ? "interface Out { tag: Writable<string>; extra: Writable<number>; }"
+          : "interface Out { tag: Writable<string>; }",
+        "export default pattern<Args, Out>(() => {",
+        `  const tag = new Writable<string>(${JSON.stringify(marker)}).for(${
+          JSON.stringify(key)
+        });`,
+        ...(extra
+          ? [
+            "  const extra = new Writable<number>(0).for('extra');",
+            "  return { tag, extra };",
+          ]
+          : ["  return { tag };"]),
+        "});",
+        "",
+      ].join("\n"));
+    const v1 = await pm.compilePattern(stored("v1", "tagA"), { space, tx });
+    const v2 = await pm.compilePattern(stored("v2", "tagB", true), {
+      space,
+      tx,
+    });
+    const v2Ref = pm.getArtifactEntryRef(v2)!;
+    const cell = rt.getCell<Record<string, unknown>>(
+      space,
+      "markerless-running",
+      undefined,
+      tx,
+    );
+    const running = rt.run(tx, v1, { count: "seven" }, cell);
+    await tx.commit();
+    await running.pull();
+
+    // Pointer moves; the swap refuses the wrong-typed argument and is logged,
+    // so the graph stays on V1.
+    const tx2 = rt.edit();
+    cell.withTx(tx2).setMetaRaw("patternIdentity", {
+      identity: v2Ref.identity,
+      symbol: v2Ref.symbol,
+    });
+    await tx2.commit();
+    await rt.idle();
+    await cell.pull();
+    expect((cell.getAsQueryResult() as { tag: string }).tag).toBe("v1");
+
+    // Strip the marker AND repair the argument: now the piece is markerless,
+    // running V1, under a pointer naming V2, with nothing left to refuse.
+    const { error: prepError } = await rt.editWithRetry((wtx) => {
+      cell.withTx(wtx).setMetaRaw("patternSetupIdentity", undefined);
+      rt.getCellFromLink(getMetaLink(cell, "argument")!, undefined, wtx)
+        .asSchema(undefined as never)
+        .set({ count: 7 } as never);
+    });
+    expect(prepError?.message).toBeUndefined();
+    await rt.idle();
+    await cell.sync();
+    expect(getPatternSetupIdentityRef(cell as Cell<unknown>)).toBeUndefined();
+
+    let error: string | undefined;
+    try {
+      await rt.runSynced(cell.withTx(), v2, undefined, {});
+    } catch (thrown) {
+      error = thrown instanceof Error ? thrown.message : String(thrown);
+    }
+    await rt.idle();
+    await rt.storageManager.synced();
+    await cell.pull();
+
+    expect(error).toBeUndefined();
+    expect(
+      (cell.getAsQueryResult() as { tag: string }).tag,
+      "the markerless piece's live value moved without its graph running",
+    ).toBe("v1");
+    await cell.sync();
+    expect(
+      (cell as unknown as { getMetaRaw: (k: string) => unknown })
+        .getMetaRaw("schema"),
+      "the candidate's result schema was written over a MARKERLESS running " +
+        "piece — 'not staged by another version' was read as 'staged by this " +
+        "one', and an absent marker proves neither",
+    ).toEqual(v1.resultSchema);
+  });
+
   it("still repairs a missing result schema on a piece running THIS version", async () => {
     // The counterweight to the half-swap guard, and the line between them.
     //
