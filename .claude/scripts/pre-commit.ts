@@ -18,7 +18,10 @@
  */
 
 import {
+  commitCreatesNothing,
   commitFlagRegion,
+  commitIncludesIndex,
+  commitPathspecs,
   commitsAllTracked,
   commitSkipsVerify,
   commitTargetWorktree,
@@ -68,14 +71,14 @@ if (cmd.length > MAX_COMMAND_LENGTH) {
 const commitAfter = splitAtGitCommit(cmd).after;
 const commitFlags = commitFlagRegion(commitAfter);
 
-if (!isGitCommit(cmd) || commitSkipsVerify(commitFlags)) {
-  Deno.exit(0);
-}
+if (!isGitCommit(cmd)) Deno.exit(0);
 
-// Only the first commit in a command is modelled, so anything staged for a
-// second one is invisible. Reporting a clean pass over the first commit's files
-// would be a false verdict on a change that does get committed — worse than a
-// skip, by the standard this hook is held to.
+// `--help`, `-h` and `--dry-run` create no commit. Blocking them is a hard block
+// on a read-only command, and `--dry-run` is how you preview a commit.
+if (commitCreatesNothing(commitFlags)) Deno.exit(0);
+
+// Before the skip gate, so a `--no-verify` on the *first* commit does not also
+// swallow the warning that a second one went unmodelled.
 if (splitAtGitCommit(commitAfter).matched) {
   console.error(
     "pre-commit: more than one `git commit` in this command; only the first " +
@@ -83,6 +86,8 @@ if (splitAtGitCommit(commitAfter).matched) {
   );
   Deno.exit(0);
 }
+
+if (commitSkipsVerify(commitFlags)) Deno.exit(0);
 
 // --- Resolve the worktree this commit lands in ---
 
@@ -141,6 +146,38 @@ function git(...args: string[]): Promise<string[]> {
 const adds = gitAddInvocations(cmd) ?? [];
 
 async function getFilesToCommit(): Promise<string[]> {
+  // Given pathspecs, git commits *those* — its `--only` default — and the index
+  // is beside the point. Judging the index anyway meant skipping a dirty file the
+  // commit did include and, with something unrelated staged, reporting "checks
+  // passed on 1 file" about a file the commit left behind: a verdict about the
+  // wrong change. `-i`/`--include` is the one form that means index *and* paths.
+  const pathspecs = commitPathspecs(commitFlags);
+  if (pathspecs.length > 0) {
+    if (pathspecs.some((p) => /[*?[{]/.test(p))) {
+      console.error(
+        "pre-commit: this commit carries a glob pathspec, which git and the " +
+          "shell expand differently. Skipping — commit not blocked.",
+      );
+      return [];
+    }
+    const only = await git(
+      "diff",
+      "--name-only",
+      "--diff-filter=d",
+      "HEAD",
+      "--",
+      ...pathspecs,
+    );
+    if (!commitIncludesIndex(commitFlags)) return [...new Set(only)];
+    const staged = await git(
+      "diff",
+      "--cached",
+      "--name-only",
+      "--diff-filter=d",
+    );
+    return [...new Set([...only, ...staged])];
+  }
+
   // Already staged by an earlier tool call.
   const files = await git("diff", "--cached", "--name-only", "--diff-filter=d");
 

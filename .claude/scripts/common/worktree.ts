@@ -157,7 +157,7 @@ const BOOLEAN_OPTION = String.raw`-{1,2}\w[\w-]*`;
  */
 const GLOBAL_OPTION = String.raw`(?:(?:${
   VALUE_OPTIONS.join("|")
-})(?:=|\s+)${SHELL_WORD}|${BOOLEAN_OPTION})\s+`;
+})(?:=|[^\S\n]+)${SHELL_WORD}|${BOOLEAN_OPTION})[^\S\n]+`;
 
 const MAX_GLOBAL_OPTIONS = 12;
 
@@ -172,7 +172,7 @@ const MAX_GLOBAL_OPTIONS = 12;
 function gitSubcommand(subcommand: string): RegExp {
   return new RegExp(
     String
-      .raw`\bgit\s+((?:${GLOBAL_OPTION}){0,${MAX_GLOBAL_OPTIONS}})${subcommand}(?![-\w])`,
+      .raw`\bgit[^\S\n]+((?:${GLOBAL_OPTION}){0,${MAX_GLOBAL_OPTIONS}})${subcommand}(?![-\w])`,
   );
 }
 
@@ -523,7 +523,16 @@ export function gitAddInvocations(cmd: string): GitAddInvocation[] | null {
   let consumed = 0;
 
   while (true) {
-    const add = splitAtGitSubcommand(region, "add");
+    // `stage` is git's documented synonym for `add`, and went unmodelled.
+    const byAdd = splitAtGitSubcommand(region, "add");
+    const byStage = splitAtGitSubcommand(region, "stage");
+    const add = !byAdd.matched
+      ? byStage
+      : !byStage.matched
+      ? byAdd
+      : byAdd.before.length <= byStage.before.length
+      ? byAdd
+      : byStage;
     if (!add.matched) break;
 
     // The prefix for this add is everything in the original command up to it.
@@ -668,37 +677,111 @@ function expand(raw: string): string {
  * was honoured — so the escape hatch the tests call "the only way past" did not
  * work when spelled the way git documents it first.
  */
+/**
+ * The option tokens of a commit: its own flags, with each option's *value*
+ * stepped over and everything from `--` onwards dropped.
+ *
+ * Regexing the region for dash-shaped text let a value vote on its own option.
+ * `git commit -m --no-verify` has a message of "--no-verify" and verification
+ * fully on, but read as a flag it turned the hook off — exit 0, no output. The
+ * mirror, `git commit -m -a`, blocked a correct commit on unstaged files.
+ */
+function commitOptionTokens(commitFlags: string): string[] {
+  const tokens = commitFlags.match(/\S+/g) ?? [];
+  const options: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token === "--") break;
+    if (!token.startsWith("-")) continue;
+    options.push(token);
+    if (consumesNextToken(token)) i++;
+  }
+  return options;
+}
+
+/** Every short flag in `token` up to the first that takes an attached value. */
+function shortFlagsOf(token: string): string {
+  if (!/^-[A-Za-z]+$/.test(token)) return "";
+  let flags = "";
+  for (const ch of token.slice(1)) {
+    if (VALUE_TAKING_SHORT.includes(ch)) break;
+    flags += ch;
+  }
+  return flags;
+}
+
+/**
+ * True when `token` is `full` or an unambiguous abbreviation of it.
+ *
+ * git resolves `--no-veri` to `--no-verify`, so matching the exact string only
+ * meant the documented escape hatch did not work spelled the way git accepts it,
+ * and the hook blocked a commit it had been told to skip. This is the same
+ * polarity error the `git add` whitelist was rewritten to fix, on the other side.
+ */
+function isAbbrevOf(token: string, full: string, shortest: number): boolean {
+  return token.length >= shortest && full.startsWith(token);
+}
+
 export function commitSkipsVerify(commitFlags: string): boolean {
-  const flags = beforePathspecSentinel(commitFlags);
-  if (/(?:^|\s)--no-verify(?:\s|$)/.test(flags)) return true;
-  const VALUE_TAKING = "mFcCtSu";
-  for (const m of flags.matchAll(/(?:^|\s)-([A-Za-z]+)/g)) {
-    for (const ch of m[1]) {
-      if (ch === "n") return true;
-      if (VALUE_TAKING.includes(ch)) break;
-    }
+  for (const token of commitOptionTokens(commitFlags)) {
+    // "--no-v" is the shortest prefix no other git-commit option shares.
+    if (isAbbrevOf(token, "--no-verify", 6)) return true;
+    if (shortFlagsOf(token).includes("n")) return true;
   }
   return false;
 }
 
 /**
- * `commitFlags` truncated at git's `--` sentinel, after which every token is a
- * pathspec however it is spelled.
- *
- * Without it, committing a file *named* `-n` — `git commit -- -n` — read as
- * `--no-verify` and turned the hook off, leaving that file unchecked.
+ * True when the command asks git for something other than a commit: `--help`,
+ * `-h` and `--dry-run` all create nothing, so blocking them is a hard block on a
+ * read-only command — and `--dry-run` is the canonical way to preview a commit.
  */
-function beforePathspecSentinel(commitFlags: string): string {
-  // Option values have to be stepped over, not scanned. In `git commit -m -- -a`
-  // the `--` is the message: treating it as the sentinel truncated here and hid
-  // the `-a` behind it, so the commit staged tracked changes nothing checked.
-  const tokens = [...commitFlags.matchAll(/\S+/g)];
+export function commitCreatesNothing(commitFlags: string): boolean {
+  for (const token of commitOptionTokens(commitFlags)) {
+    if (isAbbrevOf(token, "--help", 6) || token === "-h") return true;
+    if (isAbbrevOf(token, "--dry-run", 7)) return true;
+  }
+  return false;
+}
+
+/**
+ * The pathspecs a commit carries, which change what it contains: given paths,
+ * git commits *those* (its `--only` default), not the index.
+ *
+ * Unmodelled, the hook judged the index while git committed something else —
+ * skipping a dirty file the commit did include, and in the worst case reporting
+ * "checks passed on 1 file" about a staged file the commit left behind.
+ */
+export function commitPathspecs(commitFlags: string): string[] {
+  const tokens = commitFlags.match(/\S+/g) ?? [];
+  const paths: string[] = [];
+  let sentinel = false;
   for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i][0];
-    if (token === "--") return commitFlags.slice(0, tokens[i].index);
+    const token = tokens[i];
+    if (sentinel) {
+      paths.push(token);
+      continue;
+    }
+    if (token === "--") {
+      sentinel = true;
+      continue;
+    }
+    if (!token.startsWith("-")) {
+      paths.push(token);
+      continue;
+    }
     if (consumesNextToken(token)) i++;
   }
-  return commitFlags;
+  return paths;
+}
+
+/** True when `-i`/`--include` adds the index to a pathspec commit. */
+export function commitIncludesIndex(commitFlags: string): boolean {
+  for (const token of commitOptionTokens(commitFlags)) {
+    if (isAbbrevOf(token, "--include", 9)) return true;
+    if (shortFlagsOf(token).includes("i")) return true;
+  }
+  return false;
 }
 
 /** True when `token` takes the following word as its value. */
@@ -713,7 +796,10 @@ function consumesNextToken(token: string): boolean {
   return false;
 }
 
-const VALUE_TAKING_SHORT = "mFcCtSu";
+// Short options taking a separate value. `-u[<mode>]` and `-S[<keyid>]` are
+// deliberately absent: their values are attached only, so they consume nothing,
+// and claiming otherwise stepped over a real `--` sentinel.
+const VALUE_TAKING_SHORT = "mFcCt";
 const VALUE_TAKING_LONG = new Set([
   "--message",
   "--file",
@@ -747,14 +833,9 @@ function maskRedirections(text: string): string {
 }
 
 export function commitsAllTracked(commitFlags: string): boolean {
-  const flags = beforePathspecSentinel(commitFlags);
-  if (/(?:^|\s)--all(?:\s|$)/.test(flags)) return true;
-  const VALUE_TAKING = "mFcCtSu";
-  for (const m of flags.matchAll(/(?:^|\s)-([A-Za-z]+)/g)) {
-    for (const ch of m[1]) {
-      if (ch === "a") return true;
-      if (VALUE_TAKING.includes(ch)) break;
-    }
+  for (const token of commitOptionTokens(commitFlags)) {
+    if (token === "--all") return true;
+    if (shortFlagsOf(token).includes("a")) return true;
   }
   return false;
 }
