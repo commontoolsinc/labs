@@ -942,15 +942,21 @@ the bound is exhausted, `idle()` resolves while retry wakes continue at their
 rate-limited cadence; every actual idle boundary resets the episode counters so
 a later, unrelated demand wave receives its own full convergence allowance.
 
-A disposed scheduler resolves idle waiters unconditionally — those already
-parked, at dispose, and any requested afterwards. Quiescence is final once
-nothing can run again, and the conditions above are all reached through the
-execute loop, which a disposed scheduler no longer enters: waiting on them
-would be waiting forever, not waiting. This is what lets `Runtime.dispose()`
-run over a scheduler a caller has already disposed, since its teardown awaits
-`idle()`. Waiters with a wake source outside the execute loop — a run in
-flight, background tasks, held wakes, in-flight commits — still settle on
-their own before this applies, so disposing cannot cut them short.
+A disposed scheduler releases idle waiters — those already parked, at dispose,
+and any requested afterwards. Quiescence is final once nothing can run again,
+and the conditions above are all reached through the execute loop, which a
+disposed scheduler no longer enters: waiting on them would be waiting forever,
+not waiting. This is what lets `Runtime.dispose()` run over a scheduler a caller
+has already disposed, since its teardown awaits `idle()`.
+
+Releasing is not immediate, because disposing does not cancel a run already
+under way. Waiters with a wake source outside the execute loop — a run in
+flight, background tasks, held wakes, in-flight commits — still settle on their
+own first, and only then does the disposed case apply. This matters for waiters
+parked BEFORE dispose: every parking branch is reached with no run in flight, so
+a waiter parked while execution was merely scheduled is still parked once the
+run begins, and releasing it at dispose would report quiescence while an action
+and its commit were still going.
 
 ---
 

@@ -1834,7 +1834,22 @@ export class Scheduler {
     // reassigning the field: createExecuteContinuationState() hands this exact
     // array out, so a swap would leave any live continuation state draining the
     // detached one.
-    for (const resolve of this.idlePromises.splice(0)) resolve();
+    //
+    // Routed back through waitForQuiescence rather than resolved here, because
+    // dispose does NOT cancel a run already under way — `execute()` tests
+    // `disposed` only on entry. Every parking branch is reached with
+    // `runningPromise` unset, so a waiter parked while execution was merely
+    // SCHEDULED is still parked once the run begins; resolving it directly
+    // would report quiescence with an action, and its commit, still going. The
+    // re-check waits on that promise and only then takes the disposed branch,
+    // which is exactly the guarantee the branch documents. It cannot re-park:
+    // the disposed branch sits above every push to this list.
+    const parked = this.idlePromises.splice(0);
+    if (parked.length > 0) {
+      this.waitForQuiescence(false).then(() => {
+        for (const resolve of parked) resolve();
+      });
+    }
     // Clean up diagnosis state
     if (this.diagnosisTimeout) {
       clearTimeout(this.diagnosisTimeout);
