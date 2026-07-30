@@ -213,6 +213,33 @@ this.** Run dirty and clean back to back in one load window before
 attributing anything. Doing that here refuted the causation claim
 outright.
 
+### 2.4f Third timeout-barrier gate: `executor-scoped-egress-e2e` — and what is NOT yet excluded
+
+`packages/runner/test/executor-scoped-egress-e2e.test.ts` races a pending
+promise against a **30 s timeout** (`timeoutMs = 30_000`,
+`Promise.race([pending, timeout])` at `:137-152`). Same family as §2.4's
+cross-space gate and §2.4c's `iframe-sandbox`: it can breach the barrier
+under the battery's 37-package concurrency while passing alone.
+
+Measured 2026-07-29: its two C2.8 e2e cases **failed inside a battery run**
+(in which `iframe-sandbox` also failed) and then **passed 4/4 in isolation at
+loads 188-225** — far above the load at which the battery failed. Failure
+mode is `AssertionError: no broker egress`, with the event log showing the
+claim set and the settlement committed, i.e. the wait expired rather than the
+mechanism breaking.
+
+**What is NOT established, and must not be glossed:** nobody has run the
+battery at a BASELINE commit under comparable contention. So "my changes did
+not slow this path enough to breach a 30 s barrier" is untested. The
+provenance-envelope expansion (`5fea987a5`) adds two envelope entries per
+minted document to every computation descriptor — if that lands on a hot
+path, a timing regression is a live hypothesis, not a dismissed one.
+
+**Do not conclude non-causation from isolation passes alone.** That is the
+inverse of the §2.4c error and equally unsound: isolation removes the very
+contention that produces the failure. The discriminating experiment is a
+battery at baseline versus a battery at HEAD, **adjacent**, on a quiet box.
+
 ### 2.4d `deno task test` can exit 0 on a RED battery
 
 Measured 2026-07-29: the root battery printed `One or more tests failed.`
