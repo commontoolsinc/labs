@@ -1,9 +1,25 @@
 # How it works
 
-[Why](./why.md) is the argument in prose. This one is the code: a real
-pattern, what the compiler emits for it, and where the runtime checks
-the result. Every path below is in this repository; snippets are
-reproduced from a real file or a real command's output, reflowed to fit.
+The rule underneath all networked software is: hand your data to the
+software, and trust the software. This runtime inverts it. The software
+is untrusted, and safety attaches to the data — every datum carries its
+own policies, the way GPL code carries its license, and anything derived
+from it carries them too. Code that cannot prove it honors those
+policies does not compile. What it adds up to is a distributed, trusted
+microkernel for networked software in the AI era.
+
+Two ingredients made that buildable, and both arrived recently. Secure
+enclaves mean a machine you do not own can prove what it is running
+before your data ever reaches it. And language models write software for
+approximately free, so a new framework no longer means convincing humans
+to write for an empty ecosystem.
+
+This document is the code: a real pattern, what the compiler emits for
+it, and where the runtime checks the result. Every path below is in this
+repository; snippets are reproduced from a real file or a real command's
+output, reflowed to fit. [Why](./why.md) is the same argument in prose;
+[the overview](./plans/inverting-the-physics-of-trust.md) is the long
+form, with the hardware.
 
 <!-- check-docs: excerpts -->
 
