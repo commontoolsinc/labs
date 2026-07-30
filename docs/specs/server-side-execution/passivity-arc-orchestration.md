@@ -1,5 +1,35 @@
 # Server-primary passivity arc — build & orchestration plan
 
+> ## READ THIS FIRST — owner, 2026-07-29
+>
+> **The claim thing needs to go. The server always needs to do the work.**
+>
+> **We run all scopes on the server.** A rank changing is not a reason to
+> decline — "the rank changed" is an observation, never a refusal. If you find
+> yourself making two rank computations agree so a claim key matches, stop:
+> you are preserving the mechanism that is supposed to disappear.
+>
+> **Child sub-patterns must run on the server too. Punting to the client is
+> NOT an option** — nothing else runs them.
+>
+> Every claim-arbitration failure class (`claim-key-mismatch`,
+> `claim-authority-lost`, `claim-context-mismatch`, the R7 floor decline) is
+> scaffolding for the mixed-ownership era. Do not build machinery that makes
+> those declines *more correct*. Build toward not needing them.
+>
+> **Scope is DISCOVERED by running, not declared before it** (owner's
+> inversion, and it is the design direction for `map`): rather than determine
+> the required scope up front and run per principal/session, **run it as ONE
+> principal/session and see what scope the result comes back at.** If it comes
+> back at a broader scope, that is a win — the result is shared and the others
+> need no run of their own. Only a genuinely narrow result requires per-
+> principal runs. This is the same principle `scoped-cell-instances.md` already
+> applies to write surfaces (output scope is discovered per transaction, not
+> declared statically), carried over to scheduling.
+>
+> Full rationale: decision **D11** in
+> [`client-passivity.md`](client-passivity.md) §6b.
+
 **Live plan.** The orchestration companion to this directory's design docs
 ([`README.md`](README.md) — the original spec), the phase plan
 ([`implementation-plan.md`](implementation-plan.md)), the lattice register

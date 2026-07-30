@@ -1829,6 +1829,61 @@ minter reachable from a builtin writes a meta path this survey missed. The
 enumeration above covers `makeResultCell` and the two other
 `setResultCell` callers, not every conceivable mint path.
 
+### 5h.4 D11 amended — run all scopes on the server; discover scope by running
+
+**Owner, 2026-07-29**, prompted by the `map` diagnosis arriving as "two
+decisions about how to make claim declines correct":
+
+> The claim thing needs to go, the server always needs to do the work. So
+> yes, the rank changes, but that doesn't mean we can't run it on the
+> server. **We run all scopes on the server.**
+>
+> The tricky bit is that we have to run the map as all
+> principals/sessions and that appears to vary. **Flip it around: run it
+> as one principal/session, and when it comes back at lower scopes,
+> great — that means the result can be used by the others without having
+> to run it again.**
+>
+> Of course we need to run child sub-patterns, otherwise nothing runs
+> them. **Punting to the client is _not an option_.**
+
+**What this corrects in the arc's own working assumptions.** The `map`
+diagnosis (5h.3 follow-up) found that `map`'s classified context rank
+oscillates space↔user because the "static" summary folds each run's
+observed read log (`scheduler/run.ts:1428-1436`). The orchestrator's
+proposed fix was to make the executor's rank monotonic so the claim key
+would agree — i.e. to make the *decline* correct. **That is the wrong
+direction.** A changing rank is an observation, not a refusal. The
+declines themselves are the transitional scaffolding; building machinery
+that makes them more accurate entrenches what D11 says to remove.
+
+**Scope is discovered by running, not declared before it.** This is the
+same principle `scoped-cell-instances.md` already applies to write
+surfaces — output scope is discovered per transaction, and the §4 pair
+exists precisely because it cannot be declared statically (see the C1
+ruling) — now carried over to *scheduling*. Concretely, for `map`:
+
+1. Run it as **one** principal/session rather than solving for the whole
+   set up front.
+2. Observe the scope the result actually lands at.
+3. A broader-scoped result is **shared** — the other principals need no
+   run at all. Only a genuinely narrow result requires a per-principal
+   run.
+
+That inverts the cost model: today a varying rank looks like a problem to
+be pinned down before serving; under this reading it is information that
+often *saves* work.
+
+**D2 answered: child sub-patterns run on the server.** The question was
+whether scoped-rank candidacy should see actions in child sub-pattern
+pieces, given they are started via `startWithTx` and never demanded (20
+such pieces in the flagship). The option of accepting them as
+space-rank-only is **rejected** — it costs no work, which is how it wins
+by default, and it would leave a permanent hole in "the server runs every
+derived computation". Mechanism is open (publish demand per child piece,
+or make scoped candidacy roll up to an ancestor demand root); the outcome
+is not.
+
 ### The client never received authority — and that reframes the goal
 
 Investigated 2026-07-28 after the owner asked what actually triggers the
