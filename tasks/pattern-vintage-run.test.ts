@@ -404,7 +404,7 @@ describe("the vintage gate, end to end", () => {
     await captureMissing(roots, [KEY], new Date("2026-07-29T12:00:00.000Z"));
     await setSource(MOVED_KEY);
 
-    const { replayed, failures } = await replayAll(roots);
+    const { replayed, stranded, failures } = await replayAll(roots);
 
     expect(replayed).toBe(1);
     expect(failures).toHaveLength(1);
@@ -414,6 +414,11 @@ describe("the vintage gate, end to end", () => {
     // none of which is this class.
     expect(failures[0].detail).toContain("APPLIED CLEANLY but stranded");
     expect(failures[0].detail).toContain("items");
+    // EXACTLY one key, which the failure count cannot say: every stranded key
+    // on one root lands in a single failure, so a comparison that also reported
+    // the subject's stream — the false finding this suite now carries a stream
+    // to catch — would still leave `failures` at one.
+    expect(stranded).toBe(1);
   });
 
   it("reports a vintage whose pattern no longer exists", async () => {
