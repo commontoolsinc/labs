@@ -117,7 +117,7 @@ true, in this fixed order (`src/schema-generator.ts`):
 4. `IntersectionFormatter` — declines cell-branded intersections
    (`intersection-formatter.ts`)
 5. `ArrayFormatter` — deliberately before `PrimitiveFormatter` "to avoid
-   Any-flag misrouting" (comment)
+   Any-flag misrouting", per the comment on the array literal
 6. `PrimitiveFormatter`
 7. `ObjectFormatter` — also claims the TS `object` keyword via `typeToString`
    (`object-formatter.ts`)
@@ -446,7 +446,8 @@ Default paths of §7:
 
 - **Nullable special case**: exactly one non-null member + `null` →
   `{ anyOf: [<member>, { type: "null" }] }` — `anyOf` over `oneOf`
-  deliberately (comment). Emission order is member-first; goldens
+  deliberately, "for better consumer compatibility" per the nullable-case
+  comment in `union-formatter.ts`. Emission order is member-first; goldens
   may show null-first because the test normalizer canonicalizes nullable
   `anyOf` pairs (`test/utils.ts`).
 - **All-literal unions** → `{ enum: [...] }` with **no `type` key**; `null`
