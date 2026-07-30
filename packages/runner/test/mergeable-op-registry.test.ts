@@ -175,6 +175,25 @@ describe("mergeable tail-op build guards", () => {
     ).toEqual({ ops: [], suppress: [], abandon: true });
   });
 
+  // With NO base the payload is the whole working array, so the density check
+  // has to cover all of it — the other two conditions need a base to compare
+  // against, this one does not.
+  it("a tail op with no base and a sparse payload abandons the intent", () => {
+    const sparse: (string | undefined)[] = [];
+    sparse[1] = "b";
+    sparse[2] = "c";
+    expect(
+      buildMergeableIntent(
+        { op: "append", path: ["value"], count: 1 },
+        {
+          workingArray: sparse as FabricValue[],
+          hadInitialArray: false,
+          hadInitialValue: false,
+        },
+      ),
+    ).toEqual({ ops: [], suppress: [], abandon: true });
+  });
+
   // The recorded tail slice is empty: an empty working array against an empty
   // base makes `array.slice(length - count)` empty, so the op carries nothing.
   it("a tail op whose recorded tail is empty abandons the intent", () => {

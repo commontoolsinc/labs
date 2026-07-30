@@ -184,6 +184,7 @@ const buildTailOp = (
   // In each case the local value is the whole-array diff's to commit, not the
   // op's. (Case 1 is checked as `initial.length !== start` because `start` is
   // where the recorded tail begins.)
+  // Conditions 1 and 2 compare against a base, so they need one.
   if (ctx.hadInitialArray) {
     const initial = ctx.initialArray;
     if (!initial || initial.length !== start) {
@@ -194,10 +195,15 @@ const buildTailOp = (
         return { ops: [], suppress: [], abandon: true };
       }
     }
-    for (let index = start; index < array.length; index += 1) {
-      if (!(index in array)) {
-        return { ops: [], suppress: [], abandon: true };
-      }
+  }
+  // Condition 3 does not: the payload is `array.slice(start)` either way, and
+  // with no base that slice is the WHOLE working array, so a hole anywhere in a
+  // freshly created sparse array is a hole in the payload. The wire op cannot
+  // carry one — it rebuilds the payload elementwise — so a sparse payload must
+  // fall back to the diff, which does preserve holes.
+  for (let index = start; index < array.length; index += 1) {
+    if (!(index in array)) {
+      return { ops: [], suppress: [], abandon: true };
     }
   }
   const values = array.slice(start) as FabricValue[];

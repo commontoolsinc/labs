@@ -332,7 +332,12 @@ first, since the op carries only the delta.
   2. **the prefix's hole layout changed** — a hole punched or filled without a
      length change. Presence is not expressible per index, and sparse arrays are
      preserved elsewhere in the runner, so this must not be flattened away.
-  3. **the appended tail is itself sparse.**
+  3. **the payload is sparse.** Unlike the other two this needs no base to
+     compare against, and must be checked whether or not one exists: the payload
+     is `array.slice(start)` either way, and with no base that slice is the whole
+     working array — so a hole anywhere in a freshly created sparse array is a
+     hole in the payload. The wire op rebuilds its payload elementwise and cannot
+     carry one.
 
   Abandoning is the same fallback the poison sites produce, decided at commit
   rather than at the write.

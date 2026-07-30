@@ -868,6 +868,64 @@ describe("mergeable array appends", () => {
     }
   });
 
+  // No base at all: a previously absent cell set to a sparse array, then pushed.
+  // With no base the whole working array is the op's payload, so the hole is in
+  // the payload rather than in a prefix the diff would carry — the density check
+  // has to run whether or not there was a base. Without it the write does not
+  // merely flatten the hole, it fails to land at all.
+  it("an absent cell set to a sparse array then pushed commits the hole", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const SPARSE_CAUSE = "absent-sparse-append";
+    try {
+      const sparse: string[] = [];
+      sparse[1] = "b";
+      sparse[2] = "c";
+
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(
+        space,
+        SPARSE_CAUSE,
+        stringListSchema,
+        tx1,
+      );
+      cell.set(sparse);
+      cell.push("d");
+      await tx1.commit();
+      await rt1.storageManager.synced();
+
+      const storage = SharedServerStorageManager.connectTo(server, {
+        as: signer,
+      });
+      const rt2 = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: storage,
+      });
+      try {
+        const readBack = rt2.getCell<string[]>(
+          space,
+          SPARSE_CAUSE,
+          stringListSchema,
+        );
+        await readBack.sync();
+        await readBack.pull();
+        const durable = readBack.get();
+        expect(durable).toBeDefined();
+        expect(durable!.length).toBe(4);
+        expect(0 in durable!).toBe(false);
+        expect(durable![1]).toBe("b");
+        expect(durable![3]).toBe("d");
+      } finally {
+        await rt2.dispose();
+        await storage.close();
+      }
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
   // The reverse: the base is sparse and the set FILLS the hole, same length.
   // Without the layout check the fill is dropped and, because the whole-array
   // candidate carried every element, so is the rest of the replacement.
