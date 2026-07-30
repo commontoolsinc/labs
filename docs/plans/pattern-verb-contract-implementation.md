@@ -245,6 +245,13 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
 - **Exit:** a CTS pattern declares a verb returning `AddTopicResult`; the
   result schema appears in the durable schema; under the flag, both plain and
   reactive returns are readable in the receipt cell.
+- **The reactive half of that exit needs no new machinery** (Berni,
+  2026-07-29): `await cell.pull()` on the receipt already ensures the pattern
+  on that cell, if there is one, has run. The readback the CLI performs is
+  therefore the same call for a plain return and a launched one, and the
+  difference stays inside `pull()`. Recorded rather than assumed — the claim
+  is the architect's about his own machinery, and this plan has not yet
+  exercised a reactive return end to end.
 
 ### WS-D — invocation plumbing
 
@@ -266,6 +273,18 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   ends in the stream link. The binding is a content hash over the caller's key
   plus the whole link, not a delimited join: the caller's half is opaque, so
   concatenation would let a chosen id shift the separator.
+
+  The alternative — a client-side helper that derives the receipt cell rather
+  than receiving its address — was raised again in review (Berni, 2026-07-29)
+  as an equal option. It is not equal, for a reason worth keeping written
+  down: **the receipt is not derivable from the event id alone.** Its cause is
+  the handler's bound closure *plus* the event id, as the design doc states —
+  "addressed deterministically from the event id plus the handler's bound
+  closure... reachable by a caller that can reconstruct that cause from the
+  callable cell, but enumerable by nobody." A helper would have to reconstruct
+  `$ctx` from the callable cell at every call site, which is the client-side
+  reconstruction the callback route exists to avoid, and it is also why the
+  caller's key needs scoping at all.
 - ~~**cli:** `--invocation <id>` on `piece call` (UUID minted and printed by
   default, including when the wait times out); after commit, sync and read the
   receipt (a cold plain read returns `undefined` — sync first); reclassify
@@ -377,11 +396,46 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
   everything per the decided semantics; handler result schemas appear once
   WS-C lands, tier filtering with the marker, later. The 2026-07-24 amendment is absorbed: the listing carries the
   deployed pattern's source identity (skew detection).
-- Generic identity annotation for data reads and callable results. Start with
-  an exploration form such as `--include-ids` that annotates points where the
-  backing identity changes; evaluate a narrower path-selected form if broad
-  output is too noisy. Patterns return child references and never manufacture
-  their own fid fields for this purpose.
+- Generic identity annotation for data reads and callable results
+  (`--show-links` / `--include-ids`). Patterns return child references and
+  never manufacture their own fid fields for this purpose. Two shapes were
+  considered (Berni, 2026-07-29):
+
+  1. **Inline.** An `"@ID": { doc?, path?, space?, scope? }` field wherever the
+     doc id or scope changes, plus at least once at the root. In context, next
+     to the value it describes.
+  2. **Beside the value.** A second block — or one object carrying value and
+     provenance — where provenance is a `{ "/path": <link> }` dictionary.
+
+  **Take the second.** Berni's own objection to the first is decisive on its
+  own: it cannot annotate a scalar, and a scalar can be its own doc, so the
+  format would need a special case exactly where results are simplest. An
+  irregular format costs an agent more than a verbose one.
+
+  A second reason from the result-schema work: a verb's result is
+  schema-described, and every name a result publishes is permanent at every
+  depth (see the correction under Results and schema evolution). An inline
+  `@ID` is therefore either undeclared — the tolerated-but-undeclared shape
+  rule 1 exists to kill — or declared, and then permanent at every path it
+  appears, for provenance metadata. Keeping provenance beside the value is
+  what lets the declared result schema keep describing the result exactly.
+
+  This is not a new format. The llm-dialog tool path already returns
+  `{ "@resultLocation": <link>, result: <value>, schema }` from both branches
+  (`packages/runner/src/builtins/llm-dialog.ts:2841-2847`, `:2869-2875`) — the
+  link a sibling of the value, never inside it. Option 2 is that generalized
+  from one link to many.
+
+  Its cost — out of context, long — is bounded by emitting links only for
+  paths that have them, and only when asked. Default output stays the pristine
+  value.
+
+  **Placement:** a `links` field on the Invocation JSON rather than a second
+  stdout block. `resultRef` already rides stderr as a hint and is recorded
+  below as advisory "until the invocation protocol carries it in the stdout
+  Invocation JSON"; this is that slot. Invocation is required to be authored
+  open-world precisely so protocol fields can be added later, so the field
+  costs nothing in schema-evolution terms.
 - **Read-path guard:** `cf piece get` on a path that resolves to a verb returns
   the stream's serialization rather than redirecting. The llm-dialog `read`
   tool already rejects this case with the right message — "Path resolves to a
