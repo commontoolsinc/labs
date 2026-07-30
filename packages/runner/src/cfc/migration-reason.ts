@@ -3,6 +3,9 @@
 // old document that cannot migrate onto a now-required field that carries no
 // default (the estuary `favorites` case) — from every OTHER CFC rejection
 // (policy, provenance, prepared-digest races), which must stay fail-closed.
+// The backstop fires on one further, non-CFC signal — a refused stored argument
+// (`isStoredArgumentSchemaRefusal`) — which this token says nothing about; the
+// discrimination here is among CFC rejections.
 // Repointing a healthy root's pattern identity in response to a transient
 // ordering blip would be a correctness bug; see PR #4967's review.
 //
@@ -18,9 +21,9 @@
 
 /**
  * Stable machine token marking a CFC prepare rejection as the additive-required
- * schema-migration incompatibility class — the only class the default-root
- * runnability backstop rolls forward on. Emitted into the prepare `reason`
- * (see `prepare.ts`) so it appears in the commit-rejection message.
+ * schema-migration incompatibility class — the only CFC rejection the
+ * default-root runnability backstop rolls forward on. Emitted into the prepare
+ * `reason` (see `prepare.ts`) so it appears in the commit-rejection message.
  */
 export const CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON =
   "cfc-schema-migration-incompatible";

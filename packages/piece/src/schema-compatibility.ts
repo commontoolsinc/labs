@@ -138,8 +138,12 @@ const fabricAwareEqual = (left: unknown, right: unknown): boolean => {
  *   tail, and it is aged roots — the ones likeliest to hold a value a new
  *   schema cannot read — that the exemption covers.
  *
- * So this waiver is not a proof for those two cases; it is a decision to accept
- * them, and Tier 2's replay of captured vintages is what covers the gap.
+ * So this waiver is not a proof; it is a decision to accept those two cases.
+ * Neither is covered elsewhere either — in particular Tier 2's vintage replay
+ * cannot reach the markerless one, since its captures run setup through the
+ * current runner and are therefore always marked. Both are pinned as decisions
+ * in `packages/runner/test/pattern-update-argument-validation.test.ts` rather
+ * than left to be rediscovered.
  */
 export function assertPatternSchemasBackwardCompatible(
   previous: Pattern,

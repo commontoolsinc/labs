@@ -1271,6 +1271,44 @@ export class Runner {
     }
   }
 
+  /**
+   * Check a piece's STORED argument against `pattern`'s schema without staging
+   * anything. Used where the caller must not move the piece but must not
+   * report success over an argument nobody has checked either.
+   *
+   * Mirrors the re-stage branch's deferrals deliberately, so the two paths
+   * cannot disagree about what counts as valid: an argument doc that reads
+   * nothing right now is skipped (CT-1917 — a nested piece's argument lives in
+   * its host's doc, and "not synced" is not "invalid"), and the staged raw is
+   * passed so a slot holding an unreadable link validates as opaque rather than
+   * as its missing materialization.
+   */
+  private validateStoredArgument<R>(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<R>,
+    pattern: Pattern,
+  ): void {
+    const argumentLink = getMetaLink(resultCell, "argument");
+    if (argumentLink === undefined) return;
+    const stored = this.runtime.getCellFromLink(argumentLink, undefined, tx)
+      .getRaw({ meta: ignoreReadForScheduling });
+    if (stored === undefined) return;
+    const defaults = extractDefaultValues(pattern.argumentSchema);
+    this.validateArgument(
+      tx,
+      argumentLink,
+      pattern.argumentSchema,
+      defaults,
+      {
+        unresolvedLinkRaw: mergeSchemaDefaults(
+          stored,
+          defaults,
+          pattern.argumentSchema,
+        ),
+      },
+    );
+  }
+
   private updateResultSchemaMeta<R>(
     tx: IExtendedStorageTransaction,
     resultCell: Cell<R>,
@@ -1287,25 +1325,40 @@ export class Runner {
   }
 
   /**
-   * Skip setup for a piece that is already running this pattern's stored setup
-   * state. `storedSetupIsCurrent` must be false whenever the stored argument
-   * needs re-staging, or this returns before the re-stage branch is reached.
+   * Skip setup for a piece that is already RUNNING this pattern.
+   *
+   * A running piece is never re-staged here, and that is the whole point of the
+   * branch: `applySetupState` installs the incoming version's argument schema,
+   * internal manifest and result projection, but only the pattern watcher can
+   * cancel the live nodes and instantiate the new ones. Staging without that
+   * leaves the stored setup describing a version the running graph is not —
+   * the piece's projection reads as the new pattern while its handlers still
+   * drive the old one's cells — and stamps the completion marker forward,
+   * erasing the very mismatch a later repair would use to notice.
+   *
+   * What it does NOT do is report success without looking. A stale setup marker
+   * means nobody has checked the stored argument against this pattern, so it is
+   * validated in place — no write, no schema retarget, nothing that moves the
+   * piece — and a refusal surfaces to the caller.
    */
   private maybeReuseRunningSetup<T, R>(
     tx: IExtendedStorageTransaction,
     resultCell: Cell<R>,
     argument: T,
     pattern: Pattern,
-    storedSetupIsCurrent: boolean,
+    setupState: SetupStateReuse,
   ): SetupResult<R> | undefined {
     const key = this.getDocKey(resultCell);
     if (!this.cancels.has(key)) return undefined;
 
-    if (argument === undefined && storedSetupIsCurrent) {
+    if (argument === undefined && setupState.sameStoredSetup) {
+      if (setupState.restageStoredArgument) {
+        this.validateStoredArgument(tx, resultCell, pattern);
+      }
       return { resultCell, needsStart: false };
     }
 
-    if (storedSetupIsCurrent) {
+    if (setupState.sameStoredSetup) {
       const argumentLink = getMetaLink(resultCell, "argument")!;
       const defaults = extractDefaultValues(pattern.argumentSchema);
       const nextArgument = mergeSchemaDefaults(
@@ -1771,7 +1824,7 @@ export class Runner {
       resultCell,
       argument,
       pattern,
-      !setupState.restageStoredArgument,
+      setupState,
     );
     if (runningSetup) {
       return runningSetup;

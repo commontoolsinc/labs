@@ -4,6 +4,7 @@ import { Identity } from "@commonfabric/identity";
 
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
+import { getMetaLink } from "../src/link-utils.ts";
 import { isMissingStreamMarkerFailure } from "../src/runner.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 
@@ -22,9 +23,16 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 const signer = await Identity.fromPassphrase("nested-piece-setup-repair");
 const space = signer.did();
 
+// The argument object is OPEN and the piece is set up holding `limit: "ten"`,
+// which V3 below declares as a NUMBER. That mismatch is deliberate: the repair
+// re-runs setup for the pattern the pointer already names, so it would take the
+// stale-marker re-stage branch if that branch were not opted out — and the
+// re-stage validates. A repair that starts refusing here would be rewriting (or
+// rejecting) the piece's own data on what is meant to be an internal-cell fix.
 const V1_NO_HANDLER = [
   "import { Writable, pattern } from 'commonfabric';",
-  "export default pattern<Record<string, never>, { count: Writable<number> }>(() => {",
+  "interface Args { [key: string]: any }",
+  "export default pattern<Args, { count: Writable<number> }>(() => {",
   "  const count = new Writable<number>(0).for('count');",
   "  return { count };",
   "});",
@@ -35,10 +43,11 @@ const V1_NO_HANDLER = [
 // is absent from a doc set up for V1, so instantiating V3 over that doc bricks.
 const V3_WITH_HANDLER = [
   "import { Writable, handler, pattern } from 'commonfabric';",
+  "interface Args { limit?: number; [key: string]: any }",
   "const bump = handler<void, { count: Writable<number> }>((_, { count }) => {",
   "  count.set((count.get() ?? 0) + 1);",
   "});",
-  "export default pattern<Record<string, never>, { count: Writable<number> }>(() => {",
+  "export default pattern<Args, { count: Writable<number> }>(() => {",
   "  const count = new Writable<number>(0).for('count');",
   "  return { count, bump: bump({ count }) };",
   "});",
@@ -133,7 +142,7 @@ describe("nested-piece cold-start setup repair", () => {
       undefined,
       tx,
     );
-    const running = rt.run(tx, v1, {}, cell);
+    const running = rt.run(tx, v1, { limit: "ten" }, cell);
     await tx.commit();
     await running.pull();
     // Stop, then move the pinned identity to V3 with NO setup for it — the
@@ -174,6 +183,17 @@ describe("nested-piece cold-start setup repair", () => {
         getMetaRaw: (k: string) => unknown;
       }).getMetaRaw("patternIdentity") as { identity?: string } | undefined;
       expect(idRaw?.identity).toBe(v3Ref.identity);
+      // …and the piece's own data is untouched. This repair materializes
+      // missing internal cells; it must not re-point or re-validate the stored
+      // argument, which is what makes it safe to run on an ordinary start. The
+      // stored `limit` violates V3's declared type, so a repair that re-staged
+      // would either rewrite this doc or refuse the start outright.
+      const argumentLink = getMetaLink(cell as never, "argument")!;
+      expect(
+        rt.getCellFromLink(argumentLink).getRaw(),
+        "the internal-cell repair rewrote or rejected the piece's stored " +
+          "argument — it is meant to leave the piece's data alone",
+      ).toEqual({ limit: "ten" });
       // …and the once-missing handler stream now fires end to end.
       const before = (cell.getAsQueryResult() as { count: number }).count;
       (cell.key("bump") as unknown as { send: (e: unknown) => void }).send({});

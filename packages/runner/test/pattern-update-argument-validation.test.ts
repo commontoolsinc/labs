@@ -235,6 +235,149 @@ describe("pattern update validates the stored argument", () => {
     ).toBe(vintageIdentity);
   });
 
+  it("lets a MARKERLESS root through, and marks it on the way", async () => {
+    // The deliberate exemption, pinned so it is a decision rather than an
+    // assumption. `stagedByOtherVersion` treats an absent `patternSetupIdentity`
+    // as "same": absence cannot be told from a pending update, and re-staging
+    // every such root would validate — and rewrite defaults over — arguments no
+    // update is touching.
+    //
+    // Nothing else covers this population. Tier 2's vintage replay cannot: its
+    // captures run setup through the current runner, which always stamps the
+    // marker, so a captured root is never markerless. Hence this case, which
+    // strips the marker to reach the state a root written before the marker
+    // existed is in.
+    const { cell } = await setupVintage(
+      openArgument("v1"),
+      { count: "seven" },
+      "markerless-root",
+    );
+    const { error: stripError } = await rt.editWithRetry((tx) => {
+      cell.withTx(tx).setMetaRaw("patternSetupIdentity", undefined);
+    });
+    expect(stripError?.message).toBeUndefined();
+    await rt.idle();
+    await cell.sync();
+    expect(
+      getPatternSetupIdentityRef(cell as Cell<unknown>),
+      "the marker was not actually removed, so this case is exercising an " +
+        "ordinary marked root and proves nothing about the exemption",
+    ).toBeUndefined();
+
+    const { error } = await rollForward(cell, typedCount("v2"));
+
+    expect(
+      error,
+      "a markerless root was validated. That may well be the better policy, " +
+        "but it is a CHANGE: every root written before the marker existed " +
+        "would start refusing its first repair-route update",
+    ).toBeUndefined();
+    // One setup wide: the update that skipped validation stamps the marker, so
+    // the next one is checked. This is what bounds the exemption.
+    await cell.sync();
+    expect(
+      getPatternSetupIdentityRef(cell as Cell<unknown>),
+      "the exemption did not close behind itself, so this root would skip " +
+        "validation on every future update rather than just this one",
+    ).toBeDefined();
+  });
+
+  it("does not half-swap a RUNNING piece whose stored argument is fine", async () => {
+    // The counterweight to the running-piece refusal above, and a regression
+    // guard: validating on that path must not become STAGING on it.
+    //
+    // `applySetupState` installs the incoming version's argument schema,
+    // internal manifest and result projection — but only the pattern watcher
+    // can cancel the live nodes and instantiate the new ones. Staging here
+    // would leave the piece's projection reading as V2 while its nodes still
+    // drive V1's cells, and would stamp the completion marker forward, erasing
+    // the mismatch a later repair needs to see. Measured before the fix: the
+    // live value moved to the new version's without its graph ever running.
+    //
+    // The two versions differ in WHICH cell backs `tag`, so a staged-but-not-
+    // instantiated projection is visible as a value change.
+    const stored = (marker: string, key: string): RuntimeProgram =>
+      programOf([
+        "import { Writable, pattern } from 'commonfabric';",
+        "interface Args { count?: number; [key: string]: any }",
+        "interface Out { tag: Writable<string>; }",
+        "export default pattern<Args, Out>(() => {",
+        `  const tag = new Writable<string>(${JSON.stringify(marker)}).for(${
+          JSON.stringify(key)
+        });`,
+        "  return { tag };",
+        "});",
+        "",
+      ].join("\n"));
+
+    const tx = rt.edit();
+    const pm = rt.patternManager;
+    const v1 = await pm.compilePattern(stored("v1", "tagA"), { space, tx });
+    const v2 = await pm.compilePattern(stored("v2", "tagB"), { space, tx });
+    const v1Ref = pm.getArtifactEntryRef(v1)!;
+    const v2Ref = pm.getArtifactEntryRef(v2)!;
+    const cell = rt.getCell<Record<string, unknown>>(
+      space,
+      "running-half-swap",
+      undefined,
+      tx,
+    );
+    const running = rt.run(tx, v1, { count: "seven" }, cell);
+    await tx.commit();
+    await running.pull();
+
+    // Move the pointer. The swap refuses the stored argument and is LOGGED, so
+    // the piece keeps running V1 under a pointer that reads V2 — the state a
+    // repair finds.
+    const tx2 = rt.edit();
+    cell.withTx(tx2).setMetaRaw("patternIdentity", {
+      identity: v2Ref.identity,
+      symbol: v2Ref.symbol,
+    });
+    await tx2.commit();
+    await rt.idle();
+    await cell.pull();
+    expect(
+      (cell.getAsQueryResult() as { tag: string }).tag,
+      "the swap did not refuse, so this case is not testing a running piece " +
+        "with a stale setup marker",
+    ).toBe("v1");
+
+    // Now repair the argument, so validation on the repair below PASSES and the
+    // only question left is whether setup moves the piece.
+    const { error: fixError } = await rt.editWithRetry((wtx) => {
+      rt.getCellFromLink(getMetaLink(cell, "argument")!, undefined, wtx)
+        .asSchema(undefined as never)
+        .set({ count: 7 } as never);
+    });
+    expect(fixError?.message).toBeUndefined();
+    await rt.idle();
+
+    let error: string | undefined;
+    try {
+      await rt.runSynced(cell.withTx(), v2, undefined, {});
+    } catch (thrown) {
+      error = thrown instanceof Error ? thrown.message : String(thrown);
+    }
+    await rt.idle();
+    await rt.storageManager.synced();
+    await cell.pull();
+
+    expect(error).toBeUndefined();
+    expect(
+      (cell.getAsQueryResult() as { tag: string }).tag,
+      "the piece's live value changed without its graph being re-instantiated " +
+        "— setup staged the new version's result projection over nodes still " +
+        "running the old one",
+    ).toBe("v1");
+    await cell.sync();
+    expect(
+      getPatternSetupIdentityRef(cell as Cell<unknown>)?.identity,
+      "the completion marker advanced past the graph that is actually " +
+        "running, which erases the mismatch a later repair uses to notice",
+    ).toBe(v1Ref.identity);
+  });
+
   it("does not classify a failure that merely mentions the refusal", () => {
     // The counterweight to the assertion above, and the reason the prefix is
     // matched at the START. The escalation this classifier gates REPLACES a

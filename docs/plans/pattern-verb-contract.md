@@ -573,10 +573,10 @@ self-contained snapshot — the pattern knows which is meaningful for that verb.
 
 The result schema is part of the piece's public contract, and the repo already
 checks pattern schema evolution: `assertPatternSchemasBackwardCompatible`
-(`packages/piece/src/schema-compatibility.ts:125`) runs on every `setsrc` unless
+(`packages/piece/src/schema-compatibility.ts`) runs on every `setsrc` unless
 `--dangerously-allow-incompatible-schema` is passed
 (`packages/piece/src/ops/piece-controller.ts:2723-2724`). It checks arguments
-and results in **opposite directions** (`:151-183`):
+and results in **opposite directions** (`:174-206`):
 
 - **Arguments**: previous ⊆ candidate. Inputs may widen but not narrow; a new
   required field is incompatible.
@@ -594,9 +594,9 @@ named property is rejected outright in either direction — `objectSubsetIssue`
 returns "existing result field was removed" whenever the comparison is an
 evolution, on the stated principle that "pattern evolution preserves named
 fields as part of the public contract, even when the candidate object is
-otherwise open" (`packages/piece/src/schema-compatibility.ts:437-444`). A
+otherwise open" (`packages/piece/src/schema-compatibility.ts:457-466`). A
 verb's `asCell` marker is pinned the same way: it is a semantic extension key
-compared for exact equality (`:100-106`, `:329-333`), so a field cannot change
+compared for exact equality (`:100-106`, `:352-356`), so a field cannot change
 between data and verb across a deploy. Verb names and their verb-ness are
 therefore already a contract with teeth, before this document adds any rule.
 

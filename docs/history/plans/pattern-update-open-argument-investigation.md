@@ -3,7 +3,7 @@ status: historical
 created: 2026-07-30
 archived: 2026-07-30
 reason: "Investigation record: why the open-argument update class went unvalidated, and the correction of an earlier measurement that pointed at the wrong mechanism."
-superseded-by: plans/pattern-update-state-continuity.md
+superseded-by: docs/plans/pattern-update-state-continuity.md
 ---
 
 # Open-argument update validation: what was actually broken
