@@ -379,29 +379,30 @@ describe("the vintage gate, end to end", () => {
     expect(failures[0].detail).toContain("did not restore");
   });
 
-  it("does NOT catch a moved storage key — the gap, pinned", async () => {
-    // Asserting a LIMIT, deliberately. `.for('items')` → `.for('itemList')`
-    // leaves the declared contract byte-identical and strands every document
-    // written under the old name — the class Tier 2 was built for, and the one
-    // this gate's own header and CI comment must not be read as claiming.
+  it("CATCHES a moved storage key — the class this tier exists for", async () => {
+    // The inversion this test was written to receive. `.for('items')` →
+    // `.for('itemList')` leaves the declared contract byte-identical and
+    // strands every document written under the old name. No contract check can
+    // see it, and the materialize succeeds — so until the gate compared VALUES
+    // it replayed clean, and this case asserted that limit on purpose.
     //
-    // ONE reason it replays clean, and it is the whole remaining gap:
-    // `replayVintage` asks only whether the materialize was refused, never
-    // whether the values survived it. The fixture genuinely holds stranded data
-    // — capture drives the pattern through its own tests, so `items` was
-    // written through a real handler before the key moved — which is what makes
-    // this a pinned limit of the CHECK rather than of the fixture.
-    //
-    // `packages/piece/test/state-continuity.test.ts` covers the class itself,
-    // over a POPULATED vintage. When the gate grows a value comparison this
-    // test should be INVERTED, not deleted.
+    // The fixture holds real stranded data because capture drives the pattern
+    // through its own tests: `items` was written through a handler before the
+    // key moved. That is what makes this a test of the CHECK rather than of the
+    // fixture.
     await captureMissing(roots, [KEY], new Date("2026-07-29T12:00:00.000Z"));
     await setSource(MOVED_KEY);
 
     const { replayed, failures } = await replayAll(roots);
 
     expect(replayed).toBe(1);
-    expect(failures).toEqual([]);
+    expect(failures).toHaveLength(1);
+    // The specific finding, not merely "something failed": the update APPLIED
+    // and the loss is what the gate caught. A generic assertion here would also
+    // pass on a refusal, a compile error, or a fixture that never restored —
+    // none of which is this class.
+    expect(failures[0].detail).toContain("APPLIED CLEANLY but stranded");
+    expect(failures[0].detail).toContain("items");
   });
 
   it("reports a vintage whose pattern no longer exists", async () => {

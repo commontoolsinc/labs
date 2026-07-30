@@ -23,6 +23,7 @@ import {
   vintageFileName,
   VINTAGES_DIR,
 } from "./pattern-vintage-lib.ts";
+import { strandedKeys } from "../packages/piece/test/state-continuity-harness.ts";
 
 const ID_A = "bafyaaaa";
 const ID_B = "bafybbbb";
@@ -375,5 +376,45 @@ describe("path and error helpers", () => {
     // rejection assertion pass for nothing.
     expect(describeError(new Error("boom"))).toBe("boom");
     expect(describeError("plain string")).toBe("plain string");
+  });
+});
+
+describe("stranded-state comparison", () => {
+  it("reports a key whose value the update stopped preserving", () => {
+    // The class the gate exists for. A moved storage key leaves the contract
+    // untouched and the data unreachable, so the value is the only witness.
+    expect(strandedKeys(
+      { journal: [{ event: "created" }], items: ["a"] },
+      { journal: [], items: ["a"] },
+    )).toEqual(["journal"]);
+  });
+
+  it("does not report a key the update ADDED", () => {
+    // Adding a field is what `Default<>` is for. Only keys present BEFORE are
+    // compared; treating a new key as loss would fail every additive change.
+    expect(strandedKeys({ items: ["a"] }, { items: ["a"], favorites: [] }))
+      .toEqual([]);
+  });
+
+  it("reports a key that disappeared entirely", () => {
+    expect(strandedKeys({ items: ["a"] }, {})).toEqual(["items"]);
+  });
+
+  it("treats a missing after-state as everything stranded", () => {
+    // A materialize that produced no readable root lost all of it; saying
+    // "nothing changed" there would be the quietest possible false green.
+    expect(strandedKeys({ a: 1, b: 2 }, undefined)).toEqual(["a", "b"]);
+  });
+
+  it("compares by value, not identity", () => {
+    expect(strandedKeys({ a: [1, 2] }, { a: [1, 2] })).toEqual([]);
+    expect(strandedKeys({ a: [1, 2] }, { a: [2, 1] })).toEqual(["a"]);
+  });
+
+  it("does not treat an empty before-state as a finding", () => {
+    // A vintage whose root held nothing has nothing to strand. The "did it
+    // restore" control is what catches an empty fixture; this must not
+    // double-report it as data loss.
+    expect(strandedKeys({}, { items: ["a"] })).toEqual([]);
   });
 });

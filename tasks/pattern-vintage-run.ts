@@ -29,6 +29,8 @@ import {
   materializeOnCell,
   openFileBackedRuntime,
   readVintageManifest,
+  readVintageState,
+  strandedKeys,
   type VintageManifestEntry,
   vintageRootCause,
   vintageRootHasState,
@@ -117,6 +119,8 @@ export interface ReplayReport {
   changed: number;
   /** Changed targets that applied cleanly. */
   updated: number;
+  /** Keys an applied update stopped being able to read back. */
+  stranded: number;
   failures: ReplayFailure[];
 }
 
@@ -142,6 +146,7 @@ export async function replayVintage(
     unmappable: 0,
     changed: 0,
     updated: 0,
+    stranded: 0,
     failures: [{ ...where, detail }],
   });
 
@@ -194,6 +199,7 @@ export async function replayVintage(
       unmappable: unmappable.length,
       changed: 0,
       updated: 0,
+      stranded: 0,
       failures: [],
     };
     // A recorded root nothing can address is a FAILURE, not a note. The replay
@@ -253,6 +259,12 @@ export async function replayVintage(
       if (today === entry.identity) continue;
       report.changed++;
 
+      // The state as the version that wrote it saw it, BEFORE anything is
+      // applied. Read under the root's own stored schema — a schema-less read
+      // does not materialize and would hand back an empty object, making every
+      // comparison below pass trivially.
+      const before = await readVintageState(runtimeVintage, entry.cellId);
+
       const outcome = await materializeOnCell(
         runtimeVintage,
         program as never,
@@ -278,6 +290,31 @@ export async function replayVintage(
             `was REFUSED:\n      ${outcome.error}`,
         });
         continue;
+      }
+
+      // The update APPLIED. That is not the same as the data surviving, and
+      // until this comparison existed the gate could not tell the two apart:
+      // a moved `.for()` key materializes perfectly and silently reads back
+      // empty. Compare what the old version could see against what today's
+      // source can.
+      if (before !== undefined) {
+        const stranded = strandedKeys(before, outcome.value);
+        if (stranded.length > 0) {
+          report.stranded += stranded.length;
+          report.failures.push({
+            ...where,
+            detail:
+              `updating ${entry.main} (${entry.symbol}) APPLIED CLEANLY ` +
+              `but stranded state the vintage held: ${
+                stranded.map((key) =>
+                  `${key} (was ${
+                    JSON.stringify(before[key])?.slice(0, 80)
+                  }, now ${JSON.stringify(outcome.value?.[key])?.slice(0, 80)})`
+                ).join("; ")
+              }`,
+          });
+          continue;
+        }
       }
       // A migration can apply without being refused and still leave the root
       // reading as nothing — the state gone rather than rejected. "Not refused"
@@ -317,11 +354,12 @@ export async function replayAll(
     unmappable: number;
     changed: number;
     updated: number;
+    stranded: number;
     failures: ReplayFailure[];
   }
 > {
   const vintages = await collectVintages(roots.vintagesRoot);
-  let candidates = 0, changed = 0, updated = 0, unmappable = 0;
+  let candidates = 0, changed = 0, updated = 0, unmappable = 0, stranded = 0;
   const failures: ReplayFailure[] = [];
   for (const vintage of vintages) {
     const report = await replayVintage(roots, vintage);
@@ -329,6 +367,7 @@ export async function replayAll(
     unmappable += report.unmappable;
     changed += report.changed;
     updated += report.updated;
+    stranded += report.stranded;
     failures.push(...report.failures);
   }
   return {
@@ -338,6 +377,7 @@ export async function replayAll(
     unmappable,
     changed,
     updated,
+    stranded,
     failures,
   };
 }

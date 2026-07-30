@@ -392,6 +392,71 @@ export async function vintageArgumentLink(
 }
 
 /**
+ * A captured root's state, read the way the version that WROTE it saw it.
+ *
+ * The schema matters and cannot be skipped: a schema-less read does not
+ * materialize, and returns an empty object for a doc full of state — which
+ * would make every stranding comparison trivially pass. The vintage root
+ * carries its own result schema in meta, so the old version's own view of its
+ * data is available without needing its source.
+ *
+ * Returns a detached deep copy: the live value is a query-result proxy that
+ * re-reads through the transaction, so holding it across a materialize would
+ * compare the new state against itself.
+ */
+export async function readVintageState(
+  vintage: VintageRuntime,
+  cellId: string,
+): Promise<Record<string, unknown> | undefined> {
+  const raw = vintage.runtime.getCellFromEntityId(
+    vintage.space as never,
+    cellId as never,
+    [],
+    undefined as never,
+  );
+  await raw.sync();
+  const storedSchema = raw.getMetaRaw("schema");
+  if (storedSchema === undefined) return undefined;
+  const typed = vintage.runtime.getCellFromEntityId(
+    vintage.space as never,
+    cellId as never,
+    [],
+    storedSchema as never,
+  );
+  await typed.sync();
+  const value = typed.get();
+  if (value === undefined || value === null) return undefined;
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+}
+
+/**
+ * Keys whose value the update did not preserve.
+ *
+ * Only keys present BEFORE are compared: an update may legitimately ADD a
+ * field (that is what `Default<>` is for), so a new key is not a finding. An
+ * existing key whose value changed is — that is data the old version wrote and
+ * the new one no longer reads back.
+ *
+ * No exclusion list, which is worth stating because the obvious worry is
+ * derived projections. Measured on both committed fixtures: applying today's
+ * source leaves every key byte-identical, INCLUDING `$UI`, and a UI-only source
+ * change still produces no differing keys. So a difference here is signal, and
+ * carving out `$UI`/`$NAME` up front would only hide some of it.
+ */
+export function strandedKeys(
+  before: Record<string, unknown>,
+  after: Record<string, unknown> | undefined,
+): string[] {
+  const stranded: string[] = [];
+  for (const key of Object.keys(before)) {
+    const was = JSON.stringify(before[key]);
+    const now = JSON.stringify(after?.[key]);
+    if (was !== now) stranded.push(key);
+  }
+  return stranded;
+}
+
+/**
  * Whether a restored fixture's root already holds state.
  *
  * This is a CONTROL, and the replay gate is unsound without one. A fixture that
