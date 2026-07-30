@@ -1393,7 +1393,7 @@ jobs:
           host: ${{ secrets.BASTION_HOST }}
           username: bastion
           key: ${{ secrets.BASTION_SSH_PRIVATE_KEY }}
-          script: /opt/cf/deploy.sh rapids ${{ github.sha }} --skip-clusterduck
+          script: /opt/cf/deploy.sh rapids ${{ github.sha }}
 
   # Deploy shell static assets to staging GCS bucket
   deploy-shell-staging:
