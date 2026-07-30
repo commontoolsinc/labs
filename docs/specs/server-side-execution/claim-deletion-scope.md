@@ -8,8 +8,50 @@ the amended ruling, §5h.5 the corrected gate),
 SURVIVAL TEST and TERMINAL CONDITION at its top govern this work),
 [`README.md`](README.md), [`implementation-plan.md`](implementation-plan.md).
 
-**Status: SCOPED, NOT RATIFIED** (2026-07-29). §6c is an owner decision and
-it is not a bug to fix — see below.
+**Status: SCOPED; §6c RETIRED, two corrections applied** (2026-07-29).
+
+**Correction 1 — `claim-context-mismatch` is NOT a cross-principal leak
+guard, and §5c is wrong to call it one.** §5c warns that a space-rank claim
+whose run resolved `user` "would write a per-user result to the shared
+instance". Owner, 2026-07-29:
+
+> When a space-rank claim becomes per-user, we write a **redirect link to
+> itself at the narrower scope** into the original scope — so the space doc
+> points at the user doc. The link does **not contain the user's
+> principal**; it just says "if you read this, read your own version".
+>
+> Could different users reach a different conclusion? **No.** The only way
+> you go from space scope to user scope is by finding another such link,
+> and by definition all users see the same link — so whatever principal
+> this runs under, they all create the identical redirect.
+
+That is the **byte-identity convergence property**, and this is the THIRD
+time it has been the answer in this arc: it is why the §4 widening pair is
+admissible at all (C1 ruling), why the ×12 fix could accept scoped
+auxiliary result-instance links (§5h.1, pinned as "auxiliary links are
+byte-identical across two lanes"), and now why a resolved-context commit
+leaks nothing. **A redirect is identical for every principal; only a VALUE
+differs.** So `claim-context-mismatch` may be deleted outright with slice
+1 — no replacement guard is owed, and slice 1 is simpler than §5c states.
+
+**Correction 1b — the one genuinely careful case, recorded as a
+FOLLOW-UP, not a slice-1 concern.** Space → **session** *when it passes
+through a user scope*: that intermediate user-scoped doc may stay
+user-scoped for some principals and narrow to session for others, so the
+single redirect is not obviously convergent. The safe form is **two
+redirects — space → user → session** — and it is needed only when the path
+actually went through a user scope. Owner: follow-up task only.
+
+**Correction 2 — "start the adjacent ones" is NOT a design target.** Owner:
+do not build a fan-out scheduler; it may well fall out of a higher-level
+invariant — *"maybe all that happens is that the part that sends data to
+the client realises that this still needs computing."* So the trigger is
+the delivery path finding no value for a principal, not an explicit
+enumerate-and-start step. Do not add machinery for it; expect it to emerge
+from demand + delivery.
+
+§6c is retired: the owner accepted the cost shift and clarified the
+inversion as an algorithm (client-passivity §5h.4).
 
 **Two findings that reframe the arc, both verified by the orchestrator:**
 

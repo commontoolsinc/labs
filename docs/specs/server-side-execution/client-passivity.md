@@ -1913,10 +1913,14 @@ optimism. Three consequences:
    that do NOT narrow, which §6c is right to say are the easy ones. The
    algorithm is still correct; it simply saves less often than the phrase
    "scope is discovered by running" might suggest.
-2. **"Start the adjacent ones" is a concrete mechanism that must be
-   built.** When a run narrows, the server has to enumerate the other
-   interested principals/sessions and start their runs. That is the answer
-   to "who runs the remaining S-1", and nothing does it today.
+2. **"Start the adjacent ones" is NOT a design target** — corrected by the
+   owner the same day, against my reading of it as a build item: *"don't
+   treat it as a direct design target, that could as well be a side-effect
+   of a higher level invariant. Maybe all that happens is that the part
+   that sends data to the client realizes that this still needs
+   computing."* So the trigger is the delivery path finding no value for a
+   principal, not an explicit enumerate-and-start scheduler. **Build no
+   machinery for it**; expect it to emerge from demand + delivery.
 3. It disposes of §6c as a blocker, because the S runs were never assumed
    away — they are scheduled deliberately.
 
