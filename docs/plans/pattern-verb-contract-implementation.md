@@ -195,7 +195,12 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   Verb-shaped type parameters read one way throughout: **`E`** the event,
   **`R`** the declared result, **`T`** the handler's bound state where there
   is one. `Handler`/`HandlerFactory`'s second parameter was spelled `R` while
-  it meant the event.
+  it meant the event. The order is uniform too (#5161, settled after C1
+  landed): `Handler`/`HandlerFactory` are event-first — `Handler<E, T, R>`,
+  `HandlerFactory<E, T, R>` — so the tuple reads identically at the type, the
+  `handler()`/`action()` call, and the produced `Stream<E, R>`. Positional
+  annotations were flipped repo-wide in the same change; the compiler
+  enumerates any stragglers.
 
   **A result is opt-in by explicit type argument — `action<E, R>(...)` —
   never inferred.** A concise arrow body's completion value is whatever its

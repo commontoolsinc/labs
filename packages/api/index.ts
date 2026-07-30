@@ -1698,11 +1698,12 @@ export type toJSON = {
  * declares back to a caller (`void` for the value-less majority), and **`T`**
  * is the handler's bound state, present only where there is one.
  *
- * `Handler`'s second parameter was spelled `R` before a result existed; it has
- * always been the event type, so it is `E` now and `R` means one thing
- * everywhere. Type parameters are positional — no caller changes.
+ * `Handler` and `HandlerFactory` take them event-first — `Handler<E, T, R>` —
+ * the same order `handler()`'s own type parameters and `Stream<E, R>` read,
+ * so one tuple means the same thing at the declaration, the builder call, and
+ * the produced stream (#5161).
  */
-export type Handler<T = any, E = any, R = void> = Module & {
+export type Handler<E = any, T = any, R = void> = Module & {
   with: (inputs: FactoryInput<StripCell<T>>) => Stream<E, R>;
 };
 
@@ -1731,9 +1732,9 @@ export type ModuleFactory<T, R> =
     asScope(scope: CellScope): ModuleFactory<T, R>;
   };
 
-export type HandlerFactory<T, E, R = void> =
+export type HandlerFactory<E, T, R = void> =
   & ((inputs: FactoryInput<StripCell<T>>) => Stream<E, R>)
-  & Handler<T, E, R>
+  & Handler<E, T, R>
   & toJSON;
 
 // JSON types
@@ -2434,17 +2435,17 @@ export interface HandlerFunction {
     eventSchema: JSONSchema,
     stateSchema: JSONSchema,
     handler: (event: E, props: HandlerState<T>) => any,
-  ): HandlerFactory<T, E>;
+  ): HandlerFactory<E, T>;
 
   // Without schemas
   <E, T>(
     handler: (event: E, props: T) => any,
     options: { proxy: true },
-  ): HandlerFactory<T, E>;
+  ): HandlerFactory<E, T>;
 
   <E, T>(
     handler: (event: E, props: HandlerState<T>) => any,
-  ): HandlerFactory<T, E>;
+  ): HandlerFactory<E, T>;
 
   // Declared results, reached only by naming all three type arguments —
   // `ActionFunction`'s explicit-only rule, for the same reason: the `=> any`
@@ -2454,16 +2455,16 @@ export interface HandlerFunction {
     eventSchema: JSONSchema,
     stateSchema: JSONSchema,
     handler: (event: E, props: HandlerState<T>) => R,
-  ): HandlerFactory<T, E, R>;
+  ): HandlerFactory<E, T, R>;
 
   <E, T, R>(
     handler: (event: E, props: T) => R,
     options: { proxy: true },
-  ): HandlerFactory<T, E, R>;
+  ): HandlerFactory<E, T, R>;
 
   <E, T, R>(
     handler: (event: E, props: HandlerState<T>) => R,
-  ): HandlerFactory<T, E, R>;
+  ): HandlerFactory<E, T, R>;
 }
 
 /**

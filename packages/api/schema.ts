@@ -422,7 +422,7 @@ declare module "commonfabric" {
       eventSchema: E,
       stateSchema: T,
       handler: (event: Schema<E>, props: Schema<T>) => any,
-    ): HandlerFactory<SchemaWithoutCell<T>, SchemaWithoutCell<E>>;
+    ): HandlerFactory<SchemaWithoutCell<E>, SchemaWithoutCell<T>>;
   }
 
   // Augment WishFunction with schema-based overloads
