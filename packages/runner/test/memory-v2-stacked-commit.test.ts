@@ -165,6 +165,9 @@ const localSeqTop = (read: { localSeq: number | number[] }): number =>
 
 class ScriptedServerModel {
   connectionCount = 0;
+  /** Simulate a pre-CT-1926 server: accept revisions omit the post-apply
+   * document, so the client must fall back to local extrapolation. */
+  omitPostApplyDocuments = false;
   transactLocalSeqs: number[] = [];
   readonly confirmed = new Map<URI, DocState>();
   readonly applied = new Map<number, AppliedRecord>();
@@ -362,7 +365,7 @@ class ScriptedServerModel {
         opIndex: index,
         commitSeq: seq,
         op: operation.op,
-        ...(operation.op === "delete" ? {} : {
+        ...(operation.op === "delete" || this.omitPostApplyDocuments ? {} : {
           document: {
             value: clone(this.confirmed.get(operation.id as URI)?.value),
           },
@@ -2101,6 +2104,45 @@ Deno.test("memory v2 stacked commits: confirmation promotes the server's post-ap
     // fan-out eventually corrected it — the CT-1872 convergence wrinkle.
     expectVisible(harness, {
       A: valueFor("foreign", { extra: true, note: "local-edit" }),
+    });
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("memory v2 stacked commits: a pre-CT-1926 accept without a post-apply document falls back to local extrapolation", async () => {
+  const harness = await createHarness();
+  harness.model.omitPostApplyDocuments = true;
+  try {
+    await seedAccepted(harness, DOCS.A, valueFor("base"));
+
+    // Same foreign interleave as the CT-1926 promotion test, but the accept
+    // carries no post-apply document (old server). The client keeps today's
+    // extrapolation: confirmed misses the foreign fields until fan-out
+    // corrects it — the documented pre-CT-1926 residue, NOT silent
+    // breakage.
+    const patchLocalSeq = 2;
+    harness.model.setOutcome(patchLocalSeq, {
+      kind: "accept",
+      remoteInterleave: {
+        label: "foreign-replace",
+        operations: [{
+          op: "set",
+          id: DOCS.A,
+          value: valueFor("foreign", { extra: true }),
+        }],
+      },
+    });
+    const patch = beginPatch(
+      harness,
+      DOCS.A,
+      [{ op: "add", path: "/value/note", value: "local-edit" }],
+      valueFor("base", { note: "local-edit" }),
+    );
+    await assertResultOk(patch);
+
+    expectVisible(harness, {
+      A: valueFor("base", { note: "local-edit" }),
     });
   } finally {
     await harness.close();
