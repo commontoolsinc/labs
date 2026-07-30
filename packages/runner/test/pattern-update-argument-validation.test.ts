@@ -525,6 +525,61 @@ describe("pattern update validates the stored argument", () => {
     ).toBeUndefined();
   });
 
+  it("leaves a MARKERLESS running piece's argument unvalidated", async () => {
+    // The markerless exemption's licence on the RUNNING-reuse path, which the
+    // other markerless case cannot pin: that one uses a stopped root, and the
+    // half-swap case repairs the argument before the repair runs. Neither
+    // notices if the reuse path starts validating unconditionally.
+    //
+    // The population this protects is the aged root — pre-marker, and therefore
+    // the one likeliest to hold an argument its own schema would reject. Start
+    // validating those on every reuse and they stop being repairable at all,
+    // which is the failure the exemption exists to avoid.
+    const tx = rt.edit();
+    const pattern = await rt.patternManager.compilePattern(typedCount("v1"), {
+      space,
+      tx,
+    });
+    const cell = rt.getCell<Record<string, unknown>>(
+      space,
+      "markerless-running-bad-argument",
+      undefined,
+      tx,
+    );
+    const running = rt.run(tx, pattern, undefined, cell);
+    await tx.commit();
+    await running.pull();
+
+    // A value this pattern's OWN schema rejects, written schema-lessly — how it
+    // gets under a declared field without passing its check — and no marker.
+    const { error: prepError } = await rt.editWithRetry((wtx) => {
+      rt.getCellFromLink(getMetaLink(cell, "argument")!, undefined, wtx)
+        .asSchema(undefined as never)
+        .set({ count: "seven" } as never);
+      cell.withTx(wtx).setMetaRaw("patternSetupIdentity", undefined);
+    });
+    expect(prepError?.message).toBeUndefined();
+    await rt.idle();
+    await cell.sync();
+    expect(getPatternSetupIdentityRef(cell as Cell<unknown>)).toBeUndefined();
+
+    let error: string | undefined;
+    try {
+      await rt.runSynced(cell.withTx(), pattern, undefined, {});
+    } catch (thrown) {
+      error = thrown instanceof Error ? thrown.message : String(thrown);
+    }
+    await rt.idle();
+    await rt.storageManager.synced();
+
+    expect(
+      error,
+      "a markerless running piece had its stored argument validated, which " +
+        "closes the exemption for exactly the aged roots it exists for — they " +
+        "would stop being startable rather than start being checked",
+    ).toBeUndefined();
+  });
+
   it("does not half-swap a MARKERLESS running piece either", async () => {
     // The schema repair is safe only when the marker POSITIVELY names this
     // pattern. "Not staged by another version" is a weaker fact than that: it

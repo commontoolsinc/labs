@@ -856,10 +856,12 @@ export function isStoredArgumentSchemaRefusal(error: unknown): boolean {
 /**
  * How setup should treat the state already stored on a result cell.
  *
- * The two are distinct on purpose. `sameStoredSetup` answers "is this the same
- * run of the same pattern", which is what name preservation keys on;
+ * They are distinct on purpose. `sameStoredSetup` answers "is this the same run
+ * of the same pattern", which is what name preservation keys on;
  * `restageStoredArgument` answers "was this pattern's argument schema ever
- * staged here", which a pointer comparison cannot see on a repair.
+ * staged here", which a pointer comparison cannot see on a repair; and
+ * `storedSetupMatches` answers "is the running graph provably this pattern",
+ * which only a marker that NAMES it can establish.
  */
 interface SetupStateReuse {
   /** Same pattern as the last run, so stored setup state is this run's own. */
@@ -867,9 +869,10 @@ interface SetupStateReuse {
   /** Re-point the stored argument at this schema and validate it. */
   restageStoredArgument: boolean;
   /**
-   * The completion marker POSITIVELY names this pattern. Distinct from
-   * `!restageStoredArgument`, which is also true when the marker is absent —
-   * absence is not evidence that the running graph is this pattern.
+   * Same stored setup AND a completion marker that POSITIVELY names this
+   * pattern. Distinct from `!restageStoredArgument`, which is also true when the
+   * marker is absent — absence is not evidence that the running graph is this
+   * pattern, only the lack of evidence that it is not.
    */
   storedSetupMatches: boolean;
 }
@@ -906,7 +909,9 @@ interface SetupStateReuse {
  * itself and opts out (`restageStoredArgument: false`), because it is the same
  * pattern rebuilding its own internal cells rather than an update.
  *
- * An ABSENT marker reads as "same", deliberately. It cannot distinguish a
+ * For the RE-STAGE decision specifically, an ABSENT marker reads as "same",
+ * deliberately — `storedSetupMatches` is what callers use when they need the
+ * positive fact instead. It cannot distinguish a
  * pending update from a root written before the marker existed, and re-staging
  * every such root would validate — and rewrite defaults over — arguments no
  * update is touching, turning a legacy doc into a piece that will not start.
@@ -1352,10 +1357,13 @@ export class Runner {
    * drive the old one's cells — and stamps the completion marker forward,
    * erasing the very mismatch a later repair would use to notice.
    *
-   * What it does NOT do is report success without looking. A stale setup marker
-   * means nobody has checked the stored argument against this pattern, so it is
-   * validated in place — no write, no schema retarget, nothing that moves the
-   * piece — and a refusal surfaces to the caller.
+   * What it does NOT do is report success without looking, on the branch that
+   * supplies no argument: a stale setup marker there means nobody has checked
+   * the stored argument against this pattern, so it is validated in place — no
+   * write, no schema retarget, nothing that moves the piece — and a refusal
+   * surfaces to the caller. The supplied-argument branch below writes the
+   * caller's value through without that check, as it always has; callers of
+   * that shape validate what they supply before entering Runner.
    */
   private maybeReuseRunningSetup<T, R>(
     tx: IExtendedStorageTransaction,
@@ -1370,8 +1378,8 @@ export class Runner {
     // Record the result schema for BOTH reuse branches below, on the one
     // condition that makes it safe: the setup marker names THIS pattern, so the
     // running graph is this pattern and the schema cannot describe a version
-    // that is not there. (`!restageStoredArgument` implies `sameStoredSetup`,
-    // so every path reaching this write returns from one of those branches.)
+    // that is not there. (`storedSetupMatches` implies `sameStoredSetup`, so
+    // every path reaching this write returns from one of those branches.)
     // The stale-marker case is deliberately excluded — see the class comment —
     // but a piece whose `schema` meta is missing or stale-but-same-version
     // still gets it repaired, which is what keeps its reads typed and its
@@ -2392,8 +2400,10 @@ export class Runner {
             {
               sameStoredSetup: true,
               restageStoredArgument: false,
-              // Same pattern by precondition, but this repair deliberately
-              // touches nothing but the internal cells.
+              // Inert here — `applySetupState` reads only the two fields
+              // above — but stated rather than defaulted, because this repair
+              // deliberately leaves the piece's ARGUMENT alone even though its
+              // precondition proves the pattern is the same one.
               storedSetupMatches: false,
             },
             undefined,
