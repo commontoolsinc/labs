@@ -344,14 +344,16 @@ prototype has charted, and a 115-row concerns ledger) over static content in
 
 The ledger renders once and is sorted/filtered by CSS from a single reactive
 class (`ordering.ts` explains why: mapping a reordered reactive array renders
-corrupt output). Comments hang off content-derived anchors — every concern, its
-open question, and every chip — and surface in one shared panel, with per-anchor
+corrupt output). Comments hang off stable record ids — every concern, its open
+question, and every chip — and surface in one shared panel, with per-anchor
 counts driven by a single generated-CSS value rather than a computed per anchor
-(`discussion.ts`). Every content tab is commentable, and a sixth Discussion tab
-lists every thread with a link back to the place it hangs off. Discussion is
-`PerSpace`, the draft is `PerUser`, and navigation state is `PerSession`.
-Keywords: document, tabs, reference, editorial, ledger, comments, annotations,
-multi-user.
+(`discussion.ts`); because anchors are ids rather than text, editing a concern
+keeps its thread. Prose with emphasis is stored as `**bold**` markup and parsed
+at render (`markup.ts`), so it can be edited as text. Every content tab is
+commentable, and a sixth Discussion tab lists every thread with a link back to
+the place it hangs off. Discussion is `PerSpace`, the draft is `PerUser`, and
+navigation state is `PerSession`. Keywords: document, tabs, reference,
+editorial, ledger, comments, annotations, multi-user.
 
 ### Input Schema
 

@@ -17,16 +17,8 @@
 // Anything that already opens the referent sheet gets a thread; the five
 // promises do not open it, so they are out of scope for now.
 
-import {
-  BANDS,
-  CLAIMS,
-  FIGURE,
-  LAYERS,
-  type Seg,
-  TIERS,
-  WHY,
-  WHY3,
-} from "./content.ts";
+import { paragraphs } from "./markup.ts";
+import { BANDS, CLAIMS, FIGURE, LAYERS, TIERS, WHY, WHY3 } from "./content.ts";
 
 /** The open-question mark. Lives here because anchors label with it too. */
 export const FLAG = "⚑";
@@ -98,52 +90,36 @@ export interface Anchor {
   text: string;
 }
 
-const flatten = (segs: Seg[]): string => segs.map((s) => s.t).join("");
+/** Prose is stored as markup; an anchor's referent shows it as plain text. */
+const plain = (markup: string): string => (markup ?? "").split("**").join("");
 
-// The key builders are exported and used both to build the registry below and
-// to stamp the render-time view models, so the two cannot drift apart.
-export const concernKey = (
-  band: string,
-  domain: string,
-  name: string,
-): string => "cn|" + band + "|" + domain + "|" + name;
+/**
+ * A record's anchor IS its stable id. Ids are minted once in content.ts and
+ * never derived from the text, so renaming a concern keeps its thread — which
+ * is the whole reason they exist now that the text is editable.
+ *
+ * Two exceptions, both because they are not records: a row's open question
+ * shares the row's id and so takes a prefix, and the Why essay and the map are
+ * singletons with fixed keys.
+ */
+export const questionKey = (rowId: string): string => "q_" + rowId;
 
-export const questionKey = (
-  band: string,
-  domain: string,
-  name: string,
-): string => "cq|" + band + "|" + domain + "|" + name;
-
-// Chips take a prefix rather than a key builder: the transformer rejects a
-// callback passed as an argument into pattern-facing JSX, so the render site
-// concatenates prefix + label itself.
-export const layerChipPrefix = (tone: string): string => "lc|" + tone + "|";
-
-export const tierChipPrefix = (tier: string, group: string): string =>
-  "tc|" + tier + "|" + group + "|";
-
-export const layerChipKey = (tone: string, label: string): string =>
-  layerChipPrefix(tone) + label;
-
-export const tierChipKey = (
-  tier: string,
-  group: string,
-  label: string,
-): string => tierChipPrefix(tier, group) + label;
+export const WHY_ESSAY = "wh_essay";
+export const WHY_MAP = "wh_map";
 
 const concernAnchors = (): Anchor[] =>
   BANDS.flatMap((b) =>
     b.domains.flatMap((d) =>
       d.rows.flatMap((r) => {
         const self = [{
-          key: concernKey(b.title, d.title, r.name),
+          key: r.id,
           tab: "ledger",
           label: r.name,
           text: r.tip ?? r.name,
         }];
         return r.flag
           ? self.concat([{
-            key: questionKey(b.title, d.title, r.name),
+            key: questionKey(r.id),
             tab: "ledger",
             label: r.name + " " + FLAG,
             text: r.flag,
@@ -156,7 +132,7 @@ const concernAnchors = (): Anchor[] =>
 const layerChipAnchors = (): Anchor[] =>
   LAYERS.flatMap((l) =>
     l.chips.map((c) => ({
-      key: layerChipKey(l.tone, c.label),
+      key: c.id,
       tab: "orient",
       label: c.label,
       text: c.tip,
@@ -167,7 +143,7 @@ const tierChipAnchors = (): Anchor[] =>
   TIERS.flatMap((t) =>
     t.groups.flatMap((g) =>
       g.chips.map((c) => ({
-        key: tierChipKey(t.tname, g.label, c.label),
+        key: c.id,
         tab: "reach",
         label: c.label,
         text: c.tip,
@@ -177,21 +153,15 @@ const tierChipAnchors = (): Anchor[] =>
 
 // The whole essay and the map are each one thing to argue with; splitting the
 // prose per paragraph would be an arbitrary cut.
-export const whyKey = (part: string): string => "wh|" + part;
-export const claimKey = (name: string): string => "pr|" + name;
-export const why3Key = (key: string): string => "w3|" + key;
-export const layerKey = (tone: string): string => "ly|" + tone;
-export const tierKey = (tname: string): string => "ti|" + tname;
-
 const whyAnchors = (): Anchor[] => [
   {
-    key: whyKey("essay"),
+    key: WHY_ESSAY,
     tab: "why",
     label: WHY.title,
-    text: WHY.paras[0],
+    text: paragraphs(WHY.body)[0] ?? WHY.title,
   },
   {
-    key: whyKey("map"),
+    key: WHY_MAP,
     tab: "why",
     label: "The mappa mundi",
     text: FIGURE.caption,
@@ -200,7 +170,7 @@ const whyAnchors = (): Anchor[] => [
 
 const claimAnchors = (): Anchor[] =>
   CLAIMS.map((c) => ({
-    key: claimKey(c.name),
+    key: c.id,
     tab: "claims",
     label: c.name,
     text: c.lede,
@@ -208,23 +178,23 @@ const claimAnchors = (): Anchor[] =>
 
 const why3Anchors = (): Anchor[] =>
   WHY3.map((w) => ({
-    key: why3Key(w.key),
+    key: w.id,
     tab: "orient",
     label: w.key,
-    text: flatten(w.body),
+    text: plain(w.body),
   }));
 
 const layerAnchors = (): Anchor[] =>
   LAYERS.map((l) => ({
-    key: layerKey(l.tone),
+    key: l.id,
     tab: "orient",
     label: l.name + " " + l.tag,
-    text: flatten(l.what),
+    text: plain(l.what),
   }));
 
 const tierAnchors = (): Anchor[] =>
   TIERS.map((t) => ({
-    key: tierKey(t.tname),
+    key: t.id,
     tab: "reach",
     label: t.tname,
     text: t.tline,
@@ -240,23 +210,18 @@ const allAnchors = (): Anchor[] =>
     .concat(layerChipAnchors())
     .concat(tierChipAnchors());
 
-/** Every anchor, in a deterministic order. Position is the CSS-side id. */
+/** Every anchor, in a deterministic order. */
 export const ANCHORS: Anchor[] = allAnchors();
 
-const indexOf = (): Record<string, number> =>
-  Object.fromEntries(ANCHORS.map((a, i) => [a.key, i]));
+const keySet = (): Set<string> => new Set(ANCHORS.map((a) => a.key));
 
-/**
- * Anchor key to its position. Rendered into `data-a`, so the per-anchor
- * comment-count CSS can address a row by a plain number and never has to
- * interpolate document text into a selector.
- */
-export const ANCHOR_INDEX: Record<string, number> = indexOf();
+/** Which anchors exist, so a thread on reworded content can be dropped. */
+export const ANCHOR_KEYS: Set<string> = keySet();
 
 const textOf = (): Record<string, string> =>
   Object.fromEntries(ANCHORS.map((a) => [a.key, a.text]));
 
-/** Anchor key to the referent text the sheet shows above the thread. */
+/** Anchor key to the referent text the panel shows above the thread. */
 export const ANCHOR_TEXT: Record<string, string> = textOf();
 
 const labelOf = (): Record<string, string> =>
@@ -271,29 +236,29 @@ export const ANCHOR_LABEL: Record<string, string> = labelOf();
 /** Anchor key to the tab that holds it, so a thread can link back to it. */
 export const ANCHOR_TAB: Record<string, string> = tabOf();
 
-const tally = (items: readonly Comment[]): Record<number, number> =>
-  items.reduce((acc: Record<number, number>, c) => {
-    const i = ANCHOR_INDEX[c.anchor];
-    if (i === undefined) return acc;
-    acc[i] = (acc[i] ?? 0) + 1;
+const tally = (items: readonly Comment[]): Record<string, number> =>
+  items.reduce((acc: Record<string, number>, c) => {
+    if (!ANCHOR_KEYS.has(c.anchor)) return acc;
+    acc[c.anchor] = (acc[c.anchor] ?? 0) + 1;
     return acc;
   }, {});
 
 /**
  * One reactive value carries every comment count.
  *
- * A count badge per row would otherwise mean a computed on all ~200 anchors.
+ * A count badge per row would otherwise mean a computed on all ~250 anchors.
  * Instead the markers are static markup addressed by `data-a`, and this emits
- * the rules that fill them in — the same move the ledger's sort uses. Only
- * numbers reach the selector, so no document text is ever interpolated into
- * CSS.
+ * the rules that fill them in — the same move the ledger's sort uses.
+ *
+ * Only minted ids reach the selector. They match /^[a-z][a-z0-9_]*$/ by
+ * construction, so no document text is ever interpolated into CSS; an anchor
+ * that no longer exists is dropped rather than emitted.
  */
 export const countCss = (items: readonly Comment[]): string => {
   const counts = tally(items);
   return Object.keys(counts)
-    .map((i) =>
-      '.mm [data-a="' + i + '"] .ccount::after{content:"' + counts[Number(i)] +
-      '"}'
+    .map((k) =>
+      '.mm [data-a="' + k + '"] .ccount::after{content:"' + counts[k] + '"}'
     )
     .join("\n");
 };

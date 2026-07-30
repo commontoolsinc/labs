@@ -22,7 +22,6 @@ import {
   PARADIGM,
   REACH_INTRO,
   SECTIONS,
-  type Seg,
   TABS,
   TIERS,
   WHISPER,
@@ -30,21 +29,16 @@ import {
   WHY3,
 } from "./content.ts";
 import { MAPPA_IMAGE } from "./mappa-image.ts";
+import { paragraphs, parseMarkup } from "./markup.ts";
 import { FLAG_COUNT, LEDGER, MODE_CLASS, ROW_COUNT } from "./ordering.ts";
 import {
-  ANCHOR_INDEX,
   ANCHOR_TEXT,
-  claimKey,
   countCss,
   type Discussion,
   type DiscussionView,
-  layerChipPrefix,
-  layerKey,
   threadRows,
-  tierChipPrefix,
-  tierKey,
-  why3Key,
-  whyKey,
+  WHY_ESSAY,
+  WHY_MAP,
 } from "./discussion.ts";
 import { STYLES } from "./styles.ts";
 
@@ -67,7 +61,8 @@ import { STYLES } from "./styles.ts";
 // ---------------------------------------------------------------- view models
 
 /** A run of prose, rendered with its bold spans intact. */
-const prose = (segs: Seg[]) => segs.map((s) => s.b ? <b>{s.t}</b> : s.t);
+const prose = (markup: string) =>
+  parseMarkup(markup).map((s) => s.b ? <b>{s.t}</b> : s.t);
 
 interface ChipVM {
   cls: string;
@@ -179,22 +174,16 @@ const STATUS_KEY = [
 
 // ------------------------------------------------------------------- fragments
 
-const chipRow = (
-  chips: Chip[],
-  extra: string,
-  anchorPrefix: string,
-  open: Writable<string>,
-) => (
+const chipRow = (chips: Chip[], extra: string, open: Writable<string>) => (
   <div className="chips">
     {chips.map((c) => {
       const vm = chipVM(c, extra);
-      const key = anchorPrefix + c.label;
       return (
         <span
           className={vm.cls}
           data-tip={vm.tip}
-          data-a={ANCHOR_INDEX[key] ?? -1}
-          onClick={openAt({ anchor: key, open })}
+          data-a={c.id}
+          onClick={openAt({ anchor: c.id, open })}
         >
           {vm.label}
           <span className={vm.codeCls}>{vm.code}</span>
@@ -205,10 +194,10 @@ const chipRow = (
   </div>
 );
 
-const claimBlock = (kind: string, label: string, segs: Seg[]) => (
+const claimBlock = (kind: string, label: string, markup: string) => (
   <p className="cblock">
     <span className={"bl " + kind}>{label}</span>
-    <span>{prose(segs)}</span>
+    <span>{prose(markup)}</span>
   </p>
 );
 
@@ -339,12 +328,12 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                 <cf-tab-panel value="why">
                   <div className="whytext">
                     <h3>{WHY.title}</h3>
-                    {WHY.paras.map((p) => <p>{p}</p>)}
+                    {paragraphs(WHY.body).map((p) => <p>{p}</p>)}
                     <button
                       type="button"
                       className="dmark"
-                      data-a={ANCHOR_INDEX[whyKey("essay")] ?? -1}
-                      onClick={openAt({ anchor: whyKey("essay"), open })}
+                      data-a={WHY_ESSAY}
+                      onClick={openAt({ anchor: WHY_ESSAY, open })}
                     >
                       discuss<span className="ccount"></span>
                     </button>
@@ -356,8 +345,8 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                       <button
                         type="button"
                         className="dmark"
-                        data-a={ANCHOR_INDEX[whyKey("map")] ?? -1}
-                        onClick={openAt({ anchor: whyKey("map"), open })}
+                        data-a={WHY_MAP}
+                        onClick={openAt({ anchor: WHY_MAP, open })}
                       >
                         discuss<span className="ccount"></span>
                       </button>
@@ -392,8 +381,8 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                         <button
                           type="button"
                           className="dmark"
-                          data-a={ANCHOR_INDEX[claimKey(c.name)] ?? -1}
-                          onClick={openAt({ anchor: claimKey(c.name), open })}
+                          data-a={c.id}
+                          onClick={openAt({ anchor: c.id, open })}
                         >
                           discuss<span className="ccount"></span>
                         </button>
@@ -458,8 +447,8 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                           <button
                             type="button"
                             className="dmark"
-                            data-a={ANCHOR_INDEX[why3Key(w.key)] ?? -1}
-                            onClick={openAt({ anchor: why3Key(w.key), open })}
+                            data-a={w.id}
+                            onClick={openAt({ anchor: w.id, open })}
                           >
                             discuss<span className="ccount"></span>
                           </button>
@@ -496,9 +485,9 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                                 <button
                                   type="button"
                                   className="dmark"
-                                  data-a={ANCHOR_INDEX[layerKey(l.tone)] ?? -1}
+                                  data-a={l.id}
                                   onClick={openAt({
-                                    anchor: layerKey(l.tone),
+                                    anchor: l.id,
                                     open,
                                   })}
                                 >
@@ -510,12 +499,7 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                               <span className="bl">its gate</span>
                               <div>{l.gate}</div>
                             </div>
-                            {chipRow(
-                              l.chips,
-                              "",
-                              layerChipPrefix(l.tone),
-                              open,
-                            )}
+                            {chipRow(l.chips, "", open)}
                           </div>
                         ))}
                       </div>
@@ -543,8 +527,8 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                           <button
                             type="button"
                             className="dmark"
-                            data-a={ANCHOR_INDEX[tierKey(t.tname)] ?? -1}
-                            onClick={openAt({ anchor: tierKey(t.tname), open })}
+                            data-a={t.id}
+                            onClick={openAt({ anchor: t.id, open })}
                           >
                             discuss<span className="ccount"></span>
                           </button>
@@ -555,12 +539,7 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                               <span className={"glabel l-" + g.layer}>
                                 {g.label}
                               </span>
-                              {chipRow(
-                                g.chips,
-                                "l-" + g.layer,
-                                tierChipPrefix(t.tname, g.label),
-                                open,
-                              )}
+                              {chipRow(g.chips, "l-" + g.layer, open)}
                             </div>
                           ))}
                         </div>
@@ -607,7 +586,7 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                                 <span
                                   className="cname"
                                   data-tip={r.tip}
-                                  data-a={r.selfIdx}
+                                  data-a={r.selfKey}
                                   onClick={openAt({
                                     anchor: r.selfKey,
                                     open,
@@ -623,7 +602,7 @@ export default pattern<MappaMundiInput, MappaMundiOutput>(() => {
                                 <span
                                   className={r.flagCls}
                                   data-tip={r.flag}
-                                  data-a={r.flagIdx}
+                                  data-a={r.flagKey}
                                   onClick={openAt({
                                     anchor: r.flagKey,
                                     open,
