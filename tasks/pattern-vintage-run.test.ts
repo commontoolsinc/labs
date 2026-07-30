@@ -203,16 +203,25 @@ const CHILD_SPACE = (await Identity.fromPassphrase("vintage gate child space"))
 
 const crossSource = (added?: string) =>
   [
-    "import { Confidential, Default, Writable, pattern } from 'commonfabric';",
+    "import { Confidential, Default, Stream, Writable, handler, pattern } from 'commonfabric';",
     "const ATOM = {",
     "  type: 'https://commonfabric.org/cfc/atom/Resource',",
     "  class: 'VintageGateCross',",
     "  subject: 'did:example:vintage-gate-cross',",
     "} as const;",
     "type Label = readonly [typeof ATOM];",
+    // The child's own handler, so the capture can write INTO the other space
+    // the way production does. A `.set()` from the parent's space does not
+    // land — measured, the child still reads its seeded value afterwards — and
+    // a child holding only what its source seeds cannot witness a moved
+    // storage key: the fresh cell under the new name seeds the same string.
+    "const scribble = handler<{ text: string }, { note: Writable<string> }>(",
+    "  ({ text }, { note }) => { note.set(text); },",
+    ");",
     "export interface ChildOut {",
     "  owner: Confidential<Writable<string>, Label>;",
     "  note: Writable<string>;",
+    "  scribble: Stream<{ text: string }>;",
     ...(added ? [`  addedLater: Writable<${added}>;`] : []),
     "}",
     "export const Child = pattern<Record<string, never>, ChildOut>(() => {",
@@ -221,7 +230,9 @@ const crossSource = (added?: string) =>
     ...(added
       ? ["  const addedLater = new Writable<string[]>([]).for('addedLater');"]
       : []),
-    `  return { owner, note${added ? ", addedLater" : ""} };`,
+    `  return { owner, note, scribble: scribble({ note })${
+      added ? ", addedLater" : ""
+    } };`,
     "});",
     "export interface Output {",
     "  items: Writable<string[]>;",
@@ -240,6 +251,10 @@ const crossSource = (added?: string) =>
  * cross-space child really materialized during the capture — without it a
  * fixture recording the child would be indistinguishable from one that recorded
  * a root nothing ever wrote.
+ *
+ * It then drives the child's OWN handler, so the fixture holds a value in the
+ * other space that today's source cannot reproduce from its defaults — which is
+ * what lets a case there tell a moved storage key from an intact one.
  */
 const crossTest = [
   "import { action, assert, pattern } from 'commonfabric';",
@@ -251,8 +266,18 @@ const crossTest = [
   "  });",
   "  const added = assert(() => subject.items.get().length === 1);",
   "  const noted = assert(() => subject.child.note.get() === 'captured');",
+  "  const scribble = action(() => {",
+  "    subject.child.scribble.send({ text: 'written' });",
+  "  });",
+  "  const wrote = assert(() => subject.child.note.get() === 'written');",
   "  return {",
-  "    tests: [{ action: add }, { assertion: added }, { assertion: noted }],",
+  "    tests: [",
+  "      { action: add },",
+  "      { assertion: added },",
+  "      { assertion: noted },",
+  "      { action: scribble },",
+  "      { assertion: wrote },",
+  "    ],",
   "    subject,",
   "  };",
   "});",
@@ -858,6 +883,44 @@ describe("the vintage gate, end to end", () => {
       expect(childFailure?.detail).toContain(
         `the root carries ${pinned.identity}#Child`,
       );
+    });
+
+    it("CATCHES a moved storage key in the CHILD's own space", async () => {
+      // The stranding check over a NESTED root, which the entry-pattern case
+      // above cannot reach. Two things only this shape exercises:
+      //
+      // - the before-state is read in the CHILD's space. Read under the
+      //   fixture's own DID it comes back absent, and an absent before-state is
+      //   reported as unreadable rather than as loss — a different failure, for
+      //   a different reason, which would pass for this one.
+      // - the child's prior state is snapshotted before the PARENT is
+      //   materialized. The parent's setup re-instantiates the child, so a
+      //   before-read taken when the child's own turn came would be reading a
+      //   root today's source had already rewritten, and the comparison would
+      //   be against itself.
+      await captureCross();
+      await writeCross(crossSource().replace(".for('note')", ".for('moved')"));
+
+      const { stranded, failures } = await replayAll(roots);
+
+      const childFailure = failures.find((f) => f.detail.includes("(Child)"));
+      expect(childFailure?.detail).toContain("APPLIED CLEANLY but stranded");
+      // The KEY and both values, so this cannot pass on a failure that merely
+      // mentions the child: what the vintage held in the other space, and what
+      // today's source seeds the fresh cell under the new name with.
+      expect(childFailure?.detail).toContain(
+        'note (was "written", now "captured")',
+      );
+      // TWO keys for one loss, and pinned rather than loosened to "at least
+      // one": the child's own root reports `note`, and the parent — whose
+      // result projects the child's — reports `child`. A change that stopped
+      // reading either of the two roots would still leave a failure behind, so
+      // the count is what says both were examined.
+      const parent = failures.find((f) => f.detail.includes("(default)"));
+      expect(parent?.detail).toContain(
+        "stranded state the vintage held: child",
+      );
+      expect(stranded).toBe(2);
     });
 
     it("passes once the child's added field carries a default", async () => {
