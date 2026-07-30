@@ -598,8 +598,16 @@ describe("the vintage gate, end to end", () => {
     expect(targets).toBe(0);
     expect(failures).toHaveLength(1);
     expect(failures[0].detail).toContain(
-      "not one today's source can be applied to",
+      "not one is something today's source can be applied to",
     );
+    // The reason is counted, not asserted: these entries are test patterns, so
+    // the message must not blame the other exclusion.
+    expect(failures[0].detail).toContain("0 cannot be mapped to a file");
+    // And the remedy has to be one that WORKS. `--update` alone would print
+    // "already pinned" and change nothing, so the fixture must be named for
+    // deletion first — companion directory included.
+    expect(failures[0].detail).toContain("deliberately, then");
+    expect(failures[0].detail).toContain(".sqlite.spaces/");
   });
 
   describe("capture refuses a state the pattern never legitimately reaches", () => {

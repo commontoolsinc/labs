@@ -282,25 +282,25 @@ field to the real `home.tsx` makes the task exit 1 with the estuary rejection
 naming the field; restoring it returns exit 0.
 
 **What a green run does and does not assert.** Per fixture it asserts that the
-vintage RESTORED — its root already carries the identity the filename records,
+vintage RESTORED — its MANIFEST contains the identity the filename records,
 checked before anything is applied — that today's source resolves, that the
 setup commit carrying it onto that root is not refused, and that the root then
 reads as something rather than nothing. Each recorded root is read out of the
-SPACE it was materialized in, and that the fixture actually HOLDS that root —
-checked per target, before anything is applied to it. The restore control is not ceremony: an empty
-or truncated store presents as a fresh space, today's source materializes onto a
-fresh space, and without it every remaining check passes while nothing has been
-replayed. The per-root control is the same argument one level in, and the level
-that matters, because a root can be absent while the fixture is otherwise
-perfectly good — recorded in a space that did not travel, in a companion store
-that restored empty, or at a cell id nothing ever wrote. Each of those was
-measured to replay a real break with no failures at all. It compares no VALUES,
-though — and that is now the only remaining reason, since a captured vintage
-holds real data written through real handlers. So the storage-move class — the
-one this tier was built for — replays clean here: measured on the real
-`home.tsx`, renaming
-`.for("favorites")` to `.for("favouriteList")` exits 0. That is pinned as a
-limit in `tasks/pattern-vintage-run.test.ts`, covered as a behaviour by
+SPACE it was materialized in, and the fixture must actually HOLD that root —
+checked per target, before anything is applied to it. The restore control is
+not ceremony: an empty or truncated store presents as a fresh space, today's
+source materializes onto a fresh space, and without it every remaining check
+passes while nothing has been replayed. The per-root control is the same
+argument one level in, and the level that matters, because a root can be absent
+while the fixture is otherwise perfectly good — recorded in a space that did
+not travel, in a companion store that restored empty, or at a cell id nothing
+ever wrote. Each of those was measured to replay a real break with no failures
+at all. It compares no VALUES, though — and that is now the only remaining
+reason, since a captured vintage holds real data written through real handlers.
+So the storage-move class — the one this tier was built for — replays clean
+here: measured on the real `home.tsx`, renaming `.for("favorites")` to
+`.for("favouriteList")` exits 0. That is pinned as a limit in
+`tasks/pattern-vintage-run.test.ts`, covered as a behaviour by
 `state-continuity.test.ts` over a populated vintage, and listed in stage 5 as
 the thing to close. Until it is closed, this gate's honest claim is "the update
 still APPLIES", not "the data survives".

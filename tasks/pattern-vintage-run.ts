@@ -147,6 +147,20 @@ export async function replayVintage(
     updated: 0,
     failures: [{ ...where, detail }],
   });
+  // Stated once, because every "this fixture is not usable" message needs it and
+  // the obvious remedy is WRONG: `--update` skips a key that already has a
+  // pinned vintage and the capture refuses to overwrite one, so "recapture it"
+  // on its own prints "already pinned" and changes nothing. The path is
+  // ABSOLUTE, not the repo-relative one the report prints for identification —
+  // an instruction to delete a file has to name it the same way from whatever
+  // directory the reader is standing in — and it names the companion directory
+  // too, which is part of the fixture and would otherwise be left behind to
+  // collide with the recapture.
+  const remedy =
+    `Delete ${vintage.path} and ${
+      vintageCompanionDir(vintage.path)
+    }/ deliberately, then \`deno task pattern-vintage --update ` +
+    `${vintage.patternKey}\``;
 
   return await withRuntime(roots, vintage.path, async (runtimeVintage) => {
     // The control, before anything is applied. A fixture that did not restore
@@ -163,8 +177,7 @@ export async function replayVintage(
     if (manifest === undefined || manifest.entries.length === 0) {
       return fail(
         "this fixture records no pattern instantiations, so there is nothing " +
-          "to update and a green run would assert nothing. Recapture it with " +
-          "`deno task pattern-vintage --update`",
+          `to update and a green run would assert nothing. ${remedy}`,
       );
     }
     // The filename's identity is PROVENANCE — which version wrote this state —
@@ -183,6 +196,18 @@ export async function replayVintage(
     }
 
     const targets = manifest.entries.filter(isUpgradeTarget);
+    // Unaddressable, not merely un-targeted. Both shapes belong here: no source
+    // path at all, and a path that is not repo-root-relative — the evaluate loop
+    // records injected helper modules (`cfc.ts`) whose names carry no leading
+    // slash, and `${repoRoot}cfc.ts` is not a file. Counting only the first would
+    // let the second be skipped in silence while the verdict says "all mappable".
+    //
+    // Computed BEFORE the zero-target check below, which would otherwise return
+    // while claiming a reason it had not looked at: an unmappable entry is not a
+    // test pattern, and its per-entry diagnosis is the actionable half.
+    const unmappable = manifest.entries.filter(
+      (e) => e.main === undefined || !e.main.startsWith("/"),
+    );
     // Zero targets is a FIXTURE-level failure, not a quiet contribution of
     // nothing to the run's total. `isClean` floors the SUM of targets, which one
     // fixture covering nothing slips under the moment another covers five — and
@@ -197,9 +222,10 @@ export async function replayVintage(
     if (targets.length === 0) {
       return fail(
         `this fixture records ${manifest.entries.length} instantiation(s), ` +
-          `but not one today's source can be applied to (every one is a test ` +
-          `pattern or a keyless session pointer), so replaying it asserts ` +
-          `nothing`,
+          `but not one is something today's source can be applied to — ` +
+          `${unmappable.length} cannot be mapped to a file at all, and the ` +
+          `rest are test patterns or keyless session pointers. Replaying it ` +
+          `asserts nothing. ${remedy}`,
       );
     }
     // The per-entry control, and the one the whole gate leans on: does this
@@ -224,14 +250,6 @@ export async function replayVintage(
       );
       if (!held) missing.add(entry);
     }
-    // Unaddressable, not merely un-targeted. Both shapes belong here: no source
-    // path at all, and a path that is not repo-root-relative — the evaluate loop
-    // records injected helper modules (`cfc.ts`) whose names carry no leading
-    // slash, and `${repoRoot}cfc.ts` is not a file. Counting only the first would
-    // let the second be skipped in silence while the verdict says "all mappable".
-    const unmappable = manifest.entries.filter(
-      (e) => e.main === undefined || !e.main.startsWith("/"),
-    );
     const report: ReplayReport = {
       candidates: manifest.entries.length,
       targets: targets.length,
@@ -265,10 +283,6 @@ export async function replayVintage(
     // so a doc that is present but unstamped — the one shape a false red could
     // take — is distinguishable from a doc that is not there at all.
     //
-    // The remedy is spelled out rather than "recapture": `--update` skips a key
-    // that already has a pinned vintage, and the capture refuses to overwrite
-    // one, so "recapture it" on its own prints "already pinned" and changes
-    // nothing.
     for (const entry of missing) {
       report.failures.push({
         ...where,
@@ -278,9 +292,7 @@ export async function replayVintage(
               `${entry.space}, so this fixture does not hold that root`
             : `was materialized in ${entry.space}, which this fixture does ` +
               `not carry (it holds ${[...carried].sort().join(", ")})`) +
-          ` — it was recorded but NOT validated. Delete ${where.path} ` +
-          `deliberately, then \`deno task pattern-vintage --update ` +
-          `${vintage.patternKey}\``,
+          ` — it was recorded but NOT validated. ${remedy}`,
       });
     }
 

@@ -176,7 +176,9 @@ async function companionStores(
     throw error;
   }
   // Sorted so a restore is reproducible rather than directory-order dependent.
-  found.sort(([left], [right]) => left.localeCompare(right));
+  // By code point, not `localeCompare`, which is locale-dependent and so is not
+  // the same order on two machines — the property being bought here.
+  found.sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
   return found;
 }
 
@@ -230,10 +232,13 @@ export async function openFileBackedRuntime(
     async snapshot(destPath: string) {
       // Everything must be durable before the copy, or the fixture records a
       // state the capture never actually reached. `idle()` waits for scheduler
-      // quiescence and no further, and compiled/source closure write-backs —
-      // including the cross-space replication a companion store would carry —
-      // are tracked separately and drained only here. A fixture is read by a
-      // FRESH runtime, which is precisely the case that flush exists for.
+      // quiescence and no further; a COLD compile's write-back is awaited by
+      // `compilePattern` itself, but the recovery and cross-space replication
+      // paths are tracked separately and drained only by this flush. A fixture
+      // is read by a FRESH runtime, which is precisely the case it exists for —
+      // cheap insurance rather than a fix for a measured loss, since the
+      // replication a companion store would carry does not currently succeed
+      // under the pattern-test runner at all.
       await runtime.idle();
       await runtime.patternManager.flushCompileCacheWrites();
       await runtime.storageManager.synced();
@@ -543,6 +548,12 @@ export function isPresentRootValue(value: unknown): boolean {
  * entry's cell carries one by construction. A value check would instead depend
  * on the pattern's result shape, and a root whose result is legitimately `{}`
  * would read as missing.
+ *
+ * PRESENCE only — this does not check that the marker names the entry's own
+ * identity and symbol. Deliberately: a root set up twice under different
+ * identities in one capture would then false-red, and correspondence is not
+ * reachable from a legitimate capture anyway, since the observer and the stamp
+ * describe the same `resultCell`.
  */
 export async function vintageHoldsRoot(
   vintage: VintageRuntime,
