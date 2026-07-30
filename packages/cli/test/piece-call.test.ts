@@ -1806,6 +1806,18 @@ describe("verbInputSchemaError", () => {
     } as JSONSchema)).toMatch(/cannot resolve schema reference/);
   });
 
+  // Hoisting emits `$defs`; a `definitions` ref is one the runtime cannot
+  // resolve either. Relaxing on a default behind one would admit a payload the
+  // verb then receives as an absent event, spending the invocation id.
+  it("does not relax on a default behind a #/definitions ref", () => {
+    expect(verbInputSchemaError({}, {
+      type: "object",
+      properties: { mode: { $ref: "#/definitions/Mode" } },
+      required: ["mode"],
+      definitions: { Mode: { type: "string", default: "fast" } },
+    } as unknown as JSONSchema)).toMatch(/mode/);
+  });
+
   it("leaves a $ref naming a missing definition untouched", () => {
     expect(verbInputSchemaError({ mode: "x" }, {
       type: "object",

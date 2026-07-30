@@ -250,11 +250,20 @@ function localRefTarget(
     if (typeof ref !== "string" || !isSchemaObject(root)) return current;
     if (visited.has(current)) return current;
     visited.add(current);
-    const match = /^#\/(\$defs|definitions)\/(.+)$/.exec(ref);
+    // `$defs` only, deliberately — NOT `definitions`. Hoisting emits `$defs`
+    // and `#/$defs/...` (schema-generator AGENTS.md: "anything that says
+    // `definitions` is out of date"), so a `definitions` ref is one the
+    // runtime cannot resolve either. Following it here would relax a required
+    // field on the strength of a default that never gets injected, letting an
+    // invalid payload through and spending its invocation id on a handling
+    // that receives no event — the exact failure this gate exists to stop.
+    // Unresolvable refs keep the field required, so the call is refused before
+    // dispatch and the id survives.
+    const match = /^#\/\$defs\/(.+)$/.exec(ref);
     if (!match) return current;
-    const pool = (root as Record<string, unknown>)[match[1]];
+    const pool = (root as Record<string, unknown>).$defs;
     if (!isSchemaObject(pool as JSONSchema)) return current;
-    const target = (pool as Record<string, JSONSchema>)[match[2]];
+    const target = (pool as Record<string, JSONSchema>)[match[1]];
     if (target === undefined) return current;
     current = target;
   }
