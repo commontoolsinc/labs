@@ -1009,7 +1009,8 @@ export async function runTestPattern(
   // 1. Create emulated runtime (same as piece step)
   const identity = await withPhase(
     ["runTestPattern", "identity"],
-    () => options.storageHost?.identity ?? Identity.fromPassphrase("test-runner"),
+    () =>
+      options.storageHost?.identity ?? Identity.fromPassphrase("test-runner"),
   );
   const space = identity.did();
   // A caller-supplied store is FILE-BACKED, which the default emulation is not:
