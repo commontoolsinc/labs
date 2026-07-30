@@ -6270,31 +6270,32 @@ const rejectExecutionAction = (
 };
 
 /**
- * The scope keys one claimed lane may touch: the shared space scope, plus —
+ * The scope keys one acting lane may touch: the shared space scope, plus —
  * for a scoped lane — exactly that lane's own scope key. `undefined` is the
  * space lane, whose checks stay byte-identical to the pre-lane firewall.
- * The claim contextKey doubles as the lane scope key because both use the
+ * An execution context key doubles as the lane scope key because both use the
  * canonical `user:<encodeURIComponent(principal)>` encoding
  * (`userExecutionContextKey`).
  */
 type LaneScopeKey = string | undefined;
 
-const laneScopeKeyForClaimContext = (
+const laneScopeKeyForActingContext = (
   contextKey: SchedulerExecutionContextKey,
 ): LaneScopeKey => {
   if (contextKey === "space") return undefined;
   if (principalOfUserContextKey(contextKey) !== undefined) return contextKey;
-  // C2.1b: a canonical session claim context doubles as its lane scope key,
+  // C2.1b: a canonical session context doubles as its lane scope key,
   // exactly like the user encoding above (`resolveScopeKey("session", …)`
   // produces the same canonical `session:<enc>:<enc>` string).
   if (parseSessionExecutionContextKey(contextKey) !== undefined) {
     return contextKey;
   }
-  // Malformed scoped keys keep the defensive fail-closed backstop: claim
-  // admission already fences them upstream.
+  // Malformed scoped keys keep the defensive fail-closed backstop: the host
+  // rejects a malformed wire acting context, and claim admission fences a
+  // malformed asserted lane, both upstream of here.
   return rejectExecutionAction(
     "non-lane-scope",
-    `claim context ${contextKey} has no servable lane`,
+    `acting context ${contextKey} has no servable lane`,
   );
 };
 
@@ -6488,23 +6489,31 @@ const summaryDeclaredWriteIds = (
 
 /**
  * Validate the complete static and observed surface plus the actual commit
- * shape for one positively claimed action. This function is pure; callers run
+ * shape for one served reactive action run. This function is pure; callers run
  * it inside the same IMMEDIATE transaction before any commit row, revision,
  * scheduler row, SQLite statement, or merge state can be applied.
+ *
+ * CLAIM-FREE (slice 2a of the claim deletion, `claim-deletion-scope.md` §2a).
+ * Nothing here consults an execution claim: the lane arrives as the run's
+ * ACTING CONTEXT, and the static certificate arrives as the observation's own
+ * `completeActionScopeSummary`, which `trustedSchedulerScopeSummary` validates
+ * against the observation alone. The `claim-` prefixed diagnostic codes below
+ * are kept verbatim — they are the arc's measurement vocabulary, and renaming
+ * them would silently break every counter that greps for them.
  */
 const assertExecutionActionTransaction = (
   options: {
     servedSpace: string;
     branch: BranchName;
     scopeContext: SchedulerScopeContext;
-    /** The asserted claim's lane; `"space"` keeps the pre-lane firewall. */
-    claimContextKey: SchedulerExecutionContextKey;
+    /** The lane the run ACTED AS; `"space"` keeps the pre-lane firewall. */
+    actingContextKey: SchedulerExecutionContextKey;
     transaction: ExecutionActionTransaction;
     observation: SchedulerActionObservation;
   },
 ): void => {
   const { observation, transaction } = options;
-  const laneScopeKey = laneScopeKeyForClaimContext(options.claimContextKey);
+  const laneScopeKey = laneScopeKeyForActingContext(options.actingContextKey);
   // CA3: READ surfaces admit the lane's §2 chain (a session lane may read
   // the lane principal's user instances); WRITE surfaces stay exact-lane.
   const chainReadScopeKeys = laneChainReadScopeKeys(laneScopeKey);
@@ -6699,6 +6708,48 @@ const assertExecutionActionTransaction = (
     }
   }
 };
+
+/**
+ * THE FIREWALL'S PRECONDITION (slice 2a, `claim-deletion-scope.md` §2a/§2b).
+ *
+ * It used to be `acceptedObservation.provenance !== undefined`, and provenance
+ * is minted only when a live `ExecutionClaim` exists — so the engine's entire
+ * write-bounding firewall was reachable only through the mechanism D11 is
+ * deleting. Provenance is now an OUTPUT of admission, never its gate.
+ *
+ * What replaces it: a SERVED REACTIVE ACTION RUN THAT NAMED THE LANE IT ACTED
+ * AS. `actingLane` is `actingContext ?? assertedLaneOfObservation` — the wire's
+ * host-validated per-commit acting context (a non-`"space"` value requires a
+ * lease-bound executor session holding a LIVE lane grant, `server.ts`
+ * `#actingReadScopeContext`), falling back to the observation's asserted claim
+ * lane while claims still exist. `undefined` means nothing named a lane, which
+ * is the entire ordinary-client population: unchanged, still outside.
+ *
+ * THIS IS A STRICT SUPERSET OF THE CLAIMED SET, which is the safety property
+ * the slice owes. A claim can only validate against an observation that
+ * ASSERTS it (`acceptedSchedulerObservation` throws `claim-observation-mismatch`
+ * otherwise, upstream of here), so every commit that reached the firewall
+ * before names a lane now; and the two shape conditions plus `space` are
+ * already REQUIRED for a claim to validate, so restating them removes nothing.
+ * The lane VALUE is unchanged for that set too: with an acting context present
+ * `admitExecutionCommitLanes` already fences `claim.contextKey !== lane`, and
+ * without one the acting lane IS the asserted lane, which the accepted
+ * observation fences against the claim's.
+ *
+ * The trusted `completeActionScopeSummary` is deliberately NOT part of this
+ * predicate. Making it the gate would be a fail-open — a summary-less lane
+ * commit would skip every check. It stays INSIDE the firewall, where an absent
+ * or untrusted summary rejects `incomplete-static-scope`.
+ */
+const firewalledActionRun = (
+  observation: SchedulerActionObservation | undefined,
+  actingLane: SchedulerExecutionContextKey | undefined,
+  space: string | undefined,
+): boolean =>
+  observation !== undefined && actingLane !== undefined &&
+  space !== undefined &&
+  observation.transactionKind === "action-run" &&
+  observation.actionKind !== "event-handler";
 
 // ---------------------------------------------------------------------------
 // C3.8 (2026-07-18) — the home-apply authorization-epoch fence (the
@@ -8536,6 +8587,12 @@ const commitLaneAssertions = (
  * That is slice 1 of the claim deletion: the acting lane is a property of
  * the RUN, so nothing computes it twice and there is no disagreement left
  * to fence (`claim-context-mismatch` is deleted).
+ *
+ * Returns the lane ITSELF beside the acting identity (slice 2a): the lane is
+ * what the write firewall is parameterized by, and `undefined` — nothing
+ * named a lane at all — is what keeps the ordinary client population outside
+ * it. `"space"` and a malformed key both NAME a lane and are returned as
+ * such; the firewall's own checks are what fail them closed.
  */
 const admitExecutionCommitLanes = (
   engine: Engine,
@@ -8547,7 +8604,10 @@ const admitExecutionCommitLanes = (
     executionClaims?: ReadonlyMap<number, ExecutionClaim>;
     executionLeaseFence?: ExecutionLeaseFence;
   },
-): { principal: string; sessionId?: SessionId } | undefined => {
+): {
+  lane?: SchedulerExecutionContextKey;
+  identity?: { principal: string; sessionId?: SessionId };
+} => {
   const assertions = commitLaneAssertions(options.commit);
   const lanes = new Set(assertions.map((assertion) => assertion.contextKey));
   if (lanes.size > 1) {
@@ -8568,15 +8628,19 @@ const admitExecutionCommitLanes = (
     ? assertions[0].contextKey
     : undefined;
   const lane = options.actingContext ?? assertedLane;
-  if (lane === undefined || lane === "space") return undefined;
+  if (lane === undefined) return {};
+  if (lane === "space") return { lane };
   const userPrincipal = principalOfUserContextKey(lane);
   const sessionIdentity = userPrincipal === undefined
     ? parseSessionExecutionContextKey(lane)
     : undefined;
   // Malformed scoped-lane keys keep today's claim-observation-mismatch
   // rejection path unchanged (the accepted-observation guard fences them).
+  // The lane still travels: a named-but-unparseable lane must reach the
+  // firewall's `non-lane-scope` backstop rather than silently resolving
+  // scope at the sponsor.
   if (userPrincipal === undefined && sessionIdentity === undefined) {
-    return undefined;
+    return { lane };
   }
   // With-operations commits already passed commit-table replay detection;
   // observation-shaped commits are replay-checked per asserted item.
@@ -8610,9 +8674,12 @@ const admitExecutionCommitLanes = (
       );
     }
   }
-  return userPrincipal !== undefined ? { principal: userPrincipal } : {
-    principal: sessionIdentity!.principal,
-    sessionId: sessionIdentity!.sessionId,
+  return {
+    lane,
+    identity: userPrincipal !== undefined ? { principal: userPrincipal } : {
+      principal: sessionIdentity!.principal,
+      sessionId: sessionIdentity!.sessionId,
+    },
   };
 };
 
@@ -8713,7 +8780,7 @@ const applyCommitTransaction = (
   // C2.1b: a session lane substitutes ITS OWN sessionId (from the claim
   // contextKey) for scope resolution — the sponsor's scopeSessionId would
   // resolve session scope at the executor session, not the served one.
-  const actingLane = admitExecutionCommitLanes(engine, {
+  const laneAdmission = admitExecutionCommitLanes(engine, {
     branch,
     sessionKey,
     commit,
@@ -8721,8 +8788,10 @@ const applyCommitTransaction = (
     executionClaims,
     executionLeaseFence,
   });
-  const actingPrincipal = actingLane?.principal;
-  const laneScopeSessionId = actingLane?.sessionId ?? scopeSessionId;
+  const actingLane = laneAdmission.lane;
+  const actingPrincipal = laneAdmission.identity?.principal;
+  const laneScopeSessionId = laneAdmission.identity?.sessionId ??
+    scopeSessionId;
   const scopePrincipal = actingPrincipal ?? principal;
   const scopeContext = {
     principal: scopePrincipal,
@@ -8759,6 +8828,7 @@ const applyCommitTransaction = (
       space,
       principal,
       actingPrincipal,
+      actingLane,
       branch,
       localSeq: commit.localSeq,
       transaction: commit,
@@ -8813,8 +8883,8 @@ const applyCommitTransaction = (
       "failed claimed actions must not include semantic operations",
     );
   }
-  if (acceptedObservation?.provenance !== undefined) {
-    if (acceptedObservation.unservedDiagnosticCode !== undefined) {
+  if (firewalledActionRun(schedulerObservation, actingLane, space)) {
+    if (schedulerObservation!.executionUnservedAttempt !== undefined) {
       rejectExecutionAction(
         "unserved-marker-with-operations",
         "an unserved attempt marker is valid only without semantic operations",
@@ -8827,7 +8897,7 @@ const applyCommitTransaction = (
         principal: scopePrincipal!,
         sessionId: laneScopeSessionId,
       },
-      claimContextKey: executionClaim!.contextKey,
+      actingContextKey: actingLane!,
       transaction: commit,
       observation: schedulerObservation!,
     });
@@ -9899,6 +9969,7 @@ const applySchedulerObservationOnlyCommit = (
     space,
     principal,
     actingPrincipal,
+    actingLane,
     branch,
     localSeq,
     transaction,
@@ -9916,6 +9987,9 @@ const applySchedulerObservationOnlyCommit = (
     /** C1.4: scope/effective-context resolution only; sponsor roles stay
      * on `principal` and the sponsor-derived `sessionKey`. */
     actingPrincipal?: string;
+    /** Slice 2a: the lane this commit acts as — the write firewall's
+     * precondition and its scope parameter. `undefined` names no lane. */
+    actingLane?: SchedulerExecutionContextKey;
     branch: BranchName;
     localSeq: number;
     transaction: ExecutionActionTransaction;
@@ -10032,8 +10106,8 @@ const applySchedulerObservationOnlyCommit = (
       }
       : {}),
   });
-  if (accepted.provenance !== undefined) {
-    if (accepted.unservedDiagnosticCode === undefined) {
+  if (firewalledActionRun(schedulerObservation, actingLane, space)) {
+    if (schedulerObservation.executionUnservedAttempt === undefined) {
       assertExecutionActionTransaction({
         servedSpace: space!,
         branch,
@@ -10041,7 +10115,7 @@ const applySchedulerObservationOnlyCommit = (
           principal: scopePrincipal!,
           sessionId: scopeSessionId,
         },
-        claimContextKey: executionClaim!.contextKey,
+        actingContextKey: actingLane!,
         transaction,
         observation: schedulerObservation,
       });

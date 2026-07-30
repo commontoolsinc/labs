@@ -1005,3 +1005,236 @@ Deno.test("session-lane schema-bearing scope-naming links reject", async () => {
     await Deno.remove(directory, { recursive: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// SLICE 2a — the firewall's precondition is the ACTING LANE, not a claim.
+//
+// Before this slice `assertExecutionActionTransaction` was reachable only
+// through `acceptedObservation.provenance !== undefined`, and provenance is
+// minted only when a live `ExecutionClaim` exists. So every check in this file
+// — lane scope admission, the write envelopes, `broad-lane-value-write`, the
+// cross-principal leak guards — rode on the one mechanism the arc is deleting
+// (`claim-deletion-scope.md` §2a: "no claim => no provenance => no firewall").
+//
+// The commits below carry NO claim and NO lease fence: they are the shape a
+// served run has once claim arbitration is gone. What identifies them is the
+// lane the run ACTED AS — the wire's `actingContext`, which the host validates
+// against the live lane grant before any scope key resolves (server.ts
+// `#actingReadScopeContext`, slice 1) — plus the observation's own trusted
+// scope summary, which `trustedSchedulerScopeSummary` validates against the
+// observation and no claim.
+//
+// The claimed commits above keep every byte of their behavior: a claim's
+// observation always asserts its lane, so the acting lane the firewall now
+// resolves is the same context key it read off the claim before.
+
+/** The observation an unclaimed served run emits: identical to the claimed
+ * one minus the claim assertion, which is the whole point. */
+const unclaimedObservation = (
+  surfaces: {
+    reads?: readonly SchedulerObservationAddress[];
+    writes?: readonly SchedulerObservationAddress[];
+  },
+): SchedulerActionObservation => {
+  const { executionClaimAssertion: _assertion, ...unclaimed } = observationFor(
+    {
+      branch: "",
+      space: SPACE,
+      contextKey: "space",
+      pieceId: PIECE_ID,
+      actionId: ACTION_ID,
+      actionKind: "computation",
+      implementationFingerprint: IMPLEMENTATION_FINGERPRINT,
+      runtimeFingerprint: RUNTIME_FINGERPRINT,
+      leaseGeneration: 1,
+      claimGeneration: 1,
+      expiresAt: 0,
+    },
+    surfaces,
+  );
+  return unclaimed;
+};
+
+/** A served run's commit with no claim and no lease fence — the post-deletion
+ * shape. `actingContext` is the ONLY thing naming its lane. */
+const applyActingLane = (
+  engine: Engine.Engine,
+  options: {
+    actingContext?: SchedulerExecutionContextKey;
+    operations: Operation[];
+    surfaces?: {
+      reads?: readonly SchedulerObservationAddress[];
+      writes?: readonly SchedulerObservationAddress[];
+    };
+    observation?: SchedulerActionObservation;
+    scopeSessionId?: string;
+    localSeq?: number;
+  },
+) => {
+  const localSeq = options.localSeq ?? 1;
+  const commit: ClientCommit = {
+    localSeq,
+    reads: { confirmed: [], pending: [] },
+    operations: options.operations,
+    schedulerObservation: options.observation ??
+      unclaimedObservation(options.surfaces ?? {}),
+  };
+  return Engine.applyCommit(engine, {
+    sessionId: "executor-session",
+    scopeSessionId: options.scopeSessionId ?? "executor-session",
+    space: SPACE,
+    principal: PRINCIPAL,
+    commit,
+    ...(options.actingContext !== undefined
+      ? { actingContext: options.actingContext }
+      : {}),
+  });
+};
+
+Deno.test("an UNCLAIMED commit acting as a user lane reaches the firewall — broad value writes still reject broad-lane-value-write", async () => {
+  const { directory, engine } = await openTempEngine();
+  try {
+    const before = Engine.serverSeq(engine);
+    assertFirewallReject(
+      () =>
+        applyActingLane(engine, {
+          actingContext: USER_CONTEXT_KEY,
+          operations: [
+            userInstanceOperation,
+            broadLinkOperation("a plain broad value"),
+          ],
+          surfaces: { writes: [USER_OUTPUT, BROAD_LINK_WRITE] },
+        }),
+      "broad-lane-value-write",
+    );
+    assertEquals(Engine.serverSeq(engine), before);
+    assertEquals(Engine.read(engine, { id: BROAD_LINK_WRITE.id }), null);
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("an UNCLAIMED commit acting as a user lane rejects a session-scoped write non-lane-scope", async () => {
+  const { directory, engine } = await openTempEngine();
+  try {
+    const sessionOutput = address("session", "of:lane-session-output");
+    assertFirewallReject(
+      () =>
+        applyActingLane(engine, {
+          actingContext: USER_CONTEXT_KEY,
+          operations: [{
+            op: "set",
+            id: sessionOutput.id,
+            scope: "session",
+            value: { value: 1 },
+          }],
+          surfaces: { writes: [sessionOutput] },
+        }),
+      "non-lane-scope",
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("an UNCLAIMED acting lane without a trusted scope summary rejects incomplete-static-scope", async () => {
+  const { directory, engine } = await openTempEngine();
+  try {
+    // The summary requirement lives INSIDE the firewall, never in its
+    // precondition: making "has a trusted summary" the gate would let a
+    // summary-less lane commit skip every check below it.
+    const {
+      completeActionScopeSummary: _summary,
+      ...withoutSummary
+    } = unclaimedObservation({ writes: [USER_OUTPUT] });
+    assertFirewallReject(
+      () =>
+        applyActingLane(engine, {
+          actingContext: USER_CONTEXT_KEY,
+          operations: [userInstanceOperation],
+          observation: withoutSummary as SchedulerActionObservation,
+        }),
+      "incomplete-static-scope",
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("an UNCLAIMED observation-only commit acting as a user lane reaches the firewall", async () => {
+  const { directory, engine } = await openTempEngine();
+  try {
+    const sessionOutput = address("session", "of:lane-session-observed");
+    assertFirewallReject(
+      () =>
+        applyActingLane(engine, {
+          actingContext: USER_CONTEXT_KEY,
+          operations: [],
+          surfaces: { writes: [sessionOutput] },
+        }),
+      "non-lane-scope",
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("an UNCLAIMED conforming commit acting as a user lane commits at the LANE's instance", async () => {
+  const { directory, engine } = await openTempEngine();
+  try {
+    const applied = applyActingLane(engine, {
+      actingContext: USER_CONTEXT_KEY,
+      operations: [
+        userInstanceOperation,
+        broadLinkOperation(SCOPE_NAMING_LINK_CONFORMANCE.link),
+      ],
+      surfaces: { writes: [USER_OUTPUT, BROAD_LINK_WRITE] },
+    });
+    assertExists(applied.schedulerObservationResults);
+    assertEquals(
+      Engine.read(engine, { id: BROAD_LINK_WRITE.id }),
+      { value: { value: SCOPE_NAMING_LINK_CONFORMANCE.link } },
+    );
+    // Scope resolution follows the acting lane, not the sponsor session.
+    assertEquals(
+      Engine.read(engine, {
+        id: USER_OUTPUT.id,
+        scope: "user",
+        principal: PRINCIPAL,
+      }),
+      { value: 7 },
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("a commit that names NO lane stays outside the firewall (ordinary clients are unchanged)", async () => {
+  const { directory, engine } = await openTempEngine();
+  try {
+    // Byte-identical to the rejected case above except that nothing names a
+    // lane. An ordinary client sends no acting context and asserts no claim,
+    // so widening the precondition must not pull the whole client population
+    // into a firewall built for served lane runs.
+    const applied = applyActingLane(engine, {
+      operations: [
+        userInstanceOperation,
+        broadLinkOperation("a plain broad value"),
+      ],
+      surfaces: { writes: [USER_OUTPUT, BROAD_LINK_WRITE] },
+    });
+    assertExists(applied.schedulerObservationResults);
+    assertEquals(
+      Engine.read(engine, { id: BROAD_LINK_WRITE.id }),
+      { value: { value: "a plain broad value" } },
+    );
+  } finally {
+    Engine.close(engine);
+    await Deno.remove(directory, { recursive: true });
+  }
+});
