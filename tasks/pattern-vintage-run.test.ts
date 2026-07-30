@@ -3,6 +3,11 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { collectVintages, PINNED } from "./pattern-vintage-lib.ts";
 import {
+  openFileBackedRuntime,
+  readVintageManifest,
+  writeVintageManifest,
+} from "../packages/piece/test/state-continuity-harness.ts";
+import {
   captureMissing,
   type GateRoots,
   isUpgradeTarget,
@@ -389,6 +394,43 @@ describe("the vintage gate, end to end", () => {
     // fixture records many instantiations, so an unattributed failure would
     // leave the reader to guess which of them retired.
     expect(failures[0].detail).toContain(`/patterns/${KEY} no longer resolves`);
+  });
+
+  it("FAILS a fixture holding a root it cannot map to a file", async () => {
+    // Narrowed coverage must not read as success. The replay SKIPS an entry with
+    // no source path, so a green verdict would be a claim about fewer roots than
+    // the fixture holds — the shape this tier has mistaken for a pass three
+    // times. Capture refuses to create one of these, so it is written directly.
+    await captureMissing(roots, [KEY], new Date("2026-07-29T12:00:00.000Z"));
+    const [pinned] = await collectVintages(roots.vintagesRoot);
+    const tmp = await Deno.makeTempDir({ prefix: "vintage-gate-doctor-" });
+    const vintage = await openFileBackedRuntime(signer, tmp, pinned.path);
+    try {
+      const manifest = await readVintageManifest(vintage);
+      await writeVintageManifest(vintage, [
+        ...(manifest?.entries ?? []),
+        {
+          identity: pinned.identity,
+          symbol: "__cfPattern_9",
+          cellId: "of:fid1:unmappable",
+          space: signer.did(),
+        },
+      ]);
+      // To a fresh path, not over the file this runtime opened FROM — sqlite
+      // refuses that — then swapped in once the handles are closed.
+      await vintage.snapshot(`${tmp}/rewritten.sqlite`);
+    } finally {
+      await vintage.dispose().catch(() => {});
+    }
+    await Deno.copyFile(`${tmp}/rewritten.sqlite`, pinned.path);
+    await Deno.remove(tmp, { recursive: true }).catch(() => {});
+
+    const { unmappable, failures } = await replayAll(roots);
+
+    expect(unmappable).toBe(1);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].detail).toContain("carries NO source path");
+    expect(failures[0].detail).toContain("__cfPattern_9");
   });
 
   describe("capture refuses a state the pattern never legitimately reaches", () => {

@@ -155,19 +155,21 @@ async function main() {
   // examined no update targets at all, which is the shape that has read as
   // success three separate times in this tier's history.
   if (!isClean(failures, uncovered, replayed, candidates)) Deno.exit(1);
-  console.log(
-    `Replayed ${replayed} vintage(s): ${candidates} recorded instantiation(s), ` +
-      `${changed} changed since capture, ${updated} updated cleanly.`,
-  );
-  // Printed only when non-zero, and printed rather than absorbed: these are
-  // recorded roots the replay could not address, so they are a BOUND on what a
-  // green run just asserted. Silence about them would read as full coverage.
-  if (unmappable > 0) {
-    console.log(
-      `  ${unmappable} recorded instantiation(s) carry no source path and were ` +
-        `NOT validated — they cannot be mapped to a file to apply.`,
+  // Reached only with `unmappable === 0`: an unaddressable recorded root is
+  // reported as a FAILURE by the replay, not as a footnote here, because a
+  // green verdict plus a printed caveat is how narrowed coverage reads as
+  // success. Asserted rather than assumed, so the two cannot drift apart.
+  if (unmappable !== 0) {
+    throw new Error(
+      `unreachable: ${unmappable} unmappable instantiation(s) passed the clean ` +
+        `check — the replay must report them as failures`,
     );
   }
+  console.log(
+    `Replayed ${replayed} vintage(s): ${candidates} recorded instantiation(s), ` +
+      `all mappable to a file; ${changed} changed since capture, ` +
+      `${updated} updated cleanly.`,
+  );
 }
 
 if (import.meta.main) {

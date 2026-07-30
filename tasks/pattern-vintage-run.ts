@@ -102,11 +102,13 @@ export interface ReplayReport {
   /** Recorded instantiations that are legitimate upgrade targets. */
   targets: number;
   /**
-   * Recorded instantiations with NO source path — recorded but unvalidatable.
+   * Recorded instantiations with NO source path — recorded but unaddressable.
    *
-   * Reported rather than dropped silently. This is the number the source-path
-   * propagation drove to zero, and a bound on coverage that is not printed reads
-   * as "everything was checked" when it was not.
+   * Each one also lands in `failures`, so a fixture holding any is a RED run
+   * rather than a green one with a caveat: the replay skips them, and a verdict
+   * that passes while silently covering fewer roots than the fixture holds is
+   * this tier's worst failure mode. Kept as a count so the summary can state the
+   * property positively ("all mappable") instead of by absence.
    */
   unmappable: number;
   /** Targets whose source CHANGED since capture — the actual migrations. */
@@ -176,14 +178,29 @@ export async function replayVintage(
     }
 
     const targets = manifest.entries.filter(isUpgradeTarget);
+    const unmappable = manifest.entries.filter((e) => e.main === undefined);
     const report: ReplayReport = {
       candidates: manifest.entries.length,
       targets: targets.length,
-      unmappable: manifest.entries.filter((e) => e.main === undefined).length,
+      unmappable: unmappable.length,
       changed: 0,
       updated: 0,
       failures: [],
     };
+    // A recorded root nothing can address is a FAILURE, not a note. The replay
+    // skips it, so a green verdict would be a claim about fewer roots than the
+    // fixture holds — coverage silently narrowed, which is this tier's worst
+    // failure mode and the one it has hit three separate times. Every
+    // instantiation carries its own authored file today, so a sourceless entry
+    // means that propagation regressed and the gate should say so loudly.
+    for (const entry of unmappable) {
+      report.failures.push({
+        ...where,
+        detail: `recorded instantiation ${entry.identity}#${entry.symbol} ` +
+          `carries NO source path, so it cannot be mapped to a file to apply — ` +
+          `it was recorded but NOT validated`,
+      });
+    }
 
     for (const entry of targets) {
       const source = `${roots.repoRoot}${entry.main}`;
@@ -377,14 +394,26 @@ export async function captureVintage(
     // Every instantiation carries its own authored file: the runtime stamps it
     // at module-index time and resolves it through the derivation chain, so a
     // nested sub-pattern names its own source rather than the entry's. Nothing
-    // to fill in here — a sourceless entry now means a genuinely unaddressable
-    // pattern, and `isUpgradeTarget` below is the only thing that judges it.
+    // to fill in here.
     const entries = [...seen.values()];
+    // Refuse to PIN a fixture holding a root nothing can address, rather than
+    // waiting for the replay to fail on it. The replay does fail closed, but it
+    // would do so on whoever's PR next ran the gate; catching it here blames the
+    // capture that created it, when the cause is still in hand.
+    const sourceless = entries.filter((e) => e.main === undefined);
+    if (sourceless.length > 0) {
+      throw new Error(
+        `cannot capture ${patternKey}: ${sourceless.length} of ` +
+          `${entries.length} instantiation(s) carry no source path (${
+            sourceless.map((e) => `${e.identity}#${e.symbol}`).join(", ")
+          }), so the fixture would record roots the replay cannot map to a file`,
+      );
+    }
     if (!entries.some(isUpgradeTarget)) {
       throw new Error(
         `cannot capture ${patternKey}: the run instantiated no upgradable ` +
-          `pattern (${entries.length} instantiation(s), all test patterns or ` +
-          `sourceless), so the fixture would have nothing to replay`,
+          `pattern (${entries.length} instantiation(s), all test patterns), ` +
+          `so the fixture would have nothing to replay`,
       );
     }
     await writeVintageManifest(vintage, entries);
