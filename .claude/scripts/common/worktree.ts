@@ -263,14 +263,20 @@ function maskQuotesOnly(text: string): string {
  * commit here at all.
  */
 function looksLikeGitCommit(masked: string): boolean {
-  const tokens = masked.split(/\s+/).filter(Boolean);
-  for (let i = 0; i < tokens.length; i++) {
-    if (tokens[i] !== "git" && !tokens[i].endsWith("/git")) continue;
-    let j = i + 1;
-    while (j < tokens.length && tokens[j].startsWith("-")) {
-      j += VALUE_OPTIONS.includes(tokens[j]) ? 2 : 1;
+  // Per command, not across the whole string. Walking whitespace tokens through
+  // separators made `git --no-pager; commit` look like a commit — two commands,
+  // neither of them one — and since the block-node and block-legacy-cli hooks
+  // treat "is a commit" as their exemption, that waved their guards through too.
+  for (const segment of masked.split(/[;&|\n]+/)) {
+    const tokens = segment.split(/\s+/).filter(Boolean);
+    for (let i = 0; i < tokens.length; i++) {
+      if (tokens[i] !== "git" && !tokens[i].endsWith("/git")) continue;
+      let j = i + 1;
+      while (j < tokens.length && tokens[j].startsWith("-")) {
+        j += VALUE_OPTIONS.includes(tokens[j]) ? 2 : 1;
+      }
+      if (tokens[j] === "commit") return true;
     }
-    if (tokens[j] === "commit") return true;
   }
   return false;
 }
@@ -333,6 +339,22 @@ export function splitAtGitCommit(
  * Found on the mask so `git add 'a&b.ts'` is one argument rather than two
  * commands.
  */
+/**
+ * The flag region of a `git commit`: its own command, with redirections removed.
+ *
+ * Distinct from `argumentRegion`, which stops at a redirection because for
+ * `git add` everything after one is not a pathspec. A commit's flags can sit on
+ * either side of it — `git commit -m x >/dev/null --no-verify` is one command —
+ * and stopping early there meant the hook blocked a commit git had been told
+ * explicitly to skip.
+ */
+export function commitFlagRegion(after: string): string {
+  const masked = maskQuotedSpans(after);
+  const sep = masked.search(/[;\n&|]/);
+  const region = sep === -1 ? after : after.slice(0, sep);
+  return withoutQuotedSpans(region).replace(/\d*[<>]+\s*\S+/g, " ");
+}
+
 export function argumentRegion(text: string): string {
   // Redirections end the argument list too, and the whole operator has to go,
   // file descriptor included. Cutting at the bare `>` left the `2` of
@@ -527,12 +549,14 @@ export function gitAddInvocations(cmd: string): GitAddInvocation[] | null {
       dirArgs,
       flags,
       paths,
-      // An unexpanded glob is not the same pathspec the shell will produce:
-      // `git add *.ts` expands to this directory, while git's pathspec matches
-      // recursively. Resolving it here blocked commits on files in
-      // subdirectories that the command never staged.
+      // An unexpanded glob or brace is not the pathspec the shell will produce.
+      // `git add *.ts` expands to this directory while git's pathspec matches
+      // recursively, so resolving it blocked commits on subdirectory files the
+      // command never staged. `git add {a,b}.ts` is the mirror image: git has no
+      // brace expansion, so the dry run matched nothing and the files it does
+      // stage went unchecked.
       dryRunnable: flags.every(isSafeAddFlag) &&
-        !paths.some((p) => /[*?[]/.test(p)),
+        !paths.some((p) => /[*?[{]/.test(p)),
     });
 
     const advance = add.before.length +
@@ -645,9 +669,10 @@ function expand(raw: string): string {
  * work when spelled the way git documents it first.
  */
 export function commitSkipsVerify(commitFlags: string): boolean {
-  if (/(?:^|\s)--no-verify(?:\s|$)/.test(commitFlags)) return true;
+  const flags = beforePathspecSentinel(commitFlags);
+  if (/(?:^|\s)--no-verify(?:\s|$)/.test(flags)) return true;
   const VALUE_TAKING = "mFcCtSu";
-  for (const m of commitFlags.matchAll(/(?:^|\s)-([A-Za-z]+)/g)) {
+  for (const m of flags.matchAll(/(?:^|\s)-([A-Za-z]+)/g)) {
     for (const ch of m[1]) {
       if (ch === "n") return true;
       if (VALUE_TAKING.includes(ch)) break;
@@ -656,10 +681,23 @@ export function commitSkipsVerify(commitFlags: string): boolean {
   return false;
 }
 
+/**
+ * `commitFlags` truncated at git's `--` sentinel, after which every token is a
+ * pathspec however it is spelled.
+ *
+ * Without it, committing a file *named* `-n` — `git commit -- -n` — read as
+ * `--no-verify` and turned the hook off, leaving that file unchecked.
+ */
+function beforePathspecSentinel(commitFlags: string): string {
+  const m = commitFlags.match(/(?:^|\s)--(?=\s|$)/);
+  return m?.index === undefined ? commitFlags : commitFlags.slice(0, m.index);
+}
+
 export function commitsAllTracked(commitFlags: string): boolean {
-  if (/(?:^|\s)--all(?:\s|$)/.test(commitFlags)) return true;
+  const flags = beforePathspecSentinel(commitFlags);
+  if (/(?:^|\s)--all(?:\s|$)/.test(flags)) return true;
   const VALUE_TAKING = "mFcCtSu";
-  for (const m of commitFlags.matchAll(/(?:^|\s)-([A-Za-z]+)/g)) {
+  for (const m of flags.matchAll(/(?:^|\s)-([A-Za-z]+)/g)) {
     for (const ch of m[1]) {
       if (ch === "a") return true;
       if (VALUE_TAKING.includes(ch)) break;

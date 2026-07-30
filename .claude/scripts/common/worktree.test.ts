@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import {
   argumentRegion,
+  commitFlagRegion,
   commitsAllTracked,
   commitSkipsVerify,
   gitAddInvocations,
@@ -349,6 +350,39 @@ Deno.test("commitSkipsVerify honours both spellings", () => {
   }
 });
 
+Deno.test("git's -- sentinel ends flag parsing", () => {
+  // A file *named* like an option is a pathspec after `--`. Reading it as one
+  // turned the hook off (`-n`) or swept the tree (`-a`), leaving it unchecked.
+  assertEquals(commitSkipsVerify(" -- -n"), false);
+  assertEquals(commitSkipsVerify(" -m x -- -n"), false);
+  assertEquals(commitsAllTracked(" -- -a"), false);
+  // ...while a real flag before the sentinel still counts.
+  assertEquals(commitSkipsVerify(" -n -m x"), true);
+  assertEquals(commitsAllTracked(" -am x"), true);
+});
+
+Deno.test("commitFlagRegion keeps the command, drops redirections", () => {
+  // A commit's flags can sit either side of a redirection — it is all one
+  // command — and stopping at one meant blocking a commit git was told to skip.
+  assertEquals(
+    commitSkipsVerify(commitFlagRegion(" -m x >/dev/null --no-verify")),
+    true,
+  );
+  assertEquals(
+    commitSkipsVerify(commitFlagRegion(" -m x 2>err --no-verify")),
+    true,
+  );
+  // ...but a *later command's* flags are not this commit's.
+  assertEquals(
+    commitsAllTracked(commitFlagRegion(" -m x && git status -a")),
+    false,
+  );
+  assertEquals(
+    commitSkipsVerify(commitFlagRegion(" -m x && git commit --no-verify")),
+    false,
+  );
+});
+
 Deno.test("a line continuation is neither a separator nor an argument", () => {
   // `git add \<newline> bad.ts` cut the region at the newline and handed git a
   // lone backslash, so bad.ts was staged, committed and never checked.
@@ -362,6 +396,12 @@ Deno.test("an unexpanded glob is not resolvable", () => {
   // that the command never staged.
   assertEquals(
     gitAddInvocations("git add *.ts && git commit -m x")?.[0]?.dryRunnable,
+    false,
+  );
+  // Brace expansion is the shell's; git has none, so the dry run matched nothing
+  // and the files it does stage went unchecked.
+  assertEquals(
+    gitAddInvocations("git add {a,b}.ts && git commit -m x")?.[0]?.dryRunnable,
     false,
   );
   assertEquals(

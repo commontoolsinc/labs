@@ -18,7 +18,7 @@
  */
 
 import {
-  argumentRegion,
+  commitFlagRegion,
   commitsAllTracked,
   commitSkipsVerify,
   commitTargetWorktree,
@@ -28,7 +28,6 @@ import {
   MAX_COMMAND_LENGTH,
   sameRepository,
   splitAtGitCommit,
-  withoutQuotedSpans,
 } from "./common/worktree.ts";
 import { checkFiles } from "./common/checks.ts";
 
@@ -56,18 +55,20 @@ try {
 // `git commit -m one && git commit -m two --no-verify` turned verification off
 // for the first commit too, silently, and the same leak made a later `-am` sweep
 // the whole tree on behalf of an earlier plain commit.
-const commitAfter = splitAtGitCommit(cmd).after;
-const commitFlags = withoutQuotedSpans(argumentRegion(commitAfter));
-
-if (!isGitCommit(cmd) || commitSkipsVerify(commitFlags)) {
-  Deno.exit(0);
-}
-
+// Before anything parses it. The length limit existed but sat after the first
+// three parses, so the quadratic cost it was meant to avoid was already paid.
 if (cmd.length > MAX_COMMAND_LENGTH) {
   console.error(
     `pre-commit: command is ${cmd.length} characters, over the ` +
       `${MAX_COMMAND_LENGTH} this hook will parse. Skipping — not blocked.`,
   );
+  Deno.exit(0);
+}
+
+const commitAfter = splitAtGitCommit(cmd).after;
+const commitFlags = commitFlagRegion(commitAfter);
+
+if (!isGitCommit(cmd) || commitSkipsVerify(commitFlags)) {
   Deno.exit(0);
 }
 
