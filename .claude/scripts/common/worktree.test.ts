@@ -305,9 +305,14 @@ Deno.test("gitAddInvocations resolves each add on its own terms", () => {
   for (const f of ["-e", "--edit", "--edi", "--ed", "--e", "-Ae", "-p", "-i"]) {
     assertEquals(dry(`git add ${f} && git commit -m x`), false, f);
   }
+  // `-A` and `-u` are mutually exclusive to git, which exits 128 on the pair, so
+  // accepting the cluster produced an empty dry run and dropped those files.
+  for (const f of ["-Au", "-uA", "-Aufnv"]) {
+    assertEquals(dry(`git add ${f} && git commit -m x`), false, f);
+  }
   // ...while the flags actually used stay resolvable.
   for (
-    const f of ["-A", "-u", "-f", "-Au", "--all", "--update", "--chmod=+x"]
+    const f of ["-A", "-u", "-f", "-Av", "--all", "--update", "--chmod=+x"]
   ) {
     assertEquals(dry(`git add ${f} && git commit -m x`), true, f);
   }

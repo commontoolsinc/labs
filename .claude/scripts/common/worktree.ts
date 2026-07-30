@@ -483,8 +483,17 @@ const SAFE_ADD_LONG = new Set([
   "--no-warn-embedded-repo",
 ]);
 
-/** Short clusters of safe flags only: all, update, force, dry-run, verbose. */
-const SAFE_ADD_SHORT = /^-[Aufnv]+$/;
+/**
+ * Short clusters of safe flags only: all, update, force, dry-run, verbose.
+ *
+ * `-A` and `-u` are mutually exclusive to git, which exits 128 on the pair — so
+ * accepting `-Au` produced an empty dry run and silently dropped those files
+ * from the list.
+ */
+function isSafeShortCluster(flag: string): boolean {
+  if (!/^-[Aufnv]+$/.test(flag)) return false;
+  return !(flag.includes("A") && flag.includes("u"));
+}
 
 /**
  * `--refresh` is deliberately absent, and its absence is the third correction to
@@ -499,7 +508,7 @@ const SAFE_ADD_SHORT = /^-[Aufnv]+$/;
  * run.
  */
 function isSafeAddFlag(flag: string): boolean {
-  if (SAFE_ADD_SHORT.test(flag)) return true;
+  if (isSafeShortCluster(flag)) return true;
   // `--chmod` only in its attached form. Separated (`--chmod +x`), the value is
   // an argument we would classify as a pathspec and move after `--`, leaving
   // git with a `--chmod` that has lost its parameter: it fails, the file list

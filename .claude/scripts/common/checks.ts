@@ -101,6 +101,24 @@ export function typeCheckable(files: string[]): string[] {
 const FORMATTING_LABEL = "Formatting issues found";
 
 /**
+ * `--no-lock` because `deno check` rewrites `deno.lock` whenever a checked
+ * file's dependency graph names a specifier the lock does not have yet — the
+ * ordinary "add a dependency" commit. `deno.lock` is *tracked*, and this runs
+ * before the user's command, so that write landed in their commit: verified, a
+ * commit of one file came out containing two. Type errors are still reported;
+ * only lockfile integrity goes unchecked here, and CI checks that against the
+ * real lock.
+ */
+function typeCheck(worktree: string, tsFiles: string[]): Promise<Ran> {
+  return runDeno(worktree, "Type check failed", [
+    "check",
+    "--no-lock",
+    ...ambientDeclarationsFor(worktree, tsFiles),
+    ...tsFiles,
+  ]);
+}
+
+/**
  * What one `deno` invocation did: failed with output, passed over a known number
  * of files, or ran on nothing.
  *
@@ -227,13 +245,7 @@ export async function checkFiles(
   const [fmt, lint, check] = await Promise.all([
     runDeno(worktree, FORMATTING_LABEL, ["fmt", "--check", ...checked]),
     runDeno(worktree, "Lint errors", ["lint", ...checked]),
-    tsFiles.length > 0
-      ? runDeno(worktree, "Type check failed", [
-        "check",
-        ...ambientDeclarationsFor(worktree, tsFiles),
-        ...tsFiles,
-      ])
-      : "no-targets" as Ran,
+    tsFiles.length > 0 ? typeCheck(worktree, tsFiles) : "no-targets" as Ran,
   ]);
   runs.push(["fmt", checked.length, fmt]);
   runs.push(["lint", checked.length, lint]);

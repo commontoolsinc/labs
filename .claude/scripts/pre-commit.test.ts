@@ -36,6 +36,8 @@ async function run(cwd: string, args: string[]): Promise<string> {
 interface Repo {
   dir: string;
   indexHash(): Promise<string>;
+  /** Index bytes + working-tree status + deno.lock: everything a hook must leave alone. */
+  fingerprint(): Promise<string>;
 }
 
 async function makeRepo(): Promise<Repo> {
@@ -46,21 +48,56 @@ async function makeRepo(): Promise<Repo> {
   await Deno.writeTextFile(`${dir}/tracked.ts`, CLEAN);
   await run(dir, ["add", "tracked.ts"]);
   await run(dir, ["commit", "-q", "-m", "init"]);
-  return {
-    dir,
-    async indexHash() {
-      const path = await run(dir, ["rev-parse", "--git-path", "index"]);
-      const bytes = await Deno.readFile(`${dir}/${path}`);
-      const digest = await crypto.subtle.digest("SHA-256", bytes);
-      return [...new Uint8Array(digest)].map((b) =>
-        b.toString(16).padStart(2, "0")
-      ).join("");
-    },
-  };
+  async function sha(path: string): Promise<string> {
+    let bytes: Uint8Array;
+    try {
+      bytes = await Deno.readFile(path);
+    } catch {
+      return "absent";
+    }
+    const digest = await crypto.subtle.digest("SHA-256", bytes.slice());
+    return [...new Uint8Array(digest)].map((b) =>
+      b.toString(16).padStart(2, "0")
+    ).join("");
+  }
+
+  async function indexHash(): Promise<string> {
+    const relative = await run(dir, ["rev-parse", "--git-path", "index"]);
+    return await sha(`${dir}/${relative}`);
+  }
+
+  async function fingerprint(): Promise<string> {
+    return [
+      await indexHash(),
+      await run(dir, ["status", "--porcelain"]),
+      await sha(`${dir}/deno.lock`),
+    ].join("|");
+  }
+
+  return { dir, indexHash, fingerprint };
 }
 
-/** Invoke the hook exactly as Claude Code does, and report its exit code. */
+/**
+ * Invoke the hook exactly as Claude Code does, and report its exit code.
+ *
+ * The read-only contract is asserted here, on every single call, rather than in
+ * a test that remembers to check it. It broke seven times in this hook's
+ * history, twice in code written to fix the previous break, and twice more in
+ * ways that `git write-tree` and the index mtime could not see — so the check
+ * belongs where it cannot be forgotten.
+ */
 async function hook(repo: Repo, command: string): Promise<number> {
+  const before = await repo.fingerprint();
+  const code = await invoke(repo, command);
+  assertEquals(
+    await repo.fingerprint(),
+    before,
+    `hook modified the worktree while inspecting: ${command}`,
+  );
+  return code;
+}
+
+async function invoke(repo: Repo, command: string): Promise<number> {
   const payload = JSON.stringify({
     cwd: repo.dir,
     hook_event_name: "PreToolUse",
@@ -68,7 +105,13 @@ async function hook(repo: Repo, command: string): Promise<number> {
     tool_input: { command },
   });
   const child = new Deno.Command(Deno.execPath(), {
-    args: ["run", "--allow-read", "--allow-run", "--allow-env", HOOK],
+    args: [
+      "run",
+      "--allow-read",
+      "--allow-run",
+      "--allow-env",
+      HOOK,
+    ],
     cwd: repo.dir,
     env: { CLAUDE_PROJECT_DIR: repo.dir },
     stdin: "piped",
@@ -275,6 +318,38 @@ Deno.test("an editing flag is never dry-run", async () => {
       before,
       "hook staged the working tree",
     );
+  } finally {
+    await Deno.remove(repo.dir, { recursive: true });
+  }
+});
+
+Deno.test("leaves a racily-clean index alone", async () => {
+  const repo = await makeRepo();
+  try {
+    // Content matching the index with a differing mtime — what editing a file
+    // and reverting it leaves behind. In that state `git diff <commit>` calls
+    // refresh_index_quietly() and rewrites the index, and `--no-optional-locks`
+    // does not cover it. Every commit shape that names a pathspec, or `-a`,
+    // reached it. Invisible to `git write-tree` and to the index mtime.
+    await Deno.writeTextFile(`${repo.dir}/second.ts`, CLEAN);
+    await run(repo.dir, ["add", "second.ts"]);
+    await run(repo.dir, ["commit", "-q", "-m", "second"]);
+
+    for (
+      const command of [
+        "git commit -m wip tracked.ts",
+        "git commit -m wip -- tracked.ts",
+        "git commit -m wip .",
+        "git commit -i -m wip tracked.ts",
+        "git commit -am wip",
+        "git commit -m wip",
+        "git add tracked.ts && git commit -m wip",
+      ]
+    ) {
+      await Deno.utime(`${repo.dir}/tracked.ts`, new Date(0), new Date(0));
+      // hook() asserts the fingerprint itself; the exit code is incidental here.
+      await hook(repo, command);
+    }
   } finally {
     await Deno.remove(repo.dir, { recursive: true });
   }

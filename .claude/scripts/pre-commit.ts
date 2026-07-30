@@ -121,6 +121,26 @@ if (projectDir && !(await sameRepository(worktree, projectDir))) {
 
 // --- Determine which files will be committed ---
 
+/**
+ * NUL-separated fields, for `status --porcelain -z`.
+ *
+ * `-z` for two reasons, each of which broke a parse: the two status columns start
+ * with a space for an unstaged change, and the line-based helper below trims —
+ * correctly, for path lists — so ` M file.ts` shifted a column and lost the first
+ * character of the path. And line-based porcelain double-quotes any path
+ * containing a space, so `"my file.ts"` arrived with its quotes attached and
+ * matched nothing on disk. `-z` neither pads nor quotes.
+ */
+async function gitNulFields(cwd: string, args: string[]): Promise<string[]> {
+  const { stdout } = await new Deno.Command("git", {
+    args: ["--no-optional-locks", ...args],
+    cwd,
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  return new TextDecoder().decode(stdout).split("\0").filter((f) => f !== "");
+}
+
 async function gitFrom(cwd: string, args: string[]): Promise<string[]> {
   const { stdout } = await new Deno.Command("git", {
     // `--no-optional-locks` because several read-shaped commands are not reads:
@@ -140,6 +160,39 @@ async function gitFrom(cwd: string, args: string[]): Promise<string[]> {
 /** git, run at the worktree root, where its output is worktree-relative. */
 function git(...args: string[]): Promise<string[]> {
   return gitFrom(worktree, args);
+}
+
+/**
+ * Tracked files that differ from HEAD — what a `-a` commit stages, and what a
+ * pathspec commit contains.
+ *
+ * Read from `status --porcelain` rather than `diff <commit>`, which is not the
+ * obvious choice and is the whole point: `git diff HEAD` calls
+ * `refresh_index_quietly()` unconditionally, `--no-optional-locks` does not
+ * cover it, and on any racily-clean file it rewrote the index of the tree it was
+ * inspecting. `status --porcelain` answers the same question — verified to name
+ * the same files — and leaves the index alone.
+ *
+ * A shadow copy of the index also worked, but needed write permission the hook
+ * otherwise does not want, and made a missing permission mean "check nothing".
+ */
+async function changedTrackedFiles(pathspecs: string[]): Promise<string[]> {
+  const args = ["status", "--porcelain", "-z"];
+  if (pathspecs.length > 0) args.push("--", ...pathspecs);
+  const fields = await gitNulFields(worktree, args);
+  const files: string[] = [];
+  for (let i = 0; i < fields.length; i++) {
+    const entry = fields[i];
+    const [index, worktreeState] = [entry[0], entry[1]];
+    // A rename or copy is followed by its original path in the next field.
+    if (index === "R" || index === "C") i++;
+    // Untracked and ignored are not tracked changes; a file deleted in the
+    // worktree cannot be checked.
+    if (index === "?" || index === "!" || worktreeState === "D") continue;
+    if (index === " " && worktreeState === " ") continue;
+    files.push(entry.slice(3));
+  }
+  return files;
 }
 
 // Every `git add` in this command: where each runs and what it stages. Resolved
@@ -170,14 +223,7 @@ async function getFilesToCommit(): Promise<string[]> {
       );
       return [];
     }
-    const only = await git(
-      "diff",
-      "--name-only",
-      "--diff-filter=d",
-      "HEAD",
-      "--",
-      ...pathspecs,
-    );
+    const only = await changedTrackedFiles(pathspecs);
     if (!commitIncludesIndex(commitFlags)) return [...new Set(only)];
     const staged = await git(
       "diff",
@@ -201,7 +247,7 @@ async function getFilesToCommit(): Promise<string[]> {
   // of them including whole nested checkouts — and blocked the commit on files
   // it would never have touched.
   if (commitsAllTracked(commitFlags)) {
-    files.push(...await git("diff", "--name-only", "--diff-filter=d", "HEAD"));
+    files.push(...await changedTrackedFiles([]));
   }
 
   // Whatever a `git add` in this command will stage. Asked of git with
