@@ -12,8 +12,9 @@ import { recordDefiningModule } from "../harness/verified-provenance.ts";
 import type { VirtualModuleRecord } from "./esm-module-loader.ts";
 
 /**
- * Adapter from authored TypeScript sources to SES virtual module records
- * (Phase 2 of docs/specs/module-loading.md).
+ * Adapter from authored TypeScript sources to SES virtual module records; see
+ * docs/specs/module-loading.md §"Loader: per-module records in SES
+ * compartments".
  *
  * Each module is compiled independently to CommonJS, content-addressed by its
  * module hash (`cf:module/<hash>`), and wrapped in a {@link VirtualModuleRecord}
@@ -773,8 +774,18 @@ export function compileSourcesToRecords(
         // already-populated export throw, so the smuggle fails closed. A `void 0`
         // forward declaration is treated as a placeholder, so the canonical
         // `exports.x = void 0; … exports.x = real;` compiler shape is allowed.
+        // `Object.hasOwn`, not `?? specifier`: `resolvedImports` is a plain
+        // object literal, so a bare `resolvedImports["constructor"]` would read
+        // Object.prototype's member instead of falling through as absent. Either
+        // way the lookup fails closed (importNowHook throws on anything not in
+        // `records`), but only the own-property test makes "absent from the map
+        // resolves to itself" literally true — which is what the spec states.
         const requireShim = (specifier: string) =>
-          compartment.importNow(resolvedImports[specifier] ?? specifier);
+          compartment.importNow(
+            Object.hasOwn(resolvedImports, specifier)
+              ? resolvedImports[specifier]
+              : specifier,
+          );
         // A throw inside the factory is terminal for this module: SES caches the
         // error and re-throws it on every subsequent importNow.
         // Grant the real registrar ONLY if the verifier approved this module's
@@ -1012,8 +1023,12 @@ export function buildRecordsFromCompiled(
           module: { exports: Record<string, unknown> },
           register: (entries: Record<string, unknown>) => void,
         ) => void;
+        // Own-property test, matching the cold path in
+        // `compileSourcesToRecords` — see the note there.
         const requireShim = (spec: string) =>
-          compartment.importNow(resolvedImports[spec] ?? spec);
+          compartment.importNow(
+            Object.hasOwn(resolvedImports, spec) ? resolvedImports[spec] : spec,
+          );
         const { register, commit } = registrationApproved.has(specifier)
           ? createHoistRegistrar(m.identity, registrationSink)
           : createRejectingRegistrar();

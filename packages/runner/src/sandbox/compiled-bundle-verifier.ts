@@ -52,7 +52,6 @@ export interface BindingInfo {
 }
 
 /**
-/**
  * Packaging-specific configuration for the format-agnostic security classifier
  * ({@link classifyModuleItems}), which is otherwise independent of how a module
  * body is wrapped.
@@ -366,11 +365,7 @@ function verifyVariableStatement(
   filename: string,
   statement: StatementChunk,
   env: Map<string, BindingInfo>,
-  kind = getVariableStatementKindFromRange(
-    source,
-    trimRange(source, statement.start, statement.end).start,
-    trimRange(source, statement.start, statement.end).end,
-  ),
+  kind: ReturnType<typeof getVariableStatementKindFromRange>,
   reserved: ReadonlySet<string>,
 ): void {
   const start = performance.now();

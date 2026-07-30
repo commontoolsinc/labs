@@ -1778,7 +1778,7 @@ contract, analogous to §11.4's `__cfReg` pairing:
   the module compartment globals").
 - **Tooling consumer** — `cf view` classifies the three names as "module
   scaffolding" for syntax colouring via its own hard-coded copy of the list
-  (`packages/cli/lib/view/vocab.ts`, `SCAFFOLDING_NAMES`), which can drift from
+  (`packages/cli/lib/view/languages/typescript/vocab.ts`, `SCAFFOLDING_NAMES`), which can drift from
   `SHADOWED_FACTORY_BINDINGS` since it does not import it.
 
 Net: on current `main` the emission is a one-directional contract — the
@@ -2712,7 +2712,7 @@ The stage-22 slot (after everything, and specifically after
   output, call-kind resolution can see through `__cfHardenFn*(…)` wrappers
   via `unwrapHardenedCallbackExpression` (`src/ast/call-kind.ts`,
   `FUNCTION_HARDENING_HELPER_PREFIX`), and `cf view` classifies the helper
-  names for display (`packages/cli/lib/view/vocab.ts`).
+  names for display (`packages/cli/lib/view/languages/typescript/vocab.ts`).
 
 ### 17.6 The verifier contract (cross-package, normative)
 
@@ -2773,10 +2773,11 @@ until the verifier agrees (also stated in
   name must resolve to a plain function binding, explicitly excluding
   `hardeningHelper` bindings (`resolveTrustedBuilderCallback`).
 - **Where it runs.** `verifyCompiledModuleBody` runs this classification once
-  per module body on the compile path, over the shared `classifyModuleItems`
-  core with empty guard sets
-  (`packages/runner/src/sandbox/module-record-verifier.ts`;
-  `ModuleItemClassificationOptions` doc comment). There is one emit, so the
+  per module body, over the shared `classifyModuleItems` core with empty guard
+  sets (`packages/runner/src/sandbox/module-record-verifier.ts`;
+  `ModuleItemClassificationOptions` doc comment). That is on the compile path,
+  and again on the warm cached-closure load path unless the bodies arrived
+  through an integrity-gated read (`trustedBodies`). There is one emit, so the
   canonical helper sources have one byte form to match.
 
 Consequence for maintenance: the transformer's AST helper builders
@@ -2937,7 +2938,7 @@ re-listing it. The enforced sources of truth:
 | Lowerable expression-site container kinds (§6.7) | `getExpressionContainerKind` (`expression-site-policy.ts`) | — |
 | Diagnostic `type:` strings | the emitting transformer's `reportDiagnostic` calls | grep `type: "…"` per validator |
 | Auto-`.for()` cause triggers, cause-path grammar, and the `__patternResult` root (§13) | `shouldAddReactiveFor` / `createForCall` / `PATTERN_RESULT_CAUSE` (`src/transformers/reactive-variable-for.ts`) | emitted shapes pinned by the stable-cause tests in `test/transform.test.ts` |
-| Shadow-guard binding set + canonical guard text (§14) | `SHADOWED_FACTORY_BINDINGS` / `createFactoryShadowGuardSource()` (`packages/utils/src/sandbox-contract.ts`); insertion point `findFactoryGuardInsertionIndex` (`src/transformers/module-scope-shadowing.ts`) | emission byte-pinned by ~all fixture expected outputs; verifier consumes the same constants via `RESERVED_FACTORY_BINDINGS` (`packages/runner/src/sandbox/compiled-bundle-verifier.ts`); `cf view`'s `SCAFFOLDING_NAMES` (`packages/cli/lib/view/vocab.ts`) is an unimported copy — check for drift |
+| Shadow-guard binding set + canonical guard text (§14) | `SHADOWED_FACTORY_BINDINGS` / `createFactoryShadowGuardSource()` (`packages/utils/src/sandbox-contract.ts`); insertion point `findFactoryGuardInsertionIndex` (`src/transformers/module-scope-shadowing.ts`) | emission byte-pinned by ~all fixture expected outputs; verifier consumes the same constants via `RESERVED_FACTORY_BINDINGS` (`packages/runner/src/sandbox/compiled-bundle-verifier.ts`); `cf view`'s `SCAFFOLDING_NAMES` (`packages/cli/lib/view/languages/typescript/vocab.ts`) is an unimported copy — check for drift |
 | Module-scope `__cf_data` wrap/exclusion name sets + verifier error strings (§15) | `TRUSTED_BUILDERS` / `TRUSTED_DATA_HELPERS` (`packages/utils/src/sandbox-contract.ts`); `CF_DATA_CONSTRUCTOR_NAMES` (`src/transformers/module-scope-cf-data.ts`); `TOP_LEVEL_CALL_RESULT_ERROR` (`packages/runner/src/sandbox/policy.ts`) | one module feeds both transformer and runner verifier — cross-package contract; runtime freezer semantics live in `packages/runner/src/sandbox/plain-data.ts` |
 | Coverage instrumentation + span schema (§16) | `PatternCoverageTransformer` (`src/transformers/pattern-coverage.ts`); `PatternCoverageSpan` / `PatternCoverageOptions` / `PATTERN_COVERAGE_GLOBAL` (`src/core/transformers.ts`) | line remapping pins the one-line helper prelude: `HELPERS_STMT` (`src/core/cf-helpers.ts`) ↔ `patternCoverageOptionsForCompile` (`packages/runner/src/harness/engine.ts`) — change them together |
 | Hardening/binding helper names, metadata field, canonical helper bodies (§17) | `FUNCTION_HARDENING_HELPER_NAME` / `BINDING_IDENTITY_HELPER_NAME` / `VERIFIED_BINDING_METADATA_FIELD` and `createFunctionHardeningHelperSource` / `createBindingIdentityHelperSource` (`packages/utils/src/sandbox-contract.ts`) | the runner verifier recognizes helper declarations by trivia-stripped byte equality to these sources (`CANONICAL_HARDENING_HELPER` in `packages/runner/src/sandbox/compiled-bundle-verifier.ts`); the transformer's AST-built twins (`createFunctionHardeningHelper` / `createBindingIdentityHelper` in `src/transformers/module-scope-function-hardening.ts`) must compile to exactly that text — drift fails every module load |

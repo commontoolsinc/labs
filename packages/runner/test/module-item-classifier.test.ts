@@ -33,7 +33,7 @@ const EMPTY_GUARD_OPTIONS = {
 };
 
 describe("classifyModuleItems (format-agnostic security core)", () => {
-  it("accepts a guard-free module body when no shadow guards are required (ESM case)", () => {
+  it("accepts a guard-free module body when no shadow guards are required", () => {
     const body =
       `function () { const greet = (n) => n + 1; exports.greet = greet; }`;
     const { source, statements } = bodyStatements(body);

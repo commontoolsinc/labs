@@ -2,7 +2,8 @@ import { ensureSESLockdown } from "./ses-runtime.ts";
 import { verifyModuleGraph } from "./module-record-verifier.ts";
 
 /**
- * SES module-graph loader (Phase 2 of docs/specs/module-loading.md).
+ * SES module-graph loader; see docs/specs/module-loading.md §"Loader:
+ * per-module records in SES compartments".
  *
  * Loads a graph of per-module records through the SES Compartment module
  * system using synchronous `importNow`. Modules are addressed by

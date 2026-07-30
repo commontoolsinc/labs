@@ -20,9 +20,10 @@ import {
 } from "./tslib-helpers.ts";
 
 /**
- * Structural pre-flight verification for a module-record graph (Phase 3 of
- * docs/specs/module-loading.md): it validates the *shape and wiring* of the
- * graph before any module executes — every specifier is content-addressed,
+ * Structural pre-flight verification for a module-record graph; see
+ * docs/specs/module-loading.md §"Graph shape and wiring". It validates the
+ * *shape and wiring* of the graph before any module executes — every specifier
+ * is content-addressed,
  * every record is well-formed, and every resolved import points at a present
  * record.
  *

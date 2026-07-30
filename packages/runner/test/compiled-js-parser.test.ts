@@ -6,7 +6,6 @@ import {
   isStringLiteralRange,
   locationFromOffset,
   parseFunctionText,
-  parseStringLiteralValue,
   splitTopLevelCommaList,
   stripJsTrivia,
   stripWholeParentheses,
@@ -155,12 +154,6 @@ describe("scanner helpers", () => {
     expect(tryParseCallExpression(source, 0, source.length)).toBeUndefined();
   });
 
-  it("parses escaped string literal values", () => {
-    const source = `"a\\\"b"`;
-
-    expect(parseStringLiteralValue(source, 0, source.length)).toBe('a"b');
-  });
-
   it("recognizes exact string literal ranges", () => {
     const literalWithTrivia = ` /* before */ "a\\\"b" /* after */ `;
     expect(isStringLiteralRange(
@@ -217,22 +210,6 @@ describe("scanner helpers", () => {
     expect(() => new Function(`return ${escapedBackslash};`)).not.toThrow();
     expect(() => new Function(`return ${unicodeEscape};`)).not.toThrow();
     expect(() => new Function(`return ${adjacentStrings};`)).toThrow();
-  });
-
-  it("rejects non-string literal values", () => {
-    const source = `value`;
-
-    expect(() => parseStringLiteralValue(source, 0, source.length)).toThrow(
-      "Expected a string literal",
-    );
-  });
-
-  it("rejects malformed string literal ranges", () => {
-    const source = `"a\n"`;
-
-    expect(() => parseStringLiteralValue(source, 0, source.length)).toThrow(
-      "Expected a string literal",
-    );
   });
 
   it("strips only whole parentheses", () => {

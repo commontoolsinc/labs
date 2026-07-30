@@ -461,40 +461,6 @@ function extractSimpleParameterName(param: string): string {
   return candidate;
 }
 
-export function parseStringLiteralValue(
-  source: string,
-  start: number,
-  end: number,
-): string {
-  const trimmed = exactStringLiteralRange(source, start, end);
-  if (!trimmed) {
-    throw new CompiledJsParseError(
-      trimRange(source, start, end).start,
-      "Expected a string literal",
-    );
-  }
-
-  for (let i = trimmed.start + 1; i < trimmed.end - 1; i++) {
-    if (source.charCodeAt(i) === 92) {
-      let value = "";
-      for (let j = trimmed.start + 1; j < trimmed.end - 1; j++) {
-        const char = source[j];
-        if (char === "\\") {
-          j++;
-          if (j >= trimmed.end - 1) {
-            throw new CompiledJsParseError(j, "Unterminated string escape");
-          }
-          value += source[j];
-          continue;
-        }
-        value += char;
-      }
-      return value;
-    }
-  }
-  return source.slice(trimmed.start + 1, trimmed.end - 1);
-}
-
 export function isStringLiteralRange(
   source: string,
   start: number,

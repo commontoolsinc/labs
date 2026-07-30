@@ -141,7 +141,8 @@ closure, and produces a graph of per-module records. It:
 
 ### Loading
 
-`lockdown()` runs once ([`ensureSESInitialized`][c10]). [`loadModuleGraph`][c6]
+`lockdown()` runs once: the loader calls [`ensureSESLockdown`][c10], which
+delegates to the idempotent [`ensureSESInitialized`][c10]. [`loadModuleGraph`][c6]
 creates one `Compartment` per load, freezes its global bindings, and drives the
 entry with `compartment.importNow(entrySpecifier)`. Its `verify` option runs
 [`verifyModuleGraph`][c8] and defaults to **on**, so a graph assembled outside
@@ -155,9 +156,11 @@ are unchanged. Exactly four specifiers are admitted —
 [`RuntimeModuleIdentifiers`][c15]: `commonfabric`, `commonfabric/cfc`,
 `commonfabric/schema`, and `turndown`. The Engine registers records only for
 those ([`Engine.runtimeModuleNames`][c1]), and
-[`isAllowedAuthoredImportSpecifier`][c15] rejects every other bare specifier, so
-an authored import of any other name is a compile error rather than a
-`cf:runtime/` record.
+[`isAllowedAuthoredImportSpecifier`][c15] admits only those four bare
+specifiers, alongside relative/absolute local paths and `cf:` fabric refs
+(which resolve to authored `cf:module/` records of their own, not to runtime
+records — see the pin-in-source rule below). Any other bare specifier is a
+compile error rather than a `cf:runtime/` record.
 
 Records are SES *virtual* (third-party) records — `{ imports, exports, execute }`
 ([`VirtualModuleRecord`][c6]) — because this build of `ses` exposes no
@@ -209,26 +212,32 @@ For each authored module `M`:
   across entry points.
 - `deps(M)` — `M`'s imports (value and type alike), each a pair
   `(specifierText, target)` where `target` is either another authored module or
-  an external runtime module. External specifiers are deduplicated and sorted;
-  internal edges are sorted by `(specifierText, targetHash)`.
+  an external runtime module. External specifiers are deduplicated and then
+  sorted. Internal edges are partitioned: those leaving `M`'s
+  strongly-connected component are sorted by `(specifierText, targetHash)`, and
+  those staying inside it by `(specifierText, targetPath)` — see **Cycles**.
 
 The hash is computed over strongly-connected components of the import graph, so
 that an import cycle hashes as a unit. For the acyclic case a component has one
-member and the construction reduces to:
+member, `intraDeps` is empty, and the construction reduces to:
 
 ```
-componentHash(M) = H(
-  "cf/module-id/v1",
-  [ { path: path(M),
-      src:  normSrc(M),
-      external: sortByText([ (specifierText_i, runtimeLeaf(target_i)) ]),
-      crossDeps: sortBySpecifierThenHash([ (specifierText_j, moduleHash(target_j)) ]) } ]
-)
+componentHash(M) = H({
+  v: "cf/module-id/v1",
+  members: [ { path: path(M),
+               src:  normSrc(M),
+               external:  sortByText([ (specifierText_i, runtimeLeaf(target_i)) ]),
+               crossDeps: sortBySpecifierThenHash([ (specifierText_j, moduleHash(target_j)) ]),
+               intraDeps: [] } ],
+})
 
-moduleHash(M) = H("cf/module-id/v1", "module", componentHash(M), path(M))
+moduleHash(M) = H(["cf/module-id/v1", "module", componentHash(M), path(M)])
 
 runtimeLeaf(target) = "runtime:<specifierText>@<runtimeFingerprint>"
 ```
+
+Every member field is always present — `intraDeps: []` in the acyclic case, not
+omitted — because `H` hashes an absent key differently from an empty array.
 
 `H` is the existing SHA-256 construction [`hashStringOf`][c13]. External runtime
 modules (`commonfabric`, etc.) are leaves keyed by the runtime fingerprint, so a
@@ -377,7 +386,9 @@ actionImplId = "cf:module/" + moduleHash(M) + ":" + stableSymbol(M, decl)
 
 `stableSymbol` is the exported binding name where one exists, or the hoisted
 `__cfReg` registration key for anonymous callbacks (`pattern`, `lift`,
-`handler`, `action` arguments). [`schedulerImplementationFingerprint`][c12]
+`handler`, `action` arguments). An artifact whose provenance carries a module
+identity but no symbol is addressed by the one-part `cf:module/<identity>` form
+instead. [`schedulerImplementationFingerprint`][c12]
 therefore reports a genuine content hash, so a clean persisted observation can
 never be trusted against changed code. The reference machinery that carries
 `{ identity, symbol }` through the runtime is specified in

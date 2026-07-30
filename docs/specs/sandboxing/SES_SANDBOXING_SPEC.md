@@ -728,7 +728,7 @@ const DEFAULT_LOCKDOWN_OPTIONS = {
   localeTaming: "unsafe", // paired with the pre-lockdown locale sanitizer
   evalTaming: "safe-eval",
   // …plus errorTrapping, reporting, unhandledRejectionTrapping, regExpTaming,
-  // domainTaming, legacyRegeneratorRuntimeTaming, __hardenTaming__
+  // domainTaming, overrideDebug, legacyRegeneratorRuntimeTaming, __hardenTaming__
 };
 
 sanitizeLocaleMethods(); // vetted shim; before the intrinsics freeze
@@ -852,8 +852,8 @@ Important details:
   to the compartment's `importNowHook`, which serves only records present in the
   validated graph. The reachable set is therefore bounded by this load's
   already-verified modules plus the trusted runtime records the import policy
-  admits; there is no path from `require` to an unverified module or to a host
-  capability
+  admits; there is no path from `require` to an unverified module or to an
+  ungranted host capability
 - security must not depend on syntactically detecting every obfuscated path to
   `require`; the confinement above is what bounds it, and verifier rejection of
   unrecognized `require()` forms is defense in depth
@@ -2576,7 +2576,7 @@ Potential escape routes and their status:
 | `eval()` | Allowed inside SES compartments | Current lockdown uses `evalTaming: "safe-eval"` |
 | `Function()` | Allowed inside SES compartments | Same `safe-eval` policy as `eval()` |
 | `import()` | Rejected in v1 | Dynamic imports are deferred and verifier-rejected |
-| authored `require` | Confined | Bound to `compartment.importNow`; declared specifiers resolve through the record's verifier-checked `resolutions` map and anything else falls through to the `importNowHook`, which serves only records in the validated graph — so it reaches already-verified modules of the same load and policy-admitted runtime records, never an unverified module or a host capability. A declared runtime specifier cannot be rewired to an authored sibling |
+| authored `require` | Confined | Bound to `compartment.importNow`; declared specifiers resolve through the record's verifier-checked `resolutions` map and anything else falls through to the `importNowHook`, which serves only records in the validated graph — so it reaches already-verified modules of the same load and policy-admitted runtime records, never an unverified module or an ungranted host capability. A declared runtime specifier cannot be rewired to an authored sibling |
 | Prototype access | Blocked | SES freezes intrinsics, and the runtime explicitly freezes forwarded host constructors and `.prototype` objects before installation |
 | ambient web-fetch globals | Temporarily allowed | Compatibility shim in authored SES compartments; planned deprecation |
 | `globalThis` | Controlled | Custom minimal Compartment globals; runtime freezes the compartment global object after installing bindings and does not expose internal console-hook globals |
