@@ -1,7 +1,16 @@
 /**
- * Type-level tests pinning `action()`'s overload resolution.
+ * Type-level tests pinning `action()`'s overload resolution — the BUILDER half.
  *
  * If any type assertion is wrong, this file fails to compile.
+ *
+ * This file cannot see the surface a pattern compiles against. A pattern
+ * resolves `commonfabric` to `api/index.ts` and type-checks against
+ * `ActionFunction` there, which is a separate hand-maintained declaration of
+ * these same signatures. An overload present here and missing there is
+ * invisible to every pattern while this file stays green — which is exactly
+ * how the declared-result overload first shipped unreachable. The matching
+ * half is `packages/api/test/action-function-surface.test.ts`; a change to the
+ * overloads below belongs in both.
  *
  * The ordering of `action`'s overloads is load-bearing and a comment cannot
  * fail a build. Overload 2 (`(event: E) => void`) absorbs every callback,
