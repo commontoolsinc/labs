@@ -170,8 +170,17 @@ const GIT_COMMIT = gitSubcommand("commit");
  * delimiter here, so a masked span cannot match anything we look for.
  */
 function maskQuotedSpans(text: string): string {
+  // `\\.` in the double-quoted branch is load-bearing. Ending that branch at
+  // the first `"` meant an escaped quote closed the span early, leaving the rest
+  // of the message unmasked — and unmasked text carrying its own separator got
+  // read as commands again:
+  //
+  //   echo "a \" && cd /evil && echo \"" && git commit -m x
+  //
+  // resolved to /evil. A single-quoted span has no escapes in the shell, so
+  // that branch is a plain run to the next quote.
   return text.replace(
-    /"[^"]*"|'[^']*'/g,
+    /"(?:[^"\\]|\\.)*"|'[^']*'/g,
     (span) => "\0".repeat(span.length),
   );
 }
@@ -341,7 +350,11 @@ function expand(raw: string): string {
  * Flags after the message (`git commit -m "x" -a`) still register.
  */
 export function withoutQuotedSpans(text: string): string {
-  return text.replace(/"[^"]*"|'[^']*'/g, " ");
+  // Built on the same mask, not a second copy of the quote grammar: two
+  // spellings of "what is quoted" would drift, and this one guards the flag
+  // scan while that one guards the directory. NUL becomes a space so the
+  // surviving flags stay separated for the `(?:^|\s)` anchors.
+  return maskQuotedSpans(text).replaceAll("\0", " ");
 }
 
 /**

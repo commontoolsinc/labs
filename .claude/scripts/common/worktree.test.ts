@@ -118,6 +118,30 @@ const TARGET_DIR_CASES: Array<
     ],
   ],
   ["grep for the phrase is not a commit", "rg 'git commit' docs/", []],
+  // An escaped quote must not end the span early: the tail would be unmasked,
+  // and text carrying its own separator was read as commands again.
+  [
+    "escaped quote smuggling a cd",
+    String.raw`echo "a \" && cd /evil && echo \"" && git commit -m x`,
+    [],
+  ],
+  [
+    "escaped quote smuggling a ;cd",
+    String.raw`echo "x\" ; cd /evil ; echo \"" && git commit -m x`,
+    [],
+  ],
+  // ...while an escape before a genuine cd leaves that cd intact.
+  [
+    "escape then a real cd",
+    String.raw`printf "%s" "x\"" && cd /real && git commit -m x`,
+    ["-C", "/real"],
+  ],
+  // An apostrophe in prose must not pair with a later one and blank a real cd.
+  [
+    "apostrophe in a double-quoted string",
+    `echo "it's fine" && cd /a && echo "don't" && git commit -m x`,
+    ["-C", "/a"],
+  ],
 
   // --- cds compose; the last one alone was resolved against the wrong base ---
   ["absolute then relative", "cd /a && cd sub && git commit -m x", [
@@ -199,6 +223,16 @@ Deno.test("withoutQuotedSpans hides message text from flag scans", () => {
     false,
   );
   assertEquals(noVerify.test(withoutQuotedSpans(" --no-verify -m x")), true);
+  // Escapes are handled here too, from sharing the mask: ending the span at the
+  // first `"` left the tail visible, and a flag in that tail counted.
+  assertEquals(
+    flagRe.test(withoutQuotedSpans(String.raw` -m "a \" -a \""`)),
+    false,
+  );
+  assertEquals(
+    noVerify.test(withoutQuotedSpans(String.raw` -m "a \" --no-verify \""`)),
+    false,
+  );
 });
 
 Deno.test("splitAtGitSubcommand keeps each pattern in its own region", () => {
