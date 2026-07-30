@@ -193,11 +193,29 @@ const sourcePathByValue = new WeakMap<object, string>();
 /**
  * Associate the authored file a builder artifact came from. Written by the
  * PatternManager when it indexes an evaluated module, alongside the entry ref.
+ *
+ * LAST write wins, which is the opposite of {@link setArtifactEntryRef} and is
+ * load-bearing rather than incidental. A re-export barrel puts the SAME artifact
+ * object in two namespaces, so this is called twice for it — once with the
+ * barrel's filename, once with the defining module's. The defining module is the
+ * answer that is useful (it is the file a reader must edit, and the only one
+ * whose default export is this artifact), and it comes LAST because the evaluate
+ * loop walks `graph.specifierByPath` importer-first. First-write-wins would name
+ * the barrel. `Engine.recordModuleProvenance` solves the same re-export
+ * ambiguity explicitly; here the traversal order supplies it, so a change to
+ * that order has to preserve this.
+ *
+ * Gated on trusted-builder provenance to match the two writes it sits beside in
+ * `registerEvaluatedModules` — `indexArtifact` and `recordModuleProvenance` both
+ * gate the same way. Nothing that reaches {@link getPatternSourcePath} is
+ * untrusted, so the gate costs no coverage and keeps the table's population
+ * equal to the artifact index's.
  */
 export function setPatternSourcePath(
   value: unknown,
   sourcePath: string,
 ): void {
+  if (!isTrustedBuilderArtifact(value)) return;
   const key = asKey(value);
   if (key) sourcePathByValue.set(key, sourcePath);
 }

@@ -73,9 +73,26 @@ function resolver(roots: GateRoots, patternKey: string) {
   );
 }
 
-/** A test pattern creates stores; it is never an upgrade target (#5180). */
+/**
+ * Whether a recorded instantiation is something today's source can be applied
+ * to. Four ways it is not:
+ *
+ * - No source path at all: unaddressable, nothing to resolve.
+ * - A `*.test.tsx` entry: a test pattern creates stores and is never an upgrade
+ *   target (#5180).
+ * - A path that is not repo-root-relative. The evaluate loop records injected
+ *   helper modules too (`cfc.ts`), and the repo's own discriminator for "an
+ *   authored file" is a leading `/`. Without this the replay would build
+ *   `${repoRoot}cfc.ts` — a path with no separator, so a spurious red.
+ * - A `keyless:` identity: a session pointer, not a content hash, so it can
+ *   never equal a freshly compiled identity and would report as CHANGED on
+ *   every run forever.
+ */
 export function isUpgradeTarget(entry: VintageManifestEntry): boolean {
-  return entry.main !== undefined && !/\.test\.tsx?$/.test(entry.main);
+  if (entry.main === undefined) return false;
+  if (!entry.main.startsWith("/")) return false;
+  if (/\.test\.tsx?$/.test(entry.main)) return false;
+  return !entry.identity.startsWith("keyless:");
 }
 
 /** What replaying one fixture found. */
@@ -84,6 +101,14 @@ export interface ReplayReport {
   candidates: number;
   /** Recorded instantiations that are legitimate upgrade targets. */
   targets: number;
+  /**
+   * Recorded instantiations with NO source path — recorded but unvalidatable.
+   *
+   * Reported rather than dropped silently. This is the number the source-path
+   * propagation drove to zero, and a bound on coverage that is not printed reads
+   * as "everything was checked" when it was not.
+   */
+  unmappable: number;
   /** Targets whose source CHANGED since capture — the actual migrations. */
   changed: number;
   /** Changed targets that applied cleanly. */
@@ -110,6 +135,7 @@ export async function replayVintage(
   const fail = (detail: string): ReplayReport => ({
     candidates: 0,
     targets: 0,
+    unmappable: 0,
     changed: 0,
     updated: 0,
     failures: [{ ...where, detail }],
@@ -134,11 +160,26 @@ export async function replayVintage(
           "`deno task pattern-vintage --update`",
       );
     }
+    // The filename's identity is PROVENANCE — which version wrote this state —
+    // and provenance nothing reads is decoration that drifts. The manifest names
+    // every identity the run materialized, so checking that the filename's is
+    // among them costs one comparison and keeps the name answerable: a fixture
+    // renamed, or restored from the wrong file, says so here rather than
+    // replaying under a version it never came from.
+    if (!manifest.entries.some((e) => e.identity === vintage.identity)) {
+      return fail(
+        `this fixture's name records identity ${vintage.identity}, which it ` +
+          `does not contain (it holds ${
+            [...new Set(manifest.entries.map((e) => e.identity))].join(", ")
+          }) — so it is not the state its name claims`,
+      );
+    }
 
     const targets = manifest.entries.filter(isUpgradeTarget);
     const report: ReplayReport = {
       candidates: manifest.entries.length,
       targets: targets.length,
+      unmappable: manifest.entries.filter((e) => e.main === undefined).length,
       changed: 0,
       updated: 0,
       failures: [],
@@ -201,29 +242,47 @@ export async function replayVintage(
   });
 }
 
-/** Replay every fixture under `vintagesRoot`. */
+/**
+ * Replay every fixture under `vintagesRoot`.
+ *
+ * Returns the fixtures it walked, so the caller can decide coverage against the
+ * SAME list it replayed. Two walks would be two answers to one question, and the
+ * pair "replayed nothing" / "everything is covered" is exactly the disagreement
+ * that reads as a pass.
+ */
 export async function replayAll(
   roots: GateRoots,
 ): Promise<
   {
+    vintages: VintageRef[];
     replayed: number;
     candidates: number;
+    unmappable: number;
     changed: number;
     updated: number;
     failures: ReplayFailure[];
   }
 > {
   const vintages = await collectVintages(roots.vintagesRoot);
-  let candidates = 0, changed = 0, updated = 0;
+  let candidates = 0, changed = 0, updated = 0, unmappable = 0;
   const failures: ReplayFailure[] = [];
   for (const vintage of vintages) {
     const report = await replayVintage(roots, vintage);
     candidates += report.candidates;
+    unmappable += report.unmappable;
     changed += report.changed;
     updated += report.updated;
     failures.push(...report.failures);
   }
-  return { replayed: vintages.length, candidates, changed, updated, failures };
+  return {
+    vintages,
+    replayed: vintages.length,
+    candidates,
+    unmappable,
+    changed,
+    updated,
+    failures,
+  };
 }
 
 /** The pattern-test file that populates a vintage for `patternKey`. */

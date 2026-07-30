@@ -47,7 +47,6 @@ import {
 } from "../packages/piece/src/system-pattern-url.ts";
 import {
   armVerdictGuard,
-  collectVintages,
   isClean,
   relativeToRepo,
   reportFailures,
@@ -132,13 +131,19 @@ async function main() {
     return;
   }
 
-  const { replayed, candidates, changed, updated, failures } = await replayAll(
-    roots,
-  );
-  const uncovered = uncoveredRequiredPatterns(
-    required,
-    await collectVintages(roots.vintagesRoot),
-  );
+  const {
+    vintages,
+    replayed,
+    candidates,
+    unmappable,
+    changed,
+    updated,
+    failures,
+  } = await replayAll(roots);
+  // Coverage is judged against the SAME list that was replayed. A second walk
+  // would be a second answer to one question, and "replayed nothing" paired with
+  // "everything is covered" is the disagreement that reads as a pass.
+  const uncovered = uncoveredRequiredPatterns(required, vintages);
 
   if (uncovered.length > 0) console.error(reportUncovered(uncovered));
   if (replayed === 0) console.error(`\n${reportNothingReplayed()}`);
@@ -154,6 +159,15 @@ async function main() {
     `Replayed ${replayed} vintage(s): ${candidates} recorded instantiation(s), ` +
       `${changed} changed since capture, ${updated} updated cleanly.`,
   );
+  // Printed only when non-zero, and printed rather than absorbed: these are
+  // recorded roots the replay could not address, so they are a BOUND on what a
+  // green run just asserted. Silence about them would read as full coverage.
+  if (unmappable > 0) {
+    console.log(
+      `  ${unmappable} recorded instantiation(s) carry no source path and were ` +
+        `NOT validated — they cannot be mapped to a file to apply.`,
+    );
+  }
 }
 
 if (import.meta.main) {

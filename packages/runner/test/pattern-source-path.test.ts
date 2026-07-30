@@ -137,11 +137,73 @@ describe("pattern source path", () => {
 
       const sources = seen.map((i) => i.main);
       // No instantiation may arrive sourceless — that is the regression.
-      expect(sources.filter((s) => s === undefined)).toEqual([]);
+      // `not.toContain` rather than `toEqual([])`: `@std/expect`'s loose
+      // equality treats `[undefined]` as equal to `[]`, so the obvious spelling
+      // of this assertion cannot fail.
+      expect(sources).not.toContain(undefined);
       // Each names its own definition site. Asserting the sub-pattern's file
       // specifically is the point: a lookup that resolved only the exact object
       // would still report the parent correctly and drop this one.
       expect(new Set(sources)).toEqual(new Set(["/main.tsx", "/sub.tsx"]));
+    });
+
+    // A re-export barrel puts the SAME artifact object in two namespaces, so
+    // the stamp is written twice for it — once naming the barrel, once naming
+    // the module that defines it. The defining module is the useful answer: it
+    // is the file a reader edits, and the only one whose default export is this
+    // pattern. Resolving to the barrel would hand the vintage gate a path whose
+    // default export is something else entirely.
+    it("names the DEFINING module, not a re-export barrel", async () => {
+      const program: RuntimeProgram = {
+        main: "/main.tsx",
+        files: [
+          {
+            name: "/sub.tsx",
+            contents: [
+              "import { pattern, lift } from 'commonfabric';",
+              "const inc = lift((x:number)=>x+1);",
+              "export const sub = pattern<{ n: number }>(({ n }) => {",
+              "  return { out: inc(n) };",
+              "});",
+            ].join("\n"),
+          },
+          {
+            name: "/barrel.ts",
+            contents: "export { sub } from './sub.tsx';",
+          },
+          {
+            name: "/main.tsx",
+            contents: [
+              "import { pattern } from 'commonfabric';",
+              "import { sub } from './barrel.ts';",
+              "export default pattern<{ value: number }>(({ value }) => {",
+              "  const child = sub({ n: value });",
+              "  return { result: child.out };",
+              "});",
+            ].join("\n"),
+          },
+        ],
+      };
+
+      const compiled = await runtime.patternManager.compilePattern(program, {
+        space,
+      });
+      const resultCell = runtime.getCell<{ result: number }>(
+        space,
+        "barrel source path",
+        undefined,
+        tx,
+      );
+      const result = runtime.run(tx, compiled, { value: 4 }, resultCell);
+      await tx.commit();
+      tx = runtime.edit();
+      await result.pull();
+      expect(result.getAsQueryResult()).toEqual({ result: 5 });
+
+      const sources = seen.map((i) => i.main);
+      expect(sources).not.toContain(undefined);
+      expect(sources).toContain("/sub.tsx");
+      expect(sources).not.toContain("/barrel.ts");
     });
 
     // The by-identity/warm-cache path is the one this table exists for: it

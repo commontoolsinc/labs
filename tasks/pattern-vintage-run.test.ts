@@ -5,6 +5,7 @@ import { collectVintages, PINNED } from "./pattern-vintage-lib.ts";
 import {
   captureMissing,
   type GateRoots,
+  isUpgradeTarget,
   replayAll,
 } from "./pattern-vintage-run.ts";
 
@@ -185,6 +186,55 @@ const SUBJECT_TEST = [
 
 const TEST_KEY = KEY.replace(/\.tsx$/, ".test.tsx");
 
+/**
+ * The upgrade-target filter, case by case.
+ *
+ * Its own tests rather than only end-to-end coverage, because the invariant it
+ * carries is one prose already failed to enforce: a test pattern creates stores
+ * and is NEVER an upgrade target. Applying today's test pattern at a store's top
+ * measurably makes the gate WEAKER — the additive-required break exits 0 —
+ * so this is the mechanical guard that keeps it from being merely written down.
+ */
+describe("isUpgradeTarget", () => {
+  const entry = (
+    over: Partial<Parameters<typeof isUpgradeTarget>[0]> = {},
+  ) => ({
+    identity: "abc123",
+    symbol: "default",
+    main: "/packages/patterns/system/home.tsx",
+    cellId: "of:fid1:whatever",
+    space: "did:key:zSpace",
+    ...over,
+  });
+
+  it("accepts an authored pattern file", () => {
+    expect(isUpgradeTarget(entry())).toBe(true);
+  });
+
+  it("REFUSES a test pattern — it creates stores, it is never a target", () => {
+    expect(isUpgradeTarget(entry({ main: "/p/home.test.tsx" }))).toBe(false);
+    expect(isUpgradeTarget(entry({ main: "/p/home.test.ts" }))).toBe(false);
+  });
+
+  it("refuses an entry with no source path", () => {
+    expect(isUpgradeTarget(entry({ main: undefined }))).toBe(false);
+  });
+
+  it("refuses a path that is not repo-root-relative", () => {
+    // The evaluate loop records injected helper modules too, and they carry no
+    // leading slash — `${repoRoot}cfc.ts` would be a separator-less path.
+    expect(isUpgradeTarget(entry({ main: "cfc.ts" }))).toBe(false);
+  });
+
+  it("refuses a keyless session pointer", () => {
+    // Not a content hash, so it can never equal a freshly compiled identity —
+    // it would report as CHANGED on every run forever.
+    expect(isUpgradeTarget(entry({ identity: "keyless:fid1:XWh0" }))).toBe(
+      false,
+    );
+  });
+});
+
 describe("the vintage gate, end to end", () => {
   let dir = "";
   let roots: GateRoots;
@@ -339,6 +389,69 @@ describe("the vintage gate, end to end", () => {
     // fixture records many instantiations, so an unattributed failure would
     // leave the reader to guess which of them retired.
     expect(failures[0].detail).toContain(`/patterns/${KEY} no longer resolves`);
+  });
+
+  describe("capture refuses a state the pattern never legitimately reaches", () => {
+    const setSubjectTest = (body: string) =>
+      Deno.writeTextFile(`${dir}/patterns/${TEST_KEY}`, body);
+
+    it("refuses when the pattern's own tests do not pass", async () => {
+      // A fixture is only worth pinning if the state in it is state the pattern
+      // actually reaches. Capturing off a failing run would pin a lie, and every
+      // later generation would be replayed against it.
+      await setSubjectTest(
+        [
+          "import { assert, pattern } from 'commonfabric';",
+          `import Subject from './${KEY}';`,
+          "export default pattern(() => {",
+          "  const subject = Subject({});",
+          "  const never = assert(() => subject.items.get().length === 99);",
+          "  return { tests: [{ assertion: never }], subject };",
+          "});",
+          "",
+        ].join("\n"),
+      );
+
+      const { captured, problems } = await captureMissing(
+        roots,
+        [KEY],
+        new Date("2026-07-29T12:00:00.000Z"),
+      );
+
+      expect(captured).toEqual([]);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toContain("its own tests did not pass");
+      // Nothing was written: a refused capture must not leave a partial fixture
+      // behind for a later run to mistake for a good one.
+      expect(await collectVintages(roots.vintagesRoot)).toEqual([]);
+    });
+
+    it("refuses a test that asserts nothing", async () => {
+      // A run with no assertions cannot have driven the pattern anywhere, so the
+      // fixture would hold a bare materialized root — which is the shape that
+      // makes a green replay meaningless.
+      await setSubjectTest(
+        [
+          "import { pattern } from 'commonfabric';",
+          `import Subject from './${KEY}';`,
+          "export default pattern(() => {",
+          "  const subject = Subject({});",
+          "  return { tests: [], subject };",
+          "});",
+          "",
+        ].join("\n"),
+      );
+
+      const { captured, problems } = await captureMissing(
+        roots,
+        [KEY],
+        new Date("2026-07-29T12:00:00.000Z"),
+      );
+
+      expect(captured).toEqual([]);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toContain("ran no assertions");
+    });
   });
 
   describe("a module contributing several instantiable patterns", () => {
