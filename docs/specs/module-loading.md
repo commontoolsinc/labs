@@ -149,9 +149,15 @@ the Engine cannot load unchecked; the Engine passes `verify: false` because it
 already ran the check while compiling. Because every reachable record is
 registered in the compartment's `importNowHook` up front, no asynchronous import
 occurs at run time, preserving the scheduler's synchronous-execution contract.
-Runtime modules (`commonfabric`, `commonfabric/schema`, aliases) are ordinary
-records in the same graph under `cf:runtime/<specifier>`
-([`runtimeModuleRecords`][c6]); endowment and hardening are unchanged.
+Trusted runtime modules are ordinary records in the same graph under
+`cf:runtime/<specifier>` ([`runtimeModuleRecords`][c6]); endowment and hardening
+are unchanged. Exactly four specifiers are admitted —
+[`RuntimeModuleIdentifiers`][c15]: `commonfabric`, `commonfabric/cfc`,
+`commonfabric/schema`, and `turndown`. The Engine registers records only for
+those ([`Engine.runtimeModuleNames`][c1]), and
+[`isAllowedAuthoredImportSpecifier`][c15] rejects every other bare specifier, so
+an authored import of any other name is a compile error rather than a
+`cf:runtime/` record.
 
 Records are SES *virtual* (third-party) records — `{ imports, exports, execute }`
 ([`VirtualModuleRecord`][c6]) — because this build of `ses` exposes no
@@ -433,9 +439,9 @@ inputs also require the integration described in
    `compartment.importNow(entrySpecifier)` ([`loadModuleGraph`][c6]), so no
    asynchronous import occurs at run time.
 
-4. **Runtime modules as records.** `commonfabric` and friends are records in the
-   same graph ([`runtimeModuleRecords`][c6]), each copying the already-frozen
-   runtime namespace onto its module exports.
+4. **Runtime modules as records.** The four admitted runtime specifiers are
+   records in the same graph ([`runtimeModuleRecords`][c6]), each copying the
+   already-frozen runtime namespace onto its module exports.
 
 5. **Compartment lifecycle.** One compartment per load, hosting all of that
    load's modules, with its global bindings frozen so no module can poison
@@ -794,6 +800,7 @@ This spec supplies the stable implementation identity that
 [c12]: ../../packages/runner/src/scheduler/run.ts
 [c13]: ../../packages/data-model/src/value-hash.ts
 [c14]: ../../packages/runner/src/compilation-cache/cell-cache.ts
+[c15]: ../../packages/runner/src/sandbox/runtime-module-policy.ts
 
 - Compile and evaluate entry points: [`Engine.compileToRecordGraph`][c1],
   [`Engine.compileResolvedToRecordGraph`][c1],
@@ -814,6 +821,9 @@ This spec supplies the stable implementation identity that
 - Loading: [`loadModuleGraph`][c6] / [`importModuleGraphNow`][c6] over
   [`VirtualModuleRecord`][c6]s, with [`runtimeModuleRecords`][c6] supplying the
   trusted host modules.
+- Runtime-module policy: [`RuntimeModuleIdentifiers`][c15] is the admitted set,
+  enforced on the authored side by [`isAllowedAuthoredImportSpecifier`][c15] and
+  on the registration side by [`Engine.runtimeModuleNames`][c1].
 - Verification: [`verifyCompiledModuleBody`][c8] and [`verifyModuleGraph`][c8],
   over the shared [`classifyModuleItems`][c9] core.
 - SES lockdown and source-map registration: [`ensureSESInitialized`][c10],
