@@ -71,6 +71,7 @@ import {
   relativeToRepo,
   reportFailures,
   reportNothingReplayed,
+  reportReplaySummary,
   reportUncovered,
   reportUnmappedUrls,
   requiredPatternKeys,
@@ -151,34 +152,25 @@ async function main() {
     return;
   }
 
-  const { vintages, replayed, candidates, changed, updated, failures } =
-    await replayAll(roots);
+  const replay = await replayAll(roots);
   // Coverage is judged against the SAME list that was replayed. A second walk
   // would be a second answer to one question, and "replayed nothing" paired with
   // "everything is covered" is the disagreement that reads as a pass.
-  const uncovered = uncoveredRequiredPatterns(required, vintages);
+  const uncovered = uncoveredRequiredPatterns(required, replay.vintages);
 
   if (uncovered.length > 0) console.error(reportUncovered(uncovered));
-  if (replayed === 0) console.error(`\n${reportNothingReplayed()}`);
-  if (failures.length > 0) console.error(`\n${reportFailures(failures)}`);
+  if (replay.replayed === 0) console.error(`\n${reportNothingReplayed()}`);
+  if (replay.failures.length > 0) {
+    console.error(`\n${reportFailures(replay.failures)}`);
+  }
 
-  // CANDIDATES is the soundness floor, not `updated`. A run where nothing
-  // changed legitimately updates nothing — that is the common case, and the
-  // auto-updater fires on the same condition. But a run with no candidates
-  // examined no update targets at all, which is the shape that has read as
-  // success three separate times in this tier's history.
-  if (!isClean(failures, uncovered, replayed, candidates)) Deno.exit(1);
-  // "all mappable" is safe to state unconditionally here: `replayVintage`
-  // reports every unaddressable root as a FAILURE, and `isClean` above requires
-  // no failures — so this line is unreachable with `unmappable > 0`. Saying it
-  // positively rather than printing a caveat beside a pass is the point; a green
-  // verdict with a footnote about skipped roots is how narrowed coverage reads
-  // as success.
-  console.log(
-    `Replayed ${replayed} vintage(s): ${candidates} recorded instantiation(s), ` +
-      `all mappable to a file; ${changed} changed since capture, ` +
-      `${updated} updated cleanly with no state stranded.`,
-  );
+  // CANDIDATES and TARGETS are the soundness floor, not `updated`. A run where
+  // nothing changed legitimately updates nothing — that is the common case, and
+  // the auto-updater fires on the same condition. But a run with no candidates,
+  // or none that today's source could be applied to, examined no update targets
+  // at all — the shape that has read as success three separate times here.
+  if (!isClean(replay.failures, uncovered, replay)) Deno.exit(1);
+  console.log(reportReplaySummary(replay));
 }
 
 if (import.meta.main) {

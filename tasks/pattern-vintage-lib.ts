@@ -11,9 +11,18 @@
  * Layout:
  *
  *     packages/piece/test/vintages/<pattern key>/pinned/<iso>-<identity>.sqlite
+ *     packages/piece/test/vintages/<pattern key>/pinned/<iso>-<identity>.sqlite.spaces/<did>.sqlite
  *
  * `<pattern key>` is the pattern's repo path under `packages/patterns/`, so a
  * fixture sits next to nothing and is found by path alone.
+ *
+ * The `.sqlite.spaces/` directory carries the run's OTHER spaces — a capture
+ * that instantiates a pattern via `Factory.inSpace(...)` writes a second store,
+ * and a fixture that held only the first would record roots whose state it does
+ * not have. It is part of the FIXTURE, not a fixture itself, so
+ * `parseVintagePath` declines everything inside one. Its shape lives in
+ * `packages/piece/test/vintage-layout.ts`, which the snapshot/restore side needs
+ * too and which is dependency-free so this module stays so.
  *
  * The tree is deliberately NOT under `packages/patterns/`, which is the
  * obvious home for it and the wrong one. `tasks/build-binaries.ts` passes that
@@ -58,6 +67,8 @@
  * is transient and local, where git history is permanent and shared by
  * everyone who clones.
  */
+
+import { VINTAGE_SPACES_SUFFIX } from "../packages/piece/test/vintage-layout.ts";
 
 /** Root of the committed fixture tree. See the note above on why it is here. */
 export const VINTAGES_DIR = "packages/piece/test/vintages";
@@ -136,6 +147,15 @@ export function parseVintagePath(
   if (cut === -1) return undefined;
   const fileName = rest.slice(cut + 1);
   const dir = rest.slice(0, cut);
+  // A companion store is PART of the fixture beside it, not a fixture of its
+  // own. Declining it by name is deliberate rather than incidental: its filename
+  // is a space DID, which would not parse as `<stamp>-<identity>` today, but a
+  // gate that enumerated one as a separate vintage would replay a space against
+  // a pattern key it never belonged to — and the reason it does not would be
+  // invisible.
+  if (dir.split("/").some((part) => part.endsWith(VINTAGE_SPACES_SUFFIX))) {
+    return undefined;
+  }
   const tierCut = dir.lastIndexOf("/");
   if (tierCut === -1) return undefined;
   const tier = dir.slice(tierCut + 1);
@@ -315,6 +335,38 @@ export function reportFailures(failures: readonly ReplayFailure[]): string {
   ].join("\n");
 }
 
+/**
+ * What the gate prints when it PASSES — built here and tested, for the same
+ * reason the failure reports are: it is the whole of what a green run tells
+ * whoever reads the log, and a claim assembled inline is one nothing checks.
+ *
+ * "all mappable" is stated unconditionally and that is safe: `replayVintage`
+ * reports every unaddressable root as a FAILURE and this line is only reached
+ * once `isClean` has found none. Saying it positively rather than printing a
+ * caveat beside a pass is the point — a green verdict with a footnote about
+ * skipped roots is how narrowed coverage reads as success.
+ *
+ * `targets` sits beside `candidates` because the two differ, and the gap is the
+ * honest measure of what was examined: a recorded instantiation is only an
+ * upgrade target if today's source can be applied to it (a test pattern and a
+ * keyless session pointer are neither). Stating only `candidates` would
+ * overstate what a green run bought.
+ */
+export function reportReplaySummary(
+  counts: {
+    replayed: number;
+    candidates: number;
+    targets: number;
+    changed: number;
+    updated: number;
+  },
+): string {
+  return `Replayed ${counts.replayed} vintage(s): ${counts.candidates} ` +
+    `recorded instantiation(s), all mappable to a file; ${counts.targets} ` +
+    `upgrade target(s), ${counts.changed} changed since capture, ` +
+    `${counts.updated} updated cleanly with no state stranded.`;
+}
+
 /** What the gate prints when it found no fixture to replay at all. */
 export function reportNothingReplayed(): string {
   return [
@@ -401,11 +453,15 @@ export function armVerdictGuard(
  * tested, rather than being an `if` at the bottom of `main` that a later edit
  * can quietly invert — a gate that exits 0 on failure is worse than no gate.
  *
- * `candidates` is the soundness floor, NOT the number updated. A run where no
- * pattern changed legitimately updates nothing, which is the common case and
- * the same condition the auto-updater fires on. A run with no CANDIDATES
- * examined no update targets at all — the shape that has read as success three
- * separate times in this tier's history.
+ * `counts.candidates` and `counts.targets` are the soundness floor, NOT the
+ * number updated. A run where no pattern changed legitimately updates nothing,
+ * which is the common case and the same condition the auto-updater fires on. A
+ * run with no CANDIDATES examined no update targets at all — the shape that has
+ * read as success three separate times in this tier's history. `targets` is the
+ * same floor one step further in: recorded instantiations that today's source
+ * cannot be applied to (a test pattern, a keyless session pointer) are not
+ * coverage, so a run whose every candidate was one of those applied nothing
+ * either, and must not read as a pass.
  *
  * `replayed` is part of the condition and not just a number to print: zero
  * replays is the shape a broken gate takes, not the shape a clean tree takes.
@@ -413,9 +469,8 @@ export function armVerdictGuard(
 export function isClean(
   failures: readonly ReplayFailure[],
   uncovered: readonly string[],
-  replayed: number,
-  candidates: number,
+  counts: { replayed: number; candidates: number; targets: number },
 ): boolean {
-  return failures.length === 0 && uncovered.length === 0 && replayed > 0 &&
-    candidates > 0;
+  return failures.length === 0 && uncovered.length === 0 &&
+    counts.replayed > 0 && counts.candidates > 0 && counts.targets > 0;
 }

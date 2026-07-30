@@ -13,6 +13,7 @@ import {
   reportFailures,
   reportNothingReplayed,
   reportNoVerdict,
+  reportReplaySummary,
   reportUncovered,
   reportUnmappedUrls,
   requiredPatternKeys,
@@ -25,6 +26,11 @@ import {
 } from "./pattern-vintage-lib.ts";
 import { strandedKeys } from "../packages/piece/test/state-continuity-harness.ts";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import {
+  companionFileName,
+  companionSpace,
+  vintageCompanionDir,
+} from "../packages/piece/test/vintage-layout.ts";
 
 const ID_A = "bafyaaaa";
 const ID_B = "bafybbbb";
@@ -122,6 +128,45 @@ describe("vintage paths", () => {
     ) {
       expect(parseVintagePath(path), `should decline: ${path}`).toBeUndefined();
     }
+  });
+
+  it("declines a companion store — it is part of a fixture, not one", () => {
+    // A multi-space fixture keeps its other spaces beside the primary file, and
+    // each is a raw `.sqlite` under a `.sqlite.spaces/` directory. Enumerating
+    // one as a vintage in its own right would replay another space's store
+    // against a pattern key it never belonged to.
+    const fixture = `${vintageDir("system/home.tsx", PINNED)}/${
+      vintageFileName("2026-01-01T00-00-00.000Z", ID_A)
+    }`;
+    const companions = vintageCompanionDir(fixture);
+
+    expect(parseVintagePath(fixture)).toBeDefined();
+    expect(
+      parseVintagePath(
+        `${companions}/${encodeURIComponent("did:key:zChild")}.sqlite`,
+      ),
+    ).toBeUndefined();
+    // Not merely because a DID does not parse as `<stamp>-<identity>`: a
+    // companion whose name DOES look like one is still declined.
+    expect(
+      parseVintagePath(
+        `${companions}/${vintageFileName("2026-01-01T00-00-00.000Z", ID_B)}`,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("names a companion by its space, and declines one it could not have written", () => {
+    // Round-trip first: a DID is full of `:` and survives the encoding intact.
+    const did = "did:key:z6MkheCA7HT1DG4B4SvCi8eKiRt9r14iYzQowFLgwC8k7UR8";
+    expect(companionSpace(companionFileName(did))).toBe(did);
+
+    // And the guard. A bare `decodeURIComponent` THROWS on a malformed escape,
+    // so one stray file in a companion directory would take down every fixture
+    // in the run rather than its own — the failure mode this gate exists to not
+    // have. `spaceFromStoreFilename` guards the store layout the same way.
+    expect(() => decodeURIComponent("%zz")).toThrow();
+    expect(companionSpace("%zz.sqlite")).toBeUndefined();
+    expect(companionSpace("README.md")).toBeUndefined();
   });
 });
 
@@ -285,21 +330,52 @@ describe("reporting", () => {
     // Stated once and tested, rather than an `if` at the bottom of main that a
     // later edit can quietly invert. A gate that exits 0 on failure is worse
     // than no gate at all.
-    expect(isClean([], [], 2, 5)).toBe(true);
-    expect(isClean([failure], [], 2, 5)).toBe(false);
-    expect(isClean([], ["system/home.tsx"], 2, 5)).toBe(false);
-    expect(isClean([failure], ["system/home.tsx"], 2, 5)).toBe(false);
+    const counts = { replayed: 2, candidates: 5, targets: 5 };
+    expect(isClean([], [], counts)).toBe(true);
+    expect(isClean([failure], [], counts)).toBe(false);
+    expect(isClean([], ["system/home.tsx"], counts)).toBe(false);
+    expect(isClean([failure], ["system/home.tsx"], counts)).toBe(false);
+  });
+
+  it("states what a PASS actually covered, targets included", () => {
+    // The success line is the whole of what a green run tells its reader, and
+    // `targets` is the number that keeps it honest: 12 recorded instantiations
+    // of which only 5 could be applied is very different coverage from 12 of 12.
+    const summary = reportReplaySummary({
+      replayed: 2,
+      candidates: 12,
+      targets: 5,
+      changed: 3,
+      updated: 3,
+    });
+
+    expect(summary).toBe(
+      "Replayed 2 vintage(s): 12 recorded instantiation(s), all mappable to " +
+        "a file; 5 upgrade target(s), 3 changed since capture, 3 updated " +
+        "cleanly with no state stranded.",
+    );
   });
 
   it("FAILS a run that replayed nothing, however clean it looks", () => {
     // The catastrophic shape: no failures, nothing uncovered, and no evidence
     // whatsoever. A run that replays nothing proves nothing, so it cannot be
     // the same answer as a run that replayed everything and found it readable.
-    expect(isClean([], [], 0, 0)).toBe(false);
+    expect(isClean([], [], { replayed: 0, candidates: 0, targets: 0 })).toBe(
+      false,
+    );
     // The same shape one level in: fixtures replayed, but between them they
     // recorded no instantiation, so no update target was examined. "Replayed 2
     // vintage(s)" would read as success while proving nothing.
-    expect(isClean([], [], 2, 0)).toBe(false);
+    expect(isClean([], [], { replayed: 2, candidates: 0, targets: 0 })).toBe(
+      false,
+    );
+    // And one further in still: instantiations were recorded, but not one of
+    // them is something today's source can be applied to — every candidate a
+    // test pattern or a keyless session pointer. Nothing was updated and nothing
+    // could have been, so this is not a pass either.
+    expect(isClean([], [], { replayed: 2, candidates: 7, targets: 0 })).toBe(
+      false,
+    );
     expect(reportNothingReplayed()).toContain("covered NOTHING");
     expect(reportNothingReplayed()).toContain(
       "deno task pattern-vintage --update",
@@ -462,5 +538,38 @@ describe("stranded-state comparison", () => {
     const after: Record<string, unknown> = { items: ["a"] };
     after.self = after;
     expect(strandedKeys(before, after)).toEqual([]);
+  });
+});
+
+describe("stranded-state comparison is a SUBSET check", () => {
+  it("does not report a nested object that gained a field", () => {
+    // The false positive the cross-space case surfaced. An update may ADD, and
+    // additions are not only top-level: a nested pattern gaining a defaulted
+    // field turns {note, owner} into {note, owner, addedLater: []} several
+    // levels down. Comparing for equality reds a perfectly compatible change.
+    expect(strandedKeys(
+      { child: { note: "captured", owner: "v" } },
+      { child: { owner: "v", note: "captured", addedLater: [] } },
+    )).toEqual([]);
+  });
+
+  it("still reports a nested value that CHANGED", () => {
+    expect(strandedKeys(
+      { child: { note: "captured" } },
+      { child: { note: "different" } },
+    )).toEqual(["child"]);
+  });
+
+  it("still reports a nested key that DISAPPEARED", () => {
+    expect(strandedKeys({ child: { note: "captured" } }, { child: {} }))
+      .toEqual(["child"]);
+  });
+
+  it("allows an array to grow but not to lose or reorder", () => {
+    // Appending is an addition. Truncating loses data, and reordering moves an
+    // element out from under a reader that knew its index.
+    expect(strandedKeys({ xs: [1, 2] }, { xs: [1, 2, 3] })).toEqual([]);
+    expect(strandedKeys({ xs: [1, 2] }, { xs: [1] })).toEqual(["xs"]);
+    expect(strandedKeys({ xs: [1, 2] }, { xs: [2, 1] })).toEqual(["xs"]);
   });
 });

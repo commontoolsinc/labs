@@ -35,6 +35,7 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
+  listSpaceStores,
   snapshotSpaceStore,
   spaceStorePath,
 } from "@commonfabric/memory/v2/dump";
@@ -55,6 +56,11 @@ import {
   TILE_UI,
   UI,
 } from "@commonfabric/runner";
+import {
+  companionFileName,
+  companionSpace,
+  vintageCompanionDir,
+} from "./vintage-layout.ts";
 import type { RuntimeProgram } from "@commonfabric/runner";
 // The comparison's two leaf cases. A materialized root is not plain data: at an
 // `asCell`/`asStream` position it holds a live cell, and a durable doc may hold
@@ -128,11 +134,64 @@ export interface VintageRuntime {
    * handlers, rather than a bare materialized root with nothing in it.
    */
   storageManager: StorageManager;
+  /** The PRIMARY space: the signer's own, and the one a fixture is named for. */
   space: string;
+  /**
+   * Every space this runtime was restored WITH, primary and companions alike,
+   * sorted. Empty for a fresh store.
+   *
+   * Read at open, before anything can write, so it answers "what did this
+   * fixture CARRY" rather than "what has been touched since" — the engine opens
+   * a store with `{ create: true }`, so by the time a replay has read anything
+   * the answer would already have changed.
+   *
+   * It is a DIAGNOSIS, not a control: "carries the space" does not imply "holds
+   * the root", since a store that opened but never committed restores as a
+   * valid empty database. `vintageHoldsRoot` is the control; this is what lets
+   * a failure say "the fixture does not carry did:key:…" instead of leaving the
+   * reader to work out why a root was not there.
+   */
+  restoredSpaces: readonly string[];
   storeDir: string;
-  /** Snapshot this space to `destPath`. Crash-consistent, runs no migrations. */
+  /**
+   * Snapshot EVERY space this runtime wrote — the primary to `destPath`, the
+   * rest into its companion directory. Crash-consistent, runs no migrations.
+   *
+   * Not atomic: it writes the primary first, then one companion at a time, so a
+   * caller that publishes into a shared tree has to clean up after a partial
+   * write itself (`captureVintage` does).
+   */
   snapshot(destPath: string): Promise<void>;
   dispose(): Promise<void>;
+}
+
+/** Every companion store beside `fixturePath`, as `[space, path]`. */
+async function companionStores(
+  fixturePath: string,
+): Promise<[string, string][]> {
+  const dir = vintageCompanionDir(fixturePath);
+  const found: [string, string][] = [];
+  try {
+    for await (const entry of Deno.readDir(dir)) {
+      if (!entry.isFile) continue;
+      // A name this repo could not have written is not a companion — skipping
+      // it cannot lose a real space, and every root whose space did not restore
+      // is reported by the replay anyway.
+      const space = companionSpace(entry.name);
+      if (space === undefined) continue;
+      found.push([space, `${dir}/${entry.name}`]);
+    }
+  } catch (error) {
+    // No companion directory means a single-space fixture, which is the common
+    // case and not a problem. Anything else must surface.
+    if (error instanceof Deno.errors.NotFound) return [];
+    throw error;
+  }
+  // Sorted so a restore is reproducible rather than directory-order dependent.
+  // By code point, not `localeCompare`, which is locale-dependent and so is not
+  // the same order on two machines — the property being bought here.
+  found.sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+  return found;
 }
 
 /**
@@ -155,6 +214,13 @@ export async function openFileBackedRuntime(
     // re-keying is an unbounded migration that would destroy the fidelity the
     // fixture exists to buy (CFC labels name the space, among other things).
     await seedSpaceStore(storeDir, space, fromSnapshot);
+    // Companions restore under the DID they were captured in, for the same
+    // reason and more strictly: a cross-space child's recorded root names that
+    // DID, so re-keying would leave the root unaddressable rather than merely
+    // relabelled.
+    for (const [companion, path] of await companionStores(fromSnapshot)) {
+      await seedSpaceStore(storeDir, companion, path);
+    }
   }
 
   const server = serverOver(storeDir);
@@ -168,11 +234,25 @@ export async function openFileBackedRuntime(
     runtime,
     storageManager,
     space,
+    // Enumerated from disk rather than assumed from `fromSnapshot`, so this is
+    // what actually landed where the engine looks — the thing the replay needs
+    // to know.
+    restoredSpaces: fromSnapshot === undefined
+      ? []
+      : listSpaceStores(storeUrl).map((info) => info.space).sort(),
     storeDir,
     async snapshot(destPath: string) {
       // Everything must be durable before the copy, or the fixture records a
-      // state the capture never actually reached.
+      // state the capture never actually reached. `idle()` waits for scheduler
+      // quiescence and no further; a COLD compile's write-back is awaited by
+      // `compilePattern` itself, but the recovery and cross-space replication
+      // paths are tracked separately and drained only by this flush. A fixture
+      // is read by a FRESH runtime, which is precisely the case it exists for —
+      // cheap insurance rather than a fix for a measured loss, since the
+      // replication a companion store would carry does not currently succeed
+      // under the pattern-test runner at all.
       await runtime.idle();
+      await runtime.patternManager.flushCompileCacheWrites();
       await runtime.storageManager.synced();
       const path = spaceStorePath(storeUrl, space);
       if (path === null) {
@@ -181,6 +261,30 @@ export async function openFileBackedRuntime(
         );
       }
       snapshotSpaceStore(path, destPath);
+      // Every OTHER space the run wrote travels too, enumerated from the store
+      // itself rather than from what an observer recorded: the two can disagree,
+      // and the copy has to be a statement about what is on disk.
+      //
+      // "Has a store file" is NOT "holds state" — the engine opens with
+      // `{ create: true }`, so merely reaching a space leaves an empty database
+      // behind, and copying one carries nothing. That is why the replay's
+      // per-root control is `vintageHoldsRoot` and not a question about spaces.
+      const companionDir = vintageCompanionDir(destPath);
+      const companions = listSpaceStores(storeUrl).filter((info) =>
+        info.space !== space
+      );
+      if (companions.length > 0) {
+        await Deno.mkdir(companionDir, { recursive: true });
+      }
+      for (const info of companions) {
+        // `listSpaceStores` just stat'd this file, so re-resolving it cannot
+        // legitimately come back null; `!` rather than a branch nothing can
+        // reach. `snapshotSpaceStore` throws on a path that is not there.
+        snapshotSpaceStore(
+          spaceStorePath(storeUrl, info.space)!,
+          `${companionDir}/${companionFileName(info.space)}`,
+        );
+      }
     },
     async dispose() {
       await runtime.dispose();
@@ -502,11 +606,12 @@ export function comparableState(value: unknown): unknown {
  */
 export async function readVintageState(
   vintage: VintageRuntime,
+  space: string,
   cellId: string,
 ): Promise<Record<string, unknown> | undefined> {
   try {
     const raw = vintage.runtime.getCellFromEntityId(
-      vintage.space as never,
+      space as never,
       cellId as never,
       [],
       undefined as never,
@@ -515,7 +620,7 @@ export async function readVintageState(
     const storedSchema = raw.getMetaRaw("schema");
     if (storedSchema === undefined) return undefined;
     const typed = vintage.runtime.getCellFromEntityId(
-      vintage.space as never,
+      space as never,
       cellId as never,
       [],
       storedSchema as never,
@@ -607,6 +712,39 @@ const RENDERINGS: ReadonlySet<string> = new Set([UI, TILE_UI, CHIP_UI]);
  * judge, a fabric special object with its state in private fields, is reduced
  * to a content hash before it gets here rather than being compared by it.
  */
+/**
+ * Whether everything `before` held is still reachable, at the same path, in
+ * `after`.
+ *
+ * SUBSET, not equality — and the difference is not a nicety. An update may
+ * legitimately ADD, which is what `Default<>` is for, and additions are not
+ * only top-level: a nested pattern gaining a defaulted field turns
+ * `{note, owner}` into `{note, owner, addedLater: []}` several levels down.
+ * Comparing those for equality reports the whole key stranded and reds a
+ * perfectly compatible change — measured, on the cross-space case in
+ * `pattern-vintage-run.test.ts`.
+ *
+ * Arrays compare elementwise by INDEX, so appending is fine while truncating or
+ * reordering is not: an element that moved is an element the old reader can no
+ * longer find where it left it.
+ */
+function isPreserved(before: unknown, after: unknown): boolean {
+  if (Array.isArray(before)) {
+    if (!Array.isArray(after) || after.length < before.length) return false;
+    return before.every((item, index) => isPreserved(item, after[index]));
+  }
+  if (
+    typeof before === "object" && before !== null &&
+    typeof after === "object" && after !== null && !Array.isArray(after)
+  ) {
+    return Object.entries(before as Record<string, unknown>).every(
+      ([key, value]) =>
+        isPreserved(value, (after as Record<string, unknown>)[key]),
+    );
+  }
+  return deepEqual(before, after);
+}
+
 export function strandedKeys(
   before: Record<string, unknown>,
   after: unknown,
@@ -619,7 +757,7 @@ export function strandedKeys(
   const stranded: string[] = [];
   for (const key of Object.keys(beforeState)) {
     if (RENDERINGS.has(key)) continue;
-    if (!deepEqual(beforeState[key], afterView?.[key])) stranded.push(key);
+    if (!isPreserved(beforeState[key], afterView?.[key])) stranded.push(key);
   }
   return stranded;
 }
@@ -657,6 +795,55 @@ export function isPresentRootValue(value: unknown): boolean {
  * fixture is named for — an identity check would reject every fixture the
  * capture produces.
  */
+
+/**
+ * Whether the fixture actually HOLDS the root a manifest entry names.
+ *
+ * The control that has to run per entry, before today's source is applied to
+ * it. "The fixture carries this space" is not the same claim: a space store
+ * that opened but never committed is a valid empty database, an entity id is
+ * content-derived and so names a cell in any space, and a cell nobody wrote
+ * reads as absent rather than as an error. Materializing onto one of those
+ * SUCCEEDS — the root then holds today's defaults, `isPresentRootValue` is
+ * satisfied, and the entry counts as updated cleanly over state that was never
+ * there. Measured: with a companion store truncated to zero bytes, a break that
+ * the gate is built to catch replays with no failures at all.
+ *
+ * The evidence is the SETUP MARKER, not a value. The runner stamps
+ * `patternSetupIdentity` under the same condition that reports an instantiation
+ * to the capture observer (`runner.ts` — deliberately the same, so the store
+ * cannot label roots the observer missed or vice versa), so every manifest
+ * entry's cell carries one by construction. A value check would instead depend
+ * on the pattern's result shape, and a root whose result is legitimately `{}`
+ * would read as missing.
+ *
+ * PRESENCE only — this does not check that the marker names the entry's own
+ * identity and symbol. Deliberately: a root set up twice under different
+ * identities in one capture would then false-red, and correspondence is not
+ * reachable from a legitimate capture anyway, since the observer and the stamp
+ * describe the same `resultCell`.
+ */
+export async function vintageHoldsRoot(
+  vintage: VintageRuntime,
+  space: string,
+  cellId: string,
+): Promise<boolean> {
+  const cell = vintage.runtime.getCellFromEntityId(
+    space as never,
+    cellId as never,
+    [],
+    undefined as never,
+  );
+  try {
+    await cell.sync();
+    return getPatternSetupIdentityRef(cell as Cell<unknown>) !== undefined;
+  } catch {
+    // An absent doc surfaces as a throw rather than `undefined`, and for this
+    // question the two are the same answer: nothing was captured here.
+    return false;
+  }
+}
+
 export async function vintageRootHasState(
   vintage: VintageRuntime,
   rootKey: string = DEFAULT_VINTAGE_ROOT_KEY,
@@ -787,13 +974,22 @@ export async function materializeOver(
  * receives the compiled result schema, because a root has to be read under the
  * schema of the pattern being applied to it.
  *
- * `symbol` names WHICH artifact in the module to apply. A module contributes
- * more than one instantiable pattern — its default export, plus every
- * transformer hoist (`__cfPattern_N`, the body of a `map`/`filter`/`flatMap`) —
- * and a stored root records the one it was materialized from. Defaulting to the
- * entry export would apply the module's ROOT pattern to a nested pattern's
- * cell, which can refuse a valid migration or, worse, accept an invalid one
- * having checked the wrong artifact.
+ * `options.symbol` names WHICH artifact in the module to apply. A module
+ * contributes more than one instantiable pattern — its default export, plus
+ * every transformer hoist (`__cfPattern_N`, the body of a `map`/`filter`/
+ * `flatMap`) — and a stored root records the one it was materialized from.
+ * Defaulting to the entry export would apply the module's ROOT pattern to a
+ * nested pattern's cell, which can refuse a valid migration or, worse, accept
+ * an invalid one having checked the wrong artifact.
+ *
+ * `options.space` is the space to COMPILE in, which production takes from the
+ * root being updated (`pattern-updater.ts` compiles with the piece's space).
+ * It is not cosmetic: it selects the space a `cf:` fabric import resolves
+ * against and the space the compiled/source closure is persisted into
+ * (`compileViaCellCache`), so compiling a cross-space root's candidate in the
+ * fixture's primary space could resolve a different closure than the one that
+ * root actually loads. Defaults to the primary space, which is where a
+ * single-space fixture's roots live.
  */
 export async function materializeOnCell(
   vintage: VintageRuntime,
@@ -802,11 +998,12 @@ export async function materializeOnCell(
     vintage: VintageRuntime,
     resultSchema: unknown,
   ) => Cell<Record<string, unknown>>,
-  symbol?: string,
+  options: { symbol?: string; space?: string } = {},
 ): Promise<MaterializeOutcome> {
   const { runtime } = vintage;
+  const { symbol, space = vintage.space } = options;
   const entryPattern = await runtime.patternManager.compilePattern(program, {
-    space: vintage.space as never,
+    space: space as never,
   });
   const entryRef = runtime.patternManager.getArtifactEntryRef(entryPattern);
   if (entryRef === undefined) {
