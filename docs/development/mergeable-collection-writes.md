@@ -288,11 +288,13 @@ first, since the op carries only the delta.
   contention) rather than being silently corrupted. Read that as a description of
   the poisoned path, not as a closed-class guarantee for every op — see "Known
   gaps" at the end of this section for two shapes that still commit a value the
-  writer never saw. Three sites poison via
-  `poisonMergeableOp`: `recordMergeableOp` on a second, different op kind; the
-  query-result proxy on any non-`push` in-place mutator; and `Cell.set` on a
-  whole-value overwrite covering a path that already carries an intent.
-  `poisonMergeableOp` acts on every intent at *or beneath* the path written — a
+  writer never saw. The rule is that every whole-value write poisons the ops it
+  covers, so the sites to keep in step are every path that performs one:
+  `Cell.set`, `Cell.setRawUntyped`, the query-result proxy's in-place mutators,
+  and the proxy's property-assignment trap — the last two being separate code
+  paths for the same reshape. Plus `recordMergeableOp` itself, on a second,
+  different op kind at one path. `poisonMergeableOp` is what they all call, and
+  it acts on every intent at *or beneath* the path written — a
   write to an enclosing object (`doc.set({rows})`) reshapes the array inside it
   just as surely as a write to the array itself — and on nothing above it. So a
   same-kind repeat (two `push`es, two `increment`s) still folds into one op, an

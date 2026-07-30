@@ -1993,6 +1993,41 @@ describe("mergeable op guards and single-session branches", () => {
     );
   });
 
+  // The proxy reshapes an array two ways: by calling an in-place mutator on it,
+  // and by ASSIGNING over the property that holds it. Both are whole-value
+  // writes the recorded tail cannot survive, so both must poison. The assignment
+  // path runs through the proxy's `set` trap, which is a separate code path from
+  // the mutator dispatch.
+  it("a proxy property assignment poisons the tail intent it overwrites", () => {
+    const docSchema = {
+      type: "object",
+      properties: { rows: { type: "array", items: { type: "string" } } },
+      // deno-lint-ignore no-explicit-any
+    } as any;
+    const cause = "proxy-assign-poison";
+
+    const tx = rt.edit();
+    const doc = rt.getCell(space, cause, docSchema, tx);
+    doc.set({ rows: ["a", "b", "c"] });
+    // deno-lint-ignore no-explicit-any
+    const proxy = doc.getAsQueryResult([], tx, true) as any;
+
+    proxy.rows.push("p");
+    expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])].length)
+      .toBe(1);
+
+    // Same shape as the ancestor-write case, reached by assignment: the two
+    // pushes sum to a count spanning the reshape, so the length arithmetic alone
+    // would look valid.
+    proxy.rows = ["m", "n", "o", "r"];
+    proxy.rows.push("q");
+
+    expect([...(getDirectTransactionMergeableOpAddresses(tx) ?? [])]).toEqual(
+      [],
+    );
+    expect(doc.get()).toEqual({ rows: ["m", "n", "o", "r", "q"] });
+  });
+
   // The other direction, and the one that pins the predicate: a write BENEATH an
   // array (an element edit) must leave that array's intent alone. Asserted on
   // the intents, and with the push FIRST — the durable value cannot discriminate

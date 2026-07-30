@@ -2270,6 +2270,13 @@ export class CellImpl<T extends FabricValue>
       this.link.schema ?? this.schema,
     );
     this.tx.writeValueOrThrow(this.link, inlined);
+
+    // Every whole-value write poisons the mergeable ops it covers — one rule,
+    // rather than a list of write paths that happen to remember. Today's callers
+    // are internal machinery writing links into result cells, where no op is
+    // ever recorded, so this is inert; it is here so the rule stays true if that
+    // changes.
+    this.tx.poisonMergeableOp?.(this.link);
   }
 
   getArgumentCell<U>(schema?: JSONSchema): Cell<U> | undefined {
