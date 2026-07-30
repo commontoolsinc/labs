@@ -784,6 +784,123 @@ describe("mergeable array appends", () => {
     }
   });
 
+  // A whole-array set that SHRINKS the list, then a push. The set removed "b"
+  // and "c"; a tail op cannot express that removal, and its suppression covers
+  // the very diff candidates that would have carried it, so the removal must
+  // keep the path off the mergeable fast path.
+  it("a shrinking whole-array set then a push commits the shrunk list", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set([
+        "a",
+        "b",
+        "c",
+      ]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
+      cell.set(["a"]);
+      cell.push("d");
+      expect(cell.get()).toEqual(["a", "d"]);
+      await tx1.commit();
+      await rt1.storageManager.synced();
+
+      expect(await readDurable(server)).toEqual(["a", "d"]);
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  // The clear-and-reseed idiom: empty the list, then add the replacement members
+  // back with `addUnique`. The replacements are new values, so the server's
+  // add-unique dedup cannot mask the lost clear — the durable list must hold the
+  // reseeded members alone, not the cleared ones plus the additions.
+  it("a whole-array set([]) then addUnique commits only the added members", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set([
+        "a",
+        "b",
+        "c",
+      ]);
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const cell = rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx1);
+      cell.set([]);
+      cell.addUnique("x", "y");
+      expect(cell.get()).toEqual(["x", "y"]);
+      await tx1.commit();
+      await rt1.storageManager.synced();
+
+      expect(await readDurable(server)).toEqual(["x", "y"]);
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
+  // The same reshape reached from a PARENT path. `poisonMergeableOp` keys on the
+  // exact path written, so a set of the enclosing object never poisons the list
+  // inside it — the tail op's own prefix check is what has to catch this.
+  it("a parent-object set that shrinks a nested list then a push commits the shrunk list", async () => {
+    const rt1 = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: storage1,
+    });
+    const holderSchema = {
+      type: "object",
+      properties: { rows: stringListSchema },
+      // deno-lint-ignore no-explicit-any
+    } as any;
+    const HOLDER_CAUSE = "nested-shrink-holder";
+    try {
+      const tx0 = rt1.edit();
+      rt1.getCell(space, HOLDER_CAUSE, holderSchema, tx0).set({
+        rows: ["a", "b", "c"],
+      });
+      await tx0.commit();
+      await rt1.storageManager.synced();
+
+      const tx1 = rt1.edit();
+      const holder = rt1.getCell(space, HOLDER_CAUSE, holderSchema, tx1);
+      holder.set({ rows: ["a"] });
+      holder.key("rows").push("d");
+      expect(holder.get()).toEqual({ rows: ["a", "d"] });
+      await tx1.commit();
+      await rt1.storageManager.synced();
+
+      const storage = SharedServerStorageManager.connectTo(server, {
+        as: signer,
+      });
+      const rt2 = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: storage,
+      });
+      try {
+        const cell = rt2.getCell(space, HOLDER_CAUSE, holderSchema);
+        await cell.sync();
+        await cell.pull();
+        expect(cell.get()).toEqual({ rows: ["a", "d"] });
+      } finally {
+        await rt2.dispose();
+        await storage.close();
+      }
+    } finally {
+      await rt1.dispose();
+    }
+  });
+
   // A poisoned path forfeits merge-friendliness: because it commits as a
   // whole-array diff whose reads are kept, a mixed-op transaction conflicts with
   // a concurrent append instead of merging — the intended trade for never losing

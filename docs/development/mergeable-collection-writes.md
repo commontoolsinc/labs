@@ -288,9 +288,33 @@ first, since the op carries only the delta.
   query-result proxy on any non-`push` in-place mutator; and `Cell.set` on a
   whole-value overwrite of a path that already carries an intent. `poisonMergeableOp`
   only acts when an intent is already present at the exact path, so a same-kind
-  repeat (two `push`es, two `increment`s) still folds into one op, an element edit
-  (`cell.key(i).set(...)`, whose path carries no intent) still composes with a
-  push, and a reshape or `set` *before* any op leaves a later push mergeable.
+  repeat (two `push`es, two `increment`s) still folds into one op and an element
+  edit (`cell.key(i).set(...)`, whose path carries no intent) still composes with a
+  push.
+
+- **A reshape that changes the array's length ahead of the tail falls back too.**
+  The three poison sites above all fire at the moment of the write, so they see
+  only a reshape that lands *after* an op was recorded, at exactly the op's path.
+  A reshape that lands *before* the op (`rows.set([])` and then `addUnique` — the
+  clear-and-reseed idiom) or at a *parent* path (`doc.set({rows: [...]})` and then
+  `doc.key("rows").push(x)`) is invisible to them. The tail op's builder therefore
+  re-checks the invariant the recorded tail rests on: the working array's prefix
+  must still line up with the base one element for one, i.e. the base array's
+  length must equal `working.length - count`. When it does not, the builder
+  *abandons* the intent — the same fallback the poison sites produce, decided at
+  commit rather than at the write. This is what keeps a clear-and-reseed honest:
+  a tail op cannot express "and remove everything that was here", and its
+  suppression covers the very diff candidates that would have carried the
+  removal, so without the check the store keeps the old elements and appends the
+  new ones on top — a silently doubled list, with the writing session's own local
+  value showing the correct one.
+
+  Abandoning at build time has to drop the intent from the transaction, not
+  merely skip emitting the op: a live intent still narrows the op's reads out of
+  the commit's conflict set (see below), and the whole-value diff that replaces
+  the op needs those reads back. `buildMergeableOps` deletes and poisons the path
+  for exactly that reason, and it runs inside `getNativeCommit`, ahead of the
+  narrowing.
 
 ## Conditional pushes stay protected: the read-set narrowing
 

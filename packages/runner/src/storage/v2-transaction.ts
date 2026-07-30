@@ -2617,6 +2617,14 @@ export class V2StorageTransaction implements IStorageTransaction {
   // each covers so the diff candidates the op replaces can be suppressed. The
   // per-op payload/suppression rules live in ./mergeable-ops.ts; here we only
   // supply each intent the working/initial array state its builder needs.
+  //
+  // A builder can also abandon its intent — the recorded op no longer describes
+  // the transaction's local value (see `buildTailOp`). Abandoning must poison the
+  // path here rather than just skip the op, because a surviving intent still
+  // narrows the op's reads out of the commit's conflict set (v2.ts) and would
+  // hand the replacing whole-value diff a read set it has not earned. This runs
+  // inside getNativeCommit, which precedes that narrowing, so both sides see the
+  // same intents.
   private buildMergeableOps(
     doc: WritableDocumentEntry,
   ): { ops: PatchOp[]; suppress: OpSuppression[] } {
@@ -2625,6 +2633,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     if (!doc.mergeableOps || doc.current.value === undefined) {
       return { ops, suppress };
     }
+    const abandoned: string[] = [];
     for (const intent of doc.mergeableOps.values()) {
       const working = readValueAtPath(doc.current.value, intent.path, {
         allowArrayLength: true,
@@ -2647,9 +2656,18 @@ export class V2StorageTransaction implements IStorageTransaction {
           : undefined,
         hadInitialArray: Array.isArray(initial),
         hadInitialValue,
+        initialArrayLength: Array.isArray(initial) ? initial.length : undefined,
       });
+      if (built.abandon) {
+        abandoned.push(encodePointer(intent.path));
+        continue;
+      }
       ops.push(...built.ops);
       suppress.push(...built.suppress);
+    }
+    for (const pathKey of abandoned) {
+      doc.mergeableOps.delete(pathKey);
+      (doc.mergeableOpsPoisoned ??= new Set()).add(pathKey);
     }
     return { ops, suppress };
   }

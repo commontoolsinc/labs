@@ -62,6 +62,7 @@ describe("mergeable op createsKey stamping", () => {
           workingArray: ["a", "b"],
           hadInitialArray: true,
           hadInitialValue: true,
+          initialArrayLength: 1,
         },
       ).ops,
     ).toEqual([{ op: "append", path: "/value/items", values: ["b"] }]);
@@ -88,14 +89,14 @@ describe("mergeable op createsKey stamping", () => {
   });
 });
 
-// The tail op builder (append / add-unique) bails to a no-op in two guarded
-// cases, leaving the commit to carry the plain diff. A handler reaches these
-// only through sequences the poison fallback now short-circuits before build, so
-// they are covered directly here.
+// The tail op builder (append / add-unique) bails in three guarded cases,
+// abandoning the intent so the commit carries the plain diff instead. Some are
+// reachable only through sequences the poison fallback short-circuits before
+// build, so they are covered directly here.
 describe("mergeable tail-op build guards", () => {
   // The op path holds no array at commit — the value is absent, or was
   // overwritten with a non-array — so there is nothing to slice a tail from.
-  it("a tail op with no working array emits no op and no suppression", () => {
+  it("a tail op with no working array abandons the intent", () => {
     for (const op of ["append", "add-unique"] as const) {
       expect(
         buildMergeableIntent(
@@ -106,18 +107,46 @@ describe("mergeable tail-op build guards", () => {
             hadInitialValue: false,
           },
         ),
-      ).toEqual({ ops: [], suppress: [] });
+      ).toEqual({ ops: [], suppress: [], abandon: true });
     }
   });
 
-  // The recorded tail slice is empty: an empty working array against an existing
+  // The transaction changed the array's length ahead of the recorded tail, so
+  // the base no longer lines up element-for-element with the working array's
+  // prefix. The tail op cannot carry that reshape and its suppression would
+  // discard the diff that can, so the intent is abandoned. A base LONGER than
+  // the prefix is the corrupting direction (the store keeps the surplus and
+  // appends the tail on top); the guard also covers the shorter direction, where
+  // the diff alone is likewise the honest carrier.
+  it("a tail op whose prefix no longer matches the base length abandons the intent", () => {
+    for (const initialArrayLength of [3, 0]) {
+      expect(
+        buildMergeableIntent(
+          { op: "add-unique", path: ["value"], count: 2 },
+          {
+            workingArray: ["x", "y", "z"],
+            hadInitialArray: true,
+            hadInitialValue: true,
+            initialArrayLength,
+          },
+        ),
+      ).toEqual({ ops: [], suppress: [], abandon: true });
+    }
+  });
+
+  // The recorded tail slice is empty: an empty working array against an empty
   // base makes `array.slice(length - count)` empty, so the op carries nothing.
-  it("a tail op whose recorded tail is empty emits no op and no suppression", () => {
+  it("a tail op whose recorded tail is empty abandons the intent", () => {
     expect(
       buildMergeableIntent(
         { op: "append", path: ["value"], count: 2 },
-        { workingArray: [], hadInitialArray: true, hadInitialValue: true },
+        {
+          workingArray: [],
+          hadInitialArray: true,
+          hadInitialValue: true,
+          initialArrayLength: 0,
+        },
       ),
-    ).toEqual({ ops: [], suppress: [] });
+    ).toEqual({ ops: [], suppress: [], abandon: true });
   });
 });

@@ -117,6 +117,21 @@ Like the whole-value ops, a keyed op drops only the reads its own write issues
 do not false-conflict. The op's touched path for *other* readers stays the array
 path, so a reader of the whole list is still invalidated.
 
+## Clear-and-reseed commits as a plain overwrite
+
+Replacing a list's whole membership in one handler — `list.set([])`, then
+`elementById(id).set(record)` and `addUnique(elementById(id))` per record, the
+shape that seeds records the runtime can address by key — mixes a whole-value
+overwrite with mergeable adds at the same path. The overwrite wins: because the
+transaction changed the array's length ahead of the recorded tail, the commit
+abandons the mergeable intent and sends the plain whole-array diff, so the
+durable list holds exactly the reseeded members. That transaction forfeits
+merge-friendliness for the list (it can false-conflict with a concurrent add),
+which is the right trade — replacing a list wholesale is not an operation that
+should merge with a concurrent append. See "Mixed ops on one path fall back to
+the whole-array diff" in `mergeable-collection-writes.md`. The reseeded entity
+documents themselves are ordinary writes and are unaffected.
+
 ## The entity outlives its link: clear on remove
 
 A keyed element is two things — a membership link in the array, and the entity

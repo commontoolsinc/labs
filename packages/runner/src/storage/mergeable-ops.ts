@@ -69,16 +69,26 @@ export type OpSuppression = {
  * ANY value at the path: when false the op materializes a previously-absent
  * path, so it stamps the wire op's `createsKey` flag (the parent's key set
  * changed — see the field in `@commonfabric/memory/v2`).
+ * `initialArrayLength` is that base array's length (undefined when there was no
+ * base array), which a tail op checks its recorded tail against.
  */
 export interface MergeableBuildContext {
   readonly workingArray?: readonly FabricValue[];
   readonly hadInitialArray: boolean;
   readonly hadInitialValue: boolean;
+  readonly initialArrayLength?: number;
 }
 
+/**
+ * `abandon` says the intent produced no wire op and must be dropped from the
+ * transaction entirely, not merely left un-emitted: the reads a live intent
+ * narrows out of the conflict set belong to an op that is no longer being sent,
+ * so the whole-value diff that replaces it has to keep them.
+ */
 export interface MergeableBuildResult {
   ops: PatchOp[];
   suppress: OpSuppression[];
+  abandon?: boolean;
 }
 
 // The single definition of one mergeable op's runtime behavior. Every question
@@ -141,14 +151,26 @@ const buildTailOp = (
 ): MergeableBuildResult => {
   const array = ctx.workingArray;
   if (!array) {
-    return { ops: [], suppress: [] };
+    return { ops: [], suppress: [], abandon: true };
   }
   const start = ctx.hadInitialArray
     ? Math.max(0, array.length - intent.count)
     : 0;
+  // The op says "add these elements to whatever the durable array is", and its
+  // suppression drops every diff candidate at or past `start`. That is the
+  // transaction's local truth only while the elements before the tail still line
+  // up with the base one for one. If the transaction also changed the array's
+  // length ahead of the tail — a whole-value `set` at this path or at a parent
+  // that shrank or grew it — the base elements the set removed have no surviving
+  // removal candidate, so the store would keep them and append the tail on top:
+  // a silently doubled list. The op cannot express that reshape, so abandon it
+  // and let the whole-array diff commit the local value.
+  if (ctx.hadInitialArray && ctx.initialArrayLength !== start) {
+    return { ops: [], suppress: [], abandon: true };
+  }
   const values = array.slice(start) as FabricValue[];
   if (values.length === 0) {
-    return { ops: [], suppress: [] };
+    return { ops: [], suppress: [], abandon: true };
   }
   return {
     ops: [{
@@ -187,7 +209,7 @@ const mergeableOpDescriptors: Record<MergeableWireOp, MergeableOpDescriptor> = {
     // Increments that summed to zero (a +1 and a -1) are a no-op: the working
     // value already reflects no change, so emit nothing (and nothing to suppress).
     build: (intent, ctx) =>
-      intent.by === 0 ? { ops: [], suppress: [] } : {
+      intent.by === 0 ? { ops: [], suppress: [], abandon: true } : {
         ops: [
           {
             op: "increment",
