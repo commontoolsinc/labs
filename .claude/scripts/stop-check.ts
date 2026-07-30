@@ -25,7 +25,12 @@ if (stopHookActive) {
 
 // Check for uncommitted changes
 const status = await new Deno.Command("git", {
-  args: ["status", "--porcelain"],
+  // `--no-optional-locks`: `git status` refreshes and rewrites the index when any
+  // tracked file is racily clean — content matching the index with a differing
+  // mtime, which is what editing a file and reverting it leaves behind. This hook
+  // only reports, so without the flag it was writing to the tree on every stop,
+  // and taking `.git/index.lock` there. Measured in a scratch repo.
+  args: ["--no-optional-locks", "status", "--porcelain"],
   stdout: "piped",
   stderr: "piped",
 }).output();
@@ -39,7 +44,7 @@ if (changes.length === 0) {
 
 // Get current branch
 const branch = await new Deno.Command("git", {
-  args: ["branch", "--show-current"],
+  args: ["--no-optional-locks", "branch", "--show-current"],
   stdout: "piped",
   stderr: "piped",
 }).output();
