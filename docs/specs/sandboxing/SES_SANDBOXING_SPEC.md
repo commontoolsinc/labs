@@ -697,45 +697,52 @@ fallback path described in Section 5.4. It is not the normal invocation path.
 
 ### 5.1 Lockdown Configuration
 
-The runtime uses a small `SandboxConfig` surface:
+The runtime's sandbox surface is `SESRuntimeOptions`
+(`packages/runner/src/sandbox/ses-runtime.ts`):
 
 ```typescript
-export interface SandboxConfig {
-  enabled: boolean;
-  debug: boolean;
-  console?: Console;
+export interface SESRuntimeOptions {
+  globals?: Record<string, unknown>;
+  lockdown?: boolean;
+  hideInternalStackFrames?: boolean;
 }
 ```
 
-Default config:
+`lockdown` gates `ensureSESInitialized`; `globals` supplies the compartment
+endowments of §5.3.1; `hideInternalStackFrames` gates the runner-frame collapse
+described in §8.6. All three default to off/empty at this type, and the Runtime
+threads its own defaults down through `Engine` (see
+`packages/runner/src/runtime-presets.ts` for which are core-defaulted).
 
-```typescript
-// Shown inside a pattern body.
-function getDefaultSandboxConfig(): SandboxConfig {
-  return {
-    enabled: true,
-    debug: false,
-  };
-}
-```
-
-Lockdown options are derived from `debug`:
+Lockdown options are a fixed constant, `DEFAULT_LOCKDOWN_OPTIONS`, applied
+unconditionally — they are not derived from a debug flag, and no caller varies
+them:
 
 ```typescript
 // Shown for illustration only.
-const options = {
-  errorTaming: debug ? "unsafe" : "safe",
-  stackFiltering: debug ? "verbose" : "concise",
+const DEFAULT_LOCKDOWN_OPTIONS = {
+  errorTaming: "safe",
+  stackFiltering: "concise",
   overrideTaming: "severe",
   consoleTaming: "unsafe",
   localeTaming: "unsafe", // paired with the pre-lockdown locale sanitizer
+  evalTaming: "safe-eval",
+  // …plus errorTrapping, reporting, unhandledRejectionTrapping, regExpTaming,
+  // domainTaming, legacyRegeneratorRuntimeTaming, __hardenTaming__
 };
 
 sanitizeLocaleMethods(); // vetted shim; before the intrinsics freeze
-repairIntrinsics(options);
+repairIntrinsics(DEFAULT_LOCKDOWN_OPTIONS);
 restoreErrorIsError(); // vetted shim; only this seam has both constructors
 hardenIntrinsics();
 ```
+
+The option *types* admit the looser values (`errorTaming: "unsafe"`,
+`stackFiltering: "verbose"`) that a debug build would want, so varying them
+remains available — but nothing does today, and `Runtime`'s own `debug` option is
+unrelated: it only gates an initialization `console.log`. Stack readability for
+pattern authors is handled after the fact instead, by the mapping and
+frame-collapse passes in §8.6.5.
 
 Notes:
 
@@ -1376,7 +1383,8 @@ The hoisting transformer must generate accurate source maps:
 
 ```typescript
 // Shown for illustration only.
-// packages/ts-transformers/src/hoisting.ts
+// illustrative; the shipped stage is
+// packages/ts-transformers/src/transformers/builder-call-hoisting.ts
 
 class HoistingTransformer {
   private sourceMapGenerator: SourceMapGenerator;
@@ -1403,28 +1411,47 @@ class HoistingTransformer {
 
 #### 8.3.3 js-compiler Source Map Chaining
 
-The existing js-compiler already supports source maps. Ensure chaining:
+js-compiler emits one map per module, parsed alongside the body
+(`parseSourceMap`, `packages/js-compiler/typescript/compiler.ts`). The relevant
+options are in `packages/js-compiler/typescript/options.ts`:
 
 ```typescript
 // Shown for illustration only.
-// packages/js-compiler/typescript/compiler.ts
-
-const compilerOptions: ts.CompilerOptions = {
-  // ... existing options ...
-  sourceMap: true,
-  inlineSources: true,  // Include original source in map
-  inlineSourceMap: false,  // Keep separate for chaining
+const compilerOptions = {
+  sourceMap: true, // mappings are load-bearing: stack frames and CFC
+  // verified-source resolve compiled positions through them
+  inlineSources: false, // authored source is NOT embedded — see below
+  inlineSourceMap: false, // separate map, registered by filename
 };
-
-// When transformer provides input source map, chain them
-if (inputSourceMap) {
-  // Use source-map library to merge
-  const merged = await mergeSourceMaps(inputSourceMap, outputSourceMap);
-  return { js, sourceMap: merged };
-}
 ```
 
+`inlineSources` is deliberately **off**. Nothing reads `sourcesContent`: the only
+code that touches it copies it into the runtime's map registry, and the consumers
+there read mappings only, via `originalPositionFor`. No `//# sourceMappingURL` is
+emitted for a debugger to load these maps either, and the authored source is
+already persisted separately as source documents. Dropping it cuts per-module
+source-map bytes — which the compile cache stores and syncs — by roughly 65%.
+
 ### 8.4 Error Mapping Implementation
+
+**What exists today.** The shipped surface is `SESRuntime`
+(`packages/runner/src/sandbox/ses-runtime.ts`) over `SourceMapParser`
+(`packages/js-compiler/source-map.ts`): `loadSourceMap` / `loadSourceMapLazy`
+register maps by filename, `mapPosition` resolves one coordinate, `parseStack`
+rewrites a whole stack, and `mapThrownError` does that once per error —
+`materializeHostVisibleStack`, then `parseStack`, then a `markErrorStackMapped`
+marker, because `parseStack` is **not idempotent**: per-module maps are
+registered under the same module path that mapped frames carry as their source,
+so re-parsing an already-mapped stack would look the now-authored coordinates up
+again and corrupt them. `Engine` re-exports `parseStack` / `mapPosition`, and the
+scheduler's diagnostics share the same marker helpers.
+
+§8.4.1 describes the interface shape that surface already satisfies. The
+`ErrorMappingOptions` / `MappedError` / execution-wrapper designs in §8.4.2–§8.4.3
+and the display and classifier designs in §8.5–§8.6.1/§8.6.3 are **target design,
+not built** — the modules their code blocks name do not exist in the tree, and
+§8.8 tracks them as outstanding work. §8.6.5 records the filtering that is
+actually implemented.
 
 #### 8.4.1 Shared Source-Map State
 
@@ -1583,11 +1610,13 @@ Original source (MyPattern.tsx:23):
   24 │   return { doubled };
 ```
 
-#### 8.5.2 Enhanced Error Display
+#### 8.5.2 Enhanced Error Display — target design
+
+Not built; the module below is a proposed one.
 
 ```typescript
 // Shown for illustration only.
-// packages/runner/src/sandbox/error-display.ts
+// proposed: packages/runner/src/sandbox/error-display.ts
 
 interface ErrorDisplayOptions {
   readonly verbose?: boolean;
@@ -1637,10 +1666,13 @@ The key insight is that **pattern authors and runtime developers have different 
 - **Pattern authors** need to see their code, but runtime internals are noise
 - **Runtime developers** need to see everything when debugging the runtime itself
 
-#### 8.6.1 Frame Classification
+#### 8.6.1 Frame Classification — target design
+
+Not built; §8.6.5 records what the runtime does instead. The module below is a
+proposed one.
 
 ```typescript
-// packages/runner/src/sandbox/frame-classifier.ts
+// proposed: packages/runner/src/sandbox/frame-classifier.ts
 
 type FrameType = "pattern" | "runtime" | "external" | "ses";
 
@@ -1726,11 +1758,13 @@ TypeError: Cannot read property 'map' of undefined
 Pattern: my-pattern-id
 ```
 
-#### 8.6.3 Implementation
+#### 8.6.3 Implementation — target design
+
+Not built; see §8.6.5. The module below is a proposed one.
 
 ```typescript
 // Shown at module scope.
-// packages/runner/src/sandbox/stack-filter.ts
+// proposed: packages/runner/src/sandbox/stack-filter.ts
 
 interface StackFilterOptions {
   showRuntimeFrames: boolean;  // false for pattern authors, true for runtime devs
@@ -1832,45 +1866,68 @@ export function formatFilteredStack(
 
 #### 8.6.4 Sandbox Configuration
 
-```typescript
-// packages/runner/src/sandbox/types.ts
+Filtering is configured through `SESRuntimeOptions.hideInternalStackFrames`
+(§5.1), not a separate stack-filter option object. It is core-defaulted in every
+runtime preset. Lockdown's own `errorTaming` / `stackFiltering` verbosity is a
+separate axis, set at `ensureSESInitialized` time (§5.1).
 
-export interface SandboxConfig {
-  enabled: boolean;
-  debug: boolean;
-  console?: Console;
-}
-```
+#### 8.6.5 The filtering that is implemented
 
-The `debug` field controls both lockdown configuration (see Section 5.1) and
-stack trace verbosity. When `debug` is true, full stack traces including runtime
-and SES frames are shown.
+Two passes run in sequence over a thrown error's stack, each replacing a whole
+frame line with a marker rather than classifying it into a type:
+
+1. **Source-map rewrite** — `SourceMapParser.parse` walks the stack line by line
+   and hands each recognized frame to `mapFrame`. A frame whose filename has a
+   registered map and whose position resolves is rewritten to authored
+   coordinates (`at <name> (<source>:<line>:<col>)`). A frame whose position does
+   **not** resolve becomes `    at <CF_INTERNAL>` when its function name is
+   `eval` or empty — the compiled-wrapper frames — and `    at <UNMAPPED>`
+   otherwise. A frame with no registered map for its filename is left verbatim,
+   which is what keeps host and external frames intact.
+2. **Runner-frame collapse** — when `hideInternalStackFrames` is set,
+   `sanitizeInternalFrames` (`ses-runtime.ts`) replaces any remaining frame whose
+   path lies under `packages/runner/src/` with `    at <CF_INTERNAL>`.
+
+So the layering goal of §8.6 is met, by marker substitution rather than by a
+`FrameType` union: authored frames survive with authored coordinates, runtime and
+compiled-wrapper frames collapse to `<CF_INTERNAL>`, frames that should have
+mapped but did not are called out as `<UNMAPPED>` rather than silently dropped,
+and nothing is removed from the stack — every line is preserved or replaced in
+place, so frame counts stay comparable.
 
 ### 8.7 Configuration Summary
 
-| Audience | `debug` | Runtime Frames | Source Context |
-|----------|---------|----------------|----------------|
-| Pattern Author | `false` | Hidden | Pattern source shown |
-| Runtime Developer | `true` | Visible (marked) | All source shown |
-| Production (logging) | `false` | Hidden | Included in logs |
+| Audience | `hideInternalStackFrames` | Runner frames | Authored frames |
+|----------|--------------------------|---------------|-----------------|
+| Pattern author | `true` | Collapsed to `<CF_INTERNAL>` | Authored coordinates |
+| Runtime developer | `false` | Left as-is | Authored coordinates |
+| Production (logging) | `true` | Collapsed to `<CF_INTERNAL>` | Authored coordinates, included in logs |
+
+Authored frames map to authored coordinates on every row: the source-map pass of
+§8.6.5 is unconditional, and only the runner-frame collapse is switched. The
+lockdown verbosity knobs are not part of this table — they are constants (§5.1).
 
 ### 8.8 Implementation Checklist
 
-Unless noted otherwise, `packages/runner/src/sandbox/*` paths referenced below
-are target modules in the new sandbox subsystem and may not yet exist in the
-current tree.
+Done:
 
-| Task | Priority | Files |
-|------|----------|-------|
-| Transformer source map generation | High | `ts-transformers/src/hoisting.ts` |
-| Source map chaining in js-compiler | High | `js-compiler/typescript/compiler.ts` |
-| Reuse shared `SourceMapParser` lifecycle in SES runtime | High | `runner/src/harness/*`, `runner/src/sandbox/error-mapping.ts` |
-| Error mapping utility over shared mapper state | High | `runner/src/sandbox/error-mapping.ts` |
-| Execution wrapper with mapping | High | `runner/src/sandbox/execution-wrapper.ts` |
-| Frame classification and filtering | High | `runner/src/sandbox/frame-classifier.ts` |
-| Enhanced error display | Medium | `runner/src/sandbox/error-display.ts` |
-| Structured error report formatting | Medium | `runner/src/sandbox/error-display.ts` |
-| Configuration options | Low | `runner/src/sandbox/types.ts` |
+| Task | Where it landed |
+|------|-----------------|
+| Transformer source map generation | the transformer pipeline emits per-module maps under `sourceMap: true` (`js-compiler/typescript/options.ts`); the hoisting stage is `ts-transformers/src/transformers/builder-call-hoisting.ts` |
+| Source map chaining in js-compiler | `js-compiler/typescript/compiler.ts` (`parseSourceMap` per emitted module) |
+| Shared `SourceMapParser` lifecycle in the SES runtime | `SESInternals` / `SESRuntime` (`runner/src/sandbox/ses-runtime.ts`), re-exported by `Engine`; per-module and composed registration in `runner/src/harness/engine.ts` |
+| Map a thrown error's stack exactly once | `SESRuntime.mapThrownError` plus the `markErrorStackMapped` marker, shared with `runner/src/scheduler/diagnostics.ts` |
+| Collapse runner-internal frames | `sanitizeInternalFrames`, gated on `hideInternalStackFrames` (§8.6.5) |
+| Configuration options | `SESRuntimeOptions` (§5.1), core-defaulted in `runner/src/runtime-presets.ts` |
+
+Outstanding. None of the modules below exist; the paths are proposals:
+
+| Task | Priority | Proposed files |
+|------|----------|----------------|
+| `MappedError` / `ErrorMappingOptions` formatter over shared mapper state (§8.4.2) | Medium | `runner/src/sandbox/error-mapping.ts` |
+| Execution wrappers (§8.4.3) | Medium | `runner/src/sandbox/execution-wrapper.ts` |
+| Frame classification into a `FrameType` union (§8.6.1, §8.6.3) | Low — §8.6.5 already meets the layering goal by marker substitution | `runner/src/sandbox/frame-classifier.ts`, `runner/src/sandbox/stack-filter.ts` |
+| Enhanced error display and structured error reports (§8.5.2) | Low | `runner/src/sandbox/error-display.ts` |
 
 ---
 
