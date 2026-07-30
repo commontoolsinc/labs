@@ -801,13 +801,17 @@ export function consumeOuterCellContract(
   };
 }
 
-/** Consume one uniform asCell layer, including across anyOf/oneOf branches. */
 function schemaHasAsCell(
   schema: JSONSchema | undefined,
 ): schema is JSONSchemaObj {
   return SchemaObjectTraverser.hasAsCell(schema);
 }
 
+/**
+ * Consume one uniform asCell layer, including across anyOf/oneOf branches.
+ * This is the compound-schema counterpart to runner/schema.ts's filterAsCell;
+ * keep their top-level wrapper semantics aligned.
+ */
 function consumeAsCellProjectionSchema(schema: JSONSchemaObj): JSONSchema {
   if (ContextualFlowControl.getAsCellValues(schema).length > 0) {
     return consumeOuterCellContract(schema).payloadSchema;
