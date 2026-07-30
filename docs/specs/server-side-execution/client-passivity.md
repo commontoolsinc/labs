@@ -1893,6 +1893,41 @@ direction.** A changing rank is an observation, not a refusal. The
 declines themselves are the transitional scaffolding; building machinery
 that makes them more accurate entrenches what D11 says to remove.
 
+**CLARIFIED 2026-07-29, and it is an ALGORITHM, not a hope.** The scope
+doc's §6c read the inversion as "run one principal and hope the result is
+shareable", and then correctly showed that anything reading PerUser or
+PerSession state is structurally not shareable. That is a strawman of the
+ruling. The owner's actual statement:
+
+> Run it at the **declared** scope. If it **stays** there, done. If it
+> **narrowed**, make it the user's / session's run **and start the
+> adjacent ones**.
+>
+> Equivalently: the first session interested in this should run it, and if
+> scope didn't expand, you saved the others the run.
+
+So the narrowing case is handled by an explicit **fan-out**, not by
+optimism. Three consequences:
+
+1. The savings case is real but narrow — it applies exactly to derivations
+   that do NOT narrow, which §6c is right to say are the easy ones. The
+   algorithm is still correct; it simply saves less often than the phrase
+   "scope is discovered by running" might suggest.
+2. **"Start the adjacent ones" is a concrete mechanism that must be
+   built.** When a run narrows, the server has to enumerate the other
+   interested principals/sessions and start their runs. That is the answer
+   to "who runs the remaining S-1", and nothing does it today.
+3. It disposes of §6c as a blocker, because the S runs were never assumed
+   away — they are scheduled deliberately.
+
+**COST ACKNOWLEDGED (owner, 2026-07-29): "ack that the cost to run all of
+them shifts to the server."** §6c's measurement stands and is accepted:
+for a space with S live sessions and session-scoped derivations, the server
+runs them S times, on one Worker per space, with no per-principal isolation
+boundary and no implemented per-Worker budget. The two mitigations in the
+design — sharding by space DID (README §6.6) and per-Worker budgets (G18) —
+are therefore **rollout-sizing concerns, not preconditions**.
+
 **Scope is discovered by running, not declared before it.** This is the
 same principle `scoped-cell-instances.md` already applies to write
 surfaces — output scope is discovered per transaction, and the §4 pair
