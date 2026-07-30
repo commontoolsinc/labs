@@ -285,7 +285,7 @@ describe("shell piece tests", () => {
       await awaitResultValue(-2);
 
       // Compilation-cache contract: the piece's cold compile above was written
-      // back to the IDB-backed CachedCompiler. A FRESH worker must then load
+      // back to the content-addressed cell cache. A FRESH worker must then load
       // the piece from that cache — zero in-client compilations during the
       // piece load. Flush the write-backs first: a write still in flight when
       // the fresh worker reads the cache forces a recompile (the flake this
