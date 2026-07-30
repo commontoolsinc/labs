@@ -1380,6 +1380,50 @@ describe("data-updating", () => {
       expect(selfLink?.path).toEqual([]);
     });
 
+    it("anchors an element whose nested Cell awaits normalization", () => {
+      // A written element is only SHALLOWLY normalized when anchoring
+      // eligibility is decided; its nested contents (Cells here) convert
+      // during the recursion that follows. The untouched-prefix check must
+      // therefore never inspect the element's contents -- an equal-shaped
+      // fresh element carrying a Cell must anchor and normalize, not trip a
+      // premature deep comparison against the stored value.
+      const frame = pushFrame({
+        generatedIdCounter: 0,
+        cause: "nested cell awaits normalization",
+        reactives: new Set(),
+      });
+      try {
+        const target = runtime.getCell<{ hello: string }>(
+          space,
+          "nested cell normalization target",
+          undefined,
+          tx,
+        );
+        target.set({ hello: "world" });
+
+        const list = runtime.getCell<{ ref: unknown }[]>(
+          space,
+          "nested cell awaits normalization list",
+          undefined,
+          tx,
+        );
+        // Stored prefix shaped like the incoming write, inline.
+        list.setRaw([{ ref: null }]);
+
+        list.set([{ ref: target }]);
+
+        const raw = list.getRaw() as unknown[];
+        const elementLink = parseLink(raw[0], list);
+        expect(elementLink?.id).not.toBe(undefined);
+        const doc = runtime.getCellFromLink(elementLink!, undefined, tx);
+        const docRaw = doc.getRaw() as { ref: unknown };
+        const refLink = parseLink(docRaw.ref, doc);
+        expect(refLink?.id).toBe(target.getAsNormalizedFullLink().id);
+      } finally {
+        popFrame(frame);
+      }
+    });
+
     it("draws no anchor id for an addUnique candidate rejected as duplicate", () => {
       // A candidate `addUnique` rejects never reaches the write, so it draws
       // no id. (The annotation scheme anchored all candidates before
