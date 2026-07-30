@@ -11,9 +11,17 @@
  * Layout:
  *
  *     packages/piece/test/vintages/<pattern key>/pinned/<iso>-<identity>.sqlite
+ *     packages/piece/test/vintages/<pattern key>/pinned/<iso>-<identity>.sqlite.spaces/<did>.sqlite
  *
  * `<pattern key>` is the pattern's repo path under `packages/patterns/`, so a
  * fixture sits next to nothing and is found by path alone.
+ *
+ * The `.sqlite.spaces/` directory carries the run's OTHER spaces — a capture
+ * that instantiates a pattern via `Factory.inSpace(...)` writes a second store,
+ * and a fixture that held only the first would record roots whose state it does
+ * not have. It is part of the FIXTURE, not a fixture itself, so
+ * `parseVintagePath` declines everything inside one; the harness owns its shape
+ * (`VINTAGE_SPACES_SUFFIX`).
  *
  * The tree is deliberately NOT under `packages/patterns/`, which is the
  * obvious home for it and the wrong one. `tasks/build-binaries.ts` passes that
@@ -58,6 +66,8 @@
  * is transient and local, where git history is permanent and shared by
  * everyone who clones.
  */
+
+import { VINTAGE_SPACES_SUFFIX } from "../packages/piece/test/state-continuity-harness.ts";
 
 /** Root of the committed fixture tree. See the note above on why it is here. */
 export const VINTAGES_DIR = "packages/piece/test/vintages";
@@ -136,6 +146,15 @@ export function parseVintagePath(
   if (cut === -1) return undefined;
   const fileName = rest.slice(cut + 1);
   const dir = rest.slice(0, cut);
+  // A companion store is PART of the fixture beside it, not a fixture of its
+  // own. Declining it by name is deliberate rather than incidental: its filename
+  // is a space DID, which would not parse as `<stamp>-<identity>` today, but a
+  // gate that enumerated one as a separate vintage would replay a space against
+  // a pattern key it never belonged to — and the reason it does not would be
+  // invisible.
+  if (dir.split("/").some((part) => part.endsWith(VINTAGE_SPACES_SUFFIX))) {
+    return undefined;
+  }
   const tierCut = dir.lastIndexOf("/");
   if (tierCut === -1) return undefined;
   const tier = dir.slice(tierCut + 1);

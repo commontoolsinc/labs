@@ -138,8 +138,15 @@ async function main() {
     return;
   }
 
-  const { vintages, replayed, candidates, changed, updated, failures } =
-    await replayAll(roots);
+  const {
+    vintages,
+    replayed,
+    candidates,
+    targets,
+    changed,
+    updated,
+    failures,
+  } = await replayAll(roots);
   // Coverage is judged against the SAME list that was replayed. A second walk
   // would be a second answer to one question, and "replayed nothing" paired with
   // "everything is covered" is the disagreement that reads as a pass.
@@ -161,10 +168,15 @@ async function main() {
   // positively rather than printing a caveat beside a pass is the point; a green
   // verdict with a footnote about skipped roots is how narrowed coverage reads
   // as success.
+  // `targets` is printed beside `candidates` because the two differ, and the
+  // gap is the honest measure of what was examined: a recorded instantiation is
+  // only an upgrade target if today's source can be applied to it (a test
+  // pattern and a keyless session pointer are neither). Stating only
+  // `candidates` would overstate the coverage a green run bought.
   console.log(
     `Replayed ${replayed} vintage(s): ${candidates} recorded instantiation(s), ` +
-      `all mappable to a file; ${changed} changed since capture, ` +
-      `${updated} updated cleanly.`,
+      `all mappable to a file; ${targets} upgrade target(s), ` +
+      `${changed} changed since capture, ${updated} updated cleanly.`,
   );
 }
 

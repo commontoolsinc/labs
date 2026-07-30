@@ -29,6 +29,7 @@ import {
   materializeOnCell,
   openFileBackedRuntime,
   readVintageManifest,
+  vintageCompanionDir,
   type VintageManifestEntry,
   vintageRootCause,
   vintageRootHasState,
@@ -180,6 +181,14 @@ export async function replayVintage(
     }
 
     const targets = manifest.entries.filter(isUpgradeTarget);
+    // Which spaces this fixture actually holds. A target recorded in another one
+    // is unreachable here, and unreachable reads CLEAN: the read finds a fresh
+    // empty space, the materialize succeeds against nothing, and the root then
+    // holds today's defaults — a green verdict over state that was never there.
+    // Cross-space children are not hypothetical; `Factory.inSpace(...)` is how a
+    // profile is created.
+    const carried = new Set(runtimeVintage.restoredSpaces);
+    const unreachable = targets.filter((e) => !carried.has(e.space));
     // Unaddressable, not merely un-targeted. Both shapes belong here: no source
     // path at all, and a path that is not repo-root-relative — the evaluate loop
     // records injected helper modules (`cfc.ts`) whose names carry no leading
@@ -213,8 +222,26 @@ export async function replayVintage(
           }) — it was recorded but NOT validated`,
       });
     }
+    // Same rule for a space the fixture does not carry, and for the same reason:
+    // the replay cannot reach it, so a green verdict would be a claim about
+    // fewer roots than the fixture records. Scoped to TARGETS because those are
+    // the entries the loop below would otherwise "validate" against an empty
+    // space; a non-target in a dropped space was never going to be applied.
+    for (const entry of unreachable) {
+      report.failures.push({
+        ...where,
+        detail: `recorded instantiation ${entry.identity}#${entry.symbol} ` +
+          `was materialized in ${entry.space}, which this fixture does not ` +
+          `carry (it holds ${[...carried].join(", ")}) — it was recorded but ` +
+          `NOT validated. Recapture it with ` +
+          `\`deno task pattern-vintage --update\``,
+      });
+    }
 
     for (const entry of targets) {
+      // Already reported above. Materializing it anyway would apply today's
+      // source to an empty cell and count the result as a clean update.
+      if (!carried.has(entry.space)) continue;
       const source = `${roots.repoRoot}${entry.main}`;
       let program;
       try {
@@ -256,9 +283,15 @@ export async function replayVintage(
       const outcome = await materializeOnCell(
         runtimeVintage,
         program as never,
+        // The RECORDED space, not the fixture's primary one. An entity id is
+        // content-derived and so carries no space, which makes reading it under
+        // the wrong DID a lookup that SUCCEEDS at finding nothing: the cell comes
+        // back absent, today's source materializes onto it, and the entry counts
+        // as updated cleanly. Every root a cross-space child owns would replay
+        // that way.
         (v, resultSchema) =>
           v.runtime.getCellFromEntityId(
-            v.space as never,
+            entry.space as never,
             entry.cellId as never,
             [],
             resultSchema as never,
@@ -314,6 +347,7 @@ export async function replayAll(
     vintages: VintageRef[];
     replayed: number;
     candidates: number;
+    targets: number;
     unmappable: number;
     changed: number;
     updated: number;
@@ -321,11 +355,12 @@ export async function replayAll(
   }
 > {
   const vintages = await collectVintages(roots.vintagesRoot);
-  let candidates = 0, changed = 0, updated = 0, unmappable = 0;
+  let candidates = 0, targets = 0, changed = 0, updated = 0, unmappable = 0;
   const failures: ReplayFailure[] = [];
   for (const vintage of vintages) {
     const report = await replayVintage(roots, vintage);
     candidates += report.candidates;
+    targets += report.targets;
     unmappable += report.unmappable;
     changed += report.changed;
     updated += report.updated;
@@ -335,6 +370,7 @@ export async function replayAll(
     vintages,
     replayed: vintages.length,
     candidates,
+    targets,
     unmappable,
     changed,
     updated,
@@ -462,7 +498,28 @@ export async function captureVintage(
     const outDir = `${roots.vintagesRoot}/${patternKey}/${PINNED}`;
     await Deno.mkdir(outDir, { recursive: true });
     const path = `${outDir}/${vintageFileName(stampFor(now), ref.identity)}`;
-    await vintage.snapshot(path);
+    // The snapshot carries every space that has a store on disk, so a recorded
+    // space missing from it is one nothing durable was ever written to — a
+    // cross-space commit that did not land, say. The replay fails closed on that
+    // root, but it would do so on whoever's PR next ran the gate; refusing here
+    // blames the capture, the same discipline `unaddressable` above follows.
+    const carried = new Set(await vintage.snapshot(path));
+    const dropped = [
+      ...new Set(
+        entries.filter((e) => !carried.has(e.space)).map((e) => e.space),
+      ),
+    ];
+    if (dropped.length > 0) {
+      await Deno.remove(path).catch(() => {});
+      await Deno.remove(vintageCompanionDir(path), { recursive: true })
+        .catch(() => {});
+      throw new Error(
+        `cannot capture ${patternKey}: the run recorded roots in ${
+          dropped.join(", ")
+        }, which wrote no durable store, so the fixture would record roots ` +
+          `whose state it does not hold`,
+      );
+    }
     return path;
   } finally {
     await vintage.dispose().catch(() => {});

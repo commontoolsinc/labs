@@ -35,6 +35,7 @@ import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import {
+  listSpaceStores,
   snapshotSpaceStore,
   spaceStorePath,
 } from "@commonfabric/memory/v2/dump";
@@ -116,11 +117,84 @@ export interface VintageRuntime {
    * handlers, rather than a bare materialized root with nothing in it.
    */
   storageManager: StorageManager;
+  /** The PRIMARY space: the signer's own, and the one a fixture is named for. */
   space: string;
+  /**
+   * Every space this runtime was restored WITH, primary and companions alike.
+   * Empty for a fresh store.
+   *
+   * Read at open, before anything can write, so it answers "what does this
+   * fixture CARRY" rather than "what has been touched since". A replay needs
+   * exactly that question answered: reading a recorded root out of a space the
+   * fixture does not carry finds a fresh empty space, materializes onto it
+   * happily, and counts as a clean update — the same false green an absent
+   * fixture produces.
+   */
+  restoredSpaces: readonly string[];
   storeDir: string;
-  /** Snapshot this space to `destPath`. Crash-consistent, runs no migrations. */
-  snapshot(destPath: string): Promise<void>;
+  /**
+   * Snapshot EVERY space this runtime wrote to `destPath` and its companion
+   * directory. Crash-consistent, runs no migrations. Returns the spaces written.
+   */
+  snapshot(destPath: string): Promise<string[]>;
   dispose(): Promise<void>;
+}
+
+/**
+ * Suffix of the directory carrying a fixture's NON-primary space stores.
+ *
+ * A space is one SQLite file, so a capture that instantiates a pattern in
+ * another space (`Factory.inSpace(...)` — how a profile is created) writes a
+ * SECOND file, and a fixture that copied only the first would record roots
+ * whose state it does not hold. The companion directory sits beside the primary
+ * file, holds one raw `.sqlite` per other space, and travels with it in git —
+ * raw, so delta compression still works (see `tasks/pattern-vintage-lib.ts`).
+ *
+ * The suffix keeps the primary file's `.sqlite` in view rather than replacing
+ * it — `<stamp>-<identity>.sqlite` → `<stamp>-<identity>.sqlite.spaces/` — so
+ * the pair reads as one fixture, and so `parseVintagePath` can decline anything
+ * inside one on the directory NAME alone. A bare `.spaces` would be a weaker
+ * discriminator over a tree that is not exclusively fixtures.
+ */
+export const VINTAGE_SPACES_SUFFIX = ".sqlite.spaces";
+
+/** The companion directory for the fixture at `fixturePath` (`…/<name>.sqlite`). */
+export function vintageCompanionDir(fixturePath: string): string {
+  return `${fixturePath.replace(/\.sqlite$/, "")}${VINTAGE_SPACES_SUFFIX}`;
+}
+
+/**
+ * A companion's filename encodes its space id, and `encodeURIComponent` is the
+ * same escape `encodeStoreSubject` applies to a space's own store filename — so
+ * the two ends agree without a second spelling of "how a DID becomes a name".
+ */
+function companionFileName(space: string): string {
+  return `${encodeURIComponent(space)}.sqlite`;
+}
+
+/** Every companion store beside `fixturePath`, as `[space, path]`. */
+async function companionStores(
+  fixturePath: string,
+): Promise<[string, string][]> {
+  const dir = vintageCompanionDir(fixturePath);
+  const found: [string, string][] = [];
+  try {
+    for await (const entry of Deno.readDir(dir)) {
+      if (!entry.isFile || !entry.name.endsWith(".sqlite")) continue;
+      found.push([
+        decodeURIComponent(entry.name.slice(0, -".sqlite".length)),
+        `${dir}/${entry.name}`,
+      ]);
+    }
+  } catch (error) {
+    // No companion directory means a single-space fixture, which is the common
+    // case and not a problem. Anything else must surface.
+    if (error instanceof Deno.errors.NotFound) return [];
+    throw error;
+  }
+  // Sorted so a restore is reproducible rather than directory-order dependent.
+  found.sort(([left], [right]) => left.localeCompare(right));
+  return found;
 }
 
 /**
@@ -143,6 +217,13 @@ export async function openFileBackedRuntime(
     // re-keying is an unbounded migration that would destroy the fidelity the
     // fixture exists to buy (CFC labels name the space, among other things).
     await seedSpaceStore(storeDir, space, fromSnapshot);
+    // Companions restore under the DID they were captured in, for the same
+    // reason and more strictly: a cross-space child's recorded root names that
+    // DID, so re-keying would leave the root unaddressable rather than merely
+    // relabelled.
+    for (const [companion, path] of await companionStores(fromSnapshot)) {
+      await seedSpaceStore(storeDir, companion, path);
+    }
   }
 
   const server = serverOver(storeDir);
@@ -156,6 +237,12 @@ export async function openFileBackedRuntime(
     runtime,
     storageManager,
     space,
+    // Enumerated from disk rather than assumed from `fromSnapshot`, so this is
+    // what actually landed where the engine looks — the thing the replay needs
+    // to know.
+    restoredSpaces: fromSnapshot === undefined
+      ? []
+      : listSpaceStores(storeUrl).map((info) => info.space),
     storeDir,
     async snapshot(destPath: string) {
       // Everything must be durable before the copy, or the fixture records a
@@ -169,6 +256,30 @@ export async function openFileBackedRuntime(
         );
       }
       snapshotSpaceStore(path, destPath);
+      // Every OTHER space the run wrote travels too, enumerated from the store
+      // itself rather than from what an observer recorded: the two can disagree,
+      // and the copy has to be a statement about what is on disk. A space with
+      // no store file wrote nothing durable, so there is nothing to carry and
+      // nothing a replay could validate there.
+      const written: string[] = [space];
+      const companionDir = vintageCompanionDir(destPath);
+      for (const info of listSpaceStores(storeUrl)) {
+        if (info.space === space) continue;
+        const source = spaceStorePath(storeUrl, info.space);
+        if (source === null) {
+          throw new Error(
+            `space store for ${info.space} vanished mid-snapshot — the fixture ` +
+              `would record roots whose state it does not hold`,
+          );
+        }
+        await Deno.mkdir(companionDir, { recursive: true });
+        snapshotSpaceStore(
+          source,
+          `${companionDir}/${companionFileName(info.space)}`,
+        );
+        written.push(info.space);
+      }
+      return written;
     },
     async dispose() {
       await runtime.dispose();

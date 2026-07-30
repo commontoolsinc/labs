@@ -23,6 +23,7 @@ import {
   vintageFileName,
   VINTAGES_DIR,
 } from "./pattern-vintage-lib.ts";
+import { vintageCompanionDir } from "../packages/piece/test/state-continuity-harness.ts";
 
 const ID_A = "bafyaaaa";
 const ID_B = "bafybbbb";
@@ -120,6 +121,31 @@ describe("vintage paths", () => {
     ) {
       expect(parseVintagePath(path), `should decline: ${path}`).toBeUndefined();
     }
+  });
+
+  it("declines a companion store — it is part of a fixture, not one", () => {
+    // A multi-space fixture keeps its other spaces beside the primary file, and
+    // each is a raw `.sqlite` under a `.sqlite.spaces/` directory. Enumerating
+    // one as a vintage in its own right would replay another space's store
+    // against a pattern key it never belonged to.
+    const fixture = `${vintageDir("system/home.tsx", PINNED)}/${
+      vintageFileName("2026-01-01T00-00-00.000Z", ID_A)
+    }`;
+    const companions = vintageCompanionDir(fixture);
+
+    expect(parseVintagePath(fixture)).toBeDefined();
+    expect(
+      parseVintagePath(
+        `${companions}/${encodeURIComponent("did:key:zChild")}.sqlite`,
+      ),
+    ).toBeUndefined();
+    // Not merely because a DID does not parse as `<stamp>-<identity>`: a
+    // companion whose name DOES look like one is still declined.
+    expect(
+      parseVintagePath(
+        `${companions}/${vintageFileName("2026-01-01T00-00-00.000Z", ID_B)}`,
+      ),
+    ).toBeUndefined();
   });
 });
 

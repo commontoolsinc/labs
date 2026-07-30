@@ -96,6 +96,7 @@ Measured on branch `tier2`, not assumed:
 | A run that replays zero fixtures is a FAILURE | `isClean` takes `replayed` and requires it positive. Measured: with the fixture tree moved aside the task exits 1 reporting both the uncovered patterns and "covered NOTHING" |
 | A fixture that does not RESTORE would have read green | measured: an empty store presents to the runtime as a fresh space, today's source materializes onto a fresh space, the root reads as something, and every check the replay makes passes while nothing was replayed. Fixed by two controls, both BEFORE any candidate is applied: the fixture must hold a captured root at all, and its manifest must contain the identity its filename records — so a fixture restored from the wrong file, or renamed, says so instead of replaying under a version it never came from. Red/green: with the first disabled, that case is the only one in `pattern-vintage-run.test.ts` that fails |
 | The committed fixtures really do restore, and their names are provenance | the same controls, run against them: both replay clean, so each fixture contains the identity its filename records |
+| A root in ANOTHER space would have read green too | measured over a subject that instantiates a child via `Factory.inSpace(…)` — the shape `profile-create.tsx` uses. An entity id is content-derived and carries no space, so reading the child's recorded id under the FIXTURE's DID succeeds at finding nothing: the cell is absent, the broken candidate materializes onto it, and the run reports `changed: 2, updated: 2, failures: []` over a break. Two things were wrong and each alone still produced that green — the replay read `vintage.space` instead of the recorded `entry.space`, and `snapshot` copied only the primary space's SQLite file while the run had written two. Fixed by reading the recorded space, carrying every space the run wrote in a `.sqlite.spaces/` companion directory, and failing closed on a recorded target whose space the fixture does not hold. Red/green: reverting the read reds exactly the cross-space case; disabling the companion copy reds all four |
 | `StorageManager.emulate` runs its real memory server against `:memory:` | `engine.ts` `toDatabaseAddress`; there is no file to snapshot, hence file-backed capture |
 | Entity ids are content-addressed from `{source, cause}` | `packages/runner/src/create-ref.ts` |
 | `setupPersistent` mints `{ space, random: randomUUID }` when given no cause | `packages/piece/src/manager.ts` |
@@ -262,6 +263,12 @@ automatic updater performs no structural check at all.
       so fixtures would ship inside the toolshed binary and grow it with every
       stage-4 capture — and `PatternsServer` serves the same directory by path,
       so they would be fetchable from any deployment
+- [x] `…/<iso>-<identity>.sqlite.spaces/<did>.sqlite` for every OTHER space the
+      capture wrote. A space is one SQLite file and a capture can instantiate a
+      pattern in another space (`Factory.inSpace(…)`, how a profile is created),
+      so a fixture holding only the primary file would record roots whose state
+      it does not have. The companion directory is part of the fixture, not a
+      fixture itself, so `parseVintagePath` declines everything inside one
 - [x] Seed the auto-updating patterns from today's source
 - [x] Assert every REQUIRED pattern has a vintage, and replay every vintage
       that exists under today's source
@@ -275,10 +282,13 @@ naming the field; restoring it returns exit 0.
 vintage RESTORED — its root already carries the identity the filename records,
 checked before anything is applied — that today's source resolves, that the
 setup commit carrying it onto that root is not refused, and that the root then
-reads as something rather than nothing. The restore control is not ceremony: an
-empty or truncated store presents as a fresh space, today's source materializes
-onto a fresh space, and without it every remaining check passes while nothing
-has been replayed. It compares no VALUES, though — and that is now the only
+reads as something rather than nothing. Each recorded root is read out of the
+SPACE it was materialized in, and a target whose space the fixture does not
+carry is a reported failure rather than a skip. The restore control is not
+ceremony: an empty or truncated store presents as a fresh space, today's source
+materializes onto a fresh space, and without it every remaining check passes
+while nothing has been replayed — and a space that did not travel with the
+fixture reads exactly the same way, one root at a time. It compares no VALUES, though — and that is now the only
 reason, since a captured vintage holds real data written through real handlers.
 So the storage-move class — the one this tier
 was built for — replays clean here: measured on the real `home.tsx`, renaming

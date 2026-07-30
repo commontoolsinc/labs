@@ -5,6 +5,7 @@ import { collectVintages, PINNED } from "./pattern-vintage-lib.ts";
 import {
   openFileBackedRuntime,
   readVintageManifest,
+  vintageCompanionDir,
   writeVintageManifest,
 } from "../packages/piece/test/state-continuity-harness.ts";
 import {
@@ -162,6 +163,89 @@ const aliased = (aliasFirst: boolean) =>
 
 const NESTED_ALIASED = aliased(false);
 const NESTED_ALIASED_FLIPPED = aliased(true);
+
+/**
+ * A subject whose child is instantiated in ANOTHER space — the shape
+ * `system/profile-create.tsx` uses, where each profile lives in its own
+ * `ProfileHome.inSpace()` space.
+ *
+ * The child owns its own CFC-labelled root in that space, so the fixture has to
+ * CARRY that space and the replay has to READ the child's root out of it. Get
+ * either wrong and the read finds a fresh empty space, today's source
+ * materializes onto it, and the entry counts as updated cleanly.
+ *
+ * `added` is the type of a field appended to the CHILD's output: `string[]` is
+ * the estuary shape (additive, required, no default) and
+ * `string[] | Default<[]>` is the same edit made compatible. The parent's
+ * contract is identical either way, so any difference between the two runs is
+ * attributable to the child's root — the one in the other space.
+ */
+const CROSS_KEY = "vintage-gate-crossspace.tsx";
+
+/**
+ * The child's space. NAMED rather than anonymous (`inSpace()` derives a DID
+ * from the creating frame's cause), so a case can state which DID it expects.
+ */
+const CHILD_SPACE = (await Identity.fromPassphrase("vintage gate child space"))
+  .did();
+
+const crossSource = (added?: string) =>
+  [
+    "import { Confidential, Default, Writable, pattern } from 'commonfabric';",
+    "const ATOM = {",
+    "  type: 'https://commonfabric.org/cfc/atom/Resource',",
+    "  class: 'VintageGateCross',",
+    "  subject: 'did:example:vintage-gate-cross',",
+    "} as const;",
+    "type Label = readonly [typeof ATOM];",
+    "export interface ChildOut {",
+    "  owner: Confidential<Writable<string>, Label>;",
+    "  note: Writable<string>;",
+    ...(added ? [`  addedLater: Writable<${added}>;`] : []),
+    "}",
+    "export const Child = pattern<Record<string, never>, ChildOut>(() => {",
+    "  const owner = new Writable<string>('v').for('owner');",
+    "  const note = new Writable<string>('captured').for('note');",
+    ...(added
+      ? ["  const addedLater = new Writable<string[]>([]).for('addedLater');"]
+      : []),
+    `  return { owner, note${added ? ", addedLater" : ""} };`,
+    "});",
+    "export interface Output {",
+    "  items: Writable<string[]>;",
+    "  child: ChildOut;",
+    "}",
+    "export default pattern<Record<string, never>, Output>(() => {",
+    "  const items = new Writable<string[]>([]).for('items');",
+    `  const child = Child.inSpace('${CHILD_SPACE}')({});`,
+    "  return { items, child };",
+    "});",
+    "",
+  ].join("\n");
+
+/**
+ * Reads the child's `note` on purpose. The assertion is what proves the
+ * cross-space child really materialized during the capture — without it a
+ * fixture recording the child would be indistinguishable from one that recorded
+ * a root nothing ever wrote.
+ */
+const crossTest = [
+  "import { action, assert, pattern } from 'commonfabric';",
+  `import Subject from './${CROSS_KEY}';`,
+  "export default pattern(() => {",
+  "  const subject = Subject({});",
+  "  const add = action(() => {",
+  "    subject.items.set([...subject.items.get(), 'captured']);",
+  "  });",
+  "  const added = assert(() => subject.items.get().length === 1);",
+  "  const noted = assert(() => subject.child.note.get() === 'captured');",
+  "  return {",
+  "    tests: [{ action: add }, { assertion: added }, { assertion: noted }],",
+  "    subject,",
+  "  };",
+  "});",
+  "",
+].join("\n");
 
 const nestedTest = (key: string) =>
   [
@@ -624,6 +708,123 @@ describe("the vintage gate, end to end", () => {
       expect(
         failures.some((f) => f.detail.includes('defines no "Row"')),
       ).toBe(true);
+    });
+  });
+
+  describe("a child instantiated in ANOTHER space", () => {
+    const writeCross = (source: string) =>
+      Deno.writeTextFile(`${dir}/patterns/${CROSS_KEY}`, source);
+
+    const captureCross = () =>
+      captureMissing(roots, [CROSS_KEY], new Date("2026-07-29T12:00:00.000Z"));
+
+    beforeEach(async () => {
+      await writeCross(crossSource());
+      await Deno.writeTextFile(
+        `${dir}/patterns/${CROSS_KEY.replace(/\.tsx$/, ".test.tsx")}`,
+        crossTest,
+      );
+    });
+
+    it("records the child under the space it was materialized in, and carries that space", async () => {
+      const { problems, captured } = await captureCross();
+      expect(problems).toEqual([]);
+      expect(captured).toHaveLength(1);
+
+      const [pinned] = await collectVintages(roots.vintagesRoot);
+      const tmp = await Deno.makeTempDir({ prefix: "vintage-gate-cross-" });
+      const vintage = await openFileBackedRuntime(signer, tmp, pinned.path);
+      try {
+        const entries = (await readVintageManifest(vintage))?.entries ?? [];
+        // The child's root is in the child's space, not the fixture's own. This
+        // is the premise every case below rests on: if the capture stopped
+        // producing a cross-space entry, they would all pass vacuously.
+        const child = entries.find((e) => e.symbol === "Child");
+        expect(child?.space).toBe(CHILD_SPACE);
+        expect(child?.space).not.toBe(vintage.space);
+        // ...and the fixture RESTORED it. A recorded space that did not travel
+        // with the state is a root the replay cannot reach.
+        expect([...vintage.restoredSpaces].sort()).toEqual(
+          [CHILD_SPACE, signer.did()].sort(),
+        );
+      } finally {
+        await vintage.dispose().catch(() => {});
+        await Deno.remove(tmp, { recursive: true }).catch(() => {});
+      }
+      // On disk that is a companion store beside the primary file, named for
+      // the space it holds.
+      const companions: string[] = [];
+      for await (
+        const entry of Deno.readDir(vintageCompanionDir(pinned.path))
+      ) {
+        companions.push(entry.name);
+      }
+      expect(companions).toEqual([`${encodeURIComponent(CHILD_SPACE)}.sqlite`]);
+    });
+
+    it("reads the child's CAPTURED root, not an empty cell in the wrong space", async () => {
+      // The case this whole block exists for. An entity id is content-derived
+      // and carries no space, so reading the child's id under the FIXTURE's DID
+      // is a lookup that succeeds at finding nothing: the cell is absent,
+      // today's source materializes onto it, the root then holds today's
+      // defaults, and the entry is counted as updated cleanly. Measured — with
+      // the replay reading `vintage.space` this exact break replays with zero
+      // failures.
+      await captureCross();
+      const [pinned] = await collectVintages(roots.vintagesRoot);
+      await writeCross(crossSource("string[]"));
+
+      const { failures } = await replayAll(roots);
+
+      const childFailure = failures.find((f) => f.detail.includes("(Child)"));
+      expect(childFailure?.detail).toContain("was REFUSED");
+      // The proof that the CAPTURED root was reached, and not some empty cell:
+      // the root still carries the identity the capture stamped on it. A cell
+      // in a space the fixture never wrote carries no marker at all — and would
+      // have taken the migration without complaint.
+      expect(childFailure?.detail).toContain(
+        `the root carries ${pinned.identity}#Child`,
+      );
+    });
+
+    it("passes once the child's added field carries a default", async () => {
+      // The green half of the pair. The two sources differ by exactly
+      // `Default<[]>` on a field of the CHILD's output, so the failure above is
+      // attributable to that and not to anything else about reaching another
+      // space — and this direction proves the cross-space root is genuinely
+      // migrated rather than merely reported on.
+      await captureCross();
+      await writeCross(crossSource("string[] | Default<[]>"));
+
+      const { targets, changed, updated, failures } = await replayAll(roots);
+
+      expect(failures).toEqual([]);
+      // Both the parent and the child changed and both applied — `> 1` is what
+      // keeps this from staying green if a future change stopped materializing
+      // the cross-space root and only the entry pattern was applied.
+      expect(targets).toBeGreaterThan(1);
+      expect(changed).toBeGreaterThan(1);
+      expect(updated).toBe(changed);
+    });
+
+    it("FAILS a fixture that dropped a recorded space, rather than reading it clean", async () => {
+      // The same worst-available-green as an unrestored fixture, one space in:
+      // the primary store restores, every check about it passes, and the roots
+      // in the missing space are silently not replayed. Today's source is left
+      // UNCHANGED so nothing else can account for the failure — the fixture is
+      // reported as under-covering on its own.
+      await captureCross();
+      const [pinned] = await collectVintages(roots.vintagesRoot);
+      await Deno.remove(vintageCompanionDir(pinned.path), { recursive: true });
+
+      const { replayed, failures } = await replayAll(roots);
+
+      expect(replayed).toBe(1);
+      expect(failures).toHaveLength(1);
+      expect(failures[0].detail).toContain(
+        `was materialized in ${CHILD_SPACE}, which this fixture does not carry`,
+      );
+      expect(failures[0].detail).toContain("recorded but NOT validated");
     });
   });
 });
