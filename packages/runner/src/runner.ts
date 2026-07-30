@@ -1839,6 +1839,9 @@ export class Runner {
             );
             return;
           }
+          if (!ownership.isCancelled()) {
+            this.publishDeferredRootExecutionDemand(resultLink);
+          }
           if (pullOnceAfterStart && !ownership.isCancelled()) {
             this.pullCellOnceInPullMode(committedResultCell);
           }
@@ -1908,6 +1911,9 @@ export class Runner {
               error,
             );
             return;
+          }
+          if (!ownership.isCancelled()) {
+            this.publishDeferredRootExecutionDemand(resultLink);
           }
           if (pullOnceAfterStart && !ownership.isCancelled()) {
             this.pullCellOnceInPullMode(committedResultCell);
@@ -2215,6 +2221,36 @@ export class Runner {
       },
     );
     return queued;
+  }
+
+  /**
+   * Publish execution demand for a root that was started behind a commit
+   * gate, so it never passed through {@link start} — the runner's other and,
+   * until now, only demand publisher.
+   *
+   * Both callers are the deferred-root seams
+   * ({@link startAfterSuccessfulCommit} and
+   * {@link runPatternAfterSuccessfulCommit}), which install the start inside a
+   * commit callback and are the route a handler's `navigateTo` result pattern
+   * takes. Their root is already durable when the handler's transaction
+   * commits, so there is a real document to demand.
+   *
+   * Deliberately NOT published from `startWithTx`: that is also the path
+   * `instantiatePatternNode` takes for every nested pattern node, so
+   * publishing there would put each child piece on the demand wire. The
+   * demand plane is 1:1 with no roll-up, so a nested piece is covered by the
+   * demand its own eventual `start()` publishes — for a navigate target, the
+   * shell's start once the navigation lands. See
+   * `docs/specs/server-side-execution/navigate-to-server-side.md` §8b.
+   *
+   * Nothing awaits the deferred start's commit continuation, so the snapshot
+   * is tracked for settle rather than returned; `removeExecutionDemand` does
+   * the same for the symmetric `stop()` side.
+   */
+  private publishDeferredRootExecutionDemand(link: NormalizedFullLink): void {
+    this.runtime.storageManager.trackUntilSettled(
+      this.addExecutionDemand(link),
+    );
   }
 
   private removeExecutionDemand(link: NormalizedFullLink): void {
