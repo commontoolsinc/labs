@@ -22,6 +22,7 @@ import {
   commitFlagRegion,
   commitIncludesIndex,
   commitPathspecs,
+  commitRawRegion,
   commitsAllTracked,
   commitSkipsVerify,
   commitTargetWorktree,
@@ -70,15 +71,13 @@ if (cmd.length > MAX_COMMAND_LENGTH) {
 
 const commitAfter = splitAtGitCommit(cmd).after;
 const commitFlags = commitFlagRegion(commitAfter);
+const commitRaw = commitRawRegion(commitAfter);
 
 if (!isGitCommit(cmd)) Deno.exit(0);
 
-// `--help`, `-h` and `--dry-run` create no commit. Blocking them is a hard block
-// on a read-only command, and `--dry-run` is how you preview a commit.
-if (commitCreatesNothing(commitFlags)) Deno.exit(0);
-
-// Before the skip gate, so a `--no-verify` on the *first* commit does not also
-// swallow the warning that a second one went unmodelled.
+// First of the early exits, not after them: every gate below returns 0, and
+// each one that ran first swallowed this warning, turning an unmodelled second
+// commit back into a silent pass.
 if (splitAtGitCommit(commitAfter).matched) {
   console.error(
     "pre-commit: more than one `git commit` in this command; only the first " +
@@ -86,6 +85,10 @@ if (splitAtGitCommit(commitAfter).matched) {
   );
   Deno.exit(0);
 }
+
+// `--help`, `-h` and `--dry-run` create no commit. Blocking them is a hard block
+// on a read-only command, and `--dry-run` is how you preview a commit.
+if (commitCreatesNothing(commitFlags)) Deno.exit(0);
 
 if (commitSkipsVerify(commitFlags)) Deno.exit(0);
 
@@ -151,7 +154,14 @@ async function getFilesToCommit(): Promise<string[]> {
   // commit did include and, with something unrelated staged, reporting "checks
   // passed on 1 file" about a file the commit left behind: a verdict about the
   // wrong change. `-i`/`--include` is the one form that means index *and* paths.
-  const pathspecs = commitPathspecs(commitFlags);
+  const pathspecs = commitPathspecs(commitRaw);
+  if (pathspecs === null) {
+    console.error(
+      "pre-commit: this commit selects its contents in a way this hook does " +
+        "not model. Skipping — commit not blocked.",
+    );
+    return [];
+  }
   if (pathspecs.length > 0) {
     if (pathspecs.some((p) => /[*?[{]/.test(p))) {
       console.error(

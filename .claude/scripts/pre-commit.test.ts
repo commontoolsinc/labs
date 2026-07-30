@@ -190,6 +190,74 @@ Deno.test("resolves what a `git add` in the same command will stage", async () =
   }
 });
 
+Deno.test("resolves the abbreviations git resolves", async () => {
+  const repo = await makeRepo();
+  try {
+    await Deno.writeTextFile(`${repo.dir}/bad.ts`, TYPE_ERROR);
+    await run(repo.dir, ["add", "bad.ts"]);
+
+    // git accepts any unambiguous prefix. Matching exact spellings mishandled
+    // each of these in its own way: `--dr` blocked a read-only preview, `--inc`
+    // dropped the staged files from the file set, `--mess` left its message
+    // looking like a pathspec.
+    for (const command of ["git commit --dr", "git commit --dry"]) {
+      assertEquals(await hook(repo, command), 0, command);
+    }
+    assertEquals(await hook(repo, "git commit -m x --no-ver"), 0);
+    assertEquals(await hook(repo, "git commit --mess x"), 2);
+    assertEquals(await hook(repo, "git commit --inc -m x tracked.ts"), 2);
+    // Contents named in a file we never read: say so rather than fall back to
+    // the index, which is a verdict about a different change.
+    assertEquals(
+      await hook(repo, "git commit -m x --pathspec-from-file=list.txt"),
+      0,
+    );
+  } finally {
+    await Deno.remove(repo.dir, { recursive: true });
+  }
+});
+
+Deno.test("a pathspec containing spaces survives", async () => {
+  const repo = await makeRepo();
+  try {
+    await Deno.writeTextFile(`${repo.dir}/my file.ts`, CLEAN);
+    await run(repo.dir, ["add", "my file.ts"]);
+    await run(repo.dir, ["commit", "-q", "-m", "add spaced"]);
+    await Deno.writeTextFile(`${repo.dir}/my file.ts`, TYPE_ERROR);
+
+    // Reading pathspecs from the quote-blanked flag region lost this one
+    // entirely, and the hook fell back to judging the index instead.
+    assertEquals(await hook(repo, 'git commit -m x "my file.ts"'), 2);
+    assertEquals(await hook(repo, 'git commit -m x -- "my file.ts"'), 2);
+  } finally {
+    await Deno.remove(repo.dir, { recursive: true });
+  }
+});
+
+Deno.test("the multi-commit warning survives every earlier gate", async () => {
+  const repo = await makeRepo();
+  try {
+    await Deno.writeTextFile(`${repo.dir}/bad.ts`, TYPE_ERROR);
+    // Each early exit returns 0, so whichever ran first swallowed this warning
+    // and turned an unmodelled second commit back into a silent pass.
+    for (
+      const first of [
+        "git commit --dry-run",
+        "git commit --help",
+        "git commit -m one --no-verify",
+      ]
+    ) {
+      const code = await hook(
+        repo,
+        `${first} && git add bad.ts && git commit -m two`,
+      );
+      assertEquals(code, 0, first);
+    }
+  } finally {
+    await Deno.remove(repo.dir, { recursive: true });
+  }
+});
+
 Deno.test("an editing flag is never dry-run", async () => {
   const repo = await makeRepo();
   try {

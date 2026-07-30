@@ -12,10 +12,10 @@
   // its own files. That is wanted — these scripts had no formatting or lint
   // coverage at all — and it is why comments elsewhere must not claim `.claude/`
   // is still excluded. Type checking comes from `tasks/check.sh`.
-  // `-A`: pre-commit.test.ts drives the hook as a subprocess against a scratch
-  // repository under Deno.makeTempDir(), so it needs run and write. It touches
-  // nothing in the checkout — see the header of that file.
+  // Permissions enumerated rather than `-A`, so what these tests may do is
+  // visible: pre-commit.test.ts drives the hook as a subprocess against a
+  // scratch repository under Deno.makeTempDir(). No network, no FFI.
   "tasks": {
-    "test": "deno test -A --permit-no-files"
+    "test": "deno test --allow-read --allow-write --allow-run --allow-env --permit-no-files"
   }
 }

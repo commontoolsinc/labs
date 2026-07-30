@@ -349,10 +349,21 @@ export function splitAtGitCommit(
  * explicitly to skip.
  */
 export function commitFlagRegion(after: string): string {
+  return maskRedirections(withoutQuotedSpans(commitRawRegion(after)));
+}
+
+/**
+ * The commit's own command, quotes intact.
+ *
+ * `commitFlagRegion` blanks quoted spans, which is right for reading flags and
+ * fatal for reading pathspecs: `git commit -m x "my file.ts"` lost its pathspec
+ * altogether, so the hook fell back to judging the index — the same false
+ * verdict that modelling pathspecs was meant to end.
+ */
+export function commitRawRegion(after: string): string {
   const masked = maskRedirections(maskQuotedSpans(after));
   const sep = masked.search(/[;\n&|]/);
-  const region = sep === -1 ? after : after.slice(0, sep);
-  return maskRedirections(withoutQuotedSpans(region));
+  return sep === -1 ? after : after.slice(0, sep);
 }
 
 export function argumentRegion(text: string): string {
@@ -710,22 +721,9 @@ function shortFlagsOf(token: string): string {
   return flags;
 }
 
-/**
- * True when `token` is `full` or an unambiguous abbreviation of it.
- *
- * git resolves `--no-veri` to `--no-verify`, so matching the exact string only
- * meant the documented escape hatch did not work spelled the way git accepts it,
- * and the hook blocked a commit it had been told to skip. This is the same
- * polarity error the `git add` whitelist was rewritten to fix, on the other side.
- */
-function isAbbrevOf(token: string, full: string, shortest: number): boolean {
-  return token.length >= shortest && full.startsWith(token);
-}
-
 export function commitSkipsVerify(commitFlags: string): boolean {
   for (const token of commitOptionTokens(commitFlags)) {
-    // "--no-v" is the shortest prefix no other git-commit option shares.
-    if (isAbbrevOf(token, "--no-verify", 6)) return true;
+    if (resolveCommitOption(token) === "--no-verify") return true;
     if (shortFlagsOf(token).includes("n")) return true;
   }
   return false;
@@ -738,8 +736,9 @@ export function commitSkipsVerify(commitFlags: string): boolean {
  */
 export function commitCreatesNothing(commitFlags: string): boolean {
   for (const token of commitOptionTokens(commitFlags)) {
-    if (isAbbrevOf(token, "--help", 6) || token === "-h") return true;
-    if (isAbbrevOf(token, "--dry-run", 7)) return true;
+    const name = resolveCommitOption(token);
+    if (name === "--help" || name === "--dry-run") return true;
+    if (token === "-h") return true;
   }
   return false;
 }
@@ -752,8 +751,15 @@ export function commitCreatesNothing(commitFlags: string): boolean {
  * skipping a dirty file the commit did include, and in the worst case reporting
  * "checks passed on 1 file" about a staged file the commit left behind.
  */
-export function commitPathspecs(commitFlags: string): string[] {
-  const tokens = commitFlags.match(/\S+/g) ?? [];
+export function commitPathspecs(rawRegion: string): string[] | null {
+  // Split on the mask so a quoted pathspec containing spaces stays one word, and
+  // unquoted so the word itself survives — the same shape as shellWords.
+  const masked = maskQuotedSpans(rawRegion);
+  const spans = [...masked.matchAll(/\S+/g)];
+  const tokens = spans.map((m) =>
+    unquote(rawRegion.slice(m.index, m.index + m[0].length))
+  );
+
   const paths: string[] = [];
   let sentinel = false;
   for (let i = 0; i < tokens.length; i++) {
@@ -770,23 +776,126 @@ export function commitPathspecs(commitFlags: string): string[] {
       paths.push(token);
       continue;
     }
+    if (token.startsWith("--")) {
+      const name = resolveCommitOption(token);
+      // `--pathspec-from-file` names contents in a file we do not read, and an
+      // option we cannot identify may do the same. Returning an empty list here
+      // would send the caller back to judging the index; say we do not know.
+      if (name === null || name === "ambiguous") return null;
+      if (name === "--pathspec-from-file") return null;
+    }
     if (consumesNextToken(token)) i++;
   }
   return paths;
 }
 
+/** One layer of quoting removed, leaving the word as the shell would pass it. */
+function unquote(word: string): string {
+  if (word.length >= 2) {
+    const first = word[0];
+    if ((first === '"' || first === "'") && word.endsWith(first)) {
+      return word.slice(1, -1);
+    }
+  }
+  return word;
+}
+
 /** True when `-i`/`--include` adds the index to a pathspec commit. */
 export function commitIncludesIndex(commitFlags: string): boolean {
   for (const token of commitOptionTokens(commitFlags)) {
-    if (isAbbrevOf(token, "--include", 9)) return true;
+    if (resolveCommitOption(token) === "--include") return true;
     if (shortFlagsOf(token).includes("i")) return true;
   }
   return false;
 }
 
+/**
+ * git-commit's long options, and whether each takes its value as a *separate*
+ * word. Options whose value is optional (`--untracked-files[=<mode>]`,
+ * `--gpg-sign[=<keyid>]`) take it attached only, so they consume nothing.
+ *
+ * The table exists because git resolves any unambiguous abbreviation: `--mess`
+ * is `--message`, `--inc` is `--include`, `--dr` is `--dry-run`. Matching exact
+ * spellings meant each of those was mishandled in its own way — an unrecognised
+ * `--mess` left its message looking like a pathspec, an unrecognised `--inc`
+ * dropped the staged files from the file set, and an unrecognised `--dr` blocked
+ * a read-only preview. One resolver, so the whole class is handled once.
+ */
+const COMMIT_OPTIONS: Record<string, { separateValue: boolean }> = {
+  "--all": { separateValue: false },
+  "--allow-empty": { separateValue: false },
+  "--allow-empty-message": { separateValue: false },
+  "--amend": { separateValue: false },
+  "--author": { separateValue: true },
+  "--branch": { separateValue: false },
+  "--cleanup": { separateValue: true },
+  "--date": { separateValue: true },
+  "--dry-run": { separateValue: false },
+  "--edit": { separateValue: false },
+  "--file": { separateValue: true },
+  "--fixup": { separateValue: true },
+  "--gpg-sign": { separateValue: false },
+  "--help": { separateValue: false },
+  "--include": { separateValue: false },
+  "--long": { separateValue: false },
+  "--message": { separateValue: true },
+  "--no-edit": { separateValue: false },
+  "--no-gpg-sign": { separateValue: false },
+  "--no-post-rewrite": { separateValue: false },
+  "--no-signoff": { separateValue: false },
+  "--no-status": { separateValue: false },
+  "--no-verify": { separateValue: false },
+  "--null": { separateValue: false },
+  "--only": { separateValue: false },
+  "--pathspec-file-nul": { separateValue: false },
+  "--pathspec-from-file": { separateValue: true },
+  "--patch": { separateValue: false },
+  "--porcelain": { separateValue: false },
+  "--quiet": { separateValue: false },
+  "--reedit-message": { separateValue: true },
+  "--reset-author": { separateValue: false },
+  "--reuse-message": { separateValue: true },
+  "--short": { separateValue: false },
+  "--signoff": { separateValue: false },
+  "--squash": { separateValue: true },
+  "--status": { separateValue: false },
+  "--template": { separateValue: true },
+  "--trailer": { separateValue: true },
+  "--untracked-files": { separateValue: false },
+  "--verbose": { separateValue: false },
+  "--verify": { separateValue: false },
+};
+
+const COMMIT_OPTION_NAMES = Object.keys(COMMIT_OPTIONS);
+
+/**
+ * The long option `token` names, resolving abbreviations the way git does.
+ *
+ * `"ambiguous"` when a prefix matches more than one option — git errors on those,
+ * so there is no commit to judge. `null` when nothing matches, which we must
+ * treat as "this command does something we do not model" rather than assume
+ * harmless.
+ */
+export function resolveCommitOption(
+  token: string,
+): string | null | "ambiguous" {
+  const name = token.split("=")[0];
+  if (!name.startsWith("--")) return null;
+  if (name in COMMIT_OPTIONS) return name;
+  const matches = COMMIT_OPTION_NAMES.filter((o) => o.startsWith(name));
+  if (matches.length === 1) return matches[0];
+  return matches.length > 1 ? "ambiguous" : null;
+}
+
 /** True when `token` takes the following word as its value. */
 function consumesNextToken(token: string): boolean {
-  if (VALUE_TAKING_LONG.has(token)) return true;
+  if (token.startsWith("--")) {
+    // An `=` carries the value with it, so nothing further is consumed.
+    if (token.includes("=")) return false;
+    const name = resolveCommitOption(token);
+    return typeof name === "string" && name !== "ambiguous" &&
+      COMMIT_OPTIONS[name].separateValue;
+  }
   if (!/^-[A-Za-z]+$/.test(token)) return false;
   for (const ch of token.slice(1)) {
     // A value-taking short flag consumes the next word only when its own value
@@ -800,22 +909,6 @@ function consumesNextToken(token: string): boolean {
 // deliberately absent: their values are attached only, so they consume nothing,
 // and claiming otherwise stepped over a real `--` sentinel.
 const VALUE_TAKING_SHORT = "mFcCt";
-const VALUE_TAKING_LONG = new Set([
-  "--message",
-  "--file",
-  "--reuse-message",
-  "--reedit-message",
-  "--template",
-  "--gpg-sign",
-  "--untracked-files",
-  "--author",
-  "--date",
-  "--cleanup",
-  "--fixup",
-  "--squash",
-  "--trailer",
-  "--pathspec-from-file",
-]);
 
 /**
  * Blank redirections, descriptor and all, preserving length.
