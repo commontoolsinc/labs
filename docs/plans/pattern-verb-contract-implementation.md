@@ -135,104 +135,41 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   `packages/runner/src/builder/module.ts`); `Stream<E, R = void>`
   so the result type is visible to the schema layer — the defaulted parameter
   keeps every existing `Stream<E>` use compiling. A `VerbError { code,
-  message }` type for rule 4's typed rejections.~~ — **done (C1)**: the
-  workspace type-checks clean and schema-generator still recognizes every
-  stream (its detection reads `CELL_BRAND` and takes `typeArguments[0]`, so a
-  second parameter is invisible to it). `R` is pinned by a `CELL_RESULT_TYPE`
-  property rather than left to ride on `ICreatable<Stream<E, R>>`'s return
-  position, which discriminates today but only incidentally — were
-  `for(cause): C` to become `for(cause): this`, `R` would fall back to phantom
-  and declared results would start dropping silently. `VerbError` is a real
-  `Error` subclass, so until the invocation surface reports codes (WS-E) a
-  thrown one degrades to exactly what a thrown handler error does today.
-  Both type-level guards are verified to fail when what they protect is
-  removed: deleting `CELL_RESULT_TYPE` raises `TS2538`, deleting `action`'s
-  overload 2 raises `TS2344`.
+  message }` type for rule 4's typed rejections.~~ — **done (C1)**.
+
+  Verb-shaped type parameters read one way throughout: **`E`** the event,
+  **`R`** the declared result, **`T`** the handler's bound state where there
+  is one. `Handler`/`HandlerFactory`'s second parameter was spelled `R` while
+  it meant the event.
+
+  **A result is opt-in by explicit type argument — `action<E, R>(...)` —
+  never inferred.** A concise arrow body's completion value is whatever its
+  last call returns, and `Cell.set` returns the cell, so inference would
+  declare results nobody wrote. TypeScript cannot tell that from a deliberate
+  return, so overload 2 absorbs every callback and a result must be asked for
+  by name. Contextual typing does not reach it either: annotating the binding
+  still selects overload 2 and fails to assign — the intended catch.
 
   **Type-level stream detection is brand-based** — `AnyStream`
   (`AnyBrandedCell<any, "stream">`), with `StreamEventOf` / `StreamResultOf`
   recovering the halves. A guard spelled `[T] extends [Stream<any>]` pins the
   arity: it means `Stream<any, void>`, which a verb declaring a result does
   not satisfy, so every such guard stopped matching the moment a result
-  existed. It failed silently and it failed *late* — a value-less stream still
-  matches, and value-less is every stream in the tree today, so the whole
-  workspace type-checked clean while the break waited for the first
-  `action<E, R>` user.
-  This converges the type layer on what the other two already do, which is why
-  neither of them broke: the runtime reads the cell kind (`Cell.isStream`) and
-  the schema generator reads `CELL_BRAND`. Rewriting the guards to
-  `Stream<any, any>` was rejected — it re-arms the same trap for a third
-  parameter.
+  existed. It failed silently and late — a value-less stream still matches,
+  and value-less is every stream in the tree today, so the workspace
+  type-checked clean while the break waited for the first `action<E, R>`
+  user. This converges the type layer on what the other two already do, which
+  is why neither broke: the runtime reads the cell kind, the schema generator
+  reads `CELL_BRAND`. Rewriting to `Stream<any, any>` was rejected — it
+  re-arms the same trap for a third parameter.
 
   **Rebuild sites remain the fragile surface.** Pass-through guards preserve
-  `T` whole and are now arity-independent, but anything that reconstructs a
-  stream (`StripDefaultFieldInner`) still names both parameters explicitly, so
-  a future fourth axis would be dropped there even though detection survives.
-  `packages/api/test/stream-through-utilities.test.ts` is the tripwire: it
-  applies the api's own utilities to a returning stream and asserts identity,
-  not mere assignability. Verified to fail when a guard is reverted (`TS2322`).
-
-  **`action` is the sole result-authoring surface.** `handler()` produces
-  `HandlerFactory<T, E, void>`, so a returning verb written with `handler`
-  does not compile against a `Stream<E, R>` annotation. This is deliberate:
-  `action` is the CTS-native surface a pattern author writes, `handler` the
-  lower-level escape hatch, and threading `R` through both would double a
-  hand-maintained mirror that already drifts (the reason the two overload
-  tests cross-reference each other). C2's returning-body error must therefore
-  point authors at `action` rather than merely rejecting the body.
-
-  **Correction — the envelope does not do what this plan and the design doc
-  claimed.** Both said a result nested under one key leaves only that key
-  permanent, "everything beneath it free to narrow". Measured against
-  `assertPatternSchemasBackwardCompatible`, nesting confers no advantage at
-  all: the removed-field check recurses, so a nested removal is rejected on a
-  nested path (`result.topic.title: existing result field was removed`)
-  exactly as a flat one is (`result.title: ...`). Replacing a result's shape
-  is rejected either way, for the same reason.
-
-  What the checker actually enforces, in both shapes:
-
-  | change | verdict |
-  | --- | --- |
-  | remove a named field, any depth | rejected |
-  | add a **required** field, any depth | rejected unless it has a default |
-  | add an **optional** field (or one with a default), any depth | allowed |
-  | narrow a value type, any depth | allowed |
-
-  So the rule to author against is not "nest it" but: **every name a result
-  publishes is permanent regardless of depth, and every later addition must
-  be optional.** Publish as few names as the verb can live with; nesting is a
-  readability choice, not an evolution strategy. "Results may narrow freely"
-  is true of *values* and never of *names* — which is the distinction the
-  original wording blurred.
-
-  Verb-shaped type parameters read the same way throughout: **`E`** the event,
-  **`R`** the declared result, **`T`** the handler's bound state where there is
-  one. `Handler`/`HandlerFactory`'s second parameter was spelled `R` while it
-  meant the event; it is `E` now so `R` names one concept everywhere.
-
-  **A result is opt-in by explicit type argument — `action<E, R>(...)` — and
-  is never inferred from the callback.** Inferring it is not available: a
-  concise arrow body's completion value is whatever its last call returns, and
-  `Cell.set` returns the cell rather than `void` (api `ISettable`), so
-  `action((id: string) => selected.set(id))` would infer a `Cell` result and
-  declare a verb result nobody wrote. TypeScript cannot distinguish that
-  incidental return from a deliberate one, so overload 2 (`(event: E) => void`)
-  absorbs every callback and a result must be asked for by name. Contextual
-  typing does not reach it either: annotating the binding
-  `const v: Stream<E, R> = action(...)` still selects overload 2 and fails to
-  assign — which is the intended catch, an error naming `[CELL_RESULT_TYPE]`
-  rather than a silent erasure.
-- **C2 must close the case the type layer cannot see.** The catch above fires
-  at a *declaration* — an Output interface saying `Stream<E, R>`, or explicit
-  type arguments. A verb that declares its result in neither place, whose body
-  nonetheless returns a value, compiles as `Stream<E, void>` with nothing to
-  object: this is the "forgotten annotation stays silent" failure the fork
-  decision set out to kill, surviving in the one spot types cannot reach.
-  The transformer can see it, because it reads the body: a `return` statement
-  carrying a value, under a stream whose declared result is `void`, is an
-  error C2 raises. Without that, C4's `plainResultReceipts` projection will
-  happily persist a result the schema layer never described.
+  `T` whole and are arity-independent now, but anything reconstructing a
+  stream still names both parameters, so a future axis would be dropped there
+  even though detection survives. The tripwire is
+  `stream-through-utilities.test.ts`: it asserts the api's own utilities
+  preserve a returning stream identically, and fails when a guard is
+  reverted.
 - **C1 fork — settled: widen `Stream`, do not add a second carrier.** The
   alternative was a separate `StreamWithResult<T, R> extends Stream<T>` that
   only the schema layer interprets, which is tempting because it leaves
@@ -281,20 +218,7 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   slot, `Apply` and `IKeyable` assume that — keeps producing `Stream<A,
   void>`, so a projection through the HKT drops a declared result. That is
   acceptable because streams are leaves: patterns do not `key()` into a
-  stream to reach another.
-  The only thing it forecloses is constructing a result-carrying stream
-  *outside* `action()`/`handler()` — `Stream.for<Event, Result>(cause)` —
-  and nothing does that today. Should it ever be wanted, the cost is bounded and
-  worth writing down rather than rediscovering: `AsStream` has three
-  non-test uses (`api/index.ts`'s `declare const Stream`,
-  `builder/factory.ts`'s `cellConstructorFactory<AsStream>`, and
-  `builder/types.ts`'s `CellTypeConstructor<AsStream>`), and widening is four
-  defaulted edits — `_B` on `HKT` (implementors inherit it, so `AsCell` and
-  the rest need no change), `Apply<F, A, B = void>`, `<T, R = void>` on
-  `CellTypeConstructor`'s `new`/`of`/`for` (`runner/src/cell.ts:3313-3315`),
-  and `AsStream { type: Stream<this["_A"], this["_B"]> }`. Every step carries
-  a default, so it is source-compatible and no call site moves.
-  Both options need a result parameter threaded
+  stream to reach another. Both options need a result parameter threaded
   through `Handler`/`HandlerFactory` regardless, since the factory returns
   the stream, so that work is not a differentiator.
 - **ts-transformers:** lowering for value-returning `action` bodies; CTS spec
@@ -310,25 +234,6 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   ignored — design rule 1): emit `additionalProperties: false` for event
   payloads, confirm the runner enforces it at dispatch, and record the rule
   in the mapping spec.
-
-  **A value-less verb wants `{ type: "object", properties: {} }`, not the
-  generic `void` sentinel.** `void` otherwise lowers to
-  `{ asCell: ["opaque"] }` (mapping spec, semantic sentinels), which is a
-  *wrapper* claim — "the result is an opaque cell" — rather than a statement
-  that there is no result, and it would hand readback machinery a cell to
-  resolve. The empty object is right on three counts: it describes the value
-  the runtime actually writes, since a value-less handling's receipt is `{}`;
-  it satisfies rule 3's "a verb that produces nothing says so" instead of
-  leaving the reader to infer it from absence; and leaving
-  `additionalProperties` **undefined** keeps it open, because the compat
-  checker reads `additionalProperties ?? true`
-  (`packages/piece/src/schema-compatibility.ts:467`, `:519`, `:658`). That
-  last point is the trap worth avoiding: emitting `false` here would freeze a
-  verb as value-less forever, since a later result would trip "new result
-  field is rejected by the previous additionalProperties contract" (`:542`).
-  Note this is the opposite choice from verb *inputs* above, and deliberately
-  so — inputs close to make an undeclared field a rejection, results stay open
-  to stay extensible.
 - **Which signal marks a verb — checked, and C3 is not exposed to it.** An
   earlier revision of this bullet warned that "stream/handler properties" is
   not one predicate, because `Cell.isStream` accepts three independent signals
@@ -376,13 +281,6 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
 - **Exit:** a CTS pattern declares a verb returning `AddTopicResult`; the
   result schema appears in the durable schema; under the flag, both plain and
   reactive returns are readable in the receipt cell.
-- **The reactive half of that exit needs no new machinery** (Berni,
-  2026-07-29): `await cell.pull()` on the receipt already ensures the pattern
-  on that cell, if there is one, has run. The readback the CLI performs is
-  therefore the same call for a plain return and a launched one, and the
-  difference stays inside `pull()`. Recorded rather than assumed — the claim
-  is the architect's about his own machinery, and this plan has not yet
-  exercised a reactive return end to end.
 
 ### WS-D — invocation plumbing
 
@@ -515,46 +413,11 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
   everything per the decided semantics; handler result schemas appear once
   WS-C lands, tier filtering with the marker, later. The 2026-07-24 amendment is absorbed: the listing carries the
   deployed pattern's source identity (skew detection).
-- Generic identity annotation for data reads and callable results
-  (`--show-links` / `--include-ids`). Patterns return child references and
-  never manufacture their own fid fields for this purpose. Two shapes were
-  considered (Berni, 2026-07-29):
-
-  1. **Inline.** An `"@ID": { doc?, path?, space?, scope? }` field wherever the
-     doc id or scope changes, plus at least once at the root. In context, next
-     to the value it describes.
-  2. **Beside the value.** A second block — or one object carrying value and
-     provenance — where provenance is a `{ "/path": <link> }` dictionary.
-
-  **Take the second.** Berni's own objection to the first is decisive on its
-  own: it cannot annotate a scalar, and a scalar can be its own doc, so the
-  format would need a special case exactly where results are simplest. An
-  irregular format costs an agent more than a verbose one.
-
-  A second reason from the result-schema work: a verb's result is
-  schema-described, and every name a result publishes is permanent at every
-  depth (see the correction under Results and schema evolution). An inline
-  `@ID` is therefore either undeclared — the tolerated-but-undeclared shape
-  rule 1 exists to kill — or declared, and then permanent at every path it
-  appears, for provenance metadata. Keeping provenance beside the value is
-  what lets the declared result schema keep describing the result exactly.
-
-  This is not a new format. The llm-dialog tool path already returns
-  `{ "@resultLocation": <link>, result: <value>, schema }` from both branches
-  (`packages/runner/src/builtins/llm-dialog.ts:2841-2847`, `:2869-2875`) — the
-  link a sibling of the value, never inside it. Option 2 is that generalized
-  from one link to many.
-
-  Its cost — out of context, long — is bounded by emitting links only for
-  paths that have them, and only when asked. Default output stays the pristine
-  value.
-
-  **Placement:** a `links` field on the Invocation JSON rather than a second
-  stdout block. `resultRef` already rides stderr as a hint and is recorded
-  below as advisory "until the invocation protocol carries it in the stdout
-  Invocation JSON"; this is that slot. Invocation is required to be authored
-  open-world precisely so protocol fields can be added later, so the field
-  costs nothing in schema-evolution terms.
+- Generic identity annotation for data reads and callable results. Start with
+  an exploration form such as `--include-ids` that annotates points where the
+  backing identity changes; evaluate a narrower path-selected form if broad
+  output is too noisy. Patterns return child references and never manufacture
+  their own fid fields for this purpose.
 - **Read-path guard:** `cf piece get` on a path that resolves to a verb returns
   the stream's serialization rather than redirecting. The llm-dialog `read`
   tool already rejects this case with the right message — "Path resolves to a

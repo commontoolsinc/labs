@@ -641,28 +641,14 @@ compared for exact equality, so a field cannot change
 between data and verb across a deploy. Verb names and their verb-ness are
 therefore already a contract with teeth, before this document adds any rule.
 
-The practical consequence for verb results, corrected against the checker's
-actual behavior: **every name a result publishes is permanent regardless of
-depth, and every later addition must be optional.**
-
-An earlier revision of this paragraph advised nesting the value under a single
-key so that "only that key is permanent and everything beneath it is free to
-narrow". That is not what `assertPatternSchemasBackwardCompatible` does. The
-removed-field check recurses, so a nested removal is rejected on a nested path
-(`result.topic.title: existing result field was removed`) exactly as a flat one
-is. Adding a **required** field is rejected at any depth ("newly required
-result field has no default"); adding an **optional** one is allowed at any
-depth; narrowing a *value* type is allowed at any depth. Nesting changes none
-of it — the envelope is a readability choice, not an evolution strategy.
-
-"Results may narrow freely" is therefore true of values and never of names,
-which is the distinction the earlier wording blurred. Publish as few names as
-the verb can live with, and make every later addition optional. The llm-dialog
-tool path returns a single-key shape from both of its branches — an
-`@resultLocation` link, the value, and its schema together
-(both `"@resultLocation"` sites in `handleInvoke`,
-`packages/runner/src/builtins/llm-dialog.ts`) —
-which remains a good shape for readability, just not for the reason given.
+The practical consequence for verb results: return the value inside an
+envelope under a single key rather than spreading it across top-level fields.
+Every top-level name published is permanent; a value nested under one key
+leaves only that key permanent and everything beneath it free to narrow. The
+llm-dialog tool path already returns exactly this shape from both of its
+branches — an `@resultLocation` link, the value, and its schema together (both
+`"@resultLocation"` sites in `handleInvoke`,
+`packages/runner/src/builtins/llm-dialog.ts`).
 
 ### Authoring
 
