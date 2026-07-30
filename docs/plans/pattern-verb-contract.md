@@ -536,8 +536,10 @@ Caller-supplied opaque string; the client generates a UUID by default and lets
 the caller pass one explicitly. It flows through as the durable event id —
 `queueEvent` already accepts `opts.eventId`, and `mintEventId`'s own contract
 anticipates it: "ingress callers that already own a durable delivery id pass it
-through instead." The CLI becomes such an ingress caller; the gap is one
-plumbing hop in `cell.send()`, which today passes no id.
+through instead." The CLI is now such an ingress caller: `Cell.send` takes the
+id as its third argument, and `Cell.set`'s stream branch binds it to the
+specific stream through `scopeCallerEventId` before handing it to
+`queueEvent`.
 
 Content-derived ids are available to a caller that wants them, but are not the
 default, since posting the same message twice is a legitimate thing to want. A

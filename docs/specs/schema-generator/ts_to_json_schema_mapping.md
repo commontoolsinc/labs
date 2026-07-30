@@ -470,7 +470,8 @@ Default paths of §7:
   member schemas before the anyOf pass (`mergeIdenticalSchemas`). It does
   **not** reach the all-literal path:
   `"a" | "b"` still emits `{ enum: ["a","b"] }` under `widenLiterals: true`
-  (probe; the branch at runs first and never consults the flag).
+  (probe; the all-literal `enum` branch runs first and never consults the
+  flag).
 - Member nodes re-associate with semantic members order-insensitively
   (`orderMemberNodesBySemanticType`) — the checker canonicalizes
   union order. Union alias nodes resolve through non-generic alias
