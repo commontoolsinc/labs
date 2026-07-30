@@ -154,7 +154,10 @@ upload, fetch, retention-by-count, a pruner that cannot reach `pinned/` —
 existed to avoid a cost that is not there.
 
 So: captures are committed, under the same append-only discipline as pinned
-vintages and Tier 1's baselines. That deletes a whole apparatus from stage 4.
+vintages and Tier 1's baselines — though only Tier 1's is mechanically checked;
+for vintages the discipline is the command's refusal to overwrite plus review of
+the diff, which is a deliberate choice to operate on trust rather than a gap to
+close. That deletes a whole apparatus from stage 4.
 
 What survives the reversal is a DIFFERENT constraint with a different
 threshold, and it should be argued on its own terms rather than inherited:

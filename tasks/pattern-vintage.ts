@@ -33,6 +33,13 @@
  * file. Naming keys explicitly does not weaken that — a key that already has a
  * pinned vintage is skipped whichever way it was asked for.
  *
+ * That discipline is enforced HERE, in what the command will do, and otherwise
+ * rests on review — deliberately, and unlike Tier 1, whose baselines have a
+ * mechanical checker (`tasks/check-baselines-append-only.ts`). There is no
+ * equivalent gate over `packages/piece/test/vintages/`, so a deleted fixture is
+ * caught by a human reading the diff and nothing else. Recapturing one is
+ * therefore a decision to make out loud, not a routine step.
+ *
  * This file is the shell — roots, argument parsing, printing, exit code. The
  * work is in `pattern-vintage-run.ts`, which takes its roots as arguments so
  * the gate can be proved to FAIL against a deliberately broken pattern
