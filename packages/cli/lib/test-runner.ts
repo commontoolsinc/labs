@@ -1939,15 +1939,16 @@ export async function runTestPattern(
           timeout(TIMEOUT, `Runtime teardown timed out after ${TIMEOUT}ms`),
         ]),
     );
-    if (runnerOwnsStorage) {
-      await teardown.catch((error) => {
-        console.error(
-          `[cf test] teardown failed for ${testPath}: ${formatError(error)}`,
-        );
-      });
-    } else {
-      await teardown;
-    }
+    await teardown.catch((error) => {
+      // Reported either way. Raising from a `finally` DISCARDS the result this
+      // function was about to return — the catch above already turned a failing
+      // run into one — so without this line a test that fails its assertions
+      // AND wedges teardown would report only the wedge.
+      console.error(
+        `[cf test] teardown failed for ${testPath}: ${formatError(error)}`,
+      );
+      if (!runnerOwnsStorage) throw error;
+    });
   }
 }
 

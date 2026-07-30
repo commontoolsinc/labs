@@ -219,4 +219,40 @@ describe("runtime.dispose({ closeStorage })", () => {
     await held.synced();
     expect(await witnessed("dispose-drains")).toEqual({ value: 42 });
   });
+
+  it("drains work that CHAINS past settled()'s default round cap", async () => {
+    // One generation of tracked work is drained by a capped barrier too, so the
+    // case above cannot see the cap. `settled()`'s default gives up after 50
+    // rounds and returns with work outstanding — no throw, no signal — so a
+    // drain that inherited it would re-open the hole for exactly the shape a
+    // capture is likely to hit: an llm dialog with tool calls, or a fetch chain,
+    // where each result registers the next piece of work.
+    const GENERATIONS = 60;
+    const writer = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: held,
+    });
+
+    let reached = 0;
+    // Each generation registers the NEXT one and does not await it. That is
+    // what costs a round: `settled()` awaits the set it snapshotted, and finds
+    // a fresh entry waiting when it comes back. A chain whose head promise
+    // transitively awaits the whole tail drains in ONE round instead and would
+    // pass under the cap — measured, on the first version of this case.
+    const spawn = () => {
+      const work = new Promise<void>((resolve) => setTimeout(resolve, 0))
+        .then(() => {
+          reached++;
+          if (reached < GENERATIONS) spawn();
+        });
+      writer.trackAsyncWork(work);
+    };
+    spawn();
+
+    await writer.dispose({ closeStorage: false });
+
+    // Verified by mutation: with `settled()` left at its default cap this reads
+    // 50, and the chain is still running after dispose returned.
+    expect(reached).toBe(GENERATIONS);
+  });
 });

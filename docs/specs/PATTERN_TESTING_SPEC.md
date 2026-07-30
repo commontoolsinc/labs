@@ -275,7 +275,10 @@ async function runTestPattern(testPath: string, options: TestOptions): Promise<T
     storageManager,
     apiUrl: new URL(import.meta.url)
   });
-  const engine = new Engine(runtime);
+  // The runtime's OWN harness, never a second Engine: verified-load
+  // registration, source maps and module hashes live on the engine that
+  // evaluates the bundle, and splitting them breaks CFC verified bindings.
+  const engine = runtime.harness;
 
   // 2. Compile and run the test pattern
   const program = await engine.resolve(

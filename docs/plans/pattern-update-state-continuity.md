@@ -557,16 +557,26 @@ Things this stage settled that the plan had wrong or open:
   builtin work first — `settled()` is the only barrier that waits for a fetch /
   llm call or a sqlite RPC and its writeback, and it runs before anything is
   cancelled so a writeback's cascade is not cut midway. Without it a capture
-  whose pattern uses an async builtin could snapshot a partial result.
+  whose pattern uses an async builtin could snapshot a partial result. The
+  drain is UNCAPPED: `settled()`'s default gives up after 50 rounds and returns
+  with work outstanding, no throw and no signal, which is the same hole one
+  layer down. Measured over 60 generations of chained tracked work — a capped
+  drain returns at generation 50 while the chain keeps writing.
 - Closing the caller's store would NOT have broken this capture, and that is not
   a reason to do it. Measured: forcing `closeStorage: true` still produced a
-  byte-for-byte equivalent fixture, because `close()` destroys the manager's
-  providers and rotates its session id rather than latching it shut, and the
-  harness owns the memory server the manager re-provisions against. Under
+  logically identical fixture — same commit / revision / doc counts and the same
+  op multiset once entity ids are masked. But the reason it survived is narrower
+  than it looks. `close()` destroys the manager's providers and rotates its
+  session id rather than latching it shut, so what a later write does depends on
+  circumstance: a write to a doc the replica never saw lands, a retrying writer
+  recovers, and a bare `commit()` to a doc the replica already knew fails its
+  stale-read precondition and loses the write. The capture came through because
+  `writeVintageManifest` uses `editWithRetry` on a doc nothing had touched —
+  both favourable conditions at once — not because closing is benign. Under
   `StorageManager.emulate`, which owns its own server, the same close strands
-  every later write. So the survivability of a close depends on ownership the
-  callee cannot see, which is the argument for handing the decision back rather
-  than for relying on the recovery.
+  everything. Which case a caller lands in turns on ownership the callee cannot
+  see, which is the argument for handing the decision back rather than for
+  relying on the recovery.
 
 **The cycle — DECIDED.** Per change:
 

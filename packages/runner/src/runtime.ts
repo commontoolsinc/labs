@@ -1322,12 +1322,14 @@ export class Runtime {
    * path also drains in-flight async builtin work first; see below.
    *
    * It is about OWNERSHIP, not survivability. `close()` destroys the manager's
-   * providers and rotates its session id rather than latching it shut, so how
-   * badly closing hurts depends on who owns the server behind it: a manager
-   * over a caller-held server re-provisions and later writes still land, while
-   * `StorageManager.emulate` owns its own server and closing strands them (both
-   * measured). Recovering in one configuration is not a contract, so a callee
-   * hands the decision back rather than relying on it.
+   * providers and rotates its session id rather than latching it shut, so what
+   * a later write does is a matter of circumstance rather than contract — all
+   * measured: over a caller-held server, a write to a doc the replica never saw
+   * lands, a retrying writer (`editWithRetry`) recovers, and a bare `commit()`
+   * to a doc the replica already knew fails its stale-read precondition and
+   * LOSES the write; over `StorageManager.emulate`, which owns its server,
+   * closing strands everything. A callee cannot see which of those its caller
+   * is in, so it hands the decision back rather than betting on the recovery.
    *
    * Passing `false` makes closing the CALLER's job — nothing else will. Note
    * `await using` / `[Symbol.asyncDispose]` always takes the closing path.
@@ -1355,10 +1357,15 @@ export class Runtime {
     // leaving the store holding part of a result — which is worse than either
     // extreme for a reader trying to learn what state this runtime reached.
     //
-    // This is an unbounded wait, deliberately: a bound would report the runtime
-    // quiesced while it was still working, which is the one answer a caller
-    // reading the store afterwards cannot recover from.
-    if (!closeStorage) await this.settled();
+    // UNCAPPED, deliberately. `settled()`'s default 50 rounds falls out of the
+    // loop and returns — silently, with work still outstanding — which is
+    // exactly the hole this drain exists to close, one layer down. Measured: 60
+    // generations of chained tracked work, and a capped drain returned at
+    // generation 50 while the chain kept running and writing. `settledFor`'s
+    // JSDoc gives the reason a cap is wrong for this question and why removing
+    // it cannot spin: every round awaits real promises, so a runtime that keeps
+    // working keeps the barrier open rather than busy-looping.
+    if (!closeStorage) await this.settled(Infinity);
     // Abort any pending (not-yet-started) queued jobs so they don't start
     // after storage is torn down.
     for (const queue of this.queues.values()) {
