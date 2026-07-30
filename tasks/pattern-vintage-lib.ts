@@ -364,7 +364,7 @@ export function reportReplaySummary(
   return `Replayed ${counts.replayed} vintage(s): ${counts.candidates} ` +
     `recorded instantiation(s), all mappable to a file; ${counts.targets} ` +
     `upgrade target(s), ${counts.changed} changed since capture, ` +
-    `${counts.updated} updated cleanly.`;
+    `${counts.updated} updated cleanly with no state stranded.`;
 }
 
 /** What the gate prints when it found no fixture to replay at all. */

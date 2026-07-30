@@ -68,6 +68,30 @@ describe("Cell", () => {
     expect(c.get()).toBe(10);
   });
 
+  it("delegates unrecognized symbol reads on a reactive proxy to the target", () => {
+    const c = runtime.getCell<{ a: number }>(
+      space,
+      "reactive proxy delegates unrecognized symbols",
+      undefined,
+      tx,
+    );
+    c.set({ a: 1 });
+
+    // String and number properties become nested cells, and a handful of
+    // well-known symbols get bespoke answers -- but any other symbol falls
+    // through to the proxied target itself, rather than being treated as
+    // data navigation.
+    const marked = Object.assign(() => undefined, {
+      [Symbol.for("cf.test.marker")]: "on-target",
+    });
+    const proxy = c.getAsReactiveProxy(marked) as unknown as Record<
+      symbol,
+      unknown
+    >;
+    expect(proxy[Symbol.for("cf.test.marker")]).toBe("on-target");
+    expect(proxy[Symbol.for("cf.test.absent")]).toBe(undefined);
+  });
+
   it("should update cell value using send", () => {
     const c = runtime.getCell<number>(
       space,

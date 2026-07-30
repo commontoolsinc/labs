@@ -362,8 +362,14 @@ export interface TestRunnerOptions {
    * fixture instead of a bare materialized root.
    *
    * The caller OWNS the lifecycle: the runner will not close this storage
-   * manager, because the snapshot happens after the run and needs the store
-   * open to flush through `synced()`.
+   * manager, because a callee must not tear down a resource its caller is
+   * still using — the snapshot happens after the run returns.
+   *
+   * The RUNTIME is still torn down (`dispose({ closeStorage: false })`), which
+   * is what makes reading the store afterwards a statement about the state the
+   * run reached: the runtime that wrote it can no longer commit into it. A
+   * teardown that does not complete is RAISED, so a caller never reads a store
+   * whose writer never stopped.
    */
   storageHost?: {
     identity: Identity;
@@ -1894,19 +1900,62 @@ export async function runTestPattern(
       });
     }
     // 6. Cleanup
+    // The run is over, so pattern-code output during teardown is no longer the
+    // test's behavior. This matters more than it used to: `engine.dispose()`
+    // was the FIRST cleanup step and killed the SES runtime immediately, while
+    // `Runtime.dispose()` reaches `harness.dispose()` only at the end — so the
+    // drain below now runs with pattern code still able to log. Both capture
+    // lists are returned BY REFERENCE, so a late push would still fail the run.
+    consoleCaptureActive = false;
     continuousUiCancel?.();
     continuousUiCancel = undefined;
-    await withPhase(["runTestPattern", "cleanup", "engineDispose"], () => {
-      engine.dispose();
-    });
-    // A caller-supplied store is the CALLER's to close: the vintage capture
-    // snapshots after this returns and needs the store open to flush.
-    if (options.storageHost === undefined) {
-      await withPhase(
-        ["runTestPattern", "cleanup", "storageClose"],
-        () => storageManager.close(),
+    // Tear the whole runtime down, not just its engine: that is what stops it
+    // WRITING (`Runtime.dispose`'s JSDoc has the mechanism). It matters here
+    // because a caller-supplied store outlives this call and gets READ — the
+    // vintage capture snapshots it — so a runtime still able to commit would
+    // make the snapshot a race rather than a record. `closeStorage` keeps that
+    // store the CALLER's to close.
+    //
+    // Bounded the same way every other await in this function is (the step
+    // settles at `settleRuntime`), and for the same reason: a pattern under
+    // test is untrusted code that may never quiesce, and `scheduler.idle()` —
+    // which `dispose()` awaits — never resolves for a system that genuinely
+    // never settles. Unbounded, one such pattern turns "this file reports a
+    // timeout" into "`cf test` hangs with no output", since `runTests` has no
+    // per-file guard. Firing early is safe here in a way it is not elsewhere:
+    // it only skips the rest of a teardown in a process that is moving on.
+    //
+    // A teardown that does not complete is RAISED, on both paths. It says the
+    // runtime never quiesced, which is a fact about the pattern under test —
+    // reporting it only to stderr would let `cf test` exit 0 on a run whose
+    // writer was still going, and a caller that supplied its own store is worse
+    // off still, since it is about to read what that writer wrote. Raising also
+    // keeps the pre-existing contract: `storageManager.close()` used to sit here
+    // unguarded, so a failing teardown already failed the file.
+    //
+    // Logged BEFORE it is raised because throwing from a `finally` discards the
+    // result this function was about to return, including any step failures.
+    // The exit code is right either way; the log is what keeps the diagnosis.
+    //
+    // Losing the race ABANDONS the dispose rather than cancelling it:
+    // `settled()` takes no abort signal, so the drain runs on in the background
+    // and the steps after it never happen. Acceptable because the only path
+    // that reaches it has already failed, and a capture's temp store and server
+    // are torn down by `captureVintage`'s own `finally`.
+    const teardown = withPhase(
+      ["runTestPattern", "cleanup", "runtimeDispose"],
+      () =>
+        Promise.race([
+          runtime.dispose({ closeStorage: options.storageHost === undefined }),
+          timeout(TIMEOUT, `Runtime teardown timed out after ${TIMEOUT}ms`),
+        ]),
+    );
+    await teardown.catch((error) => {
+      console.error(
+        `[cf test] teardown failed for ${testPath}: ${formatError(error)}`,
       );
-    }
+      throw error;
+    });
   }
 }
 
@@ -1931,7 +1980,20 @@ export async function runTests(
   for (const testPath of paths) {
     console.log(`\n${basename(testPath)}`);
 
-    const result = await runTestPattern(testPath, options);
+    // `runTestPattern` RAISES a teardown that did not complete, which is the
+    // right contract for a direct caller — the vintage capture is about to read
+    // what the run wrote, so it must refuse rather than snapshot. A multi-file
+    // run is the other case: one wedged file is a failure of that file, not a
+    // reason the remaining ones go unreported. Counted and skipped past, so the
+    // exit code is still non-zero.
+    let result: TestRunResult;
+    try {
+      result = await runTestPattern(testPath, options);
+    } catch (error) {
+      totalFailed++;
+      console.log(`  ✗ ${formatError(error)}`);
+      continue;
+    }
     allResults.push(result);
 
     if (result.error) {

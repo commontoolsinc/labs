@@ -330,7 +330,6 @@ export interface FabricExecPlainObject
 // Runtime constants - defined by @commonfabric/runner/src/builder/types.ts
 // These are ambient declarations since the actual values are provided by the runtime environment
 export declare const ID: unique symbol;
-export declare const ID_FIELD: unique symbol;
 
 // Should be Symbol("UI") or so, but this makes repeat() use these when
 // iterating over patterns.
@@ -382,6 +381,28 @@ export declare const CELL_BRAND: unique symbol;
  * infer U (T would be a phantom parameter and inference produces `unknown`).
  */
 export declare const CELL_INNER_TYPE: unique symbol;
+
+/**
+ * Symbol for the phantom property carrying a verb's declared result type.
+ *
+ * `Stream<E, R>` already discriminates on `R` without this, because
+ * `ICreatable<Stream<E, R>>` puts the stream in `for()`'s return position.
+ * That is incidental: it survives only as long as `Stream` extends
+ * `ICreatable` with a signature mentioning the full type. Were that to change
+ * — `for(cause): this`, say — `R` would fall back to a phantom parameter,
+ * `Stream<E, R>` and `Stream<E>` would become mutually assignable, and a
+ * declared result would start being dropped on assignment with nothing to
+ * catch it.
+ *
+ * So the discrimination is pinned locally instead of inherited, the same
+ * device {@link CELL_INNER_TYPE} uses for the same class of problem.
+ *
+ * Nothing reads this at runtime — a verb's result schema travels on
+ * `module.resultSchema`, never on the stream cell's own schema, which stays
+ * the event/payload schema that `cf piece verbs` publishes and that
+ * `piece call` validates against.
+ */
+export declare const CELL_RESULT_TYPE: unique symbol;
 
 /**
  * Minimal cell type with just the brand, no methods.
@@ -899,7 +920,7 @@ export interface IKeyable<out T, Wrap extends HKT> {
  * Uses non-distributive conditionals to handle union types correctly.
  */
 export type WrapOrPreserve<T, Wrap extends HKT> = [T] extends [Cell<any>] ? T
-  : [T] extends [Stream<any>] ? T
+  : [T] extends [AnyStream] ? T
   : [T] extends [ComparableCell<any>] ? T
   : [T] extends [ReadonlyCell<any>] ? T
   : [T] extends [WriteonlyCell<any>] ? T
@@ -1394,12 +1415,53 @@ export interface AsStream extends HKT {
   type: Stream<this["_A"]>;
 }
 
-export interface Stream<T>
+/**
+ * `R` is the verb's declared result — what a caller reads back from the
+ * handling's receipt. It defaults to `void`: a stream that declares nothing
+ * is a value-less verb, which is the overwhelmingly common shape and stays
+ * spelled `Stream<Event>`.
+ *
+ * A `Stream<E, R>` does not satisfy a `Stream<E>`, or vice versa, so a
+ * declared result cannot be dropped on assignment (see
+ * {@link CELL_RESULT_TYPE} for why that is pinned here rather than inherited).
+ */
+export interface Stream<E, R = void>
   extends
-    BrandedCell<T, "stream">,
-    IAnyCell<T>,
-    ICreatable<Stream<T>>,
-    IStreamable<T> {}
+    BrandedCell<E, "stream">,
+    IAnyCell<E>,
+    ICreatable<Stream<E, R>>,
+    IStreamable<E> {
+  readonly [CELL_RESULT_TYPE]: R;
+}
+
+/**
+ * Any stream, whatever its arity — the canonical way for a type-level guard to
+ * ask "is this a stream?".
+ *
+ * Detection must not depend on how many type parameters `Stream` happens to
+ * have. Spelling a guard `[T] extends [Stream<any>]` pins it to
+ * `Stream<any, void>`, which a verb declaring a result does not satisfy, so
+ * every such guard stops matching the moment a result exists — silently, since
+ * a value-less stream still matches and value-less is the common case.
+ *
+ * This is the mechanism the other two layers already use, which is why neither
+ * broke when the result parameter arrived: the runtime reads the cell kind
+ * (`Cell.isStream`) and the schema generator reads `CELL_BRAND`. Only the type
+ * layer matched the full generic instantiation.
+ */
+export type AnyStream = AnyBrandedCell<any, "stream">;
+
+/** The event a stream accepts, recovered without naming the stream's arity. */
+export type StreamEventOf<T> = T extends AnyBrandedCell<infer E, "stream"> ? E
+  : never;
+
+/**
+ * The result a stream declares, `void` when it declares none. Reads the
+ * `CELL_RESULT_TYPE` pin directly — the complementary half of what that
+ * property is for, not a workaround for it.
+ */
+export type StreamResultOf<T> = T extends
+  { readonly [CELL_RESULT_TYPE]: infer R } ? R : void;
 
 export declare const Stream: CellTypeConstructor<AsStream>;
 
@@ -1520,7 +1582,7 @@ export type StripCell<T> =
     // Non-distributive for everything else (preserves unions like RenderNode)
     : StripCellInner<T>;
 
-type StripCellInner<T> = [T] extends [Stream<any>] ? T // Preserve Stream<T> - it's a callable interface
+type StripCellInner<T> = [T] extends [AnyStream] ? T // Preserve the stream whole - it's a callable interface
   : [T] extends [AnyBrandedCell<infer U>] ? StripCell<U>
   : [T] extends [ArrayBuffer | ArrayBufferView | URL | Date] ? T
   : [T] extends [Array<infer U>] ? StripCell<U>[]
@@ -1590,8 +1652,8 @@ export type UnwrapCell<T> =
  * is a type utility that allows any part of type T to be wrapped in AnyCell<>,
  * and allow any part of T that is currently wrapped in AnyCell<> to be used
  * unwrapped. This is designed for use with cell method parameters, allowing
- * flexibility in how values are passed. The ID and ID_FIELD metadata symbols
- * allows controlling id generation and can only be passed to write operations.
+ * flexibility in how values are passed. The ID metadata symbol allows
+ * controlling id generation and can only be passed to write operations.
  */
 export type AnyCellWrapping<T> =
   // Handle existing AnyBrandedCell<> types, allowing unwrapping
@@ -1606,7 +1668,7 @@ export type AnyCellWrapping<T> =
     // Handle objects (excluding null)
     : T extends object ?
         | { [K in keyof T]: AnyCellWrapping<T[K]> }
-          & { [ID]?: AnyCellWrapping<JSONValue>; [ID_FIELD]?: string }
+          & { [ID]?: AnyCellWrapping<JSONValue> }
         | AnyBrandedCell<{ [K in keyof T]: AnyCellWrapping<T[K]> }>
     // Handle primitives
     : T | AnyBrandedCell<T>;
@@ -1630,8 +1692,18 @@ export type toJSON = {
   toJSON(): unknown;
 };
 
-export type Handler<T = any, R = any> = Module & {
-  with: (inputs: FactoryInput<StripCell<T>>) => Stream<R>;
+/**
+ * Verb-shaped type parameters read the same way throughout this file and the
+ * builder: **`E`** is the event a verb accepts, **`R`** is the result it
+ * declares back to a caller (`void` for the value-less majority), and **`T`**
+ * is the handler's bound state, present only where there is one.
+ *
+ * `Handler`'s second parameter was spelled `R` before a result existed; it has
+ * always been the event type, so it is `E` now and `R` means one thing
+ * everywhere. Type parameters are positional — no caller changes.
+ */
+export type Handler<T = any, E = any, R = void> = Module & {
+  with: (inputs: FactoryInput<StripCell<T>>) => Stream<E, R>;
 };
 
 export type NodeFactory<T, R> =
@@ -1659,9 +1731,9 @@ export type ModuleFactory<T, R> =
     asScope(scope: CellScope): ModuleFactory<T, R>;
   };
 
-export type HandlerFactory<T, R> =
-  & ((inputs: FactoryInput<StripCell<T>>) => Stream<R>)
-  & Handler<T, R>
+export type HandlerFactory<T, E, R = void> =
+  & ((inputs: FactoryInput<StripCell<T>>) => Stream<E, R>)
+  & Handler<T, E, R>
   & toJSON;
 
 // JSON types
@@ -1686,7 +1758,6 @@ export interface JSONObject extends Readonly<Record<string, JSONValue>> {}
 // removed before sending to storage.
 export interface IDFields {
   readonly [ID]?: unknown;
-  readonly [ID_FIELD]?: unknown;
 }
 
 /**
@@ -1792,7 +1863,6 @@ export type JSONSchemaObj = {
 
   // Common Fabric extensions
   readonly [ID]?: unknown;
-  readonly [ID_FIELD]?: unknown;
   readonly scope?: SchemaScope;
   // Discovery hashtags from the doc comment (lowercased, without the leading
   // `#`). Populated by the schema generator; mirrors the description text.
@@ -1999,7 +2069,7 @@ export type BuiltInLLMTool =
       extraParams?: Record<string, any>;
       useResultSchemaForObservation?: boolean;
     }
-    | { handler: Stream<any> | Reactive<any>; pattern?: never }
+    | { handler: AnyStream | Reactive<any>; pattern?: never }
   );
 
 /**
@@ -2352,7 +2422,7 @@ export interface LiftFunction {
 // methods — `.get()/.set()`, `.send()`, `.exec()/.query()` — not data containers
 // to map over).
 export type HandlerState<T> = T extends Cell<any> ? T
-  : T extends Stream<any> ? T
+  : T extends AnyStream ? T
   : T extends SqliteDb<any> ? T
   : T extends Array<infer U> ? ReadonlyArray<HandlerState<U>>
   : T extends object ? { readonly [K in keyof T]: HandlerState<T[K]> }
@@ -2375,6 +2445,25 @@ export interface HandlerFunction {
   <E, T>(
     handler: (event: E, props: HandlerState<T>) => any,
   ): HandlerFactory<T, E>;
+
+  // Declared results, reached only by naming all three type arguments —
+  // `ActionFunction`'s explicit-only rule, for the same reason: the `=> any`
+  // forms above absorb every callback first, so an incidental return never
+  // declares a result; a result must be asked for by name.
+  <E, T, R>(
+    eventSchema: JSONSchema,
+    stateSchema: JSONSchema,
+    handler: (event: E, props: HandlerState<T>) => R,
+  ): HandlerFactory<T, E, R>;
+
+  <E, T, R>(
+    handler: (event: E, props: T) => R,
+    options: { proxy: true },
+  ): HandlerFactory<T, E, R>;
+
+  <E, T, R>(
+    handler: (event: E, props: HandlerState<T>) => R,
+  ): HandlerFactory<T, E, R>;
 }
 
 /**
@@ -2388,11 +2477,24 @@ export interface HandlerFunction {
  * computed(() => expr) becomes a lift-applied computation with closure
  * extraction.
  */
+/**
+ * This is the surface a PATTERN sees — `commonfabric` resolves to this file, so
+ * these overloads and `builder/module.ts`'s `action()` must carry the same
+ * signatures. They are maintained by hand and drift silently: an overload
+ * present only in the builder is invisible to every pattern, which is how the
+ * result overload below was initially missed.
+ */
 export type ActionFunction = {
   // Overload 1: Zero-parameter callback returns Stream<void>
   (fn: () => void): Stream<void>;
-  // Overload 2: Parameterized callback returns Stream<T>
-  <T>(fn: (event: T) => void): Stream<T>;
+  // Overload 2: Parameterized callback returns Stream<E>
+  <E>(fn: (event: E) => void): Stream<E>;
+  // Overload 3: a declared result, reached only by naming both type arguments.
+  // Never inferred — a concise arrow body returns whatever its last call
+  // evaluates to, and `Cell.set` returns the cell, so inference would declare
+  // results nobody wrote. Overload 2 absorbs every callback because anything is
+  // assignable to a void-returning signature.
+  <E, R>(fn: (event: E) => R): Stream<E, R>;
 };
 
 export type ComputedFunction = <T>(fn: () => T) => Reactive<T>;
@@ -3038,7 +3140,11 @@ type StripDefaultField<T> = IsAny<T> extends true ? T
 type StripDefaultFieldInner<T> = T extends Cell<infer U>
   ? Cell<StripDefaultUnion<U>>
   : T extends OpaqueCell<infer U> ? OpaqueCell<StripDefaultUnion<U>>
-  : T extends Stream<infer U> ? Stream<StripDefaultUnion<U>>
+  // Rebuilt, so both halves are named explicitly: detection is
+  // brand-based, but the reconstruction still has to carry R across or
+  // a returning verb silently comes back value-less.
+  : T extends AnyStream
+    ? Stream<StripDefaultUnion<StreamEventOf<T>>, StreamResultOf<T>>
   : T extends ComparableCell<infer U> ? ComparableCell<StripDefaultUnion<U>>
   : T extends ReadonlyCell<infer U> ? ReadonlyCell<StripDefaultUnion<U>>
   : T extends WriteonlyCell<infer U> ? WriteonlyCell<StripDefaultUnion<U>>
@@ -3288,7 +3394,7 @@ export type Props = {
     | null
     | undefined
     | Cell<any>
-    | Stream<any>;
+    | AnyStream;
 };
 
 /** A child in a view can be one of a few things */

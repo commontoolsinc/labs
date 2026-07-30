@@ -641,23 +641,39 @@ compared for exact equality, so a field cannot change
 between data and verb across a deploy. Verb names and their verb-ness are
 therefore already a contract with teeth, before this document adds any rule.
 
-The practical consequence for verb results: return the value inside an
-envelope under a single key rather than spreading it across top-level fields.
-Every top-level name published is permanent; a value nested under one key
-leaves only that key permanent and everything beneath it free to narrow. The
-llm-dialog tool path already returns exactly this shape from both of its
-branches — an `@resultLocation` link, the value, and its schema together (both
-`"@resultLocation"` sites in `handleInvoke`,
-`packages/runner/src/builtins/llm-dialog.ts`).
+The practical consequence for verb results: **every name a result publishes is
+permanent regardless of depth, and every later addition must be optional.**
+
+An earlier revision of this paragraph advised nesting the value under a single
+key so that "only that key is permanent and everything beneath it is free to
+narrow". Measured against `assertPatternSchemasBackwardCompatible`, that is not
+what the checker does. The removed-field check recurses, so a nested removal is
+rejected on a nested path (`result.topic.title: existing result field was
+removed`) exactly as a flat one is. Adding a **required** field is rejected at
+any depth unless it carries a default; adding an **optional** one is allowed at
+any depth; narrowing a *value* type is allowed at any depth. Nesting changes
+none of it.
+
+"Results may narrow freely" is therefore true of values and never of names,
+which is the distinction the earlier wording blurred. Publish as few names as
+the verb can live with, and make every later addition optional. An envelope
+remains a reasonable readability choice — the llm-dialog tool path returns a
+single-key shape from both of its branches, an `@resultLocation` link, the
+value, and its schema together (both `"@resultLocation"` sites in
+`handleInvoke`, `packages/runner/src/builtins/llm-dialog.ts`) — just not for
+the evolution reason previously given.
 
 ### Authoring
 
 ```tsx
 // Shown for illustration only.
-const addTopic = action(
-  ({ title, body }: AddTopicInput): AddTopicResult => {
+// The result is declared by explicit type arguments — never inferred from
+// the body, and a return-type annotation on the callback alone does not
+// declare one.
+const addTopic = action<AddTopicInput, AddTopicResult>(
+  ({ title, body }) => {
     const trimmed = (title ?? "").trim();
-    if (!trimmed) throw new VerbError("EMPTY_TITLE", "title must be non-empty");
+    if (!trimmed) throw new Error("title must be non-empty");
     const piece = Topic({ title: trimmed, body, mentionable: topics });
     topics.push(piece);
     return { topic: piece };
@@ -665,9 +681,13 @@ const addTopic = action(
 );
 ```
 
-`throw` becomes `status: "failed"` with the code; `return` becomes
-`status: "settled"` with the result. Only settlement is durable — a failed
-status is returned to the caller, not recorded (Retries and failure).
+`throw` becomes `status: "failed"`; `return` becomes `status: "settled"` with
+the result. Only settlement is durable — a failed status is returned to the
+caller, not recorded (Retries and failure). The typed-rejection carrier that
+puts a stable `code` beside the message is deliberately not minted as its own
+class: a separate `FabricError` effort is underway, and the verb-rejection
+type will derive from it. Until then a rejection is a plain thrown `Error`
+and the message is the whole signal.
 
 ### Verb discovery
 

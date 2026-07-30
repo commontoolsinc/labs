@@ -987,11 +987,11 @@ scheduler-v2 spec documents still mention it as part of their migration history.
 
 ### `esmModuleLoader` / `CF_ESM_MODULE_LOADER` (removed)
 
-The flag that selected the ESM module-record loader over the older AMD bundle
-path during the content-addressed module-loading rollout. (An early draft of the
-plan called it `EXPERIMENTAL_ESM_MODULE_LOADER`.) It was defaulted on, and then
-the flag, the AMD bundle pipeline, and the AMD compilation cache were all
-removed; the ESM loader is now the only loader. See
+The flag that selected the ESM module-record loader during the
+content-addressed module-loading rollout. (An early draft of the plan called it
+`EXPERIMENTAL_ESM_MODULE_LOADER`.) It was defaulted on, and then the flag and
+the whole-bundle loader and cache it switched away from were all removed; the
+ESM module-record loader is now the only loader. See
 [`docs/history/specs/module-loading-implementation-plan.md`](../history/specs/module-loading-implementation-plan.md),
 whose status header records the removal.
 

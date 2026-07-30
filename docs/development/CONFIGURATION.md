@@ -231,7 +231,7 @@ toolshed-only `TOOLSHED_GIT_SHA` override remains highest priority.
 The compilation cache for compiled patterns is the content-addressed cell
 cache (always on under an enforcing CFC mode; see
 `packages/runner/src/compilation-cache/cell-cache.ts`). The former
-`COMPILATION_CACHE_*` env vars configured the removed AMD bundle cache and no
+`COMPILATION_CACHE_*` env vars configured an earlier whole-bundle cache and no
 longer exist.
 
 ---

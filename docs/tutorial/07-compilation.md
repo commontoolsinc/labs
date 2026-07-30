@@ -177,11 +177,11 @@ It serves three masters:
   exact source that produced it (this also feeds the CFC contextual
   flow-control machinery in `packages/runner/src/cfc/` — Chapter 10).
 
-The `js-compiler` package does the actual TypeScript-to-JS emission in two
-modes: **bundle** (one AMD bundle — how pattern programs are packaged for
-execution) and **modules** (per-file CommonJS — used by the module-record
-loader/verifier). Compilation results are cached server-side too (Toolshed's
-compilation cache), so opening a piece doesn't recompile it per client.
+The `js-compiler` package does the actual TypeScript-to-JS emission: one
+CommonJS body per authored file, which the runtime's module-record loader and
+verifier consume a module at a time. Compilation results are cached server-side
+too (Toolshed's compilation cache), so opening a piece doesn't recompile it per
+client.
 
 ## Where compiled code runs
 

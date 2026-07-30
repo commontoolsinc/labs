@@ -293,7 +293,29 @@ The apply is: ensure the new closure is loadable in the space
 the normal pattern setup path to install the new result schema, result
 projection, `{ identity, symbol }`, and `patternSetupIdentity` completion marker
 on the existing result cell. The completion marker is not a pattern pointer;
-it records which identity had its complete setup staged. During space open,
+it records which identity had its complete setup staged. It is also what tells
+an apply from a same-version replay when the pointer moved first — the
+roll-forward materialize commits the new `{ identity, symbol }` and then runs
+setup, and an identity moved with no setup at all leaves the same shape. The
+pointer then reads as unchanged, while the marker still names the version that
+staged the state.
+
+Setup re-points the piece's stored argument at the incoming argument schema and
+validates it in the same transaction, so an apply whose durable argument the new
+schema cannot read is refused rather than committed. Two cases are deferred
+rather than refused: a slot whose stored value is a link that cannot be
+dereferenced in that transaction (a nested piece's argument lives in its host's
+document, and "not yet synced" is not "invalid"), and a root carrying no
+completion marker at all, which gets one unvalidated setup because absence
+cannot be distinguished from a pending apply.
+
+A refusal is a repair failure, not a silent one. The pointer has already moved
+by the time setup runs, so re-running the same identity refuses identically;
+the boot repair therefore classifies this failure and escalates it to the
+roll-forward backstop — the same route a refused CFC migration takes — rather
+than retrying a version that cannot read its own root.
+
+During space open,
 `ensureDefaultPattern` performs this transaction before calling `startPiece`,
 and the updated root still takes the persisted-result dependency-sync path
 before its first start. This lets an obsolete pattern that cannot load be

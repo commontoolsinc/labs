@@ -263,12 +263,12 @@ function composeBundleSourceMapTextual(
  * (`[...bodies].join("\n")`) from each module's own source map, offsetting each
  * module's generated lines by its starting line in the concatenation.
  *
- * The ESM module-record loader resolves a function's location by `indexOf`-ing
+ * The module-record loader resolves a function's location by `indexOf`-ing
  * its source into the concatenated bundle `script`, then calling
  * `mapPosition(bundleFilename, line, col)`. Without a registered map that stays
  * a raw bundle coordinate (`<loadId>.js:..`), which CFC verified-source identity
  * rejects. Registering this composed map resolves it back to the original
- * authored source (e.g. `/main.tsx:6:2`) — parity with the AMD isolate path.
+ * authored source (e.g. `/main.tsx:6:2`).
  *
  * Returns `undefined` if no module contributed a map.
  */
@@ -381,8 +381,7 @@ const MAX_SOURCE_MAP_CACHE_SIZE = 1024;
 // at doubleOrThrow (recipe-abc.js, <anonymous>:14:15)
 // at Object.eval [as factory] (recipe-abc.js, <anonymous>:4:52)
 // at Object.errorOnLine6 [as default] (known-line.js, <anonymous>:5:15)
-// at AMDLoader.resolveModule (recipe-abc.js, <anonymous>:1:1764)
-// at AMDLoader.require (recipe-abc.js, <anonymous>:1:923)
+// at Loader.resolveModule (recipe-abc.js, <anonymous>:1:1764)
 // at eval (recipe-abc.js, <anonymous>:17:10)
 // at async Scheduler.execute (http://localhost:8000/scripts/worker-runtime.js:241550:11)
 // at GmailClient.googleRequest (somefile.js:24414:23)
@@ -514,10 +513,6 @@ export class SourceMapParser {
     this.materialize(filename);
     const sourceMap = this.sourceMaps.get(filename);
     if (!sourceMap) return originalLine;
-
-    if (/AMDLoader/.test(fnName) && lineNum === 1) {
-      return CF_INTERNAL;
-    }
 
     const consumer = this.getConsumer(sourceMap);
     const originalPosition = consumer.originalPositionFor({

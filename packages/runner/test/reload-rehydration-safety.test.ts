@@ -68,6 +68,10 @@ async function seedReloadablePiece(name: string) {
   await runtime.idle();
   await runtime.storageManager.synced();
   await runtime.idle();
+  // Scheduler only, not `dispose({ closeStorage: false })`: the seeding runtime
+  // is handed back live, and both tests below write through it to race a
+  // reload. Freezing its reactions is the point; tearing it down would take the
+  // writer with it.
   runtime.scheduler.dispose();
   return { env, input, result };
 }

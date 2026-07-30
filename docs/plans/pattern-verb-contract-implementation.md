@@ -4,6 +4,23 @@
 [`pattern-verb-contract.md`](pattern-verb-contract.md) (PR #4968). Keep current
 as work proceeds: check off exit criteria, record scope changes.
 
+**Amended 2026-07-30**, follow-up scope from the pre-dispatch gate review
+(#5147): WS-D gains D5 (refuse an absent payload the verb provably cannot run
+without) and D6 (the default-relaxation helper moves next to the runner's
+validator so C5 shares it instead of re-implementing it), and WS-E records
+that pre-dispatch refusals must join the typed-rejection code taxonomy when
+codes reach the invocation surface, so agents branch on one signal. Later the
+same day, D5's open question was measured (see its bullet): absent events
+bypass default materialization entirely, narrowing D5's remaining choice to
+refuse-on-unrelaxed-`required` versus normalize-absent-to-`{}`. A third pass
+records the C1 review decisions: no bespoke `VerbError` — a separate
+`FabricError` effort is underway, the rule-4 carrier will derive from it, and
+C1 ships without one; `handler` carries the same explicit-only declared-result
+overloads as `action`, reversing the action-only record (both in WS-C); D5's
+absence rule settles as normalize-absent-to-`{}`; the reactive-readback claim
+is re-confirmed; and the compiled-pattern receipt readback is pinned as a
+runner test beside D4's fixture.
+
 **Amended 2026-07-28**, context only — no scope or decision changed: Risks
 names #5059 (`cf piece setsrc --check`) as the candidate preflight for the
 write-storm gate, WS-F gains a read-path guard so `cf piece get` on a verb
@@ -130,12 +147,84 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
 `packages/api`, `packages/ts-transformers`, `packages/schema-generator`,
 `packages/runner`.
 
-- **api:** `action` overloads accept a return type (today both overloads type
+- **Results: every published name is permanent, at every depth.** Schema
+  compatibility checks results as candidate ⊆ previous, and "results may
+  narrow freely" governs *values*, never *named fields*. Measured against
+  `assertPatternSchemasBackwardCompatible`:
+
+  | change | verdict |
+  | --- | --- |
+  | remove a named field, any depth | rejected |
+  | add a **required** field, any depth | rejected unless it has a default |
+  | add an **optional** field, any depth | allowed |
+  | narrow a value type, any depth | allowed |
+
+  Nesting a result under one key confers nothing — the removed-field check
+  recurses, so a nested removal is rejected on a nested path exactly as a flat
+  one is. So the rule to author against is: publish as few names as the verb
+  can live with, and make every later addition optional. The design doc's
+  matching paragraph is corrected the same way.
+- **Both `action` and `handler` author results; the invariant is
+  explicit-only, not which surface.** Reversed in the C1 review (Berni,
+  2026-07-30) from an earlier action-only record: `handler` gains the same
+  declared-result overloads — `handler<E, T, R>(...)`, reached only by naming
+  all three type arguments — so a returning verb compiles against
+  `Stream<E, R>` from either surface. What survives from the old rationale is
+  the mirror-drift worry, converted into a test obligation: the overloads
+  exist in both hand-maintained halves (api `HandlerFunction`,
+  `builder/module.ts`), each pinned where its consumer touches it
+  (`handler-function-surface.test.ts` on the pattern-facing side,
+  `handler-overload-types.test.ts` on the builder side). The `=> any` forms
+  absorb every inferred callback first, so an incidental return still never
+  declares a result. C2's returning-body error points at declaring the
+  result, on whichever surface the author used.
+- ~~**api:** `action` overloads accept a return type (today both overloads type
   the callback `=> void` — the `action()` overloads in
-  `packages/runner/src/builder/module.ts`); `Stream<T, R = void>`
+  `packages/runner/src/builder/module.ts`); `Stream<E, R = void>`
   so the result type is visible to the schema layer — the defaulted parameter
-  keeps every existing `Stream<T>` use compiling. A `VerbError { code,
-  message }` type for rule 4's typed rejections.
+  keeps every existing `Stream<E>` use compiling.~~ — **done (C1)**.
+
+  **No bespoke `VerbError` — rule 4's typed carrier is deferred** (review,
+  2026-07-30): a separate `FabricError` effort is underway and the
+  verb-rejection type will derive from it rather than being its own class.
+  C1 briefly carried a `VerbError { code, message }` and dropped it. Until
+  the derived carrier exists, a rejection is a thrown `Error` whose message
+  reaches the caller as prose, and stable codes wait; WS-E's taxonomy bullet
+  binds to the derived type when it lands.
+
+  Verb-shaped type parameters read one way throughout: **`E`** the event,
+  **`R`** the declared result, **`T`** the handler's bound state where there
+  is one. `Handler`/`HandlerFactory`'s second parameter was spelled `R` while
+  it meant the event.
+
+  **A result is opt-in by explicit type argument — `action<E, R>(...)` —
+  never inferred.** A concise arrow body's completion value is whatever its
+  last call returns, and `Cell.set` returns the cell, so inference would
+  declare results nobody wrote. TypeScript cannot tell that from a deliberate
+  return, so overload 2 absorbs every callback and a result must be asked for
+  by name. Contextual typing does not reach it either: annotating the binding
+  still selects overload 2 and fails to assign — the intended catch.
+
+  **Type-level stream detection is brand-based** — `AnyStream`
+  (`AnyBrandedCell<any, "stream">`), with `StreamEventOf` / `StreamResultOf`
+  recovering the halves. A guard spelled `[T] extends [Stream<any>]` pins the
+  arity: it means `Stream<any, void>`, which a verb declaring a result does
+  not satisfy, so every such guard stopped matching the moment a result
+  existed. It failed silently and late — a value-less stream still matches,
+  and value-less is every stream in the tree today, so the workspace
+  type-checked clean while the break waited for the first `action<E, R>`
+  user. This converges the type layer on what the other two already do, which
+  is why neither broke: the runtime reads the cell kind, the schema generator
+  reads `CELL_BRAND`. Rewriting to `Stream<any, any>` was rejected — it
+  re-arms the same trap for a third parameter.
+
+  **Rebuild sites remain the fragile surface.** Pass-through guards preserve
+  `T` whole and are arity-independent now, but anything reconstructing a
+  stream still names both parameters, so a future axis would be dropped there
+  even though detection survives. The tripwire is
+  `stream-through-utilities.test.ts`: it asserts the api's own utilities
+  preserve a returning stream identically, and fails when a guard is
+  reverted.
 - **C1 fork — settled: widen `Stream`, do not add a second carrier.** The
   alternative was a separate `StreamWithResult<T, R> extends Stream<T>` that
   only the schema layer interprets, which is tempting because it leaves
@@ -200,6 +289,26 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   ignored — design rule 1): emit `additionalProperties: false` for event
   payloads, confirm the runner enforces it at dispatch, and record the rule
   in the mapping spec.
+
+  **A value-less verb wants `{ type: "object", properties: {} }`, not the
+  generic `void` sentinel**, which lowers to `{ asCell: ["opaque"] }` — a
+  *wrapper* claim ("the result is an opaque cell") rather than a statement
+  that there is no result, and it would hand readback a cell to resolve. The
+  empty object describes the value the runtime actually writes, since a
+  value-less handling's receipt is `{}`; it satisfies rule 3's "a verb that
+  produces nothing says so"; and leaving `additionalProperties` **undefined**
+  keeps it open, because the compat checker reads `additionalProperties ??
+  true`. Emitting `false` there would freeze a verb as value-less forever.
+  Deliberately the opposite of verb *inputs*, which close so an undeclared
+  field is a rejection.
+
+  **`AsStream` stays single-slot**, so `Stream.for<Event, Result>()` cannot
+  construct a result-carrying stream. Acceptable because verbs come from
+  `action`/`handler` and streams are leaves. If it ever bites, the cost is
+  bounded: `AsStream` has three non-test uses, and widening is four defaulted
+  edits — `_B` on `HKT` (implementors inherit it), `Apply<F, A, B = void>`,
+  `<T, R = void>` on `CellTypeConstructor`'s `new`/`of`/`for`, and `AsStream`'s
+  two-slot projection. Every step carries a default, so no call site moves.
 - **Which signal marks a verb — checked, and C3 is not exposed to it.** An
   earlier revision of this bullet warned that "stream/handler properties" is
   not one predicate, because `Cell.isStream` accepts three independent signals
@@ -246,7 +355,20 @@ Size L (~1–2 weeks). No dependencies; starts immediately.
   decision and its measured costs are the **C1 fork — settled** bullet above.
 - **Exit:** a CTS pattern declares a verb returning `AddTopicResult`; the
   result schema appears in the durable schema; under the flag, both plain and
-  reactive returns are readable in the receipt cell.
+  reactive returns are readable in the receipt cell. The plain half of that
+  readback is pinned at the runner already — `declared-result-e2e.test.ts`
+  compiles a declared-result pattern through the real pipeline and reads the
+  receipt back through `tx.handlingReceiptLink`, both flag states — landed
+  with C1 per review (2026-07-30) in addition to D4's fixture, which stays
+  the end-to-end criterion.
+- **The reactive half of that exit needs no new machinery** (Berni,
+  2026-07-29): `await cell.pull()` on the receipt already ensures the pattern
+  on that cell, if there is one, has run. The readback the CLI performs is
+  therefore the same call for a plain return and a launched one, and the
+  difference stays inside `pull()`. Recorded rather than assumed — the claim
+  is the architect's about his own machinery, and this plan has not yet
+  exercised a reactive return end to end. Re-confirmed by Berni in the C1
+  review round (2026-07-30).
 
 ### WS-D — invocation plumbing
 
@@ -271,6 +393,14 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   published only while `commitPreconditions` is on, since nothing creates or
   create-only marks the receipt while it is off.
 
+  The alternative — a client-side helper that derives the receipt cell rather
+  than receiving its address — was raised again in review (Berni, 2026-07-29)
+  as an equal option. It is not equal, for a reason worth keeping written
+  down: **the receipt is not derivable from the event id alone.** Its cause is
+  the handler's bound closure *plus* the event id, as this document already
+  states. A helper would have to reconstruct `$ctx` from the callable cell at
+  every call site — the client-side reconstruction the callback route exists
+  to avoid, and the same fact that makes caller-key scoping necessary.
 - ~~**cli:** `--invocation <id>` on `piece call` (UUID minted and printed by
   default, including when the wait times out); after commit, sync and read the
   receipt (a cold plain read returns `undefined` — sync first); reclassify
@@ -303,7 +433,9 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   id while the call reports settled. Two shapes stay legal, because the runtime
   accepts them: a call with no payload at all (`$event` is genuinely optional —
   value-less verbs are a supported shape), and a payload omitting a property
-  that carries a `default`, which the runtime injects on read.
+  that carries a `default`, which the runtime injects on read. (D5 narrows the
+  first: once it lands, an absent payload against an object-schema verb is
+  normalized to `{}` and judged like any other — see its bullet below.)
 - **cli, phase reporting:** every output — success, failure, timeout — carries
   the furthest observed `phase`
   (`initial_sync | dispatched | committed | readback`) beside the invocation
@@ -342,6 +474,81 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   a *result* back off the receipt, because a void verb leaves none to read.
   That assertion joins when WS-C gives verbs return values — or sooner
   against `plainResultReceipts`.
+- **cli, absent-payload gate (D5) — follow-up the pre-dispatch gate's review
+  deferred.** The pre-dispatch validator passes `input === undefined`
+  unconditionally (`verbInputSchemaError`, `packages/cli/lib/callable.ts`),
+  so a call that sends *nothing* against a verb whose event schema requires
+  fields still dispatches, runs the handler with `$event === undefined`, and
+  silently spends the invocation id — the failure class the gate closes for
+  typo'd payloads, reached by the second-most-likely agent mistake:
+  forgetting the payload rather than misspelling a field. The gate's
+  "value-less verbs are a supported shape" rationale conflates a VERB that
+  declares no event with a CALLER that sent nothing; they are
+  distinguishable. The rule — refuse only on proof, stay fail-open on
+  uncertainty: refuse an absent payload iff the schema, after
+  `relaxDefaultedRequired` and after resolving a top-level local `$ref`
+  (reuse `localRefTarget`; a stream's schema is often
+  `{ $ref: "#/$defs/X", asCell: ["stream"], $defs: {...} }`), is an object
+  schema with non-empty `required` — no absent payload can ever satisfy it.
+  Everything else keeps today's behavior: schema `undefined` / `true`,
+  boolean `false` (absent must pass; supplied is already refused), object
+  schemas with no post-relaxation `required`, and combinator roots — an
+  `anyOf`/`oneOf` whose every branch has non-empty relaxed `required` may
+  refuse only with a test proving it, otherwise the helper's doc comment
+  names it out of scope. Conservative and documented beats clever and
+  silent. Characterize first: a CLI unit test pins that an absent payload
+  currently dispatches against a required-fields schema, then flips to
+  assert refusal — the same order the gate's runner characterization took.
+  The question this bullet once left to experiment is now measured
+  (2026-07-30, scratch runner test on the gate's branch, recorded on
+  #5147): defaults materialize only for a **present** object payload —
+  `SchemaObjectTraverser.traverseObjectWithSchema` fills each missing
+  defaulted property before checking `required` — while a wholly absent
+  event bypasses the object branch entirely, so the handler sees
+  `undefined` and the receipt still spends the id even when every required
+  property carries a default. Relaxation is therefore honest for present
+  payloads and the wrong lens for the absence decision: an all-defaulted
+  `required` list does not make absence deliverable. **Settled (Berni,
+  2026-07-30): normalize an absent payload to `{}`** where the verb's schema
+  is an object schema, so defaults engage and absence flows through the same
+  gate as any payload — `{}` fails the relaxed schema exactly when top-level
+  `required` survives relaxation, so the refusal set the rule above
+  describes is unchanged; what changes is the fail-open corner, which now
+  delivers a defaults-populated object instead of `undefined`. Boolean
+  `false` and non-object schemas keep today's absent-passes behavior —
+  normalization applies only where an object schema makes `{}` meaningful.
+  The measured behavior belongs in the helper's doc comment. Plumbing reuses
+  `VerbInputValidationError` with a detail that says no payload was supplied
+  and names the missing requirement ("send a payload" must read differently
+  from "fix your payload"); both entry points (piece call and mounted exec)
+  flow through the shared `assertVerbInputSatisfiesSchema` call site.
+  Integration: `run_piece_call_retry` gains the mirror of the gate's
+  scenario 5 — absent payload refused locally, zero messages recorded,
+  corrected call under the SAME invocation id records exactly one. The
+  gate's plan wording ("a call with no payload at all stays legal") narrows
+  in the same change: legal only when the relaxed schema requires nothing;
+  a provably-unsatisfiable absence is refused pre-dispatch like any other
+  unfit payload. Migration note for the PR: calls that previously "settled"
+  with no payload against a required-fields verb now fail locally and are
+  retryable under the same invocation id.
+- **runner/cfc, relocate the relaxation helper (D6).**
+  `relaxDefaultedRequired` and `localRefTarget` re-implement the runtime's
+  default-satisfaction rule inside `packages/cli/lib/callable.ts`, and C5
+  (closed-world inputs enforced at dispatch) needs the identical relaxation
+  server-side — two copies of "what does a default satisfy" is how the CLI
+  and the runtime drift apart, the residual-risk class the gate's own
+  design named. Move both next to `validateSchemaValue` under
+  `packages/runner/src/cfc/` (following that module's conventions), export
+  from the defining module, and import directly in the CLI — no re-export
+  shims. The relaxation unit tests move to the runner with the code; the
+  CLI keeps the tests that exercise the *gate* (refusal at both entry
+  points, id not spent) — those test CLI behavior, not the helper. The
+  helper's doc comment grows the list of what it does not check
+  (`additionalProperties`, `patternProperties`, and the other validations
+  `validateSchemaValue` applies but the relaxer doesn't — each a potential
+  refused-but-valid call if a generated schema leans on a required property
+  there); naming the boundary is the point. Pure move plus doc comment, no
+  behavior change, its own commit beside D5 so the diff reviews as such.
 - **Exit (Phase 2, before WS-C):** the duplicate-on-retry bug is dead on the
   live board. **Exit (Phase 4, with WS-C):** the retry returns the original
   result.
@@ -363,6 +570,17 @@ The retention half is gated on three resolutions, in order:
 Then: timestamps / typed error shape in the record (schema authored
 open-world); the collection linked from the piece with pattern-declared range +
 default and read-and-expire.
+
+- **One rejection taxonomy.** Two "fix your input" signals exist ahead of
+  this workstream, and today neither carries a stable code:
+  `VerbInputValidationError` (CLI pre-dispatch refusal) and a thrown `Error`
+  in the verb body (rule 4's rejection, whose typed carrier is deferred to
+  derive from `FabricError` — see WS-C). When this workstream puts codes on
+  the invocation surface, the `FabricError`-derived rejection type and the
+  pre-dispatch refusal must speak the same taxonomy — e.g. a reserved
+  `INVALID_INPUT` code — so an agent branches one way, not two. Recorded so
+  the convergence is a plan, not a rediscovery; no code field ships before
+  this workstream.
 
 The provenance half is a separate CFC-gated track:
 
@@ -396,11 +614,29 @@ Size M, mostly parallel. `packages/cli`, `skills/cf`.
   everything per the decided semantics; handler result schemas appear once
   WS-C lands, tier filtering with the marker, later. The 2026-07-24 amendment is absorbed: the listing carries the
   deployed pattern's source identity (skew detection).
-- Generic identity annotation for data reads and callable results. Start with
-  an exploration form such as `--include-ids` that annotates points where the
-  backing identity changes; evaluate a narrower path-selected form if broad
-  output is too noisy. Patterns return child references and never manufacture
-  their own fid fields for this purpose.
+- Generic identity annotation for data reads and callable results
+  (`--show-links` / `--include-ids`). Patterns return child references and
+  never manufacture their own fid fields for this purpose. Two shapes were
+  weighed (Berni, 2026-07-29): an inline `"@ID": { doc?, path?, space?,
+  scope? }` wherever the doc id or scope changes, versus provenance beside the
+  value as a `{ "/path": <link> }` dictionary.
+
+  **Take the second.** Berni's own objection settles it: inline cannot
+  annotate a **scalar**, and a scalar can be its own doc, so the format needs
+  a special case exactly where results are simplest — and an irregular format
+  costs an agent more than a verbose one. A second reason follows from the
+  result rule above: an inline `@ID` inside a schema-described result is
+  either undeclared (the tolerated-but-undeclared shape rule 1 exists to kill)
+  or declared, and then permanent at every path it appears, for provenance
+  metadata.
+
+  Not a new format either — the llm-dialog tool path already returns the link
+  as a sibling of the value, never inside it. Placement is a `links` field on
+  the Invocation JSON rather than a second stdout block: `resultRef` is
+  already recorded as advisory until the invocation protocol carries it there,
+  and Invocation is required to be authored open-world precisely so protocol
+  fields can be added later. Cost is bounded by emitting links only for paths
+  that have them, and only when asked.
 - **Read-path guard:** `cf piece get` on a path that resolves to a verb returns
   the stream's serialization rather than redirecting. The llm-dialog `read`
   tool already rejects this case with the right message — "Path resolves to a
@@ -506,7 +742,7 @@ Importable one-to-one into the tracker; `blocks →` names the dependency edge.
 | A1 | topics: body at create + thrown rejections | S | — |
 | A2 | topics: reference-plus-summary discovery index | S | — |
 | B1 | cli: sink-based settlement, result cell address | S | — |
-| C1 | api: action return types, `Stream<T, R>`, VerbError | M | — |
+| C1 | api: action return types, `Stream<E, R>` (rejection carrier deferred to `FabricError`) | M | — |
 | C2 | ts-transformers: value-returning action lowering + CTS spec | M | C1 |
 | C3 | schema-generator: result schemas for streams + mapping spec | M | C1 |
 | C4 | runner: plain-return projection behind flag + registry entry | S | — |
@@ -515,6 +751,8 @@ Importable one-to-one into the tracker; `blocks →` names the dependency edge.
 | D2 | cli: --invocation, readback, receipt-exists reclassification, pre-dispatch validation, phase reporting, transaction-local ack | M | D1 |
 | D3 | integration: four timeout/retry scenarios | S | D2 |
 | D4 | integration + live: three-topic end-to-end fixture | S | C1–C3, D2 |
+| D5 | cli: refuse a provably-unsatisfiable absent payload | S | D2 pre-dispatch gate (#5147) |
+| D6 | runner/cfc: relocate `relaxDefaultedRequired` + `localRefTarget` (C5 consumes) | S | D5 (same PR, own commit) |
 | E1 | timestamps, error shape + linked retention collection | L | C1–C5, D1–D4, OQ1, CFC review |
 | E2 | CFC: specify `AgentActor` mint, propagation, metadata protection + extraction | L | CFC review |
 | E3 | cli: trusted ingress provenance for `cf` calls | M | E2 |

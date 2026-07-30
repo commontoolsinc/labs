@@ -5,32 +5,41 @@ import { parseFunctionText } from "../src/sandbox/compiled-js-parser.ts";
 import {
   type BindingInfo,
   classifyModuleItems,
+  RESERVED_FACTORY_BINDING_SET,
 } from "../src/sandbox/compiled-bundle-verifier.ts";
+import { createFactoryShadowGuardSource } from "@commonfabric/utils/sandbox-contract";
 
-// The security classifier extracted from the AMD verifier is format-agnostic:
-// it classifies a module's top-level items (compiled-CJS form) against a
-// pre-seeded binding env, independent of AMD/ESM packaging. AMD passes the
-// canonical shadow guards + reserved bindings; ESM passes empty sets.
+// The security classifier is format-agnostic: it classifies a module's top-level
+// items (compiled-CJS form) against a pre-seeded binding env, independent of how
+// the body is wrapped. `verifyCompiledModuleBody` — the production caller —
+// passes empty guard/reserved sets, since no loader binding is in scope around a
+// module body. These tests exercise both the empty and non-empty configurations,
+// so the shadow-guard and reserved-binding paths stay covered.
+//
+// The empty set is load-bearing, not a stub: the canonical reserved set IS the
+// set of names the transformer emits as shadow guards, so reserving them would
+// reject transformer output. The last case below pins that relationship, which is
+// why no parameter may default to the canonical set.
 
 function bodyStatements(body: string) {
   const fn = parseFunctionText(body, 0, body.length);
   return { source: body, statements: fn.body.statements };
 }
 
-const ESM_OPTIONS = {
+const EMPTY_GUARD_OPTIONS = {
   requiredGuards: new Set<string>(),
   reservedBindings: new Set<string>(),
   missingGuardsErrorAt: 0,
 };
 
 describe("classifyModuleItems (format-agnostic security core)", () => {
-  it("accepts a guard-free module body when no shadow guards are required (ESM case)", () => {
+  it("accepts a guard-free module body when no shadow guards are required", () => {
     const body =
       `function () { const greet = (n) => n + 1; exports.greet = greet; }`;
     const { source, statements } = bodyStatements(body);
     const env = new Map<string, BindingInfo>();
     expect(() =>
-      classifyModuleItems(source, "<m>", statements, env, ESM_OPTIONS)
+      classifyModuleItems(source, "<m>", statements, env, EMPTY_GUARD_OPTIONS)
     ).not.toThrow();
   });
 
@@ -44,14 +53,14 @@ describe("classifyModuleItems (format-agnostic security core)", () => {
         "<m>",
         statements,
         new Map<string, BindingInfo>(),
-        ESM_OPTIONS,
+        EMPTY_GUARD_OPTIONS,
       )
     ).toThrow(/__cf_data/);
   });
 
-  it("honors empty reservedBindings for const declarations (ESM allows AMD-reserved names)", () => {
-    // `define` is an AMD wrapper-reserved name; under ESM (empty reserved set)
-    // a const of that name is allowed. Verifies reservedBindings reaches the
+  it("honors empty reservedBindings for const declarations", () => {
+    // With no reserved names (the production configuration), a const named
+    // `define` is allowed. Verifies reservedBindings reaches the
     // variable-declaration path, not only the function-declaration path.
     const body =
       `function () { const define = (n) => n; exports.define = define; }`;
@@ -62,10 +71,10 @@ describe("classifyModuleItems (format-agnostic security core)", () => {
         "<m>",
         statements,
         new Map<string, BindingInfo>(),
-        ESM_OPTIONS,
+        EMPTY_GUARD_OPTIONS,
       )
     ).not.toThrow();
-    // With the AMD reserved set, the same const name is rejected.
+    // With `define` reserved, the same const name is rejected.
     expect(() =>
       classifyModuleItems(
         source,
@@ -73,7 +82,7 @@ describe("classifyModuleItems (format-agnostic security core)", () => {
         statements,
         new Map<string, BindingInfo>(),
         {
-          ...ESM_OPTIONS,
+          ...EMPTY_GUARD_OPTIONS,
           reservedBindings: new Set(["define"]),
         },
       )
@@ -89,7 +98,7 @@ describe("classifyModuleItems (format-agnostic security core)", () => {
         "<m>",
         statements,
         new Map<string, BindingInfo>(),
-        ESM_OPTIONS,
+        EMPTY_GUARD_OPTIONS,
       )
     ).toThrow(/mutable/i);
   });
@@ -104,7 +113,7 @@ describe("classifyModuleItems (format-agnostic security core)", () => {
     const { source, statements } = bodyStatements(body);
     const env = new Map<string, BindingInfo>();
     expect(() =>
-      classifyModuleItems(source, "<m>", statements, env, ESM_OPTIONS)
+      classifyModuleItems(source, "<m>", statements, env, EMPTY_GUARD_OPTIONS)
     ).not.toThrow();
   });
 
@@ -120,8 +129,44 @@ describe("classifyModuleItems (format-agnostic security core)", () => {
         "<m>",
         statements,
         new Map<string, BindingInfo>(),
-        ESM_OPTIONS,
+        EMPTY_GUARD_OPTIONS,
       )
     ).toThrow(/SES mode/);
+  });
+
+  it("the canonical reserved set would reject the transformer's own shadow guards", () => {
+    // Why the production path MUST pass an empty reservedBindings set, and why no
+    // parameter may default to RESERVED_FACTORY_BINDING_SET: that set is exactly
+    // the names `createFactoryShadowGuardSource()` emits, so turning the check on
+    // rejects every transformed module on its own guards.
+    const guards = createFactoryShadowGuardSource();
+    expect(guards.length).toBeGreaterThan(0);
+    const body = `function () {\n${guards.join("\n")}\n}`;
+    const { source, statements } = bodyStatements(body);
+
+    // Empty (production): the guards verify as ordinary primitive consts.
+    expect(() =>
+      classifyModuleItems(
+        source,
+        "<m>",
+        statements,
+        new Map<string, BindingInfo>(),
+        EMPTY_GUARD_OPTIONS,
+      )
+    ).not.toThrow();
+
+    // Canonical reserved set: the very same body is rejected.
+    expect(() =>
+      classifyModuleItems(
+        source,
+        "<m>",
+        statements,
+        new Map<string, BindingInfo>(),
+        {
+          ...EMPTY_GUARD_OPTIONS,
+          reservedBindings: RESERVED_FACTORY_BINDING_SET,
+        },
+      )
+    ).toThrow(/Reserved wrapper binding/);
   });
 });

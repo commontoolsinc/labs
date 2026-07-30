@@ -125,10 +125,11 @@ describe("CFC LlmDerived stamping mechanism", () => {
     }
   });
 
-  it("stamps an [ID]-split element on its own doc", async () => {
-    // Real dialog messages carry an [ID] sigil and split into their own
-    // entity docs; the stamp must land on the split doc and surface through
-    // the element's label view.
+  it("stamps a split element on its own doc", async () => {
+    // Exercises the generic split mechanism directly, via an `[ID]` sigil.
+    // Dialog messages reach the same shape by a different route -- the dialog
+    // creates each message's document explicitly -- and either way the stamp
+    // must land on the split doc and surface through the element's label view.
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -285,7 +286,7 @@ describe("llmDialog LlmDerived stamping (end to end)", () => {
       await waitForLlmMessages(runtime, result, 2);
 
       // The contract is the PERSISTED metadata on each message's own entity
-      // doc (messages carry [ID] and split); read it there directly — the
+      // doc (every message is its own document); read it there directly — the
       // multi-hop handle chain (result → messages link → element link) is a
       // separate label-view surfacing concern.
       const messagesCell = result.key("messages");

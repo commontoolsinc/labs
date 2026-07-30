@@ -3,11 +3,10 @@ import { expect } from "@std/expect";
 import { SESRuntime } from "../src/sandbox/ses-runtime.ts";
 import { identitySourceMap } from "@commonfabric/js-compiler/source-map";
 
-// The runner-facing source-map surface of the SES runtime. The ESM boot path
-// now registers DEFERRED providers (CT-1819), but the eager chain stays
-// load-bearing: the AMD/isolate `execute` path registers per-script maps
-// directly, and an explicit registration must win over any pending provider
-// for the same name.
+// The runner-facing source-map surface of the SES runtime. The module-graph boot
+// path registers DEFERRED providers (CT-1819), but the eager chain stays
+// load-bearing: `SESIsolate.execute` registers a per-script map directly, and an
+// explicit registration must win over any pending provider for the same name.
 describe("SESRuntime source-map registration", () => {
   it("eager loads resolve immediately and supersede lazy providers", () => {
     const runtime = new SESRuntime();

@@ -29,8 +29,9 @@ import { Runtime } from "../src/runtime.ts";
 //
 // This guard asserts the chained computeds persist CLEAN (no directDirtySeq) and
 // rehydrate without misses on reload. Before the fix the first two persisted
-// with directDirtySeq set. Harness note (see reload-rehydration.test.ts): keep
-// runtime A's StorageManager open for B; quiesce A with scheduler.dispose().
+// with directDirtySeq set. Harness note (see reload-rehydration.test.ts): tear
+// runtime A down with `dispose({ closeStorage: false })`, which quiesces the
+// writer in full and leaves the StorageManager B shares open.
 
 const signer = await Identity.fromPassphrase("reload sibling overdirty guard");
 const space = signer.did();
@@ -126,7 +127,7 @@ Deno.test("reload: sibling-field computeds persist clean and do not re-run", asy
     expect(s.staleSeq).toBeUndefined();
   }
 
-  runtimeA.scheduler.dispose();
+  await runtimeA.dispose({ closeStorage: false });
   getLogger("scheduler").resetCounts();
 
   // RELOAD (runtime B, same storage). The existing piece resumes; the computeds
