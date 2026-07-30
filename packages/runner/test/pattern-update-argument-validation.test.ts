@@ -3,6 +3,13 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import {
+  type Cell,
+  getPatternIdentityRef,
+  getPatternSetupIdentityRef,
+  isStoredArgumentSchemaRefusal,
+  STORED_ARGUMENT_SCHEMA_REFUSAL,
+} from "../src/index.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { getMetaLink } from "../src/link-utils.ts";
@@ -114,14 +121,17 @@ describe("pattern update validates the stored argument", () => {
     await rt.setup(tx, pattern, argument, cell);
     await tx.commit();
     await rt.idle();
-    return cell;
+    return {
+      cell,
+      identity: rt.patternManager.getArtifactEntryRef(pattern)!.identity,
+    };
   };
 
   /** Stamp `ref` and materialize `candidate`, the production repair shape. */
   const rollForward = async (
-    cell: Awaited<ReturnType<typeof setupVintage>>,
+    cell: Cell<Record<string, unknown>>,
     candidate: RuntimeProgram,
-  ): Promise<{ error?: string }> => {
+  ): Promise<{ error?: string; thrown?: unknown; identity: string }> => {
     const pattern = await rt.patternManager.compilePattern(candidate, {
       space,
     });
@@ -134,6 +144,7 @@ describe("pattern update validates the stored argument", () => {
     });
     expect(stampError?.message).toBeUndefined();
     let error: string | undefined;
+    let raised: unknown;
     try {
       // `expectedPatternIdentity` is what makes a rejected setup commit THROW
       // rather than log and continue — the same reason the repair passes it.
@@ -141,6 +152,7 @@ describe("pattern update validates the stored argument", () => {
         expectedPatternIdentity: ref,
       });
     } catch (thrown) {
+      raised = thrown;
       error = thrown instanceof Error ? thrown.message : String(thrown);
     }
     // Settle either outcome before returning. A refused setup rejects out of
@@ -150,18 +162,21 @@ describe("pattern update validates the stored argument", () => {
     // passed.
     await rt.idle();
     await rt.storageManager.synced();
-    return { error };
+    return { error, thrown: raised, identity: ref.identity };
   };
 
   it("refuses a roll-forward whose stored argument the candidate rejects", async () => {
     // `count: "seven"` was legal under the open object and is not a number.
-    const cell = await setupVintage(
+    const { cell, identity: vintageIdentity } = await setupVintage(
       openArgument("v1"),
       { count: "seven" },
       "roll-forward-wrong-type",
     );
 
-    const { error } = await rollForward(cell, typedCount("v2"));
+    const { error, thrown, identity: rejectedIdentity } = await rollForward(
+      cell,
+      typedCount("v2"),
+    );
 
     // Assert the SPECIFIC refusal. A bare `toBeDefined()` would also pass on a
     // compile error, a missing store, or a disposed runtime — green for the
@@ -174,6 +189,19 @@ describe("pattern update validates the stored argument", () => {
     ).toContain("updated arguments do not match the candidate schema");
     expect(error).toContain("count: value does not match type number");
 
+    // The refusal must be CLASSIFIABLE, not just readable. A boot repair keys
+    // its recovery on this: re-running the same identity refuses identically,
+    // so `PiecesController` escalates to the roll-forward backstop instead of
+    // retrying, and a failure it cannot classify is discarded in favour of the
+    // original start error. Assert against the error the runner ACTUALLY threw
+    // rather than a hand-written string, so the thrower and the classifier
+    // cannot drift apart.
+    expect(
+      isStoredArgumentSchemaRefusal(thrown),
+      "the refusal is no longer classifiable, so a boot repair will discard " +
+        "it and surface an unrelated start error instead of escalating",
+    ).toBe(true);
+
     // The bytes are untouched: a refusal must abort the transaction, not
     // half-apply it. Reading them back is what tells "refused" from "deleted".
     const link = getMetaLink(cell, "argument")!;
@@ -181,12 +209,55 @@ describe("pattern update validates the stored argument", () => {
       rt.getCellFromLink(link).getRaw(),
       "the refusal did not leave the stored argument intact",
     ).toEqual({ count: "seven" });
+
+    // What a refusal does NOT undo, asserted so it is a documented consequence
+    // rather than a surprise. The identity stamp and the materialize are
+    // separate transactions — the repair commits the pointer first, on purpose,
+    // so the swap can carry its own precondition — and only the second one
+    // aborts here. The durable root is therefore left NAMING the rejected
+    // candidate while its setup marker still names the version that staged the
+    // state, which is exactly the shape a CFC migration refusal already
+    // produces on this path. The next boot re-attempts the repair and refuses
+    // again, loudly, until the incompatible argument or pattern is fixed;
+    // silently running the candidate over state it cannot read is the outcome
+    // this whole gate exists to prevent.
+    await cell.sync();
+    expect(
+      getPatternIdentityRef(cell as Cell<unknown>)?.identity,
+      "a refused roll-forward rolled the pointer back. That is a deliberate " +
+        "behaviour change, not a cleanup: the repair reaches this path BECAUSE " +
+        "the previously pinned pattern could not be set up either",
+    ).toBe(rejectedIdentity);
+    expect(
+      getPatternSetupIdentityRef(cell as Cell<unknown>)?.identity,
+      "the refused setup stamped its completion marker, so a later boot would " +
+        "read the root as fully staged for a version that never staged it",
+    ).toBe(vintageIdentity);
+  });
+
+  it("does not classify a failure that merely mentions the refusal", () => {
+    // The counterweight to the assertion above, and the reason the prefix is
+    // matched at the START. The escalation this classifier gates REPLACES a
+    // root's pattern, so a transient storage failure that happens to quote a
+    // user value must not be mistaken for "the pinned pattern cannot read this
+    // doc" — the same forgery concern `isCfcMigrationRejection` documents.
+    expect(
+      isStoredArgumentSchemaRefusal(
+        new Error(`commit failed at /${STORED_ARGUMENT_SCHEMA_REFUSAL}: nope`),
+      ),
+      "a failure that merely CONTAINS the refusal text was classified as one, " +
+        "so user-influenced content can trigger a root replacement",
+    ).toBe(false);
+    expect(isStoredArgumentSchemaRefusal(undefined)).toBe(false);
+    expect(isStoredArgumentSchemaRefusal(STORED_ARGUMENT_SCHEMA_REFUSAL)).toBe(
+      false,
+    );
   });
 
   it("rolls a COMPATIBLE stored argument forward (control)", async () => {
     // The control this file is unsound without: if a roll-forward refused every
     // argument, the case above would pass while proving nothing about types.
-    const cell = await setupVintage(
+    const { cell } = await setupVintage(
       openArgument("v1"),
       { count: 7 },
       "roll-forward-right-type",
@@ -214,7 +285,7 @@ describe("pattern update validates the stored argument", () => {
     // vintage's own instantiation wrote exactly this link. Refuse the plain
     // value, defer the unreadable link.
     const absent = rt.getCell<number>(space, "roll-forward-cold-target");
-    const cell = await setupVintage(
+    const { cell } = await setupVintage(
       openArgument("v1"),
       { count: absent },
       "roll-forward-cold-link",
@@ -232,20 +303,35 @@ describe("pattern update validates the stored argument", () => {
     expect((cell.getAsQueryResult() as { marker: string }).marker).toBe("v2");
   });
 
-  it("leaves a same-version setup alone, even over a mismatched argument", async () => {
+  it("leaves a same-version setup alone over an argument its OWN schema rejects", async () => {
     // The blast-radius guard, and the reason this check keys on the setup
-    // marker rather than on strictness everywhere. A stored argument can fail
-    // its OWN pattern's schema — written before a field was typed, or by a
-    // schema-less write — and re-running setup for the SAME version must not
-    // start refusing it. Widen the condition and every such piece stops
-    // starting at boot instead of at the update that introduced the mismatch.
-    const cell = await setupVintage(
-      openArgument("v1"),
-      { count: "seven" },
-      "same-version-mismatch",
+    // marker rather than on strictness everywhere.
+    //
+    // The vintage here is the TYPED pattern, and the stored argument violates
+    // that pattern's own schema — a schema-less write, which is how a value
+    // gets under a declared field without passing its check. Re-running setup
+    // for the SAME version must leave it alone. Widen the condition to
+    // "validate on every setup" and every piece in this state stops booting,
+    // failing at each start rather than at the update that introduced the
+    // mismatch.
+    //
+    // Note the vintage must be the typed pattern, not the open one: an open
+    // object accepts `{count: "seven"}`, so re-staging it would validate
+    // cleanly and this case would pass no matter what the condition said.
+    const { cell } = await setupVintage(
+      typedCount("v1"),
+      undefined,
+      "same-version-own-schema-mismatch",
     );
+    const { error: writeError } = await rt.editWithRetry((tx) => {
+      rt.getCellFromLink(getMetaLink(cell, "argument")!, undefined, tx)
+        .asSchema(undefined as never)
+        .set({ count: "seven" } as never);
+    });
+    expect(writeError?.message).toBeUndefined();
+    await rt.idle();
 
-    const pattern = await rt.patternManager.compilePattern(openArgument("v1"), {
+    const pattern = await rt.patternManager.compilePattern(typedCount("v1"), {
       space,
     });
     let error: string | undefined;
@@ -259,15 +345,79 @@ describe("pattern update validates the stored argument", () => {
 
     expect(
       error,
-      "re-running setup for the SAME version refused an argument that version " +
-        "itself stored, which turns a pre-existing mismatch into a piece that " +
-        "will not boot",
+      "re-running setup for the SAME version refused an argument already " +
+        "stored under it, which turns a pre-existing mismatch into a piece " +
+        "that will not boot",
     ).toBeUndefined();
     expect(rt.getCellFromLink(getMetaLink(cell, "argument")!).getRaw()).toEqual(
       {
         count: "seven",
       },
     );
+  });
+
+  it("refuses a roll-forward onto a RUNNING piece whose swap already failed", async () => {
+    // The reuse fast path, which is a second way to reach setup with the
+    // pointer already naming the candidate — and the state a refused hot-swap
+    // leaves behind, so the two interact.
+    //
+    // Sequence: the piece runs V1; the pointer moves to V2; the armed watcher
+    // swaps, its setup REFUSES the stored argument, and it is logged rather
+    // than thrown — so the piece keeps running V1 while the durable pointer now
+    // reads V2 and `patternSetupIdentity` still reads V1. A repair then calls
+    // `runSynced` with V2, and `maybeReuseRunningSetup` sees a running piece, a
+    // matching pointer, and no supplied argument: it returns before
+    // `applySetupState` ever runs. Without the setup-completion identity in
+    // that gate, the repair reports success over an argument nothing validated.
+    const tx = rt.edit();
+    const pm = rt.patternManager;
+    const v1 = await pm.compilePattern(openArgument("v1"), { space, tx });
+    const v2 = await pm.compilePattern(typedCount("v2"), { space, tx });
+    const v2Ref = pm.getArtifactEntryRef(v2)!;
+    const cell = rt.getCell<Record<string, unknown>>(
+      space,
+      "running-reuse-stale-marker",
+      undefined,
+      tx,
+    );
+    const running = rt.run(tx, v1, { count: "seven" }, cell);
+    await tx.commit();
+    await running.pull();
+
+    const tx2 = rt.edit();
+    cell.withTx(tx2).setMetaRaw("patternIdentity", {
+      identity: v2Ref.identity,
+      symbol: v2Ref.symbol,
+    });
+    await tx2.commit();
+    await rt.idle();
+    await cell.pull();
+    // Precondition, asserted rather than assumed: the swap refused, so the
+    // piece is still V1 under a pointer that reads V2. If this ever changes,
+    // the case below is exercising a different situation than it describes.
+    expect(
+      (cell.getAsQueryResult() as { marker: string }).marker,
+      "the swap did not refuse, so this case no longer sets up the " +
+        "running-piece-with-stale-marker state it exists to test",
+    ).toBe("v1");
+
+    let error: string | undefined;
+    try {
+      await rt.runSynced(cell.withTx(), v2, undefined, {
+        expectedPatternIdentity: v2Ref,
+      });
+    } catch (thrown) {
+      error = thrown instanceof Error ? thrown.message : String(thrown);
+    }
+    await rt.idle();
+    await rt.storageManager.synced();
+
+    expect(
+      error,
+      "a repair over a RUNNING piece reported success without validating the " +
+        "stored argument: `maybeReuseRunningSetup` returned before " +
+        "`applySetupState`, so the re-stage never ran",
+    ).toContain("updated arguments do not match the candidate schema");
   });
 
   it("refuses a HOT-SWAP whose stored argument the candidate rejects", async () => {

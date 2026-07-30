@@ -126,11 +126,20 @@ const fabricAwareEqual = (left: unknown, right: unknown): boolean => {
  * instead of landing over unreadable state (`Runner.applySetupState` →
  * `validateArgument`; `packages/runner/test/pattern-update-argument-validation.test.ts`).
  *
- * That check defers exactly one case, by design: a slot whose stored value is a
- * link that cannot be dereferenced in the transaction validates as opaque,
- * because "the target has not synced" is indistinguishable from "the value is
- * invalid" at that moment (CT-1917). A plain value of the wrong type is
- * refused.
+ * That check defers two cases, and the waiver is only as strong as they allow:
+ *
+ * - A slot whose stored value is a link that cannot be dereferenced in the
+ *   transaction validates as opaque, because "the target has not synced" is
+ *   indistinguishable from "the value is invalid" at that moment (CT-1917). A
+ *   plain value of the wrong type is refused.
+ * - A root carrying no `patternSetupIdentity` marker gets one unvalidated
+ *   setup, because absence cannot be told from a pending update. The marker is
+ *   recent, so this currently exempts most stored roots rather than a rare
+ *   tail, and it is aged roots — the ones likeliest to hold a value a new
+ *   schema cannot read — that the exemption covers.
+ *
+ * So this waiver is not a proof for those two cases; it is a decision to accept
+ * them, and Tier 2's replay of captured vintages is what covers the gap.
  */
 export function assertPatternSchemasBackwardCompatible(
   previous: Pattern,

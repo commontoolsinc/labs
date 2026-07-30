@@ -56,13 +56,13 @@ Three facts make that non-optional:
   data is simply gone. A document is precisely the thing a schema check does
   not have.
 - **Tier 1 hands one class back on purpose.** Over an OPEN argument object it
-  lets a candidate name a new optional field of any type, on the stated ground
-  that the runner validates merged durable arguments before committing such an
-  update. That guard was reachable on the hot-swap route and not on the repair
-  route, so a value the old version stored legally could become unreadable with
-  nothing raised anywhere; it is now reached on both. Two tiers each assuming
-  the other covers a class is how it stays uncovered, so the runtime guard is
-  pinned by its own tests and this tier replays it from a captured vintage.
+  lets a candidate name a new optional field of any type, on the ground that the
+  runner validates merged durable arguments in the setup transaction before
+  committing such an update. That makes the waiver only as good as the runtime
+  guard's reach, and two tiers each assuming the other covers a class is how a
+  class stays uncovered. So the guard is pinned on every update route by
+  `packages/runner/test/pattern-update-argument-validation.test.ts`, and this
+  tier replays it from a vintage a real prior version wrote.
 
 The motivating incident is the 2026-07-22 estuary brick: a home root doc
 predating six separately-added required fields, where "first-absence-wins, so
@@ -110,9 +110,13 @@ Measured on branch `tier2`, not assumed:
 | Every case discriminates — each goes red under a mutation of the thing it claims to test | measured by mutation: dropping `expectedPatternIdentity` reds the rejection case; no-oping the snapshot restore reds **five of six** (the sixth takes no snapshot); undoing `.for('itemList')` reds the storage-move case; giving the argument candidate a COMPATIBLE type reds the argument case |
 | A stranded-data assertion needs its control in the SAME case | measured: with the restore no-oped, the storage-move case alone stayed GREEN — `items === []` is also what an unrestored fixture reads. It now replays the vintage over the same snapshot first, and the argument case carries the same control for the same reason |
 | Tier 1 **defers** the open-argument evolution class to a runtime guard, and that guard now fires on both update routes | over an open argument object, a candidate naming a new optional field of any type is waved through (`schema-compatibility.ts`, "Open objects remain evolvable…") on the ground that the runner validates the piece's merged durable arguments. Measured on both routes: the hot-swap refused it already; the roll-forward materialize now does too, with `updated arguments do not match the candidate schema: count: value does not match type number`, and the captured bytes survive the refusal. Guarded in `packages/runner/test/pattern-update-argument-validation.test.ts` (both routes, plus the cold-link control) and replayed from a captured vintage in `state-continuity.test.ts` |
-| The miss was ONE gate, not two | measured, correcting this plan's earlier entry: the `{ unresolvedLinkRaw }` leniency does **not** swallow a plain wrong-typed value. `overlayUnresolvedLinkPlaceholders` substitutes the opaque placeholder only where the *raw* value at that slot is a cell link that materialized to nothing, so `{count:"seven"}` reached `validateSchemaValue` and was rejected — the hot-swap route refused this pair before any change here, under both write shapes (argument supplied at `run()`, and argument written through the root's `argument` meta the way the capture does). The whole miss was `applySetupState` skipping the re-stage when the pointer already named the candidate |
+| The `{ unresolvedLinkRaw }` leniency draws the link/plain line by itself | measured: `overlayUnresolvedLinkPlaceholders` substitutes the opaque placeholder only where the *raw* value at that slot is a cell link that materialized to nothing, so a plain wrong-typed value reaches `validateSchemaValue` and is rejected, under both write shapes (argument supplied at `run()`, and argument written through the root's `argument` meta the way the capture does). Validating an update strictly therefore costs nothing in CT-1917 deferral, and needs no change to this path. An investigation record of a superseded reading of this mechanism is in [`docs/history/plans/pattern-update-open-argument-investigation.md`](../history/plans/pattern-update-open-argument-investigation.md) |
 | A repair path cannot tell an update from a replay by the pattern POINTER | the roll-forward materialize commits the candidate's identity and then calls `runSynced` (`pieces-controller.ts`), and `PatternUpdater`'s instantiated mode moves the pointer with no setup at all, leaving a root that boots through the cold-start setup repair. Both reach setup with the pointer already naming the pattern being installed, so `samePattern` is true for what is an update. `patternSetupIdentity` — stamped only once setup has staged an identity's schema, arguments, internal cells and result projection — is the signal that survives, and `PatternUpdater` already used it for the same purpose (`setupNeedsRepair`). Now read in `applySetupState` via `stagedByOtherVersion`. The routes that hand setup a pattern the pointer does not name yet (`PatternUpdater`'s default-root apply, `cf piece setsrc`) were recognized as changes already, which is why they validated before this change |
-| An ABSENT setup marker still skips the re-stage | deliberate, and the one residual: a root written before the marker existed cannot be told from a pending update, and re-staging every such root would validate and rewrite defaults over arguments no update is touching. The window is one setup wide per root — the marker is stamped on every setup — and it needs the pointer to be pre-stamped, so an ordinary identity change (`samePattern` false) validates regardless |
+| An ABSENT setup marker still skips the re-stage, and that currently covers most roots | deliberate, and the residual: a root written before the marker existed cannot be told from a pending update, and re-staging every such root would validate and rewrite defaults over arguments no update is touching. The window is one setup wide per root and needs a pre-stamped pointer, so an ordinary identity change (`samePattern` false) validates regardless. What the arithmetic understates: `patternSetupIdentity` was introduced 2026-07-24, so a root written before then is exempt for its first repair-route update — and aged roots are exactly the population likeliest to hold an argument a new schema cannot read. Tier 2's vintage replay is what covers them |
+| Re-staging widens the repair transaction's conflict set | the re-stage reads the stored argument and `validateArgument` materializes it, and `ignoreReadForScheduling` suppresses scheduling only — it is not `ignoreReadForCommit` — so both reads join the commit's conflict set on paths that previously did neither. Accepted rather than closed: every production caller reaches `applySetupState` inside `runSynced`'s `editWithRetry`, so a conflict retries rather than failing the repair, and `runSynced` pre-syncs the cells it is about to set up. Not reproduced; recorded because the internal-cell code one screen up avoids exactly this hazard for its own probe read |
+| A cold replica can accept an update a synced one refuses | follows from the CT-1917 deferral: a link slot that materializes to nothing is deferred, while the same slot on a replica that HAS synced a wrong-typed target is refused. The asymmetry is inherent to deferring — "not yet synced" is indistinguishable from "empty" — and is survivable because a refusal is recoverable rather than terminal: the synced replica escalates to the roll-forward backstop instead of leaving the root unopenable. Not reproduced across two replicas |
+| A RUNNING piece reaches setup through a second gate, and it needs the same signal | measured: with the pointer pre-stamped and no argument supplied, `maybeReuseRunningSetup` returns before `applySetupState`, so a repair over a live piece reported success without validating. Reachable in ordinary sequence — a refused hot-swap is LOGGED, leaving the piece running the old version under a pointer that already names the candidate. Both gates now derive from one `SetupStateReuse` value |
+| A refused update leaves the pointer on the rejected candidate, so the refusal must be RECOVERABLE | the identity stamp and the materialize are separate transactions, so only the second aborts: the root names the candidate while `patternSetupIdentity` still names the version that staged the state, and re-running that identity refuses identically. Rolling the pointer back is not the fix — the roll-forward is reached precisely because the previously pinned pattern could not be set up either. Instead the refusal is classified (`isStoredArgumentSchemaRefusal`) and escalated to the same roll-forward backstop a CFC migration rejection takes, since "the pinned version cannot read this root" is exactly the runnability failure that backstop exists for. Without the classification the boot repair discards the error and rethrows the ORIGINAL start failure, so the operator reads a stream-marker stack for an argument problem |
 | Tier 1 also catches field REMOVAL, disjoint TYPE change, and a field moved between nesting levels | read off `schema-compatibility.ts` (messages, not line numbers, are the durable anchor): removal → "existing `<role>` field was removed" (rendered: `result.status: existing result field was removed`); disjoint type → "type … is not accepted by the candidate schema"; a nesting move is *seen* as a removal and reports as one. So none of those is a second Tier-2-only class — they are contract changes. The storage-move stays the only stranding class a contract check structurally cannot see |
 | Two roots in ONE space store would collide on a single fixed cause | `getCell` derives the entity id as `createRef({}, cause)` (`runtime.ts`), and that derivation does not include the space. Fixed by keying the cause per pattern (`vintageRoot(…, key)`); see the stage-3 note below |
 
@@ -612,24 +616,12 @@ memory migration cannot land without replaying pre-migration stores.
   or whether the fallback needs pinning too.
 - **Where does the replay run?** It needs a real runtime and is heavier than
   Tier 1. Its own job, or folded into an existing one.
-- ~~**Should the open-argument class be FIXED rather than pinned?**~~
-  **RESOLVED — fixed.** The validator is now reachable on the repair path, and
-  the Tier-2 case asserts the refusal instead of pinning the stranding.
-
-  This entry previously argued the hard part was the `{ unresolvedLinkRaw }`
-  leniency, and told whoever picked it up to start there rather than at
-  `sameStoredSetup`. That advice was backwards, and the correction is the useful
-  part of the record: the leniency **already** separates "a link I cannot read
-  yet" from "a plain value of the wrong type" — it substitutes the opaque
-  placeholder only where the raw value at that slot is a cell link — so the
-  hot-swap route was refusing this pair the whole time. `sameStoredSetup` was
-  the entire miss, and the fix is that a repair path cannot identify an update
-  by the pattern pointer it has already stamped; the `patternSetupIdentity`
-  completion marker can. See the corrected rows in "What is verified".
-
-  Residual, recorded rather than closed: a root carrying no setup marker at all
-  still skips the re-stage, because absence cannot be told from a pending
-  update. That window is one setup wide per root.
+- **Does the open-argument residual need closing?** The class itself is
+  validated on every update route, but a root carrying no `patternSetupIdentity`
+  marker at all still skips the re-stage: absence cannot be told from a pending
+  update. The window is one setup wide per root and needs a pre-stamped pointer,
+  so it is narrow enough to leave open — closing it means deciding what a root
+  with no marker and an unreadable argument should do at boot.
 
 ## References
 

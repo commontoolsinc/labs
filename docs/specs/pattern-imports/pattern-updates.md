@@ -301,10 +301,18 @@ staged the state.
 
 Setup re-points the piece's stored argument at the incoming argument schema and
 validates it in the same transaction, so an apply whose durable argument the new
-schema cannot read is refused rather than committed. A slot whose stored value
-is a link that cannot be dereferenced in that transaction is deferred to
-instantiation-time reads instead of failing the apply: a nested piece's argument
-lives in its host's document, and "not yet synced" is not "invalid".
+schema cannot read is refused rather than committed. Two cases are deferred
+rather than refused: a slot whose stored value is a link that cannot be
+dereferenced in that transaction (a nested piece's argument lives in its host's
+document, and "not yet synced" is not "invalid"), and a root carrying no
+completion marker at all, which gets one unvalidated setup because absence
+cannot be distinguished from a pending apply.
+
+A refusal is a repair failure, not a silent one. The pointer has already moved
+by the time setup runs, so re-running the same identity refuses identically;
+the boot repair therefore classifies this failure and escalates it to the
+roll-forward backstop — the same route a refused CFC migration takes — rather
+than retrying a version that cannot read its own root.
 
 During space open,
 `ensureDefaultPattern` performs this transaction before calling `startPiece`,
