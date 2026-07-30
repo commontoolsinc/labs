@@ -77,7 +77,13 @@ import { hardenVerifiedFunction } from "../sandbox/function-hardening.ts";
 /** Declare a pattern
  *
  * @param fn A function that creates the pattern graph
- * @param argumentSchema An optional JSONSchema for the pattern inputs
+ * @param argumentSchema An optional JSONSchema for the pattern inputs. A
+ *   pattern that takes no inputs may pass `false` (the JSON Schema that
+ *   matches nothing) -- but do not copy that shape into a pattern that does
+ *   take inputs: a `false` argument schema silently drops every argument
+ *   supplied at run time, so each input reads as `undefined` with no error.
+ *   A pattern with inputs needs a real argument schema here (the position
+ *   cannot be skipped when a `resultSchema` is also passed).
  * @param resultSchema An optional JSONSchema for the pattern outputs
  *
  * @returns A pattern node factory that also serializes as pattern.

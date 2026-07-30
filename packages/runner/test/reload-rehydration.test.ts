@@ -13,11 +13,11 @@ import { Runtime } from "../src/runtime.ts";
 // from a synced state (runtime B sharing runtime A's storage) should rehydrate
 // its persisted observations rather than re-run them.
 //
-// IMPORTANT harness note: do NOT call `runtimeA.dispose()` before runtime B —
-// `Runtime.dispose()` calls `storageManager.close()`, which tears down the
-// storage shared with B (B would then see zero persisted snapshots). Quiesce A
-// with `A.scheduler.dispose()` and keep the StorageManager open; flush the
-// batched scheduler observations with `await A.storageManager.synced()`.
+// Harness note: tear runtime A down with `dispose({ closeStorage: false })`,
+// which runs the whole teardown but leaves the StorageManager B shares open.
+// Quiescing the WRITER is what makes B's reading a statement about a state A
+// actually reached; flush the batched scheduler observations first with
+// `await A.storageManager.synced()`.
 
 const signer = await Identity.fromPassphrase("reload rehydration guard");
 const space = signer.did();
@@ -118,7 +118,7 @@ Deno.test("reload: resumed pattern rehydrates persisted observations", async () 
   }
   await runtimeA.storageManager.synced();
   expect(resultCellA.key("count").getAsQueryResult()).toBe(COUNT);
-  runtimeA.scheduler.dispose();
+  await runtimeA.dispose({ closeStorage: false });
 
   // Reset counters so the reading reflects only the reload runtime.
   getLogger("scheduler").resetCounts();
@@ -180,7 +180,7 @@ Deno.test("reload: transient snapshot listing failure degrades to resume-fresh",
   }
   await runtimeA.storageManager.synced();
   expect(resultCellA.key("count").getAsQueryResult()).toBe(COUNT);
-  runtimeA.scheduler.dispose();
+  await runtimeA.dispose({ closeStorage: false });
 
   // RELOAD (runtime B, same storage) with a listing that throws.
   const runtimeB = newRuntime(storageManager);

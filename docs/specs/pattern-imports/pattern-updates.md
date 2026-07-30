@@ -93,7 +93,7 @@ into the same active-origin and revision model.
 | Space root: `spaceCell.defaultPattern` link → root piece → `patternIdentity` | `packages/piece/src/manager.ts` (`linkDefaultPattern`/`getDefaultPattern`) | What a system update rewrites |
 | `ensureDefaultPattern` (resolve → reconcile → start) / `recreateDefaultPattern` (manual, **not** state-preserving) | `packages/piece/src/ops/pieces-controller.ts` | The automatic self-heal hook (ensure) and the state-losing escape hatch (recreate); both URL-based creation paths stamp `patternSource` |
 | System patterns = **raw TSX served by path**, bundled via `deno compile --include`; **no name→identity manifest** | `packages/toolshed/routes/patterns/patterns-server.ts`, `patterns.routes.ts` | Where the current system source + its identity come from |
-| Per-space host resolution: `mappedHostFor(space)` / `registerSpaceHost` (3-tier: seed `spaceHostMap` → learned site-table → default) | `runtime.ts:1423` / `:1444`, `storage/v2-remote-session.ts` | Which toolshed a space's source is fetched from |
+| Per-space host resolution: `mappedHostFor(space)` / `registerSpaceHost` (3-tier: seed `spaceHostMap` → learned site-table → default) | `Runtime.mappedHostFor` / `registerSpaceHost` in `packages/runner/src/runtime.ts`, `storage/v2-remote-session.ts` | Which toolshed a space's source is fetched from |
 | Identity computation: `transformInjectHelperModule` + `computeModuleIdentities` | `harness/pretransform.ts`, `sandbox/module-record-compiler.ts` | What toolshed runs to answer `?identity` |
 | Entry-doc `annotations` + `annotatePattern` | `pattern-manager.ts`, `cell-cache.ts` | **Rejected as the carrier** — see below |
 
@@ -101,7 +101,8 @@ into the same active-origin and revision model.
 non-hashed, excluded from `verifySourceDocs`) and looks like a natural home for
 "where updates live" — but it is **space-local**: `writeSourceDocs` preserves
 the *destination* cell's annotations, and replication does not copy the
-*source's* (`cell-cache.ts:475`). An `updatesAt` written in a publisher's space
+*source's* (`packages/runner/src/compilation-cache/cell-cache.ts`). An
+`updatesAt` written in a publisher's space
 would not appear on a consumer's replicated copy. The **piece** is the reliable
 carrier: explicit source provenance travels with it. For an unstamped non-root
 piece, its verified source-doc closure supplies the authored entry path; the

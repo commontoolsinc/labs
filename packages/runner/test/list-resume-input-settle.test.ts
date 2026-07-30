@@ -150,7 +150,10 @@ describe("list builtin resume input-settle", () => {
     expect(rc1.key(field).getAsQueryResult() ?? []).toEqual(builtValue);
 
     // Stop the builtin's action, then overwrite the input list with [] so the
-    // durable container stays non-empty while the input is empty.
+    // durable container stays non-empty while the input is empty. Scheduler
+    // only, not `dispose({ closeStorage: false })`: rt1 goes on being used as
+    // a WRITER on the next line, so this freezes reactions rather than tearing
+    // the runtime down.
     rt1.scheduler.dispose();
     const tx1 = rt1.edit();
     rc1.withTx(tx1).key("items").set([]);

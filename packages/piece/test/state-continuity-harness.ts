@@ -48,8 +48,13 @@ import {
 } from "../../runner/src/storage/v2.ts";
 import {
   type Cell,
+  CHIP_UI,
   getPatternSetupIdentityRef,
+  isCell,
+  isStream,
   Runtime,
+  TILE_UI,
+  UI,
 } from "@commonfabric/runner";
 import {
   companionFileName,
@@ -57,6 +62,13 @@ import {
   vintageCompanionDir,
 } from "./vintage-layout.ts";
 import type { RuntimeProgram } from "@commonfabric/runner";
+// The comparison's two leaf cases. A materialized root is not plain data: at an
+// `asCell`/`asStream` position it holds a live cell, and a durable doc may hold
+// a fabric special object (bytes, an epoch). Neither survives a structural
+// comparison unaided — see `comparableState`.
+import { FabricSpecialObject } from "@commonfabric/data-model/interface";
+import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 // Relative into the runner's internals for the same reason as the test
 // utilities below: `getMetaLink` and the link shape it returns are how the
 // runtime itself reaches a root's argument document, and re-deriving that
@@ -495,23 +507,416 @@ export async function vintageArgumentLink(
   return link;
 }
 
+/** What a cycle in a materialized root becomes. Structural, so two of them
+ * compare equal, and JSON-safe, so a report can print it. */
+const CYCLE = Object.freeze({ "[cycle]": true });
+
+/** What a RENDERING becomes. Carries nothing, so two of them always compare
+ * equal — which is the point: a rendering is not state. */
+const VNODE = Object.freeze({ "[vnode]": true });
+
 /**
- * Whether a restored fixture's root already holds state.
+ * Whether a value is a RENDERING rather than state.
  *
- * This is a CONTROL, and the replay gate is unsound without one. A fixture that
- * did not restore — truncated, empty, or seeded where the engine does not look
- * — presents to the runtime as a fresh empty space, and materializing today's
- * source onto a fresh empty space succeeds. The replay would then read green
- * having proved nothing at all: emptiness is indistinguishable from a fixture
- * that was never there.
- *
- * The evidence is "the root holds a value", NOT "the root carries a matching
- * patternIdentity stamp". A vintage is captured by running the pattern's own
- * TESTS, and the test harness roots its graph with `runtime.run`, so the stamp
- * at the root belongs to the TEST pattern rather than to the pattern the
- * fixture is named for — an identity check would reject every fixture the
- * capture produces.
+ * `type: "vnode"` is the whole test, and it is the runner's own definition of
+ * one — `vnodeSchema` in `runner/src/schemas.ts` requires that tag. It is
+ * deliberately NOT `html`'s `isVNodeish`, which also answers yes to any object
+ * carrying a `$UI`: that shape is a piece with a rendering ON it, whose other
+ * keys are exactly the state this comparison exists to check.
  */
+function isVNode(value: object): boolean {
+  return (value as { type?: unknown }).type === "vnode";
+}
+
+/**
+ * A materialized root, detached and reduced to something two of can be
+ * COMPARED.
+ *
+ * A materialized root is not plain data, and three of the things in it defeat a
+ * structural comparison outright:
+ *
+ * - **A live cell.** At every `asCell`/`asStream` position — the six handler
+ *   streams on `home.tsx`'s root, among others — the read yields a `Cell`,
+ *   whose own enumerable properties include `runtime`. A generic deep copy
+ *   therefore copies the whole runtime object graph into the snapshot, cycles
+ *   and all. Measured on the committed `home.tsx` fixture: the copy is cyclic
+ *   (`scheduler` → `runtime` → back), `JSON.stringify` on it throws, and the
+ *   copy compares UNEQUAL to the live cell it came from because one side is a
+ *   plain object and the other a class instance — so every stream key reports
+ *   as stranded and printing the finding takes the run down with it. Reduced
+ *   here to the DOCUMENT the cell points at, which is the durable thing about
+ *   it: a stream that moved to a different doc still shows up, and the schema
+ *   is deliberately dropped, being a view rather than data.
+ * - **A fabric special object** (`FabricBytes`, an epoch). These hold their
+ *   state in private fields, so a structural comparison sees two objects with
+ *   no properties and calls them equal REGARDLESS of contents —
+ *   `deepEqual`'s own documentation says so, and it is the quietest way a
+ *   comparison can pass. Reduced to a tagged content hash, which is the
+ *   data-model's own notion of equality for them (`valueEqual` ends in the same
+ *   hash) without needing a comparator that also has to survive link sigils.
+ * - **A cycle.** Even with cells reduced, the data itself may point back at
+ *   itself; `deepEqual` recurses until the stack ends. Cut with a marker rather
+ *   than by sharing the copy, so what comes out of here is acyclic — which is
+ *   what lets a failure report stringify it.
+ * - **A rendering.** A VNode is recomputed by the setup from the pattern body,
+ *   so the stored one and a fresh one differ whenever the source that renders
+ *   them was touched at all. `strandedKeys` excludes the `$UI` FAMILY by name,
+ *   which reaches a rendering stored AT a known key and nothing else — and a
+ *   transformer hoist (`__cfPattern_N`, the body of a `map`) is a recorded
+ *   instantiation whose whole result IS a vnode, with keys `type`/`name`/
+ *   `props`/`children`. Measured on the committed `default-app.tsx` fixture: a
+ *   UI-only edit inside that map body reported `children` stranded on both
+ *   recorded hoist roots and took the gate to exit 1, for a change that stores
+ *   nothing. Reduced by SHAPE here, so a rendering is out of the comparison
+ *   wherever it sits rather than only where it is named.
+ *
+ * Everything else is copied plainly, and `bigint` and `undefined` pass through
+ * as themselves — the two values a JSON round-trip could not carry.
+ *
+ * Idempotent: run over its own output it returns an equal structure, so a
+ * caller that normalizes early and a caller that normalizes late agree.
+ */
+export function comparableState(value: unknown): unknown {
+  // Cycle detection is per-PATH, not per-value: a shared subtree is expanded at
+  // each place it appears, which keeps the copy an honest picture of what was
+  // read. Only a genuine loop is cut.
+  const onPath = new Set<object>();
+  const walk = (current: unknown): unknown => {
+    if (current === null || typeof current !== "object") return current;
+    if (current instanceof FabricSpecialObject) {
+      return { "[fabric]": taggedHashStringOf(current) };
+    }
+    if (isCell(current) || isStream(current)) {
+      const link = current.getAsNormalizedFullLink();
+      return {
+        "[cell]": {
+          space: link.space,
+          id: link.id,
+          path: [...link.path],
+        },
+      };
+    }
+    if (isVNode(current)) return VNODE;
+    if (onPath.has(current)) return CYCLE;
+    onPath.add(current);
+    try {
+      if (Array.isArray(current)) return current.map(walk);
+      const copy: Record<string, unknown> = {};
+      for (const key of Object.keys(current)) {
+        copy[key] = walk((current as Record<string, unknown>)[key]);
+      }
+      return copy;
+    } finally {
+      onPath.delete(current);
+    }
+  };
+  return walk(value);
+}
+
+/**
+ * `schema` with every `unknown` TYPE dropped, so a read descends where the
+ * declared type stopped it.
+ *
+ * A schema-driven read resolves nothing at a `{"type": "unknown"}` position —
+ * `schemaTypeValidity` in `traverse.ts` answers `Unknown` there, and the value
+ * comes back `undefined` WHATEVER the document holds. That is the right answer
+ * for a reader; it is the wrong one for this comparison, because "the schema
+ * did not resolve it" then reads exactly like "the document does not hold it",
+ * and `isPreserved` treats the second as nothing to lose.
+ *
+ * It is not a corner. Measured on the committed fixtures, `unknown` is what a
+ * declared `unknown` field and an INDEX SIGNATURE both lower to — the second
+ * as `additionalProperties: {"type": "unknown"}` — and `default-app.tsx`
+ * declares `[key: string]: unknown` on its output. Its root holds `recentPieces`,
+ * `summaryIndex` (a whole nested pattern result) and `trackRecent` (a stream);
+ * under the stored schema verbatim all three read `undefined`, and a change
+ * that stranded any of them would have replayed clean.
+ *
+ * Only the `type` keyword is dropped, and only where it says `unknown`. That is
+ * what keeps this a RELAXATION rather than a different read: `asCell`, `ifc`
+ * and every other keyword survive, so a stream still reduces to the document it
+ * points at (reading under a bare `{}` instead would resolve it to its value
+ * and lose the moved-document class this comparison exists for). The result is
+ * still a schema-driven read, so it is still deterministic — unlike a
+ * schema-less `.get()`, which resolves whatever is already loaded and is the
+ * shape of bug that made a cross-space profile read as absent (#3830).
+ */
+export function schemaWithUnknownsRelaxed(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(schemaWithUnknownsRelaxed);
+  if (typeof schema !== "object" || schema === null) return schema;
+  const relaxed: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(schema)) {
+    // `type: "unknown"` and `type: [… "unknown" …]` both match anything, so
+    // dropping the keyword loses no constraint. Matched on the KEY as well as
+    // the value, so a property that happens to be NAMED `type` — whose value is
+    // a schema object, never the string — is recursed into rather than dropped.
+    if (
+      key === "type" &&
+      (value === "unknown" ||
+        (Array.isArray(value) && value.includes("unknown")))
+    ) {
+      continue;
+    }
+    relaxed[key] = schemaWithUnknownsRelaxed(value);
+  }
+  return relaxed;
+}
+
+/**
+ * A root's state under `schema`, detached and reduced so two of them can be
+ * compared.
+ *
+ * One spelling, used for the BEFORE state (under the root's stored schema) and
+ * for the AFTER state (under the candidate's compiled one). The two sides have
+ * to be read the same way or the comparison measures the reading rather than
+ * the data — a relaxation applied to one side alone would report every key it
+ * newly resolves as stranded.
+ *
+ * Returns a copy: the live value is a query-result proxy that re-reads through
+ * the transaction, so holding it across a materialize would compare the new
+ * state against itself. `comparableState`, not a JSON round-trip and not a
+ * generic deep copy — a JSON round-trip is lossy on exactly the values a
+ * durable doc may hold (`FabricBytes` and epoch wrappers collapse to `{}`, a
+ * `bigint` throws), and a generic copy drags the runtime object graph in behind
+ * every live cell.
+ */
+export async function readStateUnder(
+  vintage: VintageRuntime,
+  space: string,
+  cellId: string,
+  schema: unknown,
+): Promise<Record<string, unknown> | undefined> {
+  try {
+    const cell = vintage.runtime.getCellFromEntityId(
+      space as never,
+      cellId as never,
+      [],
+      schemaWithUnknownsRelaxed(schema) as never,
+    );
+    await cell.sync();
+    const detached = comparableState(cell.get());
+    // Narrow rather than cast. A root is an object in practice, but asserting
+    // it would hand `strandedKeys` a non-object to enumerate — and "no keys"
+    // reads exactly like "nothing stranded".
+    if (typeof detached !== "object" || detached === null) return undefined;
+    return detached as Record<string, unknown>;
+  } catch {
+    // A cell that cannot be read is `undefined`, not a throw. The caller treats
+    // that as a FAILURE for this entry (a recorded root the fixture does not
+    // hold), which is the right verdict — but only if it can be reported. Left
+    // throwing, one unreadable cell would abort the whole vintage and take
+    // every remaining target and fixture with it.
+    return undefined;
+  }
+}
+
+/**
+ * A captured root's state, read the way the version that WROTE it saw it.
+ *
+ * Read under the root's OWN stored result schema, which it carries in meta — so
+ * the writing version's view of its data is recoverable without its source, and
+ * without this replay having to decide what that view should be. Relaxed at its
+ * `unknown` positions first — see `schemaWithUnknownsRelaxed` for what that
+ * buys and why it is still the writer's own schema.
+ */
+export async function readVintageState(
+  vintage: VintageRuntime,
+  space: string,
+  cellId: string,
+): Promise<Record<string, unknown> | undefined> {
+  let storedSchema: unknown;
+  try {
+    const raw = vintage.runtime.getCellFromEntityId(
+      space as never,
+      cellId as never,
+      [],
+      undefined as never,
+    );
+    await raw.sync();
+    storedSchema = raw.getMetaRaw("schema");
+  } catch {
+    return undefined;
+  }
+  // No stored schema is not "read it some other way": the caller reports it,
+  // because a recorded root with none is a fixture that does not hold what it
+  // claims.
+  if (storedSchema === undefined) return undefined;
+  return await readStateUnder(vintage, space, cellId, storedSchema);
+}
+
+/**
+ * The result keys that hold a RENDERING rather than state.
+ *
+ * Taken from the runner's own constants rather than spelled as strings here:
+ * the set of UI variants is the runtime's to define, and a copy would silently
+ * stop matching the day a variant is added.
+ */
+const RENDERINGS: ReadonlySet<string> = new Set([UI, TILE_UI, CHIP_UI]);
+
+/**
+ * The single-key objects `comparableState` reduces a value TO.
+ *
+ * Every one of them stands for something the comparison cannot see through, so
+ * every one of them has to be compared WHOLE — see `isPreserved`, which would
+ * otherwise apply its subset rule to the reduction's own innards.
+ */
+const REDUCTIONS: ReadonlySet<string> = new Set([
+  "[cell]",
+  "[fabric]",
+  "[cycle]",
+  "[vnode]",
+]);
+
+/** Whether `value` is one of `comparableState`'s reductions. */
+function isReduction(value: unknown): boolean {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const keys = Object.keys(value);
+  return keys.length === 1 && REDUCTIONS.has(keys[0]);
+}
+
+/**
+ * Whether everything `before` held is still reachable, at the same path, in
+ * `after`.
+ *
+ * SUBSET, not equality — and the difference is not a nicety. An update may
+ * legitimately ADD, which is what `Default<>` is for, and additions are not
+ * only top-level: a nested pattern gaining a defaulted field turns
+ * `{note, owner}` into `{note, owner, addedLater: []}` several levels down.
+ * Comparing those for equality reports the whole key stranded and reds a
+ * perfectly compatible change — measured, on the cross-space case in
+ * `pattern-vintage-run.test.ts`.
+ *
+ * Arrays compare elementwise by INDEX, so appending is fine while truncating or
+ * reordering is not: an element that moved is an element the old reader can no
+ * longer find where it left it.
+ *
+ * Two things the subset rule does NOT apply to, both of them ways it would
+ * otherwise pass on a value that changed:
+ *
+ * - **A reduction is an identity, not a structure.** `{"[cell]": {space, id,
+ *   path}}` says WHICH document a cell-valued key points at; descending into it
+ *   makes its `path` a subset-able array, so a stream that moved from `[]` to
+ *   `["value"]` in the same document — a longer path, nothing missing from it —
+ *   reads as preserved. Compared whole instead.
+ * - **A before-value of `undefined` is not data.** The before state is read
+ *   under the root's stored schema, and a schema-driven read enumerates the
+ *   keys the schema declares whether or not the document holds them: measured
+ *   on the committed fixtures, `defaultProfile` on `home.tsx` reads as
+ *   `undefined` because the root predates any profile being created.
+ *   Comparing that would report an update that starts filling it in — adding a
+ *   `Default<>` to a field already declared — as having stranded state that
+ *   was never there. Held nothing, lost nothing.
+ *
+ *   This branch is only honest because the read cannot ALSO return `undefined`
+ *   for a key the document does hold. It could, before
+ *   `schemaWithUnknownsRelaxed`: an `unknown` position resolves to `undefined`
+ *   whatever is stored there, and measured on the committed `default-app.tsx`
+ *   fixture that hid `recentPieces`, `summaryIndex` and `trackRecent` — three
+ *   keys holding real state, indistinguishable here from three keys holding
+ *   nothing. Whatever else changes, the two must not be allowed to collapse
+ *   again.
+ */
+function isPreserved(before: unknown, after: unknown): boolean {
+  if (before === undefined) return true;
+  if (isReduction(before) || isReduction(after)) {
+    return deepEqual(before, after);
+  }
+  if (Array.isArray(before)) {
+    if (!Array.isArray(after) || after.length < before.length) return false;
+    return before.every((item, index) => isPreserved(item, after[index]));
+  }
+  if (
+    typeof before === "object" && before !== null &&
+    typeof after === "object" && after !== null && !Array.isArray(after)
+  ) {
+    return Object.entries(before as Record<string, unknown>).every(
+      ([key, value]) =>
+        isPreserved(value, (after as Record<string, unknown>)[key]),
+    );
+  }
+  return deepEqual(before, after);
+}
+
+/**
+ * Keys whose value the update did not preserve.
+ *
+ * Only keys present BEFORE are compared: an update may legitimately ADD a
+ * field (that is what `Default<>` is for), so a new key is not a finding. An
+ * existing key whose value changed is — that is data the old version wrote and
+ * the new one no longer reads back.
+ *
+ * The RENDERINGS are excluded BY NAME, and nothing else is. A root's
+ * `$UI`/`$TILE_UI`/`$CHIP_UI` is a projection the setup recomputes, and the
+ * stored rendering and a fresh one are not the same artifact even when nothing
+ * about the data changed: measured on the committed `default-app.tsx` fixture,
+ * a COMMENT-only edit to `piece-grid.tsx` reports `$UI` as stranded —
+ * `children: [null]` where the vintage held it against `children: [[]]` freshly
+ * rendered — and the same edit to `note.tsx` reports `$UI` and `$TILE_UI`, one
+ * side carrying a `type: "vnode"` tag the other does not. Comparing those keys
+ * says nothing about data and reds every pattern edit, so the gate would be
+ * turned off within a week of landing.
+ *
+ * A name is not enough on its own, which is why `comparableState` also reduces
+ * a rendering by SHAPE: a transformer hoist's whole result is a vnode, stored
+ * under no `$UI` at all. The name list stays because the shape check cannot
+ * replace it — the `note.tsx` measurement above is one side that carries the
+ * `type: "vnode"` tag against one side that does not.
+ *
+ * The exclusion is deliberately not "derived values" in general: `$NAME` is
+ * derived too and stayed equal across both of those edits, so it is compared —
+ * it is a cheap tell that the data behind it went missing. The cost is real and
+ * worth naming: a root whose only key is a rendering (`profile-picker.tsx`) has
+ * nothing left for this check to compare, and rests on the refusal, completion
+ * and reads-as-something checks instead.
+ *
+ * Everything else is compared by SHAPE rather than by name. A value the
+ * comparison cannot see through — a live cell, a fabric special object, a
+ * cycle, a rendering — is reduced by `comparableState` on both sides rather
+ * than skipped.
+ *
+ * Both sides go through it here rather than only at the call site: the before
+ * state arrives already reduced, but the after state is whatever the
+ * materialize returned — a LIVE root value — and comparing a detached copy
+ * against a live one reports every cell-valued key as stranded. It is
+ * idempotent, so normalizing the already-normalized side costs a walk and
+ * removes a way to hold this wrong.
+ *
+ * Compared with `deepEqual`, not stringified. Serialization is the wrong
+ * instrument twice over: it is key-order sensitive, so two equivalent objects
+ * whose properties were emitted in a different order would report as stranded,
+ * and it cannot represent everything a durable doc may hold — a `bigint` throws.
+ *
+ * `deepEqual` rather than the data-model's `valueEqual`, which is the more
+ * obvious choice. `valueEqual` refuses a materialized root outright — measured,
+ * it throws `Cannot compare value {"/":{"link@1":{…}}}` — but NOT for the
+ * reason that message reads as: a link sigil compares fine, and the value it
+ * actually refused was a live CELL, rendered through its `toJSON()` and so
+ * printed as the sigil it points at. That is the same fact `comparableState`
+ * exists for. Both comparators work once the reduction has run, and this one is
+ * kept because it needs no value to be a well-formed `FabricValue` and
+ * short-circuits instead of hashing a whole VNode tree; the one class it cannot
+ * judge, a fabric special object with its state in private fields, is reduced
+ * to a content hash before it gets here rather than being compared by it.
+ */
+export function strandedKeys(
+  before: Record<string, unknown>,
+  after: unknown,
+): string[] {
+  const beforeState = comparableState(before) as Record<string, unknown>;
+  const afterState = comparableState(after);
+  const afterView = typeof afterState === "object" && afterState !== null
+    ? afterState as Record<string, unknown>
+    : undefined;
+  const stranded: string[] = [];
+  for (const key of Object.keys(beforeState)) {
+    if (RENDERINGS.has(key)) continue;
+    if (!isPreserved(beforeState[key], afterView?.[key])) stranded.push(key);
+  }
+  return stranded;
+}
+
 /**
  * Whether a root value counts as STATE rather than nothing.
  *
@@ -576,6 +981,23 @@ export async function vintageHoldsRoot(
   }
 }
 
+/**
+ * Whether a restored fixture's root already holds state.
+ *
+ * This is a CONTROL, and the replay gate is unsound without one. A fixture that
+ * did not restore — truncated, empty, or seeded where the engine does not look
+ * — presents to the runtime as a fresh empty space, and materializing today's
+ * source onto a fresh empty space succeeds. The replay would then read green
+ * having proved nothing at all: emptiness is indistinguishable from a fixture
+ * that was never there.
+ *
+ * The evidence is "the root holds a value", NOT "the root carries a matching
+ * patternIdentity stamp". A vintage is captured by running the pattern's own
+ * TESTS, and the test harness roots its graph with `runtime.run`, so the stamp
+ * at the root belongs to the TEST pattern rather than to the pattern the
+ * fixture is named for — an identity check would reject every fixture the
+ * capture produces.
+ */
 export async function vintageRootHasState(
   vintage: VintageRuntime,
   rootKey: string = DEFAULT_VINTAGE_ROOT_KEY,
