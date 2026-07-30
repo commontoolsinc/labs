@@ -70,7 +70,7 @@ open-ended one it blossoms.
 
 [How it works](./how.md) is the code: what the compiler emits for an
 ordinary pattern, where the runtime checks the result, and what the
-exits are. [The full argument](./plans/inverting-the-physics-of-trust.md)
+exits are. [The full argument](./inverting-the-physics-of-trust.md)
 is the physics and the hardware.
 
 Most of what is here is early, and all of it is readable. What runs

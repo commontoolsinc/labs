@@ -18,7 +18,7 @@ This document is the code: a real pattern, what the compiler emits for
 it, and where the runtime checks the result. Every path below is in this
 repository; snippets are reproduced from a real file or a real command's
 output, reflowed to fit. [Why](./why.md) is the same argument in prose;
-[the overview](./plans/inverting-the-physics-of-trust.md) is the long
+[the overview](./inverting-the-physics-of-trust.md) is the long
 form, with the hardware.
 
 <!-- check-docs: excerpts -->
@@ -206,7 +206,7 @@ Three consequences:
 So a pattern a model wrote thirty seconds ago is not a different risk
 class from one a human wrote last year: the same graph gets checked.
 The argument for what that unlocks is
-[the overview](./plans/inverting-the-physics-of-trust.md).
+[the overview](./inverting-the-physics-of-trust.md).
 
 Transformer: `packages/ts-transformers/src/` — `closures/`, `lift/`,
 `policy/`, `cf-pipeline.ts`. `docs/tutorial/07-compilation.md` walks the
@@ -481,4 +481,4 @@ Attestation is specified as a draft in
 hardware pipeline lives outside this repository.
 
 The argument for what a substrate with these properties is for is in
-[the overview](./plans/inverting-the-physics-of-trust.md).
+[the overview](./inverting-the-physics-of-trust.md).
