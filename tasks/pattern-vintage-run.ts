@@ -10,6 +10,7 @@
  * happening.
  */
 
+import { exists } from "@std/fs";
 import { FileSystemProgramResolver } from "@commonfabric/js-compiler";
 import type { Identity } from "@commonfabric/identity";
 import { runTestPattern } from "../packages/cli/lib/test-runner.ts";
@@ -263,8 +264,15 @@ export async function replayVintage(
       let pattern;
       try {
         pattern = await runtimeVintage.runtime.patternManager
+          // Compiled in the space the ROOT lives in, which is what production
+          // does (`pattern-updater.ts` compiles with the piece's space). The
+          // space selects what a `cf:` fabric import resolves against and where
+          // the compiled closure is persisted, so compiling a cross-space root's
+          // candidate in the primary space could produce a different artifact
+          // than the one that root would actually load — a wrong answer in
+          // either direction, not just a wrong place.
           .compilePattern(program as never, {
-            space: runtimeVintage.space as never,
+            space: entry.space as never,
           });
       } catch (error) {
         report.failures.push({
@@ -296,12 +304,17 @@ export async function replayVintage(
             [],
             resultSchema as never,
           ),
-        // The RECORDED symbol, not the module's entry export. A module
-        // contributes several instantiable patterns (its default plus each
-        // transformer hoist), and the manifest already says which one this cell
-        // holds — applying the entry pattern instead would validate a different
-        // artifact than the one stored here.
-        entry.symbol,
+        {
+          // The RECORDED symbol, not the module's entry export. A module
+          // contributes several instantiable patterns (its default plus each
+          // transformer hoist), and the manifest already says which one this
+          // cell holds — applying the entry pattern instead would validate a
+          // different artifact than the one stored here.
+          symbol: entry.symbol,
+          // ...and the recorded space, for the compile inside, for the same
+          // reason as the `compilePattern` above.
+          space: entry.space,
+        },
       );
       if (outcome.error !== undefined) {
         report.failures.push({
@@ -498,27 +511,29 @@ export async function captureVintage(
     const outDir = `${roots.vintagesRoot}/${patternKey}/${PINNED}`;
     await Deno.mkdir(outDir, { recursive: true });
     const path = `${outDir}/${vintageFileName(stampFor(now), ref.identity)}`;
-    // The snapshot carries every space that has a store on disk, so a recorded
-    // space missing from it is one nothing durable was ever written to — a
-    // cross-space commit that did not land, say. The replay fails closed on that
-    // root, but it would do so on whoever's PR next ran the gate; refusing here
-    // blames the capture, the same discipline `unaddressable` above follows.
-    const carried = new Set(await vintage.snapshot(path));
-    const dropped = [
-      ...new Set(
-        entries.filter((e) => !carried.has(e.space)).map((e) => e.space),
-      ),
-    ];
-    if (dropped.length > 0) {
+    // Never write over an existing fixture. `captureMissing` already skips a
+    // covered key, so reaching this with the file present means something else
+    // did — and the cleanup below removes what this capture wrote, which must
+    // never be somebody else's pinned state. A fixture is deleted deliberately
+    // and visibly in a diff, never by an error path.
+    if (await exists(path)) {
+      throw new Error(
+        `cannot capture ${patternKey}: ${path} already exists, and a capture ` +
+          `never overwrites a pinned vintage — delete it deliberately first`,
+      );
+    }
+    try {
+      await vintage.snapshot(path);
+    } catch (error) {
+      // A fixture is written in pieces — the primary file, then one companion
+      // store per other space — so a failure part way through leaves a fixture
+      // that is missing spaces. That is worse than none at all: `--update` only
+      // ever ADDS, so it would skip the key as already covered and the partial
+      // would sit there being replayed. Publishing is therefore all-or-nothing.
       await Deno.remove(path).catch(() => {});
       await Deno.remove(vintageCompanionDir(path), { recursive: true })
         .catch(() => {});
-      throw new Error(
-        `cannot capture ${patternKey}: the run recorded roots in ${
-          dropped.join(", ")
-        }, which wrote no durable store, so the fixture would record roots ` +
-          `whose state it does not hold`,
-      );
+      throw error;
     }
     return path;
   } finally {

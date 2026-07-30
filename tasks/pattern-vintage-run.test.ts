@@ -10,6 +10,7 @@ import {
 } from "../packages/piece/test/state-continuity-harness.ts";
 import {
   captureMissing,
+  captureVintage,
   type GateRoots,
   isUpgradeTarget,
   replayAll,
@@ -712,11 +713,15 @@ describe("the vintage gate, end to end", () => {
   });
 
   describe("a child instantiated in ANOTHER space", () => {
+    // One stamp for the whole block, so a case that captures twice lands on the
+    // SAME fixture path — which is how the overwrite and partial-write cases
+    // reach the paths they are about.
+    const STAMP = new Date("2026-07-29T12:00:00.000Z");
+
     const writeCross = (source: string) =>
       Deno.writeTextFile(`${dir}/patterns/${CROSS_KEY}`, source);
 
-    const captureCross = () =>
-      captureMissing(roots, [CROSS_KEY], new Date("2026-07-29T12:00:00.000Z"));
+    const captureCross = () => captureMissing(roots, [CROSS_KEY], STAMP);
 
     beforeEach(async () => {
       await writeCross(crossSource());
@@ -805,6 +810,46 @@ describe("the vintage gate, end to end", () => {
       expect(targets).toBeGreaterThan(1);
       expect(changed).toBeGreaterThan(1);
       expect(updated).toBe(changed);
+    });
+
+    it("leaves NOTHING behind when a companion store cannot be written", async () => {
+      // A fixture is written in pieces: the primary file, then one companion per
+      // other space. A failure part way through is worse than no fixture at all
+      // — `--update` only ever ADDS, so it would skip the key as already covered
+      // and the partial would sit there being replayed forever.
+      //
+      // Forced through the layout rather than by stubbing: a stale companion
+      // store at the destination makes `VACUUM INTO` refuse (its output file
+      // must not exist), which is also the real hazard of a half-deleted
+      // fixture.
+      const first = await captureVintage(roots, CROSS_KEY, STAMP);
+      await Deno.remove(first);
+
+      await expect(captureVintage(roots, CROSS_KEY, STAMP)).rejects.toThrow();
+
+      expect(await collectVintages(roots.vintagesRoot)).toEqual([]);
+      // The companion directory goes too. Leaving it would strand the next
+      // capture on the same failure, with nothing on disk to explain why.
+      await expect(Deno.stat(vintageCompanionDir(first))).rejects.toThrow(
+        Deno.errors.NotFound,
+      );
+    });
+
+    it("refuses to write over a pinned vintage, rather than replacing it", async () => {
+      // `--update` can only ADD: a command that could replace a fixture could
+      // replace the very fixture that would have caught a break. The cleanup
+      // above is why this is enforced HERE and not only in `captureMissing` —
+      // a capture that wrote over someone else's state and then failed would
+      // delete it on the way out.
+      const first = await captureVintage(roots, CROSS_KEY, STAMP);
+      const before = await Deno.stat(first);
+
+      await expect(captureVintage(roots, CROSS_KEY, STAMP)).rejects.toThrow(
+        "never overwrites a pinned vintage",
+      );
+
+      expect((await Deno.stat(first)).mtime).toEqual(before.mtime);
+      expect(await collectVintages(roots.vintagesRoot)).toHaveLength(1);
     });
 
     it("FAILS a fixture that dropped a recorded space, rather than reading it clean", async () => {

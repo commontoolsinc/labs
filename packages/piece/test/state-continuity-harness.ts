@@ -133,10 +133,14 @@ export interface VintageRuntime {
   restoredSpaces: readonly string[];
   storeDir: string;
   /**
-   * Snapshot EVERY space this runtime wrote to `destPath` and its companion
-   * directory. Crash-consistent, runs no migrations. Returns the spaces written.
+   * Snapshot EVERY space this runtime wrote — the primary to `destPath`, the
+   * rest into its companion directory. Crash-consistent, runs no migrations.
+   *
+   * Not atomic: it writes the primary first, then one companion at a time, so a
+   * caller that publishes into a shared tree has to clean up after a partial
+   * write itself (`captureVintage` does).
    */
-  snapshot(destPath: string): Promise<string[]>;
+  snapshot(destPath: string): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -261,25 +265,18 @@ export async function openFileBackedRuntime(
       // and the copy has to be a statement about what is on disk. A space with
       // no store file wrote nothing durable, so there is nothing to carry and
       // nothing a replay could validate there.
-      const written: string[] = [space];
       const companionDir = vintageCompanionDir(destPath);
       for (const info of listSpaceStores(storeUrl)) {
         if (info.space === space) continue;
-        const source = spaceStorePath(storeUrl, info.space);
-        if (source === null) {
-          throw new Error(
-            `space store for ${info.space} vanished mid-snapshot — the fixture ` +
-              `would record roots whose state it does not hold`,
-          );
-        }
         await Deno.mkdir(companionDir, { recursive: true });
+        // `listSpaceStores` just stat'd this file, so re-resolving it cannot
+        // legitimately come back null; `!` rather than a branch nothing can
+        // reach. `snapshotSpaceStore` throws on a path that is not there.
         snapshotSpaceStore(
-          source,
+          spaceStorePath(storeUrl, info.space)!,
           `${companionDir}/${companionFileName(info.space)}`,
         );
-        written.push(info.space);
       }
-      return written;
     },
     async dispose() {
       await runtime.dispose();
@@ -665,13 +662,22 @@ export async function materializeOver(
  * receives the compiled result schema, because a root has to be read under the
  * schema of the pattern being applied to it.
  *
- * `symbol` names WHICH artifact in the module to apply. A module contributes
- * more than one instantiable pattern — its default export, plus every
- * transformer hoist (`__cfPattern_N`, the body of a `map`/`filter`/`flatMap`) —
- * and a stored root records the one it was materialized from. Defaulting to the
- * entry export would apply the module's ROOT pattern to a nested pattern's
- * cell, which can refuse a valid migration or, worse, accept an invalid one
- * having checked the wrong artifact.
+ * `options.symbol` names WHICH artifact in the module to apply. A module
+ * contributes more than one instantiable pattern — its default export, plus
+ * every transformer hoist (`__cfPattern_N`, the body of a `map`/`filter`/
+ * `flatMap`) — and a stored root records the one it was materialized from.
+ * Defaulting to the entry export would apply the module's ROOT pattern to a
+ * nested pattern's cell, which can refuse a valid migration or, worse, accept
+ * an invalid one having checked the wrong artifact.
+ *
+ * `options.space` is the space to COMPILE in, which production takes from the
+ * root being updated (`pattern-updater.ts` compiles with the piece's space).
+ * It is not cosmetic: it selects the space a `cf:` fabric import resolves
+ * against and the space the compiled/source closure is persisted into
+ * (`compileViaCellCache`), so compiling a cross-space root's candidate in the
+ * fixture's primary space could resolve a different closure than the one that
+ * root actually loads. Defaults to the primary space, which is where a
+ * single-space fixture's roots live.
  */
 export async function materializeOnCell(
   vintage: VintageRuntime,
@@ -680,11 +686,12 @@ export async function materializeOnCell(
     vintage: VintageRuntime,
     resultSchema: unknown,
   ) => Cell<Record<string, unknown>>,
-  symbol?: string,
+  options: { symbol?: string; space?: string } = {},
 ): Promise<MaterializeOutcome> {
   const { runtime } = vintage;
+  const { symbol, space = vintage.space } = options;
   const entryPattern = await runtime.patternManager.compilePattern(program, {
-    space: vintage.space as never,
+    space: space as never,
   });
   const entryRef = runtime.patternManager.getArtifactEntryRef(entryPattern);
   if (entryRef === undefined) {

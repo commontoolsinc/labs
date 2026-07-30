@@ -334,6 +334,38 @@ export function reportFailures(failures: readonly ReplayFailure[]): string {
   ].join("\n");
 }
 
+/**
+ * What the gate prints when it PASSES — built here and tested, for the same
+ * reason the failure reports are: it is the whole of what a green run tells
+ * whoever reads the log, and a claim assembled inline is one nothing checks.
+ *
+ * "all mappable" is stated unconditionally and that is safe: `replayVintage`
+ * reports every unaddressable root as a FAILURE and this line is only reached
+ * once `isClean` has found none. Saying it positively rather than printing a
+ * caveat beside a pass is the point — a green verdict with a footnote about
+ * skipped roots is how narrowed coverage reads as success.
+ *
+ * `targets` sits beside `candidates` because the two differ, and the gap is the
+ * honest measure of what was examined: a recorded instantiation is only an
+ * upgrade target if today's source can be applied to it (a test pattern and a
+ * keyless session pointer are neither). Stating only `candidates` would
+ * overstate what a green run bought.
+ */
+export function reportReplaySummary(
+  counts: {
+    replayed: number;
+    candidates: number;
+    targets: number;
+    changed: number;
+    updated: number;
+  },
+): string {
+  return `Replayed ${counts.replayed} vintage(s): ${counts.candidates} ` +
+    `recorded instantiation(s), all mappable to a file; ${counts.targets} ` +
+    `upgrade target(s), ${counts.changed} changed since capture, ` +
+    `${counts.updated} updated cleanly.`;
+}
+
 /** What the gate prints when it found no fixture to replay at all. */
 export function reportNothingReplayed(): string {
   return [

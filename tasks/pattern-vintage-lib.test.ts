@@ -13,6 +13,7 @@ import {
   reportFailures,
   reportNothingReplayed,
   reportNoVerdict,
+  reportReplaySummary,
   reportUncovered,
   reportUnmappedUrls,
   requiredPatternKeys,
@@ -313,6 +314,25 @@ describe("reporting", () => {
     expect(isClean([failure], [], 2, 5)).toBe(false);
     expect(isClean([], ["system/home.tsx"], 2, 5)).toBe(false);
     expect(isClean([failure], ["system/home.tsx"], 2, 5)).toBe(false);
+  });
+
+  it("states what a PASS actually covered, targets included", () => {
+    // The success line is the whole of what a green run tells its reader, and
+    // `targets` is the number that keeps it honest: 12 recorded instantiations
+    // of which only 5 could be applied is very different coverage from 12 of 12.
+    const summary = reportReplaySummary({
+      replayed: 2,
+      candidates: 12,
+      targets: 5,
+      changed: 3,
+      updated: 3,
+    });
+
+    expect(summary).toBe(
+      "Replayed 2 vintage(s): 12 recorded instantiation(s), all mappable to " +
+        "a file; 5 upgrade target(s), 3 changed since capture, 3 updated " +
+        "cleanly.",
+    );
   });
 
   it("FAILS a run that replayed nothing, however clean it looks", () => {
