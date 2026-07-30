@@ -58,9 +58,10 @@ headers, and prompts cannot leave the pinned origins.
   `include: ["reasoning.encrypted_content"]`, `tool_choice: "auto"`, and
   `parallel_tool_calls: true`; text verbosity is `low` and function schemas are
   passed through unchanged with `strict: null`
-- Optional experiment controls pass `reasoning.effort` and
-  `prompt_cache_options`. Explicit caching adds a breakpoint to the first
-  cacheable user content block; callers must select a supporting GPT-5.6 model.
+- Optional reasoning experiments pass `reasoning.effort`. The ChatGPT/Codex
+  backend rejects the API `prompt_cache_options` field, so this provider uses
+  implicit prompt caching with the stable affinity key; cache-mode controls and
+  explicit breakpoints are available only through the compatible API gateway.
 - Tool continuation retains both the public call id and provider function-item
   id, so the corresponding `function_call_output` remains paired after resume.
 - The first transport is SSE. WebSockets, transparent retries, endpoint probing,

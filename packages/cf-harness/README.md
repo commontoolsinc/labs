@@ -82,7 +82,7 @@ What works today:
   detail; estimates use the public OpenAI token schedule and are kept distinct
   from provider-reported cost
 - stable prompt-cache affinity across an interactive session, plus opt-in
-  reasoning effort and GPT-5.6 implicit/explicit cache-mode controls
+  reasoning effort and GPT-5.6 gateway implicit/explicit cache-mode controls
 - transcript-based resumability
 - package-local operator CLI
 - explicit Agent Skills preload via `--skills-root` and repeatable `--skill`
@@ -215,11 +215,15 @@ when present, came from the provider; `estimatedCostUsd` is an estimate based on
 the public OpenAI GPT-5.6 price schedule and is not an invoice or a subscription
 quota conversion.
 
-The default cache mode remains the provider's implicit mode. Explicit mode pins
-a breakpoint to the first user-message prefix, which is stable while the harness
-appends assistant and tool messages. Use identical prompts and tool surfaces
-when comparing modes, since exact prefix identity is required for a cache hit.
-OpenAI documents the current cache fields and semantics in its
+The API gateway's default cache mode remains the provider's implicit mode.
+Explicit mode pins a breakpoint to the first user-message prefix, which is
+stable while the harness appends assistant and tool messages. Use identical
+prompts and tool surfaces when comparing modes, since exact prefix identity is
+required for a cache hit. The ChatGPT/Codex subscription backend rejects the API
+`prompt_cache_options` field, so `--prompt-cache-mode` is not supported with
+`--model-provider openai-codex`; that provider continues to use implicit caching
+with stable affinity and reports the resulting cache usage. OpenAI documents the
+current cache fields and semantics in its
 [prompt caching guide](https://developers.openai.com/api/docs/guides/prompt-caching).
 
 ChatGPT/Codex subscription mode is a separate, explicit provider. It does not

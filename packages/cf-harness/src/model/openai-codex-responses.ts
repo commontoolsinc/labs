@@ -5,8 +5,6 @@ import {
 } from "../contracts/run-manifest.ts";
 import { defaultHarnessFetch } from "../contracts/http-fetch.ts";
 import {
-  addFirstUserPromptCacheBreakpoint,
-  assertPromptCacheModeSupported,
   normalizeTerminalResponse,
   providerRunAffinityKey,
   toResponsesInput,
@@ -294,7 +292,11 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
   async complete(
     request: HarnessModelTurnRequest,
   ): Promise<HarnessModelTurnResult> {
-    assertPromptCacheModeSupported(request.model, request.promptCacheMode);
+    if (request.promptCacheMode !== undefined) {
+      throw new Error(
+        "prompt cache mode controls are not supported by openai-codex; omit promptCacheMode to use the subscription backend's implicit prompt cache",
+      );
+    }
     if (request.nativeModelToolIds.length > 0) {
       throw new Error(
         "openai-codex does not support provider-native tools in this release",
@@ -321,21 +323,11 @@ export class OpenAICodexResponsesClient implements HarnessModelClient {
       store: false,
       stream: true,
       instructions: converted.instructions,
-      input: request.promptCacheMode === "explicit"
-        ? addFirstUserPromptCacheBreakpoint(converted.input)
-        : converted.input,
+      input: converted.input,
       ...(responseTools.length > 0 ? { tools: responseTools } : {}),
       text: { verbosity: "low" },
       include: ["reasoning.encrypted_content"],
       prompt_cache_key: affinityKey,
-      ...(request.promptCacheMode !== undefined
-        ? {
-          prompt_cache_options: {
-            mode: request.promptCacheMode,
-            ttl: "30m",
-          },
-        }
-        : {}),
       ...(request.reasoningEffort !== undefined
         ? { reasoning: { effort: request.reasoningEffort } }
         : {}),

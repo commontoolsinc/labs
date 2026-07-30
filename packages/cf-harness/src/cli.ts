@@ -398,7 +398,7 @@ Options:
   --model <name>                Model name (default: ${DEFAULT_MODEL})
   --model-provider <provider>   openai-compatible-gateway | openai-codex
   --reasoning-effort <effort>  Provider reasoning effort (for example low, medium, high)
-  --prompt-cache-mode <mode>   implicit | explicit (GPT-5.6 Responses API)
+  --prompt-cache-mode <mode>   implicit | explicit (GPT-5.6 API gateway only)
   --gateway-base-url <url>      OpenAI-compatible gateway URL
   --gateway-auth-mode <mode>    bearer | none (default: bearer)
   --artifact-root <path>        Host-side artifact directory

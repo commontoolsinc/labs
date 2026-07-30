@@ -125,7 +125,7 @@ Deno.test("Codex Responses client sends the pinned owner-authenticated request",
   assertEquals(body.prompt_cache_key, "run-123");
 });
 
-Deno.test("Codex Responses supports stable cache and reasoning controls", async () => {
+Deno.test("Codex Responses supports stable affinity and reasoning controls", async () => {
   let body: Record<string, unknown> | undefined;
   let headers: Headers | undefined;
   const client = new OpenAICodexResponsesClient({
@@ -153,20 +153,40 @@ Deno.test("Codex Responses supports stable cache and reasoning controls", async 
     nativeModelToolIds: [],
     runId: "ephemeral-run",
     cacheAffinityKey: "stable-session",
-    promptCacheMode: "explicit",
     reasoningEffort: "low",
   });
 
   assertEquals(headers?.get("session-id"), "stable-session");
   assertEquals(body?.prompt_cache_key, "stable-session");
-  assertEquals(body?.prompt_cache_options, {
-    mode: "explicit",
-    ttl: "30m",
-  });
   assertEquals(body?.reasoning, { effort: "low" });
-  const input = body?.input as Array<Record<string, unknown>>;
-  const content = input[0].content as Array<Record<string, unknown>>;
-  assertEquals(content[0].prompt_cache_breakpoint, { mode: "explicit" });
+  assertEquals(body?.prompt_cache_options, undefined);
+});
+
+Deno.test("Codex Responses rejects API prompt cache mode controls", async () => {
+  let resolvedCredential = false;
+  const client = new OpenAICodexResponsesClient({
+    credentialResolver: {
+      resolve: () => {
+        resolvedCredential = true;
+        return Promise.resolve(credential);
+      },
+    },
+  });
+
+  await assertRejects(
+    () =>
+      client.complete({
+        model: "gpt-5.6-sol",
+        transcript: [{ role: "user", content: "hi" }],
+        tools: [],
+        nativeModelToolIds: [],
+        runId: "run-123",
+        promptCacheMode: "explicit",
+      }),
+    Error,
+    "prompt cache mode controls are not supported by openai-codex",
+  );
+  assertEquals(resolvedCredential, false);
 });
 
 Deno.test("Codex Responses client bounds stable run affinity identifiers", async () => {
