@@ -9,7 +9,10 @@ as work proceeds: check off exit criteria, record scope changes.
 without) and D6 (the default-relaxation helper moves next to the runner's
 validator so C5 shares it instead of re-implementing it), and WS-E records
 that pre-dispatch refusals must join the `VerbError` code taxonomy when codes
-reach the invocation surface, so agents branch on one signal.
+reach the invocation surface, so agents branch on one signal. Later the same
+day, D5's open question was measured (see its bullet): absent events bypass
+default materialization entirely, narrowing D5's remaining choice to
+refuse-on-unrelaxed-`required` versus normalize-absent-to-`{}`.
 
 **Amended 2026-07-28**, context only — no scope or decision changed: Risks
 names #5059 (`cf piece setsrc --check`) as the candidate preflight for the
@@ -417,9 +420,19 @@ joins WS-C. `packages/runner` (`cell.ts` send path), `packages/cli`.
   silent. Characterize first: a CLI unit test pins that an absent payload
   currently dispatches against a required-fields schema, then flips to
   assert refusal — the same order the gate's runner characterization took.
-  One question settles by experiment, not assumption: when `required` names
-  only defaulted properties and nothing is sent, what does `$event` read
-  back as — the answer belongs in a code comment. Plumbing reuses
+  The question this bullet once left to experiment is now measured
+  (2026-07-30, scratch runner test on the gate's branch, recorded on
+  #5147): defaults materialize only for a **present** object payload —
+  `SchemaObjectTraverser.traverseObjectWithSchema` fills each missing
+  defaulted property before checking `required` — while a wholly absent
+  event bypasses the object branch entirely, so the handler sees
+  `undefined` and the receipt still spends the id even when every required
+  property carries a default. Relaxation is therefore honest for present
+  payloads and the wrong lens for the absence decision: an all-defaulted
+  `required` list does not make absence deliverable. D5 settles, at the
+  top of its PR, whether that corner refuses on **unrelaxed** `required`
+  or normalizes an absent payload to `{}` so defaults engage; the measured
+  behavior belongs in the helper's doc comment either way. Plumbing reuses
   `VerbInputValidationError` with a detail that says no payload was supplied
   and names the missing requirement ("send a payload" must read differently
   from "fix your payload"); both entry points (piece call and mounted exec)
