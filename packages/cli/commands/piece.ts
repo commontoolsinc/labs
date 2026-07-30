@@ -254,6 +254,24 @@ export function exitWithDataError(
   return exit(1);
 }
 
+/**
+ * Turn a failed `piece call` into its stderr report, or re-throw.
+ *
+ * A named function rather than an inline `.catch` in the command action: the
+ * action body only ever runs under Cliffy, so anything written there is
+ * unreachable from a unit test. The `deps` seam is `exitWithDataError`'s,
+ * threaded so a test can observe the report without a real process exit.
+ */
+export function reportVerbInputErrorOrRethrow(
+  error: unknown,
+  piece: string | undefined,
+  deps?: Parameters<typeof exitWithDataError>[1],
+): never {
+  const report = verbInputErrorReport(error, { piece: piece ?? "<piece>" });
+  if (report) exitWithDataError(report, deps);
+  throw error;
+}
+
 export function pieceCallRawArgs(
   tail: string[],
   literalArgs: string[],
@@ -1228,13 +1246,9 @@ after --. Handlers interpret piped input when no input argument is present.`,
             (next) => phase = next,
           ),
         },
-      ).catch((error) => {
-        const report = verbInputErrorReport(error, {
-          piece: pieceConfig.piece ?? "<piece>",
-        });
-        if (report) exitWithDataError(report);
-        throw error;
-      });
+      ).catch((error) =>
+        reportVerbInputErrorOrRethrow(error, pieceConfig.piece)
+      );
       if (result.helpText) {
         render(result.helpText);
         return;

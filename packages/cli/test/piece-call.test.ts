@@ -19,6 +19,7 @@ import {
   pieceCallRawArgs,
   pieceGetDataErrorReport,
   pieceLinkDataErrorReport,
+  reportVerbInputErrorOrRethrow,
   resolveInvocationId,
   verbInputErrorReport,
 } from "../commands/piece.ts";
@@ -1890,5 +1891,74 @@ describe("verbInputSchemaError", () => {
     (cyclic.properties as Record<string, unknown>).child = cyclic;
     expect(verbInputSchemaError({ name: "a" }, cyclic as JSONSchema))
       .toBeUndefined();
+  });
+});
+
+describe("reportVerbInputErrorOrRethrow", () => {
+  const sink = () => {
+    const printed: string[] = [];
+    const exited: number[] = [];
+    return {
+      printed,
+      exited,
+      deps: {
+        printError: (m: string) => printed.push(`error:${m}`),
+        printHint: (m: string) => printed.push(`hint:${m}`),
+        exit: ((code: number) => {
+          exited.push(code);
+          throw new Error("exit-sentinel");
+        }) as (code: number) => never,
+      },
+    };
+  };
+
+  it("reports a rejected payload and exits 1", () => {
+    const { printed, exited, deps } = sink();
+
+    expect(() =>
+      reportVerbInputErrorOrRethrow(
+        new VerbInputValidationError(
+          "recordMessage",
+          "missing required property message",
+        ),
+        "fid1:piece-123",
+        deps,
+      )
+    ).toThrow("exit-sentinel");
+
+    expect(printed[0]).toMatch(/Invalid input for "recordMessage"/);
+    expect(printed[1]).toMatch(/piece verbs/);
+    expect(printed[1]).toMatch(/fid1:piece-123/);
+    expect(exited).toEqual([1]);
+  });
+
+  it("names the piece as <piece> when the config carries none", () => {
+    const { printed, deps } = sink();
+
+    expect(() =>
+      reportVerbInputErrorOrRethrow(
+        new VerbInputValidationError("recordMessage", "bad"),
+        undefined,
+        deps,
+      )
+    ).toThrow("exit-sentinel");
+
+    expect(printed[1]).toMatch(/<piece>/);
+  });
+
+  // Anything that is not an input rejection has to keep travelling: a network
+  // failure reported as a payload problem would send an agent to fix a payload
+  // that was fine.
+  it("re-throws an unrelated failure untouched", () => {
+    const { printed, exited, deps } = sink();
+    const original = new Error("network unreachable");
+
+    expect(() =>
+      reportVerbInputErrorOrRethrow(original, "fid1:piece-123", deps)
+    )
+      .toThrow("network unreachable");
+
+    expect(printed).toEqual([]);
+    expect(exited).toEqual([]);
   });
 });
