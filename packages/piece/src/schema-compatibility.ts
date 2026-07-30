@@ -118,9 +118,19 @@ const fabricAwareEqual = (left: unknown, right: unknown): boolean => {
  * contracts of the currently running pattern.
  *
  * Arguments are contravariant and results are covariant. Open argument objects
- * may still gain optional/defaulted named fields as the piece-evolution policy;
- * the runner validates the piece's merged durable arguments against the new
- * schema transactionally before committing such an update.
+ * may still gain optional/defaulted named fields as the piece-evolution policy.
+ * What keeps that allowance sound is a second check at update time rather than
+ * anything provable here: pattern setup re-stages the piece's stored argument
+ * against the incoming schema and validates it inside the setup transaction, so
+ * an update whose durable argument the new schema cannot read is refused
+ * instead of landing over unreadable state (`Runner.applySetupState` →
+ * `validateArgument`; `packages/runner/test/pattern-update-argument-validation.test.ts`).
+ *
+ * That check defers exactly one case, by design: a slot whose stored value is a
+ * link that cannot be dereferenced in the transaction validates as opaque,
+ * because "the target has not synced" is indistinguishable from "the value is
+ * invalid" at that moment (CT-1917). A plain value of the wrong type is
+ * refused.
  */
 export function assertPatternSchemasBackwardCompatible(
   previous: Pattern,

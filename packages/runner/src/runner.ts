@@ -828,6 +828,41 @@ function overlayUnresolvedLinkPlaceholders(
   return materialized;
 }
 
+/**
+ * Whether the setup state stored on `resultCell` was staged by a DIFFERENT
+ * pattern version than `entryRef`.
+ *
+ * `patternIdentity` alone cannot answer this, because an update can move the
+ * pointer before any setup runs. `PiecesController`'s roll-forward materialize
+ * commits the candidate's identity and then calls `runSynced`, and
+ * `PatternUpdater`'s instantiated mode moves the pointer with no setup at all —
+ * leaving a root that boots through the cold-start setup repair. Either way the
+ * pointer already names the pattern being set up, so comparing pointers reports
+ * "same pattern" for what is in fact an update. (A caller that hands setup a
+ * pattern the pointer does not name yet, such as `PatternUpdater`'s default-root
+ * apply or `cf piece setsrc`, is already recognized as a change.)
+ *
+ * The completion marker is the signal that survives that: `applySetupState`
+ * stamps `patternSetupIdentity` only once it has staged this identity's schema,
+ * arguments, internal cells and result projection, so a marker naming another
+ * version means the stored argument was staged against another version's schema
+ * and must be re-staged — and re-validated — against this one.
+ *
+ * An ABSENT marker reads as "same", deliberately. It cannot distinguish a
+ * pending update from a root written before the marker existed, and re-staging
+ * every such root would validate — and rewrite defaults over — arguments no
+ * update is touching, turning a legacy doc into a piece that will not start.
+ */
+function stagedByOtherVersion(
+  resultCell: Cell<unknown>,
+  entryRef: { identity: string; symbol: string } | undefined,
+): boolean {
+  if (entryRef === undefined) return false;
+  const stagedRef = getPatternSetupIdentityRef(resultCell);
+  return stagedRef !== undefined &&
+    patternIdentityKey(stagedRef) !== patternIdentityKey(entryRef);
+}
+
 function dedupeNormalizedLinks(
   links: readonly NormalizedFullLink[],
 ): NormalizedFullLink[] {
@@ -1397,6 +1432,12 @@ export class Runner {
 
     let nextArgument: T | undefined = argument;
     let argumentUpdated = false;
+    // Re-point the stored argument at this pattern's schema and validate it
+    // when the caller changed the pattern, or when the stored setup state was
+    // staged by another version — the case a pointer comparison cannot see, for
+    // the reasons in `stagedByOtherVersion`.
+    const restageStoredArgument = !sameStoredSetup ||
+      stagedByOtherVersion(resultCell, entryRef);
     // The argument meta field of the result cell should be a link to the
     // argument cell. If it doesn't exist, we need to apply the defaults
     // I don't include the schema here, since I don't want cfc enforcement yet
@@ -1426,7 +1467,7 @@ export class Runner {
       if (argumentLink === undefined) {
         throw new Error("Invalid argument link in updateArgument");
       }
-    } else if (!sameStoredSetup) {
+    } else if (restageStoredArgument) {
       const previousArgumentCell = this.runtime.getCellFromLink(
         argumentLink,
         undefined,

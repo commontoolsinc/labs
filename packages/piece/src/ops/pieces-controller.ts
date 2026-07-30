@@ -628,11 +628,18 @@ export class PiecesController<T = unknown> {
       // covers docs ALREADY left in that state by an earlier session: their
       // identity compares current, so no further swap will ever fire.
       //
-      // run() (setup + start) is the sanctioned repair: with an unchanged
-      // pattern pointer the setup phase is idempotent — it only materializes
-      // missing internal cells and writes no argument (none supplied). Fail
-      // closed: if the repair cannot proceed or fails, surface the ORIGINAL
-      // start error; nothing is torn down or overwritten.
+      // run() (setup + start) is the sanctioned repair. With an unchanged
+      // pattern pointer the setup phase is near-idempotent: it materializes
+      // missing internal cells and supplies no argument. It is not a complete
+      // no-op on the doc this repair exists for, and deliberately so — a root
+      // whose identity moved without setup also carries a stale
+      // `patternSetupIdentity`, so setup re-points the stored argument at the
+      // pattern's argument schema and validates it (`stagedByOtherVersion` in
+      // the runner), which is the staging the skipped update never did. A
+      // stored argument the pinned pattern's schema cannot read surfaces here
+      // rather than at every later read. Fail closed: if the repair cannot
+      // proceed or fails, surface the ORIGINAL start error; nothing is torn
+      // down or overwritten.
       const runtime = this.#manager.runtime;
       const ref = getPatternIdentityRef(rootToStart);
       if (ref === undefined) throw startError;
