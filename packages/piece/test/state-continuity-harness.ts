@@ -51,6 +51,11 @@ import {
   Runtime,
 } from "@commonfabric/runner";
 import type { RuntimeProgram } from "@commonfabric/runner";
+// Fabric-aware detach + compare. A JSON round-trip is lossy on exactly the
+// values a durable doc may hold (FabricBytes and epoch wrappers collapse to
+// `{}`, a bigint throws) and its string comparison is key-order sensitive.
+import { snapshotQueryResult } from "../../runner/src/query-result-proxy.ts";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 // Relative into the runner's internals for the same reason as the test
 // utilities below: `getMetaLink` and the link shape it returns are how the
 // runtime itself reaches a root's argument document, and re-deriving that
@@ -426,7 +431,13 @@ export async function readVintageState(
   await typed.sync();
   const value = typed.get();
   if (value === undefined || value === null) return undefined;
-  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
+  // `snapshotQueryResult`, not a JSON round-trip. The live value is a
+  // query-result proxy that re-reads through the transaction, so it has to be
+  // detached — but detaching via JSON is lossy on exactly the values a durable
+  // doc may hold: `FabricBytes` and epoch wrappers collapse to `{}` (so a
+  // change to one reads as no change), and a `bigint` throws and takes the
+  // whole gate down.
+  return snapshotQueryResult(value) as Record<string, unknown>;
 }
 
 /**
@@ -442,6 +453,19 @@ export async function readVintageState(
  * source leaves every key byte-identical, INCLUDING `$UI`, and a UI-only source
  * change still produces no differing keys. So a difference here is signal, and
  * carving out `$UI`/`$NAME` up front would only hide some of it.
+ *
+ * Compared with `deepEqual`, not stringified. Serialization is the wrong
+ * instrument twice over: it is key-order sensitive, so two equivalent objects
+ * whose properties were emitted in a different order would report as stranded,
+ * and it cannot represent the Fabric values a durable doc may hold — bytes and
+ * epoch wrappers collapse to `{}`, a bigint throws.
+ *
+ * `deepEqual` rather than the data-model's `valueEqual`, which is the more
+ * obvious choice and does not work here: a schema-driven read leaves LINK
+ * SIGILS in place wherever the schema does not descend, and `valueEqual`
+ * refuses them outright ("Cannot compare value {\"/\":{\"link@1\":…}}"),
+ * taking the whole gate down. Both sides carry sigils in the same shape, so a
+ * structural comparison is both sufficient and the only one that survives them.
  */
 export function strandedKeys(
   before: Record<string, unknown>,
@@ -449,9 +473,7 @@ export function strandedKeys(
 ): string[] {
   const stranded: string[] = [];
   for (const key of Object.keys(before)) {
-    const was = JSON.stringify(before[key]);
-    const now = JSON.stringify(after?.[key]);
-    if (was !== now) stranded.push(key);
+    if (!deepEqual(before[key], after?.[key])) stranded.push(key);
   }
   return stranded;
 }

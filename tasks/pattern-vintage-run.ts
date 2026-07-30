@@ -220,6 +220,27 @@ export async function replayVintage(
       });
     }
 
+    // Every target's before-state, captured BEFORE the first materialize.
+    //
+    // Not an optimization — a correctness fix. A fixture holds a parent and its
+    // nested sub-patterns, and they share one runtime. Materializing the parent
+    // runs its reactive graph, which can write through to a nested root before
+    // that entry's own turn comes. A before-snapshot taken lazily inside the
+    // loop would then be the ALREADY-UPDATED state, and the nested target would
+    // compare it against itself and pass — a storage-key move in a sub-pattern
+    // silently uncaught, which is the exact class this comparison exists for.
+    const beforeByCell = new Map<
+      string,
+      Record<string, unknown> | undefined
+    >();
+    for (const entry of targets) {
+      if (beforeByCell.has(entry.cellId)) continue;
+      beforeByCell.set(
+        entry.cellId,
+        await readVintageState(runtimeVintage, entry.cellId),
+      );
+    }
+
     for (const entry of targets) {
       const source = `${roots.repoRoot}${entry.main}`;
       let program;
@@ -259,11 +280,7 @@ export async function replayVintage(
       if (today === entry.identity) continue;
       report.changed++;
 
-      // The state as the version that wrote it saw it, BEFORE anything is
-      // applied. Read under the root's own stored schema — a schema-less read
-      // does not materialize and would hand back an empty object, making every
-      // comparison below pass trivially.
-      const before = await readVintageState(runtimeVintage, entry.cellId);
+      const before = beforeByCell.get(entry.cellId);
 
       const outcome = await materializeOnCell(
         runtimeVintage,
@@ -297,7 +314,23 @@ export async function replayVintage(
       // a moved `.for()` key materializes perfectly and silently reads back
       // empty. Compare what the old version could see against what today's
       // source can.
-      if (before !== undefined) {
+      // A recorded target whose prior state cannot be read is a FAILURE, not a
+      // skip. The manifest says a pattern WAS materialized at this cell, so a
+      // root with no stored schema means the fixture does not hold what it
+      // claims — and skipping the comparison there would report "updated
+      // cleanly" for a target whose data was never examined. That is the
+      // silent-non-coverage shape this tier has hit repeatedly.
+      if (before === undefined) {
+        report.failures.push({
+          ...where,
+          detail: `recorded instantiation ${entry.identity}#${entry.symbol} ` +
+            `holds no readable prior state, so applying ${entry.main} over it ` +
+            `proved nothing — the fixture does not contain the root its ` +
+            `manifest records`,
+        });
+        continue;
+      }
+      {
         const stranded = strandedKeys(before, outcome.value);
         if (stranded.length > 0) {
           report.stranded += stranded.length;
