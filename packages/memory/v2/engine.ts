@@ -5232,6 +5232,7 @@ const applyCommitTransaction = (
   validateStoredSyncSchemaRefs(engine, branch, revisions, original);
 
   engine.statements.updateBranchHead.run({ branch, seq });
+  attachPostApplyDocuments(engine, branch, revisions, seq);
   materializeSnapshots(engine, branch, revisions);
 
   const changedSchedulerWrites = space
@@ -6211,6 +6212,27 @@ const selectCommitRevisions = (
   const rows = engine.statements.selectCommitRevisions.all({
     commit_seq: commitSeq,
   }) as RevisionRow[];
+  // Replayed accepts carry the same post-apply document a fresh accept does
+  // (CT-1926): recovered with a seq-pinned read, so a replay observed after
+  // LATER commits landed still reports the state as of THIS commit.
+  const postApply = new Map<string, EntityDocument | undefined>();
+  const postApplyDocument = (
+    row: RevisionRow,
+  ): EntityDocument | undefined => {
+    const key = revisionKey(row.branch, row.id, row.scope_key);
+    if (!postApply.has(key)) {
+      postApply.set(
+        key,
+        readStateForScopeKey(engine, {
+          id: row.id,
+          scopeKey: row.scope_key,
+          branch: row.branch,
+          seq: row.commit_seq,
+        })?.document ?? undefined,
+      );
+    }
+    return postApply.get(key);
+  };
   return rows.map((row) => {
     const base = {
       id: row.id,
@@ -6229,13 +6251,60 @@ const selectCommitRevisions = (
       } satisfies AppliedRevision;
     }
     if (row.op === "patch") {
+      const document = postApplyDocument(row);
       return {
         ...base,
         patches: decodeStoredPatchList(row.data),
+        ...(document !== undefined ? { document } : {}),
       } satisfies AppliedRevision;
     }
     return base as AppliedRevision;
   });
+};
+
+/**
+ * Populates `document` on every PATCH revision with the document's
+ * post-commit state (CT-1926). The client promotes its confirmed mirror
+ * from this value instead of extrapolating its own patch onto a possibly
+ * stale local base: the inline accept can outrun the batched fan-out
+ * carrying the foreign writes the patch was applied on top of, and a
+ * locally-extrapolated promotion then mints a (seq, value) pair the server
+ * never had — feeding dishonest staleness bases into later reads. `set`
+ * revisions already carry their payload; `delete` stays identity-only. The
+ * SAME post-commit state is attached to every patch revision of a doc in
+ * this commit (revision-order independent), and the field is additive: old
+ * clients ignore it, new clients fall back to local extrapolation when a
+ * pre-CT-1926 server omits it.
+ */
+const attachPostApplyDocuments = (
+  engine: Engine,
+  branch: BranchName,
+  revisions: AppliedRevision[],
+  seq: number,
+): void => {
+  const states = new Map<string, EntityDocument | undefined>();
+  for (const revision of revisions) {
+    if (revision.op !== "patch") {
+      continue;
+    }
+    const scopeKey = revision.scopeKey ?? DEFAULT_SCOPE_KEY;
+    const key = revisionKey(branch, revision.id, scopeKey);
+    if (!states.has(key)) {
+      states.set(
+        key,
+        readStateForScopeKey(engine, {
+          id: revision.id,
+          scopeKey,
+          branch,
+          seq,
+        })?.document ?? undefined,
+      );
+    }
+    const document = states.get(key);
+    if (document !== undefined) {
+      revision.document = document;
+    }
+  }
 };
 
 const materializeSnapshots = (
