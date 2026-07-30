@@ -10,6 +10,7 @@ import {
   DEFAULT_SUBAGENT_PROFILE,
   type HarnessSubagentProfile,
 } from "./subagent.ts";
+import type { HarnessModelUsage } from "../model/client.ts";
 
 export const HARNESS_CHAT_PROTOCOL_VERSION = 1 as const;
 export const HARNESS_CHAT_REQUEST_TYPE = "cf-harness.chat.request" as const;
@@ -338,12 +339,7 @@ export interface HarnessChatSubagentSummary {
   summary?: string;
 }
 
-export interface HarnessChatGatewayUsage {
-  inputTokens?: number;
-  outputTokens?: number;
-  totalTokens?: number;
-  costUsd?: number;
-}
+export type HarnessChatGatewayUsage = HarnessModelUsage;
 
 export type HarnessChatStructuredEvent =
   | {

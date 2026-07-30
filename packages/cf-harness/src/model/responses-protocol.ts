@@ -42,6 +42,17 @@ export const providerRunAffinityKey = (runId: string): string => {
   return `${runId.slice(0, prefixLength)}-${digest}`;
 };
 
+export const assertPromptCacheModeSupported = (
+  model: string,
+  mode: "implicit" | "explicit" | undefined,
+): void => {
+  if (mode !== undefined && !model.startsWith("gpt-5.6")) {
+    throw new Error(
+      `prompt cache mode ${mode} requires a GPT-5.6 model; received ${model}`,
+    );
+  }
+};
+
 /**
  * What to do when a stored continuation was produced by a different model.
  *
@@ -219,6 +230,44 @@ export const toResponsesTools = (
       : { ...tool.inputSchema },
     strict: null,
   }));
+
+/**
+ * Marks the first user-message prefix as the stable explicit cache boundary.
+ *
+ * The initial user message is immutable as the harness appends assistant and
+ * tool messages, so later model turns can reuse this prefix without creating a
+ * new cache write for every growing transcript.
+ */
+export const addFirstUserPromptCacheBreakpoint = (
+  input: readonly ResponsesInputItem[],
+  providerLabel: string,
+): ResponsesInputItem[] => {
+  const copied = [...input];
+  for (let itemIndex = 0; itemIndex < input.length; itemIndex += 1) {
+    const item = input[itemIndex];
+    if (item.role !== "user" || !Array.isArray(item.content)) continue;
+    const content = item.content;
+    for (let index = content.length - 1; index >= 0; index -= 1) {
+      const block = content[index];
+      if (typeof block !== "object" || block === null) continue;
+      if (
+        !("type" in block) ||
+        (block.type !== "input_text" && block.type !== "input_image" &&
+          block.type !== "input_file")
+      ) continue;
+      const copiedContent = [...content];
+      copiedContent[index] = {
+        ...block,
+        prompt_cache_breakpoint: { mode: "explicit" },
+      };
+      copied[itemIndex] = { ...item, content: copiedContent };
+      return copied;
+    }
+  }
+  throw new Error(
+    `${providerLabel} explicit prompt caching requires a cacheable user content block`,
+  );
+};
 
 export const normalizeTerminalResponse = (
   response: Record<string, unknown>,

@@ -107,7 +107,7 @@ import {
   type OpenAICodexCredentialResolverLike,
   OpenAICodexResponsesClient,
 } from "./model/openai-codex-responses.ts";
-import type { HarnessModelClient } from "./model/client.ts";
+import type { HarnessModelClient, HarnessModelUsage } from "./model/client.ts";
 
 const DEFAULT_MODEL = "gpt-5.6-terra";
 const DEFAULT_MAX_MODEL_TURNS = 8;
@@ -129,6 +129,8 @@ const CLI_STRING_FLAGS = [
   "resume-run",
   "model",
   "model-provider",
+  "reasoning-effort",
+  "prompt-cache-mode",
   "skills-root",
   "skill",
   "skill-script-execution-target",
@@ -194,6 +196,8 @@ export interface CfHarnessCliConfig {
   skillCatalogEnabled: boolean;
   model?: string;
   modelProvider?: HarnessModelProviderId;
+  reasoningEffort?: string;
+  promptCacheMode?: "implicit" | "explicit";
   gatewayConfigurationExplicit: boolean;
   harnessHome: string;
   gatewayBaseUrl: string;
@@ -253,6 +257,9 @@ export interface CfHarnessCliCapabilities {
     resumeRun: true;
     subscriptionAuth: true;
     modelDiscovery: true;
+    modelUsage: true;
+    promptCacheControls: true;
+    reasoningEffort: true;
   };
 }
 
@@ -390,6 +397,8 @@ Options:
   --no-skill-catalog            Disable automatic skill catalog disclosure
   --model <name>                Model name (default: ${DEFAULT_MODEL})
   --model-provider <provider>   openai-compatible-gateway | openai-codex
+  --reasoning-effort <effort>   Provider reasoning effort (for example low, medium, high)
+  --prompt-cache-mode <mode>    implicit | explicit (GPT-5.6 API gateway only)
   --gateway-base-url <url>      OpenAI-compatible gateway URL
   --gateway-auth-mode <mode>    bearer | none (default: bearer)
   --artifact-root <path>        Host-side artifact directory
@@ -423,6 +432,8 @@ Environment:
   CF_HARNESS_GATEWAY_AUTH_MODE  Default value for --gateway-auth-mode
   CF_HARNESS_MODEL              Default value for --model (ignored on --resume-run)
   CF_HARNESS_MODEL_PROVIDER     Default value for --model-provider
+  CF_HARNESS_REASONING_EFFORT   Default value for --reasoning-effort
+  CF_HARNESS_PROMPT_CACHE_MODE  Default value for --prompt-cache-mode
   CF_HARNESS_HOME               Local cf-harness credential/config directory
   CF_HARNESS_DOCKER_NETWORK_MODE none | bridge | host (default: bridge)
   CF_HARNESS_SANDBOX_IMAGE      Default value for --sandbox-image
@@ -513,6 +524,9 @@ export const createCfHarnessCliCapabilities = (): CfHarnessCliCapabilities => ({
     resumeRun: true,
     subscriptionAuth: true,
     modelDiscovery: true,
+    modelUsage: true,
+    promptCacheControls: true,
+    reasoningEffort: true,
   },
 });
 
@@ -1249,6 +1263,12 @@ export const parseCfHarnessCliArgs = async (
       ),
       CF_HARNESS_MODEL: Deno.env.get("CF_HARNESS_MODEL"),
       CF_HARNESS_MODEL_PROVIDER: Deno.env.get("CF_HARNESS_MODEL_PROVIDER"),
+      CF_HARNESS_REASONING_EFFORT: Deno.env.get(
+        "CF_HARNESS_REASONING_EFFORT",
+      ),
+      CF_HARNESS_PROMPT_CACHE_MODE: Deno.env.get(
+        "CF_HARNESS_PROMPT_CACHE_MODE",
+      ),
       CF_HARNESS_HOME: Deno.env.get("CF_HARNESS_HOME"),
       HOME: Deno.env.get("HOME"),
       CF_HARNESS_CFC_ENFORCEMENT_MODE: Deno.env.get(
@@ -1287,6 +1307,22 @@ export const parseCfHarnessCliArgs = async (
       "model provider must be one of openai-compatible-gateway, openai-codex",
     );
   }
+  const reasoningEffort = typeof args["reasoning-effort"] === "string"
+    ? nonEmptyEnvValue(args["reasoning-effort"])
+    : nonEmptyEnvValue(env.CF_HARNESS_REASONING_EFFORT);
+  if (
+    args["reasoning-effort"] !== undefined &&
+    reasoningEffort === undefined
+  ) {
+    throw new Error("--reasoning-effort requires a non-empty value");
+  }
+  const promptCacheMode = optionalStringValue(
+    typeof args["prompt-cache-mode"] === "string"
+      ? args["prompt-cache-mode"].trim()
+      : nonEmptyEnvValue(env.CF_HARNESS_PROMPT_CACHE_MODE),
+    ["implicit", "explicit"] as const,
+    "prompt cache mode",
+  );
   const gatewayConfigurationExplicit = args["gateway-base-url"] !== undefined ||
     args["gateway-auth-mode"] !== undefined ||
     nonEmptyEnvValue(env.CF_HARNESS_GATEWAY_BASE_URL) !== undefined ||
@@ -1412,6 +1448,8 @@ export const parseCfHarnessCliArgs = async (
       ? { model: nonEmptyEnvValue(env.CF_HARNESS_MODEL) ?? DEFAULT_MODEL }
       : {}),
     ...(modelProvider !== undefined ? { modelProvider } : {}),
+    ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+    ...(promptCacheMode !== undefined ? { promptCacheMode } : {}),
     gatewayConfigurationExplicit,
     harnessHome,
     gatewayBaseUrl,
@@ -1768,6 +1806,7 @@ export interface CfHarnessBatchResult {
   run_id: string;
   status: string;
   model: string;
+  usage?: HarnessModelUsage;
   artifact_root?: string;
   transcript_path?: string;
   run_report_path?: string;
@@ -1854,6 +1893,9 @@ export const createCfHarnessBatchResult = (
   run_id: result.runState.runId,
   status: result.runState.status,
   model: result.model,
+  ...((result.totalUsage ?? result.usage) !== undefined
+    ? { usage: result.totalUsage ?? result.usage }
+    : {}),
   ...(result.runState.artifactRoot !== undefined
     ? { artifact_root: result.runState.artifactRoot }
     : {}),
@@ -2021,6 +2063,48 @@ export const formatCfHarnessCliResult = (
     `status: ${result.runState.status}`,
     `modelTurns: ${result.modelTurns}`,
   ];
+  const reportedUsage = result.totalUsage ?? result.usage;
+  if (reportedUsage !== undefined) {
+    const usage = reportedUsage;
+    const fields = [
+      usage.inputTokens !== undefined
+        ? `input=${usage.inputTokens}`
+        : undefined,
+      usage.cachedInputTokens !== undefined
+        ? `cachedInput=${usage.cachedInputTokens}`
+        : undefined,
+      usage.cacheWriteTokens !== undefined
+        ? `cacheWrite=${usage.cacheWriteTokens}`
+        : undefined,
+      usage.outputTokens !== undefined
+        ? `output=${usage.outputTokens}`
+        : undefined,
+      usage.reasoningTokens !== undefined
+        ? `reasoning=${usage.reasoningTokens}`
+        : undefined,
+      usage.totalTokens !== undefined
+        ? `total=${usage.totalTokens}`
+        : undefined,
+      usage.inputTokens !== undefined && usage.inputTokens > 0 &&
+        usage.cachedInputTokens !== undefined
+        ? `cacheRead=${
+          (
+            usage.cachedInputTokens / usage.inputTokens * 100
+          ).toFixed(1)
+        }%`
+        : undefined,
+      usage.costUsd !== undefined
+        ? `providerCostUsd=${usage.costUsd.toFixed(6)}`
+        : undefined,
+      usage.estimatedCostUsd !== undefined
+        ? `estimatedCostUsd=${usage.estimatedCostUsd.toFixed(6)}`
+        : undefined,
+      usage.estimateWithheldReason !== undefined
+        ? `estimateWithheld=${usage.estimateWithheldReason}`
+        : undefined,
+    ].filter((value): value is string => value !== undefined);
+    lines.push(`usage: ${fields.join(" ")}`);
+  }
   if (result.runState.artifactRoot !== undefined) {
     lines.push(`artifactRoot: ${result.runState.artifactRoot}`);
   }
@@ -2383,6 +2467,12 @@ export const runCfHarnessCli = async (
           ? { apiKey: parsed.apiKey, apiKeySource: parsed.apiKeySource }
           : {}),
         ...(modelClient !== undefined ? { modelClient } : {}),
+        ...(parsed.reasoningEffort !== undefined
+          ? { reasoningEffort: parsed.reasoningEffort }
+          : {}),
+        ...(parsed.promptCacheMode !== undefined
+          ? { promptCacheMode: parsed.promptCacheMode }
+          : {}),
         maxModelTurns: parsed.maxModelTurns,
         allowedSubagentProfiles: parsed.allowedSubagentProfiles,
         ...(parsed.allowedToolIds !== undefined
@@ -2507,6 +2597,12 @@ export const runCfHarnessCli = async (
           ? { apiKey: parsed.apiKey, apiKeySource: parsed.apiKeySource }
           : {}),
         ...(modelClient !== undefined ? { modelClient } : {}),
+        ...(parsed.reasoningEffort !== undefined
+          ? { reasoningEffort: parsed.reasoningEffort }
+          : {}),
+        ...(parsed.promptCacheMode !== undefined
+          ? { promptCacheMode: parsed.promptCacheMode }
+          : {}),
         cfcEnforcementModeOverride: parsed.cfcEnforcementModeOverride,
         ...(runManifest !== undefined ? { runManifest } : {}),
         ...(parsed.runManifestPath !== undefined

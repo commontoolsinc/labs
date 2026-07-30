@@ -48,6 +48,7 @@ import {
   createHarnessRunReport,
   type HarnessGatewayAttempt,
   type HarnessModelAttempt,
+  type HarnessModelTurnUsage,
   type HarnessRunTimelineEntryInput,
   type HarnessToolActivity,
   type HarnessToolPolicyDecision,
@@ -101,8 +102,10 @@ import type { HarnessFetch } from "./contracts/http-fetch.ts";
 import type {
   HarnessModelAttemptDiagnostic,
   HarnessModelClient,
+  HarnessModelUsage,
 } from "./model/client.ts";
 import { OpenAICompatibleGatewayModelClient } from "./model/openai-compatible-gateway.ts";
+import { sumHarnessModelUsage } from "./model/usage.ts";
 
 const DEFAULT_MAX_MODEL_TURNS = 8;
 const BASH_CWD_MARKER_PREFIX = "__CF_HARNESS_CWD__";
@@ -120,6 +123,13 @@ export interface CreateHarnessPromptLoopOptions
   allowedSubagentProfiles?: readonly HarnessSubagentProfile[];
   nativeModelToolIds?: readonly LLMNativeModelToolId[];
   browserAccess?: HarnessBrowserAccessLease;
+  /**
+   * Stable provider cache affinity. Interactive callers should keep this
+   * constant across the turns that replay one append-only transcript.
+   */
+  cacheAffinityKey?: string;
+  promptCacheMode?: "implicit" | "explicit";
+  reasoningEffort?: string;
 }
 
 export interface RunHarnessPromptOptions {
@@ -152,6 +162,11 @@ export interface HarnessPromptLoopResult {
   finalAssistantText: string;
   transcript: HarnessTranscriptMessage[];
   modelTurns: number;
+  /** Usage from model turns executed directly by this loop. */
+  usage?: HarnessModelUsage;
+  /** Direct usage plus usage reported by completed descendant loops. */
+  totalUsage?: HarnessModelUsage;
+  modelUsage?: HarnessModelTurnUsage[];
   runState: ReturnType<CfHarnessEngine["getRunState"]>;
 }
 
@@ -1638,6 +1653,9 @@ export class CfHarnessPromptLoop {
   readonly #parentToolAllowanceMode: HarnessParentToolAllowance;
   readonly #allowedSubagentProfiles: ReadonlySet<HarnessSubagentProfile>;
   readonly #browserAccess?: HarnessBrowserAccessLease;
+  readonly #cacheAffinityKey?: string;
+  readonly #promptCacheMode?: "implicit" | "explicit";
+  readonly #reasoningEffort?: string;
 
   constructor(options: CreateHarnessPromptLoopOptions = {}) {
     this.engine = options.engine ?? new CfHarnessEngine(options);
@@ -1715,6 +1733,9 @@ export class CfHarnessPromptLoop {
           : []),
     );
     this.#browserAccess = options.browserAccess;
+    this.#cacheAffinityKey = options.cacheAffinityKey;
+    this.#promptCacheMode = options.promptCacheMode;
+    this.#reasoningEffort = options.reasoningEffort;
   }
 
   /** @deprecated Prefer `modelClient`; unavailable for `openai-codex`. */
@@ -1832,6 +1853,8 @@ export class CfHarnessPromptLoop {
     const toolActivity: HarnessToolActivity[] = [];
     const gatewayAttempts: HarnessGatewayAttempt[] = [];
     const modelAttempts: HarnessModelAttempt[] = [];
+    const modelUsage: HarnessModelTurnUsage[] = [];
+    const descendantUsage: HarnessModelUsage[] = [];
     const reportTimeline: HarnessRunTimelineEntryInput[] = [];
     let modelTurns = 0;
     const buildPolicyTrace = async () => {
@@ -1863,12 +1886,39 @@ export class CfHarnessPromptLoop {
         createHarnessRunReport({
           runState: this.engine.getRunState(),
           model,
+          ...(this.#reasoningEffort !== undefined
+            ? { reasoningEffort: this.#reasoningEffort }
+            : {}),
+          ...(this.#promptCacheMode !== undefined
+            ? { promptCacheMode: this.#promptCacheMode }
+            : {}),
+          cacheAffinity: this.#cacheAffinityKey === undefined
+            ? "run"
+            : "custom",
           modelTurns,
           ...(finalAssistantText !== undefined ? { finalAssistantText } : {}),
           timeline: reportTimeline,
           toolActivity,
           gatewayAttempts,
           modelAttempts,
+          ...(modelUsage.length > 0
+            ? {
+              modelUsage,
+              usage: sumHarnessModelUsage(
+                modelUsage.map((entry) => entry.usage),
+              ),
+            }
+            : {}),
+          ...(
+            modelUsage.length > 0 || descendantUsage.length > 0
+              ? {
+                totalUsage: sumHarnessModelUsage([
+                  ...modelUsage.map((entry) => entry.usage),
+                  ...descendantUsage,
+                ]),
+              }
+              : {}
+          ),
         }),
       );
     };
@@ -1938,9 +1988,24 @@ export class CfHarnessPromptLoop {
           ).map((tool) => tool.descriptor),
           nativeModelToolIds: this.#nativeModelToolIds,
           runId: this.engine.getRunState().runId,
+          ...(this.#cacheAffinityKey !== undefined
+            ? { cacheAffinityKey: this.#cacheAffinityKey }
+            : {}),
+          ...(this.#promptCacheMode !== undefined
+            ? { promptCacheMode: this.#promptCacheMode }
+            : {}),
+          ...(this.#reasoningEffort !== undefined
+            ? { reasoningEffort: this.#reasoningEffort }
+            : {}),
           signal: options.signal,
           onAttempt: recordModelAttempt,
         });
+        if (response.usage !== undefined) {
+          modelUsage.push({
+            modelTurn: modelTurns,
+            usage: response.usage,
+          });
+        }
         const assistantMessage = response.assistant;
         transcript.push(assistantMessage);
         await this.engine.persistTranscript(transcript);
@@ -1964,6 +2029,24 @@ export class CfHarnessPromptLoop {
             finalAssistantText: assistantMessage.content,
             transcript,
             modelTurns,
+            ...(modelUsage.length > 0
+              ? {
+                modelUsage,
+                usage: sumHarnessModelUsage(
+                  modelUsage.map((entry) => entry.usage),
+                ),
+              }
+              : {}),
+            ...(
+              modelUsage.length > 0 || descendantUsage.length > 0
+                ? {
+                  totalUsage: sumHarnessModelUsage([
+                    ...modelUsage.map((entry) => entry.usage),
+                    ...descendantUsage,
+                  ]),
+                }
+                : {}
+            ),
             runState: this.engine.getRunState(),
           };
         }
@@ -1978,6 +2061,7 @@ export class CfHarnessPromptLoop {
             options.signal,
             toolActivity.length + 1,
             (activity) => toolActivity.push(activity),
+            (usage) => descendantUsage.push(usage),
           );
           const toolMessage = invokedToolCall.toolMessage;
           transcript.push(toolMessage);
@@ -2053,6 +2137,7 @@ export class CfHarnessPromptLoop {
     signal?: AbortSignal,
     sequence = 1,
     recordActivity: (activity: HarnessToolActivity) => void = () => {},
+    recordDescendantUsage: (usage: HarnessModelUsage) => void = () => {},
   ): Promise<InvokedToolCallMessages> {
     if (!isBuiltinToolId(toolCall.function.name)) {
       throw new Error(
@@ -2348,6 +2433,7 @@ export class CfHarnessPromptLoop {
           promptSlotBinding,
           signal,
           sequence,
+          recordDescendantUsage,
         })
         : await this.#invokeBuiltinTool(
           toolCall.function.name,
@@ -2634,6 +2720,7 @@ export class CfHarnessPromptLoop {
     promptSlotBinding?: PromptSlotBinding;
     signal?: AbortSignal;
     sequence: number;
+    recordDescendantUsage: (usage: HarnessModelUsage) => void;
   }): Promise<{
     output: DelegateTaskToolOutput;
     resultRef: ToolResultRef;
@@ -2748,6 +2835,13 @@ export class CfHarnessPromptLoop {
     const childLoop = new CfHarnessPromptLoop({
       engine: childEngine,
       modelClient: this.modelClient,
+      cacheAffinityKey: childRunId,
+      ...(this.#promptCacheMode !== undefined
+        ? { promptCacheMode: this.#promptCacheMode }
+        : {}),
+      ...(this.#reasoningEffort !== undefined
+        ? { reasoningEffort: this.#reasoningEffort }
+        : {}),
       maxModelTurns,
       allowedToolIds: profileConfig.allowedToolIds,
       allowedSubagentProfiles: [],
@@ -2803,6 +2897,13 @@ export class CfHarnessPromptLoop {
       });
       summary = childResult.finalAssistantText;
       childModelTurns = childResult.modelTurns;
+      const childUsage = childResult.totalUsage ?? childResult.usage;
+      if (childUsage !== undefined) {
+        // The child has already incurred this usage. Record it before
+        // structured-return processing or parent artifact persistence can
+        // fail, so the parent failure report remains cost-complete.
+        options.recordDescendantUsage(childUsage);
+      }
       if (childResult.runState.status !== "completed") {
         subagentStatus = "failed";
       }
