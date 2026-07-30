@@ -879,7 +879,7 @@ describe("data-updating", () => {
 
       expect(changes.length).toBe(1);
       expect(changes[0].location).toEqual(current);
-      expect(areLinksSame(changes[0].value, cellA)).toBe(true);
+      expect(areLinksSame(changes[0].value, cellA, current)).toBe(true);
     });
 
     it("should handle doc and cell references that don't change", () => {
@@ -903,7 +903,7 @@ describe("data-updating", () => {
 
       expect(changes.length).toBe(1);
       expect(changes[0].location).toEqual(current);
-      expect(areLinksSame(changes[0].value, cellA)).toBe(true);
+      expect(areLinksSame(changes[0].value, cellA, current)).toBe(true);
 
       applyChangeSet(tx, changes);
 
@@ -1386,7 +1386,7 @@ describe("data-updating", () => {
       const result = testCell.getRaw();
       expect(isPrimitiveCellLink(result?.items[0])).toBe(true);
       expect(isPrimitiveCellLink(result?.items[1])).toBe(true);
-      expect(areLinksSame(result?.items[0], result?.items[1]))
+      expect(areLinksSame(result?.items[0], result?.items[1], testCell))
         .toBe(true);
       expect(
         (tx.readValueOrThrow(parseLink(result?.items[1], testCell)!) as any)
