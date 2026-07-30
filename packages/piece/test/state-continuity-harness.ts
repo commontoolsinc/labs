@@ -587,11 +587,14 @@ export async function readVintageState(
  * and it cannot represent everything a durable doc may hold — a `bigint` throws.
  *
  * `deepEqual` rather than the data-model's `valueEqual`, which is the more
- * obvious choice and does not work here: a schema-driven read leaves LINK
- * SIGILS in place wherever the schema does not descend, and `valueEqual`
- * refuses them outright ("Cannot compare value {\"/\":{\"link@1\":…}}"),
- * taking the whole gate down. Both sides carry sigils in the same shape, so a
- * structural comparison survives them — and the one class `deepEqual` cannot
+ * obvious choice. `valueEqual` refuses a materialized root outright — measured,
+ * it throws `Cannot compare value {"/":{"link@1":{…}}}` — but NOT for the
+ * reason that message reads as: a link sigil compares fine, and the value it
+ * actually refused was a live CELL, rendered through its `toJSON()` and so
+ * printed as the sigil it points at. That is the same fact `comparableState`
+ * exists for. Both comparators work once the reduction has run, and this one is
+ * kept because it needs no value to be a well-formed `FabricValue` and
+ * short-circuits instead of hashing a whole VNode tree; the one class it cannot
  * judge, a fabric special object with its state in private fields, is reduced
  * to a content hash before it gets here rather than being compared by it.
  */

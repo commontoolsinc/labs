@@ -342,6 +342,13 @@ export async function replayVintage(
       // claims — and skipping the comparison there would report "updated
       // cleanly" for a target whose data was never examined. That is the
       // silent-non-coverage shape this tier has hit repeatedly.
+      //
+      // UNREADABLE is the finding, not EMPTY. A prior state of `{}` compares
+      // clean against anything and so asserts nothing — but a pattern's result
+      // can legitimately BE `{}`, so treating that as loss would red a valid
+      // root. Telling "held nothing" from "was never here" is a question about
+      // the ROOT rather than about its value, and belongs to the presence
+      // control that runs before any of this, not to the comparison.
       if (before === undefined) {
         report.failures.push({
           ...where,
