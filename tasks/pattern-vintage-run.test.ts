@@ -563,6 +563,45 @@ describe("the vintage gate, end to end", () => {
     );
   });
 
+  it("FAILS a fixture with candidates but no upgrade TARGET, on its own", async () => {
+    // Per fixture, not just in the run's total. `isClean` floors the SUM of
+    // targets, which a fixture covering nothing slips under the moment another
+    // fixture covers five — and this one would have applied today's source to
+    // nothing while the run read green. Measured: with the per-fixture check
+    // removed, a two-fixture run where the second records only test patterns
+    // reports `targets: 1, failures: []` and passes.
+    //
+    // Reachable rather than theoretical: `isUpgradeTarget` has grown four
+    // exclusions, two added after fixtures already existed, and fixtures are
+    // append-only. A new exclusion silently zeroes an old fixture's coverage.
+    await captureMissing(roots, [KEY], new Date("2026-07-29T12:00:00.000Z"));
+    const [pinned] = await collectVintages(roots.vintagesRoot);
+    const tmp = await Deno.makeTempDir({ prefix: "vintage-gate-notarget-" });
+    const vintage = await openFileBackedRuntime(signer, tmp, pinned.path);
+    try {
+      const entries = (await readVintageManifest(vintage))?.entries ?? [];
+      // Same roots, re-recorded as test patterns — the shape a later exclusion
+      // would produce over a fixture nobody can recapture.
+      await writeVintageManifest(
+        vintage,
+        entries.map((entry) => ({ ...entry, main: "/patterns/x.test.tsx" })),
+      );
+      await vintage.snapshot(`${tmp}/rewritten.sqlite`);
+    } finally {
+      await vintage.dispose().catch(() => {});
+    }
+    await Deno.copyFile(`${tmp}/rewritten.sqlite`, pinned.path);
+    await Deno.remove(tmp, { recursive: true }).catch(() => {});
+
+    const { targets, failures } = await replayAll(roots);
+
+    expect(targets).toBe(0);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].detail).toContain(
+      "not one today's source can be applied to",
+    );
+  });
+
   describe("capture refuses a state the pattern never legitimately reaches", () => {
     const setSubjectTest = (body: string) =>
       Deno.writeTextFile(`${dir}/patterns/${TEST_KEY}`, body);
@@ -875,7 +914,10 @@ describe("the vintage gate, end to end", () => {
       const { failures } = await replayAll(roots);
 
       const childFailure = failures.find((f) => f.detail.includes("#Child"));
-      expect(childFailure?.detail).toContain("holds no captured root");
+      // Names the EVIDENCE the control looked for, so a doc that is present but
+      // unstamped — the one shape a false red could take — reads differently
+      // from a doc that is not there at all.
+      expect(childFailure?.detail).toContain("no pattern setup marker");
       expect(childFailure?.detail).toContain("recorded but NOT validated");
       // NOT the missing-space diagnosis: the space is right there, empty. A
       // message that blamed the space would send the reader after the wrong

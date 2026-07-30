@@ -229,8 +229,13 @@ export async function openFileBackedRuntime(
     storeDir,
     async snapshot(destPath: string) {
       // Everything must be durable before the copy, or the fixture records a
-      // state the capture never actually reached.
+      // state the capture never actually reached. `idle()` waits for scheduler
+      // quiescence and no further, and compiled/source closure write-backs —
+      // including the cross-space replication a companion store would carry —
+      // are tracked separately and drained only here. A fixture is read by a
+      // FRESH runtime, which is precisely the case that flush exists for.
       await runtime.idle();
+      await runtime.patternManager.flushCompileCacheWrites();
       await runtime.storageManager.synced();
       const path = spaceStorePath(storeUrl, space);
       if (path === null) {
