@@ -178,6 +178,48 @@ export function getArtifactEntryRef(
     entryRefByValue.get(resolveOriginal(key) as object);
 }
 
+// The authored file a pattern was defined in, per live builder artifact.
+//
+// Distinct from `programByPattern`, which holds the whole source CLOSURE and is
+// deliberately absent on the by-identity reload path. This is just the
+// filename, which that path does know and can afford to keep — enough to map a
+// live pattern back to a file without carrying its sources.
+//
+// A WeakMap for the same reason `programByPattern` is one: an evaluated
+// module's exports are HARDENED, so defining a property on one throws ("object
+// is not extensible"). The association has to live beside the value, not on it.
+const sourcePathByValue = new WeakMap<object, string>();
+
+/**
+ * Associate the authored file a builder artifact came from. Written by the
+ * PatternManager when it indexes an evaluated module, alongside the entry ref.
+ */
+export function setPatternSourcePath(
+  value: unknown,
+  sourcePath: string,
+): void {
+  const key = asKey(value);
+  if (key) sourcePathByValue.set(key, sourcePath);
+}
+
+/**
+ * The authored file a builder artifact came from — the exact object first, then
+ * its root original.
+ *
+ * The derivation walk is load-bearing, not defensive: a nested pattern reaches
+ * the runner as a derivation COPY (binding and traversal copies), and the
+ * source path is stamped post-evaluation on the module export it was copied
+ * from. Probing only the exact object misses every sub-pattern, which is the
+ * whole population this table exists to name. Same lazy resolution, and for the
+ * same reason, as {@link getArtifactEntryRef}.
+ */
+export function getPatternSourcePath(value: unknown): string | undefined {
+  const key = asKey(value);
+  if (!key) return undefined;
+  return sourcePathByValue.get(key) ??
+    sourcePathByValue.get(resolveOriginal(key) as object);
+}
+
 /**
  * True only for a value that is structurally a pattern AND has trusted builder
  * provenance — either it carries the brand directly, or it is a derivation /
