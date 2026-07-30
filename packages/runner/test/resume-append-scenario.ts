@@ -174,7 +174,6 @@ async function build(scenario: AppendScenario): Promise<void> {
   await rt.patternManager.flushCompileCacheWrites();
   await sm.synced();
   expect(scenario.read(rc)).toEqual(scenario.buildExpected);
-  rt.scheduler.dispose();
   await rt.dispose();
 }
 

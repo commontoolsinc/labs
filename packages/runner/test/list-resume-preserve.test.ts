@@ -237,7 +237,7 @@ describe("list builtin resume preservation", () => {
         x.label
       ),
     ).toEqual(EXPECTED);
-    rt1.scheduler.dispose();
+    await rt1.dispose({ closeStorage: false });
 
     // RELOAD (runtime B): cold cache, with per-element predicate documents
     // delivered late so the container loads before the children.
@@ -295,8 +295,7 @@ describe("list builtin resume preservation", () => {
       expect(empties).toEqual([]);
       expect(shrank).toEqual([]);
     } finally {
-      await rt2.dispose();
-      await rt1.dispose();
+      await rt2.dispose({ closeStorage: false });
     }
   });
 });
@@ -447,7 +446,7 @@ describe("flatMap builtin resume preservation", () => {
     await rt1.patternManager.flushCompileCacheWrites();
     await sm1.synced();
     expect(rc1.key("values").getAsQueryResult() ?? []).toEqual(expected);
-    rt1.scheduler.dispose();
+    await rt1.dispose({ closeStorage: false });
 
     // RELOAD (runtime B): cold cache, per-element result docs delivered late so
     // the container loads before the children.
@@ -500,8 +499,7 @@ describe("flatMap builtin resume preservation", () => {
       expect(empties).toEqual([]);
       expect(shrank).toEqual([]);
     } finally {
-      await rt2.dispose();
-      await rt1.dispose();
+      await rt2.dispose({ closeStorage: false });
     }
   }
 
