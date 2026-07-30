@@ -1,9 +1,15 @@
 import { assertEquals } from "@std/assert";
 import type { CELL_RESULT_TYPE, Stream } from "@commonfabric/api";
 
-type MustBeTrue<T extends true> = T;
+// Value-position guards, not `MustBeTrue<...>` type aliases. `MustBeTrue<T
+// extends true>` does NOT catch a failed assertion: a failing
+// AssertAssignable/AssertNotAssignable evaluates to `never`, and `never extends
+// true` is true, so the alias compiles and the assertion is vacuous. Assigning
+// `true` to the result fails when it is `never`, which is what makes these bite.
+// (Verified: `MustBeTrue<AssertAssignable<string, number>>` compiles clean.)
 type AssertAssignable<T, U> = [T] extends [U] ? true : never;
 type AssertNotAssignable<T, U> = [T] extends [U] ? never : true;
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
 interface AddTopic {
   title: string;
@@ -19,8 +25,8 @@ type ExplicitVoid = Stream<AddTopic, void>;
 type Returning = Stream<AddTopic, TopicRef>;
 
 // `R` defaults to void, so every existing `Stream<T>` means what it always did.
-type _DefaultIsVoid = MustBeTrue<AssertAssignable<ValueLess, ExplicitVoid>>;
-type _VoidIsDefault = MustBeTrue<AssertAssignable<ExplicitVoid, ValueLess>>;
+const _DefaultIsVoid: AssertAssignable<ValueLess, ExplicitVoid> = true;
+const _VoidIsDefault: AssertAssignable<ExplicitVoid, ValueLess> = true;
 
 // A verb that declares a result and one that declares none are different types
 // in both directions, so a declared result cannot be dropped on assignment.
@@ -29,51 +35,51 @@ type _VoidIsDefault = MustBeTrue<AssertAssignable<ExplicitVoid, ValueLess>>;
 // the work: `ICreatable<Stream<T, R>>` puts the stream in `for()`'s return
 // position, which discriminates on `R` too. They would still pass with the
 // property removed. The guard below is what pins it locally.
-type _ReturningIsNotValueLess = MustBeTrue<
-  AssertNotAssignable<Returning, ValueLess>
->;
-type _ValueLessIsNotReturning = MustBeTrue<
-  AssertNotAssignable<ValueLess, Returning>
->;
+const _ReturningIsNotValueLess: AssertNotAssignable<Returning, ValueLess> =
+  true;
+const _ValueLessIsNotReturning: AssertNotAssignable<ValueLess, Returning> =
+  true;
 
 // Two different declared results do not interchange either.
-type _ResultsDiscriminate = MustBeTrue<
-  AssertNotAssignable<Returning, Stream<AddTopic, { other: string }>>
->;
+const _ResultsDiscriminate: AssertNotAssignable<
+  Returning,
+  Stream<AddTopic, { other: string }>
+> = true;
 
 // A stream is still identical to itself.
-type _SelfAssignable = MustBeTrue<AssertAssignable<Returning, Returning>>;
+const _SelfAssignable: AssertAssignable<Returning, Returning> = true;
 
 // The event type keeps discriminating independently of the result.
-type _EventStillDiscriminates = MustBeTrue<
-  AssertNotAssignable<Returning, Stream<{ different: number }, TopicRef>>
->;
+const _EventStillDiscriminates: AssertNotAssignable<
+  Returning,
+  Stream<{ different: number }, TopicRef>
+> = true;
 
 // `R` is recoverable by inference — what the transformer and schema generator
 // read to lower a value-returning verb.
 type ResultOf<S> = S extends Stream<infer _E, infer R> ? R : never;
-type _InfersDeclaredResult = MustBeTrue<
-  AssertAssignable<ResultOf<Returning>, TopicRef>
->;
-type _InfersVoidWhenUndeclared = MustBeTrue<
-  AssertAssignable<ResultOf<ValueLess>, void>
->;
+const _InfersDeclaredResult: AssertAssignable<ResultOf<Returning>, TopicRef> =
+  true;
+const _InfersVoidWhenUndeclared: AssertAssignable<ResultOf<ValueLess>, void> =
+  true;
 
 // The event type stays inferable alongside it.
 type EventOf<S> = S extends Stream<infer E, infer _R> ? E : never;
-type _InfersEvent = MustBeTrue<AssertAssignable<EventOf<Returning>, AddTopic>>;
+const _InfersEvent: AssertAssignable<EventOf<Returning>, AddTopic> = true;
 
 // Stream carries the result in its OWN property rather than borrowing the
 // discrimination from ICreatable. Deleting `[CELL_RESULT_TYPE]` from Stream
 // makes this line a type error, which is the point: without it the behaviour
 // above rides on ICreatable's signature and would vanish silently if that
 // signature ever changed.
-type _ResultPinnedLocally = MustBeTrue<
-  AssertAssignable<Returning[typeof CELL_RESULT_TYPE], TopicRef>
->;
-type _ValueLessPinnedLocally = MustBeTrue<
-  AssertAssignable<ValueLess[typeof CELL_RESULT_TYPE], void>
->;
+const _ResultPinnedLocally: AssertAssignable<
+  Returning[typeof CELL_RESULT_TYPE],
+  TopicRef
+> = true;
+const _ValueLessPinnedLocally: AssertAssignable<
+  ValueLess[typeof CELL_RESULT_TYPE],
+  void
+> = true;
 
 // Schema compatibility checks results as candidate ⊆ previous, and "results may
 // narrow freely" governs values, never named fields: removing a named property
@@ -92,21 +98,21 @@ type EnvelopedVerb = Stream<AddTopic, AddTopicResult>;
 
 // The enveloped form commits one top-level name — but `fid` and `title` under
 // it are equally permanent, so this is a smaller surface at the top only.
-type _EnvelopeCommitsOneTopName = MustBeTrue<
-  AssertAssignable<keyof ResultOf<EnvelopedVerb>, "topic">
->;
+const _EnvelopeCommitsOneTopName: AssertAssignable<
+  keyof ResultOf<EnvelopedVerb>,
+  "topic"
+> = true;
 
 // Spread flat, the same two names are committed at the top instead of one.
 type FlatVerb = Stream<AddTopic, { fid: string; title: string }>;
-type _FlatCommitsEveryName = MustBeTrue<
-  AssertAssignable<keyof ResultOf<FlatVerb>, "fid" | "title">
->;
+const _FlatCommitsEveryName: AssertAssignable<
+  keyof ResultOf<FlatVerb>,
+  "fid" | "title"
+> = true;
 
 // The two are not interchangeable, so reshaping a result after the fact is a
 // compile error rather than a quiet schema break.
-type _EnvelopeIsNotFlat = MustBeTrue<
-  AssertNotAssignable<EnvelopedVerb, FlatVerb>
->;
+const _EnvelopeIsNotFlat: AssertNotAssignable<EnvelopedVerb, FlatVerb> = true;
 
 Deno.test("Stream result type parameter is structural", () => {
   // The assertions above are compile-time; this keeps the module a test file
