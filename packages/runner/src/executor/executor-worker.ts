@@ -46,6 +46,7 @@ import {
   claimedAttemptRejection,
 } from "./claimed-attempt-lifecycle.ts";
 import { prepareExecutorDemandPiece } from "./writer-discovery.ts";
+import { laneSliceCoversPiece } from "./demand-closure.ts";
 import {
   createServerBuiltinBrokerClient,
   type ServerBuiltinBrokerClient,
@@ -570,6 +571,23 @@ const applyLaneDemands = (lanes: WireLaneDemand[] | undefined): void => {
   }
 };
 
+/** D2 piece ancestry (client-passivity §5h.4): the parent piece of a child
+ * sub-pattern piece, straight off this Worker's own runtime — the runtime that
+ * instantiated it. `undefined` before initialization and for every root. */
+const parentPieceIdOf = (pieceId: string): string | undefined =>
+  runtime?.runner.parentPieceIdOf(pieceId);
+
+/** Does `lane`'s root-keyed demand slice cover `pieceId`, directly or through
+ * an ancestor? Execution demand names ROOTS, and everything else in this
+ * Worker's graph is a child sub-pattern the runtime instantiated to satisfy
+ * one — so without the roll-up an action in a child piece can never be a
+ * scoped-rank candidate (see `demand-closure.ts`). */
+const laneDemandCoversPiece = (
+  lane: { schedulerPieces: ReadonlySet<string> },
+  pieceId: string,
+): boolean =>
+  laneSliceCoversPiece(lane.schedulerPieces, pieceId, parentPieceIdOf);
+
 /** Canonical rank of one lane context key — the Worker-side twin of the
  * router's laneKeyRank (CA9: candidate lanes ⊆ action rank). */
 const laneContextRank = (key: string): "user" | "session" | undefined => {
@@ -596,7 +614,7 @@ const emitTemplateCandidatesForLane = (contextKey: string): void => {
   if (laneRank === undefined) return;
   for (const template of userCandidateTemplates.values()) {
     if (laneContextRank(template.claimKey.contextKey) !== laneRank) continue;
-    if (!lane.schedulerPieces.has(template.claimKey.pieceId)) continue;
+    if (!laneDemandCoversPiece(lane, template.claimKey.pieceId)) continue;
     postCandidate(
       {
         claimKey: {
@@ -1268,11 +1286,14 @@ const initialize = async (request: WorkerRequest): Promise<void> => {
       // C1.9c: a user-rank action produces one candidate per OPEN lane whose
       // demand slice covers its piece. Before any lane is wired the router's
       // sponsor-lane fallback keeps the C1.5a pre-lane shape.
+      // D2 (client-passivity §5h.4): coverage is the demanded root's CLOSURE,
+      // not the root set — an action in a child sub-pattern piece is a scoped
+      // candidate for every lane whose demand reaches one of its ancestors.
       openUserLaneKeys: (pieceId) => {
         if (laneDemands.size === 0) return undefined;
         const lanes: string[] = [];
         for (const [contextKey, lane] of laneDemands) {
-          if (lane.schedulerPieces.has(pieceId)) lanes.push(contextKey);
+          if (laneDemandCoversPiece(lane, pieceId)) lanes.push(contextKey);
         }
         return lanes;
       },

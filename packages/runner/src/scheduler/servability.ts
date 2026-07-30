@@ -855,7 +855,22 @@ function dynamicAddressReason(
     }
     return `dynamic-foreign-${kind}-space`;
   }
-  if (!laneAdmitsScope(address.scope, laneRank)) {
+  // Reads chain-admit (CA3); writes stay EXACT-lane, exactly as the commit's
+  // own operation loop already does via {@link laneAdmitsWriteScope} and as the
+  // engine's `assertLaneScopedAddress` does on its write side. This path used
+  // `laneAdmitsScope` for both kinds, so an observation-level write at a
+  // broader-in-chain instance (a session-rank attempt writing the principal's
+  // USER instance) was routed and then rejected by the engine as
+  // `non-lane-scope` — the very bounce `laneAdmitsWriteScope`'s docblock says
+  // the dynamic firewall exists to avoid. Measured on the flagship group-chat
+  // probe once D2's demand-closure roll-up made child sub-pattern actions
+  // reachable at session rank: `cf:module/xhlg…:__cfLift_16` produced
+  // `actionFirewallRejects` 5 / `commit-rejected:ExecutionActionFirewallError`
+  // 2 where the honest answer is a clean pre-commit unserve.
+  const admits = kind === "read"
+    ? laneAdmitsScope(address.scope, laneRank)
+    : laneAdmitsWriteScope(address.scope, laneRank);
+  if (!admits) {
     return `dynamic-non-space-${kind}-scope`;
   }
   return undefined;

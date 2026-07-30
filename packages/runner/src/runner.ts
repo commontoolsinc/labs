@@ -666,6 +666,15 @@ function dedupeNormalizedLinks(
 export class Runner {
   readonly cancels = new Map<`${MemorySpace}/${CellScope}/${URI}`, Cancel>();
   private allCancels = new Set<Cancel>();
+  // D2 piece ancestry (client-passivity §5h.4): child piece id -> the piece id
+  // of the sub-pattern node that instantiated it, both keyed `${scope}:${id}`
+  // the way `schedulerRehydrationOptions` keys a piece. Execution demand names
+  // only ROOTS, so this is what lets a server-side lane recognise a child
+  // sub-pattern as inside a demanded root's closure instead of treating it as
+  // undemanded (`executor/demand-closure.ts`). Populated by
+  // `instantiatePatternNode`, pruned when that child's start is cancelled, so
+  // it is bounded by the live piece graph.
+  private pieceParents = new Map<string, string>();
   private locallyPreparedResults = new Set<
     `${MemorySpace}/${CellScope}/${URI}`
   >();
@@ -2158,6 +2167,26 @@ export class Runner {
     return `${space}/${scope}/${id}`;
   }
 
+  /** The durable piece identity of a result cell — the same `${scope}:${id}`
+   * key `schedulerRehydrationOptions` buckets snapshots by and the scheduler
+   * stamps on every observation, so ancestry recorded here is directly
+   * comparable to an `ActionClaimKey.pieceId`. */
+  private getPieceId(cell: Cell<any>): string {
+    const { id, scope } = cell.getAsNormalizedFullLink();
+    return `${scope}:${id}`;
+  }
+
+  /**
+   * Parent piece of a child sub-pattern piece, or `undefined` for a root (D2,
+   * client-passivity §5h.4). Read by the executor Worker to decide whether a
+   * lane's root-keyed demand slice covers an action's piece; see
+   * `executor/demand-closure.ts` for the walk and why the roll-up lives on the
+   * server rather than on the demand wire.
+   */
+  parentPieceIdOf(pieceId: string): string | undefined {
+    return this.pieceParents.get(pieceId);
+  }
+
   private queueExecutionDemand(
     space: MemorySpace,
     provider: IStorageProviderWithReplica,
@@ -2871,6 +2900,7 @@ export class Runner {
     }
     this.allCancels.clear();
     this.cancels.clear();
+    this.pieceParents.clear();
     // Clear the result pattern cache as well, since the actions have been
     // canceled
     this.resultPatternCache.clear();
@@ -5549,6 +5579,18 @@ export class Runner {
         parentResultCell.space,
       );
     }
+    // D2 piece ancestry, recorded BEFORE the child starts so its first run's
+    // candidacy already rolls up (client-passivity §5h.4). This is the only
+    // path a child sub-pattern piece is created on — statically nested nodes
+    // and per-element sub-patterns minted inside a running action alike — so
+    // one record here covers the whole closure. Self-parenting is impossible
+    // (the child is a freshly minted `resultFor` cell), but guard anyway: a
+    // cycle here would be a walk that never terminates.
+    const childPieceId = this.getPieceId(childResultCell);
+    const parentPieceId = this.getPieceId(parentResultCell);
+    if (childPieceId !== parentPieceId) {
+      this.pieceParents.set(childPieceId, parentPieceId);
+    }
     this.run(tx, patternImpl, inputs, childResultCell, {
       awaitSyncBeforeInitialRun: defersInitialRunUntilSynced(
         schedulerRehydration,
@@ -5567,7 +5609,14 @@ export class Runner {
     // TODO(seefeld): Make sure to not cancel after a pattern is elevated to a
     // piece, e.g. via navigateTo. Nothing is cancelling right now, so leaving
     // this as TODO.
-    addCancel(() => this.stop(childResultCell));
+    addCancel(() => {
+      // Only prune the record this instantiation installed: a re-instantiation
+      // of the same child (pattern hot-swap) owns the newer one.
+      if (this.pieceParents.get(childPieceId) === parentPieceId) {
+        this.pieceParents.delete(childPieceId);
+      }
+      this.stop(childResultCell);
+    });
   }
 }
 
