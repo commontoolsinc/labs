@@ -7,17 +7,19 @@ import {
   classifyModuleItems,
 } from "../src/sandbox/compiled-bundle-verifier.ts";
 
-// The security classifier extracted from the AMD verifier is format-agnostic:
-// it classifies a module's top-level items (compiled-CJS form) against a
-// pre-seeded binding env, independent of AMD/ESM packaging. AMD passes the
-// canonical shadow guards + reserved bindings; ESM passes empty sets.
+// The security classifier is format-agnostic: it classifies a module's top-level
+// items (compiled-CJS form) against a pre-seeded binding env, independent of how
+// the body is wrapped. `verifyCompiledModuleBody` — the production caller —
+// passes empty guard/reserved sets, since no loader binding is in scope around a
+// module body. These tests exercise both the empty and non-empty configurations,
+// so the shadow-guard and reserved-binding paths stay covered.
 
 function bodyStatements(body: string) {
   const fn = parseFunctionText(body, 0, body.length);
   return { source: body, statements: fn.body.statements };
 }
 
-const ESM_OPTIONS = {
+const EMPTY_GUARD_OPTIONS = {
   requiredGuards: new Set<string>(),
   reservedBindings: new Set<string>(),
   missingGuardsErrorAt: 0,
@@ -30,7 +32,7 @@ describe("classifyModuleItems (format-agnostic security core)", () => {
     const { source, statements } = bodyStatements(body);
     const env = new Map<string, BindingInfo>();
     expect(() =>
-      classifyModuleItems(source, "<m>", statements, env, ESM_OPTIONS)
+      classifyModuleItems(source, "<m>", statements, env, EMPTY_GUARD_OPTIONS)
     ).not.toThrow();
   });
 
@@ -44,14 +46,14 @@ describe("classifyModuleItems (format-agnostic security core)", () => {
         "<m>",
         statements,
         new Map<string, BindingInfo>(),
-        ESM_OPTIONS,
+        EMPTY_GUARD_OPTIONS,
       )
     ).toThrow(/__cf_data/);
   });
 
-  it("honors empty reservedBindings for const declarations (ESM allows AMD-reserved names)", () => {
-    // `define` is an AMD wrapper-reserved name; under ESM (empty reserved set)
-    // a const of that name is allowed. Verifies reservedBindings reaches the
+  it("honors empty reservedBindings for const declarations", () => {
+    // With no reserved names (the production configuration), a const named
+    // `define` is allowed. Verifies reservedBindings reaches the
     // variable-declaration path, not only the function-declaration path.
     const body =
       `function () { const define = (n) => n; exports.define = define; }`;
@@ -62,10 +64,10 @@ describe("classifyModuleItems (format-agnostic security core)", () => {
         "<m>",
         statements,
         new Map<string, BindingInfo>(),
-        ESM_OPTIONS,
+        EMPTY_GUARD_OPTIONS,
       )
     ).not.toThrow();
-    // With the AMD reserved set, the same const name is rejected.
+    // With `define` reserved, the same const name is rejected.
     expect(() =>
       classifyModuleItems(
         source,
@@ -73,7 +75,7 @@ describe("classifyModuleItems (format-agnostic security core)", () => {
         statements,
         new Map<string, BindingInfo>(),
         {
-          ...ESM_OPTIONS,
+          ...EMPTY_GUARD_OPTIONS,
           reservedBindings: new Set(["define"]),
         },
       )
@@ -89,7 +91,7 @@ describe("classifyModuleItems (format-agnostic security core)", () => {
         "<m>",
         statements,
         new Map<string, BindingInfo>(),
-        ESM_OPTIONS,
+        EMPTY_GUARD_OPTIONS,
       )
     ).toThrow(/mutable/i);
   });
@@ -104,7 +106,7 @@ describe("classifyModuleItems (format-agnostic security core)", () => {
     const { source, statements } = bodyStatements(body);
     const env = new Map<string, BindingInfo>();
     expect(() =>
-      classifyModuleItems(source, "<m>", statements, env, ESM_OPTIONS)
+      classifyModuleItems(source, "<m>", statements, env, EMPTY_GUARD_OPTIONS)
     ).not.toThrow();
   });
 
@@ -120,7 +122,7 @@ describe("classifyModuleItems (format-agnostic security core)", () => {
         "<m>",
         statements,
         new Map<string, BindingInfo>(),
-        ESM_OPTIONS,
+        EMPTY_GUARD_OPTIONS,
       )
     ).toThrow(/SES mode/);
   });

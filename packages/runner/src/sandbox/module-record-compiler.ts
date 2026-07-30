@@ -393,16 +393,16 @@ export interface CompileSourcesOptions {
   /**
    * Per-source source map (from `compileToModules`), keyed by source name. Used
    * to compose a per-load bundle source map so `fn.src` / CFC verified-source
-   * coordinates resolve back to the original authored files under the ESM
-   * loader (the AMD path registers the bundle map via the isolate).
+   * coordinates resolve back to the original authored files.
    */
   precompiledSourceMaps?: Map<string, SourceMap>;
   /**
    * Whole-program path prefix (`/<id>`, no trailing slash) to strip from each
-   * module's path *for content-addressed identity only*. The ESM compile path
+   * module's path *for content-addressed identity only*. The compile path
    * resolves a program whose files are prefixed with `/<computeId>/...` (a
-   * whole-program hash) so source locations match the AMD bundle. Folding that
-   * prefix into the per-module identity would make `cf:module/<hash>`
+   * whole-program hash) to namespace per-load source-map and diagnostic
+   * coordinates. Folding that prefix into the per-module identity would make
+   * `cf:module/<hash>`
    * whole-program-dependent — defeating cross-program dedup and diverging from
    * the entry-point-independent identity the spec mandates
    * (docs/specs/module-loading.md). Stripping it here yields stable, dedupable
@@ -776,8 +776,7 @@ export function compileSourcesToRecords(
         const requireShim = (specifier: string) =>
           compartment.importNow(resolvedImports[specifier] ?? specifier);
         // A throw inside the factory is terminal for this module: SES caches the
-        // error and re-throws it on every subsequent importNow (the same
-        // contract as a failed AMD factory).
+        // error and re-throws it on every subsequent importNow.
         // Grant the real registrar ONLY if the verifier approved this module's
         // `__cfReg` call; otherwise a throwing one (fail closed).
         const { register, commit } = registrationApproved.has(specifier)

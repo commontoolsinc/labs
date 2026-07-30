@@ -4,7 +4,7 @@ import {
   findTopLevelEquals,
   isStringLiteralRange,
   locationFromOffset,
-  type ParsedDefineCall,
+  type ParsedFunction,
   parseFunctionText,
   splitTopLevelCommaList,
   type StatementChunk,
@@ -52,17 +52,19 @@ export interface BindingInfo {
 }
 
 /**
- * Configuration that lets the format-agnostic security classifier
- * ({@link classifyModuleItems}) serve both the AMD factory body and a
- * per-module ESM record body. AMD passes the canonical wrapper shadow guards
- * and reserved bindings; the ESM path passes empty sets (no `define`/
- * `runtimeDeps`/`__cfAmdHooks` in scope to shadow). See
- * docs/history/specs/module-loading-verifier-and-engine-design.md.
+ * Packaging-specific configuration for the format-agnostic security classifier
+ * ({@link classifyModuleItems}), which is otherwise independent of how a module
+ * body is wrapped. A wrapper that puts loader bindings in scope around the body
+ * would pass the canonical shadow guards and reserved bindings here; the module
+ * records this runtime loads put none in scope, so {@link
+ * verifyCompiledModuleBody} passes empty sets and both checks are inert. No
+ * production caller passes a non-empty set — `module-item-classifier.test.ts` is
+ * what exercises these branches.
  */
 export interface ModuleItemClassificationOptions {
-  /** Canonical shadow-guard statements that MUST be present (AMD) or none (ESM). */
+  /** Canonical shadow-guard statements that MUST be present, or none. */
   requiredGuards: ReadonlySet<string>;
-  /** Reserved wrapper bindings authored code may not declare (AMD) or none (ESM). */
+  /** Reserved wrapper bindings authored code may not declare, or none. */
   reservedBindings: ReadonlySet<string>;
   /** Source offset used for the "missing required shadow guards" error. */
   missingGuardsErrorAt: number;
@@ -94,10 +96,10 @@ interface ParsedNormalizedCallReference {
  * against the SES module-item rules (direct functions, trusted-builder calls
  * with direct callbacks, `__cf_data`/`schema` wrappers, export assignments,
  * reexport getters, function-hardening/binding-identity statements) and rejects
- * everything else. `env` arrives pre-seeded with the module's imports
- * (AMD: factory dependency params; ESM: record imports). Packaging differences
- * (shadow guards, reserved bindings) are supplied via `options`, so the same
- * core serves both the AMD factory body and a per-module ESM record body.
+ * everything else. `env` arrives pre-seeded with the module's imports (for a
+ * module record, the specifiers its body requires). Packaging differences
+ * (shadow guards, reserved bindings) are supplied via `options`, so the core
+ * stays independent of how a body is wrapped.
  */
 export function classifyModuleItems(
   source: string,
@@ -232,8 +234,8 @@ export function classifyModuleItems(
 
       // The single trailing `__cfReg({ __cfPattern_1, … })` hoist-registration
       // call: a shorthand object of top-level builder-artifact bindings. `__cfReg`
-      // is supplied by the module wrapper (the registrar param under the ESM
-      // loader; a no-op global on the AMD path) and is intentionally NOT a
+      // is supplied by the module wrapper (its registrar param, which shadows a
+      // no-op compartment global) and is intentionally NOT a
       // referenceable binding — so any OTHER use (nested, aliased, dynamic) falls
       // through to the unknown-identifier rejection below. Trust of the registered
       // values, single-call, and the closed-window guarantee are enforced at
@@ -255,7 +257,7 @@ export function classifyModuleItems(
         source,
         filename,
         statement.start,
-        "Compiled AMD module contains unsupported top-level executable code",
+        "Compiled module contains unsupported top-level executable code",
       );
     }
 
@@ -264,7 +266,7 @@ export function classifyModuleItems(
         source,
         filename,
         options.missingGuardsErrorAt,
-        "Compiled AMD factory is missing required wrapper shadow guards",
+        "Compiled module is missing required wrapper shadow guards",
       );
     }
   } finally {
@@ -1431,7 +1433,7 @@ function tryParseDirectFunction(
   source: string,
   start: number,
   end: number,
-): ParsedDefineCall["factory"] | undefined {
+): ParsedFunction | undefined {
   if (!looksLikeDirectFunctionSyntax(source, start, end)) {
     return undefined;
   }

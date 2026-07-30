@@ -1276,9 +1276,10 @@ modules are unchanged). The registered set includes both:
    statement so an import/alias (`const x = imported`) is never mis-attributed
    to this module's identity.
 
-`__cfReg` is a free identifier supplied by the module wrapper (the 4th factory
-parameter under the runtime's ESM loader; a no-op global on the legacy/AMD
-path). The runtime registrar pairs each `{ symbol -> live value }` entry with
+`__cfReg` is a free identifier supplied by the module wrapper (its 4th factory
+parameter, which shadows a no-op `__cfReg` compartment global for any code
+outside that wrapper). The runtime registrar pairs each
+`{ symbol -> live value }` entry with
 the module's content identity, populating the content-addressed reverse index
 that backs builder-artifact identity resolution. A single trailing call (rather
 than per-artifact export/registration) keeps the runtime verifier's obligation
@@ -1642,21 +1643,22 @@ The emitted-shape contract is pinned primarily by the "adds stable … causes"
 `src/transformers/module-scope-shadowing.ts`) inserts one module-scope
 `const <name> = undefined;` declaration for each name in
 `SHADOWED_FACTORY_BINDINGS` — as of this writing `define`, `runtimeDeps`, and
-`__cfAmdHooks` (`packages/utils/src/sandbox-contract.ts`). The names are the
-bindings the legacy AMD module wrapper placed in the enclosing scope of every
-compiled module factory; shadowing them to `undefined` at module scope makes
-loader machinery unreachable from authored/compiled pattern code even if such a
-wrapper binding is in scope. The stage landed with the SES-default sandbox
-(#3168) and is shared vocabulary with the runner's sandbox verifier via
-`@commonfabric/utils/sandbox-contract` (see §14.4).
+`__cfAmdHooks` (`packages/utils/src/sandbox-contract.ts`). These are
+module-loader binding names: declaring each as `undefined` at module scope makes
+loader machinery unreachable from authored/compiled pattern code even if a
+binding of that name were ever in scope around a module body. The stage landed
+with the SES-default sandbox (#3168) and is shared vocabulary with the runner's
+sandbox verifier via `@commonfabric/utils/sandbox-contract` (see §14.4).
 
-On current `main` the AMD loader itself is deleted, so under the runtime's ESM
-module-record loader there is no wrapper binding left to shadow (the comment in
-`packages/runner/test/security.test.ts` above "does not expose loader machinery
-on the module compartment globals" records the removal; that test asserts
-`typeof define/require/runtimeDeps/__cfAmdHooks` are all `"undefined"` inside a
-module compartment). The guards remain emitted as defense-in-depth, and they are
-byte-pinned across effectively the whole fixture corpus (§14.5).
+No such binding reaches a module body today. The module wrapper supplies
+`exports`, `require`, `module`, and `__cfReg` as parameters and nothing else, and
+none of the shadowed names is a compartment global
+(`packages/runner/test/security.test.ts`, "does not expose loader machinery on
+the module compartment globals", compiles a probe that reads
+`globalThis.define`, `globalThis.require`, `globalThis.runtimeDeps` and
+`globalThis.__cfAmdHooks` and asserts every one is `"undefined"`). The guards are
+therefore defense-in-depth, and they are byte-pinned across effectively the whole
+fixture corpus (§14.5).
 
 ### 14.1 Trigger conditions
 
@@ -1750,22 +1752,22 @@ contract, analogous to §11.4's `__cfReg` pairing:
 - **Verifier mechanism** — `classifyModuleItems` (the format-agnostic SES
   module-item classifier in `compiled-bundle-verifier.ts`) takes
   `ModuleItemClassificationOptions` with `requiredGuards` (normalized guard
-  statements that MUST all be present, else "Compiled AMD factory is missing
-  required wrapper shadow guards") and `reservedBindings` (names authored code
-  may not declare, else "Reserved wrapper binding '<name>' is not allowed in
-  SES mode", `assertFactoryBindingIsNotReserved`).
-- **Live path (ESM) passes empty sets** — `verifyCompiledModuleBody`
+  statements that MUST all be present) and `reservedBindings` (names authored
+  code may not declare, else "Reserved wrapper binding '<name>' is not allowed
+  in SES mode", `assertFactoryBindingIsNotReserved`).
+- **The live path passes empty sets** — `verifyCompiledModuleBody`
   (`packages/runner/src/sandbox/module-record-verifier.ts`) calls the
-  classifier with `requiredGuards`/`reservedBindings` both empty: "ESM modules
-  have no AMD wrapper to shadow." On this path the emitted guards are neither
-  required nor reserved; each verifies as an ordinary primitive `const`
-  (`undefined` classifies as `{ kind: "data" }` in `classifyExpressionText`).
-  The requiring/reserving configuration belonged to the deleted AMD bundle
-  verifier; the options mechanism outlives it.
-- **Runtime invariant that replaced the AMD checks** — the loader-agnostic
-  guarantee is that no loader machinery reaches the module compartment's global
-  surface (`packages/runner/test/security.test.ts`, "does not expose loader
-  machinery on the module compartment globals").
+  classifier with `requiredGuards`/`reservedBindings` both empty, since no
+  wrapper binding reaches a module body to shadow. The emitted guards are
+  therefore neither required nor reserved; each verifies as an ordinary
+  primitive `const` (`undefined` classifies as `{ kind: "data" }` in
+  `classifyExpressionText`). No production caller passes a non-empty set, so
+  both branches are exercised only by
+  `packages/runner/test/module-item-classifier.test.ts`.
+- **Runtime invariant** — the loader-agnostic guarantee is that no loader
+  machinery reaches the module compartment's global surface
+  (`packages/runner/test/security.test.ts`, "does not expose loader machinery on
+  the module compartment globals").
 - **Tooling consumer** — `cf view` classifies the three names as "module
   scaffolding" for syntax colouring via its own hard-coded copy of the list
   (`packages/cli/lib/view/vocab.ts`, `SCAFFOLDING_NAMES`), which can drift from
@@ -2030,10 +2032,10 @@ admits the module-safe subset (plain objects, arrays, `Map`→`FrozenMap`,
 `Set`→`FrozenSet`, non-global/non-sticky RegExp, primitives/bigint) and throws
 `PlainDataValidationError` on everything else
 (`SES_SANDBOXING_SPEC.md` §4.2.3; `packages/runner/src/sandbox/plain-data.ts`).
-The same classification serves both the AMD factory body and the per-module
-ESM record body (`classifyModuleItems` doc comment;
-`docs/specs/module-loading.md`); on the ESM path,
-write-once exports neutralize side effects smuggled into an accepted wrapper
+That classification runs on each per-module record body, through
+`verifyCompiledModuleBody` (`classifyModuleItems` doc comment;
+`docs/specs/module-loading.md` §"Security classification"). Write-once module
+exports neutralize side effects smuggled into an accepted wrapper
 argument (`__cf_data((exports.x = evil, 1))`), and pipeline-compiled bodies are
 required precisely because bare `ts.transpileModule` cannot produce the
 `__cf_data` wrapping (`packages/runner/src/sandbox/module-record-compiler.ts`).
@@ -2569,8 +2571,9 @@ only callers that omit the map entirely retain unstamped compatibility output.
 
 The runner's engine passes its `storedFilenameFor`
 (stripping the per-load `/${id}` module-path prefix and unmapping fabric-mount
-paths — see the prefix/identity-source-normalization discussion in
-`docs/specs/module-loading.md`), keeping claim and
+paths — see the per-load-prefix normalization discussion in
+`docs/specs/module-loading.md` §"Loader: per-module records in SES
+compartments"), keeping claim and
 provenance spellings load-independent and equal. Without the option the name
 is recorded verbatim: direct compiles (HTTP resolver, piece manifests) already
 present authored paths. Historical behavior — blindly stripping the first
@@ -2723,10 +2726,11 @@ until the verifier agrees (also stated in
   `hardeningHelper`/`bindingIdentityHelper` flags set only if its
   trivia-stripped statement text equals the trivia-stripped canonical source
   (`CANONICAL_HARDENING_HELPER`, `isFunctionHardeningHelperDeclaration`,
-  `registerFunctionStatement`). The design doc states the rule directly:
-  "canonical function-hardening (`__cfHardenFn(fn)`) and binding-identity
-  statements recognized by byte-equality to `sandbox-contract.ts` sources"
-  (`docs/specs/module-loading.md`). A same-named
+  `registerFunctionStatement`). The module-loading spec states the rule
+  directly: "canonical function-hardening (`__cfHardenFn(fn)`) and
+  binding-identity statements recognized by byte-equality to
+  `sandbox-contract.ts` sources"
+  (`docs/specs/module-loading.md` §"Security classification"). A same-named
   helper with a different body is just an ordinary function — and the module
   then fails on its call sites: pinned by the adversarial case "fake
   (non-canonical) __cfHardenFn laundering a callback"
@@ -2760,13 +2764,12 @@ until the verifier agrees (also stated in
 - **The helper is not a callback.** A trusted-builder callback referenced by
   name must resolve to a plain function binding, explicitly excluding
   `hardeningHelper` bindings (`resolveTrustedBuilderCallback`).
-- **Both loaders.** The AMD path runs this classification at compile and
-  again at evaluate (`CompiledBundleValidator.verify()`); the per-module ESM
-  path reuses the same `classifyModuleItems` core with empty guard sets
+- **Where it runs.** `verifyCompiledModuleBody` runs this classification once
+  per module body on the compile path, over the shared `classifyModuleItems`
+  core with empty guard sets
   (`packages/runner/src/sandbox/module-record-verifier.ts`;
-  `ModuleItemClassificationOptions` doc comment). The module-loading design
-  doc flags as an open question whether the canonical helper sources need an
-  ESM-emit variant if the two emits ever diverge.
+  `ModuleItemClassificationOptions` doc comment). There is one emit, so the
+  canonical helper sources have one byte form to match.
 
 Consequence for maintenance: the transformer's AST helper builders
 (`createFunctionHardeningHelper`, `createBindingIdentityHelper`) and the

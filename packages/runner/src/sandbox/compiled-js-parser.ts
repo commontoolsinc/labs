@@ -20,18 +20,6 @@ export interface ParsedFunction extends SourceRange {
   body: ParsedBlock;
 }
 
-export interface ParsedDefineCall {
-  statement: StatementChunk;
-  moduleId: string;
-  dependencies: string[];
-  factory: ParsedFunction;
-}
-
-export interface ParsedBundle {
-  body: ParsedBlock;
-  defineCalls: ParsedDefineCall[];
-}
-
 export class CompiledJsParseError extends Error {
   constructor(
     readonly offset: number,
@@ -47,26 +35,6 @@ interface ScanState {
   braceDepth: number;
   bracketDepth: number;
   regexAllowed: boolean;
-}
-
-export function parseCompiledBundleSource(
-  source: string,
-): ParsedBundle {
-  const outer = parseWrappedFunction(source);
-  const body = parseBlock(source, outer.body.start, outer.body.end);
-  const defineCalls: ParsedDefineCall[] = [];
-
-  for (const statement of body.statements) {
-    const defineCall = tryParseDefineCall(source, statement);
-    if (defineCall) {
-      defineCalls.push(defineCall);
-    }
-  }
-
-  return {
-    body,
-    defineCalls,
-  };
 }
 
 export function stripJsTrivia(
@@ -109,18 +77,6 @@ export function stripJsTrivia(
   }
 
   return output;
-}
-
-function parseBlock(
-  source: string,
-  start: number,
-  end: number,
-): ParsedBlock {
-  return {
-    start,
-    end,
-    statements: splitTopLevelStatements(source, start, end),
-  };
 }
 
 export function parseFunctionText(
@@ -196,66 +152,6 @@ export function parseFunctionText(
   };
 }
 
-export function tryParseDefineCall(
-  source: string,
-  statement: StatementChunk,
-): ParsedDefineCall | undefined {
-  const trimmed = trimRange(source, statement.start, statement.end);
-  if (!startsWithStatementWord(source, trimmed.start, trimmed.end, "define")) {
-    return undefined;
-  }
-  const openParen = skipTrivia(source, trimmed.start + 6, trimmed.end);
-  if (source.charCodeAt(openParen) !== 40) {
-    return undefined;
-  }
-  let cursor = skipTrivia(source, openParen + 1, trimmed.end);
-  const moduleIdEnd = scanArgumentTerminator(source, cursor, trimmed.end);
-  const moduleId = parseStringLiteralValue(source, cursor, moduleIdEnd);
-  cursor = expectComma(source, moduleIdEnd, trimmed.end);
-
-  const dependenciesStart = skipTrivia(source, cursor, trimmed.end);
-  const dependenciesOpen = expectChar(
-    source,
-    dependenciesStart,
-    trimmed.end,
-    "[",
-  );
-  const dependenciesClose = findMatchingDelimiter(
-    source,
-    dependenciesOpen,
-    "[",
-    "]",
-  );
-  const dependencies = parseStringArrayLiteral(
-    source,
-    dependenciesStart,
-    dependenciesClose + 1,
-  );
-  cursor = expectComma(source, dependenciesClose + 1, trimmed.end);
-
-  const factory = parseDefineFactoryFunctionAt(source, cursor, trimmed.end);
-  cursor = skipTrivia(source, factory.end, trimmed.end);
-  if (source.charCodeAt(cursor) !== 41) {
-    throw new CompiledJsParseError(cursor, "Expected ')'");
-  }
-  cursor = skipTrivia(source, cursor + 1, trimmed.end);
-  if (source.charCodeAt(cursor) === 59) {
-    cursor = skipTrivia(source, cursor + 1, trimmed.end);
-  }
-  if (cursor !== trimmed.end) {
-    throw new CompiledJsParseError(
-      cursor,
-      "AMD define() call contains trailing tokens",
-    );
-  }
-  return {
-    statement,
-    moduleId,
-    dependencies,
-    factory,
-  };
-}
-
 export function splitTopLevelCommaList(
   source: string,
   start: number,
@@ -296,90 +192,6 @@ export function splitTopLevelCommaList(
     parts.push(tail);
   }
   return parts;
-}
-
-function scanArgumentTerminator(
-  source: string,
-  start: number,
-  end: number,
-): number {
-  const state: ScanState = {
-    parenDepth: 0,
-    braceDepth: 0,
-    bracketDepth: 0,
-    regexAllowed: true,
-  };
-  let cursor = start;
-
-  while (cursor < end) {
-    const charCode = source.charCodeAt(cursor);
-    if (
-      (charCode === 44 || charCode === 41) &&
-      state.parenDepth === 0 &&
-      state.braceDepth === 0 &&
-      state.bracketDepth === 0
-    ) {
-      return cursor;
-    }
-    cursor = advanceScanner(source, cursor, end, state);
-  }
-
-  throw new CompiledJsParseError(
-    start,
-    "Call argument is missing a terminator",
-  );
-}
-
-function expectComma(
-  source: string,
-  start: number,
-  end: number,
-): number {
-  const cursor = skipTrivia(source, start, end);
-  if (source.charCodeAt(cursor) !== 44) {
-    throw new CompiledJsParseError(cursor, "Expected ','");
-  }
-  return skipTrivia(source, cursor + 1, end);
-}
-
-function parseDefineFactoryFunctionAt(
-  source: string,
-  start: number,
-  end: number,
-): ParsedFunction {
-  const functionStart = skipTrivia(source, start, end);
-  const functionKeyword = readLeadingIdentifier(
-    source,
-    functionStart,
-    end,
-  );
-  if (functionKeyword?.text !== "function") {
-    throw new CompiledJsParseError(
-      functionStart,
-      "Expected a direct function expression",
-    );
-  }
-
-  let cursor = skipTrivia(source, functionKeyword.end, end);
-  const maybeName = tryReadIdentifier(source, cursor, end);
-  if (maybeName) {
-    cursor = skipTrivia(source, maybeName.end, end);
-  }
-
-  const openParen = expectChar(source, cursor, end, "(");
-  const closeParen = findMatchingDelimiter(source, openParen, "(", ")");
-  const bodyStart = skipTrivia(source, closeParen + 1, end);
-  const openBrace = expectChar(source, bodyStart, end, "{");
-  const parsedBody = parseBraceDelimitedBlock(source, openBrace, end);
-  return {
-    start: functionStart,
-    end: parsedBody.closeBrace + 1,
-    params: parseParameterNames(
-      source.slice(openParen + 1, closeParen),
-      openParen + 1,
-    ),
-    body: parsedBody.block,
-  };
 }
 
 export function findTopLevelEquals(
@@ -439,171 +251,6 @@ export function locationFromOffset(
     }
   }
   return { line, column };
-}
-
-function parseWrappedFunction(source: string): ParsedFunction {
-  const trimmed = trimRange(source, 0, source.length);
-  if (trimmed.start === trimmed.end) {
-    throw new CompiledJsParseError(0, "Compiled bundle cannot be empty");
-  }
-
-  let fastRange = trimmed;
-  if (source[fastRange.end - 1] === ";") {
-    fastRange = trimRange(source, fastRange.start, fastRange.end - 1);
-  }
-  try {
-    return parseFunctionText(source, fastRange.start, fastRange.end);
-  } catch {
-    // Fall back to the more defensive unwrapping logic below.
-  }
-
-  const candidates: SourceRange[] = [];
-  const pushCandidate = (range: SourceRange) => {
-    for (const candidate of candidates) {
-      if (candidate.start === range.start && candidate.end === range.end) {
-        return;
-      }
-    }
-    candidates.push(range);
-  };
-
-  const stripped = stripWholeParentheses(source, trimmed.start, trimmed.end);
-  pushCandidate(stripped);
-
-  let semicolonTrimmed = stripped;
-  if (source[semicolonTrimmed.end - 1] === ";") {
-    semicolonTrimmed = trimRange(
-      source,
-      semicolonTrimmed.start,
-      semicolonTrimmed.end - 1,
-    );
-    pushCandidate(stripWholeParentheses(
-      source,
-      semicolonTrimmed.start,
-      semicolonTrimmed.end,
-    ));
-  }
-
-  let manuallyUnwrapped = semicolonTrimmed;
-  while (
-    manuallyUnwrapped.start < manuallyUnwrapped.end &&
-    source[manuallyUnwrapped.start] === "(" &&
-    source[manuallyUnwrapped.end - 1] === ")"
-  ) {
-    manuallyUnwrapped = trimRange(
-      source,
-      manuallyUnwrapped.start + 1,
-      manuallyUnwrapped.end - 1,
-    );
-    pushCandidate(manuallyUnwrapped);
-    const manuallyStripped = stripWholeParentheses(
-      source,
-      manuallyUnwrapped.start,
-      manuallyUnwrapped.end,
-    );
-    pushCandidate(manuallyStripped);
-    if (
-      manuallyStripped.start === manuallyUnwrapped.start &&
-      manuallyStripped.end === manuallyUnwrapped.end
-    ) {
-      break;
-    }
-    manuallyUnwrapped = manuallyStripped;
-  }
-
-  let lastError: unknown;
-  for (const candidate of candidates) {
-    try {
-      return parseFunctionText(source, candidate.start, candidate.end);
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  if (lastError instanceof Error) {
-    throw lastError;
-  }
-  throw new CompiledJsParseError(0, "Expected a direct function expression");
-}
-
-function splitTopLevelStatements(
-  source: string,
-  start: number,
-  end: number,
-): StatementChunk[] {
-  const statements: StatementChunk[] = [];
-  let cursor = skipTrivia(source, start, end);
-
-  while (cursor < end) {
-    const statementStart = cursor;
-    const blockKeyword = readLeadingBlockTerminatedKeyword(source, cursor, end);
-    const blockTerminated = blockKeyword !== undefined;
-    const state: ScanState = {
-      parenDepth: 0,
-      braceDepth: 0,
-      bracketDepth: 0,
-      regexAllowed: true,
-    };
-
-    while (cursor < end) {
-      const beforeBraceDepth = state.braceDepth;
-      const before = cursor;
-      const charCode = source.charCodeAt(cursor);
-      cursor = advanceScanner(source, cursor, end, state);
-
-      if (
-        charCode === 59 &&
-        state.parenDepth === 0 &&
-        state.braceDepth === 0 &&
-        state.bracketDepth === 0
-      ) {
-        statements.push({
-          start: statementStart,
-          end: cursor,
-        });
-        break;
-      }
-
-      if (
-        blockTerminated &&
-        charCode === 125 &&
-        beforeBraceDepth === 1 &&
-        state.parenDepth === 0 &&
-        state.braceDepth === 0 &&
-        state.bracketDepth === 0 &&
-        blockKeyword !== undefined &&
-        shouldTerminateAfterBlock(source, cursor, end, blockKeyword)
-      ) {
-        statements.push({
-          start: statementStart,
-          end: cursor,
-        });
-        break;
-      }
-
-      if (cursor === before) {
-        throw new CompiledJsParseError(
-          cursor,
-          "Parser did not make progress",
-        );
-      }
-    }
-
-    if (cursor >= end) {
-      const tail = trimRange(source, statementStart, end);
-      if (tail.start < tail.end) {
-        statements.push({
-          start: statementStart,
-          end,
-        });
-      }
-      break;
-    }
-
-    cursor = skipTrivia(source, cursor, end);
-  }
-
-  return statements;
 }
 
 function parseBraceDelimitedBlock(
@@ -812,27 +459,6 @@ function extractSimpleParameterName(param: string): string {
     ? param
     : param.slice(0, equals).trim();
   return candidate;
-}
-
-function parseStringArrayLiteral(
-  source: string,
-  start: number,
-  end: number,
-): string[] {
-  const trimmed = trimRange(source, start, end);
-  const open = expectChar(source, trimmed.start, trimmed.end, "[");
-  const close = findMatchingDelimiter(source, open, "[", "]");
-  const after = skipTrivia(source, close + 1, trimmed.end);
-  if (after !== trimmed.end) {
-    throw new CompiledJsParseError(
-      after,
-      "Array literal contains trailing tokens",
-    );
-  }
-  const elements = splitTopLevelCommaList(source, open + 1, close);
-  return elements.map((element) =>
-    parseStringLiteralValue(source, element.start, element.end)
-  );
 }
 
 export function parseStringLiteralValue(

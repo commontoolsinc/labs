@@ -135,7 +135,7 @@ describe("Error IPC propagation", () => {
 
     // This is what a BAD (untransformed) stack looks like - hash filenames
     const rawStack =
-      `Error: something broke\n    at Object.eval [as factory] (ba4jcbcoh3wqzgaq3x6v36c625ycvssvqewtr563cg2osp66t4jzls7cb.js, <anonymous>:1:1234)\n    at AMDLoader.resolveModule (ba4jcbcoh3wqzgaq3x6v36c625ycvssvqewtr563cg2osp66t4jzls7cb.js, <anonymous>:1:5678)`;
+      `Error: something broke\n    at Object.eval [as factory] (ba4jcbcoh3wqzgaq3x6v36c625ycvssvqewtr563cg2osp66t4jzls7cb.js, <anonymous>:1:1234)\n    at Loader.resolveModule (ba4jcbcoh3wqzgaq3x6v36c625ycvssvqewtr563cg2osp66t4jzls7cb.js, <anonymous>:1:5678)`;
 
     transport.simulateMessage({
       type: NotificationType.ErrorReport,
