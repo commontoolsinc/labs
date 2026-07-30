@@ -56,7 +56,7 @@ import {
   recordRelevantSchemaWritePolicyInput,
 } from "../cell.ts";
 import { resolveLinkScope } from "../scope.ts";
-import { type CellScope, ID, NAME, type Pattern } from "../builder/types.ts";
+import { type CellScope, NAME, type Pattern } from "../builder/types.ts";
 import { resolveStoredPatternAsync } from "./op-pattern-ref.ts";
 import { getEntityId } from "../create-ref.ts";
 import {
@@ -3148,16 +3148,25 @@ export function llmDialog(
 
           // Before starting request, set pending and append the new message.
           pending.withTx(tx).set(true);
-          inputs.key("messages").withTx(tx).push(
-            {
-              ...event,
-              // Add ID manually, as for built-ins this isn't automated
-              // TODO(seefeld): Once we have event ids, it should be that.
-              [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
-              // Cast because we can't yet express ArrayBuffer in JSON Schema
-            } as Schema<
-              typeof LLMMessageSchema
-            >,
+          // Each message becomes its own document, which the LlmDerived
+          // stamping downstream relies on. Built-ins do not get automatic
+          // entity splitting, so the document is made explicitly and its link
+          // pushed. The link is taken relative to the messages cell so it
+          // stores bare, exactly as an automatically split element does.
+          // TODO(seefeld): Once we have event ids, the cause should be that.
+          const messagesForPush = inputs.key("messages");
+          const messageCell = runtime.getCell(
+            messagesForPush.getAsNormalizedFullLink().space,
+            { llmDialog: { message: cause, id: crypto.randomUUID() } },
+            undefined,
+            tx,
+          );
+          messageCell.withTx(tx).set(
+            // Cast because we can't yet express ArrayBuffer in JSON Schema
+            { ...event } as Schema<typeof LLMMessageSchema>,
+          );
+          messagesForPush.withTx(tx).push(
+            messageCell.getAsLink({ base: messagesForPush }) as never,
           );
 
           // Set up new request (abort existing ones just in case) by allocating
@@ -3423,7 +3432,24 @@ async function startRequest(
     const startIndex = (messagesCell.withTx(tx).get() as
       | readonly CfcConfClause[]
       | undefined)?.length ?? 0;
-    messagesCell.withTx(tx).push(...messages);
+    // Each message becomes its own document, which the stamping below reads
+    // back. Built-ins get no automatic entity splitting, so the documents are
+    // made here explicitly. Links are taken relative to the messages cell, so
+    // they store bare -- the same shape an automatically split element has.
+    // TODO(seefeld): Once we have event ids, the cause should be that.
+    const space = messagesCell.getAsNormalizedFullLink().space;
+    messagesCell.withTx(tx).push(
+      ...messages.map((message) => {
+        const messageCell = runtime.getCell(
+          space,
+          { llmDialog: { message: cause, id: crypto.randomUUID() } },
+          undefined,
+          tx,
+        );
+        messageCell.withTx(tx).set(message);
+        return messageCell.getAsLink({ base: messagesCell }) as never;
+      }),
+    );
     if (runtime.cfcEnforcementMode === "disabled") {
       return;
     }
@@ -3655,11 +3681,10 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
           "LLM returned invalid/empty content, adding error message",
         );
         const errorMessage = {
-          [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
           role: "assistant",
           content:
             "I encountered an error generating a response. Please try again.",
-        } satisfies BuiltInLLMMessage & { [ID]: unknown };
+        } satisfies BuiltInLLMMessage;
 
         await safelyPerformUpdate(
           runtime,
@@ -3667,8 +3692,18 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
           internal,
           requestId,
           (tx) => {
-            messagesCell.withTx(tx).push(
+            // As above: its own document, made explicitly, link stored bare.
+            const errorCell = runtime.getCell(
+              messagesCell.getAsNormalizedFullLink().space,
+              { llmDialog: { message: cause, id: crypto.randomUUID() } },
+              undefined,
+              tx,
+            );
+            errorCell.withTx(tx).set(
               errorMessage as Schema<typeof LLMMessageSchema>,
+            );
+            messagesCell.withTx(tx).push(
+              errorCell.getAsLink({ base: messagesCell }) as never,
             );
             pending.withTx(tx).set(false);
           },
@@ -3688,11 +3723,6 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             llmContent,
             toolCallParts,
           );
-
-          // Add ID to assistant message and publish immediately
-          (assistantMessage as BuiltInLLMMessage & { [ID]: unknown })[ID] = {
-            llmDialog: { message: cause, id: crypto.randomUUID() },
-          };
 
           await safelyPerformUpdate(
             runtime,
@@ -3758,10 +3788,9 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
             );
             // Add error message instead of invalid partial results
             const errorMessage = {
-              [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
               role: "assistant",
               content: "Some tool calls failed to execute. Please try again.",
-            } satisfies BuiltInLLMMessage & { [ID]: unknown };
+            } satisfies BuiltInLLMMessage;
 
             await safelyPerformUpdate(
               runtime,
@@ -3780,12 +3809,6 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
 
           // Create and publish tool result messages
           const toolResultMessages = createToolResultMessages(toolResults);
-
-          toolResultMessages.forEach((message) => {
-            (message as BuiltInLLMMessage & { [ID]: unknown })[ID] = {
-              llmDialog: { message: cause, id: crypto.randomUUID() },
-            };
-          });
 
           const success = await safelyPerformUpdate(
             runtime,
@@ -3875,10 +3898,9 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
       } else {
         // No tool calls, just add the assistant message
         const assistantMessage = {
-          [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
           role: "assistant",
           content: llmResult.content,
-        } satisfies BuiltInLLMMessage & { [ID]: unknown };
+        } satisfies BuiltInLLMMessage;
 
         // Ignore errors here, it probably means something else took over.
         await safelyPerformUpdate(
@@ -3910,11 +3932,10 @@ Some operations (especially \`invoke()\` with patterns) create "Pages" - running
         ? error.message
         : String(error);
       const errorMessage = {
-        [ID]: { llmDialog: { message: cause, id: crypto.randomUUID() } },
         role: "assistant",
         content:
           `I encountered an error generating a response: ${errorMessageText}`,
-      } satisfies BuiltInLLMMessage & { [ID]: unknown };
+      } satisfies BuiltInLLMMessage;
 
       safelyPerformUpdate(runtime, pending, internal, requestId, (tx) => {
         messagesCell.withTx(tx).push(
