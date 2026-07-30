@@ -123,8 +123,11 @@ const fabricAwareEqual = (left: unknown, right: unknown): boolean => {
  * anything provable here: pattern setup re-stages the piece's stored argument
  * against the incoming schema and validates it inside the setup transaction, so
  * an update whose durable argument the new schema cannot read is refused
- * instead of landing over unreadable state (`Runner.applySetupState` →
- * `validateArgument`; `packages/runner/test/pattern-update-argument-validation.test.ts`).
+ * instead of landing over unreadable state. Two sites do the checking, because
+ * a piece that is already RUNNING must not be re-staged: `Runner.applySetupState`
+ * re-points and validates a stopped piece's argument, while
+ * `Runner.validateStoredArgument` checks a running one in place and moves
+ * nothing (`packages/runner/test/pattern-update-argument-validation.test.ts`).
  *
  * That check defers two cases, and the waiver is only as strong as they allow:
  *

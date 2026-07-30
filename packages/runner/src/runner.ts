@@ -1354,6 +1354,14 @@ export class Runner {
     if (argument === undefined && setupState.sameStoredSetup) {
       if (setupState.restageStoredArgument) {
         this.validateStoredArgument(tx, resultCell, pattern);
+      } else {
+        // The marker names THIS pattern, so the running graph is this pattern
+        // and recording its result schema cannot describe a version that is not
+        // there. Suppressing the write above is about the stale-marker case
+        // only; a piece whose `schema` meta is missing or stale-but-same-version
+        // still gets it repaired here, which is what keeps its reads typed and
+        // its durable write contract present.
+        this.updateResultSchemaMeta(tx, resultCell, pattern.resultSchema);
       }
       return { resultCell, needsStart: false };
     }

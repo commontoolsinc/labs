@@ -406,6 +406,178 @@ describe("pattern update validates the stored argument", () => {
     ).toEqual(v1.resultSchema);
   });
 
+  /**
+   * Put a RUNNING piece into the stale-marker state: it runs `vintage`, the
+   * pointer names `candidate`, and the swap refused so the graph never moved.
+   * The repair below then takes the in-place validation path.
+   */
+  const runningWithStaleMarker = async (
+    cause: string,
+    vintageArgument: unknown,
+  ) => {
+    const tx = rt.edit();
+    const pm = rt.patternManager;
+    const v1 = await pm.compilePattern(openArgument("v1"), { space, tx });
+    const v2 = await pm.compilePattern(typedCount("v2"), { space, tx });
+    const v2Ref = pm.getArtifactEntryRef(v2)!;
+    const cell = rt.getCell<Record<string, unknown>>(
+      space,
+      cause,
+      undefined,
+      tx,
+    );
+    const running = rt.run(tx, v1, vintageArgument, cell);
+    await tx.commit();
+    await running.pull();
+
+    // A wrong-typed argument makes the swap refuse, so the piece stays on V1
+    // under a pointer reading V2. It is replaced afterwards by the caller's
+    // real subject, so the refusal here is only scaffolding.
+    const { error: badError } = await rt.editWithRetry((wtx) => {
+      rt.getCellFromLink(getMetaLink(cell, "argument")!, undefined, wtx)
+        .asSchema(undefined as never)
+        .set({ count: "seven" } as never);
+    });
+    expect(badError?.message).toBeUndefined();
+    const tx2 = rt.edit();
+    cell.withTx(tx2).setMetaRaw("patternIdentity", {
+      identity: v2Ref.identity,
+      symbol: v2Ref.symbol,
+    });
+    await tx2.commit();
+    await rt.idle();
+    await cell.pull();
+    expect(
+      (cell.getAsQueryResult() as { marker: string }).marker,
+      "the swap did not refuse, so the piece is not in the stale-marker state",
+    ).toBe("v1");
+    return { cell, v2 };
+  };
+
+  const repairInPlace = async (
+    cell: Cell<Record<string, unknown>>,
+    pattern: Awaited<ReturnType<Runtime["patternManager"]["compilePattern"]>>,
+  ) => {
+    let error: string | undefined;
+    try {
+      await rt.runSynced(cell.withTx(), pattern, undefined, {});
+    } catch (thrown) {
+      error = thrown instanceof Error ? thrown.message : String(thrown);
+    }
+    await rt.idle();
+    await rt.storageManager.synced();
+    return error;
+  };
+
+  it("defers a COLD LINK slot on the in-place validation path", async () => {
+    // CT-1917 on the running-reuse route. The in-place check is a second
+    // validation site, and it only stays correct while it defers what the
+    // re-stage defers — otherwise every running piece whose argument slot links
+    // into a doc that has not synced starts refusing its own repair.
+    const { cell, v2 } = await runningWithStaleMarker(
+      "in-place-cold-link",
+      { count: 1 },
+    );
+    const absent = rt.getCell<number>(space, "in-place-cold-link-target");
+    const { error: writeError } = await rt.editWithRetry((wtx) => {
+      rt.getCellFromLink(getMetaLink(cell, "argument")!, undefined, wtx)
+        .asSchema(undefined as never)
+        .set({ count: absent } as never);
+    });
+    expect(writeError?.message).toBeUndefined();
+    await rt.idle();
+
+    expect(
+      await repairInPlace(cell, v2),
+      "a slot whose link cannot be dereferenced right now was refused on the " +
+        "in-place path, which fails the repair of every running piece whose " +
+        "argument links into a doc that has not synced (CT-1917)",
+    ).toBeUndefined();
+  });
+
+  it("defers an argument doc that reads NOTHING on the in-place path", async () => {
+    // The other half of the same deferral: a nested piece's argument lives in
+    // its HOST's document, so when the host is down the whole doc reads cold.
+    // Validating bare defaults against the candidate would refuse a piece whose
+    // argument is simply not loaded yet.
+    const { cell, v2 } = await runningWithStaleMarker(
+      "in-place-cold-doc",
+      { count: 1 },
+    );
+    const coldArgument = rt.getCell<Record<string, unknown>>(
+      space,
+      "in-place-cold-argument-doc",
+    );
+    const { error: retargetError } = await rt.editWithRetry((wtx) => {
+      cell.withTx(wtx).setMetaRaw(
+        "argument",
+        coldArgument.getAsWriteRedirectLink({ base: cell }),
+      );
+    });
+    expect(retargetError?.message).toBeUndefined();
+    await rt.idle();
+
+    expect(
+      await repairInPlace(cell, v2),
+      "an argument doc that reads nothing right now was treated as invalid on " +
+        "the in-place path, so a nested piece under an unsynced host cannot " +
+        "be repaired (CT-1917)",
+    ).toBeUndefined();
+  });
+
+  it("still repairs a missing result schema on a piece running THIS version", async () => {
+    // The counterweight to the half-swap guard, and the line between them.
+    //
+    // Suppressing the result-schema write on the reuse path is only correct
+    // when the running graph might not be this pattern — a STALE setup marker.
+    // When the marker names this exact pattern the running graph IS it, so
+    // writing its schema is safe, and skipping it drops a real repair: a piece
+    // whose `schema` meta is missing reads back schema-less, which costs
+    // `getResultCellWithSourceSchema` its type, `durableSourceContract` its
+    // "write destination has no durable schema contract" precondition, and
+    // `derivePersistedLinkLabel` its same-transaction hatch.
+    const { cell } = await setupVintage(
+      openArgument("v1"),
+      { count: 7 },
+      "schema-meta-repair",
+    );
+    const pattern = await rt.patternManager.compilePattern(openArgument("v1"), {
+      space,
+    });
+    await rt.runSynced(cell.withTx(), pattern, undefined, {});
+    await rt.idle();
+
+    const meta = (c: typeof cell) =>
+      (c as unknown as { getMetaRaw: (k: string) => unknown }).getMetaRaw(
+        "schema",
+      );
+    expect(meta(cell), "the piece never had a result schema to lose")
+      .toBeDefined();
+
+    // Strip it, the state a piece written before the meta existed is in.
+    const { error: stripError } = await rt.editWithRetry((tx) => {
+      cell.withTx(tx).setMetaRaw("schema", undefined);
+    });
+    expect(stripError?.message).toBeUndefined();
+    await rt.idle();
+    await cell.sync();
+    expect(meta(cell)).toBeUndefined();
+
+    // Re-run setup for the SAME version. The marker names this pattern, so the
+    // running graph is this pattern, and the repair must land.
+    await rt.runSynced(cell.withTx(), pattern, undefined, {});
+    await rt.idle();
+    await rt.storageManager.synced();
+    await cell.sync();
+
+    expect(
+      meta(cell),
+      "a piece running THIS version no longer has its missing result schema " +
+        "repaired — the reuse path suppresses the write for the stale-marker " +
+        "case and took the same-version case with it",
+    ).toEqual(pattern.resultSchema);
+  });
+
   it("does not classify a failure that merely mentions the refusal", () => {
     // The counterweight to the assertion above, and the reason the prefix is
     // matched at the START. The escalation this classifier gates REPLACES a

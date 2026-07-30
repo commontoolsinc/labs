@@ -709,6 +709,13 @@ export class PiecesController<T = unknown> {
         // identically, so without this the root would be pinned to a version
         // whose setup can never complete and the space would stop opening.
         //
+        // Both classifiers read the error, not the document it came from, so a
+        // refusal raised while instantiating a NESTED piece under this root
+        // reads the same as one raised for the root itself. That is a property
+        // of classifying by message rather than by origin, and it is shared
+        // with the CFC trigger; narrowing it means carrying the failing
+        // document through the setup boundary.
+        //
         // Any OTHER repair failure (transient storage/commit error, backend
         // unavailable, …) is NOT evidence the pinned pattern is wrong. It stays
         // FAIL-CLOSED: surface the ORIGINAL start error, change nothing, let
