@@ -79,5 +79,37 @@ describe(
       // The caller owns the close, which is the other half of the contract.
       await reader.dispose();
     });
+
+    it("RAISES a teardown that does not complete", async () => {
+      // The other half of "the store is the caller's": the caller is about to
+      // read what this run wrote, so a teardown that did not finish must not be
+      // reported as a completed run. `captureVintage` turns the throw into a
+      // refused capture rather than a fixture silently missing state.
+      //
+      // Driven by a store whose `synced()` always rejects, which is what the
+      // teardown drain awaits. The run itself fails too — that is fine and not
+      // what this pins; the claim is that the failure REACHES the caller rather
+      // than being logged and swallowed.
+      const identity = await Identity.fromPassphrase("cli storage host raise");
+      const wedged = StorageManager.emulate({ as: identity });
+      // Patched on the INSTANCE, not through a Proxy: the manager reads private
+      // class fields, and a Proxy receiver makes `#telemetry` throw before the
+      // wedge under test is ever reached.
+      (wedged as { synced: () => Promise<void> }).synced = () =>
+        Promise.reject(new Error("wedged store"));
+
+      await expect(
+        runTestPattern(resolve(FIXTURES, "counter.test.tsx"), {
+          root: FIXTURES,
+          storageHost: {
+            identity,
+            storageManager: wedged,
+            resultCause: RESULT_CAUSE,
+          },
+        }),
+      ).rejects.toThrow("wedged store");
+
+      await wedged.close();
+    });
   },
 );
