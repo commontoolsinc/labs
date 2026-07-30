@@ -337,18 +337,38 @@ function declaredCellScope(
 }
 
 /**
+ * Mutable state threaded through a single `normalizeAndDiff()` walk.
+ */
+export interface DiffWalkState {
+  /** Shared-reference / cycle tracking: source value → normalized link. */
+  seen: Map<any, NormalizedFullLink>;
+  /**
+   * When present, a plain object sitting in an array that is not already a
+   * link gets anchored into an entity document of its own, its id drawn from
+   * this source. Writers running under a builder frame supply the frame's id
+   * counter; frameless writes leave it unset, and such elements store inline.
+   */
+  nextAnchorId?: () => string | number;
+}
+
+/**
  * Traverses newValue and updates `current` and any relevant linked documents.
  *
  * Returns true if any changes were made.
  *
- * When encountering an object with a `[ID]` property, it'll be used to compute
- * an entity id based on it's relative location and the passed context, and the
- * changes will be written to that entity.
+ * A plain object sitting in an array becomes an entity document of its own
+ * when `anchorIds` is supplied, its id drawn from that source; an object
+ * carrying an explicit `[ID]` property does so anywhere, with the property's
+ * value as the id seed. Either way the entity id also derives from the
+ * object's relative location and the passed context, and the changes are
+ * written to that entity.
  *
  * @param current - A doc link to the current value to compare against.
  * @param newValue - The new value to traverse.
  * @param log - The log to write to.
  * @param context - The context of the change.
+ * @param anchorIds - The id source for anchoring array-element objects
+ * (typically a builder frame's counter, see `frameAnchorIds()`).
  * @returns Whether any changes were made.
  */
 export function diffAndUpdate(
@@ -358,6 +378,7 @@ export function diffAndUpdate(
   newValue: unknown,
   context?: unknown,
   options?: IReadOptions,
+  anchorIds?: () => string | number,
 ): boolean {
   const readOptions: IReadOptions = {
     ...options,
@@ -374,6 +395,7 @@ export function diffAndUpdate(
     newValue,
     context,
     readOptions,
+    { seen: new Map(), nextAnchorId: anchorIds },
   );
   diffLogger.debug(
     "diff",
@@ -397,12 +419,96 @@ export type ChangeSet = {
 }[];
 
 /**
+ * Turns `content` into an entity document of its own: the slot at `link` gets
+ * a link to a (possibly new) document whose id derives from `idSeed`, the
+ * slot's location, and the passed context, and `content` is diffed into that
+ * document. When the slot is an array element, the id derives from the
+ * nearest non-array ancestor location, so an element's identity does not
+ * depend on its position in the array.
+ *
+ * `registerKey` is the caller's original value (which may differ from
+ * `content` when a directive was stripped off it); it is registered in
+ * `state.seen` so shared references to it resolve to the same document.
+ */
+function anchorValueAsEntity(
+  runtime: Runtime,
+  tx: IExtendedStorageTransaction,
+  link: NormalizedFullLink,
+  content: FabricPlainObject,
+  registerKey: unknown,
+  idSeed: unknown,
+  context: unknown,
+  options: IReadOptions | undefined,
+  state: DiffWalkState,
+): ChangeSet {
+  let path = link.path;
+
+  // If we're setting an array element, make the array the context for the
+  // derived id, not the array index. If it's a nested array, take the parent
+  // array as context, recursively.
+  while (
+    path.length > 0 &&
+    Array.isArray(
+      tx.readValueOrThrow({ ...link, path: path.slice(0, -1) }, options),
+    )
+  ) {
+    path = path.slice(0, -1);
+  }
+
+  const entityId = createRef({ id: idSeed }, {
+    parent: { id: link.id, space: link.space },
+    path,
+    context,
+  });
+
+  const newEntryLink: NormalizedFullLink = {
+    id: toURI(entityId),
+    space: link.space,
+    scope: link.scope,
+    path: [],
+    schema: resolveSchemaForValue(link.schema, content),
+  };
+
+  state.seen.set(registerKey, newEntryLink);
+
+  // When a child value becomes its own entity document, carry the child
+  // schema over so CFC metadata can be prepared for that new document too.
+  recordRelevantSchemaWritePolicyInput(tx, newEntryLink, newEntryLink.schema);
+
+  return [
+    // If it wasn't already, set the current value to be a doc link to this doc
+    ...normalizeAndDiff(
+      runtime,
+      tx,
+      link,
+      createSigilLinkFromParsedLink(newEntryLink, { base: link }),
+      context,
+      options,
+      state,
+    ),
+    // And see whether the value of the document itself changed
+    ...normalizeAndDiff(
+      runtime,
+      tx,
+      newEntryLink,
+      content,
+      context,
+      options,
+      state,
+    ),
+  ];
+}
+
+/**
  * Traverses objects and returns an array of changes that should be written. An
  * empty array means no changes.
  *
- * When encountering an object with a `[ID]` property, it'll be used to compute
- * an entity id based on it's relative location and the passed context, and the
- * changes will be queued to be written to that entity.
+ * A plain object sitting in an array becomes an entity document of its own
+ * when the walk state carries an id source (`nextAnchorId`, supplied by
+ * writers running under a builder frame); an object carrying an explicit
+ * `[ID]` directive does so anywhere, with the directive's value as the id
+ * seed. Either way the changes are queued to be written to that entity, and
+ * the slot holds a link to it.
  *
  * Otherwise, when traversing and if the new value is a regular JSON value, but
  * the old value is an alias, follow the alias before writing. However document
@@ -424,7 +530,7 @@ export function normalizeAndDiff(
   newValue: unknown,
   context?: unknown,
   options?: IReadOptions,
-  seen: Map<any, NormalizedFullLink> = new Map(),
+  state: DiffWalkState = { seen: new Map() },
   precomputedCurrent: unknown = NO_PRECOMPUTED,
   // Whether the PARENT object's schema lists this slot in `required`
   // (threaded one hop by the object branch below; undefined = unknown).
@@ -432,6 +538,12 @@ export function normalizeAndDiff(
   // read when the parent requires the property, so optional slots stay
   // quiet (ubik2's criterion on #4561).
   slotRequiredByParent?: boolean,
+  // Whether this call's `newValue` arrived as an element of an array in the
+  // WRITTEN tree (threaded one hop by the array branch below, and forwarded
+  // by re-entries that keep the value while changing the target link). The
+  // written tree's structure is what decides anchoring eligibility -- the
+  // stored parent may not exist yet on a fresh array's first write.
+  isArrayElement: boolean = false,
 ): ChangeSet {
   const changes: ChangeSet = [];
 
@@ -448,13 +560,13 @@ export function normalizeAndDiff(
 
   // When detecting a circular reference on JS objects, turn it into a cell,
   // which below will be turned into a relative link.
-  if (seen.has(newValue)) {
+  if (state.seen.has(newValue)) {
     diffLogger.debug(
       "diff",
       () =>
         `[SEEN_CHECK] Already seen object at path=${pathStr}, converting to cell`,
     );
-    newValue = new CellImpl(runtime, tx, seen.get(newValue)!);
+    newValue = new CellImpl(runtime, tx, state.seen.get(newValue)!);
   }
 
   // Scope narrowing: if this slot's schema declares a scope narrower than the
@@ -487,7 +599,10 @@ export function normalizeAndDiff(
         newValue,
         context,
         options,
-        seen,
+        state,
+        NO_PRECOMPUTED,
+        undefined,
+        isArrayElement,
       ),
       // The broader-scope slot points to that instance.
       ...normalizeAndDiff(
@@ -497,7 +612,7 @@ export function normalizeAndDiff(
         createSigilLinkFromParsedLink(scopedLink, { base: link }) as unknown,
         context,
         options,
-        seen,
+        state,
       ),
     ];
   }
@@ -641,7 +756,7 @@ export function normalizeAndDiff(
       findAndInlineDataUriLinks(newValue),
       context,
       options,
-      seen,
+      state,
     );
   }
 
@@ -715,7 +830,10 @@ export function normalizeAndDiff(
       newValue,
       context,
       options,
-      seen,
+      state,
+      NO_PRECOMPUTED,
+      undefined,
+      isArrayElement,
     );
   }
 
@@ -746,7 +864,10 @@ export function normalizeAndDiff(
         newValue,
         context,
         options,
-        seen,
+        state,
+        NO_PRECOMPUTED,
+        undefined,
+        isArrayElement,
       );
     }
   }
@@ -787,7 +908,7 @@ export function normalizeAndDiff(
         snapshot,
         context,
         options,
-        seen,
+        state,
       );
     }
     if (
@@ -894,67 +1015,25 @@ export function normalizeAndDiff(
     const { [ID]: id, ...rest } = idValue as
       & { [ID]: string }
       & FabricPlainObject;
-    let path = link.path;
-
-    // If we're setting an array element, make the array the context for the
-    // derived id, not the array index. If it's a nested array, take the parent
-    // array as context, recursively.
-    while (
-      path.length > 0 &&
-      Array.isArray(
-        tx.readValueOrThrow({ ...link, path: path.slice(0, -1) }, options),
-      )
-    ) {
-      path = path.slice(0, -1);
-    }
-
-    const entityId = createRef({ id }, {
-      parent: { id: link.id, space: link.space },
-      path,
+    return anchorValueAsEntity(
+      runtime,
+      tx,
+      link,
+      rest,
+      newValue,
+      id,
       context,
-    });
-
-    const newEntryLink: NormalizedFullLink = {
-      id: toURI(entityId),
-      space: link.space,
-      scope: link.scope,
-      path: [],
-      schema: resolveSchemaForValue(link.schema, rest),
-    };
-
-    seen.set(newValue, newEntryLink);
-
-    // When a child value becomes its own entity document, carry the child
-    // schema over so CFC metadata can be prepared for that new document too.
-    recordRelevantSchemaWritePolicyInput(tx, newEntryLink, newEntryLink.schema);
-
-    return [
-      // If it wasn't already, set the current value to be a doc link to this doc
-      ...normalizeAndDiff(
-        runtime,
-        tx,
-        link,
-        createSigilLinkFromParsedLink(newEntryLink, { base: link }),
-        context,
-        options,
-        seen,
-      ),
-      // And see whether the value of the document itself changed
-      ...normalizeAndDiff(
-        runtime,
-        tx,
-        newEntryLink,
-        rest,
-        context,
-        options,
-        seen,
-      ),
-    ];
+      options,
+      state,
+    );
   }
 
   // Convert the (top level of) the value to fabric form (a valid `FabricValue`)
   // if it isn't already, or throw if it's neither already valid nor
-  // convertible.
+  // convertible. The pre-conversion value is kept: shared references and
+  // cycles arrive under that identity, so it is what anchoring registers in
+  // `state.seen`.
+  const preConversionValue = newValue;
   const fabricValue = shallowFabricFromNativeValue(newValue);
   if (fabricValue !== newValue) {
     diffLogger.debug(
@@ -963,6 +1042,43 @@ export function normalizeAndDiff(
         `[TO_STORABLE_VALUE] Converted ${typeof newValue} at path=${pathStr}`,
     );
     newValue = fabricValue;
+  }
+
+  // Anchor a plain object sitting in an array into an entity document of its
+  // own, so mutable arrays hold links rather than inline objects. Only a
+  // writer that supplied an id source (i.e. one running under a builder
+  // frame) anchors, and the source is consumed once per eligible element in
+  // traversal order, so the derived ids do not depend on the currently stored
+  // state. Cells, links, and query results were consumed by earlier branches,
+  // and atomic fabric objects are excluded here; arrays never anchor, only
+  // the objects inside them.
+  if (
+    state.nextAnchorId !== undefined &&
+    isArrayElement &&
+    isObject(newValue) &&
+    !(newValue instanceof FabricSpecialObject) &&
+    !isCellLink(newValue)
+  ) {
+    diffLogger.debug(
+      "diff",
+      () => `[BRANCH_ANCHOR] Anchoring array element at path=${pathStr}`,
+    );
+    // The content must be a distinct object from the registered one: the
+    // recursion that writes it into the entity document would otherwise find
+    // the value in `state.seen` and no-op as a self-reference, and the
+    // document would never be written. A shallow copy keeps nested shared
+    // references intact, so cycles still resolve through `state.seen`.
+    return anchorValueAsEntity(
+      runtime,
+      tx,
+      link,
+      { ...(newValue as FabricPlainObject) },
+      preConversionValue,
+      state.nextAnchorId(),
+      context,
+      options,
+      state,
+    );
   }
 
   // Handle arrays
@@ -978,7 +1094,12 @@ export function normalizeAndDiff(
     }
 
     // Have to set this before recursing!
-    seen.set(newValue, link);
+    state.seen.set(newValue, link);
+    // Shared references and cycles arrive under the pre-conversion identity;
+    // register that too when conversion produced a copy.
+    if (preConversionValue !== newValue) {
+      state.seen.set(preConversionValue, link);
+    }
 
     // Get current array for precomputing child values (if it was an array)
     const currentArray = Array.isArray(currentValue) ? currentValue : undefined;
@@ -1061,8 +1182,10 @@ export function normalizeAndDiff(
         newValue[i],
         context,
         options,
-        seen,
+        state,
         inCur ? currentArray![i] : undefined,
+        undefined,
+        true,
       );
       changes.push(...nestedChanges);
     }
@@ -1132,7 +1255,7 @@ export function normalizeAndDiff(
     // point switch this to a shallow conversion.
     //
     // BAND-AID: this *should* be a shallow conversion. This is a unified walk
-    // (one `seen` map for shared-ref/cycle handling, `[ID]` assignment, and
+    // (one walk state for shared-ref/cycle handling, element anchoring, and
     // diffing), and the right design is to shallow-wrap the `FabricInstance`
     // here and let this walk descend into its `FabricValue` internals as part
     // of the same coordinated pass. We don't support that descent yet, so the
@@ -1185,7 +1308,12 @@ export function normalizeAndDiff(
     }
 
     // Have to set this before recursing!
-    seen.set(newValue, link);
+    state.seen.set(newValue, link);
+    // Shared references and cycles arrive under the pre-conversion identity;
+    // register that too when conversion produced a copy.
+    if (preConversionValue !== newValue) {
+      state.seen.set(preConversionValue, link);
+    }
 
     // At this point currentValue is guaranteed to be a record
     const currentRecord = currentValue as Record<string, unknown>;
@@ -1238,7 +1366,7 @@ export function normalizeAndDiff(
         newValue[key],
         context,
         options,
-        seen,
+        state,
         currentRecord[key],
         requiredProps === undefined ? undefined : requiredProps.has(key),
       );
@@ -1291,7 +1419,7 @@ export function normalizeAndDiff(
             }) as unknown,
             context,
             options,
-            seen,
+            state,
             currentRecord[key],
           ),
         );
