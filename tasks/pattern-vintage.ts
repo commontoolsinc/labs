@@ -31,9 +31,12 @@
  * It compares STATE, not renderings. `$UI` and its variants are recomputed by
  * the setup and the stored rendering never matches a fresh one, so comparing
  * them would red every pattern edit while saying nothing about data; every
- * other key is compared, `$NAME` included. What a root holds at a cell or
- * stream position is compared as the DOCUMENT it points at, so a field that
- * moved to a different doc is still a finding.
+ * other key is compared, `$NAME` included. Excluding those NAMES is not enough
+ * on its own — a `map`-body hoist is a recorded instantiation whose whole
+ * result is a vnode, under no `$UI` — so a rendering is recognised by shape
+ * too, wherever it sits. What a root holds at a cell or stream position is
+ * compared as the DOCUMENT it points at, so a field that moved to a different
+ * doc is still a finding.
  *
  *   deno task pattern-vintage                      # replay; fail on a stranded fixture
  *   deno task pattern-vintage --update             # capture where a REQUIRED one is missing

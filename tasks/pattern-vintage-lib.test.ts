@@ -507,6 +507,38 @@ describe("stranded-state comparison", () => {
     )).toEqual([]);
   });
 
+  it("does not compare a RENDERING that sits under no `$UI` key", () => {
+    // The name list cannot reach this one. A transformer hoist
+    // (`__cfPattern_N`, the body of a `map`) is a recorded instantiation in its
+    // own right, and its whole result is a vnode — keys `type`/`name`/`props`/
+    // `children`, no `$UI` anywhere. Measured on the committed
+    // `default-app.tsx` fixture, which records two of them: a UI-only edit
+    // inside that map body reported `children` stranded on both and took the
+    // gate to exit 1, for a change that stores nothing.
+    const row = (label: string) => ({
+      type: "vnode",
+      name: "tr",
+      props: {},
+      children: [{ type: "vnode", name: "td", props: {}, children: [label] }],
+    });
+    expect(strandedKeys(row("🗑️"), row("✕"))).toEqual([]);
+    // ...and nested inside state, where the name list cannot reach it either.
+    expect(strandedKeys(
+      { items: [{ label: "a", view: row("🗑️") }] },
+      { items: [{ label: "a", view: row("✕") }] },
+    )).toEqual([]);
+  });
+
+  it("still reports a key whose RENDERING became data, or data a rendering", () => {
+    // The reduction is not a blanket skip of anything vnode-shaped: it says
+    // "two renderings are the same artifact", not "this key is exempt".
+    const view = { type: "vnode", name: "tr", props: {}, children: [] };
+    expect(strandedKeys({ preview: view }, { preview: ["a"] }))
+      .toEqual(["preview"]);
+    expect(strandedKeys({ preview: ["a"] }, { preview: view }))
+      .toEqual(["preview"]);
+  });
+
   it("still compares $NAME, which is derived but stable", () => {
     // The exclusion is the renderings, NOT derived values in general: `$NAME`
     // stayed equal across both measured UI-only edits, and it is a cheap tell
@@ -571,5 +603,36 @@ describe("stranded-state comparison is a SUBSET check", () => {
     expect(strandedKeys({ xs: [1, 2] }, { xs: [1, 2, 3] })).toEqual([]);
     expect(strandedKeys({ xs: [1, 2] }, { xs: [1] })).toEqual(["xs"]);
     expect(strandedKeys({ xs: [1, 2] }, { xs: [2, 1] })).toEqual(["xs"]);
+  });
+
+  it("does NOT subset a reduction — a cell is an identity, not a shape", () => {
+    // `{"[cell]": {space, id, path}}` is what a cell- or stream-valued key
+    // reduces to, and its `path` is an array. Left to the subset rule, a
+    // longer path is a superset and so "preserved": a stream that moved from
+    // the document root to `["value"]` in the SAME document would read clean,
+    // which is the moved-storage class this whole comparison exists for.
+    const at = (path: string[]) => ({
+      "[cell]": { space: "did:key:zA", id: "of:fid1:one", path },
+    });
+    expect(strandedKeys({ touch: at([]) }, { touch: at([]) })).toEqual([]);
+    expect(strandedKeys({ touch: at([]) }, { touch: at(["value"]) }))
+      .toEqual(["touch"]);
+    expect(strandedKeys({ touch: at(["a"]) }, { touch: at(["b"]) }))
+      .toEqual(["touch"]);
+  });
+
+  it("treats a before-value of `undefined` as nothing to strand", () => {
+    // The before state is read under the root's stored schema, and a
+    // schema-driven read enumerates the keys the schema DECLARES whether or not
+    // the document holds them — measured on the committed fixtures,
+    // `defaultProfile` on `home.tsx` and `recentPieces`/`summaryIndex`/
+    // `trackRecent` on `default-app.tsx` all read as `undefined`. An update
+    // that starts filling one in — a `Default<>` added to a field already
+    // declared — added data rather than stranding it.
+    expect(strandedKeys({ defaultProfile: undefined }, { defaultProfile: "v" }))
+      .toEqual([]);
+    // The other direction is still loss: something was there, and is not now.
+    expect(strandedKeys({ defaultProfile: "v" }, { defaultProfile: undefined }))
+      .toEqual(["defaultProfile"]);
   });
 });

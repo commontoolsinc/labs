@@ -93,7 +93,8 @@ Measured on branch `tier2`, not assumed:
 | The gate catches a real break, not just a synthetic one | measured by mutation on the ACTUAL `home.tsx`: adding a required defaultless output field makes `deno task pattern-vintage` exit 1 naming the field; restoring returns exit 0 |
 | The gate CATCHES a moved storage key | measured by mutation on the ACTUAL `home.tsx`: renaming `.for("journal")` exits 1 with "APPLIED CLEANLY but stranded state the vintage held: journal (was [{\"eventType\":\"piece:created\",…}], now [])", restoring exits 0. The pinned limit in `tasks/pattern-vintage-run.test.ts` is now INVERTED, which is what it was written to receive |
 | A materialized root is NOT plain data | measured on the committed `home.tsx` fixture: at each of its six stream positions the read yields a live cell whose own properties reach the runtime, so a generic deep copy of it is CYCLIC. Before that was reduced, a UI-only edit to `home.tsx` did not merely misreport — `JSON.stringify` in the failure text threw and the gate ended with no verdict. Both sides are now reduced by shape first: a cell to the document it points at, a fabric special object to a tagged content hash (`deepEqual` compares those by own properties, of which they have none), a cycle to a marker |
-| The RENDERINGS are noise, everything else is signal | measured on the committed `default-app.tsx` fixture: a COMMENT-ONLY edit to `piece-grid.tsx` reported `$UI` stranded (`children: [null]` stored against `children: [[]]` re-rendered) and the same edit to `note.tsx` reported `$UI` and `$TILE_UI`. A rendering is recomputed by the setup and the stored one is not the same artifact as a fresh one, so `$UI`/`$TILE_UI`/`$CHIP_UI` are excluded and nothing else is. `$NAME` is derived too, stayed equal across both, and is compared. After the exclusion those edits exit 0 while the moved-key and dropped-field mutations still exit 1 |
+| The RENDERINGS are noise, everything else is signal | measured on the committed `default-app.tsx` fixture: a COMMENT-ONLY edit to `piece-grid.tsx` reported `$UI` stranded (`children: [null]` stored against `children: [[]]` re-rendered) and the same edit to `note.tsx` reported `$UI` and `$TILE_UI`. A rendering is recomputed by the setup and the stored one is not the same artifact as a fresh one, so `$UI`/`$TILE_UI`/`$CHIP_UI` are excluded by NAME. `$NAME` is derived too, stayed equal across both, and is compared. After the exclusion those edits exit 0 while the moved-key and dropped-field mutations still exit 1 |
+| A NAME cannot find every rendering | measured on the same fixture, which records two `map`-body hoists (`__cfPattern_2`) whose whole result is a vnode — keys `type`/`name`/`props`/`children`, no `$UI` to exclude: a UI-only edit inside that map body reported `children` stranded on both roots and exited 1 for a change that stores nothing. A rendering is now also reduced by SHAPE (`type: "vnode"`, which is what the runner's own `vnodeSchema` requires), so it is out of the comparison wherever it sits. Re-measured: that edit exits 0, the moved-key mutation still exits 1 |
 | A schema-less read is not empty, it is NON-DETERMINISTIC | measured on the committed `home.tsx` fixture: a schema-less read returns every key, and materializes `$UI`, which the stored schema (`unknown` at that key) leaves `undefined`. The reason to read under the root's own stored `schema` meta is that a schema-driven read pulls exactly what the schema descends into, where a schema-less one resolves what happens to be resident — the shape of [#3830] |
 | The gate could exit 0 having replayed NOTHING | measured twice: a `home.tsx` that does not compile, and a truncated fixture, both leave `harness.resolve()`'s promise pending forever while the error surfaces as an unhandled rejection — `main` never reached a verdict, the event loop drained, and the process exited 0 printing no verdict at all. Fixed: `beforeunload` is the last point where that is still distinguishable from success, so it reports and exits 1. Re-measured after the fix: broken source exits 1 naming the rejection, corrupt fixture exits 1, clean tree exits 0 |
 | A run that replays zero fixtures is a FAILURE | `isClean` takes `replayed`, `candidates` and `targets`, and requires all three positive. Measured: with the fixture tree moved aside the task exits 1 reporting both the uncovered patterns and "covered NOTHING" |
@@ -616,7 +617,7 @@ Gate: **met for the stranding half.** Measured on the real `home.tsx`, renaming
 vintage held: journal (was [{"eventType":"piece:created",…}], now [])`, and
 restoring returns exit 0. Migration coverage remains open.
 
-Four measurements decided the design, three of them against expectation:
+Five measurements decided the design, four of them against expectation:
 
 - **A materialized root is not plain data.** At every `asCell`/`asStream`
   position it holds a live cell whose own properties reach the runtime, so a
@@ -629,6 +630,16 @@ Four measurements decided the design, three of them against expectation:
   comment-only edit to `piece-grid.tsx` reported `$UI` stranded. They are
   excluded; `$NAME` is derived too, stayed equal across the same edits, and is
   compared.
+- **A name cannot find every rendering.** A transformer hoist — the body of a
+  `map`, recorded as its own instantiation — has a whole result that IS a vnode,
+  under no `$UI` at all: the committed `default-app.tsx` fixture holds two, with
+  keys `type`/`name`/`props`/`children`. Measured, a UI-only edit inside that map
+  body reported `children` stranded on both and exited 1 for a change that stores
+  nothing. A rendering is now reduced by SHAPE (`type: "vnode"`) wherever it
+  sits, and the name list stays for the case the shape check cannot see — the
+  `note.tsx` measurement above is one side carrying the tag against one side that
+  does not. Re-measured after: that edit exits 0, the moved-key mutation still
+  exits 1.
 - **The "before" read wants the root's stored schema for determinism**, not
   because a schema-less read comes back empty. Measured, it comes back fuller —
   and depends on what is resident, which is the wrong property for a fixture
@@ -640,11 +651,17 @@ Four measurements decided the design, three of them against expectation:
 What a green run does NOT cover, stated so it is not read as more than it is:
 
 - A root whose every key is a rendering (`profile-picker.tsx` returns only
-  `$UI`) has nothing left for the value comparison to look at. It still has to
-  survive the refusal, completion and reads-as-something checks.
+  `$UI`) has nothing left for the value comparison to look at, and so does a
+  root that IS one (a `map`-body hoist). Both still have to survive the refusal,
+  completion and reads-as-something checks.
 - A cell- or stream-valued key is compared as the DOCUMENT it points at, not by
   that document's contents. A field that moved to a different doc is caught; a
   field whose own doc was emptied in place, under the same id, is not.
+- The before-read sees what the root's stored schema RESOLVES, which is not
+  everything the document holds: measured, `$UI` on `home.tsx` reads as
+  `undefined` under a stored schema that says `{"type": "unknown"}` there, while
+  a schema-less read materializes it. A key the stored schema leaves unresolved
+  is a key this comparison cannot speak for.
 - The value comparison runs only for a target whose identity CHANGED, which is
   the same condition the auto-updater fires on. On an unchanged tree it runs
   zero times — measured, `0 changed` on both committed fixtures — so the
@@ -658,7 +675,9 @@ subject is data loss — but the first real migration will need a way to declare
 not built speculatively; the shape of the escape hatch should be decided by the
 migration that needs it. Measured against the changes that are routine today, it
 is quiet: an additive defaulted field on a nested pattern (`note.tsx`), a
-comment-only edit, and a UI edit all exit 0.
+comment-only edit to `default-app.tsx` (3 changed, 3 clean), a UI-only edit to
+`home.tsx`'s header (1 changed, 1 clean), and a UI-only edit inside
+`default-app.tsx`'s own `map` body all exit 0.
 
 ## Open questions
 
