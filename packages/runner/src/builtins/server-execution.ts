@@ -146,20 +146,26 @@ export interface ServerBuiltinActionDescriptor {
  *    `compileAndRun`'s observation. Its own surface is BOUNDED.
  *
  *    What actually blocks it is the async continuation, and the four-document
- *    mint points the same way `llmDialog` went. Continuation synthesis is
- *    EFFECT-ONLY: `supportedBuiltinDescriptor` in
+ *    mint points the same way `llmDialog` went. That blocker had two halves,
+ *    and the ATTRIBUTION half is CLOSED as of 2026-07-29: `compileAndRun` now
+ *    enqueues its compile and `runSynced` as a post-commit effect
+ *    (`enqueuePostCommitEffect`, flushed inside
+ *    `runWithTransactionSourceAction`) instead of firing
+ *    `compileOrGetPattern(...).then(...)` inline, so its continuations inherit
+ *    the run's `sourceAction` — the only path by which that context reaches an
+ *    async continuation. Both forward routes needed that move, so it settles
+ *    nothing about which one is taken.
+ *
+ *    The OBSERVATION half is still open, and it is what still blocks serving:
+ *    continuation synthesis is EFFECT-ONLY. `supportedBuiltinDescriptor` in
  *    `executor/action-transaction-router.ts` requires a `serverBuiltin`
  *    descriptor AND `actionKind === "effect"`, so the summary/template a
  *    computation would need is never populated — every current member of this
- *    registry writes only inside its own synchronous body. And
- *    `compileAndRun`'s continuations carry no `sourceAction` at all, because
- *    that context reaches an async continuation only through the post-commit
- *    OUTBOX (`enqueuePostCommitEffect`, flushed inside
- *    `runWithTransactionSourceAction`), which this builtin does not use —
- *    it fires `compileOrGetPattern(...).then(...)` inline. Minting a
- *    computation descriptor for it today would claim the in-run writes and
- *    strand the continuations in a local executor shadow, leaving `pending`
- *    true forever. Numbers in `compile-and-run-servability.test.ts`.
+ *    registry writes only inside its own synchronous body. Minting a
+ *    computation descriptor for `compileAndRun` today would therefore still
+ *    claim the in-run writes and strand the continuations in a local executor
+ *    shadow, leaving `pending` true forever. Numbers in
+ *    `compile-and-run-servability.test.ts`.
  *
  * `sqliteDatabase` JOINS them (R5, owner ruling 2026-07-29). Both of A3's
  * objections are closed. The db `owner` now comes from the acting execution

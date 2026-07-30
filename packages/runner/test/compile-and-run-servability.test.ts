@@ -26,49 +26,72 @@
 //    merits. None of them appears in `compileAndRun`'s observation. The second
 //    test measures exactly that.
 //
-// 3. THE ACTUAL BLOCKER is the async continuation, and it is a mechanism gap
-//    rather than a surface-shape gap. `compileAndRun` writes from three
-//    `editWithRetry` transactions that run AFTER its action transaction
-//    committed (`:219` error/errors, `:242` pending, and `runSynced`'s own
-//    setup). Those transactions carry no scheduler observation, and — measured
-//    in the third test — no `sourceAction` either, because `sourceAction`
-//    reaches an async continuation only through the post-commit OUTBOX
+// 3. THE BLOCKER is the async continuation — a mechanism gap rather than a
+//    surface-shape gap — and its ATTRIBUTION half is now CLOSED.
+//    `compileAndRun` writes from three `editWithRetry` transactions that run
+//    AFTER its action transaction committed (error/errors, pending, and
+//    `runSynced`'s own setup). `sourceAction` reaches an async continuation
+//    only through the post-commit OUTBOX
 //    (`storage/extended-storage-transaction.ts` flushes each effect inside
 //    `runWithTransactionSourceAction(this.tx.sourceAction, …)`, which
-//    `Runtime.edit()` then inherits). `llmDialog` gets it that way via
-//    `enqueueSinkRequestPostCommitEffect`; `compileAndRun` fires
-//    `compileOrGetPattern(...).then(...)` inline instead.
+//    `Runtime.edit()` then inherits), so the builtin now enqueues its compile
+//    and `runSynced` as a post-commit effect rather than firing
+//    `compileOrGetPattern(...).then(...)` inline — the same mechanism
+//    `llmDialog` reaches through `enqueueSinkRequestPostCommitEffect`. The
+//    third test measures that both surviving continuations inherit the run's
+//    source-action object.
+//
+//    Two properties of that move are load-bearing and easy to undo by
+//    accident. The flush is FIRE-AND-FORGET: it starts the compile inside the
+//    `runWithTransactionSourceAction` scope — which is where `.catch`/
+//    `.finally`/`.then` capture the async context — and returns. Awaiting the
+//    compile there would make the scheduler's action commit block until an
+//    arbitrary compiled pattern has run, which is the scheduling change the
+//    open decision below is about. And a failed commit DROPS the outbox, so the
+//    in-memory `previousCallHash` dedup marker is released from a commit
+//    callback; without that, a conflict re-run early-returns on the unchanged
+//    hash and `pending` is stranded at true forever. That is the weak form of
+//    sqliteQuery's marker-ordering hazard (8cb00bbf8): sqlite's `requestHash`
+//    is DURABLE and doubles as the dedup gate, so a side that wrote it without
+//    issuing wedged the side that was supposed to issue; `previousCallHash` is
+//    per-node and in memory, so it can only strand its own node.
 //
 //    The FOUR-document mint, by contrast, is plumbing rather than a design
 //    gap: `ServerBuiltinComputationDescriptor.mintedDocuments` is already an
 //    array; only the mint site is singular (`selectorBuiltinResultCause`
 //    returns one cause, `selectorMintedResultWrite` in `runner.ts` one link).
 //
-//    And the router's continuation synthesis is EFFECT-ONLY regardless:
-//    `supportedBuiltinDescriptor` (`executor/action-transaction-router.ts`)
-//    requires both a `serverBuiltin` (effect) descriptor and
-//    `observation.actionKind === "effect"`, so the `summaries`/`templates`
-//    that `synthesizeBuiltinContinuationObservation` needs are never populated
-//    for a computation. Every current `SERVER_COMPUTATION_BUILTIN_IDS` member
-//    writes only inside its own synchronous body.
+//    WHAT IS STILL OPEN is the OBSERVATION half. The continuations carry no
+//    scheduler observation, and the router's continuation synthesis is
+//    EFFECT-ONLY regardless: `supportedBuiltinDescriptor`
+//    (`executor/action-transaction-router.ts`) requires both a `serverBuiltin`
+//    (effect) descriptor and `observation.actionKind === "effect"`, so the
+//    `summaries`/`templates` that `synthesizeBuiltinContinuationObservation`
+//    needs are never populated for a computation. Every current
+//    `SERVER_COMPUTATION_BUILTIN_IDS` member writes only inside its own
+//    synchronous body.
 //
-//    Minting a computation descriptor for `compileAndRun` TODAY would
-//    therefore be actively harmful, not merely insufficient: the in-run writes
-//    would be claimed and authoritative while the continuations routed
+//    Minting a computation descriptor for `compileAndRun` TODAY is therefore
+//    STILL actively harmful, not merely insufficient: the in-run writes would
+//    be claimed and authoritative while the continuations routed
 //    `disposition:"local"` (an executor shadow that, per `storage/v2.ts`, is
 //    "deliberately not confirmed" and reaches no host), leaving `pending` true
-//    forever and never publishing the compile result. The open decision is
-//    whether `compileAndRun` is re-kinded as an EFFECT (reusing that whole
-//    mechanism, at the cost of a scheduling change) or continuation synthesis
-//    is extended to computation descriptors. Either way its async work must
-//    move onto the outbox first.
+//    forever and never publishing the compile result. Attribution is necessary
+//    for continuation synthesis, not sufficient. The open decision is
+//    unchanged by the outbox move, which both of its arms needed: whether
+//    `compileAndRun` is re-kinded as an EFFECT (reusing that whole mechanism,
+//    at the cost of a scheduling change) or continuation synthesis is extended
+//    to computation descriptors.
 //
 // Tripwires. If the first test stops reporting `incomplete-static-surface`,
-// something gave `compileAndRun` a descriptor and the paragraph above must be
+// something gave `compileAndRun` a descriptor and the paragraphs above must be
 // re-read before believing it works. If the second test finds a spawned-pattern
 // write inside `compileAndRun`'s observation, the "bounded own surface" finding
-// is void. If the third test finds a `sourceAction` on a continuation, half the
-// blocker has been closed elsewhere.
+// is void. If the third test stops finding the run's `sourceAction` on a
+// continuation, the async work is firing inline again and the attribution half
+// of the blocker is back; if it finds a continuation that DOES carry a
+// scheduler observation, the observation half has been closed elsewhere and the
+// open decision above has been settled.
 import { assert, assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";
@@ -135,9 +158,11 @@ const operationsOf = (input: ActionTransactionRouteInput): CommitOperation[] =>
     .operations) ?? [];
 
 /** Run the OUTER pattern to completion and capture every routed transaction
- *  and every executor diagnostic. `compileOrGetPattern` is not registered as
- *  tracked async work, so `settled()` alone does not cover the continuation —
- *  poll for the published result instead of sleeping a fixed interval. */
+ *  and every executor diagnostic. The action commit is now tracked async work
+ *  (it carries a post-commit effect), but its flush only STARTS the compile —
+ *  `compileOrGetPattern` itself is never registered — so `settled()` alone
+ *  still does not cover the continuation. Poll for the published result instead
+ *  of sleeping a fixed interval. */
 async function observeCompileAndRun(): Promise<{
   transactions: CapturedTransaction[];
   diagnostics: ExecutorCandidateDiagnostic[];
@@ -331,37 +356,51 @@ Deno.test("R5: runSynced's spawned pattern writes are the SPAWNED pattern's acti
   );
 });
 
-Deno.test("R5: compileAndRun's async continuations carry no sourceAction, so continuation synthesis cannot reach them", async () => {
+Deno.test("R5: compileAndRun's async continuations carry the run's sourceAction, so continuation synthesis can reach them", async () => {
   const { transactions } = await observeCompileAndRun();
 
-  const withSourceAction = transactions.filter(({ input }) =>
-    (input as { sourceAction?: unknown }).sourceAction !== undefined
-  );
-  // Every transaction that has one is an in-run action transaction; the
-  // scheduler sets `tx.tx.sourceAction` in `scheduler/run.ts` and nowhere
-  // else on this path.
-  for (const { observation } of withSourceAction) {
-    assert(
-      observation !== undefined &&
-        observation.transactionKind === "action-run",
-      "a sourceAction outside an action-run means the continuation context " +
-        "now propagates and the blocker recorded in this file has moved",
-    );
-  }
+  const sourceActionOf = (
+    input: ActionTransactionRouteInput,
+  ): object | undefined => (input as { sourceAction?: object }).sourceAction;
 
-  // The continuations themselves: unobserved AND unattributed. `pending` goes
-  // false from `:242`, and `runSynced`'s setup replaces the result document's
-  // whole `/value`.
+  const compileRuns = transactions.filter(({ observation }) =>
+    observation?.implementationFingerprint === COMPILE_AND_RUN_FINGERPRINT
+  );
+  assert(compileRuns.length > 0, "expected a compileAndRun action run");
+  const compileSourceActions = new Set(
+    compileRuns.map(({ input }) => sourceActionOf(input)),
+  );
+  assertEquals(
+    compileSourceActions.size,
+    1,
+    "one compileAndRun node, so one source-action object",
+  );
+  const [compileSourceAction] = [...compileSourceActions];
+  assert(
+    compileSourceAction !== undefined,
+    "the scheduler sets sourceAction on every action-run transaction " +
+      "(scheduler/run.ts:472)",
+  );
+
+  // THE MEASUREMENT THIS FILE EXISTS FOR, now flipped. `compileAndRun`'s
+  // post-run writes are enqueued as a post-commit effect, so the outbox flush
+  // runs them inside `runWithTransactionSourceAction(this.tx.sourceAction, …)`
+  // and `Runtime.edit()` stamps the SAME source-action object onto each
+  // `editWithRetry` transaction they mint. Identity, not equality: the source
+  // action is the `Action` closure itself.
   const continuations = transactions.filter(({ input, observation }) =>
     observation === undefined &&
-    (input as { sourceAction?: unknown }).sourceAction === undefined
+    sourceActionOf(input) === compileSourceAction
   );
   assert(
     continuations.length > 0,
-    "expected compileAndRun's post-run transactions to be unobserved",
+    "expected compileAndRun's post-run transactions to inherit the run's " +
+      "sourceAction; none did, so the async work is firing inline again and " +
+      "the continuation-attribution blocker is back",
   );
-  // The executor's only verdict on them is the shape complaint, which routes
-  // them to a local executor shadow — never to the host.
+
+  // `runSynced`'s setup is among them — the continuation that publishes the
+  // compile result by replacing the result document's whole `/value`.
   const setupReplace = continuations.some(({ input }) =>
     operationsOf(input).some((operation) =>
       operation.op === "patch" &&
@@ -373,7 +412,36 @@ Deno.test("R5: compileAndRun's async continuations carry no sourceAction, so con
   assert(
     setupReplace,
     "expected runSynced's setup to replace the result document's whole " +
-      "/value from an unobserved transaction",
+      "/value from a sourceAction-carrying transaction",
+  );
+
+  // ...and so is the `pending` clear from the `.finally()` leg.
+  const pendingClear = continuations.some(({ input }) =>
+    operationsOf(input).some((operation) =>
+      (operation.patches ?? []).some((patch) =>
+        patch.path === "/value" && patch.value === false
+      )
+    )
+  );
+  assert(
+    pendingClear,
+    "expected the pending flag to go false from a sourceAction-carrying " +
+      "transaction",
+  );
+
+  // THE HALF THIS DOES NOT CLOSE. The continuations are now attributed but
+  // still carry no scheduler observation, so the router has nothing to match a
+  // descriptor against. Attribution is necessary for continuation synthesis,
+  // not sufficient — see the header docblock.
+  const attributedAndObserved = transactions.filter(({ input, observation }) =>
+    sourceActionOf(input) === compileSourceAction && observation !== undefined
+  );
+  assertEquals(
+    attributedAndObserved.length,
+    compileRuns.length,
+    "only the action run itself may carry a scheduler observation; an " +
+      "observed continuation means synthesis now reaches computations and " +
+      "the header docblock's open decision has been settled elsewhere",
   );
 });
 

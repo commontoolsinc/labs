@@ -208,65 +208,135 @@ export function compileAndRun(
     // Capture requestId for this compilation run
     const thisRequestId = requestId;
 
-    const compilePromise = runtime.patternManager
-      .compileOrGetPattern(program, parentCell.space)
-      .catch(
-        (err) => {
-          // Only process this error if the request hasn't been superseded
+    // A failed commit DROPS the outbox (`clearPostCommitOutbox` in
+    // `storage/extended-storage-transaction.ts`), so the compile below never
+    // starts. `previousCallHash` was already advanced above and is an
+    // IN-MEMORY marker, so the scheduler's conflict re-run would early-return
+    // on `hash === previousCallHash` and strand `pending` at true with nothing
+    // ever publishing a result. Release it so the re-run re-issues.
+    //
+    // This is the `compileAndRun` analogue of the marker-ordering hazard that
+    // `sqliteQuery` documents (8cb00bbf8), in its weaker form: sqlite's
+    // `requestHash` marker is DURABLE and doubles as the dedup gate, so a side
+    // that wrote it without issuing wedged the side that was supposed to
+    // issue. This marker is per-node and in memory, so it can only strand the
+    // node that owns it — and only for as long as this callback does not run.
+    //
+    // `addCommitCallback` covers both rejection paths (the storage commit
+    // rejecting, and `rejectCommitBeforeStorage`'s CFC refusal), but NOT
+    // `abort()`, which drops the outbox without dispatching callbacks. The one
+    // abort of a reactive action transaction is the `RetryImmediately` path
+    // (`scheduler/run.ts:582`), and that signal can only be raised by an
+    // `inSpace("name")` read — every read in this action happens above, before
+    // the marker advances — so the gap is unreachable from here. A thrown
+    // action error does NOT abort: the scheduler still commits (`run.ts:558`).
+    tx.addCommitCallback((_committedTx, commitResult) => {
+      if (commitResult.error === undefined) return;
+      if (previousCallHash === hash) previousCallHash = undefined;
+    });
+
+    // The compile and the pattern run go on the post-commit OUTBOX rather than
+    // firing inline, because that is the only path by which `sourceAction`
+    // reaches an async continuation: the outbox flush runs each effect inside
+    // `runWithTransactionSourceAction(tx.sourceAction, …)`, and every
+    // `Runtime.edit()` underneath it — the `editWithRetry` calls below and
+    // `runSynced`'s own setup — inherits it (`runtime.ts:1372`). Without that,
+    // the writes that publish the compile result are unattributable and no
+    // executor claim can cover them. Modelled on
+    // `enqueueSinkRequestPostCommitEffect` (`cfc/sink-request.ts`), which is how
+    // `llmDialog` gets the same context.
+    //
+    // Two deliberate omissions, both because `compileAndRun` is a COMPUTATION
+    // whose kind is still under review (see the header docblock of
+    // `test/compile-and-run-servability.test.ts`):
+    //  - no sink-request policy input: there is no external sink here, only
+    //    local compilation and a nested pattern run;
+    //  - no `externalSinkDisposition()` double-execution gate: it can only
+    //    answer "allow" for a computation, and asking pins the transaction's
+    //    effect authority to "client" as a side effect, which would prejudge
+    //    that review. Whoever settles it adds the gate BEFORE
+    //    `pendingWithLog.set(true)` above, per sqliteQuery's ordering note.
+    //
+    // The flush is FIRE-AND-FORGET on purpose. The async context is captured
+    // where `.catch`/`.finally`/`.then` are registered, which is inside the
+    // flush, so the continuations carry the source action without the flush
+    // awaiting them. Awaiting would make the scheduler's action commit block on
+    // an arbitrary compiled pattern running to completion — a scheduling
+    // change, and not this one. `hasPendingPostCommitEffects()` does now make
+    // this commit tracked async work (`scheduler/run.ts:675`), so `settled()`
+    // waits for the flush to have STARTED the compile, not to have finished it.
+    tx.enqueuePostCommitEffect({
+      id: `compileAndRun:${thisRequestId}`,
+      idempotencyKey: `compileAndRun:${thisRequestId}`,
+      kind: "compile-and-run",
+      flush: () => {
+        // Superseded between the action body and the flush: the newer run set
+        // its own `pending` and enqueued its own effect, so this one is dead.
+        if (requestId !== thisRequestId) return;
+
+        const compilePromise = runtime.patternManager
+          .compileOrGetPattern(program, parentCell.space)
+          .catch(
+            (err) => {
+              // Only process this error if the request hasn't been superseded
+              if (requestId !== thisRequestId) return;
+              if (abortController?.signal.aborted) return;
+
+              runtime.editWithRetry((asyncTx) => {
+                // Extract structured errors if this is a CompilerError
+                if (err instanceof CompilerError) {
+                  const structuredErrors = err.errors.map((e) => ({
+                    line: e.line ?? 1,
+                    column: e.column ?? 1,
+                    message: e.message,
+                    type: e.type,
+                    file: e.file,
+                  }));
+                  errors.withTx(asyncTx).set(structuredErrors);
+                } else {
+                  error.withTx(asyncTx).set(
+                    err.message + (err.stack ? "\n" + err.stack : ""),
+                  );
+                }
+              });
+            },
+          ).finally(() => {
+            // Only update pending if this is still the current request
+            if (requestId !== thisRequestId) return;
+            // Always clear pending state, even if cancelled, to avoid stuck
+            // state
+
+            runtime.editWithRetry((asyncTx) => {
+              pending.withTx(asyncTx).set(false);
+            });
+          });
+
+        compilePromise.then((pattern) => {
+          // Only run the result if this is still the current request
           if (requestId !== thisRequestId) return;
           if (abortController?.signal.aborted) return;
 
-          runtime.editWithRetry((asyncTx) => {
-            // Extract structured errors if this is a CompilerError
-            if (err instanceof CompilerError) {
-              const structuredErrors = err.errors.map((e) => ({
-                line: e.line ?? 1,
-                column: e.column ?? 1,
-                message: e.message,
-                type: e.type,
-                file: e.file,
-              }));
-              errors.withTx(asyncTx).set(structuredErrors);
-            } else {
-              error.withTx(asyncTx).set(
-                err.message + (err.stack ? "\n" + err.stack : ""),
-              );
-            }
-          });
-        },
-      ).finally(() => {
-        // Only update pending if this is still the current request
-        if (requestId !== thisRequestId) return;
-        // Always clear pending state, even if cancelled, to avoid stuck state
+          if (pattern) {
+            // TODO(ja): to support editting of existing pieces / running with
+            // inputs from other pieces, we will need to think more about
+            // how we pass input into the builtin.
 
-        runtime.editWithRetry((asyncTx) => {
-          pending.withTx(asyncTx).set(false);
+            // No `isHidden` write here. It used to mark the compiled result
+            // hidden so the piece this builtin AUTO-registered stayed out of
+            // the default app's Patterns list; `pieceCreatedCallback` is gone,
+            // so nothing registers the result any more — registering is an
+            // `addPiece` handler's job
+            // (docs/common/conventions/adding-pieces.md), and a pattern that
+            // deliberately registers the result wants it visible. The write was
+            // also never observable: `runSynced` replaces this same document's
+            // whole `/value` from its setup transaction one commit later, and
+            // wins deterministically because the call below is un-awaited.
+            // Measured in `compile-and-run-servability.test.ts`.
+            runtime.runSynced(result, pattern, input.get());
+          }
+          // TODO(seefeld): Add capturing runtime errors.
         });
-      });
-
-    compilePromise.then((pattern) => {
-      // Only run the result if this is still the current request
-      if (requestId !== thisRequestId) return;
-      if (abortController?.signal.aborted) return;
-
-      if (pattern) {
-        // TODO(ja): to support editting of existing pieces / running with
-        // inputs from other pieces, we will need to think more about
-        // how we pass input into the builtin.
-
-        // No `isHidden` write here. It used to mark the compiled result
-        // hidden so the piece this builtin AUTO-registered stayed out of the
-        // default app's Patterns list; `pieceCreatedCallback` is gone, so
-        // nothing registers the result any more — registering is an
-        // `addPiece` handler's job (docs/common/conventions/adding-pieces.md),
-        // and a pattern that deliberately registers the result wants it
-        // visible. The write was also never observable: `runSynced` replaces
-        // this same document's whole `/value` from its setup transaction one
-        // commit later, and wins deterministically because the call below is
-        // un-awaited. Measured in `compile-and-run-servability.test.ts`.
-        runtime.runSynced(result, pattern, input.get());
-      }
-      // TODO(seefeld): Add capturing runtime errors.
+      },
     });
   };
 }

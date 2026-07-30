@@ -202,6 +202,27 @@ const DIRECT_POST_COMMIT_EFFECT_ALLOWLIST: Record<string, string> = {
   // classification is tracked by register row R5 (W2.15 descriptors), not by
   // the suppression gate.
   "navigate-to.ts": "local shell navigation callback, not an external sink",
+  // compileAndRun's post-commit effect is a local TS compile
+  // (`compileOrGetPattern` — a content-addressed cell-cache write-back, no
+  // `fetch`) plus `runtime.runSynced`, which instantiates the compiled pattern.
+  // Neither is an external sink: both produce only storage writes, which the
+  // commit machinery reconciles if two sides produce them, so there is no
+  // outside-world action to double-fire. It uses the outbox for the OTHER thing
+  // the outbox provides — `sourceAction` propagation into async continuations
+  // (`runWithTransactionSourceAction`), without which the writes that publish
+  // the compile result are unattributable.
+  //
+  // The gate is also currently unreachable for it: `compileAndRun` is a
+  // COMPUTATION at runtime, and `externalSinkDisposition()` only answers
+  // "suppress" for a source action carrying an EFFECT claim. Asking anyway would
+  // pin `executionEffectAuthority` as a side effect and read as "double
+  // execution is handled" while the real blocker — continuation synthesis being
+  // effect-only — is untouched. Whoever settles that open kind decision (see the
+  // header docblock of `compile-and-run-servability.test.ts`) adds the gate then,
+  // BEFORE the `pending` write, per sqliteQuery's marker-ordering note, and
+  // removes this entry.
+  "compile-and-run.ts":
+    "local compile + nested pattern run; storage writes only, no external sink",
 };
 
 const DIRECT_POST_COMMIT_EFFECT = /\.enqueuePostCommitEffect\s*\(/;
