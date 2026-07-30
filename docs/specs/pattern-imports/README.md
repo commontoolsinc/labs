@@ -110,7 +110,7 @@ Because both come up, and only one is the pin:
 
 - **`of:fid1:<hash>`** — the entity URI of a **cell that carries a pattern
   pointer** (a piece result cell), `toURI(createRef(...))`
-  (`packages/runner/src/uri-utils.ts:12`). A *causal* ref: resolvable (it's a
+  (`toURI`, `packages/runner/src/uri-utils.ts`). A *causal* ref: resolvable (it's a
   cell address) but not re-hash-verifiable from fetched content alone. Usable as
   a reference *starting point* (the chase reads its `patternIdentity`); never
   the pin.
@@ -209,7 +209,7 @@ hash    = 43 base64url chars  ; hashStringOf/hashOf output (value-hash.ts):
 ```
 
 (Hashes are **not** hex: `hashStringOf` emits unprefixed base64url
-(`packages/data-model/src/value-hash.ts:553`), and entity URIs carry the
+(`packages/data-model/src/value-hash.ts`), and entity URIs carry the
 `fid1:` tag inside `of:` — `of:fid1:<hash>` is what `toURI` produces. The
 base64url alphabet contains no `/`, `@`, or `:`, so pin-splitting and
 segment-splitting stay unambiguous.)
@@ -322,7 +322,7 @@ Why this shape:
 - **Valid ESM specifier.** Schemes are legal in import specifiers; resolution
   is entirely ours via the `ProgramResolver`/compiler-host seam, and TypeScript
   is satisfied through the same mechanism that resolves `commonfabric` today
-  (`packages/js-compiler/typescript/compiler.ts:176-207`).
+  (`resolveModuleNameLiterals`, `packages/js-compiler/typescript/compiler.ts`).
 - **Its durable identifier forms follow the shell's URL shapes.** A mutable
   piece uses `cf:/<space-did>/of:fid1:<piece-id>`. An immutable pattern uses the
   space-free `cf:pattern:<identity>` form. Authored static imports may still use
@@ -416,7 +416,8 @@ Mechanics:
 
 2. **The pinned hash folds into the importer's identity for free.** Module
    identity already hashes external deps as `runtime:${specifier}@${fingerprint}`
-   (`module-identity.ts:145-149`) — the specifier string contains the pin, so
+   (`packages/runner/src/module-identity.ts`) — the specifier string contains
+   the pin, so
    two importers differing only in pin have different module identities, and
    transitively different program ids (`engine.ts:computeId` hashes the source
    files, which contain the specifier). No changes to any hashing code.
@@ -613,7 +614,8 @@ Engine wraps the authored resolver; on a `cf:` specifier:
    TS program under a reserved prefix such as
    `/~cf/<identity>/<original-path>`. Thread a
    specifier-to-mounted-module alias map into the compiler so
-   `resolveModuleNameLiterals` (`compiler.ts:176`) maps the `cf:` specifier to
+   `resolveModuleNameLiterals` (`packages/js-compiler/typescript/compiler.ts`)
+   maps the `cf:` specifier to
    the mounted file. Relative imports inside the subtree resolve as ordinary
    path joins.
 

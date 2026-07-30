@@ -74,7 +74,7 @@ These were settled in the spec + design review. Implement as stated:
 
 ```
 authored source ──pretransformProgramForModules──► /<id>/-prefixed program
-      │                                                  (engine.ts:227)
+      │                                                  (engine.ts)
       ▼
 engine.resolve(resolver)  ◄── FabricAwareResolver wraps EngineProgramResolver   [M1.4]
       │                        • intercepts cf: specifiers
@@ -117,7 +117,7 @@ Reload paths:
 - **pin** — the trailing `@<hash>` selected-module identity on a mutable ref.
 - **hash** — 43 base64url chars (`[A-Za-z0-9_-]`, case-SENSITIVE, no
   padding), the unprefixed output of `hashStringOf`/`hashOf`
-  (`packages/data-model/src/value-hash.ts:553`). NOT hex — e.g.
+  (`packages/data-model/src/value-hash.ts`). NOT hex — e.g.
   `Avcny13Rj8q-2ClANy_-k0ikWWQcXx7QTdsiqGfrC1c`. Never lowercase or
   otherwise normalize a hash.
 - **terminal identity** — the selected-module identity after pointer and
@@ -210,7 +210,7 @@ Parsing algorithm — implement exactly this order:
      match `HASH_RE`):
      - `pattern:<hash>` → `{ scheme: "pattern", hash }`
      - `of:fid1:<hash>` → `{ scheme: "of", hash }` (what `toURI` emits —
-       `packages/runner/src/uri-utils.ts:12`; the `fid1:` tag is required
+       `toURI` in `packages/runner/src/uri-utils.ts`; the `fid1:` tag is required
        inside `of:`)
      - `fid1:<hash>` → alias for `of:fid1:<hash>` (the shell's bare piece-id
        form); `formatFabricRef` canonicalizes to `of:fid1:<hash>`.
@@ -228,7 +228,8 @@ Parsing algorithm — implement exactly this order:
 
 `HASH_RE`: **base64url, exactly 43 chars, case-sensitive**:
 `/^[A-Za-z0-9_-]{43}$/`. This is the unprefixed `hashStringOf` output
-(SHA-256 → 43 unpadded base64url chars; `value-hash.ts:553`) — NOT hex.
+(SHA-256 → 43 unpadded base64url chars; `hashStringOf` in `value-hash.ts`) —
+NOT hex.
 Add two canary unit tests pinning the real formats so a future hash-encoding
 change fails here first:
 1. feed a REAL module identity from `computeModuleHashes` (import it, hash a
@@ -638,7 +639,8 @@ export class FabricAwareResolver implements ProgramResolver {
       transitive mounts arrive through this same method as the walk reaches
       mounted files' own fabric specifiers).
    d. Fetch: open a read tx exactly like `replicateClosures` does
-      (`packages/runner/src/pattern-manager.ts:620` — `runtime.edit()` /
+      (`replicateClosures`, `packages/runner/src/pattern-manager.ts` —
+      `runtime.edit()` /
       `finally tx.abort?.(…)`), call `loadVerifiedSourceClosure(runtime,
       ctx.space, hash, tx)`. `undefined` → throw
       `"source for pattern:<hash> not found in space <space> (or failed
@@ -670,7 +672,7 @@ export class FabricAwareResolver implements ProgramResolver {
 Pitfalls to encode as comments + tests:
 - The walk calls `resolveSource` with the verbatim specifier text (bare
   specifiers pass through `resolveSpecifier` unchanged —
-  `packages/js-compiler/typescript/resolver.ts:97`). Two files importing the
+  `resolveSpecifier`, `packages/js-compiler/typescript/resolver.ts`). Two files importing the
   same text → `sources.has(identifier)` dedupes upstream; two DIFFERENT
   texts pinning the same hash (e.g. `cf:pattern:<h>` and a pinned slug form
   in M2) → step (b) returns the same Source object, and `resolveProgram`
@@ -699,7 +701,7 @@ M2/M3/M4 scope errors.
 File: `packages/runner/src/harness/engine.ts`.
 
 1. Add to `TypeScriptHarnessProcessOptions`
-   (`packages/runner/src/harness/types.ts:21`):
+   (`packages/runner/src/harness/types.ts`):
    ```ts
    // Shown as interface or class members.
    /**
@@ -710,8 +712,8 @@ File: `packages/runner/src/harness/engine.ts`.
     */
    fabricImports?: { space: MemorySpace };
    ```
-2. `compileToRecordGraph` (engine.ts:212):
-   - Wrap the resolver (line 228):
+2. `compileToRecordGraph` (`packages/runner/src/harness/engine.ts`):
+   - Wrap the resolver:
      ```ts
      // Shown for illustration only.
      const engineResolver = new EngineProgramResolver(mappedProgram, this.ctRuntime.staticCache);
@@ -811,7 +813,7 @@ File: `packages/runner/src/harness/engine.ts`.
      instead. Write a small helper
      `storedFilenameFor(name, id, mounts)` → authored: status quo; mounted:
      `name.slice(("/~cf/" + m.entryIdentity).length)`.
-3. `compileResolvedToRecordGraph` (engine.ts:454): use the same provenance
+3. `compileResolvedToRecordGraph` (same file): use the same provenance
    classification, three sets, merged identity computation, aliases, and fabric
    edges, with `idPrefix` absent for the authored set because stored names are
    prefix-free. Add `options?: { fabricImports?: { space: MemorySpace } }`; the
@@ -946,7 +948,7 @@ File: `packages/runner/src/pattern-manager.ts`.
 
 Files: `packages/cli/lib/dev.ts`, `packages/cli/commands/dev.ts`.
 
-- `cf check` compiles via `engine.compileToRecordGraph` (dev.ts:52).
+- `cf check` compiles via `engine.compileToRecordGraph` (`packages/cli/lib/dev.ts`).
   Thread `fabricImports: { space }` only when the dev session has a space
   (inspect how `dev.ts` builds the runtime and whether a space/identity is
   configured; if none, leave the option absent — the M1.5 friendly error then
@@ -968,7 +970,7 @@ write-back, warm reload, cold reload, cross-runtime resume, tamper rejection.
 
 ### M2.1 Generic slug→cell resolution in runner
 
-`packages/piece/src/slugs.ts:108` (`resolveSlugTargetCell`) is the model; it
+`resolveSlugTargetCell` in `packages/piece/src/slugs.ts` is the model; it
 uses only `runtime` + `space`. Lift it:
 
 - New: `packages/runner/src/slug-resolution.ts` —
@@ -1024,31 +1026,25 @@ Algorithm (spec § Resolution rule — implement hops exactly):
      hand-building the string), then `sync()`.
    - `pattern:` → already terminal (return immediately; callers normally
      short-circuit via `pinnedIdentity` and never get here).
-4. Piece hop: if the cell has pattern metadata — use the SAME accessors the
-   runner uses (`getPatternIdentityRef` / `getPatternId` around
-   `packages/runner/src/runner.ts:4137`; export them if module-private):
+4. Piece hop: if the cell has pattern metadata — use the SAME accessor the
+   runner uses, `getPatternIdentityRef`, already exported from
+   `packages/runner/src/runner.ts`:
    - `patternIdentity` present → its `.identity` IS the terminal identity;
      append hops; done.
-   - else `patternId` present → load the pattern meta cell by that URI
-     (mirror how `PatternManager` reads meta cells — `patternMetaSchema`),
-     continue at 5.
-   - neither, and the cell itself is not a pattern meta cell → throw
-     `"cf:… does not resolve to a pattern (chain: …)"`.
-5. Pattern-meta hop: `entryIdentity` field present → done. Absent → throw
-   `"pattern meta for cf:… has no entryIdentity (legacy pattern; re-deploy
-   it)"`. (Computing it from `program` requires a full pretransform+hash
-   pass — deliberately out of scope; the error names the remedy.)
+   - absent → throw `"cf:… does not resolve to a pattern (chain: …)"`.
+     `patternIdentity` is the only pattern pointer — the legacy `patternId`
+     meta field is retired — so there is no second pointer to chase and no
+     pattern-meta hop behind this one.
 
 No cycle guard needed (≤3 hops, no recursion).
 
 Tests (`packages/runner/test/fabric-ref-resolution.test.ts`): build, in an
-in-process runtime: a pattern meta cell with `entryIdentity`; a fake piece
-cell carrying `meta("pattern")`/`meta("patternIdentity")` (use the real
-setters from runner.ts — find `setMetaRaw("pattern", …)` usage at
-runner.ts:901 and mirror it); slug → piece; slug → pattern meta directly;
-slug → plain data cell (error + chain); missing slug; `of:` directly to meta
-cell; piece with only legacy `patternId`; meta without `entryIdentity`
-(error message). Add a direct `pattern:` subpath test that proves the scope
+in-process runtime: a fake piece cell carrying `meta("pattern")` /
+`meta("patternIdentity")` (use the real setters — `setPatternCell` in
+`packages/runner/src/result-utils.ts` writes `meta("pattern")`, and
+`Runner.applySetupState` writes `meta("patternIdentity")` — and mirror them);
+slug → piece; slug → plain data cell (error + chain); missing slug; `of:`
+directly to a piece cell. Add a direct `pattern:` subpath test that proves the scope
 guard runs before the otherwise-terminal identity is returned. Add a CLI
 pin/update regression that resolves a valid slug but rejects its subpath rather
 than writing the slug target's entry identity.
@@ -1075,7 +1071,8 @@ export async function rewriteFabricPins(
 
 Implementation: `ts.createSourceFile`, walk EXACTLY the three node shapes
 `collectImportSpecifiers` walks (import decl / export-from / ImportTypeNode —
-copy that visitor, `packages/js-compiler/typescript/resolver.ts:127`),
+copy that visitor, `collectImportSpecifiers` in
+`packages/js-compiler/typescript/resolver.ts`),
 collect `{ literal.getStart()+1, literal.end-1, text }` spans, compute
 replacements with `formatFabricRef(withPin(ref, pin))`, apply BACK TO FRONT
 on the original string. Skip non-fabric specifiers; skip refs where
